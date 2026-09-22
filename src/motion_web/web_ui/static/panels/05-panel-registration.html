@@ -1,0 +1,113 @@
+<!-- 모터 등록·설정
+     `index.html`에서 떼어낸 조각 · 원본 397~623줄 · §6-44
+     들여쓰기를 그대로 둔다 · 서버가 자리표시자 줄을 이 내용으로 바꾼다 -->
+      <section class="registration-panel workspace-panel settings-editor-page hidden" data-workspace-panel="config" aria-label="모터 관리">
+        <div class="section-head workspace-page-head">
+          <div><strong>모터 관리</strong><small>연결 확인부터 모션 실행 준비까지 한 화면에서 관리합니다</small></div>
+        </div>
+
+        <section class="settings-panel" aria-label="장비 제어">
+          <div class="registry-actions">
+            <button id="allAcServoOnButton" class="primary" type="button" disabled>전체 AC 서보 켜기</button>
+            <button id="allAcServoOffButton" class="off" type="button" disabled>전체 AC 서보 끄기</button>
+          </div>
+        </section>
+
+        <section class="axis-setup-step settings-step-card" aria-label="모터 타입별 검색">
+          <div class="section-head axis-settings-head">
+            <strong>1. 장비 검색</strong>
+          </div>
+          <div class="axis-scan-grid">
+            <section class="axis-type-scan" aria-label="전체 모터 검색">
+              <button id="scanAllButton" class="primary" type="button">전체 모터 검색</button>
+              <span id="scanAllResult">대기</span>
+            </section>
+            <section class="axis-type-scan" aria-label="AC Servo 검색">
+              <button id="scanButton" class="primary" type="button">AC Servo 검색</button>
+              <span id="scanResult">대기</span>
+            </section>
+            <section class="axis-type-scan" aria-label="Dynamixel 검색">
+              <button id="dynamixelScanButton" class="primary" type="button">Dynamixel 검색</button>
+              <span id="dynamixelScanResult">대기</span>
+            </section>
+          </div>
+        </section>
+
+        <section class="axis-settings-panel settings-step-card" aria-label="모터 축 설정 표">
+          <div class="section-head axis-settings-head">
+            <strong>2. 검색 결과 확인 및 축 편집</strong>
+            <span id="axisSummary">설정 파일을 불러오는 중</span>
+          </div>
+
+          <div id="axisSettingsTabs" class="tabbar axis-settings-tabs" role="tablist" aria-label="모터 축 설정 화면">
+            <button class="tab-button active" type="button" data-axis-settings-tab="current">축 목록 편집</button>
+            <button class="tab-button" type="button" data-axis-settings-tab="table">상세 설정 표</button>
+            <button class="tab-button" type="button" data-axis-settings-tab="raw">원본 보기</button>
+          </div>
+
+          <div class="axis-settings-tab-panel" data-axis-settings-panel="current">
+            <div id="axisWorkflowStatus" class="axis-workflow-status" data-state="loading">
+              <span>현재 상태</span>
+              <strong id="axisWorkflowState">설정 확인 중</strong>
+              <p id="axisWorkflowDetail">현재 프로젝트와 실제 모터 상태를 확인하고 있습니다.</p>
+              <small id="axisWorkflowNext">다음 작업을 확인하고 있습니다.</small>
+            </div>
+            <div id="axisActionMessage" class="registry-message">모터 검색을 실행하면 찾은 축이 그대로 목록이 됩니다 · 이름만 고칠 수 있습니다</div>
+            <div class="matching-table-wrap">
+              <table class="matching-table">
+                <thead>
+                  <tr>
+                    <th>축·이름</th>
+                    <th>실제 장치 식별</th>
+                    <th>모델·운전 프로필</th>
+                    <th>연결 정보</th>
+                    <th>설정·실행 적용</th>
+                    <th>서보·토크</th>
+                  </tr>
+                </thead>
+                <tbody id="axisRows">
+                  <tr>
+                    <td colspan="6" class="empty">설정 파일을 불러오거나 모터 스캔을 실행하세요</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+          <div class="axis-settings-tab-panel hidden" data-axis-settings-panel="table">
+            <div id="motorConfigTablePath" class="registry-message config-file-path">설정 파일: -</div>
+            <div id="motorConfigTableRows" class="config-table-groups">
+              <div class="empty config-table-empty">설정 파일을 불러오는 중</div>
+            </div>
+          </div>
+
+          <div class="axis-settings-tab-panel hidden" data-axis-settings-panel="raw">
+            <pre id="motorConfigRawText" class="config-raw-text">설정 파일을 불러오는 중</pre>
+          </div>
+        </section>
+
+        <section class="axis-setup-step settings-step-card settings-final-card" aria-label="모터 설정 저장 및 실행 적용">
+          <div class="section-head axis-settings-head">
+            <strong>3. 저장하고 설정 적용</strong>
+            <span>저장한 다음 적용해야 실제 모터가 바뀝니다</span>
+          </div>
+          <div class="registry-message settings-final-note">
+            저장 = 설정 파일에 적어 둡니다 · 적용 = 실제 모터에 반영합니다 (모터가 잠깐 멈췄다 다시 켜집니다)
+          </div>
+          <div class="settings-final-actions">
+            <!-- 단추는 둘이다 · §6-154
+                 전에는 「표 변경값을 초안에 반영」이 따로 있었다 · 그 일은
+                 브라우저 안에서만 일어나고 서버에 아무것도 보내지 않는 중간
+                 단계라, 사람이 알 이유가 없었다 · 그런데 그걸 모르면 저장이
+                 영영 잠겨 있었다 · 이제 저장이 알아서 한다 -->
+            <div class="settings-final-action">
+              <span>1단계</span>
+              <button id="saveAxisConfigButton" class="primary" type="button" disabled>설정 저장</button>
+            </div>
+            <div class="settings-final-action settings-final-apply">
+              <span>2단계</span>
+              <button id="applyAxisConfigButton" class="danger" type="button" disabled>설정 적용 · 모터 재시작</button>
+            </div>
+          </div>
+        </section>
+      </section>

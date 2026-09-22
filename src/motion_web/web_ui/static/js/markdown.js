@@ -1,0 +1,203 @@
+/** 마크다운을 화면으로 · 바깥 라이브러리 없이 · §6-157
+ *
+ * **현장 PC 는 인터넷이 없을 수 있다.** CDN 에서 렌더러를 내려받는 방식은
+ * 설치 현장에서 빈 화면이 된다 · 그래서 우리 문서가 쓰는 만큼만 직접 그린다.
+ *
+ * 그리는 것 : 제목 · 표 · 코드블록 · 목록 · 인용 · 구분선 · 굵게 · 코드 ·
+ * 기울임 · 링크 · 그림
+ *
+ * **HTML 은 먼저 죽인다** · 문서는 우리가 쓴 것이지만, 언제 남의 손을 타는
+ * 파일이 목록에 들어올지 모른다 · 글자를 그대로 두고 태그만 우리가 만든다.
+ */
+
+// 글자를 죽이는 일의 주인은 `format.js` 하나다 · 사본을 두면 언젠가 한쪽만
+// 고쳐지고, 빠뜨린 문자로 화면이 깨지거나 남의 태그가 들어온다.
+import { escapeHtml } from './format.js';
+
+//: 코드 조각을 잠시 빼 두는 표 · 본문에 나올 수 없는 글자여야 한다
+const CODE_SLOT = '\u0000';
+
+/** 제목을 앵커 이름으로 · 깃허브와 같은 규칙이라 문서의 목차 링크가 그대로 산다. */
+function slugify(text) {
+  return String(text)
+    .toLowerCase()
+    .replace(/[^\p{L}\p{N}\s-]/gu, '')
+    .trim()
+    .replace(/\s+/g, '-');
+}
+
+/** 한 줄 안의 표시들 · 코드가 가장 세다 (코드 안의 `**` 는 굵게가 아니다). */
+function renderInline(text) {
+  const code = [];
+  let value = String(text).replace(/`([^`]+)`/g, (_match, inner) => {
+    code.push(`<code>${escapeHtml(inner)}</code>`);
+    return `${CODE_SLOT}${code.length - 1}${CODE_SLOT}`;
+  });
+
+  value = escapeHtml(value);
+
+  // 그림 · 링크보다 먼저 봐야 `![...]` 가 링크로 먹히지 않는다
+  value = value.replace(/!\[([^\]]*)\]\(([^)\s]+)\)/g, (_match, alt, src) => {
+    const safe = /^(https?:\/\/|\/)/.test(src)
+      ? src
+      : `/api/docs/images/${src.replace(/^(\.\/)?(docs\/)?images\//, '')}`;
+    return `<img src="${escapeHtml(safe)}" alt="${escapeHtml(alt)}" loading="lazy">`;
+  });
+
+  // 링크 · 문서 안 앵커와 진짜 주소만 누를 수 있다.
+  //
+  // 나머지(`src/...` 같은 저장소 경로)는 **글자로만** 남긴다 · 눌러 봐야
+  // 웹 서버에는 그런 주소가 없어 404 가 되고, 눌리는 줄 알았던 사람만 헛걸음한다.
+  value = value.replace(/\[([^\]]+)\]\(([^)\s]+)\)/g, (_match, label, href) => {
+    if (href.startsWith('#')) {
+      return `<a href="${escapeHtml(href)}" data-doc-anchor>${label}</a>`;
+    }
+    if (/^https?:\/\//.test(href)) {
+      return `<a href="${escapeHtml(href)}" target="_blank" rel="noopener noreferrer">${label}</a>`;
+    }
+    return `<span class="doc-path">${label}</span>`;
+  });
+
+  value = value
+    .replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>')
+    .replace(/(^|[^*])\*([^*\n]+)\*/g, '$1<em>$2</em>');
+
+  return value.replace(
+    new RegExp(`${CODE_SLOT}(\\d+)${CODE_SLOT}`, 'g'),
+    (_match, index) => code[Number(index)],
+  );
+}
+
+function renderTable(rows) {
+  const cells = (row) => row.replace(/^\||\|$/g, '').split('|').map((cell) => cell.trim());
+  const header = cells(rows[0]);
+  const body = rows.slice(2).map(cells);
+  const head = header.map((cell) => `<th>${renderInline(cell)}</th>`).join('');
+  const lines = body
+    .map((row) => `<tr>${row.map((cell) => `<td>${renderInline(cell)}</td>`).join('')}</tr>`)
+    .join('');
+  return `<div class="doc-table-scroll"><table><thead><tr>${head}</tr></thead><tbody>${lines}</tbody></table></div>`;
+}
+
+const TABLE_DIVIDER = /^\|?[\s:-]*-[\s:|-]*\|?$/;
+const BLOCK_START = /^(#{1,6}\s|\s*```|\s*[-*+]\s|\s*\d+[.)]\s|\s*>)/;
+
+/** 마크다운 한 편을 HTML 로 · 제목 목록도 같이 돌려준다 (옆의 차례에 쓴다). */
+export function renderMarkdown(source) {
+  const lines = String(source).replace(/\r\n?/g, '\n').split('\n');
+  const html = [];
+  const headings = [];
+  let index = 0;
+  let list = null;
+
+  const closeList = () => {
+    if (list) {
+      html.push(`</${list}>`);
+      list = null;
+    }
+  };
+  const openList = (tag) => {
+    if (list !== tag) {
+      closeList();
+      html.push(`<${tag}>`);
+      list = tag;
+    }
+  };
+
+  while (index < lines.length) {
+    const line = lines[index];
+
+    // 코드블록 · 안쪽은 아무 규칙도 적용하지 않는다
+    const fence = line.match(/^\s*```+\s*(\S*)\s*$/);
+    if (fence) {
+      closeList();
+      const body = [];
+      index += 1;
+      while (index < lines.length && !/^\s*```+\s*$/.test(lines[index])) {
+        body.push(lines[index]);
+        index += 1;
+      }
+      index += 1;
+      const language = fence[1] ? ` class="lang-${escapeHtml(fence[1])}"` : '';
+      html.push(`<pre><code${language}>${escapeHtml(body.join('\n'))}</code></pre>`);
+      continue;
+    }
+
+    if (!line.trim()) {
+      closeList();
+      index += 1;
+      continue;
+    }
+
+    if (/^\s*(---+|\*\*\*+|___+)\s*$/.test(line)) {
+      closeList();
+      html.push('<hr>');
+      index += 1;
+      continue;
+    }
+
+    const heading = line.match(/^(#{1,6})\s+(.*)$/);
+    if (heading) {
+      closeList();
+      const level = heading[1].length;
+      const text = heading[2].trim();
+      const id = slugify(text);
+      headings.push({ level, text, id });
+      html.push(`<h${level} id="${escapeHtml(id)}">${renderInline(text)}</h${level}>`);
+      index += 1;
+      continue;
+    }
+
+    // 표 · 머리줄 다음이 구분줄이어야 표로 본다
+    if (line.includes('|') && TABLE_DIVIDER.test(lines[index + 1] || '')) {
+      closeList();
+      const rows = [];
+      while (index < lines.length && lines[index].includes('|')) {
+        rows.push(lines[index]);
+        index += 1;
+      }
+      html.push(renderTable(rows));
+      continue;
+    }
+
+    const bullet = line.match(/^\s*[-*+]\s+(.*)$/);
+    if (bullet) {
+      openList('ul');
+      html.push(`<li>${renderInline(bullet[1])}</li>`);
+      index += 1;
+      continue;
+    }
+
+    const numbered = line.match(/^\s*\d+[.)]\s+(.*)$/);
+    if (numbered) {
+      openList('ol');
+      html.push(`<li>${renderInline(numbered[1])}</li>`);
+      index += 1;
+      continue;
+    }
+
+    const quote = line.match(/^\s*>\s?(.*)$/);
+    if (quote) {
+      closeList();
+      html.push(`<blockquote>${renderInline(quote[1])}</blockquote>`);
+      index += 1;
+      continue;
+    }
+
+    // 그냥 글 · 빈 줄이 나올 때까지 한 문단으로 묶는다
+    closeList();
+    const paragraph = [];
+    while (
+      index < lines.length
+      && lines[index].trim()
+      && !BLOCK_START.test(lines[index])
+    ) {
+      paragraph.push(lines[index].trim());
+      index += 1;
+    }
+    html.push(`<p>${renderInline(paragraph.join('\n')).replace(/\n/g, '<br>')}</p>`);
+  }
+
+  closeList();
+  return { html: html.join('\n'), headings };
+}

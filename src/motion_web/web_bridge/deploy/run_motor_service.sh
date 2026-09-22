@@ -1,0 +1,130 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+
+WORKSPACE="${MOTION_WORKSPACE:?MOTION_WORKSPACE is required}"
+MOTOR_CONFIG_FILE="${MOTOR_CONFIG_FILE:?MOTOR_CONFIG_FILE is required}"
+# 네트워크를 여는가 · §6-96
+#
+# 전에는 모터 쪽 노드를 이 컴퓨터 안에 가둬 뒀다(`ROS_LOCALHOST_ONLY=1`) ·
+# 그런데 연동된 PC 의 MIDI 로 모터를 움직이려면 열어야 한다.
+#
+# 열어도 무방한 이유 · 토픽마다 PC 이름표가 붙고(`/joonhoTest/...`), DDS
+# 도메인이 그룹 전용(기본 21)이라 남의 ROS 장비와 섞이지 않는다.
+#
+# 문제가 생기면 `MOTION_GROUP_NETWORK=0` 으로 도로 잠근다.
+export MOTION_GROUP_NETWORK="${MOTION_GROUP_NETWORK:-1}"
+if [[ "${MOTION_GROUP_NETWORK}" == "1" ]]; then
+  export ROS_LOCALHOST_ONLY=0
+else
+  export ROS_LOCALHOST_ONLY=1
+fi
+# PC 이름공간과 DDS 도메인 · §6-96
+#
+# "이 PC 는 누구인가"와 "어느 DDS 망에 있는가"는 그룹 설정이 주인이다 ·
+# `config/motion_coordination.yaml` 의 `pc_id` 와 `dds_domain_id` · 호스트
+# 이름을 따로 읽으면 주인이 둘이 된다.
+#
+# 바깥에서 이미 정했으면 그것을 존중한다 · 되돌릴 수 있어야 한다.
+GROUP_ENV_HELPER="${WORKSPACE}/src/motion_common/motion_common/group_env.py"
+if [[ -f "${GROUP_ENV_HELPER}" ]]; then
+  eval "$(python3 "${GROUP_ENV_HELPER}")"
+fi
+# 도우미가 없거나 실패해도 서비스는 떠야 한다 · 빈 값이면 예전 이름 그대로다
+export MOTION_PC_NAMESPACE="${MOTION_PC_NAMESPACE:-}"
+ROS_SETUP="/opt/ros/humble/setup.bash"
+WORKSPACE_SETUP="${WORKSPACE}/install/setup.bash"
+MOTOR_EXECUTABLE="${WORKSPACE}/install/motion_control_bridge/lib/motion_control_bridge/motor_manager_node"
+
+if [[ ! -f "${ROS_SETUP}" ]]; then
+  echo "ROS 2 Humble 환경을 찾을 수 없습니다: ${ROS_SETUP}" >&2
+  exit 1
+fi
+if [[ ! -f "${WORKSPACE_SETUP}" ]]; then
+  echo "작업공간 빌드 환경을 찾을 수 없습니다: ${WORKSPACE_SETUP}" >&2
+  exit 1
+fi
+if [[ ! -x "${MOTOR_EXECUTABLE}" ]]; then
+  echo "Motor Manager 실행 파일을 찾을 수 없습니다: ${MOTOR_EXECUTABLE}" >&2
+  exit 1
+fi
+if [[ ! -f "${MOTOR_CONFIG_FILE}" ]]; then
+  echo "적용된 모터 설정 파일을 찾을 수 없습니다: ${MOTOR_CONFIG_FILE}" >&2
+  exit 1
+fi
+
+ethercat_master_indices() {
+  ethercat master 2>/dev/null \
+    | awk '/^Master[0-9]+$/ {sub(/^Master/, ""); print}' \
+    || true
+}
+
+ethercat_error_slaves() {
+  local master_index
+
+  while IFS= read -r master_index; do
+    [[ -n "${master_index}" ]] || continue
+    ethercat slaves -m "${master_index}" 2>/dev/null \
+      | awk -v master="${master_index}" \
+          '$3 ~ /ERROR/ || $4 == "E" {print master ":" $1}' \
+      || true
+  done < <(ethercat_master_indices)
+}
+
+recover_ethercat_errors_before_launch() {
+  if ! command -v ethercat >/dev/null 2>&1; then
+    return 0
+  fi
+
+  local attempts="${ETHERCAT_RECOVERY_ATTEMPTS:-2}"
+  local interval="${ETHERCAT_RECOVERY_INTERVAL_SEC:-0.5}"
+  local command_timeout="${ETHERCAT_STATE_TIMEOUT_SEC:-3}"
+  local attempt error_slave error_slaves master_index position
+
+  for ((attempt = 1; attempt <= attempts; attempt++)); do
+    error_slaves="$(ethercat_error_slaves)"
+    if [[ -z "${error_slaves}" ]]; then
+      return 0
+    fi
+
+    while IFS= read -r error_slave; do
+      [[ -n "${error_slave}" ]] || continue
+      IFS=: read -r master_index position <<< "${error_slave}"
+      echo "EtherCAT Master ${master_index} Slave ${position} 오류 플래그 해제 시도 (${attempt}/${attempts})"
+      timeout "${command_timeout}" \
+        ethercat reg_write -m "${master_index}" -p "${position}" \
+          -t uint16 0x0120 0x0011 || true
+      sleep "${interval}"
+      timeout "${command_timeout}" \
+        ethercat states -m "${master_index}" -p "${position}" PREOP || true
+      sleep "${interval}"
+    done <<< "${error_slaves}"
+  done
+
+  error_slaves="$(ethercat_error_slaves)"
+  if [[ -n "${error_slaves}" ]]; then
+    echo "EtherCAT 오류 플래그를 해제하지 못했습니다:" >&2
+    while IFS= read -r error_slave; do
+      [[ -n "${error_slave}" ]] || continue
+      IFS=: read -r master_index position <<< "${error_slave}"
+      echo "  Master ${master_index} Slave ${position}" >&2
+    done <<< "${error_slaves}"
+    return 1
+  fi
+}
+
+if ! recover_ethercat_errors_before_launch; then
+  exit 1
+fi
+
+set +u
+source "${ROS_SETUP}"
+source "${WORKSPACE_SETUP}"
+set -u
+# Motor Manager 는 토픽을 **상대 이름**으로 연다(`motion_control/motor_status`) ·
+# 그래서 ROS 이름공간이 그대로 먹는다 · 파일을 건드리지 않고 밖에서 준다 ·
+# 그 노드는 `motion_system` 안에 있어 수정하지 않는다 · §6-95
+MOTOR_ROS_ARGS=(--ros-args -p "config_file:=${MOTOR_CONFIG_FILE}")
+if [[ -n "${MOTION_PC_NAMESPACE}" ]]; then
+  MOTOR_ROS_ARGS+=(-r "__ns:=/${MOTION_PC_NAMESPACE}")
+fi
+exec "${MOTOR_EXECUTABLE}" "${MOTOR_ROS_ARGS[@]}"

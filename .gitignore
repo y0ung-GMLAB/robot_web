@@ -1,0 +1,47 @@
+# ROS2 / colcon generated files
+build/
+install/
+log/
+
+# Python generated files
+__pycache__/
+*.py[cod]
+*.pyo
+
+# Local backups and runtime artifacts
+backups/
+*.bak
+*.bak-*
+*.tmp
+*.log
+
+# User-created project data and the read-only legacy archive. These are moved
+# between computers explicitly (USB/import), not with the application source.
+/motion_projects/
+/motion_data/
+/runtime/
+
+# Per-PC global DDS coordination settings
+/config/motion_coordination.yaml
+/config/.motion_coordination.yaml.lock
+/config/.motion_coordination.yaml.transaction.json
+
+# Local machine files
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Keep the separate low-level motor-system repository as a Git submodule.
+src/motion_system/
+
+# Local agent configuration
+.agents/
+.codex/
+
+# Misc local files
+packages.microsoft.gpg
+sdo.txt
+
+# Claude Code · 개인 설정은 공유하지 않는다 (프로젝트 공용은 .claude/settings.json)
+.claude/settings.local.json
