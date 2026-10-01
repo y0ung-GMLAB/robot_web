@@ -355,6 +355,10 @@ export const configureMotionAutomation = (payload) => request('PUT', '/api/motio
 
 export const stopMotionRun = () => request('POST', '/api/motion-run/stop');
 
+/** 재생 라이브 오버라이드 · 조인트 뮤트·좁힌 리밋 · 재생 중에도 듣는다 · P7 */
+export const setMotionRunLiveOverride = (payload) =>
+  request('POST', '/api/motion-run/live-override', { body: payload });
+
 export const stopMotionRunAfterCycle = () => request('POST', '/api/motion-run/stop-after-cycle');
 
 export const requestMotionSafetyStop = () => request('POST', '/api/safety/motion-stop');

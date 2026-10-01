@@ -57,6 +57,13 @@ def register_motion_run_routes(app: FastAPI, bridge, safety_first_stop) -> None:
     async def motion_mapping(file_id: str):
         return await asyncio.to_thread(bridge.load_motion_mapping, file_id)
 
+    @app.post('/api/motion-run/live-override')
+    async def set_motion_run_live_override(request: Request):
+        body = await request.json()
+        if not isinstance(body, dict):
+            raise HTTPException(status_code=400, detail='request body must be an object')
+        return await asyncio.to_thread(bridge.set_motion_run_live_override, body)
+
     @app.get('/api/motion-run/status')
     async def motion_run_status():
         return await asyncio.to_thread(bridge.motion_run_status)

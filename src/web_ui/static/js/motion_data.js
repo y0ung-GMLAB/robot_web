@@ -14,6 +14,7 @@ import {
   projectFileDownloadUrl,
   saveMotionMapping,
   saveRegisteredMotionFile,
+  setMotionRunLiveOverride,
   startMotionRun,
   fetchScheduleStatus,
   stopMotionRun,
@@ -23,6 +24,7 @@ import {
 } from './api.js';
 import {
   displayText,
+  escapeHtml,
   formatInt,
   formatMoment,
   formatNumber,
@@ -1407,15 +1409,29 @@ export function createMotionDataController({
     `;
   }
 
+  /** 이 조인트의 라이브 오버라이드 · 없으면 빈 객체 */
+  function liveOverrideOf(motionId) {
+    const overrides = motionRunStatus?.live_overrides;
+    const entry = overrides && typeof overrides === 'object'
+      ? overrides[String(motionId)]
+      : null;
+    return entry && typeof entry === 'object' ? entry : {};
+  }
+
   function renderMotionRunAxes() {
     if (!el.motionRunAxisRows) return;
+    // 재생 중 상태가 계속 들어온다 · 입력 중인 칸을 덮어쓰지 않는다
+    if (el.motionRunAxisRows.contains(document.activeElement)) return;
     const axes = Array.isArray(motionRunStatus?.axes) ? motionRunStatus.axes : [];
     if (!axes.length) {
-      el.motionRunAxisRows.innerHTML = emptyRow(10, '실행 준비 검사를 누르면 표시됩니다');
+      el.motionRunAxisRows.innerHTML = emptyRow(12, '실행 준비 검사를 누르면 표시됩니다');
       return;
     }
     el.motionRunAxisRows.innerHTML = axes.map((axis) => (
       `<tr>
+        <td><input type="checkbox" data-live-mute="${escapeHtml(axis.motion_id)}"
+          title="끄면 이 조인트 명령을 즉시 빼고 모터는 그 자리에 섭니다 (서보 유지)"
+          ${liveOverrideOf(axis.motion_id).muted ? '' : 'checked'}></td>
         <td class="mono">${displayText(axis.motion_id)}</td>
         <td class="mono">${formatInt(axis.motor_axis)}</td>
         <td>${displayText(axis.motor_type || '-')}</td>
@@ -1430,8 +1446,70 @@ export function createMotionDataController({
         <td>${axis.motion_clamped
           ? `${targetText(axis.source_motion_min_deg)} ~ ${targetText(axis.source_motion_max_deg)} → ${targetText(axis.command_motion_min_deg)} ~ ${targetText(axis.command_motion_max_deg)}`
           : '제한 없음'}</td>
+        <td class="live-clamp-cell" title="재생 값을 이 범위로 산 채로 자릅니다 · 빈 칸이면 매핑 리밋 그대로 · 매핑 파일은 안 바뀝니다">
+          <input class="numeric-input live-clamp-input" type="number" step="0.1"
+            data-live-clamp="${escapeHtml(axis.motion_id)}" data-live-clamp-side="lo"
+            value="${liveOverrideOf(axis.motion_id).clamp ? liveOverrideOf(axis.motion_id).clamp[0] : ''}"
+            placeholder="${targetText(axis.motion_limit_lower_deg)}">
+          ~
+          <input class="numeric-input live-clamp-input" type="number" step="0.1"
+            data-live-clamp="${escapeHtml(axis.motion_id)}" data-live-clamp-side="hi"
+            value="${liveOverrideOf(axis.motion_id).clamp ? liveOverrideOf(axis.motion_id).clamp[1] : ''}"
+            placeholder="${targetText(axis.motion_limit_upper_deg)}">
+        </td>
       </tr>`
     )).join('');
+  }
+
+  /** 사용 토글·라이브 리밋 변경 → 즉시 런타임에 반영 · 다음 20ms 틱부터 · P7 */
+  async function handleLiveOverrideEdit(target) {
+    const muteId = target?.dataset?.liveMute;
+    const clampId = target?.dataset?.liveClamp;
+    if (muteId === undefined && clampId === undefined) return;
+    const motionId = muteId !== undefined ? muteId : clampId;
+    const payload = { motion_id: motionId };
+    if (muteId !== undefined) {
+      payload.muted = !target.checked;
+    } else {
+      const inputs = el.motionRunAxisRows.querySelectorAll(
+        `[data-live-clamp="${CSS.escape(motionId)}"]`,
+      );
+      const values = {};
+      inputs.forEach((input) => {
+        values[input.dataset.liveClampSide] = String(input.value ?? '').trim();
+      });
+      if (!values.lo && !values.hi) {
+        payload.clamp = null;
+      } else {
+        const axis = (motionRunStatus?.axes || []).find(
+          (row) => String(row.motion_id) === motionId,
+        );
+        const low = values.lo === '' ? Number(axis?.motion_limit_lower_deg) : Number(values.lo);
+        const high = values.hi === '' ? Number(axis?.motion_limit_upper_deg) : Number(values.hi);
+        if (!Number.isFinite(low) || !Number.isFinite(high) || low > high) {
+          setMotionRunMessage('라이브 리밋은 최소 ≤ 최대 인 숫자여야 합니다');
+          renderMotionRunAxes();
+          return;
+        }
+        payload.clamp = [low, high];
+      }
+    }
+    try {
+      const result = await setMotionRunLiveOverride(payload);
+      if (motionRunStatus && typeof motionRunStatus === 'object') {
+        motionRunStatus.live_overrides = result?.live_overrides || {};
+      }
+      setMotionRunMessage(payload.muted !== undefined
+        ? (payload.muted
+          ? `조인트 ${motionId} 제외 · 모터는 그 자리에 섭니다`
+          : `조인트 ${motionId} 다시 사용`)
+        : (payload.clamp
+          ? `조인트 ${motionId} 라이브 리밋 ${payload.clamp[0]} ~ ${payload.clamp[1]}°`
+          : `조인트 ${motionId} 라이브 리밋 해제`));
+    } catch (error) {
+      setMotionRunMessage(`라이브 오버라이드 실패: ${error?.message || error}`);
+    }
+    renderMotionRunAxes();
   }
 
 
@@ -2773,6 +2851,9 @@ export function createMotionDataController({
 
   function bindEvents() {
     bindAnimationDropZone();
+    el.motionRunAxisRows?.addEventListener('change', (event) => {
+      handleLiveOverrideEdit(event.target);
+    });
     if (el.motionFileRows) {
       el.motionFileRows.addEventListener('click', (event) => {
         const target = event.target.closest('[data-motion-file-id]');

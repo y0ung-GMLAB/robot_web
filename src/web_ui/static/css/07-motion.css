@@ -1290,3 +1290,12 @@
   opacity: 0.65;
   padding: 2px 0 4px;
 }
+
+/* 실행 조인트 · 라이브 리밋 입력 · P7 */
+.live-clamp-cell {
+  white-space: nowrap;
+}
+
+.live-clamp-input {
+  width: 72px;
+}

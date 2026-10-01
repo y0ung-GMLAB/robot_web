@@ -332,11 +332,14 @@ class MotionPlayer:
                     positions = self._owned_positions(
                         plan, sample['positions'], float(sample['time_sec']),
                     )
+                    positions, motion_values = self._apply_live_overrides(
+                        plan['axes'], positions, sample.get('motion_values'),
+                    )
                     self._publish_motion_setpoints(
                         motors,
                         plan['axes'],
                         positions,
-                        sample.get('motion_values'),
+                        motion_values,
                     )
                     if trace is not None:
                         trace.add(sample)   # 리스트에 한 줄 · 해석·쓰기는 기록 스레드
@@ -914,12 +917,70 @@ class MotionPlayer:
         if motion_values:
             self._publish_motion_values(motion_values)
 
+    def _apply_live_overrides(
+        self,
+        axes: List[Dict[str, Any]],
+        positions: Dict[int, float],
+        motion_values: Optional[Dict[str, float]],
+    ) -> tuple[Dict[int, float], Optional[Dict[str, float]]]:
+        """재생 중 조인트 뮤트·라이브 리밋 · P7
+
+        뮤트 · 그 조인트 명령을 송출에서 뺀다 · PP 드라이브는 마지막 목표에
+        머무르므로 모터는 그 자리에 선다 · 기록(trace)의 목표는 계획값
+        그대로라 실제와의 차이가 그래프에 드러난다.
+        리밋 · 조인트 값을 좁힌 범위로 자르고 **그 축만** 매핑 식으로 모터
+        목표를 다시 계산한다 · 계획은 건드리지 않아 되돌리면 즉시 원래대로.
+        """
+        overrides = self.manager.live_override_snapshot()
+        if not overrides:
+            return positions, motion_values
+        out_positions = dict(positions)
+        out_values = dict(motion_values) if motion_values else {}
+        for axis_plan in axes:
+            motion_id = str(axis_plan.get('motion_id') or '')
+            entry = overrides.get(motion_id)
+            if not entry:
+                continue
+            motor_axis = int(axis_plan['motor_axis'])
+            if entry.get('muted'):
+                out_positions.pop(motor_axis, None)
+                out_values.pop(motion_id, None)
+                continue
+            clamp = entry.get('clamp')
+            if not clamp or motion_id not in out_values:
+                continue
+            low, high = float(clamp[0]), float(clamp[1])
+            value = min(high, max(low, float(out_values[motion_id])))
+            if value != out_values[motion_id]:
+                out_values[motion_id] = value
+                if motor_axis in out_positions:
+                    out_positions[motor_axis] = motion_run_rules._motor_target(
+                        axis_plan.get('row') or {}, value,
+                    )
+        return out_positions, (out_values if motion_values else motion_values)
+
     def _publish_positions(
         self,
         motors: List[Dict[str, Any]],
         axes: List[Dict[str, Any]],
         positions: Dict[int, float],
     ) -> None:
+        # 뮤트는 초기 위치 이동을 포함한 **모든 발행 길목**에서 거른다 · P7
+        # 고장난 모터는 초기 이동도 하면 안 된다
+        overrides = self.manager.live_override_snapshot()
+        if overrides:
+            muted_axes = {
+                int(axis_plan['motor_axis'])
+                for axis_plan in axes
+                if overrides.get(str(axis_plan.get('motion_id') or ''), {}).get('muted')
+            }
+            if muted_axes:
+                positions = {
+                    axis: value for axis, value in positions.items()
+                    if axis not in muted_axes
+                }
+                if not positions:
+                    return
         target_axes = motion_run_rules._sorted_controller_axes(positions.keys())
         command = motion_run_rules._empty_motor_command(target_axes)
         axes_by_index = {int(axis['motor_axis']): axis for axis in axes}
