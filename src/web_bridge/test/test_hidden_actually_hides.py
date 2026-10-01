@@ -3,7 +3,7 @@
 **사용법 화면이 모든 탭 아래에 붙어 나왔다.**
 
 화면 전환은 패널에 `hidden` 을 붙였다 떼는 것으로 한다 · 그 뜻은
-`09-midi.css` 의 한 줄이 정한다.
+`09-helpers.css` 의 한 줄이 정한다.
 
     .hidden { display: none; }
 
@@ -76,7 +76,7 @@ def test_the_hidden_rule_is_where_we_think():
     """이 시험이 딛고 선 바닥부터 · 숨김 방식이 바뀌면 알아야 한다."""
     sheets = _stylesheets()
     _hidden_index(sheets)  # 없으면 여기서 터진다
-    assert (UI / 'css/09-midi.css').exists()
+    assert (UI / 'css/09-helpers.css').exists()
 
 
 def test_nothing_that_gets_hidden_also_forces_its_own_display():

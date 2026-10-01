@@ -1,0 +1,32 @@
+/* 전역 도우미 클래스
+ *
+ * `styles.css` 7,415줄을 순서 그대로 자른 조각이다 · §6-43
+ * 원본은 09-midi.css 였다 · MIDI 화면이 삭제되면서 MIDI 규칙은 빠지고,
+ * 그 파일에 섞여 있던 전역 클래스만 **같은 09 슬롯**에 남는다.
+ *
+ * 자리를 지키는 이유 · `.hidden { display: none }` 은 01~08 의 단일 클래스
+ * display 규칙들을 **나중에 실려서** 이긴다 · 앞 번호로 옮기면 그 규칙들이
+ * 전부 숨김을 이겨 버린다 · 10 이후 조각은 `:not(.hidden)` 으로 양보한다 · §6-161
+ */
+
+.status-ok {
+  color: #15803d;
+}
+
+.status-bad {
+  color: #b45309;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.hidden {
+  display: none;
+}
+
+.mono {
+  font-variant-numeric: tabular-nums;
+}
