@@ -17,8 +17,11 @@ logger = logging.getLogger("motion_schedule.store")
 #: 추측을 없애고 **스위치 하나**로 만든다 · 지금 어느 쪽인지 화면에 보인다.
 SCHEDULE_MODE = 'schedule'   # 스케줄이 1분마다 맞춘다 · 전시·공연
 MANUAL_MODE = 'manual'       # 스케줄은 아무것도 안 한다 · 정비·시험
-RUN_MODES = (SCHEDULE_MODE, MANUAL_MODE)
+OFF_MODE = 'off'             # 움직임 명령을 전부 차단한다 · 서보는 홀드 유지
+RUN_MODES = (SCHEDULE_MODE, MANUAL_MODE, OFF_MODE)
 DEFAULT_RUN_MODE = SCHEDULE_MODE
+#: 알 수 없는 값은 DEFAULT(스케줄)로 정규화된다 · 구버전이 'off' 저장값을
+#: 읽으면 자동재생으로 둔갑하므로, 세 모드는 **한 배포로 같이** 나가야 한다.
 
 
 def normalize_run_mode(value, default: str = DEFAULT_RUN_MODE) -> str:

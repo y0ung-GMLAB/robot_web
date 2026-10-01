@@ -170,7 +170,7 @@ class ScheduleService:
         self._follow_selected_project()
         mode = normalize_run_mode(run_mode, default='')
         if not mode:
-            raise ValueError('run_mode 는 schedule 또는 manual 이어야 합니다')
+            raise ValueError('run_mode 는 schedule · manual · off 중 하나여야 합니다')
         if not self.store.set_mode(mode):
             raise RuntimeError('스케줄 모드를 저장하지 못했습니다')
         return {'status': 'ok', 'run_mode': self.store.mode}

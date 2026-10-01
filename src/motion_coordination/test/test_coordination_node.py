@@ -13,10 +13,6 @@ from motion_coordination.group_execution import GroupExecution, Member, MemberRe
 from motion_coordination.safety_stop import SafetyStopController
 
 
-    def snapshot(self):
-        return {}
-
-
 class _Publisher:
     def __init__(self, events=None):
         self.messages = []

@@ -88,6 +88,26 @@ test('수동 모드면 스케줄이 손대지 않는다고 말한다', () => {
   assert.match(motionScheduleScopeNote(now), /스케줄 모드로 바꾸면/);
 });
 
+test('오프 모드면 명령 차단을 말하고 회색 배지다', () => {
+  // 오프 = 움직임 명령 전부 차단 · 서보는 홀드 유지 · 수동과 달리
+  // 구간 안이라도 돌던 것은 회차 후 멈춘다
+  const now = status({ run_mode: 'off' });
+  const state = motionScheduleBadgeState(now);
+  assert.equal(state.scope, 'off');
+  assert.match(state.text, /오프/);
+  assert.equal(state.tone, 'muted');
+  assert.match(state.blockedReason, /차단/);
+  assert.match(motionScheduleScopeNote(now), /서보는 켠 채/);
+  // 오프에서는 「다시 시작합니다」 안내가 나오면 거짓말이다
+  assert.equal(motionScheduleResumeNote(inWindow({ run_mode: 'off' })), '');
+});
+
+test('모달 셀렉트에 세 모드가 다 있다', () => {
+  assert.match(indexHtml, /<option value="schedule">/);
+  assert.match(indexHtml, /<option value="manual">/);
+  assert.match(indexHtml, /<option value="off">/);
+});
+
 test('슬레이브에서는 수동 모드가 앞에 나서지 않는다', () => {
   // 슬레이브는 스케줄 자체가 안 돈다 · 거기서 「수동 모드」라고 띄우면
   // 마스터가 보내는 그룹 실행까지 안 도는 것처럼 읽힌다 · §6-143

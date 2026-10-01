@@ -20,7 +20,7 @@ from std_msgs.msg import String
 from motion_common import generation, motor_readiness, rpc
 from motion_common.values import optional_float, optional_int
 
-from motion_web_bridge import motor_config_rules
+from motion_web_bridge import motor_config_rules, run_mode_gate
 
 
 class ManualMotorCommandService:
@@ -134,7 +134,17 @@ class ManualMotorCommandService:
             is_ac_servo=is_ac_servo,
         )
 
+    def _off_mode_block(self) -> Dict[str, Any] | None:
+        """오프 모드면 움직임 명령을 받지 않는다 · 정지·서보 제어는 여기 안 온다."""
+        reason = run_mode_gate.motion_command_block_reason(self.bridge)
+        if not reason:
+            return None
+        return {'success': False, 'message': reason, **self.bridge.snapshot()}
+
     def ac_servo_jog(self, axis: Any, relative_deg: Any) -> Dict[str, Any]:
+        off = self._off_mode_block()
+        if off is not None:
+            return off
         axis_value = optional_int(axis, None)
         relative_value = optional_float(relative_deg, None)
         if axis_value is None:
@@ -207,6 +217,9 @@ class ManualMotorCommandService:
         }
 
     def dynamixel_jog(self, axis: Any, relative_deg: Any) -> Dict[str, Any]:
+        off = self._off_mode_block()
+        if off is not None:
+            return off
         axis_value = optional_int(axis, None)
         relative_value = optional_float(relative_deg, None)
         if axis_value is None:
@@ -285,6 +298,9 @@ class ManualMotorCommandService:
         duration_sec: Any = None,
         range_recovery: Any = False,
     ) -> Dict[str, Any]:
+        off = self._off_mode_block()
+        if off is not None:
+            return off
         axis_value = optional_int(axis, None)
         target_value = optional_float(target_deg, None)
         duration_value = optional_float(duration_sec, None)
@@ -370,6 +386,9 @@ class ManualMotorCommandService:
         duration_sec: Any = None,
         range_recovery: Any = False,
     ) -> Dict[str, Any]:
+        off = self._off_mode_block()
+        if off is not None:
+            return off
         axis_value = optional_int(axis, None)
         target_value = optional_float(target_deg, None)
         duration_value = optional_float(duration_sec, None)

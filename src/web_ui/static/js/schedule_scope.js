@@ -21,6 +21,7 @@ function readStatus(status) {
     // 그것으로 "빠져 있음" 이라 단정하면 없는 문제를 만든다 · §6-133
     nodeConnected: status.coordination_node_connected !== false,
     manual: String(status.run_mode || 'schedule') === 'manual',
+    off: String(status.run_mode || 'schedule') === 'off',
     // 시각이 되어 시도했는데 거부당했나 · §6-147
     failure: status.last_failure || {},
     // 시각을 못 읽어 **영영 안 도는** 스케줄 · §6-285
@@ -73,6 +74,17 @@ export function motionScheduleBadgeState(status) {
       canEdit: true,
       warning: '',
       blockedReason: '수동 모드입니다 · 스케줄이 시작·정지시키지 않습니다',
+    };
+  }
+  // 오프 모드 · 명령 전부 차단 · 돌고 있던 것은 회차 후 멈춘다
+  if (read.off) {
+    return {
+      scope: 'off',
+      text: '스케줄러: 오프 · 명령 차단',
+      tone: 'muted',
+      canEdit: true,
+      warning: '',
+      blockedReason: '오프 모드입니다 · 움직임 명령이 전부 차단됩니다 (서보는 홀드 유지)',
     };
   }
 
@@ -155,6 +167,10 @@ export function motionScheduleScopeNote(status) {
     return '수동 모드입니다 · 스케줄이 시작·정지시키지 않습니다 · '
       + '스케줄 모드로 바꾸면 시각에 맞춰 관리합니다.';
   }
+  if (state.scope === 'off') {
+    return '오프 모드입니다 · 조그·재생·그룹 시작이 전부 차단되고, '
+      + '돌고 있던 모션은 현재 회차 후 멈춥니다 · 서보는 켠 채 유지됩니다.';
+  }
   if (state.scope === 'local') {
     return '시각이 되면 이 PC 의 등록된 모션을 연속 시작하고, '
       + '종료 시각에 현재 회차 후 정지합니다.';
@@ -185,7 +201,7 @@ export function motionScheduleScopeNote(status) {
 export function motionScheduleResumeNote(status) {
   const read = readStatus(status);
   if (!read) return '';
-  if (read.manual) return '';                       // 스케줄이 손대지 않는다
+  if (read.manual || read.off) return '';           // 스케줄이 손대지 않는다
   if (read.enabled && !read.isMaster) return '';    // 여기서는 스케줄이 안 돈다
   if (!status?.active_schedule_id) return '';       // 지금은 돌아야 할 구간이 아니다
   const seconds = Number(status?.reconcile_interval_sec);

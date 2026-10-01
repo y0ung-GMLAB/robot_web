@@ -171,6 +171,7 @@ def test_a_slave_can_still_read(slave):
 def test_the_run_mode_is_not_owner_gated(slave):
     """수동 모드로 바꾸는 것은 정비 행위다 · 슬레이브도 해야 한다."""
     assert _service().set_run_mode('manual')['run_mode'] == 'manual'
+    assert _service().set_run_mode('off')['run_mode'] == 'off'
 
 
 # --------------------------------------------------------------------------- #
@@ -178,7 +179,7 @@ def test_the_run_mode_is_not_owner_gated(slave):
 # --------------------------------------------------------------------------- #
 
 def test_an_unknown_run_mode_is_refused():
-    with pytest.raises(ValueError, match='schedule 또는 manual'):
+    with pytest.raises(ValueError, match='schedule · manual · off'):
         _service().set_run_mode('무엇')
 
 

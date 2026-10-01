@@ -24,6 +24,7 @@ from motion_common.run_state import group_is_active, is_running
 from motion_common.schedule_models import ScheduleItem
 from motion_common.schedule_store import (
     DEFAULT_RUN_MODE,
+    OFF_MODE,
     SCHEDULE_MODE,
     ScheduleStore,
     normalize_run_mode,
@@ -367,6 +368,15 @@ class MotionScheduleNode(Node):
         # 않아도 사실이 아니게 된다.
         if (wanted is not None) == running:
             self._forget_failure()
+
+        # 오프 모드 · 구간 **안**이라도 돌고 있으면 회차 후 정지 · 수동과 다른 점이다
+        #
+        # 오프 = 「아무것도 움직이지 않는다 · 서보는 홀드」 · 사람이 켠 것이든
+        # 스케줄이 켠 것이든 회차를 마치고 멈춘다 · 새 시작은 아래 공통 분기가 막는다.
+        if self._run_mode == OFF_MODE and running:
+            self.get_logger().info("[점검] 오프 모드인데 돌고 있다 · 회차 후 정지")
+            self._execute_stop_after_cycle(None)
+            return
 
         if self._run_mode != SCHEDULE_MODE:
             # 수동 모드 · 스케줄은 **새로 시작하지 않는다** · §6-143

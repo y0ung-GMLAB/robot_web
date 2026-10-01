@@ -25,7 +25,7 @@ from .ethercat_alias_manager import EthercatAliasError, EthercatAliasManager
 from .coordination_bridge import (
     CoordinationWebBridge, local_motion_control, local_motion_readiness,
 )
-from . import motion_file_analysis, motor_config_rules
+from . import motion_file_analysis, motor_config_rules, run_mode_gate
 from .execution_context_service import ExecutionContextService
 from .manual_motor_commands import ManualMotorCommandService
 from .motor_runtime_service import MotorRuntimeService
@@ -1718,6 +1718,9 @@ class MotionWebBridge(Node):
         return service.local_execution_blocker() if service is not None else ''
 
     def motion_run_initialize(self, payload: Dict[str, Any]) -> Dict[str, Any]:
+        off = run_mode_gate.motion_command_block_reason(self)
+        if off:
+            return {'success': False, 'message': f'초기 위치 이동 불가: {off}'}
         if str(payload.get('request_source') or '') != 'network_control':
             conflict = self.coordination_execution_blocker()
             if conflict:
@@ -1755,12 +1758,16 @@ class MotionWebBridge(Node):
                 current_project_id=project_id,
             )
             if store.mode != SCHEDULE_MODE:
-                return '운전 모드가 「수동」입니다 · 스케줄은 시작시키지 않습니다'
+                label = '오프' if store.mode == 'off' else '수동'
+                return f'운전 모드가 「{label}」입니다 · 스케줄은 시작시키지 않습니다'
         except (OSError, ValueError) as exc:
             self.get_logger().warn(f'스케줄 시작 확인 실패: {exc}')
         return ''
 
     def motion_run_start(self, payload: Dict[str, Any]) -> Dict[str, Any]:
+        off = run_mode_gate.motion_command_block_reason(self)
+        if off:
+            return {'success': False, 'message': f'모션 실행 불가: {off}'}
         manual = self.schedule_start_blocked_by_manual_mode(payload)
         if manual:
             self.get_logger().warn(f'스케줄 시작 거절 · {manual}')

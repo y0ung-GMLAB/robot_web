@@ -54,6 +54,14 @@ def test_a_schedule_start_is_refused_in_manual_mode(tmp_path):
     assert '수동' in reason
 
 
+def test_a_schedule_start_is_refused_in_off_mode(tmp_path):
+    bridge = _bridge(tmp_path, 'off')
+
+    reason = bridge.schedule_start_blocked_by_manual_mode({'schedule_id': 's1'})
+
+    assert '오프' in reason
+
+
 def test_a_schedule_start_passes_in_schedule_mode(tmp_path):
     bridge = _bridge(tmp_path, 'schedule')
 

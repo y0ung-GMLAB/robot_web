@@ -12,6 +12,8 @@ from pathlib import Path
 from typing import Any, Callable, Dict, Mapping, Optional
 
 from motion_common import repeat_policy
+
+from motion_web_bridge import run_mode_gate
 from motion_common import run_state
 
 import yaml
@@ -213,6 +215,10 @@ class CoordinationWebBridge:
         }
         if command not in allowed:
             raise ValueError('지원하지 않는 DDS 그룹 실행 요청입니다')
+        if command in {'start_group', 'initialize_group'}:
+            off = run_mode_gate.motion_command_block_reason(self._node)
+            if off:
+                return {'success': False, 'message': off}
         start_generation = int(self._project_generation())
         try:
             request = {'command': command}
