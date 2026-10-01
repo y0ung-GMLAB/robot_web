@@ -1,0 +1,309 @@
+"""UI 개발 프리뷰 서버 · 로봇·ROS 없이 화면만 띄운다 (개발 전용).
+
+미니PC 에 가기 전에 화면을 보면서 고치기 위한 것이다 · 실제 브리지는
+rclpy 가 필요해 개발 PC(Windows)에서 못 뜬다 · 여기는:
+
+    /            실제 서버와 같은 규칙(IndexComposer)으로 조각을 합쳐 준다
+    /static/*    src/web_ui/static 그대로
+    /ws/status   가짜 스냅샷 2Hz · 플로팅 헤드 5축이 살아 있는 척한다
+    /ws/manual-stream   페이더 규약(hello → hello_ok → target/release)을 흉내
+    /api/*       그럴듯한 기본값 · 운전 모드는 메모리에 저장돼 세그먼트가 동작
+
+가짜 모터는 명령(페이더·재생 흉내)을 따라 스르르 움직이므로 상호작용
+감각까지 확인할 수 있다 · **배포와 무관** · 서비스·install.sh 는 이 파일을
+모른다.
+
+실행 (저장소 뿌리에서):
+
+    python scripts/dev_preview.py          # http://localhost:8010
+    python scripts/dev_preview.py 8020     # 다른 포트
+"""
+
+from __future__ import annotations
+
+import asyncio
+import json
+import math
+import sys
+import time
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT / 'src' / 'web_bridge'))
+
+from fastapi import FastAPI, Request, WebSocket, WebSocketDisconnect  # noqa: E402
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse  # noqa: E402
+import uvicorn  # noqa: E402
+
+from motion_web_bridge.index_composer import IndexComposer  # noqa: E402
+
+STATIC = ROOT / 'src' / 'web_ui' / 'static'
+
+# --------------------------------------------------------------------------- #
+# 가짜 장비 · 플로팅 헤드 5축
+# --------------------------------------------------------------------------- #
+
+JOINTS = [
+    # (조인트, 축, 감속비, 최소, 최대)
+    ('Neck_Pitch', 0, 150.0, -10.0, 13.0),
+    ('Neck_Yaw', 1, 100.0, -15.0, 15.0),
+    ('Eye_Pitch', 2, 50.0, -10.0, 10.0),
+    ('Eye_Yaw_L', 3, 35.0, -12.0, 12.0),
+    ('Eye_Yaw_R', 4, 35.0, -12.0, 12.0),
+]
+
+state = {
+    'run_mode': 'manual',
+    'positions': {axis: 0.0 for _, axis, *_ in JOINTS},   # 모터 deg
+    'targets': {axis: 0.0 for _, axis, *_ in JOINTS},
+    'servo_on': True,
+    'generation': 1,
+}
+
+
+def mapping_rows():
+    return [
+        {
+            'motion_id': name,
+            'enabled': True,
+            'motor_ref': '',
+            'motor_axis': axis,
+            'gear_ratio': gear,
+            'invert': False,
+            'offset_deg': 0.0,
+            'scale': 1.0,
+            'reference_position_deg': 0.0,
+            'reference_enabled': True,
+            'motion_lower_deg': lower,
+            'motion_upper_deg': upper,
+            'initial_mode': 'first_frame',
+            'initial_position_deg': 0.0,
+            'initial_move_time_sec': 5.0,
+        }
+        for name, axis, gear, lower, upper in JOINTS
+    ]
+
+
+def snapshot():
+    motors = []
+    for name, axis, gear, lower, upper in JOINTS:
+        position = state['positions'][axis]
+        motors.append({
+            'controller_index': axis,
+            'display_name': f'{axis}번 모터',
+            'name': name,
+            'motor_type': 'ac_servo',
+            'motor_type_label': 'AC Servo',
+            'state': 'detected',
+            'servo_on': state['servo_on'],
+            'fault': False,
+            'position_deg': round(position, 3),
+            'position': round(position, 3),
+            'velocity_deg_s': 0.0,
+            'torque_percent': 3.0,
+            'motion_id': name,
+            'lower': -36000.0,
+            'upper': 36000.0,
+            'profile_velocity': 18000.0,
+        })
+    return {
+        'project_generation': state['generation'],
+        'selected_project_id': 'preview',
+        'motors': motors,
+        'motor_activity': {},
+        'motion_run_status': {'state': 'idle'},
+        'safety_status': {
+            'commands_blocked': False,
+            'servo_alarm_blocked_axes': [],
+            'emergency_latched': False,
+        },
+        'runtime_status': {'ready': True, 'message': '프리뷰 · 가짜 장비'},
+        'motor_identity': {'ok': True},
+    }
+
+
+def tick(dt: float) -> None:
+    """목표를 향해 스르르 · 페이더 감각 확인용."""
+    for axis, target in state['targets'].items():
+        current = state['positions'][axis]
+        step = (target - current) * min(1.0, dt * 8.0)
+        state['positions'][axis] = current + step
+
+
+# --------------------------------------------------------------------------- #
+# 서버
+# --------------------------------------------------------------------------- #
+
+app = FastAPI()
+composer = IndexComposer(STATIC / 'index.html')
+
+
+@app.get('/')
+async def index():
+    html, _etag = composer.compose()
+    return HTMLResponse(html)
+
+
+@app.get('/favicon.ico')
+async def favicon():
+    return JSONResponse({}, status_code=404)
+
+
+@app.get('/static/{asset_path:path}')
+async def static_asset(asset_path: str):
+    target = (STATIC / asset_path).resolve()
+    if not str(target).startswith(str(STATIC.resolve())) or not target.is_file():
+        return JSONResponse({'detail': 'not found'}, status_code=404)
+    return FileResponse(target)
+
+
+@app.websocket('/ws/status')
+async def ws_status(websocket: WebSocket):
+    await websocket.accept()
+    last = time.monotonic()
+    try:
+        while True:
+            now = time.monotonic()
+            tick(now - last)
+            last = now
+            await websocket.send_text(json.dumps(snapshot()))
+            await asyncio.sleep(0.5)
+    except (WebSocketDisconnect, ConnectionError, RuntimeError):
+        return
+
+
+@app.websocket('/ws/manual-stream')
+async def ws_manual_stream(websocket: WebSocket):
+    await websocket.accept()
+    if state['run_mode'] == 'off':
+        await websocket.send_text(json.dumps({
+            'type': 'error',
+            'message': '오프 모드 · 명령이 차단되어 있습니다 (상단에서 모드를 바꾸세요)',
+        }, ensure_ascii=False))
+        await websocket.close()
+        return
+    try:
+        hello = json.loads(await websocket.receive_text())
+    except (WebSocketDisconnect, ConnectionError, RuntimeError, ValueError):
+        return
+    if hello.get('type') != 'hello':
+        await websocket.close()
+        return
+    await websocket.send_text(json.dumps({'type': 'hello_ok'}))
+    try:
+        while True:
+            message = json.loads(await websocket.receive_text())
+            kind = message.get('type')
+            if kind == 'target':
+                axis = int(message.get('axis'))
+                state['targets'][axis] = float(message.get('target_deg'))
+            elif kind == 'release':
+                for axis in message.get('axes') or []:
+                    state['targets'][int(axis)] = state['positions'][int(axis)]
+                await websocket.send_text(json.dumps({
+                    'type': 'result', 'success': True,
+                    'axes': message.get('axes'), 'message': '프리뷰 · 그 자리에 섰습니다',
+                }, ensure_ascii=False))
+    except (WebSocketDisconnect, ConnectionError, RuntimeError, ValueError, KeyError):
+        return
+
+
+# ---- REST · 그럴듯한 기본값 ------------------------------------------------ #
+
+MAPPING_FILE = {
+    'id': 'motion_axis.yaml',
+    'filename': 'motion_axis.yaml',
+    'valid': True,
+    'message': '',
+    'revision': 'preview-rev-1',
+    'mapping_revision': 'preview-rev-1',
+    'name': 'motion_axis',
+    'motion_file_id': 'demo.json',
+    'mapping_count': len(JOINTS),
+    'enabled_count': len(JOINTS),
+    'mapped_count': len(JOINTS),
+}
+
+CANNED = {
+    ('GET', '/api/schedule/status'): lambda: {
+        'run_mode': state['run_mode'],
+        'schedules': [],
+        'enabled': True,
+        'active_schedule_id': '',
+        'coordination_enabled': False,
+        'coordination_joined': False,
+        'is_master': True,
+        'clock': {
+            'local_time': time.strftime('%Y-%m-%dT%H:%M:%S'),
+            'utc_offset': '+0900',
+            'timezone': 'Asia/Seoul',
+        },
+    },
+    ('GET', '/api/schedule/list'): lambda: {'schedules': []},
+    ('GET', '/api/motion-mappings'): lambda: {
+        'success': True,
+        'files': [MAPPING_FILE],
+        'active_file_id': 'motion_axis.yaml',
+        'message': '프리뷰 조인트 연결',
+    },
+    ('GET', '/api/motion-mappings/motion_axis.yaml'): lambda: {
+        'success': True,
+        'file': MAPPING_FILE,
+        'files': [MAPPING_FILE],
+        'mapping': {
+            'name': 'motion_axis',
+            'file_id': 'motion_axis.yaml',
+            'motion_file_id': 'demo.json',
+            'mappings': mapping_rows(),
+        },
+        'validation': None,
+    },
+    ('GET', '/api/motion-files'): lambda: {
+        'success': True,
+        'files': [{
+            'id': 'demo.json', 'filename': 'demo.json',
+            'size_bytes': 12345, 'updated_at': time.time(),
+            'valid': True, 'message': '', 'duration_sec': 12.3,
+        }],
+    },
+    ('GET', '/api/motion-files/demo.json'): lambda: {
+        'success': True,
+        'file': {'id': 'demo.json', 'filename': 'demo.json', 'valid': True},
+        'files': [],
+    },
+    ('GET', '/api/projects'): lambda: {
+        'projects': [{
+            'project_id': 'preview', 'name': '프리뷰',
+            'counts': {'motions': 1, 'motion_axis_matching': 1, 'motor_axes': 1},
+        }],
+        'selected_project_id': 'preview',
+        'project': {'project_id': 'preview', 'name': '프리뷰'},
+        'tree': [],
+        'project_generation': state['generation'],
+    },
+}
+
+
+@app.put('/api/schedule/mode')
+async def set_mode(request: Request):
+    body = await request.json()
+    mode = str(body.get('run_mode') or 'schedule')
+    state['run_mode'] = mode
+    return {'success': True, 'run_mode': mode}
+
+
+@app.api_route('/api/{rest:path}', methods=['GET', 'POST', 'PUT', 'DELETE', 'PATCH'])
+async def api_catch_all(rest: str, request: Request):
+    handler = CANNED.get((request.method, f'/api/{rest}'))
+    if handler:
+        payload = handler()
+    else:
+        payload = {'success': True, 'message': f'프리뷰 · /{rest} 은 가짜 응답'}
+    payload.setdefault('project_generation', state['generation'])
+    return JSONResponse(payload)
+
+
+if __name__ == '__main__':
+    port = int(sys.argv[1]) if len(sys.argv) > 1 else 8010
+    print(f'UI 프리뷰 · http://localhost:{port}  (가짜 장비 · 배포와 무관)')
+    uvicorn.run(app, host='127.0.0.1', port=port, log_level='warning')
