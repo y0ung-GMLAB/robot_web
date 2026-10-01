@@ -187,6 +187,7 @@ export function getElements() {
     motionTestActionGuide: document.getElementById('motionTestActionGuide'),
     motionTestModePanels: document.querySelectorAll('[data-motion-test-panel]'),
     motionTestJogDistance: document.getElementById('motionTestJogDistance'),
+    motionTestJogJointMode: document.getElementById('motionTestJogJointMode'),
     motionTestJogNegativeButton: document.getElementById('motionTestJogNegativeButton'),
     motionTestJogPositiveButton: document.getElementById('motionTestJogPositiveButton'),
     motionTestPosition: document.getElementById('motionTestPosition'),

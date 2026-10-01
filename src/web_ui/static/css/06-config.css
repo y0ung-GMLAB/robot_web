@@ -1032,3 +1032,16 @@ th {
 .manual-fader-value small {
   opacity: 0.7;
 }
+
+/* 조그 단위 토글 */
+.motion-jog-joint-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.motion-jog-joint-toggle input[type="checkbox"] {
+  margin: 0;
+}

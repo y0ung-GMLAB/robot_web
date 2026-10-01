@@ -472,7 +472,7 @@ function detectedAcServoMotors(state) {
   ));
 }
 
-export function createMotionTestController({ el, getLatestState }) {
+export function createMotionTestController({ el, getLatestState, getJointRow = () => null }) {
   let selectedAxis = null;
   let lastAxisOptionsSignature = '';
   let lastJogDirection = 1;
@@ -509,6 +509,34 @@ export function createMotionTestController({ el, getLatestState }) {
     return motorByAxis(getLatestState(), selectedAxis);
   }
 
+  /** 이 모터의 조인트 연결 · 조그를 조인트 deg 로 걸 때의 비율·방향 · P4
+   *
+   * 상대 이동이라 기준점·보정값은 끼지 않는다 · signedRatio 하나로
+   * `출력 = 모터 / signedRatio` · `모터 = 출력 × signedRatio` 가 성립한다.
+   */
+  function jogJointInfo(motor) {
+    const axis = numericValue(motor?.controller_index, null);
+    const row = axis === null ? null : getJointRow(axis);
+    if (!row) return null;
+    const gear = isDynamixelMotor(motor) ? 1 : numericValue(row.gear_ratio, 1);
+    const signedRatio = gear * numericValue(row.scale, 1) * (row.invert ? -1 : 1);
+    if (!Number.isFinite(signedRatio) || signedRatio === 0) return null;
+    return { motionId: String(row.motion_id || ''), signedRatio };
+  }
+
+  /** 계산에 쓰는 (부호 포함) 감속비 · 동작 모드 = 입력칸 · 조그 = 조인트 토글 */
+  function commandGearRatio(mode, motor) {
+    if (mode === 'action') return actionGearRatio(el, motor);
+    if (mode !== 'jog' || !el.motionTestJogJointMode?.checked) return 1;
+    return jogJointInfo(motor)?.signedRatio ?? 1;
+  }
+
+  /** 조그 이동량 상한 · 조인트 deg 기준이면 모터 360도에 해당하는 만큼 줄인다 */
+  function jogInputMaxDeg(motor) {
+    const ratio = Math.abs(commandGearRatio('jog', motor)) || 1;
+    return maxJogDeltaDeg(getLatestState()) / ratio;
+  }
+
   function commandPlan(options = {}) {
     const motor = selectedMotor();
     if (!motor) return null;
@@ -520,7 +548,7 @@ export function createMotionTestController({ el, getLatestState }) {
     const isJog = mode === 'jog';
     const isRecovery = mode === 'recovery';
     const jogDirection = numericValue(options.jogDirection, lastJogDirection);
-    const gearRatio = mode === 'action' ? actionGearRatio(el, motor) : 1;
+    const gearRatio = commandGearRatio(mode, motor);
     const currentOutputDeg = currentMotorDeg / gearRatio;
     const recovery = isRecovery ? recoveryTargetForMotor(motor) : null;
     const command = isJog
@@ -531,7 +559,7 @@ export function createMotionTestController({ el, getLatestState }) {
           : numericValue(el.motionTestPosition?.value, null)
       );
     if (command === null || (isJog && command <= 0)) return null;
-    if (isJog && Math.abs(command) > maxJogDeltaDeg(getLatestState())) return null;
+    if (isJog && Math.abs(command) > jogInputMaxDeg(motor)) return null;
 
     const commandRelativeDeg = isJog
       ? Math.abs(command) * jogDirection
@@ -671,7 +699,7 @@ export function createMotionTestController({ el, getLatestState }) {
     }
 
     const mode = el.motionTestMode?.value || 'jog';
-    const gearRatio = mode === 'action' ? actionGearRatio(el, motor) : 1;
+    const gearRatio = commandGearRatio(mode, motor);
     const current = positionSnapshot(motor, gearRatio);
     const plan = commandPlan();
     const lower = limitSnapshot(motor, gearRatio, 'lower', mode);
@@ -906,11 +934,25 @@ export function createMotionTestController({ el, getLatestState }) {
         el.motionTestGearRatio.title = '';
       }
     }
+    if (el.motionTestJogJointMode) {
+      const joint = jogJointInfo(motor);
+      el.motionTestJogJointMode.disabled = !joint;
+      if (!joint) {
+        el.motionTestJogJointMode.checked = false;
+        el.motionTestJogJointMode.title = '이 모터에 연결된 조인트가 없습니다 · 모터 deg 로 움직입니다';
+      } else {
+        el.motionTestJogJointMode.title = `${joint.motionId} · 모터 ${joint.signedRatio}x`;
+        // 기본은 조인트 deg · 사람이 끈 것은 존중한다 (모터를 바꾸면 초기화)
+        if (!el.motionTestJogJointMode.dataset.userSet) {
+          el.motionTestJogJointMode.checked = true;
+        }
+      }
+    }
     if (el.motionTestAxisInfo) el.motionTestAxisInfo.textContent = motorLabel(motor);
     if (el.motionTestCurrentPosition) {
       const currentMotorDeg = positionDeg(motor);
       const currentRaw = positionRaw(motor);
-      const gearRatio = isActionMode ? actionGearRatio(el, motor) : 1;
+      const gearRatio = commandGearRatio(isActionMode ? 'action' : 'jog', motor);
       const currentOutputDeg = currentMotorDeg === null ? null : currentMotorDeg / gearRatio;
       el.motionTestCurrentPosition.innerHTML = motor
         ? valueTableHtml(
@@ -928,7 +970,7 @@ export function createMotionTestController({ el, getLatestState }) {
         : emptyValueHtml('-');
     }
     if (el.motionTestJogDistance) {
-      el.motionTestJogDistance.max = String(maxJogDeltaDeg(getLatestState()));
+      el.motionTestJogDistance.max = String(jogInputMaxDeg(motor));
     }
     updateActionPositionInputConstraints(motor, isActionMode);
     const plan = commandPlan();
@@ -1124,6 +1166,8 @@ export function createMotionTestController({ el, getLatestState }) {
   function selectAxis(axis) {
     const nextAxis = numericValue(axis, null);
     selectedAxis = nextAxis;
+    // 다른 모터로 넘어가면 조그 단위는 다시 기본(조인트 deg)으로
+    if (el.motionTestJogJointMode) delete el.motionTestJogJointMode.dataset.userSet;
     renderAxisOptions();
     renderCurrentState();
   }
@@ -1135,7 +1179,7 @@ export function createMotionTestController({ el, getLatestState }) {
     const isDynamixel = isDynamixelMotor(motor);
     const motorLabelText = isDynamixel ? '다이나믹셀' : 'AC 서보';
     const jogValue = numericValue(el.motionTestJogDistance?.value, null);
-    const maxJog = maxJogDeltaDeg(getLatestState());
+    const maxJog = jogInputMaxDeg(motor);
     const jogLimitReason = (
       jogValue !== null && Math.abs(jogValue) > maxJog
     )
@@ -1343,6 +1387,12 @@ export function createMotionTestController({ el, getLatestState }) {
     if (el.motionTestAxisSelect) {
       el.motionTestAxisSelect.addEventListener('change', () => {
         selectAxis(el.motionTestAxisSelect.value);
+      });
+    }
+    if (el.motionTestJogJointMode) {
+      el.motionTestJogJointMode.addEventListener('change', () => {
+        el.motionTestJogJointMode.dataset.userSet = '1';
+        renderCurrentState();
       });
     }
     [

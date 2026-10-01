@@ -88,6 +88,13 @@
                 <span>조그 이동량 (도)</span>
                 <input id="motionTestJogDistance" type="number" inputmode="decimal" step="0.001" min="0.001" max="360" value="1.000">
               </label>
+              <div class="manual-field motion-jog-unit-field" data-motion-test-panel="jog">
+                <span>조그 단위</span>
+                <label class="motion-jog-joint-toggle" title="끄면 모터 deg 그대로 움직입니다">
+                  <input id="motionTestJogJointMode" type="checkbox" checked>
+                  조인트 deg 기준 · 감속비·방향 적용
+                </label>
+              </div>
               <label class="manual-field hidden" data-motion-test-panel="action">
                 <span>절대 목표 위치 (출력축 도)</span>
                 <input id="motionTestPosition" type="number" inputmode="decimal" step="0.001" value="0">

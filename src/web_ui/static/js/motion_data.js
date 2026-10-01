@@ -2853,5 +2853,12 @@ export function createMotionDataController({
       renderMotionTabs();
       render();
     },
+    /** 이 모터(축)에 연결된 조인트 행 · 조그의 조인트 deg 변환에 쓴다 · P4 */
+    jointRowForAxis: (axis) => {
+      const rows = Array.isArray(mappingDraft?.mappings) ? mappingDraft.mappings : [];
+      return rows.find((row) => (
+        row?.enabled !== false && Number(row?.motor_axis) === Number(axis)
+      )) || null;
+    },
   };
 }

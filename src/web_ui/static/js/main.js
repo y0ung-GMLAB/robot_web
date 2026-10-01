@@ -1076,6 +1076,8 @@ const motorConfig = createMotorConfigController({
 motionTest = createMotionTestController({
   el,
   getLatestState: () => appState.latestState,
+  // motionData 는 아래에서 만들어진다 · 이 화살표가 불릴 때는 이미 있다
+  getJointRow: (axis) => motionData?.jointRowForAxis?.(axis) || null,
 });
 
 const manualFader = createManualFaderController({
