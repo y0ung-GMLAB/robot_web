@@ -11,6 +11,7 @@ import {
   fetchMotionRunStatus,
   importProjectFile,
   initializeMotionRun,
+  previewMotionFile,
   projectFileDownloadUrl,
   saveMotionMapping,
   saveRegisteredMotionFile,
@@ -1767,6 +1768,12 @@ export function createMotionDataController({
         ? '이 파일을 지금 보고 있는 PC 에 저장합니다'
         : '애니메이션을 먼저 선택하세요';
     }
+    if (el.previewMotionFileButton) {
+      el.previewMotionFileButton.disabled = !file || loading;
+      el.previewMotionFileButton.title = file
+        ? '설정된 뷰어(MuJoCo 등)로 띄웁니다 · config/animation_preview.yaml'
+        : '애니메이션을 먼저 선택하세요';
+    }
     // 재생 등록은 **조인트 연결 편집과 상관없다** · §6-160
     //
     // 전에는 두 버튼이 `mappingDirty` 로 꺼졌다 · 조인트 연결을 편집 중이면
@@ -2248,6 +2255,17 @@ export function createMotionDataController({
    * blob 이 아니라 평범한 링크다. blob 은 헤드리스에서 확인이 안 됐고, 서버가
    * 한글 파일명을 이미 `filename*=utf-8''` 로 붙여 준다.
    */
+  /** 미리보기 · 뷰어 실행은 서버(그 PC)에서 · 결과는 메시지 한 줄 · P7 */
+  async function previewSelectedMotionFile() {
+    if (!selectedFileId) return;
+    try {
+      const result = await previewMotionFile(selectedFileId);
+      setMessage(result?.message || '미리보기 실행');
+    } catch (error) {
+      setMessage(`미리보기 실패: ${error?.message || error}`);
+    }
+  }
+
   function downloadSelectedMotionFile() {
     const file = selectedFile;
     if (!file || !motionProjectId) {
@@ -2864,6 +2882,7 @@ export function createMotionDataController({
     el.registerMotionFileButton?.addEventListener('click', registerSelectedMotionFile);
     el.unregisterMotionFileButton?.addEventListener('click', unregisterSelectedMotionFile);
     el.downloadMotionFileButton?.addEventListener('click', downloadSelectedMotionFile);
+    el.previewMotionFileButton?.addEventListener('click', previewSelectedMotionFile);
     if (el.deleteMotionFileButton) {
       el.deleteMotionFileButton.addEventListener('click', deleteSelectedFile);
     }

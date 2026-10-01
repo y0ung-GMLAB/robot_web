@@ -1,0 +1,22 @@
+# 애니메이션 미리보기 명령 · 복사해서 animation_preview.yaml 로 저장
+#
+# 「미리보기」 버튼이 이 명령에 선택한 애니메이션 경로를 끼워 실행합니다 ·
+# {motion_path} = 애니메이션 .json 경로 · {fps} = 아래 fps 값 · 셸을 거치지
+# 않으므로 인자를 한 줄씩 적으세요 · cwd = 실행 폴더.
+#
+# 플로팅 헤드 (MuJoCo · 물리 없는 kinematic = 즉시 시작 · 미니PC 가능):
+command:
+  - uv
+  - run
+  - --no-project
+  - --with=mujoco
+  - --with=numpy
+  - python
+  - view_run.py
+  - ../fh_1800_wires_R011.xml
+  - '{motion_path}'
+  - interp
+  - '{fps}'
+  - kinematic
+fps: 60
+cwd: /home/USER/floating_share/floating_1800/sim/scripts

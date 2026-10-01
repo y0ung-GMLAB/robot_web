@@ -29,6 +29,7 @@ from . import motion_file_analysis, motor_config_rules, run_mode_gate
 from .execution_context_service import ExecutionContextService
 from .manual_motor_commands import ManualMotorCommandService
 from .manual_stream import ManualStreamService
+from . import animation_preview
 from .motor_runtime_service import MotorRuntimeService
 from .project_service import ProjectService
 from .motor_config_service import MotorConfigService
@@ -1838,6 +1839,16 @@ class MotionWebBridge(Node):
             self._with_active_project_files(payload),
             timeout_sec=2.0,
         )
+
+    def preview_motion_file(self, file_id: str) -> Dict[str, Any]:
+        """선택한 애니메이션을 현장이 설정한 미리보기 명령으로 띄운다 · P7"""
+        project_id = self.project_repository.selected_project_id()
+        if not project_id:
+            return {'success': False, 'message': NO_PROJECT_SELECTED}
+        motion_path = self.project_repository.export_path(
+            project_id, 'motions', file_id,
+        )
+        return animation_preview.launch_preview(self.workspace_root, motion_path)
 
     def set_motion_run_live_override(self, payload: Dict[str, Any]) -> Dict[str, Any]:
         """재생 라이브 오버라이드(조인트 뮤트·좁힌 리밋) · 움직임 명령이

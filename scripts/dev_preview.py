@@ -58,6 +58,7 @@ state = {
     'targets': {axis: 0.0 for _, axis, *_ in JOINTS},
     'servo_on': True,
     'generation': 1,
+    'live_overrides': {},
 }
 
 
@@ -121,7 +122,30 @@ def snapshot():
             'motor_identity': {'ok': True},
         },
         'motion_state_age_sec': 0.0,
-        'motion_run_status': {'state': 'idle'},
+        'motion_run_status': {
+            'state': 'ready',
+            'message': '프리뷰 · 실행 준비 검사 흉내',
+            'live_overrides': state['live_overrides'],
+            'automation': {'repeat_mode': 'reinitialize'},
+            'axes': [
+                {
+                    'motion_id': name,
+                    'motor_axis': axis,
+                    'motor_type': 'ac_servo',
+                    'motion_limit_lower_deg': lower,
+                    'motion_limit_upper_deg': upper,
+                    'initial_motor_target_deg': 0.0,
+                    'target_min_deg': lower * gear,
+                    'target_max_deg': upper * gear,
+                    'loop_start_motion_deg': 0.0,
+                    'loop_end_motion_deg': 0.0,
+                    'loop_delta_deg': 0.0,
+                    'loop_tolerance_deg': 5.0,
+                    'motion_clamped': False,
+                }
+                for name, axis, gear, lower, upper in JOINTS
+            ],
+        },
         'motor_activity': {},
         'execution_context': {},
         'service_management': {},
@@ -223,6 +247,53 @@ async def ws_manual_stream(websocket: WebSocket):
 
 # ---- REST · 그럴듯한 기본값 ------------------------------------------------ #
 
+# 개발 PC 의 실제 export 폴더 · 프리뷰에서 진짜 애니메이션을 고르고
+# 「미리보기」로 MuJoCo(물리 없는 kinematic)를 바로 띄운다
+EXPORT_DIR = Path(r'D:/my_ws/floating/floating_1800/export')
+SIM_SCRIPTS = Path(r'D:/my_ws/floating/floating_1800/sim/scripts')
+SIM_MODEL = '../fh_1800_wires_R011.xml'
+
+
+def export_files():
+    if not EXPORT_DIR.is_dir():
+        return []
+    return [
+        {
+            'id': path.name, 'filename': path.name,
+            'size_bytes': path.stat().st_size,
+            'updated_at': path.stat().st_mtime,
+            'valid': True, 'message': '',
+        }
+        for path in sorted(EXPORT_DIR.glob('*.json'))
+    ]
+
+
+@app.get('/api/motion-files')
+async def motion_files():
+    files = export_files()
+    return {'success': True, 'files': files,
+            'project_generation': state['generation']}
+
+
+@app.post('/api/motion-files/{file_id}/preview')
+async def preview_motion_file(file_id: str):
+    motion = (EXPORT_DIR / Path(file_id).name)
+    if not motion.is_file():
+        return {'success': False, 'message': f'파일이 없습니다: {file_id}',
+                'project_generation': state['generation']}
+    import subprocess
+    subprocess.Popen(
+        ['uv', 'run', '--no-project', '--with=mujoco', '--with=numpy',
+         'python', 'view_run.py', SIM_MODEL, str(motion),
+         'interp', '60', 'kinematic'],
+        cwd=str(SIM_SCRIPTS),
+        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, shell=False,
+    )
+    return {'success': True,
+            'message': f'MuJoCo 미리보기 실행: {motion.name} (kinematic · 첫 실행은 뜨는 데 수 초)',
+            'project_generation': state['generation']}
+
+
 MAPPING_FILE = {
     'id': 'motion_axis.yaml',
     'filename': 'motion_axis.yaml',
@@ -272,19 +343,6 @@ CANNED = {
         },
         'validation': None,
     },
-    ('GET', '/api/motion-files'): lambda: {
-        'success': True,
-        'files': [{
-            'id': 'demo.json', 'filename': 'demo.json',
-            'size_bytes': 12345, 'updated_at': time.time(),
-            'valid': True, 'message': '', 'duration_sec': 12.3,
-        }],
-    },
-    ('GET', '/api/motion-files/demo.json'): lambda: {
-        'success': True,
-        'file': {'id': 'demo.json', 'filename': 'demo.json', 'valid': True},
-        'files': [],
-    },
     ('GET', '/api/projects'): lambda: {
         'projects': [{
             'project_id': 'preview', 'name': '프리뷰',
@@ -296,6 +354,26 @@ CANNED = {
         'project_generation': state['generation'],
     },
 }
+
+
+@app.post('/api/motion-run/live-override')
+async def set_live_override(request: Request):
+    body = await request.json()
+    motion_id = str(body.get('motion_id') or '')
+    entry = dict(state['live_overrides'].get(motion_id) or {})
+    if 'muted' in body:
+        entry['muted'] = bool(body['muted'])
+    if 'clamp' in body:
+        if body['clamp'] is None:
+            entry.pop('clamp', None)
+        else:
+            entry['clamp'] = [float(body['clamp'][0]), float(body['clamp'][1])]
+    if entry.get('muted') or entry.get('clamp'):
+        state['live_overrides'][motion_id] = entry
+    else:
+        state['live_overrides'].pop(motion_id, None)
+    return {'success': True, 'live_overrides': state['live_overrides'],
+            'project_generation': state['generation']}
 
 
 @app.put('/api/schedule/mode')

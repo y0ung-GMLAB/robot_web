@@ -355,6 +355,10 @@ export const configureMotionAutomation = (payload) => request('PUT', '/api/motio
 
 export const stopMotionRun = () => request('POST', '/api/motion-run/stop');
 
+/** 애니메이션 미리보기 · 현장이 설정한 외부 뷰어(MuJoCo 등)를 띄운다 · P7 */
+export const previewMotionFile = (fileId) =>
+  request('POST', `/api/motion-files/${encodeURIComponent(fileId)}/preview`);
+
 /** 재생 라이브 오버라이드 · 조인트 뮤트·좁힌 리밋 · 재생 중에도 듣는다 · P7 */
 export const setMotionRunLiveOverride = (payload) =>
   request('POST', '/api/motion-run/live-override', { body: payload });

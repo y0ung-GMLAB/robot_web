@@ -57,6 +57,10 @@ def register_motion_run_routes(app: FastAPI, bridge, safety_first_stop) -> None:
     async def motion_mapping(file_id: str):
         return await asyncio.to_thread(bridge.load_motion_mapping, file_id)
 
+    @app.post('/api/motion-files/{file_id}/preview')
+    async def preview_motion_file(file_id: str):
+        return await asyncio.to_thread(bridge.preview_motion_file, file_id)
+
     @app.post('/api/motion-run/live-override')
     async def set_motion_run_live_override(request: Request):
         body = await request.json()
