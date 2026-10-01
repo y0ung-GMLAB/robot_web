@@ -85,6 +85,13 @@ def test_every_motion_command_entry_point_is_gated():
             f'{entry} 에 오프 게이트가 없다'
         )
 
+    for entry in ('def motion_group_prepare',):
+        start = bridge.index(entry)
+        body = bridge[start:start + 500]
+        assert 'run_mode_gate.motion_command_block_reason' in body, (
+            f'{entry} 에 오프 게이트가 없다 · 원격 그룹 시작이 뚫린다'
+        )
+
     coordination = _source('coordination_bridge.py')
     start = coordination.index("if command in {'start_group', 'initialize_group'}:")
     assert 'run_mode_gate.motion_command_block_reason' in coordination[start:start + 300], (

@@ -1823,6 +1823,11 @@ class MotionWebBridge(Node):
         return self._request_motion_run('stop_after_cycle', {}, timeout_sec=2.0)
 
     def motion_group_prepare(self, payload: Dict[str, Any]) -> Dict[str, Any]:
+        # 오프 모드 · 원격 그룹 시작도 이 PC 에서는 받지 않는다 (준비 거절 →
+        # 코디네이터가 전체 시작을 취소한다) · 정지·취소 명령은 계속 받는다
+        off = run_mode_gate.motion_command_block_reason(self)
+        if off:
+            return {'success': False, 'message': f'그룹 준비 불가: {off}'}
         blocker = self.motor_runtime_control_blocker()
         if blocker:
             return {'success': False, 'message': f'그룹 실행 준비 불가: {blocker}'}
