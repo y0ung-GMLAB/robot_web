@@ -232,7 +232,7 @@ export function createProjectExplorerController({
   function requireFileManagementPermission() {
     if (canManageProjectFiles()) return true;
     closeFileActionMenu();
-    setMessage('프로젝트 파일 관리는 프로젝트·장비 > 시스템 정보에서만 가능합니다');
+    setMessage('프로젝트 파일 관리는 설정 > 시스템 정보에서만 가능합니다');
     renderFileActionMenu();
     return false;
   }
@@ -321,7 +321,7 @@ export function createProjectExplorerController({
       el.projectExplorerSelect.classList.toggle('hidden', !projectSelectionAllowed);
       el.projectExplorerSelect.title = projectSelectionAllowed
         ? '현재 프로젝트 변경'
-        : '프로젝트 변경은 프로젝트·장비 > 시스템 정보에서만 가능합니다';
+        : '프로젝트 변경은 설정 > 시스템 정보에서만 가능합니다';
     }
     if (el.projectImportFileButton) el.projectImportFileButton.disabled = state.busy || !hasProject;
     if (el.clearMotorRuntimeButton) {
@@ -581,7 +581,7 @@ export function createProjectExplorerController({
     el.projectExplorerSelect?.addEventListener('change', async () => {
       if (!canChangeProject()) {
         el.projectExplorerSelect.value = state.project?.project_id || '';
-        setMessage('프로젝트 변경은 프로젝트·장비 > 시스템 정보에서만 가능합니다');
+        setMessage('프로젝트 변경은 설정 > 시스템 정보에서만 가능합니다');
         renderControls();
         return;
       }

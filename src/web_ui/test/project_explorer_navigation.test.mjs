@@ -27,7 +27,7 @@ test('project transitions reset feature state only after a successful change', (
   assert.match(projectExplorer, /canChangeProject = \(\) => true/);
   assert.match(
     projectExplorer,
-    /if \(!canChangeProject\(\)\)[\s\S]*?프로젝트 변경은 프로젝트·장비 > 시스템 정보에서만 가능합니다/,
+    /if \(!canChangeProject\(\)\)[\s\S]*?프로젝트 변경은 설정 > 시스템 정보에서만 가능합니다/,
   );
   assert.match(
     projectExplorer,
@@ -84,7 +84,7 @@ test('project file management is visible and executable only from system informa
   );
   assert.match(
     projectExplorer,
-    /function requireFileManagementPermission\(\)[\s\S]*?프로젝트 파일 관리는 프로젝트·장비 > 시스템 정보에서만 가능합니다/,
+    /function requireFileManagementPermission\(\)[\s\S]*?프로젝트 파일 관리는 설정 > 시스템 정보에서만 가능합니다/,
   );
   assert.match(
     projectExplorer,

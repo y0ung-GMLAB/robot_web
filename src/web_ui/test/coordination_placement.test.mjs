@@ -27,7 +27,7 @@ const navigation = readFileSync(
 test('연동 탭이 있다', () => {
   assert.match(coordinationPanel, /data-workspace-panel="coordination"/);
   assert.match(topbar, /data-workspace-tab="coordination"/);
-  assert.match(navigation, /'motion-run', 'coordination'/);
+  assert.match(navigation, /'manual', 'coordination'/);
 });
 
 test('연동 요소는 연동 탭에만 있다', () => {

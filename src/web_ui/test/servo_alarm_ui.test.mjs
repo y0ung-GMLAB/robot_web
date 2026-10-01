@@ -19,14 +19,14 @@ const main = fs.readFileSync(
 
 // 서보 에러 관리는 설정이 아니라 운영 중 대응이다 · [운영]으로 옮겼다 · §6-67
 test('서보 에러 관리는 운영 그룹에 있다', () => {
-  assert.match(index, /data-workspace-tab="config">모터 관리/);
+  assert.match(index, /data-workspace-tab="config">모터·조인트/);
   assert.match(index, /data-workspace-tab="servo-errors">서보 에러 관리/);
   assert.match(index, /data-workspace-panel="servo-errors"/);
   assert.match(
     navigation,
     // 연동은 모션 실행 화면으로 합쳐졌다 · 별도 탭이 아니다 · §6-66
     // 모션 기록은 로그 옆이다 · 회차별 목표·실제 그래프
-    /operations: Object\.freeze\(\[\s*'monitoring', 'servo-errors', 'log', 'motion-trace', 'btop'/,
+    /operations: Object\.freeze\(\[\s*'monitoring', 'motion-trace', 'servo-errors', 'log', 'btop'/,
   );
 });
 

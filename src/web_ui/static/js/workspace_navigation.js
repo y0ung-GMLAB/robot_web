@@ -1,15 +1,15 @@
 export const WORKSPACE_GROUPS = Object.freeze({
   operations: Object.freeze([
-    'monitoring', 'servo-errors', 'log', 'motion-trace', 'btop', 'terminal', 'docs',
+    'monitoring', 'motion-trace', 'servo-errors', 'log', 'btop', 'terminal', 'docs',
   ]),
-  setup: Object.freeze(['system', 'project', 'config']),
-  execution: Object.freeze(['manual', 'motion-run', 'coordination']),
+  setup: Object.freeze(['config', 'project', 'system']),
+  execution: Object.freeze(['motion-run', 'manual', 'coordination']),
 });
 
 const WORKSPACE_DEFAULTS = Object.freeze({
   operations: 'monitoring',
-  setup: 'system',
-  execution: 'manual',
+  setup: 'config',
+  execution: 'motion-run',
 });
 
 const MOTION_WORKSPACE_TABS = Object.freeze({
@@ -21,8 +21,8 @@ const LEGACY_ROUTE_ALIASES = Object.freeze({ 'motion-mapping': 'config' });
 
 export const MOTION_WORKSPACE_DETAILS = Object.freeze({
   'motion-run': Object.freeze([
-    '모션 실행',
-    '모션 파일을 고르고 재생 등록한 뒤 초기 위치 이동과 재생을 제어합니다',
+    '애니메이션 재생',
+    '애니메이션을 고르고 재생 등록한 뒤 초기 위치 이동과 재생을 제어합니다',
   ]),
 });
 

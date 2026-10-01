@@ -81,5 +81,5 @@ test('workspace route state remembers the last screen in each group', () => {
   assert.equal(state.current(), 'log');
   assert.equal(state.forGroup('setup'), 'config');
   assert.equal(state.forGroup('operations'), 'log');
-  assert.equal(state.forGroup('execution'), 'manual');
+  assert.equal(state.forGroup('execution'), 'motion-run');
 });

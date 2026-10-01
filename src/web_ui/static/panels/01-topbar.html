@@ -52,26 +52,26 @@
       <nav id="workspaceTabs" class="workspace-navigation" aria-label="작업 화면">
         <div class="workspace-group-tabs" role="tablist" aria-label="작업 분류">
           <button class="workspace-group-button active" type="button" role="tab" data-workspace-group="operations">운영</button>
-          <button class="workspace-group-button" type="button" role="tab" data-workspace-group="setup">프로젝트·장비</button>
-          <button class="workspace-group-button" type="button" role="tab" data-workspace-group="execution">실행·시험</button>
+          <button class="workspace-group-button" type="button" role="tab" data-workspace-group="setup">설정</button>
+          <button class="workspace-group-button" type="button" role="tab" data-workspace-group="execution">실행</button>
         </div>
         <div class="workspace-tabs" data-workspace-group-panel="operations" role="tablist" aria-label="운영 메뉴">
           <button class="workspace-tab-button active" type="button" role="tab" data-workspace-tab="monitoring">실시간 모니터링</button>
+          <button class="workspace-tab-button" type="button" role="tab" data-workspace-tab="motion-trace">재생 기록</button>
           <button class="workspace-tab-button" type="button" role="tab" data-workspace-tab="servo-errors">서보 에러 관리</button>
           <button class="workspace-tab-button" type="button" role="tab" data-workspace-tab="log">로그</button>
-          <button class="workspace-tab-button" type="button" role="tab" data-workspace-tab="motion-trace">모션 기록</button>
           <button class="workspace-tab-button" type="button" role="tab" data-workspace-tab="btop">PC 성능 (btop)</button>
           <button class="workspace-tab-button" type="button" role="tab" data-workspace-tab="terminal">터미널</button>
           <button class="workspace-tab-button" type="button" role="tab" data-workspace-tab="docs">사용법</button>
         </div>
-        <div class="workspace-tabs hidden" data-workspace-group-panel="setup" role="tablist" aria-label="프로젝트 및 장비 메뉴">
-          <button class="workspace-tab-button" type="button" role="tab" data-workspace-tab="system">시스템 정보</button>
+        <div class="workspace-tabs hidden" data-workspace-group-panel="setup" role="tablist" aria-label="설정 메뉴">
+          <button class="workspace-tab-button" type="button" role="tab" data-workspace-tab="config">모터·조인트</button>
           <button class="workspace-tab-button" type="button" role="tab" data-workspace-tab="project">프로젝트 관리</button>
-          <button class="workspace-tab-button" type="button" role="tab" data-workspace-tab="config">모터 관리</button>
+          <button class="workspace-tab-button" type="button" role="tab" data-workspace-tab="system">시스템 정보</button>
         </div>
-        <div class="workspace-tabs hidden" data-workspace-group-panel="execution" role="tablist" aria-label="실행 및 시험 메뉴">
-          <button class="workspace-tab-button" type="button" role="tab" data-workspace-tab="manual">동작 테스트</button>
-          <button class="workspace-tab-button" type="button" role="tab" data-workspace-tab="motion-run">모션 실행</button>
+        <div class="workspace-tabs hidden" data-workspace-group-panel="execution" role="tablist" aria-label="실행 메뉴">
+          <button class="workspace-tab-button" type="button" role="tab" data-workspace-tab="motion-run">애니메이션 재생</button>
+          <button class="workspace-tab-button" type="button" role="tab" data-workspace-tab="manual">수동 조작</button>
           <button class="workspace-tab-button" type="button" role="tab" data-workspace-tab="coordination">PC 연동 설정</button>
         </div>
       </nav>
