@@ -122,28 +122,28 @@ def test_every_managed_node_is_in_the_table():
     body = bridge[start:bridge.index('\n    def ', start)]
     names = set(re.findall(r"'(\w+)':", body))
 
-    assert names == {'motion_mapping', 'midi_control', 'motion_run', 'motion_studio'}
+    assert names == {'motion_mapping', 'motion_run'}
 
 
 def test_the_real_differences_keep_their_names():
     """합쳐서 없앨 수 없는 차이다 · 이름을 붙여 남긴다."""
     source = _read('execution_context_service.py')
 
-    # MIDI 만 적용할 때 다른 말을 알아듣는다
-    assert "APPLY_COMMANDS = {'midi_control': 'select_project'}" in source
+    # MIDI 의 「다른 말」 특례는 노드째 삭제됐다 · 빈 표가 그 사실의 기록이다
+    assert 'APPLY_COMMANDS: Dict[str, str] = {}' in source
     # 매핑 노드는 되묻지 않는다
-    assert "CONFIRM_NODES = ('midi_control', 'motion_run', 'motion_studio')" in source
+    assert "CONFIRM_NODES = ('motion_run',)" in source
 
 
 def test_confirmation_asks_fewer_nodes_than_apply():
-    """적용은 넷, 확인은 셋 · 이 차이가 사라지면 매핑 노드가 두 번 답한다."""
+    """적용은 둘, 확인은 하나 · 이 차이가 사라지면 매핑 노드가 두 번 답한다."""
     bridge = _read('bridge_node.py')
     source = _read('execution_context_service.py')
 
     start = bridge.index('    def managed_context_nodes(self)')
     body = bridge[start:bridge.index('\n    def ', start)]
     all_nodes = set(re.findall(r"'(\w+)':", body))
-    confirm = set(re.findall(r"CONFIRM_NODES = \(([^)]*)\)", source)[0].replace("'", '').split(', '))
+    confirm = set(re.findall(r"'(\w+)'", re.findall(r"CONFIRM_NODES = \(([^)]*)\)", source)[0]))
 
     assert confirm < all_nodes
     assert all_nodes - confirm == {'motion_mapping'}

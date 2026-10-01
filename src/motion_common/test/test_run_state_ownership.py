@@ -31,10 +31,8 @@ WORKSPACE = Path(__file__).resolve().parents[3]
 
 #: 이 판정을 쓰는 곳 · 여기 손으로 적은 목록이 다시 생기면 안 된다
 USERS = [
+    # 스튜디오·MIDI 사용자들은 삭제됐다 · is_moving 판정을 쓰는 곳은 이것뿐
     'src/web_bridge/motion_web_bridge/bridge_helpers.py',
-    'src/motion_control_studio/motion_control/midi_control/midi_control/midi_control_node.py',
-    'src/motion_control_studio/motion_studio/motion_studio/playback_session.py',
-    'src/motion_control_studio/motion_studio/motion_studio/recording_session.py',
 ]
 
 
@@ -90,23 +88,15 @@ def test_every_user_asks_the_owner(path):
 def test_the_other_two_questions_stay_separate():
     """다른 질문까지 끌어다 붙이면 그게 다음 버그다.
 
-    `playback_session` 의 「이미 시작했거나 끝났다」와 `group_session` 의
-    「회차를 끝까지 둬도 되나」는 여기서 답할 수 없다 · 그대로 둔다.
+    `group_session` 의 「회차를 끝까지 둬도 되나」는 여기서 답할 수 없다 ·
+    그대로 둔다. (스튜디오 `playback_session` 의 판정은 노드째 삭제됐다.)
     """
-    playback = (
-        WORKSPACE
-        / 'src/motion_control_studio/motion_studio/motion_studio/playback_session.py'
-    ).read_text(encoding='utf-8')
     group = (
         WORKSPACE
         / 'src/motion_runtime/motion_runtime'
         / 'group_session.py'
     ).read_text(encoding='utf-8')
 
-    assert "'completed', 'stopped', 'error'" in playback, (
-        '「이미 시작했거나 끝났다」 판정이 사라졌습니다 · is_moving 으로 '
-        '바꿨다면 preparing·countdown 처리가 달라집니다'
-    )
     assert "'motion_completed'" in group, (
         '「회차를 끝까지 둬도 되나」 판정이 사라졌습니다 · motion_completed 가 '
         '빠지면 회차 마무리 중에 강제 정지합니다'

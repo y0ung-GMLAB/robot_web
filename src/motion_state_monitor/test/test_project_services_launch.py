@@ -50,31 +50,18 @@ def _node_parameters() -> dict[str, dict[str, str]]:
     return result
 
 
-def test_studio_topics_are_wired_only_to_studio_node():
+def test_studio_and_midi_nodes_stay_deleted():
+    """스튜디오·MIDI 노드는 삭제됐다 · launch 에 몰래 돌아오면 안 된다."""
     parameters = _node_parameters()
 
+    assert set(parameters) == {
+        'motion_mapping_manager', 'motion_run_manager',
+        'motion_schedule_node', 'motion_web_bridge',
+    }
     assert 'request_topic' not in parameters['motion_run_manager']
     assert 'response_topic' not in parameters['motion_run_manager']
-    assert parameters['motion_studio_node']['request_topic'] == (
-        'motion_studio_request_topic'
-    )
-    assert parameters['motion_studio_node']['response_topic'] == (
-        'motion_studio_response_topic'
-    )
-
-
-def test_web_bridge_uses_the_same_studio_launch_arguments():
-    parameters = _node_parameters()['motion_web_bridge']
-
-    assert parameters['motion_studio_request_topic'] == (
-        'motion_studio_request_topic'
-    )
-    assert parameters['motion_studio_response_topic'] == (
-        'motion_studio_response_topic'
-    )
-    assert parameters['motion_studio_editor_request_topic'] == (
-        'motion_studio_editor_request_topic'
-    )
-    assert parameters['motion_studio_editor_response_topic'] == (
-        'motion_studio_editor_response_topic'
-    )
+    for executable, node_parameters in parameters.items():
+        for key in node_parameters:
+            assert 'studio' not in key and 'midi' not in key, (
+                f'{executable} 가 {key} 를 아직 받습니다'
+            )

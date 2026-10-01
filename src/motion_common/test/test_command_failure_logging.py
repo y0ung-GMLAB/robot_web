@@ -109,8 +109,7 @@ def test_every_command_boundary_uses_the_rule():
 
     workspace = Path(__file__).resolve().parents[3]
     boundaries = [
-        'src/motion_control_studio/motion_studio/motion_studio/editor_node.py',
-        'src/motion_control_studio/motion_studio/motion_studio/studio_node.py',
+        # 스튜디오 노드 둘은 삭제됐다 · 명령 경계는 이 둘이 남았다
         'src/motion_runtime/motion_runtime/motion_run_manager.py',
         'src/motion_runtime/motion_runtime/motion_mapping_manager.py',
     ]

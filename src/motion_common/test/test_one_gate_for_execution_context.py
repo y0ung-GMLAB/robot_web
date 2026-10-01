@@ -119,15 +119,12 @@ def test_an_empty_applied_context_confirms_nothing():
 
 SRC = Path(__file__).resolve().parents[2]
 
+# 스튜디오·MIDI 노드는 삭제됐다 · 공용 문을 쓰는 곳은 이 둘이 남았다
 CALLERS = {
-    'motion_control_studio/motion_studio/motion_studio/workspace_session.py':
-        ['verify_mapping_fingerprint(', 'confirm_context_id('],
     'motion_runtime/motion_runtime/motion_mapping_manager.py':
         ['verify_mapping_fingerprint('],
     'motion_runtime/motion_runtime/motion_run_manager.py':
         ['confirm_context_id('],
-    'motion_control_studio/motion_control/midi_control/midi_control/midi_control_node.py':
-        ['verify_mapping_fingerprint(', 'confirm_context_id('],
 }
 
 

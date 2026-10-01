@@ -169,4 +169,5 @@ def test_the_file_was_not_split_up():
         if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
     ]
 
-    assert len(methods) > 90, '브리지가 쪼개졌습니다 · 그러기로 한 적이 없습니다'
+    # 스튜디오·MIDI 삭제로 90 → 80 선으로 내려왔다 (2026-10-01 현재 82)
+    assert len(methods) > 75, '브리지가 쪼개졌습니다 · 그러기로 한 적이 없습니다'

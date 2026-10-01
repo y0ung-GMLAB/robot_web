@@ -41,7 +41,9 @@ def motion_command_block_reason(bridge: Any) -> str:
     try:
         if current_run_mode(bridge) == OFF_MODE:
             return OFF_BLOCK_MESSAGE
-    except (OSError, ValueError) as exc:
+    except Exception as exc:  # noqa: BLE001 - 어떤 실패든 게이트는 막지 않는다
+        # 파일 읽기(OSError)만이 아니다 · 프로젝트 저장소가 아직 없는 기동
+        # 초기에도 여기로 온다 · 게이트의 실패가 정지 명령보다 위험해선 안 된다
         logger = getattr(bridge, 'get_logger', None)
         if callable(logger):
             logger().warn(f'운전 모드 확인 실패 · 명령은 통과시킨다: {exc}')
