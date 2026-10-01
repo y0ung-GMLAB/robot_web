@@ -246,7 +246,7 @@ export function createProjectExplorerController({
     }
     const activeLabels = {
       motor_axes: '현재 모터축 설정으로 선택',
-      motion_axis_matching: '현재 모션축 설정으로 선택',
+      motion_axis_matching: '현재 조인트 연결로 선택',
       motions: '현재 모션 파일로 선택',
       layers: '현재 레이어로 선택',
     };
@@ -304,7 +304,7 @@ export function createProjectExplorerController({
       ['config', '', '모터축 설정', Boolean(status.motor_configured)],
       ['config', '', '실행 설정 적용', Boolean(status.motor_applied)],
       ['manual', '', '조그 확인', Boolean(status.jog_verified)],
-      ['motion', 'mapping', '모션축 설정', Boolean(status.motion_axes_configured)],
+      ['motion', 'mapping', '조인트 연결', Boolean(status.motion_axes_configured)],
     ];
     el.projectSetupProgress.innerHTML = '<strong>처음 설정</strong>' + steps.map((step, index) => (
       `<button type="button" data-setup-workspace="${step[0]}" data-setup-motion-tab="${step[1]}">`

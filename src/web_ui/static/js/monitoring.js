@@ -471,7 +471,7 @@ function detailRowsForTab(motor, tab, rawMode) {
       ['현재 위치', rawMode ? integerUnit(positionRaw, 'count') : numberUnit(motor.position_deg ?? motor.position, 3, 'deg')],
       ['현재 모션값', motionValue === '-' || motionValue === '미설정' || motionValue === '모션값 미수신'
         ? motionValue : `${motionValue} deg`],
-      ['모션 ID', motor.motion_id || '미설정'],
+      ['조인트', motor.motion_id || '미연결'],
       ['모션값 상태', motor.motion_value_message || '-'],
       ['현재 회전수', positionTurn === '-' ? '-' : `${positionTurn} turn`],
       ['현재 속도', rawMode ? integerUnit(velocityRaw, 'count/s') : numberUnit(motor.velocity_deg_s ?? motor.velocity, 3, 'deg/s')],

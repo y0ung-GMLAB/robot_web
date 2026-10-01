@@ -43,11 +43,11 @@ test('one-shot and continuous start include whole-axis initialization automatica
   assert.doesNotMatch(renderBody, /startReady/);
   assert.match(
     startBody,
-    /전체 활성 축을 초기 위치로 이동한 뒤 연속 모션을 시작/,
+    /전체 활성 조인트를 초기 위치로 이동한 뒤 연속 모션을 시작/,
   );
   assert.match(
     startBody,
-    /전체 활성 축을 초기 위치로 이동한 뒤 현재 모션 파일을 1회 실행/,
+    /전체 활성 조인트를 초기 위치로 이동한 뒤 현재 모션 파일을 1회 실행/,
   );
   assert.match(startBody, /startMotionRun\(\{ \.\.\.motionRunPayload\(\), run_mode: runMode \}\)/);
 });

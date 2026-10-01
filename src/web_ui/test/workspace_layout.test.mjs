@@ -101,9 +101,12 @@ test('settings workflows preserve action IDs and expose their defined steps', ()
   assert.match(html, /2\. 검색 결과 확인 및 축 편집/);
   assert.match(html, /3\. 저장하고 설정 적용/);
   assert.doesNotMatch(html, /4\. 실제 시스템 적용/);
-  assert.match(html, /1\. 모션축 설정 파일/);
-  assert.match(html, /2\. 모션축 편집/);
-  assert.match(html, /3\. 검증·미리보기·저장/);
-  assert.doesNotMatch(html, /4\. 저장/);
+  assert.match(html, /4\. 조인트 연결/);
+  assert.match(html, />연결 파일</);
+  assert.match(html, />조인트 편집</);
+  assert.match(html, />검증·미리보기·저장<\/strong>/);
+  // 구 용어가 화면에 되살아나면 안 된다
+  assert.doesNotMatch(html, /모션축 설정/);
+  assert.doesNotMatch(html, /모션 ID/);
   assert.match(styles, /\.motion-mapping-final-actions\s*\{[^}]*flex-wrap: nowrap;/s);
 });

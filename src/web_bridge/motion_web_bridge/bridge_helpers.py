@@ -201,7 +201,7 @@ def add_monitoring_motion_values(
             'motion_id': None,
             'motion_value_deg': None,
             'motion_value_status': 'unmapped',
-            'motion_value_message': '모션축 미설정',
+            'motion_value_message': '조인트 미연결',
             'motion_value_source': None,
         })
         try:
@@ -216,7 +216,7 @@ def add_monitoring_motion_values(
             motor.update({
                 'motion_value_status': 'missing',
                 'motion_value_message': (
-                    '활성 모션축 중복 설정으로 모션값을 연결할 수 없음'
+                    '활성 조인트 중복 연결로 모션값을 연결할 수 없음'
                 ),
             })
             continue
