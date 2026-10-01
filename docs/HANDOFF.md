@@ -353,7 +353,7 @@ git switch main && ./scripts/build_and_restart.sh
 - `scripts/check_locks.sh` · 락 파일 점검
 - `.claude/settings.json` · Claude Code 권한 · 모터 관련 명령은 확인을 받도록 설정
 
-### 신설된 서비스·모듈 (`src/motion_web/web_bridge/motion_web_bridge/`)
+### 신설된 서비스·모듈 (`src/web_bridge/motion_web_bridge/`)
 
 | 파일 | 역할 | 절 |
 |---|---|---|

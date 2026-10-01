@@ -19,7 +19,7 @@ def test_coordination_service_opens_ros_dds_only():
 
 def test_user_service_installer_registers_coordination_service():
     installer = (
-        WORKSPACE / 'src/motion_web/web_bridge/deploy/install_user_service.sh'
+        WORKSPACE / 'src/web_bridge/deploy/install_user_service.sh'
     ).read_text(encoding='utf-8')
 
     assert 'COORDINATION_SERVICE_EXECUTABLE=' in installer
@@ -53,9 +53,9 @@ def test_example_configuration_contains_only_dds_v2_fields():
 # --------------------------------------------------------------------- #
 
 MOTION_RUNNERS = (
-    'src/motion_web/web_bridge/deploy/run_user_service.sh',
-    'src/motion_web/web_bridge/deploy/run_motor_user_service.sh',
-    'src/motion_web/web_bridge/deploy/run_motor_service.sh',
+    'src/web_bridge/deploy/run_user_service.sh',
+    'src/web_bridge/deploy/run_motor_user_service.sh',
+    'src/web_bridge/deploy/run_motor_service.sh',
 )
 
 
@@ -128,7 +128,7 @@ def test_the_motor_node_is_given_the_namespace_from_outside():
     화면에 모터가 0대로 나왔다.
     """
     runner = (
-        WORKSPACE / 'src/motion_web/web_bridge/deploy/run_motor_service.sh'
+        WORKSPACE / 'src/web_bridge/deploy/run_motor_service.sh'
     ).read_text(encoding='utf-8')
 
     assert '__ns:=/${MOTION_PC_NAMESPACE}' in runner, '모터 노드에 이름공간을 안 준다'

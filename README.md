@@ -285,7 +285,7 @@ Personal access tokens` · 만든 뒤 한 번만 보이니 적어 두세요.
 
 ```bash
 cd ~/ros2_ws
-bash src/motion_web/install.sh
+bash scripts/install.sh
 ```
 
 몇십 분 걸립니다. 이 한 줄이 아래를 다 합니다.
@@ -324,7 +324,7 @@ sudo reboot
 ```bash
 ulimit -r                          # 99 가 나와야 합니다
 cd ~/ros2_ws
-bash src/motion_web/install.sh
+bash scripts/install.sh
 ```
 
 끝에 `설치 완료` 가 찍히면 됩니다. **여기서 재부팅을 건너뛰면 설치가 덜 된
@@ -393,7 +393,7 @@ sudo ufw allow from 192.168.0.0/16     # 같은 망 안에서는 허용 (대역�
 
 ```bash
 cd ~/ros2_ws
-bash src/motion_web/install.sh
+bash scripts/install.sh
 ```
 
 **갱신 명령은 이 한 줄입니다.** 모든 PC 에서 같습니다. 연동해서 쓰는 PC 는
@@ -602,7 +602,7 @@ cd ~/ros2_ws
 
 ```bash
 cd ~/ros2_ws
-bash src/motion_web/install.sh
+bash scripts/install.sh
 ```
 
 DDS 그룹 연동 설정(`config/motion_coordination.yaml`)은 **웹 화면 `PC 연동`
@@ -632,7 +632,7 @@ source install/setup.bash
 
 ```bash
 cd ~/ros2_ws
-bash src/motion_web/install.sh
+bash scripts/install.sh
 ```
 
 동작:
@@ -652,7 +652,7 @@ motion-coordination.service 재시작
 진행합니다. Git 수신을 일부러 막으려면 아래처럼 실행합니다.
 
 ```bash
-MOTION_WEB_SKIP_GIT_PULL=1 bash src/motion_web/install.sh
+MOTION_WEB_SKIP_GIT_PULL=1 bash scripts/install.sh
 ```
 
 `GroupCommand` 같은 DDS 메시지 정의가 바뀐 경우에는
@@ -690,7 +690,7 @@ src/motion_system은 명시 요청 없으면 수정하지 마.
 기존 PC 업데이트:
 
 ```text
-README의 코드 갱신 절차대로 bash src/motion_web/install.sh를 실행해줘.
+README의 코드 갱신 절차대로 bash scripts/install.sh를 실행해줘.
 Git 수신, 전체 빌드, ros2 daemon 초기화, 서비스 재시작 여부를 확인해줘.
 src/motion_system은 명시 요청 없으면 수정하지 마.
 실행 검증과 실물 검증을 구분해서 보고해줘.
@@ -705,7 +705,7 @@ Codex가 수정이나 설치를 수행한 뒤에는 변경 파일, 실행한 명
 
 ```bash
 cd ~/ros2_ws
-bash src/motion_web/install.sh
+bash scripts/install.sh
 ```
 
 서비스만 다시 등록해야 하는 특수 상황에서는 아래 명령을 사용할 수 있습니다.
@@ -713,7 +713,7 @@ bash src/motion_web/install.sh
 
 ```bash
 cd ~/ros2_ws
-bash src/motion_web/web_bridge/deploy/install_user_service.sh
+bash src/web_bridge/deploy/install_user_service.sh
 ```
 
 `실시간 우선순위 권한 설정 필요`가 표시되면 설치 스크립트가
@@ -755,7 +755,7 @@ sudo loginctl enable-linger "$(id -un)"
 
 ```bash
 cd ~/ros2_ws
-cp src/motion_web/web_bridge/deploy/motion-btop.service ~/.config/systemd/user/
+cp src/web_bridge/deploy/motion-btop.service ~/.config/systemd/user/
 systemctl --user daemon-reload
 systemctl --user enable --now motion-btop.service
 ```
@@ -806,7 +806,7 @@ ss -ltnp | grep ':8000'
 
 ```bash
 cd ~/ros2_ws
-bash src/motion_web/install.sh
+bash scripts/install.sh
 systemctl --user status motion-coordination.service motion-control.service
 journalctl --user -u motion-coordination.service -n 80
 ```

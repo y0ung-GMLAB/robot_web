@@ -51,7 +51,7 @@ if [[ -n "$(git status --porcelain src/motion_system)" ]]; then
 fi
 
 if [[ -n "$(git status --porcelain)" ]]; then
-  git add README.md scripts docs src/motion_coordination src/motion_web config 2>/dev/null || true
+  git add README.md scripts docs src/motion_coordination src/web_bridge src/web_ui src/motion_schedule config 2>/dev/null || true
   git add -u
   git add scripts/*.sh 2>/dev/null || true
   git commit -m "${COMMIT_MESSAGE}"

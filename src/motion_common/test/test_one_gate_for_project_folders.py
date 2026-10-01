@@ -119,8 +119,8 @@ SRC = Path(__file__).resolve().parents[2]   # .../ros2_ws/src
 
 CALLERS = [
     'motion_control_studio/motion_studio/motion_studio/workspace_session.py',
-    'motion_control_studio/motion_control/motion_runtime/motion_runtime/motion_mapping_manager.py',
-    'motion_control_studio/motion_control/motion_runtime/motion_runtime/motion_run_manager.py',
+    'motion_runtime/motion_runtime/motion_mapping_manager.py',
+    'motion_runtime/motion_runtime/motion_run_manager.py',
     'motion_control_studio/motion_control/midi_control/midi_control/midi_control_node.py',
 ]
 

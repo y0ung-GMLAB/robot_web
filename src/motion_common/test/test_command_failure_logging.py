@@ -111,8 +111,8 @@ def test_every_command_boundary_uses_the_rule():
     boundaries = [
         'src/motion_control_studio/motion_studio/motion_studio/editor_node.py',
         'src/motion_control_studio/motion_studio/motion_studio/studio_node.py',
-        'src/motion_control_studio/motion_control/motion_runtime/motion_runtime/motion_run_manager.py',
-        'src/motion_control_studio/motion_control/motion_runtime/motion_runtime/motion_mapping_manager.py',
+        'src/motion_runtime/motion_runtime/motion_run_manager.py',
+        'src/motion_runtime/motion_runtime/motion_mapping_manager.py',
     ]
     missing = [
         path for path in boundaries

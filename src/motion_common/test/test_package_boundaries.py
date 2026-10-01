@@ -14,14 +14,14 @@ WORKSPACE = Path(__file__).resolve().parents[3]
 
 #: 자체 ROS 패키지 이름 → 소스 루트
 PACKAGES = {
-    'motion_web_bridge': 'src/motion_web/web_bridge',
-    'motion_schedule': 'src/motion_web/motion_schedule',
+    'motion_web_bridge': 'src/web_bridge',
+    'motion_schedule': 'src/motion_schedule',
     'motion_coordination': 'src/motion_coordination',
     'motion_studio': 'src/motion_control_studio/motion_studio',
-    'motion_runtime': 'src/motion_control_studio/motion_control/motion_runtime',
-    'motion_supervisor': 'src/motion_control_studio/motion_control/motion_supervisor',
+    'motion_runtime': 'src/motion_runtime',
+    'motion_supervisor': 'src/motion_supervisor',
     'midi_control': 'src/motion_control_studio/motion_control/midi_control',
-    'motion_state_monitor': 'src/motion_control_studio/motion_control/motion_state_monitor',
+    'motion_state_monitor': 'src/motion_state_monitor',
 }
 
 

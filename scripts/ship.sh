@@ -12,7 +12,7 @@ set -Eeuo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 WORKSPACE="${MOTION_WORKSPACE:-$(cd "${SCRIPT_DIR}/.." && pwd)}"
-UI_DIR="${WORKSPACE}/src/motion_web/web_ui"
+UI_DIR="${WORKSPACE}/src/web_ui"
 SERVICES=(motion-control.service)
 
 cd "${WORKSPACE}"

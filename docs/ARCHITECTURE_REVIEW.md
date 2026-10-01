@@ -76,7 +76,7 @@
 - `api.js` 3종 토큰 동시 사용 · 모듈 3중 인스턴스화 · 세대 상태를 `window.__motionProjectGeneration` 전역으로 회피
 - 단일 대형 파일 · `styles.css` 7,415 · `motor_config.js` 4,032 · `motion_data.js` 3,036 · `index.html` 1,993
 - 개발 잔여물 정적 배포 · `web_ui/static/js/refactor.py` · `/static/js/refactor.py` 노출
-- 빌드 산출물 미사용 · `system_routes.py:13-17`이 소스 트리(`src/motion_web/web_ui/static`)가 있으면
+- 빌드 산출물 미사용 · `system_routes.py:13-17`이 소스 트리(`src/web_ui/static`)가 있으면
   설치본 대신 소스를 서빙
   · `build_and_restart.sh`가 매번 `motion_web_ui` 빌드 캐시를 지우고 다시 만들지만 그 산출물은 서빙되지 않음
   · 7단계(프런트엔드 빌드 도입) 시 서빙 경로 규약도 함께 정해야 함
@@ -3811,9 +3811,9 @@ errorcode 2 × 모터종류 2 × 리밋 2)로 대조했다 · `test_motor_readin
 #### 정정 ① · 프런트엔드 테스트는 이미 있었다
 
 §6-57 작업 중 "프런트엔드에 테스트가 없다"고 판단했는데 **틀렸다**.
-`src/motion_web/web_ui/test/` 에 `.mjs` 테스트가 **38개 · 257건** 있다.
+`src/web_ui/test/` 에 `.mjs` 테스트가 **38개 · 257건** 있다.
 
-    cd src/motion_web/web_ui && node --test test/
+    cd src/web_ui && node --test test/
 
 `colcon`·`pytest` 어디에도 걸려 있지 않아 파이썬 쪽만 돌려서는 보이지 않는다.
 **이것이 실행 경로에 없다는 것 자체가 결함이다.**

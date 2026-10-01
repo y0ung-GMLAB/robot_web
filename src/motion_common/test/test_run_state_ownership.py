@@ -31,7 +31,7 @@ WORKSPACE = Path(__file__).resolve().parents[3]
 
 #: 이 판정을 쓰는 곳 · 여기 손으로 적은 목록이 다시 생기면 안 된다
 USERS = [
-    'src/motion_web/web_bridge/motion_web_bridge/bridge_helpers.py',
+    'src/web_bridge/motion_web_bridge/bridge_helpers.py',
     'src/motion_control_studio/motion_control/midi_control/midi_control/midi_control_node.py',
     'src/motion_control_studio/motion_studio/motion_studio/playback_session.py',
     'src/motion_control_studio/motion_studio/motion_studio/recording_session.py',
@@ -99,7 +99,7 @@ def test_the_other_two_questions_stay_separate():
     ).read_text(encoding='utf-8')
     group = (
         WORKSPACE
-        / 'src/motion_control_studio/motion_control/motion_runtime/motion_runtime'
+        / 'src/motion_runtime/motion_runtime'
         / 'group_session.py'
     ).read_text(encoding='utf-8')
 
