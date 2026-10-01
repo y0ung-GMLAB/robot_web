@@ -12,7 +12,7 @@ from typing import Callable, Dict, Iterable, Optional
 class CommandOwner(str, Enum):
     NONE = 'none'
     MANUAL = 'manual'
-    MIDI = 'midi'
+    STREAM = 'stream'
     PLAYBACK = 'playback'
 
 
@@ -44,7 +44,7 @@ _ALL = object()
 #: 수동(MANUAL)은 뺏지 않는다 · 사람이 조그를 쥐고 있는데 재생이 가져가면
 #: 위험하다 · 수동과 재생은 그대로 선착순이다.
 _PREEMPTS = {
-    CommandOwner.PLAYBACK: frozenset({CommandOwner.MIDI}),
+    CommandOwner.PLAYBACK: frozenset({CommandOwner.STREAM}),
 }
 
 

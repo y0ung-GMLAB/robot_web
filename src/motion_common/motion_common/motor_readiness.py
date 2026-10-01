@@ -7,7 +7,7 @@
 이 모듈은 그 차이를 지우지 않는다. 차이가 **의도된 것**이기 때문이다.
 
     모션 실행 · 초기화  detected → 알람코드 → fault → servo_on
-    MIDI               detected → fault → servo_on → 내부리밋
+    수동 스트림        detected → fault → servo_on → 내부리밋
     수동 조그 · 절대이동 detected → servo_on → fault
 
 세 목록의 차이는 전부 의도다 · 기준은 **감시자의 유무**다.
@@ -15,7 +15,7 @@
 조그와 절대이동이 내부리밋을 검사하지 않는 것은, 리밋에 걸린 축을 빼내는 수단이
 조그이기 때문이다. 여기서 막으면 복구 방법이 사라진다.
 
-알람코드를 실행 경로에서만 보는 것도 같은 판단이다. 조그·MIDI는 사람이 화면을
+알람코드를 실행 경로에서만 보는 것도 같은 판단이다. 조그·수동 스트림은 사람이 화면을
 보며 축 하나를 움직이는 중이라 알람이 그 자리에서 보이고, 알람 축을 빼내는 길도
 열려 있어야 한다. 파일 재생은 사람이 자리를 뜬 동안에도 여러 축이 동시에 돌므로
 여기서만 사전에 막는다.
@@ -43,7 +43,7 @@ from .values import optional_int
 
 __all__ = [
     'MOTION_RUN_ORDER',
-    'MIDI_ORDER',
+    'STREAM_ORDER',
     'MANUAL_ORDER',
     'readiness_error',
 ]
@@ -51,8 +51,8 @@ __all__ = [
 #: 모션 실행·초기화 · 알람코드까지 본다 · 가장 엄격하다
 MOTION_RUN_ORDER: Tuple[str, ...] = ('detected', 'alarm', 'fault', 'servo_on')
 
-#: MIDI 실시간 제어 · 내부리밋까지 본다
-MIDI_ORDER: Tuple[str, ...] = ('detected', 'fault', 'servo_on', 'internal_limit')
+#: 수동 스트림(페이더) 실시간 제어 · 내부리밋까지 본다
+STREAM_ORDER: Tuple[str, ...] = ('detected', 'fault', 'servo_on', 'internal_limit')
 
 #: 수동 조그·절대이동 · 내부리밋을 **일부러** 보지 않는다
 MANUAL_ORDER: Tuple[str, ...] = ('detected', 'servo_on', 'fault')

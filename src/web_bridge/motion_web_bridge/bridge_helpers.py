@@ -54,8 +54,8 @@ def motor_activity_snapshot(
         return active('action', '동작 모드 동작 중', 'motion_supervisor')
     if 'jog' in manual_modes:
         return active('jog', '조그 모드 동작 중', 'motion_supervisor')
-    if owner == 'midi':
-        return active('midi', 'MIDI 모터 제어 중', 'motion_supervisor')
+    if owner == 'stream':
+        return active('stream', '수동 페이더 제어 중', 'motion_supervisor')
 
     repeat_waiting = run_state == 'waiting' and run_phase == 'repeat_waiting'
     if repeat_waiting and owner == 'playback':
@@ -232,7 +232,7 @@ def add_monitoring_motion_values(
             })
             continue
         source = str(value_sources.get(motion_id) or '')
-        source_label = {'midi': 'MIDI', 'motion_run': '모션 실행'}.get(source, source)
+        source_label = {'stream': '수동 페이더', 'motion_run': '모션 실행'}.get(source, source)
         motor.update({
             'motion_value_deg': round(motion_value, 6),
             'motion_value_status': 'received',

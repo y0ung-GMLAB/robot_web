@@ -65,14 +65,14 @@ DEFAULT_JOG_ACCELERATION_DEG_SEC2 = 9375.0
 ACTION_RESULT_SETTLE_SEC = 2.0
 DYNAMIXEL_ACTION_MIN_DEG = -180.0
 DYNAMIXEL_ACTION_MAX_DEG = 180.0
-MIDI_COMMAND_OWNERSHIP_SEC = 0.15
+STREAM_COMMAND_OWNERSHIP_SEC = 0.15
 MOTION_RUN_ACTIVE_GRACE_SEC = 0.15
 MANUAL_CONTROL_OWNERSHIP_SEC = 1.0
 
 #: 지금 최종 출력을 쥐고 있는 쪽 · 사용자에게 보인다 · §6-178
 COMMAND_OWNER_LABELS = {
     CommandOwner.MANUAL: '수동 조그·동작',
-    CommandOwner.MIDI: 'MIDI 페이더',
+    CommandOwner.STREAM: '수동 페이더',
     CommandOwner.PLAYBACK: '모션 재생',
 }
 
@@ -80,7 +80,7 @@ COMMAND_OWNER_LABELS = {
 def motion_run_rejection_reason(
     motor_state_available: bool,
     manual_command_active: bool,
-    midi_command_active: bool = False,
+    stream_command_active: bool = False,
     emergency_latched: bool = False,
 ) -> Optional[str]:
     """Return why a runtime command cannot own the final command output."""
@@ -90,8 +90,8 @@ def motion_run_rejection_reason(
         return '모터 상태를 읽을 수 없거나 오래되었습니다'
     if manual_command_active:
         return MANUAL_COMMAND_ACTIVE_MESSAGE
-    if midi_command_active:
-        return 'MIDI 페이더 제어가 실행 중입니다'
+    if stream_command_active:
+        return '수동 페이더 제어가 실행 중입니다'
     return None
 
 
@@ -133,13 +133,13 @@ class MotionSupervisor(Node):
             'motion_run_command_topic',
             topics.MOTION_RUN_COMMAND,
         ).value
-        self.midi_position_request_topic = self.declare_parameter(
-            'midi_position_request_topic',
-            topics.MIDI_POSITION_REQUEST,
+        self.manual_stream_request_topic = self.declare_parameter(
+            'manual_stream_request_topic',
+            topics.MANUAL_STREAM_REQUEST,
         ).value
-        self.midi_position_result_topic = self.declare_parameter(
-            'midi_position_result_topic',
-            topics.MIDI_POSITION_RESULT,
+        self.manual_stream_result_topic = self.declare_parameter(
+            'manual_stream_result_topic',
+            topics.MANUAL_STREAM_RESULT,
         ).value
         self.safety_status_topic = self.declare_parameter(
             'safety_status_topic',
@@ -209,16 +209,16 @@ class MotionSupervisor(Node):
             self._motion_run_command_callback,
             qos,
         )
-        self._midi_position_sub = self.create_subscription(
+        self._manual_stream_sub = self.create_subscription(
             String,
-            self.midi_position_request_topic,
-            self._midi_position_request_callback,
+            self.manual_stream_request_topic,
+            self._manual_stream_request_callback,
             10,
         )
         self._result_pub = self.create_publisher(String, self.jog_result_topic, 10)
         self._action_result_pub = self.create_publisher(String, self.action_result_topic, 10)
-        self._midi_position_result_pub = self.create_publisher(
-            String, self.midi_position_result_topic, 10
+        self._manual_stream_result_pub = self.create_publisher(
+            String, self.manual_stream_result_topic, 10
         )
         safety_qos = QoSProfile(
             depth=1,
@@ -236,7 +236,7 @@ class MotionSupervisor(Node):
             f'jog_request={self.jog_request_topic}, '
             f'action_request={self.action_request_topic}, '
             f'motion_run_command={self.motion_run_command_topic}, '
-            f'midi_position_request={self.midi_position_request_topic}, '
+            f'manual_stream_request={self.manual_stream_request_topic}, '
             f'safety_status={self.safety_status_topic}, '
             f'command={self.motor_command_topic}, '
             f'config_file={self.config_file}, '
@@ -373,25 +373,25 @@ class MotionSupervisor(Node):
             self._last_motion_run_command_at = time.monotonic()
             self._command_pub.publish(msg)
 
-    def _midi_position_request_callback(self, msg: String) -> None:
+    def _manual_stream_request_callback(self, msg: String) -> None:
         try:
             request = json.loads(msg.data)
         except json.JSONDecodeError:
-            self._publish_midi_position_result({}, False, 'invalid MIDI position JSON')
+            self._publish_manual_stream_result({}, False, 'invalid manual stream JSON')
             return
         if not isinstance(request, dict):
-            self._publish_midi_position_result({}, False, 'invalid MIDI position request')
+            self._publish_manual_stream_result({}, False, 'invalid manual stream request')
             return
         if not self._request_generation_is_current(request):
-            self._publish_midi_position_result(
-                request, False, '이전 프로젝트 세대의 MIDI 명령을 폐기했습니다'
+            self._publish_manual_stream_result(
+                request, False, '이전 프로젝트 세대의 수동 스트림 명령을 폐기했습니다'
             )
             return
         if (
             self._emergency_latched
             or self._servo_alarm_guard_instance().snapshot()['grade3_latched']
         ):
-            self._publish_midi_position_result(
+            self._publish_manual_stream_result(
                 request, False, EMERGENCY_LATCHED_MESSAGE
             )
             return
@@ -399,17 +399,17 @@ class MotionSupervisor(Node):
             self._optional_int(request.get('axis'))
         )
         if alarm_reason:
-            self._publish_midi_position_result(request, False, alarm_reason)
+            self._publish_manual_stream_result(request, False, alarm_reason)
             return
         if time.monotonic() < self._motion_stop_block_until:
-            self._publish_midi_position_result(request, False, 'motion stop is settling')
+            self._publish_manual_stream_result(request, False, 'motion stop is settling')
             return
         hold_axes = request.get('hold_axes')
         if isinstance(hold_axes, list):
-            success, message, results = self._handle_midi_hold_axes(
+            success, message, results = self._handle_stream_hold_axes(
                 hold_axes, self._optional_int(request.get('channel'))
             )
-            self._publish_midi_position_result(
+            self._publish_manual_stream_result(
                 request, success, message, results=results
             )
             return
@@ -420,17 +420,17 @@ class MotionSupervisor(Node):
                 for value in request.get('atomic_channels') or []
                 if (channel := self._optional_int(value)) is not None
             }
-            success, message, results = self._handle_midi_position_batch(
+            success, message, results = self._handle_manual_stream_batch(
                 targets, atomic_channels=atomic_channels
             )
-            self._publish_midi_position_result(
+            self._publish_manual_stream_result(
                 request, success, message, results=results
             )
         else:
-            success, message = self._handle_midi_position_request(request)
-            self._publish_midi_position_result(request, success, message)
+            success, message = self._handle_manual_stream_request(request)
+            self._publish_manual_stream_result(request, success, message)
 
-    def _handle_midi_hold_axes(
+    def _handle_stream_hold_axes(
         self, axes: list[Any], channel: Optional[int]
     ) -> tuple[bool, str, list[Dict[str, Any]]]:
         unique_axes = []
@@ -439,7 +439,7 @@ class MotionSupervisor(Node):
             if axis is not None and axis not in unique_axes:
                 unique_axes.append(axis)
         if not unique_axes:
-            return False, 'MIDI hold axis list is empty', []
+            return False, 'manual stream hold axis list is empty', []
         motors = self._current_motors()
         targets = []
         for axis in unique_axes:
@@ -449,8 +449,8 @@ class MotionSupervisor(Node):
             ) if motor is not None else None
             if position is None:
                 results = [
-                    self._midi_target_result({
-                        'request_id': f'midi-hold-{candidate}',
+                    self._stream_target_result({
+                        'request_id': f'stream-hold-{candidate}',
                         'channel': channel,
                         'axis': candidate,
                         'operation': 'hold',
@@ -459,18 +459,18 @@ class MotionSupervisor(Node):
                 ]
                 return False, results[0]['message'], results
             targets.append({
-                'request_id': f'midi-hold-{axis}',
+                'request_id': f'stream-hold-{axis}',
                 'channel': channel,
                 'axis': axis,
                 'target_deg': position,
                 'operation': 'hold',
             })
         atomic_channels = {channel} if channel is not None else set()
-        return self._handle_midi_position_batch(
+        return self._handle_manual_stream_batch(
             targets, atomic_channels=atomic_channels
         )
 
-    def _handle_midi_position_batch(
+    def _handle_manual_stream_batch(
         self,
         targets: list[Any],
         *,
@@ -478,7 +478,7 @@ class MotionSupervisor(Node):
     ) -> tuple[bool, str, list[Dict[str, Any]]]:
         requests = [target for target in targets if isinstance(target, dict)]
         if not requests:
-            return False, 'MIDI target batch is empty', []
+            return False, 'manual stream target batch is empty', []
 
         now = time.monotonic()
         global_error = ''
@@ -491,7 +491,7 @@ class MotionSupervisor(Node):
         if not global_error and not motors:
             global_error = 'current motion_state is unavailable'
         if global_error:
-            results = [self._midi_target_result(target, False, global_error) for target in requests]
+            results = [self._stream_target_result(target, False, global_error) for target in requests]
             return False, global_error, results
 
         command = self._empty_motor_command(motors)
@@ -513,11 +513,11 @@ class MotionSupervisor(Node):
             elif target_position is None:
                 error = 'target_deg is required'
             elif axis in commanded_axes:
-                error = f'{axis}번 축이 MIDI 묶음에 두 번 들어 있습니다'
+                error = f'{axis}번 축이 수동 스트림 묶음에 두 번 들어 있습니다'
             elif motor is None:
                 error = f'{axis}번 축을 현재 모터 상태에서 찾을 수 없습니다'
             elif self._is_ac_servo(motor):
-                error = self._midi_readiness_error(
+                error = self._stream_readiness_error(
                     motor,
                     axis,
                     # 유지 명령은 이미 리밋에 걸린 축을 그 자리에 붙잡아 두는
@@ -527,13 +527,13 @@ class MotionSupervisor(Node):
                 if not error:
                     controlword = CW_NEW_SET_POINT_MINAS
             elif self._is_dynamixel(motor):
-                error = self._midi_readiness_error(motor, axis, is_ac_servo=False)
+                error = self._stream_readiness_error(motor, axis, is_ac_servo=False)
                 if not error:
                     controlword = DYNAMIXEL_TORQUE_ENABLE
             else:
-                error = self._midi_readiness_error(motor, axis, is_ac_servo=False)
+                error = self._stream_readiness_error(motor, axis, is_ac_servo=False)
                 if not error:
-                    error = f'{axis}번 축은 MIDI 로 제어할 수 없는 모터 종류입니다'
+                    error = f'{axis}번 축은 수동 스트림으로 제어할 수 없는 모터 종류입니다'
 
             if (
                 not error
@@ -544,7 +544,7 @@ class MotionSupervisor(Node):
                 error = self._target_position_limit_error(motor, target_position) or ''
 
             if error:
-                results.append(self._midi_target_result(target, False, error))
+                results.append(self._stream_target_result(target, False, error))
                 continue
 
             commanded_axes.add(axis)
@@ -556,10 +556,10 @@ class MotionSupervisor(Node):
             command.position[axis] = float(target_position)
             motion_deg = self._optional_float(target.get('motion_deg'))
             motion_text = '' if motion_deg is None else f', motion {motion_deg:.3f} deg'
-            results.append(self._midi_target_result(
+            results.append(self._stream_target_result(
                 target,
                 True,
-                f'MIDI target published: Axis {axis}{motion_text}, '
+                f'stream target published: Axis {axis}{motion_text}, '
                 f'motor {target_position:.3f} deg (arrival not verified)',
             ))
             success_count += 1
@@ -587,7 +587,7 @@ class MotionSupervisor(Node):
                     command.controlword[axis] = 0
                     command.position[axis] = 0.0
                     commanded_axes.discard(axis)
-                results[index] = self._midi_target_result(
+                results[index] = self._stream_target_result(
                     requests[index], False, group_message
                 )
                 success_count -= 1
@@ -597,17 +597,17 @@ class MotionSupervisor(Node):
             if shape_error:
                 message = f'invalid motor command blocked: {shape_error}'
                 return False, message, [
-                    self._midi_target_result(target, False, message)
+                    self._stream_target_result(target, False, message)
                     for target in requests
                 ]
             acquired, owner_error = self._acquire_command_owner(
-                CommandOwner.MIDI,
+                CommandOwner.STREAM,
                 axes=commanded_axes,
-                lease_sec=MIDI_COMMAND_OWNERSHIP_SEC,
+                lease_sec=STREAM_COMMAND_OWNERSHIP_SEC,
             )
             if not acquired:
                 return False, owner_error, [
-                    self._midi_target_result(target, False, owner_error)
+                    self._stream_target_result(target, False, owner_error)
                     for target in requests
                 ]
             # All accepted axes are published atomically in one MotorStatus,
@@ -622,14 +622,14 @@ class MotionSupervisor(Node):
                     or time.monotonic() < self._motion_stop_block_until
                     or alarm_axes
                 ):
-                    self._command_arbiter_instance().release(CommandOwner.MIDI)
+                    self._command_arbiter_instance().release(CommandOwner.STREAM)
                     message = (
                         self._servo_alarm_block_reason(alarm_axes[0])
                         if alarm_axes
                         else 'motor command blocked by safety stop'
                     )
                     return False, message, [
-                        self._midi_target_result(target, False, message)
+                        self._stream_target_result(target, False, message)
                         for target in requests
                     ]
                 self._command_pub.publish(self._only_driven_axes(command))
@@ -638,18 +638,18 @@ class MotionSupervisor(Node):
             # SELECT 를 놓으면 소유권도 놓는다 · 뒤따르는 초기화 명령이
             # 바로 지나가야 한다.
             if not any(target.get('operation') != 'hold' for target in requests):
-                self._command_arbiter_instance().release(CommandOwner.MIDI)
+                self._command_arbiter_instance().release(CommandOwner.STREAM)
 
         all_success = success_count == len(requests)
         message = (
-            f'MIDI batch sent: {success_count}/{len(requests)} axes'
+            f'stream batch sent: {success_count}/{len(requests)} axes'
             if success_count
-            else 'MIDI batch rejected'
+            else 'stream batch rejected'
         )
         return all_success, message, results
 
     @staticmethod
-    def _midi_target_result(
+    def _stream_target_result(
         request: Dict[str, Any], success: bool, message: str
     ) -> Dict[str, Any]:
         return {
@@ -665,7 +665,7 @@ class MotionSupervisor(Node):
             'message': message,
         }
 
-    def _handle_midi_position_request(self, request: Dict[str, Any]) -> tuple[bool, str]:
+    def _handle_manual_stream_request(self, request: Dict[str, Any]) -> tuple[bool, str]:
         axis = self._optional_int(request.get('axis'))
         target_position = self._optional_float(request.get('target_deg'))
         if axis is None:
@@ -681,25 +681,25 @@ class MotionSupervisor(Node):
         if motor is None:
             return False, f'{axis}번 축을 현재 모터 상태에서 찾을 수 없습니다'
         if self._is_ac_servo(motor):
-            error = self._midi_readiness_error(motor, axis)
+            error = self._stream_readiness_error(motor, axis)
             if error:
                 return False, error
             controlword = CW_NEW_SET_POINT_MINAS
         elif self._is_dynamixel(motor):
-            error = self._midi_readiness_error(motor, axis, is_ac_servo=False)
+            error = self._stream_readiness_error(motor, axis, is_ac_servo=False)
             if error:
                 return False, error
             controlword = DYNAMIXEL_TORQUE_ENABLE
         else:
-            error = self._midi_readiness_error(motor, axis, is_ac_servo=False)
+            error = self._stream_readiness_error(motor, axis, is_ac_servo=False)
             if error:
                 return False, error
-            return False, f'{axis}번 축은 MIDI 로 제어할 수 없는 모터 종류입니다'
+            return False, f'{axis}번 축은 수동 스트림으로 제어할 수 없는 모터 종류입니다'
 
         acquired, owner_error = self._acquire_command_owner(
-            CommandOwner.MIDI,
+            CommandOwner.STREAM,
             axes=[axis],
-            lease_sec=MIDI_COMMAND_OWNERSHIP_SEC,
+            lease_sec=STREAM_COMMAND_OWNERSHIP_SEC,
         )
         if not acquired:
             return False, owner_error
@@ -710,13 +710,13 @@ class MotionSupervisor(Node):
             motion_deg = self._optional_float(request.get('motion_deg'))
             motion_text = '' if motion_deg is None else f', motion {motion_deg:.3f} deg'
             return True, (
-                f'MIDI target published: Axis {axis}{motion_text}, '
+                f'stream target published: Axis {axis}{motion_text}, '
                 f'motor {target_position:.3f} deg (arrival not verified)'
             )
-        self._command_arbiter_instance().release(CommandOwner.MIDI)
+        self._command_arbiter_instance().release(CommandOwner.STREAM)
         return False, message
 
-    def _publish_midi_position_result(
+    def _publish_manual_stream_result(
         self,
         request: Dict[str, Any],
         success: bool,
@@ -738,7 +738,7 @@ class MotionSupervisor(Node):
         }
         if results is not None:
             payload['results'] = results
-        self._midi_position_result_pub.publish(
+        self._manual_stream_result_pub.publish(
             String(data=json.dumps(payload, ensure_ascii=False))
         )
         if not success:
@@ -2469,7 +2469,7 @@ class MotionSupervisor(Node):
         text = ' '.join(str(value or '').lower() for value in values)
         return 'minas' in text or 'ac servo' in text or 'ac_servo' in text
 
-    def _midi_readiness_error(
+    def _stream_readiness_error(
         self,
         motor: Dict[str, Any],
         axis: Any,
@@ -2477,14 +2477,14 @@ class MotionSupervisor(Node):
         is_ac_servo: bool = True,
         check_internal_limit: bool = True,
     ) -> str:
-        """MIDI 실시간 제어의 준비 검사 · 내부리밋까지 본다.
+        """수동 스트림(페이더) 실시간 제어의 준비 검사 · 내부리밋까지 본다.
 
-        MIDI는 사람이 페이더를 잡고 있는 동안 50Hz로 명령이 나가므로, 리밋에
+        사람이 페이더를 잡고 있는 동안 20Hz 안팎으로 명령이 나가므로, 리밋에
         걸린 축을 계속 밀어붙이지 않도록 여기서 막는다.
         """
         return motor_readiness.readiness_error(
             motor,
-            order=motor_readiness.MIDI_ORDER,
+            order=motor_readiness.STREAM_ORDER,
             axis=axis,
             is_ac_servo=is_ac_servo,
             internal_limit_active=(

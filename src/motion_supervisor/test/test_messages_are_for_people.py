@@ -96,7 +96,7 @@ def test_the_other_blockers_speak_korean_too():
     for kwargs in (
         {'motor_state_available': False, 'manual_command_active': False},
         {'motor_state_available': True, 'manual_command_active': False,
-         'midi_command_active': True},
+         'stream_command_active': True},
     ):
         reason = supervisor_node.motion_run_rejection_reason(**kwargs)
         assert reason and re.search(r'[가-힣]', reason), (

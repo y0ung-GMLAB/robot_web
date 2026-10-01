@@ -34,12 +34,12 @@ def generate_launch_description():
         ),
         DeclareLaunchArgument('motor_command_topic', default_value=topics.MOTOR_COMMAND),
         DeclareLaunchArgument(
-            'midi_position_request_topic',
-            default_value=topics.MIDI_POSITION_REQUEST,
+            'manual_stream_request_topic',
+            default_value=topics.MANUAL_STREAM_REQUEST,
         ),
         DeclareLaunchArgument(
-            'midi_position_result_topic',
-            default_value=topics.MIDI_POSITION_RESULT,
+            'manual_stream_result_topic',
+            default_value=topics.MANUAL_STREAM_RESULT,
         ),
         Node(
             package='motion_supervisor',
@@ -55,8 +55,8 @@ def generate_launch_description():
                 'action_result_topic': LaunchConfiguration('action_result_topic'),
                 'motion_run_command_topic': LaunchConfiguration('motion_run_command_topic'),
                 'motor_command_topic': LaunchConfiguration('motor_command_topic'),
-                'midi_position_request_topic': LaunchConfiguration('midi_position_request_topic'),
-                'midi_position_result_topic': LaunchConfiguration('midi_position_result_topic'),
+                'manual_stream_request_topic': LaunchConfiguration('manual_stream_request_topic'),
+                'manual_stream_result_topic': LaunchConfiguration('manual_stream_result_topic'),
                 'config_file': LaunchConfiguration('config_file'),
             }],
         ),

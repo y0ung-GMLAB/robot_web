@@ -51,7 +51,7 @@ HISTORICAL = {
     'MOTOR_COMMAND': '/motion_control/motor_command',
     'MOTION_RUN_REQUEST': '/motion_run/request',
     'MOTION_RUN_STATUS': '/motion_run/status',
-    'MIDI_POSITION_REQUEST': '/midi/position_request',
+    'MANUAL_STREAM_REQUEST': '/manual/stream_request',
     'SAFETY_REQUEST': '/safety/request',
     'MANUAL_JOG_REQUEST': '/manual/jog_request',
     'SCHEDULE_STATUS': '/motion_schedule/status',

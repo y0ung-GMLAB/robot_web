@@ -37,9 +37,9 @@ def _bare_node() -> MotionSupervisor:
 def _midi_then_playback(node: MotionSupervisor) -> None:
     """대표 주인은 MIDI · 재생은 축 1 을 몰고 있다 · 추가 녹화의 모양."""
     arbiter = node._command_arbiter
-    arbiter.acquire(CommandOwner.MIDI, axes=[0], lease_sec=5.0)
+    arbiter.acquire(CommandOwner.STREAM, axes=[0], lease_sec=5.0)
     arbiter.acquire(CommandOwner.PLAYBACK, axes=[1], lease_sec=5.0)
-    assert arbiter.snapshot().owner is CommandOwner.MIDI, '대표가 MIDI 여야 시험이 성립한다'
+    assert arbiter.snapshot().owner is CommandOwner.STREAM, '대표가 MIDI 여야 시험이 성립한다'
 
 
 def test_safety_status_carries_the_axis_owner_table():
@@ -49,11 +49,11 @@ def test_safety_status_carries_the_axis_owner_table():
     node._publish_safety_status()
 
     payload = node._safety_status_pub.payloads[-1]
-    assert payload['command_axis_owners'] == {'0': 'midi', '1': 'playback'}, (
+    assert payload['command_axis_owners'] == {'0': 'stream', '1': 'playback'}, (
         '축별 주인 표가 비어 있다 · 재생이 자기 축을 볼 수 없다'
     )
     # 축약형은 화면용으로 그대로 남는다
-    assert payload['command_owner'] == 'midi'
+    assert payload['command_owner'] == 'stream'
 
 
 def test_alarm_evaluation_sees_playback_on_another_axis():
@@ -105,7 +105,7 @@ def test_alarm_evaluation_releases_the_hold_when_nothing_plays():
     node._evaluate_servo_alarms()
 
     node._latest_state = {'motors': [dict(motor, errorcode=0, errorcode_raw=0, fault=False)]}
-    node._command_arbiter.acquire(CommandOwner.MIDI, axes=[0], lease_sec=5.0)
+    node._command_arbiter.acquire(CommandOwner.STREAM, axes=[0], lease_sec=5.0)
     node._evaluate_servo_alarms()
 
     assert guard.snapshot()['blocked_axes'] == [], '재생이 없으면 잡아 둘 이유가 없다'

@@ -93,7 +93,7 @@ def test_midi_order_matches_legacy():
         for is_ac_servo, limit in itertools.product((True, False), (True, False)):
             assert motor_readiness.readiness_error(
                 motor,
-                order=motor_readiness.MIDI_ORDER,
+                order=motor_readiness.STREAM_ORDER,
                 axis=3,
                 is_ac_servo=is_ac_servo,
                 internal_limit_active=limit,
@@ -140,7 +140,7 @@ def test_only_motion_run_checks_alarm_code():
         motor, order=motor_readiness.MOTION_RUN_ORDER, is_ac_servo=True,
     )
     assert motor_readiness.readiness_error(
-        motor, order=motor_readiness.MIDI_ORDER, axis=3, is_ac_servo=True,
+        motor, order=motor_readiness.STREAM_ORDER, axis=3, is_ac_servo=True,
     ) == ''
     assert motor_readiness.readiness_error(
         motor, order=motor_readiness.MANUAL_ORDER, axis=3, is_ac_servo=True,

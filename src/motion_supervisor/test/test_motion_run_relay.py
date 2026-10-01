@@ -55,7 +55,7 @@ def test_runtime_command_is_rejected_while_manual_command_is_active():
 
 def test_runtime_command_is_rejected_while_midi_fader_owns_output():
     assert motion_run_rejection_reason(True, False, True) == (
-        'MIDI 페이더 제어가 실행 중입니다'
+        '수동 페이더 제어가 실행 중입니다'
     )
 
 
@@ -180,7 +180,7 @@ def test_ac_servo_jog_trajectory_sends_cubic_intermediate_targets():
 
 
 def test_midi_result_returns_the_exact_supervisor_approved_command_values():
-    result = MotionSupervisor._midi_target_result({
+    result = MotionSupervisor._stream_target_result({
         'request_id': 'midi-0-1',
         'channel': 0,
         'axis': 2,
@@ -226,7 +226,7 @@ def test_midi_batch_publishes_multiple_axes_in_one_motor_status():
     ]
     supervisor._current_motors = lambda: motors
 
-    success, _, results = supervisor._handle_midi_position_batch([
+    success, _, results = supervisor._handle_manual_stream_batch([
         {'request_id': 'one', 'channel': 1, 'axis': 1, 'target_deg': 10.0},
         {'request_id': 'two', 'channel': 3, 'axis': 3, 'target_deg': -20.0},
     ])
@@ -258,7 +258,7 @@ def test_linked_midi_group_blocks_every_axis_when_one_target_is_invalid():
         'upper': 180.0,
     }]
 
-    success, _, results = supervisor._handle_midi_position_batch(
+    success, _, results = supervisor._handle_manual_stream_batch(
         [
             {'request_id': 'one', 'channel': 0, 'axis': 1, 'target_deg': 10.0},
             {'request_id': 'two', 'channel': 0, 'axis': 9, 'target_deg': 10.0},
@@ -303,7 +303,7 @@ def test_midi_select_off_holds_linked_axes_at_their_current_positions():
     ]
     supervisor._current_motors = lambda: motors
 
-    success, _, results = supervisor._handle_midi_hold_axes([1, 3], 0)
+    success, _, results = supervisor._handle_stream_hold_axes([1, 3], 0)
 
     assert success is True
     assert all(result['operation'] == 'hold' for result in results)
@@ -311,7 +311,7 @@ def test_midi_select_off_holds_linked_axes_at_their_current_positions():
     command = supervisor._command_pub.messages[0]
     assert _targets_by_axis(command) == {1: 12.5, 3: -7.0}
     # SELECT 를 놓으면 소유권도 놓는다 · 사실의 주인은 중재기 하나다 · §6-107
-    assert supervisor._command_arbiter_instance().owns_any(CommandOwner.MIDI) is False
+    assert supervisor._command_arbiter_instance().owns_any(CommandOwner.STREAM) is False
 
 
 def test_normal_midi_position_keeps_short_command_ownership():
@@ -332,13 +332,13 @@ def test_normal_midi_position_keeps_short_command_ownership():
         'upper': 180.0,
     }]
 
-    success, _, _ = supervisor._handle_midi_position_batch([
+    success, _, _ = supervisor._handle_manual_stream_batch([
         {'request_id': 'move', 'channel': 0, 'axis': 0, 'target_deg': 10.0},
     ])
 
     assert success is True
     # 짧은 소유권은 **그 축에만** 걸린다 · §6-107
-    assert supervisor._command_arbiter_instance().axis_owners() == {'0': 'midi'}
+    assert supervisor._command_arbiter_instance().axis_owners() == {'0': 'stream'}
 
 
 def test_midi_blocks_every_ac_axis_with_live_internal_limit_status():
@@ -361,7 +361,7 @@ def test_midi_blocks_every_ac_axis_with_live_internal_limit_status():
         'upper': 36000.0,
     }]
 
-    success, _, results = supervisor._handle_midi_position_batch([{
+    success, _, results = supervisor._handle_manual_stream_batch([{
         'request_id': 'limited', 'channel': 5, 'axis': 1, 'target_deg': 0.5,
     }])
 
@@ -392,7 +392,7 @@ def test_playback_owner_blocks_midi_even_without_legacy_grace_flag():
         'upper': 180.0,
     }]
 
-    success, message, results = supervisor._handle_midi_position_batch([
+    success, message, results = supervisor._handle_manual_stream_batch([
         {'request_id': 'move', 'channel': 0, 'axis': 0, 'target_deg': 10.0},
     ])
 
@@ -943,7 +943,7 @@ def test_playback_relay_passes_while_midi_drives_another_axis():
     """추가 녹화 · 축 0 은 MIDI 로 녹화 중이고 축 1 은 재생이 몬다."""
     supervisor = _relay_supervisor([0, 1])
     supervisor._command_arbiter.acquire(
-        CommandOwner.MIDI, axes=[0], lease_sec=5.0
+        CommandOwner.STREAM, axes=[0], lease_sec=5.0
     )
     # 전역 깃발이 되살아나면 여기서 막힌다
     supervisor._midi_active_until = time.monotonic() + 10.0
@@ -1005,7 +1005,7 @@ def test_midi_command_does_not_carry_the_axes_it_is_not_driving():
     """추가 녹화 · MIDI 는 축 2 만 몬다 · 재생이 모는 축 0, 1 이 실리면 안 된다."""
     supervisor = _midi_supervisor([0, 1, 2])
 
-    success, _, _ = supervisor._handle_midi_position_batch([
+    success, _, _ = supervisor._handle_manual_stream_batch([
         {'request_id': 'rec', 'channel': 2, 'axis': 2, 'target_deg': 10.0},
     ])
 
@@ -1022,7 +1022,7 @@ def test_compacting_keeps_the_real_axis_numbers():
     """슬롯 번호가 아니라 축 번호가 실려야 한다 · 매니저가 그것으로 찾는다."""
     supervisor = _midi_supervisor([0, 1, 2, 3])
 
-    supervisor._handle_midi_position_batch([
+    supervisor._handle_manual_stream_batch([
         {'request_id': 'a', 'channel': 3, 'axis': 3, 'target_deg': 5.0},
     ])
 
@@ -1035,7 +1035,7 @@ def test_a_command_that_drives_every_axis_is_left_alone():
     """레이어 재생처럼 전 축을 모는 명령은 그대로 나간다."""
     supervisor = _midi_supervisor([0, 1])
 
-    supervisor._handle_midi_position_batch([
+    supervisor._handle_manual_stream_batch([
         {'request_id': 'a', 'channel': 0, 'axis': 0, 'target_deg': 1.0},
         {'request_id': 'b', 'channel': 1, 'axis': 1, 'target_deg': 2.0},
     ])

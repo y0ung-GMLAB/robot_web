@@ -179,7 +179,7 @@ MOTION_RUN_STATUS = scoped('/motion_run/status')
 MOTION_MAPPING_REQUEST = scoped('/motion_mapping/request')
 MOTION_MAPPING_RESPONSE = scoped('/motion_mapping/response')
 #: 모션값 상태
-MOTION_VALUE_STATE = scoped('/midi/value_state')
+MOTION_VALUE_STATE = scoped('/motion/value_state')
 
 #: 수동 조그
 MANUAL_JOG_REQUEST = scoped('/manual/jog_request')
@@ -188,9 +188,9 @@ MANUAL_JOG_RESULT = scoped('/manual/jog_response')
 MANUAL_ACTION_REQUEST = scoped('/manual/action_request')
 MANUAL_ACTION_RESULT = scoped('/manual/action_response')
 
-#: MIDI 위치 지정
-MIDI_POSITION_REQUEST = scoped('/midi/position_request')
-MIDI_POSITION_RESULT = scoped('/midi/position_response')
+#: 수동 스트림(페이더) 위치 지정
+MANUAL_STREAM_REQUEST = scoped('/manual/stream_request')
+MANUAL_STREAM_RESULT = scoped('/manual/stream_response')
 
 #: 안전
 SAFETY_REQUEST = scoped('/safety/request')
@@ -223,10 +223,6 @@ GROUP_TIME_SYNC = '/motion_group/time_sync'
 #: 그만이다 (`trigger_sync_samples * 3` 까지).
 GROUP_TIME_PROBE = '/motion_group/time_probe'
 GROUP_SYSTEM_INFO = '/motion_group/system_info'
-
-#: 원시 MIDI 중계 · §6-94 · 200Hz 최선형 · 깊이 1
-#:
-#: 장치가 꽂힌 PC 에서 대상 PC 로 · 되돌아가는 페이더 명령은 반대 길이다.
 
 # --------------------------------------------------------------------------- #
 # /motion_schedule · 스케줄
