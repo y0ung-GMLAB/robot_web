@@ -1924,6 +1924,18 @@ export function createMotorConfigController({
         ...(next.config || {}),
         controller_index: axis,
       };
+    } else if (AXIS_LIMIT_FIELDS.includes(field)) {
+      // 모터별 운전 한계 · 빈 값이면 오버라이드를 거둬 기본(드라이버 본보기)으로
+      const text = String(value ?? '').trim();
+      const config = { ...(next.config || {}) };
+      if (text === '') {
+        delete config[field];
+      } else {
+        const number = Number(text);
+        if (!Number.isFinite(number)) return next;
+        config[field] = number;
+      }
+      next.config = config;
     }
     return normalizeMotor(next);
   }
@@ -1951,7 +1963,29 @@ export function createMotorConfigController({
     if (field === 'name') input.value = rowNameRaw(row) ?? '';
     if (field === 'axis') input.value = rowAxisRaw(row) ?? '';
     if (field === 'driver_model') input.value = rowDriverModelRaw(row);
+    if (AXIS_LIMIT_FIELDS.includes(field)) {
+      input.value = rowLimitOverride(row, field);
+    }
   }
+
+  /** 저장된 오버라이드 값 · 없으면 빈 칸(드라이버 기본을 쓴다는 뜻) */
+  function rowLimitOverride(row, field) {
+    const value = row?.motor?.config?.[field];
+    return value === undefined || value === null ? '' : String(value);
+  }
+
+  /** 자리 표시 · 지금 장비에 들어가 있는 값 (모터 deg) */
+  function rowLimitPlaceholder(row, field) {
+    const axis = Number(rowAxisRaw(row));
+    const motors = getLatestState()?.motors;
+    if (!Array.isArray(motors) || !Number.isInteger(axis)) return '';
+    const runtime = motors.find((motor) => Number(motor?.controller_index) === axis);
+    const value = runtime?.[field];
+    return value === undefined || value === null ? '' : String(value);
+  }
+
+  /** 모터별 운전 한계 · registry motor.config 에 적혀 그 모터의 드라이버에만 들어간다 */
+  const AXIS_LIMIT_FIELDS = ['lower', 'upper', 'profile_velocity'];
 
   function handleAxisEdit(input) {
     const rowId = input.dataset.axisRowId || '';
@@ -1971,6 +2005,14 @@ export function createMotorConfigController({
         return;
       }
       setAxisEditValue(row, 'axis', axis);
+    } else if (AXIS_LIMIT_FIELDS.includes(field)) {
+      const text = String(input.value ?? '').trim();
+      if (text !== '' && !Number.isFinite(Number(text))) {
+        resetAxisEditInput(input, row, field);
+        setAxisMessage('운전 한계는 숫자(모터 deg)여야 합니다.');
+        return;
+      }
+      setAxisEditValue(row, field, text);
     } else {
       resetAxisEditInput(input, row, field);
       return;
@@ -2310,6 +2352,10 @@ export function createMotorConfigController({
             connection,
             drive,
             showAcServoControls,
+            limits: Object.fromEntries(AXIS_LIMIT_FIELDS.map((field) => [field, {
+              value: rowLimitOverride(row, field),
+              placeholder: rowLimitPlaceholder(row, field),
+            }])),
           };
         });
       const renderSignature = JSON.stringify(rowViews.map((view) => ({
@@ -2341,6 +2387,7 @@ export function createMotorConfigController({
         connection: view.connection,
         drive: view.drive,
         showAcServoControls: view.showAcServoControls,
+        limits: view.limits,
       })));
 
       if (renderSignature !== lastAxisRenderSignature) {
@@ -2354,6 +2401,16 @@ export function createMotorConfigController({
               <td class="axis-combined-cell">
                 <span class="axis-number-label mono">${displayText(view.axisValue)}</span>
                 <input class="axis-edit-input axis-name-input" aria-label="축 이름" data-axis-edit="name" data-axis-row-id="${escapeHtml(row.id)}" value="${escapeHtml(view.name === '-' ? '' : view.name)}"${disabled}>
+              </td>
+              <td class="axis-limits-cell" title="모터 deg 기준 · 빈 칸이면 드라이버 기본값을 씁니다">
+                ${AXIS_LIMIT_FIELDS.map((field) => `
+                  <label class="axis-limit-field"><span>${{ lower: '하한', upper: '상한', profile_velocity: '속도' }[field]}</span>
+                    <input class="axis-edit-input axis-limit-input mono" type="text" inputmode="decimal"
+                      aria-label="모터 ${{ lower: '하한', upper: '상한', profile_velocity: '속도' }[field]}"
+                      data-axis-edit="${field}" data-axis-row-id="${escapeHtml(row.id)}"
+                      value="${escapeHtml(view.limits[field].value)}"
+                      placeholder="${escapeHtml(view.limits[field].placeholder)}"${disabled}>
+                  </label>`).join('')}
               </td>
               <td class="axis-status-stack">
                 <strong>${displayText(view.identity.title)}</strong>
@@ -2675,8 +2732,20 @@ export function createMotorConfigController({
       // 돌려주고, 그때는 이미 무엇이 틀렸는지 알린 뒤다.
       if (!applyConfigTableUpdates()) return false;
       const fileName = normalizedMotorConfigFileName() || pathBasename(motorConfigFilePath);
+      // **한 번에 한쪽만** · 원본(상세 표) 수정이 목록 수정을 조용히 버리던
+      // 혼합 저장을 막는다 · content 로 보내면 registry 는 서버에 닿지 않는다
+      const rawDirty = hasMotorConfigDataChanges();
+      const registryDirty = hasAxisChanges();
+      if (rawDirty && registryDirty) {
+        const message = '원본(상세 표) 수정과 모터 목록 수정이 함께 있습니다 · '
+          + '한 번에 한쪽만 저장할 수 있습니다 · 먼저 한쪽을 저장한 뒤 다른 쪽을 고치세요';
+        setStatusMessage(message);
+        setAxisMessage(message);
+        await showAlert(message, { title: '설정 저장 중단', tone: 'danger' });
+        return false;
+      }
       const payload = await saveMotorConfig(
-        hasMotorConfigTableSaveChanges()
+        rawDirty
           ? {
             content: motorConfigRawText,
             file_name: fileName,

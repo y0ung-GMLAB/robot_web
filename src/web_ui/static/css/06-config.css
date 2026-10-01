@@ -962,3 +962,26 @@ th {
   flex: 1 1 118px;
 }
 
+
+/* 모터별 운전 한계 인라인 편집 · P3 */
+.axis-limits-cell {
+  min-width: 190px;
+}
+
+.axis-limit-field {
+  display: grid;
+  grid-template-columns: 34px 1fr;
+  align-items: center;
+  gap: 4px;
+  margin: 2px 0;
+}
+
+.axis-limit-field > span {
+  font-size: 0.78em;
+  color: var(--muted);
+}
+
+.axis-limit-input {
+  width: 100%;
+  min-width: 90px;
+}
