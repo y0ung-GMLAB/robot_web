@@ -350,8 +350,8 @@ class ProjectService:
         # 값을 끌어오는 길을 열어 두면 화면에서 지워도 언젠가 다시 새어 든다.
         if str(payload.get('category') or '').strip() != 'motions':
             raise ValueError(
-                '프로젝트로 가져올 수 있는 것은 모션 파일뿐입니다. '
-                '모터축·모션축 설정은 이 PC 에서 직접 만드세요'
+                '프로젝트로 가져올 수 있는 것은 애니메이션(.json)뿐입니다. '
+                '모터 설정과 조인트 연결은 이 PC 에서 직접 만드세요'
             )
         self._ensure_motion_import_target(project_id)
         return self.repository.import_text(
@@ -373,8 +373,8 @@ class ProjectService:
         counts = summary.get('counts') if isinstance(summary.get('counts'), dict) else {}
         if not int(counts.get('motion_axis_matching') or 0):
             raise ValueError(
-                '모션축 설정이 없는 프로젝트에는 모션 파일을 넣을 수 없습니다. '
-                '모션축 설정을 먼저 만드세요'
+                '조인트 연결이 없는 프로젝트에는 애니메이션을 넣을 수 없습니다. '
+                '조인트 연결을 먼저 만드세요'
             )
 
     def activate_file(

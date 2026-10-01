@@ -1278,3 +1278,15 @@
   min-width: 0;
   text-overflow: ellipsis;
 }
+
+/* 애니메이션 드래그&드롭 · P5 */
+.motion-file-column.drop-active {
+  outline: 2px dashed var(--accent, #4da3ff);
+  outline-offset: -4px;
+}
+
+.motion-file-drop-hint {
+  font-size: 12px;
+  opacity: 0.65;
+  padding: 2px 0 4px;
+}

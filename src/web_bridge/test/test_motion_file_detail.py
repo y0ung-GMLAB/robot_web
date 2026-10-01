@@ -112,7 +112,7 @@ def test_motion_file_import_needs_a_motion_axis_setting(tmp_path):
             'content': MOTION_CONTENT,
         })
 
-    with pytest.raises(ValueError, match='모션축 설정이 없는 프로젝트'):
+    with pytest.raises(ValueError, match='조인트 연결이 없는 프로젝트'):
         _import('external.json')
 
     (projects_dir / target_id / 'motion_axis_matching' / 'axes.yaml').write_text(
@@ -137,7 +137,7 @@ def test_only_motion_files_can_be_brought_into_a_project(tmp_path):
     bridge.ensure_project_mutation_allowed = lambda _project_id: None
 
     for category in ('motor_axes', 'motion_axis_matching', 'layers', ''):
-        with pytest.raises(ValueError, match='모션 파일뿐입니다'):
+        with pytest.raises(ValueError, match='애니메이션\\(.json\\)뿐입니다'):
             _project_of(bridge).import_file(project_id, {
                 'category': category,
                 'file_name': 'x.yaml',

@@ -9,6 +9,7 @@ import {
   fetchMotionMapping,
   fetchMotionMappings,
   fetchMotionRunStatus,
+  importProjectFile,
   initializeMotionRun,
   projectFileDownloadUrl,
   saveMotionMapping,
@@ -592,6 +593,67 @@ export function createMotionDataController({
 
   function setMessage(message) {
     if (el.motionFileMessage) el.motionFileMessage.textContent = message;
+  }
+
+  /** 애니메이션 .json 드래그&드롭 업로드 · P5
+   *
+   * 길은 기존 그대로다 · `POST /api/projects/{id}/files` (JSONL 검증 포함) ·
+   * 화면은 파일을 글자로 읽어 싣기만 한다 · 조인트 연결이 없는 프로젝트는
+   * 서버가 문 앞에서 거절하고, 그 사유를 그대로 보여 준다.
+   */
+  async function importDroppedAnimations(fileList) {
+    const files = [...(fileList || [])];
+    if (!files.length) return;
+    const projectId = getLatestState()?.selected_project_id;
+    if (!projectId) {
+      setMessage('프로젝트를 먼저 선택하세요');
+      return;
+    }
+    const wrongType = files.find((file) => !/\.json$/i.test(file.name || ''));
+    if (wrongType) {
+      setMessage(`애니메이션은 .json 만 받습니다: ${wrongType.name}`);
+      return;
+    }
+    let imported = 0;
+    for (const file of files) {
+      try {
+        const content = await file.text();
+        await importProjectFile(projectId, {
+          category: 'motions', file_name: file.name, content,
+        });
+        imported += 1;
+      } catch (error) {
+        // 하나 실패하면 멈춘다 · 사유(중복 이름 · 조인트 연결 없음 · 형식
+        // 오류)가 다음 성공 메시지에 덮이지 않게
+        setMessage(`${file.name} 업로드 실패: ${error?.message || error}`);
+        break;
+      }
+    }
+    if (imported) {
+      setMessage(`애니메이션 ${imported}개 업로드 완료`);
+      await loadFiles();
+      await onProjectFilesChange?.();
+    }
+  }
+
+  function bindAnimationDropZone() {
+    const zone = el.motionFileRows?.closest('.motion-file-column');
+    if (!zone) return;
+    ['dragenter', 'dragover'].forEach((kind) => {
+      zone.addEventListener(kind, (event) => {
+        if (![...(event.dataTransfer?.types || [])].includes('Files')) return;
+        event.preventDefault();
+        zone.classList.add('drop-active');
+      });
+    });
+    zone.addEventListener('dragleave', (event) => {
+      if (!zone.contains(event.relatedTarget)) zone.classList.remove('drop-active');
+    });
+    zone.addEventListener('drop', (event) => {
+      event.preventDefault();
+      zone.classList.remove('drop-active');
+      importDroppedAnimations(event.dataTransfer?.files);
+    });
   }
 
   function setMappingMessage(message) {
@@ -2710,6 +2772,7 @@ export function createMotionDataController({
 
 
   function bindEvents() {
+    bindAnimationDropZone();
     if (el.motionFileRows) {
       el.motionFileRows.addEventListener('click', (event) => {
         const target = event.target.closest('[data-motion-file-id]');
