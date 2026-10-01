@@ -149,7 +149,7 @@ def resolved_motor_profile(
     「모름」 표식이 그대로 남았다.
 
         drivers:            driver 4  minas  'MADLN05BE'
-        web_axis_profiles:  0번 축    driver_model 「모름」 표식
+        web_axis_profiles:  0번 모터    driver_model 「모름」 표식
 
     같은 사실이 두 곳에 다른 값으로 적히면 화면은 「모델 미확인」을 띄우고
     적용은 통과한다 · 어느 쪽이 맞는지 사람이 알 길이 없다.
@@ -442,7 +442,7 @@ def serial_masters_from_registry(
             claimed=claimed_driver_ids, pristine=pristine_drivers,
         )
         master = master_for(port, baudrate)
-        name = str(motor.get('name') or f'{axis}번 축').strip() or f'{axis}번 축'
+        name = str(motor.get('name') or f'{axis}번 모터').strip() or f'{axis}번 모터'
         master['slaves'].append(
             {
                 'controller_index': axis,
@@ -501,7 +501,7 @@ def motor_config_from_registry(
         axis = optional_int(motor_config.get('controller_index'), motor.get('axis'))
         if axis is None:
             continue
-        name = str(motor.get('name') or f'{axis}번 축').strip() or f'{axis}번 축'
+        name = str(motor.get('name') or f'{axis}번 모터').strip() or f'{axis}번 모터'
         identity = motor.get('identity') if isinstance(motor.get('identity'), dict) else {}
         ethercat_master_index = optional_int(
             motor_config.get('ethercat_master_index'),
@@ -509,7 +509,7 @@ def motor_config_from_registry(
         )
         if ethercat_master_index is None or ethercat_master_index < 0:
             raise ValueError(
-                f'{axis}번 축의 EtherCAT Master 번호가 올바르지 않습니다'
+                f'{axis}번 모터의 EtherCAT Master 번호가 올바르지 않습니다'
             )
         eeprom_alias = optional_int(
             identity.get('ethercat_alias'),

@@ -513,9 +513,9 @@ class MotionSupervisor(Node):
             elif target_position is None:
                 error = 'target_deg is required'
             elif axis in commanded_axes:
-                error = f'{axis}번 축이 수동 스트림 묶음에 두 번 들어 있습니다'
+                error = f'{axis}번 모터가 수동 스트림 묶음에 두 번 들어 있습니다'
             elif motor is None:
-                error = f'{axis}번 축을 현재 모터 상태에서 찾을 수 없습니다'
+                error = f'{axis}번 모터를 현재 모터 상태에서 찾을 수 없습니다'
             elif self._is_ac_servo(motor):
                 error = self._stream_readiness_error(
                     motor,
@@ -533,7 +533,7 @@ class MotionSupervisor(Node):
             else:
                 error = self._stream_readiness_error(motor, axis, is_ac_servo=False)
                 if not error:
-                    error = f'{axis}번 축은 수동 스트림으로 제어할 수 없는 모터 종류입니다'
+                    error = f'{axis}번 모터는 수동 스트림으로 제어할 수 없는 모터 종류입니다'
 
             if (
                 not error
@@ -679,7 +679,7 @@ class MotionSupervisor(Node):
         motors = self._current_motors()
         motor = self._motor_for_axis(axis, motors)
         if motor is None:
-            return False, f'{axis}번 축을 현재 모터 상태에서 찾을 수 없습니다'
+            return False, f'{axis}번 모터를 현재 모터 상태에서 찾을 수 없습니다'
         if self._is_ac_servo(motor):
             error = self._stream_readiness_error(motor, axis)
             if error:
@@ -694,7 +694,7 @@ class MotionSupervisor(Node):
             error = self._stream_readiness_error(motor, axis, is_ac_servo=False)
             if error:
                 return False, error
-            return False, f'{axis}번 축은 수동 스트림으로 제어할 수 없는 모터 종류입니다'
+            return False, f'{axis}번 모터는 수동 스트림으로 제어할 수 없는 모터 종류입니다'
 
         acquired, owner_error = self._acquire_command_owner(
             CommandOwner.STREAM,
@@ -985,9 +985,9 @@ class MotionSupervisor(Node):
         motors = self._current_motors()
         motor = self._motor_for_axis(axis, motors)
         if motor is None:
-            return False, f'{axis}번 축을 모터 상태에서 찾을 수 없습니다'
+            return False, f'{axis}번 모터를 모터 상태에서 찾을 수 없습니다'
         if not self._is_ac_servo(motor):
-            return False, f'{axis}번 축은 AC 서보가 아닙니다'
+            return False, f'{axis}번 모터는 AC 서보가 아닙니다'
         ready_error = self._manual_readiness_error(motor, axis)
         if ready_error:
             return False, ready_error
@@ -996,21 +996,21 @@ class MotionSupervisor(Node):
             motor.get('position_deg', motor.get('position'))
         )
         if current_position is None:
-            return False, f'{axis}번 축의 현재 위치를 읽을 수 없습니다'
+            return False, f'{axis}번 모터의 현재 위치를 읽을 수 없습니다'
 
         self._clear_completed_jogs()
         if axis in self._active_jogs:
             active = self._active_jogs[axis]
             return (
                 False,
-                f'{axis}번 축의 이전 조그가 아직 돌고 있습니다 · '
+                f'{axis}번 모터의 이전 조그가 아직 돌고 있습니다 · '
                 f'목표 {active["target_position"]:.3f} deg',
             )
         if axis in self._active_actions:
             active = self._active_actions[axis]
             return (
                 False,
-                f'{axis}번 축의 이전 동작이 아직 돌고 있습니다 · '
+                f'{axis}번 모터의 이전 동작이 아직 돌고 있습니다 · '
                 f'목표 {active["target_position"]:.3f} deg',
             )
 
@@ -1068,9 +1068,9 @@ class MotionSupervisor(Node):
         motors = self._current_motors()
         motor = self._motor_for_axis(axis, motors)
         if motor is None:
-            return False, f'{axis}번 축을 모터 상태에서 찾을 수 없습니다'
+            return False, f'{axis}번 모터를 모터 상태에서 찾을 수 없습니다'
         if not self._is_dynamixel(motor):
-            return False, f'{axis}번 축은 다이나믹셀이 아닙니다'
+            return False, f'{axis}번 모터는 다이나믹셀이 아닙니다'
         ready_error = self._manual_readiness_error(motor, axis, is_ac_servo=False)
         if ready_error:
             return False, ready_error
@@ -1079,7 +1079,7 @@ class MotionSupervisor(Node):
             motor.get('position_deg', motor.get('position'))
         )
         if current_position is None:
-            return False, f'{axis}번 축의 현재 위치를 읽을 수 없습니다'
+            return False, f'{axis}번 모터의 현재 위치를 읽을 수 없습니다'
 
         self._clear_completed_jogs()
         self._clear_completed_actions()
@@ -1087,14 +1087,14 @@ class MotionSupervisor(Node):
             active = self._active_jogs[axis]
             return (
                 False,
-                f'{axis}번 축의 이전 조그가 아직 돌고 있습니다 · '
+                f'{axis}번 모터의 이전 조그가 아직 돌고 있습니다 · '
                 f'목표 {active["target_position"]:.3f} deg',
             )
         if axis in self._active_actions:
             active = self._active_actions[axis]
             return (
                 False,
-                f'{axis}번 축의 이전 동작이 아직 돌고 있습니다 · '
+                f'{axis}번 모터의 이전 동작이 아직 돌고 있습니다 · '
                 f'목표 {active["target_position"]:.3f} deg',
             )
 
@@ -1134,9 +1134,9 @@ class MotionSupervisor(Node):
         motors = self._current_motors()
         motor = self._motor_for_axis(axis, motors)
         if motor is None:
-            return False, f'{axis}번 축을 모터 상태에서 찾을 수 없습니다'
+            return False, f'{axis}번 모터를 모터 상태에서 찾을 수 없습니다'
         if not self._is_ac_servo(motor):
-            return False, f'{axis}번 축은 AC 서보가 아닙니다'
+            return False, f'{axis}번 모터는 AC 서보가 아닙니다'
         ready_error = self._manual_readiness_error(motor, axis)
         if ready_error:
             return False, ready_error
@@ -1144,7 +1144,7 @@ class MotionSupervisor(Node):
             motor.get('position_deg', motor.get('position'))
         )
         if current_position is None:
-            return False, f'{axis}번 축의 현재 위치를 읽을 수 없습니다'
+            return False, f'{axis}번 모터의 현재 위치를 읽을 수 없습니다'
 
         self._clear_completed_jogs()
         self._clear_completed_actions()
@@ -1152,14 +1152,14 @@ class MotionSupervisor(Node):
             active = self._active_jogs[axis]
             return (
                 False,
-                f'{axis}번 축의 이전 조그가 아직 돌고 있습니다 · '
+                f'{axis}번 모터의 이전 조그가 아직 돌고 있습니다 · '
                 f'목표 {active["target_position"]:.3f} deg',
             )
         if axis in self._active_actions:
             active = self._active_actions[axis]
             return (
                 False,
-                f'{axis}번 축의 이전 동작이 아직 돌고 있습니다 · '
+                f'{axis}번 모터의 이전 동작이 아직 돌고 있습니다 · '
                 f'목표 {active["target_position"]:.3f} deg',
             )
 
@@ -1248,9 +1248,9 @@ class MotionSupervisor(Node):
         motors = self._current_motors()
         motor = self._motor_for_axis(axis, motors)
         if motor is None:
-            return False, f'{axis}번 축을 모터 상태에서 찾을 수 없습니다'
+            return False, f'{axis}번 모터를 모터 상태에서 찾을 수 없습니다'
         if not self._is_dynamixel(motor):
-            return False, f'{axis}번 축은 다이나믹셀이 아닙니다'
+            return False, f'{axis}번 모터는 다이나믹셀이 아닙니다'
         ready_error = self._manual_readiness_error(motor, axis, is_ac_servo=False)
         if ready_error:
             return False, ready_error
@@ -1258,7 +1258,7 @@ class MotionSupervisor(Node):
             motor.get('position_deg', motor.get('position'))
         )
         if current_position is None:
-            return False, f'{axis}번 축의 현재 위치를 읽을 수 없습니다'
+            return False, f'{axis}번 모터의 현재 위치를 읽을 수 없습니다'
 
         self._clear_completed_jogs()
         self._clear_completed_actions()
@@ -1266,14 +1266,14 @@ class MotionSupervisor(Node):
             active = self._active_jogs[axis]
             return (
                 False,
-                f'{axis}번 축의 이전 조그가 아직 돌고 있습니다 · '
+                f'{axis}번 모터의 이전 조그가 아직 돌고 있습니다 · '
                 f'목표 {active["target_position"]:.3f} deg',
             )
         if axis in self._active_actions:
             active = self._active_actions[axis]
             return (
                 False,
-                f'{axis}번 축의 이전 동작이 아직 돌고 있습니다 · '
+                f'{axis}번 모터의 이전 동작이 아직 돌고 있습니다 · '
                 f'목표 {active["target_position"]:.3f} deg',
             )
 
@@ -1879,12 +1879,12 @@ class MotionSupervisor(Node):
         upper = self._optional_float(motor.get('upper'))
         if lower is not None and target_position < lower:
             return (
-                f'{axis}번 축 목표 위치 {target_position:.3f} deg 가 '
+                f'{axis}번 모터 목표 위치 {target_position:.3f} deg 가 '
                 f'하한 {lower:.3f} deg 보다 작습니다'
             )
         if upper is not None and target_position > upper:
             return (
-                f'{axis}번 축 목표 위치 {target_position:.3f} deg 가 '
+                f'{axis}번 모터 목표 위치 {target_position:.3f} deg 가 '
                 f'상한 {upper:.3f} deg 보다 큽니다'
             )
         return ''
@@ -1899,7 +1899,7 @@ class MotionSupervisor(Node):
         lower = self._optional_float(motor.get('lower'))
         upper = self._optional_float(motor.get('upper'))
         if lower is None or upper is None or lower > upper:
-            return f'{axis}번 축의 위치 한계값이 올바르지 않습니다'
+            return f'{axis}번 모터의 위치 한계값이 올바르지 않습니다'
 
         expected_target: Optional[float] = None
         boundary_name = ''
@@ -1910,11 +1910,11 @@ class MotionSupervisor(Node):
             expected_target = upper
             boundary_name = '상한'
         else:
-            return f'{axis}번 축은 이미 위치 한계 안에 있습니다'
+            return f'{axis}번 모터는 이미 위치 한계 안에 있습니다'
 
         if not math.isclose(target_position, expected_target, abs_tol=1e-6):
             return (
-                f'{axis}번 축 한계 복구는 {boundary_name} '
+                f'{axis}번 모터 한계 복구는 {boundary_name} '
                 f'한계값 {expected_target:.3f} deg 를 목표로 해야 합니다'
             )
         return ''
@@ -2085,7 +2085,7 @@ class MotionSupervisor(Node):
             ]
             if fault_axes:
                 return False, (
-                    f'{fault_axes[0]}번 축에 에러가 있습니다 · '
+                    f'{fault_axes[0]}번 모터에 에러가 있습니다 · '
                     '먼저 알람 해제(Fault Reset)를 하세요'
                 )
             self._publish_controlword(motors, axes, CW_SHUTDOWN_MINAS)
@@ -2143,11 +2143,11 @@ class MotionSupervisor(Node):
         for axis in requested_axes:
             motor = self._motor_for_axis(axis, motors)
             if motor is None:
-                return [], f'{axis}번 축을 모터 상태에서 찾을 수 없습니다'
+                return [], f'{axis}번 모터를 모터 상태에서 찾을 수 없습니다'
             if not self._is_ac_servo(motor):
-                return [], f'{axis}번 축은 AC 서보가 아닙니다'
+                return [], f'{axis}번 모터는 AC 서보가 아닙니다'
             if str(motor.get('state') or '') != 'detected':
-                return [], f'{axis}번 축이 감지되지 않았습니다'
+                return [], f'{axis}번 모터가 감지되지 않았습니다'
             axes.append(axis)
         return sorted(set(axes)), ''
 

@@ -1082,7 +1082,7 @@ export function createMotionTestController({ el, getLatestState, getJointRow = (
         : '모터 동작 정지';
       el.motionTestStopButton.title = motionStopInFlight
         ? '모터 정지 요청을 처리하고 있습니다'
-        : '진행 중인 동작 테스트 명령을 취소하고 현재 위치를 유지합니다';
+        : '진행 중인 수동 조작 명령을 취소하고 현재 위치를 유지합니다';
     }
     if (el.motionTestActionGuide) {
       let guideState = 'warning';

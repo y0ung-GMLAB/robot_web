@@ -70,7 +70,7 @@ def _alarm_error(motor: Dict[str, Any], axis: Optional[int]) -> str:
     error_hex = str(motor.get('errorcode_hex') or f'0x{errorcode & 0xFFFF:04X}')
     error_text = str(motor.get('error_text') or '').strip()
     detail = f' ({error_text})' if error_text else ''
-    return f'{axis}번 축 모터 알람 {error_hex}{detail}'
+    return f'{axis}번 모터 알람 {error_hex}{detail}'
 
 
 def readiness_error(
@@ -98,20 +98,20 @@ def readiness_error(
     for check in order:
         if check == 'detected':
             if str(motor.get('state') or '') != 'detected':
-                return f'{axis}번 축이 감지되지 않았습니다'
+                return f'{axis}번 모터가 감지되지 않았습니다'
         elif check == 'alarm':
             message = _alarm_error(motor, axis)
             if message:
                 return message
         elif check == 'fault':
             if bool(motor.get('fault', False)):
-                return f'{axis}번 축에 에러가 있습니다'
+                return f'{axis}번 모터에 에러가 있습니다'
         elif check == 'servo_on':
             if is_ac_servo and motor.get('servo_on') is not True:
-                return f'{axis}번 축 서보가 꺼져 있습니다'
+                return f'{axis}번 모터 서보가 꺼져 있습니다'
         elif check == 'internal_limit':
             if is_ac_servo and internal_limit_active:
-                return f'{axis}번 축 {INTERNAL_LIMIT_MESSAGE}'
+                return f'{axis}번 모터 {INTERNAL_LIMIT_MESSAGE}'
         else:
             raise ValueError(f'알 수 없는 준비 검사 항목: {check}')
     return ''

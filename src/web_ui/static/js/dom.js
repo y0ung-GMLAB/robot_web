@@ -84,7 +84,7 @@ export function getElements() {
     coordinationStartContinuousButton: document.getElementById('coordinationStartContinuousButton'),
     coordinationStopNowButton: document.getElementById('coordinationStopNowButton'),
     coordinationStopAfterButton: document.getElementById('coordinationStopAfterButton'),
-    // 각 PC 진행은 `모션 실행` 탭에 있다 · §6-100
+    // 각 PC 진행은 `애니메이션 재생` 탭에 있다 · §6-100
     motionRunPeerRows: document.getElementById('motionRunPeerRows'),
     coordinationExecutionState: document.getElementById('coordinationExecutionState'),
     coordinationJoinButton: document.getElementById('coordinationJoinButton'),

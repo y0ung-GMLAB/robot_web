@@ -43,11 +43,11 @@ test('one-shot and continuous start include whole-axis initialization automatica
   assert.doesNotMatch(renderBody, /startReady/);
   assert.match(
     startBody,
-    /전체 활성 조인트를 초기 위치로 이동한 뒤 연속 모션을 시작/,
+    /전체 활성 조인트를 초기 위치로 이동한 뒤 연속 재생을 시작/,
   );
   assert.match(
     startBody,
-    /전체 활성 조인트를 초기 위치로 이동한 뒤 현재 모션 파일을 1회 실행/,
+    /전체 활성 조인트를 초기 위치로 이동한 뒤 현재 애니메이션을 1회 실행/,
   );
   assert.match(startBody, /startMotionRun\(\{ \.\.\.motionRunPayload\(\), run_mode: runMode \}\)/);
 });
@@ -154,7 +154,7 @@ test('registered motion file deletion is blocked with an alert before delete req
 
   assert.ok(helperStart >= 0, '삭제 불가 알림 헬퍼가 있어야 한다');
   assert.match(helperBody, /showAlert\(/);
-  assert.match(helperBody, /title: '모션 파일 삭제 불가'/);
+  assert.match(helperBody, /title: '애니메이션 삭제 불가'/);
   assert.ok(registrationGuard >= 0, '등록 파일 선검사가 있어야 한다');
   assert.ok(alertCall > registrationGuard, '막았으면 알린다');
   assert.ok(confirmCall > alertCall, '확인은 선검사를 통과한 뒤');
@@ -164,7 +164,7 @@ test('registered motion file deletion is blocked with an alert before delete req
   assert.ok(serverGuard > deleteCall, '서버 거절을 검사해야 한다');
   assert.ok(clearSelection > serverGuard, '선택 해제는 성공을 확인한 뒤');
   assert.ok(projectRefresh > clearSelection, '삭제 후 프로젝트 트리를 갱신한다');
-  assert.match(deleteBody, /재생 등록된 모션 파일은 삭제할 수 없습니다/);
+  assert.match(deleteBody, /재생 등록된 애니메이션은 삭제할 수 없습니다/);
   assert.match(
     deleteBody,
     /catch \(error\) \{[\s\S]*?await showMotionFileDeleteFailure\(message\)/,
@@ -216,13 +216,13 @@ test('DDS execution blocks show a recovery popup and expose the way out', () => 
     'utf8',
   );
   assert.match(controller, /async function showMotionRunFailure/);
-  assert.match(controller, /DDS 그룹 실행이 로컬 모션 실행을 사용 중입니다/);
+  assert.match(controller, /DDS 그룹 실행이 로컬 애니메이션 재생을 사용 중입니다/);
   // 버튼 이름이 바뀌면 이 안내문도 같이 바뀌어야 한다 · §6-132
   assert.match(controller, /「연동 탈퇴」를 누른 뒤 다시 시도하세요/);
   assert.match(html, /id="coordinationLeaveButton"[^>]*>연동 탈퇴</);
   assert.match(dom, /coordinationLeaveButton/);
   assert.match(coordination, /control\('leave'\)/);
-  assert.match(coordination, /단독 모션·모션 스튜디오를 사용할 수 있습니다/);
+  assert.match(coordination, /단독 재생을 사용할 수 있습니다/);
   // 들어오거나 나가거나 둘 뿐이다 · 「지금 빠지기」는 없앴다 · §6-164
   assert.doesNotMatch(html, /coordinationTemporaryDisableButton/);
   assert.doesNotMatch(dom, /coordinationTemporaryDisableButton/);

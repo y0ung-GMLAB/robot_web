@@ -8,14 +8,14 @@ import { showConfirm } from './ui_dialogs.js';
 const CATEGORY_LABELS = {
   error: '모터 에러',
   initial_position: '초기 위치 이동',
-  motion: '모션 시작',
+  motion: '재생 시작',
   system: '시스템 설정',
 };
 
 const EVENT_TYPE_LABELS = {
-  single_motion_started: '1회 모션 시작',
-  continuous_motion_started: '연속 모션 시작',
-  motion_started: '모션 시작',
+  single_motion_started: '1회 재생 시작',
+  continuous_motion_started: '연속 재생 시작',
+  motion_started: '재생 시작',
   ethercat_alias_written: 'EEPROM Alias 변경',
 };
 

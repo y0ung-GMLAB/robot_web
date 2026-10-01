@@ -288,7 +288,7 @@ function acceptProjectPayload(payload) {
  * (`EMERGENCY_LATCHED_MESSAGE`) · 화면이 같은 판단을 한 벌 더 하면, 두 판단이
  * 갈리는 날 사람이 갇힌다 · 실제로 갇혔다.
  *
- * **버튼마다의 판단도 이미 따로 있다** · 동작 테스트의 차단 판정이 서버가
+ * **버튼마다의 판단도 이미 따로 있다** · 수동 조작의 차단 판정이 서버가
  * 내려준 상태를 읽어 모터 버튼을 끈다 · 그것이 주인이 하나인 방식이다 ·
  * 여기서 하던 일은 그 위에 덮어씌우는 두 번째 빗장이었을 뿐이다.
  *
@@ -833,7 +833,7 @@ function restartReadyState(payload) {
     return {
       ready: true,
       title: '프로그램 재시작 완료',
-      detail: '웹·Supervisor·모션 실행 재연결 확인 · 모터 제어 상태는 변경하지 않음',
+      detail: '웹·Supervisor·애니메이션 재생 재연결 확인 · 모터 제어 상태는 변경하지 않음',
     };
   }
   const runtime = payload?.service_management?.runtime || {};
@@ -967,7 +967,7 @@ function updateRestartProgress(payload = null) {
   const programRestart = appState.restartCheckMode === 'program';
   const state = restartReadyState(payload);
   const message = programRestart
-    ? '웹·Supervisor·모션 실행이 다시 연결됐는지 확인하는 중입니다.'
+    ? '웹·Supervisor·애니메이션 재생이 다시 연결됐는지 확인하는 중입니다.'
     : [
       'motor_manager_node, motion_state_monitor, motion_supervisor, motion_web_bridge 상태를 확인하는 중입니다.',
       'YAML 등록 수가 아니라 직접 검색되거나 실제 감지된 모터를 기준으로 확인합니다.',
@@ -1370,7 +1370,7 @@ if (el.programRestartButton) {
     const confirmed = await appDialogs.confirm(
       '프로그램을 재시작합니다.\n\n'
       + 'Motor Manager와 EtherCAT은 계속 실행되며 현재 서보 ON/OFF 상태를 유지합니다.\n'
-      + '모션 녹화·재생이 정지된 상태인지 확인했습니까?',
+      + '재생이 정지된 상태인지 확인했습니까?',
       { title: '프로그램 재시작', confirmLabel: '재시작', tone: 'warning' },
     );
     if (!confirmed) return;
@@ -1383,7 +1383,7 @@ if (el.programRestartButton) {
     setRestartOverlay(
       true,
       '프로그램 재시작 중입니다',
-      '웹·Supervisor·모션 실행이 다시 실행되고 웹도 자동으로 연결됩니다.',
+      '웹·Supervisor·애니메이션 재생이 다시 실행되고 웹도 자동으로 연결됩니다.',
       '재시작 요청 전송 중',
     );
     startRestartProgressPolling();
@@ -1421,7 +1421,7 @@ async function runSafetyStop(emergency) {
   try {
     const stopCommandSources = async () => {
       const cleanup = [
-        ['모션 동작', stopMotionRun()],
+        ['애니메이션 재생', stopMotionRun()],
       ];
       const results = await Promise.allSettled(cleanup.map(([, request]) => request));
       return results.flatMap((result, index) => {

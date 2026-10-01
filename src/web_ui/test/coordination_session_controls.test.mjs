@@ -79,7 +79,7 @@ test('탈퇴는 도는 중에 아예 눌리지 않는다', () => {
   // 전에는 도는 중에도 눌렸고, 누르면 **세 대를 다 세우고** 나갔다 ·
   // 한 대만 빼려던 사람이 공연을 멈췄다 · 이제 먼저 정지해야 한다 · §6-164
   assert.match(coordination, /coordinationLeaveButton\.disabled =[^;]*\|\| active/);
-  assert.match(coordination, /연동 모션이 도는 중입니다 · 먼저 정지한 뒤 탈퇴하세요/);
+  assert.match(coordination, /연동 재생이 도는 중입니다 · 먼저 정지한 뒤 탈퇴하세요/);
 });
 
 test('탈퇴 확인창은 무엇이 남는지 말한다', () => {
@@ -87,7 +87,7 @@ test('탈퇴 확인창은 무엇이 남는지 말한다', () => {
     /async function leaveGroup\(\)[\s\S]*?\n  \}/,
   )?.[0] || '';
   assert.ok(body, '확인창 코드를 읽지 못했다');
-  assert.match(body, /단독 모션·모션 스튜디오를 사용할 수 있습니다/);
+  assert.match(body, /단독 재생을 사용할 수 있습니다/);
   assert.match(body, /프로그램을 다시 켜도 나간 채로 있습니다/);
   // 확인창은 글자 그대로 나온다 · 꾸밈 기호는 그대로 보인다
   assert.doesNotMatch(body, /\*\*/);

@@ -28,7 +28,7 @@ test('연동을 쓰지 않으면 마스터라는 말을 쓰지 않는다', () =>
   assert.equal(state.text, '스케줄러: 동작 중 (2개 등록)');
   assert.equal(state.canEdit, true);
   assert.equal(state.warning, '');
-  assert.match(motionScheduleScopeNote(status()), /이 PC 의 등록된 모션/);
+  assert.match(motionScheduleScopeNote(status()), /이 PC 의 등록된 애니메이션/);
 });
 
 test('묶여 있어도 같은 말을 한다 · 스케줄은 그것과 상관없다 · §6-266', () => {

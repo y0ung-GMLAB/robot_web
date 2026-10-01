@@ -347,7 +347,7 @@ def registry_from_motor_config(config: Dict[str, Any]) -> Dict[str, Any]:
             slave_position = optional_int(
                 slave.get('ring_position', slave.get('position')), index
             )
-            name = str(slave.get('name') or f'{axis}번 축')
+            name = str(slave.get('name') or f'{axis}번 모터')
             motor_id = motor_id_for(
                 motor_type=motor_type,
                 transport=transport,

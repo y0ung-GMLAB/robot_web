@@ -103,7 +103,7 @@ class CoordinationWebBridge:
         connected = self._status_received_at and time.time() - self._status_received_at <= 3.0
         # 「그룹 실행 중」 판단의 주인은 `motion_common.run_state` 다 · §6-145
         if connected and run_state.group_is_active(dict(execution or {})):
-            return 'DDS 그룹 실행이 로컬 모션 실행을 사용 중입니다'
+            return 'DDS 그룹 실행이 로컬 애니메이션 재생을 사용 중입니다'
         return ''
 
     def update_settings(self, payload: Mapping[str, Any]) -> Dict[str, Any]:

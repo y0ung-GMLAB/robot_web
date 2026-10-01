@@ -38,7 +38,7 @@ USER_FACING = [
     'src/motion_common/motion_common/motor_readiness.py',
 ]
 
-#: `Axis {n}` 은 이제 `{n}번 축` 이다
+#: `Axis {n}` 은 이제 `{n}번 모터` 다
 AXIS_PREFIX = re.compile(r"f'Axis \{")
 
 
@@ -50,7 +50,7 @@ def test_no_axis_message_is_english_anymore(path):
     ]
     assert found == [], (
         f'{Path(path).name} 에 영어 축 안내가 남아 있습니다 (줄 {found}) · '
-        '`{n}번 축` 으로 쓰세요'
+        '`{n}번 모터` 로 쓰세요'
     )
 
 

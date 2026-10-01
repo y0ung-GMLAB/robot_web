@@ -1505,7 +1505,7 @@ def test_a_timed_out_apply_keeps_the_new_project(tmp_path, monkeypatch):
     assert scheduled == [], '재시작을 또 걸면 안 된다'
 
     # **어느 축이 안 왔는지 말해 준다**
-    assert '1번 축이 올라오지 않았습니다' in result['error']
+    assert '1번 모터가 올라오지 않았습니다' in result['error']
     assert '붙은 축 1/2' in result['error']
 
 

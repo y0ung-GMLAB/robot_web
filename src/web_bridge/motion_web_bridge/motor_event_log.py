@@ -110,11 +110,11 @@ class MotorEventLog:
                 if previous_errors.get(axis_key) == signature:
                     continue
 
-                name = str(motor.get('display_name') or f'{axis}번 축')
+                name = str(motor.get('display_name') or f'{axis}번 모터')
                 new_events.append({
                     'category': 'error',
                     'event_type': 'motor_error',
-                    'target': f'{axis}번 축 · {name}',
+                    'target': f'{axis}번 모터 · {name}',
                     'content': f'{error_hex} {error_text}',
                     'details': {
                         'axis': axis,

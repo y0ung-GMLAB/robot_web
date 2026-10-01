@@ -556,7 +556,7 @@ class ScanOrchestrator:
             # **짝은 서버가 맞춘다** · §6-216
             #
             # 전에는 날것(`ethercat_scan.slaves` · `dynamixel_scan.devices`)만
-            # 보내고 화면이 스스로 「이 슬레이브가 몇 번 축인가」를 정했다 ·
+            # 보내고 화면이 스스로 「이 슬레이브가 몇 번 모터인가」를 정했다 ·
             # 같은 판단이 서버에도 있었고 규칙이 미묘하게 달라서 모델 이름과
             # 축 이름이 갈렸다.
             #
@@ -786,7 +786,7 @@ class ScanOrchestrator:
             # 검색 결과는 그대로 살린다 · 무엇이 없었는지만 덧붙인다
             result['message'] = (
                 f'{result.get("message") or "AC Servo 검색 완료"} / '
-                f'검색 전 설정의 {", ".join(str(a) for a in missing_axes)}번 축이 '
+                f'검색 전 설정의 {", ".join(str(a) for a in missing_axes)}번 모터가 '
                 '돌아오지 않았습니다 · 빠졌거나 알람 상태인지 확인하세요'
             )
         if restore_error:

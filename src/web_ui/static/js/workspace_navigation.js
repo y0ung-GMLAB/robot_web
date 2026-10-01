@@ -63,7 +63,7 @@ export function workspaceForLegacyNavigation(workspace, motionTab = '') {
   // **프로젝트 관리 탭**의 이름이다. 옛 이름으로 알아들으면 그 탭을 누를 때마다
   // `motion-run`으로 튕겨 나가고, `onManageFile`의 편집기 스크롤도 빗나간다.
   if (!['motion'].includes(workspace)) return normalizeWorkspaceRoute(workspace);
-  // 파일 관리는 모션 실행 화면으로 합쳐졌다 · 옛 'files' 요청도 그리로 보낸다
+  // 파일 관리는 애니메이션 재생 화면으로 합쳐졌다 · 옛 'files' 요청도 그리로 보낸다
   const tab = String(motionTab || 'run') === 'files' ? 'run' : String(motionTab || 'run');
   // 모션축 설정은 모터 관리 화면에 산다 · 옛 ('motion', 'mapping') 요청 대비
   if (tab === 'mapping') return 'config';

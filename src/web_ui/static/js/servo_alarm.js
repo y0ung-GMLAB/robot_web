@@ -5,7 +5,7 @@ import {
 
 const FALLBACK_GRADE_LABELS = Object.freeze({
   1: '1등급 · 해당 에러 모터 정지',
-  2: '2등급 · 전체 모션 종료',
+  2: '2등급 · 전체 재생 종료',
   3: '3등급 · 전체 모터 제어 차단',
 });
 

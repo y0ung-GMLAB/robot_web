@@ -34,8 +34,8 @@ test('automatic repeat has explicit enable policy and start controls', () => {
     assert.doesNotMatch(html, new RegExp(`id="${gone}"`), `${gone} 가 남아 있다`);
     assert.doesNotMatch(dom, new RegExp(`${gone}:`), `${gone} 등록이 남아 있다`);
   }
-  assert.match(html, /value="direct">바로 다음 모션/);
-  assert.match(html, /value="dwell">대기 후 다음 모션/);
+  assert.match(html, /value="direct">바로 다음 회차/);
+  assert.match(html, /value="dwell">대기 후 다음 회차/);
   assert.match(html, /value="reinitialize" selected>초기 위치 이동 후 다음/);
 });
 

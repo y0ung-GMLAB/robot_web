@@ -66,7 +66,7 @@ test('실행 화면에는 시작 판단에 필요한 것만 남는다', () => {
  * 순서가 기능을 따라간다 · 무엇을 → 어떻게 → 어떻게 되고 있나
  */
 test('실행 화면은 세 단계 순서다', () => {
-  const order = ['1. 실행할 모션', '2. 실행', '3. 진행']
+  const order = ['1. 재생할 애니메이션', '2. 실행', '3. 진행']
     .map((title) => runPanel.indexOf(`<strong>${title}</strong>`));
 
   assert.ok(order.every((index) => index > 0), `단계 제목이 빠졌다 · ${order}`);

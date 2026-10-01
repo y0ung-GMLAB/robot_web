@@ -1363,7 +1363,7 @@ def test_ac_servo_scan_temporarily_releases_and_restores_motor_service(monkeypat
 
 
 def _scan_bridge_with_runtime(monkeypatch):
-    """AC 서보 검색 시험용 브리지 · 0·1번 축이 멀쩡히 돌고 있는 상태."""
+    """AC 서보 검색 시험용 브리지 · 0·1번 모터가 멀쩡히 돌고 있는 상태."""
     bridge = MotionWebBridge.__new__(MotionWebBridge)
     bridge._lock = threading.Lock()
     bridge._motion_state = {
@@ -1496,7 +1496,7 @@ def test_a_motor_that_did_not_come_back_is_not_a_scan_failure(monkeypatch):
 
     assert result['success'] is True, '검색은 성공했다'
     assert result['missing_axes'] == [1]
-    assert '1번 축이 돌아오지 않았습니다' in result['message'], '무엇이 없는지 알려야 한다'
+    assert '1번 모터가 돌아오지 않았습니다' in result['message'], '무엇이 없는지 알려야 한다'
     assert '실패' not in result['message'], '실패라고 말하면 안 된다'
 
 

@@ -1,28 +1,28 @@
-<!-- 모션 데이터
+<!-- 애니메이션
      `index.html`에서 떼어낸 조각 · 원본 914~1381줄 · §6-44
      들여쓰기를 그대로 둔다 · 서버가 자리표시자 줄을 이 내용으로 바꾼다 -->
-      <section class="motion-data-panel workspace-panel hidden" data-workspace-panel="motion" aria-label="모션 데이터">
+      <section class="motion-data-panel workspace-panel hidden" data-workspace-panel="motion" aria-label="애니메이션">
         <div class="section-head workspace-page-head">
-          <div><strong id="motionWorkspaceTitle">모션 파일</strong><small id="motionWorkspaceSubtitle">현재 프로젝트의 모션 데이터를 확인하고 분석합니다</small></div>
+          <div><strong id="motionWorkspaceTitle">애니메이션</strong><small id="motionWorkspaceSubtitle">현재 프로젝트의 애니메이션을 확인하고 분석합니다</small></div>
         </div>
         <div class="motion-tab-panel hidden" data-motion-panel="run">
           <div class="motion-run-workspace">
 
             <!-- 기능별로 모은다 · 어디서 → 무엇을 → 어떻게 → 어떻게 되고 있나 · §6-98 -->
             <!-- 여기는 **이 PC 의 모션**만 다룬다 · §6-100
-                 그룹 실행은 모션 파일을 들고 가지 않는다 · 시작·정지 신호만
-                 보내고 각 PC 는 제 모션을 돌린다 · 다른 일이라 다른 탭이다
+                 그룹 실행은 애니메이션을 들고 가지 않는다 · 시작·정지 신호만
+                 보내고 각 PC 는 제 애니메이션을 돌린다 · 다른 일이라 다른 탭이다
                  (`PC 연동 설정`) -->
-            <section class="motion-file-subsection" aria-label="실행할 모션">
+            <section class="motion-file-subsection" aria-label="재생할 애니메이션">
               <div class="section-head compact">
-                <strong>1. 실행할 모션</strong>
-                <span id="motionRunMessage">모션 파일과 매핑 파일을 선택하세요</span>
+                <strong>1. 재생할 애니메이션</strong>
+                <span id="motionRunMessage">애니메이션과 매핑 파일을 선택하세요</span>
               </div>
               <div class="motion-run-columns">
               <div class="motion-run-side">
-                <section class="motion-file-column" aria-label="모션 파일 목록">
+                <section class="motion-file-column" aria-label="애니메이션 목록">
                   <div class="section-head compact">
-                    <strong>모션 파일 <span id="motionFileCount" class="motion-file-count"></span></strong>
+                    <strong>애니메이션 <span id="motionFileCount" class="motion-file-count"></span></strong>
                     <span id="motionFileMessage">현재 파일 확인 중</span>
                   </div>
                   <!-- 표와 버튼을 옆으로 나란히 · §6-100 · 버튼이 표 아래
@@ -40,7 +40,7 @@
                       </thead>
                       <tbody id="motionFileRows">
                         <tr>
-                          <td colspan="4" class="empty">저장된 모션 파일이 없습니다</td>
+                          <td colspan="4" class="empty">저장된 애니메이션이 없습니다</td>
                         </tr>
                       </tbody>
                     </table>
@@ -57,7 +57,7 @@
               </div>
                 <div class="motion-run-main">
                 <div id="motionRunSummary" class="motion-run-summary">
-                  <div class="empty">선택된 모션 파일과 매핑 파일 기준으로 실행합니다</div>
+                  <div class="empty">선택된 애니메이션과 매핑 파일 기준으로 실행합니다</div>
                 </div>
                 </div>
               </div>
@@ -84,8 +84,8 @@
                       </label>
                       <label class="compact-field"><span>회차 사이 동작</span>
                         <select id="motionAutomationRepeatMode" class="compact-select" disabled>
-                          <option value="direct">바로 다음 모션</option>
-                          <option value="dwell">대기 후 다음 모션</option>
+                          <option value="direct">바로 다음 회차</option>
+                          <option value="dwell">대기 후 다음 회차</option>
                           <option value="reinitialize" selected>초기 위치 이동 후 다음</option>
                           <option value="dwell_reinitialize">대기 후 초기위치 → 다음</option>
                         </select>
@@ -120,9 +120,9 @@
             <section class="motion-file-subsection" aria-label="진행 상황">
               <div class="section-head compact">
                 <strong>3. 진행</strong>
-                <span id="motionRunGraphMessage">모션 진행 대기</span>
+                <span id="motionRunGraphMessage">재생 진행 대기</span>
               </div>
-                <section class="motion-file-subsection" aria-label="모션 실행 상태">
+                <section class="motion-file-subsection" aria-label="애니메이션 재생 상태">
                   <div class="section-head compact">
                     <strong>실행 상태</strong>
                     <span>motion_run_manager</span>
@@ -131,11 +131,11 @@
                     <div class="empty">상태 수신 대기</div>
                   </div>
                 </section>
-            <section class="motion-file-subsection" aria-label="모션 실행 그래프">
+            <section class="motion-file-subsection" aria-label="애니메이션 재생 그래프">
                   <div id="motionRunStageStrip" class="motion-run-stage-strip"></div>
-                  <div class="motion-run-progress" aria-label="모션 실행 진행률">
+                  <div class="motion-run-progress" aria-label="애니메이션 재생 진행률">
                     <div class="motion-run-progress-head">
-                      <strong id="motionRunCurrentPhase">현재 단계: 모션 전</strong>
+                      <strong id="motionRunCurrentPhase">현재 단계: 재생 전</strong>
                       <span id="motionRunProgressText">0.0 %</span>
                     </div>
                     <div class="motion-run-progress-track">
@@ -156,7 +156,7 @@
 
             <!-- 접지 않는다 · §6-100 · 어느 모터가 어디까지 움직이는지는 실행
                  전에 매번 보는 것이다 · 접어 두면 펴는 손이 한 번 더 든다 -->
-                <section class="motion-file-subsection" aria-label="모션 실행 조인트">
+                <section class="motion-file-subsection" aria-label="애니메이션 재생 조인트">
                   <div class="section-head compact">
                     <strong>4. 실행 조인트</strong>
                     <span>활성 매핑 기준 · 실행 준비 검사 후 채워집니다</span>
@@ -172,7 +172,7 @@
                           <th>최대값</th>
                           <th>초기 목표</th>
                           <th>모터 목표 범위</th>
-                          <th>모션 시작/종료</th>
+                          <th>재생 시작/종료</th>
                           <th>연속 판정</th>
                           <th>범위 제한</th>
                         </tr>

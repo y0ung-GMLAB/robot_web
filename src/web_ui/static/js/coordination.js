@@ -14,7 +14,7 @@ function text(value) {
 
 const stateLabels = {
   idle: '대기', preparing: '준비 확인', initializing: '초기위치 이동',
-  armed: '시작 대기', start_scheduled: '예약됨', waiting: '예약 대기', running: '모션 실행 중',
+  armed: '시작 대기', start_scheduled: '예약됨', waiting: '예약 대기', running: '애니메이션 재생 중',
   waiting_cycle_ready: '회차 준비 중', cycle_ready: '다음 시작 준비',
   stop_after_cycle: '현재 회차 후 정지 대기', releasing: '이전 그룹 실행 정리 확인 중',
   stopped: '정지', error: '오류',
@@ -112,7 +112,7 @@ export function createCoordinationController({ el }) {
     // 표가 둘이다 · §6-100
     //
     // **구성**(누가 참가했나 · 어떤 버전인가 · 명단)은 `PC 연동 설정` 탭,
-    // **진행**(회차 · 단계 · 진행률 · 동기화 · 알람)은 `모션 실행` 탭 ·
+    // **진행**(회차 · 단계 · 진행률 · 동기화 · 알람)은 `애니메이션 재생` 탭 ·
     // 실행을 시작한 탭에서 진행을 못 보면 탭을 왔다갔다 하게 된다.
     const pcCell = `<td>${pcNameHtml}${badgeHtml}</td>`;
     const joinCell = `<td class="${executionStateClass}"><strong>${executionStateText}</strong></td>`;
@@ -296,14 +296,14 @@ export function createCoordinationController({ el }) {
       el.coordinationLeaveButton.hidden = !joined;
       el.coordinationLeaveButton.disabled = loading || !nodeReady || !joined || active;
       el.coordinationLeaveButton.title = active
-        ? '연동 모션이 도는 중입니다 · 먼저 정지한 뒤 탈퇴하세요'
-        : '이 PC 를 그룹에서 빼 단독 모션·모션 스튜디오를 사용합니다';
+        ? '연동 재생이 도는 중입니다 · 먼저 정지한 뒤 탈퇴하세요'
+        : '이 PC 를 그룹에서 빼 단독 재생을 사용합니다';
     }
-    // 실행 제어는 모션 실행 화면으로 옮겼다 · 여기서는 왜 못 하는지만 알린다 · §6-65
+    // 실행 제어는 애니메이션 재생 화면으로 옮겼다 · 여기서는 왜 못 하는지만 알린다 · §6-65
     if (el.coordinationRunAvailability) {
       const availability = groupRunAvailability();
       el.coordinationRunAvailability.textContent = availability.ok
-        ? '그룹 실행 준비됨 · 모션 실행 화면에서 시작하세요'
+        ? '그룹 실행 준비됨 · 애니메이션 재생 화면에서 시작하세요'
         : `그룹 실행 불가 · ${availability.reason}`;
       el.coordinationRunAvailability.classList.toggle('warning-text', !availability.ok);
     }
@@ -340,7 +340,7 @@ export function createCoordinationController({ el }) {
           queueMicrotask(() => showAlert(
             messageBody,
             {
-              title: `${coordinationError.code || '그룹 모션'} 정지`,
+              title: `${coordinationError.code || '그룹 재생'} 정지`,
               confirmLabel: '확인',
               tone: 'danger',
             },
@@ -517,7 +517,7 @@ export function createCoordinationController({ el }) {
 
   async function initializeGroup() {
     const confirmed = await showConfirm(
-      '참가한 모든 PC를 각자의 모션 초기 위치로 동시에 이동합니다.\n모션 재생은 시작하지 않습니다.',
+      '참가한 모든 PC를 각자의 애니메이션 초기 위치로 동시에 이동합니다.\n재생은 시작하지 않습니다.',
       {
         title: '그룹 초기 위치 이동',
         confirmLabel: '초기 위치 이동',
@@ -542,7 +542,7 @@ export function createCoordinationController({ el }) {
     if (loading) return;
     const confirmed = await showConfirm(
       '이 PC 를 그룹에서 뺍니다.\n\n'
-      + '단독 모션·모션 스튜디오를 사용할 수 있습니다.\n'
+      + '단독 재생을 사용할 수 있습니다.\n'
       + '프로그램을 다시 켜도 나간 채로 있습니다 · 다시 쓰려면 「연동 참가」를 누르세요.',
       {
         title: '연동 탈퇴',
@@ -618,8 +618,8 @@ export function createCoordinationController({ el }) {
     el.coordinationJoinButton?.addEventListener('click', () => control('join'));
     // 그룹 실행은 **여기가 주인**이다 · §6-100
     //
-    // 그룹 실행은 모션 파일을 들고 가지 않는다 · 참가한 PC 들에게 시작·정지
-    // 신호만 보내고 각 PC 는 제 모션을 돌린다 · `모션 실행` 탭의 "이 파일을
+    // 그룹 실행은 애니메이션을 들고 가지 않는다 · 참가한 PC 들에게 시작·정지
+    // 신호만 보내고 각 PC 는 제 애니메이션을 돌린다 · `애니메이션 재생` 탭의 "이 파일을
     // 이 PC 에서 돌린다" 와는 다른 일이라 버튼도 따로 둔다 · 전에는 한 버튼이
     // 대상에 따라 둘 다 했고, 모터가 움직이는 버튼에서 그 애매함은 위험했다.
     el.coordinationInitializeButton?.addEventListener(
@@ -650,7 +650,7 @@ export function createCoordinationController({ el }) {
           `현재 접속된 아래 PC 인원으로 필수 참가 명단을 확정하고 시스템에 저장하시겠습니까?\n\n`
           + `[ 확정 명단 (${rosterList.length}대) ]\n`
           + `${rosterList.join(', ')}\n\n`
-          + `(부팅 자동 재생 시 위 PC들이 모두 켜진 후 모션이 시작됩니다)`,
+          + `(부팅 자동 재생 시 위 PC들이 모두 켜진 후 애니메이션이 시작됩니다)`,
           {
             title: 'DDS 그룹 필수 참가 명단 확정',
             confirmLabel: '명단 확정 및 저장',
@@ -666,7 +666,7 @@ export function createCoordinationController({ el }) {
         await save(
           `[ 확정 명단: ${rosterList.join(', ')} ]\n\n`
           + `필수 참가 명단 확정이 완료되었습니다.\n`
-          + `PC 재부팅 시 해당 명단의 모든 PC가 준비되면 모션이 자동 시작됩니다.`,
+          + `PC 재부팅 시 해당 명단의 모든 PC가 준비되면 애니메이션이 자동 시작됩니다.`,
           '명단 확정 저장 완료',
           { required_peers: rosterList },
         );
@@ -687,7 +687,7 @@ export function createCoordinationController({ el }) {
 
       const confirmed = await showConfirm(
         isRemoving
-          ? `PC [ ${targetPcId} ]를 그룹 필수 참가 명단에서 제외하시겠습니까?\n\n제외 후 저장하면 부팅 자동 재생 시 해당 PC를 기다리지 않고 모션이 시작될 수 있습니다.`
+          ? `PC [ ${targetPcId} ]를 그룹 필수 참가 명단에서 제외하시겠습니까?\n\n제외 후 저장하면 부팅 자동 재생 시 해당 PC를 기다리지 않고 애니메이션이 시작될 수 있습니다.`
           : `PC [ ${targetPcId} ]를 그룹 필수 참가 명단에 추가하시겠습니까?\n\n추가 후 저장하면 부팅 자동 재생 시 해당 PC가 켜질 때까지 대기하게 됩니다.`,
         {
           title: isRemoving ? '참가 PC 명단 제외 확인' : '참가 PC 명단 추가 확인',
@@ -776,7 +776,7 @@ export function createCoordinationController({ el }) {
     start: (options) => control('start_group', groupRunOptions('once', options)),
     startContinuous: (options) => control('start_group', groupRunOptions('continuous', options)),
     stopAfterCycle: () => {
-      // 아직 모션이 돌기 전이면 "회차 후"가 의미가 없다 · 바로 세운다
+      // 아직 애니메이션이 돌기 전이면 "회차 후"가 의미가 없다 · 바로 세운다
       const state = snapshot?.runtime?.execution?.state;
       return ['preparing', 'initializing', 'armed', 'start_scheduled'].includes(state)
         ? control('stop_now')

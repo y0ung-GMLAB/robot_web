@@ -64,7 +64,7 @@ export function motionScheduleBadgeState(status) {
   // 마스터가 보내는 그룹 실행까지 안 도는 것처럼 읽힌다.
   //
   // 전에는 「사람이 멈췄나」를 요청 내용으로 추측했다 · 그룹 정지나 안전
-  // 정지까지 사람이 멈춘 것으로 읽어서, 1회 연동 실행만 해도 "사람이 모션을
+  // 정지까지 사람이 멈춘 것으로 읽어서, 1회 연동 실행만 해도 "사람이 애니메이션을
   // 정지했습니다" 가 떴다 · 추측을 없애고 스위치 하나로 만들었다.
   if (manual) {
     return {
@@ -169,17 +169,17 @@ export function motionScheduleScopeNote(status) {
   }
   if (state.scope === 'off') {
     return '오프 모드입니다 · 조그·재생·그룹 시작이 전부 차단되고, '
-      + '돌고 있던 모션은 현재 회차 후 멈춥니다 · 서보는 켠 채 유지됩니다.';
+      + '돌고 있던 애니메이션은 현재 회차 후 멈춥니다 · 서보는 켠 채 유지됩니다.';
   }
   if (state.scope === 'local') {
-    return '시각이 되면 이 PC 의 등록된 모션을 연속 시작하고, '
+    return '시각이 되면 이 PC 의 등록된 애니메이션을 연속 시작하고, '
       + '종료 시각에 현재 회차 후 정지합니다.';
   }
   if (state.scope === 'slave') {
     return state.blockedReason + '.';
   }
   if (state.scope === 'group') {
-    return '시각이 되면 등록된 모션을 연속 시작하고, '
+    return '시각이 되면 등록된 애니메이션을 연속 시작하고, '
       + '종료 시각에 현재 회차 후 정지합니다.';
   }
   return '스케줄러 상태를 확인하고 있습니다.';
@@ -208,7 +208,7 @@ export function motionScheduleResumeNote(status) {
   const within = Number.isFinite(seconds) && seconds > 0
     ? `최대 ${seconds.toFixed(0)}초 뒤` : '잠시 뒤';
   return `스케줄 모드입니다 · ${within} 다시 시작합니다 · `
-    + '계속 멈춰 두려면 「📅 모션 스케줄」에서 수동 모드로 바꾸세요';
+    + '계속 멈춰 두려면 「📅 재생 스케줄」에서 수동 모드로 바꾸세요';
 }
 
 

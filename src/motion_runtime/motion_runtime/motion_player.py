@@ -181,7 +181,7 @@ class MotionPlayer:
                     raise RuntimeError(motor_error)
                 current = motion_run_rules._motor_position_deg(motor)
                 if current is None:
-                    raise RuntimeError(f'{motor_axis}번 축의 현재 위치를 읽을 수 없습니다')
+                    raise RuntimeError(f'{motor_axis}번 모터의 현재 위치를 읽을 수 없습니다')
                 starts[motor_axis] = current
                 targets[motor_axis] = float(axis['initial_motor_target_deg'])
                 durations[motor_axis] = max(float(axis.get('initial_move_time_sec') or 0.0), self.manager.period_sec)
@@ -698,13 +698,13 @@ class MotionPlayer:
                 tolerance = self._target_tolerance_deg(axis_plan)
                 if current is None:
                     ok = False
-                    messages.append(f'{motor_axis}번 축의 현재 위치를 읽을 수 없습니다')
+                    messages.append(f'{motor_axis}번 모터의 현재 위치를 읽을 수 없습니다')
                     continue
                 error = abs(current - target)
                 if error > tolerance:
                     ok = False
                     messages.append(
-                        f'{motor_axis}번 축 현재 {current:.3f} deg · '
+                        f'{motor_axis}번 모터 현재 {current:.3f} deg · '
                         f'목표 {target:.3f} deg · 오차 {error:.3f} deg'
                     )
             if ok:

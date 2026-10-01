@@ -860,7 +860,7 @@ class MotionRunManager(Node):
                                 error = motor_error
                                 break
                             if motion_run_rules._motor_position_deg(motor) is None:
-                                error = f'{motor_axis}번 축의 현재 위치를 읽을 수 없습니다'
+                                error = f'{motor_axis}번 모터의 현재 위치를 읽을 수 없습니다'
                                 break
                     except ValueError as exc:
                         error = str(exc)

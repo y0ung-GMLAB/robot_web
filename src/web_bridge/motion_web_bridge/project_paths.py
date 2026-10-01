@@ -21,9 +21,9 @@ PROJECT_CATEGORIES = {
     'layers': {'.json'},
 }
 DISPLAY_NAMES = {
-    'motor_axes': '모터축 설정',
+    'motor_axes': '모터 설정',
     'motion_axis_matching': '조인트 연결',
-    'motions': '모션 파일',
+    'motions': '애니메이션',
     'layers': '레이어',
 }
 def _safe_stem(value: Any, fallback: str = 'project') -> str:

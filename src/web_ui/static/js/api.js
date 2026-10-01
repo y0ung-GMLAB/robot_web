@@ -241,7 +241,7 @@ export const clearMotorEvents = () => request('DELETE', '/api/motor-events');
 export const deleteMotorEventLogFile = (fileName) =>
   request('DELETE', `/api/motor-events/files/${encodeURIComponent(fileName)}`);
 
-// 회차별 모션 기록 · motion_runtime 이 회차마다 남긴 목표·실제 CSV
+// 회차별 재생 기록 · motion_runtime 이 회차마다 남긴 목표·실제 CSV
 export const fetchMotionTraceDays = () => request('GET', '/api/motion-trace/days');
 
 export const fetchMotionTraceRuns = (date) =>
@@ -338,7 +338,7 @@ export const saveMotionMapping = (payload) => request('POST', '/api/motion-mappi
 
 export const validateMotionMapping = (payload) => request('POST', '/api/motion-mappings/validate', { body: payload });
 
-/** 재생 등록만 바꾼다 · 모션모터 설정은 안 건드린다 · §6-160 */
+/** 재생 등록만 바꾼다 · 조인트 연결은 안 건드린다 · §6-160 */
 export const saveRegisteredMotionFile = (payload) => request('POST', '/api/motion-mappings/motion-file', { body: payload });
 
 

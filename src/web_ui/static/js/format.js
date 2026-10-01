@@ -45,7 +45,7 @@ function parseIntegerValue(value, fallback = null) {
   return Number.isFinite(parsed) ? parsed : fallback;
 }
 
-/** 언제였는지 · 레이어·모션 파일이 마지막으로 바뀐 시각 · §6-91
+/** 언제였는지 · 레이어·애니메이션이 마지막으로 바뀐 시각 · §6-91
  *
  * **언제든 같은 모양이다** · `2026-09-10 09:18`
  *

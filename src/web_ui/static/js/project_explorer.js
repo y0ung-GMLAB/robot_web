@@ -247,7 +247,7 @@ export function createProjectExplorerController({
     const activeLabels = {
       motor_axes: '현재 모터 설정으로 선택',
       motion_axis_matching: '현재 조인트 연결로 선택',
-      motions: '현재 모션 파일로 선택',
+      motions: '현재 애니메이션로 선택',
       layers: '현재 레이어로 선택',
     };
     if (el.projectFileActivateButton) {
@@ -603,7 +603,7 @@ export function createProjectExplorerController({
     el.projectCreateButton?.addEventListener('click', async () => {
       const name = await showPrompt('새 프로젝트 이름을 입력하세요', {
         title: '새 프로젝트',
-        defaultValue: '새 모션 프로젝트',
+        defaultValue: '새 프로젝트',
         confirmLabel: '생성',
       });
       if (!name?.trim()) return;
@@ -622,7 +622,7 @@ export function createProjectExplorerController({
         `모터 실행 적용을 해제합니다.\n\n`
         + `적용 중 프로젝트: ${runtimeName}\n`
         + 'Motor Manager가 정지되며, 다시 사용하려면 「장비에 적용 · 모터 재시작」이 필요합니다.\n'
-        + '모든 모션이 정지된 상태에서 「전체 동작 정지」를 먼저 실행했는지 확인하세요.',
+        + '모든 애니메이션이 정지된 상태에서 「전체 동작 정지」를 먼저 실행했는지 확인하세요.',
         {
           title: '실행 적용 해제',
           confirmLabel: '적용 해제',
@@ -737,7 +737,7 @@ export function createProjectExplorerController({
         `${file.name} 가져오기 완료`,
       );
       el.projectImportFileInput.value = '';
-      // 모션 실행 화면은 제 목록을 직접 다시 읽어야 한다 · 프로젝트가 바뀔
+      // 애니메이션 재생 화면은 제 목록을 직접 다시 읽어야 한다 · 프로젝트가 바뀔
       // 때와 스튜디오가 저장할 때만 갱신되고 있어서, 가져온 파일이 탭을
       // 옮겨도 안 보였다.
       if (imported) await onMotionFilesChange();

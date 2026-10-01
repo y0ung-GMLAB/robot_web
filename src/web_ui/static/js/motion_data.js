@@ -38,13 +38,13 @@ import {
 
 const MOTOR_AXIS_ANGLE_ALERT_DEG = 360.0;
 const MOTION_RUN_STAGES = [
-  { key: 'idle', label: '모션 전' },
+  { key: 'idle', label: '재생 전' },
   { key: 'ready', label: '준비 완료' },
   { key: 'initializing', label: '초기 위치 이동중' },
   { key: 'initialized', label: '초기 위치 완료' },
-  { key: 'running', label: '모션중' },
+  { key: 'running', label: '재생 중' },
   { key: 'verifying', label: '위치 확인중' },
-  { key: 'completed', label: '모션 완료' },
+  { key: 'completed', label: '재생 완료' },
 ];
 
 
@@ -666,8 +666,8 @@ export function createMotionDataController({
 
   function isMappingRevisionConflict(message) {
     const text = String(message || '');
-    return text.includes('모션모터 설정이 화면을 불러온 뒤 변경')
-      || text.includes('모션모터 설정 버전 정보가 없습니다');
+    return text.includes('조인트 연결이 화면을 불러온 뒤 변경')
+      || text.includes('조인트 연결 버전 정보가 없습니다');
   }
 
   /** 저장된 내용이 이 화면과 달라졌을 때 사람에게 묻는다 · §6-243
@@ -737,8 +737,8 @@ export function createMotionDataController({
   }
 
   async function showMotionRunFailure(message, title) {
-    const detail = String(message || '모션 실행 요청이 실패했습니다');
-    const blockedByCoordination = /DDS 그룹 실행이 로컬 모션 실행을 사용 중입니다/.test(detail);
+    const detail = String(message || '애니메이션 재생 요청이 실패했습니다');
+    const blockedByCoordination = /DDS 그룹 실행이 로컬 애니메이션 재생을 사용 중입니다/.test(detail);
     await showAlert(
       blockedByCoordination
         ? `${detail}\n\n`
@@ -974,16 +974,16 @@ export function createMotionDataController({
   function motionRunStateText(state) {
     const key = String(state || 'idle');
     const labels = {
-      idle: '모션 전',
+      idle: '재생 전',
       ready: '실행 준비 완료',
       initializing: '초기 위치 이동 중',
       initialized: '초기 위치 완료',
-      running: '모션 중',
+      running: '재생 중',
       waiting: '반복 대기 중',
       verifying: '위치 확인 중',
       stopping: '정지 중',
       stopped: '정지',
-      completed: '모션 완료',
+      completed: '재생 완료',
       error: '오류',
     };
     return labels[key] || key;
@@ -1068,16 +1068,16 @@ export function createMotionDataController({
       return `초기 위치 이동 ${formatNumber(progress.elapsed_sec, 2)} / ${formatNumber(progress.duration_sec, 2)} s${cycleText}`;
     }
     if (state === 'running' || state === 'stopping') {
-      return `모션 진행 ${formatNumber(progress.elapsed_sec, 2)} / ${formatNumber(progress.duration_sec, 2)} s${cycleText}`;
+      return `재생 진행 ${formatNumber(progress.elapsed_sec, 2)} / ${formatNumber(progress.duration_sec, 2)} s${cycleText}`;
     }
     if (state === 'waiting') return String(status?.message || '반복 대기 중');
     if (state === 'verifying') return '최종 위치 확인 중';
     if (state === 'initialized') return '초기 위치 이동 완료';
-    if (state === 'completed') return `모션 완료 ${formatNumber(progress.duration_sec, 2)} s`;
+    if (state === 'completed') return `재생 완료 ${formatNumber(progress.duration_sec, 2)} s`;
     if (state === 'ready') return '실행 준비 완료';
     if (state === 'stopped') return '정지됨';
     if (state === 'error') return '오류';
-    return '모션 전';
+    return '재생 전';
   }
 
   function renderMotionRunProgressBar() {
@@ -1118,10 +1118,10 @@ export function createMotionDataController({
       .filter((item) => !hiddenIds.has(String(item.motion_id)));
     const points = series.flatMap((item) => item.points || []);
     if (!allSeries.length) {
-      if (messageEl) messageEl.textContent = '모션 그래프 데이터가 없습니다';
+      if (messageEl) messageEl.textContent = '재생 그래프 데이터가 없습니다';
       context.fillStyle = '#5d6b78';
       context.font = '13px Arial';
-      context.fillText('모션 그래프 데이터 없음', 16, 28);
+      context.fillText('재생 그래프 데이터 없음', 16, 28);
       return;
     }
     if (!series.length || !points.length) {
@@ -1217,13 +1217,13 @@ export function createMotionDataController({
       if (state === 'initializing') {
         messageEl.textContent = `초기 위치 이동 중 ${formatNumber(effective.elapsed_sec, 2)} / ${formatNumber(effective.duration_sec, 2)} s · ${visibleText}`;
       } else if (state === 'running') {
-        messageEl.textContent = `모션 중 ${formatNumber(effective.elapsed_sec, 2)} / ${formatNumber(effective.duration_sec, 2)} s · ${visibleText}`;
+        messageEl.textContent = `재생 중 ${formatNumber(effective.elapsed_sec, 2)} / ${formatNumber(effective.duration_sec, 2)} s · ${visibleText}`;
       } else if (state === 'waiting') {
         messageEl.textContent = `${String(status?.message || '반복 대기 중')} · ${visibleText}`;
       } else if (state === 'verifying') {
         messageEl.textContent = `최종 위치 확인 중 · ${visibleText}`;
       } else if (state === 'completed') {
-        messageEl.textContent = `모션 완료 ${formatNumber(effective.duration_sec, 2)} s · ${visibleText}`;
+        messageEl.textContent = `재생 완료 ${formatNumber(effective.duration_sec, 2)} s · ${visibleText}`;
       } else {
         messageEl.textContent = visibleText;
       }
@@ -1392,10 +1392,10 @@ export function createMotionDataController({
                실행 화면에서 상태표가 그래프보다 높이를 더 먹는다 -->
           <tr>
             <th>초기 위치</th><td>${displayText(capabilityText(capabilities.initial_position))}</td>
-            <th>1회 모션</th><td>${displayText(capabilityText(capabilities.single_run))}</td>
+            <th>1회 재생</th><td>${displayText(capabilityText(capabilities.single_run))}</td>
           </tr>
           <tr>
-            <th>연속 모션</th><td>${displayText(continuousText)}</td>
+            <th>연속 재생</th><td>${displayText(continuousText)}</td>
             <th>범위 제한</th><td>${displayText(warnings.length ? warnings.join(' / ') : '제한 적용 없음')}</td>
           </tr>
           <tr>
@@ -1566,16 +1566,16 @@ export function createMotionDataController({
         ? blockReason
         : (scope === 'group'
           ? `참가 PC ${group.peerCount}대를 같은 시각에 1회 실행합니다`
-          : '전체 조인트 초기 위치 이동 완료 후 모션을 1회 실행합니다');
+          : '전체 조인트 초기 위치 이동 완료 후 애니메이션을 1회 실행합니다');
     }
     if (el.motionRunContinuousStartButton) {
       el.motionRunContinuousStartButton.disabled = motionRunLoading || running
         || blocked || continuousUnavailable;
       el.motionRunContinuousStartButton.title = continuousUnavailable
-        ? (continuousCapability?.reason || '연속 모션 안전조건을 통과하지 못했습니다')
+        ? (continuousCapability?.reason || '연속 재생 안전조건을 통과하지 못했습니다')
         : (blocked
           ? blockReason
-          : '전체 조인트 초기 위치 이동 완료 후 정지할 때까지 모션을 반복합니다');
+          : '전체 조인트 초기 위치 이동 완료 후 정지할 때까지 애니메이션을 반복합니다');
     }
     // 시작은 마스터만이지만 정지는 누구나 · 그룹이 도는 동안이면 슬레이브에서도
     // 세울 수 있어야 한다 · §6-70
@@ -1584,13 +1584,13 @@ export function createMotionDataController({
       el.motionRunStopButton.disabled = motionRunLoading || !stoppable;
       el.motionRunStopButton.title = scope === 'group'
         ? '참가 PC 전체를 즉시 정지합니다'
-        : '이 PC의 모션을 즉시 정지합니다';
+        : '이 PC의 애니메이션을 즉시 정지합니다';
     }
     if (el.motionRunStopAfterButton) {
       el.motionRunStopAfterButton.disabled = motionRunLoading || !stoppable;
       el.motionRunStopAfterButton.title = scope === 'group'
         ? '참가 PC 전체를 현재 회차까지 마친 뒤 정지합니다'
-        : '이 PC의 모션을 현재 회차까지 마친 뒤 정지합니다';
+        : '이 PC의 애니메이션을 현재 회차까지 마친 뒤 정지합니다';
     }
     if (el.motionRunRefreshButton) {
       el.motionRunRefreshButton.disabled = motionRunLoading;
@@ -1606,11 +1606,11 @@ export function createMotionDataController({
     }
     if (el.motionRunMessage) {
       const message = motionRunLoading
-        ? '모션 동작 요청 처리 중'
+        ? '재생 요청 처리 중'
         : !hasMappingFile
           ? '조인트 연결 파일을 선택하세요'
           : !hasMotionFile
-            ? '모션 파일 없음 · 첫 프레임 모터는 모션 0°로 초기 위치 이동할 수 있습니다'
+            ? '애니메이션 없음 · 첫 프레임 모터는 모션값 0°로 초기 위치 이동할 수 있습니다'
           : status.message || '실행 준비 가능';
       el.motionRunMessage.textContent = message;
     }
@@ -1642,7 +1642,7 @@ export function createMotionDataController({
     }
     if (!el.motionFileRows) return;
     if (!files.length) {
-      el.motionFileRows.innerHTML = emptyRow(4, '저장된 모션 파일이 없습니다');
+      el.motionFileRows.innerHTML = emptyRow(4, '저장된 애니메이션이 없습니다');
       return;
     }
     el.motionFileRows.innerHTML = files.map((file) => {
@@ -1668,7 +1668,7 @@ export function createMotionDataController({
     }).join('');
   }
 
-  /** 모션 파일 버튼을 켜고 끈다 · §6-100
+  /** 애니메이션 버튼을 켜고 끈다 · §6-100
    *
    * **화면 조각에 딸려 있으면 안 된다** · 전에는 `선택 파일 상세`를 그리는
    * 함수 안에 끼어 있었다 · 그 화면을 걷어내자 함수째 사라져 재생 등록도
@@ -1687,12 +1687,12 @@ export function createMotionDataController({
       el.downloadMotionFileButton.disabled = !file || !motionProjectId || loading;
       el.downloadMotionFileButton.title = file
         ? '이 파일을 지금 보고 있는 PC 에 저장합니다'
-        : '모션 파일을 먼저 선택하세요';
+        : '애니메이션을 먼저 선택하세요';
     }
     // 재생 등록은 **조인트 연결 편집과 상관없다** · §6-160
     //
     // 전에는 두 버튼이 `mappingDirty` 로 꺼졌다 · 조인트 연결을 편집 중이면
-    // 모션 파일도 못 바꿨고, 등록이 한 번 실패하면 프로그램이 제 손으로 세운
+    // 애니메이션도 못 바꿨고, 등록이 한 번 실패하면 프로그램이 제 손으로 세운
     // 그 표시 때문에 **되돌아갈 길까지 사라졌다**.
     //
     // 한 파일에 들어 있을 뿐 둘은 남남이다 · 재생 등록이 이미 그렇게
@@ -2153,7 +2153,7 @@ export function createMotionDataController({
       mappingRevisionConflict = false;
       const mappingFileName = payload.file?.filename || payload.file?.id || selectedMappingId || '-';
       const motionFileName = mappingDraft.motion_file_id || '-';
-      setMappingMessage(`조인트 연결: ${mappingFileName} · 모션 데이터: ${motionFileName}`);
+      setMappingMessage(`조인트 연결: ${mappingFileName} · 애니메이션: ${motionFileName}`);
     } catch (error) {
       if (loadToken !== mappingLoadToken || error?.staleProjectResponse) return;
       setMappingMessage(`매핑 파일 실패: ${error?.message || error}`);
@@ -2173,7 +2173,7 @@ export function createMotionDataController({
   function downloadSelectedMotionFile() {
     const file = selectedFile;
     if (!file || !motionProjectId) {
-      setMessage('내 PC로 저장할 모션 파일을 먼저 선택하세요');
+      setMessage('내 PC로 저장할 애니메이션을 먼저 선택하세요');
       return;
     }
     const anchor = document.createElement('a');
@@ -2205,9 +2205,9 @@ export function createMotionDataController({
    * 보내는 길이라 두 가지가 딸려 왔다.
    *
    *   하나 · 편집 중인 조인트 연결까지 같이 저장된다 (원하지 않은 저장)
-   *   둘  · 설정 개정 검사에 걸려 「모션모터 설정 저장 충돌」 창이 뜬다
+   *   둘  · 설정 개정 검사에 걸려 「조인트 연결 저장 충돌」 창이 뜬다
    *
-   * 모션 데이터만 건드린 사람에게 편집한 적도 없는 설정을 되돌릴지 묻는
+   * 애니메이션만 건드린 사람에게 편집한 적도 없는 설정을 되돌릴지 묻는
    * 창이 떴다 · 조인트 연결과 재생 등록은 한 파일에 들어 있을 뿐
    * 서로 남남이다.
    */
@@ -2243,18 +2243,18 @@ export function createMotionDataController({
 
   async function registerSelectedMotionFile() {
     if (!selectedFile || !selectedMappingId) {
-      setMessage('재생 등록할 모션 파일과 저장된 조인트 연결을 먼저 선택하세요');
+      setMessage('재생 등록할 애니메이션과 저장된 조인트 연결을 먼저 선택하세요');
       return;
     }
     const analysis = analysisOf(selectedFile);
     if (analysis.valid === false) {
-      setMessage('검증에 실패한 모션 파일은 재생 등록할 수 없습니다');
+      setMessage('검증에 실패한 애니메이션은 재생 등록할 수 없습니다');
       return;
     }
     const confirmed = await showConfirm(
       `${selectedFile.filename} 파일을 현재 조인트 연결의 재생 파일로 등록합니다.\n`
       + `${selectedMappingId}`,
-      { title: '모션 파일 재생 등록', confirmLabel: '재생 등록', tone: 'primary' },
+      { title: '애니메이션 재생 등록', confirmLabel: '재생 등록', tone: 'primary' },
     );
     if (!confirmed) return;
     await applyMotionFileRegistration(
@@ -2267,14 +2267,14 @@ export function createMotionDataController({
 
   async function unregisterSelectedMotionFile() {
     if (!selectedFile || !selectedMappingId || selectedFile.id !== registeredMotionFileIdValue) {
-      setMessage('현재 재생 등록된 모션 파일을 선택하세요');
+      setMessage('현재 재생 등록된 애니메이션을 선택하세요');
       return;
     }
     const registeredFilename = selectedFile.filename;
     const confirmed = await showConfirm(
       `${registeredFilename} 파일의 재생 등록을 해제합니다.\n`
-      + '파일은 삭제되지 않으며, 다시 등록하기 전까지 모션 실행은 차단됩니다.',
-      { title: '모션 파일 재생 등록 해제', confirmLabel: '등록 해제', tone: 'danger' },
+      + '파일은 삭제되지 않으며, 다시 등록하기 전까지 애니메이션 재생은 차단됩니다.',
+      { title: '애니메이션 재생 등록 해제', confirmLabel: '등록 해제', tone: 'danger' },
     );
     if (!confirmed) return;
     await applyMotionFileRegistration(
@@ -2285,7 +2285,7 @@ export function createMotionDataController({
     if (!registeredMotionFileIdValue) {
       motionRunStatus = null;
       motionRunLastResult = null;
-      setMotionRunMessage('재생 등록된 모션 파일이 없습니다');
+      setMotionRunMessage('재생 등록된 애니메이션이 없습니다');
     }
     render();
   }
@@ -2504,9 +2504,9 @@ export function createMotionDataController({
     motionRunLastResult = null;
     motionRunGraphFileId = '';
     motionRunGraphHiddenIds.clear();
-    setMessage('현재 프로젝트 모션 파일을 불러오세요');
+    setMessage('현재 프로젝트 애니메이션을 불러오세요');
     setMappingMessage('현재 프로젝트 조인트 연결을 불러오세요');
-    setMotionRunMessage('현재 프로젝트 모션을 선택하세요');
+    setMotionRunMessage('현재 프로젝트 애니메이션을 선택하세요');
     render();
     renderMappingPanel();
     renderMotionRunPanel();
@@ -2537,7 +2537,7 @@ export function createMotionDataController({
       const payload = await fetchMotionRunStatus();
       motionRunStatus = payload.status || motionRunStatus || null;
       motionRunLastResult = payload;
-      setMotionRunMessage(payload.message || '모션 동작 상태 갱신 완료');
+      setMotionRunMessage(payload.message || '재생 상태 갱신 완료');
     } catch (error) {
       setMotionRunMessage(`상태 갱신 실패: ${error?.message || error}`);
     } finally {
@@ -2569,7 +2569,7 @@ export function createMotionDataController({
     const confirmed = await showConfirm(
       hasMotionFile
         ? '매핑된 모터를 초기 위치로 이동합니다.'
-        : '모션 파일이 없습니다.\n\n첫 프레임 방식 모터는 모션 0°로 이동합니다.\n수동 방식 모터는 설정한 초기위치로 이동합니다.\n계속할까요?',
+        : '애니메이션이 없습니다.\n\n첫 프레임 방식 모터는 모션값 0°로 이동합니다.\n수동 방식 모터는 설정한 초기위치로 이동합니다.\n계속할까요?',
       { title: '초기 위치 이동', confirmLabel: '이동 시작', tone: 'warning' },
     );
     if (!confirmed) return;
@@ -2639,31 +2639,31 @@ export function createMotionDataController({
     const continuous = runMode === 'continuous';
     const confirmed = await showConfirm(
       continuous
-        ? '조인트 연결의 전체 활성 조인트를 초기 위치로 이동한 뒤 연속 모션을 시작합니다.\n정지 버튼을 누를 때까지 모션 파일을 반복합니다.'
-        : '조인트 연결의 전체 활성 조인트를 초기 위치로 이동한 뒤 현재 모션 파일을 1회 실행합니다.',
+        ? '조인트 연결의 전체 활성 조인트를 초기 위치로 이동한 뒤 연속 재생을 시작합니다.\n정지 버튼을 누를 때까지 애니메이션을 반복합니다.'
+        : '조인트 연결의 전체 활성 조인트를 초기 위치로 이동한 뒤 현재 애니메이션을 1회 실행합니다.',
       {
-        title: continuous ? '연속 모션 시작' : '모션 1회 시작',
-        confirmLabel: '모션 시작',
+        title: continuous ? '연속 재생 시작' : '1회 재생 시작',
+        confirmLabel: '재생 시작',
         tone: 'warning',
       },
     );
     if (!confirmed) return;
     motionRunLoading = true;
-    setMotionRunMessage('모션 시작 요청 중');
+    setMotionRunMessage('재생 시작 요청 중');
     renderMotionRunPanel();
     try {
       await ensureMotionRunMotionFileDetail();
       const payload = await startMotionRun({ ...motionRunPayload(), run_mode: runMode });
       motionRunStatus = payload.status || motionRunStatus || null;
       motionRunLastResult = payload;
-      setMotionRunMessage(payload.message || (payload.success ? '모션 실행 시작' : '모션 실행 실패'));
+      setMotionRunMessage(payload.message || (payload.success ? '애니메이션 재생 시작' : '애니메이션 재생 실패'));
       if (payload.success === false) {
-        await showMotionRunFailure(payload.message, '모션 실행 실패');
+        await showMotionRunFailure(payload.message, '애니메이션 재생 실패');
       }
     } catch (error) {
       const message = error?.message || String(error);
-      setMotionRunMessage(`모션 실행 실패: ${message}`);
-      await showMotionRunFailure(message, '모션 실행 실패');
+      setMotionRunMessage(`애니메이션 재생 실패: ${message}`);
+      await showMotionRunFailure(message, '애니메이션 재생 실패');
     } finally {
       motionRunLoading = false;
       renderMotionRunPanel();

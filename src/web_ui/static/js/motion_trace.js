@@ -1,4 +1,4 @@
-/** 회차별 모션 기록 화면 · 목표 위치와 실제 위치를 두 색 그래프로
+/** 회차별 재생 기록 화면 · 목표 위치와 실제 위치를 두 색 그래프로
  *
  * motion_runtime 이 회차마다 `<프로젝트>/logs/motion_trace/<날짜>/` 에 CSV 와
  * 요약(index.jsonl)을 남긴다 · 이 화면은 그것을 읽어 보여 주기만 한다.
@@ -93,7 +93,7 @@ if (panel) {
     if (!payload?.project_id) {
       summary.textContent = payload?.message || '프로젝트를 먼저 선택하세요';
     } else if (!state.days.length) {
-      summary.textContent = '아직 기록된 회차가 없습니다 · 모션을 실행하면 회차마다 남습니다';
+      summary.textContent = '아직 기록된 회차가 없습니다 · 애니메이션을 실행하면 회차마다 남습니다';
     }
   }
 
@@ -240,8 +240,8 @@ if (panel) {
   deleteDayButton.addEventListener('click', async () => {
     if (!state.date) return;
     const confirmed = await showConfirm(
-      `${state.date} 의 모션 기록(CSV ${state.runs.length}회차)을 모두 삭제합니다.\n삭제한 기록은 복구할 수 없습니다.`,
-      { title: '모션 기록 삭제', confirmLabel: '삭제', tone: 'danger' },
+      `${state.date} 의 재생 기록(CSV ${state.runs.length}회차)을 모두 삭제합니다.\n삭제한 기록은 복구할 수 없습니다.`,
+      { title: '재생 기록 삭제', confirmLabel: '삭제', tone: 'danger' },
     );
     if (!confirmed) return;
     deleteDayButton.disabled = true;

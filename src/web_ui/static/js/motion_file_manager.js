@@ -87,7 +87,7 @@ export function createMotionFileManager({
   async function showMotionFileDeleteFailure(message) {
     await showAlert(
       message,
-      { title: '모션 파일 삭제 불가', confirmLabel: '확인', tone: 'warning' },
+      { title: '애니메이션 삭제 불가', confirmLabel: '확인', tone: 'warning' },
     );
   }
 
@@ -95,27 +95,27 @@ export function createMotionFileManager({
     if (!selectedFileId) return;
     if (checkIsFileRegistered(selectedFileId)) {
       await showMotionFileDeleteFailure(
-        '재생 등록된 모션 파일은 삭제할 수 없습니다.\n'
+        '재생 등록된 애니메이션은 삭제할 수 없습니다.\n'
         + '먼저 재생 등록을 해제한 뒤 다시 삭제하세요.',
       );
       return;
     }
     const confirmed = await showConfirm(
-      `${selectedFile?.filename || '선택한 모션 파일'}을(를) 삭제하시겠습니까?\n삭제된 파일은 복구할 수 없습니다.`,
-      { title: '모션 파일 삭제', confirmLabel: '삭제', tone: 'danger' }
+      `${selectedFile?.filename || '선택한 애니메이션'}을(를) 삭제하시겠습니까?\n삭제된 파일은 복구할 수 없습니다.`,
+      { title: '애니메이션 삭제', confirmLabel: '삭제', tone: 'danger' }
     );
     if (!confirmed) return;
     setLoading(true);
-    setMessage('모션 파일 삭제 중');
+    setMessage('애니메이션 삭제 중');
     try {
       const payload = await deleteMotionFile(selectedFileId);
       // 서버도 등록 여부를 검사한다 · 다른 브라우저가 방금 등록했으면 여기서
       // 막힌다. HTTP 200 에 success:false 로 오므로 예외가 아니다 · 이 검사를
       // 빼면 삭제되지 않았는데 선택이 풀린다.
       if (payload.success === false) {
-        setMessage(payload.message || '모션 파일을 삭제하지 못했습니다');
+        setMessage(payload.message || '애니메이션을 삭제하지 못했습니다');
         await showMotionFileDeleteFailure(
-          payload.message || '재생 등록된 모션 파일은 삭제할 수 없습니다.',
+          payload.message || '재생 등록된 애니메이션은 삭제할 수 없습니다.',
         );
         return;
       }

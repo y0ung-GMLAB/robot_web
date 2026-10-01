@@ -256,7 +256,7 @@ const ScheduleManager = {
         if (!this.schedules || this.schedules.length === 0) {
             container.innerHTML = `
                 <div class="text-center text-muted py-4">
-                    등록된 모션 스케줄이 없습니다. [+ 신규 스케줄 추가] 버튼을 눌러 생성하세요.
+                    등록된 재생 스케줄이 없습니다. [+ 신규 스케줄 추가] 버튼을 눌러 생성하세요.
                 </div>
             `;
             return;

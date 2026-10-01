@@ -132,7 +132,7 @@ def test_the_file_never_disagrees_with_its_own_driver(tmp_path):
     검색이 모델을 못 읽어 와도 축이 가리키는 드라이버는 알고 있을 수 있다 ·
     읽는 쪽은 그것을 되짚는데 쓰는 쪽이 안 그래서 한 파일 안에서 갈렸다.
 
-        web_axis_profiles:  0번 축  driver_model ''
+        web_axis_profiles:  0번 모터  driver_model ''
         drivers:            id 4    driver_model 'MADLN05BE'
 
     읽을 때 가려져 보이지 않을 뿐 같은 사고다.

@@ -5,11 +5,11 @@
 전에는 화면이 검색 응답의 날것(`ethercat_scan.slaves` · `dynamixel_scan.devices`)을
 받아 스스로 판단했다.
 
-    이 슬레이브가 프로젝트의 몇 번 축인가        `resolveRegistryMotorForScanRow`
+    이 슬레이브가 프로젝트의 몇 번 모터인가        `resolveRegistryMotorForScanRow`
     이 축의 이름(id)을 무엇으로 하나              `dynamixelMotorIdFromDevice` 외
     모델 이름을 뭐라고 쓰나                       `canonicalDynamixelModel`
     모델을 안다고 볼 것인가                       `axisRowDriverModel`
-    새 장치에 몇 번 축을 줄 것인가                `createAxisAllocator`
+    새 장치에 몇 번 모터를 줄 것인가                `createAxisAllocator`
 
 같은 판단이 서버에도 있는 것이 다섯 가지였고, 그 다섯이 오늘 사고 넷을 냈다 ·
 모델 이름이 달랐고(`XM540-W270` / `XM540-W270-R`), 축 이름이 달라 저장하면

@@ -186,7 +186,7 @@ class MotorRuntimeService:
         if not missing:
             return '모터 설정 적용 제한시간을 초과했습니다'
         return (
-            f'{", ".join(str(axis) for axis in missing)}번 축이 올라오지 않았습니다 · '
+            f'{", ".join(str(axis) for axis in missing)}번 모터가 올라오지 않았습니다 · '
             f'전원·통신선·드라이버 상태를 확인하세요 '
             f'(붙은 축 {len(expected) - len(missing)}/{len(expected)})'
         )
