@@ -40,6 +40,8 @@ ALLOWED = {
     '/favicon.ico',
     # 아직 버튼을 안 붙인 길 · 지우지 말 것
     '/api/motors/scan/cancel',
+    # 페이더(P4-3)가 붙는 길 · 화면이 붙으면 이 줄을 뺀다
+    '/ws/manual-stream',
 }
 
 

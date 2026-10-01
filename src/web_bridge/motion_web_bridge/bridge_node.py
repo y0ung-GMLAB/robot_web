@@ -28,6 +28,7 @@ from .coordination_bridge import (
 from . import motion_file_analysis, motor_config_rules, run_mode_gate
 from .execution_context_service import ExecutionContextService
 from .manual_motor_commands import ManualMotorCommandService
+from .manual_stream import ManualStreamService
 from .motor_runtime_service import MotorRuntimeService
 from .project_service import ProjectService
 from .motor_config_service import MotorConfigService
@@ -49,6 +50,7 @@ from .routes import (
     register_schedule_routes,
     register_docs_routes,
     register_motion_trace_routes,
+    register_stream_routes,
 )
 # 재수출 · 외부에서 bridge_node 경유로 참조한다
 from .project_tree import _project_tree_category_signature  # noqa: F401
@@ -144,6 +146,14 @@ class MotionWebBridge(Node):
         self.jog_result_topic = self.declare_parameter(
             'jog_result_topic',
             topics.MANUAL_JOG_RESULT,
+        ).value
+        self.manual_stream_request_topic = self.declare_parameter(
+            'manual_stream_request_topic',
+            topics.MANUAL_STREAM_REQUEST,
+        ).value
+        self.manual_stream_result_topic = self.declare_parameter(
+            'manual_stream_result_topic',
+            topics.MANUAL_STREAM_RESULT,
         ).value
         self.safety_request_topic = self.declare_parameter(
             'safety_request_topic',
@@ -379,6 +389,12 @@ class MotionWebBridge(Node):
             jog_result_topic=self.jog_result_topic,
             action_result_topic=self.action_result_topic,
         )
+        self._manual_stream_request_publisher = self.create_publisher(
+            String, self.manual_stream_request_topic, 10
+        )
+        self.manual_stream = ManualStreamService(
+            self, publisher=self._manual_stream_request_publisher
+        )
         self._motion_mapping_request_publisher = self.create_publisher(
             String,
             self.motion_mapping_request_topic,
@@ -399,6 +415,12 @@ class MotionWebBridge(Node):
             String,
             self.action_result_topic,
             lambda msg: self._manual.action_result_callback(msg),
+            10,
+        )
+        self._manual_stream_result_subscription = self.create_subscription(
+            String,
+            self.manual_stream_result_topic,
+            lambda msg: self.manual_stream.result_callback(msg),
             10,
         )
         self._motion_mapping_response_subscription = self.create_subscription(
@@ -1406,6 +1428,7 @@ class MotionWebBridge(Node):
             self._motion_run_status = {}
         self._motor_event_log.clear_project_memory()
         self._manual.clear_pending()
+        self.manual_stream.clear_pending()
         self._motion_mapping_store.clear()
         self._motion_run_store.clear()
         scan = getattr(self, '_scan', None)
@@ -2052,6 +2075,7 @@ def create_app(bridge: MotionWebBridge) -> FastAPI:
     register_schedule_routes(app, bridge, project_call)
     register_docs_routes(app, bridge)
     register_motion_trace_routes(app, bridge, project_call)
+    register_stream_routes(app, bridge)
 
     return app
 
