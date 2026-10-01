@@ -99,7 +99,7 @@ test('motor type scans and the full scan are directly available without nested c
   );
   assert.match(
     controller,
-    /`\$\{resultState\} · \$\{formatInt\(slaves\.length\)\}축\$\{masterSummary\}`/,
+    /`\$\{resultState\} · \$\{formatInt\(slaves\.length\)\}개\$\{masterSummary\}`/,
   );
   assert.match(controller, /dynamixelScanResult\.textContent = `\$\{resultState\} · \$\{formatInt\(devices\.length\)\}개`/);
   assert.doesNotMatch(controller, /검색된 축: \$\{slaveText\}/);

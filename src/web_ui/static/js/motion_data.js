@@ -484,9 +484,9 @@ function drawGraph(canvas, messageEl, analysis, hiddenIds = new Set()) {
     return;
   }
   if (!series.length || !points.length) {
-    if (messageEl) messageEl.textContent = '표시할 축이 없습니다';
+    if (messageEl) messageEl.textContent = '표시할 모터가 없습니다';
     context.fillStyle = '#5d6b78';
-    context.fillText('축 버튼을 눌러 그래프를 표시하세요', 16, 28);
+    context.fillText('조인트 버튼을 눌러 그래프를 표시하세요', 16, 28);
     return;
   }
 
@@ -604,8 +604,8 @@ export function createMotionDataController({
 
   function isMappingRevisionConflict(message) {
     const text = String(message || '');
-    return text.includes('모션축 설정이 화면을 불러온 뒤 변경')
-      || text.includes('모션축 설정 버전 정보가 없습니다');
+    return text.includes('모션모터 설정이 화면을 불러온 뒤 변경')
+      || text.includes('모션모터 설정 버전 정보가 없습니다');
   }
 
   /** 저장된 내용이 이 화면과 달라졌을 때 사람에게 묻는다 · §6-243
@@ -724,7 +724,7 @@ export function createMotionDataController({
 
   function motorOptionLabel(motor) {
     const identity = motionMotorIdentityLabel(motor);
-    return `${identity} / 현재 축 번호 ${formatInt(motor.controller_index)} / ${motor.display_name || '-'}`;
+    return `${identity} / 현재 모터 번호 ${formatInt(motor.controller_index)} / ${motor.display_name || '-'}`;
   }
 
   function motorForAxis(axis) {
@@ -1063,10 +1063,10 @@ export function createMotionDataController({
       return;
     }
     if (!series.length || !points.length) {
-      if (messageEl) messageEl.textContent = '표시할 축이 없습니다';
+      if (messageEl) messageEl.textContent = '표시할 모터가 없습니다';
       context.fillStyle = '#5d6b78';
       context.font = '13px Arial';
-      context.fillText('축 버튼을 눌러 그래프를 표시하세요', 16, 28);
+      context.fillText('조인트 버튼을 눌러 그래프를 표시하세요', 16, 28);
       return;
     }
 
@@ -1266,10 +1266,10 @@ export function createMotionDataController({
       {
         label: '초기 이동',
         value: payload.initial_move_time_sec === null
-          ? '매핑 축별 설정'
+          ? '매핑 모터별 설정'
           : `${formatNumber(payload.initial_move_time_sec, 0)} s 일괄`,
       },
-      { label: '실행 축', value: formatInt(summary.axis_count) },
+      { label: '실행 조인트', value: formatInt(summary.axis_count) },
       { label: '총 시간', value: `${formatNumber(summary.duration_sec, 3)} s` },
       {
         label: '연속 동작',
@@ -1548,7 +1548,7 @@ export function createMotionDataController({
         : !hasMappingFile
           ? '조인트 연결 파일을 선택하세요'
           : !hasMotionFile
-            ? '모션 파일 없음 · 첫 프레임 축은 모션 0°로 초기 위치 이동할 수 있습니다'
+            ? '모션 파일 없음 · 첫 프레임 모터는 모션 0°로 초기 위치 이동할 수 있습니다'
           : status.message || '실행 준비 가능';
       el.motionRunMessage.textContent = message;
     }
@@ -1680,7 +1680,7 @@ export function createMotionDataController({
     if (!row.enabled) return { text: '비활성', className: 'warn' };
     const targetKey = mappingTargetKey(row);
     if (!targetKey) {
-      return { text: '모터축 미선택', className: 'bad' };
+      return { text: '모터 미선택', className: 'bad' };
     }
     if ((duplicateCounts[targetKey] || 0) > 1) {
       return { text: '중복 매칭', className: 'bad' };
@@ -1928,7 +1928,7 @@ export function createMotionDataController({
   function generateMotionIdsFromMotors() {
     const motors = sortedRuntimeMotors();
     if (!motors.length) {
-      setMappingMessage('현재 프로젝트에 등록된 모터축이 없습니다. 모터축 설정을 먼저 저장하세요');
+      setMappingMessage('현재 프로젝트에 등록된 모터모터가 없습니다. 모터 설정을 먼저 저장하세요');
       return;
     }
     upgradeLegacyMappingRefs();
@@ -2143,7 +2143,7 @@ export function createMotionDataController({
    * 보내는 길이라 두 가지가 딸려 왔다.
    *
    *   하나 · 편집 중인 조인트 연결까지 같이 저장된다 (원하지 않은 저장)
-   *   둘  · 설정 개정 검사에 걸려 「모션축 설정 저장 충돌」 창이 뜬다
+   *   둘  · 설정 개정 검사에 걸려 「모션모터 설정 저장 충돌」 창이 뜬다
    *
    * 모션 데이터만 건드린 사람에게 편집한 적도 없는 설정을 되돌릴지 묻는
    * 창이 떴다 · 조인트 연결과 재생 등록은 한 파일에 들어 있을 뿐
@@ -2326,7 +2326,7 @@ export function createMotionDataController({
     if (!selectedMappingId) {
       // 고른 것이 없으면 **목록부터** 다시 읽는다 · §6-236
       //
-      // 전에는 여기서 그냥 나갔다 · 「모터축 설정」을 적용하면 웹 서버가
+      // 전에는 여기서 그냥 나갔다 · 「모터 설정」을 적용하면 웹 서버가
       // 다시 뜨는데, 그때 고른 매핑이 없으면 아무것도 안 읽었다 · 「편집할
       // 매칭」과 「매핑 이름」이 **빈 채로 남았다** · 프로젝트에 파일이
       // 멀쩡히 있는데도 그랬다 · 「목록 새로고침」을 누르기 전까지 그대로다.
@@ -2506,8 +2506,8 @@ export function createMotionDataController({
     const hasMotionFile = Boolean(motionRunPayload().motion_file_id);
     const confirmed = await showConfirm(
       hasMotionFile
-        ? '매핑된 축을 초기 위치로 이동합니다.'
-        : '모션 파일이 없습니다.\n\n첫 프레임 방식 축은 모션 0°로 이동합니다.\n수동 방식 축은 설정한 초기위치로 이동합니다.\n계속할까요?',
+        ? '매핑된 모터를 초기 위치로 이동합니다.'
+        : '모션 파일이 없습니다.\n\n첫 프레임 방식 모터는 모션 0°로 이동합니다.\n수동 방식 모터는 설정한 초기위치로 이동합니다.\n계속할까요?',
       { title: '초기 위치 이동', confirmLabel: '이동 시작', tone: 'warning' },
     );
     if (!confirmed) return;

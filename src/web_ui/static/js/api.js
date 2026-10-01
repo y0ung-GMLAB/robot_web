@@ -2,7 +2,7 @@ const PROJECT_GENERATION_KEY = '__motionProjectGeneration';
 
 /** 서버가 앞서 갔을 때 알릴 곳 · §6-140
  *
- * 모터축 설정을 적용하면 프로젝트 세대가 오른다 · 그 순간 열려 있던 화면은
+ * 모터 설정을 적용하면 프로젝트 세대가 오른다 · 그 순간 열려 있던 화면은
  * 옛 세대를 들고 있어서, 그다음 요청의 응답이 전부 「이전 프로젝트의 늦은
  * 응답」으로 버려졌다 · 버리는 쪽은 조용히 `return` 만 해서 화면이 빈칸으로
  * 굳었다 · 「재생 등록된 파일 없음」이 그렇게 나왔다. 데이터는 멀쩡했다.
@@ -338,7 +338,7 @@ export const saveMotionMapping = (payload) => request('POST', '/api/motion-mappi
 
 export const validateMotionMapping = (payload) => request('POST', '/api/motion-mappings/validate', { body: payload });
 
-/** 재생 등록만 바꾼다 · 모션축 설정은 안 건드린다 · §6-160 */
+/** 재생 등록만 바꾼다 · 모션모터 설정은 안 건드린다 · §6-160 */
 export const saveRegisteredMotionFile = (payload) => request('POST', '/api/motion-mappings/motion-file', { body: payload });
 
 

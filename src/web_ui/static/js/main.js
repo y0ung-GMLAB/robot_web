@@ -470,7 +470,7 @@ function isAcServoMotor(motor) {
 
 function axisListText(motors) {
   return motors
-    .map((motor) => `축 ${motor.controller_index}`)
+    .map((motor) => `모터 ${motor.controller_index}`)
     .join(', ');
 }
 
@@ -621,7 +621,7 @@ function motorErrorTitle(motor) {
   const axis = motor?.controller_index ?? motor?.axis ?? motor?.id ?? '?';
   const type = motor?.motor_type_label || motor?.motor_type || '모터';
   const name = motor?.display_name || motor?.driver_name || motor?.driver_model || '';
-  return `축 ${axis} · ${type}${name ? ` · ${name}` : ''}`;
+  return `모터 ${axis} · ${type}${name ? ` · ${name}` : ''}`;
 }
 
 function motorErrorDetailRows(motor) {
@@ -680,7 +680,7 @@ function setMotorErrorPopup(visible, errors = []) {
   if (!visible) return;
   if (el.motorErrorTitle) {
     el.motorErrorTitle.textContent = errors.length > 1
-      ? `모터 에러 발생 · ${errors.length}축`
+      ? `모터 에러 발생 · ${errors.length}개`
       : '모터 에러 발생';
   }
   if (el.motorErrorMessage) {
@@ -720,12 +720,12 @@ function dismissMotorErrorPopup() {
   setMotorErrorPopup(false);
 }
 
-/** 어느 축이 안 올라왔는지 · §6-199
+/** 어느 모터가 안 올라왔는지 · §6-199
  *
  * **전에는 「45.1초 동안 완료 조건을 확인하지 못했습니다」 뿐이었다.**
  *
- * 서버는 어느 축인지 이미 알고 있었다 · 설정에 적은 축과 지금 붙어 있는
- * 축을 견주기만 하면 된다 · 그걸 말하지 않아서 사용자는 축 넷을 하나씩
+ * 서버는 어느 모터인지 이미 알고 있었다 · 설정에 적은 모터와 지금 붙어 있는
+ * 모터를 견주기만 하면 된다 · 그걸 말하지 않아서 사용자는 모터 넷을 하나씩
  * 뒤져야 했다.
  *
  * 서버가 문구를 만들어 보내면 그것을 쓰고(`motor_operation.error`),
@@ -745,9 +745,9 @@ function missingAxisDetail(payload, state) {
   const missing = expected.map(Number).filter((axis) => !online.has(axis));
   if (missing.length === 0) return '';
   return (
-    `${missing.join(', ')}번 축이 올라오지 않았습니다 · `
+    `${missing.join(', ')}번 모터가 올라오지 않았습니다 · `
     + '전원·통신선·드라이버 상태를 확인하세요 '
-    + `(붙은 축 ${expected.length - missing.length}/${expected.length})`
+    + `(붙은 모터 ${expected.length - missing.length}/${expected.length})`
   );
 }
 
@@ -901,7 +901,7 @@ function restartReadyState(payload) {
     return {
       ready: false,
       title: '모터 목록 수신 대기',
-      detail: '설정 축과 런타임 축 상태 대기',
+      detail: '설정 모터와 런타임 모터 상태 대기',
     };
   }
 
@@ -914,7 +914,7 @@ function restartReadyState(payload) {
     return {
       ready: false,
       title: '모터 목록 수신 대기',
-      detail: `모터 목록 ${motors.length}/${expectedMotorCount}축 수신`,
+      detail: `모터 목록 ${motors.length}/${expectedMotorCount}개 수신`,
     };
   }
 
@@ -949,12 +949,12 @@ function restartReadyState(payload) {
     ready: true,
     title: '설정 적용·재시작 완료',
     detail: [
-      `런타임 온라인 ${connectedMotors.length}축`,
-      discovery.hasDirectScan ? `버스 검색 감지 ${Number(discovery.discoveredCount || 0)}축` : '',
-      discovery.ethercatScanned ? `EtherCAT ${discovery.ethercatCount}축` : '',
-      discovery.dynamixelScanned ? `다이나믹셀 ${discovery.dynamixelCount}축` : '',
-      `미연결 ${disconnectedMotors.length}축`,
-      `오류 ${faultMotors.length}축`,
+      `런타임 온라인 ${connectedMotors.length}개`,
+      discovery.hasDirectScan ? `버스 검색 감지 ${Number(discovery.discoveredCount || 0)}개` : '',
+      discovery.ethercatScanned ? `EtherCAT ${discovery.ethercatCount}개` : '',
+      discovery.dynamixelScanned ? `다이나믹셀 ${discovery.dynamixelCount}개` : '',
+      `미연결 ${disconnectedMotors.length}개`,
+      `오류 ${faultMotors.length}개`,
     ].filter(Boolean).join(' · '),
   };
 }
@@ -1163,9 +1163,9 @@ function statusCheckResult(triggerButton, payload) {
       ? '최신 모터 상태를 확인했습니다.'
       : '모터 상태 수신이 없거나 지연되고 있습니다.',
     detail: [
-      `런타임 보고 ${motors.length}축`,
-      `온라인 ${online}축`,
-      `오류 ${faults}축`,
+      `런타임 보고 ${motors.length}개`,
+      `온라인 ${online}개`,
+      `오류 ${faults}개`,
       age === null ? '수신 시각 없음' : `수신 지연 ${age.toFixed(2)}초`,
     ].join(' · '),
   };
@@ -1264,7 +1264,7 @@ function connectSocket() {
         setRestartOverlay(
           true,
           '웹 재연결 완료',
-          '모터 상태 수신과 각 축의 연결 상태를 확인하는 중입니다.',
+          '모터 상태 수신과 각 모터의 연결 상태를 확인하는 중입니다.',
           '상태 payload 대기',
         );
         fetchStatus();

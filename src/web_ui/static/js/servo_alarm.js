@@ -4,7 +4,7 @@ import {
 } from './api.js';
 
 const FALLBACK_GRADE_LABELS = Object.freeze({
-  1: '1등급 · 해당 에러축 정지',
+  1: '1등급 · 해당 에러 모터 정지',
   2: '2등급 · 전체 모션 종료',
   3: '3등급 · 전체 모터 제어 차단',
 });
@@ -251,7 +251,7 @@ export function createServoAlarmController({ el, getLatestState }) {
       if (title) title.textContent = '3등급 차단 유지 · 프로그램 재시작 필요';
       if (detail) {
         detail.textContent = active.length
-          ? active.map((item) => `축 ${item.axis} Err${item.code}.*`).join(' · ')
+          ? active.map((item) => `모터 ${item.axis} Err${item.code}.*`).join(' · ')
           : '실제 에러가 해제됐더라도 프로그램 재시작 전까지 모터 제어를 차단합니다.';
       }
       return;
@@ -261,8 +261,8 @@ export function createServoAlarmController({ el, getLatestState }) {
         ? safety.servo_alarm_recovery_hold_axes
         : [];
       if (grade === 1 && heldAxes.length) {
-        if (title) title.textContent = '1등급 에러 해제 확인 · 현재 재생에서는 해당 축 유지 차단';
-        if (detail) detail.textContent = `${heldAxes.map((axis) => `축 ${axis}`).join(', ')} · 다음 동작부터 정상 제어`;
+        if (title) title.textContent = '1등급 에러 해제 확인 · 현재 재생에서는 해당 모터 유지 차단';
+        if (detail) detail.textContent = `${heldAxes.map((axis) => `모터 ${axis}`).join(', ')} · 다음 동작부터 정상 제어`;
       } else {
         if (title) title.textContent = '현재 서보 에러 없음';
         if (detail) detail.textContent = '실시간 모터 상태 기준';
@@ -273,7 +273,7 @@ export function createServoAlarmController({ el, getLatestState }) {
     if (detail) {
       detail.textContent = active.map((item) => {
         const entry = entryForCode(item.code);
-        return `축 ${item.axis} ${entry?.code_label || `Err${item.code}.*`} ${entry?.name || ''}`.trim();
+        return `모터 ${item.axis} ${entry?.code_label || `Err${item.code}.*`} ${entry?.name || ''}`.trim();
       }).join(' · ');
     }
   }

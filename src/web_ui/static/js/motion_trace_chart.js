@@ -56,7 +56,7 @@ export function traceResultLabel(result) {
   return TRACE_RESULT_LABELS[String(result || '')] || String(result || '-');
 }
 
-/** 회차 요약의 축별 최대 오차 중 가장 큰 것 · 없으면 null */
+/** 회차 요약의 모터별 최대 오차 중 가장 큰 것 · 없으면 null */
 export function traceWorstError(record) {
   let worst = null;
   for (const axis of record?.axes || []) {

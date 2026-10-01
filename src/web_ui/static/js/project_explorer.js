@@ -84,7 +84,7 @@ export function createProjectExplorerController({
     ) {
       return (
         `'${name}' 프로젝트를 삭제할 수 없습니다.\n\n`
-        + '현재 이 프로젝트의 모터축 설정이 실행 시스템에 적용되어 있습니다.\n'
+        + '현재 이 프로젝트의 모터 설정이 실행 시스템에 적용되어 있습니다.\n'
         + '프로그램 재시작·전체 동작 정지만으로는 적용이 해제되지 않습니다.\n\n'
         + '삭제하려면 다음 순서로 진행하세요.\n'
         + '1. 「전체 동작 정지」를 실행합니다.\n'
@@ -245,7 +245,7 @@ export function createProjectExplorerController({
       el.projectFileActionTitle.textContent = file?.file_name || '프로젝트 파일';
     }
     const activeLabels = {
-      motor_axes: '현재 모터축 설정으로 선택',
+      motor_axes: '현재 모터 설정으로 선택',
       motion_axis_matching: '현재 조인트 연결로 선택',
       motions: '현재 모션 파일로 선택',
       layers: '현재 레이어로 선택',
@@ -301,7 +301,7 @@ export function createProjectExplorerController({
     }
     const status = state.project.setup_status || {};
     const steps = [
-      ['config', '', '모터축 설정', Boolean(status.motor_configured)],
+      ['config', '', '모터 설정', Boolean(status.motor_configured)],
       ['config', '', '실행 설정 적용', Boolean(status.motor_applied)],
       ['manual', '', '조그 확인', Boolean(status.jog_verified)],
       ['motion', 'mapping', '조인트 연결', Boolean(status.motion_axes_configured)],

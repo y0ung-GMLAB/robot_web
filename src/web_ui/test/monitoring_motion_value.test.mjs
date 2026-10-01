@@ -56,5 +56,5 @@ test('monitoring summary renders runtime connection counts without an exception'
     activeMonitoringDetailTab: 'basic',
   });
 
-  assert.match(summaryText.textContent, /수신 중 1축/);
+  assert.match(summaryText.textContent, /수신 중 1개/);
 });

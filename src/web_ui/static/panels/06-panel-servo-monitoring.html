@@ -19,7 +19,7 @@
         </div>
 
         <div class="servo-alarm-summary-grid" aria-label="서보 에러 등급 요약">
-          <div><span>1등급</span><strong id="servoAlarmGrade1Count">0개</strong><small>해당 에러축 정지</small></div>
+          <div><span>1등급</span><strong id="servoAlarmGrade1Count">0개</strong><small>해당 에러 모터 정지</small></div>
           <div><span>2등급</span><strong id="servoAlarmGrade2Count">0개</strong><small>전체 모션 종료</small></div>
           <div><span>3등급</span><strong id="servoAlarmGrade3Count">0개</strong><small>전체 모터 제어 차단</small></div>
           <div><span>프로젝트 변경</span><strong id="servoAlarmModifiedCount">0개</strong><small id="servoAlarmProjectName">프로젝트 선택 필요</small></div>
@@ -56,7 +56,7 @@
       <section class="monitoring-panel workspace-panel" data-workspace-panel="monitoring" aria-label="실시간 모터 모니터링">
         <div class="section-head workspace-page-head">
           <strong>실시간 모니터링</strong>
-          <span id="monitoringViewSummary">설정 축 기준 표시</span>
+          <span id="monitoringViewSummary">설정 모터 기준 표시</span>
         </div>
         <div class="workspace-guide" aria-label="실시간 모니터링 사용 순서">
           <strong>사용 방법</strong>
@@ -64,10 +64,10 @@
         </div>
 
         <div class="monitoring-summary-grid" aria-label="모터 상태 요약">
-          <div><span>전체 모터</span><strong id="monitoringTotalCount">0축</strong></div>
-          <div><span>런타임 수신</span><strong id="monitoringOnlineCount">0축</strong></div>
-          <div><span>오류</span><strong id="monitoringFaultCount">0축</strong></div>
-          <div><span>갱신 지연</span><strong id="monitoringStaleCount">0축</strong></div>
+          <div><span>전체 모터</span><strong id="monitoringTotalCount">0개</strong></div>
+          <div><span>런타임 수신</span><strong id="monitoringOnlineCount">0개</strong></div>
+          <div><span>오류</span><strong id="monitoringFaultCount">0개</strong></div>
+          <div><span>갱신 지연</span><strong id="monitoringStaleCount">0개</strong></div>
         </div>
 
         <div class="monitoring-toolbar">
@@ -89,7 +89,7 @@
           <table>
             <thead id="motorHeaderRows">
               <tr>
-                <th>축 번호</th>
+                <th>모터 번호</th>
                 <th>ID</th>
                 <th>모터 종류</th>
                 <th>이름</th>

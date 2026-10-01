@@ -287,7 +287,7 @@ function motorFilterKey(motor) {
 
 function monitoringColumnsForFilter(filter, rawMode) {
   const identity = [
-    { label: '축 번호', className: 'mono', cell: (motor) => axisText(motor) },
+    { label: '모터 번호', className: 'mono', cell: (motor) => axisText(motor) },
     { label: 'ID', className: 'mono', cell: (motor) => commonIdText(motor) },
     { label: '모터 종류', cell: (motor) => displayMotorTypeText(motor) },
     { label: '이름', cell: (motor) => displayNameText(motor) },
@@ -500,9 +500,9 @@ function detailRowsForTab(motor, tab, rawMode) {
     ];
   }
   return [
-    ['축 번호', formatInt(motor.controller_index)],
+    ['모터 번호', formatInt(motor.controller_index)],
     ['모터 ID', motorIdValue(motor)],
-    ['축 이름', motor.display_name || '-'],
+    ['모터 이름', motor.display_name || '-'],
     ['모터 종류', motorTypeValue(motor)],
     ['드라이버 모델', motor.driver_model || motor.driver_name || '-'],
     ['드라이버 ID', motor.driver_id ?? '-'],
@@ -516,14 +516,14 @@ function renderMonitoringSummary(motors, el) {
   const faults = motors.filter((motor) => Boolean(motor.fault)
     || Number(motor.errorcode || 0) !== 0).length;
   const stale = motors.filter((motor) => motor.connection_state === 'stale').length;
-  if (el.monitoringTotalCount) el.monitoringTotalCount.textContent = `${formatInt(motors.length)}축`;
-  if (el.monitoringOnlineCount) el.monitoringOnlineCount.textContent = `${formatInt(online)}축`;
+  if (el.monitoringTotalCount) el.monitoringTotalCount.textContent = `${formatInt(motors.length)}개`;
+  if (el.monitoringOnlineCount) el.monitoringOnlineCount.textContent = `${formatInt(online)}개`;
   if (el.monitoringFaultCount) {
-    el.monitoringFaultCount.textContent = `${formatInt(faults)}축`;
+    el.monitoringFaultCount.textContent = `${formatInt(faults)}개`;
     el.monitoringFaultCount.parentElement?.classList.toggle('alert', faults > 0);
   }
   if (el.monitoringStaleCount) {
-    el.monitoringStaleCount.textContent = `${formatInt(stale)}축`;
+    el.monitoringStaleCount.textContent = `${formatInt(stale)}개`;
     el.monitoringStaleCount.parentElement?.classList.toggle('warning', stale > 0);
   }
 }
@@ -542,7 +542,7 @@ function renderMonitoringDetail(motors, selectedAxis, activeTab, rawMode, el) {
   });
   if (el.monitoringDetailTitle) {
     el.monitoringDetailTitle.textContent = selected
-      ? `축 ${formatInt(selected.controller_index)} · ${selected.display_name || '이름 없음'}`
+      ? `모터 ${formatInt(selected.controller_index)} · ${selected.display_name || '이름 없음'}`
       : '모터를 선택하세요';
   }
   if (el.monitoringDetailSubtitle) {
@@ -596,15 +596,15 @@ export function renderMonitoring(state, options) {
   const faultCount = allMotors.filter(
     (motor) => Boolean(motor.fault) || Number(motor.errorcode || 0) !== 0,
   ).length;
-  if (el.systemFaultCount) el.systemFaultCount.textContent = `${formatInt(faultCount)}축`;
+  if (el.systemFaultCount) el.systemFaultCount.textContent = `${formatInt(faultCount)}개`;
   if (el.lastUpdate) el.lastUpdate.textContent = formatTime(state.generated_at);
 
   const registryFilteredCount = allMotors.length - registryFilteredMotors.length;
   const registryText = registryCount > 0
-    ? `설정 축 표시 ${formatInt(registryFilteredMotors.length)}/${formatInt(registryCount)}축`
-    : '설정 축 표시 0축';
+    ? `설정 모터 표시 ${formatInt(registryFilteredMotors.length)}/${formatInt(registryCount)}개`
+    : '설정 모터 표시 0개';
   const filteredText = registryFilteredCount > 0
-    ? `, 설정 외 runtime ${formatInt(registryFilteredCount)}축 숨김`
+    ? `, 설정 외 runtime ${formatInt(registryFilteredCount)}개 숨김`
     : '';
   if (el.summaryText) {
     const offlineCount = Number(connectionSummary.offline || 0);
@@ -613,10 +613,10 @@ export function renderMonitoring(state, options) {
       + Number(connectionSummary.initializing || 0)
       + Number(connectionSummary.monitoring_off || 0)
       + Number(connectionSummary.unknown || 0);
-    el.summaryText.textContent = `런타임 수신: 수신 중 ${formatInt(onlineCount)}축, 수신 끊김 ${formatInt(offlineCount)}축, 버스 끊김 ${formatInt(busDownCount)}축, 확인 중 ${formatInt(pendingCount)}축 · 물리 연결은 최근 AC Servo 검색 결과 기준 · ${registryText}${filteredText} · 모터 타입 ${formatCounts(state.motor_type_counts)}`;
+    el.summaryText.textContent = `런타임 수신: 수신 중 ${formatInt(onlineCount)}개, 수신 끊김 ${formatInt(offlineCount)}개, 버스 끊김 ${formatInt(busDownCount)}개, 확인 중 ${formatInt(pendingCount)}개 · 물리 연결은 최근 AC Servo 검색 결과 기준 · ${registryText}${filteredText} · 모터 타입 ${formatCounts(state.motor_type_counts)}`;
   }
   if (el.monitoringViewSummary) {
-    el.monitoringViewSummary.textContent = `${motorFilterLabel(activeMonitoringFilter)} · 설정 기준 ${formatInt(motors.length)}축 표시`;
+    el.monitoringViewSummary.textContent = `${motorFilterLabel(activeMonitoringFilter)} · 설정 기준 ${formatInt(motors.length)}개 표시`;
   }
   renderMonitoringTabs(registryFilteredMotors, activeMonitoringFilter, el);
   renderMonitoringHeader(columns, el);
@@ -625,7 +625,7 @@ export function renderMonitoring(state, options) {
   if (motors.length === 0) {
     const emptyText = registryCount > 0
       ? `설정된 ${motorFilterLabel(activeMonitoringFilter)} 실행 상태를 아직 수신하지 못했습니다`
-      : '설정된 모터가 없습니다. 모터 축 설정을 먼저 불러오세요.';
+      : '설정된 모터가 없습니다. 모터 설정을 먼저 불러오세요.';
     const html = `<tr><td colspan="${columns.length}" class="empty">${displayText(emptyText)}</td></tr>`;
     if (el.rows.innerHTML !== html) el.rows.innerHTML = html;
     lastMonitoringRowsSignature = '';

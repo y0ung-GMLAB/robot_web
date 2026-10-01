@@ -98,7 +98,7 @@ test('settings workflows preserve action IDs and expose their defined steps', ()
     assert.equal(countId(id), 1, `${id} must remain unique`);
   }
   assert.match(html, /1\. 장비 검색/);
-  assert.match(html, /2\. 검색 결과 확인 및 축 편집/);
+  assert.match(html, /2\. 검색 결과 확인 및 모터 편집/);
   assert.match(html, /3\. 저장하고 설정 적용/);
   assert.doesNotMatch(html, /4\. 실제 시스템 적용/);
   assert.match(html, /4\. 조인트 연결/);

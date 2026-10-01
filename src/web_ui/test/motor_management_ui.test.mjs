@@ -38,7 +38,7 @@ test('axis readiness table keeps runtime facts distinct', () => {
   assert.match(controller, /Vendor \$\{displayText\(vendor\)\}/);
   assert.match(controller, /EEPROM Alias \$\{displayText\(eepromAlias\)\}/);
   assert.match(controller, /Slave Position \$\{displayText\(position\)\}/);
-  assert.match(controller, /기존 축 연결 확인/);
+  assert.match(controller, /기존 모터 연결 확인/);
   // 확인 필요 여부도 서버가 말한다 · §6-216
   assert.match(controller, /servedRow\?\.confirmation_required/);
   assert.match(controller, /SII 참고값/);
@@ -94,8 +94,8 @@ test('motor management actions follow control, edit, save and apply groups', () 
     assert.doesNotMatch(html, new RegExp(gone), `${gone} 가 남아 있습니다`);
   }
   // 고칠 수 있는 칸은 이름뿐이다
-  assert.match(controller, /aria-label="축 이름"/);
-  assert.doesNotMatch(controller, /aria-label="축 번호"/);
+  assert.match(controller, /aria-label="모터 이름"/);
+  assert.doesNotMatch(controller, /aria-label="(축|모터) 번호"/);
   assert.doesNotMatch(html, /<th>선택<\/th>/);
   assert.match(
     html,

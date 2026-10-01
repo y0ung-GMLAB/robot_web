@@ -4,22 +4,22 @@
       <section class="manual-panel workspace-panel hidden" data-workspace-panel="manual" aria-label="동작 테스트">
         <div class="section-head workspace-page-head">
           <strong>동작 테스트</strong>
-          <span>선택한 1축 기준</span>
+          <span>선택한 모터 1개 기준</span>
         </div>
         <div class="workspace-guide" aria-label="동작 테스트 사용 순서">
           <strong>사용 순서</strong>
-          <ol><li>축 선택</li><li>서보 준비</li><li>조그·동작</li><li>결과 확인</li></ol>
+          <ol><li>모터 선택</li><li>서보 준비</li><li>조그·동작</li><li>결과 확인</li></ol>
         </div>
 
-        <section class="motion-test-card motion-test-top" aria-label="시험 축 선택">
+        <section class="motion-test-card motion-test-top" aria-label="시험할 모터 선택">
           <div class="section-head">
-            <strong>1. 시험 축 선택</strong>
-            <span>한 번에 1축씩 안전하게 확인</span>
+            <strong>1. 시험할 모터 선택</strong>
+            <span>한 번에 모터 하나씩 안전하게 확인</span>
           </div>
           <label class="manual-field motion-test-axis-picker">
-            <span>축 선택</span>
+            <span>모터 선택</span>
             <select id="motionTestAxisSelect">
-              <option value="">축 선택</option>
+              <option value="">모터 선택</option>
             </select>
           </label>
         </section>
@@ -27,11 +27,11 @@
         <section class="motion-test-card ac-servo-control-card" aria-label="AC 서보 제어">
           <div class="section-head">
             <strong>2. 서보 준비</strong>
-            <span>AC 서보 축 전용</span>
+            <span>AC 서보 모터 전용</span>
           </div>
           <div class="servo-action-groups">
             <div class="servo-action-group">
-              <span>선택 축</span>
+              <span>선택 모터</span>
               <div class="manual-actions servo-control-actions">
                 <button id="selectedAcServoOnButton" class="primary" type="button" disabled>서보 켜기</button>
                 <button id="selectedAcServoOffButton" class="off" type="button" disabled>서보 끄기</button>
@@ -39,17 +39,17 @@
               </div>
             </div>
           </div>
-          <div id="acServoControlMessage" class="registry-message">선택 축을 제어합니다. 전체 AC 서보 명령과 축별 상태 관리는 모터 관리 화면에 있습니다.</div>
+          <div id="acServoControlMessage" class="registry-message">선택 모터을 제어합니다. 전체 AC 서보 명령과 모터별 상태 관리는 모터 관리 화면에 있습니다.</div>
         </section>
 
         <div class="motion-test-grid">
-          <section class="motion-test-card motion-test-status-card" aria-label="선택 축 상태">
+          <section class="motion-test-card motion-test-status-card" aria-label="선택 모터 상태">
             <div class="section-head">
-              <strong>3. 선택 축 상태</strong>
+              <strong>3. 선택 모터 상태</strong>
               <span>읽기 전용</span>
             </div>
             <div class="motion-test-readout">
-              <span>축 정보</span>
+              <span>모터 정보</span>
               <strong id="motionTestAxisInfo">-</strong>
             </div>
             <div class="motion-test-readout">
@@ -67,7 +67,7 @@
               <strong>4. 동작 명령</strong>
               <span id="motionTestModeSummary">조그 모드</span>
             </div>
-            <div id="motionTestActionGuide" class="motion-test-action-guide" data-state="warning">다음 단계: 시험할 축을 선택하세요</div>
+            <div id="motionTestActionGuide" class="motion-test-action-guide" data-state="warning">다음 단계: 시험할 모터을 선택하세요</div>
             <div id="motionTestModeButtons" class="segmented-control motion-mode-tabs" role="group" aria-label="동작 테스트 방식">
               <button class="active" type="button" data-motion-test-mode="jog">조그 모드</button>
               <button type="button" data-motion-test-mode="action">동작 모드</button>
@@ -101,7 +101,7 @@
             </div>
             <details class="motion-command-help" data-motion-test-panel="jog">
               <summary>조그 버튼 활성화 조건</summary>
-              <p class="motion-command-note">AC 서보 축 선택, 모터 감지됨, 서보 켜짐, 오류 없음, 현재 위치 수신, 조그 이동량 0.001~360도, 목표 위치가 최소/최대 설정값 범위 안, 이전 조그 완료가 필요합니다. 이전 조그 완료 기준은 목표 위치 오차 0.05도 이내, 현재 속도 0.05도/초 이하입니다.</p>
+              <p class="motion-command-note">AC 서보 모터 선택, 모터 감지됨, 서보 켜짐, 오류 없음, 현재 위치 수신, 조그 이동량 0.001~360도, 목표 위치가 최소/최대 설정값 범위 안, 이전 조그 완료가 필요합니다. 이전 조그 완료 기준은 목표 위치 오차 0.05도 이내, 현재 속도 0.05도/초 이하입니다.</p>
             </details>
             <div class="manual-actions hidden" data-motion-test-panel="action">
               <button id="motionTestRunButton" class="primary motion-command-button" type="button" disabled>동작 실행</button>
@@ -121,7 +121,7 @@
                 <strong>명령 위치 확인</strong>
                 <span>읽기 전용</span>
               </div>
-              <div id="motionTestCommandPositionSummary" class="motion-value-table">축을 선택하세요</div>
+              <div id="motionTestCommandPositionSummary" class="motion-value-table">모터를 선택하세요</div>
             </div>
           </section>
         </div>
@@ -137,7 +137,7 @@
                 <strong>핵심 출력값</strong>
                 <span id="motionTestOutputState">대기</span>
               </div>
-              <div id="motionTestOutputText" class="motion-value-table">축을 선택하세요</div>
+              <div id="motionTestOutputText" class="motion-value-table">모터를 선택하세요</div>
             </section>
 
             <section class="motion-test-result" aria-label="동작 명령 미리보기">
@@ -145,7 +145,7 @@
                 <strong>계산 미리보기</strong>
                 <span id="motionTestResultState">대기</span>
               </div>
-              <pre id="motionTestResultText">축을 선택하세요</pre>
+              <pre id="motionTestResultText">모터를 선택하세요</pre>
             </section>
 
             <section class="motion-test-result actual-result" aria-label="실제 동작 결과">

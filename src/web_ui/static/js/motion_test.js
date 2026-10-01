@@ -72,7 +72,7 @@ function motorLabel(motor) {
     dynamixel: '다이나믹셀',
     cubemars: '큐브마스',
   };
-  return `축 ${formatInt(motor.controller_index)} / ID ${motorIdText(motor)} / ${typeLabels[motorTypeKey(motor)] || '확인 불가'} / ${motor.display_name || '-'}`;
+  return `모터 ${formatInt(motor.controller_index)} / ID ${motorIdText(motor)} / ${typeLabels[motorTypeKey(motor)] || '확인 불가'} / ${motor.display_name || '-'}`;
 }
 
 function positionDeg(motor) {
@@ -399,11 +399,11 @@ function actionGearRatio(el, motor) {
 }
 
 function acServoReadyBlockReason(motor, actionText) {
-  if (!motor) return '축을 선택하세요';
-  if (!isAcServoMotor(motor)) return `AC 서보 축만 ${actionText} 가능합니다`;
-  if (String(motor.state || '') !== 'detected') return '선택 축이 감지되지 않았습니다';
+  if (!motor) return '모터를 선택하세요';
+  if (!isAcServoMotor(motor)) return `AC 서보 모터만 ${actionText} 가능합니다`;
+  if (String(motor.state || '') !== 'detected') return '선택 모터가 감지되지 않았습니다';
   if (motor.servo_on !== true) return '서보가 켜진 상태가 아닙니다';
-  if (Boolean(motor.fault)) return '선택 축에 에러가 있습니다';
+  if (Boolean(motor.fault)) return '선택 모터에 에러가 있습니다';
   return '';
 }
 
@@ -414,21 +414,21 @@ function acServoReadyBlockReason(motor, actionText) {
  * 한 번씩** 적혀 있었다.
  */
 function dynamixelReadyBlockReason(motor) {
-  if (String(motor.state || '') !== 'detected') return '선택 축이 감지되지 않았습니다';
-  if (Boolean(motor.fault)) return '선택 축에 에러가 있습니다';
+  if (String(motor.state || '') !== 'detected') return '선택 모터가 감지되지 않았습니다';
+  if (Boolean(motor.fault)) return '선택 모터에 에러가 있습니다';
   return '';
 }
 
-/** 이 축으로 그 동작을 할 수 있는가 · 못 하면 사유 · §6-172
+/** 이 모터로 그 동작을 할 수 있는가 · 못 하면 사유 · §6-172
  *
  * 조그와 절대 위치 동작은 **마지막 한 문장만** 달랐는데 함수 두 개가 통째로
  * 따로 있었다 · 한쪽에 검사를 더하면 다른 쪽은 모른 채로 남는다.
  */
 function axisActionBlockReason(motor, actionText) {
-  if (!motor) return '축을 선택하세요';
+  if (!motor) return '모터를 선택하세요';
   if (isAcServoMotor(motor)) return acServoReadyBlockReason(motor, actionText);
   if (isDynamixelMotor(motor)) return dynamixelReadyBlockReason(motor);
-  return `AC 서보 또는 다이나믹셀 축만 ${actionText} 가능합니다`;
+  return `AC 서보 또는 다이나믹셀 모터만 ${actionText} 가능합니다`;
 }
 
 function jogBlockReason(motor) {
@@ -492,7 +492,7 @@ export function createMotionTestController({ el, getLatestState }) {
       ? safety.servo_alarm_blocked_axes.map(Number)
       : [];
     if (axis !== null && blockedAxes.includes(axis)) {
-      return `1등급 서보 에러로 축 ${axis} 동작이 차단되었습니다`;
+      return `1등급 서보 에러로 모터 ${axis} 동작이 차단되었습니다`;
     }
     return '';
   }
@@ -570,7 +570,7 @@ export function createMotionTestController({ el, getLatestState }) {
     if (!el.motionTestAxisSelect) return;
     const motors = sortedMotors(getLatestState());
     const options = [
-      '<option value="">축 선택</option>',
+      '<option value="">모터 선택</option>',
       ...motors.map((motor) => {
         const axis = axisValue(motor);
         const selected = selectedAxis !== null && Number(selectedAxis) === Number(axis);
@@ -607,7 +607,7 @@ export function createMotionTestController({ el, getLatestState }) {
     if (!el.motionTestResultState || !el.motionTestResultText) return;
     if (!selectedMotor()) {
       el.motionTestResultState.textContent = '대기';
-      el.motionTestResultText.textContent = '축을 선택하세요';
+      el.motionTestResultText.textContent = '모터를 선택하세요';
       return;
     }
     if (!plan) {
@@ -666,7 +666,7 @@ export function createMotionTestController({ el, getLatestState }) {
     if (!el.motionTestCommandPositionSummary) return;
     const motor = selectedMotor();
     if (!motor) {
-      el.motionTestCommandPositionSummary.innerHTML = emptyValueHtml('축을 선택하세요');
+      el.motionTestCommandPositionSummary.innerHTML = emptyValueHtml('모터를 선택하세요');
       return;
     }
 
@@ -734,7 +734,7 @@ export function createMotionTestController({ el, getLatestState }) {
     const motor = selectedMotor();
     if (!motor) {
       el.motionTestOutputState.textContent = '대기';
-      el.motionTestOutputText.innerHTML = emptyValueHtml('축을 선택하세요');
+      el.motionTestOutputText.innerHTML = emptyValueHtml('모터를 선택하세요');
       return;
     }
     if (!lastOutputCapture || Number(lastOutputCapture.axis) !== Number(selectedAxis)) {
@@ -1044,7 +1044,7 @@ export function createMotionTestController({ el, getLatestState }) {
     }
     if (el.motionTestActionGuide) {
       let guideState = 'warning';
-      let guideText = '다음 단계: 시험할 축을 선택하세요';
+      let guideText = '다음 단계: 시험할 모터을 선택하세요';
       if (motionStopInFlight) {
         guideState = 'active';
         guideText = '모터 동작 정지 요청을 처리하고 있습니다';
@@ -1244,20 +1244,20 @@ export function createMotionTestController({ el, getLatestState }) {
     const motor = selectedMotor();
     if (scope === 'selected' && (!motor || !isAcServoMotor(motor))) {
       if (el.acServoControlMessage) {
-        el.acServoControlMessage.textContent = '선택 축이 AC 서보가 아닙니다';
+        el.acServoControlMessage.textContent = '선택 모터가 AC 서보가 아닙니다';
       }
       renderCurrentState();
       return;
     }
     if (scope === 'all' && detectedAcServoMotors(getLatestState()).length === 0) {
       if (el.acServoControlMessage) {
-        el.acServoControlMessage.textContent = '감지된 AC 서보 축이 없습니다';
+        el.acServoControlMessage.textContent = '감지된 AC 서보 모터가 없습니다';
       }
       renderCurrentState();
       return;
     }
     if (action === 'servo_off') {
-      const targetText = scope === 'all' ? '전체 AC 서보' : '선택 축 AC 서보';
+      const targetText = scope === 'all' ? '전체 AC 서보' : '선택 모터 AC 서보';
       const confirmed = await showConfirm(
         `${targetText} 서보 끄기 명령을 보냅니다.\n서보가 꺼지면 부하가 풀릴 수 있습니다. 계속할까요?`,
         { title: 'AC Servo 끄기', confirmLabel: '서보 끄기', tone: 'danger' },
