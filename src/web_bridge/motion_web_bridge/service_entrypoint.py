@@ -137,7 +137,7 @@ def motor_main() -> None:
         )
         raise SystemExit(MOTOR_CONFIG_ERROR_EXIT)
 
-    runner = workspace / 'src' / 'motion_web' / 'web_bridge' / 'deploy' / 'run_motor_service.sh'
+    runner = workspace / 'src' / 'web_bridge' / 'deploy' / 'run_motor_service.sh'
     if not runner.is_file():
         raise SystemExit(f'motor service runner not found: {runner}')
 

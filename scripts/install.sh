@@ -112,7 +112,6 @@ install_system_packages() {
     gcc-12 \
     g++-12 \
     git \
-    librtmidi-dev \
     locales \
     python3-colcon-common-extensions \
     python3-fastapi \

@@ -61,7 +61,6 @@ def create_desktop_shortcut(workspace_root: Optional[Path] = None) -> Dict[str, 
     source_candidates.append(
         Path(workspace_root if workspace_root is not None else Path.cwd())
         / 'src'
-        / 'motion_web'
         / 'web_bridge'
         / 'deploy'
         / 'motion-program.desktop'

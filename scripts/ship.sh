@@ -5,7 +5,7 @@
 # 멈춘다 · 검사에 실패한 것을 모르고 재시작해 버리는 일이 없어야 한다.
 #
 #   scripts/ship.sh                    빌드까지 전부
-#   scripts/ship.sh motion_studio      그 패키지만 빌드 (빠르다)
+#   scripts/ship.sh motion_web_bridge   그 패키지만 빌드 (빠르다)
 #   scripts/ship.sh --check            검사만 · 빌드도 재시작도 안 한다
 #
 set -Eeuo pipefail

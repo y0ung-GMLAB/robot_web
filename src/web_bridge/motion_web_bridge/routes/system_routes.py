@@ -31,7 +31,7 @@ def _is_not_modified(response_headers, request_headers) -> bool:
 def register_system_routes(app: FastAPI, bridge, project_call) -> None:
     ui_share = Path(get_package_share_directory('motion_web_ui')) / 'static'
     workspace_dir = os.environ.get('MOTION_WORKSPACE', '')
-    dev_static = Path(workspace_dir) / 'src' / 'motion_web' / 'web_ui' / 'static'
+    dev_static = Path(workspace_dir) / 'src' / 'web_ui' / 'static'
     if workspace_dir and dev_static.is_dir():
         ui_share = dev_static
 

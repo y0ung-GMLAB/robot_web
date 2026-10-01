@@ -1682,7 +1682,7 @@ def test_motor_service_entrypoint_starts_only_applied_motor_runtime(
 ):
     workspace = tmp_path / 'workspace'
     runner = (
-        workspace / 'src' / 'motion_web' / 'web_bridge'
+        workspace / 'src' / 'web_bridge'
         / 'deploy' / 'run_motor_service.sh'
     )
     runner.parent.mkdir(parents=True)
