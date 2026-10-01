@@ -1,7 +1,11 @@
-# Motion Web
+# Floating Head Stack
 
-ROS 2 기반 모션 제어 프로그램입니다. 웹 모니터링·설정, 모션 편집·실행과
+ROS 2 기반 모션 제어 프로그램입니다. 웹 모니터링·설정, 애니메이션 재생과
 저수준 모터 제어 계층을 하나의 작업공간에서 빌드합니다.
+
+애니메이션 저작은 이 저장소 밖(Blender)에서 합니다 · Blender 가 내보낸
+`.json` 을 웹 화면에 끌어다 놓으면 재생됩니다. (전신인 motion_web 의
+MIDI 녹화·모션 스튜디오는 삭제됐습니다.)
 
 **쓰는 법** : [사용법](docs/사용법.md) · 설치가 끝난 뒤에는 웹 화면
 `운영` → `사용법` 에서도 이 문서와 사용법을 그대로 읽을 수 있습니다.
@@ -9,11 +13,11 @@ ROS 2 기반 모션 제어 프로그램입니다. 웹 모니터링·설정, 모�
 ## 구성
 
 ```text
-Web UI
+Web UI  ←  Blender 가 내보낸 애니메이션(.json)
   ↓
 motion_web_bridge
   ↓
-motion_studio / motion_supervisor / motion_state_monitor
+motion_runtime / motion_supervisor / motion_state_monitor / motion_schedule
   ↓
 motion_system motor_manager_node
   ↓
@@ -22,10 +26,10 @@ EtherLab·IgH EtherCAT / Dynamixel
 
 | 구성요소 | 관리 방식 | 역할 |
 |---|---|---|
-| Motion Web | 상위 Git 저장소 | 웹 UI, 웹 API, 프로젝트·서비스 관리 |
-| Motion Control Studio | 상위 저장소에 통합 | 모션 편집, 실행, 상태·안전 관리 |
-| Motion Coordination | 상위 저장소의 독립 ROS 2 패키지 | PC 간 상태 공유·실행 조정 |
-| Motion System | Git 서브모듈 | Motor Manager와 저수준 모터 드라이버 |
+| web_bridge · web_ui | 이 저장소 | 웹 화면 · 웹 API · 프로젝트·서비스 관리 |
+| motion_runtime · motion_supervisor · motion_state_monitor · motion_schedule | 이 저장소 | 재생 · 최종 모터 명령 중재 · 상태 · 스케줄 |
+| motion_coordination (+interfaces) | 이 저장소 | PC 간 상태 공유·실행 조정 |
+| motion_system | Git 서브모듈 (수정 금지) | Motor Manager와 저수준 모터 드라이버 |
 | EtherLab/IgH EtherCAT | PC에 별도 설치 | AC Servo EtherCAT 통신 |
 
 작업공간 구조:
@@ -34,14 +38,15 @@ EtherLab·IgH EtherCAT / Dynamixel
 ros2_ws/
 ├── config/                         # PC 전역 설정 (프로젝트와 분리)
 │   └── motion_coordination.example.yaml
-├── scripts/                        # pull·빌드·재시작·커밋 편의 스크립트
-├── docs/                           # 운영·DDS 검증 문서
-├── src/motion_web
-│   ├── web_bridge
-│   └── web_ui
-├── src/motion_control_studio
-│   ├── motion_control
-│   └── motion_studio
+├── scripts/                        # 설치·빌드·재시작 스크립트 · dev_preview.py(UI 미리보기)
+├── docs/                           # 사용법 · 운영·DDS 검증 문서
+├── src/web_bridge                  # 웹 API (파이썬 패키지명 motion_web_bridge)
+├── src/web_ui                      # 웹 화면 (바닐라 JS · 패널 조각)
+├── src/motion_common               # 공용 규칙 (토픽·스케줄 저장소·판정)
+├── src/motion_runtime              # 재생 · 조인트 연결 · 회차 기록
+├── src/motion_supervisor           # 최종 모터 명령 중재 (조그·페이더·재생)
+├── src/motion_state_monitor        # 장비 상태 수집 · launch
+├── src/motion_schedule             # 재생 스케줄
 ├── src/motion_coordination         # PC 간 상태 공유·실행 조정
 ├── src/motion_coordination_interfaces  # DDS 메시지 정의
 └── src/motion_system               # Git submodule
@@ -81,13 +86,12 @@ System 서브모듈 커밋**을 함께 사용합니다. 위 표 작성 시점의
 
 ## Git 저장소
 
-- 전체 설치 저장소: `https://github.com/kimjoonho-git/motion_web.git`
+- 전체 설치 저장소: `https://github.com/y0ung-GMLAB/floating-head-stack.git`
 - Motion System 서브모듈: `https://github.com/kimjoonho-git/motion_system_ros2.git`
 - Motion System 원본: `https://github.com/SeonilChoi/motion_system.git`
 
-Motion Control Studio는 상위 저장소에 통합되어 있으므로 별도로 복제하지
-않습니다. Motion System과 그 내부 의존 저장소는 `--recurse-submodules`로
-받습니다.
+Motion System과 그 내부 의존 저장소는 `--recurse-submodules`로 받습니다 ·
+서브모듈은 수정하지 않습니다.
 
 > **설치가 끝난 뒤 쓰는 법은 [사용법](docs/사용법.md) 을 보세요.**
 
@@ -272,7 +276,7 @@ sudo apt install -y git
 
 ```bash
 cd ~
-git clone -b main --recurse-submodules https://github.com/kimjoonho-git/motion_web.git ros2_ws
+git clone -b main --recurse-submodules https://github.com/y0ung-GMLAB/floating-head-stack.git ros2_ws
 cd ~/ros2_ws
 ```
 
@@ -439,13 +443,13 @@ Ubuntu 22.04와 ROS 2 Humble을 먼저 설치합니다. 다음은 현재 작업�
 sudo apt update
 sudo apt install -y \
   git build-essential cmake \
-  gcc-12 g++-12 librtmidi-dev ethtool \
+  gcc-12 g++-12 ethtool \
   python3-rosdep python3-colcon-common-extensions \
   python3-fastapi python3-uvicorn python3-yaml chrony \
   btop ttyd
 ```
 
-Dynamixel 직렬 통신과 MIDI 장치를 사용하는 계정에는 필요한 그룹 권한을
+Dynamixel 직렬 통신을 사용하는 계정에는 필요한 그룹 권한을
 추가합니다. 변경 후에는 로그아웃하거나 재부팅해야 적용됩니다.
 
 ```bash
@@ -593,7 +597,7 @@ ethercat slaves
 ```bash
 cd ~
 git clone -b main --recurse-submodules \
-  https://github.com/kimjoonho-git/motion_web.git ros2_ws
+  https://github.com/y0ung-GMLAB/floating-head-stack.git ros2_ws
 cd ~/ros2_ws
 ```
 
@@ -853,17 +857,11 @@ motion-control.service 재시작 완료
 
 ## 8. Git 작업 방법
 
-Motion Web, Motion Control Studio, Motion Coordination과 관련 문서·설정
-예시는 상위 저장소(`main`)에서 함께 커밋합니다.
+코드·문서·설정 예시는 상위 저장소(`main`)에서 함께 커밋합니다.
 
 ```bash
 cd ~/ros2_ws
-git add \
-  README.md docs scripts config \
-  src/motion_web \
-  src/motion_control_studio \
-  src/motion_coordination \
-  src/motion_coordination_interfaces
+git add -A
 git commit -m "변경 내용"
 git push origin main
 ```
