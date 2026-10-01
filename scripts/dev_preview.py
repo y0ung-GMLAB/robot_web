@@ -106,19 +106,32 @@ def snapshot():
             'upper': 36000.0,
             'profile_velocity': 18000.0,
         })
+    # 실제 브리지 스냅샷 모양을 따른다 · 화면은 `motion_state` 아래를 읽는다
+    # (main.js motionStateFromPayload · 최상위에 두면 전부 버려진다)
     return {
         'project_generation': state['generation'],
+        'bridge_state': 'ok',
         'selected_project_id': 'preview',
-        'motors': motors,
-        'motor_activity': {},
+        'motion_state': {
+            'project_id': 'preview',
+            'selected_project_id': 'preview',
+            'project_generation': state['generation'],
+            'motors': motors,
+            'runtime_status': {'ready': True, 'message': '프리뷰 · 가짜 장비'},
+            'motor_identity': {'ok': True},
+        },
+        'motion_state_age_sec': 0.0,
         'motion_run_status': {'state': 'idle'},
+        'motor_activity': {},
+        'execution_context': {},
+        'service_management': {},
+        'motion_test_limits': {},
+        'project_scope': {},
         'safety_status': {
             'commands_blocked': False,
             'servo_alarm_blocked_axes': [],
             'emergency_latched': False,
         },
-        'runtime_status': {'ready': True, 'message': '프리뷰 · 가짜 장비'},
-        'motor_identity': {'ok': True},
     }
 
 
@@ -225,6 +238,7 @@ MAPPING_FILE = {
 }
 
 CANNED = {
+    ('GET', '/api/status'): snapshot,
     ('GET', '/api/schedule/status'): lambda: {
         'run_mode': state['run_mode'],
         'schedules': [],
