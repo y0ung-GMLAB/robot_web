@@ -2,16 +2,25 @@ import asyncio
 
 from fastapi import FastAPI, HTTPException, Request
 
-from motion_web_bridge import motion_file_analysis
+from pathlib import Path
+
+from motion_web_bridge import animation_preview, motion_file_analysis
 
 
 def register_motion_run_routes(app: FastAPI, bridge, safety_first_stop) -> None:
     @app.get('/api/motion-files')
     async def motion_files():
-        return await asyncio.to_thread(
+        payload = await asyncio.to_thread(
             motion_file_analysis.list_motion_files,
             bridge.project_repository,
             bridge.motion_projects_dir,
+        )
+        # 무조코 상태(계산 중·완료·미계산)를 파일마다 싣는다 · 설정 없으면 그대로
+        return await asyncio.to_thread(
+            animation_preview.annotate_files,
+            bridge.workspace_root,
+            Path(payload.get('files_dir') or '.'),
+            payload,
         )
 
     @app.get('/api/motion-files/{file_id}')
@@ -58,8 +67,14 @@ def register_motion_run_routes(app: FastAPI, bridge, safety_first_stop) -> None:
         return await asyncio.to_thread(bridge.load_motion_mapping, file_id)
 
     @app.post('/api/motion-files/{file_id}/preview')
-    async def preview_motion_file(file_id: str):
-        return await asyncio.to_thread(bridge.preview_motion_file, file_id)
+    async def preview_motion_file(file_id: str, request: Request):
+        body = await request.json() if int(request.headers.get('content-length') or 0) else {}
+        fps = body.get('fps') if isinstance(body, dict) else None
+        return await asyncio.to_thread(bridge.preview_motion_file, file_id, fps)
+
+    @app.post('/api/motion-files/{file_id}/preview-precompute')
+    async def precompute_motion_file(file_id: str):
+        return await asyncio.to_thread(bridge.precompute_motion_file, file_id)
 
     @app.post('/api/motion-run/live-override')
     async def set_motion_run_live_override(request: Request):

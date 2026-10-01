@@ -83,6 +83,17 @@
                           <option value="10">10초 일괄 적용</option>
                         </select>
                       </label>
+                      <div class="compact-field"><span>무조코 같이 보기</span>
+                        <span class="mujoco-companion-field" title="계산이 끝난 애니메이션만 · 초기 이동이 끝나는 순간 뷰어가 프레임 1부터 같이 출발합니다">
+                          <input id="motionRunMujocoToggle" type="checkbox" disabled>
+                          <select id="motionRunMujocoFps" class="compact-select" disabled>
+                            <option value="30">30 fps</option>
+                            <option value="60" selected>60 fps</option>
+                            <option value="120">120 fps</option>
+                            <option value="144">144 fps</option>
+                          </select>
+                        </span>
+                      </div>
                       <label class="compact-field"><span>회차 사이 동작</span>
                         <select id="motionAutomationRepeatMode" class="compact-select" disabled>
                           <option value="direct">바로 다음 회차</option>

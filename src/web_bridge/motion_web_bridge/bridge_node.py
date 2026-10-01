@@ -396,6 +396,9 @@ class MotionWebBridge(Node):
         self.manual_stream = ManualStreamService(
             self, publisher=self._manual_stream_request_publisher
         )
+        #: 무조코 같이 보기 예약 · 재생이 running 으로 바뀌는 순간 뷰어를
+        #: 띄운다 (초기 위치 이동이 끝난 뒤 = 프레임 1 과 동시) · P7
+        self._mujoco_companion: Optional[Dict[str, Any]] = None
         self._motion_mapping_request_publisher = self.create_publisher(
             String,
             self.motion_mapping_request_topic,
@@ -603,6 +606,7 @@ class MotionWebBridge(Node):
                 self._motion_run_status = status
         if isinstance(status, dict) and self._project.payload_matches_selected(status):
             self._motor_event_log.record_motion_run_transition(status)
+            self._maybe_launch_mujoco_companion(status)
 
     def _schedule_status_callback(self, msg: String) -> None:
         """스케줄 노드가 내보낸 마지막 상태 · 화면이 읽을 수 있게 들고 있는다."""
@@ -649,6 +653,7 @@ class MotionWebBridge(Node):
         with self._motion_run_lock:
             self._motion_run_status = payload
         self._motor_event_log.record_motion_run_transition(payload)
+        self._maybe_launch_mujoco_companion(payload)
 
     def _safety_status_callback(self, msg: String) -> None:
         try:
@@ -1789,6 +1794,9 @@ class MotionWebBridge(Node):
         return ''
 
     def motion_run_start(self, payload: Dict[str, Any]) -> Dict[str, Any]:
+        payload = dict(payload or {})
+        with_mujoco = bool(payload.pop('with_mujoco', False))
+        mujoco_fps = payload.pop('mujoco_fps', None)
         off = run_mode_gate.motion_command_block_reason(self)
         if off:
             return {'success': False, 'message': f'모션 실행 불가: {off}'}
@@ -1805,9 +1813,63 @@ class MotionWebBridge(Node):
             return {'success': False, 'message': f'모션 실행 불가: {blocker}'}
         # 스케줄러처럼 화면 없는 호출자는 무엇을 재생할지 모른다 ·
         # 프로젝트가 정해 둔 활성 파일로 채운다 · §6-68
-        return self._request_motion_run(
-            'start', self._with_active_project_files(payload), timeout_sec=2.0,
-        )
+        filled = self._with_active_project_files(payload)
+        if with_mujoco:
+            refusal = self._arm_mujoco_companion(filled, mujoco_fps)
+            if refusal:
+                return {'success': False, 'message': refusal}
+        result = self._request_motion_run('start', filled, timeout_sec=2.0)
+        if with_mujoco and result.get('success') is False:
+            self._mujoco_companion = None
+        return result
+
+    def _arm_mujoco_companion(self, payload: Dict[str, Any], fps: Any) -> str:
+        """같이 보기 예약 · 계산이 끝난 것만 · 사유가 있으면 그 문장을 돌려준다."""
+        project_id = self.project_repository.selected_project_id()
+        file_id = str(payload.get('motion_file_id') or '').strip()
+        if not project_id or not file_id:
+            return '무조코 같이 보기: 재생할 애니메이션이 정해지지 않았습니다'
+        motion_path = self.project_repository.export_path(project_id, 'motions', file_id)
+        state = animation_preview.preview_state(self.workspace_root, motion_path)
+        if state['state'] not in ('ready', 'direct'):
+            return (
+                '무조코 같이 보기는 계산이 끝난 뒤에 켤 수 있습니다 · '
+                + str(state.get('message') or f"지금 상태: {state['state']}")
+            )
+        self._mujoco_companion = {
+            'motion_path': str(motion_path),
+            'fps': fps,
+            'armed_at': time.time(),
+        }
+        return ''
+
+    def _maybe_launch_mujoco_companion(self, status: Dict[str, Any]) -> None:
+        """재생이 running 으로 바뀌는 순간 뷰어를 띄운다 · 한 번만.
+
+        초기 위치 이동(5~10초)이 끝난 그 시점이라 뷰어의 프레임 1 과 모터의
+        프레임 1 이 같이 출발한다 · 회차가 반복되면 조금씩 어긋날 수 있다
+        (첫 회차 기준 동기).
+        """
+        companion = self._mujoco_companion
+        if not companion:
+            return
+        state = str(status.get('state') or '')
+        if state == 'running':
+            self._mujoco_companion = None
+            result = animation_preview.launch_preview(
+                self.workspace_root,
+                Path(companion['motion_path']),
+                fps=companion.get('fps'),
+            )
+            log = self.get_logger()
+            (log.info if result.get('success') else log.warn)(
+                f"무조코 같이 보기: {result.get('message')}"
+            )
+        elif state in ('stopped', 'error') or (
+            time.time() - float(companion.get('armed_at') or 0.0) > 120.0
+        ):
+            # 시작이 무산됐다 · 예약을 버린다 (다음 재생에 몰래 뜨면 안 된다)
+            self._mujoco_companion = None
 
     def _with_active_project_files(self, payload: Dict[str, Any]) -> Dict[str, Any]:
         """빠진 모션·매핑 파일을 현재 프로젝트의 활성 파일로 채운다.
@@ -1840,7 +1902,7 @@ class MotionWebBridge(Node):
             timeout_sec=2.0,
         )
 
-    def preview_motion_file(self, file_id: str) -> Dict[str, Any]:
+    def preview_motion_file(self, file_id: str, fps: Any = None) -> Dict[str, Any]:
         """선택한 애니메이션을 현장이 설정한 미리보기 명령으로 띄운다 · P7"""
         project_id = self.project_repository.selected_project_id()
         if not project_id:
@@ -1848,7 +1910,19 @@ class MotionWebBridge(Node):
         motion_path = self.project_repository.export_path(
             project_id, 'motions', file_id,
         )
-        return animation_preview.launch_preview(self.workspace_root, motion_path)
+        return animation_preview.launch_preview(
+            self.workspace_root, motion_path, fps=fps,
+        )
+
+    def precompute_motion_file(self, file_id: str) -> Dict[str, Any]:
+        """무조코 계산 시작 · 업로드 직후 화면이 자동으로 부른다 · P7"""
+        project_id = self.project_repository.selected_project_id()
+        if not project_id:
+            return {'success': False, 'message': NO_PROJECT_SELECTED}
+        motion_path = self.project_repository.export_path(
+            project_id, 'motions', file_id,
+        )
+        return animation_preview.launch_precompute(self.workspace_root, motion_path)
 
     def set_motion_run_live_override(self, payload: Dict[str, Any]) -> Dict[str, Any]:
         """재생 라이브 오버라이드(조인트 뮤트·좁힌 리밋) · 움직임 명령이

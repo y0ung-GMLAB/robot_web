@@ -11,6 +11,7 @@ import {
   fetchMotionRunStatus,
   importProjectFile,
   initializeMotionRun,
+  precomputeMotionFile,
   previewMotionFile,
   projectFileDownloadUrl,
   saveMotionMapping,
@@ -618,6 +619,7 @@ export function createMotionDataController({
       return;
     }
     let imported = 0;
+    const uploadedNames = [];
     for (const file of files) {
       try {
         const content = await file.text();
@@ -625,6 +627,7 @@ export function createMotionDataController({
           category: 'motions', file_name: file.name, content,
         });
         imported += 1;
+        uploadedNames.push(file.name);
       } catch (error) {
         // 하나 실패하면 멈춘다 · 사유(중복 이름 · 조인트 연결 없음 · 형식
         // 오류)가 다음 성공 메시지에 덮이지 않게
@@ -636,6 +639,20 @@ export function createMotionDataController({
       setMessage(`애니메이션 ${imported}개 업로드 완료`);
       await loadFiles();
       await onProjectFilesChange?.();
+      // 무조코 구성(계산형)이면 올라온 것부터 바로 계산을 돌린다 · P7
+      const toCompute = files.filter(
+        (entry) => mujocoState(entry) === 'missing'
+          && uploadedNames.includes(entry.id),
+      );
+      for (const entry of toCompute) {
+        try {
+          await precomputeMotionFile(entry.id);
+        } catch { /* 사유는 무조코 버튼을 누르면 다시 보인다 */ }
+      }
+      if (toCompute.length) {
+        setMessage(`애니메이션 ${imported}개 업로드 · 무조코 계산 ${toCompute.length}개 시작`);
+        await loadFiles();
+      }
     }
   }
 
@@ -1733,9 +1750,9 @@ export function createMotionDataController({
         && file.id === registeredMotionFileIdValue;
       const rowClass = [selected ? 'selected' : '', registered ? 'registered' : '']
         .filter(Boolean).join(' ');
-      const badge = registered
+      const badge = (registered
         ? '<span class="motion-registered-badge" title="이 파일이 재생 등록되어 있습니다">재생</span>'
-        : '';
+        : '') + mujocoBadge(file);
       return (
         `<tr class="${rowClass}" data-motion-file-id="${displayText(file.id)}">
           <td class="motion-file-name-cell"><div class="motion-file-name-inner">${badge}<button type="button" class="link-button" data-motion-file-id="${displayText(file.id)}">${displayText(file.filename)}</button></div></td>
@@ -1769,10 +1786,41 @@ export function createMotionDataController({
         : '애니메이션을 먼저 선택하세요';
     }
     if (el.previewMotionFileButton) {
-      el.previewMotionFileButton.disabled = !file || loading;
-      el.previewMotionFileButton.title = file
-        ? '설정된 뷰어(MuJoCo 등)로 띄웁니다 · config/animation_preview.yaml'
-        : '애니메이션을 먼저 선택하세요';
+      const state = mujocoState(file);
+      const LABELS = {
+        missing: '무조코 계산', failed: '다시 계산',
+        computing: '계산 중…', ready: '무조코 재생', direct: '무조코 재생',
+      };
+      el.previewMotionFileButton.textContent = LABELS[state] || '무조코';
+      el.previewMotionFileButton.disabled = !file || loading || state === 'computing'
+        || state === '' || state === 'unavailable';
+      el.previewMotionFileButton.title = !file
+        ? '애니메이션을 먼저 선택하세요'
+        : (state === '' || state === 'unavailable'
+          ? '무조코 설정이 없습니다 · config/animation_preview.yaml (로봇마다 다릅니다)'
+          : (state === 'computing'
+            ? '무거운 물리 계산이 도는 중입니다 · 끝나면 틀 수 있습니다'
+            : (state === 'missing' || state === 'failed'
+              ? '무거운 물리 계산을 시작합니다 · 끝나면 같이 보기가 켜집니다'
+              : '계산된 결과를 뷰어로 틉니다 · 창은 서버 PC 화면에 뜹니다')));
+    }
+    // 같이 보기 토글 · 재생 등록된 파일의 계산이 끝났을 때만 켤 수 있다
+    const mujocoRegisteredFile = files.find(
+      (entry) => entry.id === registeredMotionFileIdValue,
+    ) || null;
+    const registeredState = mujocoState(mujocoRegisteredFile);
+    if (el.motionRunMujocoToggle) {
+      const usable = registeredState === 'ready' || registeredState === 'direct';
+      el.motionRunMujocoToggle.disabled = !usable;
+      if (!usable) el.motionRunMujocoToggle.checked = false;
+      el.motionRunMujocoToggle.title = usable
+        ? '켜면 재생 시작과 함께 무조코 창이 프레임 1부터 같이 출발합니다'
+        : (registeredState === 'computing'
+          ? '무조코 계산 중입니다 · 끝나면 켤 수 있습니다'
+          : '재생 등록된 애니메이션의 무조코 계산이 끝나야 켤 수 있습니다');
+      if (el.motionRunMujocoFps) {
+        el.motionRunMujocoFps.disabled = !usable;
+      }
     }
     // 재생 등록은 **조인트 연결 편집과 상관없다** · §6-160
     //
@@ -2044,6 +2092,7 @@ export function createMotionDataController({
   function render() {
     renderMotionTabs();
     renderFileRows();
+    scheduleMujocoPoll();
     renderMotionFileActions();
     renderMappingPanel();
     renderMotionRunPanel();
@@ -2255,15 +2304,51 @@ export function createMotionDataController({
    * blob 이 아니라 평범한 링크다. blob 은 헤드리스에서 확인이 안 됐고, 서버가
    * 한글 파일명을 이미 `filename*=utf-8''` 로 붙여 준다.
    */
-  /** 미리보기 · 뷰어 실행은 서버(그 PC)에서 · 결과는 메시지 한 줄 · P7 */
+  /** 무조코 상태 · 서버가 파일마다 실어 준다 (ready·computing·missing…) · P7 */
+  function mujocoState(file) {
+    return String(file?.preview?.state || '');
+  }
+
+  function mujocoBadge(file) {
+    const state = mujocoState(file);
+    if (state === 'computing') return '<span class="mujoco-badge computing" title="무거운 물리 계산이 도는 중 · 끝나면 같이 보기가 켜집니다">무조코 계산 중</span>';
+    if (state === 'ready') return '<span class="mujoco-badge ready" title="계산 완료 · 무조코 재생·같이 보기 가능">무조코 준비됨</span>';
+    if (state === 'failed') return '<span class="mujoco-badge failed" title="마지막 계산이 실패했습니다 · 다시 계산을 누르세요">계산 실패</span>';
+    return '';
+  }
+
+  /** 무조코 버튼 · 계산이 끝난 것만 튼다 · P7
+   *
+   * missing → 「무조코 계산」(시작) · computing → 그레이 「계산 중…」 ·
+   * ready/direct → 「무조코 재생」 · failed → 「다시 계산」
+   */
   async function previewSelectedMotionFile() {
     if (!selectedFileId) return;
+    const state = mujocoState(selectedFile);
     try {
-      const result = await previewMotionFile(selectedFileId);
-      setMessage(result?.message || '미리보기 실행');
+      if (state === 'missing' || state === 'failed') {
+        const result = await precomputeMotionFile(selectedFileId);
+        setMessage(result?.message || '무조코 계산 시작');
+        await loadFiles(selectedFileId);
+        return;
+      }
+      const fps = Number(el.motionRunMujocoFps?.value) || 60;
+      const result = await previewMotionFile(selectedFileId, fps);
+      setMessage(result?.message || '무조코 재생');
     } catch (error) {
-      setMessage(`미리보기 실패: ${error?.message || error}`);
+      setMessage(`무조코 실패: ${error?.message || error}`);
     }
+  }
+
+  /** 계산이 도는 동안은 목록을 몇 초마다 다시 읽어 상태를 갱신한다 */
+  let mujocoPollTimer = null;
+  function scheduleMujocoPoll() {
+    const computing = files.some((file) => mujocoState(file) === 'computing');
+    if (!computing || mujocoPollTimer) return;
+    mujocoPollTimer = window.setTimeout(async () => {
+      mujocoPollTimer = null;
+      await loadFiles(selectedFileId);
+    }, 5000);
   }
 
   function downloadSelectedMotionFile() {
@@ -2749,7 +2834,13 @@ export function createMotionDataController({
     renderMotionRunPanel();
     try {
       await ensureMotionRunMotionFileDetail();
-      const payload = await startMotionRun({ ...motionRunPayload(), run_mode: runMode });
+      const payload = await startMotionRun({
+        ...motionRunPayload(),
+        run_mode: runMode,
+        // 무조코 같이 보기 · 서버가 running 전환 순간 뷰어를 띄운다 · P7
+        with_mujoco: Boolean(el.motionRunMujocoToggle?.checked),
+        mujoco_fps: Number(el.motionRunMujocoFps?.value) || 60,
+      });
       motionRunStatus = payload.status || motionRunStatus || null;
       motionRunLastResult = payload;
       setMotionRunMessage(payload.message || (payload.success ? '애니메이션 재생 시작' : '애니메이션 재생 실패'));

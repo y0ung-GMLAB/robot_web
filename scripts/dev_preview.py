@@ -252,6 +252,24 @@ async def ws_manual_stream(websocket: WebSocket):
 EXPORT_DIR = Path(r'D:/my_ws/floating/floating_1800/export')
 SIM_SCRIPTS = Path(r'D:/my_ws/floating/floating_1800/sim/scripts')
 SIM_MODEL = '../fh_1800_wires_R011.xml'
+UV = ['uv', 'run', '--no-project', '--with=mujoco', '--with=numpy', 'python']
+
+#: 도는 무조코 계산 · {npz 경로: Popen}
+computing: dict = {}
+
+
+def _npz_for(motion: Path) -> Path:
+    return motion.with_name(motion.stem + '.sim.npz')
+
+
+def _mujoco_state(motion: Path) -> str:
+    npz = _npz_for(motion)
+    handle = computing.get(str(npz))
+    if handle is not None:
+        if handle.poll() is None:
+            return 'computing'
+        del computing[str(npz)]
+    return 'ready' if npz.is_file() else 'missing'
 
 
 def export_files():
@@ -263,6 +281,7 @@ def export_files():
             'size_bytes': path.stat().st_size,
             'updated_at': path.stat().st_mtime,
             'valid': True, 'message': '',
+            'preview': {'state': _mujoco_state(path)},
         }
         for path in sorted(EXPORT_DIR.glob('*.json'))
     ]
@@ -275,22 +294,91 @@ async def motion_files():
             'project_generation': state['generation']}
 
 
-@app.post('/api/motion-files/{file_id}/preview')
-async def preview_motion_file(file_id: str):
+@app.get('/api/motion-files/{file_id}')
+async def motion_file_detail(file_id: str):
+    motion = (EXPORT_DIR / Path(file_id).name)
+    if not motion.is_file():
+        return {'success': False, 'message': f'파일이 없습니다: {file_id}',
+                'files': export_files(), 'project_generation': state['generation']}
+    return {
+        'success': True,
+        'file': {
+            'id': motion.name, 'filename': motion.name,
+            'size_bytes': motion.stat().st_size,
+            'updated_at': motion.stat().st_mtime,
+            'valid': True, 'message': '',
+            'preview': {'state': _mujoco_state(motion)},
+        },
+        'files': export_files(),
+        'project_generation': state['generation'],
+    }
+
+
+@app.post('/api/motion-files/{file_id}/preview-precompute')
+async def precompute_motion_file(file_id: str):
     motion = (EXPORT_DIR / Path(file_id).name)
     if not motion.is_file():
         return {'success': False, 'message': f'파일이 없습니다: {file_id}',
                 'project_generation': state['generation']}
+    npz = _npz_for(motion)
+    if str(npz) in computing and computing[str(npz)].poll() is None:
+        return {'success': True, 'message': f'이미 계산 중입니다: {motion.name}',
+                'project_generation': state['generation']}
     import subprocess
-    subprocess.Popen(
-        ['uv', 'run', '--no-project', '--with=mujoco', '--with=numpy',
-         'python', 'view_run.py', SIM_MODEL, str(motion),
-         'interp', '60', 'kinematic'],
+    out_csv = motion.with_name(motion.stem + '.sim.csv')
+    computing[str(npz)] = subprocess.Popen(
+        UV + ['sim_run.py', SIM_MODEL, str(motion), str(out_csv)],
         cwd=str(SIM_SCRIPTS),
         stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, shell=False,
     )
     return {'success': True,
-            'message': f'MuJoCo 미리보기 실행: {motion.name} (kinematic · 첫 실행은 뜨는 데 수 초)',
+            'message': f'무조코 계산 시작: {motion.name} · 수십 초 걸립니다 (진짜 물리 시뮬)',
+            'project_generation': state['generation']}
+
+
+def _launch_replay(motion: Path, fps) -> dict:
+    npz = _npz_for(motion)
+    state_now = _mujoco_state(motion)
+    if state_now == 'computing':
+        return {'success': False, 'message': '무조코 계산 중입니다 · 끝나면 틀 수 있습니다'}
+    if state_now != 'ready':
+        return {'success': False, 'message': '계산 결과가 없습니다 · 「무조코 계산」을 먼저 누르세요'}
+    import subprocess
+    fps = fps if fps in (30, 60, 120, 144) else 60
+    subprocess.Popen(
+        UV + ['replay_run.py', str(npz), str(fps)],
+        cwd=str(SIM_SCRIPTS),
+        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, shell=False,
+    )
+    return {'success': True, 'message': f'무조코 재생: {motion.name} ({fps} fps · 와이어 흔들림 포함 · Space 일시정지, ←→ 탐색, ↑↓ 배속)'}
+
+
+@app.post('/api/motion-files/{file_id}/preview')
+async def preview_motion_file(file_id: str, request: Request):
+    motion = (EXPORT_DIR / Path(file_id).name)
+    if not motion.is_file():
+        return {'success': False, 'message': f'파일이 없습니다: {file_id}',
+                'project_generation': state['generation']}
+    try:
+        body = await request.json()
+    except Exception:
+        body = {}
+    result = _launch_replay(motion, body.get('fps'))
+    result['project_generation'] = state['generation']
+    return result
+
+
+@app.post('/api/motion-run/start')
+async def start_motion_run(request: Request):
+    """가짜 재생 · with_mujoco 면 그 자리에서 뷰어를 같이 띄워 흐름을 보여 준다."""
+    body = await request.json()
+    message = '프리뷰 · 재생 흉내'
+    if body.get('with_mujoco'):
+        motion = EXPORT_DIR / str(body.get('motion_file_id') or '')
+        result = _launch_replay(motion, body.get('mujoco_fps'))
+        message = f"프리뷰 재생 흉내 · {result['message']}"
+    return {'success': True, 'message': message,
+            'status': {'state': 'running'},
             'project_generation': state['generation']}
 
 
@@ -302,7 +390,7 @@ MAPPING_FILE = {
     'revision': 'preview-rev-1',
     'mapping_revision': 'preview-rev-1',
     'name': 'motion_axis',
-    'motion_file_id': 'demo.json',
+    'motion_file_id': 'floating_no1_motion1.json',
     'mapping_count': len(JOINTS),
     'enabled_count': len(JOINTS),
     'mapped_count': len(JOINTS),
@@ -338,7 +426,7 @@ CANNED = {
         'mapping': {
             'name': 'motion_axis',
             'file_id': 'motion_axis.yaml',
-            'motion_file_id': 'demo.json',
+            'motion_file_id': 'floating_no1_motion1.json',
             'mappings': mapping_rows(),
         },
         'validation': None,

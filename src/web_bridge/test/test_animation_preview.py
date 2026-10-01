@@ -1,90 +1,181 @@
-"""애니메이션 미리보기 · 현장이 정한 명령에 경로만 끼워 띄운다 · P7
+"""무조코 미리보기 · 계산(precompute)과 재생(preview)은 현장 명령이다 · P7
 
-플랫폼은 시뮬레이터를 모른다 · 설정이 없으면 버튼이 사유를 말하고,
-실행은 발사 후 망각이다(뷰어를 기다리면 브리지가 묶인다) · 셸을 거치지
-않아 파일 이름이 명령으로 둔갑하지 않는다.
+로봇마다 모델·시뮬레이터가 다르므로 플랫폼은 명령 틀과 결과 경로만 안다 ·
+뷰어는 **계산이 끝난 것만** 튼다 · 계산 중엔 computing(화면은 그레이) ·
+실행은 발사 후 망각 · 셸을 거치지 않아 파일 이름이 명령으로 둔갑하지 않는다.
 """
 
 from pathlib import Path
+from types import SimpleNamespace
 
 from motion_web_bridge import animation_preview
 
 BRIDGE_DIR = Path(__file__).resolve().parents[1] / 'motion_web_bridge'
 ROUTES_DIR = BRIDGE_DIR / 'routes'
 
+GATED = (
+    'precompute:\n'
+    '  command:\n'
+    '    - simulate\n'
+    "    - '{motion_path}'\n"
+    "    - '{motion_stem}.sim.csv'\n"
+    "  result: '{motion_stem}.sim.npz'\n"
+    'preview:\n'
+    '  command:\n'
+    '    - viewer\n'
+    "    - '{result}'\n"
+    "    - '{fps}'\n"
+    'fps: 60\n'
+)
+
 
 def _workspace(tmp_path, config_text=None):
     if config_text is not None:
-        (tmp_path / 'config').mkdir()
+        (tmp_path / 'config').mkdir(exist_ok=True)
         (tmp_path / 'config' / 'animation_preview.yaml').write_text(
             config_text, encoding='utf-8',
         )
     return tmp_path
 
 
-def _motion(tmp_path):
-    motion = tmp_path / 'demo.json'
+def _motion(tmp_path, name='demo.json'):
+    motion = tmp_path / name
     motion.write_text('{}', encoding='utf-8')
     return motion
 
 
+def _no_spawn(*args, **kwargs):
+    raise AssertionError('실행되면 안 되는 경우다')
+
+
+def setup_function(_):
+    # 모듈 전역 실행부(도는 계산 기록)를 시험마다 비운다
+    animation_preview._RUNNING.clear()
+    animation_preview._LAST_RC.clear()
+
+
 def test_without_config_the_button_says_why(tmp_path):
     result = animation_preview.launch_preview(
-        _workspace(tmp_path), _motion(tmp_path), spawn=lambda *a, **k: None,
+        _workspace(tmp_path), _motion(tmp_path), spawn=_no_spawn,
     )
     assert result['success'] is False
     assert 'animation_preview.yaml' in result['message']
 
 
-def test_placeholders_are_filled_and_no_shell_is_used(tmp_path):
+def test_viewer_refuses_until_the_computation_result_exists(tmp_path):
+    workspace = _workspace(tmp_path, GATED)
+    motion = _motion(tmp_path)
+    result = animation_preview.launch_preview(workspace, motion, spawn=_no_spawn)
+    assert result['success'] is False
+    assert '계산' in result['message']
+    assert animation_preview.preview_state(workspace, motion)['state'] == 'missing'
+
+
+def test_precompute_runs_once_and_marks_computing(tmp_path):
+    workspace = _workspace(tmp_path, GATED)
+    motion = _motion(tmp_path)
+    spawned = []
+
+    def spawn(args, **kwargs):
+        spawned.append((args, kwargs))
+        return SimpleNamespace(poll=lambda: None)   # 아직 도는 중
+
+    first = animation_preview.launch_precompute(workspace, motion, spawn=spawn)
+    assert first['success'] is True
+    second = animation_preview.launch_precompute(workspace, motion, spawn=_no_spawn)
+    assert '이미 계산 중' in second['message']
+    assert animation_preview.preview_state(workspace, motion)['state'] == 'computing'
+    # 계산 중엔 재생도 거부 · 화면은 그레이
+    refused = animation_preview.launch_preview(workspace, motion, spawn=_no_spawn)
+    assert refused['success'] is False and '계산 중' in refused['message']
+    [(args, kwargs)] = spawned
+    stem = str(motion)[: -len('.json')]
+    assert args == ['simulate', str(motion), f'{stem}.sim.csv']
+    assert kwargs['shell'] is False
+
+
+def test_finished_computation_turns_ready_and_the_viewer_plays_the_result(tmp_path):
+    workspace = _workspace(tmp_path, GATED)
+    motion = _motion(tmp_path)
+    stem = str(motion)[: -len('.json')]
+    Path(f'{stem}.sim.npz').write_bytes(b'npz')
+    assert animation_preview.preview_state(workspace, motion)['state'] == 'ready'
+    spawned = []
+    result = animation_preview.launch_preview(
+        workspace, motion, fps=144,
+        spawn=lambda args, **kwargs: spawned.append(args),
+    )
+    assert result['success'] is True
+    [args] = spawned
+    assert args == ['viewer', f'{stem}.sim.npz', '144']
+
+
+def test_a_failed_computation_is_named_not_hidden(tmp_path):
+    workspace = _workspace(tmp_path, GATED)
+    motion = _motion(tmp_path)
+    animation_preview.launch_precompute(
+        workspace, motion,
+        spawn=lambda *a, **k: SimpleNamespace(poll=lambda: 3),   # 바로 실패로 끝남
+    )
+    state = animation_preview.preview_state(workspace, motion)
+    assert state['state'] == 'failed'
+    assert '실패' in state['message']
+
+
+def test_fps_only_accepts_the_four_screen_choices():
+    config = {'fps': 60}
+    assert animation_preview.normalized_fps(config, 144) == 144
+    assert animation_preview.normalized_fps(config, 30) == 30
+    # 허용 밖·쓰레기 값은 설정 기본으로
+    assert animation_preview.normalized_fps(config, 999) == 60
+    assert animation_preview.normalized_fps(config, 'x') == 60
+    assert animation_preview.normalized_fps({'fps': 7}, None) == 60
+
+
+def test_legacy_single_command_config_plays_directly(tmp_path):
     workspace = _workspace(tmp_path, (
         'command:\n'
         '  - viewer\n'
         "  - '{motion_path}'\n"
         "  - '{fps}'\n"
-        'fps: 42\n'
     ))
     motion = _motion(tmp_path)
-    calls = []
-
-    def spawn(args, **kwargs):
-        calls.append((args, kwargs))
-
-    result = animation_preview.launch_preview(workspace, motion, spawn=spawn)
+    assert animation_preview.preview_state(workspace, motion)['state'] == 'direct'
+    spawned = []
+    result = animation_preview.launch_preview(
+        workspace, motion, fps=30,
+        spawn=lambda args, **kwargs: spawned.append(args),
+    )
     assert result['success'] is True
-    [(args, kwargs)] = calls
-    assert args == ['viewer', str(motion), '42']
-    assert kwargs['shell'] is False
-    assert kwargs['cwd'] == str(workspace)
+    assert spawned == [['viewer', str(motion), '30']]
 
 
-def test_cwd_from_config_and_missing_file_is_refused(tmp_path):
-    workspace = _workspace(tmp_path, (
-        'command:\n'
-        '  - viewer\n'
-        "  - '{motion_path}'\n"
-        f'cwd: {tmp_path}\n'
-    ))
-    missing = tmp_path / '없는파일.json'
-    result = animation_preview.launch_preview(
-        workspace, missing, spawn=lambda *a, **k: None,
-    )
-    assert result['success'] is False
-    assert '없는파일' in result['message']
+def test_listing_annotation_marks_each_file(tmp_path):
+    workspace = _workspace(tmp_path, GATED)
+    files_dir = tmp_path / 'motions'
+    files_dir.mkdir()
+    ready = files_dir / 'ready.json'
+    ready.write_text('{}', encoding='utf-8')
+    Path(str(ready)[:-len('.json')] + '.sim.npz').write_bytes(b'npz')
+    (files_dir / 'raw.json').write_text('{}', encoding='utf-8')
+    payload = {'files': [{'id': 'ready.json'}, {'id': 'raw.json'}]}
+    out = animation_preview.annotate_files(workspace, files_dir, payload)
+    assert out['files'][0]['preview']['state'] == 'ready'
+    assert out['files'][1]['preview']['state'] == 'missing'
 
 
-def test_a_broken_config_counts_as_not_configured(tmp_path):
-    workspace = _workspace(tmp_path, 'command: 문자열하나\n')
-    result = animation_preview.launch_preview(
-        workspace, _motion(tmp_path), spawn=lambda *a, **k: None,
-    )
-    assert result['success'] is False
-    assert 'animation_preview.yaml' in result['message']
-
-
-def test_route_and_bridge_are_wired():
+def test_bridge_launches_the_companion_when_playback_turns_running():
+    """같이 보기 = 모터가 running 으로 바뀌는 그 순간 뷰어를 띄운다 ·
+    초기 이동이 끝난 시점이라 양쪽 다 프레임 1 부터 출발한다."""
     bridge = (BRIDGE_DIR / 'bridge_node.py').read_text(encoding='utf-8')
-    assert 'def preview_motion_file(self, file_id' in bridge
-    assert 'animation_preview.launch_preview(self.workspace_root, motion_path)' in bridge
+    assert "payload.pop('with_mujoco', False)" in bridge
+    assert 'def _arm_mujoco_companion(' in bridge
+    assert 'def _maybe_launch_mujoco_companion(' in bridge
+    # 상태가 들어오는 두 길목 모두에서 본다
+    assert bridge.count('self._maybe_launch_mujoco_companion(') >= 2
+    # 계산 안 끝났으면 예약 자체를 거절한다
+    assert '무조코 같이 보기는 계산이 끝난 뒤에' in bridge
     routes = (ROUTES_DIR / 'motion_run_routes.py').read_text(encoding='utf-8')
     assert "@app.post('/api/motion-files/{file_id}/preview')" in routes
+    assert "@app.post('/api/motion-files/{file_id}/preview-precompute')" in routes
+    assert 'animation_preview.annotate_files' in routes

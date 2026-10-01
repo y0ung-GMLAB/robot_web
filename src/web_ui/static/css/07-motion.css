@@ -1299,3 +1299,33 @@
 .live-clamp-input {
   width: 72px;
 }
+
+/* 무조코 상태 배지 · P7 · 계산 중 = 그레이 */
+.mujoco-badge {
+  display: inline-block;
+  margin-left: 6px;
+  padding: 1px 6px;
+  border-radius: 8px;
+  font-size: 11px;
+}
+
+.mujoco-badge.computing {
+  background: var(--muted, #555c66);
+  color: #ddd;
+}
+
+.mujoco-badge.ready {
+  background: var(--green, #2e7d32);
+  color: #fff;
+}
+
+.mujoco-badge.failed {
+  background: var(--red, #b23b3b);
+  color: #fff;
+}
+
+.mujoco-companion-field {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}

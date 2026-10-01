@@ -210,6 +210,8 @@ export function getElements() {
     motionWorkspaceSubtitle: document.getElementById('motionWorkspaceSubtitle'),
     downloadMotionFileButton: document.getElementById('downloadMotionFileButton'),
     previewMotionFileButton: document.getElementById('previewMotionFileButton'),
+    motionRunMujocoToggle: document.getElementById('motionRunMujocoToggle'),
+    motionRunMujocoFps: document.getElementById('motionRunMujocoFps'),
     registerMotionFileButton: document.getElementById('registerMotionFileButton'),
     unregisterMotionFileButton: document.getElementById('unregisterMotionFileButton'),
     deleteMotionFileButton: document.getElementById('deleteMotionFileButton'),
