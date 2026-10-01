@@ -157,7 +157,6 @@ function renderWorkspacePanel() {
       || MOTION_WORKSPACE_DETAILS['motion-run'];
     if (el.motionWorkspaceTitle) el.motionWorkspaceTitle.textContent = details[0];
     if (el.motionWorkspaceSubtitle) el.motionWorkspaceSubtitle.textContent = details[1];
-    el.motionWorkflowGuide?.classList.toggle('hidden', motionTab === 'run');
   }
   projectExplorer?.syncWorkspacePermissions();
 }

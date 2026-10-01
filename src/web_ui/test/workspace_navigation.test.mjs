@@ -29,21 +29,26 @@ test('workspace routes resolve their group and shared motion panel', () => {
   assert.equal(workspaceGroupFor('monitoring'), 'operations');
   assert.equal(workspaceGroupFor('config'), 'setup');
   assert.equal(workspaceGroupFor('servo-errors'), 'operations');
-  assert.equal(workspaceGroupFor('motion-mapping'), 'creation');
+  // 모션축 설정은 모터 관리로 합쳐졌다 · 옛 경로는 설정 그룹의 그 화면으로
+  assert.equal(normalizeWorkspaceRoute('motion-mapping'), 'config');
+  assert.equal(workspaceGroupFor('motion-mapping'), 'setup');
   assert.equal(workspaceGroupFor('motion-run'), 'execution');
   assert.equal(workspacePanelFor('motion-run'), 'motion');
   // 파일 관리는 모션 실행 화면으로 합쳐졌다 · 옛 경로는 더 이상 없다
   assert.equal(normalizeWorkspaceRoute('motion-files'), 'monitoring');
-  assert.equal(motionTabForWorkspace('motion-mapping'), 'mapping');
+  assert.equal(motionTabForWorkspace('motion-mapping'), '');
 });
 
 test('workspace defaults and legacy motion navigation are deterministic', () => {
-  assert.equal(defaultWorkspaceForGroup('creation'), 'motion-mapping');
+  // creation 그룹 자체가 없어졌다 · 모르는 그룹과 같은 기본값으로
+  assert.equal(defaultWorkspaceForGroup('creation'), 'monitoring');
   assert.equal(defaultWorkspaceForGroup('unknown'), 'monitoring');
   assert.equal(normalizeWorkspaceRoute('unknown'), 'monitoring');
   // 옛 'midi' 탭 요청은 통합 실행 화면으로 보낸다 · MIDI 는 삭제됐다
   assert.equal(workspaceForLegacyNavigation('motion', 'midi'), 'motion-run');
   assert.equal(workspaceForLegacyNavigation('motion', 'unknown'), 'motion-run');
+  // 옛 ('motion', 'mapping') 요청은 모터 관리 화면으로 보낸다
+  assert.equal(workspaceForLegacyNavigation('motion', 'mapping'), 'config');
   // 옛 'files' 탭 요청도 통합된 실행 화면으로 보낸다 · 북마크·탐색기 대비
   assert.equal(workspaceForLegacyNavigation('motion', 'files'), 'motion-run');
   assert.equal(workspaceForLegacyNavigation('config'), 'config');
@@ -64,17 +69,17 @@ test('every real workspace route survives navigation unchanged', () => {
 
 test('project categories navigate directly to their feature screen', () => {
   assert.equal(workspaceForProjectCategory('motor_axes'), 'config');
-  assert.equal(workspaceForProjectCategory('motion_axis_matching'), 'motion-mapping');
+  assert.equal(workspaceForProjectCategory('motion_axis_matching'), 'config');
   assert.equal(workspaceForProjectCategory('motions'), 'motion-run');
   assert.equal(workspaceForProjectCategory('logs'), 'log');
 });
 
 test('workspace route state remembers the last screen in each group', () => {
   const state = createWorkspaceRouteState();
-  state.select('motion-mapping');
+  state.select('config');
   state.select('log');
   assert.equal(state.current(), 'log');
-  assert.equal(state.forGroup('creation'), 'motion-mapping');
+  assert.equal(state.forGroup('setup'), 'config');
   assert.equal(state.forGroup('operations'), 'log');
   assert.equal(state.forGroup('execution'), 'manual');
 });

@@ -3,29 +3,23 @@ export const WORKSPACE_GROUPS = Object.freeze({
     'monitoring', 'servo-errors', 'log', 'motion-trace', 'btop', 'terminal', 'docs',
   ]),
   setup: Object.freeze(['system', 'project', 'config']),
-  creation: Object.freeze([
-    'motion-mapping',
-  ]),
   execution: Object.freeze(['manual', 'motion-run', 'coordination']),
 });
 
 const WORKSPACE_DEFAULTS = Object.freeze({
   operations: 'monitoring',
   setup: 'system',
-  creation: 'motion-mapping',
   execution: 'manual',
 });
 
 const MOTION_WORKSPACE_TABS = Object.freeze({
-  'motion-mapping': 'mapping',
   'motion-run': 'run',
 });
 
+// 모션축 설정은 모터 관리 화면으로 합쳐졌다 · 옛 경로·북마크는 그리로 보낸다
+const LEGACY_ROUTE_ALIASES = Object.freeze({ 'motion-mapping': 'config' });
+
 export const MOTION_WORKSPACE_DETAILS = Object.freeze({
-  'motion-mapping': Object.freeze([
-    '모션축 설정',
-    '모션 ID를 프로젝트 모터축에 연결하고 실행 변환값을 설정합니다',
-  ]),
   'motion-run': Object.freeze([
     '모션 실행',
     '모션 파일을 고르고 재생 등록한 뒤 초기 위치 이동과 재생을 제어합니다',
@@ -37,7 +31,8 @@ const PROJECT_SELECTION_WORKSPACE = 'system';
 
 export function normalizeWorkspaceRoute(route) {
   const value = String(route || '').trim();
-  return WORKSPACE_ROUTES.has(value) ? value : WORKSPACE_DEFAULTS.operations;
+  const target = LEGACY_ROUTE_ALIASES[value] || value;
+  return WORKSPACE_ROUTES.has(target) ? target : WORKSPACE_DEFAULTS.operations;
 }
 
 export function canChangeProjectInWorkspace(route) {
@@ -70,6 +65,8 @@ export function workspaceForLegacyNavigation(workspace, motionTab = '') {
   if (!['motion'].includes(workspace)) return normalizeWorkspaceRoute(workspace);
   // 파일 관리는 모션 실행 화면으로 합쳐졌다 · 옛 'files' 요청도 그리로 보낸다
   const tab = String(motionTab || 'run') === 'files' ? 'run' : String(motionTab || 'run');
+  // 모션축 설정은 모터 관리 화면에 산다 · 옛 ('motion', 'mapping') 요청 대비
+  if (tab === 'mapping') return 'config';
   return Object.entries(MOTION_WORKSPACE_TABS)
     .find(([, value]) => value === tab)?.[0] || 'motion-run';
 }
@@ -81,7 +78,7 @@ export function workspaceForProjectCategory(
 ) {
   const routes = {
     motor_axes: 'config',
-    motion_axis_matching: 'motion-mapping',
+    motion_axis_matching: 'config',
     motions: 'motion-run',
     logs: 'log',
   };

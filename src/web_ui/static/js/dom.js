@@ -205,7 +205,6 @@ export function getElements() {
     motionPanels: document.querySelectorAll('[data-motion-panel]'),
     motionWorkspaceTitle: document.getElementById('motionWorkspaceTitle'),
     motionWorkspaceSubtitle: document.getElementById('motionWorkspaceSubtitle'),
-    motionWorkflowGuide: document.getElementById('motionWorkflowGuide'),
     downloadMotionFileButton: document.getElementById('downloadMotionFileButton'),
     registerMotionFileButton: document.getElementById('registerMotionFileButton'),
     unregisterMotionFileButton: document.getElementById('unregisterMotionFileButton'),

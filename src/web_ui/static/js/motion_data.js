@@ -1565,11 +1565,9 @@ export function createMotionDataController({
     renderMotionAutomation();
   }
 
-  function renderMotionTabs(active = null) {
-    // 'files'는 'run'에 합쳐졌다 · 옛 값이 들어와도 실행 화면을 연다
-    const requested = String(active || activeMotionPanel || 'run');
-    const next = requested === 'files' ? 'run' : requested;
-    activeMotionPanel = ['mapping', 'run'].includes(next) ? next : 'run';
+  function renderMotionTabs() {
+    // 'files'는 'run'에, 'mapping'은 모터 관리 화면에 합쳐졌다 · 모션 패널은 'run' 하나다
+    activeMotionPanel = 'run';
     if (el.motionPanels) {
       el.motionPanels.forEach((panel) => {
         panel.classList.toggle('hidden', panel.dataset.motionPanel !== activeMotionPanel);
@@ -1875,7 +1873,9 @@ export function createMotionDataController({
   }
 
   function renderRuntimeMappingState() {
-    if (activeMotionPanel !== 'mapping') return;
+    // 매핑 표는 모터 관리 화면에 산다 · 화면에 보일 때만 실시간 값을 다시 그린다
+    const host = el.motionMappingRows?.closest('[data-workspace-panel]');
+    if (!host || host.classList.contains('hidden')) return;
     const activeElement = document.activeElement;
     if (
       activeElement &&
@@ -2849,8 +2849,8 @@ export function createMotionDataController({
     refreshMappingAfterReconnect,
     render,
     renderRuntimeState,
-    showTab: (tab) => {
-      renderMotionTabs(tab);
+    showTab: () => {
+      renderMotionTabs();
       render();
     },
   };

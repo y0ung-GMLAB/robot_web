@@ -12,30 +12,28 @@ function countId(id) {
 }
 
 test('two-level workspace navigation exposes every defined group and route', () => {
-  for (const group of ['operations', 'setup', 'creation', 'execution']) {
+  for (const group of ['operations', 'setup', 'execution']) {
     assert.match(html, new RegExp(`data-workspace-group=["']${group}["']`));
     assert.match(html, new RegExp(`data-workspace-group-panel=["']${group}["']`));
   }
   for (const route of [
     'monitoring', 'log', 'system', 'config',
-    'motion-mapping',
     'manual', 'motion-run',
   ]) {
     assert.match(html, new RegExp(`data-workspace-tab=["']${route}["']`));
   }
+  // 모션 제작 그룹은 없어졌다 · 모션축 설정은 모터 관리 화면 안에 산다
+  assert.doesNotMatch(html, /data-workspace-group=["']creation["']/);
+  assert.doesNotMatch(html, /data-workspace-tab=["']motion-mapping["']/);
   assert.match(main, /defaultWorkspaceForGroup/);
   assert.match(main, /workspaceForLegacyNavigation/);
   assert.doesNotMatch(main, /tab\?\.click\(\)/);
 });
 
 test('motion files are managed inside the execution screen, not a separate tab', () => {
-  const creationPanel = html.match(
-    /data-workspace-group-panel="creation"[\s\S]*?<\/div>/,
-  )?.[0] || '';
   const executionPanel = html.match(
     /data-workspace-group-panel="execution"[\s\S]*?<\/div>/,
   )?.[0] || '';
-  assert.doesNotMatch(creationPanel, /data-workspace-tab="motion-run"/);
   assert.match(executionPanel, /data-workspace-tab="motion-run"/);
   // 파일 관리가 실행 화면으로 합쳐졌으므로 별도 탭은 어디에도 없어야 한다
   assert.doesNotMatch(html, /data-workspace-tab="motion-files"/);
@@ -44,9 +42,14 @@ test('motion files are managed inside the execution screen, not a separate tab',
 test('motion screens use workspace routes without obsolete internal tab controls', () => {
   assert.doesNotMatch(html, /id=["']motionTabs["']/);
   assert.doesNotMatch(html, /data-motion-tab=/);
-  for (const panel of ['mapping', 'run']) {
-    assert.match(html, new RegExp(`data-motion-panel=["']${panel}["']`));
-  }
+  assert.match(html, /data-motion-panel=["']run["']/);
+  // 매핑은 모터 관리 화면의 섹션이다 · 모션 패널 전환 대상이 아니다
+  assert.doesNotMatch(html, /data-motion-panel=["']mapping["']/);
+  const configStart = html.indexOf('data-workspace-panel="config"');
+  const configEnd = html.indexOf('data-workspace-panel=', configStart + 1);
+  const mappingAt = html.indexOf('motion-mapping-layout');
+  assert.ok(configStart >= 0 && mappingAt > configStart
+    && (configEnd === -1 || mappingAt < configEnd), '매핑 편집이 모터 관리 화면 안에 있어야 한다');
   // 'files' 패널은 'run' 으로 합쳐졌다 · 목록과 실행이 같은 화면에 뜬다
   assert.doesNotMatch(html, /data-motion-panel=["']files["']/);
   assert.equal((html.match(/data-motion-panel="run"/g) || []).length, 1);
