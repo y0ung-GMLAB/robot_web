@@ -87,58 +87,8 @@ def test_nothing_wrong_means_no_reason():
 
 
 # --------------------------------------------------------------------------- #
-# 화면은 받아쓰기만 한다
+# 화면은 받아쓰기만 한다 · 판단 함수 자체가 없다 (스튜디오 삭제와 함께 사라졌다)
 # --------------------------------------------------------------------------- #
-
-def _screen_reason_body():
-    text = MAIN_JS.read_text(encoding='utf-8')
-    start = text.index('function studioMotorActionBlockReason()')
-    return text[start:text.index('\n}', start)]
-
-
-def test_the_screen_reads_the_answer_instead_of_deriving_it():
-    body = _screen_reason_body()
-    assert 'appState.motorActionBlocker' in body, (
-        '화면이 서버의 답을 읽지 않습니다'
-    )
-
-
-@pytest.mark.parametrize('leftover', [
-    'commands_blocked',
-    'monitoring_enabled',
-    'last_motor_status_at',
-    'connection_state',
-    'executionContext',
-])
-def test_the_screen_no_longer_re_derives_the_rules(leftover):
-    """규칙 조각이 남아 있으면 언젠가 그쪽만 고쳐진다."""
-    assert leftover not in _screen_reason_body(), (
-        f'화면이 아직 {leftover} 로 직접 판단합니다'
-    )
-
-
-def test_no_threshold_is_left_in_the_screen():
-    """임계값이 양쪽에 있으면 1.0 과 1.5 처럼 갈린다."""
-    assert not re.search(r'>\s*1\.\d', _screen_reason_body()), (
-        '화면에 시간 임계값이 남아 있습니다 · 판단은 서버가 합니다'
-    )
-
-
-def test_not_yet_received_is_not_treated_as_fine():
-    """아직 못 받은 것을 「막힘 없음」 으로 읽으면 버튼이 먼저 살아난다."""
-    body = _screen_reason_body()
-    assert "typeof answered === 'string'" in body
-    assert '아직 확인하지 못했습니다' in body
-
-
-def test_the_screen_keeps_only_what_the_server_cannot_know():
-    """모터 등록 중 신원 불일치는 아직 화면 안의 일이다 · 그것만 덧붙인다."""
-    body = _screen_reason_body()
-    assert 'motorIdentityBlockMessage' in body
-    assert 'emergencyLatched' in body, (
-        '긴급정지를 누른 직후는 화면이 먼저 안다 · 그 한 번은 앞세운다'
-    )
-
 
 # --------------------------------------------------------------------------- #
 # 답이 실제로 화면까지 간다

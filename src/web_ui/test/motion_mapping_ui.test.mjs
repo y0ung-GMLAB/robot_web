@@ -112,12 +112,11 @@ test('the motion-axis page carries nothing but the file, the table, and save', (
   assert.doesNotMatch(controller, /mappingRawText/);
 });
 
-test('MIDI-only saves use the mapping-section revision without discarding the draft', () => {
+test('재생 등록 저장은 파일 개정만 동기화하고 편집 초안은 버리지 않는다', () => {
   assert.match(controller, /file\?\.mapping_revision \|\| file\?\.revision/);
   assert.match(controller, /function syncMappingFileRevision\(file\)/);
   assert.match(controller, /fileId !== selectedMappingId/);
   assert.match(controller, /mappingRevision = revision/);
-  assert.match(controller, /syncMappingFileRevision,/);
 });
 
 test('a save conflict says what is lost and never locks the draft away', () => {

@@ -7,7 +7,7 @@
         </div>
         <div id="motionWorkflowGuide" class="workspace-guide" aria-label="모션 사용 순서">
           <strong>사용 순서</strong>
-          <ol><li>모션축 설정</li><li>MIDI 입력 설정(선택)</li><li>스튜디오에서 녹화·내보내기</li><li>모션 실행에서 파일 등록 후 재생</li></ol>
+          <ol><li>모션축 설정</li><li>Blender에서 만든 모션 파일 가져오기</li><li>모션 실행에서 파일 등록 후 재생</li></ol>
         </div>
 
         <div class="motion-tab-panel settings-editor-page hidden" data-motion-panel="mapping">
@@ -78,93 +78,6 @@
           </div>
         </div>
 
-        <div class="motion-tab-panel hidden" data-motion-panel="midi">
-          <div class="midi-monitor-layout">
-
-            <section class="motion-file-subsection settings-step-card" aria-label="MIDI 뱅크">
-              <div class="section-head compact">
-                <strong>1. 뱅크</strong>
-                <span>뱅크 하나가 채널 설정 한 벌입니다</span>
-              </div>
-              <div class="midi-bank-controls">
-                <label class="compact-field">
-                  <span>활성 뱅크</span>
-                  <select id="midiBankSelect" aria-label="MIDI 뱅크"></select>
-                </label>
-                <label class="compact-field midi-bank-name-field">
-                  <span>뱅크 이름</span>
-                  <input id="midiBankName" type="text" maxlength="40" value="Bank 1">
-                </label>
-                <div class="registry-actions midi-bank-actions">
-                  <button id="addMidiBankButton" type="button">뱅크 추가</button>
-                  <button id="deleteMidiBankButton" class="danger" type="button">뱅크 삭제</button>
-                  <button id="saveMidiMappingButton" class="primary" type="button">뱅크 저장</button>
-                  <button id="loadMidiBanksFileButton" type="button">저장된 뱅크 다시 읽기</button>
-                </div>
-                <div class="registry-actions midi-device-actions">
-                  <button id="connectMidiDeviceButton" class="primary" type="button">MIDI 연결</button>
-                  <button id="refreshMidiMonitorButton" type="button">상태 새로고침</button>
-                </div>
-              </div>
-              <div id="midiMappingPath" class="registry-message">모션축 설정 파일의 MIDI 뱅크 상태 확인 중</div>
-            </section>
-
-            <section class="motion-file-subsection" aria-label="MIDI 채널값">
-              <div class="section-head compact">
-                <strong>2. 채널 설정과 실시간 값</strong>
-                <span>MIDI 값 → 필터 출력 → 최종 출력 → 모션값</span>
-              </div>
-              <div class="table-wrap midi-monitor-table-wrap">
-                <table class="midi-monitor-table">
-                  <thead>
-                    <tr>
-                      <th>사용</th>
-                      <th>채널</th>
-                      <th>셀렉트</th>
-                      <th>모션 ID · 최대 3</th>
-                      <th>MIDI 값</th>
-                      <th>필터 출력</th>
-                      <th>최소값 (%)</th>
-                      <th>최대값 (%)</th>
-                      <th>반전</th>
-                      <th>필터 0~13</th>
-                      <th>최종 출력</th>
-                      <th>미디 비율</th>
-                      <th>모션값 (deg)</th>
-                      <th>입력 상태</th>
-                    </tr>
-                  </thead>
-                  <tbody id="midiMonitorRows">
-                    <tr><td colspan="14" class="empty">MIDI 모니터 노드 상태 수신 대기</td></tr>
-                  </tbody>
-                </table>
-              </div>
-              <div class="registry-message">한 MIDI 채널에 Motion ID를 최대 3개까지 연결할 수 있습니다. 현재는 연결된 축의 모션 최소·최대 범위가 모두 같아야 하며, SELECT 시 현재 모션값도 서로 가까워야 합니다. 모션값 하나를 각 모션축 설정으로 변환해 연결된 모터에 동시에 전달합니다. 필터 출력은 2차 저역통과 필터만 적용한 값이고, 최종 출력은 반전과 최소값/최대값(%)까지 적용한 값입니다.</div>
-            </section>
-
-            <section class="motion-file-subsection settings-step-card" aria-label="MIDI 장치 연결">
-              <div class="section-head compact">
-                <strong>3. 장치 상태</strong>
-                <span id="midiMonitorMessage">MIDI 모니터 상태 확인 중</span>
-              </div>
-              <div id="midiMonitorSummary" class="motion-file-summary midi-monitor-summary">
-                <div><span>연결</span><strong id="midiConnectionState">대기</strong></div>
-                <div><span>MIDI 입력</span><strong id="midiInputState">입력 대기</strong></div>
-                <div><span>최근 MIDI 입력</span><strong id="midiLastInputState">기록 없음</strong></div>
-                <div><span>최근 전원 재연결</span><strong id="midiPowerReconnectState">감지 기록 없음</strong></div>
-                <div><span>입력 범위</span><strong>14bit · 0~16383</strong></div>
-                <div><span>출력 단위</span><strong>14bit</strong></div>
-                <div><span>필터</span><strong>2차 저역통과</strong></div>
-                <div><span>모터 출력</span><strong id="midiMotorOutputState">사용 안 함</strong></div>
-              </div>
-              <div class="midi-safety-notice">
-                <strong>모터는 움직이지 않습니다</strong>
-                <span>이 화면에서는 실제 모터축 제어 명령을 보내지 않습니다. 손을 뗀 MIDI 페이더가 현재 위치에 머물도록 그 페이더에만 유지값을 한 번 보냅니다.</span>
-              </div>
-            </section>
-          </div>
-        </div>
-
         <div class="motion-tab-panel hidden" data-motion-panel="run">
           <div class="motion-run-workspace">
 
@@ -208,7 +121,6 @@
                   <div class="motion-file-actions">
                     <button id="registerMotionFileButton" class="primary" type="button" disabled>재생 등록</button>
                     <button id="unregisterMotionFileButton" type="button" class="danger" disabled>재생 등록 해제</button>
-                    <button id="exportMotionFileToStudioButton" type="button" title="이 파일을 모션 스튜디오에서 엽니다" disabled>스튜디오로</button>
                     <button id="downloadMotionFileButton" type="button" title="이 파일을 지금 보고 있는 PC 에 저장합니다" disabled>내 PC로 저장</button>
                     <button id="deleteMotionFileButton" type="button" class="danger" disabled>삭제</button>
                   </div>

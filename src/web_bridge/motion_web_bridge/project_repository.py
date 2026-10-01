@@ -13,7 +13,7 @@ import shutil
 import time
 import uuid
 from pathlib import Path
-from typing import Any, Dict, Iterable, Optional
+from typing import Any, Dict
 
 import yaml
 
@@ -27,7 +27,6 @@ from .project_paths import (
     _is_user_file,
     _safe_stem,
     _sha256,
-    _sha256_file,
     local_directory,
 )
 
@@ -72,17 +71,6 @@ MOTOR_RUNTIME_TARGET_FIELDS = {
     'project_generation',
     'applied_at',
 }
-
-
-def _studio_layer_signature(layer_hashes: Dict[str, str]) -> str:
-    rows = sorted(
-        (str(name), str(digest))
-        for name, digest in layer_hashes.items()
-        if str(name) and str(digest)
-    )
-    return _sha256(
-        json.dumps(rows, ensure_ascii=False, separators=(',', ':')).encode('utf-8')
-    )
 
 
 def _text_limit(category: str) -> tuple[int, str]:
@@ -907,145 +895,6 @@ class ProjectRepository:
             'project_id': project_id,
             'category': safe_category,
             'file_name': name,
-        }
-
-    def sync_studio_layers(
-        self,
-        studio_project: Any,
-        *,
-        upsert_layer_ids: Optional[Iterable[Any]] = None,
-        delete_layer_ids: Optional[Iterable[Any]] = None,
-        replace_all: bool = True,
-    ) -> Dict[str, Any]:
-        started_at = time.perf_counter()
-        project_id = self.selected_project_id()
-        if not project_id or not isinstance(studio_project, dict):
-            return {'success': True, 'synced': False, 'message': '동기화할 프로젝트 없음'}
-        project_dir = self._project_dir(project_id)
-        studio_id = _safe_stem(studio_project.get('project_id'), 'studio')
-        manifest = self._read_manifest(project_dir)
-        selected_upserts = (
-            None
-            if replace_all
-            else {
-                str(value) for value in upsert_layer_ids or [] if str(value)
-            }
-        )
-        selected_deletes = {
-            str(value) for value in delete_layer_ids or [] if str(value)
-        }
-        prepared = []
-        for index, layer in enumerate(studio_project.get('layers') or []):
-            if not isinstance(layer, dict):
-                continue
-            raw_layer_id = str(
-                layer.get('layer_id') or f'layer_{index + 1}'
-            )
-            layer_id = _safe_stem(raw_layer_id, f'layer_{index + 1}')
-            if (
-                selected_upserts is not None
-                and raw_layer_id not in selected_upserts
-                and layer_id not in selected_upserts
-            ):
-                continue
-            name = f'{studio_id}__{layer_id}.json'
-            content = json.dumps(layer, ensure_ascii=False, indent=2) + '\n'
-            self._validate_content('layers', name, content)
-            prepared.append((name, content, _sha256(content.encode('utf-8'))))
-        written = [name for name, _content, _digest in prepared]
-        for name, content, _digest in prepared:
-            self._atomic_write(project_dir / 'layers' / name, content)
-        previous_managed = [
-            name
-            for name in manifest.get('studio_managed_layers') or []
-            if isinstance(name, str) and name == Path(name).name
-        ]
-        if replace_all:
-            managed = list(written)
-            removed = [
-                name for name in previous_managed if name not in managed
-            ]
-        else:
-            deleted_names = {
-                f'{studio_id}__{_safe_stem(layer_id, "layer")}.json'
-                for layer_id in selected_deletes
-            }
-            removed = [
-                name for name in previous_managed if name in deleted_names
-            ]
-            managed = [
-                name for name in previous_managed if name not in deleted_names
-            ]
-            for name in written:
-                if name not in managed:
-                    managed.append(name)
-        for name in removed:
-            path = project_dir / 'layers' / name
-            if path.is_file() and not path.is_symlink():
-                path.unlink()
-        prepared_hashes = {
-            name: digest for name, _content, digest in prepared
-        }
-        cached_files = manifest.get('studio_layer_file_cache')
-        if not isinstance(cached_files, dict):
-            cached_files = {}
-        all_layer_hashes = {}
-        current_file_cache = {}
-        hashed_file_count = 0
-        reused_hash_count = 0
-        for path in (project_dir / 'layers').iterdir():
-            if not _is_user_file(path):
-                continue
-            stat = path.stat()
-            cached = cached_files.get(path.name)
-            digest = prepared_hashes.get(path.name)
-            if not digest and isinstance(cached, dict):
-                try:
-                    cache_matches = (
-                        int(cached.get('size')) == stat.st_size
-                        and int(cached.get('mtime_ns')) == stat.st_mtime_ns
-                        and int(cached.get('ctime_ns')) == stat.st_ctime_ns
-                        and bool(str(cached.get('sha256') or ''))
-                    )
-                except (TypeError, ValueError):
-                    cache_matches = False
-                if cache_matches:
-                    digest = str(cached['sha256'])
-                    reused_hash_count += 1
-            if not digest:
-                digest = _sha256_file(path)
-                hashed_file_count += 1
-            all_layer_hashes[path.name] = digest
-            current_file_cache[path.name] = {
-                'size': stat.st_size,
-                'mtime_ns': stat.st_mtime_ns,
-                'ctime_ns': stat.st_ctime_ns,
-                'sha256': digest,
-            }
-        manifest['studio_managed_layers'] = managed
-        manifest['studio_managed_layer_sha256'] = {
-            name: all_layer_hashes[name]
-            for name in managed if name in all_layer_hashes
-        }
-        manifest['studio_layer_file_cache'] = current_file_cache
-        active_layer = manifest['active_files'].get('layers')
-        if managed and not active_layer:
-            manifest['active_files']['layers'] = managed[0]
-        elif active_layer and not (project_dir / 'layers' / active_layer).is_file():
-            manifest['active_files']['layers'] = managed[0] if managed else ''
-        if replace_all or written or removed:
-            self._write_manifest(project_dir, manifest)
-        return {
-            'success': True,
-            'synced': bool(written or removed),
-            'project_id': project_id,
-            'files': written,
-            'deleted_files': removed,
-            'managed_files': managed,
-            'layer_signature': _studio_layer_signature(all_layer_hashes),
-            'elapsed_ms': round((time.perf_counter() - started_at) * 1000, 3),
-            'hashed_file_count': hashed_file_count,
-            'reused_hash_count': reused_hash_count,
         }
 
     def _project_summary(self, project_dir: Path, manifest: Dict[str, Any]) -> Dict[str, Any]:

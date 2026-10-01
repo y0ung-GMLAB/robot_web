@@ -8,10 +8,8 @@ const styles = stylesCss;
 const scripts = [
   'motor_config.js',
   'motion_data.js',
-  'motion_studio.js',
   'project_explorer.js',
   'event_log.js',
-  'midi_monitor.js',
   'motion_test.js',
 ].map((name) => readFileSync(new URL(`../static/js/${name}`, import.meta.url), 'utf8')).join('\n');
 
@@ -19,9 +17,6 @@ test('popup UI remains grouped into four management types', () => {
   assert.match(html, /id="operationProgressModal"/);
   assert.match(html, /id="appDialogModal"/);
   assert.match(html, /id="motorErrorPopup"/);
-  assert.match(html, /id="studioLayerManagerModal"/);
-  assert.match(html, /id="studioLayerEditorModal"/);
-  assert.match(html, /id="studioEditorSaveConfirmModal"/);
 });
 
 test('feature modules do not call native confirm or prompt dialogs', () => {

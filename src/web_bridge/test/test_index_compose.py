@@ -46,7 +46,6 @@ def test_composed_html_contains_every_panel():
         'data-workspace-panel="system"',
         'data-workspace-panel="monitoring"',
         'data-workspace-panel="motion"',
-        'data-workspace-panel="studio"',
         'data-workspace-panel="log"',
         'id="scheduleEditModal"',
         'id="workspaceTabs"',

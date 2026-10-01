@@ -26,8 +26,6 @@ from .coordination_bridge import (
     CoordinationWebBridge, local_motion_control, local_motion_readiness,
 )
 from . import motion_file_analysis, motor_config_rules
-from .motion_studio_bridge import MotionStudioRosBridge
-from .motion_studio_session import MotionStudioSession
 from .execution_context_service import ExecutionContextService
 from .manual_motor_commands import ManualMotorCommandService
 from .motor_runtime_service import MotorRuntimeService
@@ -36,7 +34,6 @@ from .motor_config_service import MotorConfigService
 from .motor_event_log import MotorEventLog
 from .motion_trace_service import MotionTraceService
 from .scan_orchestrator import ScanOrchestrator
-from .motion_studio_routes import register_motion_studio_routes
 from .bridge_helpers import (
     add_monitoring_motion_values,
     motor_activity_snapshot,
@@ -47,18 +44,14 @@ from .routes import (
     register_project_routes,
     register_motor_routes,
     register_motion_run_routes,
-    register_midi_routes,
     register_safety_routes,
     register_system_routes,
     register_schedule_routes,
     register_docs_routes,
     register_motion_trace_routes,
 )
-from .motion_studio_sync import (
-    MotionStudioSync,
-    # 재수출 · 외부에서 bridge_node 경유로 참조한다
-    _project_tree_category_signature,  # noqa: F401
-)
+# 재수출 · 외부에서 bridge_node 경유로 참조한다
+from .project_tree import _project_tree_category_signature  # noqa: F401
 from .project_repository import NO_PROJECT_SELECTED, ProjectRepository
 from .servo_alarm_policy import (
     CATALOG_VERSION as SERVO_ALARM_CATALOG_VERSION,
@@ -183,33 +176,6 @@ class MotionWebBridge(Node):
         self.motion_run_status_topic = self.declare_parameter(
             'motion_run_status_topic',
             topics.MOTION_RUN_STATUS,
-        ).value
-        self.midi_monitor_state_topic = self.declare_parameter(
-            'midi_monitor_state_topic',
-            topics.MIDI_MONITOR_STATE,
-        ).value
-        self.midi_monitor_request_topic = self.declare_parameter(
-            'midi_monitor_request_topic',
-            topics.MIDI_MONITOR_REQUEST,
-        ).value
-        self.midi_monitor_response_topic = self.declare_parameter(
-            'midi_monitor_response_topic',
-            topics.MIDI_MONITOR_RESPONSE,
-        ).value
-        self.motion_studio_request_topic = self.declare_parameter(
-            'motion_studio_request_topic', topics.STUDIO_REQUEST
-        ).value
-        self.motion_studio_response_topic = self.declare_parameter(
-            'motion_studio_response_topic', topics.STUDIO_RESPONSE
-        ).value
-        self.motion_studio_status_topic = self.declare_parameter(
-            'motion_studio_status_topic', topics.STUDIO_STATUS
-        ).value
-        self.motion_studio_editor_request_topic = self.declare_parameter(
-            'motion_studio_editor_request_topic', topics.STUDIO_EDITOR_REQUEST
-        ).value
-        self.motion_studio_editor_response_topic = self.declare_parameter(
-            'motion_studio_editor_response_topic', topics.STUDIO_EDITOR_RESPONSE
         ).value
         self.safety_status_topic = self.declare_parameter(
             'safety_status_topic', topics.SAFETY_STATUS
@@ -337,19 +303,6 @@ class MotionWebBridge(Node):
         self._coordination_poll_lock = threading.Lock()
         self._coordination_poll_received_monotonic = 0.0
         self._coordination_watchdog_stop_execution_id = ''
-        self._midi_monitor_lock = threading.Lock()
-        self._midi_monitor_status: Dict[str, Any] = {}
-        self._midi_monitor_store = rpc.ResultStore()
-        self._motion_studio_session = MotionStudioSession()
-        self._motion_studio_ros_bridge = MotionStudioRosBridge(
-            self,
-            self._motion_studio_session,
-            self._execution_context.context_id,
-            self._project,
-        )
-        self._motion_studio_sync_service = MotionStudioSync(
-            self, self._motion_studio_session, self._motion_studio_ros_bridge
-        )
         self._safety_status_lock = threading.Lock()
         self._safety_status: Dict[str, Any] = {}
         self._monitoring_motion_mapping_lock = threading.Lock()
@@ -436,17 +389,6 @@ class MotionWebBridge(Node):
             self.motion_run_request_topic,
             10,
         )
-        self._midi_monitor_request_publisher = self.create_publisher(
-            String,
-            self.midi_monitor_request_topic,
-            10,
-        )
-        self._motion_studio_request_publisher = self.create_publisher(
-            String, self.motion_studio_request_topic, 10
-        )
-        self._motion_studio_editor_request_publisher = self.create_publisher(
-            String, self.motion_studio_editor_request_topic, 10
-        )
         self._jog_result_subscription = self.create_subscription(
             String,
             self.jog_result_topic,
@@ -486,36 +428,6 @@ class MotionWebBridge(Node):
             String,
             topics.SCHEDULE_STATUS,
             self._schedule_status_callback,
-            10,
-        )
-        self._midi_monitor_state_subscription = self.create_subscription(
-            String,
-            self.midi_monitor_state_topic,
-            self._midi_monitor_state_callback,
-            10,
-        )
-        self._midi_monitor_response_subscription = self.create_subscription(
-            String,
-            self.midi_monitor_response_topic,
-            self._midi_monitor_response_callback,
-            10,
-        )
-        self._motion_studio_response_subscription = self.create_subscription(
-            String,
-            self.motion_studio_response_topic,
-            self._motion_studio_response_callback,
-            10,
-        )
-        self._motion_studio_status_subscription = self.create_subscription(
-            String,
-            self.motion_studio_status_topic,
-            self._motion_studio_status_callback,
-            10,
-        )
-        self._motion_studio_editor_response_subscription = self.create_subscription(
-            String,
-            self.motion_studio_editor_response_topic,
-            self._motion_studio_editor_response_callback,
             10,
         )
         self._safety_status_subscription = self.create_subscription(
@@ -715,43 +627,6 @@ class MotionWebBridge(Node):
             self._motion_run_status = payload
         self._motor_event_log.record_motion_run_transition(payload)
 
-    def _midi_monitor_state_callback(self, msg: String) -> None:
-        try:
-            payload = json.loads(msg.data)
-        except json.JSONDecodeError:
-            self.get_logger().warn(f'Invalid {self.midi_monitor_state_topic} JSON received.')
-            return
-        if not isinstance(payload, dict):
-            return
-        if not self._project.payload_matches_selected(payload):
-            return
-        payload['_bridge_received_at'] = time.time()
-        with self._midi_monitor_lock:
-            self._midi_monitor_status = payload
-
-    def _midi_monitor_response_callback(self, msg: String) -> None:
-        try:
-            payload = json.loads(msg.data)
-        except json.JSONDecodeError:
-            self.get_logger().warn(f'Invalid {self.midi_monitor_response_topic} JSON received.')
-            return
-        if not isinstance(payload, dict):
-            return
-        request_id = str(payload.get('request_id') or '')
-        if not request_id or not self._response_matches_current_generation(payload):
-            return
-        self._midi_monitor_store.store(request_id, payload)
-        with self._midi_monitor_lock:
-            if (
-                payload.get('success')
-                and isinstance(payload.get('channels'), list)
-                and self._project.payload_matches_selected(payload)
-            ):
-                self._midi_monitor_status = dict(payload)
-
-    def _motion_studio_status_callback(self, msg: String) -> None:
-        self._motion_studio_transport().status_callback(msg)
-
     def _safety_status_callback(self, msg: String) -> None:
         try:
             payload = json.loads(msg.data)
@@ -761,12 +636,6 @@ class MotionWebBridge(Node):
         if isinstance(payload, dict):
             with self._safety_status_lock:
                 self._safety_status = payload
-
-    def _motion_studio_response_callback(self, msg: String) -> None:
-        self._motion_studio_transport().response_callback(msg)
-
-    def _motion_studio_editor_response_callback(self, msg: String) -> None:
-        self._motion_studio_transport().editor_response_callback(msg)
 
     def _wait_for_motion_mapping_result(
         self,
@@ -782,13 +651,6 @@ class MotionWebBridge(Node):
     ) -> Optional[Dict[str, Any]]:
         return self._motion_run_store.wait(request_id, timeout_sec)
 
-    def _wait_for_midi_monitor_result(
-        self,
-        request_id: str,
-        timeout_sec: float = 2.0,
-    ) -> Optional[Dict[str, Any]]:
-        return self._midi_monitor_store.wait(request_id, timeout_sec)
-
     def snapshot(self) -> Dict[str, Any]:
         with self._lock:
             motion_state = copy.deepcopy(self._motion_state)
@@ -797,18 +659,8 @@ class MotionWebBridge(Node):
             motion_value_state = copy.deepcopy(self._motion_value_state)
         with self._motion_run_lock:
             motion_run_status = dict(self._motion_run_status) if self._motion_run_status else {}
-        with self._midi_monitor_lock:
-            midi_monitor = dict(self._midi_monitor_status) if self._midi_monitor_status else {}
-        motion_studio = self._motion_studio_session.snapshot_status()
         with self._safety_status_lock:
             safety_status = dict(self._safety_status) if self._safety_status else {}
-        midi_received_at = midi_monitor.pop('_bridge_received_at', None)
-        if midi_received_at is not None and time.time() - float(midi_received_at) > 1.0:
-            midi_monitor['connected'] = False
-            midi_monitor['message'] = 'MIDI 모니터 노드 상태 수신 중단'
-        midi_monitor = self._safety_adjusted_midi_status(
-            midi_monitor, safety_status=safety_status
-        )
 
         runtime_status = motor_config_rules.runtime_service_status(
             motion_state,
@@ -896,11 +748,8 @@ class MotionWebBridge(Node):
             'motion_run_status': motion_run_status,
             'motor_activity': motor_activity_snapshot(
                 motion_run_status,
-                motion_studio,
                 safety_status,
             ),
-            'midi_monitor': midi_monitor,
-            'motion_studio': motion_studio,
             'safety_status': safety_status,
             'execution_context': execution_context,
             'motor_operation': motor_operation,
@@ -969,12 +818,6 @@ class MotionWebBridge(Node):
     def coordination_stop_now(self) -> Dict[str, Any]:
         """Publish the final-output safety command before stopping motion run."""
         errors = []
-        cancel_pending = getattr(self, 'cancel_pending_motion_studio_start', None)
-        if callable(cancel_pending):
-            try:
-                cancel_pending()
-            except Exception as exc:
-                errors.append(f'시작 예약 취소 실패: {exc}')
         try:
             request_id = self.publish_safety_stop(False)
             safety_stop = {
@@ -1413,8 +1256,7 @@ class MotionWebBridge(Node):
             적용     네 노드   apply_context        2초
             확인     세 노드   confirm_context      2초
 
-        세 곳 모두 `bridge._request_motion_mapping` · `_request_midi_monitor`
-        · `_request_motion_run` · `_motion_studio_transport().request` 를
+        세 곳 모두 `bridge._request_motion_mapping` · `_request_motion_run` 을
         손으로 나열했다 · 노드가 늘거나 통로 이름이 바뀌면 **세 곳을 모두
         찾아야** 하고, 한 곳을 놓치면 그 노드만 옛 컨텍스트에 남는다.
 
@@ -1423,9 +1265,7 @@ class MotionWebBridge(Node):
         """
         return {
             'motion_mapping': self._request_motion_mapping,
-            'midi_control': self._request_midi_monitor,
             'motion_run': self._request_motion_run,
-            'motion_studio': self._motion_studio_transport().request,
         }
 
     # 모션 상태는 ROS 콜백이 계속 갈아끼운다 · 1초보다 오래된 것은 없는
@@ -1564,14 +1404,10 @@ class MotionWebBridge(Node):
             self._motion_state_received_at = None
         with self._motion_run_lock:
             self._motion_run_status = {}
-        with self._midi_monitor_lock:
-            self._midi_monitor_status = {}
         self._motor_event_log.clear_project_memory()
         self._manual.clear_pending()
         self._motion_mapping_store.clear()
         self._motion_run_store.clear()
-        self._midi_monitor_store.clear()
-        self._motion_studio_sync().clear_project_memory()
         scan = getattr(self, '_scan', None)
         if scan is not None:
             scan.clear_progress()
@@ -1753,12 +1589,6 @@ class MotionWebBridge(Node):
             return result
         self._note_missing_motors(result)
 
-        loaded_file_id = motion_file_analysis.motion_mapping_file_id(result) or str(file_id or '').strip()
-        if loaded_file_id:
-            midi_result = self._load_and_apply_midi_banks(loaded_file_id)
-            result['midi_banks'] = midi_result
-            if midi_result.get('success') is False:
-                result['midi_banks_warning'] = str(midi_result.get('message') or '')
         return result
 
     def save_registered_motion_file(self, payload: Dict[str, Any]) -> Dict[str, Any]:
@@ -1812,16 +1642,14 @@ class MotionWebBridge(Node):
                 ),
             )
             # The active mapping file is one immutable part of the project
-            # execution context. Applying only its MIDI-bank subsection leaves
-            # the MIDI axis registry and every other consumer on the previous
-            # file hash. Reconcile the complete context after the repository
-            # has confirmed the saved file and active-file selection.
+            # execution context. Reconcile the complete context after the
+            # repository has confirmed the saved file and active-file selection.
             execution_context = self._execution_context.reconcile()
             result['execution_context'] = execution_context
             result['runtime_applied'] = bool(execution_context.get('ready'))
             if result['runtime_applied']:
                 result['message'] = (
-                    '모션축 설정 저장 완료 · 변경된 모션 범위를 MIDI에 적용했습니다'
+                    '모션축 설정 저장 완료 · 실행 컨텍스트에 적용했습니다'
                 )
             else:
                 runtime_message = str(
@@ -1830,35 +1658,10 @@ class MotionWebBridge(Node):
                 )
                 result['runtime_apply_warning'] = runtime_message
                 result['message'] = (
-                    '모션축 설정은 저장됐지만 MIDI 적용 대기 중입니다: '
+                    '모션축 설정은 저장됐지만 실행 컨텍스트 적용 대기 중입니다: '
                     f'{runtime_message}'
                 )
         return result
-
-    def _load_and_apply_midi_banks(self, file_id: str) -> Dict[str, Any]:
-        loaded = self._request_motion_mapping(
-            'load_midi_banks',
-            {'file_id': file_id},
-            timeout_sec=3.0,
-        )
-        if loaded.get('success') is False:
-            return loaded
-        state = loaded.get('midi_banks')
-        applied = self._request_midi_monitor(
-            'apply_banks',
-            {'mapping_file_id': file_id, 'midi_banks': state},
-            timeout_sec=3.0,
-        )
-        if applied.get('success') is False:
-            return applied
-        applied['file'] = loaded.get('file')
-        applied['message'] = (
-            '모션축 설정 파일의 MIDI 뱅크 적용 완료 · SELECT 전체 해제 · 페이더 0 이동'
-            if applied.get('select_reset') else
-            '모션축 설정 파일의 MIDI 필터 적용 완료 · SELECT 상태 유지'
-        )
-        return applied
-
 
     def validate_motion_mapping(self, payload: Dict[str, Any]) -> Dict[str, Any]:
         return self._request_motion_mapping('validate', payload)
@@ -2027,164 +1830,6 @@ class MotionWebBridge(Node):
     def motion_group_cancel(self, payload: Dict[str, Any]) -> Dict[str, Any]:
         return self._request_motion_run('group_cancel', payload, timeout_sec=2.0)
 
-    def midi_monitor_status(self) -> Dict[str, Any]:
-        result = self._request_midi_monitor('status', {}, timeout_sec=1.0)
-        if result.get('success') is False:
-            with self._midi_monitor_lock:
-                cached = dict(self._midi_monitor_status) if self._midi_monitor_status else {}
-            cached.pop('_bridge_received_at', None)
-            if cached:
-                result = {
-                    **cached,
-                    'success': False,
-                    'node_state': 'stale',
-                    'connected': False,
-                    'motor_output_enabled': False,
-                    'message': 'MIDI 모니터 노드 응답 없음 · 이전 상태는 제어에 사용하지 않습니다',
-                }
-        return self._safety_adjusted_midi_status(result)
-
-    def _safety_adjusted_midi_status(
-        self,
-        status: Dict[str, Any],
-        *,
-        safety_status: Optional[Dict[str, Any]] = None,
-    ) -> Dict[str, Any]:
-        """Expose the supervisor's final-output latch in every MIDI status API."""
-        result = dict(status) if isinstance(status, dict) else {}
-        if safety_status is None:
-            with self._safety_status_lock:
-                safety_status = dict(self._safety_status) if self._safety_status else {}
-        blocked = bool(safety_status.get('commands_blocked'))
-        result['motor_output_blocked_by_safety'] = blocked
-        result['motor_output_block_reason'] = (
-            str(safety_status.get('message') or '안전 정지로 모터 출력이 차단되었습니다')
-            if blocked else ''
-        )
-        if blocked:
-            result['motor_output_enabled'] = False
-        return result
-
-    def create_midi_bank(self, payload: Dict[str, Any]) -> Dict[str, Any]:
-        created = self._request_midi_monitor('create_bank', payload, timeout_sec=2.0)
-        return self._persist_midi_bank_result(created)
-
-    def select_midi_bank(self, bank_id: str) -> Dict[str, Any]:
-        selected = self._request_midi_monitor(
-            'select_bank',
-            {'bank_id': bank_id},
-            timeout_sec=2.0,
-        )
-        return self._persist_midi_bank_result(selected)
-
-    def update_midi_bank(self, bank_id: str, payload: Dict[str, Any]) -> Dict[str, Any]:
-        updated = self._request_midi_monitor(
-            'update_bank',
-            {**payload, 'bank_id': bank_id},
-            timeout_sec=2.0,
-        )
-        return self._persist_midi_bank_result(updated)
-
-    def delete_midi_bank(self, bank_id: str) -> Dict[str, Any]:
-        deleted = self._request_midi_monitor(
-            'delete_bank',
-            {'bank_id': bank_id},
-            timeout_sec=2.0,
-        )
-        return self._persist_midi_bank_result(deleted)
-
-    def load_midi_banks_from_file(self) -> Dict[str, Any]:
-        status = self.midi_monitor_status()
-        if status.get('success') is False:
-            return status
-        file_id = motion_file_analysis.midi_mapping_file_id(status)
-        if not file_id:
-            return {'success': False, 'message': '선택된 모션축 설정 파일이 없습니다'}
-        return self._load_and_apply_midi_banks(file_id)
-
-    def reset_midi_runtime_values(self) -> Dict[str, Any]:
-        return self._request_midi_monitor('reset_runtime_values', {}, timeout_sec=2.0)
-
-    def connect_midi_device(self) -> Dict[str, Any]:
-        return self._request_midi_monitor('connect_device', {}, timeout_sec=2.0)
-
-    def _persist_midi_bank_result(self, updated: Dict[str, Any]) -> Dict[str, Any]:
-        if updated.get('success') is False:
-            return updated
-        file_id = motion_file_analysis.midi_mapping_file_id(updated)
-        state = updated.get('bank_state')
-        if not file_id:
-            return {'success': False, 'message': '선택된 모션축 설정 파일이 없습니다'}
-        if not isinstance(state, dict):
-            return {'success': False, 'message': 'MIDI 노드의 뱅크 설정 응답이 올바르지 않습니다'}
-
-        saved = self._request_motion_mapping(
-            'save_midi_banks',
-            {'file_id': file_id, 'midi_banks': state},
-            timeout_sec=3.0,
-        )
-        if saved.get('success') is False:
-            # Restore the file-owned state so a failed write never leaves an
-            # unlabelled memory-only configuration active.
-            rollback = self._load_and_apply_midi_banks(file_id)
-            return {
-                'success': False,
-                'message': f"MIDI 뱅크 파일 저장 실패: {saved.get('message') or 'unknown error'}",
-                'rollback_success': rollback.get('success') is not False,
-            }
-
-        applied = self._request_midi_monitor(
-            'apply_banks',
-            {'mapping_file_id': file_id, 'midi_banks': saved.get('midi_banks')},
-            timeout_sec=3.0,
-        )
-        if applied.get('success') is False:
-            return {
-                **applied,
-                'message': '파일 저장은 완료됐지만 MIDI 노드 적용에 실패했습니다: '
-                f"{applied.get('message') or 'unknown error'}",
-                'file_saved': True,
-            }
-        applied['backup_file'] = saved.get('backup_file')
-        applied['file'] = saved.get('file')
-        applied['message'] = (
-            'MIDI 뱅크 저장·적용 완료 · SELECT 전체 해제 · 페이더 0 이동'
-            if applied.get('select_reset') else
-            'MIDI 필터 저장·적용 완료 · SELECT 상태 유지'
-        )
-        return applied
-
-    def _request_midi_monitor(
-        self,
-        command: str,
-        payload: Dict[str, Any],
-        timeout_sec: float = 2.0,
-    ) -> Dict[str, Any]:
-        request_id = self.new_project_request_id('midi')
-        project_generation = self.current_project_generation()
-        msg = String()
-        request_payload = dict(payload) if isinstance(payload, dict) else {}
-        request_payload['project_id'] = self.project_repository.selected_project_id()
-        request_payload['project_generation'] = project_generation
-        msg.data = json.dumps({
-            'request_id': request_id,
-            'project_generation': project_generation,
-            'command': command,
-            'payload': request_payload,
-        }, ensure_ascii=False)
-        self._midi_monitor_request_publisher.publish(msg)
-        result = self._wait_for_midi_monitor_result(request_id, timeout_sec=timeout_sec)
-        if result is None:
-            return {
-                'success': False,
-                'connected': False,
-                'message': 'MIDI 모니터 노드 응답 없음',
-                'motor_output_enabled': False,
-                'channels': [],
-            }
-        result.pop('_bridge_received_at', None)
-        return result
-
     def _request_motion_run(
         self,
         command: str,
@@ -2225,118 +1870,6 @@ class MotionWebBridge(Node):
             }
         result.pop('_received_at', None)
         return result
-
-    def _motion_studio_transport(self) -> MotionStudioRosBridge:
-        service = getattr(self, '_motion_studio_ros_bridge', None)
-        if service is None:
-            context = getattr(self, '_execution_context', None)
-            service = MotionStudioRosBridge(
-                self,
-                self._motion_studio_session,
-                context.context_id if context is not None else None,
-                getattr(self, '_project', None),
-            )
-            self._motion_studio_ros_bridge = service
-        return service
-
-    def _motion_studio_sync(self) -> MotionStudioSync:
-        service = getattr(self, '_motion_studio_sync_service', None)
-        if service is None:
-            service = MotionStudioSync(
-                self, self._motion_studio_session, self._motion_studio_transport()
-            )
-            self._motion_studio_sync_service = service
-        return service
-
-    def cancel_pending_motion_studio_start(self) -> int:
-        return self._motion_studio_transport().cancel_pending_start()
-
-    def _motion_file_registration_refs(
-        self, project_id: str, motion_file_id: str
-    ) -> List[str]:
-        """Return project-local mapping files that register one motion file."""
-        detail = self.project_repository.get_project(project_id)
-        references: List[str] = []
-        for folder in detail.get('tree') or []:
-            if folder.get('category') != 'motion_axis_matching':
-                continue
-            for file_info in folder.get('children') or []:
-                mapping_name = str(file_info.get('name') or '').strip()
-                if not mapping_name:
-                    continue
-                try:
-                    loaded = self.project_repository.read_file(
-                        project_id, 'motion_axis_matching', mapping_name
-                    )
-                    mapping = yaml.safe_load(loaded.get('content') or '') or {}
-                except (OSError, ValueError, yaml.YAMLError) as exc:
-                    raise ValueError(
-                        f'모션축 설정 {mapping_name}의 재생 등록 상태를 확인할 수 없습니다: {exc}'
-                    ) from exc
-                if not isinstance(mapping, dict):
-                    raise ValueError(
-                        f'모션축 설정 {mapping_name}의 재생 등록 상태를 확인할 수 없습니다'
-                    )
-                registered_id = str(mapping.get('motion_file_id') or '').strip()
-                if registered_id == motion_file_id:
-                    references.append(mapping_name)
-        return references
-
-    def delete_motion_file(self, file_id: Any) -> Dict[str, Any]:
-        try:
-            project_id = self.project_repository.require_selected_project_id()
-            self.ensure_project_mutation_allowed(project_id)
-            target = motion_file_analysis.motion_file_path(
-                file_id, self.motion_projects_dir / project_id / 'motions'
-            )
-            registration_refs = self._motion_file_registration_refs(
-                project_id, target.name
-            )
-            if registration_refs:
-                return {
-                    **motion_file_analysis.list_motion_files(
-                        self.project_repository, self.motion_projects_dir
-                    ),
-                    'success': False,
-                    'deletion_blocked': 'registered_motion_file',
-                    'registered_mapping_files': registration_refs,
-                    'message': (
-                        '재생 등록된 모션 파일은 삭제할 수 없습니다. '
-                        '재생 등록을 해제한 뒤 다시 삭제하세요. '
-                        f"모션축 설정: {', '.join(registration_refs)}"
-                    ),
-                }
-            result = self.project_repository.delete_file(
-                project_id, 'motions', target.name
-            )
-        except (OSError, ValueError) as exc:
-            return {
-                **motion_file_analysis.list_motion_files(
-                    self.project_repository, self.motion_projects_dir
-                ),
-                'success': False,
-                'message': f'failed to delete motion file: {exc}',
-            }
-        return {
-            **motion_file_analysis.list_motion_files(
-                self.project_repository, self.motion_projects_dir
-            ),
-            'success': True,
-            'message': 'motion file deleted',
-            'project': result.get('project'),
-        }
-
-
-
-
-
-
-
-
-
-
-
-
 
     def request_safety_stop(self, emergency: bool) -> Dict[str, Any]:
         request_id = self.publish_safety_stop(emergency)
@@ -2385,9 +1918,6 @@ class MotionWebBridge(Node):
 
 def _safety_first_stop(bridge: MotionWebBridge, method, *args):
     """Hold final motor output before waiting for an upper-level source to stop."""
-    cancel_pending = getattr(bridge, 'cancel_pending_motion_studio_start', None)
-    if callable(cancel_pending):
-        cancel_pending()
     safety_result = bridge.request_safety_stop(False)
     source_result = method(*args)
     result = dict(source_result) if isinstance(source_result, dict) else {
@@ -2507,11 +2037,9 @@ def create_app(bridge: MotionWebBridge) -> FastAPI:
     register_motor_routes(app, bridge, project_call)
     register_motion_run_routes(app, bridge, _safety_first_stop)
     register_safety_routes(app, bridge)
-    register_midi_routes(app, bridge)
     register_schedule_routes(app, bridge, project_call)
     register_docs_routes(app, bridge)
     register_motion_trace_routes(app, bridge, project_call)
-    register_motion_studio_routes(app, bridge, project_call, _safety_first_stop)
 
     return app
 

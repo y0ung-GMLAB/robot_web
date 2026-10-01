@@ -34,7 +34,6 @@ from motion_common import store
 from motion_web_bridge.motor_runtime_store import MOTOR_BUSY_MESSAGE
 from motion_web_bridge import (
     motion_file_analysis,
-    motion_studio_session,
     motor_config_build,
     motor_config_rules,
 )
@@ -513,13 +512,6 @@ class MotorConfigService:
         한 벌 더 있었다.
         """
         self.bridge.settle_stopping_run_state(self.RELEASE_SETTLED_MESSAGE)
-        studio_session = motion_studio_session.session_of(self.bridge)
-        if studio_session is not None:
-            studio_session.settle_state(
-                when='stopping',
-                becomes='idle',
-                message=self.RELEASE_SETTLED_MESSAGE,
-            )
 
     def restart_managed_program(self) -> Dict[str, Any]:
         """Restart only upper-level nodes while Motor Manager keeps running."""
@@ -681,7 +673,6 @@ class MotorConfigService:
             }
         project_blocker = self.project.change_blocker(
             allow_run_stopping=True,
-            allow_studio_stopping=True,
         )
         if project_blocker:
             return {
@@ -699,7 +690,6 @@ class MotorConfigService:
         moving_blocker = self.runtime.ethercat_scan_safety_blocker(
             require_fresh_motor_state=self.runtime.managed_service_active(motor_service),
             allow_run_stopping=True,
-            allow_studio_stopping=True,
         )
         if moving_blocker:
             return {

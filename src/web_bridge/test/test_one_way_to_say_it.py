@@ -87,7 +87,6 @@ def test_the_owner_lives_where_pure_modules_can_reach_it():
 @pytest.mark.parametrize('name', [
     'bridge_node.py',
     'motor_config_service.py',
-    'motion_studio_sync.py',
     'motion_file_analysis.py',
 ])
 def test_every_speaker_uses_the_same_name(name):

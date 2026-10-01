@@ -70,7 +70,7 @@ test('late motion file list responses are discarded by request token', () => {
   const loadStart = fileManager.indexOf('async function loadFiles(');
   const loadEnd = fileManager.indexOf('async function selectFile(', loadStart);
   const loadBody = fileManager.slice(loadStart, loadEnd);
-  const selectEnd = fileManager.indexOf('async function exportSelectedFileToStudio()', loadEnd);
+  const selectEnd = fileManager.indexOf('async function deleteSelectedFile()', loadEnd);
   const selectBody = fileManager.slice(loadEnd, selectEnd);
 
   assert.match(loadBody, /const loadToken = \+\+fileLoadToken/);
@@ -171,32 +171,7 @@ test('registered motion file deletion is blocked with an alert before delete req
   );
 });
 
-test('motion file screen exports the selected file to Studio without project-tree transfer', () => {
-  assert.match(html, /id="exportMotionFileToStudioButton"/);
-  assert.match(dom, /exportMotionFileToStudioButton: document\.getElementById\('exportMotionFileToStudioButton'\)/);
-  assert.match(controller, /exportMotionFileToStudioButton\?\.addEventListener\('click', exportSelectedFileToStudio\)/);
-  assert.match(fileManager, /onExportToStudio\(file\.id\)/);
-  assert.match(controller, /onExportMotionFileToStudio\(id\)/);
-  assert.match(main, /onExportMotionFileToStudio: \(fileName\) => motionStudio\.addMotionFile\(fileName\)/);
-  assert.doesNotMatch(projectExplorer, /data-project-add-layer/);
-  assert.doesNotMatch(projectExplorer, /onAddMotionLayer/);
-});
 
-test('motion file list refreshes from successful Studio exports without manual polling controls', () => {
-  const studio = readFileSync(
-    new URL('../static/js/motion_studio.js', import.meta.url),
-    'utf8',
-  );
-  assert.doesNotMatch(html, /refreshMotionFilesButton/);
-  assert.doesNotMatch(dom, /refreshMotionFilesButton/);
-  assert.doesNotMatch(controller, /refreshMotionFilesButton/);
-  assert.match(controller, /refreshMotionFiles: \(\) => loadFiles\(\)/);
-  // 성공하면 목록을 새로 읽는다
-  assert.match(studio, /await onMotionFilesChange\(result\)/);
-  // 실패해도 새로 읽는다 · 파일을 쓴 뒤 실패하면 화면만 옛 목록으로 남는다 · §6-53
-  assert.match(studio, /if \(failed\) await onMotionFilesChange\(null\)/);
-  assert.match(main, /onMotionFilesChange: async \(\) => \{\s*await motionData\.refreshMotionFiles\(\);\s*await projectExplorer\.refresh\(true\)/);
-});
 
 test('motion files leave and arrive as plain files · one door each', () => {
   // 나가는 문 · 모션 실행 화면의 「파일로 저장」 · 이미 있는 프로젝트 파일

@@ -16,13 +16,6 @@ test('project explorer results use category routes instead of backend workspace 
   assert.match(main, /motionData\.openProjectFile\(result\.category, result\.file_name\)/);
 });
 
-test('MIDI bank entry opens its mapping and then navigates to MIDI input', () => {
-  assert.match(projectExplorer, /data-project-open-midi/);
-  assert.match(projectExplorer, /onNavigate\('motion-midi'\)/);
-  assert.match(projectExplorer, /openInFeature\(category, fileName, 'motion-midi'\)/);
-  assert.match(projectExplorer, /onOpenEditor\(result, targetWorkspace\)/);
-  assert.match(main, /requestedWorkspace \|\| workspaceForProjectCategory/);
-});
 
 test('motion controller owns active panel state without hidden DOM tabs', () => {
   assert.match(motionData, /let activeMotionPanel = 'run'/);
@@ -58,7 +51,6 @@ test('failed file loads cannot reuse a previous selection or race feature naviga
   assert.match(projectExplorer, /await onOpenEditor\(result, targetWorkspace\)/);
   assert.match(main, /onOpenEditor: async \(result, requestedWorkspace = ''\)/);
   assert.match(main, /await motionData\.openProjectFile\(result\.category, result\.file_name\)/);
-  assert.match(main, /if \(target === 'studio'\) await motionStudio\.refresh\(false\)/);
 });
 
 test('project.json loads automatically and remains read-only', () => {

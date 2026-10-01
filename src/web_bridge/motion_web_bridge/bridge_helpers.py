@@ -14,16 +14,13 @@ MOTION_DATA_PERIOD_SEC = CONTROL_PERIOD_SEC
 
 def motor_activity_snapshot(
     motion_run: Dict[str, Any],
-    motion_studio: Dict[str, Any],
     safety_status: Dict[str, Any],
 ) -> Dict[str, Any]:
     """Return one conservative, display-only motor activity classification."""
     run = motion_run if isinstance(motion_run, dict) else {}
-    studio = motion_studio if isinstance(motion_studio, dict) else {}
     safety = safety_status if isinstance(safety_status, dict) else {}
     run_state = str(run.get('state') or 'idle')
     run_phase = str(run.get('phase') or '')
-    studio_state = str(studio.get('state') or 'idle')
     owner = str(safety.get('command_owner') or 'none')
     manual_values = safety.get('manual_activity_modes')
     if not isinstance(manual_values, list):
@@ -53,20 +50,6 @@ def motor_activity_snapshot(
             'source': 'motion_run',
             'warning': False,
         }
-    if run_state == 'initialized' and studio_state == 'initializing':
-        return {
-            'active': False,
-            'kind': 'initialized',
-            'label': '',
-            'source': 'motion_run',
-            'warning': False,
-        }
-    if studio_state == 'initializing':
-        return active('initializing', '초기 위치 이동 중', 'motion_studio')
-    if studio_state == 'playing':
-        return active('studio_playback', '모션 스튜디오 동작 중', 'motion_studio')
-    if studio_state == 'recording':
-        return active('studio_recording', '모션 스튜디오 녹화 중', 'motion_studio')
     if 'action' in manual_modes:
         return active('action', '동작 모드 동작 중', 'motion_supervisor')
     if 'jog' in manual_modes:

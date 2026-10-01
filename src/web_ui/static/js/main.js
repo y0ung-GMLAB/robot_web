@@ -7,16 +7,13 @@ import {
   restartManagedProgram,
   setMonitoringEnabled,
   stopMotionRun,
-  stopMotionStudio,
   setProjectAheadHandler,
   setProjectGeneration,
   fetchSystemVersion,
 } from './api.js';
 import { getElements } from './dom.js';
 import { createMotorEventLogController } from './event_log.js';
-import { createMidiMonitorController } from './midi_monitor.js';
 import { createMotionDataController } from './motion_data.js';
-import { createMotionStudioController } from './motion_studio.js';
 import { createMotionTestController } from './motion_test.js';
 import { createMotorConfigController } from './motor_config.js';
 import { createProjectExplorerController } from './project_explorer.js';
@@ -114,14 +111,6 @@ function blockWorkspaceForMotorIdentity(workspace) {
  * 긴급정지를 누른 직후도 화면이 먼저 안다 · 서버 응답을 기다리는 동안
  * 버튼이 살아 있으면 안 되므로 그 한 번은 앞세운다.
  */
-function studioMotorActionBlockReason() {
-  if (appState.emergencyLatched) return '긴급정지 잠김 상태입니다. 프로그램 재시작이 필요합니다.';
-  if (appState.motorIdentityBlockMessage) return appState.motorIdentityBlockMessage;
-  const answered = appState.motorActionBlocker;
-  if (typeof answered === 'string') return answered;
-  return '모터 동작 가능 상태를 아직 확인하지 못했습니다.';
-}
-
 function renderWorkspacePanel() {
   const activeWorkspace = normalizeWorkspaceRoute(workspaceRouteState.current());
   const activeGroup = workspaceGroupFor(activeWorkspace);
@@ -263,15 +252,12 @@ function acceptProjectPayload(payload) {
     clearBrowserProjectMemory(generation);
     motionTest.resetProjectState();
     motionData.resetProjectState();
-    midiMonitor.resetProjectState();
-    motionStudio.resetProjectState();
     motorEventLog.resetProjectState();
     servoAlarm?.resetProjectState();
     Promise.resolve().then(async () => {
       await projectExplorer.refresh(true);
       await motorConfig.loadProjectRegistry();
       await motionData.fetchFiles();
-      await motionStudio.refresh(false);
       await servoAlarm?.refresh();
     }).catch(() => {});
   }
@@ -300,10 +286,9 @@ function acceptProjectPayload(payload) {
  * (`EMERGENCY_LATCHED_MESSAGE`) · 화면이 같은 판단을 한 벌 더 하면, 두 판단이
  * 갈리는 날 사람이 갇힌다 · 실제로 갇혔다.
  *
- * **버튼마다의 판단도 이미 따로 있다** · `studioMotorActionBlockReason()` 이
- * 서버가 내려준 `motor_action_blocker` 를 읽어 모터 버튼을 끈다 · 그것이
- * 주인이 하나인 방식이다 · 여기서 하던 일은 그 위에 덮어씌우는 두 번째
- * 빗장이었을 뿐이다.
+ * **버튼마다의 판단도 이미 따로 있다** · 동작 테스트의 차단 판정이 서버가
+ * 내려준 상태를 읽어 모터 버튼을 끈다 · 그것이 주인이 하나인 방식이다 ·
+ * 여기서 하던 일은 그 위에 덮어씌우는 두 번째 빗장이었을 뿐이다.
  *
  * 그래서 이제 여기서는 **알리기만** 한다 — 띠를 띄우고 몸통에 표시를 남긴다.
  */
@@ -846,7 +831,7 @@ function restartReadyState(payload) {
     return {
       ready: true,
       title: '프로그램 재시작 완료',
-      detail: '웹·Supervisor·모션 실행·MIDI 재연결 확인 · 모터 제어 상태는 변경하지 않음',
+      detail: '웹·Supervisor·모션 실행 재연결 확인 · 모터 제어 상태는 변경하지 않음',
     };
   }
   const runtime = payload?.service_management?.runtime || {};
@@ -980,7 +965,7 @@ function updateRestartProgress(payload = null) {
   const programRestart = appState.restartCheckMode === 'program';
   const state = restartReadyState(payload);
   const message = programRestart
-    ? '웹·Supervisor·모션 실행·MIDI가 다시 연결됐는지 확인하는 중입니다.'
+    ? '웹·Supervisor·모션 실행이 다시 연결됐는지 확인하는 중입니다.'
     : [
       'motor_manager_node, motion_state_monitor, motion_supervisor, motion_web_bridge 상태를 확인하는 중입니다.',
       'YAML 등록 수가 아니라 직접 검색되거나 실제 감지된 모터를 기준으로 확인합니다.',
@@ -1096,25 +1081,11 @@ const motionData = createMotionDataController({
   getLatestState: () => appState.latestState,
   getConfiguredMotors: () => motorConfig.getConfiguredMotors(),
   onProjectFilesChange: () => projectExplorer.refresh(true),
-  onExportMotionFileToStudio: (fileName) => motionStudio.addMotionFile(fileName),
   // 실행 화면이 "그룹" 범위를 고르면 이 창구로 나간다 · 버튼은 한 벌이고
   // 어디로 나갈지만 범위가 정한다 · §6-65
   groupRun: coordination.groupRun,
 });
 
-const midiMonitor = createMidiMonitorController({
-  el,
-  onMappingFileSaved: (file) => motionData.syncMappingFileRevision(file),
-});
-const motionStudio = createMotionStudioController({
-  el,
-  getMotorActionBlockReason: studioMotorActionBlockReason,
-  getConfiguredMotors: () => motorConfig.getConfiguredMotors(),
-  onMotionFilesChange: async () => {
-    await motionData.refreshMotionFiles();
-    await projectExplorer.refresh(true);
-  },
-});
 projectExplorer = createProjectExplorerController({
   el,
   canChangeProject: () => canChangeProjectInWorkspace(workspaceRouteState.current()),
@@ -1134,7 +1105,6 @@ projectExplorer = createProjectExplorerController({
     if (['motions', 'motion_axis_matching'].includes(result.category)) {
       await motionData.openProjectFile(result.category, result.file_name);
     }
-    if (target === 'studio') await motionStudio.refresh(false);
   },
   onManageFile: () => {
     // 편집기는 프로젝트 관리 화면에 있다 · 시스템 정보에서 갈라 나왔다 · §6-67
@@ -1145,13 +1115,10 @@ projectExplorer = createProjectExplorerController({
     clearBrowserProjectMemory(projectGeneration);
     motionTest.resetProjectState();
     motionData.resetProjectState();
-    midiMonitor.resetProjectState();
-    motionStudio.resetProjectState();
     motorEventLog.resetProjectState();
     servoAlarm?.resetProjectState();
     await motorConfig.loadProjectRegistry();
     await motionData.fetchFiles();
-    await motionStudio.refresh(false);
     await servoAlarm?.refresh();
   },
   onNavigate: (workspace, motionTab) => {
@@ -1241,8 +1208,6 @@ async function fetchStatus(triggerButton = el.refreshButton) {
     }
     renderServiceManagement(payload);
     renderAccess(payload, el);
-    midiMonitor.renderSnapshot(payload.midi_monitor || {});
-    motionStudio.renderSnapshot(payload.motion_studio || {}, payload.midi_monitor || {});
     renderLatestState(motionStateFromPayload(payload));
     updateRestartProgress(payload);
     triggerButton.textContent = `확인 완료 ${new Date().toLocaleTimeString()}`;
@@ -1310,8 +1275,6 @@ function connectSocket() {
       if (!acceptProjectPayload(payload)) return;
       renderServiceManagement(payload);
       renderAccess(payload, el);
-      midiMonitor.renderSnapshot(payload.midi_monitor || {});
-      motionStudio.renderSnapshot(payload.motion_studio || {}, payload.midi_monitor || {});
       renderLatestState(motionStateFromPayload(payload));
       updateRestartProgress(payload);
     },
@@ -1410,7 +1373,7 @@ if (el.programRestartButton) {
     setRestartOverlay(
       true,
       '프로그램 재시작 중입니다',
-      '웹·Supervisor·모션 실행·MIDI가 다시 실행되고 웹도 자동으로 연결됩니다.',
+      '웹·Supervisor·모션 실행이 다시 실행되고 웹도 자동으로 연결됩니다.',
       '재시작 요청 전송 중',
     );
     startRestartProgressPolling();
@@ -1449,7 +1412,6 @@ async function runSafetyStop(emergency) {
     const stopCommandSources = async () => {
       const cleanup = [
         ['모션 동작', stopMotionRun()],
-        ['모션 스튜디오', stopMotionStudio()],
       ];
       const results = await Promise.allSettled(cleanup.map(([, request]) => request));
       return results.flatMap((result, index) => {
@@ -1575,7 +1537,6 @@ if (el.workspaceTabs) {
       if (!target) return;
       renderLatestState();
       if (target === 'log') motorEventLog.activate();
-      if (target === 'studio') motionStudio.refresh(false);
       if (target === 'config') motorConfig.fetchRegistry();
       if (target === 'servo-errors') servoAlarm.refresh();
       if (target === 'motion-run') coordination.refresh();
@@ -1588,7 +1549,6 @@ if (el.workspaceTabs) {
     if (!target) return;
     renderLatestState();
     if (target === 'log') motorEventLog.activate();
-    if (target === 'studio') motionStudio.refresh(false);
     if (target === 'config') motorConfig.fetchRegistry();
     if (target === 'servo-errors') servoAlarm.refresh();
     if (target === 'motion-run') coordination.refresh();
@@ -1599,7 +1559,6 @@ if (el.workspaceTabs) {
 motorConfig.bindEvents();
 motionTest.bindEvents();
 motionData.bindEvents();
-motionStudio.bindEvents();
 projectExplorer.bindEvents();
 motorEventLog.bindEvents();
 servoAlarm.bindEvents();
@@ -1609,14 +1568,6 @@ connectSocket();
 fetchStatus();
 motorConfig.fetchRegistry();
 motionData.fetchFiles();
-// 스튜디오를 **보고 있을 때만** 받는다 · §6-260
-//
-// 레이어를 다 실어 오므로 10분짜리 모션이 있으면 한 번에 5.2MB 다 · 탭을
-// 누를 때도 같은 것을 받으므로, 다른 화면으로 시작하면 아무도 안 보는 것을
-// 받고 곧바로 또 받았다 · 실측으로 탭을 여는 데 11.2초였다.
-if (normalizeWorkspaceRoute(workspaceRouteState.current()) === 'studio') {
-  motionStudio.refresh(false);
-}
 projectExplorer.refresh(true);
 servoAlarm.refresh();
 

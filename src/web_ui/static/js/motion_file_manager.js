@@ -8,7 +8,6 @@ import { showAlert, showConfirm } from './ui_dialogs.js';
 export function createMotionFileManager({
   onFilesChanged,
   onFileSelected,
-  onExportToStudio,
   onProjectFilesChange,
   setMessage,
   setLoading,
@@ -84,48 +83,6 @@ export function createMotionFileManager({
     }
   }
 
-  async function exportSelectedFileToStudio() {
-    const file = selectedFile;
-    if (!file) {
-      await showAlert(
-        '스튜디오로 내보낼 모션 파일을 먼저 선택하세요.',
-        { title: '스튜디오 내보내기', confirmLabel: '확인', tone: 'warning' }
-      );
-      return;
-    }
-    setLoading(true);
-    setMessage(`${file.filename} 스튜디오 내보내기 중`);
-    try {
-      const result = await onExportToStudio(file.id);
-      if (!result || result.success === false) {
-        throw new Error(result?.message || '스튜디오가 모션 파일을 받지 못했습니다');
-      }
-      const layers = Array.isArray(result.project?.layers)
-        ? result.project.layers
-        : (result.project_patch?.upsert_layers || []);
-      const exportedLayer = [...layers].reverse().find(
-        (layer) => layer?.source_motion_file_id === file.id
-      );
-      const layerName = String(
-        exportedLayer?.name || file.filename.replace(/\.json$/i, '')
-      );
-      setMessage(`스튜디오 내보내기 완료: ${file.filename} → ${layerName}`);
-      await showAlert(
-        `모션 파일을 스튜디오의 독립 레이어로 내보냈습니다.\n`
-        + `파일 · ${file.filename}\n레이어 · ${layerName}`,
-        { title: '스튜디오 내보내기 완료', confirmLabel: '확인', tone: 'info' }
-      );
-    } catch (error) {
-      const message = error?.message || String(error);
-      setMessage(`스튜디오 내보내기 실패: ${message}`);
-      await showAlert(
-        `모션 파일을 스튜디오로 내보내지 못했습니다.\n원인 · ${message}`,
-        { title: '스튜디오 내보내기 실패', confirmLabel: '확인', tone: 'danger' }
-      );
-    } finally {
-      setLoading(false);
-    }
-  }
 
   async function showMotionFileDeleteFailure(message) {
     await showAlert(
@@ -183,7 +140,6 @@ export function createMotionFileManager({
     getSelectedFile: () => selectedFile,
     loadFiles,
     selectFile,
-    exportSelectedFileToStudio,
     deleteSelectedFile,
   };
 }

@@ -11,6 +11,9 @@
 
 from __future__ import annotations
 
+import hashlib
+import json
+
 from pathlib import Path
 from typing import Any, Dict
 
@@ -23,6 +26,27 @@ from .project_paths import (
     _sha256_file,
     local_directory,
 )
+
+
+def _project_tree_category_signature(tree: Any, category: str) -> str:
+    """한 분류의 파일 이름·해시 서명 · motion_studio_sync 에서 이사 왔다."""
+    rows = []
+    for folder in tree or []:
+        if not isinstance(folder, dict) or folder.get('category') != category:
+            continue
+        rows.extend(
+            (
+                str(file_info.get('name') or ''),
+                str(file_info.get('sha256') or ''),
+            )
+            for file_info in folder.get('children') or []
+            if isinstance(file_info, dict)
+        )
+    return hashlib.sha256(
+        json.dumps(
+            sorted(rows), ensure_ascii=False, separators=(',', ':')
+        ).encode('utf-8')
+    ).hexdigest()
 
 
 def build_tree(project_dir: Path, manifest: Dict[str, Any]) -> list[Dict[str, Any]]:

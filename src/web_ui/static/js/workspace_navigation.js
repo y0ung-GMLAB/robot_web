@@ -5,8 +5,6 @@ export const WORKSPACE_GROUPS = Object.freeze({
   setup: Object.freeze(['system', 'project', 'config']),
   creation: Object.freeze([
     'motion-mapping',
-    'motion-midi',
-    'studio',
   ]),
   execution: Object.freeze(['manual', 'motion-run', 'coordination']),
 });
@@ -14,13 +12,12 @@ export const WORKSPACE_GROUPS = Object.freeze({
 const WORKSPACE_DEFAULTS = Object.freeze({
   operations: 'monitoring',
   setup: 'system',
-  creation: 'studio',
+  creation: 'motion-mapping',
   execution: 'manual',
 });
 
 const MOTION_WORKSPACE_TABS = Object.freeze({
   'motion-mapping': 'mapping',
-  'motion-midi': 'midi',
   'motion-run': 'run',
 });
 
@@ -28,10 +25,6 @@ export const MOTION_WORKSPACE_DETAILS = Object.freeze({
   'motion-mapping': Object.freeze([
     '모션축 설정',
     '모션 ID를 프로젝트 모터축에 연결하고 실행 변환값을 설정합니다',
-  ]),
-  'motion-midi': Object.freeze([
-    'MIDI 입력 설정',
-    'MIDI 연결, 뱅크 및 채널별 모션 입력을 설정합니다',
   ]),
   'motion-run': Object.freeze([
     '모션 실행',
@@ -90,7 +83,6 @@ export function workspaceForProjectCategory(
     motor_axes: 'config',
     motion_axis_matching: 'motion-mapping',
     motions: 'motion-run',
-    layers: 'studio',
     logs: 'log',
   };
   return routes[String(category || '')]

@@ -174,31 +174,10 @@ export function createProjectExplorerController({
         const managedInFeature = file.category === 'motions';
         const selected = state.selectedFile?.category === file.category
           && state.selectedFile?.file_name === file.name;
-        const bankInfo = file.category === 'motion_axis_matching' ? file.midi_banks : null;
-        const midiRouteAttributes = bankInfo
-          ? `data-project-open-midi data-project-category="${escapeHtml(file.category)}" data-project-file="${escapeHtml(file.name)}"`
-          : '';
         const fileBadge = isLogFile
           ? `<span class="project-tree-log-count">${Number(file.record_count) || 0}건</span>`
           : (file.active ? '<span class="project-tree-active">현재</span>' : '');
-        const bankTree = bankInfo ? (() => {
-          if (!bankInfo.stored) {
-            return `<button type="button" class="project-tree-midi project-tree-midi-missing" ${midiRouteAttributes}>`
-              + '<span class="project-tree-branch">└</span><span>MIDI 뱅크</span><small>미저장</small></button>';
-          }
-          const banks = (bankInfo.banks || []).map((bank, bankIndex) => (
-            '<div class="project-tree-midi-bank">'
-            + `<span class="project-tree-branch">${bankIndex === bankInfo.banks.length - 1 ? '└' : '├'}</span>`
-            + `<span>${escapeHtml(bank.name)}</span>`
-            + `${bank.bank_id === bankInfo.active_bank_id ? '<small class="project-tree-midi-active">현재</small>' : ''}`
-            + `<small>${Number(bank.mapping_count) || 0}채널</small></div>`
-          )).join('');
-          return '<div class="project-tree-midi-group">'
-            + `<button type="button" class="project-tree-midi" ${midiRouteAttributes}>`
-            + '<span class="project-tree-branch">└</span>'
-            + `<span>MIDI 뱅크</span><small>${Number(bankInfo.count) || 0}개</small></button>`
-            + `<div class="project-tree-midi-banks">${banks || '<div class="project-tree-midi-bank empty">뱅크 없음</div>'}</div></div>`;
-        })() : '';
+        const bankTree = '';
         return `<div class="project-tree-file-entry"><div class="project-tree-file-row${selected ? ' selected' : ''}" `
           + `data-project-category="${escapeHtml(file.category)}" data-project-file="${escapeHtml(file.name)}">`
           + `<button type="button" class="project-tree-file" ${isLogFile ? 'data-project-log-open' : 'data-project-open'} title="${escapeHtml(file.name)} · ${isLogFile ? '로그 탭에서 보기' : '기능에서 열기'}">`
@@ -326,7 +305,6 @@ export function createProjectExplorerController({
       ['config', '', '실행 설정 적용', Boolean(status.motor_applied)],
       ['manual', '', '조그 확인', Boolean(status.jog_verified)],
       ['motion', 'mapping', '모션축 설정', Boolean(status.motion_axes_configured)],
-      ['studio', '', '첫 모션 제작', Number(status.motion_count) > 0],
     ];
     el.projectSetupProgress.innerHTML = '<strong>처음 설정</strong>' + steps.map((step, index) => (
       `<button type="button" data-setup-workspace="${step[0]}" data-setup-motion-tab="${step[1]}">`
@@ -776,11 +754,6 @@ export function createProjectExplorerController({
       const fileName = row.dataset.projectFile;
       if (category === 'logs') {
         onNavigate('log');
-        return;
-      }
-      if (event.target.closest('[data-project-open-midi]')) {
-        onNavigate('motion-midi');
-        await openInFeature(category, fileName, 'motion-midi');
         return;
       }
       if (event.target.closest('[data-project-manage]')) {

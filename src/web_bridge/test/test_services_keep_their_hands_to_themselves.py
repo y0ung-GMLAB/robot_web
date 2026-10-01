@@ -9,13 +9,13 @@
         self.bridge._motion_state = None
     with self.bridge._motion_run_lock:
         self.bridge._motion_run_status = {}
-    with self.bridge._midi_monitor_lock:
-        self.bridge._midi_monitor_status = {}
-    self.bridge._midi_monitor_store.clear()
+    with self.bridge._motion_run_lock:
+        self.bridge._motion_run_status = {}
+    self.bridge._motion_run_store.clear()
     ...
 
 프로젝트를 다루는 쪽이 **브리지의 속살 13가지**와 **락 3개**를 알아야 했다 ·
-그래서 프로젝트를 건드릴 때마다 MIDI·모터·스튜디오가 딸려 왔고, 어느 하나의
+그래서 프로젝트를 건드릴 때마다 모터·실행 상태가 딸려 왔고, 어느 하나의
 이름이 바뀌면 프로젝트 쪽이 깨졌다.
 
 이제 프로젝트 쪽은 한 마디만 한다 — 「잊어라」 · 무엇을 어떻게 잊을지는
@@ -165,13 +165,10 @@ def test_the_owner_clears_everything_it_used_to():
         'self._motion_state = None',
         'self._motion_state_received_at = None',
         'self._motion_run_status = {}',
-        'self._midi_monitor_status = {}',
         'self._motor_event_log.clear_project_memory()',
         'self._manual.clear_pending()',
         'self._motion_mapping_store.clear()',
         'self._motion_run_store.clear()',
-        'self._midi_monitor_store.clear()',
-        'self._motion_studio_sync().clear_project_memory()',
         'scan.clear_progress()',
     ):
         assert cleared in body, f'버리는 것을 빠뜨렸습니다: {cleared}'
@@ -183,6 +180,5 @@ def test_the_locks_are_still_taken():
     start = text.index('def forget_project_memory(')
     body = text[start:text.index('\n    def ', start)]
 
-    for lock in ('with self._lock:', 'with self._motion_run_lock:',
-                 'with self._midi_monitor_lock:'):
+    for lock in ('with self._lock:', 'with self._motion_run_lock:'):
         assert lock in body, f'락을 빠뜨렸습니다: {lock}'

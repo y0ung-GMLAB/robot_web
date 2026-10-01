@@ -60,7 +60,7 @@ def test_nothing_is_rewritten_blindly_every_tick():
 def test_the_interactive_tables_go_through_the_guard():
     """누를 것이 든 세 곳은 반드시 `setHtml` 로."""
     source = _source()
-    for element in ('coordinationPeerRows', 'motionRunPeerRows', 'midiTargetChoices'):
+    for element in ('coordinationPeerRows', 'motionRunPeerRows'):
         assert re.search(rf'setHtml\(el\.{element}', source), (
             f'{element} 이 변화 검사를 안 지나갑니다'
         )

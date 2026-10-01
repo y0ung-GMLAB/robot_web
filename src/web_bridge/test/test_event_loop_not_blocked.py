@@ -26,9 +26,7 @@ import pytest
 ROOT = Path(__file__).resolve().parents[2]
 ROUTE_FILES = sorted(
     (ROOT / 'web_bridge' / 'motion_web_bridge' / 'routes').glob('*.py')
-) + [
-    ROOT / 'web_bridge' / 'motion_web_bridge' / 'motion_studio_routes.py'
-]
+)
 
 #: 처리기 안에서 이 이름들을 그냥 부르면 루프 위에서 도는 것이다
 BLOCKING_CALL = re.compile(r'\b(?:bridge|service|store)[\w.]*\(')

@@ -21,7 +21,7 @@
  *
  * **막는 일은 서버가 한다** · 슈퍼바이저가 여덟 자리에서 모터 명령을 거절한다
  * (`EMERGENCY_LATCHED_MESSAGE`) · 버튼마다의 판단도 따로 있다 ·
- * `studioMotorActionBlockReason()` 이 서버가 내려준 `motor_action_blocker` 를
+ * 동작 테스트의 차단 판정이 서버가 내려준 `motor_action_blocker` 를
  * 읽는다 · **같은 판단이 세 벌**이었고, 갈리는 날 사람이 갇혔다.
  */
 
@@ -85,13 +85,10 @@ test('끈 버튼을 되살리던 장치도 남지 않았다', () => {
 });
 
 test('모터 버튼은 서버가 내려준 답으로 끈다', () => {
-  // 화면이 스스로 판단하면 서버와 갈린다 · 주인은 하나다
-  const start = MAIN.indexOf('function studioMotorActionBlockReason() {');
-  assert.ok(start > 0);
-  const body = MAIN.slice(start, MAIN.indexOf('\n}', start));
-
-  assert.match(body, /appState\.motorActionBlocker/);
-  assert.match(body, /appState\.emergencyLatched/);
+  // 화면이 스스로 판단하면 서버와 갈린다 · 주인은 하나다 · 상태는 서버
+  // 스냅샷에서만 읽어 온다 (motor_action_blocker · emergency_latched)
+  assert.match(MAIN, /appState\.motorActionBlocker = typeof payload\?\.motor_action_blocker === 'string'/);
+  assert.match(MAIN, /appState\.emergencyLatched = Boolean\(payload\?\.safety_status\?\.emergency_latched\)/);
 });
 
 test('긴급정지를 알리는 띠가 화면에 있다', () => {

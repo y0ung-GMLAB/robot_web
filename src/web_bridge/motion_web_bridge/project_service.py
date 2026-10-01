@@ -35,7 +35,7 @@ from typing import Any, Dict
 
 import yaml
 
-from motion_web_bridge import motion_studio_session, motor_config_rules
+from motion_web_bridge import motor_config_rules
 
 
 class ProjectService:
@@ -78,7 +78,6 @@ class ProjectService:
         *,
         ignore_motor_lifecycle: bool = False,
         allow_run_stopping: bool = False,
-        allow_studio_stopping: bool = False,
     ) -> str:
         lifecycle_lock = getattr(self.bridge, '_motor_lifecycle_lock', None)
         if (
@@ -102,12 +101,7 @@ class ProjectService:
         else:
             with run_lock:
                 run_status = dict(getattr(self.bridge, '_motion_run_status', {}) or {})
-        studio_session = motion_studio_session.session_of(self.bridge)
-        studio_status = (
-            studio_session.snapshot_status() if studio_session is not None else {}
-        )
         run_state = str((run_status or {}).get('state') or 'idle')
-        studio_state = str((studio_status or {}).get('state') or 'idle')
         blocked_run_states = {
             'initializing',
             'initialized',
@@ -120,13 +114,6 @@ class ProjectService:
             blocked_run_states.discard('stopping')
         if run_state in blocked_run_states:
             return f'모션 동작 상태가 {run_state}이므로 프로젝트를 변경할 수 없습니다'
-        blocked_studio_states = {
-            'initializing', 'countdown', 'recording', 'playing', 'stopping',
-        }
-        if allow_studio_stopping:
-            blocked_studio_states.discard('stopping')
-        if studio_state in blocked_studio_states:
-            return f'모션 스튜디오 상태가 {studio_state}이므로 프로젝트를 변경할 수 없습니다'
         return ''
 
     def payload_matches_selected(

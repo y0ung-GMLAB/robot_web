@@ -99,12 +99,10 @@ class MotorRuntimeService:
         *,
         require_fresh_motor_state: bool = True,
         allow_run_stopping: bool = False,
-        allow_studio_stopping: bool = False,
     ) -> str:
         blocker = self.project.change_blocker(
             ignore_motor_lifecycle=True,
             allow_run_stopping=allow_run_stopping,
-            allow_studio_stopping=allow_studio_stopping,
         )
         if blocker:
             return blocker

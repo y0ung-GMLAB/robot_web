@@ -563,7 +563,6 @@ export function createMotionDataController({
   getConfiguredMotors = null,
   onProjectFilesChange,
   groupRun = null,
-  onExportMotionFileToStudio = async () => null,
 }) {
   let files = [];
   let selectedFileId = null;
@@ -666,8 +665,8 @@ export function createMotionDataController({
     ));
     setMappingMessage(
       mappingDirty
-        ? 'MIDI Bank 저장을 반영했습니다 · 편집 중인 모션축 설정은 유지됩니다'
-        : 'MIDI Bank 저장을 반영했습니다 · 모션축 설정을 계속 편집할 수 있습니다',
+        ? '파일 개정을 반영했습니다 · 편집 중인 모션축 설정은 유지됩니다'
+        : '파일 개정을 반영했습니다 · 모션축 설정을 계속 편집할 수 있습니다',
     );
     return true;
   }
@@ -1570,7 +1569,7 @@ export function createMotionDataController({
     // 'files'는 'run'에 합쳐졌다 · 옛 값이 들어와도 실행 화면을 연다
     const requested = String(active || activeMotionPanel || 'run');
     const next = requested === 'files' ? 'run' : requested;
-    activeMotionPanel = ['mapping', 'midi', 'run'].includes(next) ? next : 'run';
+    activeMotionPanel = ['mapping', 'run'].includes(next) ? next : 'run';
     if (el.motionPanels) {
       el.motionPanels.forEach((panel) => {
         panel.classList.toggle('hidden', panel.dataset.motionPanel !== activeMotionPanel);
@@ -1625,12 +1624,6 @@ export function createMotionDataController({
         ? '재생 등록을 해제한 뒤 삭제할 수 있습니다'
         : '';
     }
-    if (el.exportMotionFileToStudioButton) {
-      el.exportMotionFileToStudioButton.disabled = !file || loading;
-      el.exportMotionFileToStudioButton.title = file
-        ? '선택한 실행 파일을 독립된 스튜디오 레이어로 내보냅니다'
-        : '모션 파일을 먼저 선택하세요';
-    }
     if (el.downloadMotionFileButton) {
       el.downloadMotionFileButton.disabled = !file || !motionProjectId || loading;
       el.downloadMotionFileButton.title = file
@@ -1643,7 +1636,7 @@ export function createMotionDataController({
     // 모션 파일도 못 바꿨고, 등록이 한 번 실패하면 프로그램이 제 손으로 세운
     // 그 표시 때문에 **되돌아갈 길까지 사라졌다**.
     //
-    // 한 파일에 들어 있을 뿐 둘은 남남이다 · MIDI 뱅크가 이미 그렇게
+    // 한 파일에 들어 있을 뿐 둘은 남남이다 · 재생 등록이 이미 그렇게
     // 떨어져 있다.
     if (el.registerMotionFileButton) {
       el.registerMotionFileButton.disabled = (
@@ -2096,12 +2089,9 @@ export function createMotionDataController({
       normalizeDynamixelGearRatios();
       mappingDirty = false;
       mappingRevisionConflict = false;
-      const midiWarning = String(payload.midi_banks_warning || '').trim();
       const mappingFileName = payload.file?.filename || payload.file?.id || selectedMappingId || '-';
       const motionFileName = mappingDraft.motion_file_id || '-';
-      setMappingMessage(midiWarning
-        ? `모션축 설정: ${mappingFileName} · 모션 데이터: ${motionFileName} · MIDI 뱅크: ${midiWarning}`
-        : `모션축 설정: ${mappingFileName} · 모션 데이터: ${motionFileName} · MIDI 뱅크 적용 완료`);
+      setMappingMessage(`모션축 설정: ${mappingFileName} · 모션 데이터: ${motionFileName}`);
     } catch (error) {
       if (loadToken !== mappingLoadToken || error?.staleProjectResponse) return;
       setMappingMessage(`매핑 파일 실패: ${error?.message || error}`);
@@ -2156,8 +2146,8 @@ export function createMotionDataController({
    *   둘  · 설정 개정 검사에 걸려 「모션축 설정 저장 충돌」 창이 뜬다
    *
    * 모션 데이터만 건드린 사람에게 편집한 적도 없는 설정을 되돌릴지 묻는
-   * 창이 떴다 · 셋(모션축 설정 · MIDI 뱅크 · 재생 등록)은 한 파일에 들어
-   * 있을 뿐 서로 남남이다 · MIDI 가 이미 제 길로 다닌다.
+   * 창이 떴다 · 모션축 설정과 재생 등록은 한 파일에 들어 있을 뿐
+   * 서로 남남이다.
    */
   async function applyMotionFileRegistration(fileId, detail, label) {
     setMappingMessage(label);
@@ -2293,7 +2283,7 @@ export function createMotionDataController({
       mappingRevisionConflict = false;
       setMappingMessage(payload.message || (
         payload.runtime_applied
-          ? `모션축 설정 저장 완료: ${selectedMappingId} · MIDI 적용 완료`
+          ? `모션축 설정 저장 완료: ${selectedMappingId} · 실행 컨텍스트 적용 완료`
           : `모션축 설정 저장 완료: ${selectedMappingId}`
       ));
       await onProjectFilesChange?.();
@@ -2467,11 +2457,6 @@ export function createMotionDataController({
       render();
     },
     onFileSelected: (id, file) => { selectedFileId = id; selectedFile = file; render(); },
-    onExportToStudio: async (id) => {
-      const result = await onExportMotionFileToStudio(id);
-      await onProjectFilesChange?.();
-      return result;
-    },
     onProjectFilesChange: () => onProjectFilesChange?.(),
     setMessage: setMessage,
     setLoading: (l) => { loading = l; render(); },
@@ -2480,7 +2465,6 @@ export function createMotionDataController({
 
   async function loadFiles(id) { return fileManager.loadFiles(id); }
   async function selectFile(id, token) { return fileManager.selectFile(id, token); }
-  async function exportSelectedFileToStudio() { return fileManager.exportSelectedFileToStudio(); }
   async function deleteSelectedFile() { return fileManager.deleteSelectedFile(); }
 
 
@@ -2735,7 +2719,6 @@ export function createMotionDataController({
     }
     el.registerMotionFileButton?.addEventListener('click', registerSelectedMotionFile);
     el.unregisterMotionFileButton?.addEventListener('click', unregisterSelectedMotionFile);
-    el.exportMotionFileToStudioButton?.addEventListener('click', exportSelectedFileToStudio);
     el.downloadMotionFileButton?.addEventListener('click', downloadSelectedMotionFile);
     if (el.deleteMotionFileButton) {
       el.deleteMotionFileButton.addEventListener('click', deleteSelectedFile);
@@ -2864,7 +2847,6 @@ export function createMotionDataController({
       if (category === 'motion_axis_matching') await loadMappings(fileName);
     },
     refreshMappingAfterReconnect,
-    syncMappingFileRevision,
     render,
     renderRuntimeState,
     showTab: (tab) => {

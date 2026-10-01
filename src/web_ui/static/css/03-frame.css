@@ -1,65 +1,11 @@
-/* 스튜디오 틀 · 공용 패널
+/* 공용 틀 · 상단바 · 패널 · 버튼
  *
  * `styles.css` 7,415줄을 순서 그대로 자른 조각이다 · §6-43
- * 원본 1071~1779줄 · **연결 순서를 바꾸면 겹치기(cascade)가 달라진다.**
+ * 원본 1071~1779줄 · 스튜디오 삭제로 스튜디오 규칙만 빠졌다 ·
+ * **연결 순서를 바꾸면 겹치기(cascade)가 달라진다.**
  */
-.studio-grid {
-  display: grid;
-  grid-template-columns: minmax(360px, 0.82fr) minmax(0, 1.18fr);
-  gap: 14px;
-  align-items: start;
-  min-width: 0;
-}
-
-.studio-grid > * {
-  min-width: 0;
-}
-
-.studio-transport-panel {
-  grid-column: 1 / -1;
-}
-
-.studio-transport-panel {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(230px, 0.34fr);
-  gap: 10px 14px;
-  align-items: center;
-}
-
-.studio-transport-panel > .section-head {
-  grid-column: 1 / -1;
-}
-
-.studio-transport-actions {
-  margin: 0;
-}
-
-.studio-layer-panel {
-  grid-column: 1;
-  grid-row: 2;
-  min-width: 0;
-}
-
-.studio-graph-panel {
-  grid-column: 2;
-  grid-row: 2;
-  min-width: 0;
-}
-#studioExportName {
-  min-height: 36px;
-}
-
-
 .error-text {
   color: #ff7979 !important;
-}
-
-@media (max-width: 1180px) {
-  .studio-grid { grid-template-columns: 1fr; }
-  .studio-transport-panel { grid-template-columns: 1fr; }
-  .studio-transport-panel > * { grid-column: 1; }
-  .studio-layer-panel { grid-column: 1; grid-row: 2; }
-  .studio-graph-panel { grid-column: 1; grid-row: 3; }
 }
 
 * {
@@ -542,15 +488,6 @@ button[aria-disabled="true"] {
 
 /* 추가 녹화 · 어느 축을 녹화할 수 있는지 누르기 전에 알린다.
    녹화를 시작하고 나서야 "녹화된 축이 없습니다"로 끝나면 한 번을 헛돌린다 · §6-71 */
-.studio-overdub-hint {
-  margin: 6px 0 0;
-  padding: 6px 10px;
-  border: 1px solid #d7e2ee;
-  border-radius: 6px;
-  background: #f4f8fc;
-  color: #4a5666;
-  font-size: 12px;
-}
 
 /* 세션 버튼을 뱃지 줄에 태운다 · §6-100 · 버튼 세 개로 한 줄을 통째로 쓰던
    자리를 없앤다 */

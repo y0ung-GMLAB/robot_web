@@ -213,7 +213,7 @@ export const clearMotorRuntimeApplication = () => request('POST', '/api/system/m
  *
  * 74개 함수가 거의 같은 여섯 줄을 반복하고 있었다 · 봉투가 같으니 표로 쓰면
  * 어떤 화면이 어느 엔드포인트를 쓰는지 한눈에 보인다. 이 파일 안에 이미
- * `motionStudioRequest` 로 같은 꼴이 있었다 · 그 관례를 파일 전체로 넓힌다.
+ * 요청은 전부 이 한 함수를 지난다.
  */
 async function request(method, path, { body, timeoutMs, projectScoped = true } = {}) {
   const options = { method };
@@ -225,33 +225,6 @@ async function request(method, path, { body, timeoutMs, projectScoped = true } =
   return readJson(await projectFetch(path, options), { projectScoped });
 }
 
-
-async function motionStudioRequest(path = '', method = 'GET', payload = null) {
-  const options = { method };
-  if (payload !== null) {
-    options.headers = { 'Content-Type': 'application/json' };
-    options.body = JSON.stringify(payload);
-  }
-  const response = await projectFetch(`/api/motion-studio${path}`, options);
-  return readJson(response);
-}
-
-export const fetchMotionStudio = () => motionStudioRequest();
-export const importMotionStudioFile = (payload) => motionStudioRequest('/import', 'POST', payload);
-export const saveMotionStudioProject = (payload) => motionStudioRequest('/project', 'PUT', payload);
-export const createMotionStudioLayer = (payload = {}) => motionStudioRequest('/layers', 'POST', payload);
-export const updateMotionStudioLayer = (payload) => motionStudioRequest('/layers', 'PUT', payload);
-export const saveMotionStudioLayerData = (payload) => motionStudioRequest('/layers/data', 'PUT', payload);
-export const deleteMotionStudioLayer = (layerId) => motionStudioRequest(`/layers/${encodeURIComponent(layerId)}`, 'DELETE');
-export const duplicateMotionStudioLayer = (layerId) => motionStudioRequest(`/layers/${encodeURIComponent(layerId)}/duplicate`, 'POST');
-export const editMotionStudioLayer = (payload) => motionStudioRequest('/editor/transform', 'POST', payload);
-export const previewMotionStudioMerge = (payload) => motionStudioRequest('/editor/merge-preview', 'POST', payload);
-export const commitMotionStudioMerge = (payload) => motionStudioRequest('/layers/merge', 'POST', payload);
-export const startMotionStudioRecord = (payload) => motionStudioRequest('/record', 'POST', payload);
-export const startMotionStudioInitialization = (payload) => motionStudioRequest('/initialize', 'POST', payload);
-export const startMotionStudioPlayback = (payload) => motionStudioRequest('/play', 'POST', payload);
-export const stopMotionStudio = () => motionStudioRequest('/stop', 'POST');
-export const exportMotionStudio = (fileId) => motionStudioRequest('/export', 'POST', { file_id: fileId });
 
 export async function fetchMotorEvents(category = 'all', limit = 300, fileName = 'all') {
   const query = new URLSearchParams({
@@ -387,25 +360,6 @@ export const stopMotionRunAfterCycle = () => request('POST', '/api/motion-run/st
 export const requestMotionSafetyStop = () => request('POST', '/api/safety/motion-stop');
 
 export const requestEmergencySafetyStop = () => request('POST', '/api/safety/emergency-stop');
-
-export const fetchMidiMonitor = () => request('GET', '/api/midi-monitor');
-
-
-export const createMidiBank = (payload = {}) => request('POST', '/api/midi-monitor/banks', { body: payload });
-
-export const selectMidiBank = (bankId) =>
-  request('POST', `/api/midi-monitor/banks/${encodeURIComponent(bankId)}/select`);
-
-export const updateMidiBank = (bankId, payload) =>
-  request('PUT', `/api/midi-monitor/banks/${encodeURIComponent(bankId)}`, { body: payload });
-
-export const deleteMidiBank = (bankId) => request('DELETE', `/api/midi-monitor/banks/${encodeURIComponent(bankId)}`);
-
-export const loadMidiBanksFromFile = () => request('POST', '/api/midi-monitor/banks/file/load');
-
-export const resetMidiRuntimeValues = () => request('POST', '/api/midi-monitor/runtime/reset');
-
-export const connectMidiDevice = () => request('POST', '/api/midi-monitor/device/connect');
 
 export const requestAcServoJog = (payload) => request('POST', '/api/motion-test/ac-servo/jog', { body: payload });
 

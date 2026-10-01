@@ -511,14 +511,4 @@ body.app-dialog-open {
   overflow: hidden;
 }
 
-.midi-monitor-layout {
-  display: grid;
-  gap: 14px;
-  min-width: 0;
-}
-
-.midi-monitor-layout > *,
-.motion-tab-panel {
-  min-width: 0;
-}
 

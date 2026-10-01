@@ -155,10 +155,6 @@
     grid-template-columns: 1fr;
   }
 
-  .midi-safety-notice {
-    align-items: flex-start;
-    flex-direction: column;
-  }
 
   .workspace-tabs {
     flex-wrap: wrap;

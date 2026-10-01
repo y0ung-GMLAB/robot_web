@@ -18,7 +18,7 @@ test('two-level workspace navigation exposes every defined group and route', () 
   }
   for (const route of [
     'monitoring', 'log', 'system', 'config',
-    'motion-mapping', 'motion-midi', 'studio',
+    'motion-mapping',
     'manual', 'motion-run',
   ]) {
     assert.match(html, new RegExp(`data-workspace-tab=["']${route}["']`));
@@ -44,7 +44,7 @@ test('motion files are managed inside the execution screen, not a separate tab',
 test('motion screens use workspace routes without obsolete internal tab controls', () => {
   assert.doesNotMatch(html, /id=["']motionTabs["']/);
   assert.doesNotMatch(html, /data-motion-tab=/);
-  for (const panel of ['mapping', 'midi', 'run']) {
+  for (const panel of ['mapping', 'run']) {
     assert.match(html, new RegExp(`data-motion-panel=["']${panel}["']`));
   }
   // 'files' 패널은 'run' 으로 합쳐졌다 · 목록과 실행이 같은 화면에 뜬다
