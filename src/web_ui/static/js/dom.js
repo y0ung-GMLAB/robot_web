@@ -203,6 +203,8 @@ export function getElements() {
     motionTestActualState: document.getElementById('motionTestActualState'),
     motionTestActualText: document.getElementById('motionTestActualText'),
     motionPanels: document.querySelectorAll('[data-motion-panel]'),
+    manualFaderMessage: document.getElementById('manualFaderMessage'),
+    manualFaderList: document.getElementById('manualFaderList'),
     motionWorkspaceTitle: document.getElementById('motionWorkspaceTitle'),
     motionWorkspaceSubtitle: document.getElementById('motionWorkspaceSubtitle'),
     downloadMotionFileButton: document.getElementById('downloadMotionFileButton'),

@@ -15,6 +15,7 @@ import { getElements } from './dom.js';
 import { createMotorEventLogController } from './event_log.js';
 import { createMotionDataController } from './motion_data.js';
 import { createMotionTestController } from './motion_test.js';
+import { createManualFaderController } from './manual_fader.js';
 import { createMotorConfigController } from './motor_config.js';
 import { createProjectExplorerController } from './project_explorer.js';
 import { renderAccess, renderMonitoring } from './monitoring.js';
@@ -190,6 +191,7 @@ function renderLatestState(nextState = null) {
   });
   motorConfig.renderRuntimeState();
   motionTest.renderLatestState();
+  manualFader.renderRuntimeState();
   motionData.renderRuntimeState();
   servoAlarm?.renderRuntimeState();
   renderMotorActivity(appState.latestState.motor_activity);
@@ -250,6 +252,7 @@ function acceptProjectPayload(payload) {
   if (generation > appState.projectGeneration) {
     clearBrowserProjectMemory(generation);
     motionTest.resetProjectState();
+    manualFader.onProjectChange();
     motionData.resetProjectState();
     motorEventLog.resetProjectState();
     servoAlarm?.resetProjectState();
@@ -1075,6 +1078,11 @@ motionTest = createMotionTestController({
   getLatestState: () => appState.latestState,
 });
 
+const manualFader = createManualFaderController({
+  el,
+  getLatestState: () => appState.latestState,
+});
+
 const motionData = createMotionDataController({
   el,
   getLatestState: () => appState.latestState,
@@ -1113,6 +1121,7 @@ projectExplorer = createProjectExplorerController({
   onProjectChange: async (project, projectGeneration) => {
     clearBrowserProjectMemory(projectGeneration);
     motionTest.resetProjectState();
+    manualFader.onProjectChange();
     motionData.resetProjectState();
     motorEventLog.resetProjectState();
     servoAlarm?.resetProjectState();
@@ -1557,6 +1566,7 @@ if (el.workspaceTabs) {
 
 motorConfig.bindEvents();
 motionTest.bindEvents();
+manualFader.bindEvents();
 motionData.bindEvents();
 projectExplorer.bindEvents();
 motorEventLog.bindEvents();

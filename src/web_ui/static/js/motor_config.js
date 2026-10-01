@@ -2263,7 +2263,7 @@ export function createMotorConfigController({
     } else if (scanOnlyCount > 0) {
       state = '신규 모터 확인 필요';
       detail = `검색되었지만 프로젝트에 없는 모터가 ${formatInt(scanOnlyCount)}개 있습니다.`;
-      next = '다음 작업: 신규 모터을 선택하고 선택 모터 추가';
+      next = '다음 작업: 신규 모터를 선택하고 선택 모터 추가';
       stateCode = 'warning';
     } else if (configApplyPending) {
       state = '설정 적용 필요';

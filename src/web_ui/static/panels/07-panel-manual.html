@@ -39,7 +39,16 @@
               </div>
             </div>
           </div>
-          <div id="acServoControlMessage" class="registry-message">선택 모터을 제어합니다. 전체 AC 서보 명령과 모터별 상태 관리는 모터 관리 화면에 있습니다.</div>
+          <div id="acServoControlMessage" class="registry-message">선택 모터를 제어합니다. 전체 AC 서보 명령과 모터별 상태 관리는 모터 관리 화면에 있습니다.</div>
+        </section>
+
+        <section class="motion-test-card manual-fader-card" aria-label="페이더 · 실시간 드래그">
+          <div class="section-head">
+            <strong>페이더 · 실시간 드래그</strong>
+            <span>조인트 연결 기준 · 잡는 동안만 전송 · 놓으면 그 자리에 섭니다</span>
+          </div>
+          <div id="manualFaderMessage" class="registry-message">조인트 연결 확인 중</div>
+          <div id="manualFaderList" class="manual-fader-list" aria-label="조인트 페이더 목록"></div>
         </section>
 
         <div class="motion-test-grid">
@@ -67,7 +76,7 @@
               <strong>4. 동작 명령</strong>
               <span id="motionTestModeSummary">조그 모드</span>
             </div>
-            <div id="motionTestActionGuide" class="motion-test-action-guide" data-state="warning">다음 단계: 시험할 모터을 선택하세요</div>
+            <div id="motionTestActionGuide" class="motion-test-action-guide" data-state="warning">다음 단계: 시험할 모터를 선택하세요</div>
             <div id="motionTestModeButtons" class="segmented-control motion-mode-tabs" role="group" aria-label="동작 테스트 방식">
               <button class="active" type="button" data-motion-test-mode="jog">조그 모드</button>
               <button type="button" data-motion-test-mode="action">동작 모드</button>

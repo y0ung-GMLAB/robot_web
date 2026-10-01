@@ -985,3 +985,50 @@ th {
   width: 100%;
   min-width: 90px;
 }
+
+/* 수동 페이더 · 동작 테스트 화면 */
+.manual-fader-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.manual-fader-row {
+  display: grid;
+  grid-template-columns: 150px 1fr 170px;
+  align-items: center;
+  gap: 12px;
+  padding: 6px 10px;
+  border: 1px solid var(--border, #2c3340);
+  border-radius: 8px;
+}
+
+.manual-fader-label {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.manual-fader-label span {
+  font-size: 12px;
+  opacity: 0.7;
+}
+
+.manual-fader-slider {
+  width: 100%;
+  accent-color: var(--accent, #4da3ff);
+}
+
+.manual-fader-slider:disabled {
+  opacity: 0.4;
+}
+
+.manual-fader-value {
+  text-align: right;
+  font-size: 13px;
+}
+
+.manual-fader-value small {
+  opacity: 0.7;
+}

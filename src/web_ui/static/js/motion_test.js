@@ -1044,7 +1044,7 @@ export function createMotionTestController({ el, getLatestState }) {
     }
     if (el.motionTestActionGuide) {
       let guideState = 'warning';
-      let guideText = '다음 단계: 시험할 모터을 선택하세요';
+      let guideText = '다음 단계: 시험할 모터를 선택하세요';
       if (motionStopInFlight) {
         guideState = 'active';
         guideText = '모터 동작 정지 요청을 처리하고 있습니다';
