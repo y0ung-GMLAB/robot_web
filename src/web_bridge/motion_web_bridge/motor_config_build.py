@@ -10,7 +10,7 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
 from motion_common.values import optional_int
 
@@ -186,29 +186,77 @@ def resolved_motor_profile(
     }
 
 
+#: 축별 운전 한계 · registry `motor.config` 에 적히고 그 축의 드라이버에만 들어간다
+#:
+#: 전에는 같은 모델이면 드라이버 하나를 **여러 축이 공유**해서, 한 축의
+#: 상한을 고치면 같은 모델 전 축이 같이 움직였다 · 목(1:150)과 눈(1:35)이
+#: 같은 한계를 쓰게 된다 · 이제 드라이버는 **축마다 하나**다.
+AXIS_PROFILE_OVERRIDE_FIELDS = (
+    'lower', 'upper', 'speed', 'acceleration', 'deceleration',
+    'profile_velocity', 'profile_acceleration', 'profile_deceleration',
+)
+
+
+def _axis_profile_overrides(motor: Dict[str, Any]) -> Dict[str, float]:
+    motor_config = motor.get('config') if isinstance(motor.get('config'), dict) else {}
+    overrides = {}
+    for field in AXIS_PROFILE_OVERRIDE_FIELDS:
+        value = motor_config.get(field)
+        if value is None or value == '':
+            continue
+        try:
+            overrides[field] = float(value)
+        except (TypeError, ValueError):
+            continue
+    return overrides
+
+
 def driver_id_for_registry_motor(
     workspace_root: Path,
     motor: Dict[str, Any],
     drivers: List[Dict[str, Any]],
+    claimed: Optional[set] = None,
+    pristine: Optional[Dict[int, Dict[str, Any]]] = None,
 ) -> int:
+    """이 축이 쓸 드라이버 id · **빌드 한 번 안에서 축마다 하나**다.
+
+    같은 type+model 의 기존 드라이버는 본보기로 쓴다 · 이번 빌드에서 아직
+    아무 축도 쥐지 않았으면 그대로 쓰고(손으로 다듬은 값 보존), 이미
+    쥐었으면 복제해서 새 id 를 받는다 · 축별 오버라이드는 그 위에 얹는다.
+    """
     motor_config = motor.get('config') if isinstance(motor.get('config'), dict) else {}
     profile = resolved_motor_profile(motor)
     driver_type = str(motor.get('driver_family') or motor.get('motor_type') or 'unknown')
     driver_model = str(profile.get('driver_model') or '').strip()
     requested_id = optional_int(motor_config.get('driver_id'), None)
+    overrides = _axis_profile_overrides(motor)
+
+    def claim(driver_id: int, driver: Dict[str, Any]) -> int:
+        if claimed is not None:
+            claimed.add(driver_id)
+        if pristine is not None and driver_id not in pristine:
+            # 오버라이드를 얹기 **전** 모습을 본보기로 남긴다 · 다음 축의 복제가
+            # 이 축의 한계를 물려받으면 공유 시절과 다를 게 없다
+            pristine[driver_id] = dict(driver)
+        if overrides:
+            driver.update(overrides)
+        return driver_id
+
+    def unclaimed(driver_id) -> bool:
+        return claimed is None or driver_id not in claimed
 
     drivers_by_id = {
         optional_int(driver.get('id'), None): driver
         for driver in drivers
         if isinstance(driver, dict)
     }
-    if requested_id is not None:
+    if requested_id is not None and unclaimed(requested_id):
         requested_driver = drivers_by_id.get(requested_id)
         if requested_driver is not None:
             same_type = str(requested_driver.get('type') or '') == driver_type
             same_model = not driver_model or str(requested_driver.get('driver_model') or '') == driver_model
             if same_type and same_model:
-                return requested_id
+                return claim(requested_id, requested_driver)
 
     for driver in drivers:
         if not isinstance(driver, dict):
@@ -218,12 +266,18 @@ def driver_id_for_registry_motor(
         if driver_model and str(driver.get('driver_model') or '') != driver_model:
             continue
         driver_id = optional_int(driver.get('id'), None)
-        if driver_id is not None:
-            return driver_id
+        if driver_id is not None and unclaimed(driver_id):
+            return claim(driver_id, driver)
 
-    return append_driver_for_registry_motor(
-        workspace_root, driver_type, driver_model, drivers
+    new_id = append_driver_for_registry_motor(
+        workspace_root, driver_type, driver_model, drivers,
+        template_id=requested_id, pristine=pristine,
     )
+    new_driver = next(
+        driver for driver in drivers
+        if optional_int(driver.get('id'), None) == new_id
+    )
+    return claim(new_id, new_driver)
 
 
 def append_driver_for_registry_motor(
@@ -231,6 +285,8 @@ def append_driver_for_registry_motor(
     driver_type: str,
     driver_model: str,
     drivers: List[Dict[str, Any]],
+    template_id=None,
+    pristine: Optional[Dict[int, Dict[str, Any]]] = None,
 ) -> int:
     if driver_type == 'dynamixel':
         # Dynamixel values are model-specific.  Do not clone the first
@@ -238,9 +294,36 @@ def append_driver_for_registry_motor(
         # order would then give W150 values to W270 (or vice versa).
         template = default_dynamixel_driver(workspace_root, driver_model)
     else:
+        # 본보기 고르기 · 이 축이 원래 가리키던 드라이버 → 같은 모델 → 같은 타입
+        # 이번 빌드에서 이미 오버라이드가 얹힌 드라이버는 **원본 사본**(pristine)
+        # 으로 되돌려 본보기 삼는다
+        def source(driver):
+            driver_id = optional_int(driver.get('id'), None)
+            if pristine is not None and driver_id in pristine:
+                return dict(pristine[driver_id])
+            return dict(driver)
+
         template = next(
             (
-                dict(driver)
+                source(driver)
+                for driver in drivers
+                if isinstance(driver, dict)
+                and optional_int(driver.get('id'), None) == template_id
+                and str(driver.get('type') or '') == driver_type
+            ),
+            None,
+        ) or next(
+            (
+                source(driver)
+                for driver in drivers
+                if isinstance(driver, dict)
+                and str(driver.get('type') or '') == driver_type
+                and (not driver_model or str(driver.get('driver_model') or '') == driver_model)
+            ),
+            None,
+        ) or next(
+            (
+                source(driver)
                 for driver in drivers
                 if isinstance(driver, dict) and str(driver.get('type') or '') == driver_type
             ),
@@ -282,7 +365,11 @@ def serial_masters_from_registry(
     registry: Dict[str, Any],
     current_masters: List[Dict[str, Any]],
     drivers: List[Dict[str, Any]],
+    claimed_driver_ids: Optional[set] = None,
+    pristine_drivers: Optional[Dict[int, Dict[str, Any]]] = None,
 ) -> List[Dict[str, Any]]:
+    if claimed_driver_ids is None:
+        claimed_driver_ids = set()
     serial_masters_by_key: Dict[tuple, Dict[str, Any]] = {}
     used_master_ids = {
         optional_int(master.get('id'), -1)
@@ -350,7 +437,10 @@ def serial_masters_from_registry(
         if axis is None or bus_id is None or not port or baudrate is None:
             continue
 
-        driver_id = driver_id_for_registry_motor(workspace_root, motor, drivers)
+        driver_id = driver_id_for_registry_motor(
+            workspace_root, motor, drivers,
+            claimed=claimed_driver_ids, pristine=pristine_drivers,
+        )
         master = master_for(port, baudrate)
         name = str(motor.get('name') or f'{axis}번 축').strip() or f'{axis}번 축'
         master['slaves'].append(
@@ -392,6 +482,11 @@ def motor_config_from_registry(
         masters = default_motor_config(workspace_root)['masters']
     masters = [dict(master) if isinstance(master, dict) else {} for master in masters]
 
+    #: 이번 빌드에서 어느 모터가 이미 쥔 드라이버 id · 모터마다 하나를 보장한다
+    claimed_driver_ids: set = set()
+    #: 오버라이드가 얹히기 전의 드라이버 원본 · 복제 본보기로 쓴다
+    pristine_drivers: Dict[int, Dict[str, Any]] = {}
+
     ethercat_slaves_by_master: Dict[int, List[Dict[str, Any]]] = {}
     web_axis_identities = []
     web_axis_profiles = []
@@ -424,7 +519,10 @@ def motor_config_from_registry(
             identity.get('slave_position'),
             optional_int(motor_config.get('position'), 0),
         )
-        driver_id = driver_id_for_registry_motor(workspace_root, motor, drivers)
+        driver_id = driver_id_for_registry_motor(
+            workspace_root, motor, drivers,
+            claimed=claimed_driver_ids, pristine=pristine_drivers,
+        )
         ethercat_slaves_by_master.setdefault(
             ethercat_master_index, []
         ).append(
@@ -574,7 +672,9 @@ def motor_config_from_registry(
         master for master in masters if master.get('type') == 'serial'
     ]
     serial_masters = serial_masters_from_registry(
-        workspace_root, registry, master_context, drivers
+        workspace_root, registry, master_context, drivers,
+        claimed_driver_ids=claimed_driver_ids,
+        pristine_drivers=pristine_drivers,
     )
     masters = ethercat_masters + non_bus_masters + serial_masters
 
