@@ -97,9 +97,8 @@ def test_a_missing_helper_never_stops_the_service():
 def test_the_coordination_service_gets_the_same_namespace():
     """조정 노드도 이름표를 받는다 · §6-94
 
-    그룹 토픽만 쓰던 동안에는 필요 없었다 · 이제 원시 MIDI 중계를 맡아 **이 PC
-    의** `/xtouch/midi` 를 연다 · 이름표가 없으면 옛 이름을 열어 아무 말 없이
-    아무것도 안 흐른다.
+    그룹 토픽만 쓰던 동안에는 필요 없었다 · 이 PC 범위 토픽(로컬 상태·명령)을
+    열 때 이름표가 없으면 옛 이름을 열어 아무 말 없이 아무것도 안 흐른다.
 
     다른 서비스와 **같은 곳에서** 가져와야 한다 · 따로 읽으면 갈린다.
     """

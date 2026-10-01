@@ -17,10 +17,8 @@ PACKAGES = {
     'motion_web_bridge': 'src/web_bridge',
     'motion_schedule': 'src/motion_schedule',
     'motion_coordination': 'src/motion_coordination',
-    'motion_studio': 'src/motion_control_studio/motion_studio',
     'motion_runtime': 'src/motion_runtime',
     'motion_supervisor': 'src/motion_supervisor',
-    'midi_control': 'src/motion_control_studio/motion_control/midi_control',
     'motion_state_monitor': 'src/motion_state_monitor',
 }
 

@@ -33,22 +33,6 @@ def generate_launch_description():
             'motion_projects_dir',
             default_value=str(workspace / 'motion_projects'),
         ),
-        DeclareLaunchArgument(
-            'motion_studio_request_topic',
-            default_value=topics.STUDIO_REQUEST,
-        ),
-        DeclareLaunchArgument(
-            'motion_studio_response_topic',
-            default_value=topics.STUDIO_RESPONSE,
-        ),
-        DeclareLaunchArgument(
-            'motion_studio_editor_request_topic',
-            default_value=topics.STUDIO_EDITOR_REQUEST,
-        ),
-        DeclareLaunchArgument(
-            'motion_studio_editor_response_topic',
-            default_value=topics.STUDIO_EDITOR_RESPONSE,
-        ),
         Node(
             package='motion_web_bridge',
             executable='motion_web_bridge',
@@ -65,18 +49,6 @@ def generate_launch_description():
                 'web_publish_hz': LaunchConfiguration('web_publish_hz'),
                 'motor_config_file': LaunchConfiguration('motor_config_file'),
                 'motion_projects_dir': LaunchConfiguration('motion_projects_dir'),
-                'motion_studio_request_topic': LaunchConfiguration(
-                    'motion_studio_request_topic'
-                ),
-                'motion_studio_response_topic': LaunchConfiguration(
-                    'motion_studio_response_topic'
-                ),
-                'motion_studio_editor_request_topic': LaunchConfiguration(
-                    'motion_studio_editor_request_topic'
-                ),
-                'motion_studio_editor_response_topic': LaunchConfiguration(
-                    'motion_studio_editor_response_topic'
-                ),
             }],
         ),
     ])

@@ -53,11 +53,7 @@ HISTORICAL = {
     'MOTION_RUN_STATUS': '/motion_run/status',
     'MIDI_POSITION_REQUEST': '/midi/position_request',
     'SAFETY_REQUEST': '/safety/request',
-    'STUDIO_REQUEST': '/motion_studio/request',
-    'STUDIO_STATUS': '/motion_studio/status',
-    'MIDI_MONITOR_STATE': '/motion_web/midi_monitor/state',
-    'XTOUCH_MIDI': '/xtouch/midi',
-    'XTOUCH_FEEDBACK': '/xtouch/feedback',
+    'MANUAL_JOG_REQUEST': '/manual/jog_request',
     'SCHEDULE_STATUS': '/motion_schedule/status',
     'GROUP_HEARTBEAT': '/motion_group/heartbeat',
     'GROUP_COMMAND': '/motion_group/command',
@@ -88,9 +84,7 @@ def test_every_topic_still_starts_with_a_slash():
 
 def test_this_pc_topics_get_the_prefix():
     topics = _topics('pc1')
-    assert topics.XTOUCH_MIDI == '/pc1/xtouch/midi'
     assert topics.MOTOR_COMMAND == '/pc1/motion_control/motor_command'
-    assert topics.STUDIO_STATUS == '/pc1/motion_studio/status'
 
 
 def test_group_topics_never_get_the_prefix():
@@ -107,23 +101,23 @@ def test_group_topics_never_get_the_prefix():
 
 def test_two_pcs_never_collide():
     """같은 토픽이 PC 마다 달라야 한다 · 그게 이름공간의 목적이다."""
-    first = _topics('pc1').XTOUCH_MIDI
-    second = _topics('pc2').XTOUCH_MIDI
+    first = _topics('pc1').MANUAL_JOG_REQUEST
+    second = _topics('pc2').MANUAL_JOG_REQUEST
     assert first != second
-    assert _topics(None).XTOUCH_MIDI not in {first, second}
+    assert _topics(None).MANUAL_JOG_REQUEST not in {first, second}
 
 
 @pytest.mark.parametrize('given,expected', [
-    ('pc1', '/pc1/xtouch/midi'),
-    ('/pc1', '/pc1/xtouch/midi'),
-    ('/pc1/', '/pc1/xtouch/midi'),
-    ('  pc1  ', '/pc1/xtouch/midi'),
-    ('', '/xtouch/midi'),
-    ('   ', '/xtouch/midi'),
+    ('pc1', '/pc1/manual/jog_request'),
+    ('/pc1', '/pc1/manual/jog_request'),
+    ('/pc1/', '/pc1/manual/jog_request'),
+    ('  pc1  ', '/pc1/manual/jog_request'),
+    ('', '/manual/jog_request'),
+    ('   ', '/manual/jog_request'),
 ])
 def test_the_namespace_is_tidied_before_use(given, expected):
     """앞뒤 빗금이나 공백 때문에 `//pc1//xtouch` 가 되면 안 된다."""
-    assert _topics(given).XTOUCH_MIDI == expected
+    assert _topics(given).MANUAL_JOG_REQUEST == expected
 
 
 # --------------------------------------------------------------------- #
@@ -133,7 +127,7 @@ def test_the_namespace_is_tidied_before_use(given, expected):
 @pytest.mark.parametrize('given', ['pc-1', 'pc.2', 'pc 3', 'pc@4'])
 def test_characters_a_topic_name_cannot_hold_are_replaced(given):
     """하이픈이나 점이 들어가면 **아무 말 없이 통신이 안 된다**."""
-    value = _topics(given).XTOUCH_MIDI
+    value = _topics(given).MANUAL_JOG_REQUEST
     assert value.startswith('/pc_')
     body = value[1:].split('/')[0]
     assert body.replace('_', '').isalnum()
@@ -141,26 +135,26 @@ def test_characters_a_topic_name_cannot_hold_are_replaced(given):
 
 def test_a_name_starting_with_a_digit_is_fixed():
     """토픽 이름은 숫자로 시작할 수 없다."""
-    assert _topics('2호기').XTOUCH_MIDI.startswith('/pc_2')
+    assert _topics('2호기').MANUAL_JOG_REQUEST.startswith('/pc_2')
 
 
 def test_an_unusable_name_never_silently_drops_the_namespace():
     """쓸 수 있는 글자가 하나도 안 남아도 빈 값으로 두면 안 된다 ·
     공유망에서 이름표가 없어지면 다른 PC 와 토픽이 부딪힌다."""
-    value = _topics('한글이름').XTOUCH_MIDI
+    value = _topics('한글이름').MANUAL_JOG_REQUEST
     assert value != '/xtouch/midi', '이름표가 조용히 사라졌다'
     assert value.startswith('/pc_')
 
 
 def test_the_fallback_is_the_same_every_restart():
     """다시 켤 때마다 달라지면 토픽 이름이 바뀌어 아무도 못 찾는다."""
-    first = _topics('한글이름').XTOUCH_MIDI
-    second = _topics('한글이름').XTOUCH_MIDI
+    first = _topics('한글이름').MANUAL_JOG_REQUEST
+    second = _topics('한글이름').MANUAL_JOG_REQUEST
     assert first == second
 
 
 def test_two_unusable_names_still_differ():
-    assert _topics('한글이름').XTOUCH_MIDI != _topics('다른이름').XTOUCH_MIDI
+    assert _topics('한글이름').MANUAL_JOG_REQUEST != _topics('다른이름').MANUAL_JOG_REQUEST
 
 
 def test_scan_and_monitoring_services_carry_the_pc_nameplate():

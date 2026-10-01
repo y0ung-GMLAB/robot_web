@@ -57,17 +57,11 @@ patterns=(
   "ros2 run motion_supervisor motion_supervisor"
   "install/motion_runtime/lib/motion_runtime/motion_mapping_manager"
   "install/motion_runtime/lib/motion_runtime/motion_run_manager"
-  "install/motion_studio/lib/motion_studio/motion_studio_node"
-  "install/motion_studio/lib/motion_studio/motion_studio_editor_node"
-  "install/midi_control/lib/midi_control/midi_control_node"
   "install/motion_web_bridge/lib/motion_web_bridge/motion_web_bridge"
   "install/motion_schedule/lib/motion_schedule/motion_schedule_node"
   "ros2 run motion_schedule motion_schedule_node"
-  "install/midi_input_bridge/lib/midi_input_bridge/midi_input_node"
-  "ros2 launch midi_control midi_control.launch.py"
-  # Stop legacy pre-refactor processes so they cannot publish duplicate MIDI
-  # or motion state on the current topics.
-  "install/motion_web_bridge/lib/motion_web_bridge/midi_monitor_node"
+  # Stop legacy pre-refactor processes so they cannot publish duplicate
+  # motion state on the current topics.
   "install/motion_web_bridge/lib/motion_web_bridge/motion_mapping_manager"
   "install/motion_web_bridge/lib/motion_web_bridge/motion_run_manager"
   "ros2 launch motion_web_bridge midi_monitor.launch.py"
@@ -165,11 +159,5 @@ log "ROS DDS isolation: ROS_LOCALHOST_ONLY=${ROS_LOCALHOST_ONLY}"
 log "starting motion_monitor.launch.py with config_file=${CONFIG_FILE}, project_generation=${PROJECT_GENERATION}, start_motor_manager=${START_MOTOR_MANAGER}"
 sg dialout -c 'bash -lc '"'"'source "$WORKSPACE/install/setup.bash" && ros2 launch motion_state_monitor motion_monitor.launch.py config_file:="$CONFIG_FILE" motion_projects_dir:="$WORKSPACE/motion_projects" start_motor_manager:="$START_MOTOR_MANAGER"'"'" &
 launch_pid="$!"
-log "starting MIDI control (motor requests routed through motion_supervisor, config_file=${CONFIG_FILE})"
-bash -lc 'source "$WORKSPACE/install/setup.bash" && ros2 launch midi_control midi_control.launch.py motor_config_file:="$CONFIG_FILE" motion_projects_dir:="$WORKSPACE/motion_projects"' &
-midi_launch_pid="$!"
 wait "${launch_pid}"
-launch_status="$?"
-kill "${midi_launch_pid}" 2>/dev/null || true
-wait "${midi_launch_pid}" 2>/dev/null || true
-exit "${launch_status}"
+exit "$?"

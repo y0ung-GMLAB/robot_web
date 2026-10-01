@@ -1,1 +1,0 @@
-"""MIDI control domain package."""

@@ -118,9 +118,6 @@ def generate_launch_description():
                 'max_jog_delta_deg': LaunchConfiguration('max_jog_delta_deg'),
                 'host': LaunchConfiguration('host'),
                 'port': LaunchConfiguration('port'),
-                # The normal restart script launches midi_control.launch.py so
-                # the physical MIDI input bridge and controller start together.
-                'start_midi_control': 'false',
             }.items(),
         ),
     ])

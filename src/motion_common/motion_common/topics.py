@@ -122,17 +122,6 @@ MOTOR_SYSTEM_BOUNDARY = {
     'MOTOR_COMMAND': '/motion_control/motor_command',
 }
 
-#: 이름만 저쪽에서 온 것 · **지금은 우리 노드끼리만 쓴다** · §6-176
-#:
-#: `/xtouch/midi` 는 `motion_system` 의 `xtouch_midi` 패키지가 기본값으로
-#: 쓰는 이름이다 · 그 노드는 이 시스템에서 **안 돈다** (우리
-#: `midi_input_bridge` 가 대신한다) · 그래서 지금 바꿔도 아무것도 안 끊긴다.
-#:
-#: 다만 언젠가 저쪽 노드를 같이 돌리면 그때 이름이 맞아야 한다 · 바꾸기 전에
-#: 그 계획이 없는지 확인할 것.
-MOTOR_SYSTEM_SHARED_NAMES = {
-    'XTOUCH_MIDI': '/xtouch/midi',
-}
 #: 모터 스캔 진행률
 MOTOR_SCAN_PROGRESS = scoped('/motor/scan_progress')
 
@@ -208,16 +197,6 @@ SAFETY_REQUEST = scoped('/safety/request')
 SAFETY_STATUS = scoped('/safety/status')
 
 # --------------------------------------------------------------------------- #
-# /motion_studio · 편집
-# --------------------------------------------------------------------------- #
-
-STUDIO_REQUEST = scoped('/motion_studio/request')
-STUDIO_RESPONSE = scoped('/motion_studio/response')
-STUDIO_STATUS = scoped('/motion_studio/status')
-STUDIO_EDITOR_REQUEST = scoped('/motion_studio/editor/request')
-STUDIO_EDITOR_RESPONSE = scoped('/motion_studio/editor/response')
-
-# --------------------------------------------------------------------------- #
 # /motion_group · 다중 PC 연동 (DDS 별도 도메인)
 # --------------------------------------------------------------------------- #
 
@@ -248,8 +227,6 @@ GROUP_SYSTEM_INFO = '/motion_group/system_info'
 #: 원시 MIDI 중계 · §6-94 · 200Hz 최선형 · 깊이 1
 #:
 #: 장치가 꽂힌 PC 에서 대상 PC 로 · 되돌아가는 페이더 명령은 반대 길이다.
-GROUP_MIDI = '/motion_group/midi'
-GROUP_MIDI_FEEDBACK = '/motion_group/midi_feedback'
 
 # --------------------------------------------------------------------------- #
 # /motion_schedule · 스케줄
@@ -260,31 +237,6 @@ SCHEDULE_STATUS = scoped('/motion_schedule/status')
 # --------------------------------------------------------------------------- #
 # /motion_web · 웹 브리지 부가 채널
 # --------------------------------------------------------------------------- #
-
-MIDI_MONITOR_REQUEST = scoped('/motion_web/midi_monitor/request')
-MIDI_MONITOR_RESPONSE = scoped('/motion_web/midi_monitor/response')
-MIDI_MONITOR_STATE = scoped('/motion_web/midi_monitor/state')
-
-# --------------------------------------------------------------------------- #
-# /xtouch · MIDI 컨트롤 서피스
-# --------------------------------------------------------------------------- #
-
-XTOUCH_MIDI = scoped('/xtouch/midi')
-XTOUCH_FEEDBACK = scoped('/xtouch/feedback')
-XTOUCH_INPUT_STATE = scoped('/xtouch/input_state')
-XTOUCH_CONNECTION_STATE = scoped('/xtouch/connection/state')
-XTOUCH_CONNECTION_COMMAND = scoped('/xtouch/connection/command')
-
-#: 이 PC 가 지금 표면을 쓸 수 있는가 · §6-94
-#:
-#: **권한은 장치 연결과 다른 사실이다** · USB 가 꽂혔는지는 입력 브리지가
-#: 알고, 누가 쓰는지는 조정 노드가 정한다 · 두 사실을 한 통로에 섞었더니
-#: 재연결 한 번에 서로를 덮어써서, 넘긴 PC 가 페이더를 0 으로 밀고 그것이
-#: 받은 PC 의 모터까지 0 으로 끌고 갔다.
-#:
-#: 주인은 **조정 노드 하나**다 · `midi_control` 은 이것만 보고 표면 구독을
-#: 열고 닫는다 · 권한이 없으면 값을 받아 버리는 것이 아니라 **받지 않는다**.
-XTOUCH_SURFACE = scoped('/xtouch/surface')
 
 
 def all_topics() -> Dict[str, str]:
