@@ -268,6 +268,22 @@ export const clearMotorEvents = () => request('DELETE', '/api/motor-events');
 export const deleteMotorEventLogFile = (fileName) =>
   request('DELETE', `/api/motor-events/files/${encodeURIComponent(fileName)}`);
 
+// 회차별 모션 기록 · motion_runtime 이 회차마다 남긴 목표·실제 CSV
+export const fetchMotionTraceDays = () => request('GET', '/api/motion-trace/days');
+
+export const fetchMotionTraceRuns = (date) =>
+  request('GET', `/api/motion-trace/runs?${new URLSearchParams({ date: String(date || '') })}`);
+
+export const fetchMotionTrace = (date, file) =>
+  request('GET', `/api/motion-trace/trace?${new URLSearchParams({ date: String(date), file: String(file) })}`);
+
+export const deleteMotionTraceDay = (date) =>
+  request('DELETE', `/api/motion-trace/days/${encodeURIComponent(date)}`);
+
+/** 내려받기는 링크로 · 브라우저가 파일로 받는다 */
+export const motionTraceDownloadUrl = (date, file) =>
+  `/api/motion-trace/download?${new URLSearchParams({ date: String(date), file: String(file) })}`;
+
 export const setMonitoringEnabled = (enabled) => request('POST', '/api/monitoring/enabled', { body: { enabled } });
 
 export const requestMotorScan = () => request('POST', '/api/motors/scan');

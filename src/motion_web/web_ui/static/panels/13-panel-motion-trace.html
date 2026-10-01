@@ -1,0 +1,52 @@
+<!-- 회차별 모션 기록 · 회차마다 목표 위치와 실제 위치를 그래프와 CSV 로 본다
+     쓰는 쪽은 motion_runtime.motion_trace · 이 화면은 읽기만 한다 (날짜 단위 삭제 제외) -->
+      <section class="motion-trace-panel workspace-panel hidden" data-workspace-panel="motion-trace" aria-label="모션 기록">
+        <div class="section-head workspace-page-head">
+          <strong>모션 기록</strong>
+          <span id="motionTraceSummary">기록을 불러오는 중</span>
+        </div>
+        <div class="workspace-guide" aria-label="모션 기록 사용 순서">
+          <strong>사용 방법</strong>
+          <ol><li>날짜 선택</li><li>회차 선택</li><li>목표·실제 그래프 확인 · CSV 내려받기</li></ol>
+        </div>
+        <div class="motion-trace-toolbar">
+          <label>
+            <span>날짜</span>
+            <select id="motionTraceDaySelect" class="wide-select"></select>
+          </label>
+          <button id="motionTraceRefreshButton" type="button">새로고침</button>
+          <button id="motionTraceDeleteDayButton" class="off" type="button" disabled>이 날짜 기록 삭제</button>
+          <span id="motionTraceStorage"></span>
+        </div>
+        <div class="motion-trace-body">
+          <div class="table-wrap motion-trace-runs-wrap">
+            <table class="motion-trace-runs">
+              <thead>
+                <tr>
+                  <th>시작</th>
+                  <th>회차</th>
+                  <th>모션 파일</th>
+                  <th>결과</th>
+                  <th>길이</th>
+                  <th>최대 오차</th>
+                </tr>
+              </thead>
+              <tbody id="motionTraceRunRows">
+                <tr><td colspan="6" class="empty">기록된 회차가 없습니다</td></tr>
+              </tbody>
+            </table>
+          </div>
+          <div class="motion-trace-detail">
+            <div class="motion-trace-detail-head">
+              <strong id="motionTraceDetailTitle">회차를 고르세요</strong>
+              <span class="motion-trace-legend">
+                <span class="motion-trace-legend-target">목표</span>
+                <span class="motion-trace-legend-actual">실제</span>
+              </span>
+              <a id="motionTraceDownloadLink" class="motion-trace-download hidden" href="#" download>CSV 내려받기</a>
+            </div>
+            <p id="motionTraceDetailNote" class="motion-trace-note">값은 조인트 각도(deg, 모션 파일과 같은 단위)입니다 · 오차에는 명령 한 틱(20ms) 지연이 포함됩니다</p>
+            <div id="motionTraceCharts" class="motion-trace-charts"></div>
+          </div>
+        </div>
+      </section>

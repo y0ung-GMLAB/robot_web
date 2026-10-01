@@ -34,6 +34,7 @@ from .motor_runtime_service import MotorRuntimeService
 from .project_service import ProjectService
 from .motor_config_service import MotorConfigService
 from .motor_event_log import MotorEventLog
+from .motion_trace_service import MotionTraceService
 from .scan_orchestrator import ScanOrchestrator
 from .motion_studio_routes import register_motion_studio_routes
 from .bridge_helpers import (
@@ -51,6 +52,7 @@ from .routes import (
     register_system_routes,
     register_schedule_routes,
     register_docs_routes,
+    register_motion_trace_routes,
 )
 from .motion_studio_sync import (
     MotionStudioSync,
@@ -308,6 +310,8 @@ class MotionWebBridge(Node):
             runtime_project_id=lambda: self._project.runtime_project_id(),
             logger=self.get_logger,
         )
+        # 회차별 모션 기록 조회 · 쓰는 쪽은 motion_runtime.motion_trace
+        self.motion_trace = MotionTraceService(self.project_repository)
         self.web_publish_hz = float(self.declare_parameter('web_publish_hz', 10.0).value)
         self._web_access = self._build_web_access_info()
 
@@ -2506,6 +2510,7 @@ def create_app(bridge: MotionWebBridge) -> FastAPI:
     register_midi_routes(app, bridge)
     register_schedule_routes(app, bridge, project_call)
     register_docs_routes(app, bridge)
+    register_motion_trace_routes(app, bridge, project_call)
     register_motion_studio_routes(app, bridge, project_call, _safety_first_stop)
 
     return app

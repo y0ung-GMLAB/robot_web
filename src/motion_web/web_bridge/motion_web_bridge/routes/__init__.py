@@ -6,6 +6,7 @@ from .safety_routes import register_safety_routes
 from .system_routes import register_system_routes
 from .schedule_routes import register_schedule_routes
 from .docs_routes import register_docs_routes
+from .motion_trace_routes import register_motion_trace_routes
 
 __all__ = [
     'register_project_routes',
@@ -16,4 +17,5 @@ __all__ = [
     'register_system_routes',
     'register_schedule_routes',
     'register_docs_routes',
+    'register_motion_trace_routes',
 ]

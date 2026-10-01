@@ -263,6 +263,7 @@ class MotionPlayer:
         plan: Dict[str, Any],
         initialization_plan: Optional[Dict[str, Any]] = None,
     ) -> None:
+        trace = None
         try:
             run_mode = str(plan.get('run_mode') or 'once')
             continuous = run_mode == 'continuous'
@@ -311,6 +312,7 @@ class MotionPlayer:
             grade1_seen = False
             while True:
                 cycle_started = time.monotonic()
+                trace = self._trace_begin(plan, cycle_count)
                 for index, sample in enumerate(samples):
                     if self.manager._stop_event.is_set():
                         status = motion_run_rules._status_from_plan('stopped', '연속 모션 정지' if continuous else '모션 실행 정지', plan)
@@ -320,6 +322,7 @@ class MotionPlayer:
                         status['lifecycle'] = self.manager._current_lifecycle()
                         status['cycle_count'] = cycle_count
                         self.manager._set_status(status)
+                        self._trace_finish(trace, 'stopped', '회차 도중 정지')
                         return
                     self._require_playback_command_allowed(
                         self._playback_axes(plan, float(sample['time_sec'])),
@@ -335,6 +338,8 @@ class MotionPlayer:
                         positions,
                         sample.get('motion_values'),
                     )
+                    if trace is not None:
+                        trace.add(sample)   # 리스트에 한 줄 · 해석·쓰기는 기록 스레드
                     self.manager._update_progress(
                         'running',
                         float(sample['time_sec']),
@@ -348,6 +353,8 @@ class MotionPlayer:
                         ),
                     )
                     motion_run_rules._sleep_until(cycle_started + ((index + 1) * self.manager.period_sec))
+                self._trace_finish(trace, 'completed')
+                trace = None
                 cycle_count += 1
                 synchronized_count = int(plan.get('synchronized_repeat_count') or 0)
                 if synchronized_count:
@@ -476,6 +483,7 @@ class MotionPlayer:
             status['cycle_count'] = cycle_count
             self.manager._set_status(status)
         except Exception as exc:
+            self._trace_finish(trace, 'error', str(exc))
             self.manager.get_logger().error(f'motion run failed\n{traceback.format_exc()}')
             status = motion_run_rules._status_from_plan('error', f'모션 실행 실패: {exc}', plan)
             status['phase'] = 'error'
@@ -484,6 +492,18 @@ class MotionPlayer:
             self.manager._set_status(status)
             if bool(plan.get('automation_run')):
                 self.manager._automation_failure(str(exc))
+
+    def _trace_begin(self, plan: Dict[str, Any], cycle_count: int):
+        """회차 기록 열기 · 기록기가 없는 관리자(시험용 가짜 등)면 기록하지 않는다."""
+        begin = getattr(self.manager, '_motion_trace_begin', None)
+        if begin is None:
+            return None
+        return begin(plan, motion_run_rules._playback_cycle_number(plan, cycle_count))
+
+    def _trace_finish(self, trace, result: str, message: str = '') -> None:
+        recorder = getattr(self.manager, '_motion_trace', None)
+        if trace is not None and recorder is not None:
+            recorder.finish(trace, result, message)
 
     def _run_initial_position_stream(
         self,

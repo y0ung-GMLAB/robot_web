@@ -25,7 +25,8 @@ test('서보 에러 관리는 운영 그룹에 있다', () => {
   assert.match(
     navigation,
     // 연동은 모션 실행 화면으로 합쳐졌다 · 별도 탭이 아니다 · §6-66
-    /operations: Object\.freeze\(\[\s*'monitoring', 'servo-errors', 'log', 'btop'/,
+    // 모션 기록은 로그 옆이다 · 회차별 목표·실제 그래프
+    /operations: Object\.freeze\(\[\s*'monitoring', 'servo-errors', 'log', 'motion-trace', 'btop'/,
   );
 });
 

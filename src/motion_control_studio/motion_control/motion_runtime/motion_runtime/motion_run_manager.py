@@ -19,6 +19,7 @@ from motion_common.values import finite_float, optional_int
 from motion_control_msgs.msg import MotorStatus
 from rclpy.node import Node
 from rclpy.qos import DurabilityPolicy, QoSProfile, ReliabilityPolicy
+from rclpy.serialization import deserialize_message
 from std_msgs.msg import String
 
 from .motion_run_constants import (
@@ -39,12 +40,19 @@ from .motion_automation_store import (
     normalize_automation_state,
 )
 from .motion_group_display import apply_group_display
+from .motion_trace import DEFAULT_MAX_BYTES, DEFAULT_RETENTION_DAYS, MotionTraceRecorder
 
 
 DEFAULT_MOTION_PROJECTS_DIR = (
     Path(os.environ.get('MOTION_WORKSPACE', Path.cwd())).expanduser()
     / 'motion_projects'
 )
+
+
+def _decode_motor_positions(raw: bytes) -> Dict[int, float]:
+    """모터 노드 상태 바이트 → {controller_index: 모터 deg} · 기록 쓰기 스레드가 부른다."""
+    msg = deserialize_message(raw, MotorStatus)
+    return {int(index): float(position) for index, position in zip(msg.controller_index, msg.position)}
 
 
 #: 재생이 **비켜 주지 않아도 되는** 주인 · §6-290
@@ -227,6 +235,26 @@ class MotionRunManager(Node):
         self._status_timer = self.create_timer(0.5, self._publish_status)
         self._automation_timer = None
 
+        # 회차별 목표·실제 기록 · 실제 위치는 모터 노드 1kHz 상태에서 바이트로만 받는다
+        self._motion_trace = MotionTraceRecorder(
+            decode=_decode_motor_positions,
+            logger=self.get_logger(),
+            enabled=bool(self.declare_parameter('motion_trace_enabled', True).value),
+            retention_days=int(self.declare_parameter(
+                'motion_trace_retention_days', DEFAULT_RETENTION_DAYS).value),
+            max_bytes=int(self.declare_parameter(
+                'motion_trace_max_mb', DEFAULT_MAX_BYTES // (1024 * 1024)).value) * 1024 * 1024,
+        )
+        self._motor_status_raw_sub = None
+        if self._motion_trace.enabled:
+            self._motor_status_raw_sub = self.create_subscription(
+                MotorStatus,
+                str(self.declare_parameter('motor_status_topic', topics.MOTOR_STATUS).value),
+                self._motion_trace.on_motor_status,
+                qos,
+                raw=True,
+            )
+
         self.get_logger().info(
             f'motion_run_manager started: state={self.motion_state_topic}, '
             f'command={self.motion_run_command_topic}, request={self.request_topic}, '
@@ -235,6 +263,20 @@ class MotionRunManager(Node):
             f'period={self.period_sec * 1000.0:.3f} ms, '
             f'motion_projects_dir={self.motion_projects_dir}'
         )
+
+    def _motion_trace_begin(self, plan: Dict[str, Any], cycle_number: int):
+        """회차 기록을 연다 · 무슨 일이 있어도 재생을 막지 않는다."""
+        try:
+            project_dir = project_dir_for(self.motion_projects_dir, str(plan.get('project_id') or ''))
+            return self._motion_trace.begin(plan, cycle_number, project_dir)
+        except Exception as exc:  # noqa: BLE001 · 기록을 못 열어도 재생은 계속한다
+            self.get_logger().warning(f'motion trace disabled for this cycle: {exc}')
+            return None
+
+    def destroy_node(self):
+        # 쓰다 만 회차 기록을 마저 쓴다
+        self._motion_trace.close()
+        return super().destroy_node()
 
     def _motion_state_callback(self, msg: String) -> None:
         try:

@@ -1,0 +1,157 @@
+/* 회차별 모션 기록 · 목표·실제 그래프 · styles.css 를 자른 조각 뒤에 붙인 새 조각 · §6-43
+ *
+ * 목표는 파랑, 실제는 주황 · 두 선이 겹칠수록 잘 따라간 것이다.
+ */
+
+/* `:not(.hidden)` 를 꼭 붙인다 · §6-161 · 숨김보다 나중에 실리는 조각이다 */
+.motion-trace-panel:not(.hidden) {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.motion-trace-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+}
+
+.motion-trace-toolbar label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.motion-trace-toolbar #motionTraceStorage {
+  color: var(--muted);
+  font-size: 0.9em;
+}
+
+.motion-trace-body {
+  display: grid;
+  grid-template-columns: minmax(320px, 2fr) minmax(0, 3fr);
+  gap: 14px;
+  align-items: start;
+}
+
+@media (max-width: 1100px) {
+  .motion-trace-body {
+    grid-template-columns: 1fr;
+  }
+}
+
+.motion-trace-runs-wrap {
+  max-height: 70vh;
+  overflow: auto;
+}
+
+.motion-trace-runs tbody tr {
+  cursor: pointer;
+}
+
+.motion-trace-runs tbody tr.selected {
+  background: color-mix(in srgb, var(--blue) 12%, transparent);
+}
+
+.motion-trace-runs .result-completed { color: var(--green); }
+.motion-trace-runs .result-stopped { color: var(--yellow); }
+.motion-trace-runs .result-error { color: var(--red); }
+
+.motion-trace-detail {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 0;
+}
+
+.motion-trace-detail-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px;
+}
+
+.motion-trace-legend {
+  display: flex;
+  gap: 12px;
+  font-size: 0.9em;
+}
+
+.motion-trace-legend span::before {
+  content: '';
+  display: inline-block;
+  width: 18px;
+  height: 3px;
+  margin-right: 5px;
+  vertical-align: middle;
+}
+
+.motion-trace-legend-target::before { background: var(--blue); }
+.motion-trace-legend-actual::before { background: var(--yellow); }
+
+.motion-trace-download:not(.hidden) {
+  display: inline-block;
+  padding: 4px 10px;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  color: var(--blue);
+  text-decoration: none;
+}
+
+.motion-trace-note {
+  margin: 0;
+  color: var(--muted);
+  font-size: 0.85em;
+}
+
+.motion-trace-charts {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.motion-trace-chart {
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 6px 8px;
+  background: var(--panel);
+}
+
+.motion-trace-chart-head {
+  display: flex;
+  justify-content: space-between;
+  font-size: 0.9em;
+}
+
+.motion-trace-chart-head small {
+  color: var(--muted);
+}
+
+.motion-trace-chart svg {
+  display: block;
+  width: 100%;
+  height: 140px;
+}
+
+.motion-trace-chart .grid-line {
+  stroke: var(--line);
+  stroke-width: 1;
+}
+
+.motion-trace-chart .axis-label {
+  fill: var(--muted);
+  font-size: 11px;
+}
+
+.motion-trace-chart .line-target {
+  fill: none;
+  stroke: var(--blue);
+  stroke-width: 1.6;
+}
+
+.motion-trace-chart .line-actual {
+  fill: none;
+  stroke: var(--yellow);
+  stroke-width: 1.6;
+}
