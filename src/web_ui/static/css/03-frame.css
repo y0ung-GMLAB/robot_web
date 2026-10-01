@@ -497,3 +497,18 @@ button[aria-disabled="true"] {
   gap: 6px;
   flex-wrap: wrap;
 }
+
+/* 상단 운전 모드 세그먼트 · P5 */
+.run-mode-segment {
+  display: inline-flex;
+}
+
+.run-mode-segment button {
+  padding: 4px 10px;
+  font-size: 12px;
+}
+
+.run-mode-segment [data-run-mode="off"].active {
+  background: #7b1f24;
+  color: #fff;
+}

@@ -17,6 +17,7 @@ import {
     motionScheduleTimezoneDrift,
 } from './schedule_scope.js';
 import { motionHeaderConditionsUpdate } from './header_conditions.js';
+import { showConfirm } from './ui_dialogs.js';
 
 /** 그 PC 의 벽시계 글자 · 브라우저 시간대로 옮기지 않는다 · §6-147 */
 function wallClockText(epochMs, offsetText) {
@@ -104,6 +105,15 @@ const ScheduleManager = {
             modeSelect.addEventListener('change', () => this.saveRunMode(modeSelect.value));
         }
 
+        // 상단 세그먼트 · 모달을 열지 않고 어디서든 한 번에 바꾼다 · P5
+        const segment = document.getElementById('runModeSegment');
+        if (segment) {
+            segment.addEventListener('click', (event) => {
+                const mode = event.target?.dataset?.runMode;
+                if (mode) this.requestRunMode(mode);
+            });
+        }
+
         const addBtn = document.getElementById('btnAddSchedule');
         if (addBtn) {
             addBtn.addEventListener('click', () => this.openEditModal());
@@ -123,6 +133,27 @@ const ScheduleManager = {
         if (repeatTypeSelect) {
             repeatTypeSelect.addEventListener('change', () => this.onRepeatTypeChange());
         }
+    },
+
+    /** 위험한 방향 전환은 한 번 묻는다 · 스케줄(자동 재생 가능)·오프(전부 차단) */
+    async requestRunMode(mode) {
+        const current = String(this.status?.run_mode || 'schedule');
+        if (mode === current) return;
+        const CONFIRMS = {
+            schedule: '스케줄 모드로 바꿉니다.\n\n지금이 스케줄 시간 안이면 곧바로 '
+                + '초기 위치 이동과 재생이 시작될 수 있습니다.',
+            off: '오프 모드로 바꿉니다.\n\n움직임 명령(조그·페이더·재생·그룹 시작)이 '
+                + '전부 차단됩니다.\n서보는 켠 채 그 자리를 유지합니다.',
+        };
+        if (CONFIRMS[mode]) {
+            const confirmed = await showConfirm(CONFIRMS[mode], {
+                title: mode === 'off' ? '오프 모드' : '스케줄 모드',
+                confirmLabel: '바꾸기',
+                tone: 'warning',
+            });
+            if (!confirmed) return;
+        }
+        await this.saveRunMode(mode);
     },
 
     async saveRunMode(mode) {
@@ -180,6 +211,18 @@ const ScheduleManager = {
         if (badge) {
             badge.className = TONE_CLASS[state.tone] || TONE_CLASS.muted;
             badge.textContent = state.text;
+        }
+
+        // 세그먼트는 상태의 거울이다 · 눌러도 저장이 끝나야 옮겨 간다
+        const segment = document.getElementById('runModeSegment');
+        if (segment) {
+            const mode = String(this.status?.run_mode || 'schedule');
+            segment.querySelectorAll('[data-run-mode]').forEach((button) => {
+                button.classList.toggle('active', button.dataset.runMode === mode);
+                button.disabled = !state.canEdit;
+            });
+            segment.title = state.blockedReason
+                || '운전 모드 · 어느 화면에서든 한 번에 바꾼다';
         }
 
         // 한눈에 보는 두 칸 · 구간 여부는 여기가 안다 · §6-286
