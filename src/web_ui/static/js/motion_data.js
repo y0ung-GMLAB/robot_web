@@ -40,6 +40,30 @@ import {
   showPrompt,
 } from './ui_dialogs.js';
 
+/** 차트 색 · 화면 테마(CSS 토큰)를 따른다 · 리디자인 2026-10-02
+ *
+ * 전에는 캔버스가 흰 바탕·회색 격자를 박아 그려, 어두운 화면 한가운데
+ * 흰 사각형이 떴다 · 토큰이 없으면(시험 환경) 예전 밝은 값으로 돌아간다.
+ */
+function chartTheme() {
+  const fallback = {
+    bg: '#ffffff', muted: '#5d6b78', grid: '#d6dee6', ink: '#111827', faint: '#64748b',
+  };
+  if (typeof document === 'undefined' || typeof getComputedStyle !== 'function') return fallback;
+  const css = getComputedStyle(document.documentElement);
+  const read = (name, value) => (css.getPropertyValue(name) || '').trim() || value;
+  return {
+    bg: read('--panel', fallback.bg),
+    muted: read('--muted', fallback.muted),
+    grid: read('--line', fallback.grid),
+    ink: read('--ink', fallback.ink),
+    faint: read('--muted', fallback.faint),
+  };
+}
+
+/** 계열 색 · 어두운 바탕에서 서로 구별되는 8색 (CVD 고려 순서) */
+const CHART_SERIES_COLORS = ['#5aa2ff', '#46c06a', '#e5534b', '#d9a62e', '#b083f0', '#3fb8c5', '#d97a4a', '#9aa7b6'];
+
 const MOTOR_AXIS_ANGLE_ALERT_DEG = 360.0;
 const MOTION_RUN_STAGES = [
   { key: 'idle', label: '재생 전' },
@@ -474,7 +498,7 @@ function drawGraph(canvas, messageEl, analysis, hiddenIds = new Set()) {
   if (canvas.height !== height) canvas.height = height;
 
   context.clearRect(0, 0, width, height);
-  context.fillStyle = '#ffffff';
+  context.fillStyle = chartTheme().bg;
   context.fillRect(0, 0, width, height);
 
   const allSeries = Array.isArray(analysis?.graph_series) ? analysis.graph_series : [];
@@ -484,13 +508,13 @@ function drawGraph(canvas, messageEl, analysis, hiddenIds = new Set()) {
   const points = series.flatMap((item) => item.points || []);
   if (!allSeries.length) {
     if (messageEl) messageEl.textContent = '그래프 데이터가 없습니다';
-    context.fillStyle = '#5d6b78';
+    context.fillStyle = chartTheme().muted;
     context.fillText('그래프 데이터 없음', 16, 28);
     return;
   }
   if (!series.length || !points.length) {
     if (messageEl) messageEl.textContent = '표시할 모터가 없습니다';
-    context.fillStyle = '#5d6b78';
+    context.fillStyle = chartTheme().muted;
     context.fillText('축 버튼을 눌러 그래프를 표시하세요', 16, 28);
     return;
   }
@@ -507,9 +531,9 @@ function drawGraph(canvas, messageEl, analysis, hiddenIds = new Set()) {
   const padBottom = 34;
   const graphWidth = width - padLeft - padRight;
   const graphHeight = height - padTop - padBottom;
-  const colors = ['#1f6feb', '#16834a', '#c62828', '#a05d00', '#7b3ff2', '#00838f', '#6d4c41', '#455a64'];
+  const colors = CHART_SERIES_COLORS;
 
-  context.strokeStyle = '#d6dee6';
+  context.strokeStyle = chartTheme().grid;
   context.lineWidth = 1;
   context.beginPath();
   context.moveTo(padLeft, padTop);
@@ -517,7 +541,7 @@ function drawGraph(canvas, messageEl, analysis, hiddenIds = new Set()) {
   context.lineTo(padLeft + graphWidth, padTop + graphHeight);
   context.stroke();
 
-  context.fillStyle = '#5d6b78';
+  context.fillStyle = chartTheme().muted;
   context.font = '12px Arial';
   context.fillText(`${formatNumber(maxValue, 1)} deg`, 6, padTop + 8);
   context.fillText(`${formatNumber(minValue, 1)} deg`, 6, padTop + graphHeight);
@@ -1128,7 +1152,7 @@ export function createMotionDataController({
     if (canvas.height !== height) canvas.height = height;
 
     context.clearRect(0, 0, width, height);
-    context.fillStyle = '#ffffff';
+    context.fillStyle = chartTheme().bg;
     context.fillRect(0, 0, width, height);
 
     const analysis = analysisOf(file);
@@ -1139,14 +1163,14 @@ export function createMotionDataController({
     const points = series.flatMap((item) => item.points || []);
     if (!allSeries.length) {
       if (messageEl) messageEl.textContent = '재생 그래프 데이터가 없습니다';
-      context.fillStyle = '#5d6b78';
+      context.fillStyle = chartTheme().muted;
       context.font = '13px Arial';
       context.fillText('재생 그래프 데이터 없음', 16, 28);
       return;
     }
     if (!series.length || !points.length) {
       if (messageEl) messageEl.textContent = '표시할 모터가 없습니다';
-      context.fillStyle = '#5d6b78';
+      context.fillStyle = chartTheme().muted;
       context.font = '13px Arial';
       context.fillText('축 버튼을 눌러 그래프를 표시하세요', 16, 28);
       return;
@@ -1164,9 +1188,9 @@ export function createMotionDataController({
     const padBottom = 38;
     const graphWidth = width - padLeft - padRight;
     const graphHeight = height - padTop - padBottom;
-    const colors = ['#1f6feb', '#16834a', '#c62828', '#a05d00', '#7b3ff2', '#00838f', '#6d4c41', '#455a64'];
+    const colors = CHART_SERIES_COLORS;
 
-    context.strokeStyle = '#d6dee6';
+    context.strokeStyle = chartTheme().grid;
     context.lineWidth = 1;
     context.beginPath();
     context.moveTo(padLeft, padTop);
@@ -1174,7 +1198,7 @@ export function createMotionDataController({
     context.lineTo(padLeft + graphWidth, padTop + graphHeight);
     context.stroke();
 
-    context.fillStyle = '#5d6b78';
+    context.fillStyle = chartTheme().muted;
     context.font = '12px Arial';
     context.fillText(`${formatNumber(maxValue, 1)} deg`, 6, padTop + 8);
     context.fillText(`${formatNumber(minValue, 1)} deg`, 6, padTop + graphHeight);
@@ -1213,14 +1237,14 @@ export function createMotionDataController({
       cursorTime = minTime;
     }
     const cursorX = padLeft + (((cursorTime - minTime) / timeRange) * graphWidth);
-    context.strokeStyle = state === 'running' ? '#111827' : '#64748b';
+    context.strokeStyle = state === 'running' ? chartTheme().ink : chartTheme().faint;
     context.lineWidth = 2;
     context.beginPath();
     context.moveTo(cursorX, padTop);
     context.lineTo(cursorX, padTop + graphHeight);
     context.stroke();
 
-    context.fillStyle = state === 'running' ? '#111827' : '#64748b';
+    context.fillStyle = state === 'running' ? chartTheme().ink : chartTheme().faint;
     context.font = '12px Arial';
     const cursorLabel = (
       state === 'running'

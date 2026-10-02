@@ -1,0 +1,878 @@
+/* 리디자인 레이어 · 다크 컨트롤룸 · 2026-10-02 · §6-43
+ *
+ * 01~13 조각 위에 **마지막으로** 얹혀 전체 모양을 다시 정한다 · 규칙은
+ * 하나다: 구조(마크업·id·data 속성)는 그대로, 보이는 것만 여기서 바꾼다.
+ * 옛 조각의 밝은색 하드코딩은 선택자 우선순위가 아니라 **순서**로 이긴다.
+ *
+ * 설계 원칙
+ *   위계   페이지 제목 > 단계 카드 제목 > 본문 > 보조 · 크기와 굵기로만
+ *   상태   ok(초록) · warn(호박) · danger(빨강) · muted(회색) 네 가지뿐
+ *   위험   빨강 채움은 정지·삭제에만 · 파랑 채움은 화면당 한두 개
+ *   숫자   고정폭 + tabular-nums · 표의 숫자는 오른쪽 정렬
+ */
+
+/* ---------- 1. 토큰 (01-base 의 밝은 값을 다크로 재정의) ---------- */
+:root {
+  --bg: #0e1116;          /* 페이지 */
+  --panel: #151a21;       /* 카드·사이드바 */
+  --panel-2: #1b222c;     /* 카드 머리·입력·표 머리 */
+  --ink: #e8ecf1;
+  --muted: #94a0ae;
+  --line: #2a3340;
+  --line-strong: #3a4656;
+  --blue: #5aa2ff;        /* 액션·선택 */
+  --blue-deep: #2f6fd1;
+  --green: #46c06a;
+  --yellow: #d9a62e;
+  --red: #e5534b;
+  --focus: rgb(90 162 255 / 45%);
+  --radius: 10px;
+  --radius-s: 6px;
+}
+
+/* ---------- 2. 바탕 ---------- */
+html { color-scheme: dark; }
+
+body {
+  background:
+    radial-gradient(1200px 500px at 70% -200px, rgb(47 111 209 / 7%), transparent 60%),
+    var(--bg);
+  color: var(--ink);
+  font-family: 'Pretendard', 'Noto Sans KR', 'Malgun Gothic', system-ui, sans-serif;
+  font-size: 13.5px;
+  line-height: 1.55;
+  letter-spacing: -0.1px;
+}
+
+::selection { background: rgb(90 162 255 / 30%); }
+
+* { scrollbar-width: thin; scrollbar-color: var(--line-strong) transparent; }
+*::-webkit-scrollbar { width: 10px; height: 10px; }
+*::-webkit-scrollbar-thumb { background: var(--line-strong); border-radius: 5px; border: 2px solid var(--bg); }
+*::-webkit-scrollbar-track { background: transparent; }
+
+.mono, code, pre, input[type="number"], .numeric-input {
+  font-family: 'JetBrains Mono', Consolas, 'D2Coding', monospace;
+  font-variant-numeric: tabular-nums;
+}
+
+/* ---------- 3. 상단바 · 한 줄로 낮고 단단하게 ---------- */
+.topbar {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  min-height: 52px;
+  padding: 0 16px;
+  background: var(--panel);
+  border-bottom: 1px solid var(--line);
+}
+
+.app-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: 0 0 auto;
+  margin: 0;
+}
+
+.app-title h1 {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 700;
+  letter-spacing: -0.2px;
+  white-space: nowrap;
+}
+
+.version-badge {
+  padding: 1px 7px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: var(--panel-2);
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.motor-activity-banner { margin: 0; }
+
+.topbar-operations {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex: 1 1 auto;
+  justify-content: flex-end;
+  flex-wrap: nowrap;
+  min-width: 0;
+}
+
+.topbar-operation-status {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+/* 프로젝트 이름 = 칩 하나 · 파란 간판이던 것을 가라앉힌다 */
+.header-project-name {
+  display: inline-block;
+  max-width: 220px;
+  padding: 4px 10px;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-s);
+  box-shadow: none;
+  background: var(--panel-2);
+  color: var(--ink);
+  font-size: 12.5px;
+  font-weight: 600;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  overflow: hidden;
+}
+
+.header-context-state {
+  padding: 3px 9px;
+  border-radius: 999px;
+  font-size: 11.5px;
+  white-space: nowrap;
+}
+
+.topbar-operation-divider {
+  width: 1px;
+  align-self: stretch;
+  margin: 10px 2px;
+  background: var(--line);
+}
+
+.topbar-operation-buttons {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: nowrap;
+}
+
+.topbar-operation-group {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: nowrap;
+}
+
+.header-condition-badges { display: inline-flex; gap: 4px; }
+
+.header-condition-badges span {
+  padding: 3px 8px;
+  border-radius: 999px;
+  border: 1px solid var(--line);
+  background: var(--panel-2);
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.3;
+  white-space: nowrap;
+}
+
+.header-condition-badges span.on {
+  background: rgb(70 192 106 / 14%);
+  border-color: rgb(70 192 106 / 45%);
+  color: var(--green);
+}
+
+.header-condition-badges span.off { background: var(--panel-2); color: var(--muted); }
+
+/* 운전 모드 · 한 줄 세그먼트 (2×2 로 꺾이던 것 고정) */
+.run-mode-segment {
+  display: inline-flex;
+  flex-wrap: nowrap;
+  padding: 2px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--bg);
+}
+
+.run-mode-segment button {
+  min-width: 52px;
+  padding: 4px 12px;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--muted);
+  font-size: 12.5px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.run-mode-segment button + button { margin-left: 2px; border-left: none; }
+.run-mode-segment button:hover:not(:disabled) { color: var(--ink); }
+
+.run-mode-segment button.active {
+  background: var(--blue-deep);
+  color: #fff;
+}
+
+.run-mode-segment [data-run-mode="off"].active { background: #7b2a2a; }
+
+.schedule-badge {
+  padding: 4px 10px;
+  border-radius: 999px;
+  border: 1px solid var(--line);
+  font-size: 11.5px;
+  white-space: nowrap;
+}
+
+.schedule-badge.tone-ok { background: rgb(70 192 106 / 14%); border-color: rgb(70 192 106 / 45%); color: var(--green); }
+.schedule-badge.tone-warn { background: rgb(217 166 46 / 14%); border-color: rgb(217 166 46 / 45%); color: var(--yellow); }
+.schedule-badge.tone-bad { background: rgb(229 83 75 / 14%); border-color: rgb(229 83 75 / 45%); color: var(--red); }
+.schedule-badge.tone-muted { background: var(--panel-2); color: var(--muted); }
+
+/* ---------- 4. 버튼 공통 ---------- */
+button {
+  min-height: 30px;
+  padding: 4px 12px;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-s);
+  background: var(--panel-2);
+  color: var(--ink);
+  font: inherit;
+  font-size: 12.5px;
+  font-weight: 600;
+  letter-spacing: -0.1px;
+  cursor: pointer;
+  transition: background 0.12s, border-color 0.12s, color 0.12s;
+}
+
+button:hover:not(:disabled) { background: #232c38; border-color: #49566a; }
+button:active:not(:disabled) { background: #1a212b; }
+
+button:focus-visible,
+input:focus-visible,
+select:focus-visible,
+textarea:focus-visible,
+a:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 1px;
+}
+
+button:disabled { opacity: 0.45; cursor: not-allowed; }
+
+button.primary {
+  background: var(--blue-deep);
+  border-color: var(--blue-deep);
+  color: #fff;
+}
+
+button.primary:hover:not(:disabled) { background: #3b7de0; border-color: #3b7de0; }
+
+button.danger,
+.header-emergency-stop {
+  background: #8f2f2a;
+  border-color: #a13c36;
+  color: #ffd9d6;
+}
+
+button.danger:hover:not(:disabled),
+.header-emergency-stop:hover:not(:disabled) { background: #a63832; }
+
+.header-motion-stop {
+  background: #7a4b12;
+  border-color: #8f5a1a;
+  color: #ffe9c8;
+}
+
+.header-motion-stop:hover:not(:disabled) { background: #8d5a17; }
+
+button.warning-button { background: rgb(217 166 46 / 15%); border-color: rgb(217 166 46 / 50%); color: var(--yellow); }
+button.off { background: var(--panel-2); color: var(--muted); }
+
+#btnScheduleModal { background: var(--panel-2); border: 1px solid var(--line-strong); color: var(--ink); }
+#btnScheduleModal:hover:not(:disabled) { background: #232c38; }
+
+/* ---------- 5. 입력 ---------- */
+input, select, textarea {
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-s);
+  background: var(--bg);
+  color: var(--ink);
+  font: inherit;
+  font-size: 12.5px;
+  padding: 4px 8px;
+  min-height: 30px;
+}
+
+input::placeholder, textarea::placeholder { color: #5b6673; }
+
+select {
+  appearance: none;
+  background-image: linear-gradient(45deg, transparent 50%, var(--muted) 50%),
+    linear-gradient(135deg, var(--muted) 50%, transparent 50%);
+  background-position: calc(100% - 14px) 55%, calc(100% - 9px) 55%;
+  background-size: 5px 5px;
+  background-repeat: no-repeat;
+  padding-right: 24px;
+}
+
+input[type="checkbox"], input[type="radio"] {
+  min-height: 0;
+  width: 15px;
+  height: 15px;
+  accent-color: var(--blue);
+}
+
+input[type="range"] { min-height: 0; accent-color: var(--blue); background: transparent; border: none; }
+
+input:disabled, select:disabled, textarea:disabled { opacity: 0.45; }
+
+/* ---------- 6. 작업 화면 내비게이션 · 두 줄을 한 몸처럼 ---------- */
+.workspace-navigation {
+  position: sticky;
+  top: 0;
+  z-index: 40;
+  padding: 0 16px;
+  background: var(--panel);
+  border-bottom: 1px solid var(--line);
+  box-shadow: 0 6px 16px rgb(0 0 0 / 25%);
+}
+
+.workspace-group-tabs {
+  display: flex;
+  gap: 2px;
+  border-bottom: 1px solid var(--line);
+}
+
+.workspace-group-button {
+  min-height: 0;
+  padding: 9px 14px 7px;
+  border: none;
+  border-bottom: 2px solid transparent;
+  border-radius: 0;
+  background: transparent;
+  color: var(--muted);
+  font-size: 13.5px;
+  font-weight: 700;
+}
+
+.workspace-group-button:hover:not(:disabled) { background: transparent; color: var(--ink); }
+
+.workspace-group-button.active {
+  color: var(--ink);
+  border-bottom-color: var(--blue);
+  background: transparent;
+}
+
+.workspace-tabs:not(.hidden) { display: flex; gap: 6px; padding: 8px 0; }
+
+.workspace-tab-button {
+  min-height: 0;
+  padding: 5px 12px;
+  border: 1px solid transparent;
+  border-radius: 999px;
+  background: transparent;
+  color: var(--muted);
+  font-size: 12.5px;
+  font-weight: 600;
+}
+
+.workspace-tab-button:hover:not(:disabled) { background: var(--panel-2); color: var(--ink); }
+
+.workspace-tab-button.active {
+  background: rgb(90 162 255 / 14%);
+  border-color: rgb(90 162 255 / 40%);
+  color: var(--blue);
+}
+
+/* ---------- 7. 본문 틀 · 사이드바 ---------- */
+.shell { gap: 16px; padding: 16px; }
+
+.project-sidebar {
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+}
+
+.workspace-panel {
+  background: transparent;
+  border: none;
+  padding: 0;
+}
+
+.workspace-page-head { margin-bottom: 4px; }
+
+.workspace-page-head strong { font-size: 18px; font-weight: 700; letter-spacing: -0.3px; }
+.workspace-page-head small { display: block; color: var(--muted); font-size: 12.5px; }
+
+/* ---------- 8. 카드 (단계·구역) ---------- */
+/* 표면(배경)은 이 레이어가 소유한다 · 옛 조각의 깊은 선택자들이 흰 배경을
+ * 곳곳에 박아 두어(카드 안 #fff 등) 밝은 글자가 통째로 사라졌다 · 표면
+ * background 에 한해 !important 를 허용한다 — 글자색·배치에는 쓰지 않는다 */
+.settings-step-card,
+.motion-test-card,
+.motion-file-subsection,
+.settings-panel,
+.axis-settings-panel,
+.axis-setup-step,
+.axis-settings-tab-panel,
+.workspace-panel,
+.motion-run-workspace section,
+.motion-run-summary,
+.motion-value-table,
+.matching-table-wrap,
+.motion-mapping-layout section {
+  background: var(--panel) !important;
+  border-color: var(--line);
+  border-radius: var(--radius);
+  box-shadow: none;
+  color: var(--ink);
+}
+
+.settings-step-card,
+.motion-test-card,
+.motion-file-subsection,
+.axis-setup-step {
+  border: 1px solid var(--line);
+}
+
+.section-head strong { color: var(--ink); font-weight: 700; }
+.section-head > span, .section-head small { color: var(--muted); font-size: 12px; }
+
+.workspace-guide,
+.registry-message,
+.motion-run-block-reason,
+.motion-automation-detail,
+.config-table-empty,
+.empty {
+  background: var(--panel-2) !important;
+  border-color: var(--line);
+  border-radius: var(--radius-s);
+  color: var(--muted);
+}
+
+.registry-message { border-left: 3px solid var(--line-strong); }
+
+/* ---------- 9. 표 ---------- */
+.table-wrap {
+  border: 1px solid var(--line);
+  border-radius: var(--radius-s);
+  background: var(--panel) !important;
+}
+
+table, tbody, tr { background: transparent !important; }
+
+td { background: transparent; }
+
+table { border-color: var(--line); }
+
+th {
+  background: var(--panel-2) !important;
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.4px;
+  border-color: var(--line) !important;
+}
+
+td { border-color: var(--line) !important; }
+
+tbody tr:hover td { background: rgb(90 162 255 / 5%); }
+
+tbody tr.selected td { background: rgb(90 162 255 / 12%); }
+
+td.empty { color: #5b6673; }
+
+/* ---------- 10. 상태 알약 공통 ---------- */
+.status-ok { color: var(--green); }
+.status-bad { color: var(--red); }
+
+.motion-registered-badge {
+  background: rgb(90 162 255 / 16%);
+  border: 1px solid rgb(90 162 255 / 45%);
+  color: var(--blue);
+  border-radius: 999px;
+  padding: 1px 7px;
+  font-size: 10.5px;
+}
+
+.mujoco-badge { border: 1px solid transparent; font-weight: 600; }
+.mujoco-badge.computing { background: var(--panel-2); border-color: var(--line-strong); color: var(--muted); }
+.mujoco-badge.ready { background: rgb(70 192 106 / 15%); border-color: rgb(70 192 106 / 45%); color: var(--green); }
+.mujoco-badge.failed { background: rgb(229 83 75 / 15%); border-color: rgb(229 83 75 / 45%); color: var(--red); }
+
+/* ---------- 11. 화면별 수선 ---------- */
+
+/* 장비 검색 · 거대 CTA 세 개 → 보통 크기 한 줄 */
+.axis-type-scan button { width: auto; min-width: 150px; }
+
+/* 페이더 */
+.manual-fader-row { background: var(--panel-2); border-color: var(--line); }
+
+/* 드롭 힌트 · 세로로 부서지던 것 (마크업도 함께 옮김) */
+.motion-file-drop-hint {
+  flex-basis: 100%;
+  writing-mode: horizontal-tb;
+  padding: 4px 2px;
+}
+
+.motion-file-column.drop-active { outline-color: var(--blue); }
+
+/* 긴급정지 배너 */
+.emergency-stop-banner {
+  background: #5f1f1c;
+  border-bottom: 1px solid #8f2f2a;
+  color: #ffd9d6;
+}
+
+/* 모달 */
+.modal, .modal-content, dialog {
+  background: var(--panel);
+  color: var(--ink);
+  border-color: var(--line-strong);
+}
+
+/* ---------- 12. 2라운드 수선 ---------- */
+
+/* 모터 동작 배너 · visibility 숨김이 190px 흰 상자를 남겼다 → 자리째 없앤다 */
+.motor-activity-banner[aria-hidden="true"] { display: none; }
+
+.motor-activity-banner {
+  border-color: rgb(90 162 255 / 45%);
+  background: rgb(90 162 255 / 12%);
+  color: var(--blue);
+}
+
+/* 제목이 옛 조각의 흐린 색을 입던 것 · 위계 최상단은 또렷하게 */
+.workspace-content .workspace-page-head strong,
+.workspace-content .section-head strong {
+  color: var(--ink);
+}
+
+.workspace-content .workspace-page-head div > strong { font-size: 18px; }
+
+/* 장비 검색 · 화면 전체를 먹던 CTA 세 개 → 보통 크기, 한 줄 */
+#scanAllButton, #acServoScanButton, #dynamixelScanButton {
+  width: auto;
+  min-width: 150px;
+  flex: 0 0 auto;
+}
+
+.axis-type-scan { background: transparent; border: none; }
+
+/* 현재 상태 배너 · 어두운 바탕에서 읽히게 */
+.axis-workflow-status {
+  background: var(--panel-2);
+  border: 1px solid var(--line);
+  border-left: 3px solid var(--blue);
+  border-radius: var(--radius-s);
+  color: var(--muted);
+}
+
+.axis-workflow-status strong { color: var(--ink); }
+.axis-workflow-status[data-state="ready"] { border-left-color: var(--green); }
+.axis-workflow-status[data-state="warning"] { border-left-color: var(--yellow); }
+.axis-workflow-status[data-state="error"] { border-left-color: var(--red); }
+
+/* 프로젝트 사이드바 · 밝은 상자 잔재 정리 */
+.project-current-display,
+.project-explorer-tree,
+.project-sidebar textarea,
+.project-sidebar select {
+  background: var(--bg);
+  border-color: var(--line);
+  color: var(--ink);
+}
+
+.project-sidebar-help { color: #5b6673; }
+
+/* 탭바(모터 목록 편집 등) · 알약으로 통일 */
+.tabbar .tab-button {
+  border-radius: 999px;
+  border-color: transparent;
+  background: transparent;
+  color: var(--muted);
+}
+
+.tabbar .tab-button.active {
+  background: rgb(90 162 255 / 14%);
+  border-color: rgb(90 162 255 / 40%);
+  color: var(--blue);
+}
+
+/* ---------- 13. 3라운드 수선 ---------- */
+
+/* 페이지 제목 띠 · 10-workspace 의 밝은 띠(#f8fafc)가 밝은 글자를 삼켰다 */
+.workspace-page-head,
+.section-head.workspace-page-head {
+  background: var(--panel);
+  border-bottom: 1px solid var(--line);
+}
+
+/* 프로젝트 칩 · .empty 변형이 흰 세로 기둥으로 서 있던 것 */
+.topbar-operation-status { flex-direction: row; height: auto; align-items: center; }
+
+.topbar .header-project-name,
+.header-project-name.empty {
+  display: inline-block;
+  width: auto;
+  height: auto;
+  max-width: 220px;
+  padding: 4px 10px;
+  background: var(--panel-2);
+  border-color: var(--line-strong);
+  color: var(--muted);
+  white-space: nowrap;
+  writing-mode: horizontal-tb;
+}
+
+/* AC Servo 검색 버튼 (id 가 scanButton) */
+#scanButton { width: auto; min-width: 150px; flex: 0 0 auto; }
+
+/* 프로젝트 사이드바 현재 칸 · 02-project 의 깊은 선택자를 이긴다 */
+.project-sidebar .project-current-display,
+aside .project-current-display {
+  background: var(--bg);
+  border: 1px solid var(--line);
+  color: var(--muted);
+}
+
+.project-sidebar .project-explorer-tree { background: transparent; }
+
+/* 현재 상태 배너 글자 · 06-config 의 깊은 선택자 대응 */
+.axis-settings-tab-panel .axis-workflow-status,
+.axis-settings-tab-panel .axis-workflow-status p,
+.axis-settings-tab-panel .axis-workflow-status small {
+  background: var(--panel-2);
+  color: var(--muted);
+}
+
+.axis-settings-tab-panel .axis-workflow-status strong { color: var(--ink); }
+
+/* ---------- 14. 4라운드 수선 ---------- */
+
+/* 사이드바 바닥 도움말 줄 · 흰 띠 제거 */
+.project-sidebar-help,
+.project-sidebar-foot,
+.project-sidebar > div:last-child {
+  background: var(--panel) !important;
+  border-color: var(--line);
+}
+
+/* 활성 그룹 라벨 · 10-workspace 의 깊은 선택자(파란 글씨)가 어둠에 묻혔다 */
+.workspace-group-tabs .workspace-group-button.active,
+.workspace-navigation .workspace-group-button.active {
+  color: var(--ink);
+  background: transparent;
+}
+
+.workspace-group-tabs .workspace-group-button:not(.active) { color: var(--muted); }
+
+/* 입력 위 라벨 글자 */
+label, .manual-field > span, .compact-field > span { color: var(--muted); }
+
+.manual-field strong { color: var(--ink); }
+
+/* ---------- 15. 5라운드 · 재생 화면 유령 소탕 ---------- */
+
+/* 요약 타일(재생 파일·모션축 설정·상태)과 지표 줄 */
+.motion-run-targets,
+.motion-run-targets > div,
+.motion-run-metrics,
+.motion-run-metric,
+.motion-run-notice,
+.motion-run-status-table,
+.motion-state-table {
+  background: var(--panel-2) !important;
+  border-color: var(--line) !important;
+  color: var(--ink);
+}
+
+.motion-run-targets small, .motion-run-metric span { color: var(--muted); }
+
+/* 선택 행 · 흰 띠에 흰 글자로 사라지던 것 */
+tbody tr.selected td { background: rgb(90 162 255 / 14%) !important; }
+tbody tr.registered td { background: rgb(70 192 106 / 8%) !important; }
+
+/* 파일명이 배지에 밀려 세 글자로 줄던 것 · 이름이 주인공이다 */
+.motion-file-table td:first-child { max-width: none; white-space: nowrap; }
+.motion-file-table .mujoco-badge, .motion-file-table .motion-registered-badge { margin-right: 4px; }
+
+/* 위험 버튼이 옛 분홍으로 남던 자리 */
+.workspace-content button.danger {
+  background: #8f2f2a;
+  border-color: #a13c36;
+  color: #ffd9d6;
+}
+
+.workspace-content button.danger:disabled { background: #4a2523; color: #b98f8c; }
+
+.workspace-content button.warning-button {
+  background: rgb(217 166 46 / 15%);
+  border-color: rgb(217 166 46 / 50%);
+  color: var(--yellow);
+}
+
+/* ---------- 16. 6라운드 · 그룹 탭 띠 · 실행 컨트롤 묶음 ---------- */
+
+/* 그룹 탭 띠 · 03-frame 의 #eef3f8 띠가 밝은 활성 라벨을 삼켰다 */
+.workspace-group-tabs {
+  background: transparent !important;
+  padding: 0;
+}
+
+.workspace-group-tabs .workspace-group-button {
+  min-height: 0;
+  margin-bottom: -1px;
+  border: none;
+  border-bottom: 2px solid transparent;
+  border-radius: 0;
+  font-size: 14px;
+  font-weight: 700;
+}
+
+.workspace-group-tabs .workspace-group-button.active {
+  border-bottom-color: var(--blue);
+}
+
+.workspace-tabs:not(.hidden) { background: transparent !important; min-height: 0; }
+
+/* 실행 컨트롤 묶음 · 11-coordination 의 흰 상자 */
+.coord-control-groups { border-top-color: var(--line); }
+
+.coord-group,
+.motion-run-workspace .coord-group {
+  background: var(--panel-2) !important;
+  border: 1px solid var(--line) !important;
+  border-radius: var(--radius-s);
+}
+
+.coord-group-label { color: var(--muted) !important; font-weight: 700; }
+
+.coordination-control-panel { border-top-color: var(--line); }
+
+/* 무조코 같이 보기 · 체크박스와 fps 를 한 덩이로 */
+.mujoco-companion-field select { min-width: 92px; }
+
+/* ---------- 17. 7라운드 · 밝은 배경 전수 정리 (자동 스캐너 목록) ----------
+ * 화면 10개를 훑어 배경 휘도 0.6 넘는 보이는 요소를 모두 모은 뒤 덮었다 ·
+ * 새 화면을 붙이면 scratchpad/light_scan.mjs 같은 검사를 다시 돌릴 것 */
+
+/* 표면 카드 */
+.servo-alarm-catalog-card,
+.servo-alarm-runtime-banner,
+.event-log-filebar,
+.settings-final-actions,
+.project-system-manager,
+.system-overview-card,
+.servo-action-group,
+.motion-test-readout,
+.motion-test-action-guide,
+.motion-command-help,
+.motion-test-stop-bar,
+.motion-command-position,
+.motion-test-results,
+.motion-test-result,
+.coordination-dashboard,
+.coord-badge,
+.coord-badge-icon,
+.monitoring-detail-head,
+.motion-run-progress-track {
+  background: var(--panel-2) !important;
+  border-color: var(--line) !important;
+  color: var(--ink);
+}
+
+.project-system-manager, .system-overview-card, .motion-test-results,
+.servo-alarm-catalog-card, .coordination-dashboard {
+  background: var(--panel) !important;
+}
+
+/* 요약 글귀 칩 (monitoringViewSummary · motionTraceSummary 등) */
+#monitoringViewSummary, #motionTraceSummary, #motorEventLogSummary, #summaryText,
+.manual-panel .section-head > span {
+  background: var(--panel-2) !important;
+  border: 1px solid var(--line);
+  color: var(--muted);
+  border-radius: 999px;
+  padding: 2px 10px;
+}
+
+/* 입력 · 깊은 선택자에 박힌 흰 배경 전부 */
+.workspace-content input:not([type="checkbox"]):not([type="radio"]):not([type="range"]),
+.workspace-content select,
+.workspace-content textarea,
+.motion-id-input, .mapping-number-input, .wide-select, .compact-select,
+#motionTestAxisSelect, #motionTestJogDistance, #projectMemoInput, .project-file-editor {
+  background-color: var(--bg) !important;
+  border-color: var(--line-strong) !important;
+  color: var(--ink) !important;
+}
+
+td.mapping-disabled-cell { background: transparent !important; opacity: 0.55; }
+
+/* 버튼 · 흰 기본 버튼 잔재 */
+.workspace-content button:not(.primary):not(.danger):not(.warning-button):not(.active):not(.workspace-tab-button),
+#headerProgramRestartButton {
+  background: var(--panel-2);
+  border-color: var(--line-strong);
+  color: var(--ink);
+}
+
+.segmented-control:not(.run-mode-segment) {
+  background: var(--bg) !important;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 2px;
+}
+
+.segmented-control:not(.run-mode-segment) button {
+  background: transparent !important;
+  border: none !important;
+  color: var(--muted) !important;
+}
+
+.segmented-control:not(.run-mode-segment) button.active {
+  background: var(--blue-deep) !important;
+  color: #fff !important;
+}
+
+/* 상태 알약 · ok/warn/bad 를 투명 채움으로 */
+.motion-state-pill,
+.header-context-state {
+  border: 1px solid var(--line-strong);
+  background: var(--panel-2) !important;
+  color: var(--muted);
+}
+
+.motion-state-pill.ok, .header-context-state.ok, .header-context-state.ready {
+  background: rgb(70 192 106 / 14%) !important; border-color: rgb(70 192 106 / 45%); color: var(--green);
+}
+
+.motion-state-pill.warn, .header-context-state.waiting, .header-context-state.warn {
+  background: rgb(217 166 46 / 14%) !important; border-color: rgb(217 166 46 / 45%); color: var(--yellow);
+}
+
+.motion-state-pill.bad, .header-context-state.bad, .header-context-state.error {
+  background: rgb(229 83 75 / 14%) !important; border-color: rgb(229 83 75 / 45%); color: var(--red);
+}
+
+/* 진행 단계 알약 */
+.motion-run-stage {
+  background: var(--panel-2) !important;
+  border: 1px solid var(--line);
+  color: var(--muted);
+}
+
+.motion-run-stage.done { background: rgb(70 192 106 / 14%) !important; border-color: rgb(70 192 106 / 40%); color: var(--green); }
+.motion-run-stage.active, .motion-run-stage.current { background: rgb(90 162 255 / 16%) !important; border-color: rgb(90 162 255 / 45%); color: var(--blue); }
+
+/* 그래프 캔버스 테두리 (바탕은 JS 가 토큰으로 칠한다) */
+.motion-run-graph { border: 1px solid var(--line); border-radius: var(--radius-s); background: var(--panel); }
+
+/* 마지막 잔재 · 연동 설정 접이식 · 서보 에러 화면 안쪽 칸 */
+.coordination-settings-details,
+.coordination-settings-details > summary,
+.servo-errors-panel div,
+[data-workspace-panel="servo-errors"] div:not([class]) {
+  background-color: transparent !important;
+  color: inherit;
+}
+
+.coordination-settings-details > summary { color: var(--ink); cursor: pointer; }
+
+/* 연동 배지 안 값 · 어두운 바탕에 어두운 글자로 묻히던 것 */
+.coord-badge, .coord-badge * { color: var(--ink); }
+.coord-badge .coord-badge-label, .coord-badge small { color: var(--muted); }
