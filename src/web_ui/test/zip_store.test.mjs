@@ -36,7 +36,10 @@ test('항목마다 머리말 · 끝에 목차와 끝 표시', () => {
 
 test('폴더 드롭은 숨김 파일을 빼고 zip 으로 묶어 같은 길로 보낸다', () => {
   const source = readFileSync(new URL('../static/js/robot_pack.js', import.meta.url), 'utf8');
-  assert.match(source, /webkitGetAsEntry/);
+  const drop = readFileSync(new URL('../static/js/drop_files.js', import.meta.url), 'utf8');
+  // 폴더 걷기는 애니메이션과 같이 쓰는 drop_files.js 에 있다 (2026-10-02)
+  assert.match(source, /droppedEntries\(event\.dataTransfer\)/);
+  assert.match(drop, /webkitGetAsEntry/);
   assert.match(source, /buildStoredZip/);
   assert.match(source, /startsWith\('\.'\)/);
   assert.doesNotMatch(source, /FormData|multipart/);

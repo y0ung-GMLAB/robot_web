@@ -167,6 +167,27 @@ def test_missing_runner_is_a_reason(tmp_path):
     assert reasons and '실행기 없음' in reasons[0]
 
 
+def test_missing_uv_says_how_to_install(tmp_path, monkeypatch):
+    """미니 PC 실측 · uv 가 없어 팩을 못 올렸다 · 고치는 길을 같이 말한다 (2026-10-02)."""
+    script = tmp_path / 'scripts' / 'sim' / 'sim_run.py'
+    script.parent.mkdir(parents=True)
+    script.write_text('', encoding='utf-8')
+    monkeypatch.setattr(robot_pack_service, '_uv', lambda: None)
+    reasons = robot_pack_service.run_checker(tmp_path, tmp_path)
+    assert 'uv 없음' in reasons[0]
+    assert 'scripts/install.sh' in reasons[1]
+
+
+def test_installer_sets_up_uv_and_mujoco():
+    from pathlib import Path
+    installer = (Path(__file__).resolve().parents[3] / 'scripts' / 'install.sh').read_text(encoding='utf-8')
+    assert 'install_uv_and_mujoco' in installer
+    assert 'https://astral.sh/uv/install.sh' in installer
+    assert 'import mujoco' in installer
+    # 시스템 pip 에는 깔지 않는다
+    assert 'pip install' not in installer
+
+
 def test_mapping_diff_only_reports(tmp_path):
     _install(tmp_path, make_zip(pack_files()))
     mapping = {'mappings': [

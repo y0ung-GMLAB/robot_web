@@ -4,7 +4,7 @@
 고치면 같은 모델 전부가 같이 움직였다 · 목(1:150)과 눈(1:35)이 같은 한계를
 쓰게 된다.
 
-registry `motor.config` 의 오버라이드(lower/upper/speed/…)는 그 모터의
+registry `motor.config` 의 오버라이드(speed/profile_velocity/…)는 그 모터의
 드라이버에만 얹힌다 · motion_system 이 읽는 YAML 스키마는 그대로다
 (slaves[j].driver_id → drivers[k]).
 """
@@ -68,16 +68,21 @@ def test_same_model_axes_get_their_own_drivers():
 
 def test_axis_overrides_land_only_on_that_axis_driver():
     config = _build([
-        _motor(0, lower=-1200.0, upper=1200.0, profile_velocity=9000.0),
+        _motor(0, profile_velocity=9000.0),
         _motor(1),
     ])
     driver0 = _driver(config, _slave(config, 0)['driver_id'])
     driver1 = _driver(config, _slave(config, 1)['driver_id'])
-    assert driver0['lower'] == -1200.0
-    assert driver0['upper'] == 1200.0
     assert driver0['profile_velocity'] == 9000.0
-    assert driver1['lower'] != -1200.0 or driver1['profile_velocity'] != 9000.0
     assert driver1['profile_velocity'] == 18000.0   # 기본값 그대로
+
+
+def test_registry_lower_upper_no_longer_reach_the_driver():
+    """운전 한계 원본은 조인트 매핑 · 모터 관리 쪽 값은 무시한다 (2026-10-02)."""
+    config = _build([_motor(0, lower=-1200.0, upper=1200.0)])
+    driver0 = _driver(config, _slave(config, 0)['driver_id'])
+    assert driver0['lower'] == -36000.0
+    assert driver0['upper'] == 36000.0
 
 
 def test_hand_tuned_existing_driver_values_survive_for_its_axis():
@@ -111,6 +116,6 @@ def test_rebuilding_from_the_split_config_is_stable():
 
 def test_override_field_list_matches_the_editable_screen_fields():
     assert set(AXIS_PROFILE_OVERRIDE_FIELDS) == {
-        'lower', 'upper', 'speed', 'acceleration', 'deceleration',
+        'speed', 'acceleration', 'deceleration',
         'profile_velocity', 'profile_acceleration', 'profile_deceleration',
     }

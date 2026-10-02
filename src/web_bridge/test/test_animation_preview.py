@@ -1,4 +1,4 @@
-"""무조코 미리보기 · 계산(precompute)과 재생(preview)은 현장 명령이다 · P7
+"""MuJoCo 미리보기 · 계산(precompute)과 재생(preview)은 현장 명령이다 · P7
 
 로봇마다 모델·시뮬레이터가 다르므로 플랫폼은 명령 틀과 결과 경로만 안다 ·
 뷰어는 **계산이 끝난 것만** 튼다 · 계산 중엔 computing(화면은 그레이) ·
@@ -175,7 +175,7 @@ def test_bridge_launches_the_companion_when_playback_turns_running():
     # 상태가 들어오는 두 길목 모두에서 본다
     assert bridge.count('self._maybe_launch_mujoco_companion(') >= 2
     # 계산 안 끝났으면 예약 자체를 거절한다
-    assert '무조코 같이 보기는 계산이 끝난 뒤에' in bridge
+    assert 'MuJoCo 같이 보기는 계산이 끝난 뒤에' in bridge
     routes = (ROUTES_DIR / 'motion_run_routes.py').read_text(encoding='utf-8')
     assert "@app.post('/api/motion-files/{file_id}/preview')" in routes
     assert "@app.post('/api/motion-files/{file_id}/preview-precompute')" in routes

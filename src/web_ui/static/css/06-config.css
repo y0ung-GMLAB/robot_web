@@ -397,8 +397,9 @@ th {
   padding: 12px;
   overflow: auto;
   border: 1px solid var(--line);
-  background: #f8fafc;
-  color: var(--text, inherit);
+  /* 테마 색 · 흰 바탕 고정이면 다크 테마의 밝은 글씨가 안 보인다 (2026-10-02) */
+  background: var(--panel-2, #f8fafc);
+  color: var(--ink);
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
   font-size: 12px;
   line-height: 1.45;
@@ -965,12 +966,13 @@ th {
 
 /* 모터별 운전 한계 인라인 편집 · P3 */
 .axis-limits-cell {
-  min-width: 190px;
+  min-width: 300px;
 }
 
+/* 라벨을 줄임말 없이 · 단위까지 한 줄에 (2026-10-02) */
 .axis-limit-field {
   display: grid;
-  grid-template-columns: 34px 1fr;
+  grid-template-columns: 112px 1fr;
   align-items: center;
   gap: 4px;
   margin: 2px 0;

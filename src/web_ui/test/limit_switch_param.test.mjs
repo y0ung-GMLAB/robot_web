@@ -28,6 +28,25 @@ test('screen and server accept the same values', () => {
   assert.match(server, /'brake_delay_stop_ms': \(0, 10000\),/);
 });
 
+// 0/1/2 · 켬/끔 은 선택 상자 · 빈 값(첫 항목) = 유지 · 2026-10-02
+test('discrete drive params are select boxes whose first option keeps the drive value', () => {
+  assert.match(config, /encoder_absolute_mode: \[\[0, '인크리멘털'\], \[1, '절대'\], \[2, '절대·다회전 무시'\]\]/);
+  assert.match(config, /limit_switch_mode: \[\[0, '사용·그 방향 금지'\], \[1, '사용 안 함'\], \[2, '사용·알람\(Err38\)'\]\]/);
+  assert.match(config, /overload_monitor: \[\[0, '끔'\], \[1, '켬'\]\]/);
+  assert.match(config, /<option value=""\$\{value === '' \? ' selected' : ''\}>/);
+  // 같은 change 처리 · data-axis-edit 를 그대로 단다
+  assert.match(config, /data-axis-edit="\$\{field\}" data-axis-row-id="\$\{escapeHtml\(row\.id\)\}"\$\{disabled\}`;/);
+});
+
+test('grey text shows the value read from the drive at the last scan, never a stored copy', () => {
+  assert.match(config, /const scanned = row\?\.servedRow\?\.scanned;/);
+  assert.match(config, /if \(!scanned\?\.drive_params_read\) return \{ state: 'none' \};/);
+  assert.match(config, /`유지 \(드라이브: \$\{driveChoiceText\(field, read\.value\)\}\)`/);
+  assert.match(config, /`드라이브 \$\{read\.value\}`/);
+  assert.match(config, /'읽기 실패' : '검색 후 표시'/);
+  assert.doesNotMatch(config, /placeholder="유지"/);
+});
+
 test('turning it on warns about unwired axes and is not swallowed by the generic message', () => {
   const start = config.indexOf("if (field === 'limit_switch_mode' && (text === '0' || text === '2'))");
   assert.ok(start > 0);

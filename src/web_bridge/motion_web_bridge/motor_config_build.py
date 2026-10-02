@@ -192,8 +192,11 @@ def resolved_motor_profile(
 #: 전에는 같은 모델이면 드라이버 하나를 **여러 축이 공유**해서, 한 축의
 #: 상한을 고치면 같은 모델 전 축이 같이 움직였다 · 목(1:150)과 눈(1:35)이
 #: 같은 한계를 쓰게 된다 · 이제 드라이버는 **축마다 하나**다.
+#:
+#: `lower/upper` 는 여기 없다 · 원본은 조인트 매핑 최소·최대 하나다 ·
+#: `mapping_motor_limits.apply_mapping_limits` 가 저장 때 넣는다 (2026-10-02)
 AXIS_PROFILE_OVERRIDE_FIELDS = (
-    'lower', 'upper', 'speed', 'acceleration', 'deceleration',
+    'speed', 'acceleration', 'deceleration',
     'profile_velocity', 'profile_acceleration', 'profile_deceleration',
 )
 

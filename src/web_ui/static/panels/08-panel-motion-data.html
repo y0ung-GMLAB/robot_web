@@ -27,7 +27,7 @@
                   </div>
                   <!-- 표와 버튼을 옆으로 나란히 · §6-100 · 버튼이 표 아래
                        두 줄을 차지해 위아래로 길었다 -->
-                  <div class="motion-file-drop-hint">.json 애니메이션 파일을 이 목록에 끌어다 놓으면 추가됩니다</div>
+                  <div class="motion-file-drop-hint">「불러오기」 또는 .json 파일·폴더를 이 화면에 끌어다 놓으면 추가됩니다</div>
                   <div class="motion-file-body">
                   <div class="table-wrap motion-file-table-wrap">
                     <table class="motion-file-table motion-file-table-compact">
@@ -47,6 +47,8 @@
                     </table>
                   </div>
                   <div class="motion-file-actions">
+                    <button id="motionFileImportButton" type="button" title="내 PC 의 .json 애니메이션을 고릅니다 · 여러 개 가능">불러오기</button>
+                    <input id="motionFileImportInput" type="file" class="hidden" accept=".json,application/json" multiple>
                     <button id="registerMotionFileButton" class="primary" type="button" disabled>재생 등록</button>
                     <button id="unregisterMotionFileButton" type="button" class="danger" disabled>재생 등록 해제</button>
                     <button id="downloadMotionFileButton" type="button" title="이 파일을 지금 보고 있는 PC 에 저장합니다" disabled>내 PC로 저장</button>
@@ -83,7 +85,7 @@
                           <option value="10">10초 일괄 적용</option>
                         </select>
                       </label>
-                      <div class="compact-field"><span>무조코 같이 보기</span>
+                      <div class="compact-field"><span>MuJoCo 같이 보기</span>
                         <span class="mujoco-companion-field" title="계산이 끝난 애니메이션만 · 초기 이동이 끝나는 순간 뷰어가 프레임 1부터 같이 출발합니다">
                           <input id="motionRunMujocoToggle" type="checkbox" disabled>
                           <select id="motionRunMujocoFps" class="compact-select" disabled>

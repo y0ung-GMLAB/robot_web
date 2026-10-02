@@ -1,4 +1,4 @@
-/** 조그 다이얼 · 쌓인 양 취소와 눈금 링 · 실제 동작 시험 · 2026-10-02
+/** 조그 다이얼 · 동작 취소 · 목표 위치 이동 · 눈금 링 · 실제 동작 시험 · 2026-10-02
  *
  * 가짜 서버 응답을 넣고 컨트롤러를 그대로 돌린다 · 소스 글자만 훑는 시험으로는
  * 「취소했는데 날아가던 요청의 거절 응답이 그 양을 되살리는」 경로를 못 잡는다.
@@ -11,17 +11,20 @@ import { indexHtml } from '../tools/index_html.mjs';
 
 // ---- 가짜 브라우저 · api.js 가 window.fetch 를 부른다 ----
 const calls = [];
-let respond = null;   // 시험이 손으로 응답을 내보낸다
+let respond = null;   // 시험이 손으로 응답을 내보낸다 · 가장 최근 요청
 globalThis.window = globalThis.window || {};
+globalThis.document = globalThis.document || { activeElement: null };
 window.fetch = (url, options) => new Promise((resolve) => {
-  calls.push({ url, body: JSON.parse(options?.body || '{}') });
-  respond = (payload) => resolve({
+  const reply = (payload) => resolve({
     ok: true,
     status: 200,
     headers: { get: () => null },
     json: async () => payload,
   });
+  calls.push({ url, body: JSON.parse(options?.body || '{}'), reply });
+  respond = reply;
 });
+const jogCalls = () => calls.filter((call) => String(call.url).includes('/jog'));
 window.setTimeout = (fn, ms) => setTimeout(fn, ms);
 window.clearTimeout = (id) => clearTimeout(id);
 
@@ -62,8 +65,10 @@ function setup() {
   for (const name of [
     'jogDial', 'jogDialRing', 'jogDialStep', 'jogDialPosition', 'jogDialPending',
     'jogDialMessage', 'jogDialCancelPending', 'jogDialSetReference', 'jogDialSetLower',
-    'jogDialSetUpper',
+    'jogDialSetUpper', 'jogDialBlock', 'jogDialEnabled', 'jogDialEnabledState',
+    'jogTargetInput', 'jogTargetMoveButton',
   ]) el[name] = fakeElement();
+  el.jogDialEnabled.checked = true;
   el.jogDialStep.value = '1';
   const state = {
     motors: [{
@@ -83,48 +88,80 @@ function setup() {
 
 const tick = () => new Promise((resolve) => setTimeout(resolve, 0));
 
-test('cancel drops only the unsent amount and the in-flight reply cannot revive it', async () => {
+test('동작 취소 drops the unsent amount, stops motion, and the in-flight reply cannot revive it', async () => {
   const { el, wheel, pendingText } = setup();
   wheel();                         // +1 · 바로 날아간다
-  assert.equal(calls.length, 1);
-  assert.equal(calls[0].body.relative_deg, 1);
+  assert.equal(jogCalls().length, 1);
+  assert.equal(jogCalls()[0].body.relative_deg, 1);
+  const inFlightJog = jogCalls()[0];
   wheel(); wheel(); wheel();       // +3 · 앞 조그가 도는 동안 쌓인다
-  assert.match(pendingText(), /보낼 양 \+3\.00°/);
-  assert.equal(el.jogDialCancelPending.disabled, false, '쌓인 양이 있으면 켜진다');
+  assert.match(pendingText(), /남은 이동 \+3\.00°/);
 
   el.jogDialCancelPending.dispatch('click');
-  assert.equal(el.jogDialCancelPending.disabled, true, '비운 뒤엔 꺼진다');
-  assert.doesNotMatch(pendingText(), /보낼 양/);
-  assert.match(el.jogDialMessage.textContent, /움직이던 조그는 끝까지/);
+  assert.doesNotMatch(pendingText(), /남은 이동/);
+  // 움직이던 것도 멈춘다 · 「모터 동작 정지」와 같은 경로
+  assert.ok(calls.some((call) => String(call.url).endsWith('/api/safety/motion-stop')), '정지 요청이 없다');
+  respond({ success: true, message: 'stopped' });
+  await tick(); await tick();
+  assert.match(el.jogDialMessage.textContent, /동작을 취소했습니다/);
 
   // 날아가던 요청이 「이전 조그」로 거절돼도 취소한 양을 되살리지 않는다
-  respond({ success: false, message: '1번 모터의 이전 조그가 아직 돌고 있습니다' });
+  inFlightJog.reply({ success: false, message: '1번 모터의 이전 조그가 아직 돌고 있습니다' });
   await tick(); await tick();
   await new Promise((resolve) => setTimeout(resolve, 200));   // 재시도 간격(120ms)보다 길게
-  assert.equal(calls.length, 1, '취소 뒤에 다시 보냈다');
-  assert.doesNotMatch(pendingText(), /보낼 양/);
+  assert.equal(jogCalls().length, 1, '취소 뒤에 다시 보냈다');
+  assert.doesNotMatch(pendingText(), /남은 이동/);
 });
 
 test('changing the step size clears the unsent amount', async () => {
   const { el, wheel, pendingText } = setup();
   wheel();                         // 날아감
   wheel(); wheel();                // 쌓임 +2
-  assert.match(pendingText(), /보낼 양 \+2\.00°/);
+  assert.match(pendingText(), /남은 이동 \+2\.00°/);
   el.jogDialStep.value = '0.1';
   el.jogDialStep.dispatch('input');
-  assert.doesNotMatch(pendingText(), /보낼 양/);
+  assert.doesNotMatch(pendingText(), /남은 이동/);
   assert.match(el.jogDialMessage.textContent, /한 칸 크기를 바꿔 쌓인 양을 비웠습니다/);
-  assert.equal(el.jogDialCancelPending.disabled, true);
   respond({ success: true, message: 'ok' });
   await tick(); await tick();
-  assert.equal(calls.length, 1, '비운 양이 이어서 나가면 안 된다');
+  assert.equal(jogCalls().length, 1, '비운 양이 이어서 나가면 안 된다');
 });
 
-test('the cancel button is off when nothing is queued, even while a jog is moving', () => {
+test('동작 취소 is always pressable', () => {
   const { el, wheel } = setup();
-  assert.equal(el.jogDialCancelPending.disabled, true, '처음엔 꺼져 있다');
-  wheel();                         // 날아가는 중 · 쌓인 양은 0
-  assert.equal(el.jogDialCancelPending.disabled, true, '날아가는 것만 있으면 비울 게 없다');
+  assert.equal(el.jogDialCancelPending.disabled, false, '처음부터 켜져 있다');
+  wheel();
+  assert.equal(el.jogDialCancelPending.disabled, false, '움직이는 중에도 켜져 있다');
+});
+
+test('dial OFF · typed target moves in motor deg and refuses outside the limits', async () => {
+  const { el } = setup();
+  el.jogDialEnabled.checked = false;
+  el.jogDialEnabled.dispatch('change');
+  assert.ok(el.jogDialBlock.classList.contains('dial-off'));
+  assert.equal(el.jogDialEnabledState.textContent, 'OFF');
+  assert.equal(el.jogTargetInput.value, '0', '안 고쳤으면 지금 모터 위치');
+
+  el.jogTargetInput.value = '2000';     // 상한 1000 밖
+  el.jogTargetInput.dispatch('input');
+  assert.equal(el.jogTargetMoveButton.disabled, true);
+  el.jogTargetMoveButton.dispatch('click');
+  assert.equal(calls.length, 0);
+  assert.match(el.jogDialMessage.textContent, /상한 1000° 밖/);
+
+  el.jogTargetInput.value = '250.5';
+  el.jogTargetInput.dispatch('input');
+  assert.equal(el.jogTargetMoveButton.disabled, false);
+  el.jogTargetInput.dispatch('keydown', { key: 'Enter' });
+  assert.equal(calls.length, 1);
+  assert.match(String(calls[0].url), /\/api\/motion-test\/ac-servo\/action$/);
+  assert.deepEqual(calls[0].body, { axis: 1, target_deg: 250.5 });
+  // 앞 요청이 도는 동안엔 또 안 보낸다
+  el.jogTargetMoveButton.dispatch('click');
+  assert.equal(calls.length, 1);
+  respond({ success: true, message: 'ok' });
+  await tick(); await tick();
+  assert.match(el.jogDialMessage.textContent, /목표 250\.5° 로 이동 시작/);
 });
 
 test('the tick ring turns with input and there is no needle', () => {
@@ -142,5 +179,6 @@ test('the tick ring turns with input and there is no needle', () => {
   // 눈금은 한 가지 모양만 반복한다 (기준 눈금 없음)
   const ticks = css.match(/\.jog-dial-ticks \{[\s\S]*?\}/)[0];
   assert.match(ticks, /repeating-conic-gradient\(#56647a 0deg 2deg, transparent 2deg 15deg\)/);
-  assert.match(indexHtml, /id="jogDialCancelPending"[^>]*>쌓인 양 취소</);
+  assert.match(indexHtml, /id="jogDialCancelPending"[^>]*>동작 취소</);
+  assert.doesNotMatch(indexHtml, /id="jogDialCancelPending"[^>]*disabled/);
 });

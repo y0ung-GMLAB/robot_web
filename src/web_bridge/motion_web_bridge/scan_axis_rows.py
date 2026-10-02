@@ -179,6 +179,10 @@ def _scanned_ac_servo_view(slave: Dict[str, Any]) -> Dict[str, Any]:
         'revision_number': optional_int(slave.get('revision_number'), None),
         'serial_port': '',
         'bus_id': None,
+        # 검색 때 SDO 로 읽은 MINAS 드라이브 설정 · 화면 표시용 · 식별값 아님(비교 안 함)
+        'drive_params': dict(slave.get('drive_params') or {}),
+        'drive_params_error': str(slave.get('drive_params_error') or ''),
+        'drive_params_read': 'drive_params' in slave,
     }
 
 

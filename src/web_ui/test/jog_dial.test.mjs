@@ -64,15 +64,53 @@ test('capture buttons save the current motor position, with a confirm first', ()
   const mainSource = main;
   assert.match(mainSource, /async function captureJogPoint\(kind, \{ axis, motorDeg \}\)/);
   assert.match(mainSource, /await showConfirm\(/);
-  // 기준점은 조인트 매핑만 · 끝은 조인트 범위 + 모터 운전 한계 둘 다
-  assert.match(mainSource, /if \(kind === 'reference' \|\| !mapping\.success\) return mapping;/);
-  assert.match(mainSource, /motorConfig\.saveMotorLimit\(axis, kind, motorDeg\)/);
+  // 리밋 원본은 조인트 매핑 하나 · 모터 운전 한계는 매핑 저장 때 서버가 환산 (2026-10-02)
+  assert.match(mainSource, /return motionData\.saveCapturedPoint\(axis, kind, motorDeg\);/);
+  assert.doesNotMatch(mainSource, /saveMotorLimit/);
+  // 매핑 저장이 모터 설정 파일을 바꾸면 모터 관리 화면이 다시 읽는다
+  assert.match(mainSource, /onMotorLimitsChange: \(\) => motorConfig\.reloadIfClean\(\)/);
   // 이동 중·쌓인 양이 있을 때는 찍지 않는다
   assert.match(dial, /이동이 끝난 뒤에 지정하세요/);
   // 버튼 이름 · 「~으로」 대신 「지정 / limit」
   assert.match(html, />기준점 지정<\/button>/);
   assert.match(html, />\+ limit<\/button>/);
   assert.match(html, />− limit<\/button>/);
+});
+
+// 다이얼 OFF · 목표 위치 입력 후 이동 · 둘 다 모터 deg · 2026-10-02
+test('dial ON/OFF switch and a typed target live in the same jog block', () => {
+  for (const id of ['jogDialBlock', 'jogDialEnabled', 'jogDialEnabledState', 'jogTargetInput', 'jogTargetMoveButton']) {
+    assert.match(html, new RegExp(`id=["']${id}["']`), `${id} missing`);
+    assert.match(dom, new RegExp(`${id}: document\\.getElementById\\(["']${id}["']\\)`));
+  }
+  const block = html.indexOf('id="jogDialBlock"');
+  assert.ok(html.indexOf('id="jogTargetInput"') > block, '목표 칸은 다이얼 블록 안');
+  assert.match(html, /목표 위치 \(모터 deg · 감속비 미적용\)/);
+  // OFF 면 다이얼 쪽만 숨고 위치 표시·limit 버튼은 그대로
+  assert.match(html, /id="jogDial" class="jog-dial jog-dial-only"/);
+  assert.doesNotMatch(html, /jog-dial-capture[^"]*jog-dial-only/);
+});
+
+test('the typed target goes through the existing absolute move path in motor deg', () => {
+  assert.match(dial, /requestAcServoAction/);
+  assert.match(dial, /requestDynamixelAction/);
+  assert.match(dial, /target_deg: target,/);
+  // 시간은 안 보낸다 · supervisor 가 속도·가속 한계로 정한다
+  assert.doesNotMatch(dial, /duration_sec:/);
+  // 같은 잠금 · 앞 요청이 돌면 안 보낸다 · 한계 밖이면 안 보낸다
+  assert.match(dial, /if \(reason \|\| inFlight\) \{/);
+  assert.match(dial, /const limitReason = targetLimitReason\(motor, target\);/);
+  // 모터를 바꾸면 목표 칸을 새 모터 위치로 다시 채운다
+  assert.match(dial, /targetTouched = false;\s*\n\s*clearPending\(''\);/);
+});
+
+test('the old action tab with a hand-typed gear ratio is gone', () => {
+  assert.doesNotMatch(html, /data-motion-test-mode="action"/);
+  assert.doesNotMatch(html, /id="motionTestGearRatio"/);
+  assert.doesNotMatch(html, /id="motionTestRunButton"/);
+  // 범위 복귀는 남는다
+  assert.match(html, /data-motion-test-mode="recovery"/);
+  assert.match(html, /id="motionTestRecoveryButton"/);
 });
 
 test('motion range conversion respects invert and rounds inward', () => {
@@ -83,5 +121,7 @@ test('motion range conversion respects invert and rounds inward', () => {
   assert.match(data, /Math\.ceil\(motion \* 10000\) \/ 10000/);
   // 저장 안 한 편집이 있으면 거절 (같이 저장되면 안 된다)
   assert.match(data, /if \(mappingDirty\) \{/);
+  // 모터 관리에 저장 안 한 편집이 있으면 다시 읽지 않고 알린다
   assert.match(limits, /if \(hasMotorConfigDataChanges\(\) \|\| hasAxisChanges\(\)\) \{/);
+  assert.match(data, /if \(payload\.motor_limits\?\.changed\?\.length\) await onMotorLimitsChange\?\.\(\);/);
 });

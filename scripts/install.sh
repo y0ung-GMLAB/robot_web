@@ -188,6 +188,37 @@ sync_git_repository() {
   fi
 }
 
+# 로봇 팩 검사기(MuJoCo)가 쓰는 uv · 사용자 자리(~/.local/bin)에 깐다 · 2026-10-02
+#
+# 로봇 팩 업로드는 `uv run --with mujoco ... sim_run.py --check` 로 model.xml 을
+# 실제로 열어 본다 · uv 가 없으면 「실행기 로드 검사 불가: uv 없음」으로 팩을
+# 받지 않는다 (미니 PC 실측) · 시스템 pip 에는 아무것도 깔지 않는다.
+#
+# 인터넷이 안 되면 설치 전체를 멈추지 않는다 · 경고만 남긴다 (모터 제어와 무관).
+install_uv_and_mujoco() {
+  local uv_bin="${HOME}/.local/bin/uv"
+  if command -v uv >/dev/null 2>&1; then
+    uv_bin="$(command -v uv)"
+  elif [[ ! -x "${uv_bin}" ]]; then
+    if ! curl -LsSf https://astral.sh/uv/install.sh | sh; then
+      echo "!! uv 설치 실패 · 로봇 팩 업로드 검사가 안 됩니다 · 인터넷 확인 후 다시 실행하세요" >&2
+      return 0
+    fi
+  fi
+  if [[ ! -x "${uv_bin}" ]]; then
+    echo "!! uv 를 찾지 못했습니다 · ${uv_bin}" >&2
+    return 0
+  fi
+  echo "uv · $("${uv_bin}" --version)"
+  # 첫 검사 때 mujoco 를 받느라 업로드가 오래 걸리지 않게 미리 받아 둔다
+  if "${uv_bin}" run --no-project --with=mujoco --with=numpy --with=pyyaml \
+      python -c 'import mujoco; print("mujoco", mujoco.__version__)'; then
+    echo "MuJoCo 준비 완료"
+  else
+    echo "!! MuJoCo 미리 받기 실패 · 첫 로봇 팩 업로드 때 다시 받습니다" >&2
+  fi
+}
+
 configure_locale_and_groups() {
   sudo locale-gen en_US en_US.UTF-8
   sudo update-locale LC_ALL=en_US.UTF-8 LANG=en_US.UTF-8
@@ -428,6 +459,9 @@ ensure_ros_apt_source
 
 print_step "4. 필수 프로그램 설치"
 install_system_packages
+
+print_step "4-1. 로봇 팩 검사기 (uv · MuJoCo)"
+install_uv_and_mujoco
 
 print_step "5. 사용자 권한·언어 설정"
 configure_locale_and_groups

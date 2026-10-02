@@ -7,28 +7,11 @@ import {
 import { escapeHtml } from './format.js';
 import { showConfirm } from './ui_dialogs.js';
 import { buildStoredZip } from './zip_store.js';
+import { droppedEntries, walkEntry } from './drop_files.js';
 
 /** 팩 내용이 아닌 것 · 숨김 파일(.git, .DS_Store …) · macOS 압축 찌꺼기 */
 function skipped(path) {
   return path.split('/').some((part) => part.startsWith('.') || part === '__MACOSX');
-}
-
-/** 드롭된 폴더 항목 → [{path, file}] · readEntries 는 나눠서 주므로 빌 때까지 */
-async function walkEntry(entry, prefix = '') {
-  const path = prefix ? `${prefix}/${entry.name}` : entry.name;
-  if (entry.isFile) {
-    const file = await new Promise((resolve, reject) => entry.file(resolve, reject));
-    return [{ path, file }];
-  }
-  const reader = entry.createReader();
-  const children = [];
-  for (;;) {
-    const batch = await new Promise((resolve, reject) => reader.readEntries(resolve, reject));
-    if (!batch.length) break;
-    children.push(...batch);
-  }
-  const nested = await Promise.all(children.map((child) => walkEntry(child, path)));
-  return nested.flat();
 }
 
 /** [{path, file}] → zip Blob · 최상위 폴더 하나는 서버가 팩 루트로 본다 */
@@ -193,9 +176,7 @@ export function createRobotPackController({ el }) {
       event.preventDefault();
       zone.classList.remove('dragging');
       // 항목(entry)은 drop 처리 안에서 바로 꺼내야 한다 · await 뒤에는 비어 있다
-      const entries = [...(event.dataTransfer?.items || [])]
-        .map((item) => item.webkitGetAsEntry?.())
-        .filter(Boolean);
+      const entries = droppedEntries(event.dataTransfer);
       const folder = entries.find((entry) => entry.isDirectory);
       if (!folder) {
         upload(event.dataTransfer?.files?.[0]);

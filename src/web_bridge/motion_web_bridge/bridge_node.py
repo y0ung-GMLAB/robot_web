@@ -397,7 +397,7 @@ class MotionWebBridge(Node):
         self.manual_stream = ManualStreamService(
             self, publisher=self._manual_stream_request_publisher
         )
-        #: 무조코 같이 보기 예약 · 재생이 running 으로 바뀌는 순간 뷰어를
+        #: MuJoCo 같이 보기 예약 · 재생이 running 으로 바뀌는 순간 뷰어를
         #: 띄운다 (초기 위치 이동이 끝난 뒤 = 프레임 1 과 동시) · P7
         self._mujoco_companion: Optional[Dict[str, Any]] = None
         self._motion_mapping_request_publisher = self.create_publisher(
@@ -1671,6 +1671,10 @@ class MotionWebBridge(Node):
                     project_id, 'motion_axis_matching', saved_file_id
                 ),
             )
+            # 조인트 매핑 범위 = 모터 운전 한계의 원본 · 모터 설정 파일을 맞춘다
+            # (드라이브 반영은 「장비에 적용 · 모터 재시작」) · 2026-10-02
+            limits = self._motor_config.sync_limits_from_mapping()
+            result['motor_limits'] = limits
             # The active mapping file is one immutable part of the project
             # execution context. Reconcile the complete context after the
             # repository has confirmed the saved file and active-file selection.
@@ -1691,6 +1695,14 @@ class MotionWebBridge(Node):
                     '조인트 매핑은 저장됐지만 실행 컨텍스트 적용 대기 중입니다: '
                     f'{runtime_message}'
                 )
+            if limits.get('changed'):
+                axes = ', '.join(str(item.get('controller_index')) for item in limits['changed'])
+                result['message'] += (
+                    f' · 모터 {axes} 운전 한계 갱신 · 드라이브 반영은 '
+                    '모터 관리 「장비에 적용 · 모터 재시작」'
+                )
+            elif limits.get('success') is False:
+                result['message'] += f" · {limits.get('message')}"
         return result
 
     def validate_motion_mapping(self, payload: Dict[str, Any]) -> Dict[str, Any]:
@@ -1829,12 +1841,12 @@ class MotionWebBridge(Node):
         project_id = self.project_repository.selected_project_id()
         file_id = str(payload.get('motion_file_id') or '').strip()
         if not project_id or not file_id:
-            return '무조코 같이 보기: 재생할 애니메이션이 정해지지 않았습니다'
+            return 'MuJoCo 같이 보기: 재생할 애니메이션이 정해지지 않았습니다'
         motion_path = self.project_repository.export_path(project_id, 'motions', file_id)
         state = animation_preview.preview_state(self.workspace_root, motion_path)
         if state['state'] not in ('ready', 'direct', 'stale'):
             return (
-                '무조코 같이 보기는 계산이 끝난 뒤에 켤 수 있습니다 · '
+                'MuJoCo 같이 보기는 계산이 끝난 뒤에 켤 수 있습니다 · '
                 + str(state.get('message') or f"지금 상태: {state['state']}")
             )
         self._mujoco_companion = {
@@ -1864,7 +1876,7 @@ class MotionWebBridge(Node):
             )
             log = self.get_logger()
             (log.info if result.get('success') else log.warn)(
-                f"무조코 같이 보기: {result.get('message')}"
+                f"MuJoCo 같이 보기: {result.get('message')}"
             )
         elif state in ('stopped', 'error') or (
             time.time() - float(companion.get('armed_at') or 0.0) > 120.0
@@ -1916,7 +1928,7 @@ class MotionWebBridge(Node):
         )
 
     def precompute_motion_file(self, file_id: str) -> Dict[str, Any]:
-        """무조코 계산 시작 · 업로드 직후 화면이 자동으로 부른다 · P7"""
+        """MuJoCo 계산 시작 · 업로드 직후 화면이 자동으로 부른다 · P7"""
         project_id = self.project_repository.selected_project_id()
         if not project_id:
             return {'success': False, 'message': NO_PROJECT_SELECTED}

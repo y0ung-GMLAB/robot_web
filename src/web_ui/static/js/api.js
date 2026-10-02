@@ -359,11 +359,11 @@ export const configureMotionAutomation = (payload) => request('PUT', '/api/motio
 
 export const stopMotionRun = () => request('POST', '/api/motion-run/stop');
 
-/** 무조코 재생 · 계산이 끝난 결과를 설정된 뷰어로 띄운다 · P7 */
+/** MuJoCo 재생 · 계산이 끝난 결과를 설정된 뷰어로 띄운다 · P7 */
 export const previewMotionFile = (fileId, fps) =>
   request('POST', `/api/motion-files/${encodeURIComponent(fileId)}/preview`, { body: { fps } });
 
-/** 무조코 계산 시작 · 무거운 물리 시뮬 · 업로드 직후 자동으로도 부른다 · P7 */
+/** MuJoCo 계산 시작 · 무거운 물리 시뮬 · 업로드 직후 자동으로도 부른다 · P7 */
 export const precomputeMotionFile = (fileId) =>
   request('POST', `/api/motion-files/${encodeURIComponent(fileId)}/preview-precompute`);
 

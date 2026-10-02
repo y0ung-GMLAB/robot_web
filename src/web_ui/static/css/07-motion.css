@@ -1301,7 +1301,7 @@
   width: 72px;
 }
 
-/* 무조코 상태 배지 · P7 · 계산 중 = 그레이 */
+/* MuJoCo 상태 배지 · P7 · 계산 중 = 그레이 */
 .mujoco-badge {
   display: inline-block;
   margin-left: 6px;

@@ -164,7 +164,10 @@ def run_checker(workspace_root: Path, pack_dir: Path) -> List[str]:
         return [f'실행기 없음: {script}']
     uv = _uv()
     if uv is None:
-        return ['실행기 로드 검사 불가: uv 없음 (~/.local/bin/uv)']
+        return [
+            '실행기 로드 검사 불가: uv 없음 (~/.local/bin/uv)',
+            '설치: 터미널에서 bash scripts/install.sh 다시 실행 · 또는 curl -LsSf https://astral.sh/uv/install.sh | sh',
+        ]
     args = [
         uv, 'run', '--no-project', '--with=mujoco', '--with=numpy', '--with=pyyaml',
         'python', str(script), '--check', str(pack_dir),
@@ -245,7 +248,7 @@ def install_pack(
     return {
         **status,
         'success': True,
-        'message': f'로봇 팩 교체: {label} · 기존 무조코 결과는 다시 계산 필요',
+        'message': f'로봇 팩 교체: {label} · 기존 MuJoCo 결과는 다시 계산 필요',
         'errors': [],
         'warnings': report.warnings,
     }

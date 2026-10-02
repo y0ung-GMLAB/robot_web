@@ -15,7 +15,7 @@ def register_motion_run_routes(app: FastAPI, bridge, safety_first_stop) -> None:
             bridge.project_repository,
             bridge.motion_projects_dir,
         )
-        # 무조코 상태(계산 중·완료·미계산)를 파일마다 싣는다 · 설정 없으면 그대로
+        # MuJoCo 상태(계산 중·완료·미계산)를 파일마다 싣는다 · 설정 없으면 그대로
         return await asyncio.to_thread(
             animation_preview.annotate_files,
             bridge.workspace_root,

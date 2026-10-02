@@ -24,6 +24,18 @@ from .motor_values import parse_int
 #: EEPROM 읽기 시도 횟수 · 실패하면 곧바로 다시 요청한다 · §6-230
 SII_READ_ATTEMPTS = 3
 
+#: Panasonic(MINAS) EtherCAT vendor id
+MINAS_VENDOR_ID = 0x066F
+
+#: 검색 때 읽는 MINAS 드라이브 설정 · 화면 키 → (객체, 서브) · 2026-10-02
+#: web_bridge `minas_params.PARAM_FIELDS` 와 같은 객체 (테스트로 고정) · 모두 s16
+MINAS_DRIVE_PARAM_OBJECTS = {
+    'brake_delay_stop_ms': (0x3437, 0),     # Pr4.37
+    'brake_delay_run_ms': (0x3438, 0),      # Pr4.38
+    'encoder_absolute_mode': (0x3015, 0),   # Pr0.15
+    'limit_switch_mode': (0x3504, 0),       # Pr5.04
+}
+
 
 class EthercatScanner:
     def __init__(self, monitor: Any) -> None:
@@ -412,7 +424,7 @@ class EthercatScanner:
                 'ethercat_slave_read',
                 (
                     f'Master {master_index} · Slave {position}: '
-                    'SII EEPROM과 Alias 레지스터를 읽습니다'
+                    'SII EEPROM · Alias 레지스터 · 드라이브 설정을 읽습니다'
                 ),
                 transport='ethercat',
                 details={
@@ -429,6 +441,9 @@ class EthercatScanner:
             slave.update(sii_identity)
             rotary = self._read_station_alias_register(master_index, position)
             slave.update(rotary)
+            if parse_int(slave.get('vendor_id')) == MINAS_VENDOR_ID:
+                # 화면 표시용 · 실패해도 검색 결과(scan_error · complete)는 그대로
+                slave.update(self._read_drive_params(master_index, position))
             slave_errors = []
             if slave.get('sii_error'):
                 slave_errors.append(str(slave['sii_error']))
@@ -757,6 +772,55 @@ class EthercatScanner:
             'rotary_alias': value,
             'rotary_alias_hex': raw_hex,
             'rotary_alias_error': '',
+        }
+
+    def _read_drive_params(
+        self, master_index: int, slave_position: int
+    ) -> Dict[str, Any]:
+        """MINAS 드라이브 설정값을 SDO 로 읽는다 · 모터 관리 「드라이브 설정」 칸 표시용.
+
+        검색은 Motor Manager 를 멈춘 뒤 돈다 · 마스터가 쉬는 동안 슬레이브는
+        PREOP 이라 CoE(SDO) 가 된다 (실물 미검증) · 읽기 실패는 검색 실패가
+        아니다 · 값을 못 읽은 항목만 비우고 사유를 남긴다 · 이전 값으로 채우지 않는다.
+        """
+        values: Dict[str, Any] = {}
+        errors: List[str] = []
+        for field, (index, subindex) in MINAS_DRIVE_PARAM_OBJECTS.items():
+            try:
+                completed = subprocess.run(
+                    [
+                        'ethercat',
+                        'upload',
+                        '-m',
+                        str(master_index),
+                        '-p',
+                        str(slave_position),
+                        '-t',
+                        'int16',
+                        f'0x{index:04X}',
+                        str(subindex),
+                    ],
+                    check=False,
+                    capture_output=True,
+                    text=True,
+                    timeout=2.0,
+                )
+            except (OSError, subprocess.TimeoutExpired) as exc:
+                errors.append(f'0x{index:04X} {exc}')
+                continue
+            if completed.returncode != 0:
+                detail = completed.stderr.strip() or completed.stdout.strip() or 'unknown error'
+                errors.append(f'0x{index:04X} {detail}')
+                continue
+            parts = completed.stdout.strip().split()
+            value = parse_int(parts[-1]) if parts else None
+            if value is None:
+                errors.append(f'0x{index:04X} 응답을 읽지 못함: {completed.stdout.strip()!r}')
+                continue
+            values[field] = value
+        return {
+            'drive_params': values,
+            'drive_params_error': ' / '.join(errors),
         }
 
     def _scanned_ethercat_identity(

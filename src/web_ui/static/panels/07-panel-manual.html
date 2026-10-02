@@ -86,7 +86,7 @@
             <div id="motionTestActionGuide" class="motion-test-action-guide" data-state="warning">다음 단계: 시험할 모터를 선택하세요</div>
             <div id="motionTestModeButtons" class="segmented-control motion-mode-tabs" role="group" aria-label="수동 조작 방식">
               <button class="active" type="button" data-motion-test-mode="jog">조그 모드</button>
-              <button type="button" data-motion-test-mode="action">동작 모드</button>
+              <!-- 「동작 모드」(절대 목표 · 감속비 손입력)는 없앴다 · 다이얼 OFF 의 목표 위치 이동이 대신한다 · 2026-10-02 -->
               <button type="button" data-motion-test-mode="recovery">범위 복귀</button>
             </div>
             <div class="motion-test-command-grid">
@@ -102,18 +102,6 @@
                   조인트 deg 기준 · 감속비·방향 적용
                 </label>
               </div>
-              <label class="manual-field hidden" data-motion-test-panel="action">
-                <span>절대 목표 위치 (출력축 도)</span>
-                <input id="motionTestPosition" type="number" inputmode="decimal" step="0.001" value="0">
-              </label>
-              <label class="manual-field hidden" data-motion-test-panel="action">
-                <span>감속비</span>
-                <input id="motionTestGearRatio" type="number" inputmode="decimal" step="0.001" min="0.001" value="1">
-              </label>
-              <label class="manual-field hidden" data-motion-test-panel="action">
-                <span>동작 시간 (초)</span>
-                <input id="motionTestDurationSec" type="number" inputmode="decimal" step="0.01" min="0.02" value="1.00">
-              </label>
               <div class="motion-command-note hidden" data-motion-test-panel="recovery">
                 현재 위치가 설정 범위를 벗어났을 때 가장 가까운 하한 또는 상한 경계로 이동합니다.
               </div>
@@ -122,8 +110,10 @@
               <button id="motionTestJogNegativeButton" class="primary motion-command-button" type="button" disabled>- 방향</button>
               <button id="motionTestJogPositiveButton" class="primary motion-command-button" type="button" disabled>+ 방향</button>
             </div>
-            <div class="jog-dial-block" data-motion-test-panel="jog" aria-label="조그 다이얼">
-              <div id="jogDial" class="jog-dial" role="slider" tabindex="0" aria-disabled="true"
+            <!-- 다이얼 ON · 돌린 만큼 상대 이동 · OFF · 목표 위치 입력 후 「이동」 (절대 이동)
+                 둘 다 모터 deg · 같은 모터 위치 · 같은 limit 버튼 · 2026-10-02 -->
+            <div id="jogDialBlock" class="jog-dial-block" data-motion-test-panel="jog" aria-label="조그 다이얼 · 목표 위치 이동">
+              <div id="jogDial" class="jog-dial jog-dial-only" role="slider" tabindex="0" aria-disabled="true"
                 aria-label="조그 다이얼 · 돌린 만큼 모터가 움직입니다 (모터 deg)">
                 <!-- 바늘 없음 · 상대 이동이라 기준(12시·0점)으로 읽히는 표시를 두지 않는다 ·
                      같은 모양 눈금 24칸이 돌린 만큼 같이 돈다 · 2026-10-02 -->
@@ -131,7 +121,20 @@
                 <div class="jog-dial-cap" aria-hidden="true"></div>
               </div>
               <div class="jog-dial-side">
-                <label class="manual-field">
+                <label class="jog-dial-toggle" title="끄면 다이얼 대신 목표 위치를 입력해 이동합니다">
+                  <input id="jogDialEnabled" type="checkbox" checked>
+                  <span>다이얼</span>
+                  <strong id="jogDialEnabledState">ON</strong>
+                </label>
+                <div class="jog-target-row jog-target-only">
+                  <label class="manual-field">
+                    <span>목표 위치 (모터 deg · 감속비 미적용)</span>
+                    <input id="jogTargetInput" class="mono" type="number" inputmode="decimal" step="any"
+                      title="이동할 모터 위치 · 모터 운전 한계 안 · 속도·가속은 모터 설정 한계를 따릅니다">
+                  </label>
+                  <button id="jogTargetMoveButton" class="primary" type="button" disabled>이동</button>
+                </div>
+                <label class="manual-field jog-dial-only">
                   <span>한 칸 = (모터 deg · 감속비 미적용)</span>
                   <input id="jogDialStep" class="mono" type="number" inputmode="decimal"
                     min="0.001" max="360" step="any" value="1"
@@ -143,25 +146,23 @@
                 </div>
                 <div class="jog-dial-pending-row">
                   <div id="jogDialPending" class="jog-dial-pending mono">대기</div>
-                  <button id="jogDialCancelPending" type="button" disabled
-                    title="아직 안 보낸 쌓인 양만 버립니다 · 이미 움직이는 조그는 끝까지 갑니다">쌓인 양 취소</button>
+                  <button id="jogDialCancelPending" class="off" type="button"
+                    title="아직 안 보낸 다이얼 이동을 버리고 움직이는 조그·이동을 멈춥니다 · 서보 ON 유지">동작 취소</button>
                 </div>
                 <div class="jog-dial-capture" role="group" aria-label="지금 위치 찍기">
-                  <button id="jogDialSetLower" type="button" disabled title="지금 모터 위치를 − limit 으로 · 모터 하한 + 조인트 범위에 저장">− limit</button>
+                  <button id="jogDialSetLower" type="button" disabled title="지금 모터 위치를 − limit 으로 · 조인트 매핑 범위에 저장 · 모터 운전 한계는 자동 계산">− limit</button>
                   <button id="jogDialSetReference" type="button" disabled title="지금 모터 위치를 기준점(모션 0°)으로 · 조인트 매핑에 저장">기준점 지정</button>
-                  <button id="jogDialSetUpper" type="button" disabled title="지금 모터 위치를 + limit 으로 · 모터 상한 + 조인트 범위에 저장">+ limit</button>
+                  <button id="jogDialSetUpper" type="button" disabled title="지금 모터 위치를 + limit 으로 · 조인트 매핑 범위에 저장 · 모터 운전 한계는 자동 계산">+ limit</button>
                 </div>
                 <div id="jogDialMessage" class="jog-dial-message" role="status"></div>
-                <small class="jog-dial-help">드래그로 돌리기 · 휠 한 칸 · ←/→ 한 칸 · 시계 방향 = +</small>
+                <small class="jog-dial-help jog-dial-only">드래그로 돌리기 · 휠 한 칸 · ←/→ 한 칸 · 시계 방향 = +</small>
+                <small class="jog-dial-help jog-target-only">값 입력 후 「이동」 또는 Enter · 속도·가속은 모터 설정 한계를 따릅니다</small>
               </div>
             </div>
             <details class="motion-command-help" data-motion-test-panel="jog">
               <summary>조그 버튼 활성화 조건</summary>
               <p class="motion-command-note">AC 서보 모터 선택, 모터 감지됨, 서보 켜짐, 오류 없음, 현재 위치 수신, 조그 이동량 0.001~360도, 목표 위치가 최소/최대 설정값 범위 안, 이전 조그 완료가 필요합니다. 이전 조그 완료 기준은 목표 위치 오차 0.05도 이내, 현재 속도 0.05도/초 이하입니다.</p>
             </details>
-            <div class="manual-actions hidden" data-motion-test-panel="action">
-              <button id="motionTestRunButton" class="primary motion-command-button" type="button" disabled>동작 실행</button>
-            </div>
             <div class="manual-actions hidden" data-motion-test-panel="recovery">
               <button id="motionTestRecoveryButton" class="primary motion-command-button" type="button" disabled>경계 위치로 복귀</button>
             </div>

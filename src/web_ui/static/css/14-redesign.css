@@ -744,7 +744,7 @@ tbody tr.registered td { background: rgb(70 192 106 / 8%) !important; }
 
 .coordination-control-panel { border-top-color: var(--line); }
 
-/* 무조코 같이 보기 · 체크박스와 fps 를 한 덩이로 */
+/* MuJoCo 같이 보기 · 체크박스와 fps 를 한 덩이로 */
 .mujoco-companion-field select { min-width: 92px; }
 
 /* ---------- 17. 7라운드 · 밝은 배경 전수 정리 (자동 스캐너 목록) ----------
@@ -832,6 +832,9 @@ td.mapping-disabled-cell { background: transparent !important; opacity: 0.55; }
 
 /* 상태 알약 · ok/warn/bad 를 투명 채움으로 */
 .motion-state-pill,
+.header-context-state.clickable { cursor: pointer; }
+.header-context-state.clickable:hover { filter: brightness(1.15); }
+
 .header-context-state {
   border: 1px solid var(--line-strong);
   background: var(--panel-2) !important;
@@ -952,6 +955,15 @@ td.mapping-disabled-cell { background: transparent !important; opacity: 0.55; }
 .jog-dial-capture { display: flex; gap: 6px; flex-wrap: wrap; }
 .jog-dial-capture button { min-width: 84px; }
 #jogDialSetReference { border-color: rgb(90 162 255 / 50%); color: var(--blue); }
+
+/* 다이얼 ON/OFF · OFF 면 목표 위치 입력 + 이동 (2026-10-02) */
+.jog-dial-toggle { display: flex; align-items: center; gap: 8px; font-size: 13px; cursor: pointer; }
+.jog-dial-toggle strong { font-size: 12px; color: var(--muted); }
+.jog-dial-block.dial-off .jog-dial-only,
+.jog-dial-block:not(.dial-off) .jog-target-only { display: none; }
+.jog-target-row { display: flex; align-items: flex-end; gap: 8px; }
+.jog-target-row .manual-field { flex: 1; min-width: 0; }
+.jog-target-row button { min-width: 72px; }
 
 /* 수동 조작 · 모드 안내 띠 · 수동 모드에서만 조작 가능 (2026-10-02) */
 .manual-mode-banner:not(.hidden) {

@@ -33,6 +33,7 @@ from motion_common import store
 
 from motion_web_bridge.motor_runtime_store import MOTOR_BUSY_MESSAGE
 from motion_web_bridge import (
+    mapping_motor_limits,
     motion_file_analysis,
     motor_config_build,
     motor_config_rules,
@@ -251,7 +252,6 @@ class MotorConfigService:
                 content = str(payload.get('content') or '')
                 config = yaml.safe_load(content) or {}
                 config = motor_config_rules.expand_shared_driver_profiles(config)
-                content = yaml.safe_dump(config, sort_keys=False, allow_unicode=True)
             else:
                 registry = payload.get('registry', payload)
                 if not isinstance(registry, dict):
@@ -262,10 +262,14 @@ class MotorConfigService:
                 config = motor_config_build.motor_config_from_registry(
                     self.workspace_root, normalized, current
                 )
-                content = yaml.safe_dump(config, sort_keys=False, allow_unicode=True)
 
             if not isinstance(config, dict):
                 raise ValueError('motor config YAML root must be an object')
+            # 운전 한계(lower/upper)는 조인트 매핑에서 온다 · 어느 저장 경로든 마지막에 덮는다
+            config, _ = mapping_motor_limits.apply_mapping_limits(
+                config, mapping_motor_limits.active_mapping(self.repository),
+            )
+            content = yaml.safe_dump(config, sort_keys=False, allow_unicode=True)
             configured_axes = len(
                 motor_config_rules.registry_from_motor_config(
                     motor_config_rules.expand_shared_driver_profiles(config)
@@ -320,6 +324,39 @@ class MotorConfigService:
         if 'project_sync_warning' in synced:
             result['project_sync_warning'] = synced['project_sync_warning']
         return result
+
+    def sync_limits_from_mapping(self) -> Dict[str, Any]:
+        """조인트 매핑 저장 뒤 · 지금 모터 설정 파일의 lower/upper 를 매핑 환산값으로.
+
+        모터 설정 파일이 없으면 할 일이 없다 · 바뀐 것이 없으면 파일을 안 쓴다
+        (쓰면 sha 가 바뀌어 「장비에 적용 필요」가 괜히 뜬다).
+        """
+        try:
+            path = motor_config_rules.selected_motor_config_path(self.repository)
+        except ValueError:
+            return {'success': True, 'changed': [], 'config_file': ''}
+        if not path.is_file():
+            return {'success': True, 'changed': [], 'config_file': ''}
+        try:
+            config = yaml.safe_load(path.read_text(encoding='utf-8')) or {}
+            if not isinstance(config, dict):
+                raise ValueError('motor config YAML root must be an object')
+            updated, changed = mapping_motor_limits.apply_mapping_limits(
+                config, mapping_motor_limits.active_mapping(self.repository),
+            )
+            if changed:
+                self._write(
+                    yaml.safe_dump(updated, sort_keys=False, allow_unicode=True), path,
+                )
+                self.project.sync_file({}, 'motor_axes', path)
+        except (OSError, ValueError, yaml.YAMLError) as exc:
+            return {
+                'success': False,
+                'changed': [],
+                'config_file': str(path),
+                'message': f'모터 운전 한계 갱신 실패: {exc}',
+            }
+        return {'success': True, 'changed': changed, 'config_file': str(path)}
 
     def delete(self) -> Dict[str, Any]:
         project_id = self.repository.selected_project_id()

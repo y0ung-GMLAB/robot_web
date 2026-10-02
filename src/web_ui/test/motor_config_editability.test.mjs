@@ -32,6 +32,14 @@ test('model profile remains editable only outside physical SII identity', () => 
 });
 
 
+// 리밋 원본은 조인트 매핑 하나 · 상세 표에는 보이되 고칠 수 없다 · 2026-10-02
+test('driver lower/upper are read-only · speed stays editable', () => {
+  assert.equal(isEditableMotorConfigPath('drivers[0].lower'), false);
+  assert.equal(isEditableMotorConfigPath('drivers[0].upper'), false);
+  assert.equal(isEditableMotorConfigPath('drivers[0].profile_velocity'), true);
+});
+
+
 test('reload button click event cannot be mistaken for a project load token', () => {
   assert.equal(normalizeProjectLoadToken({ type: 'click' }, 7), 7);
   assert.equal(normalizeProjectLoadToken(6, 7), 6);

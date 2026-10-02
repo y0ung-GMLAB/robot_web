@@ -39,6 +39,7 @@ import {
   showConfirm,
   showPrompt,
 } from './ui_dialogs.js';
+import { draggingFiles, droppedEntries, walkEntry } from './drop_files.js';
 
 /** 차트 색 · 화면 테마(CSS 토큰)를 따른다 · 리디자인 2026-10-02
  *
@@ -590,6 +591,8 @@ export function createMotionDataController({
   getLatestState = () => null,
   getConfiguredMotors = null,
   onProjectFilesChange,
+  // 매핑 저장이 모터 설정 파일의 운전 한계를 바꿨을 때 · 모터 관리 화면을 다시 읽는다
+  onMotorLimitsChange = null,
   groupRun = null,
 }) {
   let files = [];
@@ -623,28 +626,41 @@ export function createMotionDataController({
     if (el.motionFileMessage) el.motionFileMessage.textContent = message;
   }
 
-  /** 애니메이션 .json 드래그&드롭 업로드 · P5
+  /** 실패는 작은 글씨만으론 놓친다 · 창으로도 띄운다 (2026-10-02) */
+  function reportImportFailure(message) {
+    setMessage(message);
+    showAlert(message, { title: '애니메이션 불러오기', tone: 'warning' });
+  }
+
+  /** 애니메이션 .json 업로드 · 불러오기 버튼 · 드래그&드롭 (파일 · 폴더) · P5
    *
    * 길은 기존 그대로다 · `POST /api/projects/{id}/files` (JSONL 검증 포함) ·
    * 화면은 파일을 글자로 읽어 싣기만 한다 · 조인트 매핑이 없는 프로젝트는
    * 서버가 문 앞에서 거절하고, 그 사유를 그대로 보여 준다.
+   *
+   * `fromFolder` · 폴더째 놓으면 그 안의 .json 만 고른다 (다른 파일은 건너뛴다) ·
+   * 낱개로 고른·놓은 파일에 .json 이 아닌 것이 있으면 통째로 거절한다.
    */
-  async function importDroppedAnimations(fileList) {
-    const files = [...(fileList || [])];
-    if (!files.length) return;
-    const projectId = getLatestState()?.selected_project_id;
-    if (!projectId) {
-      setMessage('프로젝트를 먼저 선택하세요');
+  async function importAnimationFiles(fileList, { fromFolder = false } = {}) {
+    let picked = [...(fileList || [])];
+    if (fromFolder) picked = picked.filter((file) => /\.json$/i.test(file.name || ''));
+    if (!picked.length) {
+      if (fromFolder) reportImportFailure('폴더 안에 .json 애니메이션이 없습니다');
       return;
     }
-    const wrongType = files.find((file) => !/\.json$/i.test(file.name || ''));
+    const projectId = getLatestState()?.selected_project_id;
+    if (!projectId) {
+      reportImportFailure('프로젝트를 먼저 선택하세요');
+      return;
+    }
+    const wrongType = picked.find((file) => !/\.json$/i.test(file.name || ''));
     if (wrongType) {
-      setMessage(`애니메이션은 .json 만 받습니다: ${wrongType.name}`);
+      reportImportFailure(`애니메이션은 .json 만 받습니다: ${wrongType.name}`);
       return;
     }
     let imported = 0;
     const uploadedNames = [];
-    for (const file of files) {
+    for (const file of picked) {
       try {
         const content = await file.text();
         await importProjectFile(projectId, {
@@ -655,15 +671,19 @@ export function createMotionDataController({
       } catch (error) {
         // 하나 실패하면 멈춘다 · 사유(중복 이름 · 조인트 매핑 없음 · 형식
         // 오류)가 다음 성공 메시지에 덮이지 않게
-        setMessage(`${file.name} 업로드 실패: ${error?.message || error}`);
+        reportImportFailure(
+          `${file.name} 업로드 실패: ${error?.message || error}`
+          + (imported ? ` · 앞의 ${imported}개는 올라갔습니다` : ''),
+        );
         break;
       }
     }
     if (imported) {
-      setMessage(`애니메이션 ${imported}개 업로드 완료`);
+      if (imported === picked.length) setMessage(`애니메이션 ${imported}개 업로드 완료`);
       await loadFiles();
       await onProjectFilesChange?.();
-      // 무조코 구성(계산형)이면 올라온 것부터 바로 계산을 돌린다 · P7
+      // MuJoCo 구성(계산형)이면 올라온 것부터 바로 계산을 돌린다 · P7
+      // (다시 읽은 목록에서 고른다 · 드롭한 File 에는 미리보기 상태가 없다)
       const toCompute = files.filter(
         (entry) => mujocoState(entry) === 'missing'
           && uploadedNames.includes(entry.id),
@@ -671,32 +691,55 @@ export function createMotionDataController({
       for (const entry of toCompute) {
         try {
           await precomputeMotionFile(entry.id);
-        } catch { /* 사유는 무조코 버튼을 누르면 다시 보인다 */ }
+        } catch { /* 사유는 MuJoCo 버튼을 누르면 다시 보인다 */ }
       }
       if (toCompute.length) {
-        setMessage(`애니메이션 ${imported}개 업로드 · 무조코 계산 ${toCompute.length}개 시작`);
+        setMessage(`애니메이션 ${imported}개 업로드 · MuJoCo 계산 ${toCompute.length}개 시작`);
         await loadFiles();
       }
     }
   }
 
+  /** 받는 칸 · 애니메이션 화면 전체 (목록 칸만이면 조금만 빗나가도 브라우저가 파일을 연다) */
   function bindAnimationDropZone() {
-    const zone = el.motionFileRows?.closest('.motion-file-column');
+    const column = el.motionFileRows?.closest('.motion-file-column');
+    const zone = el.motionFileRows?.closest('.motion-data-panel') || column;
     if (!zone) return;
+    const highlight = column || zone;
     ['dragenter', 'dragover'].forEach((kind) => {
       zone.addEventListener(kind, (event) => {
-        if (![...(event.dataTransfer?.types || [])].includes('Files')) return;
+        if (!draggingFiles(event)) return;
         event.preventDefault();
-        zone.classList.add('drop-active');
+        highlight.classList.add('drop-active');
       });
     });
     zone.addEventListener('dragleave', (event) => {
-      if (!zone.contains(event.relatedTarget)) zone.classList.remove('drop-active');
+      if (!zone.contains(event.relatedTarget)) highlight.classList.remove('drop-active');
     });
-    zone.addEventListener('drop', (event) => {
+    zone.addEventListener('drop', async (event) => {
+      if (!draggingFiles(event)) return;
       event.preventDefault();
-      zone.classList.remove('drop-active');
-      importDroppedAnimations(event.dataTransfer?.files);
+      highlight.classList.remove('drop-active');
+      // 항목은 await 전에 꺼낸다
+      const entries = droppedEntries(event.dataTransfer);
+      const files = [...(event.dataTransfer?.files || [])];
+      if (!entries.some((entry) => entry.isDirectory)) {
+        importAnimationFiles(files);
+        return;
+      }
+      try {
+        const nested = await Promise.all(entries.map((entry) => walkEntry(entry)));
+        importAnimationFiles(nested.flat().map((item) => item.file), { fromFolder: true });
+      } catch (error) {
+        reportImportFailure(`폴더 읽기 실패: ${error?.message || error}`);
+      }
+    });
+    // 불러오기 버튼 · 여러 개 한 번에
+    el.motionFileImportButton?.addEventListener('click', () => el.motionFileImportInput?.click());
+    el.motionFileImportInput?.addEventListener('change', () => {
+      const chosen = [...(el.motionFileImportInput.files || [])];
+      el.motionFileImportInput.value = '';
+      importAnimationFiles(chosen);
     });
   }
 
@@ -1812,16 +1855,16 @@ export function createMotionDataController({
     if (el.previewMotionFileButton) {
       const state = mujocoState(file);
       const LABELS = {
-        missing: '무조코 계산', failed: '다시 계산', stale: '다시 계산',
-        computing: '계산 중…', ready: '무조코 재생', direct: '무조코 재생',
+        missing: 'MuJoCo 계산', failed: '다시 계산', stale: '다시 계산',
+        computing: '계산 중…', ready: 'MuJoCo 재생', direct: 'MuJoCo 재생',
       };
-      el.previewMotionFileButton.textContent = LABELS[state] || '무조코';
+      el.previewMotionFileButton.textContent = LABELS[state] || 'MuJoCo';
       el.previewMotionFileButton.disabled = !file || loading || state === 'computing'
         || state === '' || state === 'unavailable';
       el.previewMotionFileButton.title = !file
         ? '애니메이션을 먼저 선택하세요'
         : (state === '' || state === 'unavailable'
-          ? '무조코 설정이 없습니다 · 로봇 팩(시스템 정보) 또는 config/animation_preview.yaml'
+          ? 'MuJoCo 설정이 없습니다 · 로봇 팩(시스템 정보) 또는 config/animation_preview.yaml'
           : (state === 'computing'
             ? '무거운 물리 계산이 도는 중입니다 · 끝나면 틀 수 있습니다'
             : (state === 'stale'
@@ -1836,16 +1879,16 @@ export function createMotionDataController({
     ) || null;
     const registeredState = mujocoState(mujocoRegisteredFile);
     if (el.motionRunMujocoToggle) {
-      // stale(팩 변경 뒤 옛 결과)도 같이 보기는 허용 · 다시 계산은 무조코 버튼
+      // stale(팩 변경 뒤 옛 결과)도 같이 보기는 허용 · 다시 계산은 MuJoCo 버튼
       const usable = registeredState === 'ready' || registeredState === 'direct'
         || registeredState === 'stale';
       el.motionRunMujocoToggle.disabled = !usable;
       if (!usable) el.motionRunMujocoToggle.checked = false;
       el.motionRunMujocoToggle.title = usable
-        ? '켜면 재생 시작과 함께 무조코 창이 프레임 1부터 같이 출발합니다'
+        ? '켜면 재생 시작과 함께 MuJoCo 창이 프레임 1부터 같이 출발합니다'
         : (registeredState === 'computing'
-          ? '무조코 계산 중입니다 · 끝나면 켤 수 있습니다'
-          : '재생 등록된 애니메이션의 무조코 계산이 끝나야 켤 수 있습니다');
+          ? 'MuJoCo 계산 중입니다 · 끝나면 켤 수 있습니다'
+          : '재생 등록된 애니메이션의 MuJoCo 계산이 끝나야 켤 수 있습니다');
       if (el.motionRunMujocoFps) {
         el.motionRunMujocoFps.disabled = !usable;
       }
@@ -2335,15 +2378,15 @@ export function createMotionDataController({
    * blob 이 아니라 평범한 링크다. blob 은 헤드리스에서 확인이 안 됐고, 서버가
    * 한글 파일명을 이미 `filename*=utf-8''` 로 붙여 준다.
    */
-  /** 무조코 상태 · 서버가 파일마다 실어 준다 (ready·computing·missing…) · P7 */
+  /** MuJoCo 상태 · 서버가 파일마다 실어 준다 (ready·computing·missing…) · P7 */
   function mujocoState(file) {
     return String(file?.preview?.state || '');
   }
 
   function mujocoBadge(file) {
     const state = mujocoState(file);
-    if (state === 'computing') return '<span class="mujoco-badge computing" title="무거운 물리 계산이 도는 중 · 끝나면 같이 보기가 켜집니다">무조코 계산 중</span>';
-    if (state === 'ready') return '<span class="mujoco-badge ready" title="계산 완료 · 무조코 재생·같이 보기 가능">무조코 준비됨</span>';
+    if (state === 'computing') return '<span class="mujoco-badge computing" title="무거운 물리 계산이 도는 중 · 끝나면 같이 보기가 켜집니다">MuJoCo 계산 중</span>';
+    if (state === 'ready') return '<span class="mujoco-badge ready" title="계산 완료 · MuJoCo 재생·같이 보기 가능">MuJoCo 준비됨</span>';
     if (state === 'failed') return '<span class="mujoco-badge failed" title="마지막 계산이 실패했습니다 · 다시 계산을 누르세요">계산 실패</span>';
     if (state === 'stale') {
       const why = escapeHtml(file?.preview?.message || '로봇 팩 변경');
@@ -2352,10 +2395,10 @@ export function createMotionDataController({
     return '';
   }
 
-  /** 무조코 버튼 · 계산이 끝난 것만 튼다 · P7
+  /** MuJoCo 버튼 · 계산이 끝난 것만 튼다 · P7
    *
-   * missing → 「무조코 계산」(시작) · computing → 그레이 「계산 중…」 ·
-   * ready/direct → 「무조코 재생」 · failed/stale → 「다시 계산」
+   * missing → 「MuJoCo 계산」(시작) · computing → 그레이 「계산 중…」 ·
+   * ready/direct → 「MuJoCo 재생」 · failed/stale → 「다시 계산」
    */
   async function previewSelectedMotionFile() {
     if (!selectedFileId) return;
@@ -2363,15 +2406,15 @@ export function createMotionDataController({
     try {
       if (state === 'missing' || state === 'failed' || state === 'stale') {
         const result = await precomputeMotionFile(selectedFileId);
-        setMessage(result?.message || '무조코 계산 시작');
+        setMessage(result?.message || 'MuJoCo 계산 시작');
         await loadFiles(selectedFileId);
         return;
       }
       const fps = Number(el.motionRunMujocoFps?.value) || 60;
       const result = await previewMotionFile(selectedFileId, fps);
-      setMessage(result?.message || '무조코 재생');
+      setMessage(result?.message || 'MuJoCo 재생');
     } catch (error) {
-      setMessage(`무조코 실패: ${error?.message || error}`);
+      setMessage(`MuJoCo 실패: ${error?.message || error}`);
     }
   }
 
@@ -2565,6 +2608,7 @@ export function createMotionDataController({
           : `조인트 매핑 저장 완료: ${selectedMappingId}`
       ));
       await onProjectFilesChange?.();
+      if (payload.motor_limits?.changed?.length) await onMotorLimitsChange?.();
       return true;
     } catch (error) {
       if (isMappingRevisionConflict(error?.message || error)) {
@@ -2947,7 +2991,7 @@ export function createMotionDataController({
       const payload = await startMotionRun({
         ...motionRunPayload(),
         run_mode: runMode,
-        // 무조코 같이 보기 · 서버가 running 전환 순간 뷰어를 띄운다 · P7
+        // MuJoCo 같이 보기 · 서버가 running 전환 순간 뷰어를 띄운다 · P7
         with_mujoco: Boolean(el.motionRunMujocoToggle?.checked),
         mujoco_fps: Number(el.motionRunMujocoFps?.value) || 60,
       });
@@ -3201,6 +3245,8 @@ export function createMotionDataController({
   return {
     bindEvents,
     resetProjectState,
+    /** 조인트 매핑에 저장 안 한 편집이 있나 · 상단 설정 상태 배지가 본다 */
+    hasUnsavedMappingChanges: () => Boolean(mappingDirty),
     fetchFiles: async () => {
       await loadFiles();
       await loadMappings();

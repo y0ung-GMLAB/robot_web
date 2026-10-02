@@ -41,6 +41,7 @@ import { installFeedbackPresentation } from './ui_feedback.js';
 import { createServoAlarmController } from './servo_alarm.js';
 import { createCoordinationController } from './coordination.js';
 import { createRobotPackController } from './robot_pack.js';
+import { guardDocumentDrops } from './drop_files.js';
 
 const el = getElements();
 const operationProgress = createOperationProgressManager({ el });
@@ -377,25 +378,20 @@ function renderServiceManagement(payload) {
     ? payload.motor_action_blocker
     : null;
   appState.executionContext = payload?.execution_context || null;
-  const contextReady = Boolean(appState.executionContext?.ready);
-  const contextText = contextReady ? '저장 = 실행' : (
-    appState.executionContext?.state === 'motor_apply_required'
-      ? '모터 설정 적용 필요'
-      : appState.executionContext?.state === 'configuration_required'
-        ? '설정 파일 필요'
-        : '적용 대기'
-  );
+  const badge = contextBadge(appState.executionContext);
   if (el.headerContextState) {
-    el.headerContextState.textContent = contextText;
-    el.headerContextState.title = appState.executionContext?.message || contextText;
-    el.headerContextState.classList.toggle('ready', contextReady);
-    el.headerContextState.classList.toggle('waiting', !contextReady);
+    el.headerContextState.textContent = badge.text;
+    el.headerContextState.title = badge.detail;
+    el.headerContextState.classList.toggle('ready', badge.ok);
+    el.headerContextState.classList.toggle('waiting', !badge.ok);
+    el.headerContextState.dataset.target = badge.target || '';
+    el.headerContextState.classList.toggle('clickable', Boolean(badge.target));
   }
   if (el.executionContextState) {
-    el.executionContextState.textContent = contextText;
-    el.executionContextState.title = appState.executionContext?.message || contextText;
-    el.executionContextState.classList.toggle('status-ok', contextReady);
-    el.executionContextState.classList.toggle('warning-text', !contextReady);
+    el.executionContextState.textContent = badge.text;
+    el.executionContextState.title = badge.detail;
+    el.executionContextState.classList.toggle('status-ok', badge.ok);
+    el.executionContextState.classList.toggle('warning-text', !badge.ok);
   }
   if (appState.emergencyLatched && el.summaryText) {
     el.summaryText.textContent = '긴급정지 잠김 · 프로그램 재시작 필요';
@@ -419,6 +415,61 @@ function renderServiceManagement(payload) {
   }
   showEmergencyLatched();
 }
+
+/** 상단 설정 상태 배지 · 「지금 화면 · 저장 파일 · 실행 중 설정」이 같은가 · 2026-10-02
+ *
+ * 전에는 「저장 = 실행」 하나였다 · 저장된 파일과 실행 설정만 견줘서, 화면에서
+ * 고치고 저장 안 한 값은 안 보였다 (고쳐도 초록 그대로) · 이제 저장 안 한 편집을
+ * 먼저 보고, 누르면 고칠 화면(모터 관리)으로 간다.
+ */
+function contextBadge(context) {
+  // 컨트롤러는 이 파일 아래쪽에서 만들어진다 · 그 전에 상태가 오면 「없음」으로 본다
+  const asks = (read) => {
+    try { return Boolean(read()); } catch { return false; }
+  };
+  const unsaved = [];
+  if (asks(() => motorConfig.hasUnsavedChanges())) unsaved.push('모터 관리');
+  if (asks(() => motionData.hasUnsavedMappingChanges())) unsaved.push('조인트 매핑');
+  if (unsaved.length) {
+    return {
+      ok: false,
+      text: '저장 안 한 변경',
+      detail: `${unsaved.join(' · ')} 에 저장하지 않은 편집이 있습니다 · 저장 전에는 장비에 안 들어갑니다 · 누르면 모터 관리로`,
+      target: 'config',
+    };
+  }
+  const state = context?.state;
+  if (context?.ready) {
+    return {
+      ok: true,
+      text: '설정 적용됨',
+      detail: '저장한 모터 설정·조인트 매핑이 지금 장비에서 돌고 있습니다',
+      target: '',
+    };
+  }
+  if (state === 'motor_apply_required') {
+    return {
+      ok: false,
+      text: '모터 적용 필요',
+      detail: `${context?.message || '저장은 됐지만 장비에 아직 안 들어갔습니다'} · 누르면 모터 관리로 (「장비에 적용 · 모터 재시작」)`,
+      target: 'config',
+    };
+  }
+  if (state === 'configuration_required') {
+    return {
+      ok: false,
+      text: '설정 파일 필요',
+      detail: `${context?.message || '모터 설정과 조인트 매핑 파일을 확정하세요'} · 누르면 모터 관리로`,
+      target: 'config',
+    };
+  }
+  return { ok: false, text: '적용 대기', detail: context?.message || '설정 적용 확인 중', target: '' };
+}
+
+el.headerContextState?.addEventListener('click', () => {
+  const target = el.headerContextState.dataset.target;
+  if (target) document.querySelector(`[data-workspace-tab="${target}"]`)?.click();
+});
 
 function renderGitVersion(version = {}) {
   const branch = String(version.branch || 'unknown');
@@ -1123,26 +1174,22 @@ el.manualModeSwitchButton?.addEventListener('click', () => {
 /** 다이얼 「기준점 지정 / − limit / + limit」 · 확인창 후 바로 저장 · 2026-10-02
  *
  * 기준점 지정 → 조인트 매핑의 기준점(모션 0°)
- * ± limit     → 모터 운전 한계(모터 deg) **와** 조인트 매핑 범위(모션 deg) 둘 다
- * 한쪽이 실패하면 무엇이 저장됐는지 그대로 말한다.
+ * ± limit     → 조인트 매핑 범위(모션 deg)
+ * 리밋 원본은 조인트 매핑 하나 · 모터 운전 한계(모터 deg)는 매핑 저장 때 서버가
+ * 환산해 모터 설정 파일에 넣는다 (기준점이 바뀌어도 같이 바뀐다).
  */
 async function captureJogPoint(kind, { axis, motorDeg }) {
   const title = { reference: '기준점 지정', lower: '− limit 지정', upper: '+ limit 지정' }[kind];
   const where = kind === 'reference'
     ? '조인트 매핑의 기준점(모션 0°)'
-    : `모터 ${kind === 'upper' ? '상한' : '하한'}(모터 deg)과 조인트 매핑 범위(모션 deg)`;
+    : '조인트 매핑 범위(모션 deg)';
   const confirmed = await showConfirm(
     `모터 ${axis}의 지금 위치 ${motorDeg.toFixed(3)}° 를 저장합니다.\n\n저장 위치: ${where}`
-      + (kind === 'reference' ? '' : '\n\n모터 한계는 「장비에 적용 · 모터 재시작」 후 드라이브에 반영됩니다.'),
+      + '\n\n모터 운전 한계는 조인트 매핑에서 자동 계산 · 드라이브 반영은 「장비에 적용 · 모터 재시작」 후입니다.',
     { title, confirmLabel: '저장', tone: 'warning' },
   );
   if (!confirmed) return { success: false, message: '취소했습니다' };
-  const mapping = await motionData.saveCapturedPoint(axis, kind, motorDeg);
-  if (kind === 'reference' || !mapping.success) return mapping;
-  const limit = await motorConfig.saveMotorLimit(axis, kind, motorDeg);
-  return limit.success
-    ? { success: true, message: `${mapping.message} · ${limit.message}` }
-    : { success: false, message: `조인트 범위는 저장됨 · 모터 한계 저장 실패: ${limit.message}` };
+  return motionData.saveCapturedPoint(axis, kind, motorDeg);
 }
 
 const motionData = createMotionDataController({
@@ -1150,6 +1197,7 @@ const motionData = createMotionDataController({
   getLatestState: () => appState.latestState,
   getConfiguredMotors: () => motorConfig.getConfiguredMotors(),
   onProjectFilesChange: () => projectExplorer.refresh(true),
+  onMotorLimitsChange: () => motorConfig.reloadIfClean(),
   // 실행 화면이 "그룹" 범위를 고르면 이 창구로 나간다 · 버튼은 한 벌이고
   // 어디로 나갈지만 범위가 정한다 · §6-65
   groupRun: coordination.groupRun,
@@ -1635,6 +1683,8 @@ manualFader.bindEvents();
 jogDial.bindEvents();
 el.motionTestAxisSelect?.addEventListener('change', () => jogDial.reset());
 motionData.bindEvents();
+// 받는 칸 밖에 파일을 떨어뜨려도 브라우저가 그 파일을 열어 화면을 떠나지 않게
+guardDocumentDrops();
 projectExplorer.bindEvents();
 motorEventLog.bindEvents();
 servoAlarm.bindEvents();

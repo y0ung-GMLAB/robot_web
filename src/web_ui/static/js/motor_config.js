@@ -53,9 +53,8 @@ export function isEditableMotorConfigPath(pathValue) {
     return ['controller_index', 'name'].includes(item);
   }
   if (/^drivers\[\d+\]\./.test(path)) {
+    // lower/upper 는 없다 · 원본은 조인트 매핑 최소·최대 · 저장 때 서버가 환산해 넣는다
     return [
-      'lower',
-      'upper',
       'speed',
       'acceleration',
       'deceleration',
@@ -1974,7 +1973,7 @@ export function createMotorConfigController({
     return value === undefined || value === null ? '' : String(value);
   }
 
-  /** 자리 표시 · 지금 장비에 들어가 있는 값 (모터 deg) */
+  /** 자리 표시 · 실행 중인 모터 설정 파일의 값 (드라이브에서 읽은 값 아님) */
   function rowLimitPlaceholder(row, field) {
     const axis = Number(rowAxisRaw(row));
     const motors = getLatestState()?.motors;
@@ -1984,8 +1983,12 @@ export function createMotorConfigController({
     return value === undefined || value === null ? '' : String(value);
   }
 
-  /** 모터별 운전 한계 · registry motor.config 에 적혀 그 모터의 드라이버에만 들어간다 */
-  const AXIS_LIMIT_FIELDS = ['lower', 'upper', 'profile_velocity'];
+  /** 모터별 운전 값 · registry motor.config 에 적혀 그 모터의 드라이버에만 들어간다
+   *
+   * 하한·상한은 여기 없다 · 원본은 조인트 매핑 최소·최대 (2026-10-02) ·
+   * 상세 설정 표에 환산된 drivers[].lower/upper 가 읽기 전용으로 보인다.
+   */
+  const AXIS_LIMIT_FIELDS = ['profile_velocity'];
 
   /** MINAS 드라이브 파라미터 · param_file(SDO 목록)로 부팅 때 써진다 · P8
    *
@@ -2004,13 +2007,65 @@ export function createMotorConfigController({
 
   /** 화면 이름 · 칸 머리와 읽기용 이름 */
   const DRIVE_PARAM_LABELS = {
-    brake_delay_stop_ms: ['브레이크·정지', '브레이크 정지 지연 (ms)'],
-    brake_delay_run_ms: ['브레이크·동작', '브레이크 동작 설정 (ms)'],
+    brake_delay_stop_ms: ['브레이크·정지 (ms)', '브레이크 정지 지연 (ms)'],
+    brake_delay_run_ms: ['브레이크·동작 (ms)', '브레이크 동작 설정 (ms)'],
     encoder_absolute_mode: ['앱솔루트', '앱솔루트 모드 (0 인크리멘털 · 1 절대 · 2 절대-다회전무시)'],
     limit_switch_mode: ['리밋 스위치', '리밋 스위치 (0 사용·그 방향 금지 · 1 사용 안 함 · 2 사용·알람)'],
     // 값이 아니라 PDO 배선 · 4D29h 를 주기 데이터에 더한다 · 드라이브 Ver1.03 이상만
     overload_monitor: ['과부하율 읽기', '과부하율 읽기 (4D29h · 0 끔 · 1 켬 · 드라이브 소프트웨어 Ver1.03 이상만)'],
   };
+
+  /** 정해진 값만 받는 항목 · 선택 상자로 그린다 · 빈 값 = 유지 (2026-10-02) */
+  const DRIVE_PARAM_CHOICES = {
+    encoder_absolute_mode: [[0, '인크리멘털'], [1, '절대'], [2, '절대·다회전 무시']],
+    limit_switch_mode: [[0, '사용·그 방향 금지'], [1, '사용 안 함'], [2, '사용·알람(Err38)']],
+    overload_monitor: [[0, '끔'], [1, '켬']],
+  };
+
+  /** 마지막 모터 검색 때 드라이브에서 읽은 값 · 검색 결과에서만 온다 (이전 값 대체 없음)
+   *
+   * state · 'none' 검색 안 함/MINAS 아님 · 'failed' 읽기 실패 · 'ok' 값 있음
+   * 과부하율 읽기는 드라이브 값이 아니라 PDO 배선이라 읽지 않는다.
+   */
+  function driveReadValue(row, field) {
+    if (field === 'overload_monitor') return { state: 'none' };
+    const scanned = row?.servedRow?.scanned;
+    if (!scanned?.drive_params_read) return { state: 'none' };
+    const value = scanned.drive_params?.[field];
+    return value === undefined || value === null ? { state: 'failed' } : { state: 'ok', value };
+  }
+
+  function driveChoiceText(field, value) {
+    const found = (DRIVE_PARAM_CHOICES[field] || []).find(([option]) => option === Number(value));
+    return found ? `${found[0]} ${found[1]}` : String(value);
+  }
+
+  /** 빈 칸(= 유지)일 때 보이는 글 · 숫자 칸은 placeholder, 선택 상자는 첫 항목 */
+  function driveKeepText(field, read) {
+    if (field === 'overload_monitor') return '끔 (기본)';
+    const choice = Boolean(DRIVE_PARAM_CHOICES[field]);
+    if (read.state === 'ok') {
+      return choice ? `유지 (드라이브: ${driveChoiceText(field, read.value)})` : `드라이브 ${read.value}`;
+    }
+    const why = read.state === 'failed' ? '읽기 실패' : '검색 후 표시';
+    return choice ? `유지 (${why})` : why;
+  }
+
+  function driveParamControl(row, view, field, disabled) {
+    const read = view.driveRead[field];
+    const value = view.driveParams[field];
+    const keep = driveKeepText(field, read);
+    const common = `class="axis-edit-input axis-limit-input mono" aria-label="드라이브 ${escapeHtml(DRIVE_PARAM_LABELS[field][1])}"
+      data-axis-edit="${field}" data-axis-row-id="${escapeHtml(row.id)}"${disabled}`;
+    const choices = DRIVE_PARAM_CHOICES[field];
+    if (choices) {
+      return `<select ${common}>
+        <option value=""${value === '' ? ' selected' : ''}>${escapeHtml(keep)}</option>
+        ${choices.map(([option, text]) => `<option value="${option}"${value === String(option) ? ' selected' : ''}>${option} ${escapeHtml(text)}</option>`).join('')}
+      </select>`;
+    }
+    return `<input ${common} type="text" inputmode="numeric" value="${escapeHtml(value)}" placeholder="${escapeHtml(keep)}">`;
+  }
 
   /** 서버(minas_params.ALLOWED_VALUES · RANGE_VALUES)와 같은 규칙 */
   function driveParamError(field, text) {
@@ -2051,7 +2106,7 @@ export function createMotorConfigController({
       const text = String(input.value ?? '').trim();
       if (text !== '' && !Number.isFinite(Number(text))) {
         resetAxisEditInput(input, row, field);
-        setAxisMessage('운전 한계는 숫자(모터 deg)여야 합니다.');
+        setAxisMessage('속도·드라이브 설정은 숫자여야 합니다.');
         return;
       }
       if (DRIVE_PARAM_FIELDS.includes(field)) {
@@ -2433,6 +2488,9 @@ export function createMotorConfigController({
             driveParams: Object.fromEntries(DRIVE_PARAM_FIELDS.map(
               (field) => [field, rowLimitOverride(row, field)],
             )),
+            driveRead: Object.fromEntries(DRIVE_PARAM_FIELDS.map(
+              (field) => [field, driveReadValue(row, field)],
+            )),
           };
         });
       const renderSignature = JSON.stringify(rowViews.map((view) => ({
@@ -2466,6 +2524,7 @@ export function createMotorConfigController({
         showAcServoControls: view.showAcServoControls,
         limits: view.limits,
         driveParams: view.driveParams,
+        driveRead: view.driveRead,
       })));
 
       if (renderSignature !== lastAxisRenderSignature) {
@@ -2480,22 +2539,18 @@ export function createMotorConfigController({
                 <span class="axis-number-label mono">${displayText(view.axisValue)}</span>
                 <input class="axis-edit-input axis-name-input" aria-label="모터 이름" data-axis-edit="name" data-axis-row-id="${escapeHtml(row.id)}" value="${escapeHtml(view.name === '-' ? '' : view.name)}"${disabled}>
               </td>
-              <td class="axis-limits-cell" title="위 줄: 운전 한계(모터 deg · 빈 칸이면 드라이버 기본값) · 아래 줄: MINAS 드라이브 설정(브레이크 ms · 앱솔루트 0/1/2 · 전원 재투입 후 반영 · 빈 칸이면 드라이브 값 유지)">
+              <td class="axis-limits-cell" title="위 줄: 운전 속도(모터 deg/s · 빈 칸이면 드라이버 기본값 · 회색 = 실행 설정 값) · 하한·상한은 조인트 매핑에서 계산 · 아래 줄: MINAS 드라이브 설정(빈 칸 = 드라이브 값 유지 · 회색 = 마지막 모터 검색 때 드라이브에서 읽은 값 · 앱솔루트는 전원 재투입 후 반영)">
                 ${AXIS_LIMIT_FIELDS.map((field) => `
-                  <label class="axis-limit-field"><span>${{ lower: '하한', upper: '상한', profile_velocity: '속도' }[field]}</span>
+                  <label class="axis-limit-field"><span>속도 (deg/s)</span>
                     <input class="axis-edit-input axis-limit-input mono" type="text" inputmode="decimal"
-                      aria-label="모터 ${{ lower: '하한', upper: '상한', profile_velocity: '속도' }[field]}"
+                      aria-label="모터 속도"
                       data-axis-edit="${field}" data-axis-row-id="${escapeHtml(row.id)}"
                       value="${escapeHtml(view.limits[field].value)}"
                       placeholder="${escapeHtml(view.limits[field].placeholder)}"${disabled}>
                   </label>`).join('')}
                 ${DRIVE_PARAM_FIELDS.map((field) => `
                   <label class="axis-limit-field axis-drive-field" title="${escapeHtml(DRIVE_PARAM_LABELS[field][1])}"><span>${DRIVE_PARAM_LABELS[field][0]}</span>
-                    <input class="axis-edit-input axis-limit-input mono" type="text" inputmode="numeric"
-                      aria-label="드라이브 ${escapeHtml(DRIVE_PARAM_LABELS[field][1])}"
-                      data-axis-edit="${field}" data-axis-row-id="${escapeHtml(row.id)}"
-                      value="${escapeHtml(view.driveParams[field])}"
-                      placeholder="유지"${disabled}>
+                    ${driveParamControl(row, view, field, disabled)}
                   </label>`).join('')}
               </td>
               <td class="axis-status-stack">
@@ -3319,45 +3374,24 @@ export function createMotorConfigController({
     if (el.dynamixelScanButton) el.dynamixelScanButton.addEventListener('click', scanDynamixel);
   }
 
-  /** 다이얼에서 찍은 모터 위치를 그 모터의 운전 한계(모터 deg)로 저장 · 2026-10-02
+  /** 조인트 매핑 저장이 모터 설정 파일의 운전 한계를 바꿨을 때 · 2026-10-02
    *
-   * field · 'upper'(+ limit) · 'lower'(− limit) · 모터 목록의 운전 한계 칸과 같은 자리
-   * (registry motor.config) · 실제 드라이브 반영은 「장비에 적용 · 모터 재시작」.
-   * 저장 안 한 편집이 있으면 거절한다 · 그것까지 같이 저장되면 안 된다.
+   * 화면이 옛 파일 버전을 들고 있으면 다음 「설정 저장」이 버전 충돌로 거절된다 ·
+   * 그래서 다시 읽는다 · 저장 안 한 편집이 있으면 날리지 않고 알리기만 한다.
    */
-  async function saveMotorLimit(axis, field, motorDeg) {
-    if (!['upper', 'lower'].includes(field)) {
-      return { success: false, message: '알 수 없는 한계 종류입니다' };
-    }
+  async function reloadIfClean() {
     if (hasMotorConfigDataChanges() || hasAxisChanges()) {
-      return {
-        success: false,
-        message: '모터 관리에 저장하지 않은 편집이 있습니다 · 먼저 저장하거나 되돌리세요',
-      };
+      setAxisMessage('조인트 매핑이 모터 운전 한계를 바꿨습니다 · 저장 안 한 편집을 정리한 뒤 「설정 다시 불러오기」', true);
+      return;
     }
-    const row = axisRowsData().find((entry) => (
-      entry?.motor && Number(rowAxisRaw(entry)) === Number(axis)
-    ));
-    if (!row) return { success: false, message: `${axis}번 모터를 모터 목록에서 찾지 못했습니다` };
-    const value = Math.round(Number(motorDeg) * 1000) / 1000;
-    if (!Number.isFinite(value)) return { success: false, message: '현재 모터 위치를 읽을 수 없습니다' };
-    const other = Number(row.motor?.config?.[field === 'upper' ? 'lower' : 'upper']);
-    if (Number.isFinite(other) && (field === 'upper' ? value <= other : value >= other)) {
-      return {
-        success: false,
-        message: `운전 한계가 뒤집힙니다 (${field === 'upper' ? '하한' : '상한'} ${other}°) · 반대쪽 limit 을 먼저 다시 지정하세요`,
-      };
-    }
-    setAxisEditValue(row, field, String(value));
-    const saved = await saveAxisConfig();
-    return saved
-      ? { success: true, message: `모터 ${axis} ${field === 'upper' ? '상한' : '하한'} = ${value}° · 반영하려면 「장비에 적용 · 모터 재시작」` }
-      : { success: false, message: '모터 설정 저장 실패' };
+    await fetchRegistry();
   }
 
   return {
     bindEvents,
-    saveMotorLimit,
+    reloadIfClean,
+    /** 모터 관리에 저장 안 한 편집이 있나 · 상단 설정 상태 배지가 본다 */
+    hasUnsavedChanges: () => hasMotorConfigDataChanges() || hasAxisChanges(),
     fetchRegistry,
     loadProjectRegistry,
     getDiscoverySummary,

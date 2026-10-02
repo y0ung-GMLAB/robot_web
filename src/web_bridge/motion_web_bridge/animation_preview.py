@@ -1,4 +1,4 @@
-"""애니메이션 무조코(시뮬) 미리보기 · 계산과 재생을 현장 명령에 맡긴다 · P7
+"""애니메이션 MuJoCo(시뮬) 미리보기 · 계산과 재생을 현장 명령에 맡긴다 · P7
 
 플랫폼은 로봇도 시뮬레이터도 모른다 · 로봇마다(플로팅 헤드, 다음 로봇…)
 모델·스크립트가 다르므로, 여기는 **명령 틀과 결과 경로**만 안다 · 채우는
@@ -215,7 +215,7 @@ def _stale_reason(workspace_root: Path, result: Path) -> str:
 
 
 def preview_state(workspace_root: Path, motion_path: Path) -> Dict[str, Any]:
-    """이 애니메이션의 무조코 상태 · 화면 배지와 버튼이 이대로 그린다.
+    """이 애니메이션의 MuJoCo 상태 · 화면 배지와 버튼이 이대로 그린다.
 
         unavailable  설정 없음
         direct       계산 없이 바로 트는 구성
@@ -249,7 +249,7 @@ def preview_state(workspace_root: Path, motion_path: Path) -> Dict[str, Any]:
 
 
 def annotate_files(workspace_root: Path, files_dir: Path, payload: Dict[str, Any]) -> Dict[str, Any]:
-    """파일 목록에 무조코 상태를 싣는다 · 설정 없으면 손대지 않는다."""
+    """파일 목록에 MuJoCo 상태를 싣는다 · 설정 없으면 손대지 않는다."""
     config = preview_config(Path(workspace_root))
     if config is None:
         return payload
@@ -302,7 +302,7 @@ def launch_precompute(
         _PENDING_META[key] = stamp
     return {
         'success': True,
-        'message': f'무조코 계산 시작: {motion_path.name} · 끝나면 같이 보기가 켜집니다',
+        'message': f'MuJoCo 계산 시작: {motion_path.name} · 끝나면 같이 보기가 켜집니다',
     }
 
 
@@ -322,12 +322,12 @@ def launch_preview(
         return {'success': False, 'message': f'애니메이션 파일이 없습니다: {motion_path.name}'}
     state = preview_state(workspace_root, motion_path)
     if state['state'] == 'computing':
-        return {'success': False, 'message': '무조코 계산 중입니다 · 끝나면 틀 수 있습니다'}
+        return {'success': False, 'message': 'MuJoCo 계산 중입니다 · 끝나면 틀 수 있습니다'}
     if state['state'] in ('missing', 'failed'):
         return {
             'success': False,
             'message': state.get('message')
-            or '계산 결과가 없습니다 · 「무조코 계산」을 먼저 누르세요',
+            or '계산 결과가 없습니다 · 「MuJoCo 계산」을 먼저 누르세요',
         }
     result = result_path_for(config, motion_path)
     args = _fill(
@@ -346,5 +346,5 @@ def launch_preview(
         return {'success': False, 'message': f'미리보기 실행 실패: {exc}'}
     return {
         'success': True,
-        'message': f'무조코 재생: {motion_path.name} · 창은 이 PC 화면에 뜹니다',
+        'message': f'MuJoCo 재생: {motion_path.name} · 창은 이 PC 화면에 뜹니다',
     }

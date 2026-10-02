@@ -110,6 +110,19 @@ def test_a_servo_is_found_by_its_serial_number():
     assert out['new_devices'] == []
 
 
+def test_drive_params_read_by_the_scan_reach_the_row_without_changing_identity():
+    """검색 때 SDO 로 읽은 드라이브 설정 · 화면 표시용 · 비교 항목이 아니다 (2026-10-02)."""
+    slave = {**_slave(), 'drive_params': {'brake_delay_stop_ms': 50}, 'drive_params_error': '0x3015 x'}
+    row = _rows([_servo()], _scan(slaves=[slave]))['axes'][0]
+    assert row['scanned']['drive_params'] == {'brake_delay_stop_ms': 50}
+    assert row['scanned']['drive_params_error'] == '0x3015 x'
+    assert row['scanned']['drive_params_read'] is True
+    assert row['changed'] == []
+    # 안 읽었으면(MINAS 아님 · 옛 검색) 읽었다고 하지 않는다
+    plain = _rows([_servo()], _scan(slaves=[_slave()]))['axes'][0]
+    assert plain['scanned']['drive_params_read'] is False
+
+
 def test_a_servo_moved_to_another_slave_position_is_still_found():
     """제조번호가 같으면 배선이 바뀌어도 같은 서보다."""
     out = _rows([_servo(slave=0)], _scan(slaves=[_slave(slave=3)]))
