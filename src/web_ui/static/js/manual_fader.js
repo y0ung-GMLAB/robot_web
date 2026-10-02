@@ -26,6 +26,12 @@ const SEND_PERIOD_MS = 50;
 export function createManualFaderController({ el, getLatestState }) {
   let mapping = null;        // { fileId, revision, rows }
   let refreshing = false;
+  //: 마지막 읽기가 실패했나 · 실패했으면 화면이 보이는 동안 잠깐 뒤 다시 읽는다
+  //: (모터 재시작 직후엔 서버가 다시 붙는 중이라 한 번 실패하기 쉽다 · 전에는
+  //:  그대로 옛 기준점을 들고 있어 페이더가 끝에 붙었다 · 2026-10-02)
+  let retryAt = 0;
+  let refreshAgain = false;
+  const RETRY_MS = 2000;
   let panelWasVisible = false;
   let socket = null;
   let socketReady = false;
@@ -79,8 +85,14 @@ export function createManualFaderController({ el, getLatestState }) {
   }
 
   async function refresh() {
-    if (refreshing) return;
+    if (refreshing) {
+      // 읽는 도중에 매핑이 또 저장됐다 · 끝나면 한 번 더 읽는다 (옛 것을 들고 끝나지 않게)
+      refreshAgain = true;
+      return;
+    }
     refreshing = true;
+    refreshAgain = false;
+    retryAt = 0;
     try {
       const listing = await fetchMotionMappings();
       const fileId = String(listing?.active_file_id || '');
@@ -92,8 +104,9 @@ export function createManualFaderController({ el, getLatestState }) {
       }
       const payload = await fetchMotionMapping(fileId);
       if (payload?.success === false || !payload?.mapping) {
-        // 못 읽었으면 들고 있던 것을 유지한다 · §6-237 과 같은 이유
-        if (!mapping) setMessage('조인트 매핑을 아직 못 읽었습니다 · 잠시 후 다시 시도하세요');
+        // 못 읽었으면 들고 있던 것을 유지한다 · §6-237 과 같은 이유 · 대신 곧 다시 읽는다
+        if (!mapping) setMessage('조인트 매핑을 아직 못 읽었습니다 · 잠시 후 다시 시도합니다');
+        retryAt = Date.now() + RETRY_MS;
         return;
       }
       mapping = {
@@ -110,8 +123,10 @@ export function createManualFaderController({ el, getLatestState }) {
       render();
     } catch (error) {
       if (!mapping) setMessage(`조인트 매핑 확인 실패: ${error?.message || error}`);
+      retryAt = Date.now() + RETRY_MS;
     } finally {
       refreshing = false;
+      if (refreshAgain) refresh();
     }
   }
 
@@ -237,7 +252,7 @@ export function createManualFaderController({ el, getLatestState }) {
     if (!el.manualFaderList) return;
     const rows = mapping?.rows || [];
     const signature = JSON.stringify([mapping?.fileId, mapping?.revision,
-      rows.map((row) => [row.motionId, row.axis, row.lower, row.upper])]);
+      rows.map((row) => [row.motionId, row.axis, row.lower, row.upper, row.reference, row.gear, row.sign])]);
     if (signature === renderedSignature) return;
     renderedSignature = signature;
     if (!rows.length) {
@@ -266,6 +281,7 @@ export function createManualFaderController({ el, getLatestState }) {
     const host = el.manualFaderList?.closest('[data-workspace-panel]');
     const visible = Boolean(host) && !host.classList.contains('hidden');
     if (visible && !panelWasVisible && !refreshing) refresh();
+    else if (visible && retryAt && Date.now() >= retryAt && !refreshing) refresh();
     panelWasVisible = visible;
     if (!visible || !mapping?.rows?.length) return;
     render();

@@ -133,39 +133,62 @@ class PlanBuilder:
             if str(value or '').strip()
         }
         initial_move_time_override = motion_run_rules._initial_move_time_override_sec(payload)
+        #: 초기 위치 이동만 할 때 등록 파일이 없거나 비었으면 「애니메이션 없음」처럼 간다
+        #: (2026-10-02 · 전에는 그 자리에서 실패해 0° 대체 경로까지 못 갔다)
+        unusable_motion_file_note = ''
+
+        def resolve_motion_file(resolve):
+            nonlocal unusable_motion_file_note
+            if not motion_file_id:
+                return None
+            try:
+                return resolve()
+            except ValueError as exc:
+                if not initialization_only:
+                    raise
+                unusable_motion_file_note = (
+                    f'재생 등록된 애니메이션 {motion_file_id} 를 찾지 못했습니다 ({exc}) · '
+                    '애니메이션 없이 초기 위치로 이동합니다'
+                )
+                return None
+
         if hasattr(self.manager, 'motion_projects_dir'):
             project_id, motion_files_dir, mappings_dir = self.manager._project_asset_dirs(payload)
             motion_directory = motion_files_dir
             if studio_request and motion_file_id.startswith('__studio_'):
                 motion_directory = motion_files_dir.parent / 'runtime' / 'studio_runtime'
-            motion_file_path = (
-                self.manager._motion_file_path(motion_file_id, motion_directory)
-                if motion_file_id
-                else None
+            motion_file_path = resolve_motion_file(
+                lambda: self.manager._motion_file_path(motion_file_id, motion_directory)
             )
             mapping_path = self.manager._mapping_file_path(mapping_file_id, mappings_dir)
         else:
             # Compatibility for isolated unit tests that replace the path
             # helpers without constructing a ROS node.
             project_id = ''
-            motion_file_path = (
-                self.manager._motion_file_path(motion_file_id)
-                if motion_file_id
-                else None
+            motion_file_path = resolve_motion_file(
+                lambda: self.manager._motion_file_path(motion_file_id)
             )
             mapping_path = self.manager._mapping_file_path(mapping_file_id)
         if not motion_file_id and not initialization_only:
-            raise ValueError('motion file_id is required')
+            raise ValueError('재생 등록된 애니메이션이 없습니다 (motion file_id is required)')
         motors = (
             list(motors_snapshot)
             if motors_snapshot is not None
             else self.manager._current_motors()
         )
-        motion_records = (
-            self.manager._load_motion_records(motion_file_path)
-            if motion_file_id
-            else []
-        )
+        motion_records = []
+        # 경로를 못 찾았을 때만 건너뛴다 · 경로 값이 None 인 것 자체는 막지 않는다 (옛 계약)
+        if motion_file_id and not unusable_motion_file_note:
+            try:
+                motion_records = self.manager._load_motion_records(motion_file_path)
+            except ValueError as exc:
+                if not initialization_only:
+                    raise
+                unusable_motion_file_note = (
+                    f'재생 등록된 애니메이션 {motion_file_id} 에 쓸 수 있는 줄이 없습니다 ({exc}) · '
+                    '애니메이션 없이 초기 위치로 이동합니다'
+                )
+                motion_records = []
         source_motion_data_available = bool(motion_records)
         mapping = self.manager._load_mapping(mapping_path)
 
@@ -211,14 +234,17 @@ class PlanBuilder:
             )
         initialization_fallback_used = False
         if not motors:
-            raise ValueError('current motion_state is unavailable')
+            raise ValueError(
+                '모터 상태를 아직 못 받았습니다 · 모터 관리에서 적용·재시작이 끝났는지 확인하세요 '
+                '(current motion_state is unavailable)'
+            )
 
         rows = mapping.get('mappings')
         if not isinstance(rows, list):
             rows = []
         axes = []
         errors = []
-        warnings = []
+        warnings = [unusable_motion_file_note] if unusable_motion_file_note else []
         # 모터가 이 PC 에 없는 축 · 막지 않고 건너뛴다 · §6-139
         missing_motor_motion_ids = []
         # 모션 파일에 자료가 없는 축 · 이것도 막지 않는다 · §6-142
@@ -302,14 +328,16 @@ class PlanBuilder:
                 motion_records.append(fallback_record)
                 groups[motion_id] = [fallback_record]
                 initialization_fallback_used = True
-                warnings.append(
-                    f'Motion ID {motion_id}: '
-                    + (
-                        f'모션 데이터가 없어 수동 초기위치 {fallback_value:.3f}°를 사용'
-                        if initial_mode == 'manual'
-                        else '첫 프레임 데이터가 없어 모션 0°를 초기위치로 사용'
+                # 「기준점」은 원래 0° 로 간다 · 애니메이션이 없어도 알릴 일이 아니다
+                if initial_mode != 'reference':
+                    warnings.append(
+                        f'Motion ID {motion_id}: '
+                        + (
+                            f'모션 데이터가 없어 직접 지정 초기위치 {fallback_value:.3f}°를 사용'
+                            if initial_mode == 'manual'
+                            else '첫 프레임 데이터가 없어 모션 0°를 초기위치로 사용'
+                        )
                     )
-                )
             if motor is None:
                 errors.append(f'Motion ID {motion_id}: Axis {motor_axis} not found')
                 continue
@@ -441,7 +469,10 @@ class PlanBuilder:
                 if motion_id not in set(disabled_motion_ids)
             }
         if not axes:
-            errors.append('enabled motion mappings not found')
+            errors.append(
+                '움직일 조인트가 없습니다 · 조인트 매핑에서 「사용」을 켠 줄과 모터 연결을 확인하세요 '
+                '(enabled motion mappings not found)'
+            )
         if requested_motion_ids:
             planned_motion_ids = {str(axis['motion_id']) for axis in axes}
             missing_requested = sorted(requested_motion_ids - planned_motion_ids)

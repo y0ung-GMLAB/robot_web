@@ -137,7 +137,8 @@ test('적용(모터 재시작)은 언제든 누를 수 있다', () => {
 test('버튼 이름은 바뀌지 않는다', () => {
   // 「장비에 적용됨」은 상태다 · 누를 수 있는 버튼에는 할 일을 쓴다 · §6-203
   // 그리고 이름이 상황에 따라 바뀌면 같은 버튼을 부를 말이 둘이 된다 · §6-226
-  assert.match(codeOnly(MOTOR_CONFIG), /textContent = '설정 적용 · 모터 재시작'/);
+  // 2026-10-02 · 저장·적용 바로 합치며 「장비에 적용 · 모터 재시작」 하나로 (사용자 결정)
+  assert.match(codeOnly(MOTOR_CONFIG), /textContent = '장비에 적용 · 모터 재시작'/);
   assert.doesNotMatch(codeOnly(MOTOR_CONFIG), /다시 적용/);
 });
 

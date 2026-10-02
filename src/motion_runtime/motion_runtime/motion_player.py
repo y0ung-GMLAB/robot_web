@@ -100,7 +100,12 @@ class MotionPlayer:
             status.update({
                 'state': 'error',
                 'phase': 'error',
-                'message': f'모션 실행 준비 실패: {exc}',
+                # 무엇을 하다 실패했는지 · 초기 위치 이동만 눌렀는데 「모션 실행」이라 하면 헷갈린다
+                'message': (
+                    f'초기 위치 이동 준비 실패: {exc}'
+                    if mode == 'initialize'
+                    else f'모션 실행 준비 실패: {exc}'
+                ),
                 'project_id': str(payload.get('project_id') or ''),
                 'motion_file_id': str(payload.get('motion_file_id') or ''),
                 'mapping_file_id': str(payload.get('mapping_file_id') or ''),

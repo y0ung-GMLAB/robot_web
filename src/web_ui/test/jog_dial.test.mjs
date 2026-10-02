@@ -68,7 +68,7 @@ test('capture buttons save the current motor position, with a confirm first', ()
   assert.match(mainSource, /return motionData\.saveCapturedPoint\(axis, kind, motorDeg\);/);
   assert.doesNotMatch(mainSource, /saveMotorLimit/);
   // 매핑 저장이 모터 설정 파일을 바꾸면 모터 관리 화면이 다시 읽는다
-  assert.match(mainSource, /onMotorLimitsChange: \(\) => motorConfig\.reloadIfClean\(\)/);
+  assert.match(mainSource, /onMotorLimitsChange: \(changed\) => motorConfig\.reloadIfClean\(changed\)/);
   // 이동 중·쌓인 양이 있을 때는 찍지 않는다
   assert.match(dial, /이동이 끝난 뒤에 지정하세요/);
   // 버튼 이름 · 「~으로」 대신 「지정 / limit」
@@ -123,5 +123,5 @@ test('motion range conversion respects invert and rounds inward', () => {
   assert.match(data, /if \(mappingDirty\) \{/);
   // 모터 관리에 저장 안 한 편집이 있으면 다시 읽지 않고 알린다
   assert.match(limits, /if \(hasMotorConfigDataChanges\(\) \|\| hasAxisChanges\(\)\) \{/);
-  assert.match(data, /if \(payload\.motor_limits\?\.changed\?\.length\) await onMotorLimitsChange\?\.\(\);/);
+  assert.match(data, /if \(payload\.motor_limits\?\.changed\?\.length\) await onMotorLimitsChange\?\.\(payload\.motor_limits\.changed\);/);
 });

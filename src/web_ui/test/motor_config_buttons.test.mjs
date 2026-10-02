@@ -147,8 +147,28 @@ test('저장이 표 편집을 흡수한다 · 중간 단추를 다시 만들지 
 });
 
 test('두 단추가 무엇을 하는지 이름만 보고 알 수 있다', () => {
-  assert.match(html, /id="saveAxisConfigButton"[^>]*>설정 저장</);
-  assert.match(html, /id="applyAxisConfigButton"[^>]*>설정 적용 · 모터 재시작</);
+  // 2026-10-02 · 맨 아래 저장·적용 바 하나 · 「저장」이 모터 목록과 조인트 매핑을 같이 저장
+  assert.match(html, /id="saveAxisConfigButton"[^>]*>저장</);
+  assert.match(html, /id="applyAxisConfigButton"[^>]*>장비에 적용 · 모터 재시작</);
+});
+
+test('one 저장 saves the motor list first, then the joint mapping', () => {
+  const start = controller.indexOf('async function saveAxisConfig()');
+  const body = controller.slice(start, controller.indexOf('async function saveMotorConfigFile(', start));
+  assert.ok(body.indexOf('saveMotorConfigFile(') < body.indexOf('mappingCommit.save()'), '모터 먼저');
+  // 매핑만 바뀌었으면 모터 설정은 안 건드린다
+  assert.match(body, /const withMotor = hasAnyConfigChanges\(\) \|\| !withMapping;/);
+  assert.match(main, /save: \(\) => motionData\.saveMappingIfDirty\(\),/);
+});
+
+test('the commit bar says what to press next', () => {
+  assert.match(html, /class="[^"]*settings-commit-bar[^"]*"/);
+  assert.match(html, /id="settingsCommitState"/);
+  assert.match(controller, /title = '저장 안 한 변경';/);
+  assert.match(controller, /title = '장비 적용 필요';/);
+  // 매핑 리밋이 바뀌면 이유가 남는다 · 적용 성공 때 비운다
+  assert.match(controller, /addApplyReason\(axes\.length \? `모터 \$\{axes\.join\('·'\)\} 운전 한계 바뀜`/);
+  assert.match(controller, /applyReasons = \[\];/);
 });
 
 test('모터 관리에는 설정 파일 관리 단추가 없다', () => {

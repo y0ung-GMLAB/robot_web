@@ -84,7 +84,10 @@ export function createJogDialController({ el, getLatestState, getSelectedAxis, o
   let lastMessage = '';
 
   function selectedMotor() {
-    const axis = Number(getSelectedAxis());
+    // 고른 게 없으면 없다 · Number(null) 은 0 이라 0번 모터가 움직였다 (2026-10-02 사용자 보고)
+    const raw = getSelectedAxis();
+    if (raw === null || raw === undefined || String(raw).trim() === '') return null;
+    const axis = Number(raw);
     const motors = getLatestState()?.motors;
     if (!Number.isInteger(axis) || !Array.isArray(motors)) return null;
     return motors.find((motor) => Number(motor?.controller_index) === axis) || null;

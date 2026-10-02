@@ -32,7 +32,8 @@ DEFAULT_MOTION_PROJECTS_DIR = (
     Path(os.environ.get('MOTION_WORKSPACE', Path.cwd())).expanduser()
     / 'motion_projects'
 )
-INITIAL_MODES = ('first_frame', 'manual')
+#: 초기 위치 · 첫 장면(first_frame) · 직접 지정(manual) · 기준점(reference = 모션 0°) · 2026-10-02
+INITIAL_MODES = ('first_frame', 'manual', 'reference')
 
 
 class MotionMappingManager(Node):
@@ -741,6 +742,11 @@ class MotionMappingManager(Node):
             if initial_mode == 'first_frame' and motion_id in first_values:
                 initial_position = first_values[motion_id]
                 row['initial_motion_position_deg'] = initial_position
+            if initial_mode == 'reference':
+                initial_position = 0.0
+                row['initial_motion_position_deg'] = 0.0
+                if lower is not None and upper is not None and not (lower <= 0.0 <= upper):
+                    row_warnings.append('reference (0°) is outside motion range')
             effective_reference = reference if reference_enabled else 0.0
 
             preview: Dict[str, Any] = {

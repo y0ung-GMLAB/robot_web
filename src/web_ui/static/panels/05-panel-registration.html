@@ -87,34 +87,9 @@
           </div>
         </section>
 
-        <section class="axis-setup-step settings-step-card settings-final-card" aria-label="모터 설정 저장 및 실행 적용">
-          <div class="section-head axis-settings-head">
-            <strong>3. 저장하고 설정 적용</strong>
-            <span>저장한 다음 적용해야 실제 모터가 바뀝니다</span>
-          </div>
-          <div class="registry-message settings-final-note">
-            저장 = 설정 파일에 적어 둡니다 · 적용 = 실제 모터에 반영합니다 (모터가 잠깐 멈췄다 다시 켜집니다)
-          </div>
-          <div class="settings-final-actions">
-            <!-- 단추는 둘이다 · §6-154
-                 전에는 「표 변경값을 초안에 반영」이 따로 있었다 · 그 일은
-                 브라우저 안에서만 일어나고 서버에 아무것도 보내지 않는 중간
-                 단계라, 사람이 알 이유가 없었다 · 그런데 그걸 모르면 저장이
-                 영영 잠겨 있었다 · 이제 저장이 알아서 한다 -->
-            <div class="settings-final-action">
-              <span>1단계</span>
-              <button id="saveAxisConfigButton" class="primary" type="button" disabled>설정 저장</button>
-            </div>
-            <div class="settings-final-action settings-final-apply">
-              <span>2단계</span>
-              <button id="applyAxisConfigButton" class="danger" type="button" disabled>설정 적용 · 모터 재시작</button>
-            </div>
-          </div>
-        </section>
-
         <section class="axis-setup-step settings-step-card" aria-label="조인트 매핑">
           <div class="section-head compact">
-            <strong>4. 조인트 매핑</strong>
+            <strong>3. 조인트 매핑</strong>
             <span>조인트 이름(= Blender 본 이름)를 모터에 연결하고 변환값을 설정합니다 · 애니메이션 재생 전에 필요합니다</span>
           </div>
           <div class="motion-mapping-layout">
@@ -152,8 +127,8 @@
                       <th><span class="mapping-head-label">기준점 캡처</span><span class="mapping-head-unit"></span></th>
                       <th class="mapping-number-head"><span class="mapping-head-label">최소값</span><span class="mapping-head-unit">deg</span></th>
                       <th class="mapping-number-head"><span class="mapping-head-label">최대값</span><span class="mapping-head-unit">deg</span></th>
-                      <th><span class="mapping-head-label">초기 방식</span><span class="mapping-head-unit"></span></th>
-                      <th class="mapping-number-head"><span class="mapping-head-label">초기위치</span><span class="mapping-head-unit">deg</span></th>
+                      <th title="재생 전에 먼저 옮겨 둘 자세 · 첫 프레임 = 애니메이션 첫 줄 · 직접 지정 = 옆 칸 값 · 기준점 = 모션 0°"><span class="mapping-head-label">초기 위치</span><span class="mapping-head-unit"></span></th>
+                      <th class="mapping-number-head" title="「직접 지정」일 때 이동할 값 · 다른 방식이면 보여 주기만"><span class="mapping-head-label">지정 값</span><span class="mapping-head-unit">deg</span></th>
                       <th><span class="mapping-head-label">반전</span><span class="mapping-head-unit"></span></th>
                       <th><span class="mapping-head-label">상태</span><span class="mapping-head-unit"></span></th>
                     </tr>
@@ -167,20 +142,35 @@
               </div>
             </section>
 
-            <section class="motion-file-subsection settings-step-card settings-commit-card" aria-label="조인트 매핑 검증 및 저장">
+            <!-- 저장 단추는 맨 아래 「저장」 하나다 · 매핑도 그때 검증하고 저장한다 · 2026-10-02 -->
+            <section class="motion-file-subsection settings-step-card settings-commit-card" aria-label="조인트 매핑 검증 결과">
               <div class="section-head compact">
-                <strong>검증·미리보기·저장</strong>
-                <span>검증을 통과한 계산 결과만 현재 프로젝트에 저장합니다</span>
+                <strong>검증 결과</strong>
+                <span>아래 「저장」을 누르면 검증하고, 통과한 것만 저장합니다</span>
               </div>
               <div class="registry-actions settings-step-actions motion-mapping-final-actions">
-                <button id="saveMotionMappingButton" class="primary" type="button">검증·미리보기·저장</button>
                 <button id="resetMotionMappingButton" type="button">저장된 내용으로 되돌리기</button>
               </div>
               <div id="motionMappingValidation" class="motion-value-table">
-                <div class="empty">검증·미리보기·저장을 누르면 결과가 표시됩니다</div>
+                <div class="empty">「저장」을 누르면 검증 결과가 표시됩니다</div>
               </div>
             </section>
 
+          </div>
+        </section>
+
+        <!-- 저장 · 적용 · 화면 맨 아래 하나 (고정 바) · 2026-10-02
+             전에는 매핑 저장(4번 안)과 설정 저장(3번)이 따로였고 순서도 거꾸로라
+             매핑을 고친 뒤 위로 올라가야 했다 · 이제 「저장」 하나가 바뀐 쪽을 다
+             저장하고, 「적용」은 모터가 잠깐 멈추므로 사람이 따로 누른다 · §6-154 -->
+        <section class="axis-setup-step settings-final-card settings-commit-bar" aria-label="저장 및 장비 적용">
+          <div class="settings-commit-status">
+            <strong id="settingsCommitState">변경 없음</strong>
+            <span id="settingsCommitDetail">모터 목록 · 조인트 매핑을 고치면 「저장」 · 장비 반영은 「장비에 적용 · 모터 재시작」</span>
+          </div>
+          <div class="settings-final-actions">
+            <button id="saveAxisConfigButton" class="primary" type="button" disabled>저장</button>
+            <button id="applyAxisConfigButton" class="danger" type="button" disabled>장비에 적용 · 모터 재시작</button>
           </div>
         </section>
       </section>

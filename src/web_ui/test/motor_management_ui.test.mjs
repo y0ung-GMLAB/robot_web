@@ -60,7 +60,8 @@ test('existing AC servo API is reachable per axis from motor management', () => 
   assert.match(controller, /data-axis-servo-action="fault_reset"/);
   assert.match(controller, /onAcServoControl\(button\.dataset\.axisServoAction/);
   assert.match(motionTest, /controlAcServo: async \(action, axis\)/);
-  assert.match(motionTest, /sendAcServoControl\(action, 'selected'\)/);
+  // 그 모터를 직접 넘긴다 · 수동 조작의 선택은 안 바꾼다 (2026-10-02)
+  assert.match(motionTest, /sendAcServoControl\(action, 'selected', numericValue\(axis, null\)\)/);
 });
 
 test('current project name is visually emphasized without emphasizing an empty state', () => {
@@ -97,12 +98,14 @@ test('motor management actions follow control, edit, save and apply groups', () 
   assert.match(controller, /aria-label="모터 이름"/);
   assert.doesNotMatch(controller, /aria-label="(축|모터) 번호"/);
   assert.doesNotMatch(html, /<th>선택<\/th>/);
+  // 저장·적용은 조인트 매핑 아래 맨 끝 바 하나 (2026-10-02)
   assert.match(
     html,
-    /3\. 저장하고 설정 적용[\s\S]*id="saveAxisConfigButton"[\s\S]*id="applyAxisConfigButton"/,
+    /3\. 조인트 매핑[\s\S]*settings-commit-bar[\s\S]*id="saveAxisConfigButton"[\s\S]*id="applyAxisConfigButton"/,
   );
+  assert.doesNotMatch(html, /3\. 저장하고 설정 적용/);
   assert.doesNotMatch(html, /id="saveConfigTableButton"/);
-  assert.match(styles, /\.settings-final-actions\s*\{[\s\S]*?grid-template-columns: repeat\(2,/);
+  assert.match(styles, /\.settings-commit-bar \{[\s\S]*?position: sticky;/);
 });
 
 // 모델을 몰라도 저장도 적용도 된다 · §6-213

@@ -593,6 +593,10 @@ export function createMotionDataController({
   onProjectFilesChange,
   // 매핑 저장이 모터 설정 파일의 운전 한계를 바꿨을 때 · 모터 관리 화면을 다시 읽는다
   onMotorLimitsChange = null,
+  // 매핑 편집 상태가 바뀌었을 때 · 맨 아래 저장 바가 다시 그린다
+  onMappingStateChange = null,
+  // 매핑이 저장됐을 때 · 페이더가 새 기준점·범위로 다시 읽는다
+  onMappingSaved = null,
   groupRun = null,
 }) {
   let files = [];
@@ -609,6 +613,10 @@ export function createMotionDataController({
   let loading = false;
   let mappingLoading = false;
   let mappingDirty = false;
+  //: 「초기 위치 이동」 결과를 지켜보는 시한 (0 = 안 봄) · 이동 시간 10 s + 확인 여유
+  let initializeWatchUntil = 0;
+  let initializeWatchStarted = false;
+  const INITIALIZE_WATCH_MS = 30000;
   let fileLoadToken = 0;
   let mappingLoadToken = 0;
   let mappingRevision = '';
@@ -648,7 +656,10 @@ export function createMotionDataController({
       if (fromFolder) reportImportFailure('폴더 안에 .json 애니메이션이 없습니다');
       return;
     }
-    const projectId = getLatestState()?.selected_project_id;
+    // 프로젝트 번호는 애니메이션 목록 응답이 실어 온다 (내 PC로 저장과 같은 출처) ·
+    // 전에는 상태 스트림에서 찾았다 · 그쪽엔 프로젝트 번호가 없어서 늘 비었다
+    if (!motionProjectId) await loadFiles();
+    const projectId = motionProjectId;
     if (!projectId) {
       reportImportFailure('프로젝트를 먼저 선택하세요');
       return;
@@ -992,6 +1003,7 @@ export function createMotionDataController({
   }
 
   function displayInitialPosition(row) {
+    if (row.initial_mode === 'reference') return 0.0;
     if ((row.initial_mode || 'first_frame') !== 'first_frame') {
       return numericOr(row.initial_motion_position_deg, 0.0);
     }
@@ -1690,11 +1702,16 @@ export function createMotionDataController({
     const scope = target.scope;
     const group = scope === 'group' ? groupRunAvailability() : null;
     const groupActive = Boolean(group?.active);
+    // 막힌 이유는 **진짜 이유**로 · 실행 설정이 준비됐는데 애니메이션만 없으면 그렇게 말한다
+    // (전에는 이때 「저장 설정과 실행 설정이 일치합니다 · 사용자 제어 가능」이 사유로 떴다 · 2026-10-02)
+    const localReason = contextReady && !hasMotionFile
+      ? '재생 등록된 애니메이션이 없습니다 · 「재생 등록」 후 재생 · 초기 위치 이동은 지금도 됩니다'
+      : contextMessage;
     const { blocked, reason: blockReason } = motionRunBlockView({
       scope,
       availability: group || {},
       localReady: contextReady && hasRequiredFiles,
-      localReason: contextMessage,
+      localReason,
     });
 
     // 같은 이름의 자동 재생이 둘이었다 · 범위마다 자기 것만 보인다 · §6-66
@@ -1721,7 +1738,16 @@ export function createMotionDataController({
     if (el.motionRunInitializeButton) {
       el.motionRunInitializeButton.disabled = motionRunLoading || running
         || (scope === 'group' ? !group.ok : (!contextReady || !hasMappingFile));
-      el.motionRunInitializeButton.title = blocked ? blockReason : '';
+      // 초기 위치 이동은 애니메이션이 없어도 된다 · 재생 쪽 막힘 사유를 빌려 쓰지 않는다
+      el.motionRunInitializeButton.title = scope === 'group'
+        ? (group.ok ? '참가 PC 전체를 초기 위치로 이동합니다' : (group.reason || ''))
+        : !contextReady
+          ? contextMessage
+          : !hasMappingFile
+            ? '조인트 매핑이 없습니다'
+            : hasMotionFile
+              ? '줄마다 「초기 위치」대로 이동합니다 · 첫 프레임 = 애니메이션 첫 줄 · 직접 지정 = 그 값 · 기준점 = 0°'
+              : '애니메이션이 없어 「첫 프레임」 줄은 모션 0°(기준점)로 · 「직접 지정」 줄은 그 값으로 이동합니다';
     }
     if (el.motionRunStartButton) {
       el.motionRunStartButton.disabled = motionRunLoading || running || blocked;
@@ -1768,13 +1794,16 @@ export function createMotionDataController({
       el.motionRunInitialMoveTime.disabled = motionRunLoading || running;
     }
     if (el.motionRunMessage) {
+      // 오류는 덮지 않는다 · 애니메이션이 없을 때 실패가 안내 문구에 가려 안 보였다 (2026-10-02)
       const message = motionRunLoading
         ? '재생 요청 처리 중'
         : !hasMappingFile
           ? '조인트 매핑 파일을 선택하세요'
-          : !hasMotionFile
-            ? '애니메이션 없음 · 첫 프레임 모터는 모션값 0°로 초기 위치 이동할 수 있습니다'
-          : status.message || '실행 준비 가능';
+          : status.state === 'error' && status.message
+            ? status.message
+            : !hasMotionFile
+              ? '애니메이션 없음 · 첫 프레임 모터는 모션값 0°로 초기 위치 이동할 수 있습니다'
+              : status.message || '실행 준비 가능';
       el.motionRunMessage.textContent = message;
     }
     renderMotionRunSummary();
@@ -2008,16 +2037,18 @@ export function createMotionDataController({
     el.motionMappingRows.innerHTML = rows.map((row, index) => {
       const status = mappingValidationRowStatus(row, mappingRowStatus(row, duplicateCounts));
       const initialMode = row.initial_mode || 'first_frame';
-      const firstFrameInitial = initialMode === 'first_frame';
-      const initialPositionDisabled = firstFrameInitial;
+      // 값을 직접 넣는 것은 「직접 지정」뿐 · 첫 프레임·기준점은 보여 주기만
+      const initialPositionDisabled = initialMode !== 'manual';
       const dynamixelGearFixed = isDynamixelMappingRow(row);
       const referencePositionValue = displayReferencePosition(row);
       const initialPositionValue = displayInitialPosition(row);
       const gearRatioValue = mappingGearRatioValue(row);
-      // 첫 프레임 방식 = 애니메이션 첫 프레임 값으로 간다 · 이 칸은 보여 주기만 (수동일 때만 입력)
-      const initialPositionDisabledAttr = initialPositionDisabled
-        ? ' disabled title="첫 프레임 방식 · 애니메이션 첫 프레임 값으로 이동합니다 (값 입력은 수동 방식일 때만)"'
-        : ' title="수동 방식 · 재생 전 이 값(조인트 deg)으로 이동합니다"';
+      // 초기 위치 · 첫 프레임(애니메이션 첫 줄 값) · 직접 지정(이 칸) · 기준점(모션 0°) · 2026-10-02
+      const initialPositionDisabledAttr = initialMode === 'reference'
+        ? ' disabled title="기준점 · 재생 전 모션 0°(기준점 캡처한 자세)로 이동합니다"'
+        : initialPositionDisabled
+          ? ' disabled title="첫 프레임 · 애니메이션 첫 프레임 값으로 이동합니다 (애니메이션이 없으면 0°) · 값 입력은 「직접 지정」일 때만"'
+          : ' title="직접 지정 · 재생 전 이 값(조인트 deg)으로 이동합니다"';
       const gearRatioDisabledAttr = dynamixelGearFixed ? ' disabled title="다이나믹셀은 감속비를 사용하지 않으며 1로 고정됩니다"' : '';
       return (
         `<tr data-mapping-index="${index}">
@@ -2032,9 +2063,10 @@ export function createMotionDataController({
           <td class="mapping-number-cell"><input class="numeric-input mapping-number-input" type="number" step="0.001" data-motion-mapping-field="motion_lower_deg" value="${displayText(row.motion_lower_deg)}"></td>
           <td class="mapping-number-cell"><input class="numeric-input mapping-number-input" type="number" step="0.001" data-motion-mapping-field="motion_upper_deg" value="${displayText(row.motion_upper_deg)}"></td>
           <td>
-            <select class="compact-select" data-motion-mapping-field="initial_mode">
+            <select class="compact-select" data-motion-mapping-field="initial_mode" title="재생 전에 먼저 옮겨 둘 자세">
               <option value="first_frame"${initialMode === 'first_frame' ? ' selected' : ''}>첫 프레임</option>
-              <option value="manual"${initialMode === 'manual' ? ' selected' : ''}>수동</option>
+              <option value="manual"${initialMode === 'manual' ? ' selected' : ''}>직접 지정</option>
+              <option value="reference"${initialMode === 'reference' ? ' selected' : ''}>기준점</option>
             </select>
           </td>
           <td class="mapping-number-cell ${initialPositionDisabled ? 'mapping-disabled-cell' : ''}"><input class="numeric-input mapping-number-input" type="number" step="0.001" data-motion-mapping-field="initial_motion_position_deg" value="${displayText(initialPositionValue)}"${initialPositionDisabledAttr}></td>
@@ -2048,7 +2080,7 @@ export function createMotionDataController({
   function renderMappingValidation() {
     if (!el.motionMappingValidation) return;
     if (!mappingValidation) {
-      el.motionMappingValidation.innerHTML = '<div class="empty">설정 검증을 누르면 결과가 표시됩니다</div>';
+      el.motionMappingValidation.innerHTML = '<div class="empty">맨 아래 「저장」을 누르면 검증 결과가 표시됩니다</div>';
       return;
     }
 
@@ -2086,7 +2118,9 @@ export function createMotionDataController({
         : '첫 프레임 실행 시 계산';
       const initialText = row.initial_mode === 'manual'
         ? `${targetText(detail.initial_motion_position_deg)} -> ${targetText(detail.manual_initial_output_deg)} -> ${targetText(detail.manual_initial_motor_target_deg)}`
-        : firstFrameText;
+        : row.initial_mode === 'reference'
+          ? `기준점 0 deg -> ${targetText(detail.reference_position_deg)}`
+          : firstFrameText;
       return (
         `<tr>
           <td class="mono">${displayText(row.motion_id)}</td>
@@ -2131,7 +2165,8 @@ export function createMotionDataController({
 
   function renderMappingPanel() {
     renderMappingFileName();
-    if (el.saveMotionMappingButton) el.saveMotionMappingButton.disabled = mappingLoading;
+    // 저장 단추는 모터 관리 맨 아래 「저장」 하나다 · 그 바가 편집 상태를 다시 그린다
+    onMappingStateChange?.();
     if (el.addMotionIdButton) el.addMotionIdButton.disabled = mappingLoading;
     if (el.generateMotionIdsButton) el.generateMotionIdsButton.disabled = mappingLoading;
     if (el.resetMotionMappingButton) el.resetMotionMappingButton.disabled = mappingLoading;
@@ -2154,10 +2189,33 @@ export function createMotionDataController({
     renderMappingRows();
   }
 
+  /** 「초기 위치 이동」을 누른 뒤 상태가 오류로 끝나면 한 번 창으로 알린다 · 2026-10-02
+   *
+   * 요청은 바로 「시작」으로 답한다 · 움직이는 중 실패는 상태로만 와서 놓치기 쉬웠다.
+   * 다른 데서 시작한 실행의 오류까지 띄우지 않게, 누른 뒤 정해진 시간 동안만 본다.
+   */
+  function watchInitializeOutcome(status) {
+    if (!initializeWatchUntil) return;
+    if (Date.now() > initializeWatchUntil) {
+      initializeWatchUntil = 0;
+      return;
+    }
+    const state = String(status?.state || '');
+    // 직전 실행이 남긴 옛 오류에 속지 않게 · 누른 뒤 오류 아닌 상태를 한 번 본 다음부터 센다
+    if (state !== 'error') initializeWatchStarted = true;
+    if (state === 'error' && initializeWatchStarted) {
+      initializeWatchUntil = 0;
+      showMotionRunFailure(status.message || '초기 위치 이동 실패', '초기 위치 이동 실패');
+    } else if (state === 'initialized' || state === 'completed' || state === 'stopped') {
+      initializeWatchUntil = 0;
+    }
+  }
+
   function renderRuntimeState() {
     const status = getLatestState()?.motion_run_status;
     if (status && Object.keys(status).length) {
       motionRunStatus = status;
+      watchInitializeOutcome(status);
       renderMotionRunPanel();
     }
     renderRuntimeMappingState();
@@ -2608,7 +2666,8 @@ export function createMotionDataController({
           : `조인트 매핑 저장 완료: ${selectedMappingId}`
       ));
       await onProjectFilesChange?.();
-      if (payload.motor_limits?.changed?.length) await onMotorLimitsChange?.();
+      onMappingSaved?.();
+      if (payload.motor_limits?.changed?.length) await onMotorLimitsChange?.(payload.motor_limits.changed);
       return true;
     } catch (error) {
       if (isMappingRevisionConflict(error?.message || error)) {
@@ -2697,11 +2756,13 @@ export function createMotionDataController({
         row.gear_ratio = 1.0;
       }
     } else if (field === 'initial_mode') {
-      row.initial_mode = value === 'manual' ? 'manual' : 'first_frame';
+      row.initial_mode = ['manual', 'reference'].includes(value) ? value : 'first_frame';
       if (row.initial_mode === 'first_frame') {
         const firstValue = firstMotionValueFor(row.motion_id);
         if (firstValue !== null) row.initial_motion_position_deg = firstValue;
       }
+      // 기준점 = 모션 0° · 칸에도 0 을 보여 준다
+      if (row.initial_mode === 'reference') row.initial_motion_position_deg = 0.0;
     } else if (
       field === 'gear_ratio'
       || field === 'reference_position_deg'
@@ -2919,6 +2980,10 @@ export function createMotionDataController({
       setMotionRunMessage(payload.message || (payload.success ? '초기 위치 이동 시작' : '초기 위치 이동 실패'));
       if (payload.success === false) {
         await showMotionRunFailure(payload.message, '초기 위치 이동 실패');
+      } else {
+        // 움직이는 도중의 실패(도달 확인 실패 등)는 나중에 상태로 온다 · 그것도 창으로
+        initializeWatchUntil = Date.now() + INITIALIZE_WATCH_MS;
+        initializeWatchStarted = false;
       }
     } catch (error) {
       const message = error?.message || String(error);
@@ -3208,9 +3273,6 @@ export function createMotionDataController({
     }
     el.addMotionIdButton?.addEventListener('click', addMotionId);
     el.generateMotionIdsButton?.addEventListener('click', generateMotionIdsFromMotors);
-    if (el.saveMotionMappingButton) {
-      el.saveMotionMappingButton.addEventListener('click', saveCurrentMapping);
-    }
     el.resetMotionMappingButton?.addEventListener('click', resetCurrentMapping);
     if (el.motionMappingRows) {
       el.motionMappingRows.addEventListener('click', (event) => {
@@ -3247,6 +3309,8 @@ export function createMotionDataController({
     resetProjectState,
     /** 조인트 매핑에 저장 안 한 편집이 있나 · 상단 설정 상태 배지가 본다 */
     hasUnsavedMappingChanges: () => Boolean(mappingDirty),
+    /** 맨 아래 「저장」이 부른다 · 편집이 없으면 아무것도 안 한다 · 검증 → 저장 */
+    saveMappingIfDirty: async () => (mappingDirty ? saveCurrentMapping() : null),
     fetchFiles: async () => {
       await loadFiles();
       await loadMappings();

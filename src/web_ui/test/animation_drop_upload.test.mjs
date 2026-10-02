@@ -40,6 +40,15 @@ test('json only, and one failure stops the batch so its reason stays visible', (
   assert.match(controller, /showAlert\(message, \{ title: '애니메이션 불러오기', tone: 'warning' \}\);/);
 });
 
+// 사용자 보고 · 프로젝트가 선택돼 있어도 「프로젝트를 먼저 선택하세요」 (2026-10-02)
+// 상태 스트림엔 selected_project_id 가 없다 · 목록 응답의 project_id 를 쓴다
+test('the upload takes the project id from the animation list response', () => {
+  const start = controller.indexOf('async function importAnimationFiles');
+  const body = controller.slice(start, controller.indexOf('function bindAnimationDropZone', start));
+  assert.doesNotMatch(body, /selected_project_id/);
+  assert.match(body, /if \(!motionProjectId\) await loadFiles\(\);\s*\n\s*const projectId = motionProjectId;/);
+});
+
 // 불러오기 버튼 · 폴더 드롭 · 화면 전체 받는 칸 · 문서 전체 가드 · 2026-10-02
 test('a 불러오기 button opens a multi-file picker through the same path', () => {
   assert.match(html, /<button id="motionFileImportButton"[^>]*>불러오기<\/button>/);

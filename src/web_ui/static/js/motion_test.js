@@ -1166,7 +1166,9 @@ export function createMotionTestController({ el, getLatestState, getJointRow = (
   }
 
   function selectAxis(axis) {
-    const nextAxis = numericValue(axis, null);
+    // 「모터 선택」(빈 값)은 **선택 없음**이다 · Number('') 은 0 이라 0번 모터가 골라졌다
+    const blank = axis === null || axis === undefined || String(axis).trim() === '';
+    const nextAxis = blank ? null : numericValue(axis, null);
     selectedAxis = nextAxis;
     // 다른 모터로 넘어가면 조그 단위는 다시 기본(모션 deg)으로
     if (el.motionTestJogJointMode) delete el.motionTestJogJointMode.dataset.userSet;
@@ -1286,8 +1288,11 @@ export function createMotionTestController({ el, getLatestState, getJointRow = (
     }
   }
 
-  async function sendAcServoControl(action, scope = 'selected') {
-    const motor = selectedMotor();
+  /** axisOverride · 모터 관리 표의 ON/OFF 처럼 **다른 화면이 고른 모터** · 수동 조작의
+   * 선택은 바꾸지 않는다 (2026-10-02 · 전에는 그 모터로 몰래 바뀌었다) */
+  async function sendAcServoControl(action, scope = 'selected', axisOverride = null) {
+    const axis = axisOverride ?? selectedAxis;
+    const motor = axisOverride === null ? selectedMotor() : motorByAxis(getLatestState(), axisOverride);
     if (scope === 'selected' && (!motor || !isAcServoMotor(motor))) {
       if (el.acServoControlMessage) {
         el.acServoControlMessage.textContent = '선택 모터가 AC 서보가 아닙니다';
@@ -1331,7 +1336,7 @@ export function createMotionTestController({ el, getLatestState, getJointRow = (
       const response = await requestAcServoControl({
         action,
         scope,
-        axis: selectedAxis,
+        axis,
       });
       if (el.acServoControlMessage) {
         el.acServoControlMessage.textContent = response?.message || 'AC 서보 제어 응답 없음';
@@ -1479,8 +1484,7 @@ export function createMotionTestController({ el, getLatestState, getJointRow = (
     renderLatestState,
     selectAxis,
     controlAcServo: async (action, axis) => {
-      selectAxis(axis);
-      await sendAcServoControl(action, 'selected');
+      await sendAcServoControl(action, 'selected', numericValue(axis, null));
     },
     getSelectedAxis: () => selectedAxis,
   };

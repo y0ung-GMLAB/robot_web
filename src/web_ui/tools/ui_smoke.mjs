@@ -39,7 +39,7 @@ const CHROME = ['chromium', 'chromium-browser', 'google-chrome']
 const REQUIRED = {
   'motion-run': ['#motionRunSummary', '#motionFileRows', '#motionRunStatus',
     '#registerMotionFileButton', '#motionRunStartButton', '#motionRunGraphCanvas'],
-  'motion-mapping': ['#motionMappingSelect', '#saveMotionMappingButton'],
+  'motion-mapping': ['#motionMappingRows', '#saveAxisConfigButton'],
   'motion-midi': ['#midiBankSelect', '#saveMidiMappingButton'],
   studio: ['#studioRecordButton', '#studioExportButton'],
   manual: ['#motionTestPanel, [data-workspace-panel="manual"]'],

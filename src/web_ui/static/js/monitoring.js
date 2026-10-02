@@ -1,5 +1,4 @@
 import {
-  aliasText,
   displayText,
   escapeHtml,
   formatCounts,
@@ -94,21 +93,30 @@ function driverText(motor, rawMode) {
   return rawMode ? displayText(power) : displayText(name);
 }
 
-function ethercatAliasText(motor) {
-  return displayText(aliasText(motor.alias));
-}
-
-function nodeIdText(motor) {
-  const value = motor.bus_id ?? motor.node_id ?? motor.id ?? motor.device_id;
-  return displayText(value === null || value === undefined ? '-' : formatInt(value));
+/** 연결 ID · 숫자만 쓰면 「모터 번호」와 헷갈린다 · 무슨 번호인지 이름을 붙인다 (2026-10-02)
+ *
+ * AC 서보 · `Alias 3` · Alias 0(안 정함)은 모두 같아 보이므로 랜선 위치를 덧붙인다 `Alias 0 · Slave 2`
+ * Dynamixel · `ID 3` · CubeMars · `CAN ID 3`
+ */
+function connectionIdLabel(motor) {
+  const type = motorFilterKey(motor);
+  const num = (value) => (value === null || value === undefined || value === '' || Number.isNaN(Number(value))
+    ? null : formatInt(value));
+  const aliasLabel = () => {
+    const alias = num(motor.alias);
+    if (alias === null) return null;
+    const slave = num(motor.slave_position);
+    return Number(motor.alias) === 0 && slave !== null ? `Alias 0 · Slave ${slave}` : `Alias ${alias}`;
+  };
+  const busId = num(motor.bus_id ?? motor.node_id ?? motor.id ?? motor.device_id);
+  if (type === 'ac_servo') return aliasLabel() || '-';
+  if (type === 'dynamixel') return busId === null ? '-' : `ID ${busId}`;
+  if (type === 'cubemars') return busId === null ? '-' : `CAN ID ${busId}`;
+  return aliasLabel() || (busId === null ? '-' : `ID ${busId}`);
 }
 
 function commonIdText(motor) {
-  const type = motorFilterKey(motor);
-  if (type === 'ac_servo') return ethercatAliasText(motor);
-  if (type === 'dynamixel' || type === 'cubemars') return nodeIdText(motor);
-  if (motor.alias !== null && motor.alias !== undefined) return ethercatAliasText(motor);
-  return nodeIdText(motor);
+  return displayText(connectionIdLabel(motor));
 }
 
 function portText(motor) {
@@ -303,7 +311,7 @@ function motorFilterKey(motor) {
 function monitoringColumnsForFilter(filter, rawMode) {
   const identity = [
     { label: '모터 번호', className: 'mono', cell: (motor) => axisText(motor) },
-    { label: 'ID', className: 'mono', cell: (motor) => commonIdText(motor) },
+    { label: '연결 ID', title: 'AC 서보 = EtherCAT Alias (0 이면 Slave 위치) · Dynamixel = 버스 ID · 「모터 번호」와 다른 값', className: 'mono', cell: (motor) => commonIdText(motor) },
     { label: '모터 종류', cell: (motor) => displayMotorTypeText(motor) },
     { label: '이름', cell: (motor) => displayNameText(motor) },
   ];
@@ -355,14 +363,6 @@ function renderMonitoringTabs(motors, activeMonitoringFilter, el) {
 function filterMonitoringMotors(motors, activeMonitoringFilter) {
   if (activeMonitoringFilter === 'all') return motors;
   return motors.filter((motor) => motorFilterKey(motor) === activeMonitoringFilter);
-}
-
-function motorIdValue(motor) {
-  const type = motorFilterKey(motor);
-  const value = type === 'ac_servo'
-    ? motor.alias
-    : (motor.bus_id ?? motor.node_id ?? motor.id ?? motor.device_id);
-  return value === null || value === undefined ? '-' : formatInt(value);
 }
 
 function motorTypeValue(motor) {
@@ -517,7 +517,7 @@ function detailRowsForTab(motor, tab, rawMode) {
   }
   return [
     ['모터 번호', formatInt(motor.controller_index)],
-    ['모터 ID', motorIdValue(motor)],
+    ['연결 ID', connectionIdLabel(motor)],
     ['모터 이름', motor.display_name || '-'],
     ['모터 종류', motorTypeValue(motor)],
     ['드라이버 모델', motor.driver_model || motor.driver_name || '-'],
@@ -563,7 +563,7 @@ function renderMonitoringDetail(motors, selectedAxis, activeTab, rawMode, el) {
   }
   if (el.monitoringDetailSubtitle) {
     el.monitoringDetailSubtitle.textContent = selected
-      ? `${motorTypeValue(selected)} · ID ${motorIdValue(selected)} · ${stateLabel(selected.connection_state || selected.state)}`
+      ? `${motorTypeValue(selected)} · ${connectionIdLabel(selected)} · ${stateLabel(selected.connection_state || selected.state)}`
       : '위 표의 모터 행을 누르면 상세 정보가 표시됩니다';
   }
   if (!el.monitoringDetailContent) return;

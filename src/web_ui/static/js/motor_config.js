@@ -228,7 +228,12 @@ export function createMotorConfigController({
   onConfigApplyComplete,
   onIdentityStatusChange,
   onAcServoControl,
+  // 조인트 매핑 · 맨 아래 「저장」 하나가 같이 저장한다 (2026-10-02)
+  // { dirty(): bool, save(): Promise<bool|null> }
+  mappingCommit = null,
 }) {
+  //: 장비에 적용해야 하는 이유 · 저장·매핑 리밋 변경 때 쌓이고 적용 성공 때 비운다
+  let applyReasons = [];
   let latestScan = null;
   let savedRegistry = normalizeAxisRegistry({});
   let axisConfig = normalizeAxisRegistry({});
@@ -2223,7 +2228,7 @@ export function createMotorConfigController({
   function scanAdoptedMessage(head) {
     const rows = axisRowsData();
     const parts = [`${head} · ${formatInt(rows.length)}개`];
-    parts.push('이름을 고친 뒤 「설정 저장」을 누르세요');
+    parts.push('이름을 고친 뒤 맨 아래 「저장」을 누르세요');
     return parts.join(' · ');
   }
 
@@ -2295,7 +2300,7 @@ export function createMotorConfigController({
       //
       // 전에는 이미 적용된 상태면 「설정 다시 적용 · 모터 재시작」으로
       // 글자가 바뀌었다 · 같은 버튼을 부를 이름이 둘이 되어 말이 안 통했다.
-      el.applyAxisConfigButton.textContent = '설정 적용 · 모터 재시작';
+      el.applyAxisConfigButton.textContent = '장비에 적용 · 모터 재시작';
       el.applyAxisConfigButton.title = !hasConfiguredAxes
         ? (applyBlockMessage || '적용할 프로젝트 모터 설정이 없습니다.')
         : changed
@@ -2312,6 +2317,7 @@ export function createMotorConfigController({
           ? '적용 필요'
           : '설정 저장됨';
     }
+    renderCommitBar({ changed, alreadyApplied, hasConfiguredAxes });
 
     renderAxisWorkflowStatus({
       rows,
@@ -2841,7 +2847,86 @@ export function createMotorConfigController({
       + 'Station Alias를 읽지 못했습니다. 저장된 새 설정을 적용·재시작한 뒤 다시 검색해야 합니다.';
   }
 
+  /** 맨 아래 저장·적용 바 · 지금 무엇을 눌러야 하는지 한 줄로 · 2026-10-02
+   *
+   * 저장 안 한 편집 → 「저장」 · 저장했는데 장비에 안 들어감 → 「장비에 적용」 ·
+   * 적용 단추는 끄지 않는다 (§6-203 · 장비가 이상하면 다시 눌러 재시작) ·
+   * 적용할 게 있을 때만 빨갛게 보인다 (CSS data-state).
+   */
+  function renderCommitBar(context = null) {
+    const bar = el.saveAxisConfigButton?.closest('.settings-commit-bar');
+    if (!bar) return;
+    const changed = context ? context.changed : hasAnyConfigChanges();
+    const alreadyApplied = context ? context.alreadyApplied : selectedMotorConfigAlreadyApplied();
+    const unsaved = [changed && '모터 목록', mappingDirty() && '조인트 매핑'].filter(Boolean);
+    let state = 'clean';
+    let title = '변경 없음';
+    let detail = '저장한 설정이 장비에 들어가 있습니다';
+    if (unsaved.length) {
+      state = 'unsaved';
+      title = '저장 안 한 변경';
+      detail = `${unsaved.join(' · ')} · 「저장」을 누르세요`;
+    } else if (applyReasons.length || configApplyPending || !alreadyApplied) {
+      state = 'apply';
+      title = '장비 적용 필요';
+      detail = `${applyReasons.join(' · ') || '저장된 설정이 아직 장비에 안 들어갔습니다'} · 「장비에 적용 · 모터 재시작」 (모터가 잠깐 멈췄다 켜집니다)`;
+    }
+    if (context && !context.hasConfiguredAxes && state !== 'unsaved') {
+      state = 'clean';
+      title = '모터 없음';
+      detail = '모터를 검색해 추가한 뒤 「저장」';
+    }
+    bar.dataset.state = state;
+    if (el.settingsCommitState) el.settingsCommitState.textContent = title;
+    if (el.settingsCommitDetail) el.settingsCommitDetail.textContent = detail;
+  }
+
+  function addApplyReason(reason) {
+    if (reason && !applyReasons.includes(reason)) applyReasons.push(reason);
+  }
+
+  function mappingDirty() {
+    try { return Boolean(mappingCommit?.dirty?.()); } catch { return false; }
+  }
+
+  /** 맨 아래 「저장」 · 바뀐 쪽(모터 목록 · 조인트 매핑)을 다 저장한다 · 2026-10-02
+   *
+   * 순서 · 모터 설정 먼저 → 매핑 · 매핑 저장이 서버에서 모터 설정 파일의 운전
+   * 한계를 고치므로, 모터 쪽이 옛 버전으로 덮어쓰지 않게 모터를 먼저 끝낸다.
+   * 매핑만 바뀌었으면 모터 설정은 건드리지 않는다 (파일 버전이 괜히 바뀐다).
+   */
   async function saveAxisConfig() {
+    const withMapping = mappingDirty();
+    const withMotor = hasAnyConfigChanges() || !withMapping;
+    const done = [];
+    if (withMotor) {
+      if (!(await saveMotorConfigFile({ announce: !withMapping }))) return false;
+      done.push('모터 목록');
+    }
+    if (withMapping) {
+      const saved = await mappingCommit.save();
+      if (saved === false) {
+        const message = '조인트 매핑 저장 실패 · 사유는 조인트 매핑 아래 검증 결과를 보세요'
+          + (done.length ? ' · 모터 목록은 저장됐습니다' : '');
+        setAxisMessage(message, true);
+        renderAxisSettings();
+        await showAlert(message, { title: '설정 저장 실패', tone: 'danger' });
+        return false;
+      }
+      done.push('조인트 매핑');
+      renderAxisSettings();
+      await showAlert(
+        `${done.join(' · ')} 저장했습니다.\n\n`
+        + (applyReasons.length
+          ? `장비 반영이 필요합니다 · ${applyReasons.join(' · ')}\n「장비에 적용 · 모터 재시작」을 누르세요.`
+          : '바로 반영됐습니다 · 모터 재시작은 필요 없습니다.'),
+        { title: '설정 저장 완료', tone: 'info' },
+      );
+    }
+    return true;
+  }
+
+  async function saveMotorConfigFile({ announce = true } = {}) {
     // **바뀐 게 없어도 저장한다** · §6-203
     //
     // 버튼은 풀었는데 여기서 첫 줄에 거부하고 있었다 · 눌러도 아무 일이
@@ -2907,12 +2992,13 @@ export function createMotorConfigController({
       }
       applyMotorConfigPayload(payload);
       configApplyPending = true;
+      addApplyReason('모터 설정 저장됨');
       setStatusMessage('모터 설정 저장됨');
       const modelWarning = modelProfileWarningMessage();
       setAxisMessage(
         modelWarning
           ? `프로젝트 모터 목록 저장됨 · ${modelWarning}`
-          : '저장했습니다 · 실제 모터에 반영하려면 오른쪽 「설정 적용」을 누르세요.',
+          : '저장했습니다 · 실제 모터에 반영하려면 맨 아래 「장비에 적용 · 모터 재시작」을 누르세요.',
         Boolean(modelWarning),
       );
       await onProjectFilesChange?.();
@@ -2920,13 +3006,16 @@ export function createMotorConfigController({
       //
       // 전에는 작은 글씨 한 줄뿐이었다 · 바뀐 내용이 없을 때는 화면이
       // 그대로라 「눌렀는데 아무 일도 안 일어났다」로 보였다.
-      await showAlert(
-        modelWarning
-          ? `설정 파일에 저장했습니다.\n\n${modelWarning}`
-          : '설정 파일에 저장했습니다.\n\n'
-            + '실제 모터에 반영하려면 오른쪽 「장비에 적용 · 모터 재시작」을 누르세요.',
-        { title: '설정 저장 완료', tone: modelWarning ? 'warning' : 'info' },
-      );
+      // 매핑도 같이 저장하는 중이면 끝에 한 번만 말한다 (announce=false)
+      if (announce || modelWarning) {
+        await showAlert(
+          modelWarning
+            ? `설정 파일에 저장했습니다.\n\n${modelWarning}`
+            : '설정 파일에 저장했습니다.\n\n'
+              + '실제 모터에 반영하려면 맨 아래 「장비에 적용 · 모터 재시작」을 누르세요.',
+          { title: '설정 저장 완료', tone: modelWarning ? 'warning' : 'info' },
+        );
+      }
       return true;
     } catch (error) {
       const message = `모터 설정 저장 실패: ${error?.message || error}`;
@@ -3019,6 +3108,7 @@ export function createMotorConfigController({
         return false;
       }
       configApplyPending = false;
+      applyReasons = [];
       latestScan = null;
       renderAxisSettings();
       return true;
@@ -3379,7 +3469,10 @@ export function createMotorConfigController({
    * 화면이 옛 파일 버전을 들고 있으면 다음 「설정 저장」이 버전 충돌로 거절된다 ·
    * 그래서 다시 읽는다 · 저장 안 한 편집이 있으면 날리지 않고 알리기만 한다.
    */
-  async function reloadIfClean() {
+  async function reloadIfClean(changed = []) {
+    const axes = (changed || []).map((item) => item?.controller_index).filter((axis) => axis !== undefined);
+    addApplyReason(axes.length ? `모터 ${axes.join('·')} 운전 한계 바뀜` : '운전 한계 바뀜');
+    configApplyPending = true;
     if (hasMotorConfigDataChanges() || hasAxisChanges()) {
       setAxisMessage('조인트 매핑이 모터 운전 한계를 바꿨습니다 · 저장 안 한 편집을 정리한 뒤 「설정 다시 불러오기」', true);
       return;
@@ -3390,6 +3483,8 @@ export function createMotorConfigController({
   return {
     bindEvents,
     reloadIfClean,
+    /** 조인트 매핑 편집 상태가 바뀌면 main.js 가 부른다 */
+    renderCommitBar: () => renderCommitBar(),
     /** 모터 관리에 저장 안 한 편집이 있나 · 상단 설정 상태 배지가 본다 */
     hasUnsavedChanges: () => hasMotorConfigDataChanges() || hasAxisChanges(),
     fetchRegistry,

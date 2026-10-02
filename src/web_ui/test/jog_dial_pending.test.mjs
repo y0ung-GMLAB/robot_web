@@ -127,6 +127,30 @@ test('changing the step size clears the unsent amount', async () => {
   assert.equal(jogCalls().length, 1, '비운 양이 이어서 나가면 안 된다');
 });
 
+// 사용자 보고 · 모터를 안 골라도 0번 모터가 움직였다 (Number(null) === 0) · 2026-10-02
+test('nothing selected means nothing moves · not motor 0', () => {
+  calls.length = 0;
+  const el = {};
+  for (const name of [
+    'jogDial', 'jogDialRing', 'jogDialStep', 'jogDialPosition', 'jogDialPending',
+    'jogDialMessage', 'jogDialCancelPending', 'jogDialSetReference', 'jogDialSetLower',
+    'jogDialSetUpper', 'jogDialBlock', 'jogDialEnabled', 'jogDialEnabledState',
+    'jogTargetInput', 'jogTargetMoveButton',
+  ]) el[name] = fakeElement();
+  el.jogDialStep.value = '1';
+  el.jogDialEnabled.checked = true;
+  const state = { motors: [{ controller_index: 0, state: 'detected', servo_on: true, fault: false, position_deg: 0, motor_type: 'ac_servo' }] };
+  for (const selected of [null, '', undefined]) {
+    const dial = createJogDialController({ el, getLatestState: () => state, getSelectedAxis: () => selected });
+    dial.bindEvents();
+    dial.renderRuntimeState();
+    el.jogDial.dispatch('wheel', { deltaY: -100 });
+    assert.equal(calls.length, 0, `선택 ${String(selected)} 인데 보냈다`);
+    assert.equal(el.jogDial.getAttribute('aria-disabled'), 'true');
+    assert.match(el.jogDialMessage.textContent, /모터를 먼저 선택하세요/);
+  }
+});
+
 test('동작 취소 is always pressable', () => {
   const { el, wheel } = setup();
   assert.equal(el.jogDialCancelPending.disabled, false, '처음부터 켜져 있다');

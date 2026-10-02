@@ -128,12 +128,6 @@ export function displayText(value) {
   return escapeHtml(value);
 }
 
-export function aliasText(value) {
-  return value === null || value === undefined || Number.isNaN(Number(value))
-    ? '-'
-    : formatInt(value);
-}
-
 export function clone(value) {
   return JSON.parse(JSON.stringify(value));
 }

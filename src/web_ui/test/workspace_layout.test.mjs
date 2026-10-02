@@ -92,21 +92,21 @@ test('settings workflows preserve action IDs and expose their defined steps', ()
     'applyAxisConfigButton',
     'addMotionIdButton',
     'generateMotionIdsButton',
-    'saveMotionMappingButton',
     'resetMotionMappingButton',
   ]) {
     assert.equal(countId(id), 1, `${id} must remain unique`);
   }
   assert.match(html, /1\. 장비 검색/);
   assert.match(html, /2\. 검색 결과 확인 및 모터 편집/);
-  assert.match(html, /3\. 저장하고 설정 적용/);
+  // 저장·적용은 맨 아래 바 하나 · 매핑이 3번 (2026-10-02 사용자 결정)
+  assert.doesNotMatch(html, /3\. 저장하고 설정 적용/);
   assert.doesNotMatch(html, /4\. 실제 시스템 적용/);
-  assert.match(html, /4\. 조인트 매핑/);
+  assert.match(html, /3\. 조인트 매핑/);
   assert.match(html, />연결 파일</);
   assert.match(html, />조인트 매핑 편집</);
-  assert.match(html, />검증·미리보기·저장<\/strong>/);
+  assert.match(html, />검증 결과<\/strong>/);
+  assert.doesNotMatch(html, /id="saveMotionMappingButton"/);
   // 기존 워딩 유지(2026-10-02 사용자 결정) · 조인트 매핑·조인트 이름 가 표준이다
-  assert.match(html, /4\. 조인트 매핑/);
   assert.match(html, /조인트 이름 추가/);
   assert.match(styles, /\.motion-mapping-final-actions\s*\{[^}]*flex-wrap: nowrap;/s);
 });

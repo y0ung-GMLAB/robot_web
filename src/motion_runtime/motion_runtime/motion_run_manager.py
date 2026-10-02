@@ -753,6 +753,25 @@ class MotionRunManager(Node):
                     'message': str(exc),
                     'status': self.status(),
                 }
+            # 초기 위치 이동은 **받을 때 먼저 계획을 세워 본다** · 2026-10-02
+            #
+            # 전에는 곧바로 「시작됨」으로 답하고 계획은 스레드에서 세웠다 · 거기서
+            # 실패하면 상태 표에만 남아 화면이 팝업을 못 띄웠다 (애니메이션이
+            # 없을 때는 그 줄마저 다른 안내로 덮여 실패가 안 보였다).
+            # 자동 실행은 준비를 기다린 뒤 세우므로 여기서 미리 보지 않는다.
+            if mode == 'initialize' and not bool(payload.get('automation_run')):
+                try:
+                    self._plan_builder.build(
+                        payload,
+                        initialization_only=True,
+                        motors_snapshot=list(motors_snapshot),
+                    )
+                except Exception as exc:  # noqa: BLE001 · 사유를 그대로 사람에게 돌려준다
+                    return {
+                        'success': False,
+                        'message': f'초기 위치 이동 불가: {exc}',
+                        'status': self.status(),
+                    }
             preparing_status = motion_run_rules._empty_status()
             preparing_status.update({
                 'state': 'preparing',
@@ -793,9 +812,9 @@ class MotionRunManager(Node):
         return {
             'success': True,
             'message': (
-                'initial position move preparation started'
+                '초기 위치 이동을 시작합니다'
                 if mode == 'initialize'
-                else 'motion run preparation started'
+                else '모션 실행을 준비합니다'
             ),
             'status': self.status(),
             'summary': {},

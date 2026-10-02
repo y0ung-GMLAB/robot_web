@@ -311,6 +311,105 @@ def test_first_frame_initialization_without_motion_file_uses_motion_zero():
     assert '첫 프레임 데이터가 없어 모션 0°' in plan['warnings'][0]
 
 
+def _zero_row_mapping(motion_file_id):
+    return {
+        'motion_file_id': motion_file_id,
+        'mappings': [{
+            'motion_id': '1-1', 'motor_axis': 0, 'reference_position_deg': 100.0,
+            'motion_lower_deg': -30.0, 'motion_upper_deg': 30.0,
+            'initial_mode': 'first_frame', 'initial_move_time_sec': 5.0, 'gear_ratio': 50.0,
+        }],
+    }
+
+
+def test_reference_initial_mode_always_goes_to_motion_zero():
+    """초기 위치 「기준점」 · 애니메이션 첫 줄이 있어도 모션 0° 로 간다 (2026-10-02)."""
+    row = {'initial_mode': 'reference', 'initial_motion_position_deg': 7.0}
+    assert motion_run_rules._initial_motion_value(row, [{'time_sec': 0.0, 'value': 12.0}]) == 0.0
+    assert motion_run_rules._initial_motion_value(
+        {'initial_mode': 'first_frame'}, [{'time_sec': 0.0, 'value': 12.0}],
+    ) == 12.0
+
+
+def test_reference_initial_mode_without_animation_needs_no_warning():
+    mapping = _zero_row_mapping('')
+    mapping['mappings'][0]['initial_mode'] = 'reference'
+    manager = _initialization_only_manager(mapping)
+    plan = manager._plan_builder.build({'motion_file_id': '', 'mapping_file_id': 'mapping.yaml'}, initialization_only=True)
+    assert plan['axes'][0]['initial_motor_target_deg'] == 100.0
+    assert not any('첫 프레임 데이터가 없어' in item for item in plan['warnings'])
+
+
+def test_initialization_with_a_deleted_registered_file_falls_back_to_zero():
+    """사용자 보고 · 애니메이션이 없을 때 초기 위치 이동이 자주 실패 (2026-10-02).
+
+    재생 등록된 파일이 지워졌으면 전에는 `motion file not found` 로 그 자리에서
+    실패해 0° 대체 경로까지 못 갔다.
+    """
+    manager = _initialization_only_manager(_zero_row_mapping('gone.json'))
+
+    def missing(_file_id):
+        raise ValueError('motion file not found: gone.json')
+
+    manager._motion_file_path = missing
+    plan = manager._plan_builder.build(
+        {'motion_file_id': 'gone.json', 'mapping_file_id': 'mapping.yaml'},
+        initialization_only=True,
+    )
+    assert plan['axes'][0]['initial_motor_target_deg'] == 100.0
+    assert '재생 등록된 애니메이션 gone.json 를 찾지 못했습니다' in plan['warnings'][0]
+
+
+def test_initialization_with_an_empty_registered_file_falls_back_to_zero():
+    manager = _initialization_only_manager(_zero_row_mapping('empty.json'))
+    manager._motion_file_path = lambda _file_id: 'empty.json'
+
+    def empty(_path):
+        raise ValueError('motion file has no valid records')
+
+    manager._load_motion_records = empty
+    plan = manager._plan_builder.build(
+        {'motion_file_id': 'empty.json', 'mapping_file_id': 'mapping.yaml'},
+        initialization_only=True,
+    )
+    assert plan['axes'][0]['initial_motor_target_deg'] == 100.0
+    assert '쓸 수 있는 줄이 없습니다' in plan['warnings'][0]
+
+
+def test_playback_with_a_deleted_registered_file_is_still_refused():
+    """재생은 대체하지 않는다 · 없는 애니메이션을 0° 로 「재생」할 수는 없다."""
+    manager = _initialization_only_manager(_zero_row_mapping('gone.json'))
+
+    def missing(_file_id):
+        raise ValueError('motion file not found: gone.json')
+
+    manager._motion_file_path = missing
+    with pytest.raises(ValueError, match='motion file not found'):
+        manager._plan_builder.build({'motion_file_id': 'gone.json', 'mapping_file_id': 'mapping.yaml'})
+
+
+def test_initialize_request_reports_plan_errors_right_away(monkeypatch):
+    """초기 위치 이동은 받을 때 계획을 세워 본다 · 안 되면 바로 사유 (팝업으로 뜬다)."""
+    manager = _initialization_only_manager({'motion_file_id': '', 'mappings': []})
+    manager._run_lock = threading.RLock()
+    manager._run_thread = None
+    manager._stop_event = threading.Event()
+    manager._graceful_stop_event = threading.Event()
+    manager._playback_ownership_error = lambda axes=None: ''
+    manager.status = lambda: {'state': 'idle'}
+    started = []
+    monkeypatch.setattr(
+        threading, 'Thread',
+        lambda **kwargs: type('T', (), {'start': lambda self: started.append(1), 'is_alive': lambda self: False})(),
+    )
+
+    result = manager._start_thread('initialize', {'motion_file_id': '', 'mapping_file_id': 'mapping.yaml'})
+
+    assert result['success'] is False
+    assert result['message'].startswith('초기 위치 이동 불가: 움직일 조인트가 없습니다')
+    assert started == []
+
+
 def test_motion_playback_without_motion_file_remains_blocked():
     manager = _initialization_only_manager({'motion_file_id': '', 'mappings': []})
 
@@ -366,7 +465,8 @@ def test_motion_run_initialization_uses_every_enabled_mapping_axis():
 
     assert [axis['motion_id'] for axis in plan['axes']] == ['1-1', '1-2']
     assert [axis['initial_motion_position_deg'] for axis in plan['axes']] == [-2.0, 4.0]
-    assert 'Motion ID 1-1: 모션 데이터가 없어 수동 초기위치 -2.000°를 사용' in plan['warnings']
+    # 2026-10-02 · 화면 이름 「수동」 → 「직접 지정」 에 맞춘다
+    assert 'Motion ID 1-1: 모션 데이터가 없어 직접 지정 초기위치 -2.000°를 사용' in plan['warnings']
     assert plan['samples'] == []
     assert plan['summary']['sample_count'] == 0
 
@@ -684,7 +784,7 @@ def test_start_acknowledges_before_motion_plan_processing(monkeypatch):
     })
 
     assert result['success'] is True
-    assert result['message'] == 'motion run preparation started'
+    assert result['message'] == '모션 실행을 준비합니다'
     assert result['status']['state'] == 'preparing'
     assert plan_calls == []
     assert manager._run_thread.started is True

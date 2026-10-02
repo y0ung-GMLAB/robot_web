@@ -333,8 +333,12 @@ def _initial_motion_value(
     row: Dict[str, Any],
     records: List[Dict[str, Any]],
 ) -> float:
-    if str(row.get('initial_mode') or 'first_frame') == 'manual':
+    mode = str(row.get('initial_mode') or 'first_frame')
+    if mode == 'manual':
         return finite_float(row.get('initial_motion_position_deg')) or 0.0
+    if mode == 'reference':
+        # 기준점 · 애니메이션과 상관없이 늘 모션 0° (기준점 캡처한 자세) · 2026-10-02
+        return 0.0
     return float(records[0]['value'])
 
 def _unavailable_capabilities(reason: str) -> Dict[str, Dict[str, Any]]:

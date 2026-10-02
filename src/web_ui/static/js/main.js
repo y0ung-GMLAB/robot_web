@@ -325,6 +325,8 @@ function renderServiceManagement(payload) {
     && incomingBridgeInstanceId !== previousBridgeInstanceId
   ) {
     Promise.resolve(motionData?.refreshMappingAfterReconnect?.()).catch(() => {});
+    // 브리지가 새로 떴다(모터 재시작 등) · 페이더도 매핑을 다시 읽는다 · 2026-10-02
+    Promise.resolve().then(() => manualFader.refresh()).catch(() => {});
   }
   const managed = Boolean(payload?.service_management?.managed);
   const motorManaged = Boolean(payload?.service_management?.motor_managed);
@@ -1092,6 +1094,11 @@ let servoAlarm = null;
 const motorConfig = createMotorConfigController({
   el,
   operationProgress,
+  // 맨 아래 「저장」 하나가 조인트 매핑도 저장한다 · motionData 는 아래에서 만들어진다
+  mappingCommit: {
+    dirty: () => motionData.hasUnsavedMappingChanges(),
+    save: () => motionData.saveMappingIfDirty(),
+  },
   getRawMode: () => appState.rawMode,
   getLatestState: () => appState.latestState,
   renderLatestState,
@@ -1197,7 +1204,10 @@ const motionData = createMotionDataController({
   getLatestState: () => appState.latestState,
   getConfiguredMotors: () => motorConfig.getConfiguredMotors(),
   onProjectFilesChange: () => projectExplorer.refresh(true),
-  onMotorLimitsChange: () => motorConfig.reloadIfClean(),
+  onMotorLimitsChange: (changed) => motorConfig.reloadIfClean(changed),
+  onMappingStateChange: () => motorConfig.renderCommitBar(),
+  // 기준점·범위가 바뀌면 페이더가 옛 값으로 계산해 끝에 붙었다 · 바로 다시 읽는다
+  onMappingSaved: () => manualFader.refresh(),
   // 실행 화면이 "그룹" 범위를 고르면 이 창구로 나간다 · 버튼은 한 벌이고
   // 어디로 나갈지만 범위가 정한다 · §6-65
   groupRun: coordination.groupRun,

@@ -12,7 +12,6 @@ const main = readFileSync(new URL('../static/js/main.js', import.meta.url), 'utf
 const actionIds = [
   'addMotionIdButton',
   'generateMotionIdsButton',
-  'saveMotionMappingButton',
   'resetMotionMappingButton',
 ];
 
@@ -61,7 +60,9 @@ test('one action validates, previews, and then saves the mapping', () => {
   assert.ok(saveBody.indexOf('validateMappingDraft()') < saveBody.indexOf('validateMotionMapping({'));
   assert.ok(saveBody.indexOf('validateMotionMapping({') < saveBody.indexOf('saveMotionMapping({'));
   assert.match(saveBody, /base_mapping_revision: mappingRevision/);
-  assert.match(html, />검증·미리보기·저장<\/button>/);
+  // 매핑 전용 저장 단추는 없다 · 모터 관리 맨 아래 「저장」이 부른다 (2026-10-02)
+  assert.doesNotMatch(html, /id="saveMotionMappingButton"/);
+  assert.match(controller, /saveMappingIfDirty: async \(\) => \(mappingDirty \? saveCurrentMapping\(\) : null\),/);
   assert.doesNotMatch(html, /id="validateMotionMappingButton"/);
 });
 

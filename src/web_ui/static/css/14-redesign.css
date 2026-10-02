@@ -1050,3 +1050,65 @@ td.mapping-disabled-cell { background: transparent !important; opacity: 0.55; }
   color: var(--muted);
   opacity: 0.7;
 }
+
+/* 실시간 모니터링 · 선택 모터 상세 (기본 정보 · 연결·통신 · …) (2026-10-02)
+ * 04-motor-axis.css 가 흰 바탕(#ffffff · #fff5f5)을 박아 다크 테마 글씨가 안 보였다 */
+.monitoring-detail-values > div {
+  background: var(--panel-2) !important;
+  border-color: var(--line-strong);
+}
+.monitoring-detail-values dd { color: var(--ink); }
+.monitoring-detail-values .danger {
+  background: rgb(229 83 75 / 12%) !important;
+  border-color: rgb(229 83 75 / 45%);
+}
+.monitoring-detail-values .warning {
+  background: rgb(217 166 46 / 12%) !important;
+  border-color: rgb(217 166 46 / 45%);
+}
+
+/* 옛 밝은 테마 글자색이 선택자 우선순위로 남아 어두운 바탕에서 안 보이던 곳 (2026-10-02 · 대비 검사)
+ * PC 연동 배지 값(#0f172a) · 모터 동작 정지 제목(#9d2020) · 사용 순서 제목(#445466) */
+.coord-badge-info strong,
+.coord-badge .coordination-state-warn,
+.coord-badge .coordination-state-ok { color: var(--ink) !important; }
+.coord-badge-info span { color: var(--muted) !important; }
+.coord-badge .coordination-state-warn { color: var(--yellow) !important; }
+.motion-test-stop-bar strong { color: var(--red) !important; }
+.workspace-guide > strong { color: var(--ink) !important; }
+.workspace-guide li::before { background: var(--panel) !important; color: var(--ink); }
+.workspace-guide li:not(:last-child)::after { color: var(--muted); }
+
+/* 모터 관리 · 저장·적용 바 · 화면 맨 아래에 붙는다 (2026-10-02) */
+.settings-commit-bar {
+  position: sticky;
+  bottom: 0;
+  z-index: 5;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 10px 14px !important;
+  background: var(--panel) !important;
+  border: 1px solid var(--line-strong) !important;
+  box-shadow: 0 -6px 16px rgb(0 0 0 / 35%);
+}
+.settings-commit-status { display: grid; gap: 2px; min-width: 0; }
+.settings-commit-status strong { font-size: 13px; color: var(--ink); }
+.settings-commit-status span { font-size: 12px; color: var(--muted); }
+.settings-commit-bar[data-state="unsaved"] .settings-commit-status strong { color: var(--yellow); }
+.settings-commit-bar[data-state="apply"] .settings-commit-status strong { color: var(--red); }
+.settings-commit-bar .settings-final-actions {
+  display: flex;
+  gap: 8px;
+  border: 0;
+  background: transparent !important;
+  padding: 0;
+}
+.settings-commit-bar .settings-final-actions button { min-width: 150px; }
+/* 적용할 게 없을 때는 눌러도 되지만 눈에 띄지 않게 · 있을 때만 빨갛게 */
+.settings-commit-bar:not([data-state="apply"]) #applyAxisConfigButton {
+  background: var(--panel-2) !important;
+  border-color: var(--line-strong) !important;
+  color: var(--muted) !important;
+}
