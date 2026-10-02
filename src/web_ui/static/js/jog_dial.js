@@ -19,6 +19,7 @@
 
 import { requestAcServoJog, requestDynamixelJog } from './api.js';
 import { normalizeMotorTypeKey } from './format.js';
+import { manualControlBlockReason } from './run_mode_state.js';
 
 //: 한 바퀴를 몇 칸으로 나누는가 · 15° 마다 한 칸
 const DETENTS = 24;
@@ -71,6 +72,8 @@ export function createJogDialController({ el, getLatestState, getSelectedAxis, o
   }
 
   function blockReason(motor) {
+    const modeReason = manualControlBlockReason();
+    if (modeReason) return modeReason;
     if (!motor) return '모터를 먼저 선택하세요';
     if (String(motor.state || '') !== 'detected') return '선택 모터가 감지되지 않았습니다';
     if (motor.fault) return '선택 모터에 에러가 있습니다';

@@ -13,6 +13,7 @@ import {
   requestMotionSafetyStop,
 } from './api.js';
 import { showConfirm } from './ui_dialogs.js';
+import { manualControlBlockReason } from './run_mode_state.js';
 
 const DEFAULT_MAX_JOG_DELTA_DEG = 360.0;
 const MOTION_DONE_VELOCITY_DEG_SEC = 0.05;
@@ -498,11 +499,12 @@ export function createMotionTestController({ el, getLatestState, getJointRow = (
   }
 
   function runtimeJogBlockReason(motor) {
-    return servoAlarmBlockReason(motor) || jogBlockReason(motor);
+    // 수동 모드에서만 · 스케줄이 빈틈에 재생을 켜면 사람이 만지던 축이 움직인다
+    return manualControlBlockReason() || servoAlarmBlockReason(motor) || jogBlockReason(motor);
   }
 
   function runtimeActionBlockReason(motor) {
-    return servoAlarmBlockReason(motor) || actionBlockReason(motor);
+    return manualControlBlockReason() || servoAlarmBlockReason(motor) || actionBlockReason(motor);
   }
 
   function selectedMotor() {

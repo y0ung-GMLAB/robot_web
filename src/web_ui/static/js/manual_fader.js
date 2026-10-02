@@ -18,6 +18,7 @@
 
 import { fetchMotionMapping, fetchMotionMappings } from './api.js';
 import { escapeHtml } from './format.js';
+import { manualControlBlockReason } from './run_mode_state.js';
 
 //: 전송 주기 · supervisor 임대 0.15s 의 1/3 · 한 번 빠져도 임대가 산다
 const SEND_PERIOD_MS = 50;
@@ -221,6 +222,8 @@ export function createManualFaderController({ el, getLatestState }) {
   }
 
   function faderBlockReason(motor) {
+    const modeReason = manualControlBlockReason();
+    if (modeReason) return modeReason;
     if (!motor) return '런타임에서 이 모터를 찾지 못했습니다';
     if (String(motor.state || '') !== 'detected') return '모터가 감지되지 않았습니다';
     if (motor.fault) return '모터에 에러가 있습니다';

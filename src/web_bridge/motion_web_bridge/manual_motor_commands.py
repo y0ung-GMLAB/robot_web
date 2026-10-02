@@ -135,8 +135,11 @@ class ManualMotorCommandService:
         )
 
     def _off_mode_block(self) -> Dict[str, Any] | None:
-        """오프 모드면 움직임 명령을 받지 않는다 · 정지·서보 제어는 여기 안 온다."""
-        reason = run_mode_gate.motion_command_block_reason(self.bridge)
+        """수동 모드에서만 움직임 명령을 받는다 · 스케줄·오프는 거절 · 2026-10-02
+
+        정지·서보 제어는 여기 안 온다 (모든 모드에서 된다).
+        """
+        reason = run_mode_gate.manual_control_block_reason(self.bridge)
         if not reason:
             return None
         return {'success': False, 'message': reason, **self.bridge.snapshot()}

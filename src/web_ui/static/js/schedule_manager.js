@@ -18,6 +18,7 @@ import {
 } from './schedule_scope.js';
 import { motionHeaderConditionsUpdate } from './header_conditions.js';
 import { showConfirm } from './ui_dialogs.js';
+import { setRunMode } from './run_mode_state.js';
 
 /** 그 PC 의 벽시계 글자 · 브라우저 시간대로 옮기지 않는다 · §6-147 */
 function wallClockText(epochMs, offsetText) {
@@ -172,6 +173,7 @@ const ScheduleManager = {
     async loadStatus() {
         try {
             this.status = await fetchScheduleStatus();
+            setRunMode(this.status?.run_mode || 'schedule');
             const stamp = Date.parse(this.status?.clock?.local_time || '');
             this.clockAnchor = Number.isNaN(stamp) ? null : {
                 at: stamp,

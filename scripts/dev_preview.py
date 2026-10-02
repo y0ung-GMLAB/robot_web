@@ -212,10 +212,12 @@ async def ws_status(websocket: WebSocket):
 @app.websocket('/ws/manual-stream')
 async def ws_manual_stream(websocket: WebSocket):
     await websocket.accept()
-    if state['run_mode'] == 'off':
+    if state['run_mode'] in ('off', 'schedule'):
         await websocket.send_text(json.dumps({
             'type': 'error',
-            'message': '오프 모드 · 명령이 차단되어 있습니다 (상단에서 모드를 바꾸세요)',
+            'message': ('오프 모드 · 명령이 차단되어 있습니다 (상단에서 모드를 바꾸세요)'
+                        if state['run_mode'] == 'off' else
+                        '스케줄 모드 · 수동 조작은 「수동」 모드에서만 됩니다 (상단에서 모드를 바꾸세요)'),
         }, ensure_ascii=False))
         await websocket.close()
         return
@@ -473,6 +475,10 @@ async def fake_jog(request: Request):
     delta = float(body.get('relative_deg') or 0.0)
     if state['run_mode'] == 'off':
         return {'success': False, 'message': '오프 모드 · 명령이 차단되어 있습니다',
+                'project_generation': state['generation']}
+    if state['run_mode'] == 'schedule':
+        return {'success': False,
+                'message': '스케줄 모드 · 수동 조작은 「수동」 모드에서만 됩니다 (상단에서 모드를 바꾸세요)',
                 'project_generation': state['generation']}
     if abs(state['targets'][axis] - state['positions'][axis]) > 0.05:
         return {'success': False,

@@ -142,7 +142,8 @@ def test_websocket_route_gates_off_mode_and_holds_on_disconnect():
     # 길목은 받아서 넘기기만 한다 · 업무는 세션 모듈에 있다
     assert 'run_manual_stream_socket(bridge, websocket)' in route
     source = (BRIDGE_DIR / 'manual_stream_socket.py').read_text(encoding='utf-8')
-    assert 'motion_command_block_reason' in source
+    # 수동 모드에서만 연다 · 스케줄·오프는 거절 (2026-10-02)
+    assert 'manual_control_block_reason' in source
     # 흐르는 중에도 다시 확인한다 · 상단에서 오프로 바꾸면 끊긴다
     assert 'BLOCK_RECHECK_SEC' in source
     # 낡은 변환표 거절 · 매핑이 바뀐 화면은 그대로 흘릴 수 없다

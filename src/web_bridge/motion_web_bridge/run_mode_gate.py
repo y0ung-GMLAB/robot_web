@@ -19,9 +19,12 @@ from __future__ import annotations
 
 from typing import Any
 
-from motion_common.schedule_store import OFF_MODE, ScheduleStore
+from motion_common.schedule_store import MANUAL_MODE, OFF_MODE, SCHEDULE_MODE, ScheduleStore
 
 OFF_BLOCK_MESSAGE = '오프 모드 · 명령이 차단되어 있습니다 (상단에서 모드를 바꾸세요)'
+SCHEDULE_MANUAL_BLOCK_MESSAGE = (
+    '스케줄 모드 · 수동 조작은 「수동」 모드에서만 됩니다 (상단에서 모드를 바꾸세요)'
+)
 
 
 def current_run_mode(bridge: Any) -> str:
@@ -47,4 +50,33 @@ def motion_command_block_reason(bridge: Any) -> str:
         logger = getattr(bridge, 'get_logger', None)
         if callable(logger):
             logger().warn(f'운전 모드 확인 실패 · 명령은 통과시킨다: {exc}')
+    return ''
+
+
+def manual_control_block_reason(bridge: Any) -> str:
+    """사람이 모터를 직접 움직이는 명령(조그·동작·범위 복귀·페이더)의 문 · 2026-10-02
+
+    **수동 모드에서만 연다.** 스케줄 모드에서는 스케줄이 60초마다 「구간 안인데
+    멈춰 있다」며 재생을 다시 켠다 · 서버가 조그를 막는 것은 조그가 실제로
+    움직이는 0.15~0.5초뿐이라, 조그 사이 빈틈에 걸리면 사람이 만지던 축으로
+    초기 위치 이동이 시작됐다 · 그래서 규칙을 하나로 한다: 손으로 만질 땐 수동.
+
+    오프는 원래대로 막는다 · 정지·긴급정지·서보 켜고 끄기·알람 해제는 이 문을
+    지나지 않는다 (막으면 오히려 위험하다).
+
+    프로젝트가 없으면(빈 모드) 막지 않는다 · 스케줄이 돌 수 없는 상태다 ·
+    모드 파일을 못 읽으면 경고하고 막지 않는다 (오프 문과 같은 원칙).
+    """
+    try:
+        mode = current_run_mode(bridge)
+    except Exception as exc:  # noqa: BLE001 - 문의 실패가 정지보다 위험해선 안 된다
+        logger = getattr(bridge, 'get_logger', None)
+        if callable(logger):
+            logger().warn(f'운전 모드 확인 실패 · 수동 명령은 통과시킨다: {exc}')
+        return ''
+    if mode == OFF_MODE:
+        return OFF_BLOCK_MESSAGE
+    if mode == SCHEDULE_MODE:
+        return SCHEDULE_MANUAL_BLOCK_MESSAGE
+    # MANUAL_MODE 또는 프로젝트 없음('')
     return ''

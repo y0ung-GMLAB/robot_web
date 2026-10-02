@@ -12,8 +12,8 @@
 `base_mapping_revision` 을 받아 **낡은 변환표**(다른 화면이 매핑을 고친 뒤)
 는 그 자리에서 거절한다.
 
-오프 모드는 받지 않는다 · `run_mode_gate` 와 같은 문 · 흐르는 중에도 0.5초
-마다 다시 확인해서, 상단에서 오프로 바꾸면 소켓이 끊긴다.
+수동 모드에서만 받는다(스케줄·오프는 거절) · `run_mode_gate.manual_control_block_reason` ·
+흐르는 중에도 0.5초마다 다시 확인해서, 상단에서 모드를 바꾸면 소켓이 끊긴다.
 
 끊기면(놓지 않고 창을 닫아도) 만졌던 축을 현재 위치에 세운다 · 임대는
 어차피 0.15초에 끝나지만, 마지막으로 날아가던 목표가 아니라 **지금 서 있는
@@ -29,7 +29,7 @@ from typing import Any
 
 from fastapi import WebSocketDisconnect
 
-from .run_mode_gate import motion_command_block_reason
+from .run_mode_gate import manual_control_block_reason
 
 #: 오프 전환 재확인 주기 · 매 프레임 파일을 읽지 않는다
 BLOCK_RECHECK_SEC = 0.5
@@ -51,7 +51,7 @@ async def run_manual_stream_socket(bridge: Any, websocket: Any) -> None:
     async def send(payload: dict) -> None:
         await websocket.send_text(json.dumps(payload, ensure_ascii=False))
 
-    block = await asyncio.to_thread(motion_command_block_reason, bridge)
+    block = await asyncio.to_thread(manual_control_block_reason, bridge)
     if block:
         await refuse(block)
         return
@@ -80,7 +80,7 @@ async def run_manual_stream_socket(bridge: Any, websocket: Any) -> None:
             if now - last_block_check > BLOCK_RECHECK_SEC:
                 last_block_check = now
                 block = await asyncio.to_thread(
-                    motion_command_block_reason, bridge
+                    manual_control_block_reason, bridge
                 )
                 if block:
                     await refuse(block)

@@ -17,6 +17,7 @@ import { createMotionDataController } from './motion_data.js';
 import { createMotionTestController } from './motion_test.js';
 import { createManualFaderController } from './manual_fader.js';
 import { createJogDialController } from './jog_dial.js';
+import { currentRunMode, onRunModeChange } from './run_mode_state.js';
 import { createMotorConfigController } from './motor_config.js';
 import { createProjectExplorerController } from './project_explorer.js';
 import { renderAccess, renderMonitoring } from './monitoring.js';
@@ -1086,6 +1087,35 @@ const jogDial = createJogDialController({
   getLatestState: () => appState.latestState,
   getSelectedAxis: () => motionTest.getSelectedAxis(),
   onCapture: captureJogPoint,
+});
+
+/** 수동 조작 화면의 모드 안내 띠 · 수동 모드에서만 조작 가능 · 2026-10-02 */
+function renderManualModeBanner() {
+  const mode = currentRunMode();
+  const blocked = mode === 'schedule' || mode === 'off';
+  el.manualModeBanner?.classList.toggle('hidden', !blocked);
+  el.manualModeBanner?.setAttribute('data-mode', mode);
+  if (el.manualModeBannerTitle) {
+    el.manualModeBannerTitle.textContent = mode === 'off' ? '오프 모드입니다' : '스케줄 모드입니다';
+  }
+  if (el.manualModeBannerDetail) {
+    el.manualModeBannerDetail.textContent = mode === 'off'
+      ? '움직임 명령이 전부 차단돼 있습니다 · 수동 조작은 「수동」 모드에서 하세요'
+      : '수동 조작(조그·다이얼·동작·페이더)은 「수동」 모드에서만 됩니다 · 스케줄이 빈틈에 재생을 켜면 만지던 모터가 움직일 수 있습니다';
+  }
+}
+
+onRunModeChange(() => {
+  renderManualModeBanner();
+  // 버튼·다이얼·페이더의 막힘 여부가 모드를 따른다 · 바로 다시 그린다
+  motionTest.renderLatestState();
+  manualFader.renderRuntimeState();
+  jogDial.renderRuntimeState();
+});
+
+el.manualModeSwitchButton?.addEventListener('click', () => {
+  // 수동 쪽은 확인창 없이 간다 (스케줄만 멈추는 안전한 방향) · ScheduleManager 가 주인
+  window.ScheduleManager?.requestRunMode('manual');
 });
 
 /** 다이얼 「기준점 지정 / − limit / + limit」 · 확인창 후 바로 저장 · 2026-10-02
