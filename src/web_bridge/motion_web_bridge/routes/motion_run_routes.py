@@ -25,11 +25,18 @@ def register_motion_run_routes(app: FastAPI, bridge, safety_first_stop) -> None:
 
     @app.get('/api/motion-files/{file_id}')
     async def motion_file(file_id: str):
-        return await asyncio.to_thread(
+        payload = await asyncio.to_thread(
             motion_file_analysis.load_motion_file,
             bridge.project_repository,
             bridge.motion_projects_dir,
             file_id,
+        )
+        # 목록과 같은 MuJoCo 상태를 싣는다 · 화면이 이 `files` 로 목록을 덮어쓴다
+        return await asyncio.to_thread(
+            animation_preview.annotate_files,
+            bridge.workspace_root,
+            Path(payload.get('files_dir') or '.'),
+            payload,
         )
 
     @app.delete('/api/motion-files/{file_id}')

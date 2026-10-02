@@ -165,6 +165,20 @@ def test_listing_annotation_marks_each_file(tmp_path):
     assert out['files'][1]['preview']['state'] == 'missing'
 
 
+def test_detail_annotation_marks_file_and_listing(tmp_path):
+    """상세 응답도 목록과 같은 MuJoCo 상태 · 화면이 이 `files` 로 목록을 덮어쓴다."""
+    workspace = _workspace(tmp_path, GATED)
+    files_dir = tmp_path / 'motions'
+    files_dir.mkdir()
+    ready = files_dir / 'ready.json'
+    ready.write_text('{}', encoding='utf-8')
+    Path(str(ready)[:-len('.json')] + '.sim.npz').write_bytes(b'npz')
+    payload = {'file': {'id': 'ready.json'}, 'files': [{'id': 'ready.json'}]}
+    out = animation_preview.annotate_files(workspace, files_dir, payload)
+    assert out['file']['preview']['state'] == 'ready'
+    assert out['files'][0]['preview']['state'] == 'ready'
+
+
 def test_bridge_launches_the_companion_when_playback_turns_running():
     """같이 보기 = 모터가 running 으로 바뀌는 그 순간 뷰어를 띄운다 ·
     초기 이동이 끝난 시점이라 양쪽 다 프레임 1 부터 출발한다."""
@@ -179,7 +193,7 @@ def test_bridge_launches_the_companion_when_playback_turns_running():
     routes = (ROUTES_DIR / 'motion_run_routes.py').read_text(encoding='utf-8')
     assert "@app.post('/api/motion-files/{file_id}/preview')" in routes
     assert "@app.post('/api/motion-files/{file_id}/preview-precompute')" in routes
-    assert 'animation_preview.annotate_files' in routes
+    assert routes.count('animation_preview.annotate_files') >= 2
 
 
 # --------------------------------------------------------------------------- #

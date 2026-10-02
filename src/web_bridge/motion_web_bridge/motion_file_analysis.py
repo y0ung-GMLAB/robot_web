@@ -22,6 +22,9 @@ from motion_common import motion_table
 from motion_common.paths import NO_PROJECT_SELECTED
 from motion_common.timing import CONTROL_PERIOD_SEC
 
+# MuJoCo 계산 기록 · `animation_preview.meta_path_for` 가 만든다
+SIM_META_SUFFIX = '.sim.meta.json'
+
 
 def motion_mapping_file_id(result: Dict[str, Any]) -> str:
     file_info = result.get('file')
@@ -327,6 +330,8 @@ def list_motion_files(
                 item.is_file()
                 and item.suffix.lower() == '.json'
                 and not item.name.startswith('__studio_')
+                # MuJoCo 계산 기록(`x.sim.meta.json`) · 애니메이션 아님
+                and not item.name.lower().endswith(SIM_META_SUFFIX)
             )
         ),
         key=lambda item: item.stat().st_mtime if item.exists() else 0.0,

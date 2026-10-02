@@ -203,3 +203,16 @@ def test_motion_file_registration_is_isolated_between_projects(tmp_path):
     assert repository.read_file(
         registered_project, 'motions', 'show.json'
     )['file_name'] == 'show.json'
+
+
+def test_motion_file_listing_skips_mujoco_meta(tmp_path):
+    """MuJoCo 계산 기록(`x.sim.meta.json`)은 애니메이션 목록에 안 나온다."""
+    bridge, repository, project_id = motion_file_bridge(tmp_path)
+    files_dir = bridge.motion_projects_dir / project_id / 'motions'
+    (files_dir / 'show.sim.meta.json').write_text('{}', encoding='utf-8')
+
+    listing = motion_file_analysis.list_motion_files(
+        repository, bridge.motion_projects_dir,
+    )
+
+    assert [entry['id'] for entry in listing['files']] == ['show.json']

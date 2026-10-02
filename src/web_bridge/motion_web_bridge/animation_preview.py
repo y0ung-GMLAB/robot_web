@@ -249,14 +249,21 @@ def preview_state(workspace_root: Path, motion_path: Path) -> Dict[str, Any]:
 
 
 def annotate_files(workspace_root: Path, files_dir: Path, payload: Dict[str, Any]) -> Dict[str, Any]:
-    """파일 목록에 MuJoCo 상태를 싣는다 · 설정 없으면 손대지 않는다."""
+    """파일 목록에 MuJoCo 상태를 싣는다 · 설정 없으면 손대지 않는다.
+
+    상세 응답(`file` + `files`)도 같은 길로 싣는다 · 화면이 상세 응답의
+    `files` 로 목록을 덮어쓰므로, 빠지면 파일을 고르는 순간 「MuJoCo 준비됨」이
+    꺼지고 같이 보기 체크가 풀린다.
+    """
     config = preview_config(Path(workspace_root))
     if config is None:
         return payload
     files = payload.get('files')
-    if not isinstance(files, list):
-        return payload
-    for entry in files:
+    entries = list(files) if isinstance(files, list) else []
+    detail = payload.get('file')
+    if isinstance(detail, dict):
+        entries.append(detail)
+    for entry in entries:
         if not isinstance(entry, dict) or not entry.get('id'):
             continue
         entry['preview'] = preview_state(
