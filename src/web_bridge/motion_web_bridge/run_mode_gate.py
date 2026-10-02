@@ -19,7 +19,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from motion_common.schedule_store import MANUAL_MODE, OFF_MODE, SCHEDULE_MODE, ScheduleStore
+from motion_common.schedule_store import OFF_MODE, SCHEDULE_MODE, ScheduleStore
 
 OFF_BLOCK_MESSAGE = '오프 모드 · 명령이 차단되어 있습니다 (상단에서 모드를 바꾸세요)'
 SCHEDULE_MANUAL_BLOCK_MESSAGE = (
