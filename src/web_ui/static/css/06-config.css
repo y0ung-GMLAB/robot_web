@@ -1052,3 +1052,9 @@ th {
   padding-top: 3px;
   margin-top: 3px;
 }
+
+/* 주의 · 과부하율 80% 이상 등 · 위험(빨강) 전 단계 */
+.status-warning {
+  color: var(--yellow);
+  font-weight: 700;
+}

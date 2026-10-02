@@ -140,6 +140,9 @@ void ethercat::EthercatController::read(motor_interface::motor_frame_t& status)
             status.velocity = driver_->velocity(motor_interface::value<int32_t>(e.data));
         } else if (e.id == motor_interface::ID_CURRENT_EFFORT) {
             status.effort = driver_->effort(motor_interface::value<int16_t>(e.data));
+        } else if (e.id == motor_interface::ID_OVERLOAD_RATIO) {
+            // MINAS 4D29h · 0.1% 단위 → %
+            status.overload_ratio = motor_interface::value<uint16_t>(e.data) * 0.1;
         } else {
             throw std::runtime_error("Invalid TX interface ID.");
         }

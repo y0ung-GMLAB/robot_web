@@ -4,7 +4,7 @@ import path from 'node:path';
 import test from 'node:test';
 import { fileURLToPath } from 'node:url';
 
-import { motionValueText, renderMonitoring } from '../static/js/monitoring.js';
+import { motionValueText, overloadText, renderMonitoring } from '../static/js/monitoring.js';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const source = fs.readFileSync(
@@ -60,4 +60,12 @@ test('monitoring summary renders runtime connection counts without an exception'
   });
 
   assert.match(summaryText.textContent, /수신 중 1개/);
+});
+
+test('overload ratio shows a dash for motors that are not read', () => {
+  // 과부하율 읽기를 켠 MINAS 만 값이 온다 · 나머지는 None → 「-」
+  assert.equal(overloadText({ overload_ratio_pct: null }), '-');
+  assert.equal(overloadText({}), '-');
+  assert.equal(overloadText({ overload_ratio_pct: 87.25 }), '87.3');
+  assert.match(source, /label: '과부하율 \(%\)'/);
 });

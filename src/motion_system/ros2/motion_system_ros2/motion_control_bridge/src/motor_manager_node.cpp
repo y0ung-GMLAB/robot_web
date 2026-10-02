@@ -122,6 +122,7 @@ void MotorManagerNode::timer_callback()
     msg.position.resize(n);
     msg.velocity.resize(n);
     msg.effort.resize(n);
+    msg.overload_ratio.resize(n);
 
     for (uint8_t i = 0; i < n; i++) {
         msg.controller_index[i] = status[i].controller_index;
@@ -131,6 +132,7 @@ void MotorManagerNode::timer_callback()
         msg.position[i] = status[i].position;
         msg.velocity[i] = status[i].velocity;
         msg.effort[i] = status[i].effort;
+        msg.overload_ratio[i] = status[i].overload_ratio;   // 음수 = 읽지 않음
     }
 
     motor_status_publisher_->publish(msg);

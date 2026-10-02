@@ -131,6 +131,18 @@ def array_value(msg: Any, field: str, index: int, default: Any) -> Any:
         return default
     return values[index]
 
+def overload_ratio_pct(msg: Any, index: int) -> Optional[float]:
+    """과부하율 % (모터 정격 대비 · MINAS 4D29h) · 안 읽는 축은 None.
+
+    motor_manager 는 PDO 에 매핑하지 않은 축(기본)과 다이나믹셀에 음수를 싣는다 ·
+    옛 메시지(칸 없음)도 None · 화면은 「-」로 그린다.
+    """
+    value = unchecked_float(array_value(msg, 'overload_ratio', index, None))
+    if value is None or not math.isfinite(value) or value < 0.0:
+        return None
+    return round(value, 1)
+
+
 def dynamixel_position_raw(
     position_deg: float,
     metadata: Dict[str, Any],

@@ -1998,6 +1998,7 @@ export function createMotorConfigController({
    */
   const DRIVE_PARAM_FIELDS = [
     'brake_delay_stop_ms', 'brake_delay_run_ms', 'encoder_absolute_mode', 'limit_switch_mode',
+    'overload_monitor',
   ];
   const CONFIG_EDIT_FIELDS = [...AXIS_LIMIT_FIELDS, ...DRIVE_PARAM_FIELDS];
 
@@ -2007,6 +2008,8 @@ export function createMotorConfigController({
     brake_delay_run_ms: ['브레이크·동작', '브레이크 동작 설정 (ms)'],
     encoder_absolute_mode: ['앱솔루트', '앱솔루트 모드 (0 인크리멘털 · 1 절대 · 2 절대-다회전무시)'],
     limit_switch_mode: ['리밋 스위치', '리밋 스위치 (0 사용·그 방향 금지 · 1 사용 안 함 · 2 사용·알람)'],
+    // 값이 아니라 PDO 배선 · 4D29h 를 주기 데이터에 더한다 · 드라이브 Ver1.03 이상만
+    overload_monitor: ['과부하율 읽기', '과부하율 읽기 (4D29h · 0 끔 · 1 켬 · 드라이브 소프트웨어 Ver1.03 이상만)'],
   };
 
   /** 서버(minas_params.ALLOWED_VALUES · RANGE_VALUES)와 같은 규칙 */
@@ -2016,6 +2019,9 @@ export function createMotorConfigController({
     if (!Number.isInteger(value)) return `${DRIVE_PARAM_LABELS[field][1]} · 정수만 넣을 수 있습니다`;
     if (['encoder_absolute_mode', 'limit_switch_mode'].includes(field) && ![0, 1, 2].includes(value)) {
       return `${DRIVE_PARAM_LABELS[field][1]} · 0, 1, 2 중 하나만 됩니다`;
+    }
+    if (field === 'overload_monitor' && ![0, 1].includes(value)) {
+      return `${DRIVE_PARAM_LABELS[field][1]} · 0, 1 중 하나만 됩니다`;
     }
     if (['brake_delay_stop_ms', 'brake_delay_run_ms'].includes(field) && (value < 0 || value > 10000)) {
       return `${DRIVE_PARAM_LABELS[field][1]} · 0 ~ 10000 ms 만 됩니다`;
@@ -2057,6 +2063,17 @@ export function createMotorConfigController({
         }
       }
       setAxisEditValue(row, field, text);
+      if (field === 'overload_monitor' && text === '1') {
+        // 막지는 않는다 · 드라이브 버전을 아는 것은 사람이다 · 실패 증상만 말해 둔다
+        lastAxisRenderSignature = '';
+        renderAxisSettings();
+        setAxisMessage(
+          '과부하율 읽기를 켰습니다 · 드라이브 소프트웨어 Ver1.03 미만이면 모터 제어가 뜨지 않습니다'
+          + ' · 그때는 0 으로 되돌려 저장 · 반영은 「설정 적용 · 모터 재시작」',
+          true,
+        );
+        return;
+      }
       if (field === 'limit_switch_mode' && (text === '0' || text === '2')) {
         // 막지는 않는다 · 배선을 아는 것은 사람이다 · 다만 잘못 켰을 때의 증상을 말해 둔다
         // (아래 일반 「변경됨」 문구가 덮지 않게 여기서 그리고 끝낸다)

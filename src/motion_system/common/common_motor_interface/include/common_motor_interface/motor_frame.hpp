@@ -18,6 +18,8 @@ struct motor_frame_t {
     double position{};
     double velocity{};
     double effort{};
+    // 과부하율 % (모터 정격 대비) · 음수 = 읽지 않음 (PDO 미매핑·미지원 드라이버)
+    double overload_ratio{-1.0};
 };
 
 }  // namespace motor_interface

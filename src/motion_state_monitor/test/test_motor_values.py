@@ -142,3 +142,24 @@ def test_dynamixel_position_raw_clamps_to_the_declared_range():
 
 def test_dynamixel_position_raw_gives_up_without_any_scale():
     assert motor_values.dynamixel_position_raw(10.0, {}) is None
+
+
+# --------------------------------------------------------------------------- #
+# 과부하율 · MINAS 4D29h · 모터별 선택 매핑
+# --------------------------------------------------------------------------- #
+
+class _Msg:
+    def __init__(self, **fields):
+        self.__dict__.update(fields)
+
+
+def test_overload_ratio_is_percent_when_read():
+    assert motor_values.overload_ratio_pct(_Msg(overload_ratio=[12.34, -1.0]), 0) == 12.3
+
+
+def test_overload_ratio_is_none_when_not_read():
+    # 음수 = motor_manager 가 안 읽음 (미매핑 · 다이나믹셀)
+    assert motor_values.overload_ratio_pct(_Msg(overload_ratio=[12.3, -1.0]), 1) is None
+    # 옛 메시지 · 칸 자체가 없다
+    assert motor_values.overload_ratio_pct(_Msg(), 0) is None
+    assert motor_values.overload_ratio_pct(_Msg(overload_ratio=[float('nan')]), 0) is None

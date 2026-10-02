@@ -35,6 +35,7 @@ from .motor_values import (
     hex16,
     motor_type_label,
     normalized_errorcode,
+    overload_ratio_pct,
     statusword_text,
     transport_label,
 )
@@ -191,6 +192,8 @@ class StatePublisher:
             'velocity_deg_s': velocity,
             'torque': None if is_dynamixel else effort,
             'current': effort if is_dynamixel else None,
+            # 과부하율 % · 모터별 선택 매핑(MINAS 4D29h) · 안 읽는 축은 None
+            'overload_ratio_pct': overload_ratio_pct(msg, index),
             'position_raw': position_raw,
             'velocity_raw': None,
             'torque_raw': None,
@@ -379,6 +382,7 @@ class StatePublisher:
             'velocity_deg_s': None,
             'torque': None,
             'current': None,
+            'overload_ratio_pct': None,
             'position_raw': None,
             'velocity_raw': None,
             'torque_raw': None,

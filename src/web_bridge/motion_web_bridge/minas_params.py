@@ -21,6 +21,13 @@ MINAS 의 드라이브 객체 값(SDO)은 드라이버의 `param_file` 이 가�
                             2 = 사용(눌리면 Err38 알람)
                             ⚠ 스위치 없는 축에 0/2 → 못 움직이거나 알람
 
+과부하율 읽기는 SDO 값이 아니라 **PDO 배선**이다 (2026-10-02):
+
+    overload_monitor        1 = TxPDO 에 4D29h(과부하율 · 0.1% U16)를 더한다
+                            빈 칸·0 = 더하지 않음 (기본 · 플랫폼 그대로)
+                            ⚠ 드라이브 소프트웨어 Ver1.03 이상만 지원 · 미만이면
+                              EtherCAT 설정이 실패해 motor_manager 가 안 뜬다
+
 정지 방식(Pr5.05)·입력 핀 할당(Pr4.00~)은 값의 의미를 매뉴얼로 확인하기
 전까지 넣지 않는다 · 드라이브에 있는 값을 그대로 쓴다.
 
@@ -53,6 +60,16 @@ PARAM_FIELDS: Dict[str, Tuple[int, str, str]] = {
 ALLOWED_VALUES: Dict[str, Tuple[int, ...]] = {
     'encoder_absolute_mode': (0, 1, 2),
     'limit_switch_mode': (0, 1, 2),
+    'overload_monitor': (0, 1),
+}
+
+#: PDO 에 더하는 감시 값 · registry 키 → (인터페이스 항목, 설명) · 1 일 때만 더한다
+#: id 12 = motor_manager `ID_OVERLOAD_RATIO` (src/motion_system · 2026-10-02)
+MONITOR_FIELDS: Dict[str, Tuple[Dict[str, Any], str]] = {
+    'overload_monitor': (
+        {'id': 12, 'index': 0x4D29, 'subindex': 0x00, 'size': 2, 'type': 'u16'},
+        '4D29h 과부하율 읽기 (0 끔 · 1 켬) · 드라이브 Ver1.03 이상만',
+    ),
 }
 
 #: 범위로 받는 항목 · 브레이크 시간(ms) · s16 이지만 음수·과대값은 실수다
@@ -116,7 +133,7 @@ def param_overrides(motor: Dict[str, Any]) -> Dict[str, int]:
     """
     config = motor.get('config') if isinstance(motor.get('config'), dict) else {}
     overrides: Dict[str, int] = {}
-    for key in PARAM_FIELDS:
+    for key in (*PARAM_FIELDS, *MONITOR_FIELDS):
         value = optional_int(config.get(key))
         if value is None:
             continue
@@ -126,8 +143,31 @@ def param_overrides(motor: Dict[str, Any]) -> Dict[str, int]:
             low, high = RANGE_VALUES[key]
             if not low <= value <= high:
                 continue
+        if key in MONITOR_FIELDS and value != 1:
+            continue   # 끔 = 플랫폼 그대로 · 제 파일을 만들 이유가 아니다
         overrides[key] = value
     return overrides
+
+
+def _describe(key: str) -> str:
+    if key in PARAM_FIELDS:
+        return PARAM_FIELDS[key][2]
+    return MONITOR_FIELDS[key][1]
+
+
+def _with_monitors(interfaces: List[Dict[str, Any]], overrides: Dict[str, int]) -> List[Dict[str, Any]]:
+    """켠 감시 값을 TxPDO 구획 끝에 더한다 · 이미 있으면 그대로."""
+    result = [dict(item) for item in interfaces]
+    for key, (entry, _) in MONITOR_FIELDS.items():
+        if overrides.get(key) != 1:
+            continue
+        if any(int(item.get('index') or 0) == entry['index'] for item in result):
+            continue
+        headers = [int(item.get('id') or 0) for item in result if 'subindex' not in item]
+        if not headers or headers[-1] != 99:
+            raise ValueError('minas param 의 마지막 PDO 구획이 TxPDO(0x1A00)가 아닙니다')
+        result.append(dict(entry))
+    return result
 
 
 def _base_document(workspace_root: Path) -> Dict[str, Any]:
@@ -159,6 +199,8 @@ def write_param_file(
     items = [dict(item) for item in document.get('items', [])]
     next_id = max((int(item.get('id') or 0) for item in items), default=0) + 1
     for key, value in sorted(overrides.items()):
+        if key not in PARAM_FIELDS:
+            continue   # 감시 값 · SDO 가 아니라 PDO (아래 _with_monitors)
         index, type_name, note = PARAM_FIELDS[key]
         for item in items:
             if int(item.get('index') or 0) == index and int(item.get('subindex') or 0) == 0:
@@ -172,6 +214,7 @@ def write_param_file(
             next_id += 1
     document = dict(document)
     document['items'] = items
+    document['interfaces'] = _with_monitors(document.get('interfaces', []), overrides)
 
     out_dir = Path(workspace_root) / 'config' / OUTPUT_DIR
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -180,7 +223,7 @@ def write_param_file(
         '# 이 파일은 저장할 때마다 다시 만들어진다 · 손으로 고치지 말 것\n'
         '# (모터 관리 화면의 드라이브 설정 → config/minas_params/) · P8\n'
         + ''.join(
-            f'# {key}={overrides[key]} · {PARAM_FIELDS[key][2]}\n'
+            f'# {key}={overrides[key]} · {_describe(key)}\n'
             for key in sorted(overrides)
         )
     )

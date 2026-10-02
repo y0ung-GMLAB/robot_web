@@ -7,3 +7,4 @@ uint16[] errorcode
 float64[] position
 float64[] velocity
 float64[] effort
+float64[] overload_ratio   # overload ratio [%] of motor rating (MINAS 4D29h); negative = not read; empty in commands

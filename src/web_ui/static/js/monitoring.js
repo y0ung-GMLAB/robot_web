@@ -257,6 +257,21 @@ function physicalConnectionCell(motor) {
   return `<span class="state ${escapeHtml(classes[stateName] || 'stale')}" title="${displayText(detail)}">${displayText(labels[stateName] || '확인 불가')}</span>`;
 }
 
+/** 과부하율 % · 안 읽는 모터는 「-」 · 80% 주의 · 100% 위험 */
+export function overloadText(motor) {
+  const value = Number(motor?.overload_ratio_pct);
+  if (motor?.overload_ratio_pct === null || motor?.overload_ratio_pct === undefined || !Number.isFinite(value)) return '-';
+  return value.toFixed(1);
+}
+
+function overloadClass(motor) {
+  const value = Number(motor?.overload_ratio_pct);
+  if (motor?.overload_ratio_pct === null || motor?.overload_ratio_pct === undefined || !Number.isFinite(value)) return 'mono';
+  if (value >= 100) return 'mono status-danger';
+  if (value >= 80) return 'mono status-warning';
+  return 'mono';
+}
+
 function positionHeaderText(rawMode) {
   return rawMode ? '원시 위치 (cnt)' : '모터 위치 (deg)';
 }
@@ -304,6 +319,7 @@ function monitoringColumnsForFilter(filter, rawMode) {
     { label: '회전수 (turn)', className: 'mono', cell: (motor) => displayText(positionTurnText(motor)) },
     { label: velocityHeaderText(rawMode), className: 'mono', cell: (motor) => displayText(velocityText(motor, rawMode)) },
     { label: rawMode ? '원시 토크/전류' : '토크/전류', className: 'mono', cell: (motor) => displayText(effortText(motor, rawMode)) },
+    { label: '과부하율 (%)', title: '모터 정격 대비 부하 · MINAS 4D29h · 모터 관리 「과부하율 읽기」를 켠 모터만 · 100% 를 오래 넘으면 과부하 알람', className: (motor) => overloadClass(motor), cell: (motor) => displayText(overloadText(motor)) },
     { label: '갱신 지연 (ms)', className: 'mono', cell: (motor) => displayText(ageText(motor)) },
   ];
   return common;

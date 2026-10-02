@@ -128,3 +128,46 @@ def test_the_generated_file_warns_against_hand_edits(tmp_path):
     text = Path(path).read_text(encoding='utf-8')
     assert '다시 만들어진다' in text
     assert 'brake_delay_run_ms=0' in text
+
+
+# --------------------------------------------------------------------------- #
+# 과부하율 읽기 · 4D29h 를 TxPDO 에 · 모터별 선택 · 기본 꺼짐 · 2026-10-02
+# --------------------------------------------------------------------------- #
+
+def _interfaces(path):
+    return yaml.safe_load(Path(path).read_text(encoding='utf-8'))['interfaces']
+
+
+def test_overload_monitor_is_off_unless_asked():
+    """빈 칸·0 = 플랫폼 그대로 · 제 파일을 만들 이유가 아니다 ·
+    Ver1.03 미만 드라이브에 매핑하면 motor_manager 가 안 뜬다."""
+    assert minas_params.param_overrides({'config': {}}) == {}
+    assert minas_params.param_overrides({'config': {'overload_monitor': 0}}) == {}
+    assert minas_params.param_overrides({'config': {'overload_monitor': 7}}) == {}
+    assert minas_params.param_overrides({'config': {'overload_monitor': 1}}) == {'overload_monitor': 1}
+
+
+def test_overload_monitor_adds_only_the_pdo_entry(tmp_path):
+    path = minas_params.write_param_file(tmp_path, 2, {'overload_monitor': 1})
+    payload = yaml.safe_load(Path(path).read_text(encoding='utf-8'))
+    interfaces = payload['interfaces']
+    assert interfaces[-1] == {'id': 12, 'index': 0x4D29, 'subindex': 0, 'size': 2, 'type': 'u16'}
+    # TxPDO 구획 안 · 0x1A00 머리 뒤
+    headers = [i for i, item in enumerate(interfaces) if 'subindex' not in item]
+    assert interfaces[headers[-1]]['index'] == 0x1A00
+    # SDO 목록에는 아무것도 더하지 않는다
+    assert all(int(item['index']) != 0x4D29 for item in payload['items'])
+
+
+def test_overload_monitor_is_added_once(tmp_path):
+    first = minas_params.write_param_file(tmp_path, 3, {'overload_monitor': 1, 'brake_delay_stop_ms': 100})
+    indexes = [int(item['index']) for item in _interfaces(first)]
+    assert indexes.count(0x4D29) == 1
+
+
+def test_overload_entry_id_matches_motor_manager():
+    """화면 설정 → yaml id 12 → motor_manager `ID_OVERLOAD_RATIO` · 어긋나면 예외로 멈춘다."""
+    header = (WORKSPACE / 'src/motion_system/lib/motor_manager/core/motor_interface/include/'
+              'motor_interface/motor_driver.hpp').read_text(encoding='utf-8')
+    assert 'ID_OVERLOAD_RATIO = 12;' in header
+    assert minas_params.MONITOR_FIELDS['overload_monitor'][0]['id'] == 12

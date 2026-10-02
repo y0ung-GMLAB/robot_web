@@ -49,6 +49,9 @@ inline constexpr uint8_t ID_CURRENT_EFFORT   = 8;
 inline constexpr uint8_t ID_TARGET_KP        = 9;
 inline constexpr uint8_t ID_TARGET_KD        = 10;
 inline constexpr uint8_t ID_CURRENT_TEMPERATURE = 11;
+// MINAS 4D29h 과부하율 (모터 정격 대비 · 0.1% 단위 U16) · robot_web 2026-10-02
+// 드라이브 Ver1.03 이상만 지원 · 매핑은 모터별 선택 (robot_web minas_params)
+inline constexpr uint8_t ID_OVERLOAD_RATIO = 12;
 
 inline constexpr uint8_t ID_OPERATING_MODE = 30;
 
