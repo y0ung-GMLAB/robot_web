@@ -30,7 +30,7 @@ def _axis_playback_spans(
 ) -> Dict[int, List[tuple[float, float]]]:
     """`{motion_id: [[시작, 끝], ...]}` 요청을 `{모터축: [(시작, 끝), ...]}` 로 옮긴다.
 
-    부르는 쪽(스튜디오)은 모션 ID 로 말하고 발행부는 모터축으로 움직인다 ·
+    부르는 쪽(스튜디오)은 조인트 이름 로 말하고 발행부는 모터축으로 움직인다 ·
     옮겨 두면 재생 루프가 매 프레임 매핑을 다시 뒤지지 않는다 · §6-73 §6-77
     """
     requested = payload.get('axis_playback_spans')
@@ -180,7 +180,7 @@ class PlanBuilder:
                 f'mapping file expects motion file {mapping_motion_file_id}, not {motion_file_id}'
             )
 
-        # 이 PC 의 모션축 설정에 없는 축은 **읽자마자 버린다** · 알리지 않는다.
+        # 이 PC 의 조인트 매핑에 없는 축은 **읽자마자 버린다** · 알리지 않는다.
         #
         # 연동은 원래 이 모양이다 · 한 모션 파일을 여러 PC 가 나눠 가지고 각자
         # 제 축만 돈다. 예전에는 파일에 들어 있는 축을 전부 "요구한 축" 으로
@@ -226,7 +226,7 @@ class PlanBuilder:
         # 재생 선택이 꺼진 축 · 이것도 막지 않는다 · §6-158
         #
         # 앞의 둘과 **같은 병의 세 번째 문**이다 · 모션 파일에 1-1·1-2·1-3 이
-        # 들어 있는데 모션축 설정에서 1-2·1-3 의 체크를 꺼 두면, 그 둘은 이
+        # 들어 있는데 조인트 매핑에서 1-2·1-3 의 체크를 꺼 두면, 그 둘은 이
         # 반복문 첫 줄에서 조용히 빠져나가 어느 통에도 안 담겼다 · 그래서
         # 아래에서 `requested Motion ID is unavailable: 1-2, 1-3` 로 **모션
         # 전체가** 거부됐다 · 켜 둔 1-1 까지 같이 죽었다.
@@ -259,7 +259,7 @@ class PlanBuilder:
                     #
                     # 로보티즈 2축을 떼자 3축 모션이 통째로 거부됐다 · 멀쩡한
                     # AC 서보 1축까지 같이 죽었다 · 바로 위에서 「이 PC 의
-                    # 모션축 설정에 없는 축은 읽자마자 버린다」 를 이미 하고
+                    # 조인트 매핑에 없는 축은 읽자마자 버린다」 를 이미 하고
                     # 있는데(§6-106), 모터가 빠진 것도 같은 모양이다.
                     #
                     # 조용히 넘어가지는 않는다 · 3축짜리가 1축만 도는 것을
@@ -434,7 +434,7 @@ class PlanBuilder:
             warnings.append(
                 '재생 선택이 꺼져 건너뛴 Motion ID: '
                 + ', '.join(sorted(set(disabled_motion_ids)))
-                + ' · 모션축 설정에서 체크하면 같이 돕니다'
+                + ' · 조인트 매핑에서 체크하면 같이 돕니다'
             )
             requested_motion_ids = {
                 motion_id for motion_id in requested_motion_ids

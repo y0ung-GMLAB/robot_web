@@ -1131,7 +1131,7 @@ def _shared_file_manager(mapping_motion_ids, records):
     """한 모션 파일을 여러 PC 가 나눠 가지는 모양 · §6-101
 
     연동은 원래 이렇게 돈다 · 파일 하나에 1-1, 1-2 가 들어 있고 피시1 은
-    1-1 만, 피시2 는 1-2 만 제 모션축 설정에 가지고 있다.
+    1-1 만, 피시2 는 1-2 만 제 조인트 매핑에 가지고 있다.
     """
     manager = MotionRunManager.__new__(MotionRunManager)
     manager._player = MotionPlayer(manager)
@@ -1185,7 +1185,7 @@ def _shared_file_plan(mapping_motion_ids):
 
 
 def test_motion_file_axes_missing_from_this_pc_are_skipped_in_silence():
-    """모션축 설정에 없는 축은 조용히 빠진다 · 실행을 막지 않는다.
+    """조인트 매핑에 없는 축은 조용히 빠진다 · 실행을 막지 않는다.
 
     예전에는 파일에 들어 있는 축을 전부 "요구한 축" 으로 바꿔서, 남의 축이
     하나라도 섞이면 `requested Motion ID is unavailable` 로 실행이 통째로

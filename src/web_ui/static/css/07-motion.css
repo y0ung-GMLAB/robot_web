@@ -516,22 +516,22 @@
   background: #ffffff;
 }
 
-/* 모션 ID 칸은 「1-1」 정도가 전부다 · 폭을 내용에 맞춘다 · §6-240
+/* 조인트 이름 칸 · Blender 본 이름(Neck_Pitch · Eye_Yaw_L)이 다 보이는 폭 · §6-240
  *
- * 88px 은 「1-1」 을 담기에 두 배 넘게 넓었다 · 칸이 열다섯이라 한 칸이
- * 넓으면 오른쪽이 밀려 가로로 스크롤해야 보인다. */
+ * 예전 「1-1」 시절엔 58px 이었다 · 본 이름을 쓰면서 「Nec」 로 잘렸다 (2026-10-02) ·
+ * 칸이 열다섯이라 더 넓히면 오른쪽이 밀린다 · 왼쪽 정렬로 앞 글자부터 보이게. */
 .motion-mapping-table .motion-id-input {
   width: 100%;
   min-width: 0;
   padding: 0 6px;
-  text-align: center;
+  text-align: left;
 }
 
 .motion-mapping-table .motion-id-head,
 .motion-mapping-table .motion-id-cell {
-  width: 58px;
-  min-width: 58px;
-  max-width: 58px;
+  width: 112px;
+  min-width: 112px;
+  max-width: 112px;
 }
 
 .motion-mapping-table input[type="checkbox"] {
@@ -1265,12 +1265,13 @@
 /* 모터 ID 칸이 표를 밀어낸다 · 폭을 묶는다 · §6-240
  *
  * 고르는 상자 안의 글이 길어서 실측 730px 까지 늘어났고, 표 전체가
- * 1591px 이 되어 화면(1171px)을 넘겼다 · 가로로 밀어야 「상태」가 보였다. */
+ * 1591px 이 되어 화면(1171px)을 넘겼다 · 가로로 밀어야 「상태」가 보였다.
+ * 조인트 이름 칸을 본 이름 폭으로 넓히면서(+54px) 그만큼 줄였다 (2026-10-02). */
 .motion-mapping-table .mapping-motor-head,
 .motion-mapping-table .mapping-motor-cell {
-  width: 240px;
-  min-width: 240px;
-  max-width: 240px;
+  width: 186px;
+  min-width: 186px;
+  max-width: 186px;
 }
 
 .motion-mapping-table .mapping-motor-cell select {

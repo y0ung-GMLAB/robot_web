@@ -469,7 +469,7 @@ def _local_motion_selection(bridge: Any) -> Dict[str, str]:
         active = project.get('active_files') or {}
         mapping_id = str(active.get('motion_axis_matching') or '').strip()
         if not mapping_id:
-            raise ValueError('로컬 모션축 설정을 선택하세요')
+            raise ValueError('로컬 조인트 매핑을 선택하세요')
         mapping_path = bridge.project_repository.export_path(
             project_id, 'motion_axis_matching', mapping_id
         )

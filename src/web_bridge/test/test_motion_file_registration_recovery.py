@@ -1,17 +1,17 @@
-"""재생 등록은 모션축 설정과 남남이다 · §6-160
+"""재생 등록은 조인트 매핑과 남남이다 · §6-160
 
-**모션 데이터만 건드렸는데 모션축 설정 창이 떴다.**
+**모션 데이터만 건드렸는데 조인트 매핑 창이 떴다.**
 
-    모션축 설정 저장 충돌
-    저장된 모션축 설정과 이 화면이 기준으로 삼은 설정이 다릅니다.
+    조인트 매핑 저장 충돌
+    저장된 조인트 매핑과 이 화면이 기준으로 삼은 설정이 다릅니다.
     현재 편집 내용은 저장되지 않았습니다.
 
 모션 실행 화면에서 `재생 등록` 을 눌렀을 뿐인데 이런 창이 떴다 · 편집한 적도
 없는 설정을 되돌릴지 물으니 무슨 말인지 알 수가 없다.
 
-모션축 매칭 파일 하나에 **주인이 셋**이기 때문이었다.
+조인트 매칭 파일 하나에 **주인이 셋**이기 때문이었다.
 
-    mappings        모션축 설정 화면
+    mappings        조인트 매핑 화면
     midi_banks      MIDI 입력 설정 화면
     motion_file_id  모션 실행 화면 (재생 등록)
 
@@ -59,7 +59,7 @@ def _function(source: str, name: str) -> str:
 
 
 # --------------------------------------------------------------------------- #
-# 버튼 · 모션축 설정을 편집 중이어도 눌린다
+# 버튼 · 조인트 매핑을 편집 중이어도 눌린다
 # --------------------------------------------------------------------------- #
 
 def test_the_buttons_do_not_watch_the_mapping_draft():
@@ -72,7 +72,7 @@ def test_the_buttons_do_not_watch_the_mapping_draft():
     for button in ('registerMotionFileButton', 'unregisterMotionFileButton'):
         block = source[source.index(f'el.{button}.disabled'):][:260]
         assert 'mappingDirty' not in block, (
-            f'{button} 이 모션축 설정 편집 상태를 보고 있습니다 · '
+            f'{button} 이 조인트 매핑 편집 상태를 보고 있습니다 · '
             '모션 데이터와 상관없는 사정으로 버튼이 꺼집니다'
         )
 
@@ -83,7 +83,7 @@ def test_registering_does_not_refuse_while_the_mapping_is_being_edited():
     for name in ('registerSelectedMotionFile', 'unregisterSelectedMotionFile'):
         body = _function(source, name)
         assert 'if (mappingDirty)' not in body, (
-            f'{name} 이 모션축 설정 편집 중이라고 되돌려 보냅니다'
+            f'{name} 이 조인트 매핑 편집 중이라고 되돌려 보냅니다'
         )
 
 
@@ -92,10 +92,10 @@ def test_registering_does_not_refuse_while_the_mapping_is_being_edited():
 # --------------------------------------------------------------------------- #
 
 def test_registering_uses_its_own_narrow_path():
-    """모션축 설정 전체 저장(`saveMotionMapping`)을 타면 안 된다.
+    """조인트 매핑 전체 저장(`saveMotionMapping`)을 타면 안 된다.
 
     그 길을 타면 편집 중인 설정까지 같이 저장되고, 개정 검사에 걸려
-    「모션축 설정 저장 충돌」 창이 뜬다.
+    「조인트 매핑 저장 충돌」 창이 뜬다.
     """
     body = _function(MOTION_DATA.read_text(encoding='utf-8'), 'applyMotionFileRegistration')
 
@@ -103,16 +103,16 @@ def test_registering_uses_its_own_narrow_path():
         '재생 등록이 제 길(saveRegisteredMotionFile)을 쓰지 않습니다'
     )
     assert 'saveCurrentMapping(' not in body, (
-        '재생 등록이 모션축 설정 전체 저장을 타고 있습니다'
+        '재생 등록이 조인트 매핑 전체 저장을 타고 있습니다'
     )
 
 
 def test_registering_keeps_the_mapping_draft_alone():
-    """편집 중인 모션축 설정은 건드리지도, 저장하지도 않는다."""
+    """편집 중인 조인트 매핑은 건드리지도, 저장하지도 않는다."""
     body = _function(MOTION_DATA.read_text(encoding='utf-8'), 'applyMotionFileRegistration')
 
     assert 'markMappingDirty()' not in body, (
-        '재생 등록이 모션축 설정을 「편집 중」 으로 표시합니다'
+        '재생 등록이 조인트 매핑을 「편집 중」 으로 표시합니다'
     )
     assert 'mappingDraft.mappings' not in body
 
@@ -130,7 +130,7 @@ def test_the_narrow_path_exists_end_to_end():
 # --------------------------------------------------------------------------- #
 
 def test_the_revision_ignores_the_registration():
-    """재생 등록이 바뀌었다고 모션축 설정이 바뀐 것으로 세면 안 된다.
+    """재생 등록이 바뀌었다고 조인트 매핑이 바뀐 것으로 세면 안 된다.
 
     **글자가 아니라 값을 잰다** · §6-242
 
@@ -161,13 +161,13 @@ def test_the_revision_ignores_the_registration():
         MotionMappingManager._mapping_revision({
             **base, 'mappings': [{'motion_id': '1-1', 'enabled': True, 'motor_axis': 1}],
         })
-    ), '모션축 설정을 고쳤는데 개정 번호가 그대로다'
+    ), '조인트 매핑을 고쳤는데 개정 번호가 그대로다'
 
 
 def test_running_motion_still_blocks_the_swap():
     """도는 중에 재생 파일이 바뀌면 다음 회차가 무엇을 돌지 알 수 없다.
 
-    풀어야 할 것은 「모션축 설정 편집 중」 이지 「모션이 도는 중」 이 아니다.
+    풀어야 할 것은 「조인트 매핑 편집 중」 이지 「모션이 도는 중」 이 아니다.
     """
     source = BRIDGE.read_text(encoding='utf-8')
     start = source.index('def save_registered_motion_file(')

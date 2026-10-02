@@ -16,7 +16,7 @@ const MOTION_WORKSPACE_TABS = Object.freeze({
   'motion-run': 'run',
 });
 
-// 모션축 설정은 모터 관리 화면으로 합쳐졌다 · 옛 경로·북마크는 그리로 보낸다
+// 조인트 매핑은 모터 관리 화면으로 합쳐졌다 · 옛 경로·북마크는 그리로 보낸다
 const LEGACY_ROUTE_ALIASES = Object.freeze({ 'motion-mapping': 'config' });
 
 export const MOTION_WORKSPACE_DETAILS = Object.freeze({
@@ -65,7 +65,7 @@ export function workspaceForLegacyNavigation(workspace, motionTab = '') {
   if (!['motion'].includes(workspace)) return normalizeWorkspaceRoute(workspace);
   // 파일 관리는 애니메이션 재생 화면으로 합쳐졌다 · 옛 'files' 요청도 그리로 보낸다
   const tab = String(motionTab || 'run') === 'files' ? 'run' : String(motionTab || 'run');
-  // 모션축 설정은 모터 관리 화면에 산다 · 옛 ('motion', 'mapping') 요청 대비
+  // 조인트 매핑은 모터 관리 화면에 산다 · 옛 ('motion', 'mapping') 요청 대비
   if (tab === 'mapping') return 'config';
   return Object.entries(MOTION_WORKSPACE_TABS)
     .find(([, value]) => value === tab)?.[0] || 'motion-run';

@@ -8,7 +8,7 @@
     ← {type:'release', axes:[..]}        # 놓음 → 현재 위치에 hold
     → {type:'result', ...}               # supervisor 의 축별 마지막 승인·거부
 
-모션축 deg → 모터 deg 변환은 화면이 자기 매핑 행으로 한다 · 그래서 인사에
+조인트 deg → 모터 deg 변환은 화면이 자기 매핑 행으로 한다 · 그래서 인사에
 `base_mapping_revision` 을 받아 **낡은 변환표**(다른 화면이 매핑을 고친 뒤)
 는 그 자리에서 거절한다.
 
@@ -36,7 +36,7 @@ BLOCK_RECHECK_SEC = 0.5
 
 HELLO_REQUIRED_MESSAGE = "hello 가 필요합니다 · {type:'hello'}"
 STALE_MAPPING_MESSAGE = (
-    '모션축 설정이 이 화면을 연 뒤에 바뀌었습니다 · '
+    '조인트 매핑이 이 화면을 연 뒤에 바뀌었습니다 · '
     '화면을 새로 고친 뒤 다시 잡으세요'
 )
 

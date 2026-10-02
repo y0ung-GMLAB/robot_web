@@ -1545,7 +1545,7 @@ class MotionWebBridge(Node):
         if not project_id:
             result['message'] = NO_PROJECT_SELECTED
         else:
-            result['message'] = '현재 프로젝트 모션축 설정을 불러왔습니다'
+            result['message'] = '현재 프로젝트 조인트 매핑을 불러왔습니다'
         # 어느 것이 **등록된** 파일인가를 같이 말한다 · §6-238
         #
         # 전에는 안 말해줬다 · 그래서 화면은 목록의 **첫 번째**를 골랐다 ·
@@ -1624,9 +1624,9 @@ class MotionWebBridge(Node):
     def save_registered_motion_file(self, payload: Dict[str, Any]) -> Dict[str, Any]:
         """재생 등록 파일만 바꾼다 · §6-160
 
-        `save_motion_mapping` 과 갈라놓는다 · 저것은 모션축 설정 **전체**를
+        `save_motion_mapping` 과 갈라놓는다 · 저것은 조인트 매핑 **전체**를
         보내는 길이라, 모션 실행 화면에서 파일만 갈아 끼우려 해도 설정 개정
-        검사에 걸려 「모션축 설정 저장 충돌」 창이 떴다 · 편집한 적도 없는
+        검사에 걸려 「조인트 매핑 저장 충돌」 창이 떴다 · 편집한 적도 없는
         설정을 되돌릴지 묻는 창이었다.
 
         모션이 도는 중인지는 여전히 본다 · 도는 중에 재생 파일이 바뀌면
@@ -1679,7 +1679,7 @@ class MotionWebBridge(Node):
             result['runtime_applied'] = bool(execution_context.get('ready'))
             if result['runtime_applied']:
                 result['message'] = (
-                    '모션축 설정 저장 완료 · 실행 컨텍스트에 적용했습니다'
+                    '조인트 매핑 저장 완료 · 실행 컨텍스트에 적용했습니다'
                 )
             else:
                 runtime_message = str(
@@ -1688,7 +1688,7 @@ class MotionWebBridge(Node):
                 )
                 result['runtime_apply_warning'] = runtime_message
                 result['message'] = (
-                    '모션축 설정은 저장됐지만 실행 컨텍스트 적용 대기 중입니다: '
+                    '조인트 매핑은 저장됐지만 실행 컨텍스트 적용 대기 중입니다: '
                     f'{runtime_message}'
                 )
         return result
@@ -1926,7 +1926,7 @@ class MotionWebBridge(Node):
         return animation_preview.launch_precompute(self.workspace_root, motion_path)
 
     def set_motion_run_live_override(self, payload: Dict[str, Any]) -> Dict[str, Any]:
-        """재생 라이브 오버라이드(모션축 뮤트·좁힌 리밋) · 움직임 명령이
+        """재생 라이브 오버라이드(조인트 뮤트·좁힌 리밋) · 움직임 명령이
         아니라 **줄이는** 조작이라 오프 모드에서도 막지 않는다 · P7"""
         return self._request_motion_run(
             'set_live_override', dict(payload or {}), timeout_sec=2.0,

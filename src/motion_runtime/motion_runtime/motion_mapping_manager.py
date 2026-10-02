@@ -121,7 +121,7 @@ class MotionMappingManager(Node):
         self._execution_context = {}
         return {
             'success': True,
-            'message': '모션축 설정 실행 대기 · 보던 설정은 유지',
+            'message': '조인트 매핑 실행 대기 · 보던 설정은 유지',
             'project_id': self._project_id if hasattr(self, '_project_id') else '',
             'context_id': '',
         }
@@ -198,7 +198,7 @@ class MotionMappingManager(Node):
         file_id = str(payload.get('mapping_file_id') or '').strip()
         expected_sha = str(payload.get('mapping_sha256') or '').strip()
         if not context_id or not file_id or not expected_sha:
-            raise ValueError('실행 컨텍스트 ID와 모션축 설정 버전이 필요합니다')
+            raise ValueError('실행 컨텍스트 ID와 조인트 매핑 버전이 필요합니다')
         path = self._mapping_file_path(file_id)
         actual_sha = verify_mapping_fingerprint(path, expected_sha)
         mapping = self._normalize_mapping(
@@ -207,7 +207,7 @@ class MotionMappingManager(Node):
         )
         validation = self._validate_mapping(mapping)
         if not validation.get('valid'):
-            raise ValueError('모션축 설정 검증에 실패했습니다')
+            raise ValueError('조인트 매핑 검증에 실패했습니다')
         self._execution_context = {
             'context_id': context_id,
             'project_id': str(payload.get('project_id') or ''),
@@ -217,7 +217,7 @@ class MotionMappingManager(Node):
         }
         return {
             'success': True,
-            'message': '모션축 설정 실행 컨텍스트 적용 완료',
+            'message': '조인트 매핑 실행 컨텍스트 적용 완료',
             **self._execution_context,
         }
 
@@ -306,7 +306,7 @@ class MotionMappingManager(Node):
             ).strip()
             if not expected_mapping_revision:
                 raise ValueError(
-                    '모션축 설정 버전 정보가 없습니다. 파일을 다시 불러온 뒤 저장하세요'
+                    '조인트 매핑 버전 정보가 없습니다. 파일을 다시 불러온 뒤 저장하세요'
                 )
             current_payload = yaml.safe_load(
                 source_path.read_text(encoding='utf-8')
@@ -326,23 +326,23 @@ class MotionMappingManager(Node):
                         f'actual={actual_mapping_revision}'
                     )
                 raise ValueError(
-                    '모션축 설정이 화면을 불러온 뒤 변경됐습니다. '
+                    '조인트 매핑이 화면을 불러온 뒤 변경됐습니다. '
                     '현재 설정 보호를 위해 저장을 거부했습니다. 파일을 다시 불러오세요'
                 )
         elif source_path is not None and 'base_revision' in payload:
             actual_revision = hashlib.sha256(source_path.read_bytes()).hexdigest()
             if not expected_revision:
                 raise ValueError(
-                    '모션축 설정 파일 버전 정보가 없습니다. 파일을 다시 불러온 뒤 저장하세요'
+                    '조인트 매핑 파일 버전 정보가 없습니다. 파일을 다시 불러온 뒤 저장하세요'
                 )
             if expected_revision != actual_revision:
                 raise ValueError(
-                    '모션축 설정 파일이 화면을 불러온 뒤 변경됐습니다. '
+                    '조인트 매핑 파일이 화면을 불러온 뒤 변경됐습니다. '
                     '현재 파일 보호를 위해 저장을 거부했습니다. 파일을 다시 불러오세요'
                 )
         elif expected_revision:
             raise ValueError(
-                '화면에서 불러온 모션축 설정 파일이 현재 존재하지 않습니다. '
+                '화면에서 불러온 조인트 매핑 파일이 현재 존재하지 않습니다. '
                 '목록을 새로고침하세요'
             )
         path = self._new_or_existing_mapping_path(file_id, mapping.get('name'))
@@ -389,7 +389,7 @@ class MotionMappingManager(Node):
             }
         return {
             'success': True,
-            'message': '모션축 매칭 파일에서 MIDI 뱅크를 불러왔습니다',
+            'message': '조인트 매칭 파일에서 MIDI 뱅크를 불러왔습니다',
             'file': self._mapping_file_summary(path),
             'midi_banks': state,
         }
@@ -409,7 +409,7 @@ class MotionMappingManager(Node):
             raise ValueError('저장 후 MIDI 뱅크 파일 검증에 실패했습니다')
         return {
             'success': True,
-            'message': 'MIDI 뱅크를 모션축 매칭 파일에 저장하고 검증했습니다',
+            'message': 'MIDI 뱅크를 조인트 매칭 파일에 저장하고 검증했습니다',
             'file': self._mapping_file_summary(path),
             'midi_banks': verified,
             'backup_file': str(backup),
@@ -418,8 +418,8 @@ class MotionMappingManager(Node):
     def _save_registered_motion_file(self, payload: Dict[str, Any]) -> Dict[str, Any]:
         """재생 등록 칸 하나만 바꾼다 · §6-160
 
-        모션축 설정은 건드리지 않는다 · 그래서 편집 중이어도 되고, 개정 번호도
-        오르지 않는다 · 모션 실행 화면에서 파일만 갈아 끼우는 일이 「모션축 설정
+        조인트 매핑은 건드리지 않는다 · 그래서 편집 중이어도 되고, 개정 번호도
+        오르지 않는다 · 모션 실행 화면에서 파일만 갈아 끼우는 일이 「조인트 매핑
         저장 충돌」 로 막히던 것을 끊는다.
         """
         path = self._mapping_file_path(payload.get('file_id'))
@@ -532,19 +532,19 @@ class MotionMappingManager(Node):
 
     @staticmethod
     def _mapping_revision(mapping: Dict[str, Any]) -> str:
-        """모션축 설정만 센다 · MIDI 뱅크도 재생 등록도 빼고 · §6-160
+        """조인트 매핑만 센다 · MIDI 뱅크도 재생 등록도 빼고 · §6-160
 
         한 파일에 **주인이 셋**이다.
 
-            mappings        모션축 설정 화면
+            mappings        조인트 매핑 화면
             midi_banks      MIDI 입력 설정 화면
             motion_file_id  모션 실행 화면 (재생 등록)
 
         MIDI 는 처음부터 빠져 있었다 · 그런데 `motion_file_id` 는 남아 있어서,
-        모션 실행 화면에서 **재생 등록 하나 바꿨을 뿐인데** 모션축 설정을 고친
+        모션 실행 화면에서 **재생 등록 하나 바꿨을 뿐인데** 조인트 매핑을 고친
         것으로 세어졌다.
 
-        그래서 모션 데이터만 건드린 사람에게 「모션축 설정 저장 충돌 · 현재
+        그래서 모션 데이터만 건드린 사람에게 「조인트 매핑 저장 충돌 · 현재
         편집 내용은 저장되지 않았습니다」 라는 창이 떴다 · 편집한 적도 없는
         설정을 되돌릴지 물으니 무슨 말인지 알 수가 없다.
 
@@ -563,7 +563,7 @@ class MotionMappingManager(Node):
         값**(MIDI 빠진 것)과 비교한다 · 둘이 언제나 다르다.
 
         그래서 **한 번 저장하고 나면 그 다음 저장이 반드시 충돌**했다 ·
-        실측: 저장 응답 87a61175… / 실제 파일 b36833a6… · 사람은 「모션축
+        실측: 저장 응답 87a61175… / 실제 파일 b36833a6… · 사람은 「조인트
         설정 저장 충돌」 창을 보고 편집을 버리는 수밖에 없었다.
 
         어느 쪽에서 세든 같은 값이 나와야 한다.

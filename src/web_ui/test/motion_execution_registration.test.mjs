@@ -103,9 +103,9 @@ test('file list registration is explicit and persists through mapping save', () 
   assert.match(dom, /registerMotionFileButton: document\.getElementById\('registerMotionFileButton'\)/);
   assert.match(controller, /registerMotionFileButton\?\.addEventListener\('click', registerSelectedMotionFile\)/);
 
-  // 등록은 **모션축 설정 저장을 타지 않는다** · §6-160
+  // 등록은 **조인트 매핑 저장을 타지 않는다** · §6-160
   //
-  // 한 파일에 주인이 셋이다 (모션축 설정 · MIDI 뱅크 · 재생 등록) · 전에는
+  // 한 파일에 주인이 셋이다 (조인트 매핑 · MIDI 뱅크 · 재생 등록) · 전에는
   // 등록이 「설정 전체 저장」 길로 다녀서, 모션 파일만 바꿔도 편집 중인
   // 설정까지 같이 저장되고 개정 검사에 걸려 저장 충돌 창이 떴다.
   const registerStart = controller.indexOf('async function registerSelectedMotionFile()');
@@ -136,7 +136,7 @@ test('재생 등록은 제 길로만 다닌다', () => {
   assert.ok(body, '등록 함수를 읽지 못했다');
   assert.match(body, /saveRegisteredMotionFile\(/);
   assert.doesNotMatch(body, /markMappingDirty/,
-    '등록이 모션축 설정을 「편집 중」 으로 표시하면 버튼이 제 발에 묶인다');
+    '등록이 조인트 매핑을 「편집 중」 으로 표시하면 버튼이 제 발에 묶인다');
 });
 
 test('registered motion file deletion is blocked with an alert before delete request', () => {
@@ -196,7 +196,7 @@ test('motion files leave and arrive as plain files · one door each', () => {
 });
 
 test('only motion files can be brought into a project', () => {
-  // 모터축·모션축 설정은 그 PC 의 하드웨어 배선에 매인 값이라 옮기면 꼬인다 ·
+  // 모터축·조인트 매핑은 그 PC 의 하드웨어 배선에 매인 값이라 옮기면 꼬인다 ·
   // 종류를 고르는 칸이 있으면 언젠가 다시 새어 든다 · 칸 자체를 없앴다.
   assert.doesNotMatch(html, /projectImportCategory/);
   assert.doesNotMatch(dom, /projectImportCategory/);

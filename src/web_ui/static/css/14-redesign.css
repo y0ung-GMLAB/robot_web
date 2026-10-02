@@ -668,7 +668,7 @@ label, .manual-field > span, .compact-field > span { color: var(--muted); }
 
 /* ---------- 15. 5라운드 · 재생 화면 유령 소탕 ---------- */
 
-/* 요약 타일(재생 파일·모션축 설정·상태)과 지표 줄 */
+/* 요약 타일(재생 파일·조인트 매핑·상태)과 지표 줄 */
 .motion-run-targets,
 .motion-run-targets > div,
 .motion-run-metrics,

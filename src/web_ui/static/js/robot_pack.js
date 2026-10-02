@@ -163,8 +163,8 @@ export function createRobotPackController({ el }) {
       }
       el.robotPackDiffWrap?.classList.remove('hidden');
       setMessage(result.mapping_file
-        ? `비교 대상 모션축 설정: ${result.mapping_file} · 표시만 · 적용하지 않습니다`
-        : '등록된 모션축 설정이 없습니다');
+        ? `비교 대상 조인트 매핑: ${result.mapping_file} · 표시만 · 적용하지 않습니다`
+        : '등록된 조인트 매핑이 없습니다');
     } catch (error) {
       setMessage(`비교 실패: ${error.message}`, { error: true });
     }

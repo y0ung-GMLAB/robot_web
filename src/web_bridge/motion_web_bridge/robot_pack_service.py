@@ -8,7 +8,7 @@ PC 1대 = 로봇 1대 · 팩은 프로젝트가 아니라 PC 전역 `<workspace>
     → 전부 통과해야 교체 (prev 삭제 · current → prev · incoming → current)
 
 하나라도 실패하면 **교체하지 않는다** · 이유 목록을 그대로 돌려준다.
-모터 설정·모션축 설정은 건드리지 않는다 (PC 에서 직접 작성 · 차이는 표시만).
+모터 설정·조인트 매핑은 건드리지 않는다 (PC 에서 직접 작성 · 차이는 표시만).
 """
 
 from __future__ import annotations
@@ -276,7 +276,7 @@ def rollback_pack(workspace_root: Path) -> Dict[str, Any]:
 
 
 # --------------------------------------------------------------------------- #
-# 모션축 설정과의 차이 (표시만)
+# 조인트 매핑과의 차이 (표시만)
 # --------------------------------------------------------------------------- #
 
 def _close(a: Any, b: Any) -> bool:
@@ -287,7 +287,7 @@ def _close(a: Any, b: Any) -> bool:
 
 
 def mapping_diff(workspace_root: Path, mapping: Optional[Dict[str, Any]]) -> Dict[str, Any]:
-    """팩 robot.yaml ↔ PC 모션축 설정 · motion_id · 감속비 · 범위 · 적용하지 않는다."""
+    """팩 robot.yaml ↔ PC 조인트 매핑 · motion_id · 감속비 · 범위 · 적용하지 않는다."""
     try:
         robot = robot_pack.load_robot(robot_pack.pack_root(workspace_root))
     except ValueError:
@@ -305,7 +305,7 @@ def mapping_diff(workspace_root: Path, mapping: Optional[Dict[str, Any]]) -> Dic
             'differences': [],
         }
         if row is None:
-            entry['differences'].append('모션축 설정에 motion_id 없음')
+            entry['differences'].append('조인트 매핑에 motion_id 없음')
         else:
             ratio = row.get('gear_ratio', 1.0)
             span = [row.get('motion_lower_deg', -180.0), row.get('motion_upper_deg', 180.0)]
@@ -327,7 +327,7 @@ def mapping_diff(workspace_root: Path, mapping: Optional[Dict[str, Any]]) -> Dic
 
 
 def active_mapping_diff(workspace_root: Path, repository) -> Dict[str, Any]:
-    """선택된 프로젝트의 **등록된** 모션축 설정과 비교 · 없으면 그 사실만."""
+    """선택된 프로젝트의 **등록된** 조인트 매핑과 비교 · 없으면 그 사실만."""
     project_id = repository.selected_project_id()
     name = repository.active_file_name(project_id, 'motion_axis_matching') if project_id else ''
     if not name:
@@ -338,7 +338,7 @@ def active_mapping_diff(workspace_root: Path, repository) -> Dict[str, Any]:
         content = repository.read_file(project_id, 'motion_axis_matching', name)['content']
         mapping = yaml.safe_load(content)
     except (OSError, ValueError, yaml.YAMLError) as exc:
-        return {'success': False, 'message': f'모션축 설정 읽기 실패: {exc}', 'rows': []}
+        return {'success': False, 'message': f'조인트 매핑 읽기 실패: {exc}', 'rows': []}
     result = mapping_diff(workspace_root, mapping if isinstance(mapping, dict) else None)
     result['mapping_file'] = name
     return result

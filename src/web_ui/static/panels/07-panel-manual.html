@@ -52,10 +52,10 @@
         <section class="motion-test-card manual-fader-card" aria-label="페이더 · 실시간 드래그">
           <div class="section-head">
             <strong>페이더 · 실시간 드래그</strong>
-            <span>모션축 설정 기준 · 잡는 동안만 전송 · 놓으면 그 자리에 섭니다</span>
+            <span>조인트 매핑 기준 · 잡는 동안만 전송 · 놓으면 그 자리에 섭니다</span>
           </div>
-          <div id="manualFaderMessage" class="registry-message">모션축 설정 확인 중</div>
-          <div id="manualFaderList" class="manual-fader-list" aria-label="모션축 페이더 목록"></div>
+          <div id="manualFaderMessage" class="registry-message">조인트 매핑 확인 중</div>
+          <div id="manualFaderList" class="manual-fader-list" aria-label="조인트 페이더 목록"></div>
         </section>
 
         <div class="motion-test-grid">
@@ -99,7 +99,7 @@
                 <span>조그 단위</span>
                 <label class="motion-jog-joint-toggle" title="끄면 모터 deg 그대로 움직입니다">
                   <input id="motionTestJogJointMode" type="checkbox" checked>
-                  모션축 deg 기준 · 감속비·방향 적용
+                  조인트 deg 기준 · 감속비·방향 적용
                 </label>
               </div>
               <label class="manual-field hidden" data-motion-test-panel="action">
@@ -147,9 +147,9 @@
                     title="아직 안 보낸 쌓인 양만 버립니다 · 이미 움직이는 조그는 끝까지 갑니다">쌓인 양 취소</button>
                 </div>
                 <div class="jog-dial-capture" role="group" aria-label="지금 위치 찍기">
-                  <button id="jogDialSetLower" type="button" disabled title="지금 모터 위치를 − limit 으로 · 모터 하한 + 모션축 범위에 저장">− limit</button>
-                  <button id="jogDialSetReference" type="button" disabled title="지금 모터 위치를 기준점(모션 0°)으로 · 모션축 설정에 저장">기준점 지정</button>
-                  <button id="jogDialSetUpper" type="button" disabled title="지금 모터 위치를 + limit 으로 · 모터 상한 + 모션축 범위에 저장">+ limit</button>
+                  <button id="jogDialSetLower" type="button" disabled title="지금 모터 위치를 − limit 으로 · 모터 하한 + 조인트 범위에 저장">− limit</button>
+                  <button id="jogDialSetReference" type="button" disabled title="지금 모터 위치를 기준점(모션 0°)으로 · 조인트 매핑에 저장">기준점 지정</button>
+                  <button id="jogDialSetUpper" type="button" disabled title="지금 모터 위치를 + limit 으로 · 모터 상한 + 조인트 범위에 저장">+ limit</button>
                 </div>
                 <div id="jogDialMessage" class="jog-dial-message" role="status"></div>
                 <small class="jog-dial-help">드래그로 돌리기 · 휠 한 칸 · ←/→ 한 칸 · 시계 방향 = +</small>

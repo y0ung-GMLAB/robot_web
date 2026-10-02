@@ -112,13 +112,13 @@
           </div>
         </section>
 
-        <section class="axis-setup-step settings-step-card" aria-label="모션축 설정">
+        <section class="axis-setup-step settings-step-card" aria-label="조인트 매핑">
           <div class="section-head compact">
-            <strong>4. 모션축 설정</strong>
-            <span>모션 ID(= Blender 본 이름)를 모터에 연결하고 변환값을 설정합니다 · 애니메이션 재생 전에 필요합니다</span>
+            <strong>4. 조인트 매핑</strong>
+            <span>조인트 이름(= Blender 본 이름)를 모터에 연결하고 변환값을 설정합니다 · 애니메이션 재생 전에 필요합니다</span>
           </div>
           <div class="motion-mapping-layout">
-            <section class="motion-file-subsection settings-step-card" aria-label="모션축 설정 파일">
+            <section class="motion-file-subsection settings-step-card" aria-label="조인트 매핑 파일">
               <div class="section-head compact">
                 <strong>연결 파일</strong>
                 <span id="motionMappingMessage">현재 매칭 확인 중</span>
@@ -131,20 +131,20 @@
               </div>
             </section>
 
-            <section class="motion-file-subsection settings-step-card" aria-label="모션축 설정 표">
+            <section class="motion-file-subsection settings-step-card" aria-label="조인트 매핑 표">
               <div class="section-head compact">
-                <strong>모션축 편집</strong>
-                <span>모션 ID(= Blender 본 이름)를 AC 서보·다이나믹셀 모터에 연결</span>
+                <strong>조인트 매핑 편집</strong>
+                <span>조인트 이름(= Blender 본 이름)를 AC 서보·다이나믹셀 모터에 연결</span>
               </div>
               <div class="registry-actions settings-step-actions">
-                <button id="addMotionIdButton" type="button">모션 ID 추가</button>
-                <button id="generateMotionIdsButton" type="button">모터축 행 자동 생성</button>
+                <button id="addMotionIdButton" type="button">조인트 이름 추가</button>
+                <button id="generateMotionIdsButton" type="button">자동 생성</button>
               </div>
               <div class="table-wrap motion-mapping-table-wrap">
                 <table class="motion-mapping-table">
                   <thead>
                     <tr>
-                      <th class="motion-id-head"><span class="mapping-head-label">모션 ID</span><span class="mapping-head-unit"></span></th>
+                      <th class="motion-id-head"><span class="mapping-head-label">조인트 이름</span><span class="mapping-head-unit"></span></th>
                       <th><span class="mapping-head-label">사용</span><span class="mapping-head-unit"></span></th>
                       <th class="mapping-motor-head"><span class="mapping-head-label">모터 ID</span><span class="mapping-head-unit">현재 모터 번호 자동 해석</span></th>
                       <th class="mapping-number-head"><span class="mapping-head-label">감속비</span><span class="mapping-head-unit">x</span></th>
@@ -160,14 +160,14 @@
                   </thead>
                   <tbody id="motionMappingRows">
                     <tr>
-                      <td colspan="12" class="empty">모션 ID를 추가하거나 모터축 행 자동 생성을 누르세요</td>
+                      <td colspan="12" class="empty">조인트 이름을 추가하거나 자동 생성을 누르세요</td>
                     </tr>
                   </tbody>
                 </table>
               </div>
             </section>
 
-            <section class="motion-file-subsection settings-step-card settings-commit-card" aria-label="모션축 설정 검증 및 저장">
+            <section class="motion-file-subsection settings-step-card settings-commit-card" aria-label="조인트 매핑 검증 및 저장">
               <div class="section-head compact">
                 <strong>검증·미리보기·저장</strong>
                 <span>검증을 통과한 계산 결과만 현재 프로젝트에 저장합니다</span>

@@ -36,7 +36,7 @@ def test_monitoring_distinguishes_unmapped_from_motion_value_not_received():
     add_monitoring_motion_values(state, rows, {})
 
     assert state['motors'][0]['motion_value_status'] == 'unmapped'
-    assert state['motors'][0]['motion_value_message'] == '모션축 미설정'
+    assert state['motors'][0]['motion_value_message'] == '조인트 미설정'
     assert state['motors'][1]['motion_value_status'] == 'missing'
     assert state['motors'][1]['motion_value_message'] == '모션값 토픽 미수신'
     assert state['motors'][1]['motion_value_deg'] is None

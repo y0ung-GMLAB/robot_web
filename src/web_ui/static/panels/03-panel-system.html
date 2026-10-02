@@ -46,7 +46,7 @@
           </section>
 
           <!-- 로봇 팩 · PC 전역 (PC 1대 = 로봇 1대) · 축·모터·환경·MuJoCo 모델 zip
-               모터 설정·모션축 설정은 바꾸지 않는다 · 차이는 표시만 -->
+               모터 설정·조인트 매핑은 바꾸지 않는다 · 차이는 표시만 -->
           <section class="robot-pack-card" aria-label="로봇 팩">
             <div class="section-head compact">
               <strong>로봇 팩</strong>
@@ -65,14 +65,14 @@
               <input id="robotPackFolderInput" type="file" webkitdirectory hidden>
               <button id="robotPackFolderButton" type="button">폴더 고르기</button>
               <button id="robotPackRollbackButton" type="button" disabled>이전 팩으로 되돌리기</button>
-              <button id="robotPackDiffButton" type="button">모션축 설정과 비교</button>
+              <button id="robotPackDiffButton" type="button">조인트 매핑과 비교</button>
             </div>
             <div class="registry-message" id="robotPackMessage" role="status"></div>
             <ul class="robot-pack-errors hidden" id="robotPackErrors"></ul>
             <div class="table-wrap robot-pack-diff-wrap hidden" id="robotPackDiffWrap">
               <table class="robot-pack-diff">
                 <thead>
-                  <tr><th>모션 ID</th><th>관절</th><th>감속비 (팩 / 설정)</th><th>범위 (팩 / 설정)</th><th>차이</th></tr>
+                  <tr><th>조인트 이름</th><th>관절</th><th>감속비 (팩 / 설정)</th><th>범위 (팩 / 설정)</th><th>차이</th></tr>
                 </thead>
                 <tbody id="robotPackDiffRows"></tbody>
               </table>

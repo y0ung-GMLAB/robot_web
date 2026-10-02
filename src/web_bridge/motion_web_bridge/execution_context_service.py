@@ -237,7 +237,7 @@ class ExecutionContextService:
                 self._set_status(
                     state='configuration_required', ready=False,
                     project_id=project_id, context_id=context_id,
-                    message='모터축 설정과 모션축 설정 파일을 확정하세요',
+                    message='모터축 설정과 조인트 매핑 파일을 확정하세요',
                     missing=list(context.get('missing') or []), nodes={}, context=context,
                 )
                 return self.status()

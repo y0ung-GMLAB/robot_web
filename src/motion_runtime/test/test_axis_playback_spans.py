@@ -65,7 +65,7 @@ def test_an_axis_without_an_entry_is_never_released():
 
 
 def test_motion_ids_are_translated_to_motor_axes():
-    """부르는 쪽은 모션 ID 로 말하고 발행부는 모터축으로 움직인다."""
+    """부르는 쪽은 조인트 이름 로 말하고 발행부는 모터축으로 움직인다."""
     axes = [
         {'motion_id': '1-1', 'motor_axis': 0},
         {'motion_id': '1-2', 'motor_axis': 3},

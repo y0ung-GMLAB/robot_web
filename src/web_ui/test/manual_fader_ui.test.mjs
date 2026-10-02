@@ -1,6 +1,6 @@
 /** 수동 페이더 · 잡는 동안만 흐르고, 놓으면 그 자리에 선다 · §6-310
  *
- * 변환(모션축 deg → 모터 deg)은 화면이 한다 · 그래서 소켓 인사에
+ * 변환(조인트 deg → 모터 deg)은 화면이 한다 · 그래서 소켓 인사에
  * `base_mapping_revision` 이 실려야 하고, 식은 서버
  * (`motion_mapping_manager._motion_to_motor_target`)와 같아야 한다.
  */

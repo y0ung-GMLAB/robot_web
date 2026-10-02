@@ -42,7 +42,7 @@ finite_float = values.finite_float
 
 
 def motion_id_text(value: Any) -> str:
-    """모션 ID를 문자열로 정규화한다.
+    """조인트 이름을 문자열로 정규화한다.
 
     숫자 3.0과 문자열 '3'이 서로 다른 그룹으로 갈리지 않도록 정수형 실수는
     소수점을 떼고 표기한다.

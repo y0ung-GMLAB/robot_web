@@ -3,7 +3,7 @@
 **같은 검사가 네 벌 복사돼 있었고, 둘이 틀렸다.**
 
     workspace_session      (스튜디오)      ❌ 푼 경로와 안 푼 경로를 견줌
-    motion_mapping_manager (모션축 매핑)    ❌ 같은 실수
+    motion_mapping_manager (조인트 매핑)    ❌ 같은 실수
     motion_run_manager     (모션 실행)      ✅
     midi_control_node      (MIDI)          ✅
 

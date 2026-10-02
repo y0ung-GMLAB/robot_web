@@ -1,15 +1,15 @@
 """재생 등록 칸만 따로 쓴다 · §6-160
 
-**모션 데이터만 건드렸는데 모션축 설정 창이 떴다.**
+**모션 데이터만 건드렸는데 조인트 매핑 창이 떴다.**
 
-모션축 매칭 파일 하나에 주인이 셋이다 — 모션축 설정(`mappings`),
+조인트 매칭 파일 하나에 주인이 셋이다 — 조인트 매핑(`mappings`),
 MIDI 입력 설정(`midi_banks`), 재생 등록(`motion_file_id`).
 
 MIDI 는 오래전에 제 길을 얻었는데 재생 등록만 「설정 전체 저장」 길로 다녔다 ·
 그래서 모션 실행 화면에서 파일 하나 갈아 끼우려는 사람에게
 
-    모션축 설정 저장 충돌
-    저장된 모션축 설정과 이 화면이 기준으로 삼은 설정이 다릅니다.
+    조인트 매핑 저장 충돌
+    저장된 조인트 매핑과 이 화면이 기준으로 삼은 설정이 다릅니다.
     현재 편집 내용은 저장되지 않았습니다.
 
 라는 창이 떴다 · 편집한 적도 없는 설정을 되돌릴지 물으니 알 수가 없다.
@@ -65,7 +65,7 @@ def test_only_the_registration_line_changes(tmp_path):
 
 
 def test_the_motion_axis_settings_are_untouched(tmp_path):
-    """모션축 설정은 남의 것이다 · 손대면 안 된다."""
+    """조인트 매핑은 남의 것이다 · 손대면 안 된다."""
     path = _write(tmp_path)
 
     save_registered_motion_file(path, '새파일.json', tmp_path / 'history')

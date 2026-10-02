@@ -1,6 +1,6 @@
 """로봇 팩 업로드 · 하나라도 실패하면 교체하지 않는다 · 이전 팩 1개로 되돌린다
 
-PC 1대 = 로봇 1대 · 팩은 PC 전역 `robot_pack/` · 모션축 설정은 건드리지 않는다.
+PC 1대 = 로봇 1대 · 팩은 PC 전역 `robot_pack/` · 조인트 매핑은 건드리지 않는다.
 실행기 로드 검사(MuJoCo)는 주입해서 노드·uv 없이 시험한다.
 """
 
@@ -209,4 +209,4 @@ def test_active_mapping_diff_reads_the_registered_file(tmp_path):
     rows = {row['motion_id']: row for row in result['rows']}
     assert result['mapping_file'] == 'm.yaml'
     assert rows['2-1']['differences'] == ['범위']
-    assert rows['2-2']['differences'] == ['모션축 설정에 motion_id 없음']
+    assert rows['2-2']['differences'] == ['조인트 매핑에 motion_id 없음']

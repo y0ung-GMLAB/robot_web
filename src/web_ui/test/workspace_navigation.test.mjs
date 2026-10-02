@@ -29,7 +29,7 @@ test('workspace routes resolve their group and shared motion panel', () => {
   assert.equal(workspaceGroupFor('monitoring'), 'operations');
   assert.equal(workspaceGroupFor('config'), 'setup');
   assert.equal(workspaceGroupFor('servo-errors'), 'operations');
-  // 모션축 설정은 모터 관리로 합쳐졌다 · 옛 경로는 설정 그룹의 그 화면으로
+  // 조인트 매핑은 모터 관리로 합쳐졌다 · 옛 경로는 설정 그룹의 그 화면으로
   assert.equal(normalizeWorkspaceRoute('motion-mapping'), 'config');
   assert.equal(workspaceGroupFor('motion-mapping'), 'setup');
   assert.equal(workspaceGroupFor('motion-run'), 'execution');

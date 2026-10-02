@@ -92,7 +92,7 @@ def test_external_motion_file_upload_route_is_not_available():
 
 
 def test_motion_file_import_needs_a_motion_axis_setting(tmp_path):
-    """모션축 설정이 없는 프로젝트는 모션 파일을 받지 않는다.
+    """조인트 매핑이 없는 프로젝트는 모션 파일을 받지 않는다.
 
     모션 파일 혼자서는 재생 등록도 실행도 스튜디오로 보내기도 못 한다 ·
     넣어 봐야 파일만 놓이고 `import_text`가 비어 있던 `active_files`에
@@ -112,7 +112,7 @@ def test_motion_file_import_needs_a_motion_axis_setting(tmp_path):
             'content': MOTION_CONTENT,
         })
 
-    with pytest.raises(ValueError, match='모션축 설정이 없는 프로젝트'):
+    with pytest.raises(ValueError, match='조인트 매핑이 없는 프로젝트'):
         _import('external.json')
 
     (projects_dir / target_id / 'motion_axis_matching' / 'axes.yaml').write_text(
@@ -125,7 +125,7 @@ def test_motion_file_import_needs_a_motion_axis_setting(tmp_path):
 def test_only_motion_files_can_be_brought_into_a_project(tmp_path):
     """밖에서 들어올 수 있는 것은 모션 파일 하나뿐이다.
 
-    모터축·모션축 설정은 그 PC 의 하드웨어 배선에 매인 값이고 레이어는
+    모터축·조인트 매핑은 그 PC 의 하드웨어 배선에 매인 값이고 레이어는
     스튜디오가 제 프로젝트 안에서만 다룬다 · 화면에서 종류 칸을 없앴어도
     길이 열려 있으면 언젠가 다시 새어 든다.
     """

@@ -64,7 +64,7 @@ test('capture buttons save the current motor position, with a confirm first', ()
   const mainSource = main;
   assert.match(mainSource, /async function captureJogPoint\(kind, \{ axis, motorDeg \}\)/);
   assert.match(mainSource, /await showConfirm\(/);
-  // 기준점은 모션축 설정만 · 끝은 모션축 범위 + 모터 운전 한계 둘 다
+  // 기준점은 조인트 매핑만 · 끝은 조인트 범위 + 모터 운전 한계 둘 다
   assert.match(mainSource, /if \(kind === 'reference' \|\| !mapping\.success\) return mapping;/);
   assert.match(mainSource, /motorConfig\.saveMotorLimit\(axis, kind, motorDeg\)/);
   // 이동 중·쌓인 양이 있을 때는 찍지 않는다

@@ -74,7 +74,7 @@ def atomic_write_with_backup(
 ) -> Optional[Path]:
     """이전 내용을 백업하고 원자적으로 교체한다 · 프로세스 간 락 안에서.
 
-    같은 모션축 설정 파일을 웹 브리지(`project_repository`)도 쓴다. 읽고-백업하고-
+    같은 조인트 매핑 파일을 웹 브리지(`project_repository`)도 쓴다. 읽고-백업하고-
     쓰는 구간을 통째로 감싸야 두 프로세스가 서로의 수정을 지우지 않는다 · §6-24
     """
     with common_store.locked_update(path):
@@ -97,7 +97,7 @@ def atomic_write_with_backup(
 def save_midi_banks(
     mapping_file: Path, state: Dict[str, Any], backup_dir: Optional[Path] = None
 ) -> Path:
-    """MIDI 뱅크를 모션축 설정 파일에 반영한다.
+    """MIDI 뱅크를 조인트 매핑 파일에 반영한다.
 
     읽기부터 기록까지 한 락 안에서 한다 · 락 밖에서 읽으면 그 사이 다른
     프로세스의 수정을 못 보고 덮어쓴다. 안쪽 `atomic_write_with_backup`도 같은
