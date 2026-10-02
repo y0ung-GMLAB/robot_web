@@ -1,4 +1,4 @@
-"""MINAS 드라이브 파라미터(yaml) 생성 · 브레이크 타이밍 · 앱솔루트 모드 · P8
+"""MINAS 드라이브 파라미터(yaml) 생성 · 브레이크 타이밍 · 앱솔루트 모드 · 리밋 스위치 · P8
 
 MINAS 의 드라이브 객체 값(SDO)은 드라이버의 `param_file` 이 가리키는
 `minas.yaml` 의 `items` 목록으로 부팅 때 써진다 · 그 파일은 motion_system
@@ -16,6 +16,13 @@ MINAS 의 드라이브 객체 값(SDO)은 드라이버의 `param_file` 이 가�
                             ⚠ 반영은 드라이브 전원 재투입 후 (MINAS 사양)
     brake_delay_stop_ms     Pr4.37 → 0x3437  정지 중 서보OFF → 브레이크 동작 지연
     brake_delay_run_ms      Pr4.38 → 0x3438  회전 중 서보OFF → 브레이크 동작 설정
+    limit_switch_mode       Pr5.04 → 0x3504  리밋 스위치(구동 금지 입력 POT/NOT)
+                            0 = 사용(눌린 방향만 금지) · 1 = 사용 안 함 ·
+                            2 = 사용(눌리면 Err38 알람)
+                            ⚠ 스위치 없는 축에 0/2 → 못 움직이거나 알람
+
+정지 방식(Pr5.05)·입력 핀 할당(Pr4.00~)은 값의 의미를 매뉴얼로 확인하기
+전까지 넣지 않는다 · 드라이브에 있는 값을 그대로 쓴다.
 
 기반 목록은 motion_system 의 `param/minas.yaml` 을 그대로 읽어 쓰고(있으면),
 없으면 같은 내용의 내장 사본을 쓴다 · 모터별 오버라이드는 registry
@@ -36,6 +43,22 @@ PARAM_FIELDS: Dict[str, Tuple[int, str, str]] = {
     'encoder_absolute_mode': (0x3015, 's16', 'Pr0.15 절대 엔코더 설정 (0 인크리멘털 · 1 절대 · 2 절대-다회전무시) · 전원 재투입 후 반영'),
     'brake_delay_stop_ms': (0x3437, 's16', 'Pr4.37 정지 중 서보OFF 시 브레이크 동작 지연 (ms)'),
     'brake_delay_run_ms': (0x3438, 's16', 'Pr4.38 회전 중 서보OFF 시 브레이크 동작 설정 (ms)'),
+    # 리밋 스위치(구동 금지 입력 POT/NOT) · 2026-10-02
+    # ⚠ 스위치가 **배선되지 않은 축**에 0·2 를 넣으면 b접점 입력이 열린 채라
+    #   드라이브가 「눌림」으로 읽는다 → 그 방향으로 못 움직이거나(0) Err38 알람(2)
+    'limit_switch_mode': (0x3504, 's16', 'Pr5.04 리밋 스위치(구동 금지 입력) (0 사용·그 방향 금지 · 1 사용 안 함 · 2 사용·밟으면 Err38 알람) · 배선된 축에만 0/2'),
+}
+
+#: 정해진 값만 받는 항목 · 범위 밖은 드라이브에 보내지 않는다
+ALLOWED_VALUES: Dict[str, Tuple[int, ...]] = {
+    'encoder_absolute_mode': (0, 1, 2),
+    'limit_switch_mode': (0, 1, 2),
+}
+
+#: 범위로 받는 항목 · 브레이크 시간(ms) · s16 이지만 음수·과대값은 실수다
+RANGE_VALUES: Dict[str, Tuple[int, int]] = {
+    'brake_delay_stop_ms': (0, 10000),
+    'brake_delay_run_ms': (0, 10000),
 }
 
 #: motion_system 기준 param 파일 위치 (서브모듈이 받아져 있을 때)
@@ -86,13 +109,24 @@ EMBEDDED_INTERFACES: List[Dict[str, Any]] = [
 
 
 def param_overrides(motor: Dict[str, Any]) -> Dict[str, int]:
-    """registry 모터에서 드라이브 파라미터 오버라이드만 걷는다 · 정수."""
+    """registry 모터에서 드라이브 파라미터 오버라이드만 걷는다 · 정수.
+
+    허용 값·범위를 벗어난 것은 **버린다** (드라이브 값 유지) · 화면이 먼저
+    거절하지만, 파일을 손으로 고친 경우에도 이상한 값이 드라이브로 가면 안 된다.
+    """
     config = motor.get('config') if isinstance(motor.get('config'), dict) else {}
     overrides: Dict[str, int] = {}
     for key in PARAM_FIELDS:
         value = optional_int(config.get(key))
-        if value is not None:
-            overrides[key] = value
+        if value is None:
+            continue
+        if key in ALLOWED_VALUES and value not in ALLOWED_VALUES[key]:
+            continue
+        if key in RANGE_VALUES:
+            low, high = RANGE_VALUES[key]
+            if not low <= value <= high:
+                continue
+        overrides[key] = value
     return overrides
 
 

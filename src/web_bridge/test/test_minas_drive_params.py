@@ -22,6 +22,38 @@ def test_field_table_pins_the_minas_objects():
     assert minas_params.PARAM_FIELDS['encoder_absolute_mode'][0] == 0x3015   # Pr0.15
     assert minas_params.PARAM_FIELDS['brake_delay_stop_ms'][0] == 0x3437    # Pr4.37
     assert minas_params.PARAM_FIELDS['brake_delay_run_ms'][0] == 0x3438     # Pr4.38
+    assert minas_params.PARAM_FIELDS['limit_switch_mode'][0] == 0x3504      # Pr5.04
+
+
+def test_out_of_range_drive_values_never_reach_the_drive():
+    """화면이 먼저 막지만 · 파일을 손으로 고친 경우에도 이상한 값은 버린다.
+
+    특히 리밋 스위치 · 스위치 없는 축에 0/2 가 가면 못 움직이거나 알람이다 ·
+    그 판단은 사람이 하되, 정해진 0/1/2 밖의 숫자는 아예 보내지 않는다.
+    """
+    motor = {'config': {
+        'limit_switch_mode': 5,          # 0/1/2 밖
+        'encoder_absolute_mode': -1,     # 0/1/2 밖
+        'brake_delay_stop_ms': -50,      # 음수
+        'brake_delay_run_ms': 999999,    # 과대
+    }}
+    assert minas_params.param_overrides(motor) == {}
+
+
+def test_limit_switch_mode_values_pass_through():
+    for value in (0, 1, 2):
+        motor = {'config': {'limit_switch_mode': value}}
+        assert minas_params.param_overrides(motor) == {'limit_switch_mode': value}
+
+
+def test_blank_limit_switch_leaves_the_drive_alone(tmp_path):
+    """빈 칸 = 드라이브에 있는 값 그대로 · 항목 자체를 넣지 않는다."""
+    motor = {'config': {'brake_delay_stop_ms': 100}}   # 리밋 스위치는 안 적음
+    overrides = minas_params.param_overrides(motor)
+    path = minas_params.write_param_file(tmp_path, 4, overrides)
+    payload = yaml.safe_load(Path(path).read_text(encoding='utf-8'))
+    indexes = {int(item['index']) for item in payload['items']}
+    assert 0x3504 not in indexes, '안 적었는데 리밋 스위치 항목이 들어갔다'
 
 
 def test_overrides_are_appended_to_the_item_list(tmp_path):

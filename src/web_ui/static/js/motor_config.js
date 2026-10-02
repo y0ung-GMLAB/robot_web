@@ -1991,9 +1991,37 @@ export function createMotorConfigController({
    *
    * 브레이크 두 값은 ms · 앱솔루트는 Pr0.15 (0 인크리멘털 · 1 절대 ·
    * 2 절대-다회전무시 · **전원 재투입 후 반영**) · 빈 칸 = 드라이브 값 유지.
+   *
+   * 리밋 스위치는 Pr5.04 (0 사용·그 방향 금지 · 1 사용 안 함 · 2 사용·밟으면
+   * Err38 알람) · **스위치가 배선되지 않은 축에 0/2 를 넣으면** b접점 입력이
+   * 열린 채라 「눌림」으로 읽혀 그 방향으로 못 움직이거나 알람이 뜬다.
    */
-  const DRIVE_PARAM_FIELDS = ['brake_delay_stop_ms', 'brake_delay_run_ms', 'encoder_absolute_mode'];
+  const DRIVE_PARAM_FIELDS = [
+    'brake_delay_stop_ms', 'brake_delay_run_ms', 'encoder_absolute_mode', 'limit_switch_mode',
+  ];
   const CONFIG_EDIT_FIELDS = [...AXIS_LIMIT_FIELDS, ...DRIVE_PARAM_FIELDS];
+
+  /** 화면 이름 · 칸 머리와 읽기용 이름 */
+  const DRIVE_PARAM_LABELS = {
+    brake_delay_stop_ms: ['브레이크·정지', '브레이크 정지 지연 (ms)'],
+    brake_delay_run_ms: ['브레이크·동작', '브레이크 동작 설정 (ms)'],
+    encoder_absolute_mode: ['앱솔루트', '앱솔루트 모드 (0 인크리멘털 · 1 절대 · 2 절대-다회전무시)'],
+    limit_switch_mode: ['리밋 스위치', '리밋 스위치 (0 사용·그 방향 금지 · 1 사용 안 함 · 2 사용·알람)'],
+  };
+
+  /** 서버(minas_params.ALLOWED_VALUES · RANGE_VALUES)와 같은 규칙 */
+  function driveParamError(field, text) {
+    if (text === '') return '';
+    const value = Number(text);
+    if (!Number.isInteger(value)) return `${DRIVE_PARAM_LABELS[field][1]} · 정수만 넣을 수 있습니다`;
+    if (['encoder_absolute_mode', 'limit_switch_mode'].includes(field) && ![0, 1, 2].includes(value)) {
+      return `${DRIVE_PARAM_LABELS[field][1]} · 0, 1, 2 중 하나만 됩니다`;
+    }
+    if (['brake_delay_stop_ms', 'brake_delay_run_ms'].includes(field) && (value < 0 || value > 10000)) {
+      return `${DRIVE_PARAM_LABELS[field][1]} · 0 ~ 10000 ms 만 됩니다`;
+    }
+    return '';
+  }
 
   function handleAxisEdit(input) {
     const rowId = input.dataset.axisRowId || '';
@@ -2020,7 +2048,28 @@ export function createMotorConfigController({
         setAxisMessage('운전 한계는 숫자(모터 deg)여야 합니다.');
         return;
       }
+      if (DRIVE_PARAM_FIELDS.includes(field)) {
+        const error = driveParamError(field, text);
+        if (error) {
+          resetAxisEditInput(input, row, field);
+          setAxisMessage(error);
+          return;
+        }
+      }
       setAxisEditValue(row, field, text);
+      if (field === 'limit_switch_mode' && (text === '0' || text === '2')) {
+        // 막지는 않는다 · 배선을 아는 것은 사람이다 · 다만 잘못 켰을 때의 증상을 말해 둔다
+        // (아래 일반 「변경됨」 문구가 덮지 않게 여기서 그리고 끝낸다)
+        lastAxisRenderSignature = '';
+        renderAxisSettings();
+        setAxisMessage(
+          '리밋 스위치를 켰습니다 · 스위치가 배선된 축에만 쓰세요 · 배선이 없으면 '
+          + (text === '0' ? '그 방향으로 못 움직입니다' : '바로 Err38 알람이 뜹니다')
+          + ' · 저장 후 「장비에 적용 · 모터 재시작」에서 반영',
+          true,
+        );
+        return;
+      }
     } else {
       resetAxisEditInput(input, row, field);
       return;
@@ -2424,9 +2473,9 @@ export function createMotorConfigController({
                       placeholder="${escapeHtml(view.limits[field].placeholder)}"${disabled}>
                   </label>`).join('')}
                 ${DRIVE_PARAM_FIELDS.map((field) => `
-                  <label class="axis-limit-field axis-drive-field"><span>${{ brake_delay_stop_ms: '브레이크·정지', brake_delay_run_ms: '브레이크·동작', encoder_absolute_mode: '앱솔루트' }[field]}</span>
+                  <label class="axis-limit-field axis-drive-field" title="${escapeHtml(DRIVE_PARAM_LABELS[field][1])}"><span>${DRIVE_PARAM_LABELS[field][0]}</span>
                     <input class="axis-edit-input axis-limit-input mono" type="text" inputmode="numeric"
-                      aria-label="드라이브 ${{ brake_delay_stop_ms: '브레이크 정지 지연', brake_delay_run_ms: '브레이크 동작 설정', encoder_absolute_mode: '앱솔루트 모드' }[field]}"
+                      aria-label="드라이브 ${escapeHtml(DRIVE_PARAM_LABELS[field][1])}"
                       data-axis-edit="${field}" data-axis-row-id="${escapeHtml(row.id)}"
                       value="${escapeHtml(view.driveParams[field])}"
                       placeholder="유지"${disabled}>
