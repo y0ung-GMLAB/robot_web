@@ -1,0 +1,44 @@
+# 감속기 카탈로그 · 로봇 무관 공용 · 로봇 팩은 쓰는 항목만 catalog/ 에 복사해 간다
+#
+# 이름: {ratio, t2n_nm, t2b_nm, max_input_rpm} 필수 · estop_nm 선택
+#   t2n_nm   정격 출력 토크 · t2b_nm  가감속 허용 토크 · estop_nm  비상정지 토크
+# 같은 형번이라도 감속비가 여럿이면 주문 감속비 기준으로 항목을 나눈다.
+
+KHY-90-2-RV:
+  vendor: 흥진ATG
+  kind: hypoid 2-stage
+  ratio: 150
+  t2n_nm: 95
+  t2b_nm: 142.5
+  estop_nm: 285
+  max_input_rpm: 6000
+  source: http://www.atg21.co.kr/bbs/board.php?bo_table=s2_1&wr_id=133
+
+KSD-90-2:
+  vendor: 흥진ATG
+  kind: planetary 2-stage
+  ratio: 100
+  t2n_nm: 136
+  t2b_nm: 244.8
+  estop_nm: 408
+  max_input_rpm: 6000
+  source: http://www.atg21.co.kr/bbs/board.php?bo_table=s2_1&wr_id=23
+
+KHY55-R44V:
+  vendor: 흥진ATG
+  kind: hypoid
+  ratio: 50
+  t2n_nm: 35
+  t2b_nm: 52.5
+  estop_nm: 105
+  max_input_rpm: 6000
+
+PGX44-H:
+  vendor: 흥진ATG
+  kind: planetary 2-stage
+  ratio: 35
+  t2n_nm: 13
+  t2b_nm: 23.4
+  estop_nm: 39
+  max_input_rpm: 6000
+  source: http://www.atg21.co.kr/bbs/board.php?bo_table=s2_1&wr_id=34

@@ -492,6 +492,7 @@ td.empty { color: #5b6673; }
 .mujoco-badge.computing { background: var(--panel-2); border-color: var(--line-strong); color: var(--muted); }
 .mujoco-badge.ready { background: rgb(70 192 106 / 15%); border-color: rgb(70 192 106 / 45%); color: var(--green); }
 .mujoco-badge.failed { background: rgb(229 83 75 / 15%); border-color: rgb(229 83 75 / 45%); color: var(--red); }
+.mujoco-badge.stale { background: rgb(217 166 46 / 14%); border-color: rgb(217 166 46 / 45%); color: var(--yellow); }
 
 /* ---------- 11. 화면별 수선 ---------- */
 

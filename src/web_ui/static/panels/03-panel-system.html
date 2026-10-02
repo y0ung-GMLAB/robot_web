@@ -45,6 +45,38 @@
             <div class="registry-message axis-apply-warning system-restart-warning">프로그램 재시작 · 서보 상태 유지 │ 모터 제어 재시작 · AC Servo OFF → 자동 ON 가능</div>
           </section>
 
+          <!-- 로봇 팩 · PC 전역 (PC 1대 = 로봇 1대) · 축·모터·환경·MuJoCo 모델 zip
+               모터 설정·모션축 설정은 바꾸지 않는다 · 차이는 표시만 -->
+          <section class="robot-pack-card" aria-label="로봇 팩">
+            <div class="section-head compact">
+              <strong>로봇 팩</strong>
+              <span id="robotPackSummary">확인 중</span>
+            </div>
+            <div class="status-strip robot-pack-status">
+              <div><span>지금 팩</span><strong id="robotPackCurrent">-</strong></div>
+              <div><span>올린 시각</span><strong id="robotPackUploadedAt">-</strong></div>
+              <div><span>이전 팩</span><strong id="robotPackPrevious">-</strong></div>
+            </div>
+            <div class="registry-actions robot-pack-actions">
+              <label class="robot-pack-drop" id="robotPackDropZone">
+                <input id="robotPackFileInput" type="file" accept=".zip,application/zip" hidden>
+                <span>zip 놓기 · 눌러서 고르기</span>
+              </label>
+              <button id="robotPackRollbackButton" type="button" disabled>이전 팩으로 되돌리기</button>
+              <button id="robotPackDiffButton" type="button">모션축 설정과 비교</button>
+            </div>
+            <div class="registry-message" id="robotPackMessage" role="status"></div>
+            <ul class="robot-pack-errors hidden" id="robotPackErrors"></ul>
+            <div class="table-wrap robot-pack-diff-wrap hidden" id="robotPackDiffWrap">
+              <table class="robot-pack-diff">
+                <thead>
+                  <tr><th>모션 ID</th><th>관절</th><th>감속비 (팩 / 설정)</th><th>범위 (팩 / 설정)</th><th>차이</th></tr>
+                </thead>
+                <tbody id="robotPackDiffRows"></tbody>
+              </table>
+            </div>
+          </section>
+
         </div>
 
       </section>

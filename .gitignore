@@ -21,6 +21,12 @@ backups/
 /motion_data/
 /runtime/
 
+# Per-PC robot pack (웹 업로드 · PC 1대 = 로봇 1대) · 이전 팩 · 검사 중 임시
+/robot_pack/
+/robot_pack.prev/
+/robot_pack.incoming/
+/robot_pack.swap/
+
 # Per-PC global DDS coordination settings
 /config/motion_coordination.yaml
 /config/.motion_coordination.yaml.lock

@@ -1812,7 +1812,7 @@ export function createMotionDataController({
     if (el.previewMotionFileButton) {
       const state = mujocoState(file);
       const LABELS = {
-        missing: '무조코 계산', failed: '다시 계산',
+        missing: '무조코 계산', failed: '다시 계산', stale: '다시 계산',
         computing: '계산 중…', ready: '무조코 재생', direct: '무조코 재생',
       };
       el.previewMotionFileButton.textContent = LABELS[state] || '무조코';
@@ -1821,12 +1821,14 @@ export function createMotionDataController({
       el.previewMotionFileButton.title = !file
         ? '애니메이션을 먼저 선택하세요'
         : (state === '' || state === 'unavailable'
-          ? '무조코 설정이 없습니다 · config/animation_preview.yaml (로봇마다 다릅니다)'
+          ? '무조코 설정이 없습니다 · 로봇 팩(시스템 정보) 또는 config/animation_preview.yaml'
           : (state === 'computing'
             ? '무거운 물리 계산이 도는 중입니다 · 끝나면 틀 수 있습니다'
-            : (state === 'missing' || state === 'failed'
-              ? '무거운 물리 계산을 시작합니다 · 끝나면 같이 보기가 켜집니다'
-              : '계산된 결과를 뷰어로 틉니다 · 창은 서버 PC 화면에 뜹니다')));
+            : (state === 'stale'
+              ? `${file.preview?.message || '로봇 팩 변경'} · 누르면 지금 팩으로 다시 계산합니다`
+              : (state === 'missing' || state === 'failed'
+                ? '무거운 물리 계산을 시작합니다 · 끝나면 같이 보기가 켜집니다'
+                : '계산된 결과를 뷰어로 틉니다 · 창은 서버 PC 화면에 뜹니다'))));
     }
     // 같이 보기 토글 · 재생 등록된 파일의 계산이 끝났을 때만 켤 수 있다
     const mujocoRegisteredFile = files.find(
@@ -1834,7 +1836,9 @@ export function createMotionDataController({
     ) || null;
     const registeredState = mujocoState(mujocoRegisteredFile);
     if (el.motionRunMujocoToggle) {
-      const usable = registeredState === 'ready' || registeredState === 'direct';
+      // stale(팩 변경 뒤 옛 결과)도 같이 보기는 허용 · 다시 계산은 무조코 버튼
+      const usable = registeredState === 'ready' || registeredState === 'direct'
+        || registeredState === 'stale';
       el.motionRunMujocoToggle.disabled = !usable;
       if (!usable) el.motionRunMujocoToggle.checked = false;
       el.motionRunMujocoToggle.title = usable
@@ -2338,19 +2342,23 @@ export function createMotionDataController({
     if (state === 'computing') return '<span class="mujoco-badge computing" title="무거운 물리 계산이 도는 중 · 끝나면 같이 보기가 켜집니다">무조코 계산 중</span>';
     if (state === 'ready') return '<span class="mujoco-badge ready" title="계산 완료 · 무조코 재생·같이 보기 가능">무조코 준비됨</span>';
     if (state === 'failed') return '<span class="mujoco-badge failed" title="마지막 계산이 실패했습니다 · 다시 계산을 누르세요">계산 실패</span>';
+    if (state === 'stale') {
+      const why = escapeHtml(file?.preview?.message || '로봇 팩 변경');
+      return `<span class="mujoco-badge stale" title="${why}">다시 계산 필요</span>`;
+    }
     return '';
   }
 
   /** 무조코 버튼 · 계산이 끝난 것만 튼다 · P7
    *
    * missing → 「무조코 계산」(시작) · computing → 그레이 「계산 중…」 ·
-   * ready/direct → 「무조코 재생」 · failed → 「다시 계산」
+   * ready/direct → 「무조코 재생」 · failed/stale → 「다시 계산」
    */
   async function previewSelectedMotionFile() {
     if (!selectedFileId) return;
     const state = mujocoState(selectedFile);
     try {
-      if (state === 'missing' || state === 'failed') {
+      if (state === 'missing' || state === 'failed' || state === 'stale') {
         const result = await precomputeMotionFile(selectedFileId);
         setMessage(result?.message || '무조코 계산 시작');
         await loadFiles(selectedFileId);

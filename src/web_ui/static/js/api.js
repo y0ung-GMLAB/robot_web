@@ -215,9 +215,13 @@ export const clearMotorRuntimeApplication = () => request('POST', '/api/system/m
  * 어떤 화면이 어느 엔드포인트를 쓰는지 한눈에 보인다. 이 파일 안에 이미
  * 요청은 전부 이 한 함수를 지난다.
  */
-async function request(method, path, { body, timeoutMs, projectScoped = true } = {}) {
+async function request(method, path, { body, rawBody, contentType, timeoutMs, projectScoped = true } = {}) {
   const options = { method };
-  if (body !== undefined) {
+  if (rawBody !== undefined) {
+    // 파일 그대로 (zip 등) · multipart 를 쓰지 않는다
+    options.headers = { 'Content-Type': contentType || 'application/octet-stream' };
+    options.body = rawBody;
+  } else if (body !== undefined) {
     options.headers = { 'Content-Type': 'application/json' };
     options.body = JSON.stringify(body);
   }
@@ -368,6 +372,18 @@ export const setMotionRunLiveOverride = (payload) =>
   request('POST', '/api/motion-run/live-override', { body: payload });
 
 export const stopMotionRunAfterCycle = () => request('POST', '/api/motion-run/stop-after-cycle');
+
+// 로봇 팩 · PC 전역 (PC 1대 = 로봇 1대) · 축·모터·환경·MuJoCo 모델 묶음
+export const fetchRobotPack = () => request('GET', '/api/robot-pack');
+
+/** zip 파일 그대로 올린다 · 검사를 하나라도 못 넘으면 서버가 교체하지 않는다 */
+export const uploadRobotPack = (file) =>
+  request('PUT', '/api/robot-pack', { rawBody: file, contentType: 'application/zip', timeoutMs: 240000 });
+
+export const rollbackRobotPack = () => request('POST', '/api/robot-pack/rollback');
+
+/** 팩 ↔ 등록된 모션축 설정 차이 · 표시만 */
+export const fetchRobotPackMappingDiff = () => request('GET', '/api/robot-pack/mapping-diff');
 
 export const requestMotionSafetyStop = () => request('POST', '/api/safety/motion-stop');
 

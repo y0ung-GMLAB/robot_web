@@ -1,7 +1,8 @@
 # 무조코(시뮬) 미리보기 명령 · 복사해서 animation_preview.yaml 로 저장
 #
-# 로봇마다 모델·스크립트가 다르다 · 플랫폼은 이 파일의 명령 틀만 알고,
-# 내용은 각 로봇 PC 가 채운다 (아래는 플로팅 헤드 예시).
+# **로봇 팩 우선** · 시스템 정보 → 로봇 팩으로 올린 팩에 preview.yaml 이 있으면
+# 그것을 쓰고 이 파일은 보지 않는다 · 팩이 없거나 팩에 preview.yaml 이 없을 때만
+# 이 파일을 쓴다 (형식은 팩의 preview.yaml 과 같다).
 #
 # 두 단계:
 #   precompute  무거운 물리 계산 · 업로드되면 자동 시작 · result 파일이
@@ -10,8 +11,11 @@
 #
 # 치환: {motion_path} = 애니메이션 .json 경로 · {motion_stem} = 확장자 뺀 경로
 #       {result} = precompute.result 경로 · {fps} = 화면에서 고른 30/60/120/144
-# 셸을 거치지 않으므로 인자를 한 줄씩 적는다 · cwd = 명령 실행 폴더.
+#       {stack} = 스택(워크스페이스) 루트 · {pack} = 로봇 팩 폴더 (robot_pack/)
+# 셸을 거치지 않으므로 인자를 한 줄씩 적는다 · cwd = 명령 실행 폴더
+# (팩 preview.yaml 에서 생략하면 팩 폴더 · 이 파일에서 생략하면 스택 루트).
 #
+# 공용 실행기 = scripts/sim/ (sim_run · replay_run · view_run) · 로봇 값은 전부 팩에서.
 # precompute 없이 preview 만 적으면 게이트 없이 바로 튼다(direct) ·
 # 물리 없는 kinematic 뷰어처럼 계산이 필요 없는 로봇용.
 
@@ -22,9 +26,10 @@ precompute:
     - --no-project
     - --with=mujoco
     - --with=numpy
+    - --with=pyyaml
     - python
-    - sim_run.py
-    - ../fh_1800_wires_R011.xml
+    - '{stack}/scripts/sim/sim_run.py'
+    - '{pack}'
     - '{motion_path}'
     - '{motion_stem}.sim.csv'
   result: '{motion_stem}.sim.npz'   # sim_run 이 csv 옆에 npz 를 남긴다
@@ -36,10 +41,10 @@ preview:
     - --no-project
     - --with=mujoco
     - --with=numpy
+    - --with=pyyaml
     - python
-    - replay_run.py       # Space 일시정지 · 방향키 탐색·배속 · 모델 경로는 npz 안에
+    - '{stack}/scripts/sim/replay_run.py'   # Space 일시정지 · 방향키 탐색·배속 · 모델 경로는 npz 안에
     - '{result}'
     - '{fps}'
 
 fps: 60
-cwd: /home/USER/floating_share/floating_1800/sim/scripts

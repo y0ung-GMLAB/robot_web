@@ -40,6 +40,7 @@ import {
 import { installFeedbackPresentation } from './ui_feedback.js';
 import { createServoAlarmController } from './servo_alarm.js';
 import { createCoordinationController } from './coordination.js';
+import { createRobotPackController } from './robot_pack.js';
 
 const el = getElements();
 const operationProgress = createOperationProgressManager({ el });
@@ -77,6 +78,7 @@ const appState = {
 };
 const workspaceRouteState = createWorkspaceRouteState('monitoring');
 const coordination = createCoordinationController({ el });
+const robotPack = createRobotPackController({ el });
 let projectExplorer = null;
 const RESTART_READY_STABLE_MS = 3500;
 const RESTART_TIMEOUT_MS = 45000;
@@ -1609,6 +1611,7 @@ if (el.workspaceTabs) {
       if (target === 'config') motorConfig.fetchRegistry();
       if (target === 'servo-errors') servoAlarm.refresh();
       if (target === 'motion-run') coordination.refresh();
+      if (target === 'system') robotPack.refresh();
       projectExplorer.refresh(true);
       return;
     }
@@ -1621,6 +1624,7 @@ if (el.workspaceTabs) {
     if (target === 'config') motorConfig.fetchRegistry();
     if (target === 'servo-errors') servoAlarm.refresh();
     if (target === 'motion-run') coordination.refresh();
+    if (target === 'system') robotPack.refresh();
     projectExplorer.refresh(true);
   });
 }
@@ -1634,6 +1638,8 @@ motionData.bindEvents();
 projectExplorer.bindEvents();
 motorEventLog.bindEvents();
 servoAlarm.bindEvents();
+robotPack.bindEvents();
+robotPack.refresh();
 coordination.start();
 renderWorkspacePanel();
 connectSocket();

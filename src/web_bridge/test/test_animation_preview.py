@@ -52,6 +52,7 @@ def setup_function(_):
     # 모듈 전역 실행부(도는 계산 기록)를 시험마다 비운다
     animation_preview._RUNNING.clear()
     animation_preview._LAST_RC.clear()
+    animation_preview._PENDING_META.clear()
 
 
 def test_without_config_the_button_says_why(tmp_path):
@@ -179,3 +180,113 @@ def test_bridge_launches_the_companion_when_playback_turns_running():
     assert "@app.post('/api/motion-files/{file_id}/preview')" in routes
     assert "@app.post('/api/motion-files/{file_id}/preview-precompute')" in routes
     assert 'animation_preview.annotate_files' in routes
+
+
+# --------------------------------------------------------------------------- #
+# 로봇 팩 · 팩 preview.yaml 우선 · {stack} {pack} 치환 · 팩이 바뀌면 다시 계산 필요
+# --------------------------------------------------------------------------- #
+
+PACK_PREVIEW = (
+    'precompute:\n'
+    '  command:\n'
+    "    - '{stack}/scripts/sim/sim_run.py'\n"
+    "    - '{pack}'\n"
+    "    - '{motion_path}'\n"
+    "  result: '{motion_stem}.sim.npz'\n"
+    'preview:\n'
+    '  command:\n'
+    "    - '{stack}/scripts/sim/replay_run.py'\n"
+    "    - '{result}'\n"
+)
+
+
+def _pack(workspace, preview=PACK_PREVIEW, version='1.0', model='<mujoco/>'):
+    pack = workspace / 'robot_pack'
+    pack.mkdir(exist_ok=True)
+    (pack / 'pack.yaml').write_text(
+        f"name: demo\nversion: '{version}'\ncreated: '2026-10-02'\n", encoding='utf-8',
+    )
+    (pack / 'robot.yaml').write_text('axes: []\n', encoding='utf-8')
+    (pack / 'model.xml').write_text(model, encoding='utf-8')
+    if preview is not None:
+        (pack / 'preview.yaml').write_text(preview, encoding='utf-8')
+    return pack
+
+
+def _finished_run(spawned):
+    def spawn(args, **kwargs):
+        spawned.append((args, kwargs))
+        return SimpleNamespace(poll=lambda: 0)
+    return spawn
+
+
+def test_pack_preview_wins_over_the_pc_config(tmp_path):
+    workspace = _workspace(tmp_path, GATED)
+    pack = _pack(workspace)
+    motion = _motion(tmp_path)
+    spawned = []
+    result = animation_preview.launch_precompute(workspace, motion, spawn=_finished_run(spawned))
+    assert result['success'] is True
+    [(args, kwargs)] = spawned
+    assert args == [f'{workspace}/scripts/sim/sim_run.py', str(pack), str(motion)]
+    assert kwargs['cwd'] == str(pack)          # 팩 쪽 cwd 기본값 = 팩 폴더
+
+
+def test_pc_config_is_used_when_the_pack_has_no_preview(tmp_path):
+    workspace = _workspace(tmp_path, GATED)
+    _pack(workspace, preview=None)
+    config = animation_preview.preview_config(workspace)
+    assert config['_source'] == 'config'
+    assert config['precompute']['command'][0] == 'simulate'
+
+
+def test_result_from_the_same_pack_is_ready(tmp_path):
+    workspace = _workspace(tmp_path)
+    _pack(workspace)
+    motion = _motion(tmp_path)
+    animation_preview.launch_precompute(workspace, motion, spawn=_finished_run([]))
+    result = Path(str(motion)[:-len('.json')] + '.sim.npz')
+    result.write_bytes(b'npz')
+    state = animation_preview.preview_state(workspace, motion)   # 거두면서 meta 기록
+    assert state['state'] == 'ready'
+    meta = animation_preview.meta_path_for(result)
+    assert meta.name == 'demo.sim.meta.json'
+    assert '"version": "1.0"' in meta.read_text(encoding='utf-8')
+
+
+def test_changing_the_pack_marks_results_stale_but_viewable(tmp_path):
+    workspace = _workspace(tmp_path)
+    _pack(workspace)
+    motion = _motion(tmp_path)
+    animation_preview.launch_precompute(workspace, motion, spawn=_finished_run([]))
+    Path(str(motion)[:-len('.json')] + '.sim.npz').write_bytes(b'npz')
+    assert animation_preview.preview_state(workspace, motion)['state'] == 'ready'
+
+    _pack(workspace, version='2.0', model='<mujoco model="new"/>')
+    state = animation_preview.preview_state(workspace, motion)
+    assert state['state'] == 'stale'
+    assert 'demo 1.0' in state['message']
+    spawned = []
+    viewed = animation_preview.launch_preview(
+        workspace, motion, spawn=lambda args, **kwargs: spawned.append(args),
+    )
+    assert viewed['success'] is True and spawned
+
+
+def test_failed_recompute_does_not_bless_the_old_result(tmp_path):
+    workspace = _workspace(tmp_path)
+    _pack(workspace)
+    motion = _motion(tmp_path)
+    Path(str(motion)[:-len('.json')] + '.sim.npz').write_bytes(b'npz')   # 팩 기록 없는 옛 결과
+    assert animation_preview.preview_state(workspace, motion)['state'] == 'stale'
+    animation_preview.launch_precompute(
+        workspace, motion, spawn=lambda *a, **k: SimpleNamespace(poll=lambda: 1),
+    )
+    assert animation_preview.preview_state(workspace, motion)['state'] == 'stale'
+
+
+def test_without_a_pack_nothing_is_stale(tmp_path):
+    workspace = _workspace(tmp_path, GATED)
+    motion = _motion(tmp_path)
+    Path(str(motion)[:-len('.json')] + '.sim.npz').write_bytes(b'npz')
+    assert animation_preview.preview_state(workspace, motion)['state'] == 'ready'

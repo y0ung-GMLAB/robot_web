@@ -52,6 +52,7 @@ from .routes import (
     register_docs_routes,
     register_motion_trace_routes,
     register_stream_routes,
+    register_robot_pack_routes,
 )
 # 재수출 · 외부에서 bridge_node 경유로 참조한다
 from .project_tree import _project_tree_category_signature  # noqa: F401
@@ -1831,7 +1832,7 @@ class MotionWebBridge(Node):
             return '무조코 같이 보기: 재생할 애니메이션이 정해지지 않았습니다'
         motion_path = self.project_repository.export_path(project_id, 'motions', file_id)
         state = animation_preview.preview_state(self.workspace_root, motion_path)
-        if state['state'] not in ('ready', 'direct'):
+        if state['state'] not in ('ready', 'direct', 'stale'):
             return (
                 '무조코 같이 보기는 계산이 끝난 뒤에 켤 수 있습니다 · '
                 + str(state.get('message') or f"지금 상태: {state['state']}")
@@ -2168,6 +2169,7 @@ def create_app(bridge: MotionWebBridge) -> FastAPI:
     register_docs_routes(app, bridge)
     register_motion_trace_routes(app, bridge, project_call)
     register_stream_routes(app, bridge)
+    register_robot_pack_routes(app, bridge)
 
     return app
 

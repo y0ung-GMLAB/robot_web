@@ -619,3 +619,57 @@
 .timezone-howto .timezone-mismatch:empty {
   display: none;
 }
+
+/* 로봇 팩 · PC 전역 · 시스템 정보 아래 한 줄 전체 */
+.system-runtime-grid > .robot-pack-card {
+  grid-column: 1 / -1;
+  min-width: 0;
+  margin: 0;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+}
+
+.robot-pack-status {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  margin-bottom: 8px;
+}
+
+.robot-pack-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 7px;
+  align-items: stretch;
+}
+
+.robot-pack-drop {
+  display: flex;
+  flex: 1 1 260px;
+  align-items: center;
+  justify-content: center;
+  min-height: 38px;
+  padding: 6px 12px;
+  border: 1px dashed var(--line-strong);
+  border-radius: 8px;
+  cursor: pointer;
+}
+
+.robot-pack-drop.dragging {
+  border-style: solid;
+  background: var(--panel-2);
+}
+
+.robot-pack-errors {
+  margin: 6px 0 0;
+  padding-left: 18px;
+  color: var(--red);
+  font-size: 13px;
+}
+
+.robot-pack-diff-wrap {
+  margin-top: 8px;
+}
+
+.robot-pack-diff tr.differs td {
+  color: var(--red);
+}

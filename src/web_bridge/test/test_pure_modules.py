@@ -20,6 +20,7 @@ from motion_web_bridge import (
     motor_config_build,
     motor_config_rules,
     motor_identity,
+    robot_pack_service,
 )
 
 #: 검사 대상 순수 모듈 · 분해가 진행되면 여기에 추가한다
@@ -30,6 +31,7 @@ PURE_MODULES = [
     motion_file_analysis,
     desktop_shortcut,
     ethercat_project_compat,
+    robot_pack_service,
 ]
 
 #: 순수 모듈이 기대어도 되는 것 · 공용 커널과 표준 라이브러리

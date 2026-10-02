@@ -30,6 +30,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / 'src' / 'web_bridge'))
+sys.path.insert(0, str(ROOT / 'src' / 'motion_common'))
 
 from fastapi import FastAPI, Request, WebSocket, WebSocketDisconnect  # noqa: E402
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse  # noqa: E402
@@ -487,6 +488,48 @@ async def fake_jog(request: Request):
     state['targets'][axis] = state['positions'][axis] + delta
     return {'success': True, 'message': f'프리뷰 조그 {delta:+.2f}°',
             'project_generation': state['generation']}
+
+
+# --------------------------------------------------------------------------- #
+# 로봇 팩 · 진짜 서비스(robot_pack_service)를 그대로 · 놓는 곳만 runtime/ 아래
+# --------------------------------------------------------------------------- #
+
+DEV_PACK_WORKSPACE = ROOT / 'runtime' / 'dev_preview'
+
+
+def _pack_checker(workspace_root, pack_dir):
+    from motion_web_bridge import robot_pack_service
+    return robot_pack_service.run_checker(ROOT, pack_dir)   # 실행기는 저장소의 scripts/sim
+
+
+@app.get('/api/robot-pack')
+async def robot_pack_status():
+    from motion_web_bridge import robot_pack_service
+    return robot_pack_service.pack_status(DEV_PACK_WORKSPACE)
+
+
+@app.put('/api/robot-pack')
+async def upload_robot_pack(request: Request):
+    from motion_web_bridge import robot_pack_service
+    DEV_PACK_WORKSPACE.mkdir(parents=True, exist_ok=True)
+    data = await request.body()
+    return await asyncio.to_thread(
+        robot_pack_service.install_pack, DEV_PACK_WORKSPACE, data, checker=_pack_checker,
+    )
+
+
+@app.post('/api/robot-pack/rollback')
+async def rollback_robot_pack():
+    from motion_web_bridge import robot_pack_service
+    return robot_pack_service.rollback_pack(DEV_PACK_WORKSPACE)
+
+
+@app.get('/api/robot-pack/mapping-diff')
+async def robot_pack_mapping_diff():
+    from motion_web_bridge import robot_pack_service
+    result = robot_pack_service.mapping_diff(DEV_PACK_WORKSPACE, {'mappings': mapping_rows()})
+    result['mapping_file'] = 'dev_preview (가짜 모션축 설정)'
+    return result
 
 
 @app.put('/api/schedule/mode')
