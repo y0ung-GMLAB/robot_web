@@ -44,7 +44,7 @@ STATIC = ROOT / 'src' / 'web_ui' / 'static'
 # --------------------------------------------------------------------------- #
 
 JOINTS = [
-    # (조인트, 축, 감속비, 최소, 최대)
+    # (모션 ID, 축, 감속비, 최소, 최대)
     ('Neck_Pitch', 0, 150.0, -10.0, 13.0),
     ('Neck_Yaw', 1, 100.0, -15.0, 15.0),
     ('Eye_Pitch', 2, 50.0, -10.0, 10.0),
@@ -417,7 +417,7 @@ CANNED = {
         'success': True,
         'files': [MAPPING_FILE],
         'active_file_id': 'motion_axis.yaml',
-        'message': '프리뷰 조인트 연결',
+        'message': '프리뷰 모션축 설정',
     },
     ('GET', '/api/motion-mappings/motion_axis.yaml'): lambda: {
         'success': True,

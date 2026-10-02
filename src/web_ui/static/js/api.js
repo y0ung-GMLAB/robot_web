@@ -338,7 +338,7 @@ export const saveMotionMapping = (payload) => request('POST', '/api/motion-mappi
 
 export const validateMotionMapping = (payload) => request('POST', '/api/motion-mappings/validate', { body: payload });
 
-/** 재생 등록만 바꾼다 · 조인트 연결은 안 건드린다 · §6-160 */
+/** 재생 등록만 바꾼다 · 모션축 설정은 안 건드린다 · §6-160 */
 export const saveRegisteredMotionFile = (payload) => request('POST', '/api/motion-mappings/motion-file', { body: payload });
 
 
@@ -363,7 +363,7 @@ export const previewMotionFile = (fileId, fps) =>
 export const precomputeMotionFile = (fileId) =>
   request('POST', `/api/motion-files/${encodeURIComponent(fileId)}/preview-precompute`);
 
-/** 재생 라이브 오버라이드 · 조인트 뮤트·좁힌 리밋 · 재생 중에도 듣는다 · P7 */
+/** 재생 라이브 오버라이드 · 모션축 뮤트·좁힌 리밋 · 재생 중에도 듣는다 · P7 */
 export const setMotionRunLiveOverride = (payload) =>
   request('POST', '/api/motion-run/live-override', { body: payload });
 

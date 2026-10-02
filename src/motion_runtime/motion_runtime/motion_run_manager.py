@@ -151,7 +151,7 @@ class MotionRunManager(Node):
         self._latest_safety_status: Optional[Dict[str, Any]] = None
         self._latest_safety_status_at: Optional[float] = None
         self._run_lock = threading.RLock()
-        #: 재생 라이브 오버라이드 · 조인트 뮤트·좁힌 리밋 · P7
+        #: 재생 라이브 오버라이드 · 모션축 뮤트·좁힌 리밋 · P7
         #:
         #: 재생 **중에도** 바꿀 수 있다 · 발행 직전에 읽어서 적용하므로
         #: 다음 20ms 틱부터 듣는다 · 계획(plan)은 건드리지 않는다.
@@ -1291,16 +1291,16 @@ class MotionRunManager(Node):
             return {key: dict(value) for key, value in self._live_overrides.items()}
 
     def _set_live_override(self, payload: Dict[str, Any]) -> Dict[str, Any]:
-        """조인트 하나의 뮤트·라이브 리밋을 바꾼다 · 재생 중에도 듣는다.
+        """모션 ID 하나의 뮤트·라이브 리밋을 바꾼다 · 재생 중에도 듣는다.
 
-        뮤트 = 그 조인트의 명령 송출 제외 · PP 드라이브는 마지막 목표에
-        머무르므로 모터는 그 자리에 선다(서보는 켠 채) · 리밋 = 조인트 값을
+        뮤트 = 그 모션축의 명령 송출 제외 · PP 드라이브는 마지막 목표에
+        머무르므로 모터는 그 자리에 선다(서보는 켠 채) · 리밋 = 모션값을
         [lo, hi] 로 산 채로 자르고 그 축만 모터 목표를 다시 계산한다.
-        매핑 파일은 건드리지 않는다 · 영구 반영은 조인트 연결에서 한다.
+        매핑 파일은 건드리지 않는다 · 영구 반영은 모션축 설정에서 한다.
         """
         motion_id = str(payload.get('motion_id') or '').strip()
         if not motion_id:
-            raise ValueError('조인트(motion_id)가 필요합니다')
+            raise ValueError('모션 ID(motion_id)가 필요합니다')
         with self._live_override_lock:
             entry = dict(self._live_overrides.get(motion_id) or {})
             if 'muted' in payload:
@@ -1327,7 +1327,7 @@ class MotionRunManager(Node):
         return {'success': True, 'live_overrides': snapshot}
 
     def _clear_live_overrides(self) -> None:
-        """프로젝트·매핑이 바뀌면 지운다 · 옛 조인트 이름에 걸어 둔
+        """프로젝트·매핑이 바뀌면 지운다 · 옛 모션 ID에 걸어 둔
         오버라이드가 새 연결에 몰래 따라붙으면 안 된다."""
         with self._live_override_lock:
             if not self._live_overrides:

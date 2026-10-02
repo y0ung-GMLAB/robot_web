@@ -1,7 +1,7 @@
-/** 조그 단위 토글 · 기본은 조인트 deg(감속비·방향 적용), 끄면 모터 deg · P4
+/** 조그 단위 토글 · 기본은 모션축 deg(감속비·방향 적용), 끄면 모터 deg · P4
  *
  * 전에는 조그가 **항상 모터 deg** 였다 · 목(1:150)에서 1도를 치면 모터축
- * 1도 = 조인트 0.0067도만 움직여서, 사람은 "조그가 안 된다" 고 읽었다
+ * 1도 = 관절이 0.0067도만 움직여서, 사람은 "조그가 안 된다" 고 읽었다
  * (2026-09-30 미니PC에서 실제로 그랬다).
  */
 
@@ -42,8 +42,8 @@ test('the joint row comes from the saved mapping through main.js', () => {
 test('joint mode is the default and the user override resets per motor', () => {
   assert.match(controller, /if \(!el\.motionTestJogJointMode\.dataset\.userSet\)/);
   assert.match(controller, /delete el\.motionTestJogJointMode\.dataset\.userSet/);
-  // 연결된 조인트가 없으면 꺼지고 그 이유를 말한다
-  assert.match(controller, /이 모터에 연결된 조인트가 없습니다/);
+  // 연결된 모션 ID가 없으면 꺼지고 그 이유를 말한다
+  assert.match(controller, /이 모터에 연결된 모션 ID가 없습니다/);
 });
 
 test('the jog cap shrinks with the ratio so the motor-side 360° holds', () => {

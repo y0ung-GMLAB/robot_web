@@ -144,7 +144,7 @@ def write_param_file(
     out_path = out_dir / f'driver_{driver_id}.yaml'
     header = (
         '# 이 파일은 저장할 때마다 다시 만들어진다 · 손으로 고치지 말 것\n'
-        '# (모터·조인트 화면의 드라이브 설정 → config/minas_params/) · P8\n'
+        '# (모터 관리 화면의 드라이브 설정 → config/minas_params/) · P8\n'
         + ''.join(
             f'# {key}={overrides[key]} · {PARAM_FIELDS[key][2]}\n'
             for key in sorted(overrides)

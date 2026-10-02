@@ -22,7 +22,7 @@ PROJECT_CATEGORIES = {
 }
 DISPLAY_NAMES = {
     'motor_axes': '모터 설정',
-    'motion_axis_matching': '조인트 연결',
+    'motion_axis_matching': '모션축 설정',
     'motions': '애니메이션',
     'layers': '레이어',
 }

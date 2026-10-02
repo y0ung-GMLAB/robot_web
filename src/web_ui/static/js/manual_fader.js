@@ -1,18 +1,18 @@
-/** 수동 페이더 · 조인트를 잡고 끌면 실시간으로 모터가 따라온다 · §6-310
+/** 수동 페이더 · 모션 ID를 잡고 끌면 실시간으로 모터가 따라온다 · §6-310
  *
  * 흐름 · 슬라이더 input → 50ms(20Hz) 묶음 전송 → `/ws/manual-stream` →
  * supervisor 스트림 경로(축별 임대 0.15s · 재생이 선점 · 준비 검사) →
  * 모터 · 놓으면(change) release 가 나가 **지금 서 있는 자리**에 선다.
  *
- * 변환은 여기(화면)가 한다 · 조인트 deg → 모터 deg:
+ * 변환은 여기(화면)가 한다 · 모션축 deg → 모터 deg:
  *
  *     motor = reference + (joint + offset) × scale × sign × gear
  *
  * (`motion_mapping_manager._motion_to_motor_target` 와 같은 식) · 그래서
- * 소켓 인사에 `base_mapping_revision` 을 실어, 다른 화면이 조인트 연결을
+ * 소켓 인사에 `base_mapping_revision` 을 실어, 다른 화면이 모션축 설정을
  * 고친 뒤의 **낡은 변환표**는 서버가 그 자리에서 거절한다.
  *
- * 페이더 범위 = 매핑의 모션 최소·최대(조인트 deg) · supervisor 모터
+ * 페이더 범위 = 매핑의 모션 최소·최대(모션 deg) · supervisor 모터
  * 리밋이 뒤를 받친다 · 잡지 않은 페이더는 실제 모터 위치를 따라간다.
  */
 
@@ -85,14 +85,14 @@ export function createManualFaderController({ el, getLatestState }) {
       const fileId = String(listing?.active_file_id || '');
       if (!fileId) {
         mapping = null;
-        setMessage('조인트 연결이 없습니다 · 모터 관리 화면에서 먼저 만드세요');
+        setMessage('모션축 설정이 없습니다 · 모터 관리 화면에서 먼저 만드세요');
         render();
         return;
       }
       const payload = await fetchMotionMapping(fileId);
       if (payload?.success === false || !payload?.mapping) {
         // 못 읽었으면 들고 있던 것을 유지한다 · §6-237 과 같은 이유
-        if (!mapping) setMessage('조인트 연결을 아직 못 읽었습니다 · 잠시 후 다시 시도하세요');
+        if (!mapping) setMessage('모션축 설정을 아직 못 읽었습니다 · 잠시 후 다시 시도하세요');
         return;
       }
       mapping = {
@@ -105,10 +105,10 @@ export function createManualFaderController({ el, getLatestState }) {
       disconnect();
       setMessage(mapping.rows.length
         ? '페이더를 잡는 동안만 전송합니다 · 놓으면 그 자리에 섭니다'
-        : '모션 범위(최소·최대)가 설정된 조인트가 없습니다');
+        : '모션 범위(최소·최대)가 설정된 모션 ID가 없습니다');
       render();
     } catch (error) {
-      if (!mapping) setMessage(`조인트 연결 확인 실패: ${error?.message || error}`);
+      if (!mapping) setMessage(`모션축 설정 확인 실패: ${error?.message || error}`);
     } finally {
       refreshing = false;
     }
@@ -248,7 +248,7 @@ export function createManualFaderController({ el, getLatestState }) {
           <span>모터 ${row.axis}</span>
         </div>
         <input type="range" class="manual-fader-slider"
-          aria-label="${escapeHtml(row.motionId)} 조인트 각도 (deg)"
+          aria-label="${escapeHtml(row.motionId)} 모션 각도 (deg)"
           min="${row.lower}" max="${row.upper}" step="0.05" value="${row.lower}"
           data-fader-slider="${row.axis}">
         <div class="manual-fader-value mono">
@@ -343,7 +343,7 @@ export function createManualFaderController({ el, getLatestState }) {
       renderedSignature = '';
       disconnect();
       if (el.manualFaderList) el.manualFaderList.innerHTML = '';
-      setMessage('조인트 연결 확인 중');
+      setMessage('모션축 설정 확인 중');
     },
   };
 }

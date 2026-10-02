@@ -1,7 +1,7 @@
 """회차별 모션 기록 · 목표 위치와 실제 위치를 CSV 로 남긴다.
 
 재생 루프가 하는 일은 **리스트에 한 줄 붙이기**뿐이다 · 실제 위치 해석,
-조인트 각도 환산, 오차 계산, 파일 쓰기는 전용 쓰기 스레드가 한다 · 루프 안에서
+모션 각도 환산, 오차 계산, 파일 쓰기는 전용 쓰기 스레드가 한다 · 루프 안에서
 디스크를 만지면 20ms 박자가 흔들린다.
 
 실제 위치는 `motion_state`(10Hz)가 아니라 모터 노드의 `motor_status`(1kHz)
@@ -13,7 +13,7 @@
     HHMMSS_c0001_<모션파일>.csv    회차 하나 · time_sec 과 축마다 target/actual/error
     index.jsonl                    회차마다 한 줄 · 파일 이름, 결과, 축별 최대·RMS 오차
 
-값은 **조인트 deg** (모션 파일과 같은 단위) · 모터 실제 위치를 모션축 설정의
+값은 **모션축 deg** (모션 파일과 같은 단위) · 모터 실제 위치를 모션축 설정의
 변환식으로 되돌린 값이다 · Blender 에서 만든 곡선과 바로 견줄 수 있다.
 오차는 같은 줄의 목표와 실제의 차이 · 명령 한 틱 지연이 포함된다.
 """
@@ -47,7 +47,7 @@ Decoder = Callable[[Any], Dict[int, float]]
 
 
 def joint_from_motor(row: Mapping[str, Any], motor_deg: float) -> Optional[float]:
-    """motion_run_rules._motor_target 의 역 · 모터 deg → 모션값(조인트 deg)."""
+    """motion_run_rules._motor_target 의 역 · 모터 deg → 모션값(모션 deg)."""
     reference = finite_float(row.get('reference_position_deg')) or 0.0
     if row.get('reference_enabled') is False:
         reference = 0.0

@@ -96,7 +96,7 @@ function peerSummaryText(role = {}) {
   return [here, ...others].join(' · ');
 }
 
-/** 어느 조인트 연결 파일을 열 것인가 · §6-238
+/** 어느 모션축 설정 파일을 열 것인가 · §6-238
  *
  * 프로젝트는 이 파일을 **하나만** 물고 쓴다 · 그 하나를 서버가
  * `active_file_id` 로 알려준다 · 전에는 그 값이 없어서 화면이 목록의
@@ -491,7 +491,7 @@ function drawGraph(canvas, messageEl, analysis, hiddenIds = new Set()) {
   if (!series.length || !points.length) {
     if (messageEl) messageEl.textContent = '표시할 모터가 없습니다';
     context.fillStyle = '#5d6b78';
-    context.fillText('조인트 버튼을 눌러 그래프를 표시하세요', 16, 28);
+    context.fillText('축 버튼을 눌러 그래프를 표시하세요', 16, 28);
     return;
   }
 
@@ -547,7 +547,7 @@ function drawGraph(canvas, messageEl, analysis, hiddenIds = new Set()) {
   }
 }
 
-/** 프로젝트가 쓰는 조인트 연결 파일 이름 · §6-239
+/** 프로젝트가 쓰는 모션축 설정 파일 이름 · §6-239
  *
  * 프로젝트마다 이 파일은 **하나**다 · 사람이 이름을 지을 일이 없으므로
  * 고정한다 · 이미 다른 이름으로 만들어 둔 프로젝트는 그 파일을 그대로
@@ -602,7 +602,7 @@ export function createMotionDataController({
   /** 애니메이션 .json 드래그&드롭 업로드 · P5
    *
    * 길은 기존 그대로다 · `POST /api/projects/{id}/files` (JSONL 검증 포함) ·
-   * 화면은 파일을 글자로 읽어 싣기만 한다 · 조인트 연결이 없는 프로젝트는
+   * 화면은 파일을 글자로 읽어 싣기만 한다 · 모션축 설정이 없는 프로젝트는
    * 서버가 문 앞에서 거절하고, 그 사유를 그대로 보여 준다.
    */
   async function importDroppedAnimations(fileList) {
@@ -629,7 +629,7 @@ export function createMotionDataController({
         imported += 1;
         uploadedNames.push(file.name);
       } catch (error) {
-        // 하나 실패하면 멈춘다 · 사유(중복 이름 · 조인트 연결 없음 · 형식
+        // 하나 실패하면 멈춘다 · 사유(중복 이름 · 모션축 설정 없음 · 형식
         // 오류)가 다음 성공 메시지에 덮이지 않게
         setMessage(`${file.name} 업로드 실패: ${error?.message || error}`);
         break;
@@ -686,8 +686,8 @@ export function createMotionDataController({
 
   function isMappingRevisionConflict(message) {
     const text = String(message || '');
-    return text.includes('조인트 연결이 화면을 불러온 뒤 변경')
-      || text.includes('조인트 연결 버전 정보가 없습니다');
+    return text.includes('모션축 설정이 화면을 불러온 뒤 변경')
+      || text.includes('모션축 설정 버전 정보가 없습니다');
   }
 
   /** 저장된 내용이 이 화면과 달라졌을 때 사람에게 묻는다 · §6-243
@@ -707,7 +707,7 @@ export function createMotionDataController({
     mappingRevisionConflict = true;
     setMappingMessage(`저장하지 못했습니다: ${message}`);
     const reload = await showConfirm(
-      '저장된 조인트 연결이 이 화면을 연 뒤에 바뀌었습니다.\n'
+      '저장된 모션축 설정이 이 화면을 연 뒤에 바뀌었습니다.\n'
       + '지금 고친 내용은 저장되지 않았습니다.\n\n'
       + '저장된 내용을 다시 불러오면 지금 고친 것은 사라집니다.',
       {
@@ -746,8 +746,8 @@ export function createMotionDataController({
     ));
     setMappingMessage(
       mappingDirty
-        ? '파일 개정을 반영했습니다 · 편집 중인 조인트 연결은 유지됩니다'
-        : '파일 개정을 반영했습니다 · 조인트 연결을 계속 편집할 수 있습니다',
+        ? '파일 개정을 반영했습니다 · 편집 중인 모션축 설정은 유지됩니다'
+        : '파일 개정을 반영했습니다 · 모션축 설정을 계속 편집할 수 있습니다',
     );
     return true;
   }
@@ -1148,7 +1148,7 @@ export function createMotionDataController({
       if (messageEl) messageEl.textContent = '표시할 모터가 없습니다';
       context.fillStyle = '#5d6b78';
       context.font = '13px Arial';
-      context.fillText('조인트 버튼을 눌러 그래프를 표시하세요', 16, 28);
+      context.fillText('축 버튼을 눌러 그래프를 표시하세요', 16, 28);
       return;
     }
 
@@ -1335,7 +1335,7 @@ export function createMotionDataController({
     // 묻힌다. 실행 대상 셋을 크게 두고, 나머지 수치는 아래에 작게 붙인다.
     const targets = [
       { label: '재생 파일', value: runFile?.filename || payload.motion_file_id || '등록된 파일 없음', missing: !runFile && !payload.motion_file_id },
-      { label: '조인트 연결', value: mappingFile?.filename || payload.mapping_file_id || '선택 안 됨', missing: !mappingFile && !payload.mapping_file_id },
+      { label: '모션축 설정', value: mappingFile?.filename || payload.mapping_file_id || '선택 안 됨', missing: !mappingFile && !payload.mapping_file_id },
       { label: '상태', value: motionRunStateText(status.state) },
     ].map((item) => (
       `<div class="motion-run-target-item${item.missing ? ' missing' : ''}">`
@@ -1351,7 +1351,7 @@ export function createMotionDataController({
           ? '매핑 모터별 설정'
           : `${formatNumber(payload.initial_move_time_sec, 0)} s 일괄`,
       },
-      { label: '실행 조인트', value: formatInt(summary.axis_count) },
+      { label: '실행 축', value: formatInt(summary.axis_count) },
       { label: '총 시간', value: `${formatNumber(summary.duration_sec, 3)} s` },
       {
         label: '연속 동작',
@@ -1427,7 +1427,7 @@ export function createMotionDataController({
     `;
   }
 
-  /** 이 조인트의 라이브 오버라이드 · 없으면 빈 객체 */
+  /** 이 모션축의 라이브 오버라이드 · 없으면 빈 객체 */
   function liveOverrideOf(motionId) {
     const overrides = motionRunStatus?.live_overrides;
     const entry = overrides && typeof overrides === 'object'
@@ -1448,7 +1448,7 @@ export function createMotionDataController({
     el.motionRunAxisRows.innerHTML = axes.map((axis) => (
       `<tr>
         <td><input type="checkbox" data-live-mute="${escapeHtml(axis.motion_id)}"
-          title="끄면 이 조인트 명령을 즉시 빼고 모터는 그 자리에 섭니다 (서보 유지)"
+          title="끄면 이 모션축 명령을 즉시 빼고 모터는 그 자리에 섭니다 (서보 유지)"
           ${liveOverrideOf(axis.motion_id).muted ? '' : 'checked'}></td>
         <td class="mono">${displayText(axis.motion_id)}</td>
         <td class="mono">${formatInt(axis.motor_axis)}</td>
@@ -1519,11 +1519,11 @@ export function createMotionDataController({
       }
       setMotionRunMessage(payload.muted !== undefined
         ? (payload.muted
-          ? `조인트 ${motionId} 제외 · 모터는 그 자리에 섭니다`
-          : `조인트 ${motionId} 다시 사용`)
+          ? `모션 ID ${motionId} 제외 · 모터는 그 자리에 섭니다`
+          : `모션 ID ${motionId} 다시 사용`)
         : (payload.clamp
-          ? `조인트 ${motionId} 라이브 리밋 ${payload.clamp[0]} ~ ${payload.clamp[1]}°`
-          : `조인트 ${motionId} 라이브 리밋 해제`));
+          ? `모션 ID ${motionId} 라이브 리밋 ${payload.clamp[0]} ~ ${payload.clamp[1]}°`
+          : `모션 ID ${motionId} 라이브 리밋 해제`));
     } catch (error) {
       setMotionRunMessage(`라이브 오버라이드 실패: ${error?.message || error}`);
     }
@@ -1662,7 +1662,7 @@ export function createMotionDataController({
         ? blockReason
         : (scope === 'group'
           ? `참가 PC ${group.peerCount}대를 같은 시각에 1회 실행합니다`
-          : '전체 조인트 초기 위치 이동 완료 후 애니메이션을 1회 실행합니다');
+          : '전체 모션축 초기 위치 이동 완료 후 애니메이션을 1회 실행합니다');
     }
     if (el.motionRunContinuousStartButton) {
       el.motionRunContinuousStartButton.disabled = motionRunLoading || running
@@ -1671,7 +1671,7 @@ export function createMotionDataController({
         ? (continuousCapability?.reason || '연속 재생 안전조건을 통과하지 못했습니다')
         : (blocked
           ? blockReason
-          : '전체 조인트 초기 위치 이동 완료 후 정지할 때까지 애니메이션을 반복합니다');
+          : '전체 모션축 초기 위치 이동 완료 후 정지할 때까지 애니메이션을 반복합니다');
     }
     // 시작은 마스터만이지만 정지는 누구나 · 그룹이 도는 동안이면 슬레이브에서도
     // 세울 수 있어야 한다 · §6-70
@@ -1704,7 +1704,7 @@ export function createMotionDataController({
       const message = motionRunLoading
         ? '재생 요청 처리 중'
         : !hasMappingFile
-          ? '조인트 연결 파일을 선택하세요'
+          ? '모션축 설정 파일을 선택하세요'
           : !hasMotionFile
             ? '애니메이션 없음 · 첫 프레임 모터는 모션값 0°로 초기 위치 이동할 수 있습니다'
           : status.message || '실행 준비 가능';
@@ -1745,7 +1745,7 @@ export function createMotionDataController({
       const analysis = analysisOf(file);
       const selected = file.id === selectedFileId;
       // 재생 등록된 파일은 목록에서 바로 구분돼야 한다. 등록 여부를 알려면
-      // 조인트 연결을 열어봐야 했던 것이 가장 흔한 혼란이었다.
+      // 모션축 설정을 열어봐야 했던 것이 가장 흔한 혼란이었다.
       const registered = Boolean(registeredMotionFileIdValue)
         && file.id === registeredMotionFileIdValue;
       const rowClass = [selected ? 'selected' : '', registered ? 'registered' : '']
@@ -1822,9 +1822,9 @@ export function createMotionDataController({
         el.motionRunMujocoFps.disabled = !usable;
       }
     }
-    // 재생 등록은 **조인트 연결 편집과 상관없다** · §6-160
+    // 재생 등록은 **모션축 설정 편집과 상관없다** · §6-160
     //
-    // 전에는 두 버튼이 `mappingDirty` 로 꺼졌다 · 조인트 연결을 편집 중이면
+    // 전에는 두 버튼이 `mappingDirty` 로 꺼졌다 · 모션축 설정을 편집 중이면
     // 애니메이션도 못 바꿨고, 등록이 한 번 실패하면 프로그램이 제 손으로 세운
     // 그 표시 때문에 **되돌아갈 길까지 사라졌다**.
     //
@@ -1836,15 +1836,15 @@ export function createMotionDataController({
       );
       el.registerMotionFileButton.textContent = registered ? '재생 등록됨' : '재생 등록';
       el.registerMotionFileButton.title = !selectedMappingId
-        ? '저장된 조인트 연결을 먼저 선택하세요'
-        : '이 파일을 재생 등록합니다 · 조인트 연결 편집과는 무관합니다';
+        ? '저장된 모션축 설정을 먼저 선택하세요'
+        : '이 파일을 재생 등록합니다 · 모션축 설정 편집과는 무관합니다';
     }
     if (el.unregisterMotionFileButton) {
       el.unregisterMotionFileButton.disabled = (
         !registered || !selectedMappingId || loading || mappingLoading
       );
       el.unregisterMotionFileButton.title = registered
-        ? '현재 조인트 연결에서 이 파일의 재생 등록을 해제합니다'
+        ? '현재 모션축 설정에서 이 파일의 재생 등록을 해제합니다'
         : '현재 재생 등록된 파일을 선택하세요';
     }
   }
@@ -1852,7 +1852,7 @@ export function createMotionDataController({
   function renderMappingFileName() {
     // 고르는 자리가 아니라 **보여주는 자리**다 · §6-239
     //
-    // 프로젝트는 조인트 연결 파일을 **하나만** 물고 쓴다 · 전에는 목록에서
+    // 프로젝트는 모션축 설정 파일을 **하나만** 물고 쓴다 · 전에는 목록에서
     // 고르게 했는데, 고를 일이 없으니 고르는 상자와 「새 매칭 작성」·「목록
     // 새로고침」·「현재 설정 파일 삭제」가 다 쓸모없는 손잡이였다 · 그것들이
     // 만들 수 있는 어긋난 상태(등록된 파일과 다른 것을 편집하고 있다)만
@@ -1930,7 +1930,7 @@ export function createMotionDataController({
     if (!el.motionMappingRows) return;
     const rows = Array.isArray(mappingDraft.mappings) ? mappingDraft.mappings : [];
     if (!rows.length) {
-      el.motionMappingRows.innerHTML = emptyRow(15, '조인트를 추가하거나 모터별 행 자동 생성을 누르세요');
+      el.motionMappingRows.innerHTML = emptyRow(15, '모션 ID를 추가하거나 모터축 행 자동 생성을 누르세요');
       return;
     }
     const duplicateCounts = mappingDuplicateAxisCounts();
@@ -2041,7 +2041,7 @@ export function createMotionDataController({
       <table class="motion-mapping-validation-table">
         <thead>
           <tr>
-            <th><span class="validation-head-label">조인트</span><span class="validation-head-unit">ID</span></th>
+            <th><span class="validation-head-label">모션 ID</span><span class="validation-head-unit">ID</span></th>
             <th><span class="validation-head-label">상태</span><span class="validation-head-unit">검증</span></th>
             <th><span class="validation-head-label">메시지</span><span class="validation-head-unit">-</span></th>
             <th><span class="validation-head-label">기준점</span><span class="validation-head-unit">모터 deg</span></th>
@@ -2050,7 +2050,7 @@ export function createMotionDataController({
             <th><span class="validation-head-label">초기 위치 변환</span><span class="validation-head-unit">모션 → 출력축 → 모터 deg</span></th>
           </tr>
         </thead>
-        <tbody>${tableRows || emptyRow(7, '검증할 조인트이 없습니다')}</tbody>
+        <tbody>${tableRows || emptyRow(7, '검증할 모션축이 없습니다')}</tbody>
       </table>
     `;
   }
@@ -2103,7 +2103,7 @@ export function createMotionDataController({
   }
 
   async function addMotionId() {
-    const entered = await showPrompt('추가할 조인트 이름을 입력하세요 (Blender 본 이름)', {
+    const entered = await showPrompt('추가할 모션 ID을 입력하세요 (Blender 본 이름)', {
       title: 'Motion ID 추가',
       defaultValue: '1-1',
       confirmLabel: '추가',
@@ -2111,13 +2111,13 @@ export function createMotionDataController({
     const motionId = String(entered || '').trim();
     if (!motionId) return;
     if (mappingDraft.mappings.some((row) => String(row.motion_id) === motionId)) {
-      setMappingMessage(`이미 존재하는 조인트입니다: ${motionId}`);
+      setMappingMessage(`이미 존재하는 모션 ID입니다: ${motionId}`);
       return;
     }
     mappingDraft.mappings.push(newMotionAxisRow(motionId));
     mappingValidation = null;
     markMappingDirty();
-    setMappingMessage(`조인트 ${motionId} 추가 완료`);
+    setMappingMessage(`모션 ID ${motionId} 추가 완료`);
     renderMappingPanel();
   }
 
@@ -2131,7 +2131,7 @@ export function createMotionDataController({
     mappingDraft.mappings = buildGeneratedMotionAxisRows(motors, mappingDraft.mappings);
     mappingValidation = null;
     markMappingDirty();
-    setMappingMessage(`${motors.length}개 모터 행을 만들었습니다 · 조인트 이름을 Blender 본 이름으로 바꾸세요`);
+    setMappingMessage(`${motors.length}개 모터 행을 만들었습니다 · 모션 ID을 Blender 본 이름으로 바꾸세요`);
     renderMappingPanel();
   }
 
@@ -2152,22 +2152,22 @@ export function createMotionDataController({
     upgradeLegacyMappingRefs();
     if (!mappingDraft.name?.trim()) return '매핑 이름이 필요합니다';
     const rows = Array.isArray(mappingDraft.mappings) ? mappingDraft.mappings : [];
-    if (!rows.length) return '조인트를 먼저 추가하세요';
-    // 조인트 이름 = Blender 본 이름 · 임의 문자열이라 형식 제한이 없다 (구 1-1 식도 그대로 동작)
+    if (!rows.length) return '모션 ID를 먼저 추가하세요';
+    // 모션 ID = Blender 본 이름 · 임의 문자열이라 형식 제한이 없다 (구 1-1 식도 그대로 동작)
     const emptyJoint = rows.find((row) => !String(row.motion_id || '').trim());
-    if (emptyJoint) return '조인트 이름이 비어 있습니다';
+    if (emptyJoint) return '모션 ID이 비어 있습니다';
     const motionIdCounts = rows.reduce((counts, row) => {
       const motionId = String(row.motion_id || '').trim();
       counts[motionId] = (counts[motionId] || 0) + 1;
       return counts;
     }, {});
     const duplicateMotionId = Object.entries(motionIdCounts).find(([, count]) => count > 1);
-    if (duplicateMotionId) return `조인트가 중복되었습니다: ${duplicateMotionId[0]}`;
+    if (duplicateMotionId) return `모션 ID가 중복되었습니다: ${duplicateMotionId[0]}`;
     const duplicateCounts = mappingDuplicateAxisCounts();
     const duplicateAxis = Object.entries(duplicateCounts).find(([, count]) => count > 1);
     if (duplicateAxis) return `동일한 모터 ID가 중복 사용되었습니다: ${duplicateAxis[0]}`;
     const enabledWithoutMotor = rows.find((row) => row.enabled && !mappingTargetKey(row));
-    if (enabledWithoutMotor) return `활성화된 조인트에 모터 ID가 없습니다: ${enabledWithoutMotor.motion_id}`;
+    if (enabledWithoutMotor) return `활성화된 모션 ID에 모터 ID가 없습니다: ${enabledWithoutMotor.motion_id}`;
     return '';
   }
 
@@ -2252,7 +2252,7 @@ export function createMotionDataController({
         //
         // 못 읽었으면 **아무것도 하지 않는 것이 맞다** · 화면이 들고 있던
         // 것이 마지막으로 확인된 값이다 · 노드가 뜨면 다시 읽는다.
-        setMappingMessage('조인트 연결을 아직 못 읽었습니다 · 잠시 후 다시 읽습니다');
+        setMappingMessage('모션축 설정을 아직 못 읽었습니다 · 잠시 후 다시 읽습니다');
         window.setTimeout(() => {
           if (selectedMappingId === requestedMappingId) selectMapping(requestedMappingId);
         }, 3000);
@@ -2287,7 +2287,7 @@ export function createMotionDataController({
       mappingRevisionConflict = false;
       const mappingFileName = payload.file?.filename || payload.file?.id || selectedMappingId || '-';
       const motionFileName = mappingDraft.motion_file_id || '-';
-      setMappingMessage(`조인트 연결: ${mappingFileName} · 애니메이션: ${motionFileName}`);
+      setMappingMessage(`모션축 설정: ${mappingFileName} · 애니메이션: ${motionFileName}`);
     } catch (error) {
       if (loadToken !== mappingLoadToken || error?.staleProjectResponse) return;
       setMappingMessage(`매핑 파일 실패: ${error?.message || error}`);
@@ -2374,22 +2374,22 @@ export function createMotionDataController({
    * 「설정 저장 필요」 라고 뜨는데, 사용자는 아무것도 편집한 적이 없다 ·
    * 프로그램이 제 손으로 세운 표시 때문에 **되돌아갈 길이 사라진다**.
    *
-   * 실제로 그렇게 막혔다 · 조인트 연결 파일이 화면을 띄운 뒤 바뀌어
+   * 실제로 그렇게 막혔다 · 모션축 설정 파일이 화면을 띄운 뒤 바뀌어
    * (`revision conflict`) 저장이 거부됐고, 그 뒤로는 등록도 해제도 안 됐다.
    *
    * 여기 들어올 때 `mappingDirty` 는 반드시 거짓이다(두 함수가 먼저 막는다) ·
    * 그러니 실패하면 우리가 세운 것만 지우면 된다.
    */
-  /** 재생 등록·해제 · **조인트 연결은 건드리지 않는다** · §6-160
+  /** 재생 등록·해제 · **모션축 설정은 건드리지 않는다** · §6-160
    *
-   * 전에는 `saveCurrentMapping()` 을 불렀다 · 그것은 조인트 연결 **전체**를
+   * 전에는 `saveCurrentMapping()` 을 불렀다 · 그것은 모션축 설정 **전체**를
    * 보내는 길이라 두 가지가 딸려 왔다.
    *
-   *   하나 · 편집 중인 조인트 연결까지 같이 저장된다 (원하지 않은 저장)
-   *   둘  · 설정 개정 검사에 걸려 「조인트 연결 저장 충돌」 창이 뜬다
+   *   하나 · 편집 중인 모션축 설정까지 같이 저장된다 (원하지 않은 저장)
+   *   둘  · 설정 개정 검사에 걸려 「모션축 설정 저장 충돌」 창이 뜬다
    *
    * 애니메이션만 건드린 사람에게 편집한 적도 없는 설정을 되돌릴지 묻는
-   * 창이 떴다 · 조인트 연결과 재생 등록은 한 파일에 들어 있을 뿐
+   * 창이 떴다 · 모션축 설정과 재생 등록은 한 파일에 들어 있을 뿐
    * 서로 남남이다.
    */
   async function applyMotionFileRegistration(fileId, detail, label) {
@@ -2405,7 +2405,7 @@ export function createMotionDataController({
         setMappingMessage(`재생 등록 실패: ${payload.message || '저장하지 못했습니다'}`);
         return false;
       }
-      // 편집 중인 조인트 연결은 **그대로 둔다** · 우리가 바꾼 칸만 반영한다
+      // 편집 중인 모션축 설정은 **그대로 둔다** · 우리가 바꾼 칸만 반영한다
       mappingDraft.motion_file_id = fileId;
       mappingMotionFileDetail = detail;
       registeredMotionFileIdValue = registeredMotionFileId(mappingDraft);
@@ -2424,7 +2424,7 @@ export function createMotionDataController({
 
   async function registerSelectedMotionFile() {
     if (!selectedFile || !selectedMappingId) {
-      setMessage('재생 등록할 애니메이션과 저장된 조인트 연결을 먼저 선택하세요');
+      setMessage('재생 등록할 애니메이션과 저장된 모션축 설정을 먼저 선택하세요');
       return;
     }
     const analysis = analysisOf(selectedFile);
@@ -2433,7 +2433,7 @@ export function createMotionDataController({
       return;
     }
     const confirmed = await showConfirm(
-      `${selectedFile.filename} 파일을 현재 조인트 연결의 재생 파일로 등록합니다.\n`
+      `${selectedFile.filename} 파일을 현재 모션축 설정의 재생 파일로 등록합니다.\n`
       + `${selectedMappingId}`,
       { title: '애니메이션 재생 등록', confirmLabel: '재생 등록', tone: 'primary' },
     );
@@ -2526,8 +2526,8 @@ export function createMotionDataController({
       mappingRevisionConflict = false;
       setMappingMessage(payload.message || (
         payload.runtime_applied
-          ? `조인트 연결 저장 완료: ${selectedMappingId} · 실행 컨텍스트 적용 완료`
-          : `조인트 연결 저장 완료: ${selectedMappingId}`
+          ? `모션축 설정 저장 완료: ${selectedMappingId} · 실행 컨텍스트 적용 완료`
+          : `모션축 설정 저장 완료: ${selectedMappingId}`
       ));
       await onProjectFilesChange?.();
       return true;
@@ -2545,11 +2545,11 @@ export function createMotionDataController({
   }
 
   async function resetCurrentMapping() {
-    const label = selectedMappingId || mappingDraft.name || '현재 조인트 연결';
+    const label = selectedMappingId || mappingDraft.name || '현재 모션축 설정';
     const confirmed = await showConfirm(
       `${label}의 저장하지 않은 편집 내용을 버립니다.\n`
       + '저장된 파일이 있으면 디스크에서 다시 불러옵니다.',
-      { title: '조인트 연결 되돌리기', confirmLabel: '편집 내용 버리기', tone: 'warning' },
+      { title: '모션축 설정 되돌리기', confirmLabel: '편집 내용 버리기', tone: 'warning' },
     );
     if (!confirmed) return;
     if (selectedMappingId) {
@@ -2595,7 +2595,7 @@ export function createMotionDataController({
       }
     } catch (error) {
       if (!error?.staleProjectResponse) {
-        setMappingMessage(`재연결 후 조인트 연결 확인 실패: ${error?.message || error}`);
+        setMappingMessage(`재연결 후 모션축 설정 확인 실패: ${error?.message || error}`);
       }
     }
   }
@@ -2649,20 +2649,20 @@ export function createMotionDataController({
     const motionId = String(row.motion_id || '');
     const scope = getLatestState()?.project_scope || {};
     if (scope.runtime_matches_selected !== true || scope.motor_config_applied !== true) {
-      setMappingMessage(`현재 프로젝트 모터 설정을 적용·재시작한 뒤 기준점을 캡처하세요: 조인트 ${motionId}`);
+      setMappingMessage(`현재 프로젝트 모터 설정을 적용·재시작한 뒤 기준점을 캡처하세요: 모션 ID ${motionId}`);
       return;
     }
     const motor = motorForMapping(row);
     const position = motorPositionDeg(motor);
     if (position === null) {
-      setMappingMessage(`현재 위치를 읽을 수 없습니다: 조인트 ${motionId}`);
+      setMappingMessage(`현재 위치를 읽을 수 없습니다: 모션 ID ${motionId}`);
       return;
     }
     row.reference_position_deg = position;
     row.reference_enabled = true;
     mappingValidation = null;
     markMappingDirty();
-    setMappingMessage(`조인트 ${motionId} 기준점 캡처: ${formatNumber(position, 3)} deg`);
+    setMappingMessage(`모션 ID ${motionId} 기준점 캡처: ${formatNumber(position, 3)} deg`);
     renderMappingPanel();
   }
 
@@ -2686,7 +2686,7 @@ export function createMotionDataController({
     motionRunGraphFileId = '';
     motionRunGraphHiddenIds.clear();
     setMessage('현재 프로젝트 애니메이션을 불러오세요');
-    setMappingMessage('현재 프로젝트 조인트 연결을 불러오세요');
+    setMappingMessage('현재 프로젝트 모션축 설정을 불러오세요');
     setMotionRunMessage('현재 프로젝트 애니메이션을 선택하세요');
     render();
     renderMappingPanel();
@@ -2820,8 +2820,8 @@ export function createMotionDataController({
     const continuous = runMode === 'continuous';
     const confirmed = await showConfirm(
       continuous
-        ? '조인트 연결의 전체 활성 조인트를 초기 위치로 이동한 뒤 연속 재생을 시작합니다.\n정지 버튼을 누를 때까지 애니메이션을 반복합니다.'
-        : '조인트 연결의 전체 활성 조인트를 초기 위치로 이동한 뒤 현재 애니메이션을 1회 실행합니다.',
+        ? '모션축 설정의 전체 활성 축를 초기 위치로 이동한 뒤 연속 재생을 시작합니다.\n정지 버튼을 누를 때까지 애니메이션을 반복합니다.'
+        : '모션축 설정의 전체 활성 축를 초기 위치로 이동한 뒤 현재 애니메이션을 1회 실행합니다.',
       {
         title: continuous ? '연속 재생 시작' : '1회 재생 시작',
         confirmLabel: '재생 시작',
@@ -3074,7 +3074,7 @@ export function createMotionDataController({
           mappingDraft.mappings.splice(rowIndex, 1);
           mappingValidation = null;
           markMappingDirty();
-          setMappingMessage(`조인트 ${deletedMotionId} 삭제 완료`);
+          setMappingMessage(`모션 ID ${deletedMotionId} 삭제 완료`);
           renderMappingPanel();
         }
       });
@@ -3107,7 +3107,7 @@ export function createMotionDataController({
       renderMotionTabs();
       render();
     },
-    /** 이 모터(축)에 연결된 조인트 행 · 조그의 조인트 deg 변환에 쓴다 · P4 */
+    /** 이 모터(축)에 연결된 모션축 행 · 조그의 모션축 deg 변환에 쓴다 · P4 */
     jointRowForAxis: (axis) => {
       const rows = Array.isArray(mappingDraft?.mappings) ? mappingDraft.mappings : [];
       return rows.find((row) => (

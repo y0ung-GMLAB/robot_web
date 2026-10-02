@@ -112,7 +112,7 @@ def test_motion_file_import_needs_a_motion_axis_setting(tmp_path):
             'content': MOTION_CONTENT,
         })
 
-    with pytest.raises(ValueError, match='조인트 연결이 없는 프로젝트'):
+    with pytest.raises(ValueError, match='모션축 설정이 없는 프로젝트'):
         _import('external.json')
 
     (projects_dir / target_id / 'motion_axis_matching' / 'axes.yaml').write_text(

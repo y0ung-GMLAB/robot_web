@@ -1925,7 +1925,7 @@ class MotionWebBridge(Node):
         return animation_preview.launch_precompute(self.workspace_root, motion_path)
 
     def set_motion_run_live_override(self, payload: Dict[str, Any]) -> Dict[str, Any]:
-        """재생 라이브 오버라이드(조인트 뮤트·좁힌 리밋) · 움직임 명령이
+        """재생 라이브 오버라이드(모션축 뮤트·좁힌 리밋) · 움직임 명령이
         아니라 **줄이는** 조작이라 오프 모드에서도 막지 않는다 · P7"""
         return self._request_motion_run(
             'set_live_override', dict(payload or {}), timeout_sec=2.0,

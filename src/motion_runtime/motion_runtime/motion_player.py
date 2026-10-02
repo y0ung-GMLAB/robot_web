@@ -923,12 +923,12 @@ class MotionPlayer:
         positions: Dict[int, float],
         motion_values: Optional[Dict[str, float]],
     ) -> tuple[Dict[int, float], Optional[Dict[str, float]]]:
-        """재생 중 조인트 뮤트·라이브 리밋 · P7
+        """재생 중 모션축 뮤트·라이브 리밋 · P7
 
-        뮤트 · 그 조인트 명령을 송출에서 뺀다 · PP 드라이브는 마지막 목표에
+        뮤트 · 그 모션축 명령을 송출에서 뺀다 · PP 드라이브는 마지막 목표에
         머무르므로 모터는 그 자리에 선다 · 기록(trace)의 목표는 계획값
         그대로라 실제와의 차이가 그래프에 드러난다.
-        리밋 · 조인트 값을 좁힌 범위로 자르고 **그 축만** 매핑 식으로 모터
+        리밋 · 모션값을 좁힌 범위로 자르고 **그 축만** 매핑 식으로 모터
         목표를 다시 계산한다 · 계획은 건드리지 않아 되돌리면 즉시 원래대로.
         """
         overrides = self.manager.live_override_snapshot()

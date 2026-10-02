@@ -509,7 +509,7 @@ export function createMotionTestController({ el, getLatestState, getJointRow = (
     return motorByAxis(getLatestState(), selectedAxis);
   }
 
-  /** 이 모터의 조인트 연결 · 조그를 조인트 deg 로 걸 때의 비율·방향 · P4
+  /** 이 모터의 모션축 설정 · 조그를 모션축 deg 로 걸 때의 비율·방향 · P4
    *
    * 상대 이동이라 기준점·보정값은 끼지 않는다 · signedRatio 하나로
    * `출력 = 모터 / signedRatio` · `모터 = 출력 × signedRatio` 가 성립한다.
@@ -524,14 +524,14 @@ export function createMotionTestController({ el, getLatestState, getJointRow = (
     return { motionId: String(row.motion_id || ''), signedRatio };
   }
 
-  /** 계산에 쓰는 (부호 포함) 감속비 · 동작 모드 = 입력칸 · 조그 = 조인트 토글 */
+  /** 계산에 쓰는 (부호 포함) 감속비 · 동작 모드 = 입력칸 · 조그 = 모션축 토글 */
   function commandGearRatio(mode, motor) {
     if (mode === 'action') return actionGearRatio(el, motor);
     if (mode !== 'jog' || !el.motionTestJogJointMode?.checked) return 1;
     return jogJointInfo(motor)?.signedRatio ?? 1;
   }
 
-  /** 조그 이동량 상한 · 조인트 deg 기준이면 모터 360도에 해당하는 만큼 줄인다 */
+  /** 조그 이동량 상한 · 모션축 deg 기준이면 모터 360도에 해당하는 만큼 줄인다 */
   function jogInputMaxDeg(motor) {
     const ratio = Math.abs(commandGearRatio('jog', motor)) || 1;
     return maxJogDeltaDeg(getLatestState()) / ratio;
@@ -939,10 +939,10 @@ export function createMotionTestController({ el, getLatestState, getJointRow = (
       el.motionTestJogJointMode.disabled = !joint;
       if (!joint) {
         el.motionTestJogJointMode.checked = false;
-        el.motionTestJogJointMode.title = '이 모터에 연결된 조인트가 없습니다 · 모터 deg 로 움직입니다';
+        el.motionTestJogJointMode.title = '이 모터에 연결된 모션 ID가 없습니다 · 모터 deg 로 움직입니다';
       } else {
         el.motionTestJogJointMode.title = `${joint.motionId} · 모터 ${joint.signedRatio}x`;
-        // 기본은 조인트 deg · 사람이 끈 것은 존중한다 (모터를 바꾸면 초기화)
+        // 기본은 모션축 deg · 사람이 끈 것은 존중한다 (모터를 바꾸면 초기화)
         if (!el.motionTestJogJointMode.dataset.userSet) {
           el.motionTestJogJointMode.checked = true;
         }
@@ -1166,7 +1166,7 @@ export function createMotionTestController({ el, getLatestState, getJointRow = (
   function selectAxis(axis) {
     const nextAxis = numericValue(axis, null);
     selectedAxis = nextAxis;
-    // 다른 모터로 넘어가면 조그 단위는 다시 기본(조인트 deg)으로
+    // 다른 모터로 넘어가면 조그 단위는 다시 기본(모션 deg)으로
     if (el.motionTestJogJointMode) delete el.motionTestJogJointMode.dataset.userSet;
     renderAxisOptions();
     renderCurrentState();

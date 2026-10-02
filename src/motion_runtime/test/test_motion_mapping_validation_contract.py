@@ -184,7 +184,7 @@ def test_mapping_save_rejects_a_stale_mapping_section_revision(tmp_path):
         encoding='utf-8',
     )
 
-    with pytest.raises(ValueError, match='조인트 연결이 화면을 불러온 뒤 변경'):
+    with pytest.raises(ValueError, match='모션축 설정이 화면을 불러온 뒤 변경'):
         manager._save_mapping({
             'file_id': first['file']['id'],
             'base_mapping_revision': first['file']['mapping_revision'],

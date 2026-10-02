@@ -306,7 +306,7 @@ class MotionMappingManager(Node):
             ).strip()
             if not expected_mapping_revision:
                 raise ValueError(
-                    '조인트 연결 버전 정보가 없습니다. 파일을 다시 불러온 뒤 저장하세요'
+                    '모션축 설정 버전 정보가 없습니다. 파일을 다시 불러온 뒤 저장하세요'
                 )
             current_payload = yaml.safe_load(
                 source_path.read_text(encoding='utf-8')
@@ -326,23 +326,23 @@ class MotionMappingManager(Node):
                         f'actual={actual_mapping_revision}'
                     )
                 raise ValueError(
-                    '조인트 연결이 화면을 불러온 뒤 변경됐습니다. '
+                    '모션축 설정이 화면을 불러온 뒤 변경됐습니다. '
                     '현재 설정 보호를 위해 저장을 거부했습니다. 파일을 다시 불러오세요'
                 )
         elif source_path is not None and 'base_revision' in payload:
             actual_revision = hashlib.sha256(source_path.read_bytes()).hexdigest()
             if not expected_revision:
                 raise ValueError(
-                    '조인트 연결 파일 버전 정보가 없습니다. 파일을 다시 불러온 뒤 저장하세요'
+                    '모션축 설정 파일 버전 정보가 없습니다. 파일을 다시 불러온 뒤 저장하세요'
                 )
             if expected_revision != actual_revision:
                 raise ValueError(
-                    '조인트 연결 파일이 화면을 불러온 뒤 변경됐습니다. '
+                    '모션축 설정 파일이 화면을 불러온 뒤 변경됐습니다. '
                     '현재 파일 보호를 위해 저장을 거부했습니다. 파일을 다시 불러오세요'
                 )
         elif expected_revision:
             raise ValueError(
-                '화면에서 불러온 조인트 연결 파일이 현재 존재하지 않습니다. '
+                '화면에서 불러온 모션축 설정 파일이 현재 존재하지 않습니다. '
                 '목록을 새로고침하세요'
             )
         path = self._new_or_existing_mapping_path(file_id, mapping.get('name'))

@@ -1,6 +1,6 @@
-"""재생 라이브 오버라이드 · 조인트 뮤트 + 좁힌 리밋 · P7
+"""재생 라이브 오버라이드 · 모션축 뮤트 + 좁힌 리밋 · P7
 
-재생 **중에** 이상한 조인트를 바로 빼거나(뮤트 · 모터는 그 자리에 섬)
+재생 **중에** 이상한 모션 ID를 바로 빼거나(뮤트 · 모터는 그 자리에 섬)
 범위를 산 채로 좁힌다(클램프) · 계획(plan)과 매핑 파일은 건드리지 않아
 되돌리면 즉시 원래대로 돈다 · 발행 직전에 읽으므로 다음 20ms 틱부터 듣는다.
 """
@@ -65,7 +65,7 @@ def test_mute_drops_that_joint_and_keeps_the_rest():
     positions, values = player._apply_live_overrides(
         AXES, {1: 500.0, 2: 100.0}, {'Neck_Yaw': 5.0, 'Eye_Pitch': 2.0},
     )
-    assert 1 not in positions, '뮤트한 조인트는 명령에서 빠진다 · 모터는 그 자리에 선다'
+    assert 1 not in positions, '뮤트한 모션 ID는 명령에서 빠진다 · 모터는 그 자리에 선다'
     assert positions[2] == 100.0
     assert 'Neck_Yaw' not in values
     assert values['Eye_Pitch'] == 2.0
@@ -112,7 +112,7 @@ def test_mute_also_filters_the_shared_publish_gate():
 
 
 def test_manager_clears_overrides_when_the_context_changes():
-    """옛 조인트 이름의 오버라이드가 새 연결에 몰래 따라붙으면 안 된다.
+    """옛 모션 ID의 오버라이드가 새 연결에 몰래 따라붙으면 안 된다.
 
     motion_run_manager 는 rclpy 를 끌어서 Windows 에선 import 할 수 없다 ·
     소스로 계약만 고정하고, 동작은 미니PC rclpy 시험이 본다.
