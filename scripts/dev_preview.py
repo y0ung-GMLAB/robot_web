@@ -464,6 +464,25 @@ async def set_live_override(request: Request):
             'project_generation': state['generation']}
 
 
+@app.post('/api/motion-test/ac-servo/jog')
+@app.post('/api/motion-test/dynamixel/jog')
+async def fake_jog(request: Request):
+    """가짜 조그 · 목표에 상대 이동을 더한다 · 앞 조그가 덜 끝났으면 거절(실물과 같게)"""
+    body = await request.json()
+    axis = int(body.get('axis'))
+    delta = float(body.get('relative_deg') or 0.0)
+    if state['run_mode'] == 'off':
+        return {'success': False, 'message': '오프 모드 · 명령이 차단되어 있습니다',
+                'project_generation': state['generation']}
+    if abs(state['targets'][axis] - state['positions'][axis]) > 0.05:
+        return {'success': False,
+                'message': f'{axis}번 모터의 이전 조그가 아직 돌고 있습니다 · 끝난 뒤 다시',
+                'project_generation': state['generation']}
+    state['targets'][axis] = state['positions'][axis] + delta
+    return {'success': True, 'message': f'프리뷰 조그 {delta:+.2f}°',
+            'project_generation': state['generation']}
+
+
 @app.put('/api/schedule/mode')
 async def set_mode(request: Request):
     body = await request.json()

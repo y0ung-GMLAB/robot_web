@@ -115,6 +115,33 @@
               <button id="motionTestJogNegativeButton" class="primary motion-command-button" type="button" disabled>- 방향</button>
               <button id="motionTestJogPositiveButton" class="primary motion-command-button" type="button" disabled>+ 방향</button>
             </div>
+            <div class="jog-dial-block" data-motion-test-panel="jog" aria-label="조그 다이얼">
+              <div id="jogDial" class="jog-dial" role="slider" tabindex="0" aria-disabled="true"
+                aria-label="조그 다이얼 · 돌린 만큼 모터가 움직입니다 (모터 deg)">
+                <div class="jog-dial-ticks" aria-hidden="true"></div>
+                <div id="jogDialNeedle" class="jog-dial-needle" aria-hidden="true"></div>
+                <div class="jog-dial-cap" aria-hidden="true"></div>
+              </div>
+              <div class="jog-dial-side">
+                <label class="manual-field">
+                  <span>한 칸 = (모터 deg · 감속비 미적용)</span>
+                  <select id="jogDialStep">
+                    <option value="0.01">0.01°</option>
+                    <option value="0.1">0.1°</option>
+                    <option value="1" selected>1°</option>
+                    <option value="10">10°</option>
+                    <option value="45">45°</option>
+                  </select>
+                </label>
+                <div class="jog-dial-readout">
+                  <span>모터 위치</span>
+                  <strong id="jogDialPosition" class="mono">-</strong>
+                </div>
+                <div id="jogDialPending" class="jog-dial-pending mono">대기</div>
+                <div id="jogDialMessage" class="jog-dial-message" role="status"></div>
+                <small class="jog-dial-help">드래그로 돌리기 · 휠 한 칸 · ←/→ 한 칸 · 시계 방향 = +</small>
+              </div>
+            </div>
             <details class="motion-command-help" data-motion-test-panel="jog">
               <summary>조그 버튼 활성화 조건</summary>
               <p class="motion-command-note">AC 서보 모터 선택, 모터 감지됨, 서보 켜짐, 오류 없음, 현재 위치 수신, 조그 이동량 0.001~360도, 목표 위치가 최소/최대 설정값 범위 안, 이전 조그 완료가 필요합니다. 이전 조그 완료 기준은 목표 위치 오차 0.05도 이내, 현재 속도 0.05도/초 이하입니다.</p>

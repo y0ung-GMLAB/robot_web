@@ -16,6 +16,7 @@ import { createMotorEventLogController } from './event_log.js';
 import { createMotionDataController } from './motion_data.js';
 import { createMotionTestController } from './motion_test.js';
 import { createManualFaderController } from './manual_fader.js';
+import { createJogDialController } from './jog_dial.js';
 import { createMotorConfigController } from './motor_config.js';
 import { createProjectExplorerController } from './project_explorer.js';
 import { renderAccess, renderMonitoring } from './monitoring.js';
@@ -192,6 +193,7 @@ function renderLatestState(nextState = null) {
   motorConfig.renderRuntimeState();
   motionTest.renderLatestState();
   manualFader.renderRuntimeState();
+  jogDial.renderRuntimeState();
   motionData.renderRuntimeState();
   servoAlarm?.renderRuntimeState();
   renderMotorActivity(appState.latestState.motor_activity);
@@ -253,6 +255,7 @@ function acceptProjectPayload(payload) {
     clearBrowserProjectMemory(generation);
     motionTest.resetProjectState();
     manualFader.onProjectChange();
+    jogDial.reset();
     motionData.resetProjectState();
     motorEventLog.resetProjectState();
     servoAlarm?.resetProjectState();
@@ -1085,6 +1088,12 @@ const manualFader = createManualFaderController({
   getLatestState: () => appState.latestState,
 });
 
+const jogDial = createJogDialController({
+  el,
+  getLatestState: () => appState.latestState,
+  getSelectedAxis: () => motionTest.getSelectedAxis(),
+});
+
 const motionData = createMotionDataController({
   el,
   getLatestState: () => appState.latestState,
@@ -1124,6 +1133,7 @@ projectExplorer = createProjectExplorerController({
     clearBrowserProjectMemory(projectGeneration);
     motionTest.resetProjectState();
     manualFader.onProjectChange();
+    jogDial.reset();
     motionData.resetProjectState();
     motorEventLog.resetProjectState();
     servoAlarm?.resetProjectState();
@@ -1569,6 +1579,8 @@ if (el.workspaceTabs) {
 motorConfig.bindEvents();
 motionTest.bindEvents();
 manualFader.bindEvents();
+jogDial.bindEvents();
+el.motionTestAxisSelect?.addEventListener('change', () => jogDial.reset());
 motionData.bindEvents();
 projectExplorer.bindEvents();
 motorEventLog.bindEvents();
