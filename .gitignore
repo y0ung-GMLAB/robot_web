@@ -38,9 +38,6 @@ backups/
 *.swp
 *.swo
 
-# Keep the separate low-level motor-system repository as a Git submodule.
-src/motion_system/
-
 # Local agent configuration
 .agents/
 .codex/

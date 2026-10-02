@@ -1,0 +1,9 @@
+uint8[] number_of_target_interfaces
+std_msgs/Int8MultiArray[] target_interface_id
+uint8[] controller_index
+uint16[] controlword
+uint16[] statusword
+uint16[] errorcode
+float64[] position
+float64[] velocity
+float64[] effort

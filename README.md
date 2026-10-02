@@ -29,7 +29,7 @@ EtherLab·IgH EtherCAT / Dynamixel
 | web_bridge · web_ui | 이 저장소 | 웹 화면 · 웹 API · 프로젝트·서비스 관리 |
 | motion_runtime · motion_supervisor · motion_state_monitor · motion_schedule | 이 저장소 | 재생 · 최종 모터 명령 중재 · 상태 · 스케줄 |
 | motion_coordination (+interfaces) | 이 저장소 | PC 간 상태 공유·실행 조정 |
-| motion_system | Git 서브모듈 (수정 금지) | Motor Manager와 저수준 모터 드라이버 |
+| motion_system | 이 저장소 (합친 외부 코드 · 명시 요청 때만 수정) | Motor Manager와 저수준 모터 드라이버 |
 | EtherLab/IgH EtherCAT | PC에 별도 설치 | AC Servo EtherCAT 통신 |
 
 작업공간 구조:
@@ -49,7 +49,7 @@ ros2_ws/
 ├── src/motion_schedule             # 재생 스케줄
 ├── src/motion_coordination         # PC 간 상태 공유·실행 조정
 ├── src/motion_coordination_interfaces  # DDS 메시지 정의
-└── src/motion_system               # Git submodule
+└── src/motion_system               # 모터 통신층 · 합친 외부 코드 (VENDORED.md)
 ```
 
 ## 검증 기준 버전
@@ -87,11 +87,14 @@ System 서브모듈 커밋**을 함께 사용합니다. 위 표 작성 시점의
 ## Git 저장소
 
 - 전체 설치 저장소: `https://github.com/y0ung-GMLAB/robot_web.git`
-- Motion System 서브모듈: `https://github.com/kimjoonho-git/motion_system_ros2.git`
-- Motion System 원본: `https://github.com/SeonilChoi/motion_system.git`
+- Motion System: 서브모듈이 아니라 이 저장소 안 코드 (2026-10-02 합침)
+  · 출처 커밋 · `src/motion_system/VENDORED.md`
+  · 원본 `https://github.com/kimjoonho-git/motion_system_ros2.git` ← `https://github.com/SeonilChoi/motion_system.git`
 
-Motion System과 그 내부 의존 저장소는 `--recurse-submodules`로 받습니다 ·
-서브모듈은 수정하지 않습니다.
+한 번에 받습니다 · 서브모듈 없음 · `src/motion_system` 은 명시 요청 때만 수정합니다.
+
+**합치기 전(서브모듈 시절)에 설치한 PC** 는 `install.sh` 갱신 대신 폴더 교체로
+옮깁니다 · 옛 `src/motion_system` 체크아웃이 새 파일과 겹칩니다.
 
 > **설치가 끝난 뒤 쓰는 법은 [사용법](docs/사용법.md) 을 보세요.**
 
@@ -276,7 +279,7 @@ sudo apt install -y git
 
 ```bash
 cd ~
-git clone -b main --recurse-submodules https://github.com/y0ung-GMLAB/robot_web.git ros2_ws
+git clone -b main https://github.com/y0ung-GMLAB/robot_web.git ros2_ws
 cd ~/ros2_ws
 ```
 
@@ -595,7 +598,7 @@ ethercat slaves
 
 ```bash
 cd ~
-git clone -b main --recurse-submodules \
+git clone -b main \
   https://github.com/y0ung-GMLAB/robot_web.git ros2_ws
 cd ~/ros2_ws
 ```
@@ -674,7 +677,7 @@ MOTION_WEB_BRANCH=main bash scripts/commit_branch.sh "커밋 메시지" --push
 ```
 
 `--push` 없이 커밋만 하려면 마지막 `--push`를 빼면 됩니다. 이 스크립트는
-`motion_system` submodule 변경이 있으면 중단합니다.
+`src/motion_system` 에 커밋 안 된 변경이 있으면 중단합니다.
 
 수동으로 커밋할 때는 [8. Git 작업 방법](#8-git-작업-방법)을 따릅니다.
 

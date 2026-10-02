@@ -1,0 +1,42 @@
+period: 1000000
+
+masters:
+  - id: 0
+    type: ethercat
+    number_of_slaves: 2
+    ethercat_master_index: 0
+    slaves:
+      - controller_index: 0
+        driver_id: 0
+        alias: 1
+        position: 0
+        vendor_id: 0x0000066f
+        product_id: 0x60380004
+        profile_mode: 0
+
+      - controller_index: 1
+        driver_id: 0
+        alias: 2
+        position: 0
+        vendor_id: 0x0000066f
+        product_id: 0x60380004
+        profile_mode: 0
+
+drivers:
+  - id: 0
+    pulse_per_revolution: 8388608
+    rated_effort: 0.16
+    unit_effort: 0.1
+    lower: -57.2957795131
+    upper: 57.2957795131
+    speed: 2000
+    acceleration: 57.2957795131
+    deceleration: 57.2957795131
+    profile_velocity: 57.2957795131
+    profile_acceleration: 57.2957795131
+    profile_deceleration: 57.2957795131
+    profile_position_value: 1
+    profile_velocity_value: 3
+    profile_effort_value: 4
+    type: minas
+    param_file: ../param

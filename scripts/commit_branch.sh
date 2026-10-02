@@ -10,7 +10,7 @@ usage() {
 Usage: bash scripts/commit_branch.sh "commit message" [--push]
 
 motion_web 브랜치(fix/coordination-safety) 변경만 커밋합니다.
-motion_system submodule은 수정·커밋하지 않습니다.
+src/motion_system(합친 모터 통신층)은 이 스크립트로 커밋하지 않습니다.
 EOF
 }
 
@@ -45,7 +45,7 @@ if [[ "${current_branch}" != "${BRANCH}" ]]; then
 fi
 
 if [[ -n "$(git status --porcelain src/motion_system)" ]]; then
-  echo "motion_system submodule에 로컬 변경이 있습니다. 커밋 전에 원복하세요." >&2
+  echo "src/motion_system 에 커밋 안 된 변경이 있습니다 · 명시 요청 없이 커밋하지 않습니다. 원복하거나 따로 커밋하세요." >&2
   git status --short src/motion_system >&2
   exit 1
 fi

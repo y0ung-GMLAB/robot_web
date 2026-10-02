@@ -1,0 +1,16 @@
+# ============================================================================
+# apt package list for MIDI application
+# Target: Ubuntu 22.04 (jammy)
+# ============================================================================
+
+# --- Build toolchain ---
+build-essential
+cmake
+pkg-config
+git
+
+# --- MIDI (C++ wrapper over ALSA) ---
+librtmidi-dev
+
+# --- ALSA runtime/development libraries ---
+libasound2-dev
