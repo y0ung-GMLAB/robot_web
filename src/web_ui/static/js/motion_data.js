@@ -1971,7 +1971,10 @@ export function createMotionDataController({
       const referencePositionValue = displayReferencePosition(row);
       const initialPositionValue = displayInitialPosition(row);
       const gearRatioValue = mappingGearRatioValue(row);
-      const initialPositionDisabledAttr = initialPositionDisabled ? ' disabled' : '';
+      // 첫 프레임 방식 = 애니메이션 첫 프레임 값으로 간다 · 이 칸은 보여 주기만 (수동일 때만 입력)
+      const initialPositionDisabledAttr = initialPositionDisabled
+        ? ' disabled title="첫 프레임 방식 · 애니메이션 첫 프레임 값으로 이동합니다 (값 입력은 수동 방식일 때만)"'
+        : ' title="수동 방식 · 재생 전 이 값(조인트 deg)으로 이동합니다"';
       const gearRatioDisabledAttr = dynamixelGearFixed ? ' disabled title="다이나믹셀은 감속비를 사용하지 않으며 1로 고정됩니다"' : '';
       return (
         `<tr data-mapping-index="${index}">
