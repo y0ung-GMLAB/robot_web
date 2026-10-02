@@ -2,11 +2,11 @@
 
 **노드 셋이 같은 판정을 따로 들고 있었고, 하나가 달랐다.**
 
-브리지가 「이 설정으로 일해라」를 쏘면 각 노드는 받은 모션축 설정 파일이
+브리지가 「이 설정으로 일해라」를 쏘면 각 노드는 받은 조인트 매핑 파일이
 정말 그 파일인지 sha256 으로 본다.
 
     스튜디오      if actual != expected:                 항상 검사
-    모션축 매핑    expected 없으면 「필요합니다」로 거부      항상 검사
+    조인트 매핑    expected 없으면 「필요합니다」로 거부      항상 검사
     MIDI         if expected and actual != expected:    **비면 건너뜀**
 
 MIDI 만 지문이 비어 오면 그냥 통과했다 · 게다가 매핑 파일이 **아예 없으면**
@@ -119,15 +119,12 @@ def test_an_empty_applied_context_confirms_nothing():
 
 SRC = Path(__file__).resolve().parents[2]
 
+# 스튜디오·MIDI 노드는 삭제됐다 · 공용 문을 쓰는 곳은 이 둘이 남았다
 CALLERS = {
-    'motion_control_studio/motion_studio/motion_studio/workspace_session.py':
-        ['verify_mapping_fingerprint(', 'confirm_context_id('],
-    'motion_control_studio/motion_control/motion_runtime/motion_runtime/motion_mapping_manager.py':
+    'motion_runtime/motion_runtime/motion_mapping_manager.py':
         ['verify_mapping_fingerprint('],
-    'motion_control_studio/motion_control/motion_runtime/motion_runtime/motion_run_manager.py':
+    'motion_runtime/motion_runtime/motion_run_manager.py':
         ['confirm_context_id('],
-    'motion_control_studio/motion_control/midi_control/midi_control/midi_control_node.py':
-        ['verify_mapping_fingerprint(', 'confirm_context_id('],
 }
 
 
@@ -140,4 +137,4 @@ def test_nobody_keeps_a_copy(name, expected):
 
     # 판정 문구를 제가 들고 있으면 제 판정을 한다는 뜻이다
     assert "raise ValueError('확인하려는 실행 컨텍스트가" not in source
-    assert "raise ValueError('모션축 설정 파일 버전이" not in source
+    assert "raise ValueError('조인트 매핑 파일 버전이" not in source

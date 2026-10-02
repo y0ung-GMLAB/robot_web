@@ -3,7 +3,7 @@
 **같은 검사가 네 벌 복사돼 있었고, 둘이 틀렸다.**
 
     workspace_session      (스튜디오)      ❌ 푼 경로와 안 푼 경로를 견줌
-    motion_mapping_manager (모션축 매핑)    ❌ 같은 실수
+    motion_mapping_manager (조인트 매핑)    ❌ 같은 실수
     motion_run_manager     (모션 실행)      ✅
     midi_control_node      (MIDI)          ✅
 
@@ -117,11 +117,10 @@ def test_the_name_is_trimmed(projects):
 
 SRC = Path(__file__).resolve().parents[2]   # .../ros2_ws/src
 
+# 스튜디오·MIDI 노드는 삭제됐다 · 공용 문을 쓰는 곳은 이 둘이 남았다
 CALLERS = [
-    'motion_control_studio/motion_studio/motion_studio/workspace_session.py',
-    'motion_control_studio/motion_control/motion_runtime/motion_runtime/motion_mapping_manager.py',
-    'motion_control_studio/motion_control/motion_runtime/motion_runtime/motion_run_manager.py',
-    'motion_control_studio/motion_control/midi_control/midi_control/midi_control_node.py',
+    'motion_runtime/motion_runtime/motion_mapping_manager.py',
+    'motion_runtime/motion_runtime/motion_run_manager.py',
 ]
 
 

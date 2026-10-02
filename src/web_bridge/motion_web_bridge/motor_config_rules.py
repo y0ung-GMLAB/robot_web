@@ -1,0 +1,987 @@
+"""모터 설정·스캔 판정 규칙 · 상태 비의존.
+
+`MotionWebBridge`에서 떼어낸 순수 함수 모음이다. 노드의 상태도 락도 건드리지
+않고 인자로 받은 값만 보고 판단하므로, 노드를 띄우지 않고 단위 테스트할 수 있다.
+
+`test_pure_modules.py`가 이 성질을 지킨다 · `self` 접근이나
+`bridge_node` import가 끼어들면 실패한다.
+"""
+
+from __future__ import annotations
+
+import copy
+import os
+import re
+import subprocess
+import time
+from pathlib import Path
+from urllib.parse import quote
+from typing import Any, Dict, List
+
+from motion_common import store
+from motion_common.values import optional_float, optional_int
+
+from motion_web_bridge.motor_identity import driver_model_from, model_is_unknown
+
+
+def is_ac_servo_motor(motor: Dict[str, Any]) -> bool:
+    values = [
+        motor.get('motor_type'),
+        motor.get('motor_type_label'),
+        motor.get('driver_model'),
+        motor.get('driver_name'),
+        motor.get('transport'),
+    ]
+    text = ' '.join(str(value or '').lower() for value in values)
+    return 'minas' in text or 'ac servo' in text or 'ac_servo' in text
+
+
+def is_dynamixel_motor(motor: Dict[str, Any]) -> bool:
+    values = [
+        motor.get('motor_type'),
+        motor.get('motor_type_label'),
+        motor.get('driver_model'),
+        motor.get('driver_name'),
+        motor.get('transport'),
+    ]
+    text = ' '.join(str(value or '').lower() for value in values)
+    return 'dynamixel' in text
+
+
+def empty_motor_registry() -> Dict[str, Any]:
+    return {
+        'version': 1,
+        'updated_at': None,
+        'motors': [],
+    }
+
+
+def normalize_motor_entry(motor: Dict[str, Any], index: int) -> Dict[str, Any]:
+    motor_type = str(motor.get('motor_type') or 'unknown')
+    transport = str(motor.get('transport') or 'unknown')
+    driver_family = str(motor.get('driver_family') or motor_type)
+    identity = dict(motor.get('identity')) if isinstance(motor.get('identity'), dict) else {}
+    profile = dict(motor.get('profile')) if isinstance(motor.get('profile'), dict) else {}
+    if not profile.get('driver_model') and identity.get('driver_model'):
+        profile['driver_model'] = identity.pop('driver_model')
+    else:
+        identity.pop('driver_model', None)
+    if 'model_confirmed' not in profile and 'nameplate_confirmed' in identity:
+        profile['model_confirmed'] = identity.get('nameplate_confirmed') is True
+    identity.pop('nameplate_confirmed', None)
+    if not profile.get('model_source') and profile.get('model_confirmed') is True:
+        profile['model_source'] = 'user_nameplate'
+    config = dict(motor.get('config')) if isinstance(motor.get('config'), dict) else {}
+
+    # 여기 있던 `optional_int`는 모듈 상단이 이미 가져온
+    # `motion_common.values.optional_int`와 글자까지 같으면서 그것을 가리고
+    # 있었다 · 지우면 임포트한 단일 구현이 그대로 쓰인다.
+    axis = optional_int(
+        config.get('controller_index'),
+        optional_int(motor.get('axis'), None),
+    )
+    if axis is not None:
+        config['controller_index'] = axis
+
+    motor_id = str(motor.get('id') or '').strip()
+    if not motor_id:
+        motor_id = f'{transport}_{motor_type}_{index}'
+
+    return {
+        'id': motor_id,
+        'enabled': bool(motor.get('enabled', False)),
+        'hidden': bool(motor.get('hidden', False)),
+        'deleted': bool(motor.get('deleted', False)),
+        'axis': axis,
+        'name': str(motor.get('name') or ''),
+        'motor_type': motor_type,
+        'driver_family': driver_family,
+        'transport': transport,
+        'identity': identity,
+        'profile': profile,
+        'config': config,
+    }
+
+
+def normalize_motor_registry(registry: Dict[str, Any]) -> Dict[str, Any]:
+    if not isinstance(registry, dict):
+        registry = {}
+
+    motors = registry.get('motors', [])
+    if not isinstance(motors, list):
+        motors = []
+
+    normalized_motors: List[Dict[str, Any]] = []
+    used_ids = set()
+    for index, motor in enumerate(motors):
+        if not isinstance(motor, dict):
+            continue
+        normalized = normalize_motor_entry(motor, index)
+        motor_id = str(normalized['id'])
+        if motor_id in used_ids:
+            motor_id = f'{motor_id}_{index}'
+            normalized['id'] = motor_id
+        used_ids.add(motor_id)
+        normalized_motors.append(normalized)
+
+    return {
+        'version': int(registry.get('version') or 1),
+        'updated_at': registry.get('updated_at'),
+        'motors': normalized_motors,
+    }
+
+
+def expand_shared_driver_profiles(config: Dict[str, Any]) -> Dict[str, Any]:
+    """Give every configured axis an independent driver profile.
+
+    The runtime schema stores limits on driver entries. Reusing one driver ID
+    therefore makes lower/upper and velocity settings change for every axis
+    that references it. Cloning only repeated references preserves the schema
+    while making axis editing independent for AC Servo and Dynamixel alike.
+    """
+    if not isinstance(config, dict):
+        return config
+
+    expanded = copy.deepcopy(config)
+    drivers = expanded.get('drivers')
+    masters = expanded.get('masters')
+    if not isinstance(drivers, list) or not isinstance(masters, list):
+        return expanded
+
+    drivers_by_id = {
+        optional_int(driver.get('id'), None): driver
+        for driver in drivers
+        if isinstance(driver, dict)
+        and optional_int(driver.get('id'), None) is not None
+    }
+    used_ids = set(drivers_by_id)
+    next_id = max(used_ids | {-1}) + 1
+    reference_counts: Dict[int, int] = {}
+
+    for master in masters:
+        if not isinstance(master, dict):
+            continue
+        slaves = master.get('slaves')
+        if not isinstance(slaves, list):
+            continue
+        for slave in slaves:
+            if not isinstance(slave, dict):
+                continue
+            driver_id = optional_int(slave.get('driver_id'), None)
+            if driver_id is None or driver_id not in drivers_by_id:
+                continue
+            count = reference_counts.get(driver_id, 0)
+            reference_counts[driver_id] = count + 1
+            if count == 0:
+                continue
+
+            while next_id in used_ids:
+                next_id += 1
+            cloned_driver = copy.deepcopy(drivers_by_id[driver_id])
+            cloned_driver['id'] = next_id
+            drivers.append(cloned_driver)
+            slave['driver_id'] = next_id
+            used_ids.add(next_id)
+            next_id += 1
+
+    return expanded
+
+
+def prune_unused_drivers(
+    drivers: List[Dict[str, Any]],
+    masters: List[Dict[str, Any]],
+) -> List[Dict[str, Any]]:
+    used_driver_ids = set()
+    for master in masters:
+        if not isinstance(master, dict):
+            continue
+        slaves = master.get('slaves', [])
+        if not isinstance(slaves, list):
+            continue
+        for slave in slaves:
+            if not isinstance(slave, dict):
+                continue
+            driver_id = optional_int(slave.get('driver_id'), None)
+            if driver_id is not None:
+                used_driver_ids.add(driver_id)
+
+    return [
+        driver
+        for driver in drivers
+        if not isinstance(driver, dict)
+        or optional_int(driver.get('id'), None) is None
+        or optional_int(driver.get('id'), None) in used_driver_ids
+    ]
+
+
+def motor_id_for(
+    *,
+    motor_type: str,
+    transport: str,
+    axis: Any,
+    ethercat_master_index: Any = 0,
+    alias: Any = None,
+    rotary_alias: Any = None,
+    slave_position: Any = None,
+    serial_port: Any = None,
+    bus_id: Any = None,
+) -> str:
+    """축 하나의 **이름** · §6-215
+
+    이름이 갈리면 화면이 기억하던 선택이 통째로 풀린다 · 실제로 축을 추가하고
+    저장하면 다이나믹셀 두 줄의 체크가 사라졌다 (§6-209) · 저장하면 서버가
+    설정 파일을 읽어 이름을 다시 만들기 때문이다.
+
+    전에는 서버와 화면이 각자 만들었고 규칙이 미묘하게 달랐다 · 화면은
+    alias 가 없을 때 `rotary_alias` 를 봤는데 서버는 안 봤다 · 이제 이름은
+    여기서만 만든다.
+
+        alias 가 있으면        ..._master_0_alias_103
+        rotary 가 있으면       ..._master_0_rotary_52
+        둘 다 없으면           ..._master_0_slave_1
+        직렬이면               ..._port_%2Fdev%2F..._id_3
+    """
+    def assigned(value: Any) -> bool:
+        number = optional_int(value, None)
+        return number is not None and number > 0
+
+    if transport == 'ethercat':
+        master = optional_int(ethercat_master_index, 0) or 0
+        head = f'{motor_type}_{transport}_master_{master}'
+        if assigned(alias):
+            return f'{head}_alias_{optional_int(alias, 0)}'
+        if assigned(rotary_alias):
+            return f'{head}_rotary_{optional_int(rotary_alias, 0)}'
+        return f'{head}_slave_{optional_int(slave_position, 0)}'
+    if bus_id is not None:
+        port = quote(str(serial_port or ''), safe='')
+        return f'{motor_type}_{transport}_port_{port}_id_{optional_int(bus_id, 0)}'
+    return f'{motor_type}_{transport}_axis_{axis}'
+
+
+def axis_profile(
+    web_profile: Dict[str, Any],
+    web_identity: Dict[str, Any],
+    driver: Dict[str, Any],
+) -> Dict[str, Any]:
+    """저장된 설정에서 축 하나의 모델 사실을 읽는다 · §6-210
+
+    읽는 순서는 하나다 · 프로필 → 드라이버 → SII 검색값 · 「모름」 표식은
+    어느 자리에 있든 없는 것으로 친다 · `model_confirmed` 는 모델에서
+    끌어낸다 (모델을 알면 확인된 것이다) · 두 값이 갈릴 자리를 없앤다.
+    """
+    model = driver_model_from(web_profile, web_identity)
+    if not model:
+        model = '' if model_is_unknown(driver.get('driver_model')) else str(
+            driver.get('driver_model')
+        ).strip()
+    source = str(web_profile.get('model_source') or '')
+    if not source and model:
+        source = (
+            'user_nameplate'
+            if web_identity.get('nameplate_confirmed') is True
+            else 'physical_sii'
+        )
+    return {
+        'driver_model': model,
+        'model_confirmed': bool(model),
+        'model_source': source if model else '',
+    }
+
+
+def registry_from_motor_config(config: Dict[str, Any]) -> Dict[str, Any]:
+    if not isinstance(config, dict):
+        config = {}
+    identity_by_axis = {
+        optional_int(item.get('controller_index'), None): item
+        for item in config.get('web_axis_identities', [])
+        if isinstance(item, dict)
+        and optional_int(item.get('controller_index'), None) is not None
+    }
+    profile_by_axis = {
+        optional_int(item.get('controller_index'), None): item
+        for item in config.get('web_axis_profiles', [])
+        if isinstance(item, dict)
+        and optional_int(item.get('controller_index'), None) is not None
+    }
+    drivers_by_id = {
+        int(driver.get('id')): driver
+        for driver in config.get('drivers', [])
+        if isinstance(driver, dict) and driver.get('id') is not None
+    }
+
+    motors: List[Dict[str, Any]] = []
+    for master in config.get('masters', []):
+        if not isinstance(master, dict):
+            continue
+        master_id = optional_int(master.get('id'), 0)
+        transport = str(master.get('type') or 'unknown')
+        ethercat_master_index = optional_int(
+            master.get('ethercat_master_index'), 0
+        )
+        serial_port = master.get('serial_port') or master.get('port')
+        serial_baudrate = optional_int(
+            master.get('serial_baudrate'),
+            optional_int(master.get('baudrate'), None),
+        )
+        for index, slave in enumerate(master.get('slaves', [])):
+            if not isinstance(slave, dict):
+                continue
+            driver_id = optional_int(slave.get('driver_id'), 0)
+            driver = drivers_by_id.get(driver_id, {})
+            driver_family = str(driver.get('type') or 'unknown')
+            motor_type = 'ac_servo' if driver_family == 'minas' else driver_family
+            axis = optional_int(slave.get('controller_index'), index)
+            alias = optional_int(slave.get('alias'), None)
+            web_identity = identity_by_axis.get(axis, {})
+            web_profile = profile_by_axis.get(axis, {})
+            bus_id = optional_int(
+                slave.get('bus_id'),
+                optional_int(slave.get('id'), None),
+            )
+            # **사람이 보는 Slave 값을 쓴다** · §6-207
+            #
+            # `position` 은 마스터가 쓰는 주소값이라 alias 를 쓰면 늘 0 이다 ·
+            # 레지스트리는 화면이 보는 모델이므로 여기엔 Slave 값이 들어가야
+            # 한다 · 같은 이름에 두 뜻이 섞여 오늘 사고가 여럿 났다.
+            slave_position = optional_int(
+                slave.get('ring_position', slave.get('position')), index
+            )
+            name = str(slave.get('name') or f'{axis}번 모터')
+            motor_id = motor_id_for(
+                motor_type=motor_type,
+                transport=transport,
+                axis=axis,
+                ethercat_master_index=ethercat_master_index,
+                alias=alias,
+                rotary_alias=optional_int(web_identity.get('rotary_alias'), None),
+                slave_position=slave_position,
+                serial_port=serial_port,
+                bus_id=bus_id,
+            )
+            motors.append(
+                normalize_motor_entry(
+                    {
+                        'id': motor_id,
+                        'enabled': True,
+                        'hidden': False,
+                        'deleted': False,
+                        'axis': axis,
+                        'name': name,
+                        'motor_type': motor_type,
+                        'driver_family': driver_family,
+                        'transport': transport,
+                        'identity': {
+                            'ethercat_master_index': (
+                                ethercat_master_index
+                                if transport == 'ethercat'
+                                else None
+                            ),
+                            'rotary_alias': optional_int(
+                                web_identity.get('rotary_alias'), None
+                            ),
+                            'ethercat_alias': optional_int(
+                                web_identity.get('eeprom_alias'), alias
+                            ),
+                            'node_id': bus_id,
+                            'bus_id': bus_id,
+                            'serial_port': serial_port,
+                            'serial_baudrate': serial_baudrate,
+                            'slave_position': optional_int(
+                                web_identity.get('slave_position'),
+                                slave_position
+                                if alias in (None, 0) else None,
+                            ),
+                            'identity_source': str(
+                                web_identity.get('identity_source') or ''
+                            ),
+                            'vendor_id': optional_int(
+                                web_identity.get('vendor_id'),
+                                optional_int(slave.get('vendor_id'), None),
+                            ),
+                            'product_code': optional_int(
+                                web_identity.get('product_id'),
+                                optional_int(slave.get('product_id'), None),
+                            ),
+                            'revision_number': optional_int(
+                                web_identity.get('revision_number'), None
+                            ),
+                            'serial_number': optional_int(
+                                web_identity.get('serial_number'), None
+                            ),
+                            'sii_order_number': str(
+                                web_identity.get('sii_order_number') or ''
+                            ),
+                            'sii_device_name': str(
+                                web_identity.get('sii_device_name') or ''
+                            ),
+                        },
+                        # **모름 표식은 값이 아니다** · §6-210
+                        #
+                        # 전에는 `web_profile` 의 모델이 「있으면」 그대로
+                        # 썼다 · `UNVERIFIED_MINAS` 도 글자라서 있는 것으로
+                        # 세어졌고, 옆에 놓인 드라이버가 `MADLN05BE` 를
+                        # 알고 있어도 끝내 「모델 미확인」이 떴다.
+                        'profile': axis_profile(web_profile, web_identity, driver),
+                        'config': {
+                            'controller_index': axis,
+                            'ethercat_master_index': (
+                                ethercat_master_index
+                                if transport == 'ethercat'
+                                else None
+                            ),
+                            'master_id': master_id,
+                            'driver_id': driver_id,
+                            'bus_id': bus_id,
+                            'serial_port': serial_port,
+                            'serial_baudrate': serial_baudrate,
+                            'alias': alias,
+                            'position': slave_position,
+                            'vendor_id': optional_int(slave.get('vendor_id'), None),
+                            'product_id': optional_int(slave.get('product_id'), None),
+                            'profile_mode': optional_int(slave.get('profile_mode'), 0),
+                        },
+                    },
+                    len(motors),
+                )
+            )
+
+    return {
+        'version': 1,
+        'updated_at': None,
+        'motors': motors,
+    }
+
+
+def scan_item_has_detected_devices(scan_item: Any) -> bool:
+    if not isinstance(scan_item, dict) or scan_item.get('skipped') is True:
+        return False
+    for key in ('slaves_count', 'devices_count'):
+        try:
+            if int(scan_item.get(key) or 0) > 0:
+                return True
+        except (TypeError, ValueError):
+            pass
+    for key in ('slaves', 'devices'):
+        value = scan_item.get(key)
+        if isinstance(value, list) and len(value) > 0:
+            return True
+    return False
+
+
+def scan_operation_outcome(
+    scan: Any,
+    *,
+    operation_type: str,
+    fallback_success: bool,
+) -> str:
+    if not isinstance(scan, dict):
+        return 'success' if fallback_success else 'failure'
+
+    ethercat = scan.get('ethercat_scan')
+    dynamixel = scan.get('dynamixel_scan')
+    physical = scan.get('physical_scan')
+    if isinstance(physical, dict):
+        if not isinstance(ethercat, dict):
+            ethercat = physical.get('ethercat')
+        if not isinstance(dynamixel, dict):
+            dynamixel = physical.get('dynamixel')
+
+    if operation_type == 'full_scan':
+        requested = [ethercat, dynamixel]
+    elif operation_type == 'ac_servo_scan':
+        requested = [ethercat]
+    elif operation_type == 'dynamixel_scan':
+        requested = [dynamixel]
+    else:
+        requested = [
+            item
+            for item in (ethercat, dynamixel)
+            if isinstance(item, dict) and item.get('skipped') is not True
+        ]
+    requested = [item for item in requested if isinstance(item, dict)]
+    if not requested:
+        return 'success' if fallback_success else 'failure'
+    project_comparison = scan.get('project_comparison')
+    ethercat_project = (
+        project_comparison.get('ethercat_project')
+        if isinstance(project_comparison, dict)
+        else None
+    )
+    if (
+        operation_type in {'full_scan', 'ac_servo_scan'}
+        and isinstance(ethercat_project, dict)
+        and ethercat_project.get('available') is True
+        and ethercat_project.get('compatible') is not True
+    ):
+        return 'failure'
+    # **프로젝트가 쓰는 축을 다 찾았으면 EtherCAT 은 된 것이다** · §6-198
+    #
+    # `complete` 는 「등록된 Master 가 전부 응답했나」다 · 그래서 프로젝트가
+    # 쓰지 않는 Master 하나가 랜선이 빠져 있으면 `complete=False` 가 된다.
+    #
+    # 그러면 프로젝트가 필요로 하는 축을 다 찾았는데도 「부분 완료」가 떴다 ·
+    # 같은 응답 안에서 스스로 「미사용 Master 1 미연결 허용」이라고 말해
+    # 놓고서다 · 사용자는 뭔가 덜 된 줄 안다.
+    #
+    # `compatible` 은 「프로젝트가 **필요로 하는** Master 가 다 응답했다」는
+    # 뜻이다 · 그게 곧 이 검색이 하려던 일이다.
+    ethercat_satisfied = (
+        isinstance(ethercat_project, dict)
+        and ethercat_project.get('available') is True
+        and ethercat_project.get('compatible') is True
+    )
+    completed = [
+        item.get('complete') is True
+        or (item is ethercat and ethercat_satisfied)
+        for item in requested
+    ]
+    if all(completed):
+        return 'success'
+    if any(completed):
+        return 'partial'
+    if any(
+        scan_item_has_detected_devices(item)
+        for item in requested
+    ):
+        return 'partial'
+    return 'failure'
+
+
+def scan_result_message(
+    success: bool,
+    scan: Any,
+    fallback: str,
+) -> str:
+    """Keep scan evidence in ``scan`` and expose only a concise UI message."""
+    if not isinstance(scan, dict):
+        return fallback
+
+    ethercat = scan.get('ethercat_scan')
+    if not isinstance(ethercat, dict):
+        physical = scan.get('physical_scan')
+        if isinstance(physical, dict):
+            ethercat = physical.get('ethercat')
+
+    dynamixel = scan.get('dynamixel_scan')
+    if not isinstance(dynamixel, dict):
+        physical = scan.get('physical_scan')
+        if isinstance(physical, dict):
+            dynamixel = physical.get('dynamixel')
+    requested = [
+        item
+        for item in (ethercat, dynamixel)
+        if isinstance(item, dict) and item.get('skipped') is not True
+    ]
+    project_comparison = scan.get('project_comparison')
+    ethercat_project = (
+        project_comparison.get('ethercat_project')
+        if isinstance(project_comparison, dict)
+        else None
+    )
+    project_compatible = bool(
+        isinstance(ethercat_project, dict)
+        and ethercat_project.get('compatible') is True
+    )
+    project_incompatible = bool(
+        isinstance(ethercat_project, dict)
+        and ethercat_project.get('available') is True
+        and ethercat_project.get('compatible') is not True
+    )
+    partial = bool(
+        not success
+        and not project_incompatible
+        and (
+            project_compatible
+            or (
+                any(item.get('complete') is True for item in requested)
+                and any(item.get('complete') is not True for item in requested)
+            )
+            or any(
+                scan_item_has_detected_devices(item)
+                for item in requested
+            )
+        )
+    )
+    parts = [
+        (
+            '모터 검색 완료'
+            if success
+            else '모터 검색 부분 완료'
+            if partial
+            else '모터 검색 실패'
+        )
+    ]
+    if isinstance(ethercat, dict) and ethercat.get('skipped') is not True:
+        try:
+            parts.append(f'AC Servo {int(ethercat.get("slaves_count") or 0)}축')
+        except (TypeError, ValueError):
+            pass
+        master_rows = ethercat.get('masters')
+        if isinstance(master_rows, list) and master_rows:
+            parts.append(
+                ' / '.join(
+                    (
+                        f'Master {int(row.get("master_index") or 0)} '
+                        f'{int(row.get("slaves_count") or 0)}축'
+                    )
+                    for row in master_rows
+                    if isinstance(row, dict)
+                )
+            )
+    if isinstance(dynamixel, dict) and dynamixel.get('skipped') is not True:
+        try:
+            parts.append(f'Dynamixel {int(dynamixel.get("devices_count") or 0)}축')
+        except (TypeError, ValueError):
+            pass
+    if project_compatible:
+        parts.append('프로젝트 EtherCAT 구성 확인 완료')
+        unused = ethercat_project.get('unused_registered_master_indices') or []
+        if unused:
+            parts.append(
+                '미사용 Master '
+                + ', '.join(str(index) for index in unused)
+                + ' 미연결 허용'
+            )
+
+    scan_id = str(scan.get('scan_id') or '').strip()
+    if scan_id:
+        parts.append(f'scan_id {scan_id}')
+    errors = scan.get('scan_errors')
+    if not success and isinstance(errors, list):
+        concise_errors = [
+            str(
+                error.get('message')
+                if isinstance(error, dict)
+                else error
+            ).strip()
+            for error in errors[:2]
+            if str(
+                error.get('message')
+                if isinstance(error, dict)
+                else error
+            ).strip()
+        ]
+        if concise_errors:
+            parts.append(', '.join(concise_errors))
+    return ' · '.join(parts)
+
+
+def wait_for_ethercat_release(timeout_sec: float) -> None:
+    deadline = time.time() + timeout_sec
+    last_output = ''
+    while time.time() < deadline:
+        master = subprocess.run(
+            ['ethercat', 'master'],
+            check=False,
+            capture_output=True,
+            text=True,
+            timeout=2.0,
+        )
+        last_output = master.stderr.strip() or master.stdout.strip()
+        if master.returncode == 0:
+            claimed = bool(
+                re.search(
+                    r'^\s*Phase:\s*Operation\s*$',
+                    master.stdout,
+                    re.MULTILINE | re.IGNORECASE,
+                )
+                or re.search(
+                    r'^\s*Active:\s*yes\s*$',
+                    master.stdout,
+                    re.MULTILINE | re.IGNORECASE,
+                )
+            )
+            if not claimed:
+                slaves = subprocess.run(
+                    ['ethercat', 'slaves'],
+                    check=False,
+                    capture_output=True,
+                    text=True,
+                    timeout=2.0,
+                )
+                last_output = slaves.stderr.strip() or slaves.stdout.strip()
+                active_slave = bool(
+                    slaves.returncode == 0
+                    and re.search(
+                        r'^\s*\d+\s+\S+\s+(?:SAFEOP|OP)\b',
+                        slaves.stdout,
+                        re.MULTILINE | re.IGNORECASE,
+                    )
+                )
+                if slaves.returncode == 0 and not active_slave:
+                    return
+        time.sleep(0.05)
+    raise RuntimeError(
+        'Motor Manager 정지 후에도 EtherCAT Master 또는 Slave 운전 상태가 해제되지 않았습니다'
+        + (f': {last_output}' if last_output else '')
+    )
+
+
+def schedule_managed_service_restart(*managed_services: str) -> None:
+    """Return the HTTP response before stopping the process serving it.
+
+    Starting systemctl immediately races the API response against
+    Uvicorn shutdown.  A detached, fixed-command shell gives the response
+    a short window to leave the socket, then asks systemd to restart the
+    validated service.  Positional arguments keep the service name out of
+    shell parsing.
+    """
+    allowed_services = {
+        'motion-control.service',
+        'motion-motor.service',
+        'motion-coordination.service',
+    }
+    if (
+        not managed_services
+        or any(service not in allowed_services for service in managed_services)
+    ):
+        raise ValueError('허용되지 않은 자동실행 서비스 이름입니다')
+    subprocess.Popen(
+        [
+            '/bin/bash',
+            '-c',
+            'sleep 0.5; exec "$@"',
+            'motion-control-delayed-restart',
+            '/usr/bin/systemctl',
+            '--user',
+            'restart',
+            '--no-block',
+            *managed_services,
+        ],
+        start_new_session=True,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+    )
+
+
+# --------------------------------------------------------------------------- #
+# 프로젝트 저장소를 인자로 받는 규칙
+#
+# 노드의 상태는 아니지만 저장소는 필요한 함수들이다. `self.project_repository`
+# 대신 첫 인자로 받아, 이 모듈이 노드를 모르는 성질을 유지한다.
+# --------------------------------------------------------------------------- #
+
+def selected_motor_config_path(repository) -> Path:
+    project_id = repository.require_selected_project_id()
+    detail = repository.get_project(project_id)
+    active = detail.get('project', {}).get('active_files') or {}
+    file_name = str(active.get('motor_axes') or '').strip()
+    if not file_name:
+        raise ValueError('현재 프로젝트에 모터축 설정 파일이 없습니다')
+    return repository.export_path(
+        project_id, 'motor_axes', file_name
+    )
+
+
+def write_motor_config_selection(repository, path: Path) -> None:
+    project_id = repository.require_selected_project_id()
+    project = repository.get_project(project_id)['project']
+    selection_file = Path(project['path']) / 'runtime' / 'selected_motor_config_path.txt'
+    store.atomic_write_text(selection_file, str(path) + '\n')
+
+
+def clear_motor_config_selection(repository) -> None:
+    project_id = repository.selected_project_id()
+    if not project_id:
+        return
+    project = repository.get_project(project_id)['project']
+    selection_file = Path(project['path']) / 'runtime' / 'selected_motor_config_path.txt'
+    selection_file.unlink(missing_ok=True)
+
+
+def motor_operation_runtime_readiness(
+    repository,
+    operation: Dict[str, Any],
+    motion_state: Dict[str, Any],
+    runtime_status: Dict[str, Any],
+) -> Dict[str, Any]:
+    details = operation.get('details')
+    details = dict(details) if isinstance(details, dict) else {}
+    expected_file = str(details.get('runtime_file') or '').strip()
+    if not expected_file:
+        return {
+            'ready': False,
+            'failed': True,
+            'error': '검증할 Motor Manager 실행 설정 경로가 없습니다',
+        }
+    verified_file = str(
+        details.get('verified_motor_config_file') or ''
+    ).strip()
+    actual_file = verified_file
+    if not actual_file:
+        actual_file = str(
+            runtime_status.get('runtime_config_file') or ''
+        ).strip()
+        if not actual_file:
+            return {'ready': False, 'failed': False, 'error': ''}
+        try:
+            matches = (
+                runtime_status.get('runtime_target_matches_process') is True
+                and
+                Path(actual_file).expanduser().resolve()
+                == Path(expected_file).expanduser().resolve()
+            )
+        except (OSError, ValueError):
+            matches = False
+        if not matches:
+            return {
+                'ready': False,
+                'failed': True,
+                'error': (
+                    'Motor Manager 실행 설정 불일치 · '
+                    f'기대 {expected_file} · 실제 {actual_file}'
+                ),
+            }
+        try:
+            repository.runtime.update_motor_operation(
+                str(operation.get('operation_id') or ''),
+                str(operation.get('phase') or 'verifying'),
+                details={'verified_motor_config_file': actual_file},
+            )
+        except ValueError:
+            pass
+
+    expected_axes = details.get('expected_axes')
+    if not isinstance(expected_axes, list):
+        expected_axes = []
+    try:
+        expected = sorted(set(int(axis) for axis in expected_axes))
+    except (TypeError, ValueError):
+        expected = []
+    if not expected:
+        return {
+            'ready': False,
+            'failed': True,
+            'error': '검증할 설정 대상 모터축이 없습니다',
+        }
+    motors = motion_state.get('motors')
+    motors = motors if isinstance(motors, list) else []
+    by_axis = {}
+    for motor in motors:
+        if not isinstance(motor, dict):
+            continue
+        try:
+            by_axis[int(motor.get('controller_index'))] = motor
+        except (TypeError, ValueError):
+            continue
+    pending = []
+    for axis in expected:
+        motor = by_axis.get(axis)
+        if (
+            motor is None
+            or motor.get('connection_connected') is not True
+            or str(motor.get('connection_state') or '') != 'online'
+            or motor.get('fault') is True
+        ):
+            pending.append(axis)
+    return {
+        'ready': not pending,
+        'failed': False,
+        'error': '',
+        'expected_axes': expected,
+        'pending_axes': pending,
+        'actual_config_file': actual_file,
+    }
+
+
+# 「적용 실패하면 옛 프로젝트로 되돌린다」를 지웠다 · §6-199
+#
+# 실패해도 **새 설정은 그대로 둔다** · 축 넷 중 셋이 붙었는데 하나가 안
+# 붙었다고 잘 붙은 셋까지 잃을 이유가 없다 · 화면에 엉뚱하게 옛 프로젝트가
+# 떠서 「내가 만든 프로젝트가 왜 사라졌지」가 됐다.
+#
+# Motor Manager 가 아예 못 뜬 경우에도 되돌리지 않는다 · 사용자가 고르지도
+# 않은 프로젝트가 장비에 올라가는 것이 더 위험하다 · 어느 설정으로 움직이는지
+# 사람이 알아야 한다.
+#
+# **프로젝트를 고르는 것은 사람의 일이다.**
+
+
+
+# ---------------------------------------------------------------------------
+# 모터 런타임 서비스 상태 판정
+#
+# `MotionWebBridge._runtime_service_status`에서 떼어냈다. 읽기 전용 상태 3개를
+# 인자로 받는다 · §6-13
+# ---------------------------------------------------------------------------
+
+
+def runtime_service_status(
+    motion_state: Any,
+    *,
+    applied_motor_config_file: Any,
+    repository: Any,
+    workspace_root: Path,
+) -> Dict[str, Any]:
+    runtime_path = Path(applied_motor_config_file or Path())
+    runtime_config = str(runtime_path) if runtime_path.is_file() else ''
+    runtime_target = (
+        repository.runtime.motor_runtime_state()
+        if repository is not None and hasattr(getattr(repository, 'runtime', None), 'motor_runtime_state')
+        else {}
+    )
+    target_config = str(runtime_target.get('config_file') or '')
+    runtime_target_matches_process = bool(
+        runtime_target.get('valid') is True
+        and runtime_config
+        and Path(target_config).resolve() == runtime_path.resolve()
+    )
+    start_block_reason = str(
+        os.environ.get('MOTOR_START_BLOCK_REASON') or ''
+    ).strip()
+    motor_manager_expected = (
+        bool(runtime_config)
+        and runtime_target_matches_process
+        and not start_block_reason
+    )
+    runtime_config_path = runtime_config or str(
+        workspace_root / 'config' / 'bootstrap_motor_config.yaml'
+    )
+    state_payload = motion_state if isinstance(motion_state, dict) else {}
+    generated_at = optional_float(state_payload.get('generated_at'), None)
+    last_motor_status_at = optional_float(
+        state_payload.get('last_motor_status_at'), None
+    )
+    motor_feedback_age_sec = None
+    if generated_at is not None and last_motor_status_at is not None:
+        motor_feedback_age_sec = max(generated_at - last_motor_status_at, 0.0)
+    motors = state_payload.get('motors')
+    motor_count = len(motors) if isinstance(motors, list) else 0
+    if start_block_reason:
+        runtime_phase = 'motor_manager_start_blocked'
+        runtime_message = start_block_reason
+    elif runtime_target.get('valid') is True and not runtime_target_matches_process:
+        runtime_phase = 'runtime_config_mismatch'
+        runtime_message = 'Motor Manager 실행 설정과 적용 대상 설정이 다릅니다'
+    elif not motor_manager_expected:
+        runtime_phase = 'motor_manager_disabled'
+        runtime_message = '모터 실행 설정이 없어 motor_manager_node를 시작하지 않았습니다'
+    elif last_motor_status_at is None:
+        runtime_phase = 'waiting_motor_feedback'
+        runtime_message = 'motor_manager_node 시작 후 첫 모터 상태를 기다리는 중입니다'
+    elif motor_feedback_age_sec is not None and motor_feedback_age_sec > 1.5:
+        runtime_phase = 'motor_feedback_stale'
+        runtime_message = 'motor_manager_node의 모터 상태 갱신이 중단되었습니다'
+    else:
+        runtime_phase = 'ready'
+        runtime_message = f'모터 상태 {motor_count}축 수신 중'
+
+    return {
+        'phase': runtime_phase,
+        'message': runtime_message,
+        'motor_manager_expected': motor_manager_expected,
+        'motor_manager_start_block_reason': start_block_reason,
+        'ros_localhost_only': str(
+            os.environ.get('ROS_LOCALHOST_ONLY') or ''
+        ) == '1',
+        'runtime_config_file': runtime_config_path,
+        'runtime_target_file': target_config,
+        'runtime_target_matches_process': runtime_target_matches_process,
+        'motor_count': motor_count,
+        'last_motor_status_at': last_motor_status_at,
+        'motor_feedback_age_sec': (
+            None if motor_feedback_age_sec is None
+            else round(motor_feedback_age_sec, 3)
+        ),
+    }

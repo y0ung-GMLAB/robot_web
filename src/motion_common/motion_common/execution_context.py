@@ -4,13 +4,13 @@
 
 브리지가 「이 설정으로 일해라」를 네 노드에 쏘면, 각 노드는 두 가지를 본다.
 
-    1  받은 모션축 설정 파일이 정말 그 파일인가   sha256 지문
+    1  받은 조인트 매핑 파일이 정말 그 파일인가   sha256 지문
     2  확인하려는 컨텍스트가 지금 적용된 것인가   context_id
 
 둘 다 세 벌씩 복사돼 있었고, **1번은 한 곳이 달랐다.**
 
     스튜디오      if actual != expected:                 항상 검사
-    모션축 매핑    expected 없으면 「필요합니다」로 거부      항상 검사
+    조인트 매핑    expected 없으면 「필요합니다」로 거부      항상 검사
     MIDI         if expected and actual != expected:    **비면 건너뜀**
 
 MIDI 만 지문이 비어 오면 그냥 통과했다 · 게다가 매핑 파일이 아예 없으면
@@ -30,13 +30,13 @@ from pathlib import Path
 from typing import Any, Optional
 
 #: 지문 없이 왔다 · 보내는 쪽을 믿지 않는다
-MAPPING_FINGERPRINT_REQUIRED = '모션축 설정 파일 버전(지문)이 필요합니다'
+MAPPING_FINGERPRINT_REQUIRED = '조인트 매핑 파일 버전(지문)이 필요합니다'
 
 #: 지문은 왔는데 그 파일이 없다
-MAPPING_FILE_MISSING = '현재 프로젝트의 모션축 설정 파일을 찾을 수 없습니다'
+MAPPING_FILE_MISSING = '현재 프로젝트의 조인트 매핑 파일을 찾을 수 없습니다'
 
 #: 파일은 있는데 내용이 다르다 · 누가 고쳤거나 다른 프로젝트의 것이다
-MAPPING_FINGERPRINT_MISMATCH = '모션축 설정 파일 버전이 실행 컨텍스트와 다릅니다'
+MAPPING_FINGERPRINT_MISMATCH = '조인트 매핑 파일 버전이 실행 컨텍스트와 다릅니다'
 
 #: 확인하려는 컨텍스트가 지금 적용된 것과 다르다
 CONTEXT_MISMATCH = '확인하려는 실행 컨텍스트가 적용된 설정과 다릅니다'

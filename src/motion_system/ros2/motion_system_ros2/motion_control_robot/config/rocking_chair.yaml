@@ -1,0 +1,15 @@
+dt: 0.01
+
+robot:
+  - index: 0
+    name: "rocking_chair"
+    dt: 0.01
+    controller_indices: [0, 1]
+    target_interface_ids:
+      - [0, 1]
+      - [0, 1]
+    home_positions: [10.0, 10.0]
+    home_duration: 5.0
+    move_duration: 30.0
+    init_controlword: 0x103F
+    motion_data_file_path: "../motions"

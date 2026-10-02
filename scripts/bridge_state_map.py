@@ -21,7 +21,7 @@ import json
 from collections import defaultdict
 from pathlib import Path
 
-TARGET = Path("src/motion_web/web_bridge/motion_web_bridge/bridge_node.py")
+TARGET = Path("src/web_bridge/motion_web_bridge/bridge_node.py")
 CLASS_NAME = "MotionWebBridge"
 DYNAMIC_ACCESSORS = ("getattr", "setattr", "hasattr")
 MUTATORS = {

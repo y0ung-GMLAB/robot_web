@@ -1,0 +1,865 @@
+import { escapeHtml } from './format.js';
+import {
+  activateProjectFile,
+  clearMotorRuntimeApplication,
+  createProject,
+  deleteProject,
+  deleteProjectFile,
+  fetchProject,
+  fetchProjectFile,
+  fetchReadOnlyProjectFile,
+  fetchProjects,
+  importProjectFile,
+  openProjectFileEditor,
+  projectFileDownloadUrl,
+  renameProjectFile,
+  saveProjectMemo,
+  selectProject,
+} from './api.js';
+import { showAlert, showConfirm, showPrompt } from './ui_dialogs.js';
+
+function formatBytes(value) {
+  const bytes = Number(value) || 0;
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+  return `${(bytes / 1024 / 1024).toFixed(1)} MB`;
+}
+
+const CATEGORY_VIEW = {
+  project_root: { icon: 'ⓘ' },
+  motor_axes: { icon: '⚙' },
+  motion_axis_matching: { icon: '⇄' },
+  motions: { icon: '▶' },
+  layers: { icon: '▤' },
+  logs: { icon: '≡' },
+  runtime: { icon: '◇' },
+};
+
+export function createProjectExplorerController({
+  el,
+  onOpenEditor = () => {},
+  onManageFile = () => {},
+  onNavigate = () => {},
+  onProjectChange = async () => {},
+  onMotionFilesChange = async () => {},
+  canChangeProject = () => true,
+  canManageProjectFiles = () => true,
+}) {
+  const state = {
+    projects: [], project: null, tree: [], selectedFile: null, projectInfoFile: null,
+    fileActionMenuOpen: false, busy: false, projectRoot: '',
+    runtimeProjectId: '', memoDraft: '', memoDirty: false,
+    memoError: '',
+    projectGeneration: null,
+  };
+
+  function memoSupported() {
+    return Boolean(state.project
+      && Object.prototype.hasOwnProperty.call(state.project, 'memo'));
+  }
+
+  function loadMemoDraft() {
+    state.memoDraft = String(state.project?.memo || '').slice(0, 4000);
+    state.memoDirty = false;
+    state.memoError = '';
+  }
+
+  function setMessage(message, error = false) {
+    if (!el.projectExplorerMessage) return;
+    el.projectExplorerMessage.textContent = message || '';
+    el.projectExplorerMessage.classList.toggle('error-text', error);
+  }
+
+  function projectDeleteBlockedMessage(project = state.project, detail = '') {
+    const name = String(project?.name || project?.project_id || '선택한 프로젝트');
+    const serverDetail = String(detail || '').trim();
+    const runtimeOwned = Boolean(
+      project?.project_id
+      && state.runtimeProjectId
+      && project.project_id === state.runtimeProjectId
+    );
+    if (
+      runtimeOwned
+      || /모터에 적용된 프로젝트|모터 실행 설정이 사용하는 프로젝트/.test(serverDetail)
+    ) {
+      return (
+        `'${name}' 프로젝트를 삭제할 수 없습니다.\n\n`
+        + '현재 이 프로젝트의 모터 설정이 실행 시스템에 적용되어 있습니다.\n'
+        + '프로그램 재시작·전체 동작 정지만으로는 적용이 해제되지 않습니다.\n\n'
+        + '삭제하려면 다음 순서로 진행하세요.\n'
+        + '1. 「전체 동작 정지」를 실행합니다.\n'
+        + '2. 「실행 적용 해제」를 실행합니다.\n'
+        + '3. 이 프로젝트를 다시 삭제합니다.\n\n'
+        + '또는 다른 프로젝트에서 「장비에 적용 · 모터 재시작」을 한 뒤 삭제할 수도 있습니다.'
+      );
+    }
+    return serverDetail
+      || `'${name}' 프로젝트를 삭제할 수 없습니다.`;
+  }
+
+  function renderProjectList() {
+    if (el.projectExplorerCurrentName) {
+      el.projectExplorerCurrentName.textContent = state.project?.name || '선택된 프로젝트 없음';
+      el.projectExplorerCurrentName.classList.toggle('empty', !state.project);
+      el.projectExplorerCurrentName.title = state.project?.project_id || '';
+    }
+    if (el.headerProjectName) {
+      el.headerProjectName.textContent = state.project?.name || '프로젝트 없음';
+      el.headerProjectName.title = state.project?.name || '현재 프로젝트 없음';
+      el.headerProjectName.classList.toggle('empty', !state.project);
+    }
+    const runtimeProject = state.projects.find(
+      (project) => project.project_id === state.runtimeProjectId,
+    );
+    const runtimeConfigCurrent = Boolean(runtimeProject?.setup_status?.motor_applied);
+    if (!el.projectExplorerSelect) return;
+    const selected = state.project?.project_id || el.projectExplorerSelect.value;
+    el.projectExplorerSelect.innerHTML = '<option value="">프로젝트 선택</option>' + state.projects.map((project) => (
+      `<option value="${escapeHtml(project.project_id)}">${escapeHtml(project.name)}</option>`
+    )).join('');
+    el.projectExplorerSelect.value = selected || '';
+  }
+
+  function treeFileCount(nodes) {
+    return (nodes || []).reduce((sum, node) => (
+      sum + (node.node_type === 'folder' ? treeFileCount(node.children) : 1)
+    ), 0);
+  }
+
+  function renderReadOnlyNodes(nodes, depth = 0) {
+    if (!Array.isArray(nodes) || nodes.length === 0) {
+      return '<div class="project-tree-empty">파일 없음</div>';
+    }
+    return nodes.map((node, index) => {
+      const last = index === nodes.length - 1;
+      if (node.node_type === 'folder') {
+        const count = treeFileCount(node.children);
+        return `<details class="project-tree-internal-folder" ${depth === 0 ? 'open' : ''}>`
+          + `<summary><span class="project-tree-branch">${last ? '└' : '├'}</span>`
+          + `<span class="project-tree-internal-folder-icon">▸</span>`
+          + `<strong>${escapeHtml(node.name)}</strong><small>${count}</small></summary>`
+          + `<div class="project-tree-internal-children">${renderReadOnlyNodes(node.children, depth + 1)}</div>`
+          + '</details>';
+      }
+      const selected = state.selectedFile?.read_only
+        && state.selectedFile?.relative_path === node.relative_path;
+      return `<button type="button" class="project-tree-readonly-file${selected ? ' selected' : ''}" `
+        + `data-project-readonly-open data-project-path="${escapeHtml(node.relative_path || '')}" `
+        + `title="${escapeHtml(node.relative_path || node.name)} · 원문 보기(읽기 전용)">`
+        + `<span class="project-tree-branch">${last ? '└' : '├'}</span>`
+        + '<span class="project-tree-readonly-icon">·</span>'
+        + `<span class="project-tree-name">${escapeHtml(node.name)}</span>`
+        + `<small>${formatBytes(node.size)}</small>`
+        + '<span class="project-tree-readonly-badge">읽기 전용</span></button>';
+    }).join('');
+  }
+
+  function renderTree() {
+    if (!el.projectExplorerTree) return;
+    if (!state.project) {
+      el.projectExplorerTree.innerHTML = '<div class="empty">프로젝트를 만들거나 선택하세요</div>';
+      return;
+    }
+    const fileManagementAllowed = Boolean(canManageProjectFiles());
+    const visibleTree = state.tree.filter((folder) => folder.category !== 'trash');
+    const totalFiles = visibleTree.reduce(
+      (sum, folder) => sum + treeFileCount(folder.children),
+      0,
+    );
+    const folders = visibleTree.map((folder) => {
+      const view = CATEGORY_VIEW[folder.category] || { icon: '□' };
+      const readOnly = Boolean(folder.read_only);
+      const children = readOnly ? renderReadOnlyNodes(folder.children) : folder.children.map((file, fileIndex) => {
+        const isLogFile = file.category === 'logs';
+        const managedInFeature = file.category === 'motions';
+        const selected = state.selectedFile?.category === file.category
+          && state.selectedFile?.file_name === file.name;
+        const fileBadge = isLogFile
+          ? `<span class="project-tree-log-count">${Number(file.record_count) || 0}건</span>`
+          : (file.active ? '<span class="project-tree-active">현재</span>' : '');
+        const bankTree = '';
+        return `<div class="project-tree-file-entry"><div class="project-tree-file-row${selected ? ' selected' : ''}" `
+          + `data-project-category="${escapeHtml(file.category)}" data-project-file="${escapeHtml(file.name)}">`
+          + `<button type="button" class="project-tree-file" ${isLogFile ? 'data-project-log-open' : 'data-project-open'} title="${escapeHtml(file.name)} · ${isLogFile ? '로그 탭에서 보기' : '기능에서 열기'}">`
+          + `<span class="project-tree-branch">${fileIndex === folder.children.length - 1 ? '└' : '├'}</span>`
+          + `<span class="project-tree-name">${escapeHtml(file.name)}</span>`
+          + `${fileBadge}</button>`
+          + `${isLogFile || managedInFeature || !fileManagementAllowed ? '' : `<button type="button" class="project-tree-action" data-project-manage title="파일 관리" aria-label="${escapeHtml(file.name)} 관리">⋮</button>`}`
+          + `</div>${bankTree}</div>`;
+      }).join('') || '<div class="project-tree-empty">파일 없음</div>';
+      const childCount = readOnly ? treeFileCount(folder.children) : folder.children.length;
+      const defaultOpen = folder.category === 'runtime' ? '' : 'open';
+      return `<details class="project-tree-folder project-tree-folder-${escapeHtml(folder.category)}" ${defaultOpen}>`
+        + `<summary><span class="project-folder-icon">${view.icon}</span>`
+        + `<strong>${escapeHtml(folder.name)}</strong>`
+        + `<span class="project-folder-count">${childCount}</span></summary>`
+        + `<div class="project-tree-children">${children}</div></details>`;
+    }).join('');
+    el.projectExplorerTree.innerHTML = `<div class="project-tree-root">`
+      + `<span class="project-root-icon">▾</span><span class="project-root-folder">▣</span>`
+      + `<strong>${escapeHtml(state.project.name)}</strong><span class="project-root-count">${totalFiles}</span></div>`
+      + `<div class="project-tree-folders">${folders}</div>`;
+  }
+
+  function renderEditor() {
+    const file = state.projectInfoFile;
+    if (el.projectFileEditorTitle) {
+      el.projectFileEditorTitle.textContent = file
+        ? (file.relative_path || file.file_name || 'project.json')
+        : 'project.json';
+    }
+    if (el.projectFileEditor) {
+      el.projectFileEditor.value = file?.content || '';
+      el.projectFileEditor.disabled = !file;
+      el.projectFileEditor.readOnly = true;
+    }
+    if (el.projectFileInfo) {
+      el.projectFileInfo.textContent = file
+        ? (
+          file.load_error
+            ? `읽기 실패 · ${file.load_error}`
+            : `읽기 전용 · ${formatBytes(file.size)} · SHA-256 ${String(file.sha256 || '').slice(0, 12)}…`
+        )
+        : '프로젝트 선택 필요';
+    }
+  }
+
+  function closeFileActionMenu() {
+    state.fileActionMenuOpen = false;
+    el.projectFileActionMenu?.classList.add('hidden');
+  }
+
+  function requireFileManagementPermission() {
+    if (canManageProjectFiles()) return true;
+    closeFileActionMenu();
+    setMessage('프로젝트 파일 관리는 설정 > 시스템 정보에서만 가능합니다');
+    renderFileActionMenu();
+    return false;
+  }
+
+  function renderFileActionMenu() {
+    const file = state.selectedFile;
+    const disabled = !canManageProjectFiles()
+      || !file || state.busy || Boolean(file.read_only);
+    if (el.projectFileActionTitle) {
+      el.projectFileActionTitle.textContent = file?.file_name || '프로젝트 파일';
+    }
+    const activeLabels = {
+      motor_axes: '현재 모터 설정으로 선택',
+      motion_axis_matching: '현재 조인트 매핑로 선택',
+      motions: '현재 애니메이션로 선택',
+      layers: '현재 레이어로 선택',
+    };
+    if (el.projectFileActivateButton) {
+      el.projectFileActivateButton.textContent =
+        activeLabels[file?.category] || '현재 파일로 선택';
+    }
+    for (const button of [
+      el.projectFileOpenEditorButton,
+      el.projectFileRenameButton,
+      el.projectFileActivateButton,
+      el.projectFileExportButton,
+      el.projectFileDeleteButton,
+    ]) {
+      if (button) button.disabled = disabled;
+    }
+    el.projectFileActionMenu?.classList.toggle(
+      'hidden',
+      !state.fileActionMenuOpen || disabled,
+    );
+  }
+
+  function openFileActionMenu(anchorRect) {
+    if (
+      !el.projectFileActionMenu
+      || !state.selectedFile
+      || !requireFileManagementPermission()
+    ) return;
+    state.fileActionMenuOpen = true;
+    renderFileActionMenu();
+    const menu = el.projectFileActionMenu;
+    const margin = 8;
+    const width = menu.offsetWidth;
+    const height = menu.offsetHeight;
+    const left = Math.min(
+      Math.max(anchorRect.right - width, margin),
+      Math.max(window.innerWidth - width - margin, margin),
+    );
+    const below = anchorRect.bottom + 4;
+    const top = below + height <= window.innerHeight - margin
+      ? below
+      : Math.max(anchorRect.top - height - 4, margin);
+    menu.style.left = `${Math.round(left)}px`;
+    menu.style.top = `${Math.round(top)}px`;
+  }
+
+  function renderSetupProgress() {
+    if (!el.projectSetupProgress) return;
+    if (!state.project) {
+      el.projectSetupProgress.innerHTML = '';
+      return;
+    }
+    const status = state.project.setup_status || {};
+    const steps = [
+      ['config', '', '모터 설정', Boolean(status.motor_configured)],
+      ['config', '', '실행 설정 적용', Boolean(status.motor_applied)],
+      ['manual', '', '조그 확인', Boolean(status.jog_verified)],
+      ['motion', 'mapping', '조인트 매핑', Boolean(status.motion_axes_configured)],
+    ];
+    el.projectSetupProgress.innerHTML = '<strong>처음 설정</strong>' + steps.map((step, index) => (
+      `<button type="button" data-setup-workspace="${step[0]}" data-setup-motion-tab="${step[1]}">`
+      + `<span>${step[3] ? '✓' : index + 1}</span><span>${step[2]}</span>`
+      + `<small>${step[3] ? '완료' : '진행 필요'}</small></button>`
+    )).join('');
+  }
+
+  function renderControls() {
+    const hasProject = Boolean(state.project);
+    const projectSelectionAllowed = Boolean(canChangeProject());
+    if (el.projectExplorerSelect) {
+      el.projectExplorerSelect.disabled = state.busy || !projectSelectionAllowed;
+      el.projectExplorerSelect.classList.toggle('hidden', !projectSelectionAllowed);
+      el.projectExplorerSelect.title = projectSelectionAllowed
+        ? '현재 프로젝트 변경'
+        : '프로젝트 변경은 설정 > 시스템 정보에서만 가능합니다';
+    }
+    if (el.projectImportFileButton) el.projectImportFileButton.disabled = state.busy || !hasProject;
+    if (el.clearMotorRuntimeButton) {
+      const hasRuntime = Boolean(state.runtimeProjectId);
+      el.clearMotorRuntimeButton.disabled = state.busy || !hasRuntime;
+      el.clearMotorRuntimeButton.title = hasRuntime
+        ? 'Motor Manager 실행 적용을 해제해 프로젝트 삭제가 가능하게 합니다'
+        : '해제할 모터 실행 적용이 없습니다';
+    }
+    if (el.projectDeleteButton) el.projectDeleteButton.disabled = state.busy || !hasProject;
+    // **보기만 하는 것은 막지 않는다** · §6-203
+    //
+    // 다른 일이 도는 중(`state.busy`)이라고 목록 갱신까지 막았다 · 정작
+    // 그 「다른 일」이 멎었나 보려고 누르고 싶은 버튼이다.
+    if (el.projectExplorerRefreshButton) el.projectExplorerRefreshButton.disabled = false;
+    if (el.projectUsbRescanButton) el.projectUsbRescanButton.disabled = false;
+    if (el.projectMemoInput) {
+      el.projectMemoInput.disabled = state.busy || !hasProject || !memoSupported();
+    }
+    if (el.projectMemoSaveButton) {
+      el.projectMemoSaveButton.disabled = state.busy || !hasProject
+        || !memoSupported() || !state.memoDirty;
+    }
+    if (el.projectUsbHelp && state.projectRoot) {
+      el.projectUsbHelp.textContent = `프로젝트 저장 위치 · ${state.projectRoot}`;
+    }
+  }
+
+  function renderProjectMemo() {
+    if (el.projectMemoInput && el.projectMemoInput.value !== state.memoDraft) {
+      el.projectMemoInput.value = state.memoDraft;
+    }
+    if (el.projectMemoCount) el.projectMemoCount.textContent = `${state.memoDraft.length} / 4000`;
+    if (el.projectMemoStatus) {
+      const status = !state.project
+        ? '프로젝트 선택 필요'
+        : !memoSupported()
+          ? '프로그램 재시작 필요'
+          : state.memoError
+            ? `저장 실패 · ${state.memoError}`
+            : state.memoDirty
+              ? '저장되지 않음'
+              : 'project.json · 저장됨';
+      el.projectMemoStatus.textContent = status;
+      el.projectMemoStatus.classList.toggle('unsaved', state.memoDirty);
+      el.projectMemoStatus.classList.toggle('error-text', Boolean(state.memoError)
+        || Boolean(state.project && !memoSupported()));
+    }
+  }
+
+  function render() {
+    renderProjectList();
+    renderTree();
+    renderEditor();
+    renderSetupProgress();
+    renderControls();
+    renderProjectMemo();
+    renderFileActionMenu();
+  }
+
+  function syncWorkspacePermissions() {
+    if (!canManageProjectFiles()) closeFileActionMenu();
+    renderTree();
+    renderControls();
+    renderFileActionMenu();
+  }
+
+  async function loadProjectInfoFile(projectId, relativePath = 'project.json') {
+    if (!projectId) {
+      state.projectInfoFile = null;
+      return;
+    }
+    try {
+      state.projectInfoFile = await fetchReadOnlyProjectFile(projectId, relativePath);
+    } catch (error) {
+      state.projectInfoFile = {
+        file_name: relativePath.split('/').pop() || 'project.json',
+        relative_path: relativePath,
+        content: '',
+        load_error: error.message || String(error),
+        read_only: true,
+      };
+    }
+  }
+
+  async function loadProject(projectId, select = false) {
+    if (!projectId) return;
+    const payload = select ? await selectProject(projectId) : await fetchProject(projectId);
+    const preserveMemoDraft = state.memoDirty
+      && state.project?.project_id === payload.project?.project_id;
+    state.project = payload.project || null;
+    state.tree = payload.tree || [];
+    state.selectedFile = null;
+    closeFileActionMenu();
+    await loadProjectInfoFile(state.project?.project_id);
+    if (!preserveMemoDraft) loadMemoDraft();
+    render();
+  }
+
+  async function refresh(silent = false) {
+    if (state.busy) return;
+    state.busy = true;
+    renderControls();
+    try {
+      const payload = await fetchProjects();
+      if (Number.isInteger(Number(payload.project_generation))) {
+        state.projectGeneration = Number(payload.project_generation);
+      }
+      state.projects = payload.projects || [];
+      state.runtimeProjectId = payload.runtime_project_id || '';
+      state.projectRoot = payload.project_root || '';
+      const selectedId = state.project?.project_id || payload.selected_project_id;
+      if (selectedId && state.projects.some((item) => item.project_id === selectedId)) {
+        await loadProject(selectedId);
+      } else {
+        state.project = null;
+        state.tree = [];
+        state.selectedFile = null;
+        state.projectInfoFile = null;
+        closeFileActionMenu();
+        loadMemoDraft();
+      }
+      if (!silent || el.projectExplorerMessage?.textContent.includes('불러오는 중')) {
+        setMessage(`프로젝트 ${state.projects.length}개 · 변경은 시스템 정보에서만`);
+      }
+    } catch (error) {
+      setMessage(error.message, true);
+    } finally {
+      state.busy = false;
+      render();
+    }
+  }
+
+  async function run(action, successMessage) {
+    if (state.busy) return false;
+    state.busy = true;
+    renderControls();
+    try {
+      const payload = await action();
+      if (Number.isInteger(Number(payload.project_generation))) {
+        state.projectGeneration = Number(payload.project_generation);
+      }
+      if (payload.project) {
+        const changedProject = payload.project.project_id !== state.project?.project_id;
+        state.project = payload.project;
+        if (changedProject) loadMemoDraft();
+      }
+      if (payload.tree) state.tree = payload.tree;
+      if (state.project?.project_id) {
+        await loadProjectInfoFile(state.project.project_id);
+      }
+      setMessage(successMessage);
+      const list = await fetchProjects();
+      state.projects = list.projects || [];
+      if (Number.isInteger(Number(list.project_generation))) {
+        state.projectGeneration = Number(list.project_generation);
+      }
+      state.runtimeProjectId = list.runtime_project_id || '';
+      return true;
+    } catch (error) {
+      setMessage(error.message, true);
+      return false;
+    } finally {
+      state.busy = false;
+      render();
+    }
+  }
+
+  async function openFile(category, fileName) {
+    if (!state.project || state.busy) return false;
+    state.busy = true;
+    state.selectedFile = null;
+    renderControls();
+    try {
+      state.selectedFile = await fetchProjectFile(state.project.project_id, category, fileName);
+      setMessage(`${fileName} 열기 완료`);
+      return true;
+    } catch (error) {
+      setMessage(error.message, true);
+      return false;
+    } finally {
+      state.busy = false;
+      render();
+    }
+  }
+
+  async function openReadOnlyFile(relativePath) {
+    if (!state.project || state.busy || !relativePath) return;
+    state.busy = true;
+    renderControls();
+    try {
+      state.projectInfoFile = await fetchReadOnlyProjectFile(
+        state.project.project_id, relativePath,
+      );
+      setMessage(`${relativePath} 원문 열기 완료 · 읽기 전용`);
+      onManageFile(state.projectInfoFile);
+    } catch (error) {
+      setMessage(error.message, true);
+    } finally {
+      state.busy = false;
+      render();
+    }
+  }
+
+  async function openInFeature(category, fileName, targetWorkspace = '') {
+    if (!state.project || state.busy) return false;
+    const opened = await openFile(category, fileName);
+    if (!opened || !state.selectedFile) return false;
+    state.busy = true;
+    renderControls();
+    try {
+      const result = await openProjectFileEditor(state.project.project_id, category, fileName);
+      setMessage(result.message || `${fileName} 기능에서 열기 완료`);
+      await onOpenEditor(result, targetWorkspace);
+      return true;
+    } catch (error) {
+      setMessage(error.message, true);
+      return false;
+    } finally {
+      state.busy = false;
+      render();
+    }
+  }
+
+  function bindEvents() {
+    window.addEventListener('motion-project-files-changed', () => refresh(true));
+    el.projectExplorerRefreshButton?.addEventListener('click', () => refresh());
+    el.projectUsbRescanButton?.addEventListener('click', () => refresh());
+    el.projectMemoInput?.addEventListener('input', () => {
+      state.memoDraft = el.projectMemoInput.value.slice(0, 4000);
+      state.memoDirty = state.memoDraft !== String(state.project?.memo || '');
+      state.memoError = '';
+      renderControls();
+      renderProjectMemo();
+    });
+    el.projectMemoSaveButton?.addEventListener('click', async () => {
+      if (!state.project || state.busy || !state.memoDirty) return;
+      state.busy = true;
+      renderControls();
+      try {
+        const payload = await saveProjectMemo(state.project.project_id, state.memoDraft);
+        state.project = payload.project;
+        loadMemoDraft();
+        await loadProjectInfoFile(state.project?.project_id);
+        const list = await fetchProjects();
+        state.projects = list.projects || [];
+        state.runtimeProjectId = list.runtime_project_id || '';
+        setMessage('프로젝트 메모 저장 완료');
+      } catch (error) {
+        state.memoError = error.message || String(error);
+        setMessage(error.message, true);
+      } finally {
+        state.busy = false;
+        render();
+      }
+    });
+    el.projectExplorerSelect?.addEventListener('change', async () => {
+      if (!canChangeProject()) {
+        el.projectExplorerSelect.value = state.project?.project_id || '';
+        setMessage('프로젝트 변경은 설정 > 시스템 정보에서만 가능합니다');
+        renderControls();
+        return;
+      }
+      const projectId = el.projectExplorerSelect.value;
+      if (!projectId) return;
+      if (state.memoDirty && !await showConfirm(
+        '저장하지 않은 프로젝트 메모가 있습니다. 변경을 버리고 다른 프로젝트로 이동할까요?',
+        { title: '프로젝트 전환', confirmLabel: '변경 버리기', tone: 'warning' },
+      )) {
+        el.projectExplorerSelect.value = state.project?.project_id || '';
+        return;
+      }
+      const changed = await run(
+        () => selectProject(projectId),
+        '프로젝트 선택 완료 · 장비에는 적용되지 않았습니다',
+      );
+      if (changed) await onProjectChange(state.project, state.projectGeneration);
+    });
+    el.projectCreateButton?.addEventListener('click', async () => {
+      const name = await showPrompt('새 프로젝트 이름을 입력하세요', {
+        title: '새 프로젝트',
+        defaultValue: '새 프로젝트',
+        confirmLabel: '생성',
+      });
+      if (!name?.trim()) return;
+      const created = await run(
+        () => createProject({ name: name.trim() }),
+        '프로젝트 생성 완료',
+      );
+      if (created) await onProjectChange(state.project, state.projectGeneration);
+    });
+    el.clearMotorRuntimeButton?.addEventListener('click', async () => {
+      if (state.busy || !state.runtimeProjectId) return;
+      const runtimeName = state.projects.find(
+        (item) => item.project_id === state.runtimeProjectId,
+      )?.name || state.runtimeProjectId;
+      const confirmed = await showConfirm(
+        `모터 실행 적용을 해제합니다.\n\n`
+        + `적용 중 프로젝트: ${runtimeName}\n`
+        + 'Motor Manager가 정지되며, 다시 사용하려면 「장비에 적용 · 모터 재시작」이 필요합니다.\n'
+        + '모든 애니메이션이 정지된 상태에서 「전체 동작 정지」를 먼저 실행했는지 확인하세요.',
+        {
+          title: '실행 적용 해제',
+          confirmLabel: '적용 해제',
+          tone: 'warning',
+        },
+      );
+      if (!confirmed) return;
+      state.busy = true;
+      renderControls();
+      try {
+        const result = await clearMotorRuntimeApplication();
+        if (result?.success === false) {
+          throw new Error(result.message || '실행 적용 해제 실패');
+        }
+        if (Number.isInteger(Number(result.project_generation))) {
+          state.projectGeneration = Number(result.project_generation);
+        }
+        if (Array.isArray(result.projects)) {
+          state.projects = result.projects;
+        }
+        state.runtimeProjectId = result.runtime_project_id || '';
+        setMessage(result.message || '모터 실행 적용을 해제했습니다');
+        await showAlert(result.message || '모터 실행 적용을 해제했습니다', {
+          title: '실행 적용 해제 완료',
+          confirmLabel: '확인',
+          tone: 'info',
+        });
+        await onProjectChange(state.project, state.projectGeneration);
+      } catch (error) {
+        const message = error?.message || String(error);
+        setMessage(message, true);
+        await showAlert(message, {
+          title: '실행 적용 해제 실패',
+          confirmLabel: '확인',
+          tone: 'danger',
+        });
+      } finally {
+        state.busy = false;
+        render();
+      }
+    });
+    el.projectDeleteButton?.addEventListener('click', async () => {
+      if (!state.project || state.busy) return;
+      if (
+        state.runtimeProjectId
+        && state.project.project_id === state.runtimeProjectId
+      ) {
+        const blocked = projectDeleteBlockedMessage(state.project);
+        setMessage(blocked, true);
+        await showAlert(blocked, {
+          title: '프로젝트 삭제 불가',
+          confirmLabel: '확인',
+          tone: 'warning',
+        });
+        return;
+      }
+      const expected = String(state.project.name || '');
+      const entered = await showPrompt(
+        `프로젝트와 관련 파일을 복구할 수 없도록 영구 삭제합니다.\n확인하려면 프로젝트 이름을 입력하세요.\n\n${expected}`,
+        {
+          title: '프로젝트 영구 삭제',
+          defaultValue: '',
+          confirmLabel: '삭제',
+          tone: 'danger',
+        },
+      );
+      if (entered !== expected) {
+        if (entered !== null) setMessage('프로젝트 이름이 일치하지 않아 삭제하지 않았습니다', true);
+        return;
+      }
+      state.busy = true;
+      renderControls();
+      try {
+        const result = await deleteProject(state.project.project_id);
+        if (Number.isInteger(Number(result.project_generation))) {
+          state.projectGeneration = Number(result.project_generation);
+        }
+        state.projects = result.projects || [];
+        state.project = null;
+        state.tree = [];
+        state.selectedFile = null;
+        state.projectInfoFile = null;
+        closeFileActionMenu();
+        loadMemoDraft();
+        setMessage(result.message || '프로젝트와 관련 파일을 영구 삭제했습니다');
+        await onProjectChange(null, state.projectGeneration);
+      } catch (error) {
+        const blocked = projectDeleteBlockedMessage(
+          state.project,
+          error?.message || String(error),
+        );
+        setMessage(blocked, true);
+        await showAlert(blocked, {
+          title: '프로젝트 삭제 불가',
+          confirmLabel: '확인',
+          tone: 'warning',
+        });
+      } finally {
+        state.busy = false;
+        render();
+      }
+    });
+    el.projectImportFileButton?.addEventListener('click', () => el.projectImportFileInput?.click());
+    el.projectImportFileInput?.addEventListener('change', async () => {
+      const file = el.projectImportFileInput.files?.[0];
+      if (!file || !state.project) return;
+      const content = await file.text();
+      const imported = await run(
+        () => importProjectFile(state.project.project_id, {
+          category: 'motions', file_name: file.name, content,
+        }),
+        `${file.name} 가져오기 완료`,
+      );
+      el.projectImportFileInput.value = '';
+      // 애니메이션 재생 화면은 제 목록을 직접 다시 읽어야 한다 · 프로젝트가 바뀔
+      // 때와 스튜디오가 저장할 때만 갱신되고 있어서, 가져온 파일이 탭을
+      // 옮겨도 안 보였다.
+      if (imported) await onMotionFilesChange();
+    });
+    el.projectExplorerTree?.addEventListener('click', async (event) => {
+      const readOnlyButton = event.target.closest('[data-project-readonly-open]');
+      if (readOnlyButton) {
+        await openReadOnlyFile(readOnlyButton.dataset.projectPath);
+        return;
+      }
+      const row = event.target.closest('[data-project-file]');
+      if (!row) return;
+      const category = row.dataset.projectCategory;
+      const fileName = row.dataset.projectFile;
+      if (category === 'logs') {
+        onNavigate('log');
+        return;
+      }
+      if (event.target.closest('[data-project-manage]')) {
+        if (!requireFileManagementPermission()) {
+          renderTree();
+          return;
+        }
+        const anchorRect = event.target.closest('[data-project-manage]').getBoundingClientRect();
+        const opened = await openFile(category, fileName);
+        if (opened && state.selectedFile) openFileActionMenu(anchorRect);
+        return;
+      }
+      if (event.target.closest('[data-project-open]')) {
+        await openInFeature(category, fileName);
+      }
+    });
+    el.projectSetupProgress?.addEventListener('click', (event) => {
+      const button = event.target.closest('[data-setup-workspace]');
+      if (button) onNavigate(button.dataset.setupWorkspace, button.dataset.setupMotionTab);
+    });
+    el.projectFileOpenEditorButton?.addEventListener('click', async () => {
+      const file = state.selectedFile;
+      if (!file || !state.project || state.busy || !requireFileManagementPermission()) return;
+      closeFileActionMenu();
+      state.busy = true;
+      renderControls();
+      try {
+        const result = await openProjectFileEditor(
+          state.project.project_id, file.category, file.file_name,
+        );
+        setMessage(result.message || '기능 탭에 연결했습니다');
+        await onOpenEditor(result);
+      } catch (error) {
+        setMessage(error.message, true);
+      } finally {
+        state.busy = false;
+        render();
+      }
+    });
+    el.projectFileRenameButton?.addEventListener('click', async () => {
+      const file = state.selectedFile;
+      if (!file || !state.project || !requireFileManagementPermission()) return;
+      closeFileActionMenu();
+      const newName = await showPrompt('새 파일명을 입력하세요', {
+        title: '파일명 변경',
+        defaultValue: file.file_name,
+        confirmLabel: '변경',
+      });
+      if (!newName?.trim() || newName.trim() === file.file_name) return;
+      if (!requireFileManagementPermission()) return;
+      await run(
+        () => renameProjectFile(state.project.project_id, file.category, file.file_name, newName.trim()),
+        '파일 이름 변경 완료',
+      );
+      state.selectedFile = null;
+      render();
+    });
+    el.projectFileActivateButton?.addEventListener('click', async () => {
+      const file = state.selectedFile;
+      if (!file || !state.project || !requireFileManagementPermission()) return;
+      closeFileActionMenu();
+      await run(
+        () => activateProjectFile(state.project.project_id, file.category, file.file_name),
+        '프로젝트의 현재 파일로 선택했습니다 · 실제 장비에는 적용되지 않았습니다',
+      );
+    });
+    el.projectFileExportButton?.addEventListener('click', () => {
+      const file = state.selectedFile;
+      if (!file || !state.project || !requireFileManagementPermission()) return;
+      closeFileActionMenu();
+      const anchor = document.createElement('a');
+      anchor.href = projectFileDownloadUrl(state.project.project_id, file.category, file.file_name);
+      anchor.download = file.file_name;
+      anchor.click();
+    });
+    el.projectFileDeleteButton?.addEventListener('click', async () => {
+      const file = state.selectedFile;
+      if (!file || !state.project || !requireFileManagementPermission()) return;
+      closeFileActionMenu();
+      if (!await showConfirm(
+        `${file.file_name} 파일을 프로젝트 휴지통으로 이동할까요?`,
+        { title: '파일 삭제', confirmLabel: '삭제', tone: 'danger' },
+      )) return;
+      if (!requireFileManagementPermission()) return;
+      await run(
+        () => deleteProjectFile(state.project.project_id, file.category, file.file_name),
+        '파일을 프로젝트 휴지통으로 이동했습니다',
+      );
+      state.selectedFile = null;
+      render();
+    });
+    document.addEventListener('pointerdown', (event) => {
+      if (
+        state.fileActionMenuOpen
+        && !event.target.closest('#projectFileActionMenu')
+        && !event.target.closest('[data-project-manage]')
+      ) {
+        closeFileActionMenu();
+      }
+    });
+    document.addEventListener('keydown', (event) => {
+      if (event.key === 'Escape') closeFileActionMenu();
+    });
+    window.addEventListener('resize', closeFileActionMenu);
+    window.addEventListener('scroll', closeFileActionMenu, true);
+  }
+
+  return { bindEvents, refresh, syncWorkspacePermissions };
+}

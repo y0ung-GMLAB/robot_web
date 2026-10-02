@@ -20,31 +20,31 @@ from motion_common import motor_readiness
 
 def _legacy_motion_run(motor, axis, is_ac_servo):
     if str(motor.get('state') or '') != 'detected':
-        return f'{axis}번 축이 감지되지 않았습니다'
+        return f'{axis}번 모터가 감지되지 않았습니다'
     errorcode = int(str(motor.get('errorcode') or 0), 0)
     if errorcode:
         error_hex = str(motor.get('errorcode_hex') or f'0x{errorcode & 0xFFFF:04X}')
         error_text = str(motor.get('error_text') or '').strip()
         detail = f' ({error_text})' if error_text else ''
-        return f'{axis}번 축 모터 알람 {error_hex}{detail}'
+        return f'{axis}번 모터 알람 {error_hex}{detail}'
     if bool(motor.get('fault', False)):
-        return f'{axis}번 축에 에러가 있습니다'
+        return f'{axis}번 모터에 에러가 있습니다'
     if is_ac_servo and motor.get('servo_on') is not True:
-        return f'{axis}번 축 서보가 꺼져 있습니다'
+        return f'{axis}번 모터 서보가 꺼져 있습니다'
     return ''
 
 
 def _legacy_midi(motor, axis, is_ac_servo, limit_active):
     if str(motor.get('state') or '') != 'detected':
-        return f'{axis}번 축이 감지되지 않았습니다'
+        return f'{axis}번 모터가 감지되지 않았습니다'
     if bool(motor.get('fault', False)):
-        return f'{axis}번 축에 에러가 있습니다'
+        return f'{axis}번 모터에 에러가 있습니다'
     if is_ac_servo:
         if motor.get('servo_on') is not True:
-            return f'{axis}번 축 서보가 꺼져 있습니다'
+            return f'{axis}번 모터 서보가 꺼져 있습니다'
         if limit_active:
             return (
-                f'{axis}번 축 내부 리밋이 걸려 있습니다 · '
+                f'{axis}번 모터 내부 리밋이 걸려 있습니다 · '
                 'POT/NOT · 비상정지 · 토크 제한 · 소프트웨어 리밋을 확인하세요'
             )
     return ''
@@ -52,11 +52,11 @@ def _legacy_midi(motor, axis, is_ac_servo, limit_active):
 
 def _legacy_manual(motor, axis, is_ac_servo):
     if str(motor.get('state') or '') != 'detected':
-        return f'{axis}번 축이 감지되지 않았습니다'
+        return f'{axis}번 모터가 감지되지 않았습니다'
     if is_ac_servo and motor.get('servo_on') is not True:
-        return f'{axis}번 축 서보가 꺼져 있습니다'
+        return f'{axis}번 모터 서보가 꺼져 있습니다'
     if bool(motor.get('fault', False)):
-        return f'{axis}번 축에 에러가 있습니다'
+        return f'{axis}번 모터에 에러가 있습니다'
     return ''
 
 
@@ -93,7 +93,7 @@ def test_midi_order_matches_legacy():
         for is_ac_servo, limit in itertools.product((True, False), (True, False)):
             assert motor_readiness.readiness_error(
                 motor,
-                order=motor_readiness.MIDI_ORDER,
+                order=motor_readiness.STREAM_ORDER,
                 axis=3,
                 is_ac_servo=is_ac_servo,
                 internal_limit_active=limit,
@@ -140,7 +140,7 @@ def test_only_motion_run_checks_alarm_code():
         motor, order=motor_readiness.MOTION_RUN_ORDER, is_ac_servo=True,
     )
     assert motor_readiness.readiness_error(
-        motor, order=motor_readiness.MIDI_ORDER, axis=3, is_ac_servo=True,
+        motor, order=motor_readiness.STREAM_ORDER, axis=3, is_ac_servo=True,
     ) == ''
     assert motor_readiness.readiness_error(
         motor, order=motor_readiness.MANUAL_ORDER, axis=3, is_ac_servo=True,
@@ -151,7 +151,7 @@ def test_axis_falls_back_to_controller_index():
     motor = {'controller_index': 7, 'state': 'missing'}
     assert motor_readiness.readiness_error(
         motor, order=motor_readiness.MANUAL_ORDER,
-    ) == '7번 축이 감지되지 않았습니다'
+    ) == '7번 모터가 감지되지 않았습니다'
 
 
 def test_unknown_check_is_rejected():

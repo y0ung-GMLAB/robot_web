@@ -59,8 +59,8 @@ def test_the_other_side_really_uses_this_name(path):
 
     저쪽 저장소가 없을 수도 있다 (하위 모듈을 안 받은 PC) · 그때는 건너뛴다.
     """
-    if not MOTION_SYSTEM.is_dir():
-        pytest.skip('motion_system 하위 모듈이 없습니다')
+    if not MOTION_SYSTEM.is_dir() or not any(MOTION_SYSTEM.iterdir()):
+        pytest.skip('motion_system 하위 모듈이 없습니다 (초기화 안 됨)')
 
     name = path.lstrip('/')
     found = [
@@ -89,18 +89,6 @@ def test_we_do_not_reach_into_their_own_channel():
         '모터 시스템의 내부 통로를 쓰고 있습니다: '
         f'{[str(p.relative_to(WORKSPACE)) for p in ours]}'
     )
-
-
-def test_a_name_that_only_looks_shared_is_recorded_as_such():
-    """`/xtouch/midi` 는 저쪽 이름이지만 그 노드는 여기서 안 돈다 · §6-176
-
-    「저쪽에도 있다」와 「지금 저쪽과 만난다」는 다르다 · 섞어 두면 바꿔도
-    되는 이름을 못 바꾸거나, 바꾸면 안 되는 이름을 바꾼다.
-    """
-    assert topics.MOTOR_SYSTEM_SHARED_NAMES == {'XTOUCH_MIDI': '/xtouch/midi'}
-    assert topics.XTOUCH_MIDI.endswith('/xtouch/midi')
-    # 진짜 경계와 섞이지 않았는지
-    assert not set(topics.MOTOR_SYSTEM_SHARED_NAMES) & set(topics.MOTOR_SYSTEM_BOUNDARY)
 
 
 def test_our_own_channels_are_not_mistaken_for_the_boundary():

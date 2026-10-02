@@ -1,0 +1,455 @@
+/* 연동 화면 · 나머지
+ *
+ * `styles.css` 7,415줄을 순서 그대로 자른 조각이다 · §6-43
+ * 원본 7007~7415줄 · **연결 순서를 바꾸면 겹치기(cascade)가 달라진다.**
+ */
+.system-panel .system-project-info-file .project-file-editor:disabled {
+  background: #f8fafc;
+  color: var(--ink);
+  opacity: 1;
+}
+
+@media (max-width: 1100px) {
+  .system-status-primary,
+  .system-status-secondary {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+}
+
+@media (max-width: 1500px) {
+  .system-runtime-grid,
+  .system-project-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 760px) {
+  .shell {
+    padding: 12px;
+  }
+
+  .topbar {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .motor-activity-banner {
+    width: 120px;
+  }
+
+  .topbar-operations {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .topbar-operation-status {
+    align-items: stretch;
+    flex-wrap: wrap;
+    justify-content: flex-start;
+  }
+
+  .header-project-name {
+    max-width: none;
+  }
+
+  .topbar-operation-buttons {
+    flex-wrap: wrap;
+  }
+
+  .topbar-operation-group {
+    flex-wrap: wrap;
+  }
+
+  .topbar-operation-divider {
+    display: none;
+  }
+
+  .actions {
+    justify-content: stretch;
+  }
+
+  button {
+    flex: 1 1 150px;
+  }
+
+  .scan-panel {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .scan-panel span {
+    white-space: normal;
+  }
+
+  .axis-scan-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .section-head {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .workspace-page-head {
+    min-height: 0;
+  }
+
+  .workspace-page-head > span {
+    max-width: none;
+    text-align: left;
+  }
+
+  .workspace-guide {
+    align-items: flex-start;
+    flex-direction: column;
+    gap: 7px;
+  }
+
+  .workspace-guide ol {
+    gap: 6px 4px;
+  }
+
+  .monitoring-toolbar {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .monitoring-summary-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .monitoring-actions {
+    flex-wrap: wrap;
+  }
+
+  .monitoring-detail-values {
+    grid-template-columns: 1fr;
+  }
+
+  .motion-test-grid,
+  .motion-test-command-grid,
+  .motion-test-results-grid,
+  .servo-action-groups,
+  .motion-file-layout,
+  .motion-file-summary,
+  .motion-mapping-toolbar,
+  .motion-mapping-form {
+    grid-template-columns: 1fr;
+  }
+
+  .motion-test-result.output-result {
+    grid-column: auto;
+  }
+
+  .motion-test-stop-bar {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .motion-test-stop-button {
+    width: 100%;
+  }
+
+  .motion-mapping-guide {
+    grid-template-columns: 1fr;
+  }
+
+
+  .workspace-tabs {
+    flex-wrap: wrap;
+  }
+
+  .workspace-group-tabs {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    padding: 6px;
+  }
+
+  .workspace-group-button {
+    margin: 0;
+    border-radius: 6px;
+    font-size: 13px;
+  }
+
+  .workspace-group-button.active {
+    border-bottom-color: var(--line);
+  }
+
+  .settings-commit-actions {
+    grid-template-columns: 1fr;
+  }
+
+  .motor-readiness-control-groups {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .motor-readiness-system-group {
+    padding: 8px 0 0;
+    border-top: 1px solid var(--line);
+    border-left: 0;
+  }
+
+  .motor-config-file-panel,
+  .settings-final-actions {
+    grid-template-columns: 1fr;
+  }
+
+  .settings-final-action {
+    grid-template-columns: 1fr;
+  }
+
+  .settings-final-apply {
+    border-top: 1px solid var(--line);
+    border-left: 0;
+  }
+
+  .settings-file-actions .danger {
+    margin-left: 0;
+  }
+
+  .status-strip {
+    grid-template-columns: repeat(2, minmax(130px, 1fr));
+  }
+
+  .work-context-strip {
+    grid-template-columns: 1fr 1fr;
+  }
+
+  .system-program-actions {
+    grid-template-columns: 1fr;
+  }
+
+  .system-program-actions #programRestartButton {
+    grid-column: auto;
+  }
+
+  .system-project-memo-footer {
+    align-items: stretch;
+    flex-direction: column;
+  }
+}
+
+/* --- Redesigned Coordination Tab UI --- */
+
+.coordination-settings-details {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #fdfdfd;
+  overflow: hidden;
+}
+
+.coordination-settings-details summary {
+  padding: 10px 14px;
+  cursor: pointer;
+  background: #f5f7f9;
+  user-select: none;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.coordination-settings-details summary:hover {
+  background: #edf1f4;
+}
+
+.coordination-settings-details[open] summary {
+  border-bottom: 1px solid var(--line);
+}
+
+/* 한 줄에 눕힌다 · §6-100
+   칸마다 라벨을 값 위에 쌓고 넉넉한 여백을 주니, 다섯 칸이 화면 높이를
+   통째로 먹었다 · 여기 있는 것은 전부 **한눈에 스치는 값**이지 읽고 앉아
+   있을 것이 아니다. */
+.coordination-dashboard {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 10px;
+  margin-bottom: 10px;
+  padding: 8px 10px;
+  background: #f8fafc;
+  border-radius: 8px;
+  border: 1px solid #e2e8f0;
+}
+
+.coord-badge {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  padding: 4px 10px;
+  border-radius: 6px;
+  background: #ffffff;
+  border: 1px solid #cbd5e1;
+}
+
+.coord-badge-icon {
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: #94a3b8;
+  align-self: center;
+}
+
+.coord-badge.active .coord-badge-icon {
+  background: #22c55e;
+  box-shadow: 0 0 8px rgba(34, 197, 94, 0.4);
+}
+
+.coord-badge.error .coord-badge-icon {
+  background: #ef4444;
+  box-shadow: 0 0 8px rgba(239, 68, 68, 0.4);
+}
+
+/* 라벨과 값을 나란히 · 쌓으면 칸 높이가 두 배가 된다 */
+.coord-badge-info {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  white-space: nowrap;
+}
+
+.coord-badge-info span {
+  font-size: 11px;
+  color: #64748b;
+  font-weight: 500;
+}
+
+.coord-badge-info strong {
+  font-size: 13px;
+  color: #0f172a;
+}
+
+/* 세션 버튼도 같은 줄에 · 뱃지 높이에 맞춘다 */
+.coord-badge-actions > button {
+  padding: 4px 10px;
+  font-size: 12px;
+}
+
+/* 무엇이 남고 무엇이 풀리는지 · §6-132
+   「연동 사용」은 설정 파일에 영구히 남고, 「지금 빠지기」는 노드 메모리만
+   바꾼다 · 화면에서는 둘 다 그냥 선택지라 구분할 길이 없었다. */
+.coordination-persistence-note {
+  margin: 8px 0 0;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--muted, #5b6b7c);
+}
+
+.coordination-settings-fields .coordination-persistence-note {
+  align-self: end;
+  margin: 0 0 6px;
+}
+
+.coord-control-groups {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  padding-top: 16px;
+  border-top: 1px solid var(--line);
+}
+
+.coord-group {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 12px 16px;
+  background: #ffffff;
+  border-radius: 8px;
+  border: 1px solid #e2e8f0;
+}
+
+.coord-group-label {
+  min-width: 80px;
+  font-weight: 600;
+  color: #334155;
+  font-size: 13px;
+}
+
+.coord-group-buttons {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.coord-group-buttons button {
+  min-height: 36px;
+  padding: 0 16px;
+  font-size: 13px;
+  border-radius: 6px;
+}
+
+.coord-motion-options {
+  display: flex;
+  gap: 12px;
+  padding-right: 16px;
+  border-right: 1px solid #e2e8f0;
+}
+
+.warning-button {
+  background-color: #f59e0b;
+  color: white;
+  border: 1px solid #d97706;
+}
+
+.warning-button:hover:not(:disabled) {
+  background-color: #d97706;
+}
+
+.peer-status-dot {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  margin-right: 6px;
+  background-color: #94a3b8;
+}
+
+.peer-status-dot.online { background-color: #22c55e; }
+.peer-status-dot.offline { background-color: #ef4444; }
+.peer-status-dot.warning { background-color: #f59e0b; }
+
+/* 스케줄 범위 안내 · 발화해도 실행되지 않는 상태를 목록 위에 띄운다 · §6-133 */
+.schedule-scope-notice {
+  margin: 0 0 16px;
+  padding: 8px 10px;
+  border-radius: 6px;
+  font-size: 13px;
+  line-height: 1.5;
+  color: #a0aec0;
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.schedule-scope-notice.schedule-scope-warning {
+  color: #f6e05e;
+  background: rgba(246, 224, 94, 0.12);
+}
+
+.schedule-scope-notice.schedule-scope-blocked {
+  color: #90cdf4;
+  background: rgba(144, 205, 244, 0.12);
+}
+
+/* 스케줄 실행 관리 스위치 · §6-143 */
+.schedule-mode-switch {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 0 0 16px;
+}
+
+.schedule-mode-switch label {
+  font-size: 13px;
+  color: #a0aec0;
+  white-space: nowrap;
+}
+
+.schedule-mode-switch select {
+  flex: 1;
+  padding: 6px;
+  background: #1a202c;
+  border: 1px solid #4a5568;
+  color: #fff;
+  border-radius: 4px;
+}

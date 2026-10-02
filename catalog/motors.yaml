@@ -1,0 +1,46 @@
+# 모터 카탈로그 · 로봇 무관 공용 · 로봇 팩은 쓰는 항목만 catalog/ 에 복사해 간다
+#
+# 이름: {type, ...} · type 별 필수 수치 (motion_common/robot_pack.py MOTOR_TYPE_FIELDS)
+#   ac_servo   rated_rpm, max_rpm, rated_torque_nm, peak_torque_nm, rotor_inertia_kgm2
+#   dynamixel  max_rpm, stall_torque_nm
+# 단위 · 모터축 기준 · rpm, N·m, kg·m²
+# confirmed: false = 모델명 추정 (현장 명판 확인 전)
+
+MSMF082L1T2:
+  vendor: Panasonic
+  series: MINAS A6 MSMF
+  type: ac_servo
+  rated_w: 750
+  rated_rpm: 3000
+  max_rpm: 6000
+  rated_torque_nm: 2.39
+  peak_torque_nm: 7.16
+  rotor_inertia_kgm2: 1.06e-4
+  confirmed: true
+  source: https://industry.panasonic.com/ap/en/products/motor/fa-motor/ac-servo/number/msmf082l1t2
+
+MSMF011L1:
+  vendor: Panasonic
+  series: MINAS A6 MSMF
+  type: ac_servo
+  rated_w: 100
+  rated_rpm: 3000
+  max_rpm: 6000
+  rated_torque_nm: 0.32
+  peak_torque_nm: 0.95
+  rotor_inertia_kgm2: 4.8e-6
+  confirmed: false
+  source: https://industry.panasonic.com/global/en/products/motor/fa-motor/ac-servo/number/msmf011l1u2
+
+MSMF5AZL1:
+  vendor: Panasonic
+  series: MINAS A6 MSMF
+  type: ac_servo
+  rated_w: 50
+  rated_rpm: 3000
+  max_rpm: 6000
+  rated_torque_nm: 0.16
+  peak_torque_nm: 0.48
+  rotor_inertia_kgm2: 2.6e-6
+  confirmed: false
+  source: https://industry.panasonic.com/global/en/products/motor/fa-motor/ac-servo/number/msmf5azl1u2

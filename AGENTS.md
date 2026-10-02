@@ -37,9 +37,9 @@
 
 # Git 작업 범위
 
-- 사용자가 Git 작업 대상을 지정하지 않으면 `/home/joonho_test/ros2_ws`의 `motion_web`만 대상으로 한다.
-- 일반적인 Git, 커밋, 브랜치, 푸시, `main` 및 복원 작업에 `src/motion_system`과 그 내부 저장소를 포함하지 않는다.
-- `src/motion_system` 관련 Git 작업은 사용자가 `모션시스템`을 작업 대상으로 명시한 경우에만 수행한다.
+- 사용자가 Git 작업 대상을 지정하지 않으면 이 저장소(`robot_web`)만 대상으로 한다.
+- `src/motion_system`은 서브모듈이 아니라 이 저장소 안 코드다 (2026-10-02 합침 · 출처 `src/motion_system/VENDORED.md`).
+- 일반적인 Git, 커밋, 복원 작업에서 `src/motion_system`의 변경은 사용자가 `모션시스템`을 작업 대상으로 명시한 경우에만 포함한다.
 
 # 모터 스캔 영구 불변조건
 

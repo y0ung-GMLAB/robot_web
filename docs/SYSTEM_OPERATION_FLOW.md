@@ -58,7 +58,7 @@ NTP 가 맞추는 것은 절대 시각(UTC)뿐이다 · 시간대는 사람이 `
 
 ```bash
 sudo timedatectl set-timezone Europe/Paris    # 화면이 만들어 주는 명령
-bash src/motion_web/install.sh                # 위 칸의 다시 빌드 명령
+bash scripts/install.sh                # 위 칸의 다시 빌드 명령
 ```
 
 두 번째 줄이 필요한 이유 · 돌고 있던 노드가 **기동할 때 읽은 시간대를 그대로

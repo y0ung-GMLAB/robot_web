@@ -1,0 +1,1323 @@
+import json
+import threading
+import time
+from pathlib import Path
+
+from unittest import mock
+
+import pytest
+
+from motion_runtime.motion_mapping_manager import MotionMappingManager
+from motion_runtime.motion_player import MotionPlayer
+from motion_runtime.plan_builder import PlanBuilder
+from motion_runtime import motion_run_rules
+from motion_runtime.motion_run_constants import (
+    CONTINUOUS_LOOP_TOLERANCE_DEG,
+)
+from motion_runtime.motion_run_manager import (
+    MotionRunManager,
+)
+
+
+def _patch_rule(name, value):
+    """규칙 함수를 시험용으로 갈아끼운다 · §6-25로 노드에서 떨어져 나왔다.
+
+    이전에는 `manager.<이름> = ...`로 인스턴스에 꽂았다. 규칙이 모듈 함수가
+    되면서 이음매도 모듈로 옮겼다 · autouse 픽스처가 테스트마다 되돌린다.
+    """
+    mock.patch.object(motion_run_rules, name, value).start()
+
+
+@pytest.fixture(autouse=True)
+def _restore_patched_rules():
+    yield
+    mock.patch.stopall()
+
+
+def test_runtime_ignores_optional_studio_editor_metadata_in_motion_header():
+    content = (
+        '{"title":"편집 가능 모션","type":"motion_header","rotation_unit":"deg",'
+        '"fields":["frame","time_sec","id","value"],'
+        '"editor":{"schema_version":1,"layer":{"point_curves":['
+        '{"curve_id":"curve_1","motion_id":"1-1","points":[]}]}}}\n'
+        '[1,0.02,"1-1",3.5]\n'
+    )
+
+    rows, headers = motion_run_rules._extract_motion_rows(content)
+
+    assert headers == ['frame', 'time_sec', 'id', 'value']
+    assert rows == [[1, 0.02, '1-1', 3.5]]
+
+
+def test_motion_run_confirmation_returns_standard_context_acknowledgement():
+    manager = MotionRunManager.__new__(MotionRunManager)
+    manager._player = MotionPlayer(manager)
+    manager._plan_builder = PlanBuilder(manager)
+    manager._plan_builder = PlanBuilder(manager)
+    manager._run_lock = threading.RLock()
+    manager._execution_context_ready = False
+    manager._execution_context = {
+        'context_id': 'context-1',
+        'project_id': 'project-1',
+        'mapping_file_id': 'mapping.yaml',
+        'mapping_sha256': 'mapping-sha',
+    }
+
+    result = manager._confirm_execution_context({'context_id': 'context-1'})
+
+    assert result['success'] is True
+    assert result['context_id'] == 'context-1'
+    assert result['project_id'] == 'project-1'
+    assert manager._execution_context_ready is True
+
+
+def test_continuous_capability_accepts_values_inside_axis_tolerances():
+    capability = motion_run_rules._continuous_capability([
+        {
+            'motor_axis': 0,
+            'loop_delta_deg': 4.9,
+            'loop_tolerance_deg': 5.0,
+        },
+        {
+            'motor_axis': 1,
+            'loop_delta_deg': 5.0,
+            'loop_tolerance_deg': 5.0,
+        },
+    ])
+
+    assert capability['available'] is True
+    assert '5° 이내' in capability['reason']
+
+
+def test_motion_run_publishes_final_control_motion_values():
+    class CapturePublisher:
+        def __init__(self):
+            self.messages = []
+
+        def publish(self, message):
+            self.messages.append(message)
+
+    manager = MotionRunManager.__new__(MotionRunManager)
+
+    manager._player = MotionPlayer(manager)
+
+    manager._plan_builder = PlanBuilder(manager)
+
+    manager._plan_builder = PlanBuilder(manager)
+    manager._execution_context = {
+        'project_id': 'project-1',
+        'project_generation': 9,
+    }
+    manager._motion_value_pub = CapturePublisher()
+
+    manager._player._publish_motion_values({'2-1': 3.5, 'bad': float('nan')})
+
+    payload = json.loads(manager._motion_value_pub.messages[-1].data)
+    assert payload['source'] == 'motion_run'
+    assert payload['project_id'] == 'project-1'
+    assert payload['project_generation'] == 9
+    assert payload['values'] == {'2-1': 3.5}
+
+
+def test_four_degree_motion_seam_is_allowed_even_if_motor_delta_is_large():
+    capability = motion_run_rules._continuous_capability([{
+        'motor_axis': 0,
+        'loop_delta_deg': 4.0,
+        'loop_motor_delta_deg': 400.0,
+        'loop_tolerance_deg': 5.0,
+    }])
+
+    assert capability['available'] is True
+
+
+def test_continuous_loop_tolerance_is_five_degrees():
+    assert CONTINUOUS_LOOP_TOLERANCE_DEG == 5.0
+
+
+def test_synchronized_stop_after_cycle_is_distinct_from_immediate_stop():
+    manager = MotionRunManager.__new__(MotionRunManager)
+    manager._player = MotionPlayer(manager)
+    manager._plan_builder = PlanBuilder(manager)
+    manager._plan_builder = PlanBuilder(manager)
+    manager._graceful_stop_event = threading.Event()
+    manager.status = lambda: {
+        'state': 'running', 'synchronized_repeat_count': 3,
+    }
+    result = manager._handle_stop_after_cycle()
+    assert result['success'] is True
+    assert manager._graceful_stop_event.is_set()
+
+
+def test_past_synchronized_start_is_rejected_instead_of_running_late():
+    manager = MotionRunManager.__new__(MotionRunManager)
+    manager._player = MotionPlayer(manager)
+    manager._plan_builder = PlanBuilder(manager)
+    manager._plan_builder = PlanBuilder(manager)
+    manager._stop_event = threading.Event()
+    captured = []
+    _patch_rule(
+        '_status_from_plan',
+        lambda state, message, _plan: {'state': state, 'message': message},
+    )
+    manager._set_status = captured.append
+    result = manager._player._run_countdown({
+        'scheduled_start_at': time.time() - 0.1,
+        'countdown_sec': 0.0,
+    })
+    assert result is False
+    assert captured[-1]['state'] == 'error'
+
+
+def test_motion_value_clamps_to_mapping_min_and_max():
+    assert motion_run_rules._clamp_motion_value(-35.0, -30.0, 30.0) == -30.0
+    assert motion_run_rules._clamp_motion_value(12.0, -30.0, 30.0) == 12.0
+    assert motion_run_rules._clamp_motion_value(35.0, -30.0, 30.0) == 30.0
+
+
+def test_legacy_initial_disabled_setting_is_ignored():
+
+    initial = motion_run_rules._initial_motion_value({
+        'initial_enabled': False,
+        'initial_mode': 'manual',
+        'initial_motion_position_deg': 12.5,
+    }, [{'value': -3.0}])
+
+    assert initial == 12.5
+
+
+def test_legacy_initial_disabled_mapping_keeps_initial_settings_and_drops_option():
+    manager = MotionMappingManager.__new__(MotionMappingManager)
+
+    normalized = manager._normalize_mapping({
+        'name': 'legacy',
+        'mappings': [{
+            'motion_id': '1-1',
+            'initial_enabled': False,
+            'initial_mode': 'manual',
+            'initial_motion_position_deg': 12.5,
+            'initial_move_time_sec': 5.0,
+        }],
+    })
+
+    row = normalized['mappings'][0]
+    assert 'initial_enabled' not in row
+    assert row['initial_motion_position_deg'] == 12.5
+    assert row['initial_move_time_sec'] == 5.0
+
+
+def test_continuous_capability_rejects_only_continuous_mode_on_seam_mismatch():
+    capability = motion_run_rules._continuous_capability([
+        {
+            'motor_axis': 2,
+            'loop_delta_deg': 5.001,
+            'loop_tolerance_deg': 5.0,
+        },
+    ])
+
+    assert capability['available'] is False
+    assert 'Axis 2' in capability['reason']
+    assert '5.001°' in capability['reason']
+
+
+def test_failed_readiness_marks_all_actions_unavailable():
+    capabilities = motion_run_rules._unavailable_capabilities('모터 연결 끊김')
+
+    assert all(item['available'] is False for item in capabilities.values())
+    assert all(item['reason'] == '모터 연결 끊김' for item in capabilities.values())
+
+
+def test_motor_alarm_is_reported_even_when_fault_flag_is_missing():
+    error = motion_run_rules._motor_ready_error({
+        'controller_index': 0,
+        'state': 'detected',
+        'motor_type': 'AC Servo',
+        'servo_on': True,
+        'fault': False,
+        'errorcode': 21,
+        'errorcode_hex': '0xFF15',
+        'error_text': 'Error 21.0',
+    })
+
+    assert error == '0번 모터 알람 0xFF15 (Error 21.0)'
+
+
+def test_motor_target_applies_reference_scale_direction_and_gear_ratio():
+    row = {
+        'reference_position_deg': 10.0,
+        'offset_deg': 2.0,
+        'scale': 1.5,
+        'invert': True,
+        'gear_ratio': 2.0,
+    }
+
+    assert motion_run_rules._motor_target(row, 3.0) == -5.0
+
+
+def test_interpolation_uses_precomputed_time_index_for_irregular_samples():
+    records = [
+        {'time_sec': 0.0, 'value': 0.0},
+        {'time_sec': 1.0, 'value': 10.0},
+        {'time_sec': 3.0, 'value': 30.0},
+    ]
+    record_times = [record['time_sec'] for record in records]
+
+    assert motion_run_rules._interpolated_value(records, record_times, -1.0) == 0.0
+    assert motion_run_rules._interpolated_value(records, record_times, 0.5) == 5.0
+    assert motion_run_rules._interpolated_value(records, record_times, 2.0) == 20.0
+    assert motion_run_rules._interpolated_value(records, record_times, 4.0) == 30.0
+
+
+def _initialization_only_manager(mapping):
+    manager = MotionRunManager.__new__(MotionRunManager)
+    manager._player = MotionPlayer(manager)
+    manager._plan_builder = PlanBuilder(manager)
+    manager._plan_builder = PlanBuilder(manager)
+    manager.period_sec = 0.02
+    manager._mapping_file_path = lambda _file_id: None
+    manager._load_mapping = lambda _path: mapping
+    manager._current_motors = lambda: [{'axis': 0}]
+    manager._motor_for_axis = lambda _axis, motors: motors[0]
+    _patch_rule('_motor_ready_error', lambda _motor: '')
+    _patch_rule('_target_range_limit_error', lambda _motor, _low, _high: '')
+    _patch_rule('_motor_type', lambda _motor: 'ac_servo')
+    return manager
+
+
+def test_first_frame_initialization_without_motion_file_uses_motion_zero():
+    manager = _initialization_only_manager({
+        'motion_file_id': '',
+        'mappings': [{
+            'motion_id': '1-1',
+            'motor_axis': 0,
+            'reference_position_deg': 100.0,
+            'motion_lower_deg': -30.0,
+            'motion_upper_deg': 30.0,
+            'initial_mode': 'first_frame',
+            'initial_move_time_sec': 5.0,
+            'gear_ratio': 50.0,
+        }],
+    })
+
+    plan = manager._plan_builder.build(
+        {'motion_file_id': '', 'mapping_file_id': 'mapping.yaml'},
+        initialization_only=True,
+    )
+
+    axis = plan['axes'][0]
+    assert axis['initial_motion_source_position_deg'] == 0.0
+    assert axis['initial_motion_position_deg'] == 0.0
+    assert axis['initial_motor_target_deg'] == 100.0
+    assert plan['capabilities']['single_run']['available'] is False
+    assert '첫 프레임 데이터가 없어 모션 0°' in plan['warnings'][0]
+
+
+def _zero_row_mapping(motion_file_id):
+    return {
+        'motion_file_id': motion_file_id,
+        'mappings': [{
+            'motion_id': '1-1', 'motor_axis': 0, 'reference_position_deg': 100.0,
+            'motion_lower_deg': -30.0, 'motion_upper_deg': 30.0,
+            'initial_mode': 'first_frame', 'initial_move_time_sec': 5.0, 'gear_ratio': 50.0,
+        }],
+    }
+
+
+def test_reference_initial_mode_always_goes_to_motion_zero():
+    """초기 위치 「기준점」 · 애니메이션 첫 줄이 있어도 모션 0° 로 간다 (2026-10-02)."""
+    row = {'initial_mode': 'reference', 'initial_motion_position_deg': 7.0}
+    assert motion_run_rules._initial_motion_value(row, [{'time_sec': 0.0, 'value': 12.0}]) == 0.0
+    assert motion_run_rules._initial_motion_value(
+        {'initial_mode': 'first_frame'}, [{'time_sec': 0.0, 'value': 12.0}],
+    ) == 12.0
+
+
+def test_reference_initial_mode_without_animation_needs_no_warning():
+    mapping = _zero_row_mapping('')
+    mapping['mappings'][0]['initial_mode'] = 'reference'
+    manager = _initialization_only_manager(mapping)
+    plan = manager._plan_builder.build({'motion_file_id': '', 'mapping_file_id': 'mapping.yaml'}, initialization_only=True)
+    assert plan['axes'][0]['initial_motor_target_deg'] == 100.0
+    assert not any('첫 프레임 데이터가 없어' in item for item in plan['warnings'])
+
+
+def test_initialization_with_a_deleted_registered_file_falls_back_to_zero():
+    """사용자 보고 · 애니메이션이 없을 때 초기 위치 이동이 자주 실패 (2026-10-02).
+
+    재생 등록된 파일이 지워졌으면 전에는 `motion file not found` 로 그 자리에서
+    실패해 0° 대체 경로까지 못 갔다.
+    """
+    manager = _initialization_only_manager(_zero_row_mapping('gone.json'))
+
+    def missing(_file_id):
+        raise ValueError('motion file not found: gone.json')
+
+    manager._motion_file_path = missing
+    plan = manager._plan_builder.build(
+        {'motion_file_id': 'gone.json', 'mapping_file_id': 'mapping.yaml'},
+        initialization_only=True,
+    )
+    assert plan['axes'][0]['initial_motor_target_deg'] == 100.0
+    assert '재생 등록된 애니메이션 gone.json 를 찾지 못했습니다' in plan['warnings'][0]
+
+
+def test_initialization_with_an_empty_registered_file_falls_back_to_zero():
+    manager = _initialization_only_manager(_zero_row_mapping('empty.json'))
+    manager._motion_file_path = lambda _file_id: 'empty.json'
+
+    def empty(_path):
+        raise ValueError('motion file has no valid records')
+
+    manager._load_motion_records = empty
+    plan = manager._plan_builder.build(
+        {'motion_file_id': 'empty.json', 'mapping_file_id': 'mapping.yaml'},
+        initialization_only=True,
+    )
+    assert plan['axes'][0]['initial_motor_target_deg'] == 100.0
+    assert '쓸 수 있는 줄이 없습니다' in plan['warnings'][0]
+
+
+def test_playback_with_a_deleted_registered_file_is_still_refused():
+    """재생은 대체하지 않는다 · 없는 애니메이션을 0° 로 「재생」할 수는 없다."""
+    manager = _initialization_only_manager(_zero_row_mapping('gone.json'))
+
+    def missing(_file_id):
+        raise ValueError('motion file not found: gone.json')
+
+    manager._motion_file_path = missing
+    with pytest.raises(ValueError, match='motion file not found'):
+        manager._plan_builder.build({'motion_file_id': 'gone.json', 'mapping_file_id': 'mapping.yaml'})
+
+
+def test_initialize_request_reports_plan_errors_right_away(monkeypatch):
+    """초기 위치 이동은 받을 때 계획을 세워 본다 · 안 되면 바로 사유 (팝업으로 뜬다)."""
+    manager = _initialization_only_manager({'motion_file_id': '', 'mappings': []})
+    manager._run_lock = threading.RLock()
+    manager._run_thread = None
+    manager._stop_event = threading.Event()
+    manager._graceful_stop_event = threading.Event()
+    manager._playback_ownership_error = lambda axes=None: ''
+    manager.status = lambda: {'state': 'idle'}
+    started = []
+    monkeypatch.setattr(
+        threading, 'Thread',
+        lambda **kwargs: type('T', (), {'start': lambda self: started.append(1), 'is_alive': lambda self: False})(),
+    )
+
+    result = manager._start_thread('initialize', {'motion_file_id': '', 'mapping_file_id': 'mapping.yaml'})
+
+    assert result['success'] is False
+    assert result['message'].startswith('초기 위치 이동 불가: 움직일 조인트가 없습니다')
+    assert started == []
+
+
+def test_motion_playback_without_motion_file_remains_blocked():
+    manager = _initialization_only_manager({'motion_file_id': '', 'mappings': []})
+
+    with pytest.raises(ValueError, match='motion file_id is required'):
+        manager._plan_builder.build({
+            'motion_file_id': '',
+            'mapping_file_id': 'mapping.yaml',
+        })
+
+
+def test_motion_run_initialization_uses_every_enabled_mapping_axis():
+    manager = MotionRunManager.__new__(MotionRunManager)
+    manager._player = MotionPlayer(manager)
+    manager._plan_builder = PlanBuilder(manager)
+    manager._plan_builder = PlanBuilder(manager)
+    manager.period_sec = 0.02
+    manager._motion_file_path = lambda _file_id: None
+    manager._mapping_file_path = lambda _file_id: None
+    manager._load_motion_records = lambda _path: [
+        {'time_sec': 0.02, 'motion_id': '1-2', 'value': 3.0},
+    ]
+    manager._load_mapping = lambda _path: {
+        'motion_file_id': 'motion.json',
+        'mappings': [
+            {
+                'motion_id': '1-1',
+                'motor_axis': 0,
+                'initial_mode': 'manual',
+                'initial_motion_position_deg': -2.0,
+            },
+            {
+                'motion_id': '1-2',
+                'motor_axis': 1,
+                'initial_mode': 'manual',
+                'initial_motion_position_deg': 4.0,
+            },
+        ],
+    }
+    motors = [{'axis': 0}, {'axis': 1}]
+    manager._current_motors = lambda: motors
+    manager._motor_for_axis = lambda axis, _motors: motors[axis]
+    _patch_rule('_motor_ready_error', lambda _motor: '')
+    _patch_rule('_target_range_limit_error', lambda _motor, _low, _high: '')
+    _patch_rule('_motor_type', lambda _motor: 'ac_servo')
+
+    plan = manager._plan_builder.build({
+        'request_source': 'motion_run',
+        'motion_file_id': 'motion.json',
+        'mapping_file_id': 'mapping.yaml',
+        # A client-supplied subset must not weaken whole-mapping initialization.
+        'active_motion_ids': ['1-2'],
+    }, initialization_only=True)
+
+    assert [axis['motion_id'] for axis in plan['axes']] == ['1-1', '1-2']
+    assert [axis['initial_motion_position_deg'] for axis in plan['axes']] == [-2.0, 4.0]
+    # 2026-10-02 · 화면 이름 「수동」 → 「직접 지정」 에 맞춘다
+    assert 'Motion ID 1-1: 모션 데이터가 없어 직접 지정 초기위치 -2.000°를 사용' in plan['warnings']
+    assert plan['samples'] == []
+    assert plan['summary']['sample_count'] == 0
+
+
+def test_plan_uses_motion_state_captured_before_slow_motion_file_processing():
+    manager = MotionRunManager.__new__(MotionRunManager)
+    manager._player = MotionPlayer(manager)
+    manager._plan_builder = PlanBuilder(manager)
+    manager._plan_builder = PlanBuilder(manager)
+    manager.period_sec = 0.02
+    manager._motion_file_path = lambda _file_id: None
+    manager._mapping_file_path = lambda _file_id: None
+    started_at = time.monotonic()
+
+    def slow_motion_records(_path):
+        time.sleep(1.05)
+        return [
+            {'time_sec': 0.00, 'motion_id': '1-1', 'value': 0.0},
+            {'time_sec': 0.02, 'motion_id': '1-1', 'value': 1.0},
+        ]
+
+    manager._load_motion_records = slow_motion_records
+    manager._load_mapping = lambda _path: {
+        'motion_file_id': 'motion.json',
+        'mappings': [{
+            'motion_id': '1-1',
+            'motor_axis': 0,
+            'initial_mode': 'manual',
+            'initial_motion_position_deg': 0.0,
+        }],
+    }
+    motors = [{'axis': 0}]
+    manager._current_motors = lambda: (
+        motors if time.monotonic() - started_at < 1.0 else []
+    )
+    manager._motor_for_axis = lambda _axis, _motors: motors[0]
+    _patch_rule('_motor_ready_error', lambda _motor: '')
+    _patch_rule('_target_range_limit_error', lambda _motor, _low, _high: '')
+    _patch_rule('_motor_type', lambda _motor: 'ac_servo')
+
+    plan = manager._plan_builder.build({
+        'motion_file_id': 'motion.json',
+        'mapping_file_id': 'mapping.yaml',
+    })
+
+    assert [axis['motion_id'] for axis in plan['axes']] == ['1-1']
+
+
+def test_runtime_streams_line_motion_file_without_reading_whole_text(
+    tmp_path,
+    monkeypatch,
+):
+    path = tmp_path / 'large-compatible-motion.json'
+    path.write_text(
+        '{"type":"motion_header","fields":["frame","time_sec","id","value"]}\n'
+        '[1,0.02,"1-1",1.0,"1-2",-1.0]\n'
+        '[2,0.04,"1-1",2.0,"1-2",-2.0]\n',
+        encoding='utf-8',
+    )
+    original_read_text = Path.read_text
+
+    def reject_whole_file_read(candidate, *args, **kwargs):
+        if candidate == path:
+            raise AssertionError('line motion file must be streamed')
+        return original_read_text(candidate, *args, **kwargs)
+
+    monkeypatch.setattr(Path, 'read_text', reject_whole_file_read)
+    manager = MotionRunManager.__new__(MotionRunManager)
+    manager._player = MotionPlayer(manager)
+    manager._plan_builder = PlanBuilder(manager)
+    manager._plan_builder = PlanBuilder(manager)
+
+    records = manager._load_motion_records(path)
+
+    assert len(records) == 4
+    assert {record['motion_id'] for record in records} == {'1-1', '1-2'}
+
+
+def test_initialization_waits_for_fresh_motion_state_after_plan_processing():
+    manager = MotionRunManager.__new__(MotionRunManager)
+    manager._player = MotionPlayer(manager)
+    manager._plan_builder = PlanBuilder(manager)
+    manager._plan_builder = PlanBuilder(manager)
+    manager.period_sec = 0.001
+    manager._stop_event = threading.Event()
+    motors = [{'controller_index': 0}]
+    calls = {'count': 0}
+
+    def current_motors():
+        calls['count'] += 1
+        return motors if calls['count'] >= 3 else []
+
+    manager._current_motors = current_motors
+
+    assert manager._player._wait_for_current_motors(timeout_sec=0.1) == motors
+    assert calls['count'] == 3
+
+
+def test_motion_run_initialization_fails_when_any_mapping_axis_is_not_ready():
+    manager = MotionRunManager.__new__(MotionRunManager)
+    manager._player = MotionPlayer(manager)
+    manager._plan_builder = PlanBuilder(manager)
+    manager._plan_builder = PlanBuilder(manager)
+    manager.period_sec = 0.02
+    manager._motion_file_path = lambda _file_id: None
+    manager._mapping_file_path = lambda _file_id: None
+    manager._load_motion_records = lambda _path: [
+        {'time_sec': 0.02, 'motion_id': '1-1', 'value': 0.0},
+        {'time_sec': 0.02, 'motion_id': '1-2', 'value': 0.0},
+    ]
+    manager._load_mapping = lambda _path: {
+        'motion_file_id': 'motion.json',
+        'mappings': [
+            {'motion_id': '1-1', 'motor_axis': 0},
+            {'motion_id': '1-2', 'motor_axis': 1},
+        ],
+    }
+    motors = [{'axis': 0}, {'axis': 1}]
+    manager._current_motors = lambda: motors
+    manager._motor_for_axis = lambda axis, _motors: motors[axis]
+    _patch_rule(
+        '_motor_ready_error',
+        lambda motor: (
+            'Axis 1 servo is off' if motor['axis'] == 1 else ''
+        ),
+    )
+    _patch_rule('_target_range_limit_error', lambda _motor, _low, _high: '')
+    _patch_rule('_motor_type', lambda _motor: 'ac_servo')
+
+    with pytest.raises(ValueError, match='Motion ID 1-2: Axis 1 servo is off'):
+        manager._plan_builder.build({
+            'request_source': 'motion_run',
+            'motion_file_id': 'motion.json',
+            'mapping_file_id': 'mapping.yaml',
+        }, initialization_only=True)
+
+
+def test_motion_run_playback_uses_only_motion_ids_present_in_file():
+    manager = MotionRunManager.__new__(MotionRunManager)
+    manager._player = MotionPlayer(manager)
+    manager._plan_builder = PlanBuilder(manager)
+    manager._plan_builder = PlanBuilder(manager)
+    manager.period_sec = 0.02
+    manager._motion_file_path = lambda _file_id: None
+    manager._mapping_file_path = lambda _file_id: None
+    manager._load_motion_records = lambda _path: [
+        {'time_sec': 0.02, 'motion_id': '1-2', 'value': 0.0},
+        {'time_sec': 0.04, 'motion_id': '1-2', 'value': 2.0},
+    ]
+    manager._load_mapping = lambda _path: {
+        'motion_file_id': 'motion.json',
+        'mappings': [
+            {'motion_id': '1-1', 'motor_axis': 0, 'reference_position_deg': 0.0},
+            {'motion_id': '1-2', 'motor_axis': 1, 'reference_position_deg': 10.0},
+        ],
+    }
+    motors = [{'axis': 0}, {'axis': 1}]
+    manager._current_motors = lambda: motors
+    manager._motor_for_axis = lambda axis, _motors: motors[axis]
+    _patch_rule('_motor_ready_error', lambda _motor: '')
+    _patch_rule('_target_range_limit_error', lambda _motor, _low, _high: '')
+    _patch_rule('_motor_type', lambda _motor: 'ac_servo')
+
+    plan = manager._plan_builder.build({
+        'request_source': 'motion_run',
+        'motion_file_id': 'motion.json',
+        'mapping_file_id': 'mapping.yaml',
+    })
+
+    assert [axis['motion_id'] for axis in plan['axes']] == ['1-2']
+    assert plan['samples'][0]['positions'] == {1: 10.0}
+    assert plan['samples'][-1]['positions'] == {1: 12.0}
+
+
+def test_auto_start_runs_motion_only_after_initialization_completes():
+    manager = MotionRunManager.__new__(MotionRunManager)
+    manager._player = MotionPlayer(manager)
+    manager._plan_builder = PlanBuilder(manager)
+    manager._plan_builder = PlanBuilder(manager)
+    manager._stop_event = threading.Event()
+    current = {'state': 'idle'}
+    calls = []
+    manager.status = lambda: dict(current)
+
+    def initialize(plan):
+        calls.append(('initialize', plan['name']))
+        current['state'] = 'initialized'
+
+    manager._player._run_initialization = initialize
+    manager._player._run_countdown = lambda _plan: True
+    manager._player._run_motion = lambda plan: calls.append(('motion', plan['name']))
+
+    manager._player._run_initialization_then_motion(
+        {'name': 'all-mapping-axes'},
+        {'name': 'file-motion-axes'},
+    )
+
+    assert calls == [
+        ('initialize', 'all-mapping-axes'),
+        ('motion', 'file-motion-axes'),
+    ]
+
+
+def test_auto_start_does_not_run_motion_when_initialization_fails():
+    manager = MotionRunManager.__new__(MotionRunManager)
+    manager._player = MotionPlayer(manager)
+    manager._plan_builder = PlanBuilder(manager)
+    manager._plan_builder = PlanBuilder(manager)
+    manager._stop_event = threading.Event()
+    current = {'state': 'idle'}
+    calls = []
+    manager.status = lambda: dict(current)
+
+    def initialize(_plan):
+        calls.append('initialize')
+        current['state'] = 'error'
+
+    manager._player._run_initialization = initialize
+    manager._player._run_countdown = lambda _plan: True
+    manager._player._run_motion = lambda _plan: calls.append('motion')
+
+    manager._player._run_initialization_then_motion({}, {})
+
+    assert calls == ['initialize']
+
+
+def test_start_routes_one_owned_initialization_and_motion_sequence(monkeypatch):
+    manager = MotionRunManager.__new__(MotionRunManager)
+    manager._player = MotionPlayer(manager)
+    manager._plan_builder = PlanBuilder(manager)
+    manager._plan_builder = PlanBuilder(manager)
+    manager._run_lock = threading.RLock()
+    manager._run_thread = None
+    manager._stop_event = threading.Event()
+    manager._graceful_stop_event = threading.Event()
+    manager._playback_ownership_error = lambda axes=None: ''
+    current = {'state': 'initialized'}
+    manager.status = lambda: dict(current)
+    manager._set_status = lambda status: (current.clear(), current.update(status))
+    motors = [{'axis': 0}]
+    snapshots = []
+    manager._current_motors = lambda: motors
+
+    def build_plan(_payload, initialization_only=False, motors_snapshot=None):
+        snapshots.append(motors_snapshot)
+        return {
+            'name': 'initialization' if initialization_only else 'motion',
+            'run_mode': 'once',
+            'summary': {},
+        }
+
+    manager._plan_builder.build = build_plan
+    _patch_rule('_motion_auto_start_guard_error', lambda _plan: '')
+    calls = []
+    manager._player._run_initialization_then_motion = lambda initialization, motion: calls.append(
+        ('initialize_then_motion', initialization['name'], motion['name'])
+    )
+
+    class ImmediateThread:
+        def __init__(self, *, target, args, daemon):
+            self._target = target
+            self._args = args
+            self.daemon = daemon
+
+        def is_alive(self):
+            return False
+
+        def start(self):
+            self._target(*self._args)
+
+    monkeypatch.setattr(threading, 'Thread', ImmediateThread)
+
+    result = manager._start_thread('run', {})
+
+    assert result['success'] is True
+    assert calls == [('initialize_then_motion', 'initialization', 'motion')]
+    assert snapshots == [motors, motors]
+
+
+def test_start_acknowledges_before_motion_plan_processing(monkeypatch):
+    manager = MotionRunManager.__new__(MotionRunManager)
+    manager._player = MotionPlayer(manager)
+    manager._plan_builder = PlanBuilder(manager)
+    manager._plan_builder = PlanBuilder(manager)
+    manager._run_lock = threading.RLock()
+    manager._run_thread = None
+    manager._stop_event = threading.Event()
+    manager._graceful_stop_event = threading.Event()
+    manager._playback_ownership_error = lambda axes=None: ''
+    manager._current_motors = lambda: [{'axis': 0}]
+    current = {'state': 'idle'}
+    manager.status = lambda: dict(current)
+    manager._set_status = lambda status: (current.clear(), current.update(status))
+    plan_calls = []
+    manager._plan_builder.build = lambda *_args, **_kwargs: plan_calls.append(True)
+
+    class DeferredThread:
+        def __init__(self, *, target, args, daemon):
+            self.target = target
+            self.args = args
+            self.daemon = daemon
+            self.started = False
+
+        def is_alive(self):
+            return self.started
+
+        def start(self):
+            self.started = True
+
+    monkeypatch.setattr(threading, 'Thread', DeferredThread)
+
+    result = manager._start_thread('run', {
+        'project_id': 'project-a',
+        'request_source': 'motion_studio',
+    })
+
+    assert result['success'] is True
+    assert result['message'] == '모션 실행을 준비합니다'
+    assert result['status']['state'] == 'preparing'
+    assert plan_calls == []
+    assert manager._run_thread.started is True
+
+
+def test_stop_during_plan_preparation_never_starts_motion():
+    manager = MotionRunManager.__new__(MotionRunManager)
+    manager._player = MotionPlayer(manager)
+    manager._plan_builder = PlanBuilder(manager)
+    manager._plan_builder = PlanBuilder(manager)
+    manager._stop_event = threading.Event()
+    manager._stop_event.set()
+    manager._plan_builder.build = lambda *_args, **_kwargs: {
+        'run_mode': 'once',
+        'summary': {},
+    }
+    started = []
+    manager._player._run_initialization_then_motion = lambda *_args: started.append(True)
+
+    manager._player._prepare_and_run('run', {}, [{'axis': 0}])
+
+    assert started == []
+
+
+def test_owned_sequence_runs_countdown_between_initialization_and_motion():
+    manager = MotionRunManager.__new__(MotionRunManager)
+    manager._player = MotionPlayer(manager)
+    manager._plan_builder = PlanBuilder(manager)
+    manager._plan_builder = PlanBuilder(manager)
+    manager._stop_event = threading.Event()
+    current = {'state': 'idle'}
+    calls = []
+    manager.status = lambda: dict(current)
+
+    def initialize(_plan):
+        calls.append('initialize')
+        current['state'] = 'initialized'
+
+    manager._player._run_initialization = initialize
+    manager._player._run_countdown = lambda _plan: calls.append('countdown') or True
+    manager._player._run_motion = lambda _plan: calls.append('motion')
+
+    manager._player._run_initialization_then_motion({}, {})
+
+    assert calls == ['initialize', 'countdown', 'motion']
+
+
+def test_countdown_stop_prevents_motion_start():
+    manager = MotionRunManager.__new__(MotionRunManager)
+    manager._player = MotionPlayer(manager)
+    manager._plan_builder = PlanBuilder(manager)
+    manager._plan_builder = PlanBuilder(manager)
+    manager._run_lock = threading.RLock()
+    manager._status = motion_run_rules._empty_status()
+    manager._publish_status = lambda: None
+    manager._stop_event = threading.Event()
+    manager._stop_event.set()
+
+    result = manager._player._run_countdown({
+        'countdown_sec': 3.0,
+        'axes': [],
+    })
+
+    assert result is False
+    assert manager._status['state'] == 'stopped'
+
+
+def test_a_loop_value_gap_no_longer_blocks_the_run():
+    """이음매에서 값이 튀는 것은 **막지 않는다** · §6-142
+
+    사용자가 보고 판단할 일이다 · 구간 붙여넣기에서 이미 그렇게 하고 있다
+    (§6-119 "이음매에서 값이 튀는지는 검사하지 않는다") · 재생만 막고 있었다.
+
+    실행을 막는 것은 장비가 상하는 경우만 남긴다 · 모터 알람, 미연결,
+    하드 리미트 초과.
+    """
+    unsafe = {
+        'run_mode': 'continuous',
+        'repeat_mode': 'direct',
+        'capabilities': {
+            'continuous_run': {
+                'available': False,
+                'reason': '시작·종료값 차이 초과',
+            },
+        },
+    }
+
+    assert motion_run_rules._motion_auto_start_guard_error(unsafe) == ''
+
+    warning = motion_run_rules._loop_gap_warning(unsafe)
+    assert '시작·종료값 차이 초과' in warning
+    assert '값이 튑니다' in warning
+
+
+def test_reinitializing_repeat_has_nothing_to_warn_about():
+    """초기 위치로 돌아가면 시작값과 끝값이 달라도 튀지 않는다."""
+    assert motion_run_rules._loop_gap_warning({
+        'run_mode': 'continuous',
+        'repeat_mode': 'reinitialize',
+        'capabilities': {'continuous_run': {'available': False, 'reason': 'x'}},
+    }) == ''
+    assert motion_run_rules._loop_gap_warning({
+        'run_mode': 'once',
+        'capabilities': {},
+    }) == ''
+
+
+def test_zero_fallback_outside_motion_range_blocks_initialization():
+    manager = _initialization_only_manager({
+        'motion_file_id': '',
+        'mappings': [{
+            'motion_id': '1-1',
+            'motor_axis': 0,
+            'reference_position_deg': 100.0,
+            'motion_lower_deg': 10.0,
+            'motion_upper_deg': 30.0,
+            'initial_mode': 'first_frame',
+            'initial_move_time_sec': 5.0,
+        }],
+    })
+
+    with pytest.raises(ValueError, match='초기 모션값 0.000°가 모션 설정 범위 밖'):
+        manager._plan_builder.build(
+            {'motion_file_id': '', 'mapping_file_id': 'mapping.yaml'},
+            initialization_only=True,
+        )
+
+
+def test_plan_keeps_single_run_available_when_continuous_seam_fails():
+    manager = MotionRunManager.__new__(MotionRunManager)
+    manager._player = MotionPlayer(manager)
+    manager._plan_builder = PlanBuilder(manager)
+    manager._plan_builder = PlanBuilder(manager)
+    manager.period_sec = 0.02
+    manager._motion_file_path = lambda _file_id: None
+    manager._mapping_file_path = lambda _file_id: None
+    manager._load_motion_records = lambda _path: [
+        {'time_sec': 0.0, 'motion_id': 'joint', 'value': 0.0},
+        {'time_sec': 1.0, 'motion_id': 'joint', 'value': 6.0},
+    ]
+    manager._load_mapping = lambda _path: {
+        'motion_file_id': 'motion.json',
+        'mappings': [{
+            'motion_id': 'joint',
+            'motor_axis': 0,
+            'reference_position_deg': 10.0,
+            # A legacy false value must not bypass mandatory initialization.
+            'initial_enabled': False,
+        }],
+    }
+    manager._current_motors = lambda: [{'axis': 0}]
+    manager._motor_for_axis = lambda _axis, motors: motors[0]
+    _patch_rule('_motor_ready_error', lambda _motor: '')
+    _patch_rule('_target_range_limit_error', lambda _motor, _low, _high: '')
+    _patch_rule('_motor_type', lambda _motor: 'ac_servo')
+    plan = manager._plan_builder.build({
+        'motion_file_id': 'motion.json',
+        'mapping_file_id': 'mapping.yaml',
+    })
+
+    assert plan['capabilities']['initial_position']['available'] is True
+    assert plan['capabilities']['single_run']['available'] is True
+    assert plan['capabilities']['continuous_run']['available'] is False
+    assert plan['axes'][0]['loop_start_motion_deg'] == 0.0
+    assert plan['axes'][0]['loop_end_motion_deg'] == 6.0
+    assert plan['axes'][0]['loop_start_target_deg'] == 10.0
+    assert plan['axes'][0]['loop_end_target_deg'] == 16.0
+    assert plan['axes'][0]['loop_delta_deg'] == 6.0
+    assert plan['axes'][0]['loop_motor_delta_deg'] == 6.0
+    assert plan['axes'][0]['loop_tolerance_deg'] == 5.0
+
+
+def test_plan_resolves_current_axis_from_stable_alias_instead_of_saved_axis():
+    manager = MotionRunManager.__new__(MotionRunManager)
+    manager._player = MotionPlayer(manager)
+    manager._plan_builder = PlanBuilder(manager)
+    manager._plan_builder = PlanBuilder(manager)
+    manager.period_sec = 0.02
+    manager._motion_file_path = lambda _file_id: None
+    manager._mapping_file_path = lambda _file_id: None
+    manager._load_motion_records = lambda _path: [
+        {'time_sec': 0.0, 'motion_id': 'joint', 'value': 0.0},
+        {'time_sec': 0.02, 'motion_id': 'joint', 'value': 1.0},
+    ]
+    manager._load_mapping = lambda _path: {
+        'motion_file_id': 'motion.json',
+        'mappings': [{
+            'motion_id': 'joint',
+            'motor_ref': 'ac_servo:alias:101',
+            'motor_axis': 0,
+            'reference_position_deg': 0.0,
+        }],
+    }
+    manager._current_motors = lambda: [{
+        'controller_index': 5,
+        'motor_type': 'ac_servo',
+        'alias': 101,
+    }]
+    _patch_rule('_motor_ready_error', lambda _motor: '')
+    _patch_rule('_target_range_limit_error', lambda _motor, _low, _high: '')
+
+    plan = manager._plan_builder.build({
+        'motion_file_id': 'motion.json',
+        'mapping_file_id': 'mapping.yaml',
+    })
+
+    assert plan['axes'][0]['motor_axis'] == 5
+    assert 5 in plan['samples'][0]['positions']
+    assert 0 not in plan['samples'][0]['positions']
+
+
+def test_motor_ref_matching_is_scoped_by_ethercat_master_and_serial_port():
+    _patch_rule('_motor_type', lambda motor: motor['motor_type'])
+    motors = [
+        {
+            'controller_index': 0,
+            'motor_type': 'ac_servo',
+            'ethercat_master_index': 0,
+            'alias': 101,
+        },
+        {
+            'controller_index': 5,
+            'motor_type': 'ac_servo',
+            'ethercat_master_index': 1,
+            'alias': 101,
+        },
+        {
+            'controller_index': 8,
+            'motor_type': 'dynamixel',
+            'serial_port': '/dev/ttyUSB0',
+            'bus_id': 3,
+        },
+        {
+            'controller_index': 9,
+            'motor_type': 'dynamixel',
+            'serial_port': '/dev/ttyUSB1',
+            'bus_id': 3,
+        },
+    ]
+
+    assert [
+        motor['controller_index']
+        for motor in motion_run_rules._motors_for_ref(
+            'ac_servo:master:1:alias:101', motors
+        )
+    ] == [5]
+    assert [
+        motor['controller_index']
+        for motor in motion_run_rules._motors_for_ref(
+            'dynamixel:port:%2Fdev%2FttyUSB1:id:3', motors
+        )
+    ] == [9]
+    assert len(motion_run_rules._motors_for_ref('ac_servo:alias:101', motors)) == 2
+    assert len(motion_run_rules._motors_for_ref('dynamixel:id:3', motors)) == 2
+
+
+def test_plan_runs_with_out_of_range_data_and_clamps_every_command():
+    manager = MotionRunManager.__new__(MotionRunManager)
+    manager._player = MotionPlayer(manager)
+    manager._plan_builder = PlanBuilder(manager)
+    manager._plan_builder = PlanBuilder(manager)
+    manager.period_sec = 0.5
+    manager._motion_file_path = lambda _file_id: None
+    manager._mapping_file_path = lambda _file_id: None
+    manager._load_motion_records = lambda _path: [
+        {'time_sec': 0.0, 'motion_id': 'joint', 'value': -35.0},
+        {'time_sec': 0.5, 'motion_id': 'joint', 'value': 0.0},
+        {'time_sec': 1.0, 'motion_id': 'joint', 'value': 35.0},
+    ]
+    manager._load_mapping = lambda _path: {
+        'motion_file_id': 'motion.json',
+        'mappings': [{
+            'motion_id': 'joint',
+            'motor_axis': 0,
+            'reference_position_deg': 0.0,
+            'motion_lower_deg': -30.0,
+            'motion_upper_deg': 30.0,
+            'initial_enabled': True,
+            'initial_mode': 'first_frame',
+        }],
+    }
+    manager._current_motors = lambda: [{'axis': 0}]
+    manager._motor_for_axis = lambda _axis, motors: motors[0]
+    _patch_rule('_motor_ready_error', lambda _motor: '')
+    _patch_rule('_target_range_limit_error', lambda _motor, _low, _high: '')
+    _patch_rule('_motor_type', lambda _motor: 'ac_servo')
+
+    plan = manager._plan_builder.build({
+        'motion_file_id': 'motion.json',
+        'mapping_file_id': 'mapping.yaml',
+    })
+    axis = plan['axes'][0]
+    commanded = [sample['positions'][0] for sample in plan['samples']]
+
+    assert plan['capabilities']['initial_position']['available'] is True
+    assert plan['capabilities']['single_run']['available'] is True
+    assert len(plan['warnings']) == 2
+    assert axis['motion_clamped'] is True
+    assert axis['initial_motion_source_position_deg'] == -35.0
+    assert axis['initial_motion_position_deg'] == -30.0
+    assert axis['initial_motor_target_deg'] == -30.0
+    assert min(commanded) == -30.0
+    assert max(commanded) == 30.0
+
+
+def test_motion_studio_can_use_read_only_mapping_with_generated_preview_file():
+    manager = MotionRunManager.__new__(MotionRunManager)
+    manager._player = MotionPlayer(manager)
+    manager._plan_builder = PlanBuilder(manager)
+    manager._plan_builder = PlanBuilder(manager)
+    manager.period_sec = 0.02
+    manager._motion_file_path = lambda _file_id: None
+    manager._mapping_file_path = lambda _file_id: None
+    manager._load_motion_records = lambda _path: [
+        {'time_sec': 0.02, 'motion_id': '1-2', 'value': 0.0},
+        {'time_sec': 0.04, 'motion_id': '1-2', 'value': 2.0},
+    ]
+    manager._load_mapping = lambda _path: {
+        'motion_file_id': 'original.json',
+        'mappings': [
+            {'motion_id': '1-1', 'motor_axis': 0, 'reference_position_deg': 0.0},
+            {'motion_id': '1-2', 'motor_axis': 1, 'reference_position_deg': 10.0},
+        ],
+    }
+    motors = [{'axis': 0}, {'axis': 1}]
+    manager._current_motors = lambda: motors
+    manager._motor_for_axis = lambda axis, _motors: motors[axis]
+    _patch_rule('_motor_ready_error', lambda _motor: '')
+    _patch_rule('_target_range_limit_error', lambda _motor, _low, _high: '')
+    _patch_rule('_motor_type', lambda _motor: 'dynamixel')
+
+    plan = manager._plan_builder.build({
+        'request_source': 'motion_studio',
+        'motion_file_id': '__studio_preview.json',
+        'mapping_file_id': 'mapping.yaml',
+        'active_motion_ids': ['1-2'],
+    })
+
+    assert plan['request_source'] == 'motion_studio'
+    assert [axis['motion_id'] for axis in plan['axes']] == ['1-2']
+    assert plan['samples'][-1]['positions'] == {1: 12.0}
+
+
+def test_normal_motion_run_still_rejects_mapping_file_mismatch():
+    manager = MotionRunManager.__new__(MotionRunManager)
+    manager._player = MotionPlayer(manager)
+    manager._plan_builder = PlanBuilder(manager)
+    manager._plan_builder = PlanBuilder(manager)
+    manager.period_sec = 0.02
+    manager._motion_file_path = lambda _file_id: None
+    manager._mapping_file_path = lambda _file_id: None
+    manager._load_motion_records = lambda _path: [
+        {'time_sec': 0.02, 'motion_id': '1-1', 'value': 0.0},
+    ]
+    manager._load_mapping = lambda _path: {
+        'motion_file_id': 'original.json',
+        'mappings': [{'motion_id': '1-1', 'motor_axis': 0}],
+    }
+    manager._current_motors = lambda: []
+
+    try:
+        manager._plan_builder.build({
+            'motion_file_id': 'different.json',
+            'mapping_file_id': 'mapping.yaml',
+        })
+    except ValueError as exc:
+        assert 'expects motion file original.json' in str(exc)
+    else:
+        raise AssertionError('normal motion run must preserve strict mapping-file binding')
+
+
+def test_run_manager_resolves_assets_only_inside_requested_project(tmp_path):
+    root = (tmp_path / 'motion_projects').resolve()
+    for project_id, marker in (('first', 'one'), ('second', 'two')):
+        project_dir = root / project_id
+        (project_dir / 'motions').mkdir(parents=True)
+        (project_dir / 'motion_axis_matching').mkdir()
+        (project_dir / 'project.json').write_text(
+            json.dumps({'project_id': project_id}), encoding='utf-8'
+        )
+        (project_dir / 'motions' / 'same.json').write_text(marker, encoding='utf-8')
+        (project_dir / 'motion_axis_matching' / 'same.yaml').write_text(
+            marker, encoding='utf-8'
+        )
+
+    manager = MotionRunManager.__new__(MotionRunManager)
+
+    manager._player = MotionPlayer(manager)
+
+    manager._plan_builder = PlanBuilder(manager)
+
+    manager._plan_builder = PlanBuilder(manager)
+    manager.motion_projects_dir = root
+    first = manager._project_asset_dirs({'project_id': 'first'})
+    second = manager._project_asset_dirs({'project_id': 'second'})
+
+    assert first[0] == 'first'
+    assert second[0] == 'second'
+    assert manager._motion_file_path('same.json', first[1]).read_text() == 'one'
+    assert manager._motion_file_path('same.json', second[1]).read_text() == 'two'
+    assert manager._mapping_file_path('same.yaml', first[2]).read_text() == 'one'
+    assert manager._mapping_file_path('same.yaml', second[2]).read_text() == 'two'
+
+
+def test_plan_builder_reads_project_dirs_from_the_manager(tmp_path):
+    """프로젝트 경로 판정이 노드를 봐야 한다 · §6-30
+
+    `_build_plan`을 `PlanBuilder`로 옮길 때 `hasattr(self, 'motion_projects_dir')`가
+    그대로 남아 **빌더 자신**을 검사하게 됐다. 빌더에는 그 속성이 없으므로 항상
+    호환 분기로 빠져 프로젝트 디렉터리를 무시했고, 실기에서
+    `motion file not found`가 났다.
+
+    단위 시험이 못 잡았던 이유는 시험들이 그 호환 분기를 쓰기 때문이다 ·
+    이 시험은 반대쪽 분기를 고정한다.
+    """
+    manager = MotionRunManager.__new__(MotionRunManager)
+    manager._player = MotionPlayer(manager)
+    manager._plan_builder = PlanBuilder(manager)
+    manager.motion_projects_dir = tmp_path
+    manager.period_sec = 0.02
+    asked = []
+    manager._project_asset_dirs = lambda payload: (
+        asked.append(payload) or ('project-1', tmp_path / 'motions', tmp_path / 'mappings')
+    )
+    manager._motion_file_path = lambda file_id, directory=None: (
+        asked.append(('motion', directory)) or None
+    )
+    manager._mapping_file_path = lambda file_id, directory=None: (
+        asked.append(('mapping', directory)) or None
+    )
+    manager._load_mapping = lambda path: {'mappings': []}
+    manager._load_motion_records = lambda path: []
+    manager._current_motors = lambda: [{'axis': 0}]
+
+    with pytest.raises(ValueError):
+        manager._plan_builder.build({'motion_file_id': 'm.json', 'mapping_file_id': 'x.yaml'})
+
+    # 프로젝트 분기를 탔다면 디렉터리를 함께 넘긴다
+    assert ('motion', tmp_path / 'motions') in asked
+    assert ('mapping', tmp_path / 'mappings') in asked
+
+
+def _shared_file_manager(mapping_motion_ids, records):
+    """한 모션 파일을 여러 PC 가 나눠 가지는 모양 · §6-101
+
+    연동은 원래 이렇게 돈다 · 파일 하나에 1-1, 1-2 가 들어 있고 피시1 은
+    1-1 만, 피시2 는 1-2 만 제 조인트 매핑에 가지고 있다.
+    """
+    manager = MotionRunManager.__new__(MotionRunManager)
+    manager._player = MotionPlayer(manager)
+    manager._plan_builder = PlanBuilder(manager)
+    manager.period_sec = 0.02
+    manager._mapping_file_path = lambda _file_id: None
+    manager._motion_file_path = lambda _file_id: None
+    manager._load_mapping = lambda _path: {
+        'motion_file_id': '',
+        'mappings': [
+            {
+                'motion_id': motion_id,
+                'motor_axis': index,
+                'reference_position_deg': 100.0,
+                'initial_mode': 'first_frame',
+                'initial_move_time_sec': 5.0,
+                'gear_ratio': 50.0,
+            }
+            for index, motion_id in enumerate(mapping_motion_ids)
+        ],
+    }
+    manager._load_motion_records = lambda _path: list(records)
+    manager._current_motors = lambda: [{'axis': 0}, {'axis': 1}]
+    manager._motor_for_axis = lambda axis, motors: motors[axis]
+    _patch_rule('_motor_ready_error', lambda _motor: '')
+    _patch_rule('_target_range_limit_error', lambda _motor, _low, _high: '')
+    _patch_rule('_motor_type', lambda _motor: 'ac_servo')
+    return manager
+
+
+def _two_axis_records():
+    records = []
+    for index, time_sec in enumerate([0.0, 0.5, 1.0]):
+        for motion_id, scale in (('1-1', 10.0), ('1-2', 20.0)):
+            records.append({
+                'frame': len(records),
+                'time_sec': time_sec,
+                'motion_id': motion_id,
+                'value': time_sec * scale,
+                'row_index': len(records),
+            })
+    return records
+
+
+def _shared_file_plan(mapping_motion_ids):
+    manager = _shared_file_manager(mapping_motion_ids, _two_axis_records())
+    return manager._plan_builder.build({
+        'motion_file_id': 'show.json',
+        'mapping_file_id': 'axes.yaml',
+    })
+
+
+def test_motion_file_axes_missing_from_this_pc_are_skipped_in_silence():
+    """조인트 매핑에 없는 축은 조용히 빠진다 · 실행을 막지 않는다.
+
+    예전에는 파일에 들어 있는 축을 전부 "요구한 축" 으로 바꿔서, 남의 축이
+    하나라도 섞이면 `requested Motion ID is unavailable` 로 실행이 통째로
+    거부됐다. 그래서 PC 마다 제 축만 든 파일을 따로 만들어야 했다.
+    """
+    plan = _shared_file_plan(['1-1'])
+
+    assert [axis['motion_id'] for axis in plan['axes']] == ['1-1']
+    assert not plan.get('errors')
+
+
+def test_each_pc_runs_its_own_axes_from_one_shared_motion_file():
+    """같은 파일로 PC 마다 제 축만 돈다 · 재생 길이는 그대로다.
+
+    길이가 달라지면 연동 회차가 어긋난다. 스튜디오가 만드는 파일은 한 시각에
+    모든 축을 함께 적으므로, 축을 덜어내도 시간 범위는 안 변한다.
+    """
+    first = _shared_file_plan(['1-1'])
+    second = _shared_file_plan(['1-2'])
+    both = _shared_file_plan(['1-1', '1-2'])
+
+    assert [axis['motion_id'] for axis in first['axes']] == ['1-1']
+    assert [axis['motion_id'] for axis in second['axes']] == ['1-2']
+    assert [axis['motion_id'] for axis in both['axes']] == ['1-1', '1-2']
+    durations = {
+        plan['summary']['duration_sec'] for plan in (first, second, both)
+    }
+    assert durations == {1.0}
+
+
+def test_mapping_axis_without_motion_data_stays_out_of_the_way():
+    """매핑에만 있고 파일에 없는 축도 실행을 막지 않는다 · 양방향이다."""
+    plan = _shared_file_plan(['1-1', '1-3'])
+
+    assert [axis['motion_id'] for axis in plan['axes']] == ['1-1']

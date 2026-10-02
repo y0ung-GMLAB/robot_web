@@ -1,0 +1,1062 @@
+/* 설정 화면 · 모터 등록
+ *
+ * `styles.css` 7,415줄을 순서 그대로 자른 조각이다 · §6-43
+ * 원본 3717~4856줄 · **연결 순서를 바꾸면 겹치기(cascade)가 달라진다.**
+ */
+
+@media (max-width: 1100px) {
+
+
+
+}
+
+@media (max-width: 900px) {
+  .axis-workflow-status { grid-template-columns: 1fr; }
+  .axis-workflow-status > small { grid-column: 1; }
+  .axis-edit-toolbar { grid-template-columns: 1fr; }
+
+  .axis-edit-list-actions,
+  .axis-edit-danger-actions {
+    margin: 8px 0 0 !important;
+    padding: 8px 0 0;
+    border-top: 1px solid var(--line);
+    border-left: 0;
+  }
+}
+
+@media (max-width: 700px) {
+}
+
+
+.confirm-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 1400;
+  display: grid;
+  place-items: center;
+  padding: 20px;
+  background: rgba(15, 23, 32, 0.72);
+}
+
+.confirm-overlay.hidden {
+  display: none;
+}
+
+.confirm-dialog {
+  box-sizing: border-box;
+  padding: 20px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--panel);
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.32);
+}
+
+
+
+
+
+.matching-table-wrap {
+  border: 1px solid var(--line);
+  overflow: auto;
+}
+.registry-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+
+.compact-field {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 32px;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.compact-field .compact-select {
+  min-width: 76px;
+  height: 32px;
+  padding: 4px 8px;
+}
+
+.registry-message {
+  margin: -4px 0 10px;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.settings-panel summary {
+  cursor: pointer;
+  list-style-position: inside;
+}
+
+table {
+  width: max-content;
+  min-width: 100%;
+  border-collapse: collapse;
+  table-layout: auto;
+}
+
+th,
+td {
+  min-height: 38px;
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--line);
+  text-align: center;
+  white-space: nowrap;
+  overflow: visible;
+  text-overflow: clip;
+  font-size: 13px;
+}
+
+th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  background: #eef3f7;
+  color: #2f3d4a;
+  font-weight: 700;
+}
+
+.empty {
+  text-align: center;
+  color: var(--muted);
+  height: 160px;
+}
+
+.state {
+  display: inline-flex;
+  align-items: center;
+  min-width: 92px;
+  height: 24px;
+  padding: 0 8px;
+  border-radius: 4px;
+  font-weight: 700;
+  justify-content: center;
+}
+
+.state.detected {
+  color: var(--green);
+  background: #e8f6ee;
+}
+
+.state.stale,
+.state.monitoring_off {
+  color: var(--yellow);
+  background: #fff5df;
+}
+
+.state.disconnected,
+.state.ethercat_down,
+.state.fault {
+  color: var(--red);
+  background: #fdeaea;
+}
+
+.status-danger {
+  color: var(--red);
+  font-weight: 700;
+}
+
+.matching-table .empty {
+  height: 72px;
+}
+
+.matching-table tbody tr[data-axis-row],
+.monitoring-row {
+  cursor: pointer;
+  user-select: none;
+}
+
+.matching-table tbody tr[data-axis-row]:hover,
+.monitoring-row:hover {
+  background: #f7fbff;
+}
+
+.monitoring-row.selected-row {
+  background: #eaf4ff;
+  box-shadow: inset 3px 0 0 var(--blue);
+}
+
+.matching-table input[data-axis-select] {
+  width: 18px;
+  height: 18px;
+  cursor: pointer;
+}
+
+.axis-edit-input {
+  width: 100%;
+  min-width: 0;
+  border: 1px solid #d9e0e7;
+  border-radius: 6px;
+  padding: 6px 8px;
+  font: inherit;
+  background: #ffffff;
+}
+
+.axis-number-input {
+  max-width: 84px;
+}
+
+.axis-name-input {
+  min-width: 120px;
+}
+
+.matching-table td.identity-mismatch {
+  background: #fff1f1;
+  color: #b42318;
+  font-weight: 700;
+}
+
+.axis-edit-input:disabled {
+  background: #f1f4f7;
+  color: #8b98a5;
+}
+
+.config-table-groups {
+  display: grid;
+  gap: 12px;
+}
+
+.config-table-group {
+  min-width: 0;
+}
+
+.config-table-group-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 6px;
+}
+
+.config-table-group-head span {
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.config-value-table .axis-edit-input {
+  min-width: 88px;
+}
+
+.config-value-table .axis-name-input {
+  min-width: 130px;
+}
+
+.config-readonly-value {
+  display: inline-block;
+  min-width: 70px;
+}
+
+.config-unit-cell {
+  color: var(--muted);
+  white-space: nowrap;
+}
+
+.config-unit-inline {
+  color: var(--muted);
+  font-family: inherit;
+}
+
+.config-master-overview-table td {
+  vertical-align: top;
+}
+
+.config-kv-cell {
+  min-width: 260px;
+  text-align: left;
+}
+
+.config-kv-list {
+  display: grid;
+  gap: 4px;
+  margin: 0;
+}
+
+.config-kv-list div {
+  display: grid;
+  grid-template-columns: minmax(130px, max-content) minmax(80px, 1fr);
+  gap: 8px;
+  align-items: baseline;
+}
+
+.config-kv-list dt,
+.config-kv-list dd {
+  margin: 0;
+}
+
+.config-kv-list dt {
+  color: var(--muted);
+  font-weight: 700;
+}
+
+.empty-inline {
+  color: var(--muted);
+}
+
+.config-table-empty {
+  height: 84px;
+  border: 1px solid var(--line);
+}
+
+.config-section-stack {
+  display: grid;
+  gap: 12px;
+}
+
+.config-master-detail {
+  display: grid;
+  grid-template-columns: minmax(260px, 0.55fr) minmax(680px, 1.45fr);
+  gap: 12px;
+  align-items: start;
+}
+
+.config-axis-list,
+.config-axis-detail,
+.config-detail-group {
+  min-width: 0;
+}
+
+.config-axis-detail {
+  display: grid;
+  gap: 12px;
+}
+
+.config-axis-table tbody tr[data-config-axis-select] {
+  cursor: pointer;
+  user-select: none;
+}
+
+.config-axis-table tbody tr[data-config-axis-select]:hover {
+  background: #f7fbff;
+}
+
+.config-value-table th,
+.config-value-table td,
+.config-master-overview-table th,
+.config-master-overview-table td,
+.config-axis-table th,
+.config-axis-table td {
+  text-align: center;
+  vertical-align: middle;
+}
+
+.config-value-table .config-value-input {
+  margin: 0 auto;
+  text-align: center;
+}
+
+.config-item-cell,
+.yaml-path-cell,
+.config-kv-cell {
+  text-align: center;
+}
+
+.config-kv-list {
+  justify-items: center;
+}
+
+.config-kv-list div {
+  grid-template-columns: max-content max-content;
+  justify-content: center;
+  text-align: center;
+}
+
+.config-selected-summary {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  min-height: 38px;
+  padding: 8px 10px;
+  border: 1px solid var(--line);
+  background: #f8fafc;
+}
+
+.config-selected-summary span {
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.config-item-cell {
+  min-width: 150px;
+  text-align: center;
+  font-weight: 700;
+}
+
+.yaml-path-cell {
+  text-align: center;
+}
+
+.config-raw-text {
+  max-height: 420px;
+  margin: 0;
+  padding: 12px;
+  overflow: auto;
+  border: 1px solid var(--line);
+  /* 테마 색 · 흰 바탕 고정이면 다크 테마의 밝은 글씨가 안 보인다 (2026-10-02) */
+  background: var(--panel-2, #f8fafc);
+  color: var(--ink);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 12px;
+  line-height: 1.45;
+  white-space: pre;
+}
+
+@media (max-width: 1100px) {
+  .config-master-detail {
+    grid-template-columns: 1fr;
+  }
+}
+
+.motor-readiness-overview {
+  display: grid;
+  gap: 12px;
+  padding: 14px;
+  border: 1px solid #b9cdea;
+  border-radius: 8px;
+  background: #f7fbff;
+}
+
+.motor-readiness-summary {
+  display: grid;
+  grid-template-columns:
+    minmax(300px, 1.5fr)
+    minmax(150px, 0.75fr)
+    minmax(360px, 1.8fr)
+    minmax(140px, 0.7fr);
+  gap: 8px;
+}
+
+.motor-readiness-summary > div {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  min-height: 40px;
+  padding: 7px 10px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: #fff;
+}
+
+.motor-readiness-summary span,
+.motor-readiness-next span {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.motor-readiness-summary strong {
+  min-width: 0;
+  overflow: hidden;
+  font-size: 14px;
+  line-height: 1.25;
+  text-align: right;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.motor-readiness-steps {
+  display: grid;
+  grid-template-columns: repeat(7, minmax(125px, 1fr));
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.motor-readiness-steps li {
+  display: grid;
+  grid-template-columns: 28px 1fr;
+  grid-template-rows: auto auto;
+  gap: 3px 7px;
+  align-items: center;
+  min-height: 70px;
+  padding: 8px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: #f1f4f7;
+}
+
+.motor-readiness-steps li > span {
+  display: inline-flex;
+  grid-row: 1 / 3;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  background: #d7dee7;
+  font-weight: 800;
+}
+
+.motor-readiness-steps li strong {
+  font-size: 13px;
+}
+
+.motor-readiness-steps li small {
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.3;
+}
+
+.motor-readiness-steps li[data-state="complete"] {
+  border-color: #9bd3b1;
+  background: #effaf3;
+}
+
+.motor-readiness-steps li[data-state="complete"] > span {
+  color: #fff;
+  background: var(--green);
+}
+
+.motor-readiness-steps li[data-state="current"] {
+  border-color: #73a7ee;
+  box-shadow: 0 0 0 2px rgb(40 112 220 / 12%);
+  background: #eaf2ff;
+}
+
+.motor-readiness-steps li[data-state="current"] > span {
+  color: #fff;
+  background: var(--blue);
+}
+
+.motor-readiness-steps li[data-state="error"] {
+  border-color: #e69797;
+  background: #fff1f1;
+}
+
+.motor-readiness-steps li[data-state="error"] > span {
+  color: #fff;
+  background: var(--red);
+}
+
+.motor-readiness-next {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 10px 12px;
+  border-left: 4px solid var(--blue);
+  background: #fff;
+}
+
+.motor-readiness-next > div:first-child {
+  display: grid;
+  gap: 3px;
+}
+
+.motor-readiness-control-groups {
+  display: flex;
+  align-items: flex-end;
+  gap: 12px;
+}
+
+.motor-readiness-control-group {
+  display: grid;
+  gap: 4px;
+}
+
+.motor-readiness-control-group .registry-actions {
+  margin: 0;
+}
+
+.motor-readiness-system-group {
+  padding-left: 12px;
+  border-left: 1px solid var(--line);
+}
+
+.motor-config-file-panel {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 12px;
+}
+
+.workspace-panel .motor-config-file-panel > .section-head:not(.workspace-page-head) {
+  margin: 0;
+  padding: 0;
+  border-bottom: 0;
+}
+
+.motor-config-file-panel .settings-file-actions {
+  margin: 0;
+}
+
+.matching-table-wrap .matching-table {
+  min-width: 1740px;
+}
+
+.axis-combined-cell {
+  display: grid;
+  grid-template-columns: 64px minmax(120px, 1fr);
+  gap: 6px;
+  min-width: 210px;
+}
+
+.axis-combined-cell .axis-edit-input {
+  width: 100%;
+  min-width: 0;
+}
+
+.axis-status-stack {
+  min-width: 138px;
+  vertical-align: middle;
+}
+
+.axis-status-stack > strong,
+.axis-status-stack > small {
+  display: block;
+}
+
+.axis-status-stack > small {
+  margin-top: 5px;
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.35;
+  white-space: normal;
+}
+
+.axis-status-stack .match-state {
+  min-width: 104px;
+}
+
+.axis-inline-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-top: 7px;
+}
+
+.axis-inline-actions button {
+  min-height: 26px;
+  padding: 3px 7px;
+  font-size: 11px;
+}
+
+@media (max-width: 1300px) {
+  .motor-readiness-summary {
+    grid-template-columns: repeat(2, minmax(180px, 1fr));
+  }
+
+  .motor-readiness-steps {
+    grid-template-columns: repeat(4, minmax(150px, 1fr));
+  }
+}
+
+@media (max-width: 760px) {
+  .motor-readiness-summary,
+  .motor-readiness-steps {
+    grid-template-columns: 1fr;
+  }
+
+  .motor-readiness-next {
+    align-items: stretch;
+    flex-direction: column;
+  }
+}
+
+.match-state {
+  display: inline-flex;
+  align-items: center;
+  min-width: 108px;
+  min-height: 24px;
+  padding: 0 8px;
+  border-radius: 4px;
+  font-weight: 700;
+  justify-content: center;
+  white-space: normal;
+}
+
+.match-state.matched {
+  color: var(--green);
+  background: #e8f6ee;
+}
+
+.match-state.configured {
+  color: var(--blue);
+  background: #eaf2ff;
+}
+
+.match-state.unregistered,
+.match-state.missing,
+.match-state.review,
+.match-state.unknown {
+  color: var(--yellow);
+  background: #fff5df;
+}
+
+.match-state.duplicate {
+  color: var(--red);
+  background: #fdeaea;
+}
+
+.match-state.delete {
+  color: var(--red);
+  background: #fdeaea;
+}
+
+.registry-flag.on {
+  background: #e8f6ee;
+  color: var(--green);
+}
+
+.selected-row {
+  background: #eff6ff;
+  box-shadow: inset 3px 0 0 #2563eb;
+}
+
+.manual-panel {
+  min-height: 180px;
+}
+
+.motion-test-top {
+  margin-bottom: 12px;
+  background: #ffffff;
+}
+
+.motion-test-axis-picker {
+  max-width: 620px;
+}
+
+.motion-test-grid {
+  display: grid;
+  grid-template-columns: minmax(280px, 0.9fr) minmax(360px, 1.4fr);
+  gap: 12px;
+  align-items: stretch;
+}
+
+.motion-test-card {
+  padding: 14px;
+  border: 1px solid var(--line);
+  background: #ffffff;
+}
+
+.ac-servo-control-card {
+  margin-bottom: 12px;
+  border-color: #cbd8e5;
+  background: #f8fbfe;
+}
+
+.servo-action-groups {
+  display: grid;
+  grid-template-columns: minmax(320px, 1.35fr) minmax(240px, 1fr);
+  gap: 10px;
+}
+
+.servo-action-group {
+  padding: 10px;
+  border: 1px solid #dfe6ed;
+  border-radius: 8px;
+  background: #ffffff;
+}
+
+.servo-action-group > span {
+  display: block;
+  margin-bottom: 8px;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.servo-action-group .manual-actions {
+  margin-top: 0;
+  margin-bottom: 0;
+}
+.motion-test-readout,
+.manual-field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.motion-test-readout {
+  min-height: 60px;
+  justify-content: center;
+  padding: 10px 12px;
+  border: 1px solid #e1e7ee;
+  border-radius: 7px;
+  background: #ffffff;
+}
+
+.motion-test-status-card {
+  background: #f8fafc;
+}
+
+.motion-test-command-card {
+  border-color: #b9cce3;
+  box-shadow: inset 0 3px 0 #dceaff;
+}
+
+.motion-test-action-guide {
+  margin: -2px 0 10px;
+  padding: 8px 10px;
+  border-left: 3px solid #d29a32;
+  border-radius: 0 6px 6px 0;
+  background: #fffaf0;
+  color: #79500c;
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 1.45;
+}
+
+.motion-test-action-guide[data-state="ready"] {
+  border-left-color: var(--green);
+  background: #eef9f3;
+  color: #14633a;
+}
+
+.motion-test-action-guide[data-state="active"] {
+  border-left-color: var(--blue);
+  background: #eef5ff;
+  color: #174f97;
+}
+
+.motion-test-readout + .motion-test-readout {
+  margin-top: 8px;
+}
+.motion-test-readout span,
+.manual-field span {
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.motion-test-readout strong {
+  font-size: 16px;
+  line-height: 1.35;
+  white-space: normal;
+}
+
+.manual-field input,
+.manual-field select {
+  min-height: 38px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 0 10px;
+  font: inherit;
+  background: #ffffff;
+}
+
+.motion-test-command-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(160px, 1fr));
+  gap: 10px;
+}
+
+.motion-command-position {
+  margin-top: 12px;
+  padding: 10px;
+  border: 1px solid #e1e7ee;
+  border-radius: 7px;
+  background: #ffffff;
+}
+
+.motion-test-stop-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-top: 12px;
+  padding: 10px 12px;
+  border: 1px solid #efb7b7;
+  border-radius: 8px;
+  background: #fff8f8;
+}
+
+.motion-test-stop-bar > div {
+  min-width: 0;
+}
+
+.motion-test-stop-bar strong,
+.motion-test-stop-bar span {
+  display: block;
+}
+
+.motion-test-stop-bar strong {
+  color: #9d2020;
+  font-size: 13px;
+}
+
+.motion-test-stop-bar span {
+  margin-top: 3px;
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.4;
+}
+
+.motion-test-stop-button {
+  flex: 0 0 auto;
+  min-width: 150px;
+}
+
+.section-head.compact {
+  min-height: 0;
+  margin-bottom: 8px;
+}
+
+.motion-command-help {
+  margin-top: 8px;
+  border: 1px solid #dfe6ed;
+  border-radius: 7px;
+  background: #f8fafc;
+}
+
+.motion-command-help summary {
+  padding: 9px 10px;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.motion-command-note {
+  margin: 0;
+  padding: 0 10px 10px;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.55;
+}
+
+.segmented-control {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  overflow: hidden;
+  background: #ffffff;
+}
+
+.segmented-control button {
+  min-height: 38px;
+  border: 0;
+  border-radius: 0;
+  background: #ffffff;
+}
+
+.segmented-control button + button {
+  border-left: 1px solid var(--line);
+}
+
+.segmented-control button.active {
+  background: #eaf2ff;
+  color: var(--blue);
+}
+
+.manual-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-top: 12px;
+}
+
+.motion-command-button {
+  flex: 1 1 180px;
+  min-height: 54px;
+  font-size: 18px;
+}
+
+.servo-control-actions button {
+  flex: 1 1 118px;
+}
+
+
+/* 모터별 운전 한계 인라인 편집 · P3 */
+.axis-limits-cell {
+  min-width: 300px;
+}
+
+/* 라벨을 줄임말 없이 · 단위까지 한 줄에 (2026-10-02) */
+.axis-limit-field {
+  display: grid;
+  grid-template-columns: 112px 1fr;
+  align-items: center;
+  gap: 4px;
+  margin: 2px 0;
+}
+
+.axis-limit-field > span {
+  font-size: 0.78em;
+  color: var(--muted);
+}
+
+.axis-limit-input {
+  width: 100%;
+  min-width: 90px;
+}
+
+/* 수동 페이더 · 동작 테스트 화면 */
+.manual-fader-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.manual-fader-row {
+  display: grid;
+  grid-template-columns: 150px 1fr 170px;
+  align-items: center;
+  gap: 12px;
+  padding: 6px 10px;
+  border: 1px solid var(--border, #2c3340);
+  border-radius: 8px;
+}
+
+.manual-fader-label {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.manual-fader-label span {
+  font-size: 12px;
+  opacity: 0.7;
+}
+
+.manual-fader-slider {
+  width: 100%;
+  accent-color: var(--accent, #4da3ff);
+}
+
+.manual-fader-slider:disabled {
+  opacity: 0.4;
+}
+
+.manual-fader-value {
+  text-align: right;
+  font-size: 13px;
+}
+
+.manual-fader-value small {
+  opacity: 0.7;
+}
+
+/* 조그 단위 토글 */
+.motion-jog-joint-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.motion-jog-joint-toggle input[type="checkbox"] {
+  margin: 0;
+}
+
+/* 드라이브 설정 줄(브레이크·앱솔루트) · 한계 줄과 눈으로 구분 · P8 */
+.axis-limit-field.axis-drive-field {
+  border-top: 1px dashed var(--border, #2c3340);
+  padding-top: 3px;
+  margin-top: 3px;
+}
+
+/* 주의 · 과부하율 80% 이상 등 · 위험(빨강) 전 단계 */
+.status-warning {
+  color: var(--yellow);
+  font-weight: 700;
+}

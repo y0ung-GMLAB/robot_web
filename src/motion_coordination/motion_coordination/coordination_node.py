@@ -44,7 +44,6 @@ from motion_common.group_config import (
 from .group_execution import GroupExecution, Member, MemberRegistry, ScheduledAction
 from .group_peer_display import enrich_peer_row
 from .local_api import LocalCoordinationApi
-from .midi_relay_bridge import MidiRelayBridge
 from .local_runtime_monitor import LocalRuntimeMonitor
 from .safety_stop import SafetyStopController, SafetyStopOutcome
 from motion_common import topics
@@ -244,15 +243,6 @@ class MotionCoordinationNode(Node):
             self._time_sync_callback, probe_qos,
         )
 
-        # 원시 MIDI 중계 · §6-94 · 규칙은 `midi_relay`, 배선은 `midi_relay_bridge`
-        #
-        # 이 노드가 중계를 맡는 이유 · 이 PC 것과 그룹 공용을 **한 프로세스에서**
-        # 모두 여는 곳이 여기뿐이고, 장치 주인과 대상을 정하는 자리(로컬 API)도
-        # 여기다 · 다른 프로세스에 두면 같은 사실을 둘이 들게 된다.
-        self._midi_relay = MidiRelayBridge(
-            self, pc_id=self._config.pc_id, group_id=self._config.group_id,
-        )
-
         local_port = int(os.environ.get('MOTION_COORDINATION_LOCAL_PORT') or 8011)
         self._local_api = LocalCoordinationApi(
             self.snapshot, self._handle_local_request, port=local_port,
@@ -386,7 +376,6 @@ class MotionCoordinationNode(Node):
         self._prune_seen_commands()
         self._check_multiple_masters()
         self._auto_recover_group_errors()
-        self._midi_relay.tick()
 
     def _auto_recover_group_errors(self) -> None:
         if not self._joined:
@@ -1295,17 +1284,6 @@ class MotionCoordinationNode(Node):
             joined = self._joined
             self._joined = False
         self._remember_joined(False)
-        # 넘겨 둔 MIDI 도 되찾는다 · §6-282
-        #
-        # 「나갈 때는 조건 없이 비운다」(§6-164)에 이것만 빠져 있었다 · 이 PC 의
-        # 페이더를 다른 PC 에 넘겨 둔 채로 그룹에서 나가면, 나갔는데도 내 표면이
-        # 남의 것으로 남아 있었다 · 그룹이 계속 잡고 있는 것처럼 보인다.
-        relay = getattr(self, '_midi_relay', None)
-        if relay is not None:
-            try:
-                relay.set_target('')
-            except Exception as exc:  # 되돌리기가 나가기를 막으면 안 된다
-                self._warn(f'MIDI 되돌리기 실패: {exc}')
         if joined and self._config.configured:
             self._publish_heartbeat(joined=False)
         return {
@@ -1390,9 +1368,6 @@ class MotionCoordinationNode(Node):
                 result = self._request_group_stop(after_cycle=False)
             elif command == 'acknowledge_group_error':
                 result = self._acknowledge_coordination_error()
-            elif command == 'set_midi_target':
-                # 장치가 꽂힌 PC 에서만 받는다 · 판정은 중계가 한다
-                result = self._midi_relay.set_target(request.get('pc_id'))
             else:
                 raise ValueError('지원하지 않는 그룹 연동 요청입니다')
         except Exception as exc:
@@ -2351,7 +2326,6 @@ class MotionCoordinationNode(Node):
                 'local_runtime': self._local_runtime_health(),
                 'coordination_error': dict(self._coordination_error),
                 'network_stale': dict(self._network_stale),
-                'midi_relay': self._midi_relay.snapshot(),
                 'timeouts': {
                     'heartbeat_sec': self._config.heartbeat_sec,
                     'warning_sec': self._config.warning_timeout_sec,

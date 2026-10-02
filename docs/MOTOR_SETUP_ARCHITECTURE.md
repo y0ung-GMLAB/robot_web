@@ -46,7 +46,7 @@ Web Bridge, ProjectRepository 및 RuntimeStateMonitor가 수명주기 책임을 
 
 - 프로젝트별 데이터 격리 원칙
 - motion_system의 실제 모터 통신·제어 통로
-- 모션축 설정과 MIDI가 소비하는 최종 `모터 설정 완료` 계약
+- 조인트 매핑과 MIDI가 소비하는 최종 `모터 설정 완료` 계약
 
 기존 클래스의 책임 배치와 상태 소유권은 새 설계의 기반으로 사용하지 않는다.
 다만 검증된 검색 규칙, RuntimeSession 해시 검증, 프로젝트 격리 및 안전조건은
@@ -127,7 +127,7 @@ Web Bridge, ProjectRepository 및 RuntimeStateMonitor가 수명주기 책임을 
 | ProjectMotorConfig | 현재 프로젝트에서 사용자가 저장한 설정 | 사용자 저장 | 불가 |
 | RuntimeSession | 검증된 ProjectMotorConfig의 불변 실행본 | 적용 작업 | 불가 |
 | RuntimeFeedback | Motor Manager가 현재 송신하는 실제 상태 | motion_system | 불가 |
-| MotionAxisConfig | 모션 ID와 실행 모터축의 연결 | 사용자 저장 | 불가 |
+| MotionAxisConfig | 조인트 이름과 실행 모터축의 연결 | 사용자 저장 | 불가 |
 
 어느 데이터도 값이 없다는 이유로 다른 데이터의 이전 값을 대신 사용하지 않는다.
 ProjectMotorConfig만 사용자 설정 원본이며 RuntimeSession은 내부 실행 사본이다.
@@ -173,7 +173,7 @@ Web Bridge, UI, RuntimeStateMonitor 및 다른 노드는 위 상태 파일을 �
   결정하지 않는다.
 - MotorLifecycleCoordinator는 motion_system을 우회해 모터 명령을 송신하지 않는다.
 
-모터 설정 완료 후 모션축 설정과 MIDI 제어 허용은 실행 컨텍스트가
+모터 설정 완료 후 조인트 매핑과 MIDI 제어 허용은 실행 컨텍스트가
 MotorLifecycleCoordinator의 `모터 설정 완료` 상태를 사용해 검사한다.
 
 ## 5. 프로젝트와 실제 장치 비교
@@ -226,7 +226,7 @@ MotorLifecycleCoordinator의 `모터 설정 완료` 상태를 사용해 검사�
 5. RuntimeStateMonitor를 동일한 프로젝트 ID·세대·세션 ID로 시작한다.
 6. Motor Manager가 보고한 실행 설정과 요청 세션이 같은지 확인한다.
 7. 새 RuntimeFeedback에서 예상 축을 모두 확인한다.
-8. 성공을 기록한 뒤 모션축 설정 단계로 이동한다.
+8. 성공을 기록한 뒤 조인트 매핑 단계로 이동한다.
 
 파일 생성이나 서비스 프로세스 존재만으로 적용 성공을 판정하지 않는다.
 
@@ -276,7 +276,7 @@ Vendor/Product/Revision, 원본 SII 및 작업 로그는 `상세 보기`에서 �
 - 실패 메시지는 `단계 · 대상 · 원인 · 사용자 다음 작업`으로 표시한다.
 - 제한시간 초과는 마지막 확인 단계와 실제 서비스 상태를 함께 기록한다.
 - 검색 실패를 프로젝트 파일 없음이나 이전 캐시로 성공 처리하지 않는다.
-- 적용 실패를 모션축 설정 부족으로 바꾸어 표시하지 않는다.
+- 적용 실패를 조인트 매핑 부족으로 바꾸어 표시하지 않는다.
 - 롤백 후 상태는 `이전 실행 복원`, `실행 대상 없음`, `복원 실패`로 구분한다.
 - 사용자가 다시 시도할 때 이전 작업의 완료 이벤트가 새 작업에 적용되지 않도록
   operation ID와 session ID를 모두 확인한다.
@@ -308,7 +308,7 @@ Vendor/Product/Revision, 원본 SII 및 작업 로그는 `상세 보기`에서 �
 1. 실제 AC Servo 검색
 2. 실제 모터 수와 검색 결과 비교
 3. 설정 적용 후 모든 설정 축의 새 피드백 확인
-4. 모션축 설정 저장·적용
+4. 조인트 매핑 저장·적용
 5. MIDI 입력별 대상 축 확인
 6. 제한범위 내 저속·소량 실제 구동
 

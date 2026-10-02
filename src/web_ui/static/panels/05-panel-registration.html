@@ -1,0 +1,176 @@
+<!-- 모터 등록·설정
+     `index.html`에서 떼어낸 조각 · 원본 397~623줄 · §6-44
+     들여쓰기를 그대로 둔다 · 서버가 자리표시자 줄을 이 내용으로 바꾼다 -->
+      <section class="registration-panel workspace-panel settings-editor-page hidden" data-workspace-panel="config" aria-label="모터 관리">
+        <div class="section-head workspace-page-head">
+          <div><strong>모터 관리</strong><small>연결 확인부터 애니메이션 재생 준비까지 한 화면에서 관리합니다</small></div>
+        </div>
+
+        <section class="settings-panel" aria-label="장비 제어">
+          <div class="registry-actions">
+            <button id="allAcServoOnButton" class="primary" type="button" disabled>전체 AC 서보 켜기</button>
+            <button id="allAcServoOffButton" class="off" type="button" disabled>전체 AC 서보 끄기</button>
+          </div>
+        </section>
+
+        <section class="axis-setup-step settings-step-card" aria-label="모터 타입별 검색">
+          <div class="section-head axis-settings-head">
+            <strong>1. 장비 검색</strong>
+          </div>
+          <div class="axis-scan-grid">
+            <section class="axis-type-scan" aria-label="전체 모터 검색">
+              <button id="scanAllButton" class="primary" type="button">전체 모터 검색</button>
+              <span id="scanAllResult">대기</span>
+            </section>
+            <section class="axis-type-scan" aria-label="AC Servo 검색">
+              <button id="scanButton" class="primary" type="button">AC Servo 검색</button>
+              <span id="scanResult">대기</span>
+            </section>
+            <section class="axis-type-scan" aria-label="Dynamixel 검색">
+              <button id="dynamixelScanButton" class="primary" type="button">Dynamixel 검색</button>
+              <span id="dynamixelScanResult">대기</span>
+            </section>
+          </div>
+        </section>
+
+        <section class="axis-settings-panel settings-step-card" aria-label="모터 설정 표">
+          <div class="section-head axis-settings-head">
+            <strong>2. 검색 결과 확인 및 모터 편집</strong>
+            <span id="axisSummary">설정 파일을 불러오는 중</span>
+          </div>
+
+          <div id="axisSettingsTabs" class="tabbar axis-settings-tabs" role="tablist" aria-label="모터 설정 화면">
+            <button class="tab-button active" type="button" data-axis-settings-tab="current">모터 목록 편집</button>
+            <button class="tab-button" type="button" data-axis-settings-tab="table">상세 설정 표</button>
+            <button class="tab-button" type="button" data-axis-settings-tab="raw">원본 보기</button>
+          </div>
+
+          <div class="axis-settings-tab-panel" data-axis-settings-panel="current">
+            <div id="axisWorkflowStatus" class="axis-workflow-status" data-state="loading">
+              <span>현재 상태</span>
+              <strong id="axisWorkflowState">설정 확인 중</strong>
+              <p id="axisWorkflowDetail">현재 프로젝트와 실제 모터 상태를 확인하고 있습니다.</p>
+              <small id="axisWorkflowNext">다음 작업을 확인하고 있습니다.</small>
+            </div>
+            <div id="axisActionMessage" class="registry-message">모터 검색을 실행하면 찾은 모터가 그대로 목록이 됩니다 · 이름만 고칠 수 있습니다</div>
+            <div class="matching-table-wrap">
+              <table class="matching-table">
+                <thead>
+                  <tr>
+                    <th>모터·이름</th>
+                    <th>운전 속도 · 드라이브 설정</th>
+                    <th>실제 장치 식별</th>
+                    <th>모델·운전 프로필</th>
+                    <th>연결 정보</th>
+                    <th>설정·실행 적용</th>
+                    <th>서보·토크</th>
+                  </tr>
+                </thead>
+                <tbody id="axisRows">
+                  <tr>
+                    <td colspan="6" class="empty">설정 파일을 불러오거나 모터 스캔을 실행하세요</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+          <div class="axis-settings-tab-panel hidden" data-axis-settings-panel="table">
+            <div id="motorConfigTablePath" class="registry-message config-file-path">설정 파일: -</div>
+            <div id="motorConfigTableRows" class="config-table-groups">
+              <div class="empty config-table-empty">설정 파일을 불러오는 중</div>
+            </div>
+          </div>
+
+          <div class="axis-settings-tab-panel hidden" data-axis-settings-panel="raw">
+            <pre id="motorConfigRawText" class="config-raw-text">설정 파일을 불러오는 중</pre>
+          </div>
+        </section>
+
+        <section class="axis-setup-step settings-step-card" aria-label="조인트 매핑">
+          <div class="section-head compact">
+            <strong>3. 조인트 매핑</strong>
+            <span>조인트 이름(= Blender 본 이름)를 모터에 연결하고 변환값을 설정합니다 · 애니메이션 재생 전에 필요합니다</span>
+          </div>
+          <div class="motion-mapping-layout">
+            <section class="motion-file-subsection settings-step-card" aria-label="조인트 매핑 파일">
+              <div class="section-head compact">
+                <strong>연결 파일</strong>
+                <span id="motionMappingMessage">현재 매칭 확인 중</span>
+              </div>
+              <div class="motion-mapping-form">
+                <label class="manual-field">
+                  <span>설정 파일</span>
+                  <strong id="motionMappingFileName" class="mono">-</strong>
+                </label>
+              </div>
+            </section>
+
+            <section class="motion-file-subsection settings-step-card" aria-label="조인트 매핑 표">
+              <div class="section-head compact">
+                <strong>조인트 매핑 편집</strong>
+                <span>조인트 이름(= Blender 본 이름)를 AC 서보·다이나믹셀 모터에 연결</span>
+              </div>
+              <div class="registry-actions settings-step-actions">
+                <button id="addMotionIdButton" type="button">조인트 이름 추가</button>
+                <button id="generateMotionIdsButton" type="button">자동 생성</button>
+              </div>
+              <div class="table-wrap motion-mapping-table-wrap">
+                <table class="motion-mapping-table">
+                  <thead>
+                    <tr>
+                      <th class="motion-id-head"><span class="mapping-head-label">조인트 이름</span><span class="mapping-head-unit"></span></th>
+                      <th><span class="mapping-head-label">사용</span><span class="mapping-head-unit"></span></th>
+                      <th class="mapping-motor-head"><span class="mapping-head-label">모터 ID</span><span class="mapping-head-unit"></span></th>
+                      <th class="mapping-number-head"><span class="mapping-head-label">감속비</span><span class="mapping-head-unit">x</span></th>
+                      <th class="mapping-number-head"><span class="mapping-head-label">기준점</span><span class="mapping-head-unit">deg</span></th>
+                      <th><span class="mapping-head-label">기준점 캡처</span><span class="mapping-head-unit"></span></th>
+                      <th class="mapping-number-head"><span class="mapping-head-label">최소값</span><span class="mapping-head-unit">deg</span></th>
+                      <th class="mapping-number-head"><span class="mapping-head-label">최대값</span><span class="mapping-head-unit">deg</span></th>
+                      <th title="재생 전에 먼저 옮겨 둘 자세 · 첫 프레임 = 애니메이션 첫 줄 · 직접 지정 = 옆 칸 값 · 기준점 = 모션 0°"><span class="mapping-head-label">초기 위치</span><span class="mapping-head-unit"></span></th>
+                      <th class="mapping-number-head" title="「직접 지정」일 때 이동할 값 · 다른 방식이면 보여 주기만"><span class="mapping-head-label">지정 값</span><span class="mapping-head-unit">deg</span></th>
+                      <th><span class="mapping-head-label">반전</span><span class="mapping-head-unit"></span></th>
+                      <th><span class="mapping-head-label">상태</span><span class="mapping-head-unit"></span></th>
+                    </tr>
+                  </thead>
+                  <tbody id="motionMappingRows">
+                    <tr>
+                      <td colspan="12" class="empty">조인트 이름을 추가하거나 자동 생성을 누르세요</td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+            </section>
+
+            <!-- 저장 단추는 맨 아래 「저장」 하나다 · 매핑도 그때 검증하고 저장한다 · 2026-10-02 -->
+            <section class="motion-file-subsection settings-step-card settings-commit-card" aria-label="조인트 매핑 검증 결과">
+              <div class="section-head compact">
+                <strong>검증 결과</strong>
+                <span>아래 「저장」을 누르면 검증하고, 통과한 것만 저장합니다</span>
+              </div>
+              <div class="registry-actions settings-step-actions motion-mapping-final-actions">
+                <button id="resetMotionMappingButton" type="button">저장된 내용으로 되돌리기</button>
+              </div>
+              <div id="motionMappingValidation" class="motion-value-table">
+                <div class="empty">「저장」을 누르면 검증 결과가 표시됩니다</div>
+              </div>
+            </section>
+
+          </div>
+        </section>
+
+        <!-- 저장 · 적용 · 화면 맨 아래 하나 (고정 바) · 2026-10-02
+             전에는 매핑 저장(4번 안)과 설정 저장(3번)이 따로였고 순서도 거꾸로라
+             매핑을 고친 뒤 위로 올라가야 했다 · 이제 「저장」 하나가 바뀐 쪽을 다
+             저장하고, 「적용」은 모터가 잠깐 멈추므로 사람이 따로 누른다 · §6-154 -->
+        <section class="axis-setup-step settings-final-card settings-commit-bar" aria-label="저장 및 장비 적용">
+          <div class="settings-commit-status">
+            <strong id="settingsCommitState">변경 없음</strong>
+            <span id="settingsCommitDetail">모터 목록 · 조인트 매핑을 고치면 「저장」 · 장비 반영은 「장비에 적용 · 모터 재시작」</span>
+          </div>
+          <div class="settings-final-actions">
+            <button id="saveAxisConfigButton" class="primary" type="button" disabled>저장</button>
+            <button id="applyAxisConfigButton" class="danger" type="button" disabled>장비에 적용 · 모터 재시작</button>
+          </div>
+        </section>
+      </section>

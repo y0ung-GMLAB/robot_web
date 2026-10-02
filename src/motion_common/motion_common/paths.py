@@ -122,7 +122,7 @@ def project_dir_for(projects_dir: Path, project_id: str) -> Path:
     **같은 검사가 네 벌 복사돼 있었고, 둘이 틀렸다.**
 
         workspace_session      (스튜디오)      ❌
-        motion_mapping_manager (모션축 매핑)    ❌
+        motion_mapping_manager (조인트 매핑)    ❌
         motion_run_manager     (모션 실행)      ✅
         midi_control_node      (MIDI)          ✅
 

@@ -35,6 +35,12 @@ def test_unknown_modes_fall_back_to_the_default(value):
     assert normalize_run_mode(value) == SCHEDULE_MODE
 
 
+def test_off_mode_is_kept_as_is():
+    """오프 = 움직임 명령 전부 차단 · 저장도 정규화도 제 이름 그대로."""
+    assert normalize_run_mode('off') == 'off'
+    assert normalize_run_mode(' OFF ') == 'off'
+
+
 def test_manual_mode_is_kept_as_is():
     assert normalize_run_mode('manual') == MANUAL_MODE
     assert normalize_run_mode('MANUAL') == MANUAL_MODE

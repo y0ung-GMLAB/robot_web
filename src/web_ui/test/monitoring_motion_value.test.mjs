@@ -1,0 +1,71 @@
+import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import path from 'node:path';
+import test from 'node:test';
+import { fileURLToPath } from 'node:url';
+
+import { motionValueText, overloadText, renderMonitoring } from '../static/js/monitoring.js';
+
+const here = path.dirname(fileURLToPath(import.meta.url));
+const source = fs.readFileSync(
+  path.join(here, '../static/js/monitoring.js'),
+  'utf8',
+);
+
+test('monitoring table contains the motion target column', () => {
+  assert.match(source, /label: '모션 목표 \(deg\)'/);
+  assert.match(source, /\['모션 목표'/);
+  // 위치는 모터축 · 목표는 관절 · 섞어 읽지 않게 머리줄에 설명을 단다
+  assert.match(source, /'모터 위치 \(deg\)'/);
+  assert.match(source, /<th\$\{column\.title/);
+});
+
+test('motion value formatter distinguishes received, unmapped, and missing states', () => {
+  assert.equal(motionValueText({
+    motion_value_status: 'received',
+    motion_value_deg: 2.125,
+  }), '2.125');
+  assert.equal(motionValueText({ motion_value_status: 'unmapped' }), '미설정');
+  assert.equal(motionValueText({ motion_value_status: 'missing' }), '목표 미수신');
+});
+
+test('monitoring summary renders runtime connection counts without an exception', () => {
+  const summaryText = { textContent: '' };
+  const el = new Proxy(
+    { summaryText, rows: null },
+    { get: (target, property) => target[property] ?? null },
+  );
+
+  renderMonitoring({
+    monitoring_enabled: true,
+    motors: [{ controller_index: 0, connection_state: 'online' }],
+    connection_summary: {
+      online: 1,
+      offline: 0,
+      bus_down: 0,
+      stale: 0,
+      initializing: 0,
+      monitoring_off: 0,
+      unknown: 0,
+    },
+    motor_type_counts: { 'AC Servo': 1 },
+  }, {
+    el,
+    rawMode: false,
+    activeMonitoringFilter: 'all',
+    shouldShowMonitoringMotor: () => true,
+    registryCount: 1,
+    selectedMotionTestAxis: null,
+    activeMonitoringDetailTab: 'basic',
+  });
+
+  assert.match(summaryText.textContent, /수신 중 1개/);
+});
+
+test('overload ratio shows a dash for motors that are not read', () => {
+  // 과부하율 읽기를 켠 MINAS 만 값이 온다 · 나머지는 None → 「-」
+  assert.equal(overloadText({ overload_ratio_pct: null }), '-');
+  assert.equal(overloadText({}), '-');
+  assert.equal(overloadText({ overload_ratio_pct: 87.25 }), '87.3');
+  assert.match(source, /label: '과부하율 \(%\)'/);
+});

@@ -1,0 +1,84 @@
+<!-- 시스템 정보
+     `index.html`에서 떼어낸 조각 · 원본 113~223줄 · §6-44
+     들여쓰기를 그대로 둔다 · 서버가 자리표시자 줄을 이 내용으로 바꾼다 -->
+      <section class="system-panel workspace-panel hidden" data-workspace-panel="system" aria-label="시스템 정보">
+        <div class="section-head system-page-head workspace-page-head">
+          <div><strong>시스템 정보</strong></div>
+          <span id="summaryText">재생 상태 수신 대기</span>
+        </div>
+
+        <div class="system-runtime-grid">
+          <section class="system-overview-card" aria-label="시스템 운영 상태">
+            <div class="section-head compact">
+              <strong>운영 상태</strong>
+            </div>
+            <div class="status-strip system-status-primary" aria-label="핵심 상태">
+              <div><span>프로그램 실행</span><strong id="serviceMode">확인 중</strong></div>
+              <div><span>웹 브리지</span><strong id="bridgeState">연결 중</strong></div>
+              <div><span>모니터링</span><strong id="monitoringState">확인 중</strong></div>
+              <div><span>프로젝트 실행 설정</span><strong id="executionContextState">확인 중</strong></div>
+              <div><span>런타임 오류</span><strong id="systemFaultCount">0개</strong></div>
+            </div>
+            <div class="status-strip system-status-secondary" aria-label="세부 상태">
+              <div><span>컴퓨터 명</span><strong id="systemHostname">-</strong></div>
+              <div><span>작업공간</span><strong id="systemWorkspacePath">-</strong></div>
+              <div><span>프로젝트 폴더</span><strong id="systemProjectsPath">-</strong></div>
+              <div><span>Git 주소</span><strong><a id="systemGitRemote" href="#" target="_blank" rel="noopener">-</a></strong></div>
+              <div><span>Git 브랜치</span><strong id="systemGitBranch">-</strong></div>
+              <div><span>Git HEAD</span><strong id="systemGitHead">-</strong></div>
+              <div><span>접속 주소</span><strong id="accessUrl">-</strong></div>
+              <div><span>마지막 갱신</span><strong id="lastUpdate">-</strong></div>
+            </div>
+          </section>
+
+          <section class="project-system-manager system-program-card" aria-label="프로그램 상태 및 재시작">
+            <div class="section-head compact">
+              <strong>프로그램 상태 및 복구</strong>
+              <span id="programHealthDetail">자동 실행 · 모터 상태 수신</span>
+            </div>
+            <div class="registry-actions system-program-actions">
+              <button id="programStatusRefreshButton" type="button">프로그램 상태 확인</button>
+              <button id="programPageReloadButton" type="button">화면 갱신</button>
+              <button id="desktopShortcutButton" type="button">바탕화면 바로가기 만들기</button>
+              <button id="programRestartButton" type="button" disabled>프로그램 재시작</button>
+            </div>
+            <div class="registry-message axis-apply-warning system-restart-warning">프로그램 재시작 · 서보 상태 유지 │ 모터 제어 재시작 · AC Servo OFF → 자동 ON 가능</div>
+          </section>
+
+          <!-- 로봇 팩 · PC 전역 (PC 1대 = 로봇 1대) · 축·모터·환경·MuJoCo 모델 zip
+               모터 설정·조인트 매핑은 바꾸지 않는다 · 차이는 표시만 -->
+          <section class="robot-pack-card" aria-label="로봇 팩">
+            <div class="section-head compact">
+              <strong>로봇 팩</strong>
+              <span id="robotPackSummary">확인 중</span>
+            </div>
+            <div class="status-strip robot-pack-status">
+              <div><span>지금 팩</span><strong id="robotPackCurrent">-</strong></div>
+              <div><span>올린 시각</span><strong id="robotPackUploadedAt">-</strong></div>
+              <div><span>이전 팩</span><strong id="robotPackPrevious">-</strong></div>
+            </div>
+            <div class="registry-actions robot-pack-actions">
+              <label class="robot-pack-drop" id="robotPackDropZone">
+                <input id="robotPackFileInput" type="file" accept=".zip,application/zip" hidden>
+                <span>팩 폴더 또는 zip 놓기 · 눌러서 zip 고르기</span>
+              </label>
+              <input id="robotPackFolderInput" type="file" webkitdirectory hidden>
+              <button id="robotPackFolderButton" type="button">폴더 고르기</button>
+              <button id="robotPackRollbackButton" type="button" disabled>이전 팩으로 되돌리기</button>
+              <button id="robotPackDiffButton" type="button">조인트 매핑과 비교</button>
+            </div>
+            <div class="registry-message" id="robotPackMessage" role="status"></div>
+            <ul class="robot-pack-errors hidden" id="robotPackErrors"></ul>
+            <div class="table-wrap robot-pack-diff-wrap hidden" id="robotPackDiffWrap">
+              <table class="robot-pack-diff">
+                <thead>
+                  <tr><th>조인트 이름</th><th>관절</th><th>감속비 (팩 / 설정)</th><th>범위 (팩 / 설정)</th><th>차이</th></tr>
+                </thead>
+                <tbody id="robotPackDiffRows"></tbody>
+              </table>
+            </div>
+          </section>
+
+        </div>
+
+      </section>

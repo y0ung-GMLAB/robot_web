@@ -13,7 +13,7 @@
 로그를 세어 보니 ERROR·WARN 의 **절반 이상**이 그것이었다.
 
     53회  스튜디오 에디터 · 포인트 선택 안내
-    46회  모션축 설정 · 세대 불일치
+    46회  조인트 매핑 · 세대 불일치
     17회  모션 실행 · 상태 조회 경합
 
 그래서 2026-09-18 에 세 대를 세운 진짜 버그
@@ -109,10 +109,9 @@ def test_every_command_boundary_uses_the_rule():
 
     workspace = Path(__file__).resolve().parents[3]
     boundaries = [
-        'src/motion_control_studio/motion_studio/motion_studio/editor_node.py',
-        'src/motion_control_studio/motion_studio/motion_studio/studio_node.py',
-        'src/motion_control_studio/motion_control/motion_runtime/motion_runtime/motion_run_manager.py',
-        'src/motion_control_studio/motion_control/motion_runtime/motion_runtime/motion_mapping_manager.py',
+        # 스튜디오 노드 둘은 삭제됐다 · 명령 경계는 이 둘이 남았다
+        'src/motion_runtime/motion_runtime/motion_run_manager.py',
+        'src/motion_runtime/motion_runtime/motion_mapping_manager.py',
     ]
     missing = [
         path for path in boundaries
