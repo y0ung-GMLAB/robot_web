@@ -27,10 +27,11 @@ const MAX_SEND_DEG = 360;
 //: 앞 조그가 아직 돌 때 다시 보낼 간격
 const RETRY_MS = 120;
 
-//: 화면 선택지와 같아야 한다 (07-panel-manual.html #jogDialStep)
-const JOG_DIAL_STEPS = Object.freeze([0.01, 0.1, 1, 10, 45]);
+//: 한 칸 크기 허용 범위 (모터 deg) · 화면 입력칸 min/max 와 같다
+const STEP_MIN_DEG = 0.001;
+const STEP_MAX_DEG = 360;
 
-export function createJogDialController({ el, getLatestState, getSelectedAxis }) {
+export function createJogDialController({ el, getLatestState, getSelectedAxis, onCapture = null }) {
   let pendingDeg = 0;
   let inFlight = false;
   let retryTimer = null;
@@ -47,9 +48,11 @@ export function createJogDialController({ el, getLatestState, getSelectedAxis })
     return motors.find((motor) => Number(motor?.controller_index) === axis) || null;
   }
 
+  /** 입력칸 값 · 범위 밖이거나 숫자가 아니면 null (돌려도 아무것도 안 보낸다) */
   function stepDeg() {
-    const value = Number(el.jogDialStep?.value);
-    return JOG_DIAL_STEPS.includes(value) ? value : 1;
+    const value = Number(String(el.jogDialStep?.value ?? '').trim());
+    if (!Number.isFinite(value) || value < STEP_MIN_DEG || value > STEP_MAX_DEG) return null;
+    return value;
   }
 
   function positionDeg(motor) {
@@ -100,7 +103,13 @@ export function createJogDialController({ el, getLatestState, getSelectedAxis })
       render();
       return;
     }
-    pendingDeg += ticks * stepDeg();
+    const step = stepDeg();
+    if (step === null) {
+      lastMessage = `한 칸 크기는 ${STEP_MIN_DEG} ~ ${STEP_MAX_DEG} deg 숫자여야 합니다`;
+      render();
+      return;
+    }
+    pendingDeg += ticks * step;
     needleDeg += ticks * (360 / DETENTS);
     render();
     pump();
@@ -233,9 +242,10 @@ export function createJogDialController({ el, getLatestState, getSelectedAxis })
   // ---------------------------------------------------------------- //
 
   function formatDeg(value) {
-    const digits = stepDeg() < 0.1 ? 2 : (stepDeg() < 1 ? 1 : 0);
+    const step = stepDeg() ?? 1;
+    const digits = step < 0.01 ? 3 : 2;
     const sign = value > 0 ? '+' : '';
-    return `${sign}${Number(value).toFixed(Math.max(digits, 2))}°`;
+    return `${sign}${Number(value).toFixed(digits)}°`;
   }
 
   function render() {
@@ -260,9 +270,35 @@ export function createJogDialController({ el, getLatestState, getSelectedAxis })
     if (el.jogDialMessage) {
       el.jogDialMessage.textContent = reason || lastMessage || '';
     }
+    const busy = Boolean(reason) || inFlight || Math.abs(pendingDeg) > 1e-9;
+    for (const button of [el.jogDialSetReference, el.jogDialSetLower, el.jogDialSetUpper]) {
+      if (button) button.disabled = busy;
+    }
+  }
+
+  /** 기준점 지정 · ± limit · 이동이 끝나 서 있을 때만 · 저장은 main.js 가 맡는다 */
+  async function capture(kind) {
+    const motor = selectedMotor();
+    const reason = blockReason(motor);
+    if (reason || inFlight || Math.abs(pendingDeg) > 1e-9) {
+      lastMessage = reason || '이동이 끝난 뒤에 지정하세요';
+      render();
+      return;
+    }
+    const position = positionDeg(motor);
+    if (position === null || typeof onCapture !== 'function') return;
+    const result = await onCapture(kind, {
+      axis: Number(motor.controller_index),
+      motorDeg: position,
+    });
+    if (result?.message) lastMessage = result.message;
+    render();
   }
 
   function bindEvents() {
+    el.jogDialSetReference?.addEventListener('click', () => capture('reference'));
+    el.jogDialSetLower?.addEventListener('click', () => capture('lower'));
+    el.jogDialSetUpper?.addEventListener('click', () => capture('upper'));
     if (!el.jogDial) return;
     el.jogDial.addEventListener('pointerdown', onPointerDown);
     el.jogDial.addEventListener('pointermove', onPointerMove);
@@ -270,7 +306,7 @@ export function createJogDialController({ el, getLatestState, getSelectedAxis })
     el.jogDial.addEventListener('pointercancel', onPointerUp);
     el.jogDial.addEventListener('wheel', onWheel, { passive: false });
     el.jogDial.addEventListener('keydown', onKeyDown);
-    el.jogDialStep?.addEventListener('change', render);
+    el.jogDialStep?.addEventListener('input', () => { lastMessage = ''; render(); });
   }
 
   return {

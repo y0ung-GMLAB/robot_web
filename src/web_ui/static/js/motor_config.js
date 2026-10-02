@@ -3253,8 +3253,45 @@ export function createMotorConfigController({
     if (el.dynamixelScanButton) el.dynamixelScanButton.addEventListener('click', scanDynamixel);
   }
 
+  /** 다이얼에서 찍은 모터 위치를 그 모터의 운전 한계(모터 deg)로 저장 · 2026-10-02
+   *
+   * field · 'upper'(+ limit) · 'lower'(− limit) · 모터 목록의 운전 한계 칸과 같은 자리
+   * (registry motor.config) · 실제 드라이브 반영은 「장비에 적용 · 모터 재시작」.
+   * 저장 안 한 편집이 있으면 거절한다 · 그것까지 같이 저장되면 안 된다.
+   */
+  async function saveMotorLimit(axis, field, motorDeg) {
+    if (!['upper', 'lower'].includes(field)) {
+      return { success: false, message: '알 수 없는 한계 종류입니다' };
+    }
+    if (hasMotorConfigDataChanges() || hasAxisChanges()) {
+      return {
+        success: false,
+        message: '모터 관리에 저장하지 않은 편집이 있습니다 · 먼저 저장하거나 되돌리세요',
+      };
+    }
+    const row = axisRowsData().find((entry) => (
+      entry?.motor && Number(rowAxisRaw(entry)) === Number(axis)
+    ));
+    if (!row) return { success: false, message: `${axis}번 모터를 모터 목록에서 찾지 못했습니다` };
+    const value = Math.round(Number(motorDeg) * 1000) / 1000;
+    if (!Number.isFinite(value)) return { success: false, message: '현재 모터 위치를 읽을 수 없습니다' };
+    const other = Number(row.motor?.config?.[field === 'upper' ? 'lower' : 'upper']);
+    if (Number.isFinite(other) && (field === 'upper' ? value <= other : value >= other)) {
+      return {
+        success: false,
+        message: `운전 한계가 뒤집힙니다 (${field === 'upper' ? '하한' : '상한'} ${other}°) · 반대쪽 limit 을 먼저 다시 지정하세요`,
+      };
+    }
+    setAxisEditValue(row, field, String(value));
+    const saved = await saveAxisConfig();
+    return saved
+      ? { success: true, message: `모터 ${axis} ${field === 'upper' ? '상한' : '하한'} = ${value}° · 반영하려면 「장비에 적용 · 모터 재시작」` }
+      : { success: false, message: '모터 설정 저장 실패' };
+  }
+
   return {
     bindEvents,
+    saveMotorLimit,
     fetchRegistry,
     loadProjectRegistry,
     getDiscoverySummary,

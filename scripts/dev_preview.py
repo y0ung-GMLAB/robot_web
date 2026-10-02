@@ -150,7 +150,7 @@ def snapshot():
         'execution_context': {},
         'service_management': {},
         'motion_test_limits': {},
-        'project_scope': {},
+        'project_scope': {'runtime_matches_selected': True, 'motor_config_applied': True},
         'safety_status': {
             'commands_blocked': False,
             'servo_alarm_blocked_axes': [],

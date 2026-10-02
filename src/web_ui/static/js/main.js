@@ -21,7 +21,7 @@ import { createMotorConfigController } from './motor_config.js';
 import { createProjectExplorerController } from './project_explorer.js';
 import { renderAccess, renderMonitoring } from './monitoring.js';
 import { createOperationProgressManager } from './operation_progress.js';
-import { installDialogManager } from './ui_dialogs.js';
+import { installDialogManager, showConfirm } from './ui_dialogs.js';
 import { StatusSocket } from './socket.js';
 import { TERMINAL_FAILURES } from './restart_tracking.js';
 import {
@@ -1092,7 +1092,33 @@ const jogDial = createJogDialController({
   el,
   getLatestState: () => appState.latestState,
   getSelectedAxis: () => motionTest.getSelectedAxis(),
+  onCapture: captureJogPoint,
 });
+
+/** 다이얼 「기준점 지정 / − limit / + limit」 · 확인창 후 바로 저장 · 2026-10-02
+ *
+ * 기준점 지정 → 모션축 설정의 기준점(모션 0°)
+ * ± limit     → 모터 운전 한계(모터 deg) **와** 모션축 설정 범위(모션 deg) 둘 다
+ * 한쪽이 실패하면 무엇이 저장됐는지 그대로 말한다.
+ */
+async function captureJogPoint(kind, { axis, motorDeg }) {
+  const title = { reference: '기준점 지정', lower: '− limit 지정', upper: '+ limit 지정' }[kind];
+  const where = kind === 'reference'
+    ? '모션축 설정의 기준점(모션 0°)'
+    : `모터 ${kind === 'upper' ? '상한' : '하한'}(모터 deg)과 모션축 설정 범위(모션 deg)`;
+  const confirmed = await showConfirm(
+    `모터 ${axis}의 지금 위치 ${motorDeg.toFixed(3)}° 를 저장합니다.\n\n저장 위치: ${where}`
+      + (kind === 'reference' ? '' : '\n\n모터 한계는 「장비에 적용 · 모터 재시작」 후 드라이브에 반영됩니다.'),
+    { title, confirmLabel: '저장', tone: 'warning' },
+  );
+  if (!confirmed) return { success: false, message: '취소했습니다' };
+  const mapping = await motionData.saveCapturedPoint(axis, kind, motorDeg);
+  if (kind === 'reference' || !mapping.success) return mapping;
+  const limit = await motorConfig.saveMotorLimit(axis, kind, motorDeg);
+  return limit.success
+    ? { success: true, message: `${mapping.message} · ${limit.message}` }
+    : { success: false, message: `모션축 범위는 저장됨 · 모터 한계 저장 실패: ${limit.message}` };
+}
 
 const motionData = createMotionDataController({
   el,

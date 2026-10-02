@@ -26,12 +26,14 @@ test('the dial sits in the jog panel and is bound through dom.js', () => {
   assert.match(html, /id="manualFaderList"/);
 });
 
-test('step choices are motor deg and match the module list', () => {
-  const options = [...html.matchAll(/<option value="([\d.]+)"[^>]*>[\d.]+°<\/option>/g)]
-    .map((match) => Number(match[1]));
-  const declared = JSON.parse(dial.match(/JOG_DIAL_STEPS = Object\.freeze\((\[[^\]]+\])\)/)[1]);
-  for (const step of declared) assert.ok(options.includes(step), `${step}° 선택지가 없다`);
+test('step size is a free numeric input in motor deg', () => {
+  assert.match(html, /<input id="jogDialStep"[^>]*type="number"/);
+  assert.doesNotMatch(html, /<select id="jogDialStep"/);
   assert.match(html, /모터 deg · 감속비 미적용/);
+  // 범위 밖·숫자 아님은 보내지 않고 사유를 말한다
+  assert.match(dial, /if \(step === null\)/);
+  assert.match(dial, /const STEP_MIN_DEG = 0\.001;/);
+  assert.match(dial, /const STEP_MAX_DEG = 360;/);
 });
 
 test('it sends raw motor deg through the existing jog path, never the gear ratio', () => {
@@ -53,4 +55,33 @@ test('switching motor or project drops the pending amount', () => {
   assert.match(main, /el\.motionTestAxisSelect\?\.addEventListener\('change', \(\) => jogDial\.reset\(\)\)/);
   assert.match(main, /jogDial\.reset\(\);/);
   assert.match(main, /jogDial\.renderRuntimeState\(\);/);
+});
+
+test('capture buttons save the current motor position, with a confirm first', () => {
+  for (const id of ['jogDialSetReference', 'jogDialSetLower', 'jogDialSetUpper']) {
+    assert.match(html, new RegExp(`id="${id}"`));
+  }
+  const mainSource = main;
+  assert.match(mainSource, /async function captureJogPoint\(kind, \{ axis, motorDeg \}\)/);
+  assert.match(mainSource, /await showConfirm\(/);
+  // 기준점은 모션축 설정만 · 끝은 모션축 범위 + 모터 운전 한계 둘 다
+  assert.match(mainSource, /if \(kind === 'reference' \|\| !mapping\.success\) return mapping;/);
+  assert.match(mainSource, /motorConfig\.saveMotorLimit\(axis, kind, motorDeg\)/);
+  // 이동 중·쌓인 양이 있을 때는 찍지 않는다
+  assert.match(dial, /이동이 끝난 뒤에 지정하세요/);
+  // 버튼 이름 · 「~으로」 대신 「지정 / limit」
+  assert.match(html, />기준점 지정<\/button>/);
+  assert.match(html, />\+ limit<\/button>/);
+  assert.match(html, />− limit<\/button>/);
+});
+
+test('motion range conversion respects invert and rounds inward', () => {
+  const data = readFileSync(new URL('../static/js/motion_data.js', import.meta.url), 'utf8');
+  const limits = readFileSync(new URL('../static/js/motor_config.js', import.meta.url), 'utf8');
+  assert.match(data, /const setsMotionUpper = motorUpper === \(factor > 0\);/);
+  assert.match(data, /Math\.floor\(motion \* 10000\) \/ 10000/);
+  assert.match(data, /Math\.ceil\(motion \* 10000\) \/ 10000/);
+  // 저장 안 한 편집이 있으면 거절 (같이 저장되면 안 된다)
+  assert.match(data, /if \(mappingDirty\) \{/);
+  assert.match(limits, /if \(hasMotorConfigDataChanges\(\) \|\| hasAxisChanges\(\)\) \{/);
 });

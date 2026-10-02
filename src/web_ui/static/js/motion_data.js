@@ -2690,6 +2690,81 @@ export function createMotionDataController({
     renderMappingPanel();
   }
 
+  /** 다이얼에서 찍은 모터 위치를 모션축 설정에 저장한다 · 2026-10-02
+   *
+   * kind · 'reference' = 기준점(모션 0°) · 'upper' = + limit · 'lower' = − limit
+   * (+/− 는 **모터** 방향 · 다이얼이 모터 deg 로 움직이므로)
+   *
+   * 끝 → 모션 deg 환산 · motion = (motor − ref) ÷ (gear·scale·sign) − offset ·
+   * 반전(sign<0)이면 모터 + limit 이 모션 최소가 된다 · 경계는 안쪽으로 0.0001°
+   * 반올림해 모터 리밋과 정확히 같은 값을 넘어서는 일이 없게 한다.
+   *
+   * 저장 안 한 편집이 있으면 거절한다 · 그것까지 같이 저장되면 안 된다.
+   */
+  async function saveCapturedPoint(axis, kind, motorDeg) {
+    if (mappingDirty) {
+      return {
+        success: false,
+        message: '모션축 설정에 저장하지 않은 편집이 있습니다 · 먼저 저장하거나 되돌리세요',
+      };
+    }
+    const rows = Array.isArray(mappingDraft?.mappings) ? mappingDraft.mappings : [];
+    const row = rows.find((entry) => (
+      entry?.enabled !== false && Number(entry?.motor_axis) === Number(axis)
+    ));
+    if (!row) {
+      return { success: false, message: `${axis}번 모터에 연결된 모션 ID가 없습니다 · 모션축 설정에서 먼저 연결하세요` };
+    }
+    const scope = getLatestState()?.project_scope || {};
+    if (scope.runtime_matches_selected !== true || scope.motor_config_applied !== true) {
+      return { success: false, message: '현재 프로젝트 모터 설정을 적용·재시작한 뒤 찍을 수 있습니다' };
+    }
+    const position = Number(motorDeg);
+    if (!Number.isFinite(position)) {
+      return { success: false, message: '현재 모터 위치를 읽을 수 없습니다' };
+    }
+    const motionId = String(row.motion_id || '');
+    if (kind === 'reference') {
+      row.reference_position_deg = position;
+      row.reference_enabled = true;
+    } else {
+      const gear = isDynamixelMappingRow(row) ? 1 : numericOr(row.gear_ratio, 1);
+      const factor = gear * numericOr(row.scale, 1) * (row.invert ? -1 : 1);
+      if (!factor) return { success: false, message: '감속비·배율이 0이라 환산할 수 없습니다' };
+      const reference = row.reference_enabled === false ? 0 : numericOr(row.reference_position_deg, 0);
+      const motion = (position - reference) / factor - numericOr(row.offset_deg, 0);
+      const motorUpper = kind === 'upper';
+      const setsMotionUpper = motorUpper === (factor > 0);
+      if (setsMotionUpper) {
+        row.motion_upper_deg = Math.floor(motion * 10000) / 10000;
+      } else {
+        row.motion_lower_deg = Math.ceil(motion * 10000) / 10000;
+      }
+      const lower = Number(row.motion_lower_deg);
+      const upper = Number(row.motion_upper_deg);
+      if (Number.isFinite(lower) && Number.isFinite(upper) && lower > upper) {
+        await selectMapping(selectedMappingId);   // 편집을 되돌린다
+        return {
+          success: false,
+          message: `모션 범위가 뒤집힙니다 (최소 ${formatNumber(lower, 3)} > 최대 ${formatNumber(upper, 3)}) · 반대쪽 limit 을 먼저 다시 지정하세요`,
+        };
+      }
+    }
+    mappingValidation = null;
+    markMappingDirty();
+    renderMappingPanel();
+    const saved = await saveCurrentMapping();
+    if (!saved) {
+      return { success: false, message: el.motionMappingMessage?.textContent || '모션축 설정 저장 실패' };
+    }
+    return {
+      success: true,
+      message: kind === 'reference'
+        ? `모션 ID ${motionId} 기준점 = 모터 ${formatNumber(position, 3)}°`
+        : `모션 ID ${motionId} 범위 ${formatNumber(row.motion_lower_deg, 3)} ~ ${formatNumber(row.motion_upper_deg, 3)}°`,
+    };
+  }
+
   function resetProjectState() {
     files = [];
     selectedFileId = null;
@@ -3131,6 +3206,7 @@ export function createMotionDataController({
       renderMotionTabs();
       render();
     },
+    saveCapturedPoint,
     /** 이 모터(축)에 연결된 모션축 행 · 조그의 모션축 deg 변환에 쓴다 · P4 */
     jointRowForAxis: (axis) => {
       const rows = Array.isArray(mappingDraft?.mappings) ? mappingDraft.mappings : [];

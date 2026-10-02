@@ -125,19 +125,20 @@
               <div class="jog-dial-side">
                 <label class="manual-field">
                   <span>한 칸 = (모터 deg · 감속비 미적용)</span>
-                  <select id="jogDialStep">
-                    <option value="0.01">0.01°</option>
-                    <option value="0.1">0.1°</option>
-                    <option value="1" selected>1°</option>
-                    <option value="10">10°</option>
-                    <option value="45">45°</option>
-                  </select>
+                  <input id="jogDialStep" class="mono" type="number" inputmode="decimal"
+                    min="0.001" max="360" step="any" value="1"
+                    title="한 칸에 움직일 모터 각도 · 0.001 ~ 360 deg">
                 </label>
                 <div class="jog-dial-readout">
                   <span>모터 위치</span>
                   <strong id="jogDialPosition" class="mono">-</strong>
                 </div>
                 <div id="jogDialPending" class="jog-dial-pending mono">대기</div>
+                <div class="jog-dial-capture" role="group" aria-label="지금 위치 찍기">
+                  <button id="jogDialSetLower" type="button" disabled title="지금 모터 위치를 − limit 으로 · 모터 하한 + 모션축 범위에 저장">− limit</button>
+                  <button id="jogDialSetReference" type="button" disabled title="지금 모터 위치를 기준점(모션 0°)으로 · 모션축 설정에 저장">기준점 지정</button>
+                  <button id="jogDialSetUpper" type="button" disabled title="지금 모터 위치를 + limit 으로 · 모터 상한 + 모션축 범위에 저장">+ limit</button>
+                </div>
                 <div id="jogDialMessage" class="jog-dial-message" role="status"></div>
                 <small class="jog-dial-help">드래그로 돌리기 · 휠 한 칸 · ←/→ 한 칸 · 시계 방향 = +</small>
               </div>
