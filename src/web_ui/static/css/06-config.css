@@ -1045,3 +1045,10 @@ th {
 .motion-jog-joint-toggle input[type="checkbox"] {
   margin: 0;
 }
+
+/* 드라이브 설정 줄(브레이크·앱솔루트) · 한계 줄과 눈으로 구분 · P8 */
+.axis-limit-field.axis-drive-field {
+  border-top: 1px dashed var(--border, #2c3340);
+  padding-top: 3px;
+  margin-top: 3px;
+}

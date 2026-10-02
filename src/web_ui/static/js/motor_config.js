@@ -1924,8 +1924,8 @@ export function createMotorConfigController({
         ...(next.config || {}),
         controller_index: axis,
       };
-    } else if (AXIS_LIMIT_FIELDS.includes(field)) {
-      // 모터별 운전 한계 · 빈 값이면 오버라이드를 거둬 기본(드라이버 본보기)으로
+    } else if (CONFIG_EDIT_FIELDS.includes(field)) {
+      // 모터별 운전 한계·드라이브 설정 · 빈 값이면 오버라이드를 거둔다
       const text = String(value ?? '').trim();
       const config = { ...(next.config || {}) };
       if (text === '') {
@@ -1963,7 +1963,7 @@ export function createMotorConfigController({
     if (field === 'name') input.value = rowNameRaw(row) ?? '';
     if (field === 'axis') input.value = rowAxisRaw(row) ?? '';
     if (field === 'driver_model') input.value = rowDriverModelRaw(row);
-    if (AXIS_LIMIT_FIELDS.includes(field)) {
+    if (CONFIG_EDIT_FIELDS.includes(field)) {
       input.value = rowLimitOverride(row, field);
     }
   }
@@ -1987,6 +1987,14 @@ export function createMotorConfigController({
   /** 모터별 운전 한계 · registry motor.config 에 적혀 그 모터의 드라이버에만 들어간다 */
   const AXIS_LIMIT_FIELDS = ['lower', 'upper', 'profile_velocity'];
 
+  /** MINAS 드라이브 파라미터 · param_file(SDO 목록)로 부팅 때 써진다 · P8
+   *
+   * 브레이크 두 값은 ms · 앱솔루트는 Pr0.15 (0 인크리멘털 · 1 절대 ·
+   * 2 절대-다회전무시 · **전원 재투입 후 반영**) · 빈 칸 = 드라이브 값 유지.
+   */
+  const DRIVE_PARAM_FIELDS = ['brake_delay_stop_ms', 'brake_delay_run_ms', 'encoder_absolute_mode'];
+  const CONFIG_EDIT_FIELDS = [...AXIS_LIMIT_FIELDS, ...DRIVE_PARAM_FIELDS];
+
   function handleAxisEdit(input) {
     const rowId = input.dataset.axisRowId || '';
     const field = input.dataset.axisEdit || '';
@@ -2005,7 +2013,7 @@ export function createMotorConfigController({
         return;
       }
       setAxisEditValue(row, 'axis', axis);
-    } else if (AXIS_LIMIT_FIELDS.includes(field)) {
+    } else if (CONFIG_EDIT_FIELDS.includes(field)) {
       const text = String(input.value ?? '').trim();
       if (text !== '' && !Number.isFinite(Number(text))) {
         resetAxisEditInput(input, row, field);
@@ -2356,6 +2364,9 @@ export function createMotorConfigController({
               value: rowLimitOverride(row, field),
               placeholder: rowLimitPlaceholder(row, field),
             }])),
+            driveParams: Object.fromEntries(DRIVE_PARAM_FIELDS.map(
+              (field) => [field, rowLimitOverride(row, field)],
+            )),
           };
         });
       const renderSignature = JSON.stringify(rowViews.map((view) => ({
@@ -2388,6 +2399,7 @@ export function createMotorConfigController({
         drive: view.drive,
         showAcServoControls: view.showAcServoControls,
         limits: view.limits,
+        driveParams: view.driveParams,
       })));
 
       if (renderSignature !== lastAxisRenderSignature) {
@@ -2402,7 +2414,7 @@ export function createMotorConfigController({
                 <span class="axis-number-label mono">${displayText(view.axisValue)}</span>
                 <input class="axis-edit-input axis-name-input" aria-label="모터 이름" data-axis-edit="name" data-axis-row-id="${escapeHtml(row.id)}" value="${escapeHtml(view.name === '-' ? '' : view.name)}"${disabled}>
               </td>
-              <td class="axis-limits-cell" title="모터 deg 기준 · 빈 칸이면 드라이버 기본값을 씁니다">
+              <td class="axis-limits-cell" title="위 줄: 운전 한계(모터 deg · 빈 칸이면 드라이버 기본값) · 아래 줄: MINAS 드라이브 설정(브레이크 ms · 앱솔루트 0/1/2 · 전원 재투입 후 반영 · 빈 칸이면 드라이브 값 유지)">
                 ${AXIS_LIMIT_FIELDS.map((field) => `
                   <label class="axis-limit-field"><span>${{ lower: '하한', upper: '상한', profile_velocity: '속도' }[field]}</span>
                     <input class="axis-edit-input axis-limit-input mono" type="text" inputmode="decimal"
@@ -2410,6 +2422,14 @@ export function createMotorConfigController({
                       data-axis-edit="${field}" data-axis-row-id="${escapeHtml(row.id)}"
                       value="${escapeHtml(view.limits[field].value)}"
                       placeholder="${escapeHtml(view.limits[field].placeholder)}"${disabled}>
+                  </label>`).join('')}
+                ${DRIVE_PARAM_FIELDS.map((field) => `
+                  <label class="axis-limit-field axis-drive-field"><span>${{ brake_delay_stop_ms: '브레이크·정지', brake_delay_run_ms: '브레이크·동작', encoder_absolute_mode: '앱솔루트' }[field]}</span>
+                    <input class="axis-edit-input axis-limit-input mono" type="text" inputmode="numeric"
+                      aria-label="드라이브 ${{ brake_delay_stop_ms: '브레이크 정지 지연', brake_delay_run_ms: '브레이크 동작 설정', encoder_absolute_mode: '앱솔루트 모드' }[field]}"
+                      data-axis-edit="${field}" data-axis-row-id="${escapeHtml(row.id)}"
+                      value="${escapeHtml(view.driveParams[field])}"
+                      placeholder="유지"${disabled}>
                   </label>`).join('')}
               </td>
               <td class="axis-status-stack">

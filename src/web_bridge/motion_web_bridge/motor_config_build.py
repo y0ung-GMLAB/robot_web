@@ -12,6 +12,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
+from . import minas_params
 from motion_common.values import optional_int
 
 from motion_web_bridge.motor_identity import (
@@ -240,6 +241,15 @@ def driver_id_for_registry_motor(
             pristine[driver_id] = dict(driver)
         if overrides:
             driver.update(overrides)
+        # MINAS 드라이브 파라미터(브레이크 타이밍 · 앱솔루트 모드)는 드라이버
+        # yaml 키가 아니라 param_file(SDO 목록)로 들어간다 · 오버라이드가
+        # 있는 모터만 제 param 파일을 받는다 · P8
+        if str(driver.get('type') or '') == 'minas':
+            drive_params = minas_params.param_overrides(motor)
+            if drive_params:
+                driver['param_file'] = minas_params.write_param_file(
+                    workspace_root, driver_id, drive_params,
+                )
         return driver_id
 
     def unclaimed(driver_id) -> bool:
