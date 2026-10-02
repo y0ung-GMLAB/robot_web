@@ -66,7 +66,11 @@ def _decode_motor_positions(raw: bytes) -> Dict[int, float]:
 #:
 #: 수동 조그는 그대로 막는다 · 재생이 그것은 못 뺏는다 · 사람이 손으로 움직이는
 #: 중에 모션이 끼어들면 안 된다.
-PLAYBACK_MAY_TAKE_FROM = ('none', 'playback', 'midi')
+#:
+#: 'stream' = 수동 스트림(페이더) · 옛 MIDI 경로를 개명한 것(P4-1) · supervisor 가
+#: 2026-10-01 부터 이 이름으로 보낸다 · 'midi' 는 개명 전 supervisor 와 섞여
+#: 도는 배포 과도기용으로 남긴다 (원자 배포가 끝나면 지워도 된다).
+PLAYBACK_MAY_TAKE_FROM = ('none', 'playback', 'stream', 'midi')
 
 
 class MotionRunManager(Node):
@@ -1007,6 +1011,7 @@ class MotionRunManager(Node):
         if bool(status.get('commands_blocked')):
             return str(status.get('message') or '모터 명령이 일시 차단된 상태입니다')
         owner_names = {
+            'stream': '수동 페이더',
             'midi': 'MIDI 제어',
             'manual': '수동 제어',
         }

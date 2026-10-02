@@ -97,6 +97,26 @@ def test_midi_never_blocks_playback(manager_owner='midi'):
     manager._player._require_playback_command_allowed()
 
 
+def test_fader_stream_never_blocks_playback():
+    """**수동 페이더(stream)도 모션 시작을 막지 않는다** · P4-1 회귀 시험
+
+    supervisor 는 수동 스트림 주인을 'stream' 으로 보낸다(개명 전 'midi') ·
+    허용 목록이 'midi' 로만 남아 있어 페이더를 움직이는 동안 재생 시작이
+    「stream 이 사용 중」으로 막혔다 · 중재기 규칙(재생이 페이더를 뺏는다)과
+    반대였다.
+    """
+    manager = run_manager_with_safety_status({
+        'command_owner': 'stream',
+        'command_axis_owners': {'0': 'stream'},
+        'commands_blocked': False,
+        'emergency_latched': False,
+    })
+
+    assert manager._playback_ownership_error() == ''
+    assert manager._playback_ownership_error(axes=[0]) == ''
+    manager._player._require_playback_command_allowed()
+
+
 def test_manual_jog_still_blocks_playback():
     """수동 조그는 그대로 막는다 · 재생이 그것은 못 뺏는다."""
     manager = run_manager_with_safety_status({
