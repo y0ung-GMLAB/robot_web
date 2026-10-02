@@ -6,6 +6,40 @@ import {
 } from './api.js';
 import { escapeHtml } from './format.js';
 import { showConfirm } from './ui_dialogs.js';
+import { buildStoredZip } from './zip_store.js';
+
+/** 팩 내용이 아닌 것 · 숨김 파일(.git, .DS_Store …) · macOS 압축 찌꺼기 */
+function skipped(path) {
+  return path.split('/').some((part) => part.startsWith('.') || part === '__MACOSX');
+}
+
+/** 드롭된 폴더 항목 → [{path, file}] · readEntries 는 나눠서 주므로 빌 때까지 */
+async function walkEntry(entry, prefix = '') {
+  const path = prefix ? `${prefix}/${entry.name}` : entry.name;
+  if (entry.isFile) {
+    const file = await new Promise((resolve, reject) => entry.file(resolve, reject));
+    return [{ path, file }];
+  }
+  const reader = entry.createReader();
+  const children = [];
+  for (;;) {
+    const batch = await new Promise((resolve, reject) => reader.readEntries(resolve, reject));
+    if (!batch.length) break;
+    children.push(...batch);
+  }
+  const nested = await Promise.all(children.map((child) => walkEntry(child, path)));
+  return nested.flat();
+}
+
+/** [{path, file}] → zip Blob · 최상위 폴더 하나는 서버가 팩 루트로 본다 */
+async function zipFiles(items) {
+  const entries = [];
+  for (const { path, file } of items) {
+    if (skipped(path)) continue;
+    entries.push({ path, data: new Uint8Array(await file.arrayBuffer()) });
+  }
+  return new Blob([buildStoredZip(entries)], { type: 'application/zip' });
+}
 
 /** 로봇 팩 · PC 전역 · zip 업로드 → 서버 검사 → 통과해야 교체 · 이전 팩 1개로 되돌리기
  *
@@ -52,17 +86,29 @@ export function createRobotPackController({ el }) {
     }
   }
 
-  async function upload(file) {
-    if (!file || busy) return;
-    if (!/\.zip$/i.test(file.name)) {
-      setMessage(`zip 파일만 올릴 수 있습니다: ${file.name}`, { error: true });
+  /** zip 파일 하나 · 또는 폴더(파일 목록)를 묶어서 */
+  async function upload(source) {
+    if (!source || busy) return;
+    const isFolder = Array.isArray(source);
+    if (!isFolder && !/\.zip$/i.test(source.name)) {
+      setMessage(`zip 파일이나 팩 폴더만 올릴 수 있습니다: ${source.name}`, { error: true });
       return;
     }
+    if (isFolder && !source.length) {
+      setMessage('폴더가 비어 있습니다', { error: true });
+      return;
+    }
+    const name = isFolder ? `${source[0].path.split('/')[0]} 폴더` : source.name;
     busy = true;
     showList(el.robotPackErrors, []);
-    setMessage(`검사 중: ${file.name} · 모델 로드 검사까지 수십 초 걸릴 수 있습니다`);
     try {
-      const result = await uploadRobotPack(file);
+      let body = source;
+      if (isFolder) {
+        setMessage(`묶는 중: ${name} · 파일 ${source.length}개`);
+        body = await zipFiles(source);
+      }
+      setMessage(`검사 중: ${name} · 모델 로드 검사까지 수십 초 걸릴 수 있습니다`);
+      const result = await uploadRobotPack(body);
       setMessage(result.message || '', { error: result.success === false });
       showList(el.robotPackErrors, [...(result.errors || []), ...(result.warnings || []).map((w) => `경고 · ${w}`)]);
       if (result.success) render(result);
@@ -130,16 +176,36 @@ export function createRobotPackController({ el }) {
       el.robotPackFileInput.value = '';
       upload(file);
     });
+    el.robotPackFolderButton?.addEventListener('click', () => el.robotPackFolderInput?.click());
+    el.robotPackFolderInput?.addEventListener('change', () => {
+      const files = [...(el.robotPackFolderInput.files || [])]
+        .map((file) => ({ path: file.webkitRelativePath || file.name, file }));
+      el.robotPackFolderInput.value = '';
+      upload(files);
+    });
     const zone = el.robotPackDropZone;
     zone?.addEventListener('dragover', (event) => {
       event.preventDefault();
       zone.classList.add('dragging');
     });
     zone?.addEventListener('dragleave', () => zone.classList.remove('dragging'));
-    zone?.addEventListener('drop', (event) => {
+    zone?.addEventListener('drop', async (event) => {
       event.preventDefault();
       zone.classList.remove('dragging');
-      upload(event.dataTransfer?.files?.[0]);
+      // 항목(entry)은 drop 처리 안에서 바로 꺼내야 한다 · await 뒤에는 비어 있다
+      const entries = [...(event.dataTransfer?.items || [])]
+        .map((item) => item.webkitGetAsEntry?.())
+        .filter(Boolean);
+      const folder = entries.find((entry) => entry.isDirectory);
+      if (!folder) {
+        upload(event.dataTransfer?.files?.[0]);
+        return;
+      }
+      try {
+        upload(await walkEntry(folder));
+      } catch (error) {
+        setMessage(`폴더 읽기 실패: ${error.message}`, { error: true });
+      }
     });
     el.robotPackRollbackButton?.addEventListener('click', rollback);
     el.robotPackDiffButton?.addEventListener('click', showDiff);

@@ -14,6 +14,8 @@ export function getElements() {
     robotPackPrevious: document.getElementById('robotPackPrevious'),
     robotPackDropZone: document.getElementById('robotPackDropZone'),
     robotPackFileInput: document.getElementById('robotPackFileInput'),
+    robotPackFolderInput: document.getElementById('robotPackFolderInput'),
+    robotPackFolderButton: document.getElementById('robotPackFolderButton'),
     robotPackRollbackButton: document.getElementById('robotPackRollbackButton'),
     robotPackDiffButton: document.getElementById('robotPackDiffButton'),
     robotPackMessage: document.getElementById('robotPackMessage'),

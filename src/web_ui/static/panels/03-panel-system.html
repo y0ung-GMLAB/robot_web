@@ -60,8 +60,10 @@
             <div class="registry-actions robot-pack-actions">
               <label class="robot-pack-drop" id="robotPackDropZone">
                 <input id="robotPackFileInput" type="file" accept=".zip,application/zip" hidden>
-                <span>zip 놓기 · 눌러서 고르기</span>
+                <span>팩 폴더 또는 zip 놓기 · 눌러서 zip 고르기</span>
               </label>
+              <input id="robotPackFolderInput" type="file" webkitdirectory hidden>
+              <button id="robotPackFolderButton" type="button">폴더 고르기</button>
               <button id="robotPackRollbackButton" type="button" disabled>이전 팩으로 되돌리기</button>
               <button id="robotPackDiffButton" type="button">모션축 설정과 비교</button>
             </div>

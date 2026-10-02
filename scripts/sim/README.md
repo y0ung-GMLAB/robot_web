@@ -47,7 +47,9 @@ preview.yaml    precompute/preview 명령 (선택 · config/animation_preview.ex
 
 ## 웹 업로드
 
-시스템 정보 → 로봇 팩 · zip 놓기 → 서버 검사 → 통과 시 교체
+시스템 정보 → 로봇 팩 · 팩 폴더 또는 zip 놓기 (「폴더 고르기」 가능) → 서버 검사 → 통과 시 교체
+
+- 폴더는 화면이 zip(무압축)으로 묶어 같은 길로 보냄 · 숨김 파일(.git 등) 제외
 
 - 위치 · `<workspace>/robot_pack/` (PC 전역) · 이전 팩 1개 `robot_pack.prev/`
 - 검사 · zip 50 MB · 풀린 합계 200 MB · 파일 2000개 · `..`/절대경로/링크/암호 거부 · 형식 · `sim_run.py --check`
