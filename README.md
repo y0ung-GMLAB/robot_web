@@ -1,6 +1,6 @@
-# Floating Head Stack
+# Robot Web
 
-ROS 2 기반 모션 제어 프로그램입니다. 웹 모니터링·설정, 애니메이션 재생과
+ROS 2 기반 로봇 모션 제어 프로그램입니다 (로봇 무관 · 로봇별 값은 로봇 팩). 웹 모니터링·설정, 애니메이션 재생과
 저수준 모터 제어 계층을 하나의 작업공간에서 빌드합니다.
 
 애니메이션 저작은 이 저장소 밖(Blender)에서 합니다 · Blender 가 내보낸
@@ -86,7 +86,7 @@ System 서브모듈 커밋**을 함께 사용합니다. 위 표 작성 시점의
 
 ## Git 저장소
 
-- 전체 설치 저장소: `https://github.com/y0ung-GMLAB/floating-head-stack.git`
+- 전체 설치 저장소: `https://github.com/y0ung-GMLAB/robot_web.git`
 - Motion System 서브모듈: `https://github.com/kimjoonho-git/motion_system_ros2.git`
 - Motion System 원본: `https://github.com/SeonilChoi/motion_system.git`
 
@@ -276,7 +276,7 @@ sudo apt install -y git
 
 ```bash
 cd ~
-git clone -b main --recurse-submodules https://github.com/y0ung-GMLAB/floating-head-stack.git ros2_ws
+git clone -b main --recurse-submodules https://github.com/y0ung-GMLAB/robot_web.git ros2_ws
 cd ~/ros2_ws
 ```
 
@@ -596,7 +596,7 @@ ethercat slaves
 ```bash
 cd ~
 git clone -b main --recurse-submodules \
-  https://github.com/y0ung-GMLAB/floating-head-stack.git ros2_ws
+  https://github.com/y0ung-GMLAB/robot_web.git ros2_ws
 cd ~/ros2_ws
 ```
 
