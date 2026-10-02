@@ -103,7 +103,6 @@ ensure_ros_apt_source() {
 install_system_packages() {
   sudo apt update
   sudo apt install -y \
-    btop \
     build-essential \
     chrony \
     cmake \
@@ -119,8 +118,7 @@ install_system_packages() {
     python3-uvicorn \
     python3-yaml \
     ros-humble-desktop \
-    software-properties-common \
-    ttyd
+    software-properties-common
 }
 
 sync_git_repository() {

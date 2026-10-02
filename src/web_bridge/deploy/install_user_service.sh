@@ -16,7 +16,6 @@ USER_UNIT_DIR="${HOME}/.config/systemd/user"
 CONTROL_UNIT_FILE="${USER_UNIT_DIR}/motion-control.service"
 MOTOR_UNIT_FILE="${USER_UNIT_DIR}/motion-motor.service"
 COORDINATION_UNIT_FILE="${USER_UNIT_DIR}/motion-coordination.service"
-TERMINAL_TEMPLATE="${SCRIPT_DIR}/motion-terminal.service.in"
 TERMINAL_UNIT_FILE="${USER_UNIT_DIR}/motion-terminal.service"
 INSTALL_TMP=""
 SERVICES_STOPPED=false
@@ -177,27 +176,16 @@ mv "${INSTALL_TMP}/motion-control.service" "${CONTROL_UNIT_FILE}"
 mv "${INSTALL_TMP}/motion-motor.service" "${MOTOR_UNIT_FILE}"
 mv "${INSTALL_TMP}/motion-coordination.service" "${COORDINATION_UNIT_FILE}"
 
-# 웹 터미널 · ttyd 가 있을 때만 · 없는 PC 에서도 설치는 끝나야 한다
-#
-# **이 서비스는 절대 멈추지 않는다** · 설치를 돌리고 있는 창이 바로 이 서비스일
-# 수 있다 · 멈추면 자기가 자기를 죽여 설치가 9단계에서 끊긴다 · 실제로 그랬다 ·
-# 유닛 파일만 갱신하고, 꺼져 있을 때만 켠다 · 바뀐 내용은 다음에 켤 때 붙는다.
-if [[ -x /usr/bin/ttyd ]]; then
-  sed -e "s|@WORKSPACE@|${WORKSPACE//&/\\&}|g" \
-    "${TERMINAL_TEMPLATE}" > "${INSTALL_TMP}/motion-terminal.service"
-  chmod 0644 "${INSTALL_TMP}/motion-terminal.service"
-  mv "${INSTALL_TMP}/motion-terminal.service" "${TERMINAL_UNIT_FILE}"
-else
-  echo "ttyd 가 없어 웹 터미널은 건너뜁니다 · sudo apt install ttyd" >&2
-fi
-
 systemctl --user daemon-reload
 systemctl --user enable motion-motor.service motion-control.service motion-coordination.service
+# 웹 터미널(ttyd)은 화면에서 뺐다 · 2026-10-02
+#
+# 예전에 깔린 PC 에서는 **disable 만** 한다 · stop 하지 않는다 · 지금 이 설치를
+# 돌리는 창이 바로 그 웹 터미널일 수 있다 · 멈추면 설치가 제 손으로 끊긴다 ·
+# 떠 있는 것은 다음 재부팅 때 사라진다.
 if [[ -f "${TERMINAL_UNIT_FILE}" ]]; then
-  systemctl --user enable motion-terminal.service
-  # 이미 떠 있으면 건드리지 않는다 · 이 창이 그 서비스일 수 있다
-  systemctl --user is-active --quiet motion-terminal.service \
-    || systemctl --user start motion-terminal.service
+  systemctl --user disable motion-terminal.service 2>/dev/null || true
+  rm -f "${TERMINAL_UNIT_FILE}"
 fi
 if [[ -n "${MOTOR_CONFIG}" ]]; then
   systemctl --user start motion-motor.service

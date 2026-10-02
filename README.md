@@ -445,8 +445,7 @@ sudo apt install -y \
   git build-essential cmake \
   gcc-12 g++-12 ethtool \
   python3-rosdep python3-colcon-common-extensions \
-  python3-fastapi python3-uvicorn python3-yaml chrony \
-  btop ttyd
+  python3-fastapi python3-uvicorn python3-yaml chrony
 ```
 
 Dynamixel 직렬 통신을 사용하는 계정에는 필요한 그룹 권한을
@@ -754,15 +753,6 @@ sudo loginctl enable-linger "$(id -un)"
 
 4. **4단계: 부팅 테스트 및 완전 자동 구동**
    - PC 전원 재부팅 시 사용자 조작 없이 확정 저장된 명단 자동 감지 ➔ 수동 조작 없는 무인 연동 구동 완료
-
-웹 UI의 **PC 성능 (btop)** 탭을 사용하기 위해 `btop`을 자동 실행하려면 아래 명령어로 서비스를 등록합니다.
-
-```bash
-cd ~/ros2_ws
-cp src/web_bridge/deploy/motion-btop.service ~/.config/systemd/user/
-systemctl --user daemon-reload
-systemctl --user enable --now motion-btop.service
-```
 
 새 PC에 검증된 모터 실행 설정이 없으면 웹(`motion-control.service`)은 정상 실행되지만 `motion-motor.service` 시작은 보류(inactive/dead)됩니다. 이는 모터 무단 구동을 방지하는 **정상 동작**입니다. 브라우저 창은 자동으로 열리지 않습니다.
 
