@@ -125,8 +125,9 @@
             <div class="jog-dial-block" data-motion-test-panel="jog" aria-label="조그 다이얼">
               <div id="jogDial" class="jog-dial" role="slider" tabindex="0" aria-disabled="true"
                 aria-label="조그 다이얼 · 돌린 만큼 모터가 움직입니다 (모터 deg)">
-                <div class="jog-dial-ticks" aria-hidden="true"></div>
-                <div id="jogDialNeedle" class="jog-dial-needle" aria-hidden="true"></div>
+                <!-- 바늘 없음 · 상대 이동이라 기준(12시·0점)으로 읽히는 표시를 두지 않는다 ·
+                     같은 모양 눈금 24칸이 돌린 만큼 같이 돈다 · 2026-10-02 -->
+                <div id="jogDialRing" class="jog-dial-ticks" aria-hidden="true"></div>
                 <div class="jog-dial-cap" aria-hidden="true"></div>
               </div>
               <div class="jog-dial-side">
@@ -140,7 +141,11 @@
                   <span>모터 위치</span>
                   <strong id="jogDialPosition" class="mono">-</strong>
                 </div>
-                <div id="jogDialPending" class="jog-dial-pending mono">대기</div>
+                <div class="jog-dial-pending-row">
+                  <div id="jogDialPending" class="jog-dial-pending mono">대기</div>
+                  <button id="jogDialCancelPending" type="button" disabled
+                    title="아직 안 보낸 쌓인 양만 버립니다 · 이미 움직이는 조그는 끝까지 갑니다">쌓인 양 취소</button>
+                </div>
                 <div class="jog-dial-capture" role="group" aria-label="지금 위치 찍기">
                   <button id="jogDialSetLower" type="button" disabled title="지금 모터 위치를 − limit 으로 · 모터 하한 + 모션축 범위에 저장">− limit</button>
                   <button id="jogDialSetReference" type="button" disabled title="지금 모터 위치를 기준점(모션 0°)으로 · 모션축 설정에 저장">기준점 지정</button>

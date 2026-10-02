@@ -16,7 +16,7 @@ const main = readFileSync(new URL('../static/js/main.js', import.meta.url), 'utf
 const dial = readFileSync(new URL('../static/js/jog_dial.js', import.meta.url), 'utf8');
 
 test('the dial sits in the jog panel and is bound through dom.js', () => {
-  for (const id of ['jogDial', 'jogDialNeedle', 'jogDialStep', 'jogDialPosition', 'jogDialPending', 'jogDialMessage']) {
+  for (const id of ['jogDial', 'jogDialRing', 'jogDialStep', 'jogDialPosition', 'jogDialPending', 'jogDialMessage', 'jogDialCancelPending']) {
     assert.match(html, new RegExp(`id=["']${id}["']`), `${id} missing`);
     assert.match(dom, new RegExp(`${id}: document\\.getElementById\\(["']${id}["']\\)`));
   }

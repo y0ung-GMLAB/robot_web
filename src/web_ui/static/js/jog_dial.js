@@ -39,7 +39,13 @@ export function createJogDialController({ el, getLatestState, getSelectedAxis, o
   let dragging = false;
   let lastAngle = null;
   let carry = 0;           // 드래그 중 한 칸이 안 된 나머지 각도
-  let needleDeg = 0;       // 바늘 표시 각도 (돌린 만큼 따라 돈다)
+  //: 눈금 링 표시 각도 · **화면 느낌 전용** · 기준 위치가 아니다
+  //: (바늘을 없앤 이유 · 상대 이동인데 바늘이 「0점」처럼 읽혔다 · 2026-10-02)
+  //: 눈금 24칸이 모두 같아서 서 있을 때는 어느 쪽이 기준인지 읽히지 않는다
+  let ringDeg = 0;
+  //: 쌓인 양을 비울 때마다 올린다 · 이미 날아간 요청의 응답이 비운 양을
+  //: 되살리지 못하게 한다 (「이전 조그」 거절 → 다시 쌓기 경로)
+  let pendingEpoch = 0;
   let lastMessage = '';
 
   function selectedMotor() {
@@ -113,9 +119,28 @@ export function createJogDialController({ el, getLatestState, getSelectedAxis, o
       return;
     }
     pendingDeg += ticks * step;
-    needleDeg += ticks * (360 / DETENTS);
+    // 드래그는 손을 따라 이미 돌렸다(onPointerMove) · 휠·방향키만 한 칸씩 돌린다
+    if (!dragging) ringDeg += ticks * (360 / DETENTS);
     render();
     pump();
+  }
+
+  /** 아직 안 보낸 쌓인 양만 버린다 · 이미 움직이는 조그는 끝까지 간다
+   *
+   * 정지 명령을 보내지 않는다 · 날아간 요청은 그대로 두고, 그 응답이
+   * 「이전 조그」 거절이어도 세대가 바뀌었으면 다시 쌓지 않는다.
+   */
+  function clearPending(message) {
+    const had = Math.abs(pendingDeg) > 1e-9 || Boolean(retryTimer);
+    pendingDeg = 0;
+    pendingEpoch += 1;
+    if (retryTimer) {
+      window.clearTimeout(retryTimer);
+      retryTimer = null;
+    }
+    if (had && message) lastMessage = message;
+    render();
+    return had;
   }
 
   async function pump() {
@@ -144,6 +169,7 @@ export function createJogDialController({ el, getLatestState, getSelectedAxis, o
     }
     pendingDeg -= delta;
     inFlight = true;
+    const epoch = pendingEpoch;
     render();
     try {
       const send = isDynamixel(motor) ? requestDynamixelJog : requestAcServoJog;
@@ -155,8 +181,11 @@ export function createJogDialController({ el, getLatestState, getSelectedAxis, o
         const message = String(response?.message || '조그 거부');
         if (message.includes('이전 조그')) {
           // 앞 조그가 아직 돈다 · 이번 양을 되돌려 쌓고 잠깐 뒤 다시
-          pendingDeg += delta;
-          scheduleRetry();
+          // 그 사이 사람이 쌓인 양을 비웠으면(세대 바뀜) 되살리지 않는다
+          if (epoch === pendingEpoch) {
+            pendingDeg += delta;
+            scheduleRetry();
+          }
         } else {
           pendingDeg = 0;
           lastMessage = message;
@@ -211,6 +240,9 @@ export function createJogDialController({ el, getLatestState, getSelectedAxis, o
     if (diff < -180) diff += 360;
     lastAngle = angle;
     carry += diff;
+    // 눈금 링은 손을 그대로 따라 돈다 · 한 칸이 안 돼도 움직여야 「잡고 있다」는 느낌이 난다
+    ringDeg += diff;
+    paintRing();
     const per = 360 / DETENTS;
     const ticks = Math.trunc(carry / per);
     if (ticks) {
@@ -224,6 +256,7 @@ export function createJogDialController({ el, getLatestState, getSelectedAxis, o
     lastAngle = null;
     carry = 0;
     el.jogDial.releasePointerCapture?.(event.pointerId);
+    render();   // 링의 「드래그 중」 표시를 내린다
   }
 
   function onWheel(event) {
@@ -251,15 +284,21 @@ export function createJogDialController({ el, getLatestState, getSelectedAxis, o
     return `${sign}${Number(value).toFixed(digits)}°`;
   }
 
+  /** 눈금 링만 다시 그린다 · 드래그 중 매 움직임마다 불러도 가볍다 */
+  function paintRing() {
+    if (!el.jogDialRing) return;
+    el.jogDialRing.style.transform = `rotate(${ringDeg}deg)`;
+    // 드래그 중엔 손을 바로 따라가고, 휠·방향키는 한 칸을 부드럽게 넘어간다
+    el.jogDialRing.classList.toggle('dragging', dragging);
+  }
+
   function render() {
     if (!el.jogDial) return;
     const motor = selectedMotor();
     const reason = blockReason(motor);
     el.jogDial.setAttribute('aria-disabled', reason ? 'true' : 'false');
     el.jogDial.title = reason || '돌리면 모터가 그만큼 움직입니다 · 휠·방향키도 됩니다 · 단위 = 모터 deg';
-    if (el.jogDialNeedle) {
-      el.jogDialNeedle.style.transform = `rotate(${needleDeg}deg)`;
-    }
+    paintRing();
     if (el.jogDialPosition) {
       const position = positionDeg(motor);
       el.jogDialPosition.textContent = position === null ? '-' : `${position.toFixed(2)}°`;
@@ -276,6 +315,10 @@ export function createJogDialController({ el, getLatestState, getSelectedAxis, o
     const busy = Boolean(reason) || inFlight || Math.abs(pendingDeg) > 1e-9;
     for (const button of [el.jogDialSetReference, el.jogDialSetLower, el.jogDialSetUpper]) {
       if (button) button.disabled = busy;
+    }
+    // 쌓인 양이 있을 때만 · 날아가는 조그만 있으면 비울 것이 없다
+    if (el.jogDialCancelPending) {
+      el.jogDialCancelPending.disabled = !(Math.abs(pendingDeg) > 1e-9 || retryTimer);
     }
   }
 
@@ -299,6 +342,9 @@ export function createJogDialController({ el, getLatestState, getSelectedAxis, o
   }
 
   function bindEvents() {
+    el.jogDialCancelPending?.addEventListener('click', () => {
+      clearPending('쌓인 양을 버렸습니다 · 움직이던 조그는 끝까지 갑니다');
+    });
     el.jogDialSetReference?.addEventListener('click', () => capture('reference'));
     el.jogDialSetLower?.addEventListener('click', () => capture('lower'));
     el.jogDialSetUpper?.addEventListener('click', () => capture('upper'));
@@ -309,7 +355,11 @@ export function createJogDialController({ el, getLatestState, getSelectedAxis, o
     el.jogDial.addEventListener('pointercancel', onPointerUp);
     el.jogDial.addEventListener('wheel', onWheel, { passive: false });
     el.jogDial.addEventListener('keydown', onKeyDown);
-    el.jogDialStep?.addEventListener('input', () => { lastMessage = ''; render(); });
+    el.jogDialStep?.addEventListener('input', () => {
+      // 단위를 바꾸면 옛 단위로 쌓인 양은 의미가 바뀐다 · 아직 안 보낸 것은 버린다
+      lastMessage = '';
+      clearPending('한 칸 크기를 바꿔 쌓인 양을 비웠습니다');
+    });
   }
 
   return {
@@ -317,13 +367,8 @@ export function createJogDialController({ el, getLatestState, getSelectedAxis, o
     renderRuntimeState: render,
     /** 모터를 바꾸거나 프로젝트가 바뀌면 쌓인 양을 버린다 · 엉뚱한 모터로 가면 안 된다 */
     reset: () => {
-      pendingDeg = 0;
       lastMessage = '';
-      if (retryTimer) {
-        window.clearTimeout(retryTimer);
-        retryTimer = null;
-      }
-      render();
+      clearPending('');
     },
   };
 }

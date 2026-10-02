@@ -895,9 +895,10 @@ td.mapping-disabled-cell { background: transparent !important; opacity: 0.55; }
   width: 148px;
   height: 148px;
   border-radius: 50%;
-  background: radial-gradient(circle at 50% 38%, #2a3442, #161c24 70%);
+  /* 하이라이트를 가운데에 둔다 · 위로 치우치면 「위쪽이 기준」처럼 읽힌다 */
+  background: radial-gradient(circle at 50% 50%, #283240, #161c24 72%);
   border: 1px solid var(--line-strong);
-  box-shadow: inset 0 2px 6px rgb(0 0 0 / 45%), 0 4px 14px rgb(0 0 0 / 35%);
+  box-shadow: inset 0 0 8px rgb(0 0 0 / 45%), 0 4px 14px rgb(0 0 0 / 35%);
   cursor: grab;
   touch-action: none;
   user-select: none;
@@ -907,42 +908,32 @@ td.mapping-disabled-cell { background: transparent !important; opacity: 0.55; }
 .jog-dial:focus-visible { outline: 2px solid var(--focus); outline-offset: 3px; }
 .jog-dial[aria-disabled="true"] { opacity: 0.4; cursor: not-allowed; }
 
-/* 눈금 24칸 · 한 칸 = 15° */
+/* 눈금 링 24칸 · 한 칸 = 15° · **모든 눈금이 같은 모양** (기준 눈금 없음)
+ * 돌린 만큼 링이 같이 돈다 · 드래그는 손을 바로 따라가고(.dragging),
+ * 휠·방향키는 한 칸을 부드럽게 넘어간다 */
 .jog-dial-ticks {
   position: absolute;
   inset: 6px;
   border-radius: 50%;
-  background: repeating-conic-gradient(var(--line-strong) 0deg 1.2deg, transparent 1.2deg 15deg);
-  -webkit-mask: radial-gradient(circle, transparent 60%, #000 61%, #000 70%, transparent 71%);
-  mask: radial-gradient(circle, transparent 60%, #000 61%, #000 70%, transparent 71%);
+  background: repeating-conic-gradient(#56647a 0deg 2deg, transparent 2deg 15deg);
+  -webkit-mask: radial-gradient(circle, transparent 58%, #000 59%, #000 71%, transparent 72%);
+  mask: radial-gradient(circle, transparent 58%, #000 59%, #000 71%, transparent 72%);
+  transition: transform 0.18s ease-out;
+  will-change: transform;
 }
 
-.jog-dial-needle {
-  position: absolute;
-  inset: 0;
-  transition: transform 0.08s linear;
-}
-
-.jog-dial-needle::after {
-  content: "";
-  position: absolute;
-  left: 50%;
-  top: 14px;
-  width: 4px;
-  height: 22px;
-  margin-left: -2px;
-  border-radius: 2px;
-  background: var(--blue);
-  box-shadow: 0 0 8px rgb(90 162 255 / 60%);
-}
+.jog-dial-ticks.dragging { transition: none; }
 
 .jog-dial-cap {
   position: absolute;
   inset: 48px;
   border-radius: 50%;
-  background: radial-gradient(circle at 50% 35%, #323d4d, #1b222c);
+  background: radial-gradient(circle at 50% 50%, #2f3a49, #1b222c);
   border: 1px solid var(--line);
 }
+
+.jog-dial-pending-row { display: flex; align-items: center; gap: 10px; }
+#jogDialCancelPending { min-height: 26px; padding: 2px 10px; font-size: 12px; }
 
 .jog-dial-side {
   display: grid;
