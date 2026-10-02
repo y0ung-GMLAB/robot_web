@@ -2,8 +2,8 @@
  *
  * 칸은 둘이다 ·
  *
- *     연동 / 단독      이 PC 가 그룹으로 도나 혼자 도나
- *     시간 안 / 시간 밖  지금이 스케줄 구간 안인가
+ *     그룹 참여 / 그룹 미참여   이 PC 가 그룹으로 도나 혼자 도나
+ *     운영시간 / 운영시간 외    지금이 스케줄 구간 안인가
  *
  * 두 사실은 **주인이 다르다** · 연동 여부는 연동 화면이 1초마다 받고, 구간
  * 여부는 스케줄 상태가 5초마다 받는다 · 전에는 둘 다 스케줄 상태에만
@@ -23,30 +23,30 @@ const state = {
 export function motionHeaderConditionCells({ enabled, joined, inWindow }) {
   if (enabled === null || joined === null) {
     return [
-      { key: 'scope', text: '연동?', on: false, title: '연동 상태 확인 중' },
-      { key: 'window', text: '시간?', on: false, title: '스케줄 상태 확인 중' },
+      { key: 'scope', text: '그룹?', on: false, title: '그룹 참여 상태 확인 중' },
+      { key: 'window', text: '운영시간?', on: false, title: '스케줄 상태 확인 중' },
     ];
   }
   const grouped = Boolean(enabled) && Boolean(joined);
   return [
     {
       key: 'scope',
-      text: grouped ? '연동' : '단독',
+      text: grouped ? '그룹 참여' : '그룹 미참여',
       on: grouped,
       title: grouped
-        ? '연동 참가 중 · 그룹으로 함께 돕니다'
+        ? '그룹 참여 중 · 다른 PC 들과 함께 재생합니다'
         : (enabled
-          ? '연동을 쓰지만 그룹에서 나가 있습니다 · 이 PC 혼자 돕니다'
-          : '연동을 쓰지 않습니다 · 이 PC 혼자 돕니다'),
+          ? '연동을 쓰지만 그룹에서 나가 있습니다 · 이 PC 혼자 재생합니다'
+          : '연동을 쓰지 않습니다 · 이 PC 혼자 재생합니다'),
     },
     {
       key: 'window',
       // 시간만 본다 · 돌지 말지는 옆의 스케줄러 배지가 말한다
-      text: inWindow ? '시간 안' : '시간 밖',
+      text: inWindow ? '운영시간' : '운영시간 외',
       on: Boolean(inWindow),
       title: inWindow
-        ? '지금은 스케줄 구간 안입니다'
-        : '지금은 스케줄 구간 밖입니다 · 시간이 되면 스스로 켭니다',
+        ? '지금은 스케줄 운영시간입니다'
+        : '지금은 스케줄 운영시간이 아닙니다 · 운영시간이 되면 스스로 켭니다',
     },
   ];
 }

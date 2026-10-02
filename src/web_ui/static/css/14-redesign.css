@@ -976,3 +976,52 @@ td.mapping-disabled-cell { background: transparent !important; opacity: 0.55; }
 .manual-mode-banner strong { display: block; color: var(--ink); font-size: 14px; }
 .manual-mode-banner span { color: var(--muted); font-size: 12.5px; }
 .manual-mode-banner button { flex: 0 0 auto; }
+
+/* ---------- 13. 팝업 다크 수선 ----------
+ * 확인 팝업 · 작업 진행 · 모터 에러 · 파일 메뉴가 01~08 의 흰 바탕을 그대로 두고
+ * 글자색만 다크 토큰(밝은 회색)을 받아 거의 안 보였다 → 바탕도 다크로. */
+.app-dialog,
+.operation-progress-dialog,
+.project-file-action-menu {
+  background: var(--panel);
+  border-color: var(--line-strong);
+  color: var(--ink);
+}
+
+.app-dialog > p { color: var(--ink); }
+
+.operation-progress-head,
+.operation-progress-detail,
+.operation-progress-actions {
+  background: var(--panel-2);
+  border-color: var(--line);
+  color: var(--ink);
+}
+
+.operation-progress-dialog > p { color: var(--muted); }
+.operation-progress-head b[data-state="success"] { color: var(--green); }
+
+.operation-progress-log {
+  background: var(--bg);
+  border-color: var(--line);
+}
+
+.operation-progress-line {
+  background: var(--panel-2);
+  color: var(--ink);
+}
+.operation-progress-line.is-success { background: rgb(70 192 106 / 12%); color: var(--green); }
+.operation-progress-line.is-failure { background: rgb(229 83 75 / 12%); color: var(--red); }
+.operation-progress-line.is-partial { background: rgb(217 166 46 / 12%); color: var(--yellow); }
+
+.motor-error-dialog {
+  background: var(--panel);
+  border-color: rgb(229 83 75 / 55%);
+  color: var(--ink);
+}
+.motor-error-dialog p { color: #ffb4ae; }
+.motor-error-item {
+  background: var(--panel-2);
+  border-color: var(--line);
+  color: var(--ink);
+}

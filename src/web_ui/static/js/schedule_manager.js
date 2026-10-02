@@ -141,7 +141,7 @@ const ScheduleManager = {
         const current = String(this.status?.run_mode || 'schedule');
         if (mode === current) return;
         const CONFIRMS = {
-            schedule: '스케줄 모드로 바꿉니다.\n\n지금이 스케줄 시간 안이면 곧바로 '
+            schedule: '스케줄 모드로 바꿉니다.\n\n지금이 운영시간이면 곧바로 '
                 + '초기 위치 이동과 재생이 시작될 수 있습니다.',
             off: '오프 모드로 바꿉니다.\n\n움직임 명령(조그·페이더·재생·그룹 시작)이 '
                 + '전부 차단됩니다.\n서보는 켠 채 그 자리를 유지합니다.',
