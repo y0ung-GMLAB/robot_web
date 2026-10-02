@@ -160,7 +160,7 @@ export function motionValueText(motor) {
   }
   const labels = {
     unmapped: '미설정',
-    missing: '모션값 미수신',
+    missing: '목표 미수신',
   };
   return labels[motor.motion_value_status] || '-';
 }
@@ -258,7 +258,7 @@ function physicalConnectionCell(motor) {
 }
 
 function positionHeaderText(rawMode) {
-  return rawMode ? '원시 위치 (cnt)' : '위치 (deg)';
+  return rawMode ? '원시 위치 (cnt)' : '모터 위치 (deg)';
 }
 
 function velocityHeaderText(rawMode) {
@@ -299,8 +299,8 @@ function monitoringColumnsForFilter(filter, rawMode) {
     { label: '런타임 수신', cell: (motor) => stateCell(motor) },
     { label: '서보 상태', className: (motor) => statusClass(motor), cell: (motor) => displayText(statusText(motor, rawMode)) },
     { label: '오류', className: (motor) => errorClass(motor), cell: (motor) => displayText(errorText(motor, rawMode)) },
-    { label: positionHeaderText(rawMode), className: 'mono', cell: (motor) => displayText(positionText(motor, rawMode)) },
-    { label: '모션값 (deg)', className: (motor) => motionValueClass(motor), cell: (motor) => displayText(motionValueText(motor)) },
+    { label: positionHeaderText(rawMode), title: '모터축 엔코더 위치 · 감속비가 곱해진 값 (예: 목 상하 관절 1° = 150°)', className: 'mono', cell: (motor) => displayText(positionText(motor, rawMode)) },
+    { label: '모션 목표 (deg)', title: '애니메이션이 보내는 관절 목표값 · 감속비 전 · 애니메이션 재생 중에만 갱신', className: (motor) => motionValueClass(motor), cell: (motor) => displayText(motionValueText(motor)) },
     { label: '회전수 (turn)', className: 'mono', cell: (motor) => displayText(positionTurnText(motor)) },
     { label: velocityHeaderText(rawMode), className: 'mono', cell: (motor) => displayText(velocityText(motor, rawMode)) },
     { label: rawMode ? '원시 토크/전류' : '토크/전류', className: 'mono', cell: (motor) => displayText(effortText(motor, rawMode)) },
@@ -316,7 +316,7 @@ function renderMonitoringHeader(columns, el) {
   lastMonitoringHeaderSignature = signature;
   el.motorHeaderRows.innerHTML = `
     <tr>
-      ${columns.map((column) => `<th>${displayText(column.label)}</th>`).join('')}
+      ${columns.map((column) => `<th${column.title ? ` title="${escapeHtml(column.title)}"` : ''}>${displayText(column.label)}</th>`).join('')}
     </tr>
   `;
 }
@@ -468,11 +468,11 @@ function detailRowsForTab(motor, tab, rawMode) {
     const motionValue = motionValueText(motor);
     return [
       ['표시 방식', rawMode ? '원시값' : '해석값'],
-      ['현재 위치', rawMode ? integerUnit(positionRaw, 'count') : numberUnit(motor.position_deg ?? motor.position, 3, 'deg')],
-      ['현재 모션값', motionValue === '-' || motionValue === '미설정' || motionValue === '모션값 미수신'
+      ['모터 위치', rawMode ? integerUnit(positionRaw, 'count') : numberUnit(motor.position_deg ?? motor.position, 3, 'deg')],
+      ['모션 목표', motionValue === '-' || motionValue === '미설정' || motionValue === '목표 미수신'
         ? motionValue : `${motionValue} deg`],
       ['모션 ID', motor.motion_id || '미설정'],
-      ['모션값 상태', motor.motion_value_message || '-'],
+      ['모션 목표 상태', motor.motion_value_message || '-'],
       ['현재 회전수', positionTurn === '-' ? '-' : `${positionTurn} turn`],
       ['현재 속도', rawMode ? integerUnit(velocityRaw, 'count/s') : numberUnit(motor.velocity_deg_s ?? motor.velocity, 3, 'deg/s')],
       [isDynamixel ? '현재 전류' : '현재 토크', rawMode

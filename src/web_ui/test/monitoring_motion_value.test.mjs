@@ -12,9 +12,12 @@ const source = fs.readFileSync(
   'utf8',
 );
 
-test('monitoring table contains the motion value column', () => {
-  assert.match(source, /label: '모션값 \(deg\)'/);
-  assert.match(source, /\['현재 모션값'/);
+test('monitoring table contains the motion target column', () => {
+  assert.match(source, /label: '모션 목표 \(deg\)'/);
+  assert.match(source, /\['모션 목표'/);
+  // 위치는 모터축 · 목표는 관절 · 섞어 읽지 않게 머리줄에 설명을 단다
+  assert.match(source, /'모터 위치 \(deg\)'/);
+  assert.match(source, /<th\$\{column\.title/);
 });
 
 test('motion value formatter distinguishes received, unmapped, and missing states', () => {
@@ -23,7 +26,7 @@ test('motion value formatter distinguishes received, unmapped, and missing state
     motion_value_deg: 2.125,
   }), '2.125');
   assert.equal(motionValueText({ motion_value_status: 'unmapped' }), '미설정');
-  assert.equal(motionValueText({ motion_value_status: 'missing' }), '모션값 미수신');
+  assert.equal(motionValueText({ motion_value_status: 'missing' }), '목표 미수신');
 });
 
 test('monitoring summary renders runtime connection counts without an exception', () => {
