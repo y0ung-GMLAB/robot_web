@@ -54,20 +54,34 @@ def test_composed_html_contains_every_panel():
 
 
 def test_etag_follows_the_parts_not_only_the_shell(tmp_path):
-    """조각만 고쳐도 ETag가 바뀌어야 한다 · 셸만 보면 옛 화면이 남는다."""
-    composer = _composer()
+    """조각만 고쳐도 ETag가 바뀌어야 한다 · 셸만 보면 옛 화면이 남는다.
+
+    **실제 소스가 아니라 임시 복사본을 고친다** · 전에는 진짜 조각 파일에 한 줄을
+    썼다가 되돌렸는데, 되돌리기 전에 실행이 끊기면 그 줄이 소스에 남았다 ·
+    실제로 `01-topbar.html` 끝에 「시험용 한 줄」이 두 번 남아 커밋까지 됐다.
+    """
+    import os
+    import shutil
+    import time
+
+    static = tmp_path / 'static'
+    shutil.copytree(STATIC, static)
+    composer = IndexComposer(static / 'index.html')
     _html, first = composer.compose()
     _shell, parts = composer._parts()
 
     target = parts[0]
     original = target.read_bytes()
-    try:
-        target.write_bytes(original + '<!-- 시험용 한 줄 -->\n'.encode('utf-8'))
-        _again, second = composer.compose()
-    finally:
-        target.write_bytes(original)
-
+    target.write_bytes(original + '<!-- 시험용 한 줄 -->\n'.encode('utf-8'))
+    # 파일 시각 해상도가 거친 곳(Windows 등)에서도 바뀐 것으로 보이게 시각을 민다
+    stamp = time.time() + 5
+    os.utime(target, (stamp, stamp))
+    _again, second = composer.compose()
     assert second != first
+
+    target.write_bytes(original)
+    stamp += 5
+    os.utime(target, (stamp, stamp))
     _restored, third = composer.compose()
     assert third == first
 
