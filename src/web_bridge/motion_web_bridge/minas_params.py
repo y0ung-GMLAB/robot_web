@@ -25,7 +25,7 @@ MINAS 의 드라이브 객체 값(SDO)은 드라이버의 `param_file` 이 가�
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Tuple
 
 import yaml
 
