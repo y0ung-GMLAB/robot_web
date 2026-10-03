@@ -17,10 +17,19 @@ log() {
   echo "[$(date +%Y%m%d-%H%M%S.%3N)] $*"
 }
 
-# Until the multi-PC namespace/synchronization layer is implemented, every PC
-# must keep its low-level motor topics local. The web UI is still reachable
-# from another PC because this setting affects ROS DDS only, not HTTP.
-export ROS_LOCALHOST_ONLY="${ROS_LOCALHOST_ONLY:-1}"
+# DDS 범위 · 서비스 실행 스크립트(run_user_service.sh)와 같은 규칙 · §6-96 · 수정 목록 19
+# MOTION_GROUP_NETWORK=1(기본) → ROS_LOCALHOST_ONLY=0 (PC 이름공간 + 그룹 도메인으로 구분)
+# MOTION_GROUP_NETWORK=0        → ROS_LOCALHOST_ONLY=1 (이 PC 안에 가둠)
+# 이미 ROS_LOCALHOST_ONLY 가 주어졌으면(서비스에서 상속) 그대로 쓴다 · 전에는 손으로
+# 직접 실행하면 기본값 1 이라 서비스 때와 다르게 돌았다
+export MOTION_GROUP_NETWORK="${MOTION_GROUP_NETWORK:-1}"
+if [[ -z "${ROS_LOCALHOST_ONLY:-}" ]]; then
+  if [[ "${MOTION_GROUP_NETWORK}" == "1" ]]; then
+    export ROS_LOCALHOST_ONLY=0
+  else
+    export ROS_LOCALHOST_ONLY=1
+  fi
+fi
 START_MOTOR_MANAGER_MODE="${START_MOTOR_MANAGER:-auto}"
 
 any_running() {

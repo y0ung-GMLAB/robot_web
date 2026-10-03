@@ -838,10 +838,11 @@ motion-control.service 재시작 완료
   않습니다.
 - 웹은 `0.0.0.0:8000`에 바인딩되므로 신뢰할 수 있는 내부망에서만 사용합니다.
 - 방화벽은 운영 PC가 있는 내부 대역만 허용하고 인터넷에 직접 노출하지 않습니다.
-- `motion-control`과 `motion-motor`는 `ROS_LOCALHOST_ONLY=1`로 PC 내부에
-  격리합니다.
-- `motion-coordination`만 `ROS_LOCALHOST_ONLY=0`으로 실행해 같은 Wi-Fi의
-  다른 PC와 typed ROS 2 DDS 메시지를 주고받습니다.
+- 서비스 3개(`motion-control` · `motion-motor` · `motion-coordination`)는 모두
+  `ROS_LOCALHOST_ONLY=0`으로 실행합니다(`MOTION_GROUP_NETWORK=1` 기본 · §6-96).
+  남의 ROS 장비와 섞이지 않는 근거는 PC 이름공간(`/<PC이름>/...`)과 그룹 전용
+  DDS 도메인(기본 21)입니다. 한 PC 안에 가두려면 서비스 환경에
+  `MOTION_GROUP_NETWORK=0`을 주면 `ROS_LOCALHOST_ONLY=1`이 됩니다.
 - PC 간에는 그룹 참가 상태·고수준 실행 트리거·완료·오류만 전송합니다. 프로젝트
   파일, 모션 데이터와 모터 목표값은 전송하지 않습니다.
 - 각 PC 웹의 `장비 연동 상태 → DDS 그룹 연동`에서 서로 다른 `이 PC ID`, 같은

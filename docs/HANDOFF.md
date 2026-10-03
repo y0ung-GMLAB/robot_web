@@ -80,7 +80,7 @@ bash scripts/restart_motion_monitor.sh               # 실행 권한 없음 · b
 - **`src/motion_system` 보호** · 일반 수정 요청을 여기까지 넓히지 않는다 · 모터 통신은 이 경로만 쓴다
 - **프로젝트 격리** · 설정·작업 데이터는 활성 프로젝트 기준 · 다른 프로젝트 값을 기본값으로 쓰지 않는다 · 관련 수정은 프로젝트 2개로 검증
 - **모터 스캔 불변조건** · `AGENTS.md` · `docs/MOTOR_SCAN_CONTRACT.md` · 매번 물리 검색 · 캐시 대체 금지 · 부분 완료 구분
-- **`ROS_LOCALHOST_ONLY`** · 서비스 파일은 `=0`(그룹 연동) · 일부 문서는 `=1` 로 남아 있다 (수정 목록 19 · 보류) · 셸에서 `ros2` 명령이 노드를 못 보면 이 값을 맞춘다
+- **`ROS_LOCALHOST_ONLY`** · 서비스·재시작 스크립트 모두 `MOTION_GROUP_NETWORK=1` → `=0` (그룹 연동 · 19 정정 완료) · 셸에서 `ros2` 명령이 노드를 못 보면 이 값을 맞춘다
 - **ROS 노드 로그** · systemd 저널이 아니라 `log/ros/<실행>/` (`ROS_LOG_DIR` · 서비스 스크립트가 지정 · 14일 지나면 시작 시 삭제 · 21-1) · 재시작 로그 `log/web_apply_restart/` 14일 · 설정 변경 이력 `<프로젝트>/runtime/history/<분류>/` 50개 (21)
 - **MuJoCo 미리보기** · `config/animation_preview.yaml` 또는 로봇 팩 `preview.yaml` · 계산 결과 `.sim.npz` · 뷰어 핸들 보관 · 「MuJoCo 창 닫기」 · 출력 기록 `log/animation_preview/` (7-1)
 - **설치** · `scripts/install.sh` · 수동 단계 잔존(EtherLab · linger · 절전) · 수정 목록 11
