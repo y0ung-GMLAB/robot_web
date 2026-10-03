@@ -97,7 +97,7 @@ def test_no_route_is_left_without_a_caller():
     )
     assert dead == [], (
         '아무도 안 부르는 API 가 있습니다 · 지우거나, 왜 남기는지 ALLOWED 에 '
-        f'적으세요:\n  ' + '\n  '.join(dead)
+        '적으세요:\n  ' + '\n  '.join(dead)
     )
 
 

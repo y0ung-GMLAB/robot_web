@@ -45,11 +45,6 @@ def validate_runtime_motor_profiles(payload: Dict[str, Any]) -> None:
         for item in payload.get('web_axis_identities') or []
         if isinstance(item, dict) and item.get('controller_index') is not None
     }
-    profile_by_axis = {
-        item.get('controller_index'): item
-        for item in payload.get('web_axis_profiles') or []
-        if isinstance(item, dict) and item.get('controller_index') is not None
-    }
     for master in payload.get('masters') or []:
         if not isinstance(master, dict):
             continue

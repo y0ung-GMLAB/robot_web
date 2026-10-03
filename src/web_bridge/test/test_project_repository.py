@@ -10,7 +10,6 @@ from pathlib import Path
 import pytest
 import yaml
 
-import motion_web_bridge.project_repository as project_repository_module
 from motion_web_bridge import service_entrypoint
 from motion_web_bridge.motor_restart_coordinator import MotorRestartCoordinator
 # 프로파일 검증은 별도 모듈이 갖는다 (§6-46)
@@ -30,7 +29,6 @@ from motion_common import store as common_store
 from motion_web_bridge.project_service import ProjectService
 from motion_web_bridge.bridge_node import (
     MotionWebBridge,
-    _project_tree_category_signature,
 )
 from motion_web_bridge import motor_config_rules
 from motion_web_bridge.service_entrypoint import (
@@ -177,7 +175,7 @@ def test_new_project_is_ready_for_first_run_without_legacy_files(tmp_path):
         'drivers:\n- id: 0\n  type: minas\n'
         '  profile_velocity: 10\n  profile_acceleration: 20\n  profile_deceleration: 20\n',
     )
-    runtime = repository.prepare_runtime_motor_config(project_id)
+    repository.prepare_runtime_motor_config(project_id)
     runtime_path = project_dir / 'runtime' / 'applied_motor_config.yaml'
     assert runtime_path.is_file()
     assert 'web_axis_identities' not in yaml.safe_load(runtime_path.read_text())
@@ -1223,7 +1221,7 @@ def test_applied_runtime_rejects_modified_runtime_content(tmp_path):
         '  profile_velocity: 18000\n  profile_acceleration: 180000\n'
         '  profile_deceleration: 180000\n',
     )
-    prepared = repository.prepare_runtime_motor_config(project_id)
+    repository.prepare_runtime_motor_config(project_id)
     repository.runtime.mark_runtime_motor_config_applied(project_id)
     runtime = Path(repository.runtime.motor_runtime_state()['config_file'])
     runtime.write_text(runtime.read_text(encoding='utf-8') + '# changed\n', encoding='utf-8')
