@@ -19,8 +19,12 @@ WEB_UI = Path(__file__).resolve().parents[1]
 
 @pytest.mark.skipif(shutil.which('node') is None, reason='node 가 없다')
 def test_frontend_mjs_suite_passes():
+    # 디렉터리 인자(`node --test test/`)는 Node 22 에서 모듈로 해석돼 실패한다 ·
+    # 파일을 직접 나열하면 Node 18 ~ 22 어디서나 같다 (수정 목록 10 · 2026-10-03)
+    files = sorted(str(path.relative_to(WEB_UI)) for path in (WEB_UI / 'test').glob('*.test.mjs'))
+    assert files, 'test/*.test.mjs 가 없다'
     result = subprocess.run(
-        ['node', '--test', 'test/'],
+        ['node', '--test', *files],
         cwd=WEB_UI,
         capture_output=True,
         text=True,
@@ -32,7 +36,7 @@ def test_frontend_mjs_suite_passes():
             if line.startswith('not ok')
         ]
         pytest.fail(
-            'node --test 실패 {}건\n{}\n\n재현 · cd {} && node --test test/'.format(
+            'node --test 실패 {}건\n{}\n\n재현 · cd {} && node --test test/*.test.mjs'.format(
                 len(failures), '\n'.join(failures), WEB_UI,
             ),
             pytrace=False,
