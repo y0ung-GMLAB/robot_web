@@ -1,67 +1,58 @@
 import assert from 'node:assert/strict';
-import { existsSync, readFileSync } from 'node:fs';
+import { readFileSync } from 'node:fs';
 import test from 'node:test';
 import { indexHtml } from '../tools/index_html.mjs';
 import { WORKSPACE_GROUPS, workspaceGroupFor, workspacePanelFor } from '../static/js/workspace_navigation.js';
 
 /**
- * 터미널 · btop 탭 · §6-311
+ * 터미널 · PC 성능 (btop) 탭 · 전신(motion_web §6-99)과 같은 구조로 되살렸다
  *
- * 탭 하나는 네 곳이 맞아야 보인다 · 상단바 버튼 · 라우트 묶음 · 패널 조각 ·
- * 모듈 적재 · 어느 하나가 빠지면 버튼은 있는데 눌러도 빈 화면이거나, 패널은
- * 있는데 갈 길이 없다 · 그리고 xterm.js 는 CDN 이 아니라 저장소 안에 있어야
- * 한다 · 현장 PC 는 인터넷이 없을 수 있다.
+ * 둘 다 **별도 서비스**(ttyd · 8081 · 8080)를 iframe 으로 보여 준다 · 웹 브리지
+ * 안에 두면 코드를 받아 다시 빌드할 때 그 화면이 올라가 있는 서버가 멈추면서
+ * 터미널도 끊긴다 · 그래서 서버 코드가 아니라 화면 조각·유닛 파일만 있다.
  */
 
-const shell = readFileSync(new URL('../static/index.html', import.meta.url), 'utf8');
-const panelJs = readFileSync(new URL('../static/js/terminal_panel.js', import.meta.url), 'utf8');
-const css = readFileSync(new URL('../static/css/13b-terminal.css', import.meta.url), 'utf8');
+const main = readFileSync(new URL('../static/js/main.js', import.meta.url), 'utf8');
+const dom = readFileSync(new URL('../static/js/dom.js', import.meta.url), 'utf8');
 
-test('터미널 탭은 설정 묶음에 있고 제 패널로 간다', () => {
-  assert.ok(WORKSPACE_GROUPS.setup.includes('terminal'));
-  assert.equal(workspaceGroupFor('terminal'), 'setup');
-  assert.equal(workspacePanelFor('terminal'), 'terminal');
-  assert.match(indexHtml, /data-workspace-tab="terminal"/);
-});
-
-test('터미널 패널은 숨긴 채 시작하고 셸·btop 화면 둘을 가진다', () => {
-  const section = indexHtml.match(/<section([^>]*data-workspace-panel="terminal"[^>]*)>/);
-  assert.ok(section, '터미널 패널이 화면에 없다');
-  assert.match(section[1], /\bhidden\b/);
-  assert.match(indexHtml, /data-terminal-screen="shell"/);
-  assert.match(indexHtml, /data-terminal-screen="btop"/);
-  for (const id of ['terminalPicker', 'terminalStatus', 'terminalReconnectButton', 'terminalDisconnectButton']) {
-    assert.match(indexHtml, new RegExp(`id="${id}"`), `${id} 가 없다`);
+test('두 탭은 운영 묶음에 있고 제 패널로 간다', () => {
+  for (const route of ['btop', 'terminal']) {
+    assert.ok(WORKSPACE_GROUPS.operations.includes(route), `${route} 가 운영 묶음에 없다`);
+    assert.equal(workspaceGroupFor(route), 'operations');
+    assert.equal(workspacePanelFor(route), route);
+    assert.match(indexHtml, new RegExp(`data-workspace-tab="${route}"`));
   }
 });
 
-test('셸이 CSS 와 모듈을 싣는다', () => {
-  assert.match(shell, /13b-terminal\.css/);
-  assert.match(shell, /js\/terminal_panel\.js/);
-  const order = ['13-motion-trace.css', '13b-terminal.css', '14-redesign.css'].map((name) => shell.indexOf(name));
-  assert.ok(order[0] < order[1] && order[1] < order[2], '터미널 CSS 는 재생 기록 뒤 · 재설계 층 앞에 실린다');
-});
-
-test('xterm.js 는 저장소 안에 있고 패널이 그 길을 쓴다', () => {
-  for (const name of ['xterm.js', 'xterm.css', 'addon-fit.js', 'LICENSE']) {
-    assert.ok(
-      existsSync(new URL(`../static/vendor/xterm/${name}`, import.meta.url)),
-      `vendor/xterm/${name} 이 없다 · npm pack 으로 받아 두세요`,
-    );
+test('패널은 숨긴 채 시작하고 iframe 하나씩 가진다', () => {
+  for (const [route, id] of [['terminal', 'terminalIframe'], ['btop', 'btopIframe']]) {
+    const section = indexHtml.match(new RegExp(`<section([^>]*data-workspace-panel="${route}"[^>]*)>`));
+    assert.ok(section, `${route} 패널이 화면에 없다`);
+    assert.match(section[1], /\bhidden\b/);
+    assert.match(indexHtml, new RegExp(`<iframe id="${id}"`));
+    assert.match(dom, new RegExp(`${id}: document\\.getElementById\\('${id}'\\)`));
   }
-  assert.match(panelJs, /\/static\/vendor\/xterm/);
-  assert.doesNotMatch(panelJs, /https?:\/\//, 'CDN 을 쓰면 인터넷 없는 PC 에서 안 뜬다');
 });
 
-test('패널은 서버의 두 길을 부른다', () => {
-  const api = readFileSync(new URL('../static/js/api.js', import.meta.url), 'utf8');
-  assert.match(panelJs, /'\/ws\/terminal'/);
-  assert.match(api, /'\/api\/terminal\/programs'/);
-  assert.match(panelJs, /fetchTerminalPrograms\(/);
+test('iframe 은 탭을 열 때 한 번만 · 터미널 8081 · btop 8080', () => {
+  assert.match(main, /activePanel === 'terminal' && el\.terminalIframe && !el\.terminalIframe\.src/);
+  assert.match(main, /terminalIframe\.src = `http:\/\/\$\{window\.location\.hostname\}:8081\/`/);
+  assert.match(main, /activePanel === 'btop' && el\.btopIframe && !el\.btopIframe\.src/);
+  assert.match(main, /btopIframe\.src = `http:\/\/\$\{window\.location\.hostname\}:8080\/`/);
 });
 
-test('숨겨지는 화면 칸은 display 를 :not(.hidden) 안에서만 정한다', () => {
-  assert.match(css, /\.terminal-screen:not\(\.hidden\)\s*\{[^}]*display:/);
-  assert.doesNotMatch(css, /^\.terminal-screen\s*\{[^}]*display:/m);
-  assert.match(css, /\.terminal-panel:not\(\.hidden\)\s*\{[^}]*display:/);
+test('터미널 화면에 갱신 명령이 적혀 있다 · git pull && 는 앞에 붙이지 않는다', () => {
+  assert.match(indexHtml, /<pre class="terminal-howto-command">bash scripts\/install\.sh<\/pre>/);
+  assert.doesNotMatch(indexHtml, /git pull &amp;&amp; bash|git pull && bash/);
+});
+
+test('유닛 파일의 포트가 화면과 같다', () => {
+  const terminal = readFileSync(new URL('../../web_bridge/deploy/motion-terminal.service.in', import.meta.url), 'utf8');
+  const btop = readFileSync(new URL('../../web_bridge/deploy/motion-btop.service', import.meta.url), 'utf8');
+  const runner = readFileSync(new URL('../../web_bridge/deploy/run_terminal_service.sh', import.meta.url), 'utf8');
+  assert.match(terminal, /run_terminal_service\.sh @WORKSPACE@/);
+  assert.match(runner, /MOTION_WEB_TERMINAL_PORT:-8081/);
+  assert.match(runner, /--writable/, 'ttyd 1.7 은 -W 가 없으면 읽기 전용이다');
+  assert.match(btop, /ttyd -p 8080 \/usr\/bin\/btop/);
+  for (const unit of [terminal, btop]) assert.match(unit, /Environment=LANG=C\.UTF-8/);
 });

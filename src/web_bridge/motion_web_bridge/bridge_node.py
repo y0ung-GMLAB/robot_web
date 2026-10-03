@@ -53,7 +53,6 @@ from .routes import (
     register_motion_trace_routes,
     register_stream_routes,
     register_robot_pack_routes,
-    register_terminal_routes,
 )
 # 재수출 · 외부에서 bridge_node 경유로 참조한다
 from .project_tree import _project_tree_category_signature  # noqa: F401
@@ -2183,7 +2182,6 @@ def create_app(bridge: MotionWebBridge) -> FastAPI:
     register_motion_trace_routes(app, bridge, project_call)
     register_stream_routes(app, bridge)
     register_robot_pack_routes(app, bridge)
-    register_terminal_routes(app, bridge)
 
     return app
 

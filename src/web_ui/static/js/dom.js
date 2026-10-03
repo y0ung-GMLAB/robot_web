@@ -29,6 +29,8 @@ export function getElements() {
     emergencyStopBanner: document.getElementById('emergencyStopBanner'),
     motorActivityBanner: document.getElementById('motorActivityBanner'),
     motorActivityLabel: document.getElementById('motorActivityLabel'),
+    btopIframe: document.getElementById('btopIframe'),
+    terminalIframe: document.getElementById('terminalIframe'),
     headerProjectName: document.getElementById('headerProjectName'),
     headerContextState: document.getElementById('headerContextState'),
     executionContextState: document.getElementById('executionContextState'),

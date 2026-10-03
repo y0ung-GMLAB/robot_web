@@ -119,7 +119,8 @@ install_system_packages() {
     python3-uvicorn \
     python3-yaml \
     ros-humble-desktop \
-    software-properties-common
+    software-properties-common \
+    ttyd
 }
 
 sync_git_repository() {

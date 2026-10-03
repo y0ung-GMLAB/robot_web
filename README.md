@@ -448,7 +448,8 @@ sudo apt install -y \
   git build-essential cmake \
   gcc-12 g++-12 ethtool \
   python3-rosdep python3-colcon-common-extensions \
-  python3-fastapi python3-uvicorn python3-yaml chrony
+  python3-fastapi python3-uvicorn python3-yaml chrony \
+  btop ttyd
 ```
 
 Dynamixel 직렬 통신을 사용하는 계정에는 필요한 그룹 권한을
@@ -737,6 +738,8 @@ sudo loginctl enable-linger "$(id -un)"
 - `motion-control.service`: 웹·프로젝트·모션 제어 서비스 (`LimitRTPRIO=99`, `LimitMEMLOCK=infinity` 적용 - 하위 모터 재시작 스크립트 및 런타임 RT 권한 보장)
 - `motion-motor.service`: 검증된 프로젝트 모터 실행 설정이 있을 때 Motor Manager (`LimitRTPRIO=99`, `LimitMEMLOCK=infinity` 적용)
 - `motion-coordination.service`: PC 간 DDS 그룹 상태 공유·실행 조정
+- `motion-terminal.service`: 웹 「터미널」 탭 (`ttyd` · 포트 8081 · `ttyd` 가 있을 때만)
+- `motion-btop.service`: 웹 「PC 성능 (btop)」 탭 (`ttyd` · 포트 8080 · `ttyd`·`btop` 이 있을 때만)
 
 ### 무인 연동 구동 설정 절차 (부팅 시 자동 재생)
 
@@ -756,6 +759,10 @@ sudo loginctl enable-linger "$(id -un)"
 
 4. **4단계: 부팅 테스트 및 완전 자동 구동**
    - PC 전원 재부팅 시 사용자 조작 없이 확정 저장된 명단 자동 감지 ➔ 수동 조작 없는 무인 연동 구동 완료
+
+웹 UI의 **터미널** · **PC 성능 (btop)** 탭은 별도 서비스(`ttyd`)로 돕니다 · `install_user_service.sh` 가
+`ttyd`·`btop` 이 깔려 있으면 자동으로 등록합니다 (`sudo apt install btop ttyd` 후 `bash scripts/install.sh`).
+터미널 서비스는 설치 중에도 멈추지 않습니다 · 설치를 치고 있는 창이 바로 그 서비스일 수 있기 때문입니다.
 
 새 PC에 검증된 모터 실행 설정이 없으면 웹(`motion-control.service`)은 정상 실행되지만 `motion-motor.service` 시작은 보류(inactive/dead)됩니다. 이는 모터 무단 구동을 방지하는 **정상 동작**입니다. 브라우저 창은 자동으로 열리지 않습니다.
 

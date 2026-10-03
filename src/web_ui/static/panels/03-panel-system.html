@@ -1,6 +1,42 @@
-<!-- 시스템 정보
+<!-- PC 성능 · 시스템 정보
      `index.html`에서 떼어낸 조각 · 원본 113~223줄 · §6-44
      들여쓰기를 그대로 둔다 · 서버가 자리표시자 줄을 이 내용으로 바꾼다 -->
+      <!-- 웹 터미널 · 코드를 받아 다시 빌드하는 일을 여기서 한다 · §6-99 -->
+      <section class="btop-panel workspace-panel hidden" data-workspace-panel="terminal" aria-label="터미널">
+        <div class="section-head workspace-page-head">
+          <div><strong>터미널</strong><small>이 PC 의 작업공간에서 바로 시작합니다</small></div>
+        </div>
+        <div class="registry-message terminal-howto">
+          <!-- `git pull &&` 를 앞에 붙이지 않는다 · §6-102
+               이력이 갈라진 PC 에서 `git pull` 이 실패하면 `&&` 때문에
+               install.sh 가 **아예 돌지 않았다** · 그래서 그 PC 만 다른 명령을
+               손으로 치게 됐고 그것이 다음 사고가 됐다. 코드 수신은 install.sh
+               2단계가 스스로 한다. -->
+          <strong>코드 받기 + 다시 빌드</strong> · 아래 한 줄을 그대로 치세요 (몇 분 걸립니다)
+          <pre class="terminal-howto-command">bash scripts/install.sh</pre>
+          <span>빌드 동안 이 웹 화면은 잠깐 끊깁니다 · <strong>터미널은 안 끊깁니다</strong> · 끝나면 <code>설치 완료</code> 가 찍힙니다</span>
+        </div>
+        <!-- 시간대 바꾸기는 화면에서 뺐다 · §6-291
+             해외 설치는 **우분투에서 직접** 바꾼다 · `sudo timedatectl set-timezone …`
+             한 줄이면 되고, 그 뒤 이 프로그램을 다시 띄우면 된다 · 화면에 자리를
+             차지할 만큼 자주 하는 일이 아니다.
+
+             코드(`system_time.js`)는 그대로 둔다 · 자리가 없으면 아무 일도
+             하지 않는다. -->
+        <div style="flex: 1; display: flex; flex-direction: column; width: 100%; min-height: calc(100vh - 200px);">
+          <iframe id="terminalIframe" style="flex: 1; width: 100%; height: 100%; min-height: 600px; border: none;"></iframe>
+        </div>
+      </section>
+
+      <section class="btop-panel workspace-panel hidden" data-workspace-panel="btop" aria-label="PC 성능 (btop)">
+        <div class="section-head workspace-page-head">
+          <div><strong>PC 성능 (btop)</strong></div>
+        </div>
+        <div style="flex: 1; display: flex; flex-direction: column; width: 100%; min-height: calc(100vh - 200px);">
+          <iframe id="btopIframe" style="flex: 1; width: 100%; height: 100%; min-height: 600px; border: none;"></iframe>
+        </div>
+      </section>
+
       <section class="system-panel workspace-panel hidden" data-workspace-panel="system" aria-label="시스템 정보">
         <div class="section-head system-page-head workspace-page-head">
           <div><strong>시스템 정보</strong></div>

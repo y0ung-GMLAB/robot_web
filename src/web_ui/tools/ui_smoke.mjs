@@ -44,7 +44,8 @@ const REQUIRED = {
   studio: ['#studioRecordButton', '#studioExportButton'],
   manual: ['#motionTestPanel, [data-workspace-panel="manual"]'],
   monitoring: ['[data-workspace-panel="monitoring"]'],
-  terminal: ['[data-workspace-panel="terminal"]', '#terminalPicker', '#terminalStatus'],
+  terminal: ['#terminalIframe'],
+  btop: ['#btopIframe'],
 };
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));

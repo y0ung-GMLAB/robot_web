@@ -8,7 +8,6 @@ from .docs_routes import register_docs_routes
 from .motion_trace_routes import register_motion_trace_routes
 from .stream_routes import register_stream_routes
 from .robot_pack_routes import register_robot_pack_routes
-from .terminal_routes import register_terminal_routes
 
 __all__ = [
     'register_project_routes',
@@ -21,5 +20,4 @@ __all__ = [
     'register_motion_trace_routes',
     'register_stream_routes',
     'register_robot_pack_routes',
-    'register_terminal_routes',
 ]

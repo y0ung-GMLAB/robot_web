@@ -58,8 +58,7 @@ test('프로젝트와 무관한 것만 검사를 건너뛴다', () => {
   const skipped = [...API.matchAll(/export const (\w+)[^;]*projectScoped: false/g)]
     .map((match) => match[1]);
 
-  // 터미널은 PC 의 것이지 프로젝트의 것이 아니다 · §6-311
-  assert.deepEqual(skipped.sort(), ['fetchDocument', 'fetchDocumentList', 'fetchSystemTime', 'fetchTerminalPrograms']);
+  assert.deepEqual(skipped.sort(), ['fetchDocument', 'fetchDocumentList', 'fetchSystemTime']);
 });
 
 test('스케줄은 프로젝트에 매인 것으로 다룬다', () => {
