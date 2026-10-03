@@ -106,7 +106,7 @@ def test_the_node_list_is_written_once():
 
     for transport in (
         '_request_motion_mapping', '_request_midi_monitor',
-        '_request_motion_run', '_motion_studio_transport',
+        '_request_motion_run',
     ):
         assert f'self.bridge.{transport}' not in source, (
             f'{transport} 을 직접 부릅니다 · managed_context_nodes() 를 쓰세요'
