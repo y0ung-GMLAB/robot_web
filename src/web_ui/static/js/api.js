@@ -191,6 +191,9 @@ export const fetchDocumentList = () => request('GET', '/api/docs', { projectScop
 export const fetchDocument = (documentId) =>
   request('GET', `/api/docs/${encodeURIComponent(documentId)}`, { projectScoped: false });
 
+// 웹 터미널 · 어느 프로그램이 이 PC 에 있는가 · §6-311
+export const fetchTerminalPrograms = () => request('GET', '/api/terminal/programs', { projectScoped: false });
+
 export const fetchCoordinationStatus = () => request('GET', '/api/coordination');
 
 export const saveCoordinationSettings = (payload) => request('PUT', '/api/coordination/settings', { body: payload });
