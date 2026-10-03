@@ -331,6 +331,14 @@ def test_reference_initial_mode_always_goes_to_motion_zero():
     ) == 12.0
 
 
+def test_a_row_without_initial_mode_defaults_to_reference():
+    """칸이 없는 줄은 기준점 · 화면 「줄 추가」와 같은 기본값 · 2026-10-03 (13-3)."""
+    records = [{'time_sec': 0.0, 'value': 12.0}]
+    assert motion_run_rules.DEFAULT_INITIAL_MODE == 'reference'
+    assert motion_run_rules._initial_motion_value({}, records) == 0.0
+    assert motion_run_rules._initial_motion_value({'initial_mode': ''}, records) == 0.0
+
+
 def test_reference_initial_mode_without_animation_needs_no_warning():
     mapping = _zero_row_mapping('')
     mapping['mappings'][0]['initial_mode'] = 'reference'

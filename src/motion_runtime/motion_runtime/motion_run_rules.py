@@ -23,7 +23,7 @@ from std_msgs.msg import Int8MultiArray
 from motion_common import motion_table, motor_readiness
 from motion_common.values import finite_float, optional_int
 
-from .motion_run_constants import INITIAL_MOVE_TIME_OPTIONS_SEC
+from .motion_run_constants import DEFAULT_INITIAL_MODE, INITIAL_MOVE_TIME_OPTIONS_SEC
 
 
 class RunSlotUnavailable(RuntimeError):
@@ -333,7 +333,7 @@ def _initial_motion_value(
     row: Dict[str, Any],
     records: List[Dict[str, Any]],
 ) -> float:
-    mode = str(row.get('initial_mode') or 'first_frame')
+    mode = str(row.get('initial_mode') or DEFAULT_INITIAL_MODE)
     if mode == 'manual':
         return finite_float(row.get('initial_motion_position_deg')) or 0.0
     if mode == 'reference':
