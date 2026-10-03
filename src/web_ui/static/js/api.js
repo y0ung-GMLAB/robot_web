@@ -363,6 +363,10 @@ export const stopMotionRun = () => request('POST', '/api/motion-run/stop');
 export const previewMotionFile = (fileId, fps) =>
   request('POST', `/api/motion-files/${encodeURIComponent(fileId)}/preview`, { body: { fps } });
 
+/** MuJoCo 창 닫기 · 떠 있는 뷰어 프로세스를 끝낸다 · 7-1 */
+export const stopPreviewMotionFile = (fileId) =>
+  request('POST', `/api/motion-files/${encodeURIComponent(fileId)}/preview-stop`);
+
 /** MuJoCo 계산 시작 · 무거운 물리 시뮬 · 업로드 직후 자동으로도 부른다 · P7 */
 export const precomputeMotionFile = (fileId) =>
   request('POST', `/api/motion-files/${encodeURIComponent(fileId)}/preview-precompute`);
