@@ -1,0 +1,15 @@
+[Unit]
+Description=Motion Web btop (ttyd) Service
+After=network.target
+
+[Service]
+Type=simple
+# btop 은 UTF-8 로케일이 없으면 「No UTF-8 locale detected」 로 바로 꺼진다 ·
+# 서비스 환경에는 LANG 이 없을 수 있다 (실행 검증에서 확인)
+Environment=LANG=C.UTF-8
+ExecStart=/usr/bin/ttyd -p 8080 /usr/bin/btop
+Restart=always
+RestartSec=3
+
+[Install]
+WantedBy=default.target

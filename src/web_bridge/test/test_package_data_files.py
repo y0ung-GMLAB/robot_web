@@ -152,9 +152,9 @@ def test_the_installer_never_stops_the_terminal_it_runs_in():
     assert 'systemctl --user stop motion-terminal' not in installer, (
         '설치가 자기가 도는 터미널을 멈춘다'
     )
-    # 웹 터미널은 화면에서 뺐다(2026-10-02) · 예전 PC 에서는 disable 만 한다
-    assert 'systemctl --user disable motion-terminal.service' in installer
-    assert 'motion-terminal.service.in' not in installer
+    assert 'is-active --quiet motion-terminal.service' in installer, (
+        '이미 떠 있는데 다시 켠다'
+    )
 
 
 def test_the_installer_does_not_skip_the_pull_because_of_the_submodule():
