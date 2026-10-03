@@ -13,6 +13,7 @@ import {
   initializeMotionRun,
   precomputeMotionFile,
   previewMotionFile,
+  stopPreviewMotionFile,
   projectFileDownloadUrl,
   saveMotionMapping,
   saveRegisteredMotionFile,
@@ -359,7 +360,7 @@ function defaultMotionAxisRow(motionId, motorAxis = null) {
     motor_ref: '', motor_axis: motorAxis,
     reference_enabled: true, reference_position_deg: 0.0,
     motion_lower_deg: -180.0, motion_upper_deg: 180.0,
-    initial_mode: 'manual', initial_motion_position_deg: 0.0,
+    initial_mode: 'reference', initial_motion_position_deg: 0.0,   // 기본 기준점 · 2026-10-03 (13-3)
     initial_move_time_sec: 5.0, invert: false, offset_deg: 0.0,
     scale: 1.0, gear_ratio: 1.0,
   };
@@ -1003,8 +1004,8 @@ export function createMotionDataController({
   }
 
   function displayInitialPosition(row) {
-    if (row.initial_mode === 'reference') return 0.0;
-    if ((row.initial_mode || 'first_frame') !== 'first_frame') {
+    if ((row.initial_mode || 'reference') === 'reference') return 0.0;
+    if (row.initial_mode !== 'first_frame') {
       return numericOr(row.initial_motion_position_deg, 0.0);
     }
     const firstValue = firstMotionValueFor(row.motion_id);
@@ -1902,6 +1903,14 @@ export function createMotionDataController({
                 ? '무거운 물리 계산을 시작합니다 · 끝나면 같이 보기가 켜집니다'
                 : '계산된 결과를 뷰어로 틉니다 · 창은 서버 PC 화면에 뜹니다'))));
     }
+    if (el.stopPreviewMotionFileButton) {
+      // 뷰어가 떠 있을 때만 · 서버가 핸들을 보관한다 (7-1)
+      const viewerRunning = Boolean(file?.preview?.viewer_running);
+      el.stopPreviewMotionFileButton.disabled = !file || loading || !viewerRunning;
+      el.stopPreviewMotionFileButton.title = viewerRunning
+        ? '이 애니메이션의 MuJoCo 창을 닫습니다'
+        : '떠 있는 MuJoCo 창이 없습니다';
+    }
     // 같이 보기 토글 · 재생 등록된 파일의 계산이 끝났을 때만 켤 수 있다
     const mujocoRegisteredFile = files.find(
       (entry) => entry.id === registeredMotionFileIdValue,
@@ -2036,7 +2045,7 @@ export function createMotionDataController({
     const duplicateCounts = mappingDuplicateAxisCounts();
     el.motionMappingRows.innerHTML = rows.map((row, index) => {
       const status = mappingValidationRowStatus(row, mappingRowStatus(row, duplicateCounts));
-      const initialMode = row.initial_mode || 'first_frame';
+      const initialMode = row.initial_mode || 'reference';   // 칸 없으면 기준점 · 서버와 같다 (13-3)
       // 값을 직접 넣는 것은 「직접 지정」뿐 · 첫 프레임·기준점은 보여 주기만
       const initialPositionDisabled = initialMode !== 'manual';
       const dynamixelGearFixed = isDynamixelMappingRow(row);
@@ -2476,6 +2485,18 @@ export function createMotionDataController({
     }
   }
 
+  /** MuJoCo 창 닫기 · 서버가 보관한 뷰어 프로세스를 끝낸다 · 7-1 */
+  async function stopPreviewSelectedMotionFile() {
+    if (!selectedFileId) return;
+    try {
+      const result = await stopPreviewMotionFile(selectedFileId);
+      setMessage(result?.message || 'MuJoCo 창 닫음');
+      await loadFiles(selectedFileId);
+    } catch (error) {
+      setMessage(`MuJoCo 창 닫기 실패: ${error?.message || error}`);
+    }
+  }
+
   /** 계산이 도는 동안은 목록을 몇 초마다 다시 읽어 상태를 갱신한다 */
   let mujocoPollTimer = null;
   function scheduleMujocoPoll() {
@@ -2756,7 +2777,7 @@ export function createMotionDataController({
         row.gear_ratio = 1.0;
       }
     } else if (field === 'initial_mode') {
-      row.initial_mode = ['manual', 'reference'].includes(value) ? value : 'first_frame';
+      row.initial_mode = ['manual', 'first_frame'].includes(value) ? value : 'reference';
       if (row.initial_mode === 'first_frame') {
         const firstValue = firstMotionValueFor(row.motion_id);
         if (firstValue !== null) row.initial_motion_position_deg = firstValue;
@@ -3193,6 +3214,7 @@ export function createMotionDataController({
     el.unregisterMotionFileButton?.addEventListener('click', unregisterSelectedMotionFile);
     el.downloadMotionFileButton?.addEventListener('click', downloadSelectedMotionFile);
     el.previewMotionFileButton?.addEventListener('click', previewSelectedMotionFile);
+    el.stopPreviewMotionFileButton?.addEventListener('click', stopPreviewSelectedMotionFile);
     if (el.deleteMotionFileButton) {
       el.deleteMotionFileButton.addEventListener('click', deleteSelectedFile);
     }

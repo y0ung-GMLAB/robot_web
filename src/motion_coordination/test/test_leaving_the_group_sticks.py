@@ -11,7 +11,6 @@
 from dataclasses import replace
 from pathlib import Path
 
-import pytest
 import yaml
 
 from motion_common.group_config import (

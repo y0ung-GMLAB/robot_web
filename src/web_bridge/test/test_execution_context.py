@@ -1384,7 +1384,7 @@ def _scan_bridge_with_runtime(monkeypatch):
     bridge._motion_run_lock = threading.Lock()
     bridge._motion_run_status = {}
     bridge.project_repository = operation_repository(lambda: 'project-a')
-    operation = bridge.project_repository.runtime.begin_motor_operation(
+    bridge.project_repository.runtime.begin_motor_operation(
         'ac_servo_scan',
         'preparing',
     )

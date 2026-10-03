@@ -241,6 +241,7 @@ export function getElements() {
     motionWorkspaceSubtitle: document.getElementById('motionWorkspaceSubtitle'),
     downloadMotionFileButton: document.getElementById('downloadMotionFileButton'),
     previewMotionFileButton: document.getElementById('previewMotionFileButton'),
+    stopPreviewMotionFileButton: document.getElementById('stopPreviewMotionFileButton'),
     motionRunMujocoToggle: document.getElementById('motionRunMujocoToggle'),
     motionRunMujocoFps: document.getElementById('motionRunMujocoFps'),
     registerMotionFileButton: document.getElementById('registerMotionFileButton'),

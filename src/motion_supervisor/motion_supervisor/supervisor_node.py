@@ -480,7 +480,6 @@ class MotionSupervisor(Node):
         if not requests:
             return False, 'manual stream target batch is empty', []
 
-        now = time.monotonic()
         global_error = ''
         # 재생 여부는 **축마다** 따진다 · 전에는 재생이 돌면 MIDI 전체를 막아서
         # 오버더빙이 불가능했다 · §6-72

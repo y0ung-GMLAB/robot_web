@@ -124,7 +124,7 @@ def report(data: Dict[str, Any], baseline: Dict[str, Any] | None) -> None:
     line('총 줄수', 'total_lines')
     line('함수', 'total_functions')
 
-    print(f'\n■ §7 기준 초과')
+    print('\n■ §7 기준 초과')
     line(f'파일 {FILE_LIMIT}줄 초과', 'files_over_limit')
     line(f'함수 {FUNCTION_LIMIT}줄 초과', 'functions_over_limit')
     line('함수 100줄 초과', 'functions_over_100')

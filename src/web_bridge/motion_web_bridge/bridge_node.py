@@ -1927,6 +1927,16 @@ class MotionWebBridge(Node):
             self.workspace_root, motion_path, fps=fps,
         )
 
+    def stop_preview_motion_file(self, file_id: str) -> Dict[str, Any]:
+        """떠 있는 MuJoCo 뷰어 창을 끝낸다 · 화면 「MuJoCo 창 닫기」 · 7-1"""
+        project_id = self.project_repository.selected_project_id()
+        if not project_id:
+            return {'success': False, 'message': NO_PROJECT_SELECTED}
+        motion_path = self.project_repository.export_path(
+            project_id, 'motions', file_id,
+        )
+        return animation_preview.stop_preview(motion_path)
+
     def precompute_motion_file(self, file_id: str) -> Dict[str, Any]:
         """MuJoCo 계산 시작 · 업로드 직후 화면이 자동으로 부른다 · P7"""
         project_id = self.project_repository.selected_project_id()

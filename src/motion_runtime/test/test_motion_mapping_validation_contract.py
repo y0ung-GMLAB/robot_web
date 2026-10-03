@@ -42,6 +42,15 @@ def test_alias_zero_axis_fallback_is_a_valid_unique_mapping_target():
     assert [row['motor_ref'] for row in mapping['mappings']] == ['', '']
 
 
+def test_a_row_without_initial_mode_is_normalized_to_reference():
+    """칸이 없는 줄(옛 파일)은 기준점으로 읽는다 · 2026-10-03 (13-3)."""
+    manager = _manager()
+    row = _row()
+    del row['initial_mode']
+    mapping = manager._normalize_mapping({'name': 'legacy', 'mappings': [row]})
+    assert mapping['mappings'][0]['initial_mode'] == 'reference'
+
+
 def test_duplicate_axis_and_invalid_numeric_ranges_are_rejected():
     manager = _manager()
     mapping = manager._normalize_mapping({

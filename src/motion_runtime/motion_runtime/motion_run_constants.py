@@ -32,3 +32,6 @@ TARGET_SETTLE_TIMEOUT_SEC = 3.0
 CONTINUOUS_LOOP_TOLERANCE_DEG = 5.0
 #: 초기 위치 이동 시간 후보
 INITIAL_MOVE_TIME_OPTIONS_SEC = (5.0, 7.0, 10.0)
+#: 초기 위치 기본값 · 칸이 없는 매핑 줄과 화면 「줄 추가」가 같은 값을 쓴다 · 기준점(모션 0°)
+#: 2026-10-03 사용자 결정 (수정 목록 13-3) · 전에는 서버 first_frame · 화면 manual 로 갈라져 있었다
+DEFAULT_INITIAL_MODE = 'reference'

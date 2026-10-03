@@ -1,12 +1,10 @@
 """Validate and execute motion plans independently from the web API process."""
 
-import hashlib
 import json
 import math
 import os
 import threading
 import time
-import traceback
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 

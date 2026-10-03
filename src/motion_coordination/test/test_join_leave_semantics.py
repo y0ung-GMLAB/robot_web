@@ -12,7 +12,6 @@
 **도는 중에는 못 나간다** · 먼저 세운다 · 연동 설정을 바꿀 때도 같다 (§6-163).
 """
 
-from types import SimpleNamespace
 
 import pytest
 
