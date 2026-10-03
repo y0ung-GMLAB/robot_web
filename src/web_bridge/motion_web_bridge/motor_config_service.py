@@ -220,6 +220,7 @@ class MotorConfigService:
                 backup = history_dir / f'{timestamp}-{counter}-{target.name}'
                 counter += 1
             store.atomic_write_text(backup, target.read_text(encoding='utf-8'))
+            store.prune_history(history_dir)   # 분류별 50개 상한 · 21-3
         # 원자적 교체 · 기록 도중 죽어도 모터 설정이 반쪽으로 남지 않는다 · §6-24
         store.atomic_write_text(target, content.rstrip() + '\n')
         self.selected = target

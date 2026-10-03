@@ -90,6 +90,9 @@ def atomic_write_with_backup(
                 backup = backup_root / f'{timestamp}-{counter}-{path.name}'
                 counter += 1
             common_store.atomic_write_text(backup, existing)
+            if backup_dir is not None:
+                # 이력 폴더일 때만 · 원본 옆에 두는 옛 방식은 원본까지 지울 수 있다 · 21-3
+                common_store.prune_history(backup_root)
         common_store.atomic_write_text(path, updated)
         return backup
 

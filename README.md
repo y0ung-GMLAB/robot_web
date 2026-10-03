@@ -775,7 +775,7 @@ journalctl --user -u motion-coordination.service -n 100
 ```
 
 > [!TIP]
-> 웹 서비스(`motion-control.service`)에서 프로젝트 적용 및 백그라운드 프로세스 재시작 중 발생한 ROS 노드 오류나 저수준 에러 로그는 작업공간의 **`log/web_apply_restart/restart-*.log`** 파일에서도 확인할 수 있습니다.
+> 웹 서비스(`motion-control.service`)에서 프로젝트 적용 및 백그라운드 프로세스 재시작 중 발생한 ROS 노드 오류나 저수준 에러 로그는 작업공간의 **`log/web_apply_restart/restart-*.log`** 파일에서도 확인할 수 있습니다. ROS 2 노드 자체 로그는 `~/.ros/log/` 가 아니라 작업공간 **`log/ros/`** 에 남습니다(`ROS_LOG_DIR`). 두 폴더 모두 서비스 시작 때 **14일**이 지난 항목을 삭제합니다(`LOG_RETENTION_DAYS` 로 변경).
 
 웹 접속:
 

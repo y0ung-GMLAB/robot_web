@@ -49,6 +49,9 @@ if [[ -f "${NET_READY_HELPER}" ]]; then
   python3 "${NET_READY_HELPER}" || true
 fi
 set +u
+# 기록 파일 보존 · ROS 로그를 작업공간 log/ros 로 · 14일 지난 것 삭제 · 수정 목록 21
+source "${WORKSPACE}/src/web_bridge/deploy/log_retention.sh"
+prepare_ros_log_dir "${WORKSPACE}"
 source "${ROS_SETUP}"
 source "${WORKSPACE_SETUP}"
 set -u

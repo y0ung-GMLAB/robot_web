@@ -270,3 +270,43 @@ def test_locked_update_prevents_lost_update(tmp_path):
         thread.join(timeout=20.0)
 
     assert store.read_json(target)['count'] == 100
+
+
+# --------------------------------------------------------------------------- #
+# prune_history · 설정 변경 이력 분류별 보존 개수 · 수정 목록 21-3
+# --------------------------------------------------------------------------- #
+
+def _history(tmp_path, count, start=0):
+    root = tmp_path / 'runtime' / 'history' / 'motor_axes'
+    root.mkdir(parents=True, exist_ok=True)
+    for index in range(start, start + count):
+        path = root / f'20260101-{index:06d}-motor_axes.yaml'
+        path.write_text(str(index), encoding='utf-8')
+        os.utime(path, (1_700_000_000 + index, 1_700_000_000 + index))
+    return root
+
+
+def test_prune_history_keeps_the_newest_files_only(tmp_path):
+    root = _history(tmp_path, 53)
+    removed = store.prune_history(root)
+    assert store.HISTORY_KEEP_FILES == 50
+    assert sorted(p.name for p in removed) == [
+        f'20260101-{i:06d}-motor_axes.yaml' for i in range(3)
+    ]
+    kept = sorted(p.name for p in root.iterdir())
+    assert len(kept) == 50 and kept[0] == '20260101-000003-motor_axes.yaml'
+
+
+def test_prune_history_leaves_dirs_links_and_a_missing_root_alone(tmp_path):
+    root = _history(tmp_path, 2)
+    (root / 'sub').mkdir()
+    (root / 'link').symlink_to(root / '20260101-000001-motor_axes.yaml')
+    assert store.prune_history(root, keep=1) == [root / '20260101-000000-motor_axes.yaml']
+    assert (root / 'sub').is_dir() and (root / 'link').is_symlink()
+    assert store.prune_history(tmp_path / 'nowhere') == []
+
+
+def test_prune_history_with_keep_zero_empties_the_folder(tmp_path):
+    root = _history(tmp_path, 3)
+    assert len(store.prune_history(root, keep=0)) == 3
+    assert list(root.iterdir()) == []

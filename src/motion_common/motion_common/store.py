@@ -21,7 +21,7 @@ import tempfile
 import threading
 from contextlib import contextmanager
 from pathlib import Path
-from typing import Any, Callable, Dict, Iterator, Optional, Union
+from typing import Any, Callable, Dict, Iterator, List, Optional, Union
 
 __all__ = [
     'LOCK_SUFFIX',
@@ -128,6 +128,41 @@ def atomic_write_yaml(path: PathLike, payload: Any, *, mode: Optional[int] = Non
 # --------------------------------------------------------------------------- #
 # 읽기
 # --------------------------------------------------------------------------- #
+
+#: 설정 변경 이력(`<프로젝트>/runtime/history/<분류>/`) 분류별 보존 개수 · 수정 목록 21-3
+#: 저장할 때마다 이전 내용을 한 벌 남기므로 상한이 없으면 끝없이 는다 (2026-10-03)
+HISTORY_KEEP_FILES = 50
+
+
+def prune_history(history_dir: PathLike, keep: int = HISTORY_KEEP_FILES) -> List[Path]:
+    """이력 폴더에서 오래된 파일부터 지워 `keep` 개만 남긴다 · 지운 경로를 돌려준다.
+
+    한 폴더 = 한 분류다 · 하위 폴더·심볼릭 링크는 건드리지 않는다 · 순서는
+    수정 시각 → 이름(이름이 `YYYYMMDD-HHMMSS-` 로 시작하므로 둘이 같다) ·
+    삭제 실패는 넘어간다 · 이력 정리가 저장을 막으면 안 된다.
+    """
+    root = Path(history_dir)
+    keep = max(int(keep), 0)
+    if not root.is_dir():
+        return []
+    files = []
+    for path in root.iterdir():
+        if path.is_symlink() or not path.is_file():
+            continue
+        try:
+            files.append((path.stat().st_mtime, path.name, path))
+        except OSError:
+            continue
+    files.sort()
+    removed: List[Path] = []
+    for _mtime, _name, path in files[: max(len(files) - keep, 0)]:
+        try:
+            path.unlink()
+        except OSError:
+            continue
+        removed.append(path)
+    return removed
+
 
 def read_text(path: PathLike, default: Optional[str] = None) -> Optional[str]:
     """텍스트를 읽는다. 파일이 없거나 읽지 못하면 ``default``."""

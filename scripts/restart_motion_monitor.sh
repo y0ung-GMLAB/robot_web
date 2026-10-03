@@ -7,6 +7,10 @@ LOG_DIR="${WORKSPACE}/log/web_apply_restart"
 STAMP="$(date +%Y%m%d-%H%M%S)"
 
 mkdir -p "${LOG_DIR}"
+# 재시작 로그 · 14일 지난 것은 시작 때 삭제 · ROS 노드 로그도 작업공간 log/ros 로 · 수정 목록 21
+source "${WORKSPACE}/src/web_bridge/deploy/log_retention.sh"
+prune_old_entries "${LOG_DIR}"
+prepare_ros_log_dir "${WORKSPACE}"
 exec >> "${LOG_DIR}/restart-${STAMP}.log" 2>&1
 
 log() {
