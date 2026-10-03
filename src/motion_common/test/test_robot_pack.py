@@ -141,6 +141,26 @@ def test_fingerprint_follows_content_not_install_record(tmp_path):
     assert robot_pack.pack_fingerprint(pack) != first
 
 
+def test_hand_placed_pack_is_hashed_once_until_a_file_changes(tmp_path, monkeypatch):
+    """손으로 놓은 팩 · 목록 파일마다 메쉬까지 다시 읽던 것 → 1회 · 수정 목록 5-4."""
+    pack = make_pack(tmp_path / 'p')
+    calls = []
+    real = robot_pack.pack_fingerprint
+    monkeypatch.setattr(robot_pack, 'pack_fingerprint', lambda p: calls.append(p) or real(p))
+    robot_pack._FINGERPRINT_CACHE.clear()
+
+    first = robot_pack.current_fingerprint(pack)
+    assert robot_pack.current_fingerprint(pack) == first
+    assert robot_pack.current_fingerprint(pack) == first
+    assert len(calls) == 1
+
+    model = pack / 'model.xml'
+    model.write_text(model.read_text(encoding='utf-8') + '<!-- changed -->', encoding='utf-8')
+    # 서명은 크기·수정시각 · 여기선 크기가 바뀌었다 (같은 크기면 mtime 이 잡는다)
+    assert robot_pack.current_fingerprint(pack) != first
+    assert len(calls) == 2
+
+
 def test_current_fingerprint_prefers_install_record(tmp_path):
     pack = make_pack(tmp_path / 'p')
     assert robot_pack.current_fingerprint(pack) == robot_pack.pack_fingerprint(pack)
