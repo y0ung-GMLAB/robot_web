@@ -52,13 +52,18 @@ def test_no_project_does_not_block(tmp_path):
     assert run_mode_gate.motion_command_block_reason(bridge) == ''
 
 
-def test_a_read_failure_lets_commands_through_with_a_warning(tmp_path):
-    """게이트가 죽어서 전시가 서면 안 된다 · 못 읽으면 통과시키고 알린다."""
+def test_a_read_failure_blocks_commands_with_a_reason(tmp_path):
+    """못 읽으면 막는다(fail-close · 수정 목록 18) · 사유에 원인이 붙고 경고도 남는다."""
     bridge = _bridge(tmp_path, 'off')
-    bridge.project_repository = SimpleNamespace(
-        selected_project_id=lambda: '없는/프로젝트',   # ScheduleStore 가 ValueError
-    )
-    assert run_mode_gate.motion_command_block_reason(bridge) == ''
+    warns = []
+    def broken():
+        raise OSError('디스크 오류')
+    bridge.project_repository = SimpleNamespace(selected_project_id=broken)
+    bridge.get_logger = lambda: SimpleNamespace(warn=warns.append)
+    reason = run_mode_gate.motion_command_block_reason(bridge)
+    assert '디스크 오류' in reason
+    assert reason.startswith(run_mode_gate.MODE_UNREADABLE_BLOCK_MESSAGE)
+    assert warns and '차단' in warns[0]
 
 
 # --------------------------------------------------------------------------- #

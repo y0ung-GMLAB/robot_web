@@ -1,6 +1,7 @@
 from pathlib import Path
 
 from motion_common.paths import NO_PROJECT_SELECTED
+from motion_web_bridge import run_mode_gate
 from motion_web_bridge.coordination_bridge import (
     CoordinationWebBridge,
     local_motion_control,
@@ -222,7 +223,9 @@ def test_stale_dds_display_state_without_lease_does_not_block_local_start(tmp_pa
     assert service.local_execution_blocker() == ''
 
 
-def test_control_response_is_discarded_after_project_transition(tmp_path):
+def test_control_response_is_discarded_after_project_transition(tmp_path, monkeypatch):
+    # 운전 모드 문은 못 읽으면 막는다(18) · 이 시험의 관심사가 아니라 수동으로 둔다
+    monkeypatch.setattr(run_mode_gate, 'current_run_mode', lambda _node: 'manual')
     node = _Node()
     node.change_generation_on_publish = True
     service = CoordinationWebBridge(node, tmp_path, lambda: node.generation[0])
