@@ -954,7 +954,7 @@ def test_playback_relay_passes_while_midi_drives_another_axis():
         'MIDI 가 다른 축을 쓴다고 재생 중계가 통째로 막혔다'
     )
     assert supervisor._command_arbiter.axis_owners() == {
-        '0': 'midi', '1': 'playback',
+        '0': 'stream', '1': 'playback',   # 소유자 라벨 · CommandOwner.STREAM (MIDI 삭제 뒤 이름)
     }
 
 

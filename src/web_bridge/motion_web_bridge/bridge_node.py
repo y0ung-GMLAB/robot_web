@@ -1927,6 +1927,62 @@ class MotionWebBridge(Node):
             self.workspace_root, motion_path, fps=fps,
         )
 
+    def delete_motion_file(self, file_id: str) -> Dict[str, Any]:
+        """애니메이션 삭제 · 재생 등록된 파일은 거부 · `DELETE /api/motion-files/{id}`
+
+        라우트와 화면(「삭제」)은 있는데 메서드가 없어 500 이 났다 · 수정 목록
+        10-7 (2026-10-03) · 등록 여부는 **현재 프로젝트의 매핑 파일**만 본다 ·
+        다른 프로젝트의 등록은 이 프로젝트 파일 삭제를 막지 않는다 (프로젝트 격리).
+        """
+        repository = self.project_repository
+        project_id = repository.selected_project_id()
+        if not project_id:
+            return {'success': False, 'message': NO_PROJECT_SELECTED}
+        name = str(file_id or '').strip()
+        if not name:
+            return {'success': False, 'message': '삭제할 애니메이션이 정해지지 않았습니다'}
+        registered = self._mapping_files_registering(project_id, name)
+        if registered:
+            return {
+                'success': False,
+                'deletion_blocked': 'registered_motion_file',
+                'registered_mapping_files': registered,
+                'message': (
+                    f'재생 등록된 애니메이션입니다: {name} · '
+                    f'재생 등록을 해제한 뒤 삭제하세요 (등록 파일: {", ".join(registered)})'
+                ),
+            }
+        self.ensure_project_mutation_allowed(project_id)
+        result = repository.delete_file(project_id, 'motions', name)
+        payload = dict(result) if isinstance(result, dict) else {}
+        payload.setdefault('success', True)
+        payload.setdefault('message', f'애니메이션 삭제 완료: {name}')
+        return payload
+
+    def _mapping_files_registering(self, project_id: str, motion_file_id: str) -> List[str]:
+        """이 프로젝트의 조인트 매핑 파일 중 `motion_file_id` 가 그 애니메이션인 것."""
+        repository = self.project_repository
+        try:
+            tree = repository.get_project(project_id).get('tree') or []
+        except (OSError, ValueError, KeyError):
+            return []
+        names: List[str] = []
+        for folder in tree:
+            if not isinstance(folder, dict) or folder.get('category') != 'motion_axis_matching':
+                continue
+            for item in folder.get('children') or []:
+                file_name = str((item or {}).get('name') or '')
+                if not file_name:
+                    continue
+                try:
+                    content = repository.read_file(project_id, 'motion_axis_matching', file_name)
+                    mapping = yaml.safe_load(str(content.get('content') or '')) or {}
+                except (OSError, ValueError, yaml.YAMLError):
+                    continue
+                if isinstance(mapping, dict) and str(mapping.get('motion_file_id') or '') == motion_file_id:
+                    names.append(file_name)
+        return sorted(names)
+
     def stop_preview_motion_file(self, file_id: str) -> Dict[str, Any]:
         """떠 있는 MuJoCo 뷰어 창을 끝낸다 · 화면 「MuJoCo 창 닫기」 · 7-1"""
         project_id = self.project_repository.selected_project_id()

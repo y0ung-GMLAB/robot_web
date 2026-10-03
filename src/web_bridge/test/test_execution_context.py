@@ -11,6 +11,7 @@ from types import SimpleNamespace
 import pytest
 from std_msgs.msg import String
 
+from motion_web_bridge import run_mode_gate
 from motion_web_bridge.motor_config_service import MotorConfigService
 from motion_web_bridge.execution_context_service import ExecutionContextService
 from motion_web_bridge.manual_motor_commands import ManualMotorCommandService
@@ -286,6 +287,8 @@ def make_bridge():
     bridge._motion_mapping_store = rpc.ResultStore()
     bridge._motion_run_store = rpc.ResultStore()
     bridge._motion_run_status = {}
+    # __init__ 이 만드는 서비스 · 프로젝트 전환이 clear_pending() 을 부른다 (10-7)
+    bridge.manual_stream = SimpleNamespace(clear_pending=lambda: None)
     bridge._safety_request_publisher = type('Publisher', (), {
         'publish': lambda _self, _message: None,
     })()
@@ -356,7 +359,9 @@ def test_motion_automation_commands_use_current_execution_context():
     assert not hasattr(bridge, 'motion_automation_disable')
 
 
-def test_group_motion_commands_include_execution_context_id():
+def test_group_motion_commands_include_execution_context_id(monkeypatch):
+    # 운전 모드 문은 못 읽으면 막는다(18) · 이 시험의 관심사가 아니라 수동으로 둔다
+    monkeypatch.setattr(run_mode_gate, 'current_run_mode', lambda _bridge: 'manual')
     bridge = make_bridge()
     _execution_context_of(bridge)._status = {
         'state': 'ready',
@@ -443,7 +448,9 @@ def test_coordinator_does_not_enable_context_without_supervisor_generation_ack()
     assert 'motor_runtime' in result['failures']
 
 
-def test_range_recovery_flag_is_forwarded_to_motion_supervisor():
+def test_range_recovery_flag_is_forwarded_to_motion_supervisor(monkeypatch):
+    # 운전 모드 문은 못 읽으면 막는다(18) · 이 시험의 관심사가 아니라 수동으로 둔다
+    monkeypatch.setattr(run_mode_gate, 'current_run_mode', lambda _bridge: 'manual')
     bridge = make_bridge()
     published = []
     _manual_of(bridge)._motion_state_motor = lambda _axis: {

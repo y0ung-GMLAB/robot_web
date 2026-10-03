@@ -12,7 +12,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-from . import minas_params
+from motion_web_bridge import minas_params
 from motion_common.values import optional_int
 
 from motion_web_bridge.motor_identity import (

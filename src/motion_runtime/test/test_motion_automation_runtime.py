@@ -1,10 +1,13 @@
 from unittest import mock
 
 import pytest
+import tempfile
+from pathlib import Path
 import threading
 import time
 
 from motion_runtime.motion_automation_store import default_automation_state
+from motion_runtime.motion_automation_store import MotionAutomationStore
 from motion_runtime.motion_player import MotionPlayer
 from motion_runtime import motion_run_rules
 from motion_runtime.motion_run_manager import MotionRunManager
@@ -29,6 +32,11 @@ class _Logger:
     def error(self, _message):
         pass
 
+    def warning(self, _message):
+        pass
+
+    warn = info = debug = warning
+
 
 def _manager():
     manager = MotionRunManager.__new__(MotionRunManager)
@@ -47,6 +55,11 @@ def _manager():
         'stop_after_cycle': False,
     }
     manager._automation_project_id = 'project'
+    # __init__ 이 만드는 속성 중 시험 경로가 쓰는 것 · 빠지면 AttributeError (수정 목록 10-7)
+    manager.motion_projects_dir = Path(tempfile.mkdtemp(prefix='automation-'))
+    manager._automation_store = MotionAutomationStore(manager.motion_projects_dir)
+    manager._live_overrides = {}
+    manager._live_override_lock = threading.Lock()
     manager._publish_status = lambda: None
     manager._player._require_playback_command_allowed = lambda axes=None: None
     manager._current_motors = lambda: []
