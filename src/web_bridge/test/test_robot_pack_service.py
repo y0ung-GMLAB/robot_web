@@ -198,7 +198,7 @@ def test_mapping_diff_only_reports(tmp_path):
     before = json.dumps(mapping, sort_keys=True)
     rows = {row['motion_id']: row for row in robot_pack_service.mapping_diff(tmp_path, mapping)['rows']}
     assert rows['2-1']['differences'] == []
-    assert rows['2-2']['differences'] == ['감속비']
+    assert rows['2-2']['differences'] == ['감속·기어비']
     assert rows['9-9']['differences'] == ['팩에 motion_id 없음']
     assert json.dumps(mapping, sort_keys=True) == before
 

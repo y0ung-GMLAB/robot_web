@@ -1043,3 +1043,100 @@ def test_a_command_that_drives_every_axis_is_left_alone():
     command = supervisor._command_pub.messages[0]
     assert list(command.controller_index) == [0, 1]
     assert _targets_by_axis(command) == {0: 1.0, 1: 2.0}
+
+
+# --------------------------------------------------------------------------- #
+# 재생 목표도 운전 한계 안으로 · 2026-10-04
+#
+# 수동 경로는 `_target_position_limit_error` 가 막는데 재생 중계만 검사가
+# 없었다 · Dynamixel 은 Extended Position 모드라 드라이브 한계가 안 먹어
+# 여기가 마지막 문이다 · 밖이면 버리지 않고 경계값으로 보낸다.
+# --------------------------------------------------------------------------- #
+
+
+class RecordingLogger(QuietLogger):
+    def __init__(self):
+        self.warnings = []
+
+    def warning(self, message, *_args, **_kwargs):
+        self.warnings.append(str(message))
+
+
+def _limited_relay_supervisor(limits):
+    """limits · {axis: (lower, upper) | None} · None 이면 한계 없는 모터."""
+    supervisor = _relay_supervisor(list(limits))
+    supervisor._current_motors = lambda: [
+        {
+            'controller_index': axis,
+            **({} if bounds is None else {'lower': bounds[0], 'upper': bounds[1]}),
+        }
+        for axis, bounds in limits.items()
+    ]
+    return supervisor
+
+
+def _relay_with_position(supervisor, controller_indexes, driven_axes, positions):
+    command = _command_for(controller_indexes, driven_axes)
+    for slot, axis in enumerate(controller_indexes):
+        if axis in positions:
+            command.position[slot] = positions[axis]
+    supervisor._motion_run_command_callback(command)
+    return command
+
+
+def test_playback_target_above_upper_is_clamped_and_still_published():
+    supervisor = _limited_relay_supervisor({0: (-10.0, 10.0)})
+    _relay_with_position(supervisor, [0], {0}, {0: 25.0})
+    assert len(supervisor._command_pub.messages) == 1
+    assert _targets_by_axis(supervisor._command_pub.messages[0]) == {0: 10.0}
+
+
+def test_playback_target_below_lower_is_clamped():
+    supervisor = _limited_relay_supervisor({0: (-10.0, 10.0)})
+    _relay_with_position(supervisor, [0], {0}, {0: -25.0})
+    assert _targets_by_axis(supervisor._command_pub.messages[0]) == {0: -10.0}
+
+
+def test_playback_target_inside_limits_is_untouched():
+    supervisor = _limited_relay_supervisor({0: (-10.0, 10.0)})
+    command = _relay_with_position(supervisor, [0], {0}, {0: 5.0})
+    assert supervisor._command_pub.messages == [command]
+    assert _targets_by_axis(command) == {0: 5.0}
+
+
+def test_axes_without_limits_or_with_inverted_limits_are_left_alone():
+    supervisor = _limited_relay_supervisor({0: None, 1: (10.0, -10.0)})
+    _relay_with_position(supervisor, [0, 1], {0, 1}, {0: 500.0, 1: 500.0})
+    assert _targets_by_axis(supervisor._command_pub.messages[0]) == {0: 500.0, 1: 500.0}
+
+
+def test_slot_not_driven_or_without_target_position_is_left_alone():
+    supervisor = _limited_relay_supervisor({0: (-10.0, 10.0), 1: (-10.0, 10.0)})
+    command = _command_for([0, 1], {1})
+    command.position[0] = 500.0                         # 슬롯 0 · 이번 명령이 안 모는 축
+    command.number_of_target_interfaces[1] = 1          # 제어어만 · 목표 위치 없음
+    command.target_interface_id[1] = Int8MultiArray(data=[0])
+    command.position[1] = 500.0
+    supervisor._motion_run_command_callback(command)
+    published = supervisor._command_pub.messages[0]
+    assert list(published.position) == [500.0, 500.0]
+
+
+def test_clamp_is_reported_once_per_throttle_window():
+    supervisor = _limited_relay_supervisor({0: (-10.0, 10.0)})
+    logger = RecordingLogger()
+    supervisor.get_logger = lambda: logger
+    _relay_with_position(supervisor, [0], {0}, {0: 25.0})
+    assert len(logger.warnings) == 1
+    assert '경계값' in logger.warnings[0]
+    assert '0번 25.000→10.000 deg' in logger.warnings[0]
+
+
+def test_dynamixel_playback_target_is_clamped_to_motor_limits():
+    """모터 종류를 가리지 않는다 · Dynamixel 도 lower/upper 가 전부다."""
+    supervisor = _limited_relay_supervisor({0: (-180.0, 180.0)})
+    supervisor._current_motors = lambda: [
+        {'controller_index': 0, 'motor_type': 'dynamixel', 'lower': -180.0, 'upper': 180.0},
+    ]
+    _relay_with_position(supervisor, [0], {0}, {0: 200.0})
+    assert _targets_by_axis(supervisor._command_pub.messages[0]) == {0: 180.0}

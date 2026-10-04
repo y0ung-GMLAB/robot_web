@@ -31,6 +31,7 @@ from .motor_values import (
     count_values,
     dynamixel_position_raw,
     dynamixel_statusword_text,
+    dynamixel_error_text,
     error_text,
     hex16,
     motor_type_label,
@@ -183,7 +184,11 @@ class StatePublisher:
             'error_text': (
                 'Communication unavailable'
                 if communication_unavailable
-                else error_text(errorcode, '')
+                else (
+                    dynamixel_error_text(errorcode)
+                    if is_dynamixel
+                    else error_text(errorcode, '')
+                )
             ),
             'station_alias_register': None,
             'position': position,

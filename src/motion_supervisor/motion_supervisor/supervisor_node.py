@@ -63,8 +63,6 @@ JOG_COMMAND_PERIOD_SEC = 0.04
 DEFAULT_JOG_VELOCITY_DEG_SEC = 1125.0
 DEFAULT_JOG_ACCELERATION_DEG_SEC2 = 9375.0
 ACTION_RESULT_SETTLE_SEC = 2.0
-DYNAMIXEL_ACTION_MIN_DEG = -180.0
-DYNAMIXEL_ACTION_MAX_DEG = 180.0
 STREAM_COMMAND_OWNERSHIP_SEC = 0.15
 MOTION_RUN_ACTIVE_GRACE_SEC = 0.15
 MANUAL_CONTROL_OWNERSHIP_SEC = 1.0
@@ -269,6 +267,60 @@ class MotionSupervisor(Node):
                 axes.append(int(axis))
         return axes
 
+    def _clamp_motion_run_targets(self, msg: Any, motors: list) -> list:
+        """재생 목표도 모터 운전 한계(`lower/upper`) 안으로 · 2026-10-04
+
+        수동 조그·절대이동·스트림은 `_target_position_limit_error` 가 막는데
+        재생 중계만 검사가 없었다 · 계획(plan_builder)이 자르긴 하지만 매핑
+        저장으로 `lower/upper` 가 바뀐 뒤 옛 계획이 돌 수 있다 · Dynamixel 은
+        Extended Position 모드라 드라이브 Min/Max Position Limit 이 안 먹어
+        여기가 마지막 문이다.
+
+        밖이면 **버리지 않고 경계값으로** 보낸다 · 샘플을 버리면 그 축이 멈췄다
+        다음 샘플에서 튄다 · 슬롯이 0 인 축(이번 명령이 안 모는 축 · §6-72)과
+        목표 위치가 없는 슬롯(제어어만)은 건드리지 않는다 · 한계가 없거나
+        뒤집힌 모터도 그대로 둔다 (매핑 검증이 잡을 일).
+
+        돌려주는 값 · 클램프한 축 설명 목록 (비어 있으면 변경 없음).
+        """
+        clamped = []
+        try:
+            indexes = list(msg.controller_index)
+            counts = list(msg.number_of_target_interfaces)
+        except (AttributeError, TypeError):
+            return clamped
+        for slot, axis in enumerate(indexes):
+            if slot >= len(counts) or int(counts[slot]) <= 0:
+                continue
+            try:
+                interface_ids = list(msg.target_interface_id[slot].data)[:int(counts[slot])]
+            except (AttributeError, IndexError, TypeError):
+                continue
+            if ID_TARGET_POSITION not in interface_ids:
+                continue
+            motor = self._motor_for_axis(int(axis), motors)
+            if motor is None:
+                continue
+            lower = self._optional_float(motor.get('lower'))
+            upper = self._optional_float(motor.get('upper'))
+            if lower is None or upper is None or lower > upper:
+                continue
+            try:
+                target = self._optional_float(msg.position[slot])
+            except (IndexError, TypeError):
+                continue
+            if target is None:
+                continue
+            bounded = min(max(target, lower), upper)
+            if bounded == target:
+                continue
+            msg.position[slot] = bounded
+            clamped.append(
+                f'{int(axis)}번 {target:.3f}→{bounded:.3f} deg '
+                f'(한계 {lower:.3f}~{upper:.3f})'
+            )
+        return clamped
+
     def _acquire_command_owner(
         self,
         owner: CommandOwner,
@@ -325,8 +377,9 @@ class MotionSupervisor(Node):
         #
         # 같은 사실을 `CommandArbiter` 가 이미 축별로 쥐고 있다 · 한 사실을 두
         # 곳에 적으면 반드시 어긋난다 · 판정은 중재기 하나만 한다.
+        motors = self._current_motors()
         reason = motion_run_rejection_reason(
-            motor_state_available=bool(self._current_motors()),
+            motor_state_available=bool(motors),
             manual_command_active=bool(self._active_jogs or self._active_actions),
             emergency_latched=self._emergency_latched,
         )
@@ -370,6 +423,13 @@ class MotionSupervisor(Node):
             ):
                 msg.number_of_target_interfaces[slot] = 0
                 msg.target_interface_id[slot].data = []
+            clamped = self._clamp_motion_run_targets(msg, motors)
+            if clamped:
+                self.get_logger().warning(
+                    '재생 목표가 모터 운전 한계를 벗어나 경계값으로 보냅니다 · '
+                    + ' · '.join(clamped),
+                    throttle_duration_sec=1.0,
+                )
             self._last_motion_run_command_at = time.monotonic()
             self._command_pub.publish(msg)
 
@@ -1231,18 +1291,6 @@ class MotionSupervisor(Node):
             return False, 'target_deg is required'
         if requested_duration is not None and requested_duration <= 0:
             return False, 'duration_sec must be greater than 0'
-        if (
-            not range_recovery
-            and (
-                target_position < DYNAMIXEL_ACTION_MIN_DEG
-                or target_position > DYNAMIXEL_ACTION_MAX_DEG
-            )
-        ):
-            return (
-                False,
-                f'Dynamixel action target must be between '
-                f'{DYNAMIXEL_ACTION_MIN_DEG:.3f} and {DYNAMIXEL_ACTION_MAX_DEG:.3f} deg',
-            )
 
         motors = self._current_motors()
         motor = self._motor_for_axis(axis, motors)
@@ -1250,6 +1298,12 @@ class MotionSupervisor(Node):
             return False, f'{axis}번 모터를 모터 상태에서 찾을 수 없습니다'
         if not self._is_dynamixel(motor):
             return False, f'{axis}번 모터는 다이나믹셀이 아닙니다'
+        # ±180 한 바퀴 검사는 없앴다 · Extended Position(멀티턴) · 한계는 모터
+        # 운전 한계(`lower/upper` = 조인트 매핑 환산값) 하나 · AC 서보와 같다 · 2026-10-04
+        if not range_recovery:
+            limit_error = self._target_position_limit_error(motor, target_position)
+            if limit_error:
+                return False, limit_error
         ready_error = self._manual_readiness_error(motor, axis, is_ac_servo=False)
         if ready_error:
             return False, ready_error

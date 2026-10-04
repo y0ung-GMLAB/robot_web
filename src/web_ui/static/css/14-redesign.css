@@ -1060,7 +1060,7 @@ td.mapping-disabled-cell { background: transparent !important; opacity: 0.55; }
 
 /* ---------- 14. 조인트 매핑 · 비활성 칸 ----------
  * 다크 입력칸 규칙이 비활성 모양을 덮어 「켜진 칸」과 똑같아 보였다 ·
- * 첫 프레임 방식의 초기위치 · 다이나믹셀 감속비처럼 못 바꾸는 칸을 확실히 흐리게. */
+ * 첫 프레임 방식의 초기위치처럼 못 바꾸는 칸을 확실히 흐리게 (다이나믹셀 감속·기어비는 2026-10-04 부터 입력 가능). */
 .motion-mapping-table .mapping-disabled-cell { background: transparent; color: var(--muted); }
 .motion-mapping-table input:disabled,
 .motion-mapping-table select:disabled {

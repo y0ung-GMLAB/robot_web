@@ -100,6 +100,28 @@ def error_text(errorcode: int, alarm_text: str) -> str:
         return 'No error'
     return f'Error {float(errorcode):.1f}'
 
+#: Dynamixel X 시리즈 Hardware Error Status(addr 70) 비트 · 2026-10-04
+#: bit1 · bit6 · bit7 은 정의 없음 → `Unknown bit`
+DYNAMIXEL_HARDWARE_ERROR_BITS = (
+    (0x01, 'Input voltage error'),
+    (0x04, 'Overheating error'),
+    (0x08, 'Motor encoder error'),
+    (0x10, 'Electrical shock error'),
+    (0x20, 'Overload error'),
+)
+
+def dynamixel_error_text(errorcode: int) -> str:
+    """Hardware Error Status → 비트 이름 · 복구는 전원 재투입(웹 수단 없음)."""
+    code = int(errorcode) & 0xFF
+    if code == 0:
+        return 'No error'
+    names = [name for bit, name in DYNAMIXEL_HARDWARE_ERROR_BITS if code & bit]
+    known = sum(bit for bit, _ in DYNAMIXEL_HARDWARE_ERROR_BITS)
+    unknown = code & ~known
+    if unknown:
+        names.append(f'Unknown bit 0x{unknown:02X}')
+    return ' · '.join(names) + f' (0x{code:02X})'
+
 def normalized_errorcode(raw_errorcode: int, metadata: Dict[str, Any]) -> int:
     if (
         str(metadata.get('motor_type', '')).lower() == 'minas'

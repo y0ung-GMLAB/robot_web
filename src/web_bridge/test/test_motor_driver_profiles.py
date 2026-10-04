@@ -79,6 +79,7 @@ def test_motor_model_defaults_match_verified_development_config(tmp_path):
 
     w150 = motor_config_build.default_dynamixel_driver(tmp_path, 'XM540-W150')
     assert w150['driver_model'] == 'XM540-W150'
+    assert w150['profile_position_value'] == 4      # Extended Position
     assert w150['rated_speed_rpm'] == 66
     assert w150['speed'] == 396.0
     assert w150['profile_velocity'] == 396.0
@@ -334,3 +335,31 @@ def test_zero_alias_ac_axes_round_trip_with_unique_slave_ids(tmp_path):
         f'ac_servo_ethercat_master_0_slave_{axis}' for axis in range(5)
     ]
     assert len({motor['id'] for motor in restored}) == 5
+
+
+def test_dynamixel_drivers_always_boot_in_extended_position(tmp_path):
+    """Operating Mode 4 · 저장된 옛 드라이버(3)도 정규화에서 4 로 · minas 는 손대지 않는다."""
+    unknown = motor_config_build.default_dynamixel_driver(tmp_path, 'Model 9999')
+    assert unknown['profile_position_value'] == motor_config_build.DYNAMIXEL_EXTENDED_POSITION_MODE == 4
+
+    stale = {'id': 1, 'type': 'dynamixel', 'driver_model': 'XM540-W270-R', 'profile_position_value': 3}
+    minas = {'id': 0, 'type': 'minas', 'profile_position_value': 1}
+    normalized = motor_config_build.normalize_driver_configs(tmp_path, [minas, stale])
+    assert normalized[1]['profile_position_value'] == 4
+    assert normalized[0]['profile_position_value'] == 1
+    assert stale['profile_position_value'] == 3      # 입력은 복사본으로 다룬다
+
+
+def test_dynamixel_param_files_write_operating_mode_only():
+    """부팅 때 장치에 쓰는 items · Operating Mode(id 30) 하나 · EEPROM 다른 항목 없음."""
+    import yaml
+    from pathlib import Path
+
+    root = Path(__file__).resolve().parents[3]
+    for name in ('dynamixel_xm540_w150.yaml', 'dynamixel_xm540_w270.yaml'):
+        root_doc = yaml.safe_load((root / 'config' / name).read_text())
+        items = root_doc['items']
+        assert items == [{'id': 30, 'name': 'Operating Mode', 'type': 's8', 'value': 4}], name
+        assert root_doc['extended_position_raw_limit'] == 1048575, name
+        names = [entry.get('name') for entry in root_doc['interfaces']]
+        assert names.count('Torque Enable') == 2 and 'Goal Position' in names, name

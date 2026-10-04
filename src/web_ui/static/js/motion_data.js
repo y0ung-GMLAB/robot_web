@@ -978,22 +978,6 @@ export function createMotionDataController({
     return normalizeMotorTypeKey(motor?.motor_type, motor?.motor_type_label) === 'dynamixel';
   }
 
-  function isDynamixelMappingRow(row) {
-    return isDynamixelMotor(motorForMapping(row));
-  }
-
-  function mappingGearRatioValue(row) {
-    return isDynamixelMappingRow(row) ? 1.0 : numericOr(row?.gear_ratio, 1.0);
-  }
-
-  function normalizeDynamixelGearRatios() {
-    const rows = Array.isArray(mappingDraft.mappings) ? mappingDraft.mappings : [];
-    rows.forEach((row) => {
-      if (isDynamixelMappingRow(row)) {
-        row.gear_ratio = 1.0;
-      }
-    });
-  }
 
   function firstMotionValueFor(motionId) {
     const motionIds = Array.isArray(mappingMotionFileDetail?.analysis?.motion_ids)
@@ -2044,23 +2028,22 @@ export function createMotionDataController({
       const initialMode = row.initial_mode || 'reference';   // 칸 없으면 기준점 · 서버와 같다 (13-3)
       // 값을 직접 넣는 것은 「직접 지정」뿐 · 첫 프레임·기준점은 보여 주기만
       const initialPositionDisabled = initialMode !== 'manual';
-      const dynamixelGearFixed = isDynamixelMappingRow(row);
       const referencePositionValue = displayReferencePosition(row);
       const initialPositionValue = displayInitialPosition(row);
-      const gearRatioValue = mappingGearRatioValue(row);
+      // 감속·기어비 · 다이나믹셀도 입력 · 외부 기어 사례 (2026-10-04 · 「1 고정」 폐지)
+      const gearRatioValue = numericOr(row?.gear_ratio, 1.0);
       // 초기 위치 · 첫 프레임(애니메이션 첫 줄 값) · 직접 지정(이 칸) · 기준점(모션 0°) · 2026-10-02
       const initialPositionDisabledAttr = initialMode === 'reference'
         ? ' disabled title="기준점 · 재생 전 모션 0°(기준점 캡처한 자세)로 이동합니다"'
         : initialPositionDisabled
           ? ' disabled title="첫 프레임 · 애니메이션 첫 프레임 값으로 이동합니다 (애니메이션이 없으면 0°) · 값 입력은 「직접 지정」일 때만"'
           : ' title="직접 지정 · 재생 전 이 값(조인트 deg)으로 이동합니다"';
-      const gearRatioDisabledAttr = dynamixelGearFixed ? ' disabled title="다이나믹셀은 감속비를 사용하지 않으며 1로 고정됩니다"' : '';
       return (
         `<tr data-mapping-index="${index}">
           <td class="motion-id-cell"><input class="motion-id-input mono" type="text" title="Blender 본 이름 그대로 입력하세요 (구 파일의 1-1 형식도 그대로 사용 가능)" data-motion-mapping-field="motion_id" value="${displayText(row.motion_id)}" placeholder="예: Neck_Yaw" autocomplete="off" autocapitalize="off" spellcheck="false"></td>
           <td><input type="checkbox" data-motion-mapping-field="enabled" ${row.enabled ? 'checked' : ''}></td>
           <td class="mapping-motor-cell">${motorSelectHtml(row)}</td>
-          <td class="mapping-number-cell ${dynamixelGearFixed ? 'mapping-disabled-cell' : ''}"><input class="numeric-input mapping-number-input" type="number" min="0.0001" step="0.0001" data-motion-mapping-field="gear_ratio" value="${displayText(gearRatioValue)}"${gearRatioDisabledAttr}></td>
+          <td class="mapping-number-cell"><input class="numeric-input mapping-number-input" type="number" min="0.0001" step="0.0001" data-motion-mapping-field="gear_ratio" value="${displayText(gearRatioValue)}"></td>
           <td class="mapping-number-cell"><input class="numeric-input mapping-number-input" type="number" step="0.001" data-motion-mapping-field="reference_position_deg" value="${displayText(referencePositionValue)}"></td>
           <td>
             <button class="mapping-mini-button" type="button" data-motion-mapping-action="capture_reference">캡처</button>
@@ -2419,7 +2402,6 @@ export function createMotionDataController({
       mappingRevision = mappingFileRevision(payload.file);
       mappingValidation = payload.validation || null;
       mappingMotionFileDetail = loadedMotionFileDetail;
-      normalizeDynamixelGearRatios();
       mappingDirty = false;
       mappingRevisionConflict = false;
       const mappingFileName = payload.file?.filename || payload.file?.id || selectedMappingId || '-';
@@ -2628,7 +2610,6 @@ export function createMotionDataController({
     }
     mappingLoading = true;
     setMappingMessage('매핑 저장 중');
-    normalizeDynamixelGearRatios();
     upgradeLegacyMappingRefs();
     renderMappingPanel();
     try {
@@ -2758,9 +2739,6 @@ export function createMotionDataController({
         ? ''
         : selectionValue;
       row.motor_axis = motor ? Number(motor.controller_index) : null;
-      if (isDynamixelMappingRow(row)) {
-        row.gear_ratio = 1.0;
-      }
     } else if (field === 'initial_mode') {
       row.initial_mode = ['manual', 'first_frame'].includes(value) ? value : 'reference';
       if (row.initial_mode === 'first_frame') {
@@ -2780,9 +2758,6 @@ export function createMotionDataController({
       const number = Number(value);
       const fallback = field === 'scale' || field === 'gear_ratio' ? 1.0 : field === 'initial_move_time_sec' ? 5.0 : 0.0;
       row[field] = Number.isFinite(number) ? number : fallback;
-      if (field === 'gear_ratio' && isDynamixelMappingRow(row)) {
-        row.gear_ratio = 1.0;
-      }
     }
     mappingValidation = null;
     markMappingDirty();
@@ -2850,9 +2825,9 @@ export function createMotionDataController({
       row.reference_position_deg = position;
       row.reference_enabled = true;
     } else {
-      const gear = isDynamixelMappingRow(row) ? 1 : numericOr(row.gear_ratio, 1);
+      const gear = numericOr(row.gear_ratio, 1);
       const factor = gear * numericOr(row.scale, 1) * (row.invert ? -1 : 1);
-      if (!factor) return { success: false, message: '감속비·배율이 0이라 환산할 수 없습니다' };
+      if (!factor) return { success: false, message: '감속·기어비·배율이 0이라 환산할 수 없습니다' };
       const reference = row.reference_enabled === false ? 0 : numericOr(row.reference_position_deg, 0);
       const motion = (position - reference) / factor - numericOr(row.offset_deg, 0);
       const motorUpper = kind === 'upper';

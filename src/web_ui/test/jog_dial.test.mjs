@@ -1,4 +1,4 @@
-/** 조그 다이얼 · 돌린 만큼 상대 이동 · 단위는 모터 deg (감속비 미적용) · 2026-10-02
+/** 조그 다이얼 · 돌린 만큼 상대 이동 · 단위는 모터 deg (감속·기어비 미적용) · 2026-10-02
  *
  * supervisor 는 앞 조그가 끝나기 전 새 조그를 거절한다 · 그래서 다이얼은
  * 돌린 양을 쌓아 두고 앞 요청이 끝나면 한 번에 보낸다 · 빨리 돌려도 칸을
@@ -29,7 +29,7 @@ test('the dial sits in the jog panel and is bound through dom.js', () => {
 test('step size is a free numeric input in motor deg', () => {
   assert.match(html, /<input id="jogDialStep"[^>]*type="number"/);
   assert.doesNotMatch(html, /<select id="jogDialStep"/);
-  assert.match(html, /모터 deg · 감속비 미적용/);
+  assert.match(html, /모터 deg · 감속·기어비 미적용/);
   // 범위 밖·숫자 아님은 보내지 않고 사유를 말한다
   assert.match(dial, /if \(step === null\)/);
   assert.match(dial, /const STEP_MIN_DEG = 0\.001;/);
@@ -85,7 +85,7 @@ test('dial ON/OFF switch and a typed target live in the same jog block', () => {
   }
   const block = html.indexOf('id="jogDialBlock"');
   assert.ok(html.indexOf('id="jogTargetInput"') > block, '목표 칸은 다이얼 블록 안');
-  assert.match(html, /목표 위치 \(모터 deg · 감속비 미적용\)/);
+  assert.match(html, /목표 위치 \(모터 deg · 감속·기어비 미적용\)/);
   // OFF 면 썸휠·화살표 묶음만 숨고 위치 표시·limit 버튼은 그대로 (묶음이 jog-dial-only · 2026-10-04)
   assert.match(html, /class="jog-wheel-column jog-dial-only"/);
   const column = html.indexOf('class="jog-wheel-column jog-dial-only"');

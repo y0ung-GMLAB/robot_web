@@ -8,7 +8,10 @@
     motor = ref + (motion + offset) × scale × sign × gear
 
 `motion_runtime.motion_run_rules._motor_target` 과 같은 식이다 (테스트로 고정).
-Dynamixel 은 감속비 1 고정 (화면 `motion_data.js` 규칙과 같다).
+Dynamixel 도 같은 식 · 감속·기어비는 줄에 적힌 값 그대로 (외부 기어 사용 사례) ·
+Dynamixel 은 Extended Position 모드라 드라이브 Min/Max Position Limit 이
+안 먹고, 한계는 supervisor·plan_builder 가 이 `lower/upper` 로 지킨다 ·
+2026-10-04 「감속비 1 고정」·「±180 한 바퀴 클램프」 폐지 (사용자 결정).
 
 모터 고르기는 런타임과 같다 · `motor_ref` 가 있으면 그 이름으로, 없으면
 옛 파일처럼 `motor_axis`(controller_index)로.
@@ -29,9 +32,6 @@ from motion_web_bridge.motor_config_rules import expand_shared_driver_profiles
 DEFAULT_MOTION_LOWER_DEG = -180.0
 DEFAULT_MOTION_UPPER_DEG = 180.0
 
-#: Dynamixel 위치 명령 한계 · supervisor 절대 이동 검사와 같은 ±180
-DYNAMIXEL_LIMIT_DEG = 180.0
-
 #: 파일에 적을 자릿수 · 모터 deg 0.001° 단위
 LIMIT_DECIMALS = 3
 
@@ -44,7 +44,7 @@ def _float(value: Any, default: float) -> float:
     return number if number == number and abs(number) != float('inf') else default
 
 
-def motor_target(row: Dict[str, Any], motion_value: float, *, dynamixel: bool = False) -> float:
+def motor_target(row: Dict[str, Any], motion_value: float) -> float:
     """조인트 deg → 모터 deg · `motion_run_rules._motor_target` 과 같은 식."""
     sign = -1.0 if bool(row.get('invert')) else 1.0
     reference = _float(row.get('reference_position_deg'), 0.0)
@@ -52,20 +52,17 @@ def motor_target(row: Dict[str, Any], motion_value: float, *, dynamixel: bool = 
         reference = 0.0
     offset = _float(row.get('offset_deg'), 0.0)
     scale = _float(row.get('scale'), 1.0) or 1.0
-    gear_ratio = 1.0 if dynamixel else (_float(row.get('gear_ratio'), 1.0) or 1.0)
+    gear_ratio = _float(row.get('gear_ratio'), 1.0) or 1.0
     return reference + (float(motion_value) + offset) * scale * sign * gear_ratio
 
 
-def row_motor_limits(row: Dict[str, Any], *, dynamixel: bool = False) -> Tuple[float, float]:
+def row_motor_limits(row: Dict[str, Any]) -> Tuple[float, float]:
     """한 줄의 조인트 범위를 모터 deg (하한, 상한)으로 · 반전이면 뒤집혀 정렬된다."""
     lower = _float(row.get('motion_lower_deg'), DEFAULT_MOTION_LOWER_DEG)
     upper = _float(row.get('motion_upper_deg'), DEFAULT_MOTION_UPPER_DEG)
-    first = motor_target(row, lower, dynamixel=dynamixel)
-    second = motor_target(row, upper, dynamixel=dynamixel)
+    first = motor_target(row, lower)
+    second = motor_target(row, upper)
     low, high = min(first, second), max(first, second)
-    if dynamixel:
-        low = max(low, -DYNAMIXEL_LIMIT_DEG)
-        high = min(high, DYNAMIXEL_LIMIT_DEG)
     return round(low, LIMIT_DECIMALS), round(high, LIMIT_DECIMALS)
 
 
@@ -137,9 +134,8 @@ def apply_mapping_limits(
     rows = [row for row in mapping_rows(mapping) if row.get('enabled', True) is not False]
     changes: List[Dict[str, Any]] = []
     for slave, driver, motor in _config_axes(result):
-        dynamixel = motor.get('motor_type') == 'dynamixel'
         limits = [
-            row_motor_limits(row, dynamixel=dynamixel)
+            row_motor_limits(row)
             for row in rows
             if _row_matches(row, motor)
         ]

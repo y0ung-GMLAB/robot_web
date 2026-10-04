@@ -31,6 +31,13 @@ from motion_web_bridge.motor_config_rules import (
 #: Dynamixel 직렬 통신 속도 · 화면(`motor_type_dynamixel.js`)과 같은 값
 DYNAMIXEL_BAUDRATE = 1000000
 
+#: Dynamixel Operating Mode · 4 = Extended Position (멀티턴) · 2026-10-04 사용자 결정
+#: 부팅 때 `config/dynamixel_*.yaml` items 의 Operating Mode 에 이 값이 들어간다
+#: (`serial_controller` 가 `profile_position_value` 로 덮어씀) · Position Control(3)
+#: 이면 장치 Min/Max Position Limit(한 바퀴)이 살아나 한계가 둘이 된다 · 저장된
+#: 옛 드라이버(3)도 `normalize_driver_configs` 가 4 로 맞춘다
+DYNAMIXEL_EXTENDED_POSITION_MODE = 4
+
 
 def dynamixel_param_file_for_model(workspace_root: Path, driver_model: str) -> str:
     model = driver_model.lower().replace('_', '-')
@@ -52,6 +59,7 @@ def normalize_driver_configs(
             item['param_file'] = dynamixel_param_file_for_model(
                 workspace_root, str(item.get('driver_model') or '')
             )
+            item['profile_position_value'] = DYNAMIXEL_EXTENDED_POSITION_MODE
         normalized.append(item)
     return normalized
 
@@ -87,7 +95,7 @@ def default_dynamixel_driver(workspace_root: Path, driver_model: str = '') -> Di
         'profile_velocity': velocity,
         'profile_acceleration': 703104.5,
         'profile_deceleration': 703104.5,
-        'profile_position_value': 3,
+        'profile_position_value': DYNAMIXEL_EXTENDED_POSITION_MODE,
         'profile_velocity_value': 1,
         'profile_effort_value': 0,
         'type': 'dynamixel',

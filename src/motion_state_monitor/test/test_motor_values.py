@@ -163,3 +163,18 @@ def test_overload_ratio_is_none_when_not_read():
     # 옛 메시지 · 칸 자체가 없다
     assert motor_values.overload_ratio_pct(_Msg(), 0) is None
     assert motor_values.overload_ratio_pct(_Msg(overload_ratio=[float('nan')]), 0) is None
+
+
+# --------------------------------------------------------------------------- #
+# Dynamixel Hardware Error Status · 비트 이름 · 2026-10-04
+# --------------------------------------------------------------------------- #
+
+@pytest.mark.parametrize(('errorcode', 'expected'), [
+    (0, 'No error'),
+    (0x20, 'Overload error (0x20)'),
+    (0x05, 'Input voltage error · Overheating error (0x05)'),
+    (0x02, 'Unknown bit 0x02 (0x02)'),
+    (0x1F0, 'Electrical shock error · Overload error · Unknown bit 0xC0 (0xF0)'),
+])
+def test_dynamixel_error_text_names_hardware_error_bits(errorcode, expected):
+    assert motor_values.dynamixel_error_text(errorcode) == expected

@@ -27,3 +27,9 @@
 - `ros2/playstation_joy_interface_ros2/.vscode/` 4개 (편집기 설정)
 
 나머지 250개 파일 · 원본 커밋과 blob 해시 동일 (합칠 때 확인)
+
+## 이후 수정 (robot_web 커밋 · 사용자 명시 지시)
+
+| 날짜 | 경로 | 수정 | 사유 |
+|---|---|---|---|
+| 2026-10-04 | `lib/motor_manager/hardware/dynamixel/src/dynamixel_driver.cpp` · `include/dynamixel/dynamixel_driver.hpp` | `position(double)` 한 바퀴(0~4095) 클램프 → Extended Position 허용 raw ±`extended_position_raw_limit_`(기본 1,048,575 · param yaml `extended_position_raw_limit`) | 다이나믹셀 멀티턴 · 외부 기어 사용 · 운전 한계는 상위 `lower/upper` 로 |

@@ -86,7 +86,7 @@
             <div id="motionTestActionGuide" class="motion-test-action-guide" data-state="warning">다음 단계: 시험할 모터를 선택하세요</div>
             <div id="motionTestModeButtons" class="segmented-control motion-mode-tabs" role="group" aria-label="수동 조작 방식">
               <button class="active" type="button" data-motion-test-mode="jog">조그 모드</button>
-              <!-- 「동작 모드」(절대 목표 · 감속비 손입력)는 없앴다 · 다이얼 OFF 의 목표 위치 이동이 대신한다 · 2026-10-02 -->
+              <!-- 「동작 모드」(절대 목표 · 감속·기어비 손입력)는 없앴다 · 다이얼 OFF 의 목표 위치 이동이 대신한다 · 2026-10-02 -->
               <button type="button" data-motion-test-mode="recovery">범위 복귀</button>
             </div>
             <div class="motion-test-command-grid">
@@ -99,7 +99,7 @@
                 <span>조그 단위</span>
                 <label class="motion-jog-joint-toggle" title="끄면 모터 deg 그대로 움직입니다">
                   <input id="motionTestJogJointMode" type="checkbox" checked>
-                  조인트 deg 기준 · 감속비·방향 적용
+                  조인트 deg 기준 · 감속·기어비·방향 적용
                 </label>
               </div>
               <div class="motion-command-note hidden" data-motion-test-panel="recovery">
@@ -136,14 +136,14 @@
                 </label>
                 <div class="jog-target-row jog-target-only">
                   <label class="manual-field">
-                    <span>목표 위치 (모터 deg · 감속비 미적용)</span>
+                    <span>목표 위치 (모터 deg · 감속·기어비 미적용)</span>
                     <input id="jogTargetInput" class="mono" type="number" inputmode="decimal" step="any"
                       title="이동할 모터 위치 · 모터 운전 한계 안 · 속도·가속은 모터 설정 한계를 따릅니다">
                   </label>
                   <button id="jogTargetMoveButton" class="primary" type="button" disabled>이동</button>
                 </div>
                 <label class="manual-field jog-dial-only">
-                  <span>한 칸 = (모터 deg · 감속비 미적용)</span>
+                  <span>한 칸 = (모터 deg · 감속·기어비 미적용)</span>
                   <input id="jogDialStep" class="mono" type="number" inputmode="decimal"
                     min="0.001" max="360" step="any" value="1"
                     title="한 칸에 움직일 모터 각도 · 0.001 ~ 360 deg">
