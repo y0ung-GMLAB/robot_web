@@ -15,12 +15,11 @@
       command: [...]            # {motion_path} {motion_stem} 치환
       result: '{motion_stem}.sim.npz'   # 이 파일이 생기면 「계산 끝」
     preview:
-      command: [...]            # {motion_path} {motion_stem} {result} {fps} 치환
-    fps: 60                     # 기본 fps · 화면에서 30/60/120/144 선택
+      command: [...]            # (선택 · 서버는 쓰지 않음 · 개발 PC 참고용)
     cwd: ...                    # 명령 실행 폴더
 
-`precompute` 없이 `preview`(또는 옛 `command`)만 있으면 게이트 없이 바로
-튼다(direct) · 물리 없는 kinematic 뷰어처럼 계산이 필요 없는 구성용.
+`precompute` 가 없고 `preview`(또는 옛 `command`)만 있으면 계산 결과가 없는
+구성(direct) · 웹 3D 는 그릴 것이 없다 · 상태만 알린다.
 
 **로봇 팩 우선** · `robot_pack/preview.yaml` 이 있으면 그것을, 없으면
 `config/animation_preview.yaml` 을 쓴다 · 치환 `{stack}` = 스택(워크스페이스)
@@ -29,12 +28,13 @@
 계산이 끝나면 결과 옆 `<결과>.meta.json` 에 그때의 팩(이름·버전·지문)을
 남긴다 · 지금 팩과 지문이 다르면 `stale`(다시 계산 필요) · 보기는 허용.
 
-계산은 끝났는지(결과 파일 존재)와 도는 중인지를 기억한다 · 뷰어는 **핸들을
-보관**한다(수정 목록 7-1 · 2026-10-03) · 화면 「MuJoCo 창 닫기」가 `stop_preview`
-로 끝낸다 · 같은 애니메이션의 뷰어가 이미 떠 있으면 다시 띄우지 않는다 ·
-계산·뷰어의 stdout·stderr 는 `log/animation_preview/<애니메이션>.<종류>.log`
-에 남긴다(전에는 DEVNULL 이라 실패 사유를 볼 수 없었다). 웹 3D 표시(7번)가
-들어오면 네이티브 뷰어와 함께 이 보관도 사라진다.
+계산은 끝났는지(결과 파일 존재)와 도는 중인지를 기억한다 · 계산의
+stdout·stderr 는 `log/animation_preview/<애니메이션>.precompute.log` 에 남긴다.
+
+**네이티브 뷰어 창은 없앴다**(수정 목록 7 · 2026-10-04) · 서버 PC 모니터에만
+뜨는 창은 슬레이브·원격에서 보이지 않는다 · 보기는 브라우저가 한다
+(`sim_scene.py` · `static/js/sim3d.js`) · `preview.command` 는 개발 PC 에서
+`scripts/sim/replay_run.py` 를 손으로 돌릴 때 참고용으로만 남는다(서버는 쓰지 않는다).
 """
 
 from __future__ import annotations
@@ -52,7 +52,6 @@ from motion_common.store import atomic_write_json
 
 CONFIG_NAME = 'animation_preview.yaml'
 PACK_CONFIG_NAME = 'preview.yaml'
-ALLOWED_FPS = (30, 60, 120, 144)
 NOT_CONFIGURED_MESSAGE = (
     '미리보기 명령이 설정되지 않았습니다 · '
     '로봇 팩(preview.yaml)을 올리거나 config/animation_preview.yaml 을 만드세요 '
@@ -66,12 +65,8 @@ _LAST_RC: Dict[str, int] = {}
 #: 도는 계산이 시작될 때의 팩 · 성공으로 끝나야 meta 로 남긴다
 _PENDING_META: Dict[str, Dict[str, Any]] = {}
 _LOCK = threading.Lock()
-#: 떠 있는 뷰어들 · {애니메이션 경로: Popen} · 끝난 것은 보일 때 거둔다 · 7-1
-_VIEWERS: Dict[str, subprocess.Popen] = {}
-#: 계산·뷰어 출력 기록 폴더 (워크스페이스 기준 · `log/` 는 커밋하지 않는다)
+#: 계산 출력 기록 폴더 (워크스페이스 기준 · `log/` 는 커밋하지 않는다)
 LOG_DIR_NAME = 'animation_preview'
-#: 뷰어 종료 대기 · terminate 뒤 이 시간 안에 안 끝나면 kill
-VIEWER_STOP_WAIT_SEC = 3.0
 
 
 def preview_config(workspace_root: Path) -> Optional[Dict[str, Any]]:
@@ -102,16 +97,13 @@ def _read_config(path: Path) -> Optional[Dict[str, Any]]:
         return None
     if not isinstance(payload, dict):
         return None
+    payload = dict(payload)
     preview = payload.get('preview')
-    if not isinstance(preview, dict):
-        # 옛 모양 · 최상위 command 하나 = 게이트 없는 direct 재생
-        command = payload.get('command')
-        if not _valid_command(command):
-            return None
-        payload = dict(payload)
-        payload['preview'] = {'command': command}
+    if not isinstance(preview, dict) and _valid_command(payload.get('command')):
+        # 옛 모양 · 최상위 command 하나 = 계산 없는 구성(direct)
+        payload['preview'] = {'command': payload['command']}
         preview = payload['preview']
-    if not _valid_command(preview.get('command')):
+    if isinstance(preview, dict) and not _valid_command(preview.get('command')):
         return None
     precompute = payload.get('precompute')
     if precompute is not None:
@@ -119,7 +111,10 @@ def _read_config(path: Path) -> Optional[Dict[str, Any]]:
             return None
         if not str(precompute.get('result') or '').strip():
             return None
-    return dict(payload)
+    # 계산(precompute)도 참고용 preview 도 없으면 설정이 아니다
+    if precompute is None and not isinstance(preview, dict):
+        return None
+    return payload
 
 
 def _valid_command(command: Any) -> bool:
@@ -148,21 +143,6 @@ def _fill(
         .replace('{pack}', str(config.get('_pack', '')))
         for part in parts
     ]
-
-
-def normalized_fps(config: Dict[str, Any], requested: Any = None) -> int:
-    """화면이 고른 fps · 허용 값(30/60/120/144)만 · 아니면 설정 기본."""
-    try:
-        value = int(requested)
-    except (TypeError, ValueError):
-        value = None
-    if value in ALLOWED_FPS:
-        return value
-    try:
-        fallback = int(config.get('fps', 60))
-    except (TypeError, ValueError):
-        fallback = 60
-    return fallback if fallback in ALLOWED_FPS else 60
 
 
 def result_path_for(config: Dict[str, Any], motion_path: Path) -> Optional[Path]:
@@ -214,57 +194,6 @@ def _close_log(handle: Any) -> None:
             pass
 
 
-def _reap_viewers() -> None:
-    with _LOCK:
-        for key in list(_VIEWERS):
-            if _VIEWERS[key].poll() is not None:
-                del _VIEWERS[key]
-
-
-def viewer_running(motion_path: Path) -> bool:
-    """이 애니메이션의 뷰어가 떠 있는가 · 화면 「MuJoCo 창 닫기」 활성 조건."""
-    _reap_viewers()
-    with _LOCK:
-        return str(Path(motion_path)) in _VIEWERS
-
-
-def stop_preview(motion_path: Optional[Path] = None) -> Dict[str, Any]:
-    """뷰어를 끝낸다 · 경로를 주면 그 애니메이션 것만 · 없으면 전부 · 7-1
-
-    terminate → `VIEWER_STOP_WAIT_SEC` 대기 → kill. 떠 있는 것이 없으면
-    success=True 에 그렇다고 말한다 (닫기 버튼은 몇 번 눌러도 된다).
-    """
-    _reap_viewers()
-    with _LOCK:
-        if motion_path is None:
-            targets = dict(_VIEWERS)
-        else:
-            key = str(Path(motion_path))
-            targets = {key: _VIEWERS[key]} if key in _VIEWERS else {}
-        for key in targets:
-            _VIEWERS.pop(key, None)
-    if not targets:
-        return {'success': True, 'stopped': 0, 'message': '떠 있는 MuJoCo 창이 없습니다'}
-    killed = 0
-    for handle in targets.values():
-        try:
-            handle.terminate()
-            try:
-                handle.wait(timeout=VIEWER_STOP_WAIT_SEC)
-            except subprocess.TimeoutExpired:
-                handle.kill()
-                killed += 1
-        except (OSError, ProcessLookupError):
-            pass
-    names = ' · '.join(Path(key).name for key in targets)
-    note = f' (강제 종료 {killed})' if killed else ''
-    return {
-        'success': True,
-        'stopped': len(targets),
-        'message': f'MuJoCo 창 닫음: {names}{note}',
-    }
-
-
 def _reap() -> None:
     finished = []
     with _LOCK:
@@ -302,13 +231,6 @@ def _stale_reason(workspace_root: Path, result: Path) -> str:
 
 
 def preview_state(workspace_root: Path, motion_path: Path) -> Dict[str, Any]:
-    """이 애니메이션의 MuJoCo 상태 + `viewer_running`(뷰어가 떠 있는가 · 7-1)."""
-    state = _preview_state(workspace_root, motion_path)
-    state['viewer_running'] = viewer_running(motion_path)
-    return state
-
-
-def _preview_state(workspace_root: Path, motion_path: Path) -> Dict[str, Any]:
     """이 애니메이션의 MuJoCo 상태 · 화면 배지와 버튼이 이대로 그린다.
 
         unavailable  설정 없음
@@ -404,59 +326,4 @@ def launch_precompute(
     return {
         'success': True,
         'message': f'MuJoCo 계산 시작: {motion_path.name} · 끝나면 같이 보기가 켜집니다',
-    }
-
-
-def launch_preview(
-    workspace_root: Path,
-    motion_path: Path,
-    *,
-    fps: Any = None,
-    spawn=subprocess.Popen,
-) -> Dict[str, Any]:
-    """뷰어를 띄운다 · 계산이 있는 구성이면 **끝난 것만** 튼다."""
-    config = preview_config(Path(workspace_root))
-    if config is None:
-        return {'success': False, 'message': NOT_CONFIGURED_MESSAGE}
-    motion_path = Path(motion_path)
-    if not motion_path.is_file():
-        return {'success': False, 'message': f'애니메이션 파일이 없습니다: {motion_path.name}'}
-    state = preview_state(workspace_root, motion_path)
-    if state['state'] == 'computing':
-        return {'success': False, 'message': 'MuJoCo 계산 중입니다 · 끝나면 틀 수 있습니다'}
-    if state['state'] in ('missing', 'failed'):
-        return {
-            'success': False,
-            'message': state.get('message')
-            or '계산 결과가 없습니다 · 「MuJoCo 계산」을 먼저 누르세요',
-        }
-    result = result_path_for(config, motion_path)
-    args = _fill(
-        config['preview']['command'], motion_path,
-        result=str(result) if result else '',
-        fps=normalized_fps(config, fps),
-        config=config,
-    )
-    cwd = str(config.get('cwd') or workspace_root)
-    _reap_viewers()
-    key = str(motion_path)
-    with _LOCK:
-        if key in _VIEWERS:
-            return {
-                'success': True,
-                'message': f'MuJoCo 창이 이미 떠 있습니다: {motion_path.name} · '
-                           '다시 틀려면 「MuJoCo 창 닫기」 후 누르세요',
-            }
-    log = _open_log(workspace_root, motion_path, 'preview')
-    try:
-        handle = spawn(args, cwd=cwd, stdout=log, stderr=log, shell=False)
-    except OSError as exc:
-        _close_log(log)
-        return {'success': False, 'message': f'미리보기 실행 실패: {exc}'}
-    _close_log(log)
-    with _LOCK:
-        _VIEWERS[key] = handle
-    return {
-        'success': True,
-        'message': f'MuJoCo 재생: {motion_path.name} · 창은 이 PC 화면에 뜹니다',
     }

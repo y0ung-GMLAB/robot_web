@@ -1,8 +1,8 @@
-"""MuJoCo 미리보기 · 계산(precompute)과 재생(preview)은 현장 명령이다 · P7
+"""MuJoCo 미리보기 · 계산(precompute)은 현장 명령이다 · 보기는 브라우저(웹 3D) · P7 · 7
 
 로봇마다 모델·시뮬레이터가 다르므로 플랫폼은 명령 틀과 결과 경로만 안다 ·
-뷰어는 **계산이 끝난 것만** 튼다 · 계산 중엔 computing(화면은 그레이) ·
-실행은 발사 후 망각 · 셸을 거치지 않아 파일 이름이 명령으로 둔갑하지 않는다.
+계산 중엔 computing(화면은 그레이) · 셸을 거치지 않아 파일 이름이 명령으로
+둔갑하지 않는다 · 네이티브 뷰어 창(launch_preview)은 없앴다(2026-10-04).
 """
 
 from pathlib import Path
@@ -53,24 +53,38 @@ def setup_function(_):
     animation_preview._RUNNING.clear()
     animation_preview._LAST_RC.clear()
     animation_preview._PENDING_META.clear()
-    animation_preview._VIEWERS.clear()
 
 
 def test_without_config_the_button_says_why(tmp_path):
-    result = animation_preview.launch_preview(
+    result = animation_preview.launch_precompute(
         _workspace(tmp_path), _motion(tmp_path), spawn=_no_spawn,
     )
     assert result['success'] is False
     assert 'animation_preview.yaml' in result['message']
+    state = animation_preview.preview_state(_workspace(tmp_path), _motion(tmp_path))
+    assert state['state'] == 'unavailable'
 
 
-def test_viewer_refuses_until_the_computation_result_exists(tmp_path):
+def test_until_the_computation_result_exists_the_state_is_missing(tmp_path):
     workspace = _workspace(tmp_path, GATED)
     motion = _motion(tmp_path)
-    result = animation_preview.launch_preview(workspace, motion, spawn=_no_spawn)
-    assert result['success'] is False
-    assert '계산' in result['message']
     assert animation_preview.preview_state(workspace, motion)['state'] == 'missing'
+
+
+def test_precompute_only_config_is_enough_and_the_preview_command_is_optional(tmp_path):
+    """보기는 브라우저가 한다 · preview.command 없이 precompute 만 있어도 설정이다 (7)."""
+    workspace = _workspace(tmp_path, (
+        'precompute:\n  command: [simulate, "{motion_path}"]\n  result: "{motion_stem}.sim.npz"\n'
+    ))
+    motion = _motion(tmp_path)
+    config = animation_preview.preview_config(workspace)
+    assert config is not None and 'preview' not in config
+    assert animation_preview.preview_state(workspace, motion)['state'] == 'missing'
+    # 둘 다 없으면 설정이 아니다
+    assert animation_preview.preview_config(_workspace(tmp_path, 'fps: 60\n')) is None
+    # 뷰어 함수는 사라졌다
+    for gone in ('launch_preview', 'stop_preview', 'viewer_running', 'normalized_fps', '_VIEWERS'):
+        assert not hasattr(animation_preview, gone), gone
 
 
 def test_precompute_runs_once_and_marks_computing(tmp_path):
@@ -87,81 +101,22 @@ def test_precompute_runs_once_and_marks_computing(tmp_path):
     second = animation_preview.launch_precompute(workspace, motion, spawn=_no_spawn)
     assert '이미 계산 중' in second['message']
     assert animation_preview.preview_state(workspace, motion)['state'] == 'computing'
-    # 계산 중엔 재생도 거부 · 화면은 그레이
-    refused = animation_preview.launch_preview(workspace, motion, spawn=_no_spawn)
-    assert refused['success'] is False and '계산 중' in refused['message']
     [(args, kwargs)] = spawned
     stem = str(motion)[: -len('.json')]
     assert args == ['simulate', str(motion), f'{stem}.sim.csv']
     assert kwargs['shell'] is False
 
 
-def test_finished_computation_turns_ready_and_the_viewer_plays_the_result(tmp_path):
+def test_finished_computation_turns_ready(tmp_path):
     workspace = _workspace(tmp_path, GATED)
     motion = _motion(tmp_path)
     stem = str(motion)[: -len('.json')]
     Path(f'{stem}.sim.npz').write_bytes(b'npz')
-    assert animation_preview.preview_state(workspace, motion)['state'] == 'ready'
-    spawned = []
-    result = animation_preview.launch_preview(
-        workspace, motion, fps=144,
-        spawn=lambda args, **kwargs: spawned.append(args),
-    )
-    assert result['success'] is True
-    [args] = spawned
-    assert args == ['viewer', f'{stem}.sim.npz', '144']
+    state = animation_preview.preview_state(workspace, motion)
+    assert state['state'] == 'ready' and 'viewer_running' not in state
 
 
-def test_viewer_handle_is_kept_and_the_close_button_ends_it(tmp_path):
-    """뷰어는 발사 후 망각이 아니다 · 핸들을 보관하고 「MuJoCo 창 닫기」가 끝낸다 · 7-1"""
-    workspace = _workspace(tmp_path, GATED)
-    motion = _motion(tmp_path)
-    Path(f'{str(motion)[: -len(".json")]}.sim.npz').write_bytes(b'npz')
-    events = []
-
-    class _Viewer:
-        def __init__(self):
-            self.alive = True
-        def poll(self):
-            return None if self.alive else 0
-        def terminate(self):
-            events.append('terminate')
-            self.alive = False
-        def wait(self, timeout=None):
-            return 0
-        def kill(self):
-            events.append('kill')
-
-    viewer = _Viewer()
-    assert animation_preview.launch_preview(
-        workspace, motion, spawn=lambda *a, **k: viewer,
-    )['success'] is True
-    assert animation_preview.preview_state(workspace, motion)['viewer_running'] is True
-    # 떠 있는 동안은 또 띄우지 않는다
-    again = animation_preview.launch_preview(workspace, motion, spawn=_no_spawn)
-    assert again['success'] is True and '이미 떠 있습니다' in again['message']
-
-    stopped = animation_preview.stop_preview(motion)
-    assert stopped['stopped'] == 1 and events == ['terminate']
-    assert animation_preview.preview_state(workspace, motion)['viewer_running'] is False
-    # 닫을 것이 없어도 실패가 아니다
-    assert animation_preview.stop_preview(motion) == {
-        'success': True, 'stopped': 0, 'message': '떠 있는 MuJoCo 창이 없습니다',
-    }
-
-
-def test_viewer_that_exited_on_its_own_is_forgotten(tmp_path):
-    workspace = _workspace(tmp_path, GATED)
-    motion = _motion(tmp_path)
-    Path(f'{str(motion)[: -len(".json")]}.sim.npz').write_bytes(b'npz')
-    animation_preview.launch_preview(
-        workspace, motion, spawn=lambda *a, **k: SimpleNamespace(poll=lambda: 0),
-    )
-    assert animation_preview.viewer_running(motion) is False
-    assert animation_preview.stop_preview()['stopped'] == 0
-
-
-def test_precompute_and_viewer_output_go_to_a_log_file_not_devnull(tmp_path):
+def test_precompute_output_goes_to_a_log_file_not_devnull(tmp_path):
     """실패 사유가 보여야 한다 · stdout·stderr 를 log/animation_preview/ 에 남긴다 · 7-1"""
     workspace = _workspace(tmp_path, GATED)
     motion = _motion(tmp_path)
@@ -179,10 +134,6 @@ def test_precompute_and_viewer_output_go_to_a_log_file_not_devnull(tmp_path):
     assert spawned[0]['stdout'] is spawned[0]['stderr']
     assert spawned[0]['stderr'].closed   # 부모 쪽 핸들은 닫는다
 
-    Path(f'{str(motion)[: -len(".json")]}.sim.npz').write_bytes(b'npz')
-    animation_preview.launch_preview(workspace, motion, spawn=spawn)
-    assert animation_preview.log_path_for(workspace, motion, 'preview').read_bytes() == b'boom\n'
-
 
 def test_a_failed_computation_is_named_not_hidden(tmp_path):
     workspace = _workspace(tmp_path, GATED)
@@ -196,32 +147,16 @@ def test_a_failed_computation_is_named_not_hidden(tmp_path):
     assert '실패' in state['message']
 
 
-def test_fps_only_accepts_the_four_screen_choices():
-    config = {'fps': 60}
-    assert animation_preview.normalized_fps(config, 144) == 144
-    assert animation_preview.normalized_fps(config, 30) == 30
-    # 허용 밖·쓰레기 값은 설정 기본으로
-    assert animation_preview.normalized_fps(config, 999) == 60
-    assert animation_preview.normalized_fps(config, 'x') == 60
-    assert animation_preview.normalized_fps({'fps': 7}, None) == 60
-
-
-def test_legacy_single_command_config_plays_directly(tmp_path):
+def test_legacy_single_command_config_is_a_direct_configuration(tmp_path):
+    """옛 모양(최상위 command) · 계산 결과가 없는 구성 · 상태만 알린다 · 웹 3D 는 그릴 것이 없다."""
     workspace = _workspace(tmp_path, (
         'command:\n'
         '  - viewer\n'
         "  - '{motion_path}'\n"
-        "  - '{fps}'\n"
     ))
     motion = _motion(tmp_path)
     assert animation_preview.preview_state(workspace, motion)['state'] == 'direct'
-    spawned = []
-    result = animation_preview.launch_preview(
-        workspace, motion, fps=30,
-        spawn=lambda args, **kwargs: spawned.append(args),
-    )
-    assert result['success'] is True
-    assert spawned == [['viewer', str(motion), '30']]
+    assert animation_preview.launch_precompute(workspace, motion, spawn=_no_spawn)['success'] is True
 
 
 def test_listing_annotation_marks_each_file(tmp_path):
@@ -252,22 +187,19 @@ def test_detail_annotation_marks_file_and_listing(tmp_path):
     assert out['files'][0]['preview']['state'] == 'ready'
 
 
-def test_bridge_launches_the_companion_when_playback_turns_running():
-    """같이 보기 = 모터가 running 으로 바뀌는 그 순간 뷰어를 띄운다 ·
-    초기 이동이 끝난 시점이라 양쪽 다 프레임 1 부터 출발한다."""
+def test_the_server_no_longer_launches_a_native_viewer():
+    """같이 보기는 브라우저(웹 3D)가 한다 · 서버는 계산만 · 뷰어 창·예약·fps 는 사라졌다 (7)."""
     bridge = (BRIDGE_DIR / 'bridge_node.py').read_text(encoding='utf-8')
-    assert "payload.pop('with_mujoco', False)" in bridge
-    assert 'def _arm_mujoco_companion(' in bridge
-    assert 'def _maybe_launch_mujoco_companion(' in bridge
-    # 상태가 들어오는 두 길목 모두에서 본다
-    assert bridge.count('self._maybe_launch_mujoco_companion(') >= 2
-    # 계산 안 끝났으면 예약 자체를 거절한다
-    assert 'MuJoCo 같이 보기는 계산이 끝난 뒤에' in bridge
+    for gone in ('_arm_mujoco_companion', '_maybe_launch_mujoco_companion', '_mujoco_companion',
+                 'def preview_motion_file(', 'def stop_preview_motion_file(', 'launch_preview('):
+        assert gone not in bridge, gone
+    # 옛 화면이 보내던 칸은 받아서 버린다 · 거절하지 않는다
+    assert "payload.pop('with_mujoco', None)" in bridge
     routes = (ROUTES_DIR / 'motion_run_routes.py').read_text(encoding='utf-8')
-    assert "@app.post('/api/motion-files/{file_id}/preview')" in routes
     assert "@app.post('/api/motion-files/{file_id}/preview-precompute')" in routes
-    assert "@app.post('/api/motion-files/{file_id}/preview-stop')" in routes
-    assert 'def stop_preview_motion_file(' in bridge
+    assert "@app.post('/api/motion-files/{file_id}/preview')" not in routes
+    assert 'preview-stop' not in routes
+    assert "'/api/motion-files/{file_id}/preview-frames'" in routes
     assert routes.count('animation_preview.annotate_files') >= 2
 
 
@@ -355,11 +287,6 @@ def test_changing_the_pack_marks_results_stale_but_viewable(tmp_path):
     state = animation_preview.preview_state(workspace, motion)
     assert state['state'] == 'stale'
     assert 'demo 1.0' in state['message']
-    spawned = []
-    viewed = animation_preview.launch_preview(
-        workspace, motion, spawn=lambda args, **kwargs: spawned.append(args),
-    )
-    assert viewed['success'] is True and spawned
 
 
 def test_failed_recompute_does_not_bless_the_old_result(tmp_path):

@@ -74,19 +74,9 @@ def register_motion_run_routes(app: FastAPI, bridge, safety_first_stop) -> None:
     async def motion_mapping(file_id: str):
         return await asyncio.to_thread(bridge.load_motion_mapping, file_id)
 
-    @app.post('/api/motion-files/{file_id}/preview')
-    async def preview_motion_file(file_id: str, request: Request):
-        body = await request.json() if int(request.headers.get('content-length') or 0) else {}
-        fps = body.get('fps') if isinstance(body, dict) else None
-        return await asyncio.to_thread(bridge.preview_motion_file, file_id, fps)
-
     @app.post('/api/motion-files/{file_id}/preview-precompute')
     async def precompute_motion_file(file_id: str):
         return await asyncio.to_thread(bridge.precompute_motion_file, file_id)
-
-    @app.post('/api/motion-files/{file_id}/preview-stop')
-    async def stop_preview_motion_file(file_id: str):
-        return await asyncio.to_thread(bridge.stop_preview_motion_file, file_id)
 
     # 웹 3D 표시 · 7-a · 장면은 팩마다 1회 · 프레임은 계산 결과(.sim.npz)에서
     @app.get('/api/preview/scene')

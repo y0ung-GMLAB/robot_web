@@ -12,8 +12,6 @@ import {
   importProjectFile,
   initializeMotionRun,
   precomputeMotionFile,
-  previewMotionFile,
-  stopPreviewMotionFile,
   projectFileDownloadUrl,
   saveMotionMapping,
   saveRegisteredMotionFile,
@@ -1673,7 +1671,11 @@ export function createMotionDataController({
 
 
   function renderMotionRunPanel() {
-    sim3d.update({ file: selectedFile });
+    // 같이 보기 토글 · 재생 등록된 파일의 계산이 끝났을 때만 켤 수 있다
+    const mujocoRegisteredFile = files.find(
+      (entry) => entry.id === registeredMotionFileIdValue,
+    ) || null;
+    sim3d.update({ file: selectedFile, registeredFile: mujocoRegisteredFile });
     const payload = motionRunPayload();
     const status = motionRunStatus || {};
     const state = String(status.state || 'idle');
@@ -1887,53 +1889,43 @@ export function createMotionDataController({
         : '애니메이션을 먼저 선택하세요';
     }
     if (el.previewMotionFileButton) {
+      // 계산 버튼만 남았다 · 보기는 「3D 보기 (웹)」 · 네이티브 뷰어 창은 없앴다(7)
       const state = mujocoState(file);
       const LABELS = {
         missing: 'MuJoCo 계산', failed: '다시 계산', stale: '다시 계산',
-        computing: '계산 중…', ready: 'MuJoCo 재생', direct: 'MuJoCo 재생',
+        computing: '계산 중…', ready: '계산 완료', direct: '계산 없는 구성',
       };
-      el.previewMotionFileButton.textContent = LABELS[state] || 'MuJoCo';
-      el.previewMotionFileButton.disabled = !file || loading || state === 'computing'
-        || state === '' || state === 'unavailable';
+      el.previewMotionFileButton.textContent = LABELS[state] || 'MuJoCo 계산';
+      el.previewMotionFileButton.disabled = !file || loading
+        || !(state === 'missing' || state === 'failed' || state === 'stale');
       el.previewMotionFileButton.title = !file
         ? '애니메이션을 먼저 선택하세요'
         : (state === '' || state === 'unavailable'
           ? 'MuJoCo 설정이 없습니다 · 로봇 팩(시스템 정보) 또는 config/animation_preview.yaml'
           : (state === 'computing'
-            ? '무거운 물리 계산이 도는 중입니다 · 끝나면 틀 수 있습니다'
+            ? '무거운 물리 계산이 도는 중입니다 · 끝나면 3D 보기가 켜집니다'
             : (state === 'stale'
               ? `${file.preview?.message || '로봇 팩 변경'} · 누르면 지금 팩으로 다시 계산합니다`
               : (state === 'missing' || state === 'failed'
-                ? '무거운 물리 계산을 시작합니다 · 끝나면 같이 보기가 켜집니다'
-                : '계산된 결과를 뷰어로 틉니다 · 창은 서버 PC 화면에 뜹니다'))));
+                ? '무거운 물리 계산을 시작합니다 · 끝나면 「3D 보기 (웹)」와 같이 보기가 켜집니다'
+                : (state === 'ready'
+                  ? '계산이 끝났습니다 · 아래 「3D 보기 (웹)」에서 봅니다'
+                  : '계산(precompute)이 없는 구성입니다 · 웹 3D 로 볼 결과가 없습니다')))));
     }
-    if (el.stopPreviewMotionFileButton) {
-      // 뷰어가 떠 있을 때만 · 서버가 핸들을 보관한다 (7-1)
-      const viewerRunning = Boolean(file?.preview?.viewer_running);
-      el.stopPreviewMotionFileButton.disabled = !file || loading || !viewerRunning;
-      el.stopPreviewMotionFileButton.title = viewerRunning
-        ? '이 애니메이션의 MuJoCo 창을 닫습니다'
-        : '떠 있는 MuJoCo 창이 없습니다';
-    }
-    // 같이 보기 토글 · 재생 등록된 파일의 계산이 끝났을 때만 켤 수 있다
-    const mujocoRegisteredFile = files.find(
-      (entry) => entry.id === registeredMotionFileIdValue,
-    ) || null;
     const registeredState = mujocoState(mujocoRegisteredFile);
     if (el.motionRunMujocoToggle) {
       // stale(팩 변경 뒤 옛 결과)도 같이 보기는 허용 · 다시 계산은 MuJoCo 버튼
-      const usable = registeredState === 'ready' || registeredState === 'direct'
-        || registeredState === 'stale';
+      const usable = registeredState === 'ready' || registeredState === 'stale';
       el.motionRunMujocoToggle.disabled = !usable;
-      if (!usable) el.motionRunMujocoToggle.checked = false;
+      if (!usable && el.motionRunMujocoToggle.checked) {
+        el.motionRunMujocoToggle.checked = false;
+        sim3d.setFollow(false);
+      }
       el.motionRunMujocoToggle.title = usable
-        ? '켜면 재생 시작과 함께 MuJoCo 창이 프레임 1부터 같이 출발합니다'
+        ? '켜면 아래 「3D 보기 (웹)」가 열리고 재생 시작과 함께 0초부터 같이 출발합니다'
         : (registeredState === 'computing'
           ? 'MuJoCo 계산 중입니다 · 끝나면 켤 수 있습니다'
           : '재생 등록된 애니메이션의 MuJoCo 계산이 끝나야 켤 수 있습니다');
-      if (el.motionRunMujocoFps) {
-        el.motionRunMujocoFps.disabled = !usable;
-      }
     }
     // 재생 등록은 **조인트 매핑 편집과 상관없다** · §6-160
     //
@@ -2466,39 +2458,28 @@ export function createMotionDataController({
     return '';
   }
 
-  /** MuJoCo 버튼 · 계산이 끝난 것만 튼다 · P7
+  /** MuJoCo 계산 버튼 · missing/failed/stale 에서만 · 보기는 「3D 보기 (웹)」 (7)
    *
    * missing → 「MuJoCo 계산」(시작) · computing → 그레이 「계산 중…」 ·
-   * ready/direct → 「MuJoCo 재생」 · failed/stale → 「다시 계산」
+   * ready → 「계산 완료」(비활성) · failed/stale → 「다시 계산」
    */
   async function previewSelectedMotionFile() {
     if (!selectedFileId) return;
     const state = mujocoState(selectedFile);
+    if (!(state === 'missing' || state === 'failed' || state === 'stale')) return;
     try {
-      if (state === 'missing' || state === 'failed' || state === 'stale') {
-        const result = await precomputeMotionFile(selectedFileId);
-        setMessage(result?.message || 'MuJoCo 계산 시작');
-        await loadFiles(selectedFileId);
-        return;
-      }
-      const fps = Number(el.motionRunMujocoFps?.value) || 60;
-      const result = await previewMotionFile(selectedFileId, fps);
-      setMessage(result?.message || 'MuJoCo 재생');
+      const result = await precomputeMotionFile(selectedFileId);
+      setMessage(result?.message || 'MuJoCo 계산 시작');
+      await loadFiles(selectedFileId);
     } catch (error) {
-      setMessage(`MuJoCo 실패: ${error?.message || error}`);
+      setMessage(`MuJoCo 계산 실패: ${error?.message || error}`);
     }
   }
 
-  /** MuJoCo 창 닫기 · 서버가 보관한 뷰어 프로세스를 끝낸다 · 7-1 */
-  async function stopPreviewSelectedMotionFile() {
-    if (!selectedFileId) return;
-    try {
-      const result = await stopPreviewMotionFile(selectedFileId);
-      setMessage(result?.message || 'MuJoCo 창 닫음');
-      await loadFiles(selectedFileId);
-    } catch (error) {
-      setMessage(`MuJoCo 창 닫기 실패: ${error?.message || error}`);
-    }
+  /** 「MuJoCo 같이 보기」 · 웹 3D 뷰어가 재생 등록 파일을 따라간다 (7) */
+  function toggleMujocoCompanion() {
+    const registered = files.find((entry) => entry.id === registeredMotionFileIdValue) || null;
+    sim3d.setFollow(Boolean(el.motionRunMujocoToggle?.checked), registered);
   }
 
   /** 계산이 도는 동안은 목록을 몇 초마다 다시 읽어 상태를 갱신한다 */
@@ -3081,9 +3062,6 @@ export function createMotionDataController({
       const payload = await startMotionRun({
         ...motionRunPayload(),
         run_mode: runMode,
-        // MuJoCo 같이 보기 · 서버가 running 전환 순간 뷰어를 띄운다 · P7
-        with_mujoco: Boolean(el.motionRunMujocoToggle?.checked),
-        mujoco_fps: Number(el.motionRunMujocoFps?.value) || 60,
       });
       motionRunStatus = payload.status || motionRunStatus || null;
       motionRunLastResult = payload;
@@ -3218,7 +3196,7 @@ export function createMotionDataController({
     el.unregisterMotionFileButton?.addEventListener('click', unregisterSelectedMotionFile);
     el.downloadMotionFileButton?.addEventListener('click', downloadSelectedMotionFile);
     el.previewMotionFileButton?.addEventListener('click', previewSelectedMotionFile);
-    el.stopPreviewMotionFileButton?.addEventListener('click', stopPreviewSelectedMotionFile);
+    el.motionRunMujocoToggle?.addEventListener('change', toggleMujocoCompanion);
     if (el.deleteMotionFileButton) {
       el.deleteMotionFileButton.addEventListener('click', deleteSelectedFile);
     }

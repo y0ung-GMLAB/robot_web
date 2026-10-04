@@ -7,7 +7,8 @@
 # 두 단계:
 #   precompute  무거운 물리 계산 · 업로드되면 자동 시작 · result 파일이
 #               생기면 「계산 끝」 → 그때부터 재생·같이 보기가 켜진다
-#   preview     계산 결과를 그대로 트는 뷰어 · 가볍다 · 모터 재생과 동시 실행
+#   preview     (선택 · 서버는 쓰지 않음) 개발 PC 에서 replay_run.py 를 손으로 돌릴 때
+#               참고용 · 보기는 웹 화면 「3D 보기 (웹)」·「MuJoCo 같이 보기」가 한다 (7)
 #
 # 치환: {motion_path} = 애니메이션 .json 경로 · {motion_stem} = 확장자 뺀 경로
 #       {result} = precompute.result 경로 · {fps} = 화면에서 고른 30/60/120/144
@@ -34,20 +35,18 @@ precompute:
     - '{motion_stem}.sim.csv'
   result: '{motion_stem}.sim.npz'   # sim_run 이 csv 옆에 npz 를 남긴다
 
-preview:
-  command:
-    - uv
-    - run
-    - --no-project
-    - --with=mujoco
-    - --with=numpy
-    - --with=pyyaml
-    - python
-    - '{stack}/scripts/sim/replay_run.py'   # Space 일시정지 · 방향키 탐색·배속 · 모델 경로는 npz 안에
-    - '{result}'
-    - '{fps}'
-
-fps: 60
+# preview:                                  # 선택 · 개발 PC 참고용 · 서버는 실행하지 않는다
+#   command:
+#     - uv
+#     - run
+#     - --no-project
+#     - --with=mujoco
+#     - --with=numpy
+#     - --with=pyyaml
+#     - python
+#     - '{stack}/scripts/sim/replay_run.py'
+#     - '{result}'
+#     - '60'
 
 # 웹 3D 표시 (7-a) · 로봇 팩에서 장면(JSON)을 뽑는 명령 · 생략하면 아래 기본값과 같다 ·
 # 결과는 runtime/preview/scene-<팩 지문>.json · 팩이 바뀌면 새로 만든다

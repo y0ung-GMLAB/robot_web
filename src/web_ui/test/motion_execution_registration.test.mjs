@@ -50,8 +50,9 @@ test('one-shot and continuous start include whole-axis initialization automatica
     /전체 활성 축를 초기 위치로 이동한 뒤 현재 애니메이션을 1회 실행/,
   );
   assert.match(startBody, /startMotionRun\(\{\s*\.\.\.motionRunPayload\(\),\s*run_mode: runMode,/);
-  // MuJoCo 같이 보기는 선택 사항으로 함께 실린다 · P7
-  assert.match(startBody, /with_mujoco: Boolean\(el\.motionRunMujocoToggle\?\.checked\)/);
+  // MuJoCo 같이 보기는 브라우저 몫이다 · 서버에 실어 보내지 않는다 (7 · 네이티브 뷰어 없음)
+  assert.doesNotMatch(startBody, /with_mujoco/);
+  assert.match(controller, /el\.motionRunMujocoToggle\?\.addEventListener\('change', toggleMujocoCompanion\)/);
 });
 
 test('motion file list does not arbitrarily select the first file', () => {

@@ -11,9 +11,10 @@
  * three.js 는 탭을 열 때 처음 한 번만 동적으로 받는다(1.2 MB · 벤더 사본 ·
  * `static/vendor/three/`) · 초기 화면 무게에 얹지 않는다.
  *
- * 「실물 따라가기」 · 재생 상태가 running 으로 바뀌는 순간 0초부터 틀고
- * stopped/error/completed 면 멈춘다 · 시작 동기의 정밀도는 8번(별도) · 여기선
- * 같은 순간에 출발만 한다.
+ * 「MuJoCo 같이 보기」(모션 패널 체크) · 켜면 이 구역을 열고 **재생 등록된**
+ * 애니메이션의 프레임을 받아 두었다가, 재생 상태가 running 으로 바뀌는 순간
+ * 0초부터 틀고 stopped/error/completed 면 멈춘다 · 시작 동기의 정밀도는
+ * 8번(별도) · 여기선 같은 순간에 출발만 한다 · 네이티브 뷰어 창은 없앴다(7).
  */
 import { exportPreviewScene, fetchPreviewFrames, fetchPreviewScene, fetchPreviewSceneData } from './api.js';
 import { bodyLocalPose, cameraPosition, frameIndexAt, jointsByBody } from './sim3d_math.js';
@@ -46,6 +47,7 @@ export function createSim3dViewer({ el, getLatestState = () => null }) {
   let lastTick = 0;
   let rafId = 0;
   let follow = false;
+  let followFile = null;      // 같이 보기 대상 · 재생 등록된 애니메이션
   let lastRunState = '';
   let pollTimer = null;
   let message = '';
@@ -364,7 +366,6 @@ export function createSim3dViewer({ el, getLatestState = () => null }) {
       el.sim3dPlayButton.textContent = playing ? '일시정지' : '재생';
     }
     if (has('sim3dSlider')) el.sim3dSlider.disabled = !frames;
-    if (has('sim3dFollowToggle')) el.sim3dFollowToggle.disabled = !frames;
     renderTime();
   }
 
@@ -382,10 +383,6 @@ export function createSim3dViewer({ el, getLatestState = () => null }) {
       seek((Number(el.sim3dSlider.value) / 1000) * frames.duration_sec);
     });
     el.sim3dSpeed?.addEventListener('change', () => { speed = Number(el.sim3dSpeed.value) || 1; });
-    el.sim3dFollowToggle?.addEventListener('change', () => {
-      follow = Boolean(el.sim3dFollowToggle.checked);
-      lastRunState = '';
-    });
     el.sim3dResetViewButton?.addEventListener('click', () => {
       if (sceneJson && camera && controls) {
         const p = cameraPosition(sceneJson.camera);
@@ -401,17 +398,41 @@ export function createSim3dViewer({ el, getLatestState = () => null }) {
     });
   }
 
-  /** 애니메이션 선택이 바뀌었을 때 · 모션 패널이 그릴 때마다 부른다 (싸다) */
-  function update({ file = null } = {}) {
-    const changed = (file?.id || '') !== (currentFile?.id || '');
-    currentFile = file;
+  function usable(file) {
+    return Boolean(file) && (file.preview?.state === 'ready' || file.preview?.state === 'stale');
+  }
+
+  /** 애니메이션 선택이 바뀌었을 때 · 모션 패널이 그릴 때마다 부른다 (싸다)
+   *
+   * 같이 보기 중에는 재생 등록된 파일을 붙들고 있는다 · 목록에서 다른 파일을
+   * 눌러도 바뀌지 않는다 (실물이 재생할 것은 등록 파일이다)
+   */
+  function update({ file = null, registeredFile = null } = {}) {
+    if (follow && followFile && registeredFile && registeredFile.id !== followFile.id) {
+      followFile = registeredFile;           // 등록이 바뀌면 그쪽으로
+    }
+    const target = follow ? (followFile || registeredFile) : file;
+    const changed = (target?.id || '') !== (currentFile?.id || '');
+    currentFile = target;
     if (changed) {
       frames = null; framesFileId = ''; playing = false;
-      if (opened && sceneJson && file && (file.preview?.state === 'ready' || file.preview?.state === 'stale')) {
-        loadFrames(file.id);
-      }
+      if (opened && sceneJson && usable(target)) loadFrames(target.id);
     }
     renderControls();
+  }
+
+  /** 「MuJoCo 같이 보기」 체크 · 켜면 구역을 열고 등록 파일 프레임을 받아 둔다 */
+  async function setFollow(enabled, registeredFile = null) {
+    follow = Boolean(enabled);
+    lastRunState = '';
+    followFile = follow ? registeredFile : null;
+    if (!follow) { playing = false; renderControls(); return; }
+    if (has('sim3dSection') && !el.sim3dSection.open) {
+      el.sim3dSection.open = true;             // toggle 이벤트가 refreshScene 을 부른다
+    } else if (opened) {
+      await refreshScene();
+    }
+    update({ file: currentFile, registeredFile });
   }
 
   function destroy() {
@@ -424,5 +445,8 @@ export function createSim3dViewer({ el, getLatestState = () => null }) {
 
   bind();
   renderControls();
-  return { update, refreshScene, loadFrames, seek, destroy, get frames() { return frames; }, get framesFileId() { return framesFileId; } };
+  return {
+    update, setFollow, refreshScene, loadFrames, seek, destroy,
+    get frames() { return frames; }, get framesFileId() { return framesFileId; }, get following() { return follow; },
+  };
 }
