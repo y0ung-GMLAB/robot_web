@@ -37,6 +37,8 @@ from motion_common.values import finite_float
 
 TRACE_DIRNAME = 'motion_trace'
 INDEX_FILENAME = 'index.jsonl'
+#: 정리(`prune`)는 **새 회차 기록이 쓰일 때만** 돈다 (쓰기 스레드 · 60초 간격) ·
+#: 재생이 없는 동안은 지우지 않는다 · 상한 안이라 유지 · 수정 목록 21-4
 DEFAULT_RETENTION_DAYS = 14
 DEFAULT_MAX_BYTES = 1024 * 1024 * 1024
 #: 실제 위치가 이보다 오래되면 비워 둔다 · 모터 노드가 멈춘 것이다

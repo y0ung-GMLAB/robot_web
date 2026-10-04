@@ -70,3 +70,29 @@ def test_repeated_saves_in_same_second_keep_distinct_history_files(tmp_path, mon
     assert first != second
     assert first.is_file()
     assert second.is_file()
+
+
+def test_history_folder_is_capped_at_fifty_backups(tmp_path):
+    """저장마다 한 벌 남기되 분류별 50개까지만 · 수정 목록 21-3 (2026-10-03)."""
+    mapping_file = tmp_path / 'show_mapping.yaml'
+    mapping_file.write_text('file_id: show_mapping.yaml\nmappings: []\n', encoding='utf-8')
+    history = tmp_path / 'runtime' / 'history' / 'motion_axis_matching'
+    for index in range(55):
+        stale = history / f'20250101-{index:06d}-show_mapping.yaml'
+        stale.parent.mkdir(parents=True, exist_ok=True)
+        stale.write_text(str(index), encoding='utf-8')
+    save_midi_banks(mapping_file, STATE, history)
+    names = sorted(p.name for p in history.iterdir())
+    assert len(names) == 50
+    assert names[0] == '20250101-000006-show_mapping.yaml'   # 가장 오래된 6개가 빠졌다
+    assert names[-1].endswith('-show_mapping.yaml') and not names[-1].startswith('20250101')
+
+
+def test_backup_next_to_the_file_is_never_pruned(tmp_path):
+    """이력 폴더를 안 주면 원본 옆에 백업한다 · 그 폴더는 정리 대상이 아니다."""
+    mapping_file = tmp_path / 'show_mapping.yaml'
+    mapping_file.write_text('file_id: show_mapping.yaml\nmappings: []\n', encoding='utf-8')
+    for index in range(60):
+        (tmp_path / f'other-{index}.yaml').write_text('x', encoding='utf-8')
+    save_midi_banks(mapping_file, STATE)
+    assert len(list(tmp_path.glob('other-*.yaml'))) == 60

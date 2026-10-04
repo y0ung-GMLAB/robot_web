@@ -290,7 +290,7 @@ def _close(a: Any, b: Any) -> bool:
 
 
 def mapping_diff(workspace_root: Path, mapping: Optional[Dict[str, Any]]) -> Dict[str, Any]:
-    """팩 robot.yaml ↔ PC 조인트 매핑 · motion_id · 감속비 · 범위 · 적용하지 않는다."""
+    """팩 robot.yaml ↔ PC 조인트 매핑 · motion_id · 감속·기어비 · 범위 · 적용하지 않는다."""
     try:
         robot = robot_pack.load_robot(robot_pack.pack_root(workspace_root))
     except ValueError:
@@ -314,7 +314,7 @@ def mapping_diff(workspace_root: Path, mapping: Optional[Dict[str, Any]]) -> Dic
             span = [row.get('motion_lower_deg', -180.0), row.get('motion_upper_deg', 180.0)]
             entry.update(mapping_ratio=ratio, mapping_range=span)
             if not _close(ratio, axis.ratio):
-                entry['differences'].append('감속비')
+                entry['differences'].append('감속·기어비')
             if not (_close(span[0], axis.range_deg[0]) and _close(span[1], axis.range_deg[1])):
                 entry['differences'].append('범위')
         rows.append(entry)

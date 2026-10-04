@@ -14,7 +14,6 @@
 읽기 한 번이 3ms 라 곧바로 다시 요청한다 · 기다리지 않는다.
 """
 
-import pytest
 
 from motion_state_monitor.ethercat_scanner import EthercatScanner, SII_READ_ATTEMPTS
 

@@ -44,7 +44,7 @@ def test_nobody_writes_the_sentence_by_hand():
 
     assert offenders == [], (
         '안내문을 직접 적고 있습니다 · motion_common.paths.NO_PROJECT_SELECTED 를 '
-        f'쓰세요:\n  ' + '\n  '.join(offenders)
+        '쓰세요:\n  ' + '\n  '.join(offenders)
     )
 
 

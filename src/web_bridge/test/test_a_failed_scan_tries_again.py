@@ -16,7 +16,6 @@
 한다.**
 """
 
-import pytest
 
 from motion_web_bridge.scan_orchestrator import ScanOrchestrator
 

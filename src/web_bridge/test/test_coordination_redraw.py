@@ -53,7 +53,7 @@ def test_nothing_is_rewritten_blindly_every_tick():
 
     assert offenders == [], (
         '매초 통째로 다시 그리는 곳이 있습니다 · 그 안의 버튼은 누름과 뗌 '
-        f'사이에 사라집니다:\n  ' + '\n  '.join(offenders)
+        '사이에 사라집니다:\n  ' + '\n  '.join(offenders)
     )
 
 

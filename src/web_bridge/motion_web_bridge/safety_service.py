@@ -39,16 +39,12 @@ class SafetyService:
 
         **순서가 정해져 있다.**
 
-            1  예약된 스튜디오 시작을 취소한다 (아직 안 뜬 것을 막는다)
-            2  이 PC 에 정지를 쏜다        ← 제일 급한 일
-            3  그다음 그룹을 챙긴다
+            1  이 PC 에 정지를 쏜다        ← 제일 급한 일
+            2  그다음 그룹을 챙긴다
 
-        2번을 먼저 하는 이유 · 3번은 HTTP 왕복이라 느리다 · 그 사이 이 PC 가
+        1번을 먼저 하는 이유 · 2번은 HTTP 왕복이라 느리다 · 그 사이 이 PC 가
         계속 돌면 안 된다.
         """
-        cancel_pending = getattr(self.bridge, 'cancel_pending_motion_studio_start', None)
-        if callable(cancel_pending):
-            cancel_pending()
         request_id = self.bridge.publish_safety_stop(emergency)
         return {
             'success': True,

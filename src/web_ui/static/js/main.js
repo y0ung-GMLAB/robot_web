@@ -149,6 +149,13 @@ function renderWorkspacePanel() {
       panel.classList.toggle('hidden', panel.dataset.workspacePanel !== activePanel);
     });
   }
+  if (activePanel === 'btop' && el.btopIframe && !el.btopIframe.src) {
+    el.btopIframe.src = `http://${window.location.hostname}:8080/`;
+  }
+  // 터미널은 **별개 서비스**다 · 빌드가 제어 서비스를 멈춰도 끊기지 않는다
+  if (activePanel === 'terminal' && el.terminalIframe && !el.terminalIframe.src) {
+    el.terminalIframe.src = `http://${window.location.hostname}:8081/`;
+  }
   const motionTab = motionTabForWorkspace(activeWorkspace);
   if (motionTab) {
     motionData.showTab(motionTab);

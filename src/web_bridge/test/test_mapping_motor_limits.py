@@ -90,13 +90,21 @@ def test_offset_and_scale_follow_the_runtime_formula():
     assert motor_target(row, 13.0) == 100.0 + (13.0 + 2.0) * 0.5 * 150.0
 
 
-def test_dynamixel_gear_is_one_and_clamped():
-    row = _row(motor_ref='dynamixel:port:%2Fdev%2FttyUSB0:id:7', gear_ratio=35.0,
+def test_dynamixel_uses_row_gear_without_one_turn_clamp():
+    """Dynamixel 도 감속·기어비 그대로 · ±180 한 바퀴 클램프 없음 (2026-10-04 · 멀티턴)."""
+    row = _row(motor_ref='dynamixel:port:%2Fdev%2FttyUSB0:id:7', gear_ratio=2.0,
                reference_position_deg=170.0)
     config, _ = apply_mapping_limits(_config(), {'mappings': [row]})
     driver = _driver(config, 2)
-    assert driver['lower'] == 160.0          # 170 − 10 · 감속비 무시
-    assert driver['upper'] == 180.0          # 170 + 13 = 183 → ±180 안으로
+    assert driver['lower'] == 150.0          # 170 − 10×2
+    assert driver['upper'] == 196.0          # 170 + 13×2 · 180 넘어도 안 자른다
+
+
+def test_dynamixel_formula_matches_runtime():
+    rules = pytest.importorskip('motion_runtime.motion_run_rules')
+    row = _row(motor_ref='dynamixel:port:%2Fdev%2FttyUSB0:id:7', gear_ratio=35.0)
+    for value in (-10.0, 0.0, 13.0):
+        assert motor_target(row, value) == pytest.approx(rules._motor_target(row, value))
 
 
 def test_legacy_motor_axis_rows_still_match():

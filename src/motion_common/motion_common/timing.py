@@ -1,11 +1,11 @@
 """제어 주기 상수 단일 정의.
 
-모션 데이터 샘플 간격 20ms가 네 곳에 따로 적혀 있었다.
+모션 데이터 샘플 간격 20ms가 네 곳에 따로 적혀 있었다 (스튜디오·MIDI 는 그 뒤 삭제).
 
-    motion_studio/constants.py      DEFAULT_PERIOD_SEC
     motion_run_manager.py           DEFAULT_PERIOD_SEC
-    midi_control_node.py            MIDI_COMMAND_PERIOD_SEC
     web_bridge/bridge_helpers.py    MOTION_DATA_PERIOD_SEC
+    (삭제됨) 스튜디오 constants.py  DEFAULT_PERIOD_SEC
+    (삭제됨) MIDI 노드              MIDI_COMMAND_PERIOD_SEC
 
 같은 값이지만 이름이 달라 한 곳만 바꾸면 어긋난다. 모션 파일의 프레임 간격과
 명령 발행 주기가 갈라지면 재생 속도가 틀어지므로, 한 군데서만 정의한다.

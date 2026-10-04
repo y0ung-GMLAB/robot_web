@@ -16,7 +16,6 @@ from types import SimpleNamespace
 
 from motion_common import repeat_policy
 from motion_common.schedule_models import ScheduleItem
-import motion_schedule.motion_schedule_node as schedule_node
 from motion_schedule.motion_schedule_node import MotionScheduleNode
 
 

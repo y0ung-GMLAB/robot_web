@@ -100,6 +100,31 @@ System 서브모듈 커밋**을 함께 사용합니다. 위 표 작성 시점의
 
 ## 새 PC 설치 · 우분투 설치 직후부터
 
+### 한 줄 설치 (권장 · 2026-10-04)
+
+우분투 22.04 를 깐 직후, **늘 쓸 계정**으로 로그인해 터미널에서 한 줄만 칩니다.
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/y0ung-GMLAB/robot_web/main/scripts/bootstrap.sh | bash
+```
+
+- sudo 비밀번호 1회 · 시간대 질문 1회(Enter = 현재) · 모터 랜카드는 **IP 없는 유선 포트**를 자동으로 고릅니다(둘 이상이면 묻습니다)
+- 아래 2~8단계를 전부 대신합니다 · 자동 업데이트·절전·화면 잠금 끄기 · 자동 로그인 · 로그아웃해도 유지(linger) ·
+  EtherLab 설치(커널 업데이트 뒤 자동 재빌드) · `/etc/ethercat.conf`(MAC 기준) · 방화벽 같은 망 허용 · 코드 받기 · 빌드 · 서비스 등록
+- 첫 설치는 중간에 **재부팅 1회**가 필요합니다 · 15초 뒤 스스로 재부팅하고, 자동 로그인 뒤 **저절로 이어서** 끝냅니다
+  (기록 · `~/ros2_ws/log/site_setup/`) · 끝에 자가 점검표가 찍힙니다
+- **수작업으로 남는 것** · 1단계 BIOS(전원 복구 시 켜기) · 웹에서 로봇 팩 업로드 · 모터 관리 → 전체 모터 검색 → 설정 적용
+
+| 상황 | 할 일 |
+|---|---|
+| 다른 용도로 쓰던 PC | 그대로 됩니다 · 있는 프로그램은 지우지 않고 더하기만 합니다 · 단 자동 로그인·자동 업데이트 끄기·절전 끄기는 전시 PC 전제라 적용됩니다 · 깨끗이 하려면 우분투 재설치 뒤 한 줄 |
+| 이미 이 프로그램이 깔린 PC | 같은 한 줄 = 코드 갱신 + 현장 준비 점검 · 또는 전처럼 `bash scripts/install.sh` (현장 준비는 손대지 않음) |
+| 인터넷이 안 되는 매장 | 한 줄 설치는 인터넷이 필요합니다 · 사무실에서 설치한 뒤 들고 가세요 |
+| 미리 보기만 | `bash scripts/install.sh --site --dry-run` · 바꾸지 않고 할 일만 찍습니다 |
+| 랜카드 지정 · 시간대 지정 | `SITE_ETHERCAT_NIC=enp2s0 SITE_TIMEZONE=Europe/Paris bash scripts/install.sh --site` |
+
+아래는 **손으로 할 때**의 순서입니다 (한 줄 설치가 하는 일의 설명이기도 합니다).
+
 ### 준비할 것
 
 | | |
@@ -107,7 +132,7 @@ System 서브모듈 커밋**을 함께 사용합니다. 위 표 작성 시점의
 | 운영체제 | **Ubuntu 22.04 LTS** · 다른 버전이면 설치가 중간에 멈춥니다 |
 | 네트워크 | 인터넷 연결 |
 | 계정 | 이 PC 를 늘 쓸 계정 하나 · **모든 단계를 그 계정으로** 합니다 |
-| GitHub | 사용자 이름과 **토큰** · 계정 비밀번호로는 안 됩니다 (받는 법은 6단계) |
+| GitHub | 저장소가 비공개일 때만 사용자 이름과 **토큰** (계정 비밀번호로는 안 됩니다 · 6단계) · 공개 저장소면 필요 없음 |
 
 ### 전체 순서
 
@@ -448,7 +473,8 @@ sudo apt install -y \
   git build-essential cmake \
   gcc-12 g++-12 ethtool \
   python3-rosdep python3-colcon-common-extensions \
-  python3-fastapi python3-uvicorn python3-yaml chrony
+  python3-fastapi python3-uvicorn python3-yaml chrony \
+  btop ttyd
 ```
 
 Dynamixel 직렬 통신을 사용하는 계정에는 필요한 그룹 권한을
@@ -737,6 +763,8 @@ sudo loginctl enable-linger "$(id -un)"
 - `motion-control.service`: 웹·프로젝트·모션 제어 서비스 (`LimitRTPRIO=99`, `LimitMEMLOCK=infinity` 적용 - 하위 모터 재시작 스크립트 및 런타임 RT 권한 보장)
 - `motion-motor.service`: 검증된 프로젝트 모터 실행 설정이 있을 때 Motor Manager (`LimitRTPRIO=99`, `LimitMEMLOCK=infinity` 적용)
 - `motion-coordination.service`: PC 간 DDS 그룹 상태 공유·실행 조정
+- `motion-terminal.service`: 웹 「터미널」 탭 (`ttyd` · 포트 8081 · `ttyd` 가 있을 때만)
+- `motion-btop.service`: 웹 「PC 성능 (btop)」 탭 (`ttyd` · 포트 8080 · `ttyd`·`btop` 이 있을 때만)
 
 ### 무인 연동 구동 설정 절차 (부팅 시 자동 재생)
 
@@ -757,6 +785,10 @@ sudo loginctl enable-linger "$(id -un)"
 4. **4단계: 부팅 테스트 및 완전 자동 구동**
    - PC 전원 재부팅 시 사용자 조작 없이 확정 저장된 명단 자동 감지 ➔ 수동 조작 없는 무인 연동 구동 완료
 
+웹 UI의 **터미널** · **PC 성능 (btop)** 탭은 별도 서비스(`ttyd`)로 돕니다 · `install_user_service.sh` 가
+`ttyd`·`btop` 이 깔려 있으면 자동으로 등록합니다 (`sudo apt install btop ttyd` 후 `bash scripts/install.sh`).
+터미널 서비스는 설치 중에도 멈추지 않습니다 · 설치를 치고 있는 창이 바로 그 서비스일 수 있기 때문입니다.
+
 새 PC에 검증된 모터 실행 설정이 없으면 웹(`motion-control.service`)은 정상 실행되지만 `motion-motor.service` 시작은 보류(inactive/dead)됩니다. 이는 모터 무단 구동을 방지하는 **정상 동작**입니다. 브라우저 창은 자동으로 열리지 않습니다.
 
 ## 6. 실행과 상태 확인
@@ -775,7 +807,7 @@ journalctl --user -u motion-coordination.service -n 100
 ```
 
 > [!TIP]
-> 웹 서비스(`motion-control.service`)에서 프로젝트 적용 및 백그라운드 프로세스 재시작 중 발생한 ROS 노드 오류나 저수준 에러 로그는 작업공간의 **`log/web_apply_restart/restart-*.log`** 파일에서도 확인할 수 있습니다.
+> 웹 서비스(`motion-control.service`)에서 프로젝트 적용 및 백그라운드 프로세스 재시작 중 발생한 ROS 노드 오류나 저수준 에러 로그는 작업공간의 **`log/web_apply_restart/restart-*.log`** 파일에서도 확인할 수 있습니다. ROS 2 노드 자체 로그는 `~/.ros/log/` 가 아니라 작업공간 **`log/ros/`** 에 남습니다(`ROS_LOG_DIR`). 두 폴더 모두 서비스 시작 때 **14일**이 지난 항목을 삭제합니다(`LOG_RETENTION_DAYS` 로 변경).
 
 웹 접속:
 
@@ -831,10 +863,11 @@ motion-control.service 재시작 완료
   않습니다.
 - 웹은 `0.0.0.0:8000`에 바인딩되므로 신뢰할 수 있는 내부망에서만 사용합니다.
 - 방화벽은 운영 PC가 있는 내부 대역만 허용하고 인터넷에 직접 노출하지 않습니다.
-- `motion-control`과 `motion-motor`는 `ROS_LOCALHOST_ONLY=1`로 PC 내부에
-  격리합니다.
-- `motion-coordination`만 `ROS_LOCALHOST_ONLY=0`으로 실행해 같은 Wi-Fi의
-  다른 PC와 typed ROS 2 DDS 메시지를 주고받습니다.
+- 서비스 3개(`motion-control` · `motion-motor` · `motion-coordination`)는 모두
+  `ROS_LOCALHOST_ONLY=0`으로 실행합니다(`MOTION_GROUP_NETWORK=1` 기본 · §6-96).
+  남의 ROS 장비와 섞이지 않는 근거는 PC 이름공간(`/<PC이름>/...`)과 그룹 전용
+  DDS 도메인(기본 21)입니다. 한 PC 안에 가두려면 서비스 환경에
+  `MOTION_GROUP_NETWORK=0`을 주면 `ROS_LOCALHOST_ONLY=1`이 됩니다.
 - PC 간에는 그룹 참가 상태·고수준 실행 트리거·완료·오류만 전송합니다. 프로젝트
   파일, 모션 데이터와 모터 목표값은 전송하지 않습니다.
 - 각 PC 웹의 `장비 연동 상태 → DDS 그룹 연동`에서 서로 다른 `이 PC ID`, 같은

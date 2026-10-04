@@ -66,6 +66,10 @@ private:
     double current_unit_{1.0};
 
     bool has_position_model_{false};
+
+    // Extended Position(멀티턴) Goal Position 허용 raw · X 시리즈 ±1,048,575(±256 바퀴)
+    // param yaml `extended_position_raw_limit` 로 바꾼다 · robot_web 2026-10-04
+    int32_t extended_position_raw_limit_{1048575};
 };
 
 } // namespace dynamixel

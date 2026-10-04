@@ -16,11 +16,9 @@
 세워 두고, 그 표시 때문에 되돌아갈 버튼까지 꺼졌다 · 서버는 멀쩡했다.
 """
 
-import re
 import threading
 from pathlib import Path
 
-import pytest
 
 WORKSPACE = Path(__file__).resolve().parents[3]
 MAIN_JS = WORKSPACE / 'src/web_ui/static/js/main.js'

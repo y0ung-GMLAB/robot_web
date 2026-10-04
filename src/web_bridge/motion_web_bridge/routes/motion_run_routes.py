@@ -1,6 +1,7 @@
 import asyncio
 
 from fastapi import FastAPI, HTTPException, Request
+from fastapi.responses import FileResponse
 
 from pathlib import Path
 
@@ -73,15 +74,29 @@ def register_motion_run_routes(app: FastAPI, bridge, safety_first_stop) -> None:
     async def motion_mapping(file_id: str):
         return await asyncio.to_thread(bridge.load_motion_mapping, file_id)
 
-    @app.post('/api/motion-files/{file_id}/preview')
-    async def preview_motion_file(file_id: str, request: Request):
-        body = await request.json() if int(request.headers.get('content-length') or 0) else {}
-        fps = body.get('fps') if isinstance(body, dict) else None
-        return await asyncio.to_thread(bridge.preview_motion_file, file_id, fps)
-
     @app.post('/api/motion-files/{file_id}/preview-precompute')
     async def precompute_motion_file(file_id: str):
         return await asyncio.to_thread(bridge.precompute_motion_file, file_id)
+
+    # 웹 3D 표시 · 7-a · 장면은 팩마다 1회 · 프레임은 계산 결과(.sim.npz)에서
+    @app.get('/api/preview/scene')
+    async def preview_scene_state():
+        return await asyncio.to_thread(bridge.preview_scene_state)
+
+    @app.post('/api/preview/scene/export')
+    async def preview_scene_export():
+        return await asyncio.to_thread(bridge.preview_scene_export)
+
+    @app.get('/api/preview/scene/data')
+    async def preview_scene_data():
+        path = await asyncio.to_thread(bridge.preview_scene_path)
+        if path is None:
+            raise HTTPException(status_code=404, detail='3D 장면이 아직 없습니다')
+        return FileResponse(str(path), media_type='application/json', headers={'Cache-Control': 'no-cache'})
+
+    @app.get('/api/motion-files/{file_id}/preview-frames')
+    async def preview_motion_frames(file_id: str):
+        return await asyncio.to_thread(bridge.preview_motion_frames, file_id)
 
     @app.post('/api/motion-run/live-override')
     async def set_motion_run_live_override(request: Request):

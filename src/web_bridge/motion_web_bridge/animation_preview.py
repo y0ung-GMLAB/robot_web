@@ -15,12 +15,11 @@
       command: [...]            # {motion_path} {motion_stem} 치환
       result: '{motion_stem}.sim.npz'   # 이 파일이 생기면 「계산 끝」
     preview:
-      command: [...]            # {motion_path} {motion_stem} {result} {fps} 치환
-    fps: 60                     # 기본 fps · 화면에서 30/60/120/144 선택
+      command: [...]            # (선택 · 서버는 쓰지 않음 · 개발 PC 참고용)
     cwd: ...                    # 명령 실행 폴더
 
-`precompute` 없이 `preview`(또는 옛 `command`)만 있으면 게이트 없이 바로
-튼다(direct) · 물리 없는 kinematic 뷰어처럼 계산이 필요 없는 구성용.
+`precompute` 가 없고 `preview`(또는 옛 `command`)만 있으면 계산 결과가 없는
+구성(direct) · 웹 3D 는 그릴 것이 없다 · 상태만 알린다.
 
 **로봇 팩 우선** · `robot_pack/preview.yaml` 이 있으면 그것을, 없으면
 `config/animation_preview.yaml` 을 쓴다 · 치환 `{stack}` = 스택(워크스페이스)
@@ -29,8 +28,13 @@
 계산이 끝나면 결과 옆 `<결과>.meta.json` 에 그때의 팩(이름·버전·지문)을
 남긴다 · 지금 팩과 지문이 다르면 `stale`(다시 계산 필요) · 보기는 허용.
 
-실행은 **발사 후 망각**이다 · 뷰어 창은 그 PC 화면에 뜨고 닫는 것도 사람이
-한다 · 계산은 끝났는지(결과 파일 존재)와 도는 중인지만 기억한다.
+계산은 끝났는지(결과 파일 존재)와 도는 중인지를 기억한다 · 계산의
+stdout·stderr 는 `log/animation_preview/<애니메이션>.precompute.log` 에 남긴다.
+
+**네이티브 뷰어 창은 없앴다**(수정 목록 7 · 2026-10-04) · 서버 PC 모니터에만
+뜨는 창은 슬레이브·원격에서 보이지 않는다 · 보기는 브라우저가 한다
+(`sim_scene.py` · `static/js/sim3d.js`) · `preview.command` 는 개발 PC 에서
+`scripts/sim/replay_run.py` 를 손으로 돌릴 때 참고용으로만 남는다(서버는 쓰지 않는다).
 """
 
 from __future__ import annotations
@@ -48,7 +52,6 @@ from motion_common.store import atomic_write_json
 
 CONFIG_NAME = 'animation_preview.yaml'
 PACK_CONFIG_NAME = 'preview.yaml'
-ALLOWED_FPS = (30, 60, 120, 144)
 NOT_CONFIGURED_MESSAGE = (
     '미리보기 명령이 설정되지 않았습니다 · '
     '로봇 팩(preview.yaml)을 올리거나 config/animation_preview.yaml 을 만드세요 '
@@ -62,6 +65,8 @@ _LAST_RC: Dict[str, int] = {}
 #: 도는 계산이 시작될 때의 팩 · 성공으로 끝나야 meta 로 남긴다
 _PENDING_META: Dict[str, Dict[str, Any]] = {}
 _LOCK = threading.Lock()
+#: 계산 출력 기록 폴더 (워크스페이스 기준 · `log/` 는 커밋하지 않는다)
+LOG_DIR_NAME = 'animation_preview'
 
 
 def preview_config(workspace_root: Path) -> Optional[Dict[str, Any]]:
@@ -92,16 +97,13 @@ def _read_config(path: Path) -> Optional[Dict[str, Any]]:
         return None
     if not isinstance(payload, dict):
         return None
+    payload = dict(payload)
     preview = payload.get('preview')
-    if not isinstance(preview, dict):
-        # 옛 모양 · 최상위 command 하나 = 게이트 없는 direct 재생
-        command = payload.get('command')
-        if not _valid_command(command):
-            return None
-        payload = dict(payload)
-        payload['preview'] = {'command': command}
+    if not isinstance(preview, dict) and _valid_command(payload.get('command')):
+        # 옛 모양 · 최상위 command 하나 = 계산 없는 구성(direct)
+        payload['preview'] = {'command': payload['command']}
         preview = payload['preview']
-    if not _valid_command(preview.get('command')):
+    if isinstance(preview, dict) and not _valid_command(preview.get('command')):
         return None
     precompute = payload.get('precompute')
     if precompute is not None:
@@ -109,7 +111,10 @@ def _read_config(path: Path) -> Optional[Dict[str, Any]]:
             return None
         if not str(precompute.get('result') or '').strip():
             return None
-    return dict(payload)
+    # 계산(precompute)도 참고용 preview 도 없으면 설정이 아니다
+    if precompute is None and not isinstance(preview, dict):
+        return None
+    return payload
 
 
 def _valid_command(command: Any) -> bool:
@@ -140,21 +145,6 @@ def _fill(
     ]
 
 
-def normalized_fps(config: Dict[str, Any], requested: Any = None) -> int:
-    """화면이 고른 fps · 허용 값(30/60/120/144)만 · 아니면 설정 기본."""
-    try:
-        value = int(requested)
-    except (TypeError, ValueError):
-        value = None
-    if value in ALLOWED_FPS:
-        return value
-    try:
-        fallback = int(config.get('fps', 60))
-    except (TypeError, ValueError):
-        fallback = 60
-    return fallback if fallback in ALLOWED_FPS else 60
-
-
 def result_path_for(config: Dict[str, Any], motion_path: Path) -> Optional[Path]:
     precompute = config.get('precompute')
     if not isinstance(precompute, dict):
@@ -176,6 +166,32 @@ def _pack_stamp(workspace_root: Path) -> Dict[str, Any]:
         'version': info.get('version', ''),
         'fingerprint': robot_pack.current_fingerprint(pack_dir),
     }
+
+
+def log_path_for(workspace_root: Path, motion_path: Path, kind: str) -> Path:
+    """계산(precompute)·뷰어(preview) 출력 기록 파일 경로."""
+    return Path(workspace_root) / 'log' / LOG_DIR_NAME / f'{Path(motion_path).stem}.{kind}.log'
+
+
+def _open_log(workspace_root: Path, motion_path: Path, kind: str):
+    """출력 기록 파일을 연다 · 못 열면 DEVNULL (기록 실패가 실행을 막지는 않는다).
+
+    매 실행마다 새로 쓴다 · 마지막 실행의 사유만 남기면 된다.
+    """
+    path = log_path_for(workspace_root, motion_path, kind)
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        return open(path, 'wb')
+    except OSError:
+        return subprocess.DEVNULL
+
+
+def _close_log(handle: Any) -> None:
+    if handle is not subprocess.DEVNULL:
+        try:
+            handle.close()   # 자식이 fd 를 물려받았다 · 부모 쪽만 닫는다
+        except OSError:
+            pass
 
 
 def _reap() -> None:
@@ -296,13 +312,13 @@ def launch_precompute(
     args = _fill(config['precompute']['command'], motion_path, result=key, config=config)
     cwd = str(config.get('cwd') or workspace_root)
     stamp = _pack_stamp(Path(workspace_root))
+    log = _open_log(workspace_root, motion_path, 'precompute')
     try:
-        handle = spawn(
-            args, cwd=cwd,
-            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, shell=False,
-        )
+        handle = spawn(args, cwd=cwd, stdout=log, stderr=log, shell=False)
     except OSError as exc:
+        _close_log(log)
         return {'success': False, 'message': f'계산 시작 실패: {exc}'}
+    _close_log(log)
     with _LOCK:
         _RUNNING[key] = handle
         _LAST_RC.pop(key, None)
@@ -310,48 +326,4 @@ def launch_precompute(
     return {
         'success': True,
         'message': f'MuJoCo 계산 시작: {motion_path.name} · 끝나면 같이 보기가 켜집니다',
-    }
-
-
-def launch_preview(
-    workspace_root: Path,
-    motion_path: Path,
-    *,
-    fps: Any = None,
-    spawn=subprocess.Popen,
-) -> Dict[str, Any]:
-    """뷰어를 띄운다 · 계산이 있는 구성이면 **끝난 것만** 튼다."""
-    config = preview_config(Path(workspace_root))
-    if config is None:
-        return {'success': False, 'message': NOT_CONFIGURED_MESSAGE}
-    motion_path = Path(motion_path)
-    if not motion_path.is_file():
-        return {'success': False, 'message': f'애니메이션 파일이 없습니다: {motion_path.name}'}
-    state = preview_state(workspace_root, motion_path)
-    if state['state'] == 'computing':
-        return {'success': False, 'message': 'MuJoCo 계산 중입니다 · 끝나면 틀 수 있습니다'}
-    if state['state'] in ('missing', 'failed'):
-        return {
-            'success': False,
-            'message': state.get('message')
-            or '계산 결과가 없습니다 · 「MuJoCo 계산」을 먼저 누르세요',
-        }
-    result = result_path_for(config, motion_path)
-    args = _fill(
-        config['preview']['command'], motion_path,
-        result=str(result) if result else '',
-        fps=normalized_fps(config, fps),
-        config=config,
-    )
-    cwd = str(config.get('cwd') or workspace_root)
-    try:
-        spawn(
-            args, cwd=cwd,
-            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, shell=False,
-        )
-    except OSError as exc:
-        return {'success': False, 'message': f'미리보기 실행 실패: {exc}'}
-    return {
-        'success': True,
-        'message': f'MuJoCo 재생: {motion_path.name} · 창은 이 PC 화면에 뜹니다',
     }

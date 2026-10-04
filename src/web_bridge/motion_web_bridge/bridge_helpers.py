@@ -66,6 +66,16 @@ def motor_activity_snapshot(
             'source': 'motion_run',
             'warning': False,
         }
+    if run_state == 'initialized' and owner == 'playback':
+        # 초기 위치 이동이 끝나 서 있다 · 재생이 아직 축을 쥐고 있어도 움직임이
+        # 아니다 · 전에는 「모터 동작 상태 확인 필요」 경고로 떴다 (10-7 · 2026-10-03)
+        return {
+            'active': False,
+            'kind': 'initialized',
+            'label': '',
+            'source': 'motion_run',
+            'warning': False,
+        }
     if owner not in {'', 'none'}:
         return {
             'active': True,

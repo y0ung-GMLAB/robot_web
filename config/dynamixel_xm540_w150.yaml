@@ -8,7 +8,16 @@ protocol:
 
 model_file: ../src/motion_system/lib/motor_manager/hardware/dynamixel/control_table/xm540_w150.model
 
-items: []
+# 부팅 때 장치에 쓰는 항목 · 토크 OFF 뒤 기록 (serial_controller addSlaveConfigItems)
+# Operating Mode 4 = Extended Position(멀티턴) · 값은 드라이버 설정 profile_position_value 로
+# 덮어쓴다 (motor_config_build.DYNAMIXEL_EXTENDED_POSITION_MODE) · EEPROM 항목이라 매 재시작 기록
+# · ID · 보레이트 · Shutdown 등 다른 EEPROM 은 쓰지 않는다 (Dynamixel Wizard 사전 세팅) · 2026-10-04
+items:
+  - { id: 30, name: "Operating Mode", type: s8, value: 4 }
+
+# Extended Position Goal Position 허용 raw (X 시리즈 ±1,048,575 · ±256 바퀴) · 드라이버가
+# 이 범위로 자른다 · 밖이면 장치 Data Range Error → 통신 예외 → motor_manager 전체 정지
+extended_position_raw_limit: 1048575
 
 interfaces:
   - { id: 98, index: 0 }

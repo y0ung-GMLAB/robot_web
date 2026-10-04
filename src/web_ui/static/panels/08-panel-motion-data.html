@@ -52,7 +52,7 @@
                     <button id="registerMotionFileButton" class="primary" type="button" disabled>재생 등록</button>
                     <button id="unregisterMotionFileButton" type="button" class="danger" disabled>재생 등록 해제</button>
                     <button id="downloadMotionFileButton" type="button" title="이 파일을 지금 보고 있는 PC 에 저장합니다" disabled>내 PC로 저장</button>
-                    <button id="previewMotionFileButton" type="button" title="설정된 뷰어(MuJoCo 등)로 이 애니메이션을 띄웁니다" disabled>미리보기</button>
+                    <button id="previewMotionFileButton" type="button" title="MuJoCo 물리 계산을 시작합니다 · 끝나면 「3D 보기 (웹)」와 「MuJoCo 같이 보기」가 켜집니다" disabled>MuJoCo 계산</button>
                     <button id="deleteMotionFileButton" type="button" class="danger" disabled>삭제</button>
                   </div>
                   </div>
@@ -86,14 +86,8 @@
                         </select>
                       </label>
                       <div class="compact-field"><span>MuJoCo 같이 보기</span>
-                        <span class="mujoco-companion-field" title="계산이 끝난 애니메이션만 · 초기 이동이 끝나는 순간 뷰어가 프레임 1부터 같이 출발합니다">
+                        <span class="mujoco-companion-field" title="계산이 끝난 재생 등록 애니메이션만 · 켜면 아래 「3D 보기 (웹)」가 열리고 재생이 running 으로 바뀌는 순간 0초부터 같이 출발합니다 · 이 브라우저에서 그립니다(원격 접속자 포함)">
                           <input id="motionRunMujocoToggle" type="checkbox" disabled>
-                          <select id="motionRunMujocoFps" class="compact-select" disabled>
-                            <option value="30">30 fps</option>
-                            <option value="60" selected>60 fps</option>
-                            <option value="120">120 fps</option>
-                            <option value="144">144 fps</option>
-                          </select>
                         </span>
                       </div>
                       <label class="compact-field"><span>회차 사이 동작</span>
@@ -130,6 +124,32 @@
                 </div>
               </div>
             </section>
+
+            <!-- 웹 3D 표시 · 수정 목록 7-a · 네이티브 뷰어 창은 서버 PC 모니터에만 뜬다 ·
+                 여기는 브라우저가 그린다 · 원격 접속자도 본다 · 접어 두면 three.js 를 받지 않는다 -->
+            <details id="sim3dSection" class="motion-file-subsection sim3d-section" aria-label="3D 보기 (웹)">
+              <summary class="section-head compact sim3d-summary">
+                <strong>3D 보기 (웹)</strong>
+                <span id="sim3dStatus">펼치면 로봇 팩의 3D 장면을 불러옵니다 · 실물과 같이 보려면 위 「MuJoCo 같이 보기」</span>
+              </summary>
+              <div class="sim3d-toolbar">
+                <button id="sim3dPrepareButton" type="button" title="로봇 팩에서 3D 장면을 만듭니다 · 팩마다 한 번">3D 장면 준비</button>
+                <button id="sim3dLoadButton" type="button" disabled title="선택한 애니메이션의 MuJoCo 계산 결과를 불러옵니다">프레임 불러오기</button>
+                <button id="sim3dPlayButton" type="button" class="primary" disabled>재생</button>
+                <input id="sim3dSlider" type="range" min="0" max="1000" value="0" step="1" disabled aria-label="재생 위치">
+                <span id="sim3dTime" class="sim3d-time">-- / -- s</span>
+                <label class="compact-field"><span>배속</span>
+                  <select id="sim3dSpeed" class="compact-select">
+                    <option value="0.25">0.25×</option>
+                    <option value="0.5">0.5×</option>
+                    <option value="1" selected>1×</option>
+                    <option value="2">2×</option>
+                  </select>
+                </label>
+                <button id="sim3dResetViewButton" type="button" title="로봇 팩의 카메라 설정으로 되돌립니다">시점 초기화</button>
+              </div>
+              <div id="sim3dCanvasWrap" class="sim3d-canvas-wrap" aria-label="3D 화면"></div>
+            </details>
 
             <section class="motion-file-subsection" aria-label="진행 상황">
               <div class="section-head compact">

@@ -69,7 +69,7 @@ def test_no_handler_works_on_the_event_loop(path):
     offenders = _offenders(path.read_text(encoding='utf-8'))
     assert offenders == [], (
         '이벤트 루프에서 일하는 처리기가 있습니다 · 그룹 실행이 통째로 멈출 수 '
-        f'있습니다:\n  ' + '\n  '.join(offenders)
+        '있습니다:\n  ' + '\n  '.join(offenders)
     )
 
 
@@ -170,7 +170,7 @@ def test_project_call_is_awaited_not_threaded():
             threaded.append(f'{path.name}:{line}')
     assert threaded == [], (
         'project_call 을 to_thread 로 감쌌습니다 · 코루틴이 그대로 돌아와 '
-        f'500 이 납니다:\n  ' + '\n  '.join(threaded)
+        '500 이 납니다:\n  ' + '\n  '.join(threaded)
     )
 
 

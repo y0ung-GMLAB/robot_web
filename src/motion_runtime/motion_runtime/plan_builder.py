@@ -312,7 +312,7 @@ class PlanBuilder:
                     # 나머지가 못 돌 이유가 없다 · 사용자가 보고 판단한다.
                     missing_motion_data_ids.append(motion_id)
                     continue
-                initial_mode = str(row.get('initial_mode') or 'first_frame')
+                initial_mode = str(row.get('initial_mode') or motion_run_rules.DEFAULT_INITIAL_MODE)
                 fallback_value = (
                     finite_float(row.get('initial_motion_position_deg')) or 0.0
                     if initial_mode == 'manual'

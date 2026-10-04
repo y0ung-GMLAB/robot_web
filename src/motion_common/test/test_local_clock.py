@@ -8,7 +8,6 @@
 자리라서, 여기서 조용히 틀리면 화면도 같이 조용히 틀린다.
 """
 
-from pathlib import Path
 
 import pytest
 

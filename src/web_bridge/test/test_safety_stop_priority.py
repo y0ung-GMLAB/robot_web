@@ -1,6 +1,5 @@
 import asyncio
 import json
-import threading
 from motion_web_bridge.manual_motor_commands import ManualMotorCommandService
 from motion_web_bridge.bridge_node import MotionWebBridge, _safety_first_stop, create_app
 
@@ -108,22 +107,3 @@ def test_bridge_publishes_safety_stop_on_dedicated_topic():
     assert result['success'] is True
     assert len(published) == 1
     assert published[0]['command'] == 'safety_emergency_stop'
-
-
-def test_midi_status_reports_final_output_blocked_while_emergency_is_latched():
-    bridge = MotionWebBridge.__new__(MotionWebBridge)
-    bridge._safety_status_lock = threading.Lock()
-    bridge._safety_status = {
-        'commands_blocked': True,
-        'message': '긴급정지 잠김 · 전체 프로그램 재시작 필요',
-    }
-
-    result = bridge._safety_adjusted_midi_status({
-        'device_connected': True,
-        'motor_output_enabled': True,
-    })
-
-    assert result['device_connected'] is True
-    assert result['motor_output_enabled'] is False
-    assert result['motor_output_blocked_by_safety'] is True
-    assert result['motor_output_block_reason'] == '긴급정지 잠김 · 전체 프로그램 재시작 필요'

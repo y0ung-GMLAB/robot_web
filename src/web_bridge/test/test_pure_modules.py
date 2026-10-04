@@ -16,6 +16,7 @@ import pytest
 from motion_web_bridge import (
     desktop_shortcut,
     ethercat_project_compat,
+    minas_params,
     motion_file_analysis,
     motor_config_build,
     motor_config_rules,
@@ -28,6 +29,7 @@ PURE_MODULES = [
     motor_identity,
     motor_config_rules,
     motor_config_build,
+    minas_params,          # motor_config_build 가 쓴다 · yaml · motion_common 만 의존 (10-7)
     motion_file_analysis,
     desktop_shortcut,
     ethercat_project_compat,
@@ -111,8 +113,13 @@ def test_module_only_depends_on_the_shared_kernel(module):
                 top = parts[0]
                 pure_sibling = (
                     top == 'motion_web_bridge'
-                    and len(parts) == 2
-                    and parts[1] in ALLOWED_PURE_MODULE_NAMES
+                    and (
+                        (len(parts) == 2 and parts[1] in ALLOWED_PURE_MODULE_NAMES)
+                        # `from motion_web_bridge import minas_params` 꼴 · 이름이 전부 순수 모듈
+                        or (len(parts) == 1 and all(
+                            alias.name in ALLOWED_PURE_MODULE_NAMES for alias in node.names
+                        ))
+                    )
                 )
                 if (
                     top.startswith('motion_')

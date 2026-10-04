@@ -26,8 +26,6 @@ const DYNAMIXEL_JOG_MOTION_LOCK_TIMEOUT_MS = 8000;
 const ACTION_MOTION_LOCK_EXTRA_MS = 10000;
 const CUBIC_SMOOTHSTEP_MAX_VELOCITY = 1.5;
 const CUBIC_SMOOTHSTEP_MAX_ACCELERATION = 6.0;
-const DYNAMIXEL_ACTION_MIN_DEG = -180.0;
-const DYNAMIXEL_ACTION_MAX_DEG = 180.0;
 
 function numericValue(value, fallback = null) {
   const number = Number(value);
@@ -149,15 +147,14 @@ function positionSnapshot(motor, gearRatio) {
   };
 }
 
-function limitValueDeg(motor, field, mode = '') {
-  if (mode === 'action' && isDynamixelMotor(motor)) {
-    return field === 'lower' ? DYNAMIXEL_ACTION_MIN_DEG : DYNAMIXEL_ACTION_MAX_DEG;
-  }
+function limitValueDeg(motor, field) {
+  // 다이나믹셀 ±180 한 바퀴 한계는 없앴다 · Extended Position(멀티턴) ·
+  // 한계는 모터 운전 한계(lower/upper = 조인트 매핑 환산값) 하나 · 2026-10-04
   return numericValue(motor?.[field], null);
 }
 
 function limitSnapshot(motor, gearRatio, field, mode = '') {
-  const motorDeg = limitValueDeg(motor, field, mode);
+  const motorDeg = limitValueDeg(motor, field);
   return {
     outputDeg: motorDeg === null ? null : motorDeg / gearRatio,
     motorDeg,
@@ -395,10 +392,6 @@ function actionMotorLabel(motor) {
   return isDynamixelMotor(motor) ? '다이나믹셀' : 'AC 서보';
 }
 
-function actionGearRatio(el, motor) {
-  return isDynamixelMotor(motor) ? 1 : gearRatioValue(el);
-}
-
 function acServoReadyBlockReason(motor, actionText) {
   if (!motor) return '모터를 선택하세요';
   if (!isAcServoMotor(motor)) return `AC 서보 모터만 ${actionText} 가능합니다`;
@@ -442,8 +435,8 @@ function actionBlockReason(motor) {
 
 function positionLimitBlockReason(plan) {
   if (!plan) return '';
-  const lower = limitValueDeg(plan.motor, 'lower', plan.mode);
-  const upper = limitValueDeg(plan.motor, 'upper', plan.mode);
+  const lower = limitValueDeg(plan.motor, 'lower');
+  const upper = limitValueDeg(plan.motor, 'upper');
   if (lower !== null && plan.targetMotorDeg < lower) {
     return `목표 위치가 하한 ${formatNumber(lower, 3)} deg보다 작습니다`;
   }
@@ -520,15 +513,15 @@ export function createMotionTestController({ el, getLatestState, getJointRow = (
     const axis = numericValue(motor?.controller_index, null);
     const row = axis === null ? null : getJointRow(axis);
     if (!row) return null;
-    const gear = isDynamixelMotor(motor) ? 1 : numericValue(row.gear_ratio, 1);
+    const gear = numericValue(row.gear_ratio, 1);
     const signedRatio = gear * numericValue(row.scale, 1) * (row.invert ? -1 : 1);
     if (!Number.isFinite(signedRatio) || signedRatio === 0) return null;
     return { motionId: String(row.motion_id || ''), signedRatio };
   }
 
-  /** 계산에 쓰는 (부호 포함) 감속비 · 동작 모드 = 입력칸 · 조그 = 조인트 토글 */
+  /** 계산에 쓰는 (부호 포함) 감속·기어비 · 동작 모드 = 입력칸 · 조그 = 조인트 토글 */
   function commandGearRatio(mode, motor) {
-    if (mode === 'action') return actionGearRatio(el, motor);
+    if (mode === 'action') return gearRatioValue(el);
     if (mode !== 'jog' || !el.motionTestJogJointMode?.checked) return 1;
     return jogJointInfo(motor)?.signedRatio ?? 1;
   }
@@ -680,10 +673,7 @@ export function createMotionTestController({ el, getLatestState, getJointRow = (
       lines.push(`복귀 경계: ${plan.recoveryBoundary === 'lower' ? '하한' : '상한'}`);
       lines.push('제어: 드라이브 속도·가속도 제한으로 경계 복귀');
     } else {
-      const gearText = isDynamixelMotor(plan.motor)
-        ? `${formatNumber(plan.gearRatio, 3)}:1 (다이나믹셀 고정)`
-        : `${formatNumber(plan.gearRatio, 3)}:1`;
-      lines.push(`감속비: ${gearText}`);
+      lines.push(`감속·기어비: ${formatNumber(plan.gearRatio, 3)}:1`);
       lines.push(`모터 명령 절대값: ${positionPairText(plan.targetMotorDeg, plan.targetRaw)}`);
       lines.push(`모터 명령 상대값: ${positionPairText(plan.motorDeltaDeg, plan.deltaRaw, true)}`);
       lines.push('궤적: 3차 S-curve 기준');
@@ -740,20 +730,7 @@ export function createMotionTestController({ el, getLatestState, getJointRow = (
 
   function updateActionPositionInputConstraints(motor, isActionMode) {
     if (!el.motionTestPosition) return;
-    if (isDynamixelMotor(motor)) {
-      el.motionTestPosition.min = String(DYNAMIXEL_ACTION_MIN_DEG);
-      el.motionTestPosition.max = String(DYNAMIXEL_ACTION_MAX_DEG);
-      el.motionTestPosition.title = '다이나믹셀 동작 모드 목표 위치는 -180~180도로 제한됩니다';
-      if (isActionMode) {
-        const value = numericValue(el.motionTestPosition.value, null);
-        if (value !== null && value < DYNAMIXEL_ACTION_MIN_DEG) {
-          el.motionTestPosition.value = String(DYNAMIXEL_ACTION_MIN_DEG);
-        } else if (value !== null && value > DYNAMIXEL_ACTION_MAX_DEG) {
-          el.motionTestPosition.value = String(DYNAMIXEL_ACTION_MAX_DEG);
-        }
-      }
-      return;
-    }
+    // 다이나믹셀 ±180 입력 제한은 없앴다 · 멀티턴 · 한계는 모터 lower/upper (2026-10-04)
     el.motionTestPosition.removeAttribute('min');
     el.motionTestPosition.removeAttribute('max');
     el.motionTestPosition.title = '';
@@ -925,16 +902,10 @@ export function createMotionTestController({ el, getLatestState, getJointRow = (
     const motor = selectedMotor();
     const isActionMode = el.motionTestMode?.value === 'action';
     const isRecoveryMode = el.motionTestMode?.value === 'recovery';
-    const isDynamixelSelected = isDynamixelMotor(motor);
     if (el.motionTestGearRatio) {
-      if (isDynamixelSelected) {
-        el.motionTestGearRatio.value = '1';
-        el.motionTestGearRatio.disabled = true;
-        el.motionTestGearRatio.title = '다이나믹셀 동작 모드는 감속비를 사용하지 않으며 1로 고정됩니다';
-      } else {
-        el.motionTestGearRatio.disabled = false;
-        el.motionTestGearRatio.title = '';
-      }
+      // 다이나믹셀도 감속·기어비 입력 · 외부 기어 사례 (2026-10-04 · 「1 고정」 폐지)
+      el.motionTestGearRatio.disabled = false;
+      el.motionTestGearRatio.title = '';
     }
     if (el.motionTestJogJointMode) {
       const joint = jogJointInfo(motor);
@@ -1043,7 +1014,7 @@ export function createMotionTestController({ el, getLatestState, getJointRow = (
             : motionStopInFlight ? '모터 정지 요청을 처리하고 있습니다'
               : motionCommandActive ? '현재 동작이 완료될 때까지 기다리거나 동작 정지를 누르세요'
                 : runtimeActionBlockReason(motor)
-                  || (plan === null ? '목표 위치, 감속비, 동작 시간을 확인하세요' : '')
+                  || (plan === null ? '목표 위치, 감속·기어비, 동작 시간을 확인하세요' : '')
                   || positionLimitBlockReason(plan)
       );
       el.motionTestRunButton.title = actionDisabled ? reason : '설정한 목표 위치로 동작';
@@ -1115,7 +1086,7 @@ export function createMotionTestController({ el, getLatestState, getJointRow = (
         } else {
           const reason = runtimeActionBlockReason(motor)
             || positionLimitBlockReason(plan)
-            || '목표 위치, 감속비, 동작 시간을 확인하세요';
+            || '목표 위치, 감속·기어비, 동작 시간을 확인하세요';
           guideText = `동작 불가: ${reason}`;
         }
       } else if (motor && isRecoveryMode) {

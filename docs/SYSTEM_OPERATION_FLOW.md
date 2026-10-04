@@ -9,10 +9,10 @@
 
 ```text
 브라우저 :8000
-  → Motion Web Bridge (ROS_LOCALHOST_ONLY=1)
+  → Motion Web Bridge (ROS_LOCALHOST_ONLY=0 · PC 이름공간 /<PC이름>/… · 그룹 DDS 도메인)
       → motion_run_manager → motion_supervisor → motion_system
       ↕ 127.0.0.1:8011 로컬 고수준 어댑터
-    motion_coordination_node (ROS_LOCALHOST_ONLY=0, 선택한 DDS Domain)
+    motion_coordination_node (ROS_LOCALHOST_ONLY=0 · 같은 DDS Domain)
       ↔ 다른 PC의 motion_coordination_node (typed ROS 2 DDS)
 ```
 

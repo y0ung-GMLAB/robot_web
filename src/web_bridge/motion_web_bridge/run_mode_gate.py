@@ -13,6 +13,10 @@
 
 판정은 **저장 파일**을 읽는다 · 조회 경유(0.5초 제한)는 브리지가 잠깐 막히면
 기본값(스케줄)으로 둔갑했던 전력이 있다 (§6-270 과 같은 이유).
+
+**모드를 못 읽으면 막는다**(fail-close · 수정 목록 18 · 2026-10-03) · 전에는
+통과시켰다 · 정지·긴급정지·서보 끄기는 이 문을 지나지 않으므로 막아도 멈출 수
+있다 · 기동 초기(프로젝트 저장소 미준비)에는 잠깐 막히고 사유가 화면에 뜬다.
 """
 
 from __future__ import annotations
@@ -25,6 +29,7 @@ OFF_BLOCK_MESSAGE = '오프 모드 · 명령이 차단되어 있습니다 (상�
 SCHEDULE_MANUAL_BLOCK_MESSAGE = (
     '스케줄 모드 · 수동 조작은 「수동」 모드에서만 됩니다 (상단에서 모드를 바꾸세요)'
 )
+MODE_UNREADABLE_BLOCK_MESSAGE = '운전 모드를 확인할 수 없어 명령을 차단했습니다'
 
 
 def current_run_mode(bridge: Any) -> str:
@@ -39,17 +44,23 @@ def current_run_mode(bridge: Any) -> str:
     return store.mode
 
 
+def _unreadable(bridge: Any, exc: BaseException, what: str) -> str:
+    """모드를 못 읽었다 · 경고를 남기고 차단 사유를 돌려준다 (fail-close · 18)."""
+    logger = getattr(bridge, 'get_logger', None)
+    if callable(logger):
+        logger().warn(f'운전 모드 확인 실패 · {what} 차단: {exc}')
+    return f'{MODE_UNREADABLE_BLOCK_MESSAGE} ({exc})'
+
+
 def motion_command_block_reason(bridge: Any) -> str:
-    """막혔으면 사유를, 아니면 빈 문자열을 돌려준다 · 읽기 실패는 막지 않는다."""
+    """막혔으면 사유를, 아니면 빈 문자열을 돌려준다 · 읽기 실패도 막는다."""
     try:
         if current_run_mode(bridge) == OFF_MODE:
             return OFF_BLOCK_MESSAGE
-    except Exception as exc:  # noqa: BLE001 - 어떤 실패든 게이트는 막지 않는다
+    except Exception as exc:  # noqa: BLE001 - 어떤 실패든 사유를 붙여 막는다
         # 파일 읽기(OSError)만이 아니다 · 프로젝트 저장소가 아직 없는 기동
-        # 초기에도 여기로 온다 · 게이트의 실패가 정지 명령보다 위험해선 안 된다
-        logger = getattr(bridge, 'get_logger', None)
-        if callable(logger):
-            logger().warn(f'운전 모드 확인 실패 · 명령은 통과시킨다: {exc}')
+        # 초기에도 여기로 온다 · 정지 계열은 이 문을 지나지 않는다
+        return _unreadable(bridge, exc, '명령')
     return ''
 
 
@@ -65,15 +76,12 @@ def manual_control_block_reason(bridge: Any) -> str:
     지나지 않는다 (막으면 오히려 위험하다).
 
     프로젝트가 없으면(빈 모드) 막지 않는다 · 스케줄이 돌 수 없는 상태다 ·
-    모드 파일을 못 읽으면 경고하고 막지 않는다 (오프 문과 같은 원칙).
+    모드 파일을 못 읽으면 경고하고 **막는다** (오프 문과 같은 원칙 · 18).
     """
     try:
         mode = current_run_mode(bridge)
-    except Exception as exc:  # noqa: BLE001 - 문의 실패가 정지보다 위험해선 안 된다
-        logger = getattr(bridge, 'get_logger', None)
-        if callable(logger):
-            logger().warn(f'운전 모드 확인 실패 · 수동 명령은 통과시킨다: {exc}')
-        return ''
+    except Exception as exc:  # noqa: BLE001 - 어떤 실패든 사유를 붙여 막는다
+        return _unreadable(bridge, exc, '수동 명령')
     if mode == OFF_MODE:
         return OFF_BLOCK_MESSAGE
     if mode == SCHEDULE_MODE:

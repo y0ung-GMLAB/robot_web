@@ -17,6 +17,7 @@ from motion_common.execution_context import verify_mapping_fingerprint
 from motion_common.paths import project_dir_for
 from motion_common import command_router, generation, topics, values
 from motion_common import store as common_store
+from motion_runtime.motion_run_constants import DEFAULT_INITIAL_MODE
 from motion_runtime.midi_bank_store import (
     atomic_write_with_backup,
     load_midi_banks,
@@ -600,7 +601,9 @@ class MotionMappingManager(Node):
             motion_id = str(row.get('motion_id') or '').strip()
             if not motion_id:
                 continue
-            initial_mode = str(row.get('initial_mode') or 'first_frame').strip() or 'first_frame'
+            initial_mode = (
+                str(row.get('initial_mode') or DEFAULT_INITIAL_MODE).strip() or DEFAULT_INITIAL_MODE
+            )
             reference_enabled = bool(row.get('reference_enabled', True))
             reference_position = self._optional_float(row.get('reference_position_deg'), 0.0)
             initial_position = self._optional_float(row.get('initial_motion_position_deg'), 0.0)

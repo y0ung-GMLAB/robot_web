@@ -1,5 +1,6 @@
 #include <cmath>
 #include <algorithm>
+#include <cstdint>
 #include <filesystem>
 #include <fstream>
 #include <sstream>
@@ -132,6 +133,13 @@ void dynamixel::DynamixelDriver::loadParameters(const std::string& param_file)
     }
     if (root["max_radian"]) {
         max_radian_ = root["max_radian"].as<double>();
+    }
+    if (root["extended_position_raw_limit"]) {
+        const int64_t limit = root["extended_position_raw_limit"].as<int64_t>();
+        if (limit <= 0 || limit > INT32_MAX) {
+            throw std::runtime_error("Dynamixel extended_position_raw_limit must be a positive int32.");
+        }
+        extended_position_raw_limit_ = static_cast<int32_t>(limit);
     }
     if (root["velocity_unit"]) {
         velocity_unit_ = root["velocity_unit"].as<double>();
@@ -269,18 +277,14 @@ double dynamixel::DynamixelDriver::effort(const int16_t value)
 int32_t dynamixel::DynamixelDriver::position(const double value)
 {
     if (has_position_model_) {
-        const int32_t raw_position =
-            static_cast<int32_t>(std::lround(zero_position_ + value * DEG_TO_RAD / positionUnit()));
-        const int32_t min_raw =
-            static_cast<int32_t>(std::lround(std::min(min_position_, max_position_)));
-        const int32_t max_raw =
-            static_cast<int32_t>(std::lround(std::max(min_position_, max_position_)));
-
-        if (min_raw < max_raw) {
-            return std::clamp(raw_position, min_raw, max_raw);
-        }
-
-        return raw_position;
+        // 전에는 모델 파일의 한 바퀴 범위(0~4095)로 잘랐다 · Position Control 전제 ·
+        // Extended Position(멀티턴)으로 바뀌어 장치 허용 범위(±extended_position_raw_limit_)
+        // 로 자른다 · 밖이면 장치가 Data Range Error 를 돌려주고 writeData 가 예외를 던져
+        // motor_manager 전체가 서므로 클램프는 남긴다 · 운전 한계는 상위(supervisor ·
+        // plan_builder)가 lower/upper 로 지킨다 · robot_web 2026-10-04 (사용자 지시)
+        const double raw = std::lround(zero_position_ + value * DEG_TO_RAD / positionUnit());
+        const double limit = static_cast<double>(extended_position_raw_limit_);
+        return static_cast<int32_t>(std::clamp(raw, -limit, limit));
     }
 
     return static_cast<int32_t>(std::lround(value / DEGREE_PER_REVOLUTION * config_.pulse_per_revolution));

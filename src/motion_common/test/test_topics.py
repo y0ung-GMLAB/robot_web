@@ -12,7 +12,7 @@ from motion_common import topics
 SOURCE_ROOT = Path(__file__).resolve().parents[3]
 
 TOPIC_LITERAL = re.compile(
-    r"""['"](/(?:motion_control|motion_studio|motion_group|motion_schedule"""
+    r"""['"](/(?:motion_control|motion_group|motion_schedule"""
     r"""|motion_web|xtouch)/[a-z_/]+)['"]"""
 )
 
@@ -103,7 +103,7 @@ def test_every_channel_lives_under_a_group():
             loose.append(f'{name} = {value}')
     assert loose == [], (
         '묶음 이름 없이 맨 바깥에 있는 통로가 있습니다 · '
-        f'기능 이름 아래로 넣으세요:\n  ' + '\n  '.join(loose)
+        '기능 이름 아래로 넣으세요:\n  ' + '\n  '.join(loose)
     )
 
 

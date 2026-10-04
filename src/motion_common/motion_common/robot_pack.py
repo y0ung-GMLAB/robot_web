@@ -405,10 +405,41 @@ def pack_fingerprint(pack_dir: Path) -> str:
     return digest.hexdigest()
 
 
+#: 손으로 놓은 팩(설치 기록 없음)의 지문 · {팩 경로: (파일 서명, 지문)} · 수정 목록 5-4
+#: 목록 요청마다 파일 수만큼 팩 전체(메쉬 포함)를 다시 읽던 것을 1회로 · 파일
+#: 이름·크기·수정시각이 하나라도 바뀌면 다시 계산한다
+_FINGERPRINT_CACHE: Dict[str, Tuple[Tuple[Tuple[str, int, int], ...], str]] = {}
+
+
+def _pack_signature(pack_dir: Path) -> Tuple[Tuple[str, int, int], ...]:
+    """팩 파일들의 (상대경로 · 크기 · mtime_ns) · 내용을 읽지 않는다."""
+    rows = []
+    for path in sorted(p for p in pack_dir.rglob('*') if p.is_file()):
+        relative = path.relative_to(pack_dir).as_posix()
+        if relative == INSTALLED_NAME:
+            continue
+        stat = path.stat()
+        rows.append((relative, int(stat.st_size), int(stat.st_mtime_ns)))
+    return tuple(rows)
+
+
+def cached_pack_fingerprint(pack_dir: Path) -> str:
+    """`pack_fingerprint` 와 같은 값 · 파일 서명이 같으면 다시 읽지 않는다."""
+    pack_dir = Path(pack_dir)
+    key = str(pack_dir.resolve())
+    signature = _pack_signature(pack_dir)
+    cached = _FINGERPRINT_CACHE.get(key)
+    if cached is not None and cached[0] == signature:
+        return cached[1]
+    digest = pack_fingerprint(pack_dir)
+    _FINGERPRINT_CACHE[key] = (signature, digest)
+    return digest
+
+
 def current_fingerprint(pack_dir: Path) -> str:
-    """지금 놓인 팩의 지문 · 설치 기록 우선 · 손으로 놓은 팩이면 계산 · 팩 없으면 ''."""
+    """지금 놓인 팩의 지문 · 설치 기록 우선 · 손으로 놓은 팩이면 계산(1회 · 기억) · 팩 없으면 ''."""
     pack_dir = Path(pack_dir)
     if not (pack_dir / 'robot.yaml').is_file():
         return ''
     recorded = str(read_installed(pack_dir).get('fingerprint') or '')
-    return recorded or pack_fingerprint(pack_dir)
+    return recorded or cached_pack_fingerprint(pack_dir)

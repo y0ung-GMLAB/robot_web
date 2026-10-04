@@ -136,7 +136,7 @@ def test_the_release_message_is_written_once():
     source = _read('motor_config_service.py')
 
     assert source.count("'실행 적용 해제로 정지 상태를 정리했습니다'") == 1
-    assert source.count('RELEASE_SETTLED_MESSAGE') == 3  # 정의 + 쓰는 곳 둘
+    assert source.count('RELEASE_SETTLED_MESSAGE') == 2  # 정의 + 쓰는 곳 하나(settle_stopping_run_state)
 
 
 def test_the_duplicated_fallback_is_gone():

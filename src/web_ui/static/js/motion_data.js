@@ -12,7 +12,6 @@ import {
   importProjectFile,
   initializeMotionRun,
   precomputeMotionFile,
-  previewMotionFile,
   projectFileDownloadUrl,
   saveMotionMapping,
   saveRegisteredMotionFile,
@@ -40,6 +39,7 @@ import {
   showPrompt,
 } from './ui_dialogs.js';
 import { draggingFiles, droppedEntries, walkEntry } from './drop_files.js';
+import { createSim3dViewer } from './sim3d.js';
 
 /** 차트 색 · 화면 테마(CSS 토큰)를 따른다 · 리디자인 2026-10-02
  *
@@ -359,7 +359,7 @@ function defaultMotionAxisRow(motionId, motorAxis = null) {
     motor_ref: '', motor_axis: motorAxis,
     reference_enabled: true, reference_position_deg: 0.0,
     motion_lower_deg: -180.0, motion_upper_deg: 180.0,
-    initial_mode: 'manual', initial_motion_position_deg: 0.0,
+    initial_mode: 'reference', initial_motion_position_deg: 0.0,   // 기본 기준점 · 2026-10-03 (13-3)
     initial_move_time_sec: 5.0, invert: false, offset_deg: 0.0,
     scale: 1.0, gear_ratio: 1.0,
   };
@@ -617,6 +617,8 @@ export function createMotionDataController({
   let initializeWatchUntil = 0;
   let initializeWatchStarted = false;
   const INITIALIZE_WATCH_MS = 30000;
+  // 웹 3D 표시 · 7-a · 선택한 애니메이션을 따라간다 · 접혀 있으면 아무것도 받지 않는다
+  const sim3d = createSim3dViewer({ el, getLatestState });
   let fileLoadToken = 0;
   let mappingLoadToken = 0;
   let mappingRevision = '';
@@ -976,22 +978,6 @@ export function createMotionDataController({
     return normalizeMotorTypeKey(motor?.motor_type, motor?.motor_type_label) === 'dynamixel';
   }
 
-  function isDynamixelMappingRow(row) {
-    return isDynamixelMotor(motorForMapping(row));
-  }
-
-  function mappingGearRatioValue(row) {
-    return isDynamixelMappingRow(row) ? 1.0 : numericOr(row?.gear_ratio, 1.0);
-  }
-
-  function normalizeDynamixelGearRatios() {
-    const rows = Array.isArray(mappingDraft.mappings) ? mappingDraft.mappings : [];
-    rows.forEach((row) => {
-      if (isDynamixelMappingRow(row)) {
-        row.gear_ratio = 1.0;
-      }
-    });
-  }
 
   function firstMotionValueFor(motionId) {
     const motionIds = Array.isArray(mappingMotionFileDetail?.analysis?.motion_ids)
@@ -1003,8 +989,8 @@ export function createMotionDataController({
   }
 
   function displayInitialPosition(row) {
-    if (row.initial_mode === 'reference') return 0.0;
-    if ((row.initial_mode || 'first_frame') !== 'first_frame') {
+    if ((row.initial_mode || 'reference') === 'reference') return 0.0;
+    if (row.initial_mode !== 'first_frame') {
       return numericOr(row.initial_motion_position_deg, 0.0);
     }
     const firstValue = firstMotionValueFor(row.motion_id);
@@ -1669,6 +1655,11 @@ export function createMotionDataController({
 
 
   function renderMotionRunPanel() {
+    // 같이 보기 토글 · 재생 등록된 파일의 계산이 끝났을 때만 켤 수 있다
+    const mujocoRegisteredFile = files.find(
+      (entry) => entry.id === registeredMotionFileIdValue,
+    ) || null;
+    sim3d.update({ file: selectedFile, registeredFile: mujocoRegisteredFile });
     const payload = motionRunPayload();
     const status = motionRunStatus || {};
     const state = String(status.state || 'idle');
@@ -1882,45 +1873,43 @@ export function createMotionDataController({
         : '애니메이션을 먼저 선택하세요';
     }
     if (el.previewMotionFileButton) {
+      // 계산 버튼만 남았다 · 보기는 「3D 보기 (웹)」 · 네이티브 뷰어 창은 없앴다(7)
       const state = mujocoState(file);
       const LABELS = {
         missing: 'MuJoCo 계산', failed: '다시 계산', stale: '다시 계산',
-        computing: '계산 중…', ready: 'MuJoCo 재생', direct: 'MuJoCo 재생',
+        computing: '계산 중…', ready: '계산 완료', direct: '계산 없는 구성',
       };
-      el.previewMotionFileButton.textContent = LABELS[state] || 'MuJoCo';
-      el.previewMotionFileButton.disabled = !file || loading || state === 'computing'
-        || state === '' || state === 'unavailable';
+      el.previewMotionFileButton.textContent = LABELS[state] || 'MuJoCo 계산';
+      el.previewMotionFileButton.disabled = !file || loading
+        || !(state === 'missing' || state === 'failed' || state === 'stale');
       el.previewMotionFileButton.title = !file
         ? '애니메이션을 먼저 선택하세요'
         : (state === '' || state === 'unavailable'
           ? 'MuJoCo 설정이 없습니다 · 로봇 팩(시스템 정보) 또는 config/animation_preview.yaml'
           : (state === 'computing'
-            ? '무거운 물리 계산이 도는 중입니다 · 끝나면 틀 수 있습니다'
+            ? '무거운 물리 계산이 도는 중입니다 · 끝나면 3D 보기가 켜집니다'
             : (state === 'stale'
               ? `${file.preview?.message || '로봇 팩 변경'} · 누르면 지금 팩으로 다시 계산합니다`
               : (state === 'missing' || state === 'failed'
-                ? '무거운 물리 계산을 시작합니다 · 끝나면 같이 보기가 켜집니다'
-                : '계산된 결과를 뷰어로 틉니다 · 창은 서버 PC 화면에 뜹니다'))));
+                ? '무거운 물리 계산을 시작합니다 · 끝나면 「3D 보기 (웹)」와 같이 보기가 켜집니다'
+                : (state === 'ready'
+                  ? '계산이 끝났습니다 · 아래 「3D 보기 (웹)」에서 봅니다'
+                  : '계산(precompute)이 없는 구성입니다 · 웹 3D 로 볼 결과가 없습니다')))));
     }
-    // 같이 보기 토글 · 재생 등록된 파일의 계산이 끝났을 때만 켤 수 있다
-    const mujocoRegisteredFile = files.find(
-      (entry) => entry.id === registeredMotionFileIdValue,
-    ) || null;
     const registeredState = mujocoState(mujocoRegisteredFile);
     if (el.motionRunMujocoToggle) {
       // stale(팩 변경 뒤 옛 결과)도 같이 보기는 허용 · 다시 계산은 MuJoCo 버튼
-      const usable = registeredState === 'ready' || registeredState === 'direct'
-        || registeredState === 'stale';
+      const usable = registeredState === 'ready' || registeredState === 'stale';
       el.motionRunMujocoToggle.disabled = !usable;
-      if (!usable) el.motionRunMujocoToggle.checked = false;
+      if (!usable && el.motionRunMujocoToggle.checked) {
+        el.motionRunMujocoToggle.checked = false;
+        sim3d.setFollow(false);
+      }
       el.motionRunMujocoToggle.title = usable
-        ? '켜면 재생 시작과 함께 MuJoCo 창이 프레임 1부터 같이 출발합니다'
+        ? '켜면 아래 「3D 보기 (웹)」가 열리고 재생 시작과 함께 0초부터 같이 출발합니다'
         : (registeredState === 'computing'
           ? 'MuJoCo 계산 중입니다 · 끝나면 켤 수 있습니다'
           : '재생 등록된 애니메이션의 MuJoCo 계산이 끝나야 켤 수 있습니다');
-      if (el.motionRunMujocoFps) {
-        el.motionRunMujocoFps.disabled = !usable;
-      }
     }
     // 재생 등록은 **조인트 매핑 편집과 상관없다** · §6-160
     //
@@ -2036,26 +2025,25 @@ export function createMotionDataController({
     const duplicateCounts = mappingDuplicateAxisCounts();
     el.motionMappingRows.innerHTML = rows.map((row, index) => {
       const status = mappingValidationRowStatus(row, mappingRowStatus(row, duplicateCounts));
-      const initialMode = row.initial_mode || 'first_frame';
+      const initialMode = row.initial_mode || 'reference';   // 칸 없으면 기준점 · 서버와 같다 (13-3)
       // 값을 직접 넣는 것은 「직접 지정」뿐 · 첫 프레임·기준점은 보여 주기만
       const initialPositionDisabled = initialMode !== 'manual';
-      const dynamixelGearFixed = isDynamixelMappingRow(row);
       const referencePositionValue = displayReferencePosition(row);
       const initialPositionValue = displayInitialPosition(row);
-      const gearRatioValue = mappingGearRatioValue(row);
+      // 감속·기어비 · 다이나믹셀도 입력 · 외부 기어 사례 (2026-10-04 · 「1 고정」 폐지)
+      const gearRatioValue = numericOr(row?.gear_ratio, 1.0);
       // 초기 위치 · 첫 프레임(애니메이션 첫 줄 값) · 직접 지정(이 칸) · 기준점(모션 0°) · 2026-10-02
       const initialPositionDisabledAttr = initialMode === 'reference'
         ? ' disabled title="기준점 · 재생 전 모션 0°(기준점 캡처한 자세)로 이동합니다"'
         : initialPositionDisabled
           ? ' disabled title="첫 프레임 · 애니메이션 첫 프레임 값으로 이동합니다 (애니메이션이 없으면 0°) · 값 입력은 「직접 지정」일 때만"'
           : ' title="직접 지정 · 재생 전 이 값(조인트 deg)으로 이동합니다"';
-      const gearRatioDisabledAttr = dynamixelGearFixed ? ' disabled title="다이나믹셀은 감속비를 사용하지 않으며 1로 고정됩니다"' : '';
       return (
         `<tr data-mapping-index="${index}">
           <td class="motion-id-cell"><input class="motion-id-input mono" type="text" title="Blender 본 이름 그대로 입력하세요 (구 파일의 1-1 형식도 그대로 사용 가능)" data-motion-mapping-field="motion_id" value="${displayText(row.motion_id)}" placeholder="예: Neck_Yaw" autocomplete="off" autocapitalize="off" spellcheck="false"></td>
           <td><input type="checkbox" data-motion-mapping-field="enabled" ${row.enabled ? 'checked' : ''}></td>
           <td class="mapping-motor-cell">${motorSelectHtml(row)}</td>
-          <td class="mapping-number-cell ${dynamixelGearFixed ? 'mapping-disabled-cell' : ''}"><input class="numeric-input mapping-number-input" type="number" min="0.0001" step="0.0001" data-motion-mapping-field="gear_ratio" value="${displayText(gearRatioValue)}"${gearRatioDisabledAttr}></td>
+          <td class="mapping-number-cell"><input class="numeric-input mapping-number-input" type="number" min="0.0001" step="0.0001" data-motion-mapping-field="gear_ratio" value="${displayText(gearRatioValue)}"></td>
           <td class="mapping-number-cell"><input class="numeric-input mapping-number-input" type="number" step="0.001" data-motion-mapping-field="reference_position_deg" value="${displayText(referencePositionValue)}"></td>
           <td>
             <button class="mapping-mini-button" type="button" data-motion-mapping-action="capture_reference">캡처</button>
@@ -2414,7 +2402,6 @@ export function createMotionDataController({
       mappingRevision = mappingFileRevision(payload.file);
       mappingValidation = payload.validation || null;
       mappingMotionFileDetail = loadedMotionFileDetail;
-      normalizeDynamixelGearRatios();
       mappingDirty = false;
       mappingRevisionConflict = false;
       const mappingFileName = payload.file?.filename || payload.file?.id || selectedMappingId || '-';
@@ -2453,27 +2440,28 @@ export function createMotionDataController({
     return '';
   }
 
-  /** MuJoCo 버튼 · 계산이 끝난 것만 튼다 · P7
+  /** MuJoCo 계산 버튼 · missing/failed/stale 에서만 · 보기는 「3D 보기 (웹)」 (7)
    *
    * missing → 「MuJoCo 계산」(시작) · computing → 그레이 「계산 중…」 ·
-   * ready/direct → 「MuJoCo 재생」 · failed/stale → 「다시 계산」
+   * ready → 「계산 완료」(비활성) · failed/stale → 「다시 계산」
    */
   async function previewSelectedMotionFile() {
     if (!selectedFileId) return;
     const state = mujocoState(selectedFile);
+    if (!(state === 'missing' || state === 'failed' || state === 'stale')) return;
     try {
-      if (state === 'missing' || state === 'failed' || state === 'stale') {
-        const result = await precomputeMotionFile(selectedFileId);
-        setMessage(result?.message || 'MuJoCo 계산 시작');
-        await loadFiles(selectedFileId);
-        return;
-      }
-      const fps = Number(el.motionRunMujocoFps?.value) || 60;
-      const result = await previewMotionFile(selectedFileId, fps);
-      setMessage(result?.message || 'MuJoCo 재생');
+      const result = await precomputeMotionFile(selectedFileId);
+      setMessage(result?.message || 'MuJoCo 계산 시작');
+      await loadFiles(selectedFileId);
     } catch (error) {
-      setMessage(`MuJoCo 실패: ${error?.message || error}`);
+      setMessage(`MuJoCo 계산 실패: ${error?.message || error}`);
     }
+  }
+
+  /** 「MuJoCo 같이 보기」 · 웹 3D 뷰어가 재생 등록 파일을 따라간다 (7) */
+  function toggleMujocoCompanion() {
+    const registered = files.find((entry) => entry.id === registeredMotionFileIdValue) || null;
+    sim3d.setFollow(Boolean(el.motionRunMujocoToggle?.checked), registered);
   }
 
   /** 계산이 도는 동안은 목록을 몇 초마다 다시 읽어 상태를 갱신한다 */
@@ -2622,7 +2610,6 @@ export function createMotionDataController({
     }
     mappingLoading = true;
     setMappingMessage('매핑 저장 중');
-    normalizeDynamixelGearRatios();
     upgradeLegacyMappingRefs();
     renderMappingPanel();
     try {
@@ -2752,11 +2739,8 @@ export function createMotionDataController({
         ? ''
         : selectionValue;
       row.motor_axis = motor ? Number(motor.controller_index) : null;
-      if (isDynamixelMappingRow(row)) {
-        row.gear_ratio = 1.0;
-      }
     } else if (field === 'initial_mode') {
-      row.initial_mode = ['manual', 'reference'].includes(value) ? value : 'first_frame';
+      row.initial_mode = ['manual', 'first_frame'].includes(value) ? value : 'reference';
       if (row.initial_mode === 'first_frame') {
         const firstValue = firstMotionValueFor(row.motion_id);
         if (firstValue !== null) row.initial_motion_position_deg = firstValue;
@@ -2774,9 +2758,6 @@ export function createMotionDataController({
       const number = Number(value);
       const fallback = field === 'scale' || field === 'gear_ratio' ? 1.0 : field === 'initial_move_time_sec' ? 5.0 : 0.0;
       row[field] = Number.isFinite(number) ? number : fallback;
-      if (field === 'gear_ratio' && isDynamixelMappingRow(row)) {
-        row.gear_ratio = 1.0;
-      }
     }
     mappingValidation = null;
     markMappingDirty();
@@ -2844,9 +2825,9 @@ export function createMotionDataController({
       row.reference_position_deg = position;
       row.reference_enabled = true;
     } else {
-      const gear = isDynamixelMappingRow(row) ? 1 : numericOr(row.gear_ratio, 1);
+      const gear = numericOr(row.gear_ratio, 1);
       const factor = gear * numericOr(row.scale, 1) * (row.invert ? -1 : 1);
-      if (!factor) return { success: false, message: '감속비·배율이 0이라 환산할 수 없습니다' };
+      if (!factor) return { success: false, message: '감속·기어비·배율이 0이라 환산할 수 없습니다' };
       const reference = row.reference_enabled === false ? 0 : numericOr(row.reference_position_deg, 0);
       const motion = (position - reference) / factor - numericOr(row.offset_deg, 0);
       const motorUpper = kind === 'upper';
@@ -3056,9 +3037,6 @@ export function createMotionDataController({
       const payload = await startMotionRun({
         ...motionRunPayload(),
         run_mode: runMode,
-        // MuJoCo 같이 보기 · 서버가 running 전환 순간 뷰어를 띄운다 · P7
-        with_mujoco: Boolean(el.motionRunMujocoToggle?.checked),
-        mujoco_fps: Number(el.motionRunMujocoFps?.value) || 60,
       });
       motionRunStatus = payload.status || motionRunStatus || null;
       motionRunLastResult = payload;
@@ -3193,6 +3171,7 @@ export function createMotionDataController({
     el.unregisterMotionFileButton?.addEventListener('click', unregisterSelectedMotionFile);
     el.downloadMotionFileButton?.addEventListener('click', downloadSelectedMotionFile);
     el.previewMotionFileButton?.addEventListener('click', previewSelectedMotionFile);
+    el.motionRunMujocoToggle?.addEventListener('change', toggleMujocoCompanion);
     if (el.deleteMotionFileButton) {
       el.deleteMotionFileButton.addEventListener('click', deleteSelectedFile);
     }

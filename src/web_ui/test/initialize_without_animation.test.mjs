@@ -37,7 +37,9 @@ test('initial position offers 첫 프레임 · 직접 지정 · 기준점', () =
   assert.match(data, />첫 프레임<\/option>/);
   // 값은 「직접 지정」일 때만 입력
   assert.match(data, /const initialPositionDisabled = initialMode !== 'manual';/);
-  assert.match(data, /row\.initial_mode = \['manual', 'reference'\]\.includes\(value\) \? value : 'first_frame';/);
+  // 모르는 값·빈 칸은 기준점 · 2026-10-03 (13-3)
+  assert.match(data, /row\.initial_mode = \['manual', 'first_frame'\]\.includes\(value\) \? value : 'reference';/);
+  assert.match(data, /initial_mode: 'reference', initial_motion_position_deg: 0\.0,/);
 });
 
 test('the runtime and the validator know the 기준점 mode', () => {

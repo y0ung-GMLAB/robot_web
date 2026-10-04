@@ -29,7 +29,7 @@ from .project_paths import (
 
 
 def _project_tree_category_signature(tree: Any, category: str) -> str:
-    """한 분류의 파일 이름·해시 서명 · motion_studio_sync 에서 이사 왔다."""
+    """한 분류의 파일 이름·해시 서명 · 프로젝트 트리 변경 감지용."""
     rows = []
     for folder in tree or []:
         if not isinstance(folder, dict) or folder.get('category') != category:

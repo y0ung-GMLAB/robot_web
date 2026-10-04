@@ -58,7 +58,8 @@ def test_no_project_does_not_block(tmp_path):
     assert run_mode_gate.manual_control_block_reason(bridge) == ''
 
 
-def test_unreadable_mode_warns_and_lets_through(tmp_path):
+def test_unreadable_mode_warns_and_blocks(tmp_path):
+    """못 읽으면 막는다 · 오프 문과 같은 원칙 (fail-close · 수정 목록 18)."""
     def broken():
         raise OSError('디스크 오류')
     warns = []
@@ -67,8 +68,10 @@ def test_unreadable_mode_warns_and_lets_through(tmp_path):
         project_repository=SimpleNamespace(selected_project_id=broken),
         get_logger=lambda: SimpleNamespace(warn=warns.append),
     )
-    assert run_mode_gate.manual_control_block_reason(bridge) == ''
-    assert warns and '통과' in warns[0]
+    reason = run_mode_gate.manual_control_block_reason(bridge)
+    assert reason.startswith(run_mode_gate.MODE_UNREADABLE_BLOCK_MESSAGE)
+    assert '디스크 오류' in reason
+    assert warns and '차단' in warns[0]
 
 
 def test_playback_start_keeps_its_own_off_only_gate(tmp_path):

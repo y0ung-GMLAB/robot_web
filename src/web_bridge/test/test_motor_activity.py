@@ -1,10 +1,15 @@
+"""모터 동작 표시 분류 · `motor_activity_snapshot(motion_run, safety_status)`
+
+소유자(`command_owner`)·수동 모드는 **안전 상태 안에** 실려 온다 · 셋째 인자로
+따로 주던 옛 호출을 정리했다 · 수정 목록 10-7 (2026-10-03).
+"""
+
 from motion_web_bridge.bridge_node import motor_activity_snapshot
 
 
 def test_automatic_motion_has_priority_over_playback_owner():
     result = motor_activity_snapshot(
         {'state': 'running', 'automation_run': True},
-        {},
         {'command_owner': 'playback'},
     )
 
@@ -20,7 +25,6 @@ def test_automatic_motion_has_priority_over_playback_owner():
 def test_repeat_dwell_is_not_reported_as_motor_activity():
     result = motor_activity_snapshot(
         {'state': 'waiting', 'phase': 'repeat_waiting'},
-        {},
         {'command_owner': 'playback'},
     )
 
@@ -31,8 +35,7 @@ def test_repeat_dwell_is_not_reported_as_motor_activity():
 def test_runtime_countdown_is_not_reported_as_initial_position_motion():
     result = motor_activity_snapshot(
         {'state': 'countdown', 'phase': 'countdown'},
-        {'state': 'initializing'},
-        {'command_owner': 'playback'},
+        {'state': 'initializing', 'command_owner': 'playback'},
     )
 
     assert result['active'] is False
@@ -42,8 +45,7 @@ def test_runtime_countdown_is_not_reported_as_initial_position_motion():
 def test_completed_initial_position_is_not_reported_as_moving():
     result = motor_activity_snapshot(
         {'state': 'initialized', 'phase': 'initialized'},
-        {'state': 'initializing'},
-        {'command_owner': 'playback'},
+        {'state': 'initializing', 'command_owner': 'playback'},
     )
 
     assert result['active'] is False
@@ -52,16 +54,10 @@ def test_completed_initial_position_is_not_reported_as_moving():
 
 def test_manual_activity_distinguishes_action_from_jog():
     action = motor_activity_snapshot(
-        {}, {}, {
-            'command_owner': 'manual',
-            'manual_activity_modes': ['jog', 'action'],
-        },
+        {}, {'command_owner': 'manual', 'manual_activity_modes': ['jog', 'action']},
     )
     jog = motor_activity_snapshot(
-        {}, {}, {
-            'command_owner': 'manual',
-            'manual_activity_modes': ['jog'],
-        },
+        {}, {'command_owner': 'manual', 'manual_activity_modes': ['jog']},
     )
 
     assert action['kind'] == 'action'
@@ -69,9 +65,7 @@ def test_manual_activity_distinguishes_action_from_jog():
 
 
 def test_unmatched_active_owner_is_visible_as_warning():
-    result = motor_activity_snapshot(
-        {}, {}, {'command_owner': 'playback'},
-    )
+    result = motor_activity_snapshot({}, {'command_owner': 'playback'})
 
     assert result['active'] is True
     assert result['warning'] is True
