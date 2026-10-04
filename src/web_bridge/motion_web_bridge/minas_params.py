@@ -81,7 +81,7 @@ RANGE_VALUES: Dict[str, Tuple[int, int]] = {
 #: motion_system 기준 param 파일 위치 (서브모듈이 받아져 있을 때)
 PLATFORM_PARAM = Path('src/motion_system/ros2/motion_system_ros2/motion_control_bridge/param/minas.yaml')
 
-#: 생성 위치 · 설정 파일(config/active_motor_config.yaml) 기준 상대경로로 적는다
+#: 생성 위치 · 프로젝트 모터 설정 파일 기준 상대경로로 적는다
 OUTPUT_DIR = 'minas_params'
 
 #: 플랫폼 `param/minas.yaml` 의 items 사본 · 서브모듈이 없을 때의 기반

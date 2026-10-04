@@ -1,0 +1,13 @@
+[Unit]
+# 재부팅 뒤 설치를 이어간다 · 자동 로그인 → 이 유닛 1회 → install.sh --resume · robot_web 수정 목록 11
+Description=Resume robot_web site install after reboot (one shot)
+After=default.target
+
+[Service]
+Type=oneshot
+Environment=MOTION_SITE_RESUME=1
+ExecStart=/bin/bash -c 'cd @WORKSPACE@ && bash scripts/install.sh --resume >> @WORKSPACE@/log/site_setup/resume-$(date +%%Y%%m%%d-%%H%%M%%S).log 2>&1'
+TimeoutStartSec=3600
+
+[Install]
+WantedBy=default.target

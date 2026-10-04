@@ -56,6 +56,33 @@ report_failure() {
 }
 trap 'report_failure "$?" "${LINENO}" "${BASH_COMMAND}"' ERR
 
+# 옵션 · 수정 목록 11 (2026-10-04)
+#   --site       현장 준비까지 (자동 업데이트·절전 끄기 · 자동 로그인 · linger · 시간대 · 방화벽 ·
+#                EtherLab 설치·랜카드 자동 감지) · 끝에 자가 점검 · 재부팅이 필요하면 재부팅 뒤 저절로 이어감
+#   --resume     재부팅 뒤 이어가기 (motion-site-resume.service 가 부른다 · 손으로 쳐도 됨)
+#   --dry-run    바꾸지 않고 할 일만 찍는다 (빌드·설치는 건너뜀)
+#   --no-reboot  재부팅이 필요해도 스스로 재부팅하지 않는다
+# 옵션 없이 치면 전과 같다 · 이미 설치된 PC 의 코드 갱신 (현장 준비는 손대지 않는다)
+SITE_MODE=false
+RESUME_MODE=false
+DRY_RUN=false
+AUTO_REBOOT=true
+for arg in "$@"; do
+  case "${arg}" in
+    --site) SITE_MODE=true ;;
+    --resume) RESUME_MODE=true ;;
+    --dry-run) DRY_RUN=true; export SITE_DRY_RUN=1 ;;
+    --no-reboot) AUTO_REBOOT=false ;;
+    -h|--help)
+      sed -n '/^# 옵션 · 수정 목록 11/,/^# 옵션 없이/p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'
+      exit 0 ;;
+    *) echo "알 수 없는 옵션: ${arg} (--site · --resume · --dry-run · --no-reboot)" >&2; exit 2 ;;
+  esac
+done
+# shellcheck disable=SC1091
+source "${SCRIPT_DIR}/setup/site.sh"
+if [[ "${MOTION_SITE_RESUME:-}" == "1" ]]; then RESUME_MODE=true; fi
+
 # 중간에 멈추는 흔한 이유 둘을 **먼저** 걸러낸다
 preflight_checks() {
   local avail_gb
@@ -66,6 +93,10 @@ preflight_checks() {
     echo "!! 저장 공간이 5GB 미만입니다 · 전체 빌드가 중간에 멈출 수 있습니다" >&2
   fi
   # sudo 는 여러 단계에서 쓴다 · 중간에 물어 멈추지 않게 여기서 한 번만 받는다
+  if [[ "${DRY_RUN}" == true ]]; then
+    echo "[dry-run] 바꾸지 않습니다 · 할 일만 찍습니다"
+    return 0
+  fi
   if ! sudo -n true 2>/dev/null; then
     echo "관리자 권한이 필요합니다 · 비밀번호를 한 번만 입력하세요"
     sudo -v
@@ -82,8 +113,28 @@ require_ubuntu_2204() {
   if [[ "${ID:-}" != "ubuntu" || "${VERSION_ID:-}" != "22.04" ]]; then
     echo "지원 대상: Ubuntu 22.04" >&2
     echo "현재 OS: ${PRETTY_NAME:-unknown}" >&2
+    if [[ "${DRY_RUN}" == true ]]; then
+      echo "[dry-run] 버전이 달라도 계속 찍습니다" >&2
+      return 0
+    fi
     exit 1
   fi
+}
+
+# 현장 준비 · README 2~5단계를 대신한다 · 멱등 · `scripts/setup/site.sh`
+prepare_site() {
+  echo "-- 자동 업데이트·절전·화면 잠금 끄기"
+  site_disable_interruptions
+  echo "-- 자동 로그인 · linger"
+  site_autologin "$(id -un)"
+  echo "-- 시간대"
+  site_timezone
+  echo "-- 방화벽 (같은 망 허용)"
+  site_firewall
+  echo "-- EtherLab (빌드에 필수 · motor_manager 가 libethercat 에 링크)"
+  site_ethercat_install
+  echo "-- EtherCAT 랜카드"
+  site_ethercat_configure
 }
 
 ensure_ros_apt_source() {
@@ -435,8 +486,9 @@ resolve_ethercat_paths() {
   echo "찾아본 자리:"
   ethercat_search_roots | sed 's/^/  /'
   echo
-  echo "AC 서보를 쓰신다면 IgH EtherCAT Master 를 설치하세요."
-  echo "다이나믹셀만 쓰신다면 이 경고를 무시해도 됩니다."
+  echo "EtherLab(IgH EtherCAT Master) 은 **모터에 안 써도 빌드에 필요**합니다 ·"
+  echo "motor_manager 가 libethercat 에 링크합니다 (motor_manager/CMakeLists.txt) ·"
+  echo "다이나믹셀만 써도 마찬가지입니다 · bash scripts/install.sh --site 가 설치합니다."
   echo "========================================="
 
   if [[ -z "${include_dir}" ]]; then
@@ -452,6 +504,17 @@ preflight_checks
 
 print_step "1. Ubuntu 버전 확인"
 require_ubuntu_2204
+
+if [[ "${SITE_MODE}" == true ]]; then
+  print_step "1-1. 현장 준비 (자동 업데이트·절전 끄기 · 자동 로그인 · 시간대 · 방화벽 · EtherLab)"
+  prepare_site
+fi
+
+if [[ "${DRY_RUN}" == true ]]; then
+  print_step "dry-run 끝"
+  echo "실제 실행 때는 이어서 · 2 Git 수신 · 3 ROS 2 저장소 · 4 필수 프로그램 · 4-1 uv·MuJoCo · 5 권한·언어 · 6 rosdep · 7 EtherCAT 경로 · 8 전체 빌드 · 9 서비스 등록 · 10 적용 · 자가 점검"
+  exit 0
+fi
 
 print_step "2. Git 코드 수신"
 sync_git_repository
@@ -479,7 +542,35 @@ cd "${WORKSPACE_DIR}"
 build_workspace
 
 print_step "9. 자동실행 서비스 등록"
-install_user_services
+# 첫 설치에서는 실시간 권한 파일을 쓰고 78 로 끝난다(재부팅 필요) · 현장 준비 모드면 여기서
+# 멈추지 않고 재부팅 뒤 이어가게 예약한다 · 옵션 없이 치면 전처럼 안내만 하고 끝난다
+REBOOT_REQUIRED=false
+if ! install_user_services; then
+  rc=$?
+  if [[ "${rc}" == "78" ]]; then
+    REBOOT_REQUIRED=true
+    site_mark_reboot "rtprio"
+  else
+    exit "${rc}"
+  fi
+fi
+
+if [[ "${REBOOT_REQUIRED}" == true && "${SITE_MODE}" == true ]]; then
+  print_step "재부팅 필요 · 재부팅 뒤 저절로 이어서 끝냅니다"
+  site_schedule_resume "${WORKSPACE_DIR}"
+  echo "재부팅 뒤 자동 로그인 → 설치가 이어서 돌고(몇 분) → 웹이 뜹니다 · 기록 · ${WORKSPACE_DIR}/log/site_setup/"
+  if [[ "${AUTO_REBOOT}" == true ]]; then
+    for i in 15 10 5; do echo "  ${i}초 뒤 재부팅 (Ctrl+C 로 취소 · 나중에 sudo reboot)"; sleep 5; done
+    sudo reboot
+  else
+    echo "  지금 재부팅하세요 · sudo reboot"
+  fi
+  exit 0
+fi
+if [[ "${REBOOT_REQUIRED}" == true ]]; then
+  echo "재부팅 뒤 같은 명령을 다시 실행하세요 · sudo reboot → bash scripts/install.sh" >&2
+  exit 78
+fi
 
 print_step "10. 서비스 적용"
 restart_user_services
@@ -499,7 +590,13 @@ echo "상태 확인: systemctl --user status --no-pager motion-control.service m
 if [[ "${ROS_DAEMON_UPDATED}" == true ]]; then
   echo "ROS 2 daemon 초기화 완료"
 fi
-echo
-echo "설치 중 재부팅 안내가 나왔으면 sudo reboot 후 같은 명령을 다시 실행하세요:"
-echo "  cd ${WORKSPACE_DIR}"
-echo "  bash scripts/install.sh"
+if [[ "${SITE_MODE}" == true || "${RESUME_MODE}" == true ]]; then
+  print_step "11. 자가 점검"
+  site_selfcheck "${WORKSPACE_DIR}"
+  if [[ "${RESUME_MODE}" == true ]]; then
+    site_cancel_resume
+  fi
+  site_clear_reboot
+  echo
+  echo "남은 수작업 · BIOS 「전원 복구 시 켜기」(1회) · 웹에서 로봇 팩 업로드 · 모터 관리 → 전체 모터 검색 → 설정 적용"
+fi
