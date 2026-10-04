@@ -893,14 +893,36 @@ td.mapping-disabled-cell { background: transparent !important; opacity: 0.55; }
   background: var(--panel-2);
 }
 
+/* 썸휠 · 원형 다이얼을 눕혀 옆에서 본 드럼 · 2026-10-04
+ * 띠를 좌우로 끌면 눈금이 굴러간다 · 한 칸 = 24px (드래그) · 끝없음 */
+.jog-wheel-column {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 6px;
+  flex: 0 0 auto;
+  width: 300px;
+}
+
+.jog-wheel-arrows { display: flex; justify-content: center; gap: 12px; }
+.jog-wheel-arrow {
+  min-width: 64px;
+  min-height: 34px;
+  font-size: 16px;
+  line-height: 1;
+  padding: 4px 10px;
+  user-select: none;
+  touch-action: manipulation;
+}
+
 .jog-dial {
   position: relative;
-  flex: 0 0 auto;
-  width: 148px;
-  height: 148px;
-  border-radius: 50%;
-  /* 하이라이트를 가운데에 둔다 · 위로 치우치면 「위쪽이 기준」처럼 읽힌다 */
-  background: radial-gradient(circle at 50% 50%, #283240, #161c24 72%);
+  width: 100%;
+  height: 84px;
+  border-radius: 10px;
+  overflow: hidden;
+  /* 위·아래가 어둡고 가운데가 밝다 · 둥근 드럼의 옆면처럼 읽힌다 */
+  background: linear-gradient(180deg, #0b0f13 0%, #283240 24%, #56647a 50%, #283240 76%, #0b0f13 100%);
   border: 1px solid var(--line-strong);
   box-shadow: inset 0 0 8px rgb(0 0 0 / 45%), 0 4px 14px rgb(0 0 0 / 35%);
   cursor: grab;
@@ -912,28 +934,26 @@ td.mapping-disabled-cell { background: transparent !important; opacity: 0.55; }
 .jog-dial:focus-visible { outline: 2px solid var(--focus); outline-offset: 3px; }
 .jog-dial[aria-disabled="true"] { opacity: 0.4; cursor: not-allowed; }
 
-/* 눈금 링 24칸 · 한 칸 = 15° · **모든 눈금이 같은 모양** (기준 눈금 없음)
- * 돌린 만큼 링이 같이 돈다 · 드래그는 손을 바로 따라가고(.dragging),
- * 휠·방향키는 한 칸을 부드럽게 넘어간다 */
+/* 세로 눈금 · 24px 마다 한 칸 · **모든 눈금이 같은 모양** (기준 눈금 없음)
+ * 끌린 만큼 배경 위치가 같이 밀린다 · 드래그는 손을 바로 따라가고(.dragging),
+ * 휠·방향키·화살표는 한 칸을 부드럽게 넘어간다 */
 .jog-dial-ticks {
   position: absolute;
-  inset: 6px;
-  border-radius: 50%;
-  background: repeating-conic-gradient(#56647a 0deg 2deg, transparent 2deg 15deg);
-  -webkit-mask: radial-gradient(circle, transparent 58%, #000 59%, #000 71%, transparent 72%);
-  mask: radial-gradient(circle, transparent 58%, #000 59%, #000 71%, transparent 72%);
-  transition: transform 0.18s ease-out;
-  will-change: transform;
+  inset: 0;
+  background: repeating-linear-gradient(90deg, #0e1319 0 2px, transparent 2px 24px);
+  background-position-x: 0px;
+  transition: background-position-x 0.18s ease-out;
+  will-change: background-position-x;
 }
 
 .jog-dial-ticks.dragging { transition: none; }
 
-.jog-dial-cap {
+/* 양 끝을 어둡게 · 드럼이 뒤로 말려 들어가는 느낌 */
+.jog-wheel-shade {
   position: absolute;
-  inset: 48px;
-  border-radius: 50%;
-  background: radial-gradient(circle at 50% 50%, #2f3a49, #1b222c);
-  border: 1px solid var(--line);
+  inset: 0;
+  pointer-events: none;
+  background: linear-gradient(90deg, rgb(0 0 0 / 70%), transparent 16%, transparent 84%, rgb(0 0 0 / 70%));
 }
 
 .jog-dial-pending-row { display: flex; align-items: center; gap: 10px; }

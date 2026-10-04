@@ -27,6 +27,8 @@ window.fetch = (url, options) => new Promise((resolve) => {
 const jogCalls = () => calls.filter((call) => String(call.url).includes('/jog'));
 window.setTimeout = (fn, ms) => setTimeout(fn, ms);
 window.clearTimeout = (id) => clearTimeout(id);
+window.setInterval = (fn, ms) => setInterval(fn, ms);
+window.clearInterval = (id) => clearInterval(id);
 
 const { createJogDialController } = await import('../static/js/jog_dial.js');
 
@@ -66,7 +68,7 @@ function setup() {
     'jogDial', 'jogDialRing', 'jogDialStep', 'jogDialPosition', 'jogDialPending',
     'jogDialMessage', 'jogDialCancelPending', 'jogDialSetReference', 'jogDialSetLower',
     'jogDialSetUpper', 'jogDialBlock', 'jogDialEnabled', 'jogDialEnabledState',
-    'jogTargetInput', 'jogTargetMoveButton',
+    'jogTargetInput', 'jogTargetMoveButton', 'jogDialMinus', 'jogDialPlus',
   ]) el[name] = fakeElement();
   el.jogDialEnabled.checked = true;
   el.jogDialStep.value = '1';
@@ -135,7 +137,7 @@ test('nothing selected means nothing moves · not motor 0', () => {
     'jogDial', 'jogDialRing', 'jogDialStep', 'jogDialPosition', 'jogDialPending',
     'jogDialMessage', 'jogDialCancelPending', 'jogDialSetReference', 'jogDialSetLower',
     'jogDialSetUpper', 'jogDialBlock', 'jogDialEnabled', 'jogDialEnabledState',
-    'jogTargetInput', 'jogTargetMoveButton',
+    'jogTargetInput', 'jogTargetMoveButton', 'jogDialMinus', 'jogDialPlus',
   ]) el[name] = fakeElement();
   el.jogDialStep.value = '1';
   el.jogDialEnabled.checked = true;
@@ -188,21 +190,59 @@ test('dial OFF · typed target moves in motor deg and refuses outside the limits
   assert.match(el.jogDialMessage.textContent, /목표 250\.5° 로 이동 시작/);
 });
 
-test('the tick ring turns with input and there is no needle', () => {
+test('the tick strip slides with input and there is no needle', () => {
   const { el, wheel } = setup();
-  const before = el.jogDialRing.style.transform;
+  const before = el.jogDialRing.style.backgroundPositionX;
   wheel();
-  const after = el.jogDialRing.style.transform;
-  assert.notEqual(after, before, '휠 한 칸에 링이 돌아야 한다');
-  assert.equal(after, 'rotate(15deg)');
+  const after = el.jogDialRing.style.backgroundPositionX;
+  assert.notEqual(after, before, '휠 한 칸에 띠가 한 칸 밀려야 한다');
+  assert.equal(after, '24px');
 
   // 바늘·기준 표시가 화면에 없다
-  assert.doesNotMatch(indexHtml, /jogDialNeedle|jog-dial-needle/);
+  assert.doesNotMatch(indexHtml, /jogDialNeedle|jog-dial-needle|jog-wheel-pointer/);
   const css = readFileSync(new URL('../static/css/14-redesign.css', import.meta.url), 'utf8');
   assert.doesNotMatch(css, /jog-dial-needle/);
-  // 눈금은 한 가지 모양만 반복한다 (기준 눈금 없음)
+  // 눈금은 한 가지 모양만 반복한다 (기준 눈금 없음) · 간격 24px = 드래그 한 칸
   const ticks = css.match(/\.jog-dial-ticks \{[\s\S]*?\}/)[0];
-  assert.match(ticks, /repeating-conic-gradient\(#56647a 0deg 2deg, transparent 2deg 15deg\)/);
+  assert.match(ticks, /repeating-linear-gradient\(90deg, #0e1319 0 2px, transparent 2px 24px\)/);
   assert.match(indexHtml, /id="jogDialCancelPending"[^>]*>동작 취소</);
   assert.doesNotMatch(indexHtml, /id="jogDialCancelPending"[^>]*disabled/);
+});
+
+
+test('썸휠 · 오른쪽으로 24px 끌면 +1칸 · 왼쪽은 −1칸 · 띠는 손을 따라 밀린다', () => {
+  const { el, pendingText } = setup();
+  el.jogDial.dispatch('pointerdown', { clientX: 100, clientY: 40, pointerId: 1 });
+  el.jogDial.dispatch('pointermove', { clientX: 112, clientY: 40 });   // 반 칸 · 아직 안 쌓임
+  assert.equal(el.jogDialRing.style.backgroundPositionX, '12px');
+  assert.ok(el.jogDialRing.classList.contains('dragging'));
+  assert.equal(jogCalls().length, 0);
+  el.jogDial.dispatch('pointermove', { clientX: 148, clientY: 40 });   // 누적 48px = 2칸 · 바로 날아간다
+  assert.equal(jogCalls().length, 1);
+  assert.equal(jogCalls()[0].body.relative_deg, 2);
+  el.jogDial.dispatch('pointermove', { clientX: 124, clientY: 40 });   // 왼쪽 24px = −1칸 · 앞 조그가 도는 동안 쌓임
+  assert.match(pendingText(), /남은 이동 -1\.00°/);
+  assert.equal(el.jogDialRing.style.backgroundPositionX, '24px');      // 띠는 손 위치 그대로 (100 → 124)
+  el.jogDial.dispatch('pointerup', { pointerId: 1 });
+  assert.ok(!el.jogDialRing.classList.contains('dragging'));
+});
+
+test('◀ ▶ 화살표 · 한 번에 한 칸 · 잡고 있으면 반복 · 놓으면 멈춤', async () => {
+  const { el, pendingText } = setup();
+  assert.equal(el.jogDialPlus.disabled, false, '모터가 골라져 있으면 화살표가 열린다');
+  el.jogDialPlus.dispatch('pointerdown', { pointerId: 1 });
+  assert.equal(jogCalls().length, 1);
+  assert.equal(jogCalls()[0].body.relative_deg, 1);
+  el.jogDialPlus.dispatch('pointerup', { pointerId: 1 });
+  await new Promise((resolve) => setTimeout(resolve, 600));
+  assert.doesNotMatch(pendingText(), /남은 이동/, '놓은 뒤에는 더 쌓이면 안 된다');
+
+  el.jogDialMinus.dispatch('pointerdown', { pointerId: 2 });           // 앞 조그가 도는 동안 · 쌓임
+  assert.match(pendingText(), /남은 이동 -1\.00°/);
+  await new Promise((resolve) => setTimeout(resolve, 700));            // 400ms 뒤부터 120ms 마다 반복
+  assert.match(pendingText(), /남은 이동 -[3-9]\.00°/, '잡고 있으면 반복해서 쌓여야 한다');
+  el.jogDialMinus.dispatch('pointerup', { pointerId: 2 });
+  const held = pendingText();
+  await new Promise((resolve) => setTimeout(resolve, 300));
+  assert.equal(pendingText(), held, '놓으면 반복이 멈춘다');
 });

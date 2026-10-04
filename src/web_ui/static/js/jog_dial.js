@@ -1,10 +1,12 @@
-/** 조그 다이얼 · 돌린 만큼 상대 이동 · 단위는 **모터 deg** (감속비 미적용) · 2026-10-02
+/** 조그 썸휠 · 끌린 만큼 상대 이동 · 단위는 **모터 deg** (감속비 미적용) · 2026-10-02 · 썸휠 2026-10-04
  *
- * 페이더(절대 위치·조인트 deg)와 역할을 나눈다 · 다이얼은 끝이 없는 상대
- * 이동이라 미세 조정에 쓴다.
+ * 페이더(절대 위치·조인트 deg)와 역할을 나눈다 · 썸휠은 끝이 없는 상대
+ * 이동이라 미세 조정에 쓴다 · 원형 다이얼을 눕혀 옆에서 본 모양(가로 드럼) ·
+ * 원형보다 손목이 편하다는 사용자 요청.
  *
- * 입력 · 마우스로 잡고 돌리기(한 바퀴 = DETENTS 칸) · 휠 한 칸 = 한 칸 ·
- * 초점이 있을 때 ←/→ 또는 ↓/↑ = 한 칸 · 한 칸 = 화면에서 고른 단위(모터 deg).
+ * 입력 · 띠를 좌우로 끌기(PX_PER_TICK 픽셀 = 한 칸 · 오른쪽 = +) · 휠 한 칸 = 한 칸 ·
+ * 위 ◀ ▶ 버튼 = 한 칸(길게 누르면 반복) · 초점이 있을 때 ←/→ 또는 ↓/↑ = 한 칸 ·
+ * 한 칸 = 화면에서 고른 단위(모터 deg).
  *
  * 보내는 법 · supervisor 는 **앞 조그가 끝나기 전 새 조그를 거절**한다
  * (`이전 조그가 아직 돌고 있습니다`) · 그래서 돌린 양을 쌓아 두고, 앞 요청이
@@ -33,7 +35,11 @@ import { normalizeMotorTypeKey } from './format.js';
 import { manualControlBlockReason } from './run_mode_state.js';
 
 //: 한 바퀴를 몇 칸으로 나누는가 · 15° 마다 한 칸
-const DETENTS = 24;
+//: 드래그 한 칸 · 눈금 간격(CSS `.jog-dial-ticks` 24px)과 같다
+const PX_PER_TICK = 24;
+//: ◀ ▶ 길게 누르기 · 처음 대기 · 반복 간격
+const HOLD_DELAY_MS = 400;
+const HOLD_REPEAT_MS = 120;
 //: 한 번에 보내는 최대 이동량 · 서버 조그 상한(모터 360°)과 같다
 const MAX_SEND_DEG = 360;
 //: 앞 조그가 아직 돌 때 다시 보낼 간격
@@ -72,12 +78,12 @@ export function createJogDialController({ el, getLatestState, getSelectedAxis, o
   let inFlight = false;
   let retryTimer = null;
   let dragging = false;
-  let lastAngle = null;
+  let lastX = null;
   let carry = 0;           // 드래그 중 한 칸이 안 된 나머지 각도
   //: 눈금 링 표시 각도 · **화면 느낌 전용** · 기준 위치가 아니다
   //: (바늘을 없앤 이유 · 상대 이동인데 바늘이 「0점」처럼 읽혔다 · 2026-10-02)
   //: 눈금 24칸이 모두 같아서 서 있을 때는 어느 쪽이 기준인지 읽히지 않는다
-  let ringDeg = 0;
+  let ringOffsetPx = 0;
   //: 쌓인 양을 비울 때마다 올린다 · 이미 날아간 요청의 응답이 비운 양을
   //: 되살리지 못하게 한다 (「이전 조그」 거절 → 다시 쌓기 경로)
   let pendingEpoch = 0;
@@ -157,8 +163,8 @@ export function createJogDialController({ el, getLatestState, getSelectedAxis, o
       return;
     }
     pendingDeg += ticks * step;
-    // 드래그는 손을 따라 이미 돌렸다(onPointerMove) · 휠·방향키만 한 칸씩 돌린다
-    if (!dragging) ringDeg += ticks * (360 / DETENTS);
+    // 드래그는 손을 따라 이미 밀었다(onPointerMove) · 휠·방향키·화살표만 한 칸씩 민다
+    if (!dragging) ringOffsetPx += ticks * PX_PER_TICK;
     render();
     pump();
   }
@@ -336,17 +342,10 @@ export function createJogDialController({ el, getLatestState, getSelectedAxis, o
   // 입력
   // ---------------------------------------------------------------- //
 
-  function angleOf(event) {
-    const rect = el.jogDial.getBoundingClientRect();
-    const cx = rect.left + rect.width / 2;
-    const cy = rect.top + rect.height / 2;
-    return (Math.atan2(event.clientY - cy, event.clientX - cx) * 180) / Math.PI;
-  }
-
   function onPointerDown(event) {
     if (el.jogDial.getAttribute('aria-disabled') === 'true') return;
     dragging = true;
-    lastAngle = angleOf(event);
+    lastX = Number(event.clientX) || 0;
     carry = 0;
     el.jogDial.setPointerCapture?.(event.pointerId);
     el.jogDial.focus();
@@ -355,29 +354,51 @@ export function createJogDialController({ el, getLatestState, getSelectedAxis, o
 
   function onPointerMove(event) {
     if (!dragging) return;
-    const angle = angleOf(event);
-    let diff = angle - lastAngle;
-    if (diff > 180) diff -= 360;
-    if (diff < -180) diff += 360;
-    lastAngle = angle;
+    const x = Number(event.clientX) || 0;
+    const diff = x - lastX;
+    lastX = x;
     carry += diff;
-    // 눈금 링은 손을 그대로 따라 돈다 · 한 칸이 안 돼도 움직여야 「잡고 있다」는 느낌이 난다
-    ringDeg += diff;
+    // 눈금 띠는 손을 그대로 따라 밀린다 · 한 칸이 안 돼도 움직여야 「잡고 있다」는 느낌이 난다
+    ringOffsetPx += diff;
     paintRing();
-    const per = 360 / DETENTS;
-    const ticks = Math.trunc(carry / per);
+    const ticks = Math.trunc(carry / PX_PER_TICK);
     if (ticks) {
-      carry -= ticks * per;
-      addTicks(ticks);   // 시계 방향 = + (화면 좌표계에서 각도가 커지는 쪽)
+      carry -= ticks * PX_PER_TICK;
+      addTicks(ticks);   // 오른쪽으로 끌면 + (▶ · ArrowRight 와 같은 방향)
     }
   }
 
   function onPointerUp(event) {
     dragging = false;
-    lastAngle = null;
+    lastX = null;
     carry = 0;
     el.jogDial.releasePointerCapture?.(event.pointerId);
-    render();   // 링의 「드래그 중」 표시를 내린다
+    render();   // 띠의 「드래그 중」 표시를 내린다
+  }
+
+  /** ◀ ▶ · 누르면 한 칸 · 잡고 있으면 HOLD_DELAY_MS 뒤부터 HOLD_REPEAT_MS 마다 한 칸 */
+  function bindArrow(button, direction) {
+    if (!button) return;
+    let holdTimer = null;
+    let repeatTimer = null;
+    const stop = () => {
+      if (holdTimer) window.clearTimeout(holdTimer);
+      if (repeatTimer) window.clearInterval(repeatTimer);
+      holdTimer = null;
+      repeatTimer = null;
+    };
+    button.addEventListener('pointerdown', (event) => {
+      if (button.disabled) return;
+      event.preventDefault();
+      addTicks(direction);
+      stop();
+      holdTimer = window.setTimeout(() => {
+        repeatTimer = window.setInterval(() => addTicks(direction), HOLD_REPEAT_MS);
+      }, HOLD_DELAY_MS);
+    });
+    for (const type of ['pointerup', 'pointercancel', 'pointerleave', 'blur']) {
+      button.addEventListener(type, stop);
+    }
   }
 
   function onWheel(event) {
@@ -405,11 +426,11 @@ export function createJogDialController({ el, getLatestState, getSelectedAxis, o
     return `${sign}${Number(value).toFixed(digits)}°`;
   }
 
-  /** 눈금 링만 다시 그린다 · 드래그 중 매 움직임마다 불러도 가볍다 */
+  /** 눈금 띠만 다시 그린다 · 드래그 중 매 움직임마다 불러도 가볍다 */
   function paintRing() {
     if (!el.jogDialRing) return;
-    el.jogDialRing.style.transform = `rotate(${ringDeg}deg)`;
-    // 드래그 중엔 손을 바로 따라가고, 휠·방향키는 한 칸을 부드럽게 넘어간다
+    el.jogDialRing.style.backgroundPositionX = `${ringOffsetPx}px`;
+    // 드래그 중엔 손을 바로 따라가고, 휠·방향키·화살표는 한 칸을 부드럽게 넘어간다
     el.jogDialRing.classList.toggle('dragging', dragging);
   }
 
@@ -439,7 +460,10 @@ export function createJogDialController({ el, getLatestState, getSelectedAxis, o
     const reason = blockReason(motor);
     renderTarget(motor, reason);
     el.jogDial.setAttribute('aria-disabled', reason ? 'true' : 'false');
-    el.jogDial.title = reason || '돌리면 모터가 그만큼 움직입니다 · 휠·방향키도 됩니다 · 단위 = 모터 deg';
+    el.jogDial.title = reason || '좌우로 끌면 모터가 그만큼 움직입니다 · 휠·방향키·◀ ▶ 도 됩니다 · 단위 = 모터 deg';
+    for (const arrow of [el.jogDialMinus, el.jogDialPlus]) {
+      if (arrow) arrow.disabled = Boolean(reason);
+    }
     paintRing();
     if (el.jogDialPosition) {
       const position = positionDeg(motor);
@@ -523,6 +547,8 @@ export function createJogDialController({ el, getLatestState, getSelectedAxis, o
     el.jogDial.addEventListener('pointercancel', onPointerUp);
     el.jogDial.addEventListener('wheel', onWheel, { passive: false });
     el.jogDial.addEventListener('keydown', onKeyDown);
+    bindArrow(el.jogDialMinus, -1);
+    bindArrow(el.jogDialPlus, 1);
     el.jogDialStep?.addEventListener('input', () => {
       // 단위를 바꾸면 옛 단위로 쌓인 양은 의미가 바뀐다 · 아직 안 보낸 것은 버린다
       lastMessage = '';

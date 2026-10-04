@@ -210,6 +210,8 @@ export function getElements() {
     manualModeSwitchButton: document.getElementById('manualModeSwitchButton'),
     jogDial: document.getElementById('jogDial'),
     jogDialRing: document.getElementById('jogDialRing'),
+    jogDialMinus: document.getElementById('jogDialMinus'),
+    jogDialPlus: document.getElementById('jogDialPlus'),
     jogDialCancelPending: document.getElementById('jogDialCancelPending'),
     jogDialStep: document.getElementById('jogDialStep'),
     jogDialPosition: document.getElementById('jogDialPosition'),

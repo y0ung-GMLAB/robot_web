@@ -16,7 +16,7 @@ const main = readFileSync(new URL('../static/js/main.js', import.meta.url), 'utf
 const dial = readFileSync(new URL('../static/js/jog_dial.js', import.meta.url), 'utf8');
 
 test('the dial sits in the jog panel and is bound through dom.js', () => {
-  for (const id of ['jogDial', 'jogDialRing', 'jogDialStep', 'jogDialPosition', 'jogDialPending', 'jogDialMessage', 'jogDialCancelPending']) {
+  for (const id of ['jogDial', 'jogDialRing', 'jogDialMinus', 'jogDialPlus', 'jogDialStep', 'jogDialPosition', 'jogDialPending', 'jogDialMessage', 'jogDialCancelPending']) {
     assert.match(html, new RegExp(`id=["']${id}["']`), `${id} missing`);
     assert.match(dom, new RegExp(`${id}: document\\.getElementById\\(["']${id}["']\\)`));
   }
@@ -86,8 +86,10 @@ test('dial ON/OFF switch and a typed target live in the same jog block', () => {
   const block = html.indexOf('id="jogDialBlock"');
   assert.ok(html.indexOf('id="jogTargetInput"') > block, '목표 칸은 다이얼 블록 안');
   assert.match(html, /목표 위치 \(모터 deg · 감속비 미적용\)/);
-  // OFF 면 다이얼 쪽만 숨고 위치 표시·limit 버튼은 그대로
-  assert.match(html, /id="jogDial" class="jog-dial jog-dial-only"/);
+  // OFF 면 썸휠·화살표 묶음만 숨고 위치 표시·limit 버튼은 그대로 (묶음이 jog-dial-only · 2026-10-04)
+  assert.match(html, /class="jog-wheel-column jog-dial-only"/);
+  const column = html.indexOf('class="jog-wheel-column jog-dial-only"');
+  assert.ok(html.indexOf('id="jogDialPlus"') > column && html.indexOf('id="jogDial" class="jog-dial jog-wheel"') > column);
   assert.doesNotMatch(html, /jog-dial-capture[^"]*jog-dial-only/);
 });
 
