@@ -29,7 +29,7 @@ from . import motion_file_analysis, motor_config_rules, run_mode_gate
 from .execution_context_service import ExecutionContextService
 from .manual_motor_commands import ManualMotorCommandService
 from .manual_stream import ManualStreamService
-from . import animation_preview
+from . import animation_preview, sim_scene
 from .motor_runtime_service import MotorRuntimeService
 from .project_service import ProjectService
 from .motor_config_service import MotorConfigService
@@ -1982,6 +1982,29 @@ class MotionWebBridge(Node):
                 if isinstance(mapping, dict) and str(mapping.get('motion_file_id') or '') == motion_file_id:
                     names.append(file_name)
         return sorted(names)
+
+    # ------------------------------------------------------------------ #
+    # 웹 3D 표시 · 장면·프레임을 브라우저가 그린다 · 7-a
+    # ------------------------------------------------------------------ #
+
+    def preview_scene_state(self) -> Dict[str, Any]:
+        return sim_scene.scene_state(self.workspace_root)
+
+    def preview_scene_export(self) -> Dict[str, Any]:
+        return sim_scene.launch_scene_export(self.workspace_root)
+
+    def preview_scene_path(self) -> Optional[Path]:
+        """준비된 장면 JSON 파일 · 없으면 None (라우트가 파일로 흘려보낸다)."""
+        path = sim_scene.scene_path(self.workspace_root)
+        return path if path is not None and path.is_file() else None
+
+    def preview_motion_frames(self, file_id: str) -> Dict[str, Any]:
+        """선택한 애니메이션의 MuJoCo 계산 결과(t · qpos) · 브라우저 재생용."""
+        project_id = self.project_repository.selected_project_id()
+        if not project_id:
+            return {'success': False, 'message': NO_PROJECT_SELECTED}
+        motion_path = self.project_repository.export_path(project_id, 'motions', file_id)
+        return sim_scene.frames_payload(self.workspace_root, motion_path)
 
     def stop_preview_motion_file(self, file_id: str) -> Dict[str, Any]:
         """떠 있는 MuJoCo 뷰어 창을 끝낸다 · 화면 「MuJoCo 창 닫기」 · 7-1"""

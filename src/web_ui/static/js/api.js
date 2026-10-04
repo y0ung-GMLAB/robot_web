@@ -363,6 +363,13 @@ export const stopMotionRun = () => request('POST', '/api/motion-run/stop');
 export const previewMotionFile = (fileId, fps) =>
   request('POST', `/api/motion-files/${encodeURIComponent(fileId)}/preview`, { body: { fps } });
 
+/** 웹 3D 표시 · 7-a · 장면(팩 1회) · 프레임(.sim.npz) */
+export const fetchPreviewScene = () => request('GET', '/api/preview/scene');
+export const exportPreviewScene = () => request('POST', '/api/preview/scene/export');
+export const fetchPreviewSceneData = () => request('GET', '/api/preview/scene/data');
+export const fetchPreviewFrames = (fileId) =>
+  request('GET', `/api/motion-files/${encodeURIComponent(fileId)}/preview-frames`);
+
 /** MuJoCo 창 닫기 · 떠 있는 뷰어 프로세스를 끝낸다 · 7-1 */
 export const stopPreviewMotionFile = (fileId) =>
   request('POST', `/api/motion-files/${encodeURIComponent(fileId)}/preview-stop`);

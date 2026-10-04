@@ -132,6 +132,36 @@
               </div>
             </section>
 
+            <!-- 웹 3D 표시 · 수정 목록 7-a · 네이티브 뷰어 창은 서버 PC 모니터에만 뜬다 ·
+                 여기는 브라우저가 그린다 · 원격 접속자도 본다 · 접어 두면 three.js 를 받지 않는다 -->
+            <details id="sim3dSection" class="motion-file-subsection sim3d-section" aria-label="3D 보기 (웹)">
+              <summary class="section-head compact sim3d-summary">
+                <strong>3D 보기 (웹)</strong>
+                <span id="sim3dStatus">펼치면 로봇 팩의 3D 장면을 불러옵니다</span>
+              </summary>
+              <div class="sim3d-toolbar">
+                <button id="sim3dPrepareButton" type="button" title="로봇 팩에서 3D 장면을 만듭니다 · 팩마다 한 번">3D 장면 준비</button>
+                <button id="sim3dLoadButton" type="button" disabled title="선택한 애니메이션의 MuJoCo 계산 결과를 불러옵니다">프레임 불러오기</button>
+                <button id="sim3dPlayButton" type="button" class="primary" disabled>재생</button>
+                <input id="sim3dSlider" type="range" min="0" max="1000" value="0" step="1" disabled aria-label="재생 위치">
+                <span id="sim3dTime" class="sim3d-time">-- / -- s</span>
+                <label class="compact-field"><span>배속</span>
+                  <select id="sim3dSpeed" class="compact-select">
+                    <option value="0.25">0.25×</option>
+                    <option value="0.5">0.5×</option>
+                    <option value="1" selected>1×</option>
+                    <option value="2">2×</option>
+                  </select>
+                </label>
+                <label class="compact-field sim3d-follow" title="재생 상태가 running 으로 바뀌는 순간 0초부터 같이 틉니다 · 정지하면 멈춥니다">
+                  <input id="sim3dFollowToggle" type="checkbox" disabled>
+                  <span>실물 따라가기</span>
+                </label>
+                <button id="sim3dResetViewButton" type="button" title="로봇 팩의 카메라 설정으로 되돌립니다">시점 초기화</button>
+              </div>
+              <div id="sim3dCanvasWrap" class="sim3d-canvas-wrap" aria-label="3D 화면"></div>
+            </details>
+
             <section class="motion-file-subsection" aria-label="진행 상황">
               <div class="section-head compact">
                 <strong>3. 진행</strong>

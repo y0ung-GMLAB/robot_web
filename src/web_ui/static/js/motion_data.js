@@ -41,6 +41,7 @@ import {
   showPrompt,
 } from './ui_dialogs.js';
 import { draggingFiles, droppedEntries, walkEntry } from './drop_files.js';
+import { createSim3dViewer } from './sim3d.js';
 
 /** 차트 색 · 화면 테마(CSS 토큰)를 따른다 · 리디자인 2026-10-02
  *
@@ -618,6 +619,8 @@ export function createMotionDataController({
   let initializeWatchUntil = 0;
   let initializeWatchStarted = false;
   const INITIALIZE_WATCH_MS = 30000;
+  // 웹 3D 표시 · 7-a · 선택한 애니메이션을 따라간다 · 접혀 있으면 아무것도 받지 않는다
+  const sim3d = createSim3dViewer({ el, getLatestState });
   let fileLoadToken = 0;
   let mappingLoadToken = 0;
   let mappingRevision = '';
@@ -1670,6 +1673,7 @@ export function createMotionDataController({
 
 
   function renderMotionRunPanel() {
+    sim3d.update({ file: selectedFile });
     const payload = motionRunPayload();
     const status = motionRunStatus || {};
     const state = String(status.state || 'idle');
