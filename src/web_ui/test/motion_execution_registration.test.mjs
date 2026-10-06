@@ -112,7 +112,9 @@ test('file list registration is explicit and persists through mapping save', () 
   const registerStart = controller.indexOf('async function registerSelectedMotionFile()');
   const registerEnd = controller.indexOf('async function unregisterSelectedMotionFile()', registerStart);
   const registerBody = controller.slice(registerStart, registerEnd);
-  assert.match(registerBody, /applyMotionFileRegistration\(\s*selectedFile\.id/);
+  // 재생 목록 · 비었으면 [파일] · 있으면 끝에 붙인 목록 전체 · 수정 목록 35
+  assert.match(registerBody, /playlistWithAdded\(current, selectedFile\.id\)/);
+  assert.match(registerBody, /applyMotionFileRegistration\(\s*next/);
   assert.doesNotMatch(registerBody, /saveCurrentMapping/);
 });
 
@@ -124,7 +126,9 @@ test('registered motion file can be explicitly unregistered without deleting the
   const unregisterStart = controller.indexOf('async function unregisterSelectedMotionFile()');
   const unregisterEnd = controller.indexOf('async function saveCurrentMapping()', unregisterStart);
   const unregisterBody = controller.slice(unregisterStart, unregisterEnd);
-  assert.match(unregisterBody, /applyMotionFileRegistration\(\s*''/);
+  // 목록에서 그 파일만 뺀다 · 마지막이면 빈 목록 = 등록 해제 · 수정 목록 35
+  assert.match(unregisterBody, /filter\(\(id\) => id !== selectedFile\.id\)/);
+  assert.match(unregisterBody, /applyMotionFileRegistration\(\s*next/);
   assert.doesNotMatch(unregisterBody, /saveCurrentMapping/);
   assert.doesNotMatch(unregisterBody, /deleteMotionFile/);
 });

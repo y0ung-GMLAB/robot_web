@@ -51,6 +51,18 @@ uint16_t readLe16(const uint8_t low, const uint8_t high)
            static_cast<uint16_t>(static_cast<uint16_t>(high) << 8);
 }
 
+// Status packet error byte · bit 7 is the Alert flag ("the device has a
+// hardware error"), bits 0-6 are the packet error code (1 result fail ...
+// 7 access error). An Alert alone still carries valid data: dropping it froze
+// Hardware Error Status, Torque Enable and Present Position at their last
+// values, so the fault never reached the status (robot_web fix-list 23-1).
+constexpr uint8_t DXL_ALERT_BIT = 0x80;
+
+bool isPacketFailure(uint8_t error)
+{
+    return (error & static_cast<uint8_t>(~DXL_ALERT_BIT)) != 0;
+}
+
 uint32_t remainingTimeoutMs(uint64_t deadline_ns)
 {
     const uint64_t now = nowNs();
@@ -373,7 +385,8 @@ void serial::SerialMaster::configureProtocol(const serial::serial_protocol_confi
             protocol_.instruction_write == protocol.instruction_write &&
             protocol_.instruction_status == protocol.instruction_status &&
             protocol_.instruction_bulk_read == protocol.instruction_bulk_read &&
-            protocol_.instruction_bulk_write == protocol.instruction_bulk_write;
+            protocol_.instruction_bulk_write == protocol.instruction_bulk_write &&
+            protocol_.instruction_reboot == protocol.instruction_reboot;
 
         if (!same) throw std::runtime_error("Conflicting serial protocol configuration on one master.");
         return;
@@ -465,8 +478,8 @@ bool serial::SerialMaster::writeRegister(uint8_t node_id, uint16_t address, cons
         if (!receiveStatus(status, SERIAL_TIMEOUT_MS)) return false;
         if (status.id != node_id) continue;
 
-        if (serial_node_data_t* n = findNode(node_id)) n->last_packet_error = status.error;
-        return status.error == 0;
+        noteResponse(node_id, status.error);
+        return !isPacketFailure(status.error);
     }
 
     return false;
@@ -491,14 +504,45 @@ bool serial::SerialMaster::readRegister(uint8_t node_id, uint16_t address, uint8
         if (!receiveStatus(status, SERIAL_TIMEOUT_MS)) return false;
         if (status.id != node_id) continue;
 
-        if (serial_node_data_t* n = findNode(node_id)) n->last_packet_error = status.error;
-        if (status.error != 0 || status.parameters.size() < size) return false;
+        noteResponse(node_id, status.error);
+        if (isPacketFailure(status.error) || status.parameters.size() < size) return false;
 
         std::memcpy(data, status.parameters.data(), size);
         return true;
     }
 
     return false;
+}
+
+bool serial::SerialMaster::reboot(uint8_t node_id)
+{
+    ensureProtocolConfigured();
+
+    if (node_id >= protocol_.broadcast_id) return false;
+
+    // The device answers first, then restarts (torque off, RAM items back to
+    // defaults, hardware error cleared) · robot_web fix-list 24-1
+    sendPacket(node_id, protocol_.instruction_reboot, {});
+
+    const uint64_t deadline = nowNs() + SERIAL_TIMEOUT_MS * NSEC_PER_MSEC;
+    while (nowNs() < deadline) {
+        status_packet_t status{};
+        if (!receiveStatus(status, SERIAL_TIMEOUT_MS)) return false;
+        if (status.id != node_id) continue;
+
+        noteResponse(node_id, status.error);
+        return !isPacketFailure(status.error);
+    }
+
+    return false;
+}
+
+void serial::SerialMaster::noteResponse(uint8_t node_id, uint8_t error)
+{
+    serial_node_data_t* n = findNode(node_id);
+    if (!n) return;
+    n->last_packet_error = error;
+    n->missed_responses = 0;
 }
 
 serial::serial_node_data_t* serial::SerialMaster::findNode(uint8_t node_id)
@@ -727,7 +771,7 @@ void serial::SerialMaster::bulkRead(uint16_t address, uint8_t size, const std::v
     while (!remaining.empty() && nowNs() < deadline) {
         status_packet_t status{};
         const uint32_t receive_timeout_ms = remainingTimeoutMs(deadline);
-        if (receive_timeout_ms == 0 || !receiveStatus(status, receive_timeout_ms)) return;
+        if (receive_timeout_ms == 0 || !receiveStatus(status, receive_timeout_ms)) break;
 
         auto it = std::find(remaining.begin(), remaining.end(), status.id);
         if (it == remaining.end()) continue;
@@ -738,14 +782,21 @@ void serial::SerialMaster::bulkRead(uint16_t address, uint8_t size, const std::v
             continue;
         }
 
-        n->last_packet_error = status.error;
+        noteResponse(status.id, status.error);
         serial_bulk_entry_t* entry = findEntry(n->tx_entries, n->number_of_tx_entries, address, size);
-        if (entry && status.error == 0 && status.parameters.size() >= size) {
+        if (entry && !isPacketFailure(status.error) && status.parameters.size() >= size) {
             std::memcpy(entry->data, status.parameters.data(), size);
             entry->updated = true;
         }
 
         remaining.erase(it);
+    }
+
+    // Nodes that stayed silent · the controller reports them as
+    // COMMUNICATION_UNAVAILABLE after a run of misses (robot_web fix-list 23-3)
+    for (uint8_t id : remaining) {
+        serial_node_data_t* n = findNode(id);
+        if (n && n->missed_responses < UINT16_MAX) ++n->missed_responses;
     }
 }
 

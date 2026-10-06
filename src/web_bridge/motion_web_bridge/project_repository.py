@@ -7,19 +7,19 @@ configuration or issue a motor command.
 
 from __future__ import annotations
 
-import io
 import json
 import shutil
 import time
 import uuid
 from pathlib import Path
-from typing import Any, Dict
+from typing import Any, Dict, List
 
 import yaml
 
-from motion_common import store
+from motion_common import motion_table, store
 from motion_common.paths import NO_PROJECT_SELECTED
 
+from . import project_backup
 from .motor_runtime_store import MotorRuntimeStore
 from .project_tree import build_tree
 from .project_paths import (
@@ -524,25 +524,6 @@ class ProjectRepository:
         manifest = self._read_manifest(project_dir)
         project_name = str(manifest.get('name') or project_dir.name)
 
-        # Older releases archived deleted projects. Remove only archive
-        # directories whose own manifest confirms the exact same project ID.
-        trash_root = self.root / '.trash' / 'projects'
-        if trash_root.is_dir() and not trash_root.is_symlink():
-            for archived in list(trash_root.iterdir()):
-                if not archived.is_dir() or archived.is_symlink():
-                    continue
-                try:
-                    archived_manifest = json.loads(
-                        (archived / 'project.json').read_text(encoding='utf-8')
-                    )
-                except (OSError, ValueError, json.JSONDecodeError):
-                    continue
-                if (
-                    isinstance(archived_manifest, dict)
-                    and archived_manifest.get('project_id') == project_dir.name
-                ):
-                    shutil.rmtree(archived)
-
         original_selection = self._read_selection()
         selection = dict(original_selection)
         if selection.get('project_id') == project_dir.name:
@@ -557,16 +538,10 @@ class ProjectRepository:
                 self.selection_file.unlink()
             except FileNotFoundError:
                 pass
-        # Rename inside the repository first so a partially removed project
-        # can never be listed or opened. Report success only after rmtree has
-        # removed the complete directory tree.
-        deleting = self.root / f'.deleting-{project_dir.name}-{uuid.uuid4().hex}'
+        # 지우지 않고 휴지통으로 · 7일 뒤 정리 · 되살릴 수 있다 · 수정 목록 33
         try:
-            project_dir.rename(deleting)
-            shutil.rmtree(deleting)
+            trash_path = project_backup.move_to_trash(self.root, project_dir)
         except OSError:
-            if deleting.exists() and not project_dir.exists():
-                deleting.rename(project_dir)
             if original_selection:
                 self._atomic_write(
                     self.selection_file,
@@ -578,11 +553,77 @@ class ProjectRepository:
                 except FileNotFoundError:
                     pass
             raise
+        project_backup.prune_trash(self.root)
         return {
             **self.list_projects(),
-            'message': f"프로젝트 '{project_name}'와 관련 파일을 영구 삭제했습니다",
+            'message': (
+                f"프로젝트 '{project_name}'를 휴지통으로 옮겼습니다 · "
+                '7일 안에 되살릴 수 있습니다'
+            ),
             'deleted_project_id': project_dir.name,
-            'permanently_deleted': True,
+            'permanently_deleted': False,
+            'trash_entry': trash_path.name,
+        }
+
+    # -- 백업·복원·휴지통 · 수정 목록 33 ----------------------------------- #
+
+    def export_project_zip(self, project_id: Any) -> Dict[str, Any]:
+        project_dir = self._project_dir(project_id)
+        stamp = time.strftime('%Y%m%d-%H%M%S')
+        return {
+            'filename': f'{project_dir.name}-{stamp}.zip',
+            'data': project_backup.export_project_zip(project_dir),
+        }
+
+    def import_project_zip(self, data: bytes, *, overwrite: bool = False) -> Dict[str, Any]:
+        result = project_backup.import_project_zip(self.root, data, overwrite=overwrite)
+        project_dir = self._project_dir(result['project_id'])
+        self._read_manifest(project_dir)   # 형식 확인 · 안 맞으면 여기서 오류
+        return {
+            **self.list_projects(),
+            'imported_project_id': result['project_id'],
+            'replaced_to_trash': bool(result['replaced_to']),
+            'message': (
+                f"프로젝트 '{result['project_id']}' 를 복원했습니다"
+                + (' · 있던 것은 휴지통으로 옮겼습니다' if result['replaced_to'] else '')
+                + ' · 선택한 뒤 「장비에 적용」 하세요'
+            ),
+        }
+
+    def list_trash(self) -> Dict[str, Any]:
+        project_backup.prune_trash(self.root)
+        return {'entries': project_backup.list_trash(self.root), 'keep_days': 7}
+
+    # -- 자동 백업 · 하루 1회 · 수정 목록 33-4 --------------------------------- #
+
+    def _project_dirs(self) -> List[Path]:
+        """`list_projects` 와 같은 기준 · 숨김 폴더(.trash · .backups) 빼고 project.json 이 있는 것"""
+        return [
+            path for path in sorted(self.root.iterdir(), key=lambda item: item.name.lower())
+            if path.is_dir() and not path.name.startswith('.') and (path / 'project.json').is_file()
+        ]
+
+    def auto_backup(self) -> Dict[str, Any]:
+        """오늘 백업이 없으면 만든다 · 자동 백업 서비스가 부른다"""
+        return project_backup.daily_backup(self.root, self._project_dirs())
+
+    def list_auto_backups(self) -> Dict[str, Any]:
+        return {
+            'success': True,
+            'days': project_backup.list_auto_backups(self.root),
+            'keep_days': project_backup.AUTO_BACKUP_KEEP_DAYS,
+        }
+
+    def auto_backup_file(self, day: Any, project_id: Any) -> Dict[str, Any]:
+        path = project_backup.auto_backup_file(self.root, str(day or ''), str(project_id or ''))
+        return {'path': str(path), 'filename': f'{path.stem}-{day}-auto.zip'}
+
+    def restore_trash(self, entry: Any) -> Dict[str, Any]:
+        project_id = project_backup.restore_from_trash(self.root, str(entry or ''))
+        return {
+            **self.list_projects(),
+            'restored_project_id': project_id,
+            'message': f"프로젝트 '{project_id}' 를 되살렸습니다",
         }
 
     def import_text(
@@ -1063,23 +1104,13 @@ class ProjectRepository:
                 if not isinstance(payload, dict):
                     raise ValueError('YAML 최상위 값은 객체여야 합니다')
             elif category == 'motions':
-                lines = (
-                    line.strip()
-                    for line in io.StringIO(content)
-                    if line.strip()
-                )
-                header_line = next(lines, '')
-                frame_line = next(lines, '')
-                if not header_line or not frame_line:
-                    raise ValueError('모션 헤더와 프레임 데이터가 필요합니다')
-                header = json.loads(header_line)
-                if not isinstance(header, dict) or header.get('type') != 'motion_header':
-                    raise ValueError('지원하지 않는 모션 파일 헤더입니다')
-                if not isinstance(json.loads(frame_line), list):
-                    raise ValueError('모션 프레임은 배열이어야 합니다')
-                for line in lines:
-                    if not isinstance(json.loads(line), list):
-                        raise ValueError('모션 프레임은 배열이어야 합니다')
+                # 검사 = 재생 파서 하나 · 수정 목록 31 (2026-10-06)
+                #
+                # 전에는 여기만의 규칙(첫 줄 motion_header + 대괄호 행)이 따로
+                # 있었다 · 재생 파서는 더 많은 형식을 읽는다 · 내보내기 형식이
+                # 바뀌면 한쪽만 고쳐 「올라가는데 안 돈다」 「도는데 안 올라간다」
+                # 가 생긴다 · 이제 재생이 읽을 수 있으면 올라간다.
+                motion_table.validate_motion_content(content)
             else:
                 if not isinstance(json.loads(content), dict):
                     raise ValueError('레이어 파일 최상위 값은 객체여야 합니다')

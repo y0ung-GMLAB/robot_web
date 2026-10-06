@@ -47,6 +47,14 @@ def register_motor_routes(app: FastAPI, bridge, project_call) -> None:
             raise HTTPException(status_code=400, detail='request body must be an object')
         return await asyncio.to_thread(bridge.motor_config.save, body)
 
+    @app.post('/api/motor-config/drive-maintenance')
+    async def minas_drive_maintenance(request: Request):
+        # EEPROM 저장 · 앱솔루트 방식 · 다회전 클리어 · 수정 목록 15 + 34-3
+        body = await request.json()
+        if not isinstance(body, dict):
+            raise HTTPException(status_code=400, detail='request body must be an object')
+        return await asyncio.to_thread(bridge.minas_drive_maintenance, body)
+
     @app.post('/api/motor-config/apply')
     async def apply_motor_config():
         return await asyncio.to_thread(bridge.motor_config.apply)
@@ -86,7 +94,7 @@ def register_motor_routes(app: FastAPI, bridge, project_call) -> None:
         return await asyncio.to_thread(
             bridge.manual.ac_servo_jog,
             body.get('axis'),
-            body.get('relative_deg'),
+            body.get('relative_rad'),
         )
 
     @app.post('/api/motion-test/dynamixel/jog')
@@ -95,7 +103,7 @@ def register_motor_routes(app: FastAPI, bridge, project_call) -> None:
         return await asyncio.to_thread(
             bridge.manual.dynamixel_jog,
             body.get('axis'),
-            body.get('relative_deg'),
+            body.get('relative_rad'),
         )
 
     @app.post('/api/motion-test/ac-servo/action')
@@ -104,7 +112,7 @@ def register_motor_routes(app: FastAPI, bridge, project_call) -> None:
         return await asyncio.to_thread(
             bridge.manual.ac_servo_action,
             body.get('axis'),
-            body.get('target_deg'),
+            body.get('target_rad'),
             body.get('duration_sec'),
             body.get('range_recovery', False),
         )
@@ -115,9 +123,23 @@ def register_motor_routes(app: FastAPI, bridge, project_call) -> None:
         return await asyncio.to_thread(
             bridge.manual.dynamixel_action,
             body.get('axis'),
-            body.get('target_deg'),
+            body.get('target_rad'),
             body.get('duration_sec'),
             body.get('range_recovery', False),
+        )
+
+    @app.post('/api/motion-test/dynamixel/control')
+    async def dynamixel_control(request: Request):
+        """다이나믹셀 토크 켜기·끄기·재부팅 · 한 모터 · 수정 목록 24"""
+        body = await request.json()
+        try:
+            axis = int(body.get('axis'))
+        except (TypeError, ValueError):
+            return {'success': False, 'message': 'axis is required'}
+        return await asyncio.to_thread(
+            bridge.manual.dynamixel_torque_control,
+            body.get('action'),
+            [axis],
         )
 
     @app.post('/api/motion-test/ac-servo/control')

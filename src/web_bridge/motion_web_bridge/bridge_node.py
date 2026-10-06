@@ -4,6 +4,7 @@ import copy
 import json
 import os
 import socket
+import subprocess
 import threading
 import time
 from pathlib import Path
@@ -14,6 +15,7 @@ import uvicorn
 import yaml
 from fastapi import FastAPI, HTTPException, Request
 from motion_common import generation, rpc, topics
+from motion_common import paths as common_paths
 from motion_common import motor_ref as motor_ref_rules
 from fastapi.responses import JSONResponse
 from rclpy.node import Node
@@ -28,6 +30,10 @@ from .coordination_bridge import (
 from . import motion_file_analysis, motor_config_rules, run_mode_gate
 from .execution_context_service import ExecutionContextService
 from .manual_motor_commands import ManualMotorCommandService
+from .schedule_end import ScheduleEndService
+from .supervisor_watchdog import SupervisorWatchdog
+from .auto_backup import AutoBackupService
+from .drive_maintenance import DriveMaintenance
 from .manual_stream import ManualStreamService
 from . import animation_preview, sim_scene
 from .motor_runtime_service import MotorRuntimeService
@@ -66,6 +72,12 @@ from .servo_alarm_policy import (
     normalize_overrides,
     policy_revision,
 )
+
+
+def _managed_motor_service() -> str:
+    """Motor Manager 가 따로 도는 설치인가 · 아니면 빈 글자 (멈출 것이 없다)"""
+    service = str(os.environ.get('MOTION_MOTOR_SERVICE_UNIT') or '').strip()
+    return service if service == 'motion-motor.service' else ''
 
 
 class MotionWebBridge(Node):
@@ -210,12 +222,8 @@ class MotionWebBridge(Node):
         self.restart_script = Path(
             str(self.declare_parameter('restart_script', str(default_restart_script)).value)
         ).expanduser()
-        default_motion_projects_dir = self.workspace_root / 'motion_projects'
-        self.motion_projects_dir = Path(
-            str(self.declare_parameter(
-                'motion_projects_dir', str(default_motion_projects_dir)
-            ).value)
-        ).expanduser()
+        # 프로젝트 폴더 · 스케줄 노드·실행 노드와 같은 함수 하나 · 파라미터 없음 · 수정 목록 32
+        self.motion_projects_dir = common_paths.motion_projects_dir()
         self.project_repository = ProjectRepository(self.motion_projects_dir)
         self._motor_lifecycle_lock = threading.Lock()
 
@@ -317,6 +325,12 @@ class MotionWebBridge(Node):
         self._coordination_watchdog_stop_execution_id = ''
         self._safety_status_lock = threading.Lock()
         self._safety_status: Dict[str, Any] = {}
+        # supervisor 생존·수신 감시 · 수정 목록 29 + 14 · 상태 콜백보다 먼저 만든다
+        self.supervisor_watchdog = SupervisorWatchdog(
+            log_dir=Path(self.workspace_root) / 'log',
+            restart=self._restart_upper_services_for_watchdog,
+            dump_threads=self._dump_supervisor_threads,
+        )
         self._monitoring_motion_mapping_lock = threading.Lock()
         self._monitoring_motion_mapping_context_id = ''
         self._monitoring_motion_mapping_rows: List[Dict[str, Any]] = []
@@ -390,6 +404,34 @@ class MotionWebBridge(Node):
             action_publisher=self._action_request_publisher,
             jog_result_topic=self.jog_result_topic,
             action_result_topic=self.action_result_topic,
+        )
+        # MINAS 드라이브 정비 · EEPROM 저장 · 앱솔루트 방식 · 다회전 클리어 · 수정 목록 15 + 34-3
+        self.drive_maintenance = DriveMaintenance(
+            read_slaves=self.ethercat_alias_manager.read_slaves,
+            registry_motor=self._registry_motor_for_axis,
+            current_motor=self._current_motor_for_axis,
+            safety_blocker=lambda: self._motor_runtime.ethercat_scan_safety_blocker(
+                require_fresh_motor_state=True,
+            ),
+            lifecycle_lock=self._motor_lifecycle_lock,
+            motor_service=_managed_motor_service,
+            service_active=self._motor_runtime.managed_service_active,
+            run_service=lambda action, service: self._motor_runtime.run_managed_service(action, service),
+            wait_release=lambda: motor_config_rules.wait_for_ethercat_release(timeout_sec=5.0),
+            wait_recovery=lambda service, axes: self._motor_runtime.wait_for_runtime_recovery(
+                axes, timeout_sec=12.0, motor_service=service,
+            ),
+            expected_axes=self._detected_axes,
+            record=self._record_drive_maintenance,
+        )
+        # 스케줄 끝 · 기준점 주차 → 서보 OFF · 다음 시작 전 다시 켜기 · 수정 목록 36
+        self.schedule_end = ScheduleEndService(
+            self,
+            fill_active_files=self._with_active_project_files,
+            ac_servo_control=self._manual.ac_servo_control,
+            dynamixel_torque_control=self._manual.dynamixel_torque_control,
+            load_motor_registry=lambda: self._motor_config.load().get('registry') or {},
+            alarm_grade=lambda: int((self._safety_status or {}).get('servo_alarm_grade') or 0),
         )
         self._manual_stream_request_publisher = self.create_publisher(
             String, self.manual_stream_request_topic, 10
@@ -474,6 +516,16 @@ class MotionWebBridge(Node):
         self._coordination_watchdog_timer = self.create_timer(
             0.1, self._coordination_watchdog_callback
         )
+        self._supervisor_watchdog_timer = self.create_timer(
+            1.0, self._supervisor_watchdog_tick
+        )
+        # 프로젝트 자동 백업 · 하루 1회 · 만드는 일은 별도 스레드 · 수정 목록 33-4
+        self.auto_backup = AutoBackupService(
+            self.project_repository.auto_backup,
+            log_info=self.get_logger().info,
+            log_error=self.get_logger().error,
+        )
+        self._auto_backup_timer = self.create_timer(60.0, self.auto_backup.tick)
 
     def _log_started(self) -> None:
         """무엇을 물고 떴는지 남긴다 · 현장에서 이 줄 하나로 원인을 찾는다."""
@@ -660,6 +712,9 @@ class MotionWebBridge(Node):
         if isinstance(payload, dict):
             with self._safety_status_lock:
                 self._safety_status = payload
+            watchdog = getattr(self, 'supervisor_watchdog', None)
+            if watchdog is not None:
+                watchdog.safety_received(payload)
 
     def _wait_for_motion_mapping_result(
         self,
@@ -737,8 +792,11 @@ class MotionWebBridge(Node):
             motion_state['project_scope'] = project_scope
             motion_state['project_generation'] = current_generation
 
+        watchdog = getattr(self, 'supervisor_watchdog', None)
         return {
             'bridge_state': 'ok',
+            # supervisor 살아 있나 · 자동 재시작 횟수 · 수정 목록 29
+            'supervisor_watchdog': watchdog.snapshot() if watchdog is not None else {},
             'bridge_instance_id': str(getattr(self, '_bridge_instance_id', '')),
             'bridge_started_at': getattr(self, '_bridge_started_at', None),
             'project_generation': self.current_project_generation(),
@@ -789,6 +847,19 @@ class MotionWebBridge(Node):
         """Check the currently active local execution files and safety state."""
         return local_motion_readiness(self, payload)
 
+    def record_coordination_note(
+        self, event_type: str, content: str, details: Dict[str, Any],
+    ) -> Dict[str, Any]:
+        """연동 기록을 운영 로그에 · 그룹 실행에서 뺀 PC 등 · 수정 목록 30-2"""
+        self._motor_event_log.append(
+            category='coordination',
+            event_type=event_type,
+            target='그룹 연동',
+            content=content[:500],
+            details=details,
+        )
+        return {'success': True}
+
     def coordination_local_status(self) -> Dict[str, Any]:
         """Return only the runtime fields needed by the loopback DDS adapter."""
         with self._coordination_poll_lock:
@@ -806,7 +877,22 @@ class MotionWebBridge(Node):
             'sampled_monotonic': time.monotonic(),
             'motion_run_status': motion_run_status,
             'safety_status': safety_status,
+            # 운전 모드 · 하트비트로 마스터에게 · 오프·수동 PC 는 그룹 시작에서 뺀다 · 수정 목록 30-6
+            'operation_mode': self._cached_operation_mode(),
         }
+
+    def _cached_operation_mode(self) -> str:
+        """50ms 마다 불린다 · 파일은 1초에 한 번만 읽는다."""
+        now = time.monotonic()
+        cached = getattr(self, '_operation_mode_cache', None)
+        if cached is not None and now - cached[0] < 1.0:
+            return cached[1]
+        try:
+            mode = run_mode_gate.current_run_mode(self)
+        except Exception:  # noqa: BLE001 · 못 읽으면 빈 값 · 시작 판정은 준비 단계가 다시 본다
+            mode = ''
+        self._operation_mode_cache = (now, str(mode or ''))
+        return self._operation_mode_cache[1]
 
     def _coordination_watchdog_callback(self) -> None:
         """Stop a local group run if its coordination process disappears."""
@@ -973,7 +1059,49 @@ class MotionWebBridge(Node):
             )
         return self.motor_runtime_control_blocker()
 
+    def _supervisor_watchdog_tick(self) -> None:
+        with self._motion_run_lock:
+            state = str((self._motion_run_status or {}).get('state') or '')
+        reason = self.supervisor_watchdog.tick(state)
+        if reason:
+            self.get_logger().error(f'[supervisor 감시] {reason}')
+
+    def _restart_upper_services_for_watchdog(self) -> str:
+        """상위 서비스만 재시작 · Motor Manager 는 따로라 모터는 홀드 · 수정 목록 29-2
+
+        「프로그램 재시작」 버튼과 같은 서비스를 같은 방법으로 다시 띄운다 ·
+        다만 프로젝트 변경 잠금은 보지 않는다 · supervisor 가 죽었으면 어차피
+        아무것도 움직이지 못한다.
+        """
+        managed = str(os.environ.get('MOTION_CONTROL_SERVICE_UNIT') or '').strip()
+        if managed != 'motion-control.service':
+            return '자동실행 서비스가 아니라 재시작하지 않음'
+        services = [managed]
+        coordination = str(os.environ.get('MOTION_COORDINATION_SERVICE_UNIT') or '').strip()
+        if coordination == 'motion-coordination.service':
+            services.append(coordination)
+        try:
+            motor_config_rules.schedule_managed_service_restart(*services)
+        except (OSError, ValueError) as exc:
+            return f'재시작 요청 실패: {exc}'
+        return '재시작 요청: ' + ', '.join(services)
+
+    @staticmethod
+    def _dump_supervisor_threads() -> None:
+        """supervisor 에 SIGUSR1 · 스레드 스택이 log/motion_supervisor_threads.log 에 · 14-2"""
+        if os.name != 'posix':
+            return
+        subprocess.run(
+            ['/usr/bin/pkill', '-USR1', '-f', 'motion_supervisor/motion_supervisor'],
+            check=False, timeout=2.0,
+        )
+        time.sleep(0.5)
+
     def motor_runtime_control_blocker(self) -> str:
+        watchdog = getattr(self, 'supervisor_watchdog', None)
+        silent = watchdog.unresponsive_reason() if watchdog is not None else ''
+        if silent:
+            return silent
         lock = getattr(self, '_lock', None)
         if lock is None:
             motion_state = copy.deepcopy(getattr(self, '_motion_state', None))
@@ -1740,12 +1868,60 @@ class MotionWebBridge(Node):
             with self._motion_run_lock:
                 status = dict(self._motion_run_status) if self._motion_run_status else {}
             if status:
-                return {
+                result = {
                     'success': True,
                     'message': 'motion run status from cache',
                     'status': status,
                 }
+        end = getattr(self, 'schedule_end', None)
+        if end is not None and isinstance(result, dict):
+            result = {**result, 'schedule_end': end.status()}
         return result
+
+    def minas_drive_maintenance(self, payload: Dict[str, Any]) -> Dict[str, Any]:
+        """MINAS 드라이브 정비 · `POST /api/motor-config/drive-maintenance` · 수정 목록 15 + 34-3"""
+        result = self.drive_maintenance.run(payload if isinstance(payload, dict) else {})
+        return {**result, **self.snapshot()}
+
+    def _registry_motor_for_axis(self, axis: int) -> Optional[Dict[str, Any]]:
+        registry = self._motor_config.load().get('registry') or {}
+        for entry in registry.get('motors') or []:
+            if isinstance(entry, dict) and entry.get('axis') is not None and int(entry['axis']) == int(axis):
+                return entry
+        return None
+
+    def _current_motor_for_axis(self, axis: int) -> Optional[Dict[str, Any]]:
+        state = self.motion_state()
+        for motor in (state or {}).get('motors') or []:
+            if isinstance(motor, dict) and motor.get('controller_index') is not None:
+                if int(motor['controller_index']) == int(axis):
+                    return motor
+        return None
+
+    def _detected_axes(self) -> List[int]:
+        state = self.motion_state()
+        return sorted(
+            int(motor['controller_index'])
+            for motor in (state or {}).get('motors') or []
+            if isinstance(motor, dict) and motor.get('controller_index') is not None
+            and str(motor.get('state') or '') == 'detected'
+        )
+
+    def _record_drive_maintenance(self, entry: Dict[str, Any]) -> None:
+        self._motor_event_log.append(
+            category='system',
+            event_type=str(entry.get('event_type') or 'minas_maintenance'),
+            target=f'{entry.get("axis")}번 모터 · Master {entry.get("master_index")} · Slave {entry.get("slave_position")}',
+            content=str(entry.get('message') or ''),
+            details=entry,
+        )
+
+    def schedule_end_start_blocker(self, payload: Dict[str, Any]) -> str:
+        """스케줄 끝에 끈 서보를 켠다 · 주차 중이면 막는다 · 수정 목록 36"""
+        end = getattr(self, 'schedule_end', None)
+        if end is None or str(payload.get('request_source') or '') == 'schedule_end':
+            return ''
+        return end.start_blocker()
 
     def motion_run_check(self, payload: Dict[str, Any]) -> Dict[str, Any]:
         return self._request_motion_run('check', payload, timeout_sec=3.0)
@@ -1765,6 +1941,9 @@ class MotionWebBridge(Node):
         blocker = self.motor_runtime_control_blocker()
         if blocker:
             return {'success': False, 'message': f'초기 위치 이동 불가: {blocker}'}
+        parked = self.schedule_end_start_blocker(payload)
+        if parked:
+            return {'success': False, 'message': f'초기 위치 이동 불가: {parked}'}
         return self._request_motion_run('initialize', payload, timeout_sec=2.0)
 
     def schedule_start_blocked_by_manual_mode(self, payload: Dict[str, Any]) -> str:
@@ -1821,6 +2000,9 @@ class MotionWebBridge(Node):
         blocker = self.motor_runtime_control_blocker()
         if blocker:
             return {'success': False, 'message': f'모션 실행 불가: {blocker}'}
+        parked = self.schedule_end_start_blocker(payload)
+        if parked:
+            return {'success': False, 'message': f'모션 실행 불가: {parked}'}
         # 스케줄러처럼 화면 없는 호출자는 무엇을 재생할지 모른다 ·
         # 프로젝트가 정해 둔 활성 파일로 채운다 · §6-68
         filled = self._with_active_project_files(payload)
@@ -1840,6 +2022,11 @@ class MotionWebBridge(Node):
             mapping = files.get('motion_axis_matching') if isinstance(files.get('motion_axis_matching'), dict) else {}
             active_motion = str(motions.get('name') or '').strip()
             active_mapping = str(mapping.get('name') or '').strip()
+            # 재생 등록(매핑 파일의 `motion_file_id` = 재생 목록 1번)이 먼저다 ·
+            # 목록은 늘 1번부터 시작한다 · 수정 목록 35
+            registered = self._registered_motion_file(project_id, active_mapping)
+            if registered:
+                active_motion = registered
 
         filled = dict(payload if payload is not None else {})
         if not str(filled.get('motion_file_id') or '').strip():
@@ -1847,6 +2034,19 @@ class MotionWebBridge(Node):
         if not str(filled.get('mapping_file_id') or '').strip():
             filled['mapping_file_id'] = active_mapping
         return filled
+
+    def _registered_motion_file(self, project_id: str, mapping_id: str) -> str:
+        export_path = getattr(self.project_repository, 'export_path', None)
+        if not project_id or not mapping_id or export_path is None:
+            return ''
+        try:
+            path = export_path(
+                project_id, 'motion_axis_matching', mapping_id,
+            )
+            root = yaml.safe_load(path.read_text(encoding='utf-8')) or {}
+        except (OSError, ValueError, yaml.YAMLError):
+            return ''
+        return str(root.get('motion_file_id') or '').strip() if isinstance(root, dict) else ''
 
     def motion_automation_configure(
         self, payload: Dict[str, Any]
@@ -1890,7 +2090,7 @@ class MotionWebBridge(Node):
         return payload
 
     def _mapping_files_registering(self, project_id: str, motion_file_id: str) -> List[str]:
-        """이 프로젝트의 조인트 매핑 파일 중 `motion_file_id` 가 그 애니메이션인 것."""
+        """이 프로젝트의 조인트 매핑 파일 중 그 애니메이션을 재생 등록(목록 포함)한 것."""
         repository = self.project_repository
         try:
             tree = repository.get_project(project_id).get('tree') or []
@@ -1909,7 +2109,15 @@ class MotionWebBridge(Node):
                     mapping = yaml.safe_load(str(content.get('content') or '')) or {}
                 except (OSError, ValueError, yaml.YAMLError):
                     continue
-                if isinstance(mapping, dict) and str(mapping.get('motion_file_id') or '') == motion_file_id:
+                if not isinstance(mapping, dict):
+                    continue
+                # 재생 목록 안에 있어도 등록이다 · 지우면 그 차례에서 재생이 멈춘다 · 수정 목록 35
+                listed = mapping.get('motion_playlist')
+                listed = [str(item or '') for item in listed] if isinstance(listed, list) else []
+                if (
+                    str(mapping.get('motion_file_id') or '') == motion_file_id
+                    or motion_file_id in listed
+                ):
                     names.append(file_name)
         return sorted(names)
 
@@ -1927,6 +2135,10 @@ class MotionWebBridge(Node):
         """준비된 장면 JSON 파일 · 없으면 None (라우트가 파일로 흘려보낸다)."""
         path = sim_scene.scene_path(self.workspace_root)
         return path if path is not None and path.is_file() else None
+
+    def preview_blender_scene_path(self) -> Optional[Path]:
+        """팩의 Blender 뷰 장면(scene.glb) · 없으면 None · 수정 목록 50"""
+        return sim_scene.blender_scene_path(self.workspace_root)
 
     def preview_motion_frames(self, file_id: str) -> Dict[str, Any]:
         """선택한 애니메이션의 MuJoCo 계산 결과(t · qpos) · 브라우저 재생용."""
@@ -1956,8 +2168,22 @@ class MotionWebBridge(Node):
     def motion_run_stop(self) -> Dict[str, Any]:
         return self._request_motion_run('stop', {}, timeout_sec=2.0)
 
-    def motion_run_stop_after_cycle(self) -> Dict[str, Any]:
-        return self._request_motion_run('stop_after_cycle', {}, timeout_sec=2.0)
+    def motion_run_stop_after_cycle(self, payload: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+        """현재 회차 후 정지 · 스케줄 끝이면 그 뒤에 기준점 주차 → 서보 OFF · 수정 목록 36
+
+        `reason='schedule_end'` 는 스케줄(또는 그룹 마스터의 스케줄)이 보낸다 ·
+        사람이 누른 「현재 회차 후 정지」 는 옛 그대로 멈추기만 한다.
+        """
+        payload = payload if isinstance(payload, dict) else {}
+        end = getattr(self, 'schedule_end', None)
+        if end is not None and end.active():
+            # 1분마다 오는 스케줄 점검이 주차 중인 초기 위치 이동을 끊지 않게
+            return {'success': True, 'message': end.status().get('message') or '스케줄 끝 동작 중'}
+        result = self._request_motion_run('stop_after_cycle', {}, timeout_sec=2.0)
+        if str(payload.get('reason') or '') == 'schedule_end' and end is not None:
+            # 이미 멈춰 있어서 정지가 거절돼도 주차는 한다
+            result = {**result, 'schedule_end': end.begin()}
+        return result
 
     def motion_group_prepare(self, payload: Dict[str, Any]) -> Dict[str, Any]:
         # 오프 모드 · 원격 그룹 시작도 이 PC 에서는 받지 않는다 (준비 거절 →
@@ -1968,6 +2194,9 @@ class MotionWebBridge(Node):
         blocker = self.motor_runtime_control_blocker()
         if blocker:
             return {'success': False, 'message': f'그룹 실행 준비 불가: {blocker}'}
+        parked = self.schedule_end_start_blocker(payload)
+        if parked:
+            return {'success': False, 'message': f'그룹 실행 준비 불가: {parked}'}
         return self._request_motion_run('group_prepare', payload, timeout_sec=2.0)
 
     def motion_group_start_at(self, payload: Dict[str, Any]) -> Dict[str, Any]:
@@ -1975,6 +2204,10 @@ class MotionWebBridge(Node):
 
     def motion_group_initialize_at(self, payload: Dict[str, Any]) -> Dict[str, Any]:
         return self._request_motion_run('group_initialize_at', payload, timeout_sec=2.0)
+
+    def motion_group_join_commit(self, payload: Dict[str, Any]) -> Dict[str, Any]:
+        """도는 그룹에 복귀 · 진행 PC 가 합류를 확정했다 · 수정 목록 30-3"""
+        return self._request_motion_run('group_join_commit', payload, timeout_sec=2.0)
 
     def motion_group_cancel(self, payload: Dict[str, Any]) -> Dict[str, Any]:
         return self._request_motion_run('group_cancel', payload, timeout_sec=2.0)

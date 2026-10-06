@@ -77,20 +77,24 @@ test('capture buttons save the current motor position, with a confirm first', ()
   assert.match(html, />− limit<\/button>/);
 });
 
-// 다이얼 OFF · 목표 위치 입력 후 이동 · 둘 다 모터 deg · 2026-10-02
-test('dial ON/OFF switch and a typed target live in the same jog block', () => {
-  for (const id of ['jogDialBlock', 'jogDialEnabled', 'jogDialEnabledState', 'jogTargetInput', 'jogTargetMoveButton']) {
+// 목표 위치 입력 후 이동 · 둘 다 모터 deg · 2026-10-02
+// ON/OFF 토글 삭제 · 다이얼과 목표 칸을 늘 같이 · 숨김 규칙 없음 · 2026-10-06
+test('dial and typed target are always shown together in the same jog block', () => {
+  for (const id of ['jogDialBlock', 'jogTargetInput', 'jogTargetMoveButton']) {
     assert.match(html, new RegExp(`id=["']${id}["']`), `${id} missing`);
     assert.match(dom, new RegExp(`${id}: document\\.getElementById\\(["']${id}["']\\)`));
   }
   const block = html.indexOf('id="jogDialBlock"');
   assert.ok(html.indexOf('id="jogTargetInput"') > block, '목표 칸은 다이얼 블록 안');
   assert.match(html, /목표 위치 \(모터 deg · 감속·기어비 미적용\)/);
-  // OFF 면 썸휠·화살표 묶음만 숨고 위치 표시·limit 버튼은 그대로 (묶음이 jog-dial-only · 2026-10-04)
-  assert.match(html, /class="jog-wheel-column jog-dial-only"/);
-  const column = html.indexOf('class="jog-wheel-column jog-dial-only"');
+  assert.doesNotMatch(html, /jogDialEnabled|jog-dial-toggle|jog-dial-only|jog-target-only|썸휠/);
+  assert.doesNotMatch(dom, /jogDialEnabled/);
+  assert.doesNotMatch(dial, /dialEnabled|dial-off|localStorage/);
+  const css = readFileSync(new URL('../static/css/14-redesign.css', import.meta.url), 'utf8');
+  assert.doesNotMatch(css, /dial-off|jog-dial-only|jog-target-only/);
+  const column = html.indexOf('class="jog-wheel-column"');
   assert.ok(html.indexOf('id="jogDialPlus"') > column && html.indexOf('id="jogDial" class="jog-dial jog-wheel"') > column);
-  assert.doesNotMatch(html, /jog-dial-capture[^"]*jog-dial-only/);
+  assert.match(html, /오른쪽 = \+/);
 });
 
 test('the typed target goes through the existing absolute move path in motor deg', () => {
@@ -99,8 +103,8 @@ test('the typed target goes through the existing absolute move path in motor deg
   assert.match(dial, /target_deg: target,/);
   // 시간은 안 보낸다 · supervisor 가 속도·가속 한계로 정한다
   assert.doesNotMatch(dial, /duration_sec:/);
-  // 같은 잠금 · 앞 요청이 돌면 안 보낸다 · 한계 밖이면 안 보낸다
-  assert.match(dial, /if \(reason \|\| inFlight\) \{/);
+  // 같은 잠금 · 앞 요청이 돌거나 다이얼 양이 남았으면 안 보낸다 · 한계 밖이면 안 보낸다
+  assert.match(dial, /if \(reason \|\| inFlight \|\| hasPending\(\)\) \{/);
   assert.match(dial, /const limitReason = targetLimitReason\(motor, target\);/);
   // 모터를 바꾸면 목표 칸을 새 모터 위치로 다시 채운다
   assert.match(dial, /targetTouched = false;\s*\n\s*clearPending\(''\);/);

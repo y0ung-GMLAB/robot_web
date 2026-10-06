@@ -109,6 +109,8 @@ void dynamixel::DynamixelDriver::loadParameters(const std::string& param_file)
     serial_protocol_.instruction_status = readProtocolByte(protocol, "status");
     serial_protocol_.instruction_bulk_read = readProtocolByte(protocol, "bulk_read");
     serial_protocol_.instruction_bulk_write = readProtocolByte(protocol, "bulk_write");
+    // Optional so existing parameter files keep loading · default 0x08 (robot_web fix-list 24-1)
+    if (protocol["reboot"]) serial_protocol_.instruction_reboot = readProtocolByte(protocol, "reboot");
 
     if (root["model_file"]) {
         std::filesystem::path model_path(root["model_file"].as<std::string>());

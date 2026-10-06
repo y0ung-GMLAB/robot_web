@@ -170,7 +170,7 @@ PROJECT_GENERATION="${MOTION_PROJECT_GENERATION:-0}"
 export PROJECT_GENERATION
 log "ROS DDS isolation: ROS_LOCALHOST_ONLY=${ROS_LOCALHOST_ONLY}"
 log "starting motion_monitor.launch.py with config_file=${CONFIG_FILE}, project_generation=${PROJECT_GENERATION}, start_motor_manager=${START_MOTOR_MANAGER}"
-sg dialout -c 'bash -lc '"'"'source "$WORKSPACE/install/setup.bash" && ros2 launch motion_state_monitor motion_monitor.launch.py config_file:="$CONFIG_FILE" motion_projects_dir:="$WORKSPACE/motion_projects" start_motor_manager:="$START_MOTOR_MANAGER"'"'" &
+sg dialout -c 'bash -lc '"'"'source "$WORKSPACE/install/setup.bash" && ros2 launch motion_state_monitor motion_monitor.launch.py config_file:="$CONFIG_FILE" start_motor_manager:="$START_MOTOR_MANAGER"'"'" &
 launch_pid="$!"
 wait "${launch_pid}"
 exit "$?"

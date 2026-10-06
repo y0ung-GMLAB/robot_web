@@ -13,6 +13,8 @@ struct serial_protocol_config_t {
     uint8_t instruction_status{0};
     uint8_t instruction_bulk_read{0};
     uint8_t instruction_bulk_write{0};
+    // Protocol 2.0 REBOOT · clears a latched hardware error (robot_web fix-list 24-1)
+    uint8_t instruction_reboot{0x08};
 };
 
 class SerialDriver {

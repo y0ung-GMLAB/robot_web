@@ -7,6 +7,11 @@ Description=Motion Control Persistent Motor Manager
 # 없는 유닛으로 보고 조용히 넘어간다 · 지키지 못하는 약속을 적어 두면 다음
 # 사람이 또 속으므로 지웠다 · 실제 대기는 `motion_common/net_ready.py` 가 한다.
 
+# 모터 통신 루프가 예외로 끝나면 노드가 70 으로 나간다 → Restart=on-failure 로 3초 뒤 다시 ·
+# 같은 고장이 되풀이되면 60초에 5번까지만 · 그 뒤로는 멈춰 서서 사람이 본다 · 수정 목록 3-2
+StartLimitIntervalSec=60
+StartLimitBurst=5
+
 [Service]
 Type=simple
 WorkingDirectory=@WORKSPACE@

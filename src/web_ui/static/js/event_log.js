@@ -10,6 +10,7 @@ const CATEGORY_LABELS = {
   initial_position: '초기 위치 이동',
   motion: '재생 시작',
   system: '시스템 설정',
+  coordination: '그룹 연동',
 };
 
 const EVENT_TYPE_LABELS = {
@@ -17,6 +18,7 @@ const EVENT_TYPE_LABELS = {
   continuous_motion_started: '연속 재생 시작',
   motion_started: '재생 시작',
   ethercat_alias_written: 'EEPROM Alias 변경',
+  group_excluded: '그룹 실행 · PC 제외',
 };
 
 function eventTimeText(event) {

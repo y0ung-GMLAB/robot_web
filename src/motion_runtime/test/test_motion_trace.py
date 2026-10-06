@@ -9,6 +9,7 @@
 
 import csv
 import json
+import math
 import os
 import time
 
@@ -43,8 +44,11 @@ def _plan(**over):
 
 
 def _motor(joint):
-    # motion_run_rules._motor_target 과 같은 식
-    return 1000.0 + (joint + 0.5) * 1.0 * -1.0 * 150.0
+    # motion_run_rules._motor_target 과 같은 식 · 재생 안쪽 값은 rad(수정 목록 6) · 파일은 deg
+    return math.radians(1000.0 + (joint + 0.5) * 1.0 * -1.0 * 150.0)
+
+
+R = math.radians
 
 
 def _recorder(**over):
@@ -54,8 +58,8 @@ def _recorder(**over):
 
 
 def test_joint_from_motor_inverts_the_mapping_formula():
-    assert abs(joint_from_motor(ROW, _motor(3.25)) - 3.25) < 1e-9
-    assert joint_from_motor({**ROW, 'reference_enabled': False}, -525.0) == 3.0
+    assert abs(joint_from_motor(ROW, _motor(3.25)) - R(3.25)) < 1e-12
+    assert abs(joint_from_motor({**ROW, 'reference_enabled': False}, R(-525.0)) - R(3.0)) < 1e-12
 
 
 def test_cycle_is_written_as_csv_with_index(tmp_path):
@@ -63,7 +67,7 @@ def test_cycle_is_written_as_csv_with_index(tmp_path):
     trace = recorder.begin(_plan(), 3, tmp_path)
     for i, joint in enumerate((0.0, 1.0, 2.0)):
         recorder.on_motor_status({0: _motor(joint - 0.1)})   # 실제는 0.1° 늦다
-        trace.add({'time_sec': i * 0.02, 'positions': {0: _motor(joint)}, 'motion_values': {'1-1': joint}})
+        trace.add({'time_sec': i * 0.02, 'positions': {0: _motor(joint)}, 'motion_values': {'1-1': R(joint)}})
     path = recorder.write(trace, 'completed')
     recorder.close()
 
@@ -96,7 +100,7 @@ def test_stale_actual_position_is_left_blank(tmp_path):
     recorder = _recorder(stale_sec=0.05)
     trace = recorder.begin(_plan(), 1, tmp_path)
     recorder._latest = ({0: _motor(1.0)}, time.monotonic() - 1.0)
-    trace.add({'time_sec': 0.0, 'positions': {0: _motor(1.0)}, 'motion_values': {'1-1': 1.0}})
+    trace.add({'time_sec': 0.0, 'positions': {0: _motor(1.0)}, 'motion_values': {'1-1': R(1.0)}})
     _header, rows, summary, missing = recorder.build(trace)
     recorder.close()
     assert rows[0] == ['0.000', '1.0000', '', '']

@@ -16,12 +16,16 @@ import math
 import time
 from typing import Any, Dict, List, Mapping, Optional
 
-from motion_common import repeat_policy
+from motion_common import joint_mapping, repeat_policy, units
 from motion_common.values import finite_float, optional_int
 
 from . import motion_run_rules
 from .motion_automation_store import REPEAT_MODES
 from .motion_run_constants import CONTINUOUS_LOOP_TOLERANCE_DEG
+
+#: 안쪽 값은 rad · 글에 넣을 때만 deg · 수정 목록 6
+_deg = units.rad_to_deg
+from .registered_motion_file import playlist_from_mapping
 
 
 def _axis_playback_spans(
@@ -133,6 +137,13 @@ class PlanBuilder:
             if str(value or '').strip()
         }
         initial_move_time_override = motion_run_rules._initial_move_time_override_sec(payload)
+        # 스케줄이 끝나 기준점(조인트 0°)에 세울 때 · 매핑의 초기 방식과 상관없이 ·
+        # 초기 위치 이동에서만 받는다 · 수정 목록 36
+        initial_mode_override = str(payload.get('initial_mode_override') or '').strip()
+        if initial_mode_override and (
+            not initialization_only or initial_mode_override != 'reference'
+        ):
+            raise ValueError('초기 방식 덮어쓰기는 초기 위치 이동의 기준점(reference)만 됩니다')
         #: 초기 위치 이동만 할 때 등록 파일이 없거나 비었으면 「애니메이션 없음」처럼 간다
         #: (2026-10-02 · 전에는 그 자리에서 실패해 0° 대체 경로까지 못 갔다)
         unusable_motion_file_note = ''
@@ -193,13 +204,16 @@ class PlanBuilder:
         mapping = self.manager._load_mapping(mapping_path)
 
         mapping_motion_file_id = str(mapping.get('motion_file_id') or '').strip()
+        # 재생 목록 안의 파일이면 된다 · 수정 목록 35 · 목록이 없으면 옛 규칙(등록 파일 하나)
+        registered_playlist = playlist_from_mapping(mapping)
         if (
             mapping_motion_file_id
-            and mapping_motion_file_id != motion_file_id
+            and motion_file_id not in registered_playlist
             and not studio_request
             and not (initialization_only and not motion_file_id)
         ):
             raise ValueError(
+                f'재생 등록에 없는 애니메이션입니다 ({motion_file_id}) · '
                 f'mapping file expects motion file {mapping_motion_file_id}, not {motion_file_id}'
             )
 
@@ -312,9 +326,13 @@ class PlanBuilder:
                     # 나머지가 못 돌 이유가 없다 · 사용자가 보고 판단한다.
                     missing_motion_data_ids.append(motion_id)
                     continue
-                initial_mode = str(row.get('initial_mode') or motion_run_rules.DEFAULT_INITIAL_MODE)
+                initial_mode = str(
+                    initial_mode_override
+                    or row.get('initial_mode')
+                    or motion_run_rules.DEFAULT_INITIAL_MODE
+                )
                 fallback_value = (
-                    finite_float(row.get('initial_motion_position_deg')) or 0.0
+                    float(joint_mapping.angle(row, 'initial_motion_position', units.RAD))
                     if initial_mode == 'manual'
                     else 0.0
                 )
@@ -333,7 +351,7 @@ class PlanBuilder:
                     warnings.append(
                         f'Motion ID {motion_id}: '
                         + (
-                            f'모션 데이터가 없어 직접 지정 초기위치 {fallback_value:.3f}°를 사용'
+                            f'모션 데이터가 없어 직접 지정 초기위치 {_deg(fallback_value):.3f}°를 사용'
                             if initial_mode == 'manual'
                             else '첫 프레임 데이터가 없어 모션 0°를 초기위치로 사용'
                         )
@@ -348,8 +366,9 @@ class PlanBuilder:
             motion_values = [record['value'] for record in groups[motion_id]]
             motion_min = min(motion_values)
             motion_max = max(motion_values)
-            lower = finite_float(row.get('motion_lower_deg'))
-            upper = finite_float(row.get('motion_upper_deg'))
+            # 범위 칸이 없으면 자르지 않는다(None) · 옛 동작 그대로
+            lower = joint_mapping.angle(row, 'motion_lower', units.RAD, default=None)
+            upper = joint_mapping.angle(row, 'motion_upper', units.RAD, default=None)
             if lower is not None and upper is not None and lower > upper:
                 errors.append(f'Motion ID {motion_id}: motion min limit must be <= max limit')
                 continue
@@ -358,17 +377,17 @@ class PlanBuilder:
                 or (upper is not None and motion_values[0] > upper)
             ):
                 errors.append(
-                    f'Motion ID {motion_id}: 초기 모션값 {motion_values[0]:.3f}°가 '
+                    f'Motion ID {motion_id}: 초기 모션값 {_deg(motion_values[0]):.3f}°가 '
                     '모션 설정 범위 밖입니다'
                 )
                 continue
             if lower is not None and motion_min < lower:
                 warnings.append(
-                    f'Motion ID {motion_id}: {motion_min:.3f}° 이하 데이터는 {lower:.3f}°로 제한'
+                    f'Motion ID {motion_id}: {_deg(motion_min):.3f}° 이하 데이터는 {_deg(lower):.3f}°로 제한'
                 )
             if upper is not None and motion_max > upper:
                 warnings.append(
-                    f'Motion ID {motion_id}: {motion_max:.3f}° 이상 데이터는 {upper:.3f}°로 제한'
+                    f'Motion ID {motion_id}: {_deg(motion_max):.3f}° 이상 데이터는 {_deg(upper):.3f}°로 제한'
                 )
 
             command_motion_min = motion_run_rules._clamp_motion_value(motion_min, lower, upper)
@@ -382,7 +401,10 @@ class PlanBuilder:
             if limit_error:
                 errors.append(f'Motion ID {motion_id}: {limit_error}')
 
-            initial_motion_source_value = motion_run_rules._initial_motion_value(row, groups[motion_id])
+            initial_motion_source_value = motion_run_rules._initial_motion_value(
+                {**row, 'initial_mode': initial_mode_override} if initial_mode_override else row,
+                groups[motion_id],
+            )
             initial_motion_value = motion_run_rules._clamp_motion_value(
                 initial_motion_source_value,
                 lower,
@@ -403,37 +425,41 @@ class PlanBuilder:
                 'motor_axis': motor_axis,
                 'motor_type': motion_run_rules._motor_type(motor),
                 'initial_move_time_sec': initial_move_time,
-                'initial_motion_source_position_deg': initial_motion_source_value,
-                'initial_motion_position_deg': initial_motion_value,
-                'initial_motor_target_deg': motion_run_rules._motor_target(row, initial_motion_value),
-                'motion_limit_lower_deg': lower,
-                'motion_limit_upper_deg': upper,
-                'source_motion_min_deg': motion_min,
-                'source_motion_max_deg': motion_max,
-                'command_motion_min_deg': command_motion_min,
-                'command_motion_max_deg': command_motion_max,
+                'initial_motion_source_position_rad': initial_motion_source_value,
+                'initial_motion_position_rad': initial_motion_value,
+                'initial_motor_target_rad': motion_run_rules._motor_target(row, initial_motion_value),
+                'motion_limit_lower_rad': lower,
+                'motion_limit_upper_rad': upper,
+                'source_motion_min_rad': motion_min,
+                'source_motion_max_rad': motion_max,
+                'command_motion_min_rad': command_motion_min,
+                'command_motion_max_rad': command_motion_max,
                 'motion_clamped': command_motion_min != motion_min or command_motion_max != motion_max,
-                'target_min_deg': target_low,
-                'target_max_deg': target_high,
-                'loop_start_motion_deg': motion_run_rules._clamp_motion_value(motion_values[0], lower, upper),
-                'loop_end_motion_deg': motion_run_rules._clamp_motion_value(motion_values[-1], lower, upper),
+                'target_min_rad': target_low,
+                'target_max_rad': target_high,
+                'loop_start_motion_rad': motion_run_rules._clamp_motion_value(motion_values[0], lower, upper),
+                # 첫 프레임 · 초기 위치와 다르면 초기 이동 끝에 여기까지 잇는다 · 수정 목록 13-1
+                'first_frame_motor_target_rad': motion_run_rules._motor_target(
+                    row, motion_run_rules._clamp_motion_value(motion_values[0], lower, upper),
+                ),
+                'loop_end_motion_rad': motion_run_rules._clamp_motion_value(motion_values[-1], lower, upper),
                 'row': row,
             }
-            axis_plan['loop_start_target_deg'] = motion_run_rules._motor_target(
+            axis_plan['loop_start_target_rad'] = motion_run_rules._motor_target(
                 row,
-                axis_plan['loop_start_motion_deg'],
+                axis_plan['loop_start_motion_rad'],
             )
-            axis_plan['loop_end_target_deg'] = motion_run_rules._motor_target(
+            axis_plan['loop_end_target_rad'] = motion_run_rules._motor_target(
                 row,
-                axis_plan['loop_end_motion_deg'],
+                axis_plan['loop_end_motion_rad'],
             )
-            axis_plan['loop_delta_deg'] = abs(
-                float(axis_plan['loop_end_motion_deg']) - float(axis_plan['loop_start_motion_deg'])
+            axis_plan['loop_delta_rad'] = abs(
+                float(axis_plan['loop_end_motion_rad']) - float(axis_plan['loop_start_motion_rad'])
             )
-            axis_plan['loop_motor_delta_deg'] = abs(
-                float(axis_plan['loop_end_target_deg']) - float(axis_plan['loop_start_target_deg'])
+            axis_plan['loop_motor_delta_rad'] = abs(
+                float(axis_plan['loop_end_target_rad']) - float(axis_plan['loop_start_target_rad'])
             )
-            axis_plan['loop_tolerance_deg'] = CONTINUOUS_LOOP_TOLERANCE_DEG
+            axis_plan['loop_tolerance_rad'] = units.deg_to_rad(CONTINUOUS_LOOP_TOLERANCE_DEG)
             axes.append(axis_plan)
 
         if missing_motion_data_ids:
@@ -513,8 +539,8 @@ class PlanBuilder:
                     )
                     motion_value = motion_run_rules._clamp_motion_value(
                         motion_value,
-                        axis.get('motion_limit_lower_deg'),
-                        axis.get('motion_limit_upper_deg'),
+                        axis.get('motion_limit_lower_rad'),
+                        axis.get('motion_limit_upper_rad'),
                     )
                     positions[int(axis['motor_axis'])] = motion_run_rules._motor_target(
                         axis['row'],
@@ -527,6 +553,10 @@ class PlanBuilder:
                     'positions': positions,
                     'motion_values': motion_values,
                 })
+
+        rate_error = _motion_rate_limit_error(axes, samples, self.manager.period_sec)
+        if rate_error:
+            raise ValueError(rate_error)
 
         complete_motion_data_available = (
             source_motion_data_available and not initialization_fallback_used
@@ -574,6 +604,8 @@ class PlanBuilder:
             'group_cycle_number': int(payload.get('group_cycle_number') or 0),
             'motion_file_id': motion_file_id,
             'mapping_file_id': mapping_file_id,
+            # 매핑 파일의 재생 목록 · 재생기가 다음 애니를 고를 때 본다 · 수정 목록 35
+            'motion_playlist': list(registered_playlist),
             'run_mode': run_mode,
             'automation_run': automation_run,
             'repeat_mode': repeat_mode,
@@ -627,3 +659,52 @@ class PlanBuilder:
                 'target_cycle_count': target_cycle_count,
             },
         }
+
+
+def _motion_rate_limit_error(axes, samples, period_sec: float) -> str:
+    """조인트 최대 속도·가속도를 넘는 애니메이션이면 거부 사유 · 수정 목록 5-2 (2026-10-06)
+
+    전에는 어느 계층도 속도·가속도를 보지 않았다 · 너무 빠른 애니메이션은 모터가
+    못 따라가 「도달 실패」 로 끝나거나 기구에 무리가 갔다. 조인트 매핑에 축별
+    상한을 적으면(비우면 검사 안 함) 재생 계획(20 ms 재샘플 · 매핑 범위로 자른 값)
+    의 차분으로 잰다 · 재생과 같은 값을 보므로 「검사는 통과했는데 실제로는 넘는다」 가 없다.
+    """
+    if len(samples) < 2 or period_sec <= 0:
+        return ''
+    problems = []
+    for axis in axes:
+        row = axis.get('row') or {}
+        # 상한·재는 값 모두 rad · 글에만 deg · 수정 목록 6
+        max_velocity = joint_mapping.rate(row, 'max_velocity', units.RAD)
+        max_acceleration = joint_mapping.rate(row, 'max_acceleration', units.RAD)
+        if not max_velocity and not max_acceleration:
+            continue
+        motion_id = str(axis['motion_id'])
+        values = [float(sample['motion_values'][motion_id]) for sample in samples]
+        times = [float(sample['time_sec']) for sample in samples]
+        velocities = []
+        for index in range(1, len(values)):
+            dt = times[index] - times[index - 1]
+            if dt <= 1e-9:
+                continue
+            velocities.append(((values[index] - values[index - 1]) / dt, times[index]))
+        if max_velocity:
+            worst = max(velocities, key=lambda item: abs(item[0]), default=None)
+            if worst and abs(worst[0]) > max_velocity * (1 + 1e-6):
+                problems.append(
+                    f'{motion_id} 속도 {_deg(abs(worst[0])):.1f} deg/s > 상한 {round(_deg(max_velocity), 6):g} ({worst[1]:.2f} s)'
+                )
+        if max_acceleration and len(velocities) > 1:
+            accelerations = [
+                ((velocities[i][0] - velocities[i - 1][0]) / max(velocities[i][1] - velocities[i - 1][1], 1e-9),
+                 velocities[i][1])
+                for i in range(1, len(velocities))
+            ]
+            worst = max(accelerations, key=lambda item: abs(item[0]), default=None)
+            if worst and abs(worst[0]) > max_acceleration * (1 + 1e-6):
+                problems.append(
+                    f'{motion_id} 가속도 {_deg(abs(worst[0])):.0f} deg/s² > 상한 {round(_deg(max_acceleration), 6):g} ({worst[1]:.2f} s)'
+                )
+    if not problems:
+        return ''
+    return '애니메이션이 조인트 매핑의 속도·가속도 상한을 넘습니다 · ' + ' · '.join(problems[:4])

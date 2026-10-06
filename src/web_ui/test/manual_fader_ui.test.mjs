@@ -14,8 +14,10 @@ const html = indexHtml;
 const dom = readFileSync(new URL('../static/js/dom.js', import.meta.url), 'utf8');
 const main = readFileSync(new URL('../static/js/main.js', import.meta.url), 'utf8');
 const fader = readFileSync(new URL('../static/js/manual_fader.js', import.meta.url), 'utf8');
-const mappingManager = readFileSync(
-  new URL('../../motion_runtime/motion_runtime/motion_mapping_manager.py', import.meta.url),
+const jointMapping = readFileSync(new URL('../static/js/joint_mapping.js', import.meta.url), 'utf8');
+// 서버 식의 원본 · 수정 목록 6 (2026-10-06 · 매핑 노드·재생 규칙이 이것을 부른다)
+const serverFormula = readFileSync(
+  new URL('../../motion_common/motion_common/joint_mapping.py', import.meta.url),
   'utf8',
 );
 
@@ -50,17 +52,15 @@ test('input streams while held and change releases in place', () => {
 });
 
 test('the joint-to-motor formula matches the server', () => {
-  // 서버: reference + ((value + offset) * scale * sign) * gear
+  // 서버: reference + (joint + offset) × gain · gain = scale × sign × gear
+  assert.match(serverFormula, /return reference\(row, unit\) \+ \(float\(joint\) \+ offset\) \* gain\(row\)/);
+  assert.match(serverFormula, /return scale \* sign \* gear_ratio/);
+  // 화면: 같은 식 · `joint_mapping.js` 한 곳 · 페이더는 그걸 부른다 (수정 목록 6)
   assert.match(
-    mappingManager,
-    /return \(motion_value \+ offset\) \* scale \* sign/,
+    jointMapping,
+    /mappingReference\(row, unit\) \+ \(Number\(joint\) \+ mappingAngle\(row, 'offset', unit\)\) \* mappingGain\(row\)/,
   );
-  assert.match(mappingManager, /return reference \+ \(output_value \* gear_ratio\)/);
-  // 화면: 같은 식 · 한 줄로 합쳐 적었다
-  assert.match(
-    fader,
-    /row\.reference \+ \(jointDeg \+ row\.offset\) \* row\.scale \* row\.sign \* row\.gear/,
-  );
+  assert.match(fader, /mappingJointToMotor\(row\.source, jointDeg, 'deg'\)/);
 });
 
 test('faders follow the real position only while not held', () => {

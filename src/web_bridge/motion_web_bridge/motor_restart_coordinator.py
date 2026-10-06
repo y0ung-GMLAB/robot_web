@@ -293,6 +293,16 @@ class MotorRestartCoordinator:
     @classmethod
     def _restart_managed_service(cls, service: str) -> None:
         cls._validate_service(service)
+        # 모터 통신 루프가 되풀이해 죽으면 systemd 가 재시작 횟수 제한(60초에 5번)에
+        # 걸어 세운다 · 사람이 웹에서 누른 재시작은 그 제한과 상관없이 되게 먼저 푼다 ·
+        # 실패해도 그대로 재시작을 시도한다(그 유닛에 기록이 없으면 실패한다) · 수정 목록 3-2
+        try:
+            subprocess.run(
+                ['/usr/bin/systemctl', '--user', 'reset-failed', service],
+                check=False, capture_output=True, text=True, timeout=5.0,
+            )
+        except subprocess.TimeoutExpired:
+            pass
         try:
             completed = subprocess.run(
                 ['/usr/bin/systemctl', '--user', 'restart', service],

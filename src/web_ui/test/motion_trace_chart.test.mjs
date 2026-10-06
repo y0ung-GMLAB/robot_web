@@ -55,3 +55,15 @@ test('결과 이름과 크기 표기', () => {
   assert.equal(traceResultLabel('weird'), 'weird');
   assert.equal(formatTraceBytes(2048), '2.0 KB');
 });
+
+// 재생 루프 마감 초과 · 수정 목록 12-2
+import { traceTimingText } from '../static/js/motion_trace_chart.js';
+
+test('playback timing problems are summarised on one line', () => {
+  assert.equal(traceTimingText({}), '');
+  assert.equal(traceTimingText({ timing: { late_count: 0, skipped_samples: 0, max_late_ms: 3 } }), '');
+  assert.equal(
+    traceTimingText({ timing: { late_count: 2, skipped_samples: 4, max_late_ms: 100 } }),
+    '늦은 프레임 2 · 최대 100.0 ms · 건너뜀 4',
+  );
+});

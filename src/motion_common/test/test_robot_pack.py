@@ -167,3 +167,43 @@ def test_current_fingerprint_prefers_install_record(tmp_path):
     (pack / robot_pack.INSTALLED_NAME).write_text('{"fingerprint": "abc"}', encoding='utf-8')
     assert robot_pack.current_fingerprint(pack) == 'abc'
     assert robot_pack.current_fingerprint(tmp_path / 'none') == ''
+
+
+# --------------------------------------------------------------------------- #
+# 선택 파일 scene.glb · 웹 3D 「Blender 뷰」 · 수정 목록 50
+# --------------------------------------------------------------------------- #
+
+def _glb(json_bytes=b'{"asset":{"version":"2.0"}}', *, version=2, length=None):
+    import struct
+    pad = (4 - len(json_bytes) % 4) % 4
+    chunk = json_bytes + b' ' * pad
+    total = 12 + 8 + len(chunk)
+    return (b'glTF' + struct.pack('<II', version, total if length is None else length)
+            + struct.pack('<I', len(chunk)) + b'JSON' + chunk)
+
+
+def test_scene_glb_is_optional_and_checked_when_present(tmp_path):
+    pack = make_pack(tmp_path / 'p')
+    assert robot_pack.scene_glb_path(pack) is None
+    assert robot_pack.validate_pack_dir(pack) == []
+    (pack / 'scene.glb').write_bytes(_glb())
+    assert robot_pack.scene_glb_path(pack) == pack / 'scene.glb'
+    assert robot_pack.validate_pack_dir(pack) == []
+
+
+def test_scene_glb_must_be_a_whole_gltf2_binary(tmp_path):
+    pack = make_pack(tmp_path / 'p')
+    (pack / 'scene.glb').write_bytes(b'{"asset":{}}')
+    assert 'glTF 바이너리(.glb)가 아닙니다' in '\n'.join(robot_pack.validate_pack_dir(pack))
+    (pack / 'scene.glb').write_bytes(_glb(version=1))
+    assert 'glTF 버전 1' in '\n'.join(robot_pack.validate_pack_dir(pack))
+    (pack / 'scene.glb').write_bytes(_glb(length=999))
+    assert '파일이 잘렸습니다' in '\n'.join(robot_pack.validate_pack_dir(pack))
+
+
+def test_scene_glb_size_limit_keeps_the_pack_under_the_zip_limit(tmp_path, monkeypatch):
+    pack = make_pack(tmp_path / 'p')
+    (pack / 'scene.glb').write_bytes(_glb())
+    monkeypatch.setattr(robot_pack, 'SCENE_GLB_MAX_BYTES', 10)
+    assert '크기 초과' in '\n'.join(robot_pack.validate_pack_dir(pack))
+    assert robot_pack.SCENE_GLB_NAME == 'scene.glb'

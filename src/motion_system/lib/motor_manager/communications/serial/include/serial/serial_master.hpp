@@ -24,6 +24,9 @@ struct serial_node_data_t {
     bool registered{false};
     uint8_t node_id{0};
     uint8_t last_packet_error{0};
+    // Bulk reads in a row this node did not answer · reset by any status packet
+    // from it (robot_web fix-list 23-3)
+    uint16_t missed_responses{0};
     serial_bulk_entry_t rx_entries[motor_interface::MAX_INTERFACE_SIZE]{};
     serial_bulk_entry_t tx_entries[motor_interface::MAX_INTERFACE_SIZE]{};
     uint8_t number_of_rx_entries{0};
@@ -68,6 +71,8 @@ public:
 
     bool readRegister(uint8_t node_id, uint16_t address, uint8_t* data, uint8_t size);
 
+    bool reboot(uint8_t node_id);
+
 private:
     struct status_packet_t {
         uint8_t id{0};
@@ -78,6 +83,8 @@ private:
     serial_node_data_t* findNode(uint8_t node_id);
 
     const serial_node_data_t* findNode(uint8_t node_id) const;
+
+    void noteResponse(uint8_t node_id, uint8_t error);
 
     serial_bulk_entry_t* findEntry(
         serial_bulk_entry_t* entries,

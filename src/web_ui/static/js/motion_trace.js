@@ -18,6 +18,7 @@ import {
   formatTraceBytes,
   tracePolylines,
   traceResultLabel,
+  traceTimingText,
   traceValueRange,
   traceWorstError,
 } from './motion_trace_chart.js';
@@ -182,6 +183,9 @@ if (panel) {
       const record = trace.record || {};
       detailTitle.textContent = `${record.motion_file_id || file} · ${record.cycle ?? '-'}회차 · `
         + `${traceResultLabel(record.result)} · ${(timeRange[1] - timeRange[0]).toFixed(2)}s`
+        // 재생 루프가 밀렸으면 · 오류로 끝났으면 그 사유 · 수정 목록 12
+        + (traceTimingText(record) ? ` · ${traceTimingText(record)}` : '')
+        + (record.result === 'error' && record.message ? ` · ${record.message}` : '')
         + (trace.decimation > 1 ? ` · 그래프는 ${trace.decimation}개 중 1개 표시` : '');
       charts.replaceChildren(...(trace.axes || []).map((axis) => chartFor(axis, times, timeRange)));
       downloadLink.href = motionTraceDownloadUrl(state.date, file);

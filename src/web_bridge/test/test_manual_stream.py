@@ -50,13 +50,14 @@ def _result_msg(payload):
 
 def test_send_target_publishes_one_generation_tagged_request():
     service, publisher = _service(generation=7)
-    result = service.send_target(2, 36.5, motion_id='Neck_Yaw', motion_deg=0.365)
+    # 값은 rad 그대로 싣는다 · 화면이 보낼 때 rad 로 바꾼다 · 수정 목록 6-4
+    result = service.send_target(2, 0.637, motion_id='Neck_Yaw', motion_rad=0.00637)
     assert result['success'] is True
     [request] = publisher.sent
     assert request['axis'] == 2
-    assert request['target_deg'] == 36.5
+    assert request['target_rad'] == 0.637
     assert request['motion_id'] == 'Neck_Yaw'
-    assert request['motion_deg'] == 0.365
+    assert request['motion_rad'] == 0.00637
     assert '-g7-' in request['request_id']
     assert request['project_generation'] == 7
 

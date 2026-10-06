@@ -56,6 +56,8 @@
                     <button id="deleteMotionFileButton" type="button" class="danger" disabled>삭제</button>
                   </div>
                   </div>
+                  <!-- 재생 목록 · 두 개 이상 등록하면 보인다 · 수정 목록 35 -->
+                  <div id="motionPlaylistPanel" class="motion-playlist hidden" aria-label="재생 목록"></div>
                 </section>
               </div>
                 <div class="motion-run-main">
@@ -147,6 +149,16 @@
                   </select>
                 </label>
                 <button id="sim3dResetViewButton" type="button" title="로봇 팩의 카메라 설정으로 되돌립니다">시점 초기화</button>
+                <!-- 수정 목록 7-c · 실제 모터 위치로 같은 로봇을 주황 반투명으로 겹쳐 그린다 · MuJoCo 뷰만 -->
+                <label class="compact-field sim3d-view-toggle"
+                  title="실제 모터 위치(매핑 식으로 되돌린 조인트 각도)로 로봇을 하나 더 그립니다 · 계획과 실물의 차이 · 처짐·늦음 확인">
+                  <input id="sim3dActualToggle" type="checkbox" disabled><span>실물 위치</span>
+                </label>
+                <!-- 수정 목록 50 · 팩에 scene.glb 가 있을 때만 보인다 · 끄면 MuJoCo 뷰 -->
+                <label id="sim3dBlenderLabel" class="compact-field sim3d-view-toggle hidden"
+                  title="Blender 에서 만든 장면(헤드 4대 · 매장 오브제)을 그립니다 · 실제 재생 시각을 따라갑니다 · 끄면 MuJoCo 계산 뷰">
+                  <input id="sim3dBlenderToggle" type="checkbox"><span>Blender 뷰</span>
+                </label>
               </div>
               <div id="sim3dCanvasWrap" class="sim3d-canvas-wrap" aria-label="3D 화면"></div>
             </details>
@@ -195,11 +207,15 @@
                     <strong>4. 실행 축</strong>
                     <span>활성 매핑 기준 · 실행 준비 검사 후 채워집니다</span>
                   </div>
+                  <!-- 「사용」·라이브 리밋은 누르는 즉시 재생에 들어간다 · 저장하지 않는다 · 40 -->
+                  <p class="motion-run-axis-note">「사용」 체크·라이브 리밋은 <strong>누르는 즉시</strong> 재생에 반영됩니다 ·
+                    끄면 그 모터는 그 자리에 섭니다(서보 유지) · 다시 켜면 초기 이동 시간 동안 천천히 이어 갑니다 ·
+                    매핑 파일에는 저장되지 않고 「재생 등록」 때 모두 풀립니다</p>
                   <div class="table-wrap">
                     <table>
                       <thead>
                         <tr>
-                          <th>사용</th>
+                          <th>사용 (즉시)</th>
                           <th>조인트 이름</th>
                           <th>모터</th>
                           <th>종류</th>

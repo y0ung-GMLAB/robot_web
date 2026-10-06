@@ -88,6 +88,15 @@
             <option value="off">오프 · 움직임 명령 전부 차단 (서보 홀드 유지)</option>
           </select>
         </div>
+        <!-- 운영 시간이 끝나면 · 이 PC 의 설정 · 그룹이어도 PC 마다 제 것 · 수정 목록 36 -->
+        <div class="schedule-mode-switch">
+          <label for="scheduleEndAction">운영 시간이 끝나면</label>
+          <select id="scheduleEndAction" title="지금 애니메이션을 마친 뒤 · 기준점(0°)으로 10초 동안 천천히 이동 → 도달 확인 → 서보 OFF(AC 서보는 브레이크) · 다음 시작 때 끈 모터를 다시 켭니다 · 모터별로 끄지 않게 하려면 모터 관리 상세 설정의 「끝나면 서보 OFF」">
+            <option value="park_servo_off">기준점으로 이동 후 서보 OFF (기본)</option>
+            <option value="hold">마지막 자세에서 서보 켠 채 정지</option>
+          </select>
+        </div>
+        <p id="scheduleEndStatus" class="schedule-scope-notice"></p>
         <div id="scheduleListContainer" style="max-height: 350px; overflow-y: auto; margin-bottom: 20px; background: #2d3748; padding: 12px; border-radius: 6px;">
           <div class="text-center text-muted py-4">스케줄 목록을 불러오는 중...</div>
         </div>

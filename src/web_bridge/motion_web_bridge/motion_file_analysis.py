@@ -11,10 +11,12 @@
 
 from __future__ import annotations
 
+import copy
 import json
 import math
+from collections import OrderedDict
 from pathlib import Path
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
 import yaml
 
@@ -143,6 +145,17 @@ def analyze_motion_json(content: str, *, include_records: bool) -> Dict[str, Any
     else:
         result['json_valid'] = True
         rows, headers, source = motion_table.extract_rows(payload)
+    # 각도 단위 · 헤더 `rotation_unit` · 모르는 단위는 거절 · 수정 목록 6-2
+    try:
+        rotation_unit = motion_table.rotation_unit_from_content(content)
+    except ValueError as exc:
+        result['message'] = str(exc)
+        result['errors'].append(str(exc))
+        return result
+    result['rotation_unit'] = rotation_unit
+    # 아래 값(첫·끝·최소·최대·그래프·미리보기)의 단위 · 파일 단위와 상관없이 내부 단위 ·
+    # 화면이 이것을 보고 deg 로 바꿔 보여 준다 · 수정 목록 6
+    result['value_unit'] = motion_table.INTERNAL_ROTATION_UNIT
     result['format_valid'] = True
     result['headers'] = headers
     result['source'] = source
@@ -163,6 +176,8 @@ def analyze_motion_json(content: str, *, include_records: bool) -> Dict[str, Any
         parsed['row_index'] = index
         parsed_records.append(parsed)
 
+    # 화면 값·그래프·범위 검사는 재생과 같은 내부 단위로
+    motion_table.scale_record_values(parsed_records, rotation_unit)
     result['valid_records'] = len(parsed_records)
     if not parsed_records:
         result['message'] = 'valid motion records not found'
@@ -274,6 +289,30 @@ def analyze_motion_json(content: str, *, include_records: bool) -> Dict[str, Any
     return result
 
 
+#: 목록용 분석 캐시 · (경로, 수정 시각 ns, 크기) → 분석 · 수정 목록 5-3 (2026-10-06)
+#:
+#: 전에는 목록을 부를 때마다(재생 등록·화면 새로고침마다) 프로젝트의 애니메이션을
+#: **전부** 다시 읽고 파싱했다 · 수천 줄 파일 여러 개면 그것만으로 응답이 늦었다.
+#: 파일이 바뀌면 시각·크기가 바뀌어 저절로 새로 읽는다.
+_SUMMARY_CACHE: 'OrderedDict[tuple, Dict[str, Any]]' = OrderedDict()
+_SUMMARY_CACHE_SIZE = 256
+
+
+def _cached_summary(path: Path, stat) -> Optional[Dict[str, Any]]:
+    key = (str(path), stat.st_mtime_ns, stat.st_size)
+    cached = _SUMMARY_CACHE.get(key)
+    if cached is None:
+        return None
+    _SUMMARY_CACHE.move_to_end(key)
+    return copy.deepcopy(cached)
+
+
+def _remember_summary(path: Path, stat, analysis: Dict[str, Any]) -> None:
+    _SUMMARY_CACHE[(str(path), stat.st_mtime_ns, stat.st_size)] = copy.deepcopy(analysis)
+    while len(_SUMMARY_CACHE) > _SUMMARY_CACHE_SIZE:
+        _SUMMARY_CACHE.popitem(last=False)
+
+
 def motion_file_entry(path: Path, *, include_detail: bool) -> Dict[str, Any]:
     stat = path.stat()
     entry: Dict[str, Any] = {
@@ -283,9 +322,16 @@ def motion_file_entry(path: Path, *, include_detail: bool) -> Dict[str, Any]:
         'size_bytes': stat.st_size,
         'updated_at': stat.st_mtime,
     }
+    if not include_detail:
+        cached = _cached_summary(path, stat)
+        if cached is not None:
+            entry['analysis'] = cached
+            return entry
     try:
         content = path.read_text(encoding='utf-8')
         analysis = analyze_motion_json(content, include_records=include_detail)
+        if not include_detail:
+            _remember_summary(path, stat, analysis)
     except OSError as exc:
         analysis = {
             'json_valid': False,

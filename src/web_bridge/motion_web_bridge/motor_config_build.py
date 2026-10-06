@@ -220,7 +220,51 @@ def _axis_profile_overrides(motor: Dict[str, Any]) -> Dict[str, float]:
             overrides[field] = float(value)
         except (TypeError, ValueError):
             continue
+    # 화면 4칸 → 드라이버 값 · 수정 목록 37 (2026-10-06)
+    #   프로파일 가속도 하나 → 0x6083·0x6084 (감속 따로 안 적었으면 같은 값)
+    #   최대 가속도 하나     → 0x60C5·0x60C6 (`acceleration`·`deceleration`)
+    #   최대 속도(rpm)       → 0x6080 `speed`(rpm) · 0x607F 는 param_file 에서 count/s 로
+    if 'profile_acceleration' in overrides and 'profile_deceleration' not in overrides:
+        overrides['profile_deceleration'] = overrides['profile_acceleration']
+    if 'acceleration' in overrides and 'deceleration' not in overrides:
+        overrides['deceleration'] = overrides['acceleration']
+    if str(motor.get('driver_family') or motor.get('motor_type') or '') in {'minas', 'ac_servo'}:
+        try:
+            rpm = float(motor_config.get('max_speed_rpm'))
+        except (TypeError, ValueError):
+            rpm = None
+        if rpm is not None and rpm > 0:
+            overrides['speed'] = rpm
     return overrides
+
+
+def axis_speed_limit_error(motor: Dict[str, Any]) -> str:
+    """최대 ≥ 프로파일 · 어기면 저장 거부 사유 · 수정 목록 37"""
+    config = motor.get('config') if isinstance(motor.get('config'), dict) else {}
+
+    def number(key):
+        try:
+            value = float(config.get(key))
+        except (TypeError, ValueError):
+            return None
+        return value if value > 0 else None
+
+    axis = motor.get('axis')
+    profile_velocity = number('profile_velocity')
+    max_rpm = number('max_speed_rpm')
+    if profile_velocity and max_rpm and profile_velocity > max_rpm * 6.0 + 1e-6:
+        return (
+            f'{axis}번 모터 · 프로파일 속도 {profile_velocity:g} deg/s 가 '
+            f'최대 속도 {max_rpm:g} rpm ({max_rpm * 6.0:g} deg/s) 보다 큽니다'
+        )
+    profile_acceleration = number('profile_acceleration')
+    max_acceleration = number('acceleration')
+    if profile_acceleration and max_acceleration and profile_acceleration > max_acceleration + 1e-6:
+        return (
+            f'{axis}번 모터 · 프로파일 가속도 {profile_acceleration:g} deg/s² 가 '
+            f'최대 가속도 {max_acceleration:g} deg/s² 보다 큽니다'
+        )
+    return ''
 
 
 def driver_id_for_registry_motor(

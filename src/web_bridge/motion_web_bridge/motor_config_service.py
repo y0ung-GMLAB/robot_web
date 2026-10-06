@@ -258,6 +258,11 @@ class MotorConfigService:
                 if not isinstance(registry, dict):
                     raise ValueError('registry must be an object')
                 normalized = motor_config_rules.normalize_motor_registry(registry)
+                # 최대 ≥ 프로파일 · 어기면 저장 거부 · 수정 목록 37
+                for motor in normalized.get('motors') or []:
+                    speed_error = motor_config_build.axis_speed_limit_error(motor)
+                    if speed_error:
+                        raise ValueError(speed_error)
                 normalized['updated_at'] = time.time()
                 current = self._read_current()
                 config = motor_config_build.motor_config_from_registry(

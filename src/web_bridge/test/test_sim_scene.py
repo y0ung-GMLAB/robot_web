@@ -141,3 +141,28 @@ def test_routes_and_bridge_methods_exist_for_the_screen():
     for method in ('def preview_scene_state(', 'def preview_scene_export(', 'def preview_scene_path(',
                    'def preview_motion_frames('):
         assert method in bridge, method
+
+
+# Blender 뷰 · 팩의 scene.glb 를 그대로 내준다 · 수정 목록 50
+
+def test_blender_scene_is_reported_only_when_the_pack_has_one(tmp_path):
+    assert sim_scene.scene_state(tmp_path)['blender'] == {'available': False}
+    pack = _pack(tmp_path)
+    assert sim_scene.blender_scene_path(tmp_path) is None
+    assert sim_scene.scene_state(tmp_path)['blender'] == {'available': False}
+    (pack / 'scene.glb').write_bytes(b'glTF' + b'\x00' * 20)
+    info = sim_scene.scene_state(tmp_path)['blender']
+    assert info['available'] is True
+    assert info['size_bytes'] == 24
+    assert len(info['fingerprint']) == 16
+    assert sim_scene.blender_scene_path(tmp_path) == pack / 'scene.glb'
+    # MuJoCo 장면 상태는 그대로 · Blender 뷰는 계산 없이 따로
+    assert sim_scene.scene_state(tmp_path)['state'] == 'missing'
+
+
+def test_blender_scene_route_streams_the_file():
+    routes = (BRIDGE_DIR / 'routes' / 'motion_run_routes.py').read_text(encoding='utf-8')
+    assert "@app.get('/api/preview/blender-scene')" in routes
+    assert "media_type='model/gltf-binary'" in routes
+    bridge = (BRIDGE_DIR / 'bridge_node.py').read_text(encoding='utf-8')
+    assert 'return sim_scene.blender_scene_path(self.workspace_root)' in bridge

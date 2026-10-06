@@ -1,4 +1,5 @@
 #include <algorithm>
+#include <chrono>
 #include <cstring>
 #include <iomanip>
 #include <sstream>
@@ -7,6 +8,14 @@
 #include "serial/serial_controller.hpp"
 
 namespace {
+
+// robot_web fix-list 23 · 24 · 25 (2026-10-06)
+constexpr uint8_t DXL_ACCESS_ERROR = 7;                       // e.g. EEPROM write while torque is on
+constexpr uint16_t DXL_COMMUNICATION_LOSS_MISSES = 20;        // bulk reads in a row · about 1 s when silent
+constexpr uint16_t COMMUNICATION_UNAVAILABLE_ERROR = 0xFFFF;  // same code the state monitor already reads
+constexpr uint16_t DXL_REBOOT_CONTROLWORD_BIT = 0x0080;       // the fault-reset bit · REBOOT for a Dynamixel
+constexpr auto DXL_REBOOT_SETTLE = std::chrono::milliseconds(1000);
+constexpr auto DXL_REAPPLY_RETRY = std::chrono::milliseconds(1000);
 
 bool isFilteredByProfile(uint8_t id, uint8_t profile_mode)
 {
@@ -182,6 +191,18 @@ void serial::SerialController::check(const motor_interface::motor_frame_t& statu
 {
     (void)status;
 
+    // A reboot puts RAM items (profile velocity and so on) back to their
+    // defaults · write the configured items again once the device is back.
+    // EEPROM items survive the reboot, so this never needs torque off.
+    if (reapply_items_pending_ && std::chrono::steady_clock::now() >= next_reapply_at_) {
+        std::string error;
+        if (applyConfigItems(false, error)) {
+            reapply_items_pending_ = false;
+        } else {
+            next_reapply_at_ = std::chrono::steady_clock::now() + DXL_REAPPLY_RETRY;
+        }
+    }
+
     const motor_interface::entry_table_t* status_interface = txInterface(motor_interface::ID_STATUSWORD);
     const motor_interface::entry_table_t* control_interface = rxInterface(motor_interface::ID_CONTROLWORD);
     if (!status_interface || !control_interface) return;
@@ -200,6 +221,20 @@ void serial::SerialController::write(const motor_interface::motor_frame_t& comma
     motor_interface::entry_table_t rx_interfaces[motor_interface::MAX_INTERFACE_SIZE]{};
 
     const uint8_t n_rx = std::min(command.number_of_target_interfaces, motor_interface::MAX_INTERFACE_SIZE);
+
+    // The controlword lands in Torque Enable (0/1), so the fault-reset bit has
+    // no meaning there · for a Dynamixel it asks for a REBOOT, the only way to
+    // clear a latched hardware error short of a power cycle. It passes the
+    // motor_manager alarm gate like an AC servo fault reset (fix-list 1, 24-1).
+    for (uint8_t i = 0; i < n_rx; ++i) {
+        if (command.target_interface_id[i] == motor_interface::ID_CONTROLWORD &&
+            (command.controlword & DXL_REBOOT_CONTROLWORD_BIT) != 0)
+        {
+            rebootNode();
+            return;
+        }
+    }
+
     for (uint8_t i = 0; i < n_rx; ++i) {
         const uint8_t id = command.target_interface_id[i];
         const motor_interface::entry_table_t* descriptor = rxInterface(id);
@@ -244,6 +279,12 @@ void serial::SerialController::read(motor_interface::motor_frame_t& status)
     }
 
     status.controller_index = index_;
+
+    // No answer for a run of bulk reads · say so instead of repeating the last
+    // values (robot_web fix-list 23-3). The next answer clears it.
+    if (node_ && node_->missed_responses >= DXL_COMMUNICATION_LOSS_MISSES) {
+        status.errorcode = COMMUNICATION_UNAVAILABLE_ERROR;
+    }
 }
 
 void serial::SerialController::writeData(const motor_interface::entry_table_t* rx_interfaces, uint8_t number_of_rx_interfaces)
@@ -274,27 +315,20 @@ void serial::SerialController::readData(motor_interface::entry_table_t* tx_inter
 
 void serial::SerialController::addSlaveConfigItems()
 {
-    const motor_interface::entry_table_t* control =
-        findInterface(*driver_, motor_interface::ID_CONTROLWORD);
-    if (control) {
-        uint8_t disable_data[motor_interface::MAX_DATA_SIZE]{};
-        if (node_) node_->last_packet_error = 0;
-        const bool disabled = master_->writeRegister(
-            bus_id_,
-            control->index,
-            disable_data,
-            control->size);
+    std::string error;
+    if (!applyConfigItems(true, error)) throw std::runtime_error(error);
+}
 
-        if (!disabled && node_ && node_->last_packet_error != 0) {
-            throw std::runtime_error(formatWriteFailure(
-                "Failed to disable Dynamixel effort before configuration",
-                bus_id_,
-                *control,
-                node_->last_packet_error));
-        }
-    }
-
+bool serial::SerialController::applyConfigItems(bool allow_torque_off, std::string& error)
+{
+    // robot_web fix-list 25-2 (2026-10-06) · this used to turn torque off and
+    // rewrite every item on each start. A Dynamixel has no brake, so every
+    // restart (apply to device, auto restart, update) let the joints sag, and
+    // the EEPROM took the same write again. Now: read each item, write only
+    // the ones that differ, and turn torque off only when the device refuses a
+    // write because torque is on (Access Error · EEPROM area).
     const motor_interface::entry_table_t* items = driver_->items();
+    bool torque_disabled = false;
 
     for (uint8_t i = 0; i < driver_->number_of_items(); ++i) {
         motor_interface::entry_table_t item = items[i];
@@ -311,16 +345,74 @@ void serial::SerialController::addSlaveConfigItems()
             motor_interface::fill<int8_t>(mode, item.data);
         }
 
-        if (node_) node_->last_packet_error = 0;
-        if (!master_->writeRegister(bus_id_, item.index, item.data, item.size)) {
-            const uint8_t packet_error = node_ ? node_->last_packet_error : 0;
-            throw std::runtime_error(formatWriteFailure(
-                "Failed to write Dynamixel item",
-                bus_id_,
-                item,
-                packet_error));
+        uint8_t current[motor_interface::MAX_DATA_SIZE]{};
+        if (master_->readRegister(bus_id_, item.index, current, item.size) &&
+            std::memcmp(current, item.data, item.size) == 0)
+        {
+            continue;
         }
+
+        if (writeConfigItem(item)) continue;
+
+        const uint8_t packet_error = node_ ? node_->last_packet_error : 0;
+        if (allow_torque_off && !torque_disabled && (packet_error & 0x7F) == DXL_ACCESS_ERROR) {
+            if (!disableTorqueForConfiguration(error)) return false;
+            torque_disabled = true;
+            if (writeConfigItem(item)) continue;
+        }
+
+        error = formatWriteFailure(
+            "Failed to write Dynamixel item",
+            bus_id_,
+            item,
+            node_ ? node_->last_packet_error : 0);
+        return false;
     }
+
+    return true;
+}
+
+bool serial::SerialController::writeConfigItem(const motor_interface::entry_table_t& item)
+{
+    if (node_) node_->last_packet_error = 0;
+    return master_->writeRegister(bus_id_, item.index, item.data, item.size);
+}
+
+bool serial::SerialController::disableTorqueForConfiguration(std::string& error)
+{
+    const motor_interface::entry_table_t* control =
+        findInterface(*driver_, motor_interface::ID_CONTROLWORD);
+    if (!control) return true;
+
+    uint8_t disable_data[motor_interface::MAX_DATA_SIZE]{};
+    if (node_) node_->last_packet_error = 0;
+    const bool disabled = master_->writeRegister(
+        bus_id_,
+        control->index,
+        disable_data,
+        control->size);
+
+    if (!disabled && node_ && node_->last_packet_error != 0) {
+        error = formatWriteFailure(
+            "Failed to disable Dynamixel effort before configuration",
+            bus_id_,
+            *control,
+            node_->last_packet_error);
+        return false;
+    }
+
+    return true;
+}
+
+void serial::SerialController::rebootNode()
+{
+    // A failed reboot leaves the alarm as it is · the operator sees no change
+    // and can try again or power-cycle. It must not throw: that would stop
+    // motor_manager for every axis.
+    if (!master_->reboot(bus_id_)) return;
+
+    reapply_items_pending_ = true;
+    next_reapply_at_ = std::chrono::steady_clock::now() + DXL_REBOOT_SETTLE;
 }
 
 void serial::SerialController::addBulkEntries()

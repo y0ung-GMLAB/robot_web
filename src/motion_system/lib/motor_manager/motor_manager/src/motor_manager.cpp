@@ -377,12 +377,35 @@ void motor_manager::MotorManager::updateController(const uint8_t controller_inde
         std::lock_guard<std::mutex> lock(frame_mutex_);
         status_[controller_index] = controller_status;
 
-        if (controller_status.errorcode == 0 &&
-            command_sequence_[controller_index] != applied_command_sequence_[controller_index])
-        {
-            pending_command = command_[controller_index];
-            pending_sequence = command_sequence_[controller_index];
-            has_pending_command = true;
+        const bool pending =
+            command_sequence_[controller_index] != applied_command_sequence_[controller_index];
+
+        if (controller_status.errorcode != 0) {
+            // robot_web fix-list 1 (2026-10-06): while the drive is in alarm,
+            // only a controlword-only fault reset (bit 7) may pass. Everything
+            // else stays blocked as before.
+            alarm_latched_[controller_index] = true;
+            alarm_command_sequence_[controller_index] = command_sequence_[controller_index];
+            if (pending && isFaultResetOnly(command_[controller_index])) {
+                pending_command = command_[controller_index];
+                pending_sequence = command_sequence_[controller_index];
+                has_pending_command = true;
+            }
+        } else {
+            if (alarm_latched_[controller_index]) {
+                // The alarm just cleared. Drop what arrived during the alarm
+                // (an old position target would make the axis jump); commands
+                // that arrive after this point are applied normally.
+                alarm_latched_[controller_index] = false;
+                if (applied_command_sequence_[controller_index] < alarm_command_sequence_[controller_index]) {
+                    applied_command_sequence_[controller_index] = alarm_command_sequence_[controller_index];
+                }
+            }
+            if (command_sequence_[controller_index] != applied_command_sequence_[controller_index]) {
+                pending_command = command_[controller_index];
+                pending_sequence = command_sequence_[controller_index];
+                has_pending_command = true;
+            }
         }
     }
 
@@ -396,6 +419,24 @@ void motor_manager::MotorManager::updateController(const uint8_t controller_inde
             applied_command_sequence_[controller_index] = pending_sequence;
         }
     }
+}
+
+bool motor_manager::MotorManager::isFaultResetOnly(const motor_interface::motor_frame_t& command)
+{
+    // A frame that writes the controlword with the fault-reset bit and no
+    // target position (the web "alarm reset" sends exactly this).
+    if ((command.controlword & 0x0080) == 0) return false;
+    bool has_controlword = false;
+    const uint8_t n = std::min(command.number_of_target_interfaces, motor_interface::MAX_INTERFACE_SIZE);
+    for (uint8_t j = 0; j < n; ++j) {
+        const uint8_t id = command.target_interface_id[j];
+        if (id == motor_interface::ID_CONTROLWORD) {
+            has_controlword = true;
+        } else {
+            return false;
+        }
+    }
+    return has_controlword;
 }
 
 void motor_manager::MotorManager::updateControllers(const std::vector<uint8_t>& controller_indices)

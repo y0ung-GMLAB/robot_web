@@ -20,7 +20,7 @@ from typing import Any, Dict, List, Mapping, Optional
 
 from motion_common import axis_ownership
 
-from motion_common import repeat_policy
+from motion_common import repeat_policy, units, wire_units
 
 from motion_common.values import finite_float
 from std_msgs.msg import Int8MultiArray, String
@@ -35,6 +35,10 @@ from .motion_run_constants import (
     STATE_TIMEOUT_SEC,
 )
 
+#: 사용 체크를 다시 켜거나 라이브 리밋을 바꾼 축을 잇는 시간 · 매핑 줄에
+#: `initial_move_time_sec` 이 없을 때만 · 40
+OVERRIDE_RESUME_DEFAULT_SEC = 5.0
+
 
 class MotionPlayer:
     def __init__(self, manager: Any) -> None:
@@ -46,6 +50,7 @@ class MotionPlayer:
         payload: Dict[str, Any],
         motors_snapshot: List[Dict[str, Any]],
     ) -> None:
+        self._reset_override_resume()
         try:
             if bool(payload.get('automation_run')):
                 self.manager._wait_for_automation_ready(payload)
@@ -73,21 +78,32 @@ class MotionPlayer:
                 initialization_only=True,
                 motors_snapshot=motors_snapshot,
             )
+            playlist = self._build_playlist_entries(
+                payload, plan, initialization_plan, motors_snapshot,
+            )
+            if playlist:
+                plan, initialization_plan = playlist[0]
             if self.manager._stop_event.is_set():
                 return
-            # 시작 전에도 **내가 쓸 축만** 본다 · §6-106
-            ownership_error = self.manager._playback_ownership_error(
-                axes=[
-                    int(axis_plan['motor_axis'])
-                    for axis_plan in self._playback_axes(plan, 0.0)
-                ]
-            )
-            if ownership_error:
-                raise ValueError(ownership_error)
-            guard_error = motion_run_rules._motion_auto_start_guard_error(plan)
-            if guard_error:
-                raise ValueError(guard_error)
-            self._run_initialization_then_motion(initialization_plan, plan)
+            # 시작 전에도 **내가 쓸 축만** 본다 · §6-106 · 목록이면 항목마다
+            for checked in ([entry[0] for entry in playlist] or [plan]):
+                ownership_error = self.manager._playback_ownership_error(
+                    axes=[
+                        int(axis_plan['motor_axis'])
+                        for axis_plan in self._playback_axes(checked, 0.0)
+                    ]
+                )
+                if ownership_error:
+                    raise ValueError(ownership_error)
+                guard_error = motion_run_rules._motion_auto_start_guard_error(checked)
+                if guard_error:
+                    raise ValueError(guard_error)
+            if playlist:
+                self._run_initialization_then_motion(
+                    initialization_plan, plan, playlist,
+                )
+            else:
+                self._run_initialization_then_motion(initialization_plan, plan)
         except InterruptedError:
             return
         except Exception as exc:
@@ -123,12 +139,75 @@ class MotionPlayer:
             if bool(payload.get('automation_run')):
                 self.manager._automation_failure(str(exc))
 
+    def _build_playlist_entries(
+        self,
+        payload: Dict[str, Any],
+        plan: Dict[str, Any],
+        initialization_plan: Dict[str, Any],
+        motors_snapshot: List[Dict[str, Any]],
+        *,
+        require_continuous: bool = True,
+    ) -> List[tuple]:
+        """재생 목록 · 수정 목록 35 · 항목마다 (재생 계획, 초기 위치 계획)
+
+        연속 재생이고 매핑 파일에 두 개 이상 등록됐을 때만 · 아니면 빈 목록
+        (옛 길 그대로). 시작 때 **모두** 만든다 · 셋째 파일이 깨져 있으면 한참
+        돌다 멈추는 대신 시작부터 거절하고 그 파일 이름을 알린다.
+
+        항목 순서는 목록 그대로 · 같은 파일이 두 번 있어도 된다 (계산은 한 번).
+        재시작은 늘 1번부터 · 등록이 첫 항목을 `motion_file_id` 로 두므로
+        요청 파일이 곧 1번이다.
+        """
+        names = [str(name) for name in (plan.get('motion_playlist') or [])]
+        if (
+            len(names) <= 1
+            or (
+                require_continuous
+                and str(plan.get('run_mode') or '') != 'continuous'
+            )
+            or str(plan.get('request_source') or '') == 'motion_studio'
+            or int(plan.get('synchronized_repeat_count') or 0)
+            or str(plan.get('motion_file_id') or '') != names[0]
+        ):
+            return []
+        built: Dict[str, tuple] = {names[0]: (plan, initialization_plan)}
+        entries: List[tuple] = []
+        for index, name in enumerate(names):
+            if name not in built:
+                item_payload = {**payload, 'motion_file_id': name}
+                try:
+                    built[name] = (
+                        self.manager._plan_builder.build(
+                            item_payload, motors_snapshot=motors_snapshot,
+                        ),
+                        self.manager._plan_builder.build(
+                            item_payload,
+                            initialization_only=True,
+                            motors_snapshot=motors_snapshot,
+                        ),
+                    )
+                except ValueError as exc:
+                    raise ValueError(
+                        f'재생 목록 {index + 1}번 {name}: {exc}'
+                    ) from exc
+            item_plan, item_init = built[name]
+            marks = {
+                'playlist_index': index,
+                'playlist_length': len(names),
+                'motion_playlist': list(names),
+            }
+            # 얕은 사본 · 샘플은 같이 쓰고 목록 위치만 따로 · 같은 파일 두 번이어도 번호가 맞게
+            entries.append(({**item_plan, **marks}, {**item_init, **marks}))
+        return entries
+
     def _run_initialization_then_motion(
         self,
         initialization_plan: Dict[str, Any],
         motion_plan: Dict[str, Any],
+        playlist: Optional[List[tuple]] = None,
     ) -> None:
-        self._run_initialization(initialization_plan)
+        # 재생이 뒤따른다 · 초기 위치 끝에 첫 프레임까지 잇는다 · 13-1
+        self._run_initialization({**initialization_plan, 'blend_to_first_frame': True})
         if self.manager._stop_event.is_set():
             return
         if self.manager.status().get('state') != 'initialized':
@@ -146,7 +225,9 @@ class MotionPlayer:
                 '초기위치 이동 완료 후 자동 반복 정지',
             )
             return
-        if motion_plan.get('repeat_mode') in {'reinitialize', 'dwell_reinitialize'}:
+        if playlist:
+            self._run_motion(motion_plan, initialization_plan, playlist)
+        elif motion_plan.get('repeat_mode') in {'reinitialize', 'dwell_reinitialize'}:
             self._run_motion(motion_plan, initialization_plan)
         else:
             self._run_motion(motion_plan)
@@ -184,11 +265,11 @@ class MotionPlayer:
                 )
                 if motor_error:
                     raise RuntimeError(motor_error)
-                current = motion_run_rules._motor_position_deg(motor)
+                current = motion_run_rules._motor_position(motor)
                 if current is None:
                     raise RuntimeError(f'{motor_axis}번 모터의 현재 위치를 읽을 수 없습니다')
                 starts[motor_axis] = current
-                targets[motor_axis] = float(axis['initial_motor_target_deg'])
+                targets[motor_axis] = float(axis['initial_motor_target_rad'])
                 durations[motor_axis] = max(float(axis.get('initial_move_time_sec') or 0.0), self.manager.period_sec)
 
             max_duration = max(durations.values()) if durations else self.manager.period_sec
@@ -225,10 +306,33 @@ class MotionPlayer:
             )
             if not reached:
                 raise RuntimeError(f'초기 위치 도달 확인 실패: {message}')
-            self._publish_motion_values({
-                str(axis['motion_id']): float(axis['initial_motion_position_deg'])
+            motion_values = {
+                str(axis['motion_id']): float(axis['initial_motion_position_rad'])
                 for axis in init_axes
-            })
+            }
+            blend_targets = self._first_frame_targets(plan, init_axes, targets)
+            if blend_targets:
+                # 초기 위치 ≠ 첫 프레임 · 재생 첫 틱에 튀지 않게 여기서 잇는다 · 수정 목록 13-1
+                self.manager._update_status({
+                    'state': 'initializing',
+                    'phase': 'initializing',
+                    'message': '초기 위치 → 첫 프레임으로 잇는 중',
+                })
+                self._run_initial_position_stream(
+                    motors, init_axes, dict(targets), blend_targets, durations, max_duration,
+                )
+                reached, message = self._wait_for_targets(
+                    init_axes, blend_targets, self._target_settle_timeout_sec(),
+                )
+                if not reached:
+                    raise RuntimeError(f'첫 프레임 도달 확인 실패: {message}')
+                motion_values = {
+                    str(axis['motion_id']): float(
+                        axis.get('loop_start_motion_rad', axis['initial_motion_position_rad'])
+                    )
+                    for axis in init_axes
+                }
+            self._publish_motion_values(motion_values)
             initial_finished_at = time.time()
             status = motion_run_rules._status_from_plan('initialized', '초기 위치 이동 완료', plan)
             status['phase'] = 'initialized'
@@ -267,6 +371,7 @@ class MotionPlayer:
         self,
         plan: Dict[str, Any],
         initialization_plan: Optional[Dict[str, Any]] = None,
+        playlist: Optional[List[tuple]] = None,
     ) -> None:
         trace = None
         try:
@@ -317,8 +422,12 @@ class MotionPlayer:
             grade1_seen = False
             while True:
                 cycle_started = time.monotonic()
+                cycle_started_wall = time.time()
                 trace = self._trace_begin(plan, cycle_count)
-                for index, sample in enumerate(samples):
+                timing = motion_run_rules.PlaybackTiming(self.manager.period_sec)
+                index = 0
+                while index < len(samples):
+                    sample = samples[index]
                     if self.manager._stop_event.is_set():
                         status = motion_run_rules._status_from_plan('stopped', '연속 모션 정지' if continuous else '모션 실행 정지', plan)
                         status['phase'] = 'stopped'
@@ -332,6 +441,11 @@ class MotionPlayer:
                     self._require_playback_command_allowed(
                         self._playback_axes(plan, float(sample['time_sec'])),
                     )
+                    dropped = motion_run_rules._supervisor_drop_error(
+                        self._latest_safety_status(), cycle_started_wall,
+                    )
+                    if dropped:
+                        raise RuntimeError(dropped)
                     if automation_run and self._current_servo_alarm_grade() == 1:
                         grade1_seen = True
                     positions = self._owned_positions(
@@ -360,7 +474,17 @@ class MotionPlayer:
                             plan, cycle_count,
                         ),
                     )
-                    motion_run_rules._sleep_until(cycle_started + ((index + 1) * self.manager.period_sec))
+                    timing.note(time.monotonic() - (cycle_started + index * self.manager.period_sec))
+                    index, deadline = timing.next_index(index, cycle_started, time.monotonic())
+                    if deadline is not None:
+                        motion_run_rules._sleep_until(deadline)
+                if trace is not None:
+                    trace.timing = timing.as_dict()
+                if timing.late_count or timing.skipped_samples:
+                    self.manager.get_logger().warning(
+                        f'재생 마감 초과 · 늦은 프레임 {timing.late_count} · '
+                        f'최대 {timing.max_late_ms:.1f} ms · 건너뜀 {timing.skipped_samples}'
+                    )
                 self._trace_finish(trace, 'completed')
                 trace = None
                 cycle_count += 1
@@ -415,10 +539,23 @@ class MotionPlayer:
                         dwell_sec,
                     ):
                         return
-                if repeat_mode in {'reinitialize', 'dwell_reinitialize'}:
+                if playlist:
+                    # 다음 애니로 · 사이는 **늘** 그 애니의 첫 프레임으로 초기 위치 이동 ·
+                    # 반복 방식이 바로 잇기여도 파일이 바뀌면 값이 튀므로 · 수정 목록 35
+                    plan, initialization_plan = playlist[cycle_count % len(playlist)]
+                    samples = plan['samples']
+                if plan.get('independent_group'):
+                    # 각자 재생 · 회차 번호는 이 PC 가 센다 · 화면 표시용
+                    plan = {**plan, 'group_cycle_number': cycle_count + 1}
+                    if initialization_plan is not None:
+                        initialization_plan = {
+                            **initialization_plan,
+                            'group_cycle_number': cycle_count + 1,
+                        }
+                if playlist or repeat_mode in {'reinitialize', 'dwell_reinitialize'}:
                     if initialization_plan is None:
                         raise RuntimeError('반복 초기위치 이동 계획이 없습니다')
-                    self._run_initialization(initialization_plan)
+                    self._run_initialization({**initialization_plan, 'blend_to_first_frame': True})
                     if self.manager._stop_event.is_set():
                         return
                     if self.manager.status().get('state') != 'initialized':
@@ -512,6 +649,31 @@ class MotionPlayer:
         recorder = getattr(self.manager, '_motion_trace', None)
         if trace is not None and recorder is not None:
             recorder.finish(trace, result, message)
+
+    def _first_frame_targets(
+        self,
+        plan: Dict[str, Any],
+        axes: List[Dict[str, Any]],
+        targets: Dict[int, float],
+    ) -> Dict[int, float]:
+        """초기 위치에서 첫 프레임까지 이어야 할 목표 · 이을 일이 없으면 빈 dict · 13-1
+
+        재생이 뒤따르는 초기 이동만(`blend_to_first_frame`) · 「초기 위치 이동」
+        버튼과 스케줄 끝 주차는 초기 위치에 멈춘다.
+        """
+        if not plan.get('blend_to_first_frame'):
+            return {}
+        blended = dict(targets)
+        differs = False
+        for axis in axes:
+            motor_axis = int(axis['motor_axis'])
+            first = axis.get('first_frame_motor_target_rad')
+            if first is None or motor_axis not in targets:
+                continue
+            if abs(float(first) - float(targets[motor_axis])) > self._target_tolerance(axis):
+                blended[motor_axis] = float(first)
+                differs = True
+        return blended if differs else {}
 
     def _run_initial_position_stream(
         self,
@@ -701,9 +863,9 @@ class MotionPlayer:
                 )
                 if ready_error:
                     return False, ready_error
-                current = motion_run_rules._motor_position_deg(motor)
+                current = motion_run_rules._motor_position(motor)
                 target = float(targets[motor_axis])
-                tolerance = self._target_tolerance_deg(axis_plan)
+                tolerance = self._target_tolerance(axis_plan)
                 if current is None:
                     ok = False
                     messages.append(f'{motor_axis}번 모터의 현재 위치를 읽을 수 없습니다')
@@ -712,8 +874,8 @@ class MotionPlayer:
                 if error > tolerance:
                     ok = False
                     messages.append(
-                        f'{motor_axis}번 모터 현재 {current:.3f} deg · '
-                        f'목표 {target:.3f} deg · 오차 {error:.3f} deg'
+                        f'{motor_axis}번 모터 현재 {units.rad_to_deg(current):.3f} deg · '
+                        f'목표 {units.rad_to_deg(target):.3f} deg · 오차 {units.rad_to_deg(error):.3f} deg'
                     )
             if ok:
                 return True, 'targets reached'
@@ -856,6 +1018,14 @@ class MotionPlayer:
                 return []
             time.sleep(min(max(self.manager.period_sec, 0.01), 0.05, remaining))
 
+    def _latest_safety_status(self) -> Dict[str, Any]:
+        lock = getattr(self.manager, '_safety_status_lock', None)
+        if lock is None:
+            return {}
+        with lock:
+            status = getattr(self.manager, '_latest_safety_status', None)
+            return dict(status) if isinstance(status, dict) else {}
+
     def _current_servo_alarm_grade(self) -> int:
         lock = getattr(self.manager, '_safety_status_lock', None)
         if lock is None:
@@ -964,6 +1134,68 @@ class MotionPlayer:
                     )
         return out_positions, (out_values if motion_values else motion_values)
 
+    def _reset_override_resume(self) -> None:
+        """재생(또는 초기 이동)을 새로 시작할 때 · 이어 가기 기억을 비운다
+
+        지난 실행의 마지막 목표에서 이어 가면 그 사이 조그로 옮긴 모터가
+        옛 자리로 끌려간다 · 새 실행은 초기 이동이 지금 자리에서 출발한다.
+        지금 오버라이드를 「본 것」으로 적어 시작부터 잇기가 걸리지 않게 한다.
+        """
+        self._override_seen = {
+            key: dict(value)
+            for key, value in (self.manager.live_override_snapshot() or {}).items()
+        }
+        self._last_sent_positions = {}
+        self._resume_blends = {}
+
+    def _blend_override_changes(
+        self,
+        axes_by_index: Dict[int, Dict[str, Any]],
+        positions: Dict[int, float],
+        overrides: Mapping[str, Any],
+    ) -> Dict[int, float]:
+        """사용 체크·라이브 리밋이 바뀐 축은 마지막 목표에서 천천히 잇는다 · 40
+
+        다시 켠 축은 서 있던 자리와 지금 계획값이 다르다 · 그대로 보내면 PP
+        드라이브가 프로파일 속도로 한 번에 간다 · 그 축의 `initial_move_time_sec`
+        동안 smoothstep 으로 마지막 목표 → 계획값 (계획값은 그동안에도 움직인다).
+        끄는 쪽은 잇지 않는다 · 끄면 그 자리에 선다(명령을 안 보냄).
+        """
+        if not hasattr(self, '_override_seen'):
+            self._reset_override_resume()
+        now = time.monotonic()
+        # 바뀜은 **계획의 모든 축**에서 본다 · 꺼진 축은 positions 에서 이미 빠져
+        # 있어 여기서만 보면 「끔 → 켬」 이 「바뀜 없음」 으로 읽힌다
+        for motor_axis, axis_plan in axes_by_index.items():
+            motion_id = str(axis_plan.get('motion_id') or '')
+            if not motion_id:
+                continue
+            entry = dict((overrides or {}).get(motion_id) or {})
+            if entry == self._override_seen.get(motion_id, {}):
+                continue
+            self._override_seen[motion_id] = entry
+            last = self._last_sent_positions.get(int(motor_axis))
+            if entry.get('muted') or last is None:
+                continue
+            row = axis_plan.get('row') or {}
+            duration = finite_float(row.get('initial_move_time_sec'))
+            if duration is None or duration <= 0:
+                duration = OVERRIDE_RESUME_DEFAULT_SEC
+            self._resume_blends[int(motor_axis)] = (float(last), now, float(duration))
+        out = dict(positions)
+        for motor_axis, target in positions.items():
+            blend = self._resume_blends.get(int(motor_axis))
+            if blend is not None:
+                start, started_at, duration = blend
+                alpha = (now - started_at) / duration
+                if alpha >= 1.0:
+                    self._resume_blends.pop(int(motor_axis), None)
+                else:
+                    s = alpha * alpha * (3.0 - 2.0 * alpha)
+                    out[motor_axis] = start + (float(target) - start) * s
+            self._last_sent_positions[int(motor_axis)] = float(out[motor_axis])
+        return out
+
     def _publish_positions(
         self,
         motors: List[Dict[str, Any]],
@@ -986,9 +1218,10 @@ class MotionPlayer:
                 }
                 if not positions:
                     return
+        axes_by_index = {int(axis['motor_axis']): axis for axis in axes}
+        positions = self._blend_override_changes(axes_by_index, positions, overrides)
         target_axes = motion_run_rules._sorted_controller_axes(positions.keys())
         command = motion_run_rules._empty_motor_command(target_axes)
-        axes_by_index = {int(axis['motor_axis']): axis for axis in axes}
         for slot, motor_axis in enumerate(target_axes):
             target = positions.get(motor_axis)
             if target is None:
@@ -1003,7 +1236,8 @@ class MotionPlayer:
                 if axis_plan.get('motor_type') == 'dynamixel'
                 else CW_NEW_SET_POINT_MINAS
             )
-            command.position[slot] = float(target)
+            # 안쪽은 rad · 명령 토픽 단위로는 여기서만 바꾼다 · 수정 목록 6
+            command.position[slot] = wire_units.command_value(target)
         self.manager._command_pub.publish(command)
 
     def _publish_motion_values(self, values: Dict[str, float]) -> None:
@@ -1074,16 +1308,17 @@ class MotionPlayer:
             self.manager.target_settle_timeout_sec,
         )
 
-    def _target_tolerance_deg(self, axis_plan: Dict[str, Any]) -> float:
+    def _target_tolerance(self, axis_plan: Dict[str, Any]) -> float:
+        """도달 허용 오차 · rad · 파라미터는 사람이 적는 값이라 deg 그대로 둔다 · 수정 목록 6"""
         if axis_plan.get('motor_type') == 'dynamixel':
-            return self.manager._runtime_float_parameter(
+            return units.deg_to_rad(self.manager._runtime_float_parameter(
                 'dynamixel_target_tolerance_deg',
                 self.manager.dynamixel_target_tolerance_deg,
-            )
-        return self.manager._runtime_float_parameter(
+            ))
+        return units.deg_to_rad(self.manager._runtime_float_parameter(
             'ac_target_tolerance_deg',
             self.manager.ac_target_tolerance_deg,
-        )
+        ))
 
     @staticmethod
     def _playback_axes(
@@ -1137,10 +1372,17 @@ class MotionPlayer:
         `axes` 를 주면 **그 축들만** 본다 · 다른 축을 MIDI 가 잡고 있어도
         내 축이 비어 있으면 계속한다. 추가 녹화가 그 위에 선다.
         """
-        error = self.manager._playback_ownership_error(
-            axes=None if axes is None else [
-                int(axis_plan['motor_axis']) for axis_plan in axes
-            ]
-        )
+        axis_numbers = None if axes is None else [
+            int(axis_plan['motor_axis']) for axis_plan in axes
+        ]
+        error = self.manager._playback_ownership_error(axes=axis_numbers)
         if error:
             raise RuntimeError(error)
+        # 내 축 가운데 통신이 끊긴 축이 있으면 멈춘다 · 재생 기록에는 오류로 남는다 ·
+        # 수정 목록 3-1
+        if axis_numbers:
+            lost = motion_run_rules._communication_lost_error(
+                axis_numbers, self.manager._current_motors(),
+            )
+            if lost:
+                raise RuntimeError(lost)

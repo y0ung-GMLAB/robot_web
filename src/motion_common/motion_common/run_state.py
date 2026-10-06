@@ -26,6 +26,10 @@ IDLE_STATES = frozenset({
     'motion_completed',
     'error',
     'blocked',
+    # 초기 위치 이동이 끝나 서 있다 · 수동 「초기 위치 이동」 과 스케줄 끝 기준점
+    # 주차가 여기서 멈춘다 · 전에는 도는 중으로 읽혀 다음 스케줄이 시작을 못 했다 ·
+    # 수정 목록 36
+    'initialized',
 })
 
 
@@ -87,6 +91,8 @@ GROUP_ACTIVE_STATES = frozenset({
     'start_scheduled',
     'waiting',
     'running',
+    # 각자 재생 · 1회차 뒤로 PC 마다 제 목록을 돈다 · 수정 목록 35
+    'running_independent',
     'waiting_cycle_ready',
     'cycle_ready',
     'stop_after_cycle',

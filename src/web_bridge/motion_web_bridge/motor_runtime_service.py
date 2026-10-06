@@ -22,10 +22,10 @@ from functools import partial
 from pathlib import Path
 from typing import Any, Dict, List
 
+from motion_common import units, wire_units
 from motion_common.values import optional_float
 
 from motion_web_bridge import motor_config_rules
-from motion_web_bridge.bridge_helpers import _monitoring_finite_float
 from motion_web_bridge.motor_restart_coordinator import MotorRestartCoordinator
 from motion_web_bridge.motor_restart_diagnostics import diagnose_motor_restart_failure
 
@@ -131,9 +131,9 @@ class MotorRuntimeService:
                 or motor.get('fault') is True
             ):
                 continue
-            velocity = _monitoring_finite_float(
-                motor.get('velocity_deg_s', motor.get('velocity'))
-            )
+            # 상태는 rad/s · 문턱은 사람이 정한 deg/s 라 바꿔서 본다 · 수정 목록 6-5
+            velocity_rad_s = wire_units.motor_velocity(motor)
+            velocity = None if velocity_rad_s is None else units.rad_to_deg(velocity_rad_s)
             # **서 있는 서보도 값이 튄다** · §6-225
             #
             # 엔코더 한 칸이 초당 0.6866도라, 정지 상태에서도 0~3칸이 그냥

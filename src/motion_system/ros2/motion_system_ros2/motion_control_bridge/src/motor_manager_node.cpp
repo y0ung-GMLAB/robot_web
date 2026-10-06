@@ -7,6 +7,17 @@
 
 #include "motion_control_bridge/motor_manager_node.hpp"
 
+namespace {
+
+// 토픽(motor_command · motor_status)의 위치·속도는 rad · rad/s ·
+// motor_manager 와 드라이버·모터 설정 파일은 원본 그대로 deg 라서 여기서만 바꾼다 ·
+// robot_web 수정 목록 6-1 (2026-10-06 · 사용자 결정 「노드 경계만」)
+constexpr double kPi = 3.14159265358979323846;
+constexpr double kDegPerRad = 180.0 / kPi;
+constexpr double kRadPerDeg = kPi / 180.0;
+
+}  // namespace
+
 MotorManagerNode::MotorManagerNode(const rclcpp::NodeOptions& options)
     : Node("motor_manager_node", options)
 {
@@ -48,7 +59,16 @@ MotorManagerNode::MotorManagerNode(const rclcpp::NodeOptions& options)
         try {
             motor_manager_->run();
         } catch (const std::exception& e) {
-            RCLCPP_ERROR(get_logger(), "MotorManager::run() failed: %s", e.what());
+            // robot_web fix-list 3-2 (2026-10-06): the control loop is gone, so
+            // the node must not keep running with frozen status. Stop spinning;
+            // main() exits non-zero and systemd (Restart=on-failure) restarts it.
+            RCLCPP_FATAL(get_logger(), "MotorManager::run() failed: %s", e.what());
+            run_failed_.store(true, std::memory_order_release);
+            rclcpp::shutdown();
+        } catch (...) {
+            RCLCPP_FATAL(get_logger(), "MotorManager::run() failed: unknown exception");
+            run_failed_.store(true, std::memory_order_release);
+            rclcpp::shutdown();
         }
     });
 }
@@ -86,8 +106,8 @@ void MotorManagerNode::motor_command_callback(const MotorStatus::SharedPtr msg)
         motor_frame[i].controlword = msg->controlword[i];
         //motor_frame[i].statusword = msg->statusword[i];
         //motor_frame[i].errorcode = msg->errorcode[i];
-        motor_frame[i].position = msg->position[i];
-        motor_frame[i].velocity = msg->velocity[i];
+        motor_frame[i].position = msg->position[i] * kDegPerRad;
+        motor_frame[i].velocity = msg->velocity[i] * kDegPerRad;
         motor_frame[i].effort = msg->effort[i];
     }
 
@@ -129,8 +149,8 @@ void MotorManagerNode::timer_callback()
         msg.controlword[i] = status[i].controlword;
         msg.statusword[i] = status[i].statusword;
         msg.errorcode[i] = status[i].errorcode;
-        msg.position[i] = status[i].position;
-        msg.velocity[i] = status[i].velocity;
+        msg.position[i] = status[i].position * kRadPerDeg;
+        msg.velocity[i] = status[i].velocity * kRadPerDeg;
         msg.effort[i] = status[i].effort;
         msg.overload_ratio[i] = status[i].overload_ratio;   // 음수 = 읽지 않음
     }
@@ -141,7 +161,11 @@ void MotorManagerNode::timer_callback()
 int main(int argc, char* argv[])
 {
     rclcpp::init(argc, argv);
-    rclcpp::spin(std::make_shared<MotorManagerNode>());
+    auto node = std::make_shared<MotorManagerNode>();
+    rclcpp::spin(node);
+    const bool failed = node->run_failed();
+    node.reset();
     rclcpp::shutdown();
-    return 0;
+    // 70 = EX_SOFTWARE · systemd restarts on non-zero (78 stays reserved for config errors)
+    return failed ? 70 : 0;
 }

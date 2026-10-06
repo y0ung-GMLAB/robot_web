@@ -239,3 +239,11 @@ export function motionScheduleTimezoneDrift(schedules, timezone) {
   return `⚠️ 이 스케줄은 ${names} 에서 만들어졌는데 이 PC 는 지금 ${now} 입니다 · `
     + '시각을 다시 확인하세요 · 시간대를 바꾸려면 「터미널」 화면에서';
 }
+
+
+/** 지난 스케줄 끝 동작 한 줄 · 서버 `schedule_end` 상태 · 수정 목록 36 (2026-10-06) */
+export function scheduleEndText(status = {}) {
+  const state = String(status?.state || 'idle');
+  if (state === 'idle' && !status?.message) return '';
+  return String(status?.message || '');
+}

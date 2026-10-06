@@ -9,6 +9,7 @@ import {
   requestAcServoControl,
   requestAcServoJog,
   requestDynamixelAction,
+  requestDynamixelControl,
   requestDynamixelJog,
   requestMotionSafetyStop,
 } from './api.js';
@@ -386,6 +387,20 @@ function isAcServoMotor(motor) {
 
 function isDynamixelMotor(motor) {
   return motorTypeKey(motor) === 'dynamixel';
+}
+
+/** 서보 버튼 자리 → 다이나믹셀 명령 · 오류 초기화 자리 = 재부팅 · 수정 목록 24 */
+export const DYNAMIXEL_CONTROL_ACTIONS = Object.freeze({
+  servo_on: 'torque_on',
+  servo_off: 'torque_off',
+  fault_reset: 'reboot',
+});
+
+/** 서보 버튼 3개의 글자 · 모터 종류별 */
+export function servoButtonLabels(motor) {
+  return isDynamixelMotor(motor)
+    ? { on: '토크 켜기', off: '토크 끄기', reset: '재부팅' }
+    : { on: '서보 켜기', off: '서보 끄기', reset: '오류 초기화' };
 }
 
 function actionMotorLabel(motor) {
@@ -1103,11 +1118,16 @@ export function createMotionTestController({ el, getLatestState, getJointRow = (
       el.motionTestActionGuide.dataset.state = guideState;
       el.motionTestActionGuide.textContent = guideText;
     }
+    // 다이나믹셀도 같은 세 버튼 · 토크 켜기·끄기·재부팅 (수정 목록 24)
     const selectedAcServoReady = (
       motor
-      && isAcServoMotor(motor)
+      && (isAcServoMotor(motor) || isDynamixelMotor(motor))
       && String(motor.state || '') === 'detected'
     );
+    const labels = servoButtonLabels(motor);
+    if (el.selectedAcServoOnButton) el.selectedAcServoOnButton.textContent = labels.on;
+    if (el.selectedAcServoOffButton) el.selectedAcServoOffButton.textContent = labels.off;
+    if (el.selectedAcServoFaultResetButton) el.selectedAcServoFaultResetButton.textContent = labels.reset;
     const anyAcServoReady = detectedAcServoMotors(getLatestState()).length > 0;
     [
       el.selectedAcServoOnButton,
@@ -1264,6 +1284,10 @@ export function createMotionTestController({ el, getLatestState, getJointRow = (
   async function sendAcServoControl(action, scope = 'selected', axisOverride = null) {
     const axis = axisOverride ?? selectedAxis;
     const motor = axisOverride === null ? selectedMotor() : motorByAxis(getLatestState(), axisOverride);
+    if (scope === 'selected' && motor && isDynamixelMotor(motor)) {
+      await sendDynamixelControl(DYNAMIXEL_CONTROL_ACTIONS[action] || action, axis);
+      return;
+    }
     if (scope === 'selected' && (!motor || !isAcServoMotor(motor))) {
       if (el.acServoControlMessage) {
         el.acServoControlMessage.textContent = '선택 모터가 AC 서보가 아닙니다';
@@ -1315,6 +1339,47 @@ export function createMotionTestController({ el, getLatestState, getJointRow = (
     } catch (error) {
       if (el.acServoControlMessage) {
         el.acServoControlMessage.textContent = `AC 서보 제어 요청 실패: ${error?.message || error}`;
+      }
+    } finally {
+      servoControlInFlight = false;
+      renderCurrentState();
+    }
+  }
+
+  /** 다이나믹셀 토크 켜기·끄기·재부팅 · 같은 버튼 자리 · 수정 목록 24 (2026-10-06)
+   * 하드웨어 오류(과부하·과열·전압)는 재부팅이나 전원 재투입으로만 풀린다 */
+  async function sendDynamixelControl(action, axis) {
+    const confirmText = {
+      torque_off: '선택 모터 다이나믹셀 토크를 끕니다.\n다이나믹셀은 브레이크가 없어 관절이 처질 수 있습니다. 계속할까요?',
+      reboot: '선택 모터 다이나믹셀을 재부팅합니다.\n'
+        + '하드웨어 오류가 풀리고 토크가 꺼집니다 · 브레이크가 없어 관절이 처질 수 있습니다.\n'
+        + '다회전 모드 모터는 바퀴 수가 사라져 위치 표시가 바뀔 수 있습니다 · 재부팅 뒤 위치를 확인하세요. 계속할까요?',
+    }[action];
+    if (confirmText) {
+      const label = action === 'reboot' ? '재부팅' : '토크 끄기';
+      const confirmed = await showConfirm(confirmText, {
+        title: `다이나믹셀 ${label}`, confirmLabel: label, tone: 'danger',
+      });
+      if (!confirmed) {
+        if (el.acServoControlMessage) el.acServoControlMessage.textContent = `${label} 취소`;
+        return;
+      }
+    }
+
+    servoControlInFlight = true;
+    if (el.acServoControlMessage) {
+      const label = { torque_on: '토크 켜기', torque_off: '토크 끄기', reboot: '재부팅' }[action] || action;
+      el.acServoControlMessage.textContent = `${label} 요청 전송 중`;
+    }
+    renderCurrentState();
+    try {
+      const response = await requestDynamixelControl({ action, axis });
+      if (el.acServoControlMessage) {
+        el.acServoControlMessage.textContent = response?.message || '다이나믹셀 제어 응답 없음';
+      }
+    } catch (error) {
+      if (el.acServoControlMessage) {
+        el.acServoControlMessage.textContent = `다이나믹셀 제어 요청 실패: ${error?.message || error}`;
       }
     } finally {
       servoControlInFlight = false;

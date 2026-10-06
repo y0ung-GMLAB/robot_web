@@ -2,7 +2,6 @@
 
 import json
 import math
-import os
 import threading
 import time
 from pathlib import Path
@@ -10,9 +9,10 @@ from typing import Any, Dict, List, Optional
 
 import rclpy
 import yaml
+from motion_common import paths as common_paths
 from motion_common.execution_context import confirm_context_id
 from motion_common.paths import project_dir_for
-from motion_common import command_router, generation as generation_mod, motion_table, topics
+from motion_common import command_router, generation as generation_mod, motion_table, topics, wire_units
 from motion_common.values import finite_float, optional_int
 from motion_control_msgs.msg import MotorStatus
 from rclpy.node import Node
@@ -41,16 +41,17 @@ from .motion_group_display import apply_group_display
 from .motion_trace import DEFAULT_MAX_BYTES, DEFAULT_RETENTION_DAYS, MotionTraceRecorder
 
 
-DEFAULT_MOTION_PROJECTS_DIR = (
-    Path(os.environ.get('MOTION_WORKSPACE', Path.cwd())).expanduser()
-    / 'motion_projects'
-)
+# 프로젝트 폴더는 `motion_common.paths` 하나가 정한다 · 파라미터로 받지 않는다 · 수정 목록 32
+DEFAULT_MOTION_PROJECTS_DIR = common_paths.motion_projects_dir()
 
 
 def _decode_motor_positions(raw: bytes) -> Dict[int, float]:
-    """모터 노드 상태 바이트 → {controller_index: 모터 deg} · 기록 쓰기 스레드가 부른다."""
+    """모터 노드 상태 바이트 → {controller_index: 모터 rad} · 기록 쓰기 스레드가 부른다."""
     msg = deserialize_message(raw, MotorStatus)
-    return {int(index): float(position) for index, position in zip(msg.controller_index, msg.position)}
+    return {
+        int(index): wire_units.from_motor_node(position)
+        for index, position in zip(msg.controller_index, msg.position)
+    }
 
 
 #: 재생이 **비켜 주지 않아도 되는** 주인 · §6-290
@@ -136,11 +137,7 @@ class MotionRunManager(Node):
                 topics.MANUAL_ACTION_RESULT,
             ).value
         )
-        self.motion_projects_dir = Path(
-            str(self.declare_parameter(
-                'motion_projects_dir', str(DEFAULT_MOTION_PROJECTS_DIR)
-            ).value)
-        ).expanduser().resolve()
+        self.motion_projects_dir = Path(DEFAULT_MOTION_PROJECTS_DIR).expanduser().resolve()
         self.period_sec = self._load_period_sec()
         self.motion_files_dir = self.motion_projects_dir
         self.mappings_dir = self.motion_projects_dir
@@ -390,6 +387,8 @@ class MotionRunManager(Node):
         router.register('group_start_at', self._group.schedule_cycle)
         router.register('group_initialize_at', self._group.schedule_initialization)
         router.register('group_cancel', self._group.cancel)
+        # 도는 그룹에 복귀 · 합류 확정 · 수정 목록 30-3
+        router.register('group_join_commit', self._group.commit_join)
         router.register('set_live_override', self._set_live_override)
         router.register('stop', lambda payload: self._handle_stop())
         router.register('stop_after_cycle', lambda payload: self._handle_stop_after_cycle())
@@ -624,6 +623,12 @@ class MotionRunManager(Node):
             **current,
             'repeat_mode': repeat_mode,
             'dwell_sec': dwell_sec,
+            'group_sync_mode': (
+                payload.get('group_sync_mode') or current.get('group_sync_mode')
+            ),
+            'schedule_end_action': (
+                payload.get('schedule_end_action') or current.get('schedule_end_action')
+            ),
             'motion_file_id': motion_file_id if files_ready else '',
             'mapping_file_id': mapping_file_id if files_ready else '',
             'motion_sha256': '',
@@ -888,7 +893,7 @@ class MotionRunManager(Node):
                             if motor_error:
                                 error = motor_error
                                 break
-                            if motion_run_rules._motor_position_deg(motor) is None:
+                            if motion_run_rules._motor_position(motor) is None:
                                 error = f'{motor_axis}번 모터의 현재 위치를 읽을 수 없습니다'
                                 break
                     except ValueError as exc:
@@ -1167,6 +1172,8 @@ class MotionRunManager(Node):
                     if isinstance(headers, list)
                     else []
                 )
+                # 헤더의 `rotation_unit` · rad 파일을 deg 로 읽던 것을 막는다 · 수정 목록 6-2
+                unit = motion_table.header_rotation_unit(first_payload)
                 records = []
                 row_index = 0
                 for raw_line in handle:
@@ -1185,6 +1192,7 @@ class MotionRunManager(Node):
                         records.append(record)
                 if not records:
                     raise ValueError('motion file has no valid records')
+                motion_table.scale_record_values(records, unit)
                 return sorted(
                     records,
                     key=lambda item: (
@@ -1205,6 +1213,9 @@ class MotionRunManager(Node):
             records.append(record)
         if not records:
             raise ValueError('motion file has no valid records')
+        motion_table.scale_record_values(
+            records, motion_table.rotation_unit_from_content(content),
+        )
         return sorted(records, key=lambda item: (item['time_sec'], str(item['motion_id']), item['row_index']))
 
     def _load_mapping(self, path: Path) -> Dict[str, Any]:
@@ -1309,6 +1320,10 @@ class MotionRunManager(Node):
     # ------------------------------------------------------------------ #
 
     def live_override_snapshot(self) -> Dict[str, Dict[str, Any]]:
+        # 재생 시작이 이어 가기 기억을 비울 때도 부른다(40) · 노드 없이 만든
+        # 가벼운 관리자(시험)에는 오버라이드 칸이 없다 · 없으면 「오버라이드 없음」
+        if not hasattr(self, '_live_override_lock'):
+            return {}
         with self._live_override_lock:
             return {key: dict(value) for key, value in self._live_overrides.items()}
 

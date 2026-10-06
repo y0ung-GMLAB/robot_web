@@ -4,11 +4,11 @@
 
     ← {type:'hello', mapping_file_id?, base_mapping_revision?}
     → {type:'hello_ok'}  |  {type:'error', message}  (보내고 닫는다)
-    ← {type:'target', axis, target_deg, motion_id?, motion_deg?}   # 모터 deg
+    ← {type:'target', axis, target_rad, motion_id?, motion_rad?}   # 모터 rad (수정 목록 6)
     ← {type:'release', axes:[..]}        # 놓음 → 현재 위치에 hold
     → {type:'result', ...}               # supervisor 의 축별 마지막 승인·거부
 
-조인트 deg → 모터 deg 변환은 화면이 자기 매핑 행으로 한다 · 그래서 인사에
+조인트 → 모터 변환은 화면이 자기 매핑 행으로 한다 · 그래서 인사에
 `base_mapping_revision` 을 받아 **낡은 변환표**(다른 화면이 매핑을 고친 뒤)
 는 그 자리에서 거절한다.
 
@@ -90,9 +90,9 @@ async def run_manual_stream_socket(bridge: Any, websocket: Any) -> None:
             if kind == 'target':
                 result = service.send_target(
                     message.get('axis'),
-                    message.get('target_deg'),
+                    message.get('target_rad'),
                     motion_id=message.get('motion_id'),
-                    motion_deg=message.get('motion_deg'),
+                    motion_rad=message.get('motion_rad'),
                 )
                 if not result.get('success'):
                     await send({'type': 'result', **result})

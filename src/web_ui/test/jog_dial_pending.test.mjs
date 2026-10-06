@@ -25,6 +25,8 @@ window.fetch = (url, options) => new Promise((resolve) => {
   respond = reply;
 });
 const jogCalls = () => calls.filter((call) => String(call.url).includes('/jog'));
+// 화면은 모터 deg 로 부르고 서버에는 rad 로 간다 · 수정 목록 6-4 · 시험은 deg 로 되돌려 본다
+const sentDeg = (value) => Math.round((value * 180) / Math.PI * 1e9) / 1e9;
 window.setTimeout = (fn, ms) => setTimeout(fn, ms);
 window.clearTimeout = (id) => clearTimeout(id);
 window.setInterval = (fn, ms) => setInterval(fn, ms);
@@ -67,10 +69,9 @@ function setup() {
   for (const name of [
     'jogDial', 'jogDialRing', 'jogDialStep', 'jogDialPosition', 'jogDialPending',
     'jogDialMessage', 'jogDialCancelPending', 'jogDialSetReference', 'jogDialSetLower',
-    'jogDialSetUpper', 'jogDialBlock', 'jogDialEnabled', 'jogDialEnabledState',
+    'jogDialSetUpper', 'jogDialBlock',
     'jogTargetInput', 'jogTargetMoveButton', 'jogDialMinus', 'jogDialPlus',
   ]) el[name] = fakeElement();
-  el.jogDialEnabled.checked = true;
   el.jogDialStep.value = '1';
   const state = {
     motors: [{
@@ -94,7 +95,7 @@ test('동작 취소 drops the unsent amount, stops motion, and the in-flight rep
   const { el, wheel, pendingText } = setup();
   wheel();                         // +1 · 바로 날아간다
   assert.equal(jogCalls().length, 1);
-  assert.equal(jogCalls()[0].body.relative_deg, 1);
+  assert.equal(sentDeg(jogCalls()[0].body.relative_rad), 1);
   const inFlightJog = jogCalls()[0];
   wheel(); wheel(); wheel();       // +3 · 앞 조그가 도는 동안 쌓인다
   assert.match(pendingText(), /남은 이동 \+3\.00°/);
@@ -136,11 +137,10 @@ test('nothing selected means nothing moves · not motor 0', () => {
   for (const name of [
     'jogDial', 'jogDialRing', 'jogDialStep', 'jogDialPosition', 'jogDialPending',
     'jogDialMessage', 'jogDialCancelPending', 'jogDialSetReference', 'jogDialSetLower',
-    'jogDialSetUpper', 'jogDialBlock', 'jogDialEnabled', 'jogDialEnabledState',
+    'jogDialSetUpper', 'jogDialBlock',
     'jogTargetInput', 'jogTargetMoveButton', 'jogDialMinus', 'jogDialPlus',
   ]) el[name] = fakeElement();
   el.jogDialStep.value = '1';
-  el.jogDialEnabled.checked = true;
   const state = { motors: [{ controller_index: 0, state: 'detected', servo_on: true, fault: false, position_deg: 0, motor_type: 'ac_servo' }] };
   for (const selected of [null, '', undefined]) {
     const dial = createJogDialController({ el, getLatestState: () => state, getSelectedAxis: () => selected });
@@ -160,12 +160,8 @@ test('동작 취소 is always pressable', () => {
   assert.equal(el.jogDialCancelPending.disabled, false, '움직이는 중에도 켜져 있다');
 });
 
-test('dial OFF · typed target moves in motor deg and refuses outside the limits', async () => {
+test('typed target (always shown next to the dial) moves in motor deg and refuses outside the limits', async () => {
   const { el } = setup();
-  el.jogDialEnabled.checked = false;
-  el.jogDialEnabled.dispatch('change');
-  assert.ok(el.jogDialBlock.classList.contains('dial-off'));
-  assert.equal(el.jogDialEnabledState.textContent, 'OFF');
   assert.equal(el.jogTargetInput.value, '0', '안 고쳤으면 지금 모터 위치');
 
   el.jogTargetInput.value = '2000';     // 상한 1000 밖
@@ -181,13 +177,29 @@ test('dial OFF · typed target moves in motor deg and refuses outside the limits
   el.jogTargetInput.dispatch('keydown', { key: 'Enter' });
   assert.equal(calls.length, 1);
   assert.match(String(calls[0].url), /\/api\/motion-test\/ac-servo\/action$/);
-  assert.deepEqual(calls[0].body, { axis: 1, target_deg: 250.5 });
+  assert.deepEqual(Object.keys(calls[0].body), ['axis', 'target_rad']);
+  assert.equal(calls[0].body.axis, 1);
+  assert.equal(sentDeg(calls[0].body.target_rad), 250.5);
   // 앞 요청이 도는 동안엔 또 안 보낸다
   el.jogTargetMoveButton.dispatch('click');
   assert.equal(calls.length, 1);
   respond({ success: true, message: 'ok' });
   await tick(); await tick();
   assert.match(el.jogDialMessage.textContent, /목표 250\.5° 로 이동 시작/);
+});
+
+// 다이얼과 목표 칸이 늘 같이 보인다 · 다이얼 양이 남았으면 목표 이동은 기다린다 · 2026-10-06
+test('typed target waits while dial ticks are still pending', async () => {
+  const { el, wheel, pendingText } = setup();
+  wheel();                         // 날아감
+  wheel();                         // 쌓임 +1
+  assert.match(pendingText(), /남은 이동/);
+  el.jogTargetInput.value = '10';
+  el.jogTargetInput.dispatch('input');
+  assert.equal(el.jogTargetMoveButton.disabled, true);
+  el.jogTargetInput.dispatch('keydown', { key: 'Enter' });
+  assert.equal(calls.filter((call) => /\/action$/.test(String(call.url))).length, 0);
+  assert.match(el.jogDialMessage.textContent, /앞 이동이 끝난 뒤에/);
 });
 
 test('the tick strip slides with input and there is no needle', () => {
@@ -210,7 +222,7 @@ test('the tick strip slides with input and there is no needle', () => {
 });
 
 
-test('썸휠 · 오른쪽으로 24px 끌면 +1칸 · 왼쪽은 −1칸 · 띠는 손을 따라 밀린다', () => {
+test('다이얼 · 오른쪽으로 24px 끌면 +1칸 · 왼쪽은 −1칸 · 띠는 손을 따라 밀린다', () => {
   const { el, pendingText } = setup();
   el.jogDial.dispatch('pointerdown', { clientX: 100, clientY: 40, pointerId: 1 });
   el.jogDial.dispatch('pointermove', { clientX: 112, clientY: 40 });   // 반 칸 · 아직 안 쌓임
@@ -219,7 +231,7 @@ test('썸휠 · 오른쪽으로 24px 끌면 +1칸 · 왼쪽은 −1칸 · 띠는
   assert.equal(jogCalls().length, 0);
   el.jogDial.dispatch('pointermove', { clientX: 148, clientY: 40 });   // 누적 48px = 2칸 · 바로 날아간다
   assert.equal(jogCalls().length, 1);
-  assert.equal(jogCalls()[0].body.relative_deg, 2);
+  assert.equal(sentDeg(jogCalls()[0].body.relative_rad), 2);
   el.jogDial.dispatch('pointermove', { clientX: 124, clientY: 40 });   // 왼쪽 24px = −1칸 · 앞 조그가 도는 동안 쌓임
   assert.match(pendingText(), /남은 이동 -1\.00°/);
   assert.equal(el.jogDialRing.style.backgroundPositionX, '24px');      // 띠는 손 위치 그대로 (100 → 124)
@@ -232,7 +244,7 @@ test('◀ ▶ 화살표 · 한 번에 한 칸 · 잡고 있으면 반복 · 놓�
   assert.equal(el.jogDialPlus.disabled, false, '모터가 골라져 있으면 화살표가 열린다');
   el.jogDialPlus.dispatch('pointerdown', { pointerId: 1 });
   assert.equal(jogCalls().length, 1);
-  assert.equal(jogCalls()[0].body.relative_deg, 1);
+  assert.equal(sentDeg(jogCalls()[0].body.relative_rad), 1);
   el.jogDialPlus.dispatch('pointerup', { pointerId: 1 });
   await new Promise((resolve) => setTimeout(resolve, 600));
   assert.doesNotMatch(pendingText(), /남은 이동/, '놓은 뒤에는 더 쌓이면 안 된다');

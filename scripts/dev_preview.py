@@ -23,6 +23,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import math
 import sys
 import time
 from pathlib import Path
@@ -58,6 +59,14 @@ state = {
     'targets': {axis: 0.0 for _, axis, *_ in JOINTS},
     'servo_on': True,
     'generation': 1,
+    # 재생 목록 흉내 · 수정 목록 35 · 「재생 등록」·「목록에 추가」·↑↓ 가 여기를 바꾼다
+    'playlist': [
+        'floating_no1_motion1.json',
+        'floating_no2_motion1.json',
+        'floating_animation_sample.json',
+    ],
+    'group_sync_mode': 'lockstep',
+    'run_started': None,
     'live_overrides': {},
 }
 
@@ -71,18 +80,69 @@ def mapping_rows():
             'motor_axis': axis,
             'gear_ratio': gear,
             'invert': False,
-            'offset_deg': 0.0,
+            # 서버처럼 각도 칸은 rad · 화면이 deg 로 바꿔 보여 준다 · 수정 목록 6
+            'offset_rad': 0.0,
             'scale': 1.0,
-            'reference_position_deg': 0.0,
+            'reference_position_rad': 0.0,
             'reference_enabled': True,
-            'motion_lower_deg': lower,
-            'motion_upper_deg': upper,
+            'motion_lower_rad': math.radians(lower),
+            'motion_upper_rad': math.radians(upper),
             'initial_mode': 'first_frame',
-            'initial_position_deg': 0.0,
+            'initial_motion_position_rad': 0.0,
             'initial_move_time_sec': 5.0,
         }
         for name, axis, gear, lower, upper in JOINTS
     ]
+
+
+FAKE_ITEM_SEC = 6.0      # 재생 목록 흉내 · 항목마다 초기 이동 2초 + 재생 4초
+
+
+def _fake_run_status():
+    """연속 시작을 누르면 목록을 차례로 도는 척한다 · 「2/3 · B · 다음 C」 확인용"""
+    playlist = list(state['playlist'])
+    if state['run_started'] is None or not playlist:
+        return {'state': 'ready', 'message': '프리뷰 · 실행 준비 검사 흉내',
+                'motion_file_id': playlist[0] if playlist else ''}
+    elapsed = time.time() - state['run_started']
+    cycle = int(elapsed // FAKE_ITEM_SEC)
+    within = elapsed - cycle * FAKE_ITEM_SEC
+    index = cycle % len(playlist)
+    initializing = within < 2.0 and cycle > 0
+    return {
+        'state': 'initializing' if initializing else 'running',
+        'phase': 'initializing' if initializing else 'running',
+        'message': '프리뷰 · 목록 재생 흉내',
+        'run_mode': 'continuous',
+        'motion_file_id': playlist[index],
+        'motion_playlist': playlist if len(playlist) > 1 else [],
+        'playlist_index': index,
+        'playlist_length': len(playlist) if len(playlist) > 1 else 0,
+        'cycle_count': cycle,
+        'current_cycle': cycle + 1,
+        'progress': {
+            'elapsed_sec': within if initializing else within - (0.0 if cycle == 0 else 2.0),
+            'duration_sec': 2.0 if initializing else 4.0,
+            'ratio': 0.0,
+            'sample_index': 0,
+            'active_axis_count': len(JOINTS),
+        },
+        'summary': {'target_cycle_count': 0},
+    }
+
+
+def _mapping_doc():
+    playlist = list(state['playlist'])
+    mapping = {
+        'name': 'motion_axis',
+        'file_id': 'motion_axis.yaml',
+        'angle_unit': 'rad',
+        'motion_file_id': playlist[0] if playlist else '',
+        'mappings': mapping_rows(),
+    }
+    if len(playlist) > 1:
+        mapping['motion_playlist'] = playlist
+    return mapping
 
 
 def snapshot():
@@ -98,9 +158,11 @@ def snapshot():
             'state': 'detected',
             'servo_on': state['servo_on'],
             'fault': False,
-            'position_deg': round(position, 3),
-            'position': round(position, 3),
-            'velocity_deg_s': 0.0,
+            # 서버처럼 rad · 화면이 deg 로 바꿔 보여 준다 · 수정 목록 6-5
+            'position_rad': math.radians(position),
+            'velocity_rad_s': 0.0,
+            # 서버가 매핑 식으로 되돌린 실제 조인트 각도 흉내(기준점 0 · 감속비만) · 7-c
+            'motion_actual_rad': math.radians(position / gear),
             'torque_percent': 3.0,
             'motion_id': name,
             'lower': -36000.0,
@@ -123,24 +185,26 @@ def snapshot():
         },
         'motion_state_age_sec': 0.0,
         'motion_run_status': {
-            'state': 'ready',
-            'message': '프리뷰 · 실행 준비 검사 흉내',
+            **_fake_run_status(),
             'live_overrides': state['live_overrides'],
-            'automation': {'repeat_mode': 'reinitialize'},
+            'automation': {
+                'repeat_mode': 'reinitialize',
+                'group_sync_mode': state['group_sync_mode'],
+            },
             'axes': [
                 {
                     'motion_id': name,
                     'motor_axis': axis,
                     'motor_type': 'ac_servo',
-                    'motion_limit_lower_deg': lower,
-                    'motion_limit_upper_deg': upper,
-                    'initial_motor_target_deg': 0.0,
-                    'target_min_deg': lower * gear,
-                    'target_max_deg': upper * gear,
-                    'loop_start_motion_deg': 0.0,
-                    'loop_end_motion_deg': 0.0,
-                    'loop_delta_deg': 0.0,
-                    'loop_tolerance_deg': 5.0,
+                    'motion_limit_lower_rad': math.radians(lower),
+                    'motion_limit_upper_rad': math.radians(upper),
+                    'initial_motor_target_rad': 0.0,
+                    'target_min_rad': math.radians(lower * gear),
+                    'target_max_rad': math.radians(upper * gear),
+                    'loop_start_motion_rad': 0.0,
+                    'loop_end_motion_rad': 0.0,
+                    'loop_delta_rad': 0.0,
+                    'loop_tolerance_rad': math.radians(5.0),
                     'motion_clamped': False,
                 }
                 for name, axis, gear, lower, upper in JOINTS
@@ -235,7 +299,7 @@ async def ws_manual_stream(websocket: WebSocket):
             kind = message.get('type')
             if kind == 'target':
                 axis = int(message.get('axis'))
-                state['targets'][axis] = float(message.get('target_deg'))
+                state['targets'][axis] = math.degrees(float(message.get('target_rad')))
             elif kind == 'release':
                 for axis in message.get('axes') or []:
                     state['targets'][int(axis)] = state['positions'][int(axis)]
@@ -370,11 +434,54 @@ async def preview_motion_file(file_id: str, request: Request):
     return result
 
 
+@app.post('/api/motion-mappings/motion-file')
+async def save_registered_playlist(request: Request):
+    """재생 등록 · 재생 목록 흉내 · 메모리에만 · 수정 목록 35"""
+    body = await request.json()
+    if 'motion_playlist' in body:
+        playlist = [str(item) for item in body.get('motion_playlist') or [] if str(item)]
+    else:
+        single = str(body.get('motion_file_id') or '')
+        playlist = [single] if single else []
+    state['playlist'] = playlist
+    MAPPING_FILE['motion_file_id'] = playlist[0] if playlist else ''
+    message = (
+        f'재생 목록 등록 완료: {len(playlist)}개 · ' + ' → '.join(playlist)
+        if len(playlist) > 1
+        else (f'재생 등록 완료: {playlist[0]}' if playlist else '재생 등록을 해제했습니다')
+    )
+    return {'success': True, 'message': message, 'file': MAPPING_FILE,
+            'motion_file_id': MAPPING_FILE['motion_file_id'],
+            'motion_playlist': playlist,
+            'project_generation': state['generation']}
+
+
+@app.put('/api/motion-run/automation')
+async def configure_automation(request: Request):
+    body = await request.json()
+    if body.get('group_sync_mode') in ('lockstep', 'independent'):
+        state['group_sync_mode'] = body['group_sync_mode']
+    return {'success': True, 'message': '프리뷰 · 자동 반복 설정 저장',
+            'status': snapshot()['motion_run_status'],
+            'project_generation': state['generation']}
+
+
+@app.post('/api/motion-run/stop')
+@app.post('/api/motion-run/stop-after-cycle')
+async def stop_motion_run():
+    state['run_started'] = None
+    return {'success': True, 'message': '프리뷰 · 정지',
+            'status': {'state': 'stopped'},
+            'project_generation': state['generation']}
+
+
 @app.post('/api/motion-run/start')
 async def start_motion_run(request: Request):
     """가짜 재생 · with_mujoco 면 그 자리에서 뷰어를 같이 띄워 흐름을 보여 준다."""
     body = await request.json()
     message = '프리뷰 · 재생 흉내'
+    if body.get('run_mode') == 'continuous':
+        state['run_started'] = time.time()
     if body.get('with_mujoco'):
         motion = EXPORT_DIR / str(body.get('motion_file_id') or '')
         result = _launch_replay(motion, body.get('mujoco_fps'))
@@ -425,12 +532,7 @@ CANNED = {
         'success': True,
         'file': MAPPING_FILE,
         'files': [MAPPING_FILE],
-        'mapping': {
-            'name': 'motion_axis',
-            'file_id': 'motion_axis.yaml',
-            'motion_file_id': 'floating_no1_motion1.json',
-            'mappings': mapping_rows(),
-        },
+        'mapping': _mapping_doc(),
         'validation': None,
     },
     ('GET', '/api/projects'): lambda: {
@@ -472,7 +574,7 @@ async def fake_jog(request: Request):
     """가짜 조그 · 목표에 상대 이동을 더한다 · 앞 조그가 덜 끝났으면 거절(실물과 같게)"""
     body = await request.json()
     axis = int(body.get('axis'))
-    delta = float(body.get('relative_deg') or 0.0)
+    delta = math.degrees(float(body.get('relative_rad') or 0.0))
     if state['run_mode'] == 'off':
         return {'success': False, 'message': '오프 모드 · 명령이 차단되어 있습니다',
                 'project_generation': state['generation']}
@@ -529,6 +631,128 @@ async def robot_pack_mapping_diff():
     result = robot_pack_service.mapping_diff(DEV_PACK_WORKSPACE, {'mappings': mapping_rows()})
     result['mapping_file'] = 'dev_preview (가짜 모션축 설정)'
     return result
+
+
+# --------------------------------------------------------------------------- #
+# 웹 3D 「Blender 뷰」 흉내 · 수정 목록 50 · 상자 헤드 4개가 4초 동안 고개를 돌리는 glb
+# --------------------------------------------------------------------------- #
+
+def _demo_glb() -> bytes:
+    """진짜 Blender 장면 대신 · glTF 2.0 바이너리를 손으로 짠다 (Y-up · 정면 +Z)"""
+    import struct
+    vertices = [(x, y, z) for x in (-0.2, 0.2) for y in (-0.2, 0.2) for z in (-0.2, 0.2)]
+    faces = [(0, 1, 3), (0, 3, 2), (4, 6, 7), (4, 7, 5), (0, 4, 5), (0, 5, 1),
+             (2, 3, 7), (2, 7, 6), (0, 2, 6), (0, 6, 4), (1, 5, 7), (1, 7, 3)]
+    half = math.sqrt(0.5)
+    times = [0.0, 2.0, 4.0]
+    turns = [(0, 0, 0, 1), (0, half, 0, half), (0, 0, 0, 1)]
+    blobs = [
+        b''.join(struct.pack('<3f', *v) for v in vertices),
+        b''.join(struct.pack('<3H', *f) for f in faces),   # 72 바이트
+        struct.pack('<3f', *times),
+        b''.join(struct.pack('<4f', *q) for q in turns),
+    ]
+    views, offset = [], 0
+    for blob in blobs:
+        views.append({'buffer': 0, 'byteOffset': offset, 'byteLength': len(blob)})
+        offset += len(blob)
+    accessors = [
+        {'bufferView': 0, 'componentType': 5126, 'count': 8, 'type': 'VEC3',
+         'min': [-0.2, -0.2, -0.2], 'max': [0.2, 0.2, 0.2]},
+        {'bufferView': 1, 'componentType': 5123, 'count': 36, 'type': 'SCALAR'},
+        {'bufferView': 2, 'componentType': 5126, 'count': 3, 'type': 'SCALAR', 'min': [0.0], 'max': [4.0]},
+        {'bufferView': 3, 'componentType': 5126, 'count': 3, 'type': 'VEC4'},
+    ]
+    nodes = [{'name': f'Head_{i + 1}', 'mesh': 0, 'translation': [(i - 1.5) * 0.8, 1.5, 0.0]} for i in range(4)]
+    nodes.append({'name': 'Store_Floor', 'mesh': 0, 'scale': [10.0, 0.05, 6.0]})
+    gltf = {
+        'asset': {'version': '2.0', 'generator': 'robot_web dev_preview'},
+        'scene': 0, 'scenes': [{'nodes': list(range(len(nodes)))}],
+        'nodes': nodes,
+        'meshes': [{'primitives': [{'attributes': {'POSITION': 0}, 'indices': 1, 'material': 0}]}],
+        'materials': [{'pbrMetallicRoughness': {'baseColorFactor': [0.8, 0.7, 0.6, 1.0], 'roughnessFactor': 0.8}}],
+        'animations': [{'name': 'Look_Around', 'samplers': [{'input': 2, 'output': 3}],
+                        'channels': [{'sampler': 0, 'target': {'node': i, 'path': 'rotation'}} for i in range(4)]}],
+        'buffers': [{'byteLength': offset}], 'bufferViews': views, 'accessors': accessors,
+    }
+    body = json.dumps(gltf).encode('utf-8')
+    body += b' ' * ((4 - len(body) % 4) % 4)
+    binary = b''.join(blobs)
+    binary += b'\x00' * ((4 - len(binary) % 4) % 4)
+    total = 12 + 8 + len(body) + 8 + len(binary)
+    return (b'glTF' + struct.pack('<II', 2, total) + struct.pack('<I', len(body)) + b'JSON' + body
+            + struct.pack('<I', len(binary)) + b'BIN\x00' + binary)
+
+
+DEMO_GLB = _demo_glb()
+
+
+def _demo_scene() -> dict:
+    """MuJoCo 장면 JSON 흉내 · 헤드 5축(목 좌우·상하 · 눈 상하 · 눈 좌우 둘) · z-up · m"""
+    def body(i, name, parent, pos):
+        return {'id': i, 'name': name, 'parent': parent, 'pos': pos, 'quat': [1, 0, 0, 0]}
+
+    def hinge(i, name, body_id, adr, axis):
+        return {'id': i, 'name': name, 'body': body_id, 'type': 'hinge', 'qposadr': adr,
+                'axis': axis, 'pos': [0, 0, 0]}
+
+    def geom(body_id, kind, size, pos, rgba):
+        return {'body': body_id, 'type': kind, 'size': size, 'pos': pos, 'quat': [1, 0, 0, 0],
+                'rgba': rgba, 'group': 0}
+
+    gray, skin, white = [0.55, 0.58, 0.62, 1], [0.85, 0.75, 0.65, 1], [0.95, 0.95, 0.95, 1]
+    return {
+        'bodies': [
+            body(0, 'world', -1, [0, 0, 0]), body(1, 'base', 0, [0, 0, 2.0]),
+            body(2, 'yaw', 1, [0, 0, -0.3]), body(3, 'pitch', 2, [0, 0, -0.2]),
+            body(4, 'eye_pitch', 3, [0, -0.32, 0.05]),
+            body(5, 'eye_l', 4, [0.12, 0, 0]), body(6, 'eye_r', 4, [-0.12, 0, 0]),
+        ],
+        'joints': [
+            hinge(0, 'neck_yaw', 2, 0, [0, 0, 1]), hinge(1, 'neck_pitch', 3, 1, [1, 0, 0]),
+            hinge(2, 'eye_pitch', 4, 2, [1, 0, 0]), hinge(3, 'eye_yaw_l', 5, 3, [0, 0, 1]),
+            hinge(4, 'eye_yaw_r', 6, 4, [0, 0, 1]),
+        ],
+        'geoms': [
+            geom(0, 'plane', [3, 3, 0.01], [0, 0, 0], [0.4, 0.45, 0.5, 1]),
+            geom(1, 'cylinder', [0.04, 0.15, 0], [0, 0, 0.15], gray),
+            geom(2, 'box', [0.1, 0.1, 0.1], [0, 0, 0], gray),
+            geom(3, 'box', [0.3, 0.3, 0.25], [0, 0, -0.1], skin),
+            geom(5, 'sphere', [0.07, 0, 0], [0, 0, 0], white),
+            geom(6, 'sphere', [0.07, 0, 0], [0, 0, 0], white),
+            geom(5, 'sphere', [0.03, 0, 0], [0, -0.06, 0], [0.1, 0.1, 0.1, 1]),
+            geom(6, 'sphere', [0.03, 0, 0], [0, -0.06, 0], [0.1, 0.1, 0.1, 1]),
+        ],
+        'meshes': {},
+        'camera': {'lookat': [0, 0, 1.6], 'distance': 2.2, 'azimuth': -90, 'elevation': -10},
+        'axes': [
+            {'joint': 'neck_pitch', 'motion_id': 'Neck_Pitch'},
+            {'joint': 'neck_yaw', 'motion_id': 'Neck_Yaw'},
+            {'joint': 'eye_pitch', 'motion_id': 'Eye_Pitch'},
+            {'joint': 'eye_yaw_l', 'motion_id': 'Eye_Yaw_L'},
+            {'joint': 'eye_yaw_r', 'motion_id': 'Eye_Yaw_R'},
+        ],
+    }
+
+
+@app.get('/api/preview/scene/data')
+async def preview_scene_data():
+    # 진짜 서버는 모든 응답 머리에 프로젝트 세대를 싣는다 · 화면이 그것으로 늦은 응답을 가린다
+    return JSONResponse(_demo_scene(), headers={'X-Project-Generation': str(state['generation'])})
+
+
+@app.get('/api/preview/scene')
+async def preview_scene_state():
+    # MuJoCo 장면(가짜 헤드 5축)과 Blender 뷰가 둘 다 있는 팩
+    return {'state': 'ready', 'message': '프리뷰 · 가짜 MuJoCo 장면 · Blender 뷰도 있음',
+            'blender': {'available': True, 'size_bytes': len(DEMO_GLB), 'fingerprint': 'devpreview000001'},
+            'project_generation': state['generation']}
+
+
+@app.get('/api/preview/blender-scene')
+async def preview_blender_scene():
+    from fastapi import Response
+    return Response(DEMO_GLB, media_type='model/gltf-binary', headers={'Cache-Control': 'no-cache'})
 
 
 @app.put('/api/schedule/mode')

@@ -94,6 +94,14 @@ def register_motion_run_routes(app: FastAPI, bridge, safety_first_stop) -> None:
             raise HTTPException(status_code=404, detail='3D 장면이 아직 없습니다')
         return FileResponse(str(path), media_type='application/json', headers={'Cache-Control': 'no-cache'})
 
+    # Blender 뷰 · 팩의 scene.glb 그대로 · 수정 목록 50
+    @app.get('/api/preview/blender-scene')
+    async def preview_blender_scene():
+        path = await asyncio.to_thread(bridge.preview_blender_scene_path)
+        if path is None:
+            raise HTTPException(status_code=404, detail='로봇 팩에 scene.glb 가 없습니다')
+        return FileResponse(str(path), media_type='model/gltf-binary', headers={'Cache-Control': 'no-cache'})
+
     @app.get('/api/motion-files/{file_id}/preview-frames')
     async def preview_motion_frames(file_id: str):
         return await asyncio.to_thread(bridge.preview_motion_frames, file_id)
@@ -157,5 +165,12 @@ def register_motion_run_routes(app: FastAPI, bridge, safety_first_stop) -> None:
         )
 
     @app.post('/api/motion-run/stop-after-cycle')
-    async def motion_run_stop_after_cycle_api():
-        return await asyncio.to_thread(bridge.motion_run_stop_after_cycle)
+    async def motion_run_stop_after_cycle_api(request: Request):
+        # 몸통은 선택 · 스케줄은 `reason: schedule_end` 를 싣는다 · 수정 목록 36
+        try:
+            body = await request.json()
+        except Exception:  # noqa: BLE001 · 빈 몸통 = 사람이 누른 정지
+            body = {}
+        return await asyncio.to_thread(
+            bridge.motion_run_stop_after_cycle, body if isinstance(body, dict) else {},
+        )

@@ -98,3 +98,35 @@ def test_systemd_timeout_is_reported_as_runtime_error(monkeypatch):
         MotorRestartCoordinator._read_service_identity(
             MotorRestartCoordinator.SERVICE
         )
+
+
+def test_web_restart_clears_the_systemd_start_limit_first(monkeypatch):
+    """수정 목록 3-2 · 통신 루프가 되풀이해 죽어 재시작 제한에 걸려도 웹 재시작은 된다"""
+    calls = []
+
+    def run(args, **_kwargs):
+        calls.append(list(args))
+        return subprocess.CompletedProcess(args, 0, '', '')
+
+    monkeypatch.setattr('motion_web_bridge.motor_restart_coordinator.subprocess.run', run)
+    MotorRestartCoordinator._restart_managed_service(MotorRestartCoordinator.SERVICE)
+    service = MotorRestartCoordinator.SERVICE
+    assert calls == [
+        ['/usr/bin/systemctl', '--user', 'reset-failed', service],
+        ['/usr/bin/systemctl', '--user', 'restart', service],
+    ]
+
+
+def test_motor_service_restarts_on_failure_with_a_start_limit():
+    from pathlib import Path
+    unit = (Path(__file__).resolve().parents[1] / 'deploy' / 'motion-motor.service.in').read_text(encoding='utf-8')
+    unit_section = unit.split('[Service]')[0]
+    assert 'StartLimitIntervalSec=60' in unit_section and 'StartLimitBurst=5' in unit_section
+    assert 'Restart=on-failure' in unit and 'RestartSec=3' in unit
+    node = (
+        Path(__file__).resolve().parents[2] / 'motion_system' / 'ros2' / 'motion_system_ros2'
+        / 'motion_control_bridge' / 'src' / 'motor_manager_node.cpp'
+    ).read_text(encoding='utf-8')
+    # 통신 루프가 예외로 끝나면 0 이 아닌 코드로 나가야 systemd 가 다시 띄운다
+    assert 'run_failed_.store(true, std::memory_order_release);' in node
+    assert 'return failed ? 70 : 0;' in node

@@ -7,6 +7,7 @@ import {
   fetchMotorScanProgress,
   writeEthercatAlias,
   saveMotorConfig,
+  requestDriveMaintenance,
 } from './api.js';
 import {
   clone,
@@ -1233,9 +1234,9 @@ export function createMotorConfigController({
       rated_speed_rpm: '정격 속도',
       lower: '최소 위치',
       upper: '최대 위치',
-      speed: '속도 설정값',
-      acceleration: '가속도',
-      deceleration: '감속도',
+      speed: '최대 속도',
+      acceleration: '최대 가속도',
+      deceleration: '최대 감속도',
       profile_velocity: '프로파일 속도',
       profile_acceleration: '프로파일 가속도',
       profile_deceleration: '프로파일 감속도',
@@ -1928,6 +1929,12 @@ export function createMotorConfigController({
         ...(next.config || {}),
         controller_index: axis,
       };
+    } else if (field === SCHEDULE_END_FIELD) {
+      // 스케줄 끝에 이 모터를 끌까 · 켬이 기본이라 끌 때만 적는다 · 수정 목록 36
+      const config = { ...(next.config || {}) };
+      if (value === false) config[field] = false;
+      else delete config[field];
+      next.config = config;
     } else if (CONFIG_EDIT_FIELDS.includes(field)) {
       // 모터별 운전 한계·드라이브 설정 · 빈 값이면 오버라이드를 거둔다
       const text = String(value ?? '').trim();
@@ -1995,37 +2002,158 @@ export function createMotorConfigController({
    */
   const AXIS_LIMIT_FIELDS = ['profile_velocity'];
 
+  /** MINAS 속도·가속 4칸 · 운전값 2개 + 상한 2개 · 수정 목록 37 (2026-10-06)
+   *
+   * 프로파일 속도(0x6081 · 평소 최고 속도) · 최대 속도(rpm → 0x607F·0x6080 같은 값) ·
+   * 프로파일 가속도(0x6083·0x6084) · 최대 가속도(0x60C5·0x60C6) · 최대 ≥ 프로파일.
+   * 빈 칸 = 지금 값 유지 · 다이나믹셀은 뜻이 달라 MINAS 줄에만 보인다.
+   */
+  const MINAS_RATE_FIELDS = ['max_speed_rpm', 'profile_acceleration', 'acceleration'];
+  const MINAS_RATE_LABELS = {
+    max_speed_rpm: ['최대 속도 (rpm)', '모터축 최대 회전 속도 · 0x607F(count/s 로 환산)와 0x6080(rpm) 둘 다 이 값 · PP 외 모드에서도 보호'],
+    profile_acceleration: ['프로파일 가속도 (deg/s²)', '평소 가속·감속 · 0x6083·0x6084'],
+    acceleration: ['최대 가속도 (deg/s²)', '가속·감속 상한 · 0x60C5·0x60C6 · 프로파일 가속도 이상'],
+  };
+
   /** MINAS 드라이브 파라미터 · param_file(SDO 목록)로 부팅 때 써진다 · P8
    *
-   * 브레이크 두 값은 ms · 앱솔루트는 Pr0.15 (0 인크리멘털 · 1 절대 ·
-   * 2 절대-다회전무시 · **전원 재투입 후 반영**) · 빈 칸 = 드라이브 값 유지.
+   * 브레이크 두 값은 ms (속성 B · 바로 반영) · 빈 칸 = 드라이브 값 유지.
    *
-   * 리밋 스위치는 Pr5.04 (0 사용·그 방향 금지 · 1 사용 안 함 · 2 사용·밟으면
-   * Err38 알람) · **스위치가 배선되지 않은 축에 0/2 를 넣으면** b접점 입력이
-   * 열린 채라 「눌림」으로 읽혀 그 방향으로 못 움직이거나 알람이 뜬다.
+   * 2026-10-06 · 수정 목록 34 · 매뉴얼(SX-DSV03241) 기준으로 바로잡음
+   * - 앱솔루트(Pr0.15)는 **고치지 않고 보여 주기만** · 값 뜻이 화면과 반대였다
+   *   (매뉴얼 0 = 절대 · 1 = 인크리멘털) · 속성 C 라 부팅 RAM 쓰기로는 반영도
+   *   안 된다 · 바꾸는 일은 EEPROM 저장(수정 목록 15)과 같이
+   * - 리밋 스위치(Pr5.04)는 화면에서 뺐다 · 「1 사용 안 함」은 실제로는 CiA402
+   *   감속 정지(리밋 살아 있음) · 필요하면 명령어로 (사용법 12장)
    */
   const DRIVE_PARAM_FIELDS = [
-    'brake_delay_stop_ms', 'brake_delay_run_ms', 'encoder_absolute_mode', 'limit_switch_mode',
-    'overload_monitor',
+    'brake_delay_stop_ms', 'brake_delay_run_ms', 'overload_monitor',
   ];
-  const CONFIG_EDIT_FIELDS = [...AXIS_LIMIT_FIELDS, ...DRIVE_PARAM_FIELDS];
+
+  /** 드라이브에서 읽어 보여 주기만 하는 값 · 검색 때 SDO 로 읽는다 */
+  const DRIVE_READ_ONLY_FIELDS = ['encoder_absolute_mode'];
+
+  /** Pr0.15 값의 뜻 · 매뉴얼 SX-DSV03241 R10.0 p.176 */
+  const ABSOLUTE_MODE_TEXT = {
+    0: '절대',
+    1: '인크리멘털',
+    2: '절대 · 다회전 넘침 무시',
+    3: '절대 · 한 바퀴만',
+    4: '절대 · 연속 회전',
+  };
+  const CONFIG_EDIT_FIELDS = [...AXIS_LIMIT_FIELDS, ...MINAS_RATE_FIELDS, ...DRIVE_PARAM_FIELDS];
+
+  /** 최대 ≥ 프로파일 · 서버(`axis_speed_limit_error`)와 같은 규칙 · 어기면 저장 전에 알린다 */
+  function axisRateError(config = {}) {
+    const value = (key) => {
+      const number = Number(config[key]);
+      return Number.isFinite(number) && number > 0 ? number : null;
+    };
+    const profileVelocity = value('profile_velocity');
+    const maxRpm = value('max_speed_rpm');
+    if (profileVelocity && maxRpm && profileVelocity > maxRpm * 6) {
+      return `프로파일 속도 ${profileVelocity} deg/s 가 최대 속도 ${maxRpm} rpm (${maxRpm * 6} deg/s) 보다 큽니다`;
+    }
+    const profileAcceleration = value('profile_acceleration');
+    const maxAcceleration = value('acceleration');
+    if (profileAcceleration && maxAcceleration && profileAcceleration > maxAcceleration) {
+      return `프로파일 가속도 ${profileAcceleration} 가 최대 가속도 ${maxAcceleration} 보다 큽니다`;
+    }
+    return '';
+  }
+
+  /** MINAS 드라이브 정비 · 확인 → 서버(Motor Manager 잠시 정지 → ethercat download) · 수정 목록 15 + 34-3 */
+  const MAINTENANCE_TEXT = {
+    eeprom_save: {
+      title: 'EEPROM 저장',
+      body: '드라이브의 지금 값을 전원을 꺼도 남게 저장합니다.\n'
+        + 'Motor Manager 를 잠시 멈췄다가 다시 띄웁니다 (몇 초) · 그동안 모터는 서보가 풀릴 수 있습니다.\n'
+        + '저장 중(최대 10초) 드라이브 전원을 끄지 마세요.',
+    },
+    absolute_clear: {
+      title: '앱솔루트 다회전 클리어',
+      body: '엔코더의 회전 수 기록을 0 으로 지웁니다 · 위치 기준이 바뀝니다.\n'
+        + '서보가 꺼져 있어야 합니다 · 끝나면 드라이브 전원을 껐다 켜고 기준점을 다시 캡처하세요.\n'
+        + '그 전에는 재생하지 마세요.',
+    },
+  };
+
+  async function runDriveMaintenance(button) {
+    const action = button.dataset.axisMaintenance || '';
+    const axis = Number(button.dataset.axisMaintenanceIndex);
+    if (!Number.isInteger(axis) || axis < 0) {
+      setAxisMessage('정비할 모터 번호를 확인할 수 없습니다.', true);
+      return;
+    }
+    const payload = { action, axis, confirmed: true };
+    if (action === 'absolute_mode') {
+      const text = await showPrompt(
+        `${axis}번 모터 · 앱솔루트 방식(Pr0.15)을 바꾸고 EEPROM 에 저장합니다.\n`
+        + Object.entries(ABSOLUTE_MODE_TEXT).map(([value, label]) => `${value} = ${label}`).join(' · ')
+        + '\n드라이브 전원을 껐다 켜야 적용됩니다 · 0~4 중 하나를 입력하세요',
+        { title: '앱솔루트 방식 바꾸기', confirmLabel: '저장', defaultValue: '0' },
+      );
+      if (text === null || text === undefined) return;
+      const value = Number(String(text).trim());
+      if (!Number.isInteger(value) || !(value in ABSOLUTE_MODE_TEXT)) {
+        setAxisMessage('앱솔루트 방식은 0~4 중 하나입니다.', true);
+        return;
+      }
+      payload.value = value;
+    } else {
+      const text = MAINTENANCE_TEXT[action];
+      if (!text) return;
+      const confirmed = await showConfirm(`${axis}번 모터 · ${text.body}`, {
+        title: text.title,
+        confirmLabel: text.title,
+        tone: action === 'absolute_clear' ? 'danger' : 'warning',
+      });
+      if (!confirmed) return;
+    }
+    button.disabled = true;
+    setAxisMessage(`${axis}번 모터 드라이브 정비 중 · Motor Manager 를 잠시 멈춥니다`);
+    try {
+      const result = await requestDriveMaintenance(payload);
+      setAxisMessage(result?.message || '드라이브 정비 결과를 받지 못했습니다', result?.success === false);
+      if (result?.power_cycle_required) {
+        await showAlert(result.message, { title: '드라이브 전원 재투입 필요', tone: 'warning' });
+      }
+    } catch (error) {
+      setAxisMessage(`드라이브 정비 실패: ${error?.message || error}`, true);
+    } finally {
+      button.disabled = false;
+    }
+  }
+
+  /** 운영 시간이 끝나 기준점에 세운 뒤 이 모터 서보(토크)를 끈다 · 기본 켬 · 수정 목록 36 */
+  const SCHEDULE_END_FIELD = 'schedule_end_servo_off';
+
+  function rowTurnsOffAtEnd(row) {
+    return row?.motor?.config?.[SCHEDULE_END_FIELD] !== false;
+  }
 
   /** 화면 이름 · 칸 머리와 읽기용 이름 */
   const DRIVE_PARAM_LABELS = {
     brake_delay_stop_ms: ['브레이크·정지 (ms)', '브레이크 정지 지연 (ms)'],
     brake_delay_run_ms: ['브레이크·동작 (ms)', '브레이크 동작 설정 (ms)'],
-    encoder_absolute_mode: ['앱솔루트', '앱솔루트 모드 (0 인크리멘털 · 1 절대 · 2 절대-다회전무시)'],
-    limit_switch_mode: ['리밋 스위치', '리밋 스위치 (0 사용·그 방향 금지 · 1 사용 안 함 · 2 사용·알람)'],
+    encoder_absolute_mode: ['앱솔루트 (읽기)', '앱솔루트 방식 · 드라이브에서 읽은 값 · 바꾸기는 EEPROM 저장 기능과 함께 (수정 목록 15)'],
     // 값이 아니라 PDO 배선 · 4D29h 를 주기 데이터에 더한다 · 드라이브 Ver1.03 이상만
     overload_monitor: ['과부하율 읽기', '과부하율 읽기 (4D29h · 0 끔 · 1 켬 · 드라이브 소프트웨어 Ver1.03 이상만)'],
   };
 
   /** 정해진 값만 받는 항목 · 선택 상자로 그린다 · 빈 값 = 유지 (2026-10-02) */
   const DRIVE_PARAM_CHOICES = {
-    encoder_absolute_mode: [[0, '인크리멘털'], [1, '절대'], [2, '절대·다회전 무시']],
-    limit_switch_mode: [[0, '사용·그 방향 금지'], [1, '사용 안 함'], [2, '사용·알람(Err38)']],
     overload_monitor: [[0, '끔'], [1, '켬']],
   };
+
+  /** 앱솔루트 칸 · 읽은 값과 뜻 · 고칠 수 없음 */
+  function absoluteModeText(read) {
+    if (read.state === 'ok') {
+      const meaning = ABSOLUTE_MODE_TEXT[Number(read.value)];
+      return meaning ? `${read.value} ${meaning}` : `${read.value} (알 수 없는 값)`;
+    }
+    return read.state === 'failed' ? '읽기 실패' : '검색 후 표시';
+  }
 
   /** 마지막 모터 검색 때 드라이브에서 읽은 값 · 검색 결과에서만 온다 (이전 값 대체 없음)
    *
@@ -2077,9 +2205,6 @@ export function createMotorConfigController({
     if (text === '') return '';
     const value = Number(text);
     if (!Number.isInteger(value)) return `${DRIVE_PARAM_LABELS[field][1]} · 정수만 넣을 수 있습니다`;
-    if (['encoder_absolute_mode', 'limit_switch_mode'].includes(field) && ![0, 1, 2].includes(value)) {
-      return `${DRIVE_PARAM_LABELS[field][1]} · 0, 1, 2 중 하나만 됩니다`;
-    }
     if (field === 'overload_monitor' && ![0, 1].includes(value)) {
       return `${DRIVE_PARAM_LABELS[field][1]} · 0, 1 중 하나만 됩니다`;
     }
@@ -2095,7 +2220,9 @@ export function createMotorConfigController({
     const row = rowById(rowId);
     if (!row) return;
 
-    if (field === 'name') {
+    if (field === SCHEDULE_END_FIELD) {
+      setAxisEditValue(row, field, Boolean(input.checked));
+    } else if (field === 'name') {
       setAxisEditValue(row, 'name', input.value);
     } else if (field === 'driver_model') {
       setAxisEditValue(row, 'driver_model', input.value);
@@ -2122,6 +2249,14 @@ export function createMotorConfigController({
           return;
         }
       }
+      if (MINAS_RATE_FIELDS.includes(field) || field === 'profile_velocity') {
+        const rateError = axisRateError({ ...(row.motor?.config || {}), [field]: text });
+        if (rateError) {
+          resetAxisEditInput(input, row, field);
+          setAxisMessage(`${rateError} · 최대는 프로파일 이상이어야 합니다`, true);
+          return;
+        }
+      }
       setAxisEditValue(row, field, text);
       if (field === 'overload_monitor' && text === '1') {
         // 막지는 않는다 · 드라이브 버전을 아는 것은 사람이다 · 실패 증상만 말해 둔다
@@ -2130,19 +2265,6 @@ export function createMotorConfigController({
         setAxisMessage(
           '과부하율 읽기를 켰습니다 · 드라이브 소프트웨어 Ver1.03 미만이면 모터 제어가 뜨지 않습니다'
           + ' · 그때는 0 으로 되돌려 저장 · 반영은 「설정 적용 · 모터 재시작」',
-          true,
-        );
-        return;
-      }
-      if (field === 'limit_switch_mode' && (text === '0' || text === '2')) {
-        // 막지는 않는다 · 배선을 아는 것은 사람이다 · 다만 잘못 켰을 때의 증상을 말해 둔다
-        // (아래 일반 「변경됨」 문구가 덮지 않게 여기서 그리고 끝낸다)
-        lastAxisRenderSignature = '';
-        renderAxisSettings();
-        setAxisMessage(
-          '리밋 스위치를 켰습니다 · 스위치가 배선된 축에만 쓰세요 · 배선이 없으면 '
-          + (text === '0' ? '그 방향으로 못 움직입니다' : '바로 Err38 알람이 뜹니다')
-          + ' · 저장 후 「장비에 적용 · 모터 재시작」에서 반영',
           true,
         );
         return;
@@ -2459,6 +2581,9 @@ export function createMotorConfigController({
           const drive = rowDriveView(row);
           const showAcServoControls = rowMotorType(row) === 'ac_servo' &&
             Boolean(row.motor && !row.motor.deleted && row.motor.enabled);
+          // 다이나믹셀 · 토크 ON/OFF · 재부팅(하드웨어 오류 해제) · 수정 목록 24
+          const showDynamixelControls = rowMotorType(row) === 'dynamixel' &&
+            Boolean(row.motor && !row.motor.deleted && row.motor.enabled);
           return {
             row,
             settingText,
@@ -2487,14 +2612,16 @@ export function createMotorConfigController({
             connection,
             drive,
             showAcServoControls,
-            limits: Object.fromEntries(AXIS_LIMIT_FIELDS.map((field) => [field, {
+            showDynamixelControls,
+            limits: Object.fromEntries([...AXIS_LIMIT_FIELDS, ...MINAS_RATE_FIELDS].map((field) => [field, {
               value: rowLimitOverride(row, field),
               placeholder: rowLimitPlaceholder(row, field),
             }])),
             driveParams: Object.fromEntries(DRIVE_PARAM_FIELDS.map(
               (field) => [field, rowLimitOverride(row, field)],
             )),
-            driveRead: Object.fromEntries(DRIVE_PARAM_FIELDS.map(
+            endOff: rowTurnsOffAtEnd(row),
+            driveRead: Object.fromEntries([...DRIVE_PARAM_FIELDS, ...DRIVE_READ_ONLY_FIELDS].map(
               (field) => [field, driveReadValue(row, field)],
             )),
           };
@@ -2528,9 +2655,11 @@ export function createMotorConfigController({
         connection: view.connection,
         drive: view.drive,
         showAcServoControls: view.showAcServoControls,
+        showDynamixelControls: view.showDynamixelControls,
         limits: view.limits,
         driveParams: view.driveParams,
         driveRead: view.driveRead,
+        endOff: view.endOff,
       })));
 
       if (renderSignature !== lastAxisRenderSignature) {
@@ -2545,7 +2674,7 @@ export function createMotorConfigController({
                 <span class="axis-number-label mono">${displayText(view.axisValue)}</span>
                 <input class="axis-edit-input axis-name-input" aria-label="모터 이름" data-axis-edit="name" data-axis-row-id="${escapeHtml(row.id)}" value="${escapeHtml(view.name === '-' ? '' : view.name)}"${disabled}>
               </td>
-              <td class="axis-limits-cell" title="위 줄: 운전 속도(모터 deg/s · 빈 칸이면 드라이버 기본값 · 회색 = 실행 설정 값) · 하한·상한은 조인트 매핑에서 계산 · 아래 줄: MINAS 드라이브 설정(빈 칸 = 드라이브 값 유지 · 회색 = 마지막 모터 검색 때 드라이브에서 읽은 값 · 앱솔루트는 전원 재투입 후 반영)">
+              <td class="axis-limits-cell" title="위 줄: 운전 속도(모터 deg/s · 빈 칸이면 드라이버 기본값 · 회색 = 실행 설정 값) · 하한·상한은 조인트 매핑에서 계산 · 아래 줄: MINAS 드라이브 설정(빈 칸 = 드라이브 값 유지 · 회색 = 마지막 모터 검색 때 드라이브에서 읽은 값 · 앱솔루트는 읽기만 · 리밋 스위치·입력 핀은 명령어로(사용법 12장))">
                 ${AXIS_LIMIT_FIELDS.map((field) => `
                   <label class="axis-limit-field"><span>속도 (deg/s)</span>
                     <input class="axis-edit-input axis-limit-input mono" type="text" inputmode="decimal"
@@ -2554,10 +2683,24 @@ export function createMotorConfigController({
                       value="${escapeHtml(view.limits[field].value)}"
                       placeholder="${escapeHtml(view.limits[field].placeholder)}"${disabled}>
                   </label>`).join('')}
+                ${view.showAcServoControls ? MINAS_RATE_FIELDS.map((field) => `
+                  <label class="axis-limit-field" title="${escapeHtml(MINAS_RATE_LABELS[field][1])}"><span>${MINAS_RATE_LABELS[field][0]}</span>
+                    <input class="axis-edit-input axis-limit-input mono" type="text" inputmode="decimal"
+                      aria-label="${escapeHtml(MINAS_RATE_LABELS[field][0])}"
+                      data-axis-edit="${field}" data-axis-row-id="${escapeHtml(row.id)}"
+                      value="${escapeHtml(view.limits[field].value)}"
+                      placeholder="${escapeHtml(view.limits[field].placeholder)}"${disabled}>
+                  </label>`).join('') : ''}
                 ${DRIVE_PARAM_FIELDS.map((field) => `
                   <label class="axis-limit-field axis-drive-field" title="${escapeHtml(DRIVE_PARAM_LABELS[field][1])}"><span>${DRIVE_PARAM_LABELS[field][0]}</span>
                     ${driveParamControl(row, view, field, disabled)}
                   </label>`).join('')}
+                <label class="axis-limit-field axis-drive-field" title="${escapeHtml(DRIVE_PARAM_LABELS.encoder_absolute_mode[1])}"><span>${DRIVE_PARAM_LABELS.encoder_absolute_mode[0]}</span>
+                  <span class="mono axis-drive-readonly">${escapeHtml(absoluteModeText(view.driveRead.encoder_absolute_mode))}</span>
+                </label>
+                <label class="axis-limit-field" title="운영 시간이 끝나 기준점에 세운 뒤 이 모터 서보(다이나믹셀은 토크)를 끕니다 · 다이나믹셀은 브레이크가 없어 처질 수 있으면 끄세요 · 다음 시작 때 다시 켭니다"><span>끝나면 서보 OFF</span>
+                  <input type="checkbox" data-axis-edit="${SCHEDULE_END_FIELD}" data-axis-row-id="${escapeHtml(row.id)}"${view.endOff ? ' checked' : ''}${disabled}>
+                </label>
               </td>
               <td class="axis-status-stack">
                 <strong>${displayText(view.identity.title)}</strong>
@@ -2580,6 +2723,18 @@ export function createMotorConfigController({
                     <button type="button" data-axis-servo-action="servo_on" data-axis-servo-index="${escapeHtml(view.axisValue ?? '')}">ON</button>
                     <button type="button" data-axis-servo-action="servo_off" data-axis-servo-index="${escapeHtml(view.axisValue ?? '')}">OFF</button>
                     <button type="button" data-axis-servo-action="fault_reset" data-axis-servo-index="${escapeHtml(view.axisValue ?? '')}">오류 초기화</button>
+                  </div>
+                  <div class="axis-inline-actions" title="드라이브 정비 · Motor Manager 를 잠시 멈추고 드라이브에 직접 씁니다 (수정 목록 15)">
+                    <button type="button" data-axis-maintenance="eeprom_save" data-axis-maintenance-index="${escapeHtml(view.axisValue ?? '')}">EEPROM 저장</button>
+                    <button type="button" data-axis-maintenance="absolute_mode" data-axis-maintenance-index="${escapeHtml(view.axisValue ?? '')}">앱솔루트 방식</button>
+                    <button type="button" class="danger" data-axis-maintenance="absolute_clear" data-axis-maintenance-index="${escapeHtml(view.axisValue ?? '')}">다회전 클리어</button>
+                  </div>
+                ` : ''}
+                ${view.showDynamixelControls ? `
+                  <div class="axis-inline-actions" title="다이나믹셀 · 재부팅은 하드웨어 오류(과부하·과열·전압)를 풀고 토크를 끕니다 (수정 목록 24)">
+                    <button type="button" data-axis-servo-action="servo_on" data-axis-servo-index="${escapeHtml(view.axisValue ?? '')}">토크 ON</button>
+                    <button type="button" data-axis-servo-action="servo_off" data-axis-servo-index="${escapeHtml(view.axisValue ?? '')}">토크 OFF</button>
+                    <button type="button" class="danger" data-axis-servo-action="fault_reset" data-axis-servo-index="${escapeHtml(view.axisValue ?? '')}">재부팅</button>
                   </div>
                 ` : ''}
               </td>
@@ -3418,12 +3573,18 @@ export function createMotorConfigController({
       });
 
       el.axisRows.addEventListener('click', async (event) => {
+        const maintenance = event.target.closest('button[data-axis-maintenance]');
+        if (maintenance) {
+          event.stopPropagation();
+          await runDriveMaintenance(maintenance);
+          return;
+        }
         const button = event.target.closest('button[data-axis-servo-action]');
         if (!button || !onAcServoControl) return;
         event.stopPropagation();
         const axis = Number(button.dataset.axisServoIndex);
         if (!Number.isInteger(axis) || axis < 0) {
-          setAxisMessage('AC 서보 제어 모터 번호를 확인할 수 없습니다.', true);
+          setAxisMessage('서보·토크 제어 모터 번호를 확인할 수 없습니다.', true);
           return;
         }
         button.disabled = true;

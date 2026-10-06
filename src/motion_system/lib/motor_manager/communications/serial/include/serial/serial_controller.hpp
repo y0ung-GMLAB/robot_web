@@ -1,6 +1,9 @@
 #ifndef SERIAL_SERIAL_CONTROLLER_HPP_
 #define SERIAL_SERIAL_CONTROLLER_HPP_
 
+#include <chrono>
+#include <string>
+
 #include "motor_interface/motor_controller.hpp"
 #include "serial/serial_driver.hpp"
 #include "serial/serial_master.hpp"
@@ -36,6 +39,14 @@ private:
 
     void addSlaveConfigItems();
 
+    bool applyConfigItems(bool allow_torque_off, std::string& error);
+
+    bool writeConfigItem(const motor_interface::entry_table_t& item);
+
+    bool disableTorqueForConfiguration(std::string& error);
+
+    void rebootNode();
+
     void addBulkEntries();
 
     const motor_interface::entry_table_t* rxInterface(uint8_t id) const;
@@ -64,6 +75,11 @@ private:
     uint8_t number_of_active_rx_interfaces_{0};
 
     uint8_t bus_id_{0};
+
+    // Write the items again after a REBOOT (fix-list 24-1)
+    bool reapply_items_pending_{false};
+
+    std::chrono::steady_clock::time_point next_reapply_at_{};
 };
 
 } // namespace serial

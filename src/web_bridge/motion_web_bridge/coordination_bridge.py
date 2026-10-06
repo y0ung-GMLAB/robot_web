@@ -222,6 +222,9 @@ class CoordinationWebBridge:
         start_generation = int(self._project_generation())
         try:
             request = {'command': command}
+            if command == 'stop_after_cycle':
+                # 스케줄 끝이면 PC 마다 기준점 주차 → 서보 OFF · 수정 목록 36
+                request['reason'] = str(payload.get('reason') or '')
             if command in {'start_group', 'initialize_group'}:
                 request.update({
                     'run_mode': payload.get('run_mode', 'continuous'),
@@ -230,6 +233,10 @@ class CoordinationWebBridge:
                     ),
                     'dwell_sec': payload.get('dwell_sec', 0.0),
                     'target_cycle_count': payload.get('target_cycle_count', 0),
+                    # 회차 맞춤 / 각자 재생 · 수정 목록 35
+                    'sync_mode': repeat_policy.normalize_group_sync_mode(
+                        payload.get('sync_mode'),
+                    ),
                 })
             result = self._local_api('/control', request)
         except (OSError, ValueError) as exc:
@@ -362,6 +369,13 @@ def local_motion_readiness(
         selection = _local_motion_selection(bridge)
     except ValueError as exc:
         return {'success': False, 'message': str(exc)}
+    # 스케줄 끝에 끈 서보를 켜고 나서 본다 · 안 그러면 「서보가 꺼져 있습니다」 로
+    # 이 PC 가 그룹에서 빠진다 · 수정 목록 36
+    parked = getattr(bridge, 'schedule_end_start_blocker', None)
+    if callable(parked):
+        reason = parked({})
+        if reason:
+            return {'success': False, 'message': reason}
     return bridge.motion_run_check({
         **selection,
         'initial_move_time_sec': None,
@@ -391,8 +405,25 @@ def local_motion_control(bridge: Any, payload: Mapping[str, Any]) -> Dict[str, A
                 'message': '이미 정리된 그룹 실행 세션입니다',
             }
         return result
+    if command == 'group_join_commit':
+        # 도는 그룹에 복귀한 PC · 합류 확정 · 수정 목록 30-3
+        return bridge.motion_group_join_commit({
+            'execution_id': str(payload.get('execution_id') or ''),
+            'cycle_number': payload.get('cycle_number'),
+        })
+    if command == 'group_note':
+        # 연동 노드가 남기는 기록 · 지금은 뺀 PC · 수정 목록 30-2
+        return bridge.record_coordination_note(
+            str(payload.get('event_type') or 'group_note'),
+            str(payload.get('message') or ''),
+            {
+                key: payload.get(key)
+                for key in ('execution_id', 'excluded', 'participants')
+                if key in payload
+            },
+        )
     if command == 'stop_after_cycle':
-        result = bridge.motion_run_stop_after_cycle()
+        result = bridge.motion_run_stop_after_cycle({'reason': payload.get('reason') or ''})
         if (
             result.get('success') is False
             and '활성 그룹 실행이 없습니다' in str(result.get('message') or '')
@@ -414,7 +445,7 @@ def local_motion_control(bridge: Any, payload: Mapping[str, Any]) -> Dict[str, A
         'request_source': 'network_control',
         'network_operation_id': str(payload.get('network_operation_id') or ''),
     }
-    if command == 'group_prepare':
+    if command in {'group_prepare', 'group_join'}:
         repeat_mode = str(payload.get('repeat_mode') or '').strip()
         dwell_sec = payload.get('dwell_sec')
         initialization_only = bool(payload.get('initialization_only'))
@@ -437,11 +468,21 @@ def local_motion_control(bridge: Any, payload: Mapping[str, Any]) -> Dict[str, A
             'initialization_only': initialization_only,
             'repeat_mode': repeat_mode,
             'dwell_sec': float(dwell_sec or 0.0),
+            'sync_mode': repeat_policy.normalize_group_sync_mode(
+                payload.get('sync_mode'),
+            ),
+            'target_cycle_count': int(payload.get('target_cycle_count') or 0),
             # Direct repetition must use the same continuity validation as a
             # local continuous run. Reinitializing policies deliberately
             # bypass that check because every cycle returns to the start pose.
             'run_mode': 'once' if initialization_only else run_mode,
         })
+        if command == 'group_join':
+            # 도는 그룹에 복귀 · 계획만 만들고 서 있다가 합류 확정을 기다린다 · 30-3
+            request.pop('initialize_monotonic', None)
+            request['join_cycle_number'] = int(payload.get('join_cycle_number') or 0)
+            if request['join_cycle_number'] < 1:
+                return {'success': False, 'message': '복귀 회차 번호가 필요합니다'}
         return bridge.motion_group_prepare(request)
     if command == 'group_start_at':
         request.update({

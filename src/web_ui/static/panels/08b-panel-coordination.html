@@ -135,6 +135,13 @@
                전에는 `애니메이션 재생` 탭의 입력을 빌려 썼다 · 화면을 가르면서 그냥
                두면 그룹은 말없이 기본값(바로 다음 모션 · 무한 반복)으로 돈다 -->
           <div class="motion-run-compact-fields">
+            <!-- 회차 맞춤 / 각자 재생 · 수정 목록 35 · 고르면 프로젝트 설정에 저장돼 스케줄 시작도 따른다 -->
+            <label class="compact-field"><span>PC 사이 맞춤</span>
+              <select id="coordinationSyncMode" class="compact-select" title="회차 맞춤 · 매 회차 모든 PC 가 끝나야 다 같이 다음 회차 · 각자 재생 · 처음 초기 위치 이동과 1회차 시작만 같이, 그 뒤로는 PC 마다 제 재생 목록을 제 속도로 · 정지·회차 후 정지는 둘 다 그룹 전체">
+                <option value="lockstep" selected>회차 맞춤</option>
+                <option value="independent">각자 재생</option>
+              </select>
+            </label>
             <label class="compact-field"><span>회차 사이 동작</span>
               <select id="coordinationRepeatMode" class="compact-select">
                 <option value="direct">바로 다음 회차</option>

@@ -1,4 +1,4 @@
-"""MINAS 드라이브 파라미터 생성 · 브레이크 타이밍 · 앱솔루트 모드 · P8
+"""MINAS 드라이브 파라미터 생성 · 브레이크 타이밍 · 과부하율 · P8 · 수정 목록 34
 
 드라이버 yaml 키가 아니라 `param_file`(부팅 때 쓰는 SDO 목록)로 들어간다 ·
 오버라이드가 있는 모터만 제 param 파일을 받고, 없는 모터는 플랫폼 경로
@@ -19,52 +19,48 @@ WORKSPACE = Path(__file__).resolve().parents[3]
 
 
 def test_field_table_pins_the_minas_objects():
-    assert minas_params.PARAM_FIELDS['encoder_absolute_mode'][0] == 0x3015   # Pr0.15
     assert minas_params.PARAM_FIELDS['brake_delay_stop_ms'][0] == 0x3437    # Pr4.37
     assert minas_params.PARAM_FIELDS['brake_delay_run_ms'][0] == 0x3438     # Pr4.38
-    assert minas_params.PARAM_FIELDS['limit_switch_mode'][0] == 0x3504      # Pr5.04
+
+
+def test_absolute_mode_and_limit_switch_are_never_written_at_boot(tmp_path):
+    """수정 목록 34 · 매뉴얼 SX-DSV03241 R10.0 · 2026-10-06.
+
+    Pr0.15 는 속성 C (재투입 때 EEPROM 을 다시 읽어 RAM 쓰기는 반영 안 됨) 이고
+    예전 화면은 0/1 뜻이 반대였다 · Pr5.04 「1 사용 안 함」은 실제로 CiA402 감속
+    정지다 · 둘 다 registry 에 옛 값이 남아 있어도 드라이브로 보내지 않는다.
+    """
+    assert 'encoder_absolute_mode' not in minas_params.PARAM_FIELDS
+    assert 'limit_switch_mode' not in minas_params.PARAM_FIELDS
+    motor = {'config': {
+        'encoder_absolute_mode': 1, 'limit_switch_mode': 1, 'brake_delay_stop_ms': 100,
+    }}
+    overrides = minas_params.param_overrides(motor)
+    assert overrides == {'brake_delay_stop_ms': 100}
+    path = minas_params.write_param_file(tmp_path, 4, overrides)
+    payload = yaml.safe_load(Path(path).read_text(encoding='utf-8'))
+    indexes = {int(item['index']) for item in payload['items']}
+    assert 0x3015 not in indexes and 0x3504 not in indexes
 
 
 def test_out_of_range_drive_values_never_reach_the_drive():
-    """화면이 먼저 막지만 · 파일을 손으로 고친 경우에도 이상한 값은 버린다.
-
-    특히 리밋 스위치 · 스위치 없는 축에 0/2 가 가면 못 움직이거나 알람이다 ·
-    그 판단은 사람이 하되, 정해진 0/1/2 밖의 숫자는 아예 보내지 않는다.
-    """
+    """화면이 먼저 막지만 · 파일을 손으로 고친 경우에도 이상한 값은 버린다."""
     motor = {'config': {
-        'limit_switch_mode': 5,          # 0/1/2 밖
-        'encoder_absolute_mode': -1,     # 0/1/2 밖
         'brake_delay_stop_ms': -50,      # 음수
         'brake_delay_run_ms': 999999,    # 과대
     }}
     assert minas_params.param_overrides(motor) == {}
 
 
-def test_limit_switch_mode_values_pass_through():
-    for value in (0, 1, 2):
-        motor = {'config': {'limit_switch_mode': value}}
-        assert minas_params.param_overrides(motor) == {'limit_switch_mode': value}
-
-
-def test_blank_limit_switch_leaves_the_drive_alone(tmp_path):
-    """빈 칸 = 드라이브에 있는 값 그대로 · 항목 자체를 넣지 않는다."""
-    motor = {'config': {'brake_delay_stop_ms': 100}}   # 리밋 스위치는 안 적음
-    overrides = minas_params.param_overrides(motor)
-    path = minas_params.write_param_file(tmp_path, 4, overrides)
-    payload = yaml.safe_load(Path(path).read_text(encoding='utf-8'))
-    indexes = {int(item['index']) for item in payload['items']}
-    assert 0x3504 not in indexes, '안 적었는데 리밋 스위치 항목이 들어갔다'
-
-
 def test_overrides_are_appended_to_the_item_list(tmp_path):
     path = minas_params.write_param_file(
         tmp_path, 7,
-        {'encoder_absolute_mode': 1, 'brake_delay_stop_ms': 150},
+        {'brake_delay_run_ms': 80, 'brake_delay_stop_ms': 150},
     )
     assert Path(path).is_absolute()
     payload = yaml.safe_load(Path(path).read_text(encoding='utf-8'))
     by_index = {int(item['index']): item for item in payload['items']}
-    assert by_index[0x3015]['value'] == 1
+    assert by_index[0x3438]['value'] == 80
     assert by_index[0x3437]['value'] == 150
     assert by_index[0x3437]['type'] == 's16'
     # 기반 목록(운전 모드 등)은 그대로 실려 있다
@@ -72,18 +68,18 @@ def test_overrides_are_appended_to_the_item_list(tmp_path):
     # PDO 배선 구획도 함께 복사된다 · 없으면 드라이버가 못 뜬다
     assert isinstance(payload.get('interfaces'), list) and payload['interfaces']
     # 항목 id 는 겹치지 않게 이어 붙인다
-    ids = [int(item['id']) for item in payload['items'] if int(item.get('index') or 0) in (0x3015, 0x3437)]
+    ids = [int(item['id']) for item in payload['items'] if int(item.get('index') or 0) in (0x3438, 0x3437)]
     assert all(new_id > 58 for new_id in ids)
 
 
 def test_an_existing_object_is_overwritten_not_duplicated(tmp_path):
-    first = minas_params.write_param_file(tmp_path, 1, {'encoder_absolute_mode': 1})
+    first = minas_params.write_param_file(tmp_path, 1, {'brake_delay_stop_ms': 100})
     # 같은 드라이버를 다시 쓰면(설정 변경) 값만 바뀐다
-    second = minas_params.write_param_file(tmp_path, 1, {'encoder_absolute_mode': 2})
+    second = minas_params.write_param_file(tmp_path, 1, {'brake_delay_stop_ms': 200})
     assert first == second
     payload = yaml.safe_load(Path(second).read_text(encoding='utf-8'))
-    hits = [item for item in payload['items'] if int(item['index']) == 0x3015]
-    assert len(hits) == 1 and hits[0]['value'] == 2
+    hits = [item for item in payload['items'] if int(item['index']) == 0x3437]
+    assert len(hits) == 1 and hits[0]['value'] == 200
 
 
 def _motor(axis, **config_overrides):
@@ -102,7 +98,7 @@ def _motor(axis, **config_overrides):
 
 def test_only_motors_with_drive_params_get_their_own_param_file(tmp_path):
     registry = {'motors': [
-        _motor(0, brake_delay_stop_ms=200, encoder_absolute_mode=1),
+        _motor(0, brake_delay_stop_ms=200, encoder_absolute_mode=1),   # 옛 키는 무시
         _motor(1),
     ]}
     config = motor_config_from_registry(
@@ -118,7 +114,7 @@ def test_only_motors_with_drive_params_get_their_own_param_file(tmp_path):
     assert 'minas_params' in with_params and with_params.endswith('.yaml')
     payload = yaml.safe_load(Path(with_params).read_text(encoding='utf-8'))
     values = {int(item['index']): item['value'] for item in payload['items']}
-    assert values[0x3437] == 200 and values[0x3015] == 1
+    assert values[0x3437] == 200 and 0x3015 not in values
     # 오버라이드 없는 모터는 플랫폼 param 경로 그대로
     assert 'minas_params' not in str(drivers[driver_of[1]]['param_file'])
 

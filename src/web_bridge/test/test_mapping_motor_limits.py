@@ -6,6 +6,7 @@
 """
 
 import copy
+import math
 from pathlib import Path
 
 import pytest
@@ -86,8 +87,20 @@ def test_reference_off_means_zero():
 
 
 def test_offset_and_scale_follow_the_runtime_formula():
+    # 계산은 rad · 매핑 줄이 deg(옛 파일)여도 같은 값 · 수정 목록 6
     row = _row(offset_deg=2.0, scale=0.5)
-    assert motor_target(row, 13.0) == 100.0 + (13.0 + 2.0) * 0.5 * 150.0
+    expected = math.radians(100.0 + (13.0 + 2.0) * 0.5 * 150.0)
+    assert motor_target(row, math.radians(13.0)) == pytest.approx(expected)
+
+
+def test_new_rad_mapping_file_gives_the_same_motor_limits():
+    """rad 로 저장한 매핑 = deg 로 적은 옛 매핑 · 모터 설정 파일 값(deg)이 같다"""
+    rad_row = {
+        key[:-4] + '_rad' if key.endswith('_deg') else key:
+        math.radians(value) if key.endswith('_deg') else value
+        for key, value in _row().items()
+    }
+    assert row_motor_limits(rad_row) == row_motor_limits(_row())
 
 
 def test_dynamixel_uses_row_gear_without_one_turn_clamp():

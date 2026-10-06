@@ -162,7 +162,7 @@ function positionTurnText(motor) {
 }
 
 export function motionValueText(motor) {
-  const value = Number(motor.motion_value_deg);
+  const value = Number(motor.motion_value_deg);  // 서버는 motion_value_rad · main.js 가 deg 로 바꿔 둔다
   if (motor.motion_value_status === 'received' && Number.isFinite(value)) {
     return formatNumber(value, 3);
   }
