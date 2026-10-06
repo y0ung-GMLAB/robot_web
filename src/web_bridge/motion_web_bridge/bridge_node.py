@@ -847,6 +847,19 @@ class MotionWebBridge(Node):
         """Check the currently active local execution files and safety state."""
         return local_motion_readiness(self, payload)
 
+    def record_coordination_note(
+        self, event_type: str, content: str, details: Dict[str, Any],
+    ) -> Dict[str, Any]:
+        """연동 기록을 운영 로그에 · 그룹 실행에서 뺀 PC 등 · 수정 목록 30-2"""
+        self._motor_event_log.append(
+            category='coordination',
+            event_type=event_type,
+            target='그룹 연동',
+            content=content[:500],
+            details=details,
+        )
+        return {'success': True}
+
     def coordination_local_status(self) -> Dict[str, Any]:
         """Return only the runtime fields needed by the loopback DDS adapter."""
         with self._coordination_poll_lock:

@@ -405,6 +405,17 @@ def local_motion_control(bridge: Any, payload: Mapping[str, Any]) -> Dict[str, A
                 'message': '이미 정리된 그룹 실행 세션입니다',
             }
         return result
+    if command == 'group_note':
+        # 연동 노드가 남기는 기록 · 지금은 뺀 PC · 수정 목록 30-2
+        return bridge.record_coordination_note(
+            str(payload.get('event_type') or 'group_note'),
+            str(payload.get('message') or ''),
+            {
+                key: payload.get(key)
+                for key in ('execution_id', 'excluded', 'participants')
+                if key in payload
+            },
+        )
     if command == 'stop_after_cycle':
         result = bridge.motion_run_stop_after_cycle({'reason': payload.get('reason') or ''})
         if (

@@ -631,7 +631,8 @@ def test_missing_prepare_ack_excludes_the_silent_pc_and_goes_on():
 
     node._enforce_schedule_ack_deadline()
 
-    assert sent == [('dds', 'update_participants')]
+    # 운영 로그 기록(`group_note`)은 별도 스레드라 순서·도착 시점이 정해지지 않는다 · 30-2
+    assert [item for item in sent if item != ('local', 'group_note')] == [('dds', 'update_participants')]
     assert node._command_pub.messages[-1].participant_ids == ['pc-a', 'pc-b']
     assert node._execution.participants == ('pc-a', 'pc-b')
     assert node._execution.excluded == {'pc-c': '준비 응답 없음'}
@@ -1622,3 +1623,44 @@ def test_one_lost_probe_no_longer_counts_as_clock_drift():
         )
 
     assert estimator.estimate().uncertainty_ms == pytest.approx(0.5, abs=0.01)
+
+
+def test_left_out_pcs_are_written_to_the_operation_log_not_the_alarm_table(monkeypatch):
+    """수정 목록 30-2 · 뺀 PC 는 이 PC 웹의 운영 로그로 · 그룹 알람 표(PC 마다 한 칸)는 건드리지 않는다"""
+    class _Now:
+        def __init__(self, target, **_kwargs):
+            self.target = target
+
+        def start(self):
+            self.target()
+
+    monkeypatch.setattr(coordination_node.threading, 'Thread', _Now)
+    node = _node()
+    node._joined = True
+    node._command_pub = _Publisher()
+    node._alarm_pub = _Publisher()
+    node._config.required_peers = ('pc-a', 'pc-b', 'pc-c')
+    node._registry.update(_member('pc-b'))
+    sent = []
+    node._call_local_control = lambda payload, **_kwargs: sent.append(payload) or {'success': True}
+
+    result = node._start_group_execution()
+
+    assert result['excluded'] == {'pc-c': '미접속'}
+    [note] = sent
+    assert note['command'] == 'group_note'
+    assert note['event_type'] == 'group_excluded'
+    assert note['excluded'] == {'pc-c': '미접속'}
+    assert '그룹 실행 시작 · 뺀 PC pc-c(미접속) · 참가 pc-a, pc-b' == note['message']
+    assert node._alarm_pub.messages == []
+
+
+def test_start_without_left_out_pcs_writes_nothing(monkeypatch):
+    node = _node()
+    node._joined = True
+    node._command_pub = _Publisher()
+    node._registry.update(_member('pc-b'))
+    sent = []
+    node._call_local_control = lambda payload, **_kwargs: sent.append(payload) or {'success': True}
+    node._start_group_execution()
+    assert sent == []

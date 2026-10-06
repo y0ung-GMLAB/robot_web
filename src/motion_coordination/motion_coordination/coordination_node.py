@@ -1555,6 +1555,8 @@ class MotionCoordinationNode(Node):
         if recovered_disconnect:
             # 끊긴 PC 를 뺀 새 실행이 나갔다 · 그 오류는 여기서 닫는다 · 수정 목록 30
             self._acknowledge_coordination_error()
+        if excluded:
+            self._note_excluded(execution_id, excluded, participants, stage='시작')
         return {
             'success': True,
             'message': (
@@ -1656,8 +1658,42 @@ class MotionCoordinationNode(Node):
             + ', '.join(f'{pc_id}({reasons[pc_id]})' for pc_id in dropped)
         )
         self._command_pub.publish(message)
+        self._note_excluded(
+            message.execution_id, {pc_id: reasons[pc_id] for pc_id in dropped},
+            tuple(message.participant_ids), stage='준비 중',
+        )
         if start_sync:
             self._begin_trigger_sync('initialize')
+
+    def _note_excluded(
+        self, execution_id: str, excluded: Mapping[str, str],
+        participants: tuple[str, ...], *, stage: str,
+    ) -> None:
+        """뺀 PC 를 이 PC 웹의 「모터 동작 로그」 에 남긴다 · 원격에서도 본다 · 수정 목록 30-2
+
+        그룹 알람(`GroupAlarm`)으로는 보내지 않는다 · 알람 표는 PC 마다 한 칸이라
+        마스터의 서보 알람을 덮어쓰거나 지운다 · 기록이 목적이니 모터 동작 로그로 ·
+        웹 응답을 기다리지 않게 따로 스레드에서(연동 명령 처리를 막지 않게).
+        """
+        payload = {
+            'command': 'group_note',
+            'event_type': 'group_excluded',
+            'execution_id': str(execution_id or ''),
+            'message': (
+                f'그룹 실행 {stage} · 뺀 PC '
+                + ', '.join(f'{pc_id}({reason})' for pc_id, reason in sorted(excluded.items()))
+                + f' · 참가 {", ".join(participants)}'
+            ),
+            'excluded': dict(excluded),
+            'participants': list(participants),
+        }
+
+        def send() -> None:
+            result = self._call_local_control(payload, timeout_sec=2.0)
+            if not result.get('success'):
+                self.get_logger().warn(f'운영 로그 기록 실패 · {result.get("message")}')
+
+        threading.Thread(target=send, name='group-note', daemon=True).start()
 
     def _request_group_stop(self, *, after_cycle: bool, reason: str = '') -> Dict[str, Any]:
         with self._lock:
