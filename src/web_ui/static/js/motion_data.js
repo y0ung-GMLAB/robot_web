@@ -2061,7 +2061,7 @@ export function createMotionDataController({
     if (!el.motionMappingRows) return;
     const rows = Array.isArray(mappingDraft.mappings) ? mappingDraft.mappings : [];
     if (!rows.length) {
-      el.motionMappingRows.innerHTML = emptyRow(15, '조인트 이름을 추가하거나 자동 생성을 누르세요');
+      el.motionMappingRows.innerHTML = emptyRow(17, '조인트 이름을 추가하거나 자동 생성을 누르세요');
       return;
     }
     const duplicateCounts = mappingDuplicateAxisCounts();
@@ -2092,6 +2092,8 @@ export function createMotionDataController({
           </td>
           <td class="mapping-number-cell"><input class="numeric-input mapping-number-input" type="number" step="0.001" data-motion-mapping-field="motion_lower_deg" value="${displayText(row.motion_lower_deg)}"></td>
           <td class="mapping-number-cell"><input class="numeric-input mapping-number-input" type="number" step="0.001" data-motion-mapping-field="motion_upper_deg" value="${displayText(row.motion_upper_deg)}"></td>
+          <td class="mapping-number-cell"><input class="numeric-input mapping-number-input" type="number" min="0" step="1" placeholder="없음" data-motion-mapping-field="max_velocity_deg_s" value="${row.max_velocity_deg_s == null ? '' : displayText(row.max_velocity_deg_s)}"></td>
+          <td class="mapping-number-cell"><input class="numeric-input mapping-number-input" type="number" min="0" step="10" placeholder="없음" data-motion-mapping-field="max_acceleration_deg_s2" value="${row.max_acceleration_deg_s2 == null ? '' : displayText(row.max_acceleration_deg_s2)}"></td>
           <td>
             <select class="compact-select" data-motion-mapping-field="initial_mode" title="재생 전에 먼저 옮겨 둘 자세">
               <option value="first_frame"${initialMode === 'first_frame' ? ' selected' : ''}>첫 프레임</option>
@@ -2869,6 +2871,11 @@ export function createMotionDataController({
       }
       // 기준점 = 모션 0° · 칸에도 0 을 보여 준다
       if (row.initial_mode === 'reference') row.initial_motion_position_deg = 0.0;
+    } else if (field === 'max_velocity_deg_s' || field === 'max_acceleration_deg_s2') {
+      // 비우면 검사 안 함 · 칸 자체를 지운다 (수정 목록 5-2)
+      const number = Number(value);
+      if (String(value ?? '').trim() === '' || !Number.isFinite(number) || number <= 0) delete row[field];
+      else row[field] = number;
     } else if (
       field === 'gear_ratio'
       || field === 'reference_position_deg'

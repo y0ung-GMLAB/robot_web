@@ -38,6 +38,9 @@ DEFAULT_MOTION_PROJECTS_DIR = (
     / 'motion_projects'
 )
 #: 초기 위치 · 첫 장면(first_frame) · 직접 지정(manual) · 기준점(reference = 모션 0°) · 2026-10-02
+#: 조인트 최대 속도(deg/s)·가속도(deg/s²) · 애니메이션이 넘으면 재생 거부 · 수정 목록 5-2
+MOTION_RATE_LIMIT_FIELDS = ('max_velocity_deg_s', 'max_acceleration_deg_s2')
+
 INITIAL_MODES = ('first_frame', 'manual', 'reference')
 
 
@@ -658,6 +661,11 @@ class MotionMappingManager(Node):
                 'scale': self._optional_float(row.get('scale'), 1.0),
                 'gear_ratio': self._optional_float(row.get('gear_ratio'), 1.0),
             })
+            # 조인트 최대 속도·가속도 · 비우면 검사 안 함 · 적은 것만 둔다(옛 파일 모양 유지) · 수정 목록 5-2
+            for field in MOTION_RATE_LIMIT_FIELDS:
+                value = self._optional_float(row.get(field), None)
+                if value is not None:
+                    normalized_rows[-1][field] = value
 
         playlist = playlist_from_mapping(mapping)
         normalized = {
@@ -754,6 +762,13 @@ class MotionMappingManager(Node):
                 row_errors.append('scale must be a non-zero number')
             if gear_ratio is None or gear_ratio <= 0:
                 row_errors.append('gear_ratio must be > 0')
+            for field in MOTION_RATE_LIMIT_FIELDS:
+                raw = row.get(field)
+                if raw in (None, ''):
+                    continue
+                limit = self._finite_float(raw)
+                if limit is None or limit <= 0:
+                    row_errors.append(f'{field} must be > 0 (비우면 검사 안 함)')
             if offset is None:
                 row_errors.append('offset_deg must be numeric')
             if reference is None:
