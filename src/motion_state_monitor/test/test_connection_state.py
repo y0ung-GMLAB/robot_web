@@ -379,7 +379,10 @@ Identity:
         return result, calls
 
     def test_ethercat_scan_reads_minas_drive_params_by_sdo(self):
-        answers = {'0x3437': '0x0032 50', '0x3438': '0x0064 100', '0x3015': '0x0000 0'}
+        answers = {
+            '0x3437': '0x0032 50', '0x3438': '0x0064 100', '0x3015': '0x0000 0',
+            '0x607F': '0x10aaaaab 279620267',   # 2000 rpm · 수정 목록 37
+        }
 
         def upload(command):
             return SimpleNamespace(returncode=0, stdout=answers[command[8]], stderr='')
@@ -391,9 +394,12 @@ Identity:
             'brake_delay_stop_ms': 50,
             'brake_delay_run_ms': 100,
             'encoder_absolute_mode': 0,   # 매뉴얼 · 0 = 절대 (읽기 전용 표시)
+            'max_profile_velocity_count': 279620267,
         })
         self.assertEqual(slave['drive_params_error'], '')
         self.assertIn(['ethercat', 'upload', '-m', '0', '-p', '0', '-t', 'int16', '0x3437', '0'], calls)
+        # 0x607F 는 u32 로 읽는다 · s16 로 읽으면 값이 깨진다
+        self.assertIn(['ethercat', 'upload', '-m', '0', '-p', '0', '-t', 'uint32', '0x607F', '0'], calls)
         # 리밋 스위치(Pr5.04)는 화면에서 빠져 읽지 않는다 · 수정 목록 34
         self.assertFalse(any('0x3504' in command for command in calls))
 

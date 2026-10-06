@@ -35,6 +35,12 @@ MINAS_DRIVE_PARAM_OBJECTS = {
     'brake_delay_stop_ms': (0x3437, 0),     # Pr4.37
     'brake_delay_run_ms': (0x3438, 0),      # Pr4.38
     'encoder_absolute_mode': (0x3015, 0),   # Pr0.15 · 읽기 전용 표시
+    'max_profile_velocity_count': (0x607F, 0),   # 최대 프로파일 속도 · count/s · 수정 목록 37
+}
+
+#: s16 이 아닌 것 · 읽는 형식 · 수정 목록 37
+MINAS_DRIVE_PARAM_TYPES = {
+    'max_profile_velocity_count': 'uint32',
 }
 
 
@@ -797,7 +803,7 @@ class EthercatScanner:
                         '-p',
                         str(slave_position),
                         '-t',
-                        'int16',
+                        MINAS_DRIVE_PARAM_TYPES.get(field, 'int16'),
                         f'0x{index:04X}',
                         str(subindex),
                     ],

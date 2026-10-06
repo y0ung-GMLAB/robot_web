@@ -56,7 +56,19 @@ from motion_common.values import optional_int
 PARAM_FIELDS: Dict[str, Tuple[int, str, str]] = {
     'brake_delay_stop_ms': (0x3437, 's16', 'Pr4.37 정지 중 서보OFF 시 브레이크 동작 지연 (ms)'),
     'brake_delay_run_ms': (0x3438, 's16', 'Pr4.38 회전 중 서보OFF 시 브레이크 동작 설정 (ms)'),
+    # 화면 「최대 속도(rpm)」 에서 계산 · 직접 적는 키 아님 · 수정 목록 37
+    'max_profile_velocity_count': (0x607F, 'u32', '0x607F 최대 프로파일 속도 (count/s · 최대 속도 rpm 환산)'),
 }
+
+#: 화면 「최대 속도」 · 모터축 rpm · 0x607F(count/s) 와 0x6080(rpm) 둘 다 이 값 · 수정 목록 37
+MAX_SPEED_FIELD = 'max_speed_rpm'
+MAX_SPEED_RANGE_RPM = (1, 6500)
+#: MINAS A6 23 bit 엔코더 · 0x607F 는 count/s
+MINAS_PULSE_PER_REVOLUTION = 8_388_608
+
+
+def max_speed_count_per_sec(rpm: float) -> int:
+    return int(round(float(rpm) * MINAS_PULSE_PER_REVOLUTION / 60.0))
 
 #: 부팅 때 쓰지 않는 옛 키 · 남아 있어도 드라이브로 보내지 않는다 (위 설명)
 RETIRED_FIELDS: Tuple[str, ...] = ('encoder_absolute_mode', 'limit_switch_mode')
@@ -136,7 +148,12 @@ def param_overrides(motor: Dict[str, Any]) -> Dict[str, int]:
     """
     config = motor.get('config') if isinstance(motor.get('config'), dict) else {}
     overrides: Dict[str, int] = {}
+    rpm = optional_int(config.get(MAX_SPEED_FIELD))
+    if rpm is not None and MAX_SPEED_RANGE_RPM[0] <= rpm <= MAX_SPEED_RANGE_RPM[1]:
+        overrides['max_profile_velocity_count'] = max_speed_count_per_sec(rpm)
     for key in (*PARAM_FIELDS, *MONITOR_FIELDS):
+        if key == 'max_profile_velocity_count':
+            continue   # 위에서 rpm 으로 만든다
         value = optional_int(config.get(key))
         if value is None:
             continue

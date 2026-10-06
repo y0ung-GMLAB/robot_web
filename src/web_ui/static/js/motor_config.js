@@ -1234,9 +1234,9 @@ export function createMotorConfigController({
       rated_speed_rpm: '정격 속도',
       lower: '최소 위치',
       upper: '최대 위치',
-      speed: '속도 설정값',
-      acceleration: '가속도',
-      deceleration: '감속도',
+      speed: '최대 속도',
+      acceleration: '최대 가속도',
+      deceleration: '최대 감속도',
       profile_velocity: '프로파일 속도',
       profile_acceleration: '프로파일 가속도',
       profile_deceleration: '프로파일 감속도',
@@ -2002,6 +2002,19 @@ export function createMotorConfigController({
    */
   const AXIS_LIMIT_FIELDS = ['profile_velocity'];
 
+  /** MINAS 속도·가속 4칸 · 운전값 2개 + 상한 2개 · 수정 목록 37 (2026-10-06)
+   *
+   * 프로파일 속도(0x6081 · 평소 최고 속도) · 최대 속도(rpm → 0x607F·0x6080 같은 값) ·
+   * 프로파일 가속도(0x6083·0x6084) · 최대 가속도(0x60C5·0x60C6) · 최대 ≥ 프로파일.
+   * 빈 칸 = 지금 값 유지 · 다이나믹셀은 뜻이 달라 MINAS 줄에만 보인다.
+   */
+  const MINAS_RATE_FIELDS = ['max_speed_rpm', 'profile_acceleration', 'acceleration'];
+  const MINAS_RATE_LABELS = {
+    max_speed_rpm: ['최대 속도 (rpm)', '모터축 최대 회전 속도 · 0x607F(count/s 로 환산)와 0x6080(rpm) 둘 다 이 값 · PP 외 모드에서도 보호'],
+    profile_acceleration: ['프로파일 가속도 (deg/s²)', '평소 가속·감속 · 0x6083·0x6084'],
+    acceleration: ['최대 가속도 (deg/s²)', '가속·감속 상한 · 0x60C5·0x60C6 · 프로파일 가속도 이상'],
+  };
+
   /** MINAS 드라이브 파라미터 · param_file(SDO 목록)로 부팅 때 써진다 · P8
    *
    * 브레이크 두 값은 ms (속성 B · 바로 반영) · 빈 칸 = 드라이브 값 유지.
@@ -2028,7 +2041,26 @@ export function createMotorConfigController({
     3: '절대 · 한 바퀴만',
     4: '절대 · 연속 회전',
   };
-  const CONFIG_EDIT_FIELDS = [...AXIS_LIMIT_FIELDS, ...DRIVE_PARAM_FIELDS];
+  const CONFIG_EDIT_FIELDS = [...AXIS_LIMIT_FIELDS, ...MINAS_RATE_FIELDS, ...DRIVE_PARAM_FIELDS];
+
+  /** 최대 ≥ 프로파일 · 서버(`axis_speed_limit_error`)와 같은 규칙 · 어기면 저장 전에 알린다 */
+  function axisRateError(config = {}) {
+    const value = (key) => {
+      const number = Number(config[key]);
+      return Number.isFinite(number) && number > 0 ? number : null;
+    };
+    const profileVelocity = value('profile_velocity');
+    const maxRpm = value('max_speed_rpm');
+    if (profileVelocity && maxRpm && profileVelocity > maxRpm * 6) {
+      return `프로파일 속도 ${profileVelocity} deg/s 가 최대 속도 ${maxRpm} rpm (${maxRpm * 6} deg/s) 보다 큽니다`;
+    }
+    const profileAcceleration = value('profile_acceleration');
+    const maxAcceleration = value('acceleration');
+    if (profileAcceleration && maxAcceleration && profileAcceleration > maxAcceleration) {
+      return `프로파일 가속도 ${profileAcceleration} 가 최대 가속도 ${maxAcceleration} 보다 큽니다`;
+    }
+    return '';
+  }
 
   /** MINAS 드라이브 정비 · 확인 → 서버(Motor Manager 잠시 정지 → ethercat download) · 수정 목록 15 + 34-3 */
   const MAINTENANCE_TEXT = {
@@ -2214,6 +2246,14 @@ export function createMotorConfigController({
         if (error) {
           resetAxisEditInput(input, row, field);
           setAxisMessage(error);
+          return;
+        }
+      }
+      if (MINAS_RATE_FIELDS.includes(field) || field === 'profile_velocity') {
+        const rateError = axisRateError({ ...(row.motor?.config || {}), [field]: text });
+        if (rateError) {
+          resetAxisEditInput(input, row, field);
+          setAxisMessage(`${rateError} · 최대는 프로파일 이상이어야 합니다`, true);
           return;
         }
       }
@@ -2569,7 +2609,7 @@ export function createMotorConfigController({
             connection,
             drive,
             showAcServoControls,
-            limits: Object.fromEntries(AXIS_LIMIT_FIELDS.map((field) => [field, {
+            limits: Object.fromEntries([...AXIS_LIMIT_FIELDS, ...MINAS_RATE_FIELDS].map((field) => [field, {
               value: rowLimitOverride(row, field),
               placeholder: rowLimitPlaceholder(row, field),
             }])),
@@ -2638,6 +2678,14 @@ export function createMotorConfigController({
                       value="${escapeHtml(view.limits[field].value)}"
                       placeholder="${escapeHtml(view.limits[field].placeholder)}"${disabled}>
                   </label>`).join('')}
+                ${view.showAcServoControls ? MINAS_RATE_FIELDS.map((field) => `
+                  <label class="axis-limit-field" title="${escapeHtml(MINAS_RATE_LABELS[field][1])}"><span>${MINAS_RATE_LABELS[field][0]}</span>
+                    <input class="axis-edit-input axis-limit-input mono" type="text" inputmode="decimal"
+                      aria-label="${escapeHtml(MINAS_RATE_LABELS[field][0])}"
+                      data-axis-edit="${field}" data-axis-row-id="${escapeHtml(row.id)}"
+                      value="${escapeHtml(view.limits[field].value)}"
+                      placeholder="${escapeHtml(view.limits[field].placeholder)}"${disabled}>
+                  </label>`).join('') : ''}
                 ${DRIVE_PARAM_FIELDS.map((field) => `
                   <label class="axis-limit-field axis-drive-field" title="${escapeHtml(DRIVE_PARAM_LABELS[field][1])}"><span>${DRIVE_PARAM_LABELS[field][0]}</span>
                     ${driveParamControl(row, view, field, disabled)}
