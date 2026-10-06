@@ -60,14 +60,27 @@ class GroupSession:
             return True
 
     def prepare(self, payload: Dict[str, Any]) -> Dict[str, Any]:
-        """Prepare one persistent group session without enabling local repeat."""
+        """Prepare one persistent group session without enabling local repeat.
+
+        `join_cycle_number` (수정 목록 30-3) · 도는 그룹에 **복귀**하는 PC · 계획만
+        만들고 움직이지 않는다 · 진행 PC 가 합류를 확정하면(`commit_join`) 다른 PC 와
+        같이 다음 회차 초기 위치로 가서 다음 회차부터 같이 돈다.
+        """
         execution_id = str(payload.get('execution_id') or '').strip()
         initialize_monotonic = finite_float(
             payload.get('initialize_monotonic')
         )
+        try:
+            join_cycle = int(payload.get('join_cycle_number') or 0)
+        except (TypeError, ValueError) as exc:
+            raise ValueError('복귀 회차 번호가 올바르지 않습니다') from exc
         if not execution_id:
             raise ValueError('그룹 execution_id가 필요합니다')
-        if initialize_monotonic is None or initialize_monotonic <= time.monotonic():
+        if join_cycle < 0:
+            raise ValueError('복귀 회차 번호가 올바르지 않습니다')
+        if not join_cycle and (
+            initialize_monotonic is None or initialize_monotonic <= time.monotonic()
+        ):
             raise ValueError('그룹 초기 위치 이동 예약 트리거가 이미 지났습니다')
         with self.manager._run_lock:
             # 같은 execution_id의 재요청은 슬롯 경쟁이 아니라 중복 전달이다 ·
@@ -94,8 +107,10 @@ class GroupSession:
             self.session = {
                 'active': True,
                 'execution_id': execution_id,
-                'state': 'preparing',
-                'cycle_number': 0,
+                'state': 'join_preparing' if join_cycle else 'preparing',
+                'cycle_number': join_cycle,
+                'join_cycle_number': join_cycle,
+                'join_committed_cycle': 0,
                 'next_start_at': 0.0,
                 'next_cycle_number': 0,
                 'next_initialize_at': 0.0,
@@ -127,6 +142,46 @@ class GroupSession:
             'success': True,
             'message': '그룹 실행 준비 시작',
             'execution_id': execution_id,
+            'status': self.manager.status(),
+        }
+
+    def commit_join(self, payload: Dict[str, Any]) -> Dict[str, Any]:
+        """복귀 확정 · 진행 PC 가 이 PC 를 참가 목록에 넣었다 · 수정 목록 30-3
+
+        `cycle_number` = 그룹이 방금 끝낸 회차 · 이 PC 도 그 회차를 끝낸 것처럼
+        서서 다음 회차 초기화(`schedule_initialization`)를 같이 받는다.
+        """
+        execution_id = str(payload.get('execution_id') or '').strip()
+        try:
+            cycle_number = int(payload.get('cycle_number'))
+        except (TypeError, ValueError) as exc:
+            raise ValueError('그룹 회차 번호가 필요합니다') from exc
+        if cycle_number < 1:
+            raise ValueError('복귀 회차 번호가 올바르지 않습니다')
+        with self.condition:
+            session = self.session
+            if not session.get('active') or session.get('execution_id') != execution_id:
+                raise ValueError('활성 그룹 실행 세션이 일치하지 않습니다')
+            if int(session.get('join_committed_cycle') or 0) == cycle_number:
+                return {
+                    'success': True, 'duplicate': True,
+                    'message': '이미 확정된 복귀', 'status': self.manager.status(),
+                }
+            if session.get('state') != 'join_ready':
+                raise ValueError('복귀 준비가 끝나지 않아 합류를 확정할 수 없습니다')
+            # 상태도 여기서 바꾼다 · 바로 뒤따르는 회차 초기화 명령이 작업
+            # 스레드가 깨기 전에 와도 받아지게
+            session.update({
+                'join_committed_cycle': cycle_number,
+                'cycle_number': cycle_number,
+                'state': 'motion_completed',
+            })
+            self.condition.notify_all()
+        return {
+            'success': True,
+            'message': f'복귀 · {cycle_number + 1}회차부터 합류',
+            'execution_id': execution_id,
+            'cycle_number': cycle_number,
             'status': self.manager.status(),
         }
 
@@ -322,40 +377,55 @@ class GroupSession:
                 plan, initialization_plan = playlist[0]
             if self.manager._stop_event.is_set():
                 return
-            self.manager._wait_group_deadline(
-                float(payload['initialize_monotonic']),
-                phase='group_initialize_scheduled',
-                message='그룹 초기 위치 이동 시작 대기',
-                execution_id=execution_id,
-            )
-            initialize_triggered_at = time.time()
-            initialize_triggered_monotonic = time.monotonic()
-            # 재생이 뒤따르면 첫 프레임까지 잇는다 · 그룹 「초기 위치 이동」 만이면 초기 위치에 선다 · 13-1
-            self.manager._player._run_initialization({
-                **initialization_plan,
-                'blend_to_first_frame': not payload.get('initialization_only'),
-            })
-            if self.manager._stop_event.is_set() or self.manager.status().get('state') != 'initialized':
-                return
-            with self.condition:
-                self.session.update({
+            join_cycle = int(payload.get('join_cycle_number') or 0)
+            cycle_number = 0
+            if join_cycle:
+                # 복귀 · 계획만 만들고 서 있는다 · 모터는 아직 움직이지 않는다 · 30-3
+                committed = self._wait_join_commit(execution_id, join_cycle)
+                if committed is None:
+                    return
+                cycle_number = committed
+            else:
+                self.manager._wait_group_deadline(
+                    float(payload['initialize_monotonic']),
+                    phase='group_initialize_scheduled',
+                    message='그룹 초기 위치 이동 시작 대기',
+                    execution_id=execution_id,
+                )
+                initialize_triggered_at = time.time()
+                initialize_triggered_monotonic = time.monotonic()
+                # 재생이 뒤따르면 첫 프레임까지 잇는다 · 그룹 「초기 위치 이동」 만이면 초기 위치에 선다 · 13-1
+                self.manager._player._run_initialization({
+                    **initialization_plan,
+                    'blend_to_first_frame': not payload.get('initialization_only'),
+                })
+                if self.manager._stop_event.is_set() or self.manager.status().get('state') != 'initialized':
+                    return
+                with self.condition:
+                    self.session.update({
+                        'state': 'armed',
+                        'initialize_triggered_at': initialize_triggered_at,
+                        'initialize_triggered_monotonic': (
+                            initialize_triggered_monotonic
+                        ),
+                    })
+                self.manager._update_status({
                     'state': 'armed',
+                    'phase': 'group_armed',
+                    'message': '그룹 초기 위치 이동 완료 · 모션 시작 대기',
+                    'group_execution': True,
+                    'execution_id': execution_id,
                     'initialize_triggered_at': initialize_triggered_at,
                     'initialize_triggered_monotonic': (
                         initialize_triggered_monotonic
                     ),
                 })
-            self.manager._update_status({
-                'state': 'armed',
-                'phase': 'group_armed',
-                'message': '그룹 초기 위치 이동 완료 · 모션 시작 대기',
-                'group_execution': True,
-                'execution_id': execution_id,
-                'initialize_triggered_at': initialize_triggered_at,
-                'initialize_triggered_monotonic': (
-                    initialize_triggered_monotonic
-                ),
-            })
+            # 복귀한 PC 는 그룹이 막 끝낸 회차에서 들어온다 · 첫 바퀴는 재생 없이
+            # 바로 다음 회차 초기화를 기다린다
+            if join_cycle and not self._initialize_next_cycle(
+                execution_id, cycle_number, playlist, initialization_plan,
+            ):
+                return
             while not self.manager._stop_event.is_set():
                 scheduled = self._wait_cycle(execution_id)
                 if scheduled is None:
@@ -411,54 +481,10 @@ class GroupSession:
                 if stop_after_cycle:
                     self._finish('현재 그룹 모션 회차 완료 후 정지')
                     return
-                scheduled_initialize = self._wait_initialization(
-                    execution_id,
-                )
-                if scheduled_initialize is None:
+                if not self._initialize_next_cycle(
+                    execution_id, cycle_number, playlist, initialization_plan,
+                ):
                     break
-                initialized_cycle, initialize_at = scheduled_initialize
-                if playlist:
-                    # 다음 회차 애니의 첫 프레임으로 · 회차 N 다음은 목록의 N 번째
-                    initialization_plan = playlist[
-                        initialized_cycle % len(playlist)
-                    ][1]
-                initialization_plan = {
-                    **initialization_plan,
-                    'group_execution': True,
-                    'execution_id': execution_id,
-                    'group_cycle_number': initialized_cycle,
-                }
-                self.manager._wait_group_deadline(
-                    initialize_at,
-                    phase='group_cycle_initialize_scheduled',
-                    message=f'그룹 모션 {initialized_cycle}회차 후 초기화 대기',
-                    execution_id=execution_id,
-                    cycle_number=initialized_cycle,
-                )
-                if self.manager._stop_event.is_set():
-                    break
-                self.manager._player._run_initialization({
-                    **initialization_plan, 'blend_to_first_frame': True,
-                })
-                if self.manager._stop_event.is_set() or self.manager.status().get('state') != 'initialized':
-                    break
-                with self.condition:
-                    self.session.update({
-                        'state': 'cycle_ready',
-                        'cycle_number': cycle_number,
-                        'next_start_at': 0.0,
-                        'next_cycle_number': 0,
-                    })
-                self.manager._update_status({
-                    'state': 'cycle_ready',
-                    'phase': 'group_cycle_initialized',
-                    'message': f'그룹 모션 {cycle_number}회차 후 초기화 완료',
-                    'group_execution': True,
-                    'execution_id': execution_id,
-                    'cycle_count': cycle_number,
-                    'current_cycle': cycle_number,
-                    'group_cycle_number': cycle_number,
-                })
         except InterruptedError:
             pass
         except Exception as exc:
@@ -491,6 +517,67 @@ class GroupSession:
                     'message': '그룹 실행 정지',
                     'phase_finished_at': time.time(),
                 })
+
+    def _initialize_next_cycle(
+        self,
+        execution_id: str,
+        cycle_number: int,
+        playlist: List[tuple],
+        initialization_plan: Dict[str, Any],
+    ) -> bool:
+        """회차가 끝난 뒤 · 다음 회차 초기화 명령을 기다렸다가 초기 위치로 · 실패·정지면 거짓
+
+        끝난 회차의 PC 와 복귀한 PC(수정 목록 30-3)가 같은 길을 탄다.
+        """
+        scheduled_initialize = self._wait_initialization(
+            execution_id,
+        )
+        if scheduled_initialize is None:
+            return False
+        initialized_cycle, initialize_at = scheduled_initialize
+        if playlist:
+            # 다음 회차 애니의 첫 프레임으로 · 회차 N 다음은 목록의 N 번째
+            initialization_plan = playlist[
+                initialized_cycle % len(playlist)
+            ][1]
+        initialization_plan = {
+            **initialization_plan,
+            'group_execution': True,
+            'execution_id': execution_id,
+            'group_cycle_number': initialized_cycle,
+        }
+        self.manager._wait_group_deadline(
+            initialize_at,
+            phase='group_cycle_initialize_scheduled',
+            message=f'그룹 모션 {initialized_cycle}회차 후 초기화 대기',
+            execution_id=execution_id,
+            cycle_number=initialized_cycle,
+        )
+        if self.manager._stop_event.is_set():
+            return False
+        self.manager._player._run_initialization({
+            **initialization_plan, 'blend_to_first_frame': True,
+        })
+        if self.manager._stop_event.is_set() or self.manager.status().get('state') != 'initialized':
+            return False
+        with self.condition:
+            self.session.update({
+                'state': 'cycle_ready',
+                'cycle_number': cycle_number,
+                'next_start_at': 0.0,
+                'next_cycle_number': 0,
+            })
+        self.manager._update_status({
+            'state': 'cycle_ready',
+            'phase': 'group_cycle_initialized',
+            'message': f'그룹 모션 {cycle_number}회차 후 초기화 완료',
+            'group_execution': True,
+            'execution_id': execution_id,
+            'cycle_count': cycle_number,
+            'current_cycle': cycle_number,
+            'group_cycle_number': cycle_number,
+        })
+        return True
 
     def _run_independent(
         self,
@@ -528,6 +615,43 @@ class GroupSession:
             if result.get('state') == 'stopped'
             else '각자 재생 · 현재 회차 완료 후 정지'
         )
+
+    def _wait_join_commit(self, execution_id: str, join_cycle: int) -> Optional[int]:
+        """복귀 · 계획을 다 만들었다고 알리고 진행 PC 의 합류 확정을 기다린다 · 30-3"""
+        with self.condition:
+            if self.session.get('execution_id') != execution_id:
+                return None
+            self.session['state'] = 'join_ready'
+        self.manager._update_status({
+            'state': 'join_ready',
+            'phase': 'group_join_ready',
+            'message': '그룹 복귀 · 다음 회차부터 합류 대기',
+            'group_execution': True,
+            'execution_id': execution_id,
+            'group_cycle_number': join_cycle,
+        })
+        with self.condition:
+            while not self.manager._stop_event.is_set():
+                if self.session.get('execution_id') != execution_id or not self.session.get('active'):
+                    return None
+                committed = int(self.session.get('join_committed_cycle') or 0)
+                if committed > 0:
+                    self.session['state'] = 'motion_completed'
+                    break
+                self.condition.wait(timeout=0.2)
+            else:
+                return None
+        self.manager._update_status({
+            'state': 'motion_completed',
+            'phase': 'group_join_committed',
+            'message': f'그룹 복귀 · {committed + 1}회차부터 합류',
+            'group_execution': True,
+            'execution_id': execution_id,
+            'cycle_count': committed,
+            'current_cycle': committed,
+            'group_cycle_number': committed,
+        })
+        return committed
 
     def _wait_initialization(
         self, execution_id: str,

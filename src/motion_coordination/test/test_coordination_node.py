@@ -632,8 +632,11 @@ def test_missing_prepare_ack_excludes_the_silent_pc_and_goes_on():
     node._enforce_schedule_ack_deadline()
 
     # 운영 로그 기록(`group_note`)은 별도 스레드라 순서·도착 시점이 정해지지 않는다 · 30-2
-    assert [item for item in sent if item != ('local', 'group_note')] == [('dds', 'update_participants')]
-    assert node._command_pub.messages[-1].participant_ids == ['pc-a', 'pc-b']
+    assert [item for item in sent if item != ('local', 'group_note')] == [
+        ('dds', 'update_participants'), ('dds', 'cancel_before_start'),
+    ]
+    assert node._command_pub.messages[-2].participant_ids == ['pc-a', 'pc-b']
+    assert node._command_pub.messages[-1].participant_ids == ['pc-a', 'pc-c']
     assert node._execution.participants == ('pc-a', 'pc-b')
     assert node._execution.excluded == {'pc-c': '준비 응답 없음'}
     assert node._execution.pending_command == ''
@@ -763,7 +766,11 @@ def test_rejected_prepare_from_a_slave_excludes_it_and_goes_on():
         event='rejected', success=False, message='오프 모드',
     ))
 
-    assert sent == [('dds', 'update_participants')]
+    # 남은 PC 에 새 목록 · 뺀 PC 에는 따로 「풀어라」 (30-3 · 잡아 둔 실행을 들고 서 있지 않게)
+    assert [item for item in sent if item != ('local', 'group_note')] == [
+        ('dds', 'update_participants'), ('dds', 'cancel_before_start'),
+    ]
+    assert node._command_pub.messages[-1].participant_ids == ['pc-a', 'pc-b']
     assert node._execution.participants == ('pc-a', 'pc-c')
     assert node._execution.excluded['pc-b'].endswith('오프 모드')
     assert node._execution.state == 'preparing'

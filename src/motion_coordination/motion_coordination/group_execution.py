@@ -17,8 +17,10 @@ from motion_common.repeat_policy import (
 #:
 #: 1 · 칸 없음(옛 PC · 0 으로 읽힌다) · 2 · 2026-10-06 `GroupCommand.sync_mode` ·
 #: `GroupHeartbeat.operation_mode`·`web_url`·`protocol_version` ·
-#: 3 · 2026-10-06 `GroupCommand.stop_reason` (스케줄 끝 주차 · 수정 목록 36)
-GROUP_PROTOCOL_VERSION = 3
+#: 3 · 2026-10-06 `GroupCommand.stop_reason` (스케줄 끝 주차 · 수정 목록 36) ·
+#: 4 · 2026-10-06 도는 그룹 복귀 · 명령 `join` · `update_participants` 가 참가자를 늘릴 수 있음 ·
+#: 사건 `join_ready` (수정 목록 30-3)
+GROUP_PROTOCOL_VERSION = 4
 
 
 @dataclass
@@ -146,6 +148,13 @@ class GroupExecution:
         self.independent_stopped: set[str] = set()
         #: 이번 실행에서 뺀 PC 와 이유 · 미접속·알람·오프 모드·명단 외 · 수정 목록 30
         self.excluded: Dict[str, str] = {}
+        #: 진행 PC · 도는 중에 복귀하는 PC · {pc_id: {'state': preparing|ready, 'since': monotonic}} · 30-3
+        self.joining: Dict[str, Dict[str, object]] = {}
+        #: 진행 PC · 이번 회차 경계에서 넣은 PC · 확정이 거절되면 빼고 나머지로 간다
+        self.admitted: set[str] = set()
+        #: 복귀하는 쪽 PC · 합류 확정을 기다리는 회차(0 = 아님) · 기다리기 시작한 시각
+        self.join_cycle = 0
+        self.join_started = 0.0
         self.last_start_spread_ms: Optional[float] = None
         self.last_initialize_spread_ms: Optional[float] = None
         self.pending_command = ''
@@ -179,6 +188,27 @@ class GroupExecution:
         self.pending_scheduled_at = 0.0
         self.motion_start_report_deadline = 0.0
         self.release_error = False
+        self.joining.clear()
+        self.admitted.clear()
+        self.join_cycle = 0
+        self.join_started = 0.0
+
+    def admit(self, pc_ids: Iterable[str]) -> tuple[str, ...]:
+        """도는 실행에 복귀 PC 를 넣는다 · 다음 회차 초기화부터 같이 · 넣은 PC 목록 · 30-3"""
+        added = tuple(sorted(
+            str(pc_id) for pc_id in pc_ids
+            if str(pc_id) and str(pc_id) not in self.participants
+        ))
+        if not added:
+            return ()
+        self.participants = tuple(sorted({*self.participants, *added}))
+        for pc_id in added:
+            self.excluded.pop(pc_id, None)
+            self.joining.pop(pc_id, None)
+        # 막 끝난 회차를 같이 끝낸 것으로 친다 · 회차 초기화 장벽이 넣은 PC 까지 보고 넘어가게
+        self.motion_completed.update(added)
+        self.admitted = set(added)
+        return added
 
     def begin(
         self,
@@ -231,6 +261,7 @@ class GroupExecution:
         )
         for pc_id in drop:
             self.excluded[pc_id] = str(reasons[pc_id])
+            self.admitted.discard(pc_id)
         for bucket in (
             self.ready, self.armed, self.cycle_ready, self.motion_completed,
             self.cycle_initialized, self.scheduled, self.independent_stopped,

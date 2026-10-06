@@ -95,6 +95,7 @@ export function createCoordinationController({ el }) {
 
   function peerRow(
     peer = {}, requiredPeers = new Set(), fixedParticipants = new Set(), excluded = {}, isLocal = false,
+    joining = {},
   ) {
     const alarm = peer.alarm || {};
     const alarmText = Number(peer.servo_alarm_grade || 0) > 0
@@ -117,12 +118,18 @@ export function createCoordinationController({ el }) {
     // 이번 실행에서 뺐으면 이유를 · 명단이 있는데 그 밖이면 「명단 외」 · 수정 목록 30
     const excludedReason = excluded[peer.pc_id] || '';
     const outsideRoster = !isLocal && requiredPeers.size > 0 && !isRequired;
-    const executionStateText = excludedReason
+    // 도는 중에 돌아온 PC · 계획 만드는 중 → 다음 회차 경계 대기 · 수정 목록 30-3
+    const joiningState = joining[peer.pc_id] || '';
+    const executionStateText = joiningState
+      ? (joiningState === 'ready' ? '복귀 · 다음 회차부터 합류' : '복귀 준비 중')
+      : excludedReason
       ? `제외 · ${excludedReason}`
       : (fixedParticipants.has(peer.pc_id)
         ? '고정 참가'
         : (outsideRoster ? '명단 외' : (isRequired ? '명단 포함' : '대기')));
-    const executionStateClass = excludedReason
+    const executionStateClass = joiningState
+      ? 'coordination-state-warn'
+      : excludedReason
       ? 'coordination-state-bad'
       : (fixedParticipants.has(peer.pc_id) || isRequired ? 'coordination-state-ok' : 'coordination-state-warn');
     const modeText = OPERATION_MODE_TEXT[peer.operation_mode] || '';
@@ -196,6 +203,7 @@ export function createCoordinationController({ el }) {
     const peers = Array.isArray(runtime.peers) ? runtime.peers : [];
     const fixedParticipants = new Set(Array.isArray(execution.participants) ? execution.participants : []);
     const excludedMap = execution.excluded && typeof execution.excluded === 'object' ? execution.excluded : {};
+    const joiningMap = execution.joining && typeof execution.joining === 'object' ? execution.joining : {};
     const requiredPeersList = Array.isArray(config.required_peers) ? config.required_peers : [];
     const requiredPeers = new Set(requiredPeersList);
     const coordinationError = runtime.coordination_error || {};
@@ -389,12 +397,12 @@ export function createCoordinationController({ el }) {
           pc_id: localId,
           display_name: `${runtime.local?.display_name || runtimeConfig.display_name || config.pc_id} (이 PC)`,
           state: 'online',
-        }, requiredPeers, fixedParticipants, excludedMap, true));
+        }, requiredPeers, fixedParticipants, excludedMap, true, joiningMap));
         if (localId) seenPcs.add(localId);
       }
       
       peers.forEach((peer) => {
-        rows.push(peerRow(peer, requiredPeers, fixedParticipants, excludedMap));
+        rows.push(peerRow(peer, requiredPeers, fixedParticipants, excludedMap, false, joiningMap));
         if (peer.pc_id) seenPcs.add(peer.pc_id);
       });
       

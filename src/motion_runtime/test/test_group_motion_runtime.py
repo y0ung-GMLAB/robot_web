@@ -166,3 +166,92 @@ def test_playback_cycle_number_uses_local_counter_for_standalone_motion():
     plan = {'group_execution': False}
     assert motion_run_rules._playback_cycle_number(plan, 0) == 1
     assert motion_run_rules._playback_cycle_number(plan, 2) == 3
+
+
+# 도는 그룹 복귀 · 수정 목록 30-3 ------------------------------------------- #
+
+def test_rejoining_pc_waits_without_moving_then_joins_from_the_next_cycle():
+    manager = _group_manager()
+    manager._group.session = {
+        'active': True, 'execution_id': 'exec-a', 'state': 'join_preparing',
+        'cycle_number': 3, 'join_cycle_number': 3, 'join_committed_cycle': 0,
+        'next_cycle_number': 0, 'next_start_at': 0.0,
+        'next_initialize_at': 0.0, 'next_initialize_cycle_number': 0,
+        'stop_after_cycle': False,
+    }
+    manager._plan_builder.build = lambda payload, **kwargs: {
+        'run_mode': payload.get('run_mode', 'once'), 'repeat_mode': 'reinitialize',
+        'dwell_sec': 0.0, 'group_execution': True,
+        'capabilities': {'continuous_run': {'available': True}},
+    }
+    manager._wait_group_deadline = lambda *_args, **_kwargs: None
+    initializations = []
+
+    def run_initialization(plan):
+        initializations.append(int(plan.get('group_cycle_number') or 0))
+        manager._status.update({'state': 'initialized', 'phase': 'initialized'})
+
+    manager._player._run_initialization = run_initialization
+    cycles = []
+
+    def run_motion(plan):
+        cycles.append(int(plan['group_cycle_number']))
+        manager._status.update({
+            'state': 'completed', 'phase': 'completed',
+            'lifecycle': {'motion_started_at': time.time()},
+        })
+
+    manager._player._run_motion = run_motion
+    worker = threading.Thread(target=manager._group._run, args=({
+        'execution_id': 'exec-a', 'join_cycle_number': 3,
+    }, [{}]))
+    worker.start()
+    _wait_until(lambda: manager._group.session.get('state') == 'join_ready')
+    assert manager.status()['phase'] == 'group_join_ready'
+    time.sleep(0.03)
+    assert initializations == [] and cycles == []          # 확정 전에는 안 움직인다
+
+    committed = manager._group.commit_join({'execution_id': 'exec-a', 'cycle_number': 3})
+    assert committed['success'] is True
+    # 확정 직후 다른 PC 와 같은 회차 초기화를 받는다
+    manager._group.schedule_initialization({
+        'execution_id': 'exec-a', 'cycle_number': 3,
+        'initialize_monotonic': time.monotonic() + 0.05,
+    })
+    _wait_until(lambda: manager._group.session.get('state') == 'cycle_ready')
+    assert initializations == [3]
+    assert manager.status()['phase'] == 'group_cycle_initialized'
+
+    manager._group.schedule_cycle({
+        'execution_id': 'exec-a', 'cycle_number': 4,
+        'start_monotonic': time.monotonic() + 1.0,
+    })
+    _wait_until(lambda: cycles == [4])
+    manager._group.cancel({'execution_id': 'exec-a'})
+    worker.join(timeout=1.0)
+    assert not worker.is_alive()
+
+
+def test_join_commit_before_the_plan_is_ready_is_refused():
+    manager = _group_manager()
+    manager._group.session = {
+        'active': True, 'execution_id': 'exec-a', 'state': 'join_preparing',
+        'cycle_number': 3, 'join_committed_cycle': 0,
+    }
+    try:
+        manager._group.commit_join({'execution_id': 'exec-a', 'cycle_number': 3})
+    except ValueError as exc:
+        assert '복귀 준비가 끝나지 않아' in str(exc)
+    else:
+        raise AssertionError('commit before ready must fail')
+
+
+def test_join_prepare_needs_no_initialize_time_but_a_normal_prepare_does():
+    from motion_runtime.group_session import GroupSession
+    session = GroupSession.__new__(GroupSession)
+    try:
+        session.prepare({'execution_id': 'exec-a'})
+    except ValueError as exc:
+        assert '트리거' in str(exc)
+    else:
+        raise AssertionError('normal prepare needs initialize_monotonic')

@@ -53,7 +53,7 @@ from .local_api import LocalCoordinationApi
 from .local_runtime_monitor import LocalRuntimeMonitor
 from .safety_stop import SafetyStopController, SafetyStopOutcome
 from motion_common import topics
-from motion_common.repeat_policy import normalize_group_sync_mode
+from motion_common.repeat_policy import GROUP_LOCKSTEP, normalize_group_sync_mode
 from .trigger_sync import (
     TriggerSyncEstimator,
     coordinator_to_local_ns,
@@ -393,6 +393,8 @@ class MotionCoordinationNode(Node):
         self._enforce_schedule_ack_deadline()
         self._enforce_motion_start_report_deadline()
         self._drive_trigger_sync()
+        self._manage_rejoiners()
+        self._enforce_join_wait()
         self._prune_seen_commands()
         self._check_multiple_masters()
         self._auto_recover_group_errors()
@@ -784,15 +786,36 @@ class MotionCoordinationNode(Node):
             if not 1 <= len(participants) <= 8:
                 raise ValueError('그룹 실행 참가 PC는 1~8대여야 합니다')
             if command == 'update_participants':
-                # 진행 PC 가 빠진 PC 를 뺐다 · 이 PC 는 남았다 · 수정 목록 30
+                # 진행 PC 가 참가 목록을 바꿨다 · 빠진 PC 를 뺐거나(30) 복귀 PC 를 넣었다(30-3)
                 with self._lock:
                     if (
                         message.execution_id != self._execution.execution_id
                         or message.coordinator_id != self._execution.coordinator_id
-                        or not set(participants) <= set(self._execution.participants)
+                        or self._config.pc_id not in participants
                     ):
                         raise ValueError('참가 목록 갱신이 지금 실행과 맞지 않습니다')
-                    self._execution.participants = participants
+                    joining_self = self._execution.join_cycle > 0
+                if joining_self:
+                    # 이 PC 가 복귀 대상이다 · 합류 확정 · 다음 회차 초기화부터 같이
+                    committed = self._call_local_control({
+                        'command': 'group_join_commit',
+                        'execution_id': message.execution_id,
+                        'cycle_number': int(message.cycle_number),
+                        'network_operation_id': message.command_id,
+                    })
+                    if not committed.get('success'):
+                        raise ValueError(
+                            '복귀 합류 확정 실패: '
+                            + str(committed.get('message') or '응답 없음')
+                        )
+                with self._lock:
+                    if message.execution_id == self._execution.execution_id:
+                        self._execution.participants = participants
+                        self._execution.join_cycle = 0
+                        self._execution.join_started = 0.0
+                return
+            if command == 'join':
+                self._accept_rejoin(message, participants)
                 return
             if command == 'prepare':
                 self._accept_execution_claim(message, participants)
@@ -934,6 +957,45 @@ class MotionCoordinationNode(Node):
             ):
                 return
             if self._execution.coordinator_id != self._config.pc_id:
+                return
+            joiner_drop = ''
+            if (
+                message.pc_id in self._execution.joining
+                and message.pc_id not in self._execution.participants
+            ):
+                # 복귀 준비 중인 PC · 그 PC 의 실패가 도는 그룹을 멈추면 안 된다 · 30-3
+                if message.event == 'join_ready' and message.success:
+                    self._execution.joining[message.pc_id]['state'] = 'ready'
+                elif message.event in {'rejected', 'error', 'stopped'} or not message.success:
+                    joiner_drop = f'복귀 실패 · {message.message or message.event}'
+                if not joiner_drop:
+                    return
+            elif message.pc_id not in self._execution.participants:
+                # 이번 실행 밖 PC(뺐거나 복귀를 접은 PC)의 늦은 사건 · 그 PC 의 「정지」·
+                # 「거절」 이 도는 그룹을 멈추면 안 된다 · 수정 목록 30-3
+                return
+            elif (
+                message.event == 'rejected'
+                and message.pc_id in self._execution.admitted
+                and message.pc_id != self._config.pc_id
+                and self._execution.state in {'motion_completed', 'cycle_initializing'}
+            ):
+                # 이번 경계에서 넣은 복귀 PC 가 확정·초기화를 거절했다 · 그 PC 만 뺀다
+                exclude_reasons = {
+                    message.pc_id: f'복귀 거절 · {message.message or "로컬 준비 실패"}',
+                }
+        if joiner_drop:
+            self._drop_joiner(message.pc_id, joiner_drop)
+            return
+        if exclude_reasons:
+            self._exclude_participants(exclude_reasons)
+            return
+        with self._lock:
+            if (
+                not self._execution.execution_id
+                or message.execution_id != self._execution.execution_id
+                or self._execution.coordinator_id != self._config.pc_id
+            ):
                 return
             try:
                 if self._execution.independent and message.event in {
@@ -1638,6 +1700,16 @@ class MotionCoordinationNode(Node):
                 cycle_number=self._execution.cycle_number,
                 participants=self._execution.participants,
             )
+            # 뺀 PC 에는 따로 풀라고 알린다 · 잡아 둔 실행·계획을 들고 서 있지 않게
+            releases = [
+                self._new_command(
+                    command='cancel_before_start',
+                    execution_id=self._execution.execution_id,
+                    cycle_number=self._execution.cycle_number,
+                    participants=tuple(sorted({self._config.pc_id, pc_id})),
+                )
+                for pc_id in dropped
+            ]
             remaining = set(self._execution.participants)
             if (
                 self._execution.pending_command == 'prepare'
@@ -1658,6 +1730,22 @@ class MotionCoordinationNode(Node):
             + ', '.join(f'{pc_id}({reasons[pc_id]})' for pc_id in dropped)
         )
         self._command_pub.publish(message)
+        for release in releases:
+            self._command_pub.publish(release)
+        # 뺀 PC 만 기다리던 장벽을 다시 본다 · 시계 맞추기·회차 초기화 완료 · 30-3
+        advance_start = False
+        with self._lock:
+            if self._execution.execution_id:
+                self._complete_trigger_sync_if_ready()
+                if (
+                    self._execution.state == 'cycle_initializing'
+                    and self._execution.participants
+                    and self._execution.cycle_initialized >= set(self._execution.participants)
+                ):
+                    self._execution.state = 'cycle_ready'
+                    advance_start = True
+        if advance_start:
+            self._publish_next_start()
         self._note_excluded(
             message.execution_id, {pc_id: reasons[pc_id] for pc_id in dropped},
             tuple(message.participant_ids), stage='준비 중',
@@ -1686,6 +1774,236 @@ class MotionCoordinationNode(Node):
             ),
             'excluded': dict(excluded),
             'participants': list(participants),
+        }
+
+        def send() -> None:
+            result = self._call_local_control(payload, timeout_sec=2.0)
+            if not result.get('success'):
+                self.get_logger().warn(f'운영 로그 기록 실패 · {result.get("message")}')
+
+        threading.Thread(target=send, name='group-note', daemon=True).start()
+
+    # ------------------------------------------------------------------ #
+    # 도는 그룹 복귀 · 수정 목록 30-3
+    #
+    # 빠졌던 PC 가 돌아오면 진행 PC 가 `join` 을 보낸다 · 그 PC 는 계획만 만들고
+    # 서 있는다(`join_ready`) · 지금 회차가 끝나 모두가 다음 회차 초기 위치로 갈 때
+    # 참가 목록에 넣고(`update_participants`) 같이 초기 위치 → 다음 회차부터 같이 ·
+    # 늘 회차 첫 프레임부터 · 다른 PC 를 기다리게 하지 않는다 · 회차 맞춤에서만.
+    # ------------------------------------------------------------------ #
+
+    JOIN_PREPARE_TIMEOUT_SEC = 30.0
+    JOIN_RETRY_SEC = 30.0
+    JOINER_WAIT_LIMIT_SEC = 600.0
+
+    def _member_exclusion_reason(self, pc_id: str) -> str:
+        """그룹 실행에 넣을 수 없는 이유 · 비면 넣어도 된다 · 시작과 복귀가 같은 규칙"""
+        member = self._registry.member(pc_id)
+        state = self._registry.status(pc_id)
+        if member is None or not member.joined or state == 'offline':
+            return '통신 단절'
+        if state != 'online':
+            return '응답 지연'
+        if member.alarm_grade > 0:
+            return f'Servo 알람 {member.alarm_grade}등급'
+        if member.protocol_version != GROUP_PROTOCOL_VERSION:
+            return '버전 불일치 · 그 PC 에서 bash scripts/install.sh'
+        if member.operation_mode == 'off':
+            return '오프 모드'
+        if member.operation_mode == 'manual':
+            return '수동 모드'
+        return ''
+
+    def _rejoin_open(self) -> bool:
+        """지금 도는 실행이 복귀를 받을 수 있나 · 진행 PC · 회차 맞춤 연속 재생이 도는 중"""
+        execution = self._execution
+        if (
+            not execution.execution_id
+            or execution.coordinator_id != self._config.pc_id
+            or not self._config.is_master
+            or execution.sync_mode != GROUP_LOCKSTEP
+            or execution.run_mode != 'continuous'
+            or execution.initialization_only
+            or execution.stop_after_cycle
+            or execution.state != 'running'
+        ):
+            return False
+        # 목표 회차가 있으면 다음 회차가 남아 있어야 들어올 수 있다
+        return not (
+            execution.target_cycle_count
+            and execution.cycle_number >= execution.target_cycle_count
+        )
+
+    def _manage_rejoiners(self) -> None:
+        """진행 PC · 돌아온 PC 에 복귀를 권하고, 늦거나 끊긴 복귀는 접는다"""
+        now = time.monotonic()
+        invites = []
+        drops: Dict[str, str] = {}
+        with self._lock:
+            if (
+                not self._execution.execution_id
+                or self._execution.coordinator_id != self._config.pc_id
+            ):
+                return
+            for pc_id, info in list(self._execution.joining.items()):
+                if self._registry.status(pc_id) == 'offline':
+                    drops[pc_id] = '복귀 중 통신 단절'
+                elif (
+                    info.get('state') == 'preparing'
+                    and now - float(info.get('since') or now) > self.JOIN_PREPARE_TIMEOUT_SEC
+                ):
+                    drops[pc_id] = '복귀 준비 응답 없음'
+            if self._rejoin_open():
+                me = self._config.pc_id
+                roster = {
+                    str(pc_id) for pc_id in (self._config.required_peers or ())
+                    if str(pc_id) and str(pc_id) != me
+                }
+                pool = roster or set(self._registry.joined())
+                pool -= set(self._execution.participants)
+                pool -= set(self._execution.joining)
+                pool -= set(drops)
+                pool.discard(me)
+                retry = getattr(self, '_join_retry_after', {})
+                for pc_id in sorted(pool):
+                    if retry.get(pc_id, 0.0) > now or self._member_exclusion_reason(pc_id):
+                        continue
+                    self._execution.joining[pc_id] = {'state': 'preparing', 'since': now}
+                    invites.append(self._new_command(
+                        command='join',
+                        execution_id=self._execution.execution_id,
+                        cycle_number=self._execution.cycle_number,
+                        participants=tuple(sorted({me, pc_id})),
+                        repeat_mode=self._execution.repeat_mode,
+                        dwell_sec=self._execution.dwell_sec,
+                        target_cycle_count=self._execution.target_cycle_count,
+                        run_mode=self._execution.run_mode,
+                        sync_mode=self._execution.sync_mode,
+                    ))
+        for pc_id, reason in drops.items():
+            self._drop_joiner(pc_id, reason)
+        for command in invites:
+            joiner = next(pc for pc in command.participant_ids if pc != self._config.pc_id)
+            self.get_logger().info(f'그룹 복귀 준비 · {joiner} · 회차 {command.cycle_number} 끝나면 합류')
+            self._command_pub.publish(command)
+
+    def _drop_joiner(self, pc_id: str, reason: str) -> None:
+        """복귀를 접는다 · 그 PC 는 계획을 버리고 다음 기회(30초 뒤)를 기다린다"""
+        with self._lock:
+            info = self._execution.joining.pop(pc_id, None)
+            if info is None or not self._execution.execution_id:
+                return
+            retry = getattr(self, '_join_retry_after', None)
+            if retry is None:
+                retry = self._join_retry_after = {}
+            retry[pc_id] = time.monotonic() + self.JOIN_RETRY_SEC
+            self._execution.excluded[pc_id] = reason
+            message = self._new_command(
+                command='cancel_before_start',
+                execution_id=self._execution.execution_id,
+                cycle_number=self._execution.cycle_number,
+                participants=tuple(sorted({self._config.pc_id, pc_id})),
+            )
+            participants = tuple(self._execution.participants)
+            execution_id = self._execution.execution_id
+        self.get_logger().warn(f'그룹 복귀 접음 · {pc_id} · {reason}')
+        self._command_pub.publish(message)
+        self._note_excluded(execution_id, {pc_id: reason}, participants, stage='복귀 중')
+
+    def _admit_ready_joiners(self) -> None:
+        """회차 초기화 직전 · 준비가 끝난 복귀 PC 를 참가 목록에 넣는다"""
+        with self._lock:
+            self._execution.admitted = set()
+            ready = [
+                pc_id for pc_id, info in self._execution.joining.items()
+                if info.get('state') == 'ready'
+                and not self._member_exclusion_reason(pc_id)
+            ]
+            if not ready or self._execution.stop_after_cycle:
+                return
+            added = self._execution.admit(ready)
+            if not added:
+                return
+            message = self._new_command(
+                command='update_participants',
+                execution_id=self._execution.execution_id,
+                cycle_number=self._execution.cycle_number,
+                participants=self._execution.participants,
+            )
+            next_cycle = self._execution.cycle_number + 1
+            execution_id = self._execution.execution_id
+            participants = tuple(self._execution.participants)
+        self.get_logger().info(f'그룹 복귀 · {", ".join(added)} · {next_cycle}회차부터 합류')
+        self._command_pub.publish(message)
+        self._note_group(
+            execution_id, 'group_rejoined',
+            f'그룹 복귀 · {", ".join(added)} · {next_cycle}회차부터 합류 · 참가 {", ".join(participants)}',
+            {'joined': list(added), 'participants': list(participants), 'cycle': next_cycle},
+        )
+
+    def _accept_rejoin(self, message: GroupCommand, participants: tuple[str, ...]) -> None:
+        """복귀하는 쪽 · 계획만 만들고 서 있는다 · 합류는 진행 PC 가 확정한다"""
+        self._accept_execution_claim(message, participants)
+        with self._lock:
+            self._execution.repeat_mode = str(message.repeat_mode or 'direct').strip().lower()
+            self._execution.dwell_sec = max(float(message.dwell_sec), 0.0)
+            self._execution.initialization_only = False
+            self._execution.run_mode = str(message.run_mode or 'continuous').strip().lower()
+            self._execution.sync_mode = normalize_group_sync_mode(getattr(message, 'sync_mode', ''))
+            self._execution.target_cycle_count = int(getattr(message, 'target_cycle_count', 0) or 0)
+            self._execution.join_cycle = int(message.cycle_number)
+            self._execution.join_started = time.monotonic()
+        result = self._local_readiness()
+        if result.get('success'):
+            result = self._call_local_control({
+                'command': 'group_join',
+                'execution_id': message.execution_id,
+                'join_cycle_number': int(message.cycle_number),
+                'network_operation_id': message.command_id,
+                'repeat_mode': self._execution.repeat_mode,
+                'dwell_sec': self._execution.dwell_sec,
+                'initialization_only': False,
+                'run_mode': self._execution.run_mode,
+                'sync_mode': self._execution.sync_mode,
+                'target_cycle_count': self._execution.target_cycle_count,
+            })
+        if result.get('success'):
+            self._publish_event(message, 'join_accepted', True, '복귀 준비 시작')
+            return
+        self._publish_event(
+            message, 'rejected', False, str(result.get('message') or '복귀 준비 실패'),
+        )
+        with self._lock:
+            if self._execution.execution_id == message.execution_id:
+                self._execution.stop_now()
+                self._clear_active_execution()
+
+    def _enforce_join_wait(self) -> None:
+        """복귀하는 쪽 · 합류 확정이 너무 오래 안 오면 계획을 버리고 놓는다"""
+        with self._lock:
+            if (
+                not self._execution.join_cycle
+                or not self._execution.join_started
+                or time.monotonic() - self._execution.join_started < self.JOINER_WAIT_LIMIT_SEC
+            ):
+                return
+            execution_id = self._execution.execution_id
+        self.get_logger().warn('그룹 복귀 · 합류 확정이 오지 않아 놓음')
+        self._call_local_control({
+            'command': 'group_cancel',
+            'execution_id': execution_id,
+            'network_operation_id': f'join-timeout-{uuid.uuid4().hex}',
+        })
+        with self._lock:
+            if self._execution.execution_id == execution_id:
+                self._execution.stop_now()
+                self._clear_active_execution()
+
+    def _note_group(self, execution_id: str, event_type: str, message: str, details: Mapping[str, Any]) -> None:
+        """연동 기록을 이 PC 웹의 모터 동작 로그에 · 응답을 기다리지 않는다"""
+        payload = {
+            'command': 'group_note', 'event_type': event_type,
+            'execution_id': str(execution_id or ''), 'message': message, **dict(details),
         }
 
         def send() -> None:
@@ -1841,6 +2159,7 @@ class MotionCoordinationNode(Node):
             schedule()
 
     def _publish_next_cycle_initialization(self) -> None:
+        self._admit_ready_joiners()
         unhealthy = self._execution_unhealthy_members()
         if unhealthy:
             reason = (
@@ -2068,6 +2387,9 @@ class MotionCoordinationNode(Node):
             elif phase == 'group_cycle_initialized':
                 event = 'cycle_initialized'
                 cycle = int(status.get('current_cycle') or cycle)
+            elif phase == 'group_join_ready':
+                # 도는 그룹 복귀 · 계획을 다 만들었다 · 수정 목록 30-3
+                event = 'join_ready'
             elif phase == 'error':
                 event = 'error'
                 success = False
@@ -2527,6 +2849,11 @@ class MotionCoordinationNode(Node):
                     'sync_mode': self._execution.sync_mode,
                     # 이번 실행에서 뺀 PC 와 이유 · 수정 목록 30
                     'excluded': dict(self._execution.excluded),
+                    # 도는 중 복귀하는 PC · preparing(계획 만드는 중) · ready(다음 회차 경계 대기) · 30-3
+                    'joining': {
+                        pc_id: str(info.get('state') or '')
+                        for pc_id, info in self._execution.joining.items()
+                    },
                     'stop_after_cycle': self._execution.stop_after_cycle,
                     'initialize_spread_ms': self._execution.last_initialize_spread_ms,
                     'start_spread_ms': self._execution.last_start_spread_ms,
@@ -2605,6 +2932,18 @@ class MotionCoordinationNode(Node):
                 self._cancelled_execution_ids = {active} if active else set()
 
     def _clear_active_execution(self) -> None:
+        if (
+            self._execution.joining
+            and self._execution.coordinator_id == self._config.pc_id
+        ):
+            # 복귀 준비 중이던 PC 가 계획만 들고 서 있지 않게 · 30-3
+            for pc_id in sorted(self._execution.joining):
+                self._command_pub.publish(self._new_command(
+                    command='cancel_before_start',
+                    execution_id=self._execution.execution_id,
+                    cycle_number=self._execution.cycle_number,
+                    participants=tuple(sorted({self._config.pc_id, pc_id})),
+                ))
         self._execution.clear_active()
         self._sync_estimators.clear()
         self._sync_sent_samples.clear()

@@ -405,6 +405,12 @@ def local_motion_control(bridge: Any, payload: Mapping[str, Any]) -> Dict[str, A
                 'message': '이미 정리된 그룹 실행 세션입니다',
             }
         return result
+    if command == 'group_join_commit':
+        # 도는 그룹에 복귀한 PC · 합류 확정 · 수정 목록 30-3
+        return bridge.motion_group_join_commit({
+            'execution_id': str(payload.get('execution_id') or ''),
+            'cycle_number': payload.get('cycle_number'),
+        })
     if command == 'group_note':
         # 연동 노드가 남기는 기록 · 지금은 뺀 PC · 수정 목록 30-2
         return bridge.record_coordination_note(
@@ -439,7 +445,7 @@ def local_motion_control(bridge: Any, payload: Mapping[str, Any]) -> Dict[str, A
         'request_source': 'network_control',
         'network_operation_id': str(payload.get('network_operation_id') or ''),
     }
-    if command == 'group_prepare':
+    if command in {'group_prepare', 'group_join'}:
         repeat_mode = str(payload.get('repeat_mode') or '').strip()
         dwell_sec = payload.get('dwell_sec')
         initialization_only = bool(payload.get('initialization_only'))
@@ -471,6 +477,12 @@ def local_motion_control(bridge: Any, payload: Mapping[str, Any]) -> Dict[str, A
             # bypass that check because every cycle returns to the start pose.
             'run_mode': 'once' if initialization_only else run_mode,
         })
+        if command == 'group_join':
+            # 도는 그룹에 복귀 · 계획만 만들고 서 있다가 합류 확정을 기다린다 · 30-3
+            request.pop('initialize_monotonic', None)
+            request['join_cycle_number'] = int(payload.get('join_cycle_number') or 0)
+            if request['join_cycle_number'] < 1:
+                return {'success': False, 'message': '복귀 회차 번호가 필요합니다'}
         return bridge.motion_group_prepare(request)
     if command == 'group_start_at':
         request.update({

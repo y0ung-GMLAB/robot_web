@@ -387,6 +387,8 @@ class MotionRunManager(Node):
         router.register('group_start_at', self._group.schedule_cycle)
         router.register('group_initialize_at', self._group.schedule_initialization)
         router.register('group_cancel', self._group.cancel)
+        # 도는 그룹에 복귀 · 합류 확정 · 수정 목록 30-3
+        router.register('group_join_commit', self._group.commit_join)
         router.register('set_live_override', self._set_live_override)
         router.register('stop', lambda payload: self._handle_stop())
         router.register('stop_after_cycle', lambda payload: self._handle_stop_after_cycle())

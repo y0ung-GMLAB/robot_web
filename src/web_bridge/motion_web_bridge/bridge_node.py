@@ -2205,6 +2205,10 @@ class MotionWebBridge(Node):
     def motion_group_initialize_at(self, payload: Dict[str, Any]) -> Dict[str, Any]:
         return self._request_motion_run('group_initialize_at', payload, timeout_sec=2.0)
 
+    def motion_group_join_commit(self, payload: Dict[str, Any]) -> Dict[str, Any]:
+        """도는 그룹에 복귀 · 진행 PC 가 합류를 확정했다 · 수정 목록 30-3"""
+        return self._request_motion_run('group_join_commit', payload, timeout_sec=2.0)
+
     def motion_group_cancel(self, payload: Dict[str, Any]) -> Dict[str, Any]:
         return self._request_motion_run('group_cancel', payload, timeout_sec=2.0)
 
