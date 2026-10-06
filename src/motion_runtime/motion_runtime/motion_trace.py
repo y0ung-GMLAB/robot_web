@@ -84,6 +84,8 @@ class CycleTrace:
     axes: List[TraceAxis]
     status_source: Callable[[], Tuple[Any, float]]
     rows: List[tuple] = field(default_factory=list)
+    #: 재생 루프 마감 초과 · 늦은 프레임 · 최대 지연 · 건너뜀 · 수정 목록 12-2
+    timing: Dict[str, Any] = field(default_factory=dict)
 
     def add(self, sample: Mapping[str, Any]) -> None:
         raw, raw_at = self.status_source()
@@ -272,6 +274,7 @@ class MotionTraceRecorder:
             'sample_count': len(rows),
             'duration_sec': round(float(rows[-1][0]) if rows else 0.0, 3),
             'actual_missing_samples': missing,
+            'timing': dict(trace.timing),
             'axes': summary,
         }
         index = trace.directory / INDEX_FILENAME

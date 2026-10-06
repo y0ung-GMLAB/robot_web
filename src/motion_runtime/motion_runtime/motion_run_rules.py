@@ -407,6 +407,72 @@ def _duplicate_axis_text(axes: List[Dict[str, Any]]) -> str:
     duplicates = [str(axis) for axis, count in counts.items() if count > 1]
     return ', '.join(duplicates)
 
+class PlaybackTiming:
+    """재생 루프의 마감 초과 · 회차 기록에 남긴다 · 수정 목록 12-2 · 12-3 (2026-10-06)
+
+    전에는 늦어도 재기만 하지 않고 밀린 프레임을 **몰아 쐈다** · 모터가 짧은 순간에
+    여러 목표를 받아 튄다. 이제 한 틱 넘게 밀리면 건너뛰고 지금 시각의 프레임을 보낸다.
+    """
+
+    def __init__(self, period_sec: float) -> None:
+        self.period_sec = max(float(period_sec), 1e-3)
+        self.late_count = 0
+        self.max_late_ms = 0.0
+        self.skipped_samples = 0
+
+    def note(self, late_sec: float) -> None:
+        """이 프레임을 보내야 했던 시각보다 얼마나 늦게 보냈나"""
+        if late_sec > self.period_sec:
+            self.late_count += 1
+        self.max_late_ms = max(self.max_late_ms, max(late_sec, 0.0) * 1000.0)
+
+    def next_index(self, index: int, cycle_started: float, now: float) -> tuple:
+        """(다음에 보낼 샘플 번호, 기다릴 마감 시각 · 기다릴 필요 없으면 None)"""
+        next_deadline = cycle_started + ((index + 1) * self.period_sec)
+        behind = now - next_deadline
+        if behind > self.period_sec:
+            # 지금 시각의 프레임으로 · 나눗셈 오차(0.08/0.02 = 3.999…) 를 덜어 낸다
+            current = int((now - cycle_started) / self.period_sec + 1e-6)
+            target = max(index + 1, current)
+            self.skipped_samples += target - index - 1
+            return target, None
+        return index + 1, next_deadline
+
+    def as_dict(self) -> Dict[str, Any]:
+        return {
+            'late_count': self.late_count,
+            'max_late_ms': round(self.max_late_ms, 1),
+            'skipped_samples': self.skipped_samples,
+        }
+
+
+#: supervisor 가 재생 프레임을 이만큼 이어서 버리면 재생을 멈춘다 · 12-1
+MOTION_RUN_DROP_STOP_SEC = 0.5
+
+
+def _supervisor_drop_error(safety_status: Any, run_started_wall: float) -> str:
+    """supervisor 가 재생 명령을 통째로 버리는 중이면 그 사유 · 수정 목록 12-1
+
+    전에는 마지막 위치 도달만 확인해서 중간에 버려져도 「정상 완료」 였다.
+    재생 시작보다 오래된 상태는 보지 않는다(지난 재생의 기록으로 새 재생을 멈추지 않게).
+    """
+    if not isinstance(safety_status, dict):
+        return ''
+    try:
+        if float(safety_status.get('stamp') or 0.0) < run_started_wall:
+            return ''
+        drop = safety_status.get('motion_run_drop') or {}
+        continuous = float(drop.get('continuous_sec') or 0.0)
+    except (TypeError, ValueError, AttributeError):
+        return ''
+    if continuous < MOTION_RUN_DROP_STOP_SEC:
+        return ''
+    return (
+        f'모터 제어가 재생 명령을 {continuous:.1f}초째 버리고 있어 멈춥니다 · '
+        f'{drop.get("reason") or "사유 미상"}'
+    )
+
+
 def _sleep_until(deadline: float) -> None:
     delay = deadline - time.monotonic()
     if delay > 0.0:

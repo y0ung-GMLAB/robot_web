@@ -393,8 +393,12 @@ class MotionPlayer:
             grade1_seen = False
             while True:
                 cycle_started = time.monotonic()
+                cycle_started_wall = time.time()
                 trace = self._trace_begin(plan, cycle_count)
-                for index, sample in enumerate(samples):
+                timing = motion_run_rules.PlaybackTiming(self.manager.period_sec)
+                index = 0
+                while index < len(samples):
+                    sample = samples[index]
                     if self.manager._stop_event.is_set():
                         status = motion_run_rules._status_from_plan('stopped', '연속 모션 정지' if continuous else '모션 실행 정지', plan)
                         status['phase'] = 'stopped'
@@ -408,6 +412,11 @@ class MotionPlayer:
                     self._require_playback_command_allowed(
                         self._playback_axes(plan, float(sample['time_sec'])),
                     )
+                    dropped = motion_run_rules._supervisor_drop_error(
+                        self._latest_safety_status(), cycle_started_wall,
+                    )
+                    if dropped:
+                        raise RuntimeError(dropped)
                     if automation_run and self._current_servo_alarm_grade() == 1:
                         grade1_seen = True
                     positions = self._owned_positions(
@@ -436,7 +445,17 @@ class MotionPlayer:
                             plan, cycle_count,
                         ),
                     )
-                    motion_run_rules._sleep_until(cycle_started + ((index + 1) * self.manager.period_sec))
+                    timing.note(time.monotonic() - (cycle_started + index * self.manager.period_sec))
+                    index, deadline = timing.next_index(index, cycle_started, time.monotonic())
+                    if deadline is not None:
+                        motion_run_rules._sleep_until(deadline)
+                if trace is not None:
+                    trace.timing = timing.as_dict()
+                if timing.late_count or timing.skipped_samples:
+                    self.manager.get_logger().warning(
+                        f'재생 마감 초과 · 늦은 프레임 {timing.late_count} · '
+                        f'최대 {timing.max_late_ms:.1f} ms · 건너뜀 {timing.skipped_samples}'
+                    )
                 self._trace_finish(trace, 'completed')
                 trace = None
                 cycle_count += 1
@@ -944,6 +963,14 @@ class MotionPlayer:
             if remaining <= 0.0:
                 return []
             time.sleep(min(max(self.manager.period_sec, 0.01), 0.05, remaining))
+
+    def _latest_safety_status(self) -> Dict[str, Any]:
+        lock = getattr(self.manager, '_safety_status_lock', None)
+        if lock is None:
+            return {}
+        with lock:
+            status = getattr(self.manager, '_latest_safety_status', None)
+            return dict(status) if isinstance(status, dict) else {}
 
     def _current_servo_alarm_grade(self) -> int:
         lock = getattr(self.manager, '_safety_status_lock', None)

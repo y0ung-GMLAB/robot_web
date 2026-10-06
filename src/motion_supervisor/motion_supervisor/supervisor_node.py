@@ -170,6 +170,11 @@ class MotionSupervisor(Node):
         #: 재생 명령을 **받은** 시각 · 내보낸 시각(`_last_motion_run_command_at`)과 다르다 ·
         #: 알람·잠김으로 버린 명령도 받은 것이다 · 브리지가 「수신 정지」 를 가린다 · 수정 목록 14
         self._last_motion_run_received_at = 0.0
+        # 재생 명령을 통째로 버린 기록 · 재생기가 보고 멈춘다 · 수정 목록 12-1
+        self._motion_run_drop_since = 0.0
+        self._motion_run_drop_last_at = 0.0
+        self._motion_run_drop_reason = ''
+        self._motion_run_drop_count = 0
         self._emergency_latched = False
         self._servo_alarm_guard = ServoAlarmGuard()
         self._motion_stop_block_until = 0.0
@@ -375,6 +380,7 @@ class MotionSupervisor(Node):
                 f'Rejected malformed motion runtime command: {shape_error}.',
                 throttle_duration_sec=1.0,
             )
+            self._note_motion_run_drop(f'명령 형식 오류 · {shape_error}')
             return
         # MIDI 는 **축별로** 판정한다 · §6-107
         #
@@ -401,6 +407,7 @@ class MotionSupervisor(Node):
                 f'Rejected motion runtime command because {reason}.',
                 throttle_duration_sec=1.0,
             )
+            self._note_motion_run_drop(reason)
             return
         # 이번 명령이 실제로 모는 축만 잡는다 · 슬롯이 0 인 축은 건드리지 않으므로
         # 그 축은 MIDI 가 쓸 수 있다 · 이것이 오버더빙의 바탕이다 · §6-72
@@ -416,6 +423,7 @@ class MotionSupervisor(Node):
                 f'{self._command_owner_label(current_owner)} 실행 중입니다.',
                 throttle_duration_sec=1.0,
             )
+            self._note_motion_run_drop(f'{self._command_owner_label(current_owner)} 실행 중')
             return
         with self._command_lock:
             alarm_state = self._servo_alarm_guard_instance().snapshot()
@@ -425,6 +433,11 @@ class MotionSupervisor(Node):
                 or alarm_state['grade'] >= 2
                 or time.monotonic() < self._motion_stop_block_until
             ):
+                self._note_motion_run_drop(
+                    '긴급정지 잠김' if self._emergency_latched
+                    else (f'{alarm_state["grade"]}등급 서보 에러' if alarm_state['grade'] >= 2
+                          or alarm_state['grade3_latched'] else '전체 정지 처리 중')
+                )
                 return
             for slot in self._servo_alarm_guard_instance().blocked_slots(
                 msg.controller_index
@@ -439,7 +452,35 @@ class MotionSupervisor(Node):
                     throttle_duration_sec=1.0,
                 )
             self._last_motion_run_command_at = time.monotonic()
+            self._motion_run_drop_since = 0.0
             self._command_pub.publish(msg)
+
+    #: 이만큼 새 버림이 없으면 「지금 버리는 중」 이 아니다 · 옛 기록으로 새 재생을 멈추지 않게
+    MOTION_RUN_DROP_FRESH_SEC = 0.25
+
+    def _note_motion_run_drop(self, reason: str) -> None:
+        """재생 명령 한 프레임을 통째로 버렸다 · 수정 목록 12-1
+
+        축 일부만 막는 것(1등급 알람 축)은 정책이라 여기 넣지 않는다 · 프레임
+        전체가 모터에 못 간 경우만 센다.
+        """
+        now = time.monotonic()
+        if not getattr(self, '_motion_run_drop_since', 0.0):
+            self._motion_run_drop_since = now
+        self._motion_run_drop_last_at = now
+        self._motion_run_drop_reason = str(reason)
+        self._motion_run_drop_count = int(getattr(self, '_motion_run_drop_count', 0)) + 1
+
+    def _motion_run_drop_snapshot(self) -> Dict[str, Any]:
+        now = time.monotonic()
+        since = float(getattr(self, '_motion_run_drop_since', 0.0) or 0.0)
+        last = float(getattr(self, '_motion_run_drop_last_at', 0.0) or 0.0)
+        dropping = bool(since) and now - last <= self.MOTION_RUN_DROP_FRESH_SEC
+        return {
+            'count': int(getattr(self, '_motion_run_drop_count', 0)),
+            'reason': str(getattr(self, '_motion_run_drop_reason', '') or ''),
+            'continuous_sec': round(now - since, 3) if dropping else 0.0,
+        }
 
     def _manual_stream_request_callback(self, msg: String) -> None:
         try:
@@ -2418,6 +2459,8 @@ class MotionSupervisor(Node):
             'command_axis_owners': self._command_arbiter_instance().axis_owners(),
             **self._manual_activity_snapshot(),
             # 마지막 재생 명령을 받은 지 몇 초 · 받은 적 없으면 None · 수정 목록 14
+            # 재생 프레임을 통째로 버리는 중인가 · 재생기가 0.5초 넘으면 멈춘다 · 12-1
+            'motion_run_drop': self._motion_run_drop_snapshot(),
             'motion_run_received_age_sec': (
                 round(time.monotonic() - self._last_motion_run_received_at, 3)
                 if getattr(self, '_last_motion_run_received_at', 0.0) else None

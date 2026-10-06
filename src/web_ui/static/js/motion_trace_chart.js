@@ -56,6 +56,16 @@ export function traceResultLabel(result) {
   return TRACE_RESULT_LABELS[String(result || '')] || String(result || '-');
 }
 
+/** 재생 루프 마감 초과 한 줄 · 수정 목록 12-2 · 문제 없으면 빈 글자 */
+export function traceTimingText(record) {
+  const timing = record?.timing || {};
+  const late = Number(timing.late_count) || 0;
+  const skipped = Number(timing.skipped_samples) || 0;
+  if (!late && !skipped) return '';
+  const worst = Number(timing.max_late_ms) || 0;
+  return `늦은 프레임 ${late} · 최대 ${worst.toFixed(1)} ms${skipped ? ` · 건너뜀 ${skipped}` : ''}`;
+}
+
 /** 회차 요약의 모터별 최대 오차 중 가장 큰 것 · 없으면 null */
 export function traceWorstError(record) {
   let worst = null;
