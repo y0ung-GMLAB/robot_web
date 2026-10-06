@@ -31,6 +31,7 @@ from .execution_context_service import ExecutionContextService
 from .manual_motor_commands import ManualMotorCommandService
 from .schedule_end import ScheduleEndService
 from .supervisor_watchdog import SupervisorWatchdog
+from .drive_maintenance import DriveMaintenance
 from .manual_stream import ManualStreamService
 from . import animation_preview, sim_scene
 from .motor_runtime_service import MotorRuntimeService
@@ -69,6 +70,12 @@ from .servo_alarm_policy import (
     normalize_overrides,
     policy_revision,
 )
+
+
+def _managed_motor_service() -> str:
+    """Motor Manager 가 따로 도는 설치인가 · 아니면 빈 글자 (멈출 것이 없다)"""
+    service = str(os.environ.get('MOTION_MOTOR_SERVICE_UNIT') or '').strip()
+    return service if service == 'motion-motor.service' else ''
 
 
 class MotionWebBridge(Node):
@@ -399,6 +406,25 @@ class MotionWebBridge(Node):
             action_publisher=self._action_request_publisher,
             jog_result_topic=self.jog_result_topic,
             action_result_topic=self.action_result_topic,
+        )
+        # MINAS 드라이브 정비 · EEPROM 저장 · 앱솔루트 방식 · 다회전 클리어 · 수정 목록 15 + 34-3
+        self.drive_maintenance = DriveMaintenance(
+            read_slaves=self.ethercat_alias_manager.read_slaves,
+            registry_motor=self._registry_motor_for_axis,
+            current_motor=self._current_motor_for_axis,
+            safety_blocker=lambda: self._motor_runtime.ethercat_scan_safety_blocker(
+                require_fresh_motor_state=True,
+            ),
+            lifecycle_lock=self._motor_lifecycle_lock,
+            motor_service=_managed_motor_service,
+            service_active=self._motor_runtime.managed_service_active,
+            run_service=lambda action, service: self._motor_runtime.run_managed_service(action, service),
+            wait_release=lambda: motor_config_rules.wait_for_ethercat_release(timeout_sec=5.0),
+            wait_recovery=lambda service, axes: self._motor_runtime.wait_for_runtime_recovery(
+                axes, timeout_sec=12.0, motor_service=service,
+            ),
+            expected_axes=self._detected_axes,
+            record=self._record_drive_maintenance,
         )
         # 스케줄 끝 · 기준점 주차 → 서보 OFF · 다음 시작 전 다시 켜기 · 수정 목록 36
         self.schedule_end = ScheduleEndService(
@@ -1833,6 +1859,44 @@ class MotionWebBridge(Node):
         if end is not None and isinstance(result, dict):
             result = {**result, 'schedule_end': end.status()}
         return result
+
+    def minas_drive_maintenance(self, payload: Dict[str, Any]) -> Dict[str, Any]:
+        """MINAS 드라이브 정비 · `POST /api/motor-config/drive-maintenance` · 수정 목록 15 + 34-3"""
+        result = self.drive_maintenance.run(payload if isinstance(payload, dict) else {})
+        return {**result, **self.snapshot()}
+
+    def _registry_motor_for_axis(self, axis: int) -> Optional[Dict[str, Any]]:
+        registry = self._motor_config.load().get('registry') or {}
+        for entry in registry.get('motors') or []:
+            if isinstance(entry, dict) and entry.get('axis') is not None and int(entry['axis']) == int(axis):
+                return entry
+        return None
+
+    def _current_motor_for_axis(self, axis: int) -> Optional[Dict[str, Any]]:
+        state = self.motion_state()
+        for motor in (state or {}).get('motors') or []:
+            if isinstance(motor, dict) and motor.get('controller_index') is not None:
+                if int(motor['controller_index']) == int(axis):
+                    return motor
+        return None
+
+    def _detected_axes(self) -> List[int]:
+        state = self.motion_state()
+        return sorted(
+            int(motor['controller_index'])
+            for motor in (state or {}).get('motors') or []
+            if isinstance(motor, dict) and motor.get('controller_index') is not None
+            and str(motor.get('state') or '') == 'detected'
+        )
+
+    def _record_drive_maintenance(self, entry: Dict[str, Any]) -> None:
+        self._motor_event_log.append(
+            category='system',
+            event_type=str(entry.get('event_type') or 'minas_maintenance'),
+            target=f'{entry.get("axis")}번 모터 · Master {entry.get("master_index")} · Slave {entry.get("slave_position")}',
+            content=str(entry.get('message') or ''),
+            details=entry,
+        )
 
     def schedule_end_start_blocker(self, payload: Dict[str, Any]) -> str:
         """스케줄 끝에 끈 서보를 켠다 · 주차 중이면 막는다 · 수정 목록 36"""

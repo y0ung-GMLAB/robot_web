@@ -47,3 +47,14 @@ test('the top bar shows a red cell only while the supervisor is silent', () => {
   assert.equal(cell.text, '모터 제어 응답 없음');
   assert.match(cell.title, /4초째/);
 });
+
+// MINAS 드라이브 정비 버튼 · 수정 목록 15 + 34-3
+test('MINAS rows offer EEPROM save, absolute mode and multi-turn clear', () => {
+  const motorConfig = read('../static/js/motor_config.js');
+  const api = read('../static/js/api.js');
+  for (const action of ['eeprom_save', 'absolute_mode', 'absolute_clear']) {
+    assert.match(motorConfig, new RegExp(`data-axis-maintenance="${action}"`));
+  }
+  assert.match(motorConfig, /const payload = \{ action, axis, confirmed: true \};/);
+  assert.match(api, /'\/api\/motor-config\/drive-maintenance'/);
+});

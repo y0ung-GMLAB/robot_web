@@ -47,6 +47,14 @@ def register_motor_routes(app: FastAPI, bridge, project_call) -> None:
             raise HTTPException(status_code=400, detail='request body must be an object')
         return await asyncio.to_thread(bridge.motor_config.save, body)
 
+    @app.post('/api/motor-config/drive-maintenance')
+    async def minas_drive_maintenance(request: Request):
+        # EEPROM 저장 · 앱솔루트 방식 · 다회전 클리어 · 수정 목록 15 + 34-3
+        body = await request.json()
+        if not isinstance(body, dict):
+            raise HTTPException(status_code=400, detail='request body must be an object')
+        return await asyncio.to_thread(bridge.minas_drive_maintenance, body)
+
     @app.post('/api/motor-config/apply')
     async def apply_motor_config():
         return await asyncio.to_thread(bridge.motor_config.apply)

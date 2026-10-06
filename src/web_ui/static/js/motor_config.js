@@ -7,6 +7,7 @@ import {
   fetchMotorScanProgress,
   writeEthercatAlias,
   saveMotorConfig,
+  requestDriveMaintenance,
 } from './api.js';
 import {
   clone,
@@ -2029,6 +2030,69 @@ export function createMotorConfigController({
   };
   const CONFIG_EDIT_FIELDS = [...AXIS_LIMIT_FIELDS, ...DRIVE_PARAM_FIELDS];
 
+  /** MINAS 드라이브 정비 · 확인 → 서버(Motor Manager 잠시 정지 → ethercat download) · 수정 목록 15 + 34-3 */
+  const MAINTENANCE_TEXT = {
+    eeprom_save: {
+      title: 'EEPROM 저장',
+      body: '드라이브의 지금 값을 전원을 꺼도 남게 저장합니다.\n'
+        + 'Motor Manager 를 잠시 멈췄다가 다시 띄웁니다 (몇 초) · 그동안 모터는 서보가 풀릴 수 있습니다.\n'
+        + '저장 중(최대 10초) 드라이브 전원을 끄지 마세요.',
+    },
+    absolute_clear: {
+      title: '앱솔루트 다회전 클리어',
+      body: '엔코더의 회전 수 기록을 0 으로 지웁니다 · 위치 기준이 바뀝니다.\n'
+        + '서보가 꺼져 있어야 합니다 · 끝나면 드라이브 전원을 껐다 켜고 기준점을 다시 캡처하세요.\n'
+        + '그 전에는 재생하지 마세요.',
+    },
+  };
+
+  async function runDriveMaintenance(button) {
+    const action = button.dataset.axisMaintenance || '';
+    const axis = Number(button.dataset.axisMaintenanceIndex);
+    if (!Number.isInteger(axis) || axis < 0) {
+      setAxisMessage('정비할 모터 번호를 확인할 수 없습니다.', true);
+      return;
+    }
+    const payload = { action, axis, confirmed: true };
+    if (action === 'absolute_mode') {
+      const text = await showPrompt(
+        `${axis}번 모터 · 앱솔루트 방식(Pr0.15)을 바꾸고 EEPROM 에 저장합니다.\n`
+        + Object.entries(ABSOLUTE_MODE_TEXT).map(([value, label]) => `${value} = ${label}`).join(' · ')
+        + '\n드라이브 전원을 껐다 켜야 적용됩니다 · 0~4 중 하나를 입력하세요',
+        { title: '앱솔루트 방식 바꾸기', confirmLabel: '저장', defaultValue: '0' },
+      );
+      if (text === null || text === undefined) return;
+      const value = Number(String(text).trim());
+      if (!Number.isInteger(value) || !(value in ABSOLUTE_MODE_TEXT)) {
+        setAxisMessage('앱솔루트 방식은 0~4 중 하나입니다.', true);
+        return;
+      }
+      payload.value = value;
+    } else {
+      const text = MAINTENANCE_TEXT[action];
+      if (!text) return;
+      const confirmed = await showConfirm(`${axis}번 모터 · ${text.body}`, {
+        title: text.title,
+        confirmLabel: text.title,
+        tone: action === 'absolute_clear' ? 'danger' : 'warning',
+      });
+      if (!confirmed) return;
+    }
+    button.disabled = true;
+    setAxisMessage(`${axis}번 모터 드라이브 정비 중 · Motor Manager 를 잠시 멈춥니다`);
+    try {
+      const result = await requestDriveMaintenance(payload);
+      setAxisMessage(result?.message || '드라이브 정비 결과를 받지 못했습니다', result?.success === false);
+      if (result?.power_cycle_required) {
+        await showAlert(result.message, { title: '드라이브 전원 재투입 필요', tone: 'warning' });
+      }
+    } catch (error) {
+      setAxisMessage(`드라이브 정비 실패: ${error?.message || error}`, true);
+    } finally {
+      button.disabled = false;
+    }
+  }
+
   /** 운영 시간이 끝나 기준점에 세운 뒤 이 모터 서보(토크)를 끈다 · 기본 켬 · 수정 목록 36 */
   const SCHEDULE_END_FIELD = 'schedule_end_servo_off';
 
@@ -2606,6 +2670,11 @@ export function createMotorConfigController({
                     <button type="button" data-axis-servo-action="servo_on" data-axis-servo-index="${escapeHtml(view.axisValue ?? '')}">ON</button>
                     <button type="button" data-axis-servo-action="servo_off" data-axis-servo-index="${escapeHtml(view.axisValue ?? '')}">OFF</button>
                     <button type="button" data-axis-servo-action="fault_reset" data-axis-servo-index="${escapeHtml(view.axisValue ?? '')}">오류 초기화</button>
+                  </div>
+                  <div class="axis-inline-actions" title="드라이브 정비 · Motor Manager 를 잠시 멈추고 드라이브에 직접 씁니다 (수정 목록 15)">
+                    <button type="button" data-axis-maintenance="eeprom_save" data-axis-maintenance-index="${escapeHtml(view.axisValue ?? '')}">EEPROM 저장</button>
+                    <button type="button" data-axis-maintenance="absolute_mode" data-axis-maintenance-index="${escapeHtml(view.axisValue ?? '')}">앱솔루트 방식</button>
+                    <button type="button" class="danger" data-axis-maintenance="absolute_clear" data-axis-maintenance-index="${escapeHtml(view.axisValue ?? '')}">다회전 클리어</button>
                   </div>
                 ` : ''}
               </td>
@@ -3444,6 +3513,12 @@ export function createMotorConfigController({
       });
 
       el.axisRows.addEventListener('click', async (event) => {
+        const maintenance = event.target.closest('button[data-axis-maintenance]');
+        if (maintenance) {
+          event.stopPropagation();
+          await runDriveMaintenance(maintenance);
+          return;
+        }
         const button = event.target.closest('button[data-axis-servo-action]');
         if (!button || !onAcServoControl) return;
         event.stopPropagation();

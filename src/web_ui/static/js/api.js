@@ -402,5 +402,9 @@ export const requestAcServoAction = (payload) =>
 export const requestDynamixelAction = (payload) =>
   request('POST', '/api/motion-test/dynamixel/action', { body: payload });
 
+/** MINAS 정비 · EEPROM 저장 · 앱솔루트 방식 · 다회전 클리어 · 수정 목록 15 + 34-3 */
+export const requestDriveMaintenance = (payload) =>
+  request('POST', '/api/motor-config/drive-maintenance', { body: payload });
+
 export const requestAcServoControl = (payload) =>
   request('POST', '/api/motion-test/ac-servo/control', { body: payload });
