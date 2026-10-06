@@ -35,6 +35,7 @@ catalog/        motors.yaml · reducers.yaml · 팩에서 쓰는 항목 사본 (
 model.xml       MuJoCo 모델 + meshes/
 robot.urdf      참고용 (선택)
 preview.yaml    precompute/preview 명령 (선택 · config/animation_preview.example.yaml 형식)
+scene.glb       웹 3D 「Blender 뷰」 장면 (선택 · glTF 2.0 바이너리 · 45 MB 까지 · 수정 목록 50)
 ```
 
 - `axes` 순서 = 실행기 축 순서 · `joint` = model.xml joint 이름 · actuator 는 `act_<joint>`
@@ -44,6 +45,10 @@ preview.yaml    precompute/preview 명령 (선택 · config/animation_preview.ex
 - `settle_body` · 정착·흔들림·비틀림 측정 바디 · 그 위에 free joint 가 없으면 정착 감쇠 생략
 - preview.yaml 치환 · `{stack}` 스택 루트 · `{pack}` 팩 폴더 · `{motion_path}` `{motion_stem}` `{result}` `{fps}`
 - preview.yaml `cwd` 생략 · 팩 폴더
+- scene.glb · Blender 가 작업 PC 에서 glTF Binary 로 내보낸 장면(헤드 4대 + 애니메이션 + 매장 오브제 · 월드 배치 그대로) ·
+  같은 파일을 모든 PC 팩에 넣는다 · 있으면 웹 3D 에 「Blender 뷰」 체크가 생기고 실제 재생 시각을 따라 애니메이션을 그린다 ·
+  담기지 않는 것 · 오디오 · Blender 화면 설정 · 절차적 재질(굽거나 단순색으로) · Area 라이트 · HDRI(조명은 웹에서) ·
+  검사 · 머리말(glTF 2) · 길이 · 크기만 · 좌표는 glTF 기본(Y-up · Blender 내보내기 기본값 +Y Up)
 
 ## 웹 업로드
 

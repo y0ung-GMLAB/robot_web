@@ -23,6 +23,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import math
 import sys
 import time
 from pathlib import Path
@@ -626,6 +627,74 @@ async def robot_pack_mapping_diff():
     result = robot_pack_service.mapping_diff(DEV_PACK_WORKSPACE, {'mappings': mapping_rows()})
     result['mapping_file'] = 'dev_preview (가짜 모션축 설정)'
     return result
+
+
+# --------------------------------------------------------------------------- #
+# 웹 3D 「Blender 뷰」 흉내 · 수정 목록 50 · 상자 헤드 4개가 4초 동안 고개를 돌리는 glb
+# --------------------------------------------------------------------------- #
+
+def _demo_glb() -> bytes:
+    """진짜 Blender 장면 대신 · glTF 2.0 바이너리를 손으로 짠다 (Y-up · 정면 +Z)"""
+    import struct
+    vertices = [(x, y, z) for x in (-0.2, 0.2) for y in (-0.2, 0.2) for z in (-0.2, 0.2)]
+    faces = [(0, 1, 3), (0, 3, 2), (4, 6, 7), (4, 7, 5), (0, 4, 5), (0, 5, 1),
+             (2, 3, 7), (2, 7, 6), (0, 2, 6), (0, 6, 4), (1, 5, 7), (1, 7, 3)]
+    half = math.sqrt(0.5)
+    times = [0.0, 2.0, 4.0]
+    turns = [(0, 0, 0, 1), (0, half, 0, half), (0, 0, 0, 1)]
+    blobs = [
+        b''.join(struct.pack('<3f', *v) for v in vertices),
+        b''.join(struct.pack('<3H', *f) for f in faces),   # 72 바이트
+        struct.pack('<3f', *times),
+        b''.join(struct.pack('<4f', *q) for q in turns),
+    ]
+    views, offset = [], 0
+    for blob in blobs:
+        views.append({'buffer': 0, 'byteOffset': offset, 'byteLength': len(blob)})
+        offset += len(blob)
+    accessors = [
+        {'bufferView': 0, 'componentType': 5126, 'count': 8, 'type': 'VEC3',
+         'min': [-0.2, -0.2, -0.2], 'max': [0.2, 0.2, 0.2]},
+        {'bufferView': 1, 'componentType': 5123, 'count': 36, 'type': 'SCALAR'},
+        {'bufferView': 2, 'componentType': 5126, 'count': 3, 'type': 'SCALAR', 'min': [0.0], 'max': [4.0]},
+        {'bufferView': 3, 'componentType': 5126, 'count': 3, 'type': 'VEC4'},
+    ]
+    nodes = [{'name': f'Head_{i + 1}', 'mesh': 0, 'translation': [(i - 1.5) * 0.8, 1.5, 0.0]} for i in range(4)]
+    nodes.append({'name': 'Store_Floor', 'mesh': 0, 'scale': [10.0, 0.05, 6.0]})
+    gltf = {
+        'asset': {'version': '2.0', 'generator': 'robot_web dev_preview'},
+        'scene': 0, 'scenes': [{'nodes': list(range(len(nodes)))}],
+        'nodes': nodes,
+        'meshes': [{'primitives': [{'attributes': {'POSITION': 0}, 'indices': 1, 'material': 0}]}],
+        'materials': [{'pbrMetallicRoughness': {'baseColorFactor': [0.8, 0.7, 0.6, 1.0], 'roughnessFactor': 0.8}}],
+        'animations': [{'name': 'Look_Around', 'samplers': [{'input': 2, 'output': 3}],
+                        'channels': [{'sampler': 0, 'target': {'node': i, 'path': 'rotation'}} for i in range(4)]}],
+        'buffers': [{'byteLength': offset}], 'bufferViews': views, 'accessors': accessors,
+    }
+    body = json.dumps(gltf).encode('utf-8')
+    body += b' ' * ((4 - len(body) % 4) % 4)
+    binary = b''.join(blobs)
+    binary += b'\x00' * ((4 - len(binary) % 4) % 4)
+    total = 12 + 8 + len(body) + 8 + len(binary)
+    return (b'glTF' + struct.pack('<II', 2, total) + struct.pack('<I', len(body)) + b'JSON' + body
+            + struct.pack('<I', len(binary)) + b'BIN\x00' + binary)
+
+
+DEMO_GLB = _demo_glb()
+
+
+@app.get('/api/preview/scene')
+async def preview_scene_state():
+    # MuJoCo 장면은 없고(uv 없음 흉내) Blender 뷰만 있는 팩
+    return {'state': 'missing', 'message': '프리뷰 · MuJoCo 장면 없음 · Blender 뷰는 있음',
+            'blender': {'available': True, 'size_bytes': len(DEMO_GLB), 'fingerprint': 'devpreview000001'},
+            'project_generation': state['generation']}
+
+
+@app.get('/api/preview/blender-scene')
+async def preview_blender_scene():
+    from fastapi import Response
+    return Response(DEMO_GLB, media_type='model/gltf-binary', headers={'Cache-Control': 'no-cache'})
 
 
 @app.put('/api/schedule/mode')

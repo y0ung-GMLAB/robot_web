@@ -13,6 +13,7 @@
     model.xml       MuJoCo 모델 (+ meshes/)
     robot.urdf      참고용 (선택)
     preview.yaml    미리보기 명령 (선택 · config/animation_preview.example.yaml 형식)
+    scene.glb       웹 3D 「Blender 뷰」 장면 (선택 · glTF 2.0 바이너리 · 수정 목록 50)
 
 순수 Python + PyYAML · rclpy 비의존 · 브리지(ROS Python)와 uv 실행기 양쪽에서 import.
 모델 로드(MuJoCo)는 여기서 하지 않는다 · 실행기 `sim_run.py --check` 몫.
@@ -32,6 +33,10 @@ import yaml
 
 __all__ = [
     'Axis',
+    'SCENE_GLB_MAX_BYTES',
+    'SCENE_GLB_NAME',
+    'check_scene_glb',
+    'scene_glb_path',
     'INSTALLED_NAME',
     'PACK_DIRNAME',
     'PackReport',
@@ -343,7 +348,48 @@ def inspect_pack(pack_dir: Path) -> PackReport:
         payload = _load_yaml(preview, errors)
         if payload is not None and not isinstance(payload, dict):
             errors.append('preview.yaml · 표 필요')
+    scene_glb = scene_glb_path(pack_dir)
+    if scene_glb is not None:
+        errors += check_scene_glb(scene_glb)
     return report
+
+
+#: 선택 파일 · 웹 3D 「Blender 뷰」 장면 · Blender 가 작업 PC 에서 내보낸 glTF 2.0 바이너리 · 수정 목록 50
+#:
+#: 헤드 4대 + 애니메이션 + 매장 오브제를 월드 배치 그대로 · 같은 파일을 모든 PC 팩에 넣는다 ·
+#: 없으면 웹 3D 는 MuJoCo 뷰만 · 팩 zip 상한(50 MB) 안에 다른 파일과 같이 들어가야 해서 45 MB 까지
+SCENE_GLB_NAME = 'scene.glb'
+SCENE_GLB_MAX_BYTES = 45 * 1024 * 1024
+_GLB_MAGIC = b'glTF'
+
+
+def scene_glb_path(pack_dir: Path) -> Optional[Path]:
+    """팩에 Blender 뷰 장면이 있으면 그 경로 · 없으면 None (검사는 `inspect_pack`)"""
+    path = Path(pack_dir) / SCENE_GLB_NAME
+    return path if path.is_file() else None
+
+
+def check_scene_glb(path: Path) -> List[str]:
+    """glTF 바이너리 머리말(12 바이트)과 크기만 본다 · 내용(메쉬·애니메이션)은 브라우저가 읽는다"""
+    where = SCENE_GLB_NAME
+    try:
+        size = path.stat().st_size
+        with open(path, 'rb') as handle:
+            header = handle.read(12)
+    except OSError as exc:
+        return [f'{where} · 읽기 실패: {exc}']
+    errors = []
+    if size > SCENE_GLB_MAX_BYTES:
+        errors.append(f'{where} · 크기 초과: {size / 1e6:.1f} MB > {SCENE_GLB_MAX_BYTES / 1e6:.0f} MB (감량해서 다시 내보내기)')
+    if len(header) < 12 or header[:4] != _GLB_MAGIC:
+        return errors + [f'{where} · glTF 바이너리(.glb)가 아닙니다 (Blender 내보내기 형식 glTF Binary)']
+    version = int.from_bytes(header[4:8], 'little')
+    length = int.from_bytes(header[8:12], 'little')
+    if version != 2:
+        errors.append(f'{where} · glTF 버전 {version} · 2 만 읽습니다')
+    if length != size:
+        errors.append(f'{where} · 파일이 잘렸습니다 (머리말 {length} 바이트 · 실제 {size} 바이트)')
+    return errors
 
 
 def validate_pack_dir(pack_dir: Path) -> List[str]:

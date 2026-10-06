@@ -7,6 +7,7 @@
     장면      로봇 팩 → `scripts/sim/export_scene.py` (uv · MuJoCo 로 메쉬·바디·관절 내보냄)
               → `runtime/preview/scene-<팩 지문>.json` · 팩이 바뀌면 다른 파일 · 1회 계산
     프레임    `.sim.npz` 의 t · qpos 를 읽어 JSON 으로 (numpy · 60 Hz 로 솎음)
+    Blender   팩의 선택 파일 `scene.glb` 를 그대로 내준다 · 계산 없음 · 수정 목록 50
 
 브라우저(`static/js/sim3d.js`)가 장면을 세우고 프레임마다 순방향 운동학을 돈다.
 """
@@ -71,8 +72,30 @@ def _reap() -> None:
                 del _RUNNING[key]
 
 
+def blender_scene_path(workspace_root: Path) -> Optional[Path]:
+    """팩의 Blender 뷰 장면 · 없으면 None · 팩 검사를 통과한 것만 깔려 있다"""
+    return robot_pack.scene_glb_path(robot_pack.pack_root(Path(workspace_root)))
+
+
+def blender_scene_info(workspace_root: Path) -> Dict[str, Any]:
+    """화면이 「Blender 뷰」 체크를 보일지 · 팩 지문은 브라우저 캐시 열쇠"""
+    path = blender_scene_path(workspace_root)
+    if path is None:
+        return {'available': False}
+    pack_dir = robot_pack.pack_root(Path(workspace_root))
+    return {
+        'available': True,
+        'size_bytes': path.stat().st_size,
+        'fingerprint': robot_pack.current_fingerprint(pack_dir)[:16],
+    }
+
+
 def scene_state(workspace_root: Path) -> Dict[str, Any]:
-    """unavailable(팩 없음) · computing · ready · failed · missing."""
+    """unavailable(팩 없음) · computing · ready · failed · missing · `blender` = Blender 뷰 장면 정보."""
+    return {**_mujoco_scene_state(workspace_root), 'blender': blender_scene_info(workspace_root)}
+
+
+def _mujoco_scene_state(workspace_root: Path) -> Dict[str, Any]:
     path = scene_path(workspace_root)
     if path is None:
         return {'state': 'unavailable', 'message': NO_PACK_MESSAGE}
@@ -94,7 +117,7 @@ def launch_scene_export(workspace_root: Path, *, spawn=subprocess.Popen) -> Dict
     path = scene_path(workspace_root)
     if path is None:
         return {'success': False, 'message': NO_PACK_MESSAGE}
-    state = scene_state(workspace_root)
+    state = _mujoco_scene_state(workspace_root)
     if state['state'] == 'ready':
         return {'success': True, 'message': '3D 장면이 이미 준비돼 있습니다'}
     if state['state'] == 'computing':

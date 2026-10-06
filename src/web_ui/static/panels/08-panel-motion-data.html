@@ -149,6 +149,11 @@
                   </select>
                 </label>
                 <button id="sim3dResetViewButton" type="button" title="로봇 팩의 카메라 설정으로 되돌립니다">시점 초기화</button>
+                <!-- 수정 목록 50 · 팩에 scene.glb 가 있을 때만 보인다 · 끄면 MuJoCo 뷰 -->
+                <label id="sim3dBlenderLabel" class="compact-field sim3d-view-toggle hidden"
+                  title="Blender 에서 만든 장면(헤드 4대 · 매장 오브제)을 그립니다 · 실제 재생 시각을 따라갑니다 · 끄면 MuJoCo 계산 뷰">
+                  <input id="sim3dBlenderToggle" type="checkbox"><span>Blender 뷰</span>
+                </label>
               </div>
               <div id="sim3dCanvasWrap" class="sim3d-canvas-wrap" aria-label="3D 화면"></div>
             </details>
