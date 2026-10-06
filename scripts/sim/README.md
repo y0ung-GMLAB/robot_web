@@ -38,6 +38,10 @@ preview.yaml    precompute/preview 명령 (선택 · config/animation_preview.ex
 ```
 
 - `axes` 순서 = 실행기 축 순서 · `joint` = model.xml joint 이름 · actuator 는 `act_<joint>`
+- 각도 단위 · 팩은 사람이 적는 파일이라 **칸 이름에 단위를 붙인 deg** 그대로다(`range_deg` ·
+  `profile_velocity_deg_s` · `profile_accel_deg_s2` · `camera.azimuth/elevation`) · 스택 안쪽은 rad
+  (수정 목록 6) 이지만 팩 형식은 바꾸지 않는다 · 읽는 쪽이 이름대로 바꾼다(실행기 → MuJoCo rad ·
+  조인트 매핑 비교 → deg) · 환경변수 `FH_VMAX`·`FH_AMAX` 도 모터축 deg/s · deg/s² · 6-7 (2026-10-06)
 - `motion_id` · 애니메이션 파일 id 와 **완전 일치** · 파일에 없으면 0° 유지 + 경고
 - `motor` · `reducer` · 팩 `catalog/` 의 항목 이름 · 감속기 없는 축은 `reducer: null`
 - `ratio` ≠ 카탈로그 감속비 · 경고만 (팩 값 사용)

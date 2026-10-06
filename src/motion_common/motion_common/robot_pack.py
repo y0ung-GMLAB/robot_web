@@ -14,6 +14,9 @@
     robot.urdf      참고용 (선택)
     preview.yaml    미리보기 명령 (선택 · config/animation_preview.example.yaml 형식)
 
+각도는 칸 이름대로 deg 다 · 사람(터미널 세션)이 적는 계약이라 스택 안쪽이 rad 로
+옮겨 간 뒤에도(수정 목록 6) 형식은 그대로 두고, 읽는 쪽이 이름을 보고 바꾼다 · 6-7.
+
 순수 Python + PyYAML · rclpy 비의존 · 브리지(ROS Python)와 uv 실행기 양쪽에서 import.
 모델 로드(MuJoCo)는 여기서 하지 않는다 · 실행기 `sim_run.py --check` 몫.
 """
