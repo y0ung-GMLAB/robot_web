@@ -28,12 +28,13 @@ SII_READ_ATTEMPTS = 3
 MINAS_VENDOR_ID = 0x066F
 
 #: 검색 때 읽는 MINAS 드라이브 설정 · 화면 키 → (객체, 서브) · 2026-10-02
-#: web_bridge `minas_params.PARAM_FIELDS` 와 같은 객체 (테스트로 고정) · 모두 s16
+#: web_bridge `minas_params.PARAM_FIELDS` 를 다 포함 (테스트로 고정) · 모두 s16
+#: 앱솔루트(Pr0.15)는 **읽기만** (부팅 때 안 씀 · 수정 목록 34) · 리밋 스위치(Pr5.04)는
+#: 화면에서 빠져 읽지 않는다 (2026-10-06)
 MINAS_DRIVE_PARAM_OBJECTS = {
     'brake_delay_stop_ms': (0x3437, 0),     # Pr4.37
     'brake_delay_run_ms': (0x3438, 0),      # Pr4.38
-    'encoder_absolute_mode': (0x3015, 0),   # Pr0.15
-    'limit_switch_mode': (0x3504, 0),       # Pr5.04
+    'encoder_absolute_mode': (0x3015, 0),   # Pr0.15 · 읽기 전용 표시
 }
 
 

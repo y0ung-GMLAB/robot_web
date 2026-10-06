@@ -1,4 +1,4 @@
-"""MINAS 드라이브 파라미터(yaml) 생성 · 브레이크 타이밍 · 앱솔루트 모드 · 리밋 스위치 · P8
+"""MINAS 드라이브 파라미터(yaml) 생성 · 브레이크 타이밍 · 과부하율 읽기 · P8
 
 MINAS 의 드라이브 객체 값(SDO)은 드라이버의 `param_file` 이 가리키는
 `minas.yaml` 의 `items` 목록으로 부팅 때 써진다 · 그 파일은 motion_system
@@ -10,16 +10,23 @@ MINAS 의 드라이브 객체 값(SDO)은 드라이버의 `param_file` 이 가�
 
 객체 번호 규칙 · Pr X.YY → 0x3XYY (플랫폼 파일의 0x3511 = Pr5.11 로 확인):
 
-    encoder_absolute_mode   Pr0.15 → 0x3015  절대 엔코더 설정
-                            0 = 인크리멘털로 사용 · 1 = 절대 사용 ·
-                            2 = 절대 사용(다회전 카운터 넘침 무시)
-                            ⚠ 반영은 드라이브 전원 재투입 후 (MINAS 사양)
-    brake_delay_stop_ms     Pr4.37 → 0x3437  정지 중 서보OFF → 브레이크 동작 지연
-    brake_delay_run_ms      Pr4.38 → 0x3438  회전 중 서보OFF → 브레이크 동작 설정
-    limit_switch_mode       Pr5.04 → 0x3504  리밋 스위치(구동 금지 입력 POT/NOT)
-                            0 = 사용(눌린 방향만 금지) · 1 = 사용 안 함 ·
-                            2 = 사용(눌리면 Err38 알람)
-                            ⚠ 스위치 없는 축에 0/2 → 못 움직이거나 알람
+    brake_delay_stop_ms     Pr4.37 → 0x3437  정지 중 서보OFF → 브레이크 동작 지연 (속성 B)
+    brake_delay_run_ms      Pr4.38 → 0x3438  회전 중 서보OFF → 브레이크 동작 설정 (속성 B)
+
+부팅 때 **쓰지 않는** 것 · 2026-10-06 · 수정 목록 34 · 매뉴얼 SX-DSV03241 R10.0 기준:
+
+    Pr0.15 앱솔루트 (0x3015)  값 뜻 · 0 = 절대 · 1 = 인크리멘털 · 2 = 절대·넘침
+                              무시 · 3 = 한 바퀴 절대 · 4 = 연속 회전 (p.176)
+                              속성 C · 제어 전원 재투입 때 EEPROM 을 다시 읽으므로
+                              부팅 RAM 쓰기로는 **반영되지 않는다** (p.241) ·
+                              예전 화면은 0/1 뜻이 반대였다 · 남은 RAM 값이 나중
+                              EEPROM 저장에 박히지 않게 아예 안 쓴다 · 바꾸기는
+                              EEPROM 저장(1010h · 수정 목록 15) 과 같이
+    Pr5.04 리밋 스위치 (0x3504) 1 = 「사용 안 함」이 아니라 CiA402 감속 정지
+                              (리밋 살아 있음 · p.155) · 화면에서 뺐다 · 명령어로
+                              (`docs/사용법.md` 12장)
+    registry 에 옛 값(`encoder_absolute_mode` · `limit_switch_mode`)이 남아 있어도
+    무시한다 (지우지 않는다)
 
 과부하율 읽기는 SDO 값이 아니라 **PDO 배선**이다 (2026-10-02):
 
@@ -47,19 +54,15 @@ from motion_common.values import optional_int
 
 #: registry motor.config 키 → (MINAS 객체, 타입, 설명)
 PARAM_FIELDS: Dict[str, Tuple[int, str, str]] = {
-    'encoder_absolute_mode': (0x3015, 's16', 'Pr0.15 절대 엔코더 설정 (0 인크리멘털 · 1 절대 · 2 절대-다회전무시) · 전원 재투입 후 반영'),
     'brake_delay_stop_ms': (0x3437, 's16', 'Pr4.37 정지 중 서보OFF 시 브레이크 동작 지연 (ms)'),
     'brake_delay_run_ms': (0x3438, 's16', 'Pr4.38 회전 중 서보OFF 시 브레이크 동작 설정 (ms)'),
-    # 리밋 스위치(구동 금지 입력 POT/NOT) · 2026-10-02
-    # ⚠ 스위치가 **배선되지 않은 축**에 0·2 를 넣으면 b접점 입력이 열린 채라
-    #   드라이브가 「눌림」으로 읽는다 → 그 방향으로 못 움직이거나(0) Err38 알람(2)
-    'limit_switch_mode': (0x3504, 's16', 'Pr5.04 리밋 스위치(구동 금지 입력) (0 사용·그 방향 금지 · 1 사용 안 함 · 2 사용·밟으면 Err38 알람) · 배선된 축에만 0/2'),
 }
+
+#: 부팅 때 쓰지 않는 옛 키 · 남아 있어도 드라이브로 보내지 않는다 (위 설명)
+RETIRED_FIELDS: Tuple[str, ...] = ('encoder_absolute_mode', 'limit_switch_mode')
 
 #: 정해진 값만 받는 항목 · 범위 밖은 드라이브에 보내지 않는다
 ALLOWED_VALUES: Dict[str, Tuple[int, ...]] = {
-    'encoder_absolute_mode': (0, 1, 2),
-    'limit_switch_mode': (0, 1, 2),
     'overload_monitor': (0, 1),
 }
 

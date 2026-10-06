@@ -1997,35 +1997,54 @@ export function createMotorConfigController({
 
   /** MINAS 드라이브 파라미터 · param_file(SDO 목록)로 부팅 때 써진다 · P8
    *
-   * 브레이크 두 값은 ms · 앱솔루트는 Pr0.15 (0 인크리멘털 · 1 절대 ·
-   * 2 절대-다회전무시 · **전원 재투입 후 반영**) · 빈 칸 = 드라이브 값 유지.
+   * 브레이크 두 값은 ms (속성 B · 바로 반영) · 빈 칸 = 드라이브 값 유지.
    *
-   * 리밋 스위치는 Pr5.04 (0 사용·그 방향 금지 · 1 사용 안 함 · 2 사용·밟으면
-   * Err38 알람) · **스위치가 배선되지 않은 축에 0/2 를 넣으면** b접점 입력이
-   * 열린 채라 「눌림」으로 읽혀 그 방향으로 못 움직이거나 알람이 뜬다.
+   * 2026-10-06 · 수정 목록 34 · 매뉴얼(SX-DSV03241) 기준으로 바로잡음
+   * - 앱솔루트(Pr0.15)는 **고치지 않고 보여 주기만** · 값 뜻이 화면과 반대였다
+   *   (매뉴얼 0 = 절대 · 1 = 인크리멘털) · 속성 C 라 부팅 RAM 쓰기로는 반영도
+   *   안 된다 · 바꾸는 일은 EEPROM 저장(수정 목록 15)과 같이
+   * - 리밋 스위치(Pr5.04)는 화면에서 뺐다 · 「1 사용 안 함」은 실제로는 CiA402
+   *   감속 정지(리밋 살아 있음) · 필요하면 명령어로 (사용법 12장)
    */
   const DRIVE_PARAM_FIELDS = [
-    'brake_delay_stop_ms', 'brake_delay_run_ms', 'encoder_absolute_mode', 'limit_switch_mode',
-    'overload_monitor',
+    'brake_delay_stop_ms', 'brake_delay_run_ms', 'overload_monitor',
   ];
+
+  /** 드라이브에서 읽어 보여 주기만 하는 값 · 검색 때 SDO 로 읽는다 */
+  const DRIVE_READ_ONLY_FIELDS = ['encoder_absolute_mode'];
+
+  /** Pr0.15 값의 뜻 · 매뉴얼 SX-DSV03241 R10.0 p.176 */
+  const ABSOLUTE_MODE_TEXT = {
+    0: '절대',
+    1: '인크리멘털',
+    2: '절대 · 다회전 넘침 무시',
+    3: '절대 · 한 바퀴만',
+    4: '절대 · 연속 회전',
+  };
   const CONFIG_EDIT_FIELDS = [...AXIS_LIMIT_FIELDS, ...DRIVE_PARAM_FIELDS];
 
   /** 화면 이름 · 칸 머리와 읽기용 이름 */
   const DRIVE_PARAM_LABELS = {
     brake_delay_stop_ms: ['브레이크·정지 (ms)', '브레이크 정지 지연 (ms)'],
     brake_delay_run_ms: ['브레이크·동작 (ms)', '브레이크 동작 설정 (ms)'],
-    encoder_absolute_mode: ['앱솔루트', '앱솔루트 모드 (0 인크리멘털 · 1 절대 · 2 절대-다회전무시)'],
-    limit_switch_mode: ['리밋 스위치', '리밋 스위치 (0 사용·그 방향 금지 · 1 사용 안 함 · 2 사용·알람)'],
+    encoder_absolute_mode: ['앱솔루트 (읽기)', '앱솔루트 방식 · 드라이브에서 읽은 값 · 바꾸기는 EEPROM 저장 기능과 함께 (수정 목록 15)'],
     // 값이 아니라 PDO 배선 · 4D29h 를 주기 데이터에 더한다 · 드라이브 Ver1.03 이상만
     overload_monitor: ['과부하율 읽기', '과부하율 읽기 (4D29h · 0 끔 · 1 켬 · 드라이브 소프트웨어 Ver1.03 이상만)'],
   };
 
   /** 정해진 값만 받는 항목 · 선택 상자로 그린다 · 빈 값 = 유지 (2026-10-02) */
   const DRIVE_PARAM_CHOICES = {
-    encoder_absolute_mode: [[0, '인크리멘털'], [1, '절대'], [2, '절대·다회전 무시']],
-    limit_switch_mode: [[0, '사용·그 방향 금지'], [1, '사용 안 함'], [2, '사용·알람(Err38)']],
     overload_monitor: [[0, '끔'], [1, '켬']],
   };
+
+  /** 앱솔루트 칸 · 읽은 값과 뜻 · 고칠 수 없음 */
+  function absoluteModeText(read) {
+    if (read.state === 'ok') {
+      const meaning = ABSOLUTE_MODE_TEXT[Number(read.value)];
+      return meaning ? `${read.value} ${meaning}` : `${read.value} (알 수 없는 값)`;
+    }
+    return read.state === 'failed' ? '읽기 실패' : '검색 후 표시';
+  }
 
   /** 마지막 모터 검색 때 드라이브에서 읽은 값 · 검색 결과에서만 온다 (이전 값 대체 없음)
    *
@@ -2077,9 +2096,6 @@ export function createMotorConfigController({
     if (text === '') return '';
     const value = Number(text);
     if (!Number.isInteger(value)) return `${DRIVE_PARAM_LABELS[field][1]} · 정수만 넣을 수 있습니다`;
-    if (['encoder_absolute_mode', 'limit_switch_mode'].includes(field) && ![0, 1, 2].includes(value)) {
-      return `${DRIVE_PARAM_LABELS[field][1]} · 0, 1, 2 중 하나만 됩니다`;
-    }
     if (field === 'overload_monitor' && ![0, 1].includes(value)) {
       return `${DRIVE_PARAM_LABELS[field][1]} · 0, 1 중 하나만 됩니다`;
     }
@@ -2130,19 +2146,6 @@ export function createMotorConfigController({
         setAxisMessage(
           '과부하율 읽기를 켰습니다 · 드라이브 소프트웨어 Ver1.03 미만이면 모터 제어가 뜨지 않습니다'
           + ' · 그때는 0 으로 되돌려 저장 · 반영은 「설정 적용 · 모터 재시작」',
-          true,
-        );
-        return;
-      }
-      if (field === 'limit_switch_mode' && (text === '0' || text === '2')) {
-        // 막지는 않는다 · 배선을 아는 것은 사람이다 · 다만 잘못 켰을 때의 증상을 말해 둔다
-        // (아래 일반 「변경됨」 문구가 덮지 않게 여기서 그리고 끝낸다)
-        lastAxisRenderSignature = '';
-        renderAxisSettings();
-        setAxisMessage(
-          '리밋 스위치를 켰습니다 · 스위치가 배선된 축에만 쓰세요 · 배선이 없으면 '
-          + (text === '0' ? '그 방향으로 못 움직입니다' : '바로 Err38 알람이 뜹니다')
-          + ' · 저장 후 「장비에 적용 · 모터 재시작」에서 반영',
           true,
         );
         return;
@@ -2494,7 +2497,7 @@ export function createMotorConfigController({
             driveParams: Object.fromEntries(DRIVE_PARAM_FIELDS.map(
               (field) => [field, rowLimitOverride(row, field)],
             )),
-            driveRead: Object.fromEntries(DRIVE_PARAM_FIELDS.map(
+            driveRead: Object.fromEntries([...DRIVE_PARAM_FIELDS, ...DRIVE_READ_ONLY_FIELDS].map(
               (field) => [field, driveReadValue(row, field)],
             )),
           };
@@ -2545,7 +2548,7 @@ export function createMotorConfigController({
                 <span class="axis-number-label mono">${displayText(view.axisValue)}</span>
                 <input class="axis-edit-input axis-name-input" aria-label="모터 이름" data-axis-edit="name" data-axis-row-id="${escapeHtml(row.id)}" value="${escapeHtml(view.name === '-' ? '' : view.name)}"${disabled}>
               </td>
-              <td class="axis-limits-cell" title="위 줄: 운전 속도(모터 deg/s · 빈 칸이면 드라이버 기본값 · 회색 = 실행 설정 값) · 하한·상한은 조인트 매핑에서 계산 · 아래 줄: MINAS 드라이브 설정(빈 칸 = 드라이브 값 유지 · 회색 = 마지막 모터 검색 때 드라이브에서 읽은 값 · 앱솔루트는 전원 재투입 후 반영)">
+              <td class="axis-limits-cell" title="위 줄: 운전 속도(모터 deg/s · 빈 칸이면 드라이버 기본값 · 회색 = 실행 설정 값) · 하한·상한은 조인트 매핑에서 계산 · 아래 줄: MINAS 드라이브 설정(빈 칸 = 드라이브 값 유지 · 회색 = 마지막 모터 검색 때 드라이브에서 읽은 값 · 앱솔루트는 읽기만 · 리밋 스위치·입력 핀은 명령어로(사용법 12장))">
                 ${AXIS_LIMIT_FIELDS.map((field) => `
                   <label class="axis-limit-field"><span>속도 (deg/s)</span>
                     <input class="axis-edit-input axis-limit-input mono" type="text" inputmode="decimal"
@@ -2558,6 +2561,9 @@ export function createMotorConfigController({
                   <label class="axis-limit-field axis-drive-field" title="${escapeHtml(DRIVE_PARAM_LABELS[field][1])}"><span>${DRIVE_PARAM_LABELS[field][0]}</span>
                     ${driveParamControl(row, view, field, disabled)}
                   </label>`).join('')}
+                <label class="axis-limit-field axis-drive-field" title="${escapeHtml(DRIVE_PARAM_LABELS.encoder_absolute_mode[1])}"><span>${DRIVE_PARAM_LABELS.encoder_absolute_mode[0]}</span>
+                  <span class="mono axis-drive-readonly">${escapeHtml(absoluteModeText(view.driveRead.encoder_absolute_mode))}</span>
+                </label>
               </td>
               <td class="axis-status-stack">
                 <strong>${displayText(view.identity.title)}</strong>

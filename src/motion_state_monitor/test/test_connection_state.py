@@ -379,7 +379,7 @@ Identity:
         return result, calls
 
     def test_ethercat_scan_reads_minas_drive_params_by_sdo(self):
-        answers = {'0x3437': '0x0032 50', '0x3438': '0x0064 100', '0x3015': '0x0001 1', '0x3504': '0x0001 1'}
+        answers = {'0x3437': '0x0032 50', '0x3438': '0x0064 100', '0x3015': '0x0000 0'}
 
         def upload(command):
             return SimpleNamespace(returncode=0, stdout=answers[command[8]], stderr='')
@@ -390,11 +390,12 @@ Identity:
         self.assertEqual(slave['drive_params'], {
             'brake_delay_stop_ms': 50,
             'brake_delay_run_ms': 100,
-            'encoder_absolute_mode': 1,
-            'limit_switch_mode': 1,
+            'encoder_absolute_mode': 0,   # 매뉴얼 · 0 = 절대 (읽기 전용 표시)
         })
         self.assertEqual(slave['drive_params_error'], '')
         self.assertIn(['ethercat', 'upload', '-m', '0', '-p', '0', '-t', 'int16', '0x3437', '0'], calls)
+        # 리밋 스위치(Pr5.04)는 화면에서 빠져 읽지 않는다 · 수정 목록 34
+        self.assertFalse(any('0x3504' in command for command in calls))
 
     def test_drive_param_read_failure_does_not_fail_the_scan(self):
         def upload(command):
@@ -424,10 +425,12 @@ Identity:
             from motion_web_bridge.minas_params import PARAM_FIELDS
         except ImportError:
             self.skipTest('motion_web_bridge 가 경로에 없다')
-        self.assertEqual(
-            {field: index for field, (index, _sub) in MINAS_DRIVE_PARAM_OBJECTS.items()},
-            {field: spec[0] for field, spec in PARAM_FIELDS.items()},
-        )
+        read = {field: index for field, (index, _sub) in MINAS_DRIVE_PARAM_OBJECTS.items()}
+        written = {field: spec[0] for field, spec in PARAM_FIELDS.items()}
+        # 부팅 때 쓰는 것은 전부 읽어 보여 준다 · 읽기만 하는 것은 앱솔루트(Pr0.15) 하나
+        self.assertEqual({k: v for k, v in read.items() if k in written}, written)
+        self.assertEqual(set(read) - set(written), {'encoder_absolute_mode'})
+        self.assertEqual(read['encoder_absolute_mode'], 0x3015)
 
     def test_ethercat_scan_reads_duplicate_slave_positions_from_each_master(self):
         self.monitor._state.last_status_at = None
