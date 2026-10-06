@@ -15,6 +15,7 @@ import uvicorn
 import yaml
 from fastapi import FastAPI, HTTPException, Request
 from motion_common import generation, rpc, topics
+from motion_common import paths as common_paths
 from motion_common import motor_ref as motor_ref_rules
 from fastapi.responses import JSONResponse
 from rclpy.node import Node
@@ -220,12 +221,8 @@ class MotionWebBridge(Node):
         self.restart_script = Path(
             str(self.declare_parameter('restart_script', str(default_restart_script)).value)
         ).expanduser()
-        default_motion_projects_dir = self.workspace_root / 'motion_projects'
-        self.motion_projects_dir = Path(
-            str(self.declare_parameter(
-                'motion_projects_dir', str(default_motion_projects_dir)
-            ).value)
-        ).expanduser()
+        # 프로젝트 폴더 · 스케줄 노드·실행 노드와 같은 함수 하나 · 파라미터 없음 · 수정 목록 32
+        self.motion_projects_dir = common_paths.motion_projects_dir()
         self.project_repository = ProjectRepository(self.motion_projects_dir)
         self._motor_lifecycle_lock = threading.Lock()
 

@@ -110,11 +110,6 @@ def generate_launch_description():
         ),
         DeclareLaunchArgument('host', default_value='0.0.0.0'),
         DeclareLaunchArgument('port', default_value='8000'),
-        DeclareLaunchArgument(
-            'motion_projects_dir',
-            default_value=str(WORKSPACE / 'motion_projects'),
-            description='Root containing isolated integrated projects.',
-        ),
         Node(
             package='motion_control_bridge',
             executable='motor_manager_node',
@@ -135,7 +130,6 @@ def generate_launch_description():
             ),
             launch_arguments={
                 'config_file': LaunchConfiguration('config_file'),
-                'motion_projects_dir': LaunchConfiguration('motion_projects_dir'),
                 'motion_state_topic': LaunchConfiguration('motion_state_topic'),
                 'safety_request_topic': LaunchConfiguration('safety_request_topic'),
                 'publish_hz': LaunchConfiguration('publish_hz'),

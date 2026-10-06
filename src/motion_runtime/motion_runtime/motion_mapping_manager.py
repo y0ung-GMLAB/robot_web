@@ -3,7 +3,6 @@
 import json
 import hashlib
 import math
-import os
 import time
 from pathlib import Path
 from typing import Any, Dict, List, Optional
@@ -13,6 +12,7 @@ import yaml
 from rclpy.node import Node
 from std_msgs.msg import String
 
+from motion_common import paths as common_paths
 from motion_common.execution_context import verify_mapping_fingerprint
 from motion_common.paths import project_dir_for
 from motion_common import command_router, generation, motion_table, topics, values
@@ -33,10 +33,8 @@ from motion_runtime.registered_motion_file import (
 )
 
 
-DEFAULT_MOTION_PROJECTS_DIR = (
-    Path(os.environ.get('MOTION_WORKSPACE', Path.cwd())).expanduser()
-    / 'motion_projects'
-)
+# 프로젝트 폴더는 `motion_common.paths` 하나가 정한다 · 파라미터로 받지 않는다 · 수정 목록 32
+DEFAULT_MOTION_PROJECTS_DIR = common_paths.motion_projects_dir()
 #: 초기 위치 · 첫 장면(first_frame) · 직접 지정(manual) · 기준점(reference = 모션 0°) · 2026-10-02
 #: 조인트 최대 속도(deg/s)·가속도(deg/s²) · 애니메이션이 넘으면 재생 거부 · 수정 목록 5-2
 MOTION_RATE_LIMIT_FIELDS = ('max_velocity_deg_s', 'max_acceleration_deg_s2')
@@ -47,11 +45,7 @@ INITIAL_MODES = ('first_frame', 'manual', 'reference')
 class MotionMappingManager(Node):
     def __init__(self) -> None:
         super().__init__('motion_mapping_manager')
-        self.motion_projects_dir = Path(
-            str(self.declare_parameter(
-                'motion_projects_dir', str(DEFAULT_MOTION_PROJECTS_DIR)
-            ).value)
-        ).expanduser().resolve()
+        self.motion_projects_dir = Path(DEFAULT_MOTION_PROJECTS_DIR).expanduser().resolve()
         # These are assigned to a selected project for each request.  The
         # legacy motion_data directory is never used as a project workspace.
         self.mappings_dir = self.motion_projects_dir

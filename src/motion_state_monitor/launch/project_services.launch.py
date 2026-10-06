@@ -19,10 +19,6 @@ def generate_launch_description():
             'config_file',
             default_value=str(WORKSPACE / 'config' / 'bootstrap_motor_config.yaml'),
         ),
-        DeclareLaunchArgument(
-            'motion_projects_dir',
-            default_value=str(WORKSPACE / 'motion_projects'),
-        ),
         DeclareLaunchArgument('host', default_value='0.0.0.0'),
         DeclareLaunchArgument('port', default_value='8000'),
         DeclareLaunchArgument('motion_state_topic', default_value=topics.MOTION_STATE),
@@ -39,7 +35,6 @@ def generate_launch_description():
             output='screen',
             parameters=[{
                 'motion_state_topic': LaunchConfiguration('motion_state_topic'),
-                'motion_projects_dir': LaunchConfiguration('motion_projects_dir'),
             }],
         ),
         Node(
@@ -48,7 +43,6 @@ def generate_launch_description():
             name='motion_run_manager',
             output='screen',
             parameters=[{
-                'motion_projects_dir': LaunchConfiguration('motion_projects_dir'),
             }],
         ),
         Node(
@@ -70,7 +64,6 @@ def generate_launch_description():
                 'port': LaunchConfiguration('port'),
                 'web_publish_hz': LaunchConfiguration('publish_hz'),
                 'motor_config_file': LaunchConfiguration('config_file'),
-                'motion_projects_dir': LaunchConfiguration('motion_projects_dir'),
             }],
         ),
     ])

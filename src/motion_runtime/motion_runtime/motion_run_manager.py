@@ -2,7 +2,6 @@
 
 import json
 import math
-import os
 import threading
 import time
 from pathlib import Path
@@ -10,6 +9,7 @@ from typing import Any, Dict, List, Optional
 
 import rclpy
 import yaml
+from motion_common import paths as common_paths
 from motion_common.execution_context import confirm_context_id
 from motion_common.paths import project_dir_for
 from motion_common import command_router, generation as generation_mod, motion_table, topics
@@ -41,10 +41,8 @@ from .motion_group_display import apply_group_display
 from .motion_trace import DEFAULT_MAX_BYTES, DEFAULT_RETENTION_DAYS, MotionTraceRecorder
 
 
-DEFAULT_MOTION_PROJECTS_DIR = (
-    Path(os.environ.get('MOTION_WORKSPACE', Path.cwd())).expanduser()
-    / 'motion_projects'
-)
+# 프로젝트 폴더는 `motion_common.paths` 하나가 정한다 · 파라미터로 받지 않는다 · 수정 목록 32
+DEFAULT_MOTION_PROJECTS_DIR = common_paths.motion_projects_dir()
 
 
 def _decode_motor_positions(raw: bytes) -> Dict[int, float]:
@@ -136,11 +134,7 @@ class MotionRunManager(Node):
                 topics.MANUAL_ACTION_RESULT,
             ).value
         )
-        self.motion_projects_dir = Path(
-            str(self.declare_parameter(
-                'motion_projects_dir', str(DEFAULT_MOTION_PROJECTS_DIR)
-            ).value)
-        ).expanduser().resolve()
+        self.motion_projects_dir = Path(DEFAULT_MOTION_PROJECTS_DIR).expanduser().resolve()
         self.period_sec = self._load_period_sec()
         self.motion_files_dir = self.motion_projects_dir
         self.mappings_dir = self.motion_projects_dir

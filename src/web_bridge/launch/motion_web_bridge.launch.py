@@ -29,10 +29,6 @@ def generate_launch_description():
             'motor_config_file',
             default_value=str(workspace / 'config/bootstrap_motor_config.yaml'),
         ),
-        DeclareLaunchArgument(
-            'motion_projects_dir',
-            default_value=str(workspace / 'motion_projects'),
-        ),
         Node(
             package='motion_web_bridge',
             executable='motion_web_bridge',
@@ -48,7 +44,6 @@ def generate_launch_description():
                 'port': LaunchConfiguration('port'),
                 'web_publish_hz': LaunchConfiguration('web_publish_hz'),
                 'motor_config_file': LaunchConfiguration('motor_config_file'),
-                'motion_projects_dir': LaunchConfiguration('motion_projects_dir'),
             }],
         ),
     ])
