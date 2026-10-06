@@ -6,6 +6,7 @@ from urllib.parse import quote
 
 from ament_index_python.packages import get_package_share_directory
 from motion_common.timing import CONTROL_PERIOD_SEC
+from motion_common import joint_mapping, units, wire_units
 from motion_common import run_state as run_state_rules
 
 #: 공용 커널이 단일 정의 · 기존 이름은 호환을 위해 남긴다
@@ -210,6 +211,7 @@ def add_monitoring_motion_values(
             'motion_axis_configured': False,
             'motion_id': None,
             'motion_value_rad': None,
+            'motion_actual_rad': None,
             'motion_value_status': 'unmapped',
             'motion_value_message': '조인트 미설정',
             'motion_value_source': None,
@@ -234,6 +236,10 @@ def add_monitoring_motion_values(
         row = rows[0]
         motion_id = str(row.get('motion_id') or '').strip()
         motor['motion_id'] = motion_id or None
+        # 실제 조인트 각도 · 모터 실제 위치를 매핑 식으로 되돌린 값 · 웹 3D 실물 겹쳐 보기 · 7-c
+        position = wire_units.motor_position(motor)
+        actual = None if position is None else joint_mapping.joint_from_motor(row, position, units.RAD)
+        motor['motion_actual_rad'] = None if actual is None else round(actual, 9)
         motion_value = _monitoring_finite_float(received_values.get(motion_id))
         if not motion_id or motion_value is None:
             motor.update({

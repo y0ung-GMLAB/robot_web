@@ -122,3 +122,20 @@ def test_monitoring_does_not_calculate_when_topic_value_is_invalid():
     motor = state['motors'][0]
     assert motor['motion_value_status'] == 'missing'
     assert motor['motion_value_rad'] is None
+
+
+def test_monitoring_adds_the_actual_joint_angle_from_the_motor_position():
+    """수정 목록 7-c · 웹 3D 실물 위치 · 모터 실제 위치를 매핑 식으로 되돌린 조인트 각도"""
+    import math
+    state = {'motors': [{'controller_index': 1, 'position_rad': math.radians(1500.0 + 300.0)}]}
+    rows = [{
+        'motion_id': 'Neck_Pitch', 'motor_axis': 1, 'gear_ratio': 150.0,
+        'reference_position_rad': math.radians(1500.0),
+    }]
+    add_monitoring_motion_values(state, rows, {})
+    motor = state['motors'][0]
+    assert abs(motor['motion_actual_rad'] - math.radians(2.0)) < 1e-9   # 모터 300° / 150 = 조인트 2°
+    assert motor['motion_value_status'] == 'missing'                    # 명령값 토픽과는 따로
+    unmapped = {'motors': [{'controller_index': 9, 'position_rad': 1.0}]}
+    add_monitoring_motion_values(unmapped, rows, {})
+    assert unmapped['motors'][0]['motion_actual_rad'] is None

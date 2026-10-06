@@ -149,6 +149,11 @@
                   </select>
                 </label>
                 <button id="sim3dResetViewButton" type="button" title="로봇 팩의 카메라 설정으로 되돌립니다">시점 초기화</button>
+                <!-- 수정 목록 7-c · 실제 모터 위치로 같은 로봇을 주황 반투명으로 겹쳐 그린다 · MuJoCo 뷰만 -->
+                <label class="compact-field sim3d-view-toggle"
+                  title="실제 모터 위치(매핑 식으로 되돌린 조인트 각도)로 로봇을 하나 더 그립니다 · 계획과 실물의 차이 · 처짐·늦음 확인">
+                  <input id="sim3dActualToggle" type="checkbox" disabled><span>실물 위치</span>
+                </label>
                 <!-- 수정 목록 50 · 팩에 scene.glb 가 있을 때만 보인다 · 끄면 MuJoCo 뷰 -->
                 <label id="sim3dBlenderLabel" class="compact-field sim3d-view-toggle hidden"
                   title="Blender 에서 만든 장면(헤드 4대 · 매장 오브제)을 그립니다 · 실제 재생 시각을 따라갑니다 · 끄면 MuJoCo 계산 뷰">

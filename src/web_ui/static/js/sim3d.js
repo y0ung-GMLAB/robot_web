@@ -20,10 +20,14 @@
  * 장면 대신 Blender 가 내보낸 glTF 장면(헤드 4대 · 매장 오브제)을 그린다 · 물리 없음 ·
  * 시각은 실물 따라가기와 같은 시계(running · 회차 · 파일이 바뀌면 0 부터 · 멈추면 멈춤) ·
  * 애니메이션은 `AnimationMixer.setTime(t)` · 계산(.sim.npz) 없이 바로 된다.
+ *
+ * 「실물 위치」(수정 목록 7-c) · 실제 모터 위치를 서버가 매핑 식으로 되돌린 조인트 각도
+ * (`motion_actual_rad` · 화면에는 deg)로 같은 로봇을 주황 반투명으로 겹쳐 그린다 · 계획
+ * (MuJoCo 프레임)과 실물의 차이가 보인다 · MuJoCo 뷰에서만(glTF 는 관절을 따로 못 움직인다).
  */
 import { exportPreviewScene, fetchPreviewFrames, fetchPreviewScene, fetchPreviewSceneData } from './api.js';
 import {
-  bodyLocalPose, cameraPosition, followEndSec, followRunKey, frameIndexAt, jointsByBody,
+  actualQpos, bodyLocalPose, cameraPosition, followEndSec, followRunKey, frameIndexAt, jointsByBody,
 } from './sim3d_math.js';
 
 const THREE_URL = '/static/vendor/three/three.module.js';
@@ -66,6 +70,11 @@ export function createSim3dViewer({ el, getLatestState = () => null }) {
   let blenderInfo = null;     // 서버 · {available, size_bytes, fingerprint}
   let blender = null;         // {scene, camera, controls, mixer, duration, fingerprint, home}
   let blenderLoading = false;
+  // 실물 위치 겹쳐 보기 · 수정 목록 7-c
+  let showActual = false;
+  let actualGroups = [];
+  let shownQpos = null;       // 지금 계획 로봇의 자세 · 실물 로봇의 관절 밖 칸(바닥·비틀림)을 여기서 빌린다
+  let actualText = '';
 
   const has = (name) => Boolean(el[name]);
 
@@ -88,12 +97,13 @@ export function createSim3dViewer({ el, getLatestState = () => null }) {
     return new THREE.Quaternion(q[1], q[2], q[3], q[0]);
   }
 
-  function geomMesh(geom, meshes) {
+  function geomMesh(geom, meshes, { ghost = false } = {}) {
     const rgba = geom.rgba || [0.6, 0.6, 0.6, 1];
     const material = new THREE.MeshStandardMaterial({
-      color: new THREE.Color(rgba[0], rgba[1], rgba[2]),
-      transparent: rgba[3] < 1,
-      opacity: rgba[3],
+      color: ghost ? new THREE.Color(1.0, 0.55, 0.15) : new THREE.Color(rgba[0], rgba[1], rgba[2]),
+      transparent: ghost || rgba[3] < 1,
+      opacity: ghost ? 0.45 : rgba[3],
+      depthWrite: !ghost,
       metalness: 0.1,
       roughness: 0.7,
       side: THREE.DoubleSide,
@@ -150,19 +160,10 @@ export function createSim3dViewer({ el, getLatestState = () => null }) {
     grid.position.z = 0.0005;
     scene3.add(grid);
 
-    bodyGroups = [];
     jointMap = jointsByBody(json);
-    for (const body of json.bodies) {
-      const group = new THREE.Group();
-      group.name = body.name;
-      bodyGroups.push(group);
-      if (body.parent < 0) scene3.add(group); else bodyGroups[body.parent].add(group);
-    }
-    for (const geom of json.geoms) {
-      if (geom.group >= 3) continue;        // MuJoCo 기본 뷰어와 같이 0~2 만
-      const mesh = geomMesh(geom, json.meshes || {});
-      if (mesh) bodyGroups[geom.body].add(mesh);
-    }
+    bodyGroups = buildRobot(json);
+    actualGroups = [];
+    if (showActual) actualGroups = buildRobot(json, { ghost: true });
     applyPose(null);
 
     const cam = json.camera || {};
@@ -179,6 +180,34 @@ export function createSim3dViewer({ el, getLatestState = () => null }) {
     resize();
   }
 
+  /** 바디 묶음 하나를 장면에 세운다 · ghost = 실물 위치용 주황 반투명 사본 */
+  function buildRobot(json, { ghost = false } = {}) {
+    const groups = [];
+    for (const body of json.bodies) {
+      const group = new THREE.Group();
+      group.name = ghost ? `actual:${body.name}` : body.name;
+      groups.push(group);
+      if (body.parent < 0) scene3.add(group); else groups[body.parent].add(group);
+    }
+    for (const geom of json.geoms) {
+      if (geom.group >= 3) continue;        // MuJoCo 기본 뷰어와 같이 0~2 만
+      if (ghost && geom.type === 'plane') continue;   // 바닥은 하나면 된다
+      const mesh = geomMesh(geom, json.meshes || {}, { ghost });
+      if (mesh) groups[geom.body].add(mesh);
+    }
+    return groups;
+  }
+
+  function removeRobot(groups) {
+    for (const group of groups) {
+      group.traverse((node) => {
+        if (node.geometry) node.geometry.dispose();
+        if (node.material) node.material.dispose();
+      });
+      group.removeFromParent();
+    }
+  }
+
   function disposeScene() {
     if (!scene3) return;
     scene3.traverse((node) => {
@@ -187,17 +216,46 @@ export function createSim3dViewer({ el, getLatestState = () => null }) {
     });
     scene3 = null;
     bodyGroups = [];
+    actualGroups = [];
   }
 
-  function applyPose(qpos) {
-    if (!sceneJson || !bodyGroups.length) return;
+  function applyPose(qpos, groups = bodyGroups) {
+    if (!sceneJson || !groups.length) return;
+    if (groups === bodyGroups) shownQpos = qpos;
     for (const body of sceneJson.bodies) {
       if (body.parent < 0) continue;
       const local = bodyLocalPose(body, jointMap.get(body.id), qpos);
-      const group = bodyGroups[body.id];
+      const group = groups[body.id];
       group.position.set(local.pos[0], local.pos[1], local.pos[2]);
       group.quaternion.copy(quatToThree(local.quat));
     }
+  }
+
+  /** 실물 로봇 자세 · 매 그림마다 · 받은 축 수를 상태줄에 */
+  function applyActualPose() {
+    if (!showActual || !actualGroups.length || !sceneJson) return;
+    const motors = getLatestState()?.motors || [];
+    const { qpos, matched, missing } = actualQpos(sceneJson, motors, shownQpos);
+    applyPose(qpos, actualGroups);
+    const text = missing.length
+      ? `실물 위치 · ${matched}축 · 못 받은 축 ${missing.join(', ')}`
+      : `실물 위치 · ${matched}축`;
+    if (text !== actualText) {
+      actualText = text;
+      if (has('sim3dActualToggle')) el.sim3dActualToggle.parentElement.title = text;
+    }
+  }
+
+  /** 체크 · 「실물 위치」 · 주황 반투명 사본을 세우거나 걷는다 */
+  function setShowActual(enabled) {
+    showActual = Boolean(enabled);
+    if (showActual && sceneJson && scene3 && !actualGroups.length) {
+      actualGroups = buildRobot(sceneJson, { ghost: true });
+    } else if (!showActual && actualGroups.length) {
+      removeRobot(actualGroups);
+      actualGroups = [];
+    }
+    renderControls();
   }
 
   function ensureRenderer() {
@@ -330,6 +388,7 @@ export function createSim3dViewer({ el, getLatestState = () => null }) {
         blender.controls.update();
         renderer.render(blender.scene, blender.camera);
       } else {
+        applyActualPose();
         if (controls) controls.update();
         if (renderer && scene3 && camera) renderer.render(scene3, camera);
       }
@@ -540,6 +599,10 @@ export function createSim3dViewer({ el, getLatestState = () => null }) {
       el.sim3dBlenderToggle.checked = view === 'blender';
       el.sim3dBlenderToggle.disabled = blenderLoading;
     }
+    if (has('sim3dActualToggle')) {
+      el.sim3dActualToggle.checked = showActual;
+      el.sim3dActualToggle.disabled = view === 'blender' || !ready;
+    }
     if (has('sim3dLoadButton')) {
       el.sim3dLoadButton.disabled = view === 'blender' || !ready || !currentFile;
       el.sim3dLoadButton.title = currentFile ? `${currentFile.id} 의 계산 결과를 불러옵니다` : '애니메이션을 먼저 선택하세요';
@@ -565,6 +628,7 @@ export function createSim3dViewer({ el, getLatestState = () => null }) {
       if (!hasTimeline()) return;
       seek((Number(el.sim3dSlider.value) / 1000) * timelineSec());
     });
+    el.sim3dActualToggle?.addEventListener('change', () => setShowActual(el.sim3dActualToggle.checked));
     el.sim3dBlenderToggle?.addEventListener('change', () => {
       setView(el.sim3dBlenderToggle.checked ? 'blender' : 'mujoco');
     });

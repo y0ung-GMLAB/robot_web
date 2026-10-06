@@ -263,6 +263,7 @@ export function getElements() {
     sim3dResetViewButton: document.getElementById('sim3dResetViewButton'),
     sim3dBlenderLabel: document.getElementById('sim3dBlenderLabel'),
     sim3dBlenderToggle: document.getElementById('sim3dBlenderToggle'),
+    sim3dActualToggle: document.getElementById('sim3dActualToggle'),
     sim3dCanvasWrap: document.getElementById('sim3dCanvasWrap'),
     motionRunMujocoToggle: document.getElementById('motionRunMujocoToggle'),
     registerMotionFileButton: document.getElementById('registerMotionFileButton'),

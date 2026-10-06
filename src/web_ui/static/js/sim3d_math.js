@@ -141,6 +141,48 @@ export function frameIndexAt(times, seconds) {
   return seconds - times[lo] < times[hi] - seconds ? lo : hi;
 }
 
+/** 실물 위치 겹쳐 보기의 qpos · 수정 목록 7-c (2026-10-06)
+ *
+ * 팩의 축(`scene.axes` · {joint, motion_id})마다 같은 조인트 이름의 모터에서 실제 조인트
+ * 각도(`motion_actual_deg` · 서버가 매핑 식으로 되돌린 값을 화면이 deg 로 바꾼 것)를 받아
+ * 그 관절 칸에 넣는다 · 회전 관절만(rad) · 나머지 칸(바닥 자유 관절·비틀림)은 `base`
+ * (지금 계획 로봇의 자세)를 빌린다 · 받지 못한 축은 0 이 아니라 `base` 그대로.
+ */
+export function actualQpos(scene, motors = [], base = null) {
+  const joints = new Map((scene?.joints || []).map((joint) => [joint.name, joint]));
+  const size = Math.max(0, ...(scene?.joints || []).map((joint) => (
+    joint.qposadr + (joint.type === 'free' ? 7 : joint.type === 'ball' ? 4 : 1)
+  )));
+  const qpos = Array.from({ length: size }, (_, index) => (
+    base && Number.isFinite(Number(base[index])) ? Number(base[index]) : 0
+  ));
+  // 자유·공 관절의 기본 자세는 단위 쿼터니언
+  for (const joint of scene?.joints || []) {
+    if (base) continue;
+    if (joint.type === 'free') qpos[joint.qposadr + 3] = 1;
+    if (joint.type === 'ball') qpos[joint.qposadr] = 1;
+  }
+  const byMotion = new Map();
+  for (const motor of motors) {
+    if (motor && motor.motion_id) byMotion.set(String(motor.motion_id), motor);
+  }
+  let matched = 0;
+  const missing = [];
+  for (const axis of scene?.axes || []) {
+    const joint = joints.get(axis.joint);
+    const raw = byMotion.get(String(axis.motion_id))?.motion_actual_deg;
+    // 값이 없으면(null) 못 받은 것 · Number(null) = 0 으로 0° 에 그리지 않게
+    const value = raw === null || raw === undefined || raw === '' ? NaN : Number(raw);
+    if (!joint || joint.type !== 'hinge' || !Number.isFinite(value)) {
+      missing.push(axis.motion_id || axis.joint);
+      continue;
+    }
+    qpos[joint.qposadr] = (value * Math.PI) / 180;
+    matched += 1;
+  }
+  return { qpos, matched, missing };
+}
+
 /** 실물 따라가기 · 「새 회차가 시작됐나」 를 가리는 열쇠 · 수정 목록 8 (2026-10-06)
  *
  * 전에는 상태가 running 으로 **바뀔 때만** 처음부터 다시 그렸다 · 「바로 다음

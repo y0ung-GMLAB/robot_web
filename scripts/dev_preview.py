@@ -161,6 +161,8 @@ def snapshot():
             # 서버처럼 rad · 화면이 deg 로 바꿔 보여 준다 · 수정 목록 6-5
             'position_rad': math.radians(position),
             'velocity_rad_s': 0.0,
+            # 서버가 매핑 식으로 되돌린 실제 조인트 각도 흉내(기준점 0 · 감속비만) · 7-c
+            'motion_actual_rad': math.radians(position / gear),
             'torque_percent': 3.0,
             'motion_id': name,
             'lower': -36000.0,
@@ -685,10 +687,64 @@ def _demo_glb() -> bytes:
 DEMO_GLB = _demo_glb()
 
 
+def _demo_scene() -> dict:
+    """MuJoCo 장면 JSON 흉내 · 헤드 5축(목 좌우·상하 · 눈 상하 · 눈 좌우 둘) · z-up · m"""
+    def body(i, name, parent, pos):
+        return {'id': i, 'name': name, 'parent': parent, 'pos': pos, 'quat': [1, 0, 0, 0]}
+
+    def hinge(i, name, body_id, adr, axis):
+        return {'id': i, 'name': name, 'body': body_id, 'type': 'hinge', 'qposadr': adr,
+                'axis': axis, 'pos': [0, 0, 0]}
+
+    def geom(body_id, kind, size, pos, rgba):
+        return {'body': body_id, 'type': kind, 'size': size, 'pos': pos, 'quat': [1, 0, 0, 0],
+                'rgba': rgba, 'group': 0}
+
+    gray, skin, white = [0.55, 0.58, 0.62, 1], [0.85, 0.75, 0.65, 1], [0.95, 0.95, 0.95, 1]
+    return {
+        'bodies': [
+            body(0, 'world', -1, [0, 0, 0]), body(1, 'base', 0, [0, 0, 2.0]),
+            body(2, 'yaw', 1, [0, 0, -0.3]), body(3, 'pitch', 2, [0, 0, -0.2]),
+            body(4, 'eye_pitch', 3, [0, -0.32, 0.05]),
+            body(5, 'eye_l', 4, [0.12, 0, 0]), body(6, 'eye_r', 4, [-0.12, 0, 0]),
+        ],
+        'joints': [
+            hinge(0, 'neck_yaw', 2, 0, [0, 0, 1]), hinge(1, 'neck_pitch', 3, 1, [1, 0, 0]),
+            hinge(2, 'eye_pitch', 4, 2, [1, 0, 0]), hinge(3, 'eye_yaw_l', 5, 3, [0, 0, 1]),
+            hinge(4, 'eye_yaw_r', 6, 4, [0, 0, 1]),
+        ],
+        'geoms': [
+            geom(0, 'plane', [3, 3, 0.01], [0, 0, 0], [0.4, 0.45, 0.5, 1]),
+            geom(1, 'cylinder', [0.04, 0.15, 0], [0, 0, 0.15], gray),
+            geom(2, 'box', [0.1, 0.1, 0.1], [0, 0, 0], gray),
+            geom(3, 'box', [0.3, 0.3, 0.25], [0, 0, -0.1], skin),
+            geom(5, 'sphere', [0.07, 0, 0], [0, 0, 0], white),
+            geom(6, 'sphere', [0.07, 0, 0], [0, 0, 0], white),
+            geom(5, 'sphere', [0.03, 0, 0], [0, -0.06, 0], [0.1, 0.1, 0.1, 1]),
+            geom(6, 'sphere', [0.03, 0, 0], [0, -0.06, 0], [0.1, 0.1, 0.1, 1]),
+        ],
+        'meshes': {},
+        'camera': {'lookat': [0, 0, 1.6], 'distance': 2.2, 'azimuth': -90, 'elevation': -10},
+        'axes': [
+            {'joint': 'neck_pitch', 'motion_id': 'Neck_Pitch'},
+            {'joint': 'neck_yaw', 'motion_id': 'Neck_Yaw'},
+            {'joint': 'eye_pitch', 'motion_id': 'Eye_Pitch'},
+            {'joint': 'eye_yaw_l', 'motion_id': 'Eye_Yaw_L'},
+            {'joint': 'eye_yaw_r', 'motion_id': 'Eye_Yaw_R'},
+        ],
+    }
+
+
+@app.get('/api/preview/scene/data')
+async def preview_scene_data():
+    # 진짜 서버는 모든 응답 머리에 프로젝트 세대를 싣는다 · 화면이 그것으로 늦은 응답을 가린다
+    return JSONResponse(_demo_scene(), headers={'X-Project-Generation': str(state['generation'])})
+
+
 @app.get('/api/preview/scene')
 async def preview_scene_state():
-    # MuJoCo 장면은 없고(uv 없음 흉내) Blender 뷰만 있는 팩
-    return {'state': 'missing', 'message': '프리뷰 · MuJoCo 장면 없음 · Blender 뷰는 있음',
+    # MuJoCo 장면(가짜 헤드 5축)과 Blender 뷰가 둘 다 있는 팩
+    return {'state': 'ready', 'message': '프리뷰 · 가짜 MuJoCo 장면 · Blender 뷰도 있음',
             'blender': {'available': True, 'size_bytes': len(DEMO_GLB), 'fingerprint': 'devpreview000001'},
             'project_generation': state['generation']}
 
