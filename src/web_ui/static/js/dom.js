@@ -176,6 +176,8 @@ export function getElements() {
     projectImportZipInput: document.getElementById('projectImportZipInput'),
     projectTrashButton: document.getElementById('projectTrashButton'),
     projectTrashList: document.getElementById('projectTrashList'),
+    projectBackupsButton: document.getElementById('projectBackupsButton'),
+    projectBackupsList: document.getElementById('projectBackupsList'),
     projectUsbRescanButton: document.getElementById('projectUsbRescanButton'),
     projectUsbHelp: document.getElementById('projectUsbHelp'),
     projectImportFileButton: document.getElementById('projectImportFileButton'),

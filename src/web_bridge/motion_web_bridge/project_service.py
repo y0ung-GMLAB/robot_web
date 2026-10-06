@@ -336,6 +336,13 @@ class ProjectService:
     def list_trash(self) -> Dict[str, Any]:
         return self.repository.list_trash()
 
+    def list_auto_backups(self) -> Dict[str, Any]:
+        """자동 백업 목록 · 읽기만 · 수정 목록 33-4"""
+        return self.repository.list_auto_backups()
+
+    def auto_backup_file(self, day: Any, project_id: Any) -> Dict[str, Any]:
+        return self.repository.auto_backup_file(day, project_id)
+
     def restore_trash(self, entry: Any) -> Dict[str, Any]:
         with self.bridge.changing_project():
             return self.repository.restore_trash(entry)

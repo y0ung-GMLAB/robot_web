@@ -147,3 +147,95 @@ def test_peek_reads_the_project_id_without_unpacking(tmp_path):
 
     assert project_backup.peek_project_id(data) == project_id
     assert project_backup.peek_project_id(b'not a zip') == ''
+
+
+# --------------------------------------------------------------------------- #
+# 자동 백업 · 하루 1회 · 14일 · 수정 목록 33-4
+# --------------------------------------------------------------------------- #
+
+def test_daily_backup_writes_one_restorable_zip_per_project_once_a_day(tmp_path):
+    from datetime import date
+    root = tmp_path / 'projects'
+    repository = ProjectRepository(root)
+    first_id, _ = _project(repository, root, 'store a')
+    second_id, _ = _project(repository, root, 'store b')
+    repository.delete_project(second_id)          # 휴지통 것은 백업하지 않는다
+
+    day = date(2026, 10, 6)
+    result = project_backup.daily_backup(root, repository._project_dirs(), today=day)
+    assert result['created'] is True
+    assert result['projects'] == [first_id]
+    again = project_backup.daily_backup(root, repository._project_dirs(), today=day)
+    assert again['created'] is False                # 같은 날은 한 번
+    listed = repository.list_auto_backups()
+    assert listed['keep_days'] == 14
+    assert listed['days'][0]['day'] == '2026-10-06'
+    assert [item['project_id'] for item in listed['days'][0]['projects']] == [first_id]
+    # 숨김 폴더라 프로젝트 목록에 안 섞인다
+    assert [item['project_id'] for item in repository.list_projects()['projects']] == [first_id]
+
+    # 「zip 올려 복원」 에 그대로
+    file = repository.auto_backup_file('2026-10-06', first_id)
+    assert file['filename'] == f'{first_id}-2026-10-06-auto.zip'
+    other = ProjectRepository(tmp_path / 'new_pc')
+    with open(file['path'], 'rb') as handle:
+        assert other.import_project_zip(handle.read())['imported_project_id'] == first_id
+
+
+def test_auto_backups_older_than_fourteen_days_are_pruned(tmp_path):
+    from datetime import date, timedelta
+    root = tmp_path / 'projects'
+    repository = ProjectRepository(root)
+    _project(repository, root)
+    start = date(2026, 10, 1)
+    for offset in range(16):
+        project_backup.daily_backup(root, repository._project_dirs(), today=start + timedelta(days=offset))
+    days = [item['day'] for item in repository.list_auto_backups()['days']]
+    assert len(days) == 14
+    assert days[0] == '2026-10-16' and days[-1] == '2026-10-03'
+
+
+def test_backup_file_names_cannot_leave_the_backup_folder(tmp_path):
+    root = tmp_path / 'projects'
+    root.mkdir()
+    for day, project_id in (('../x', 'a'), ('2026-10-06', '../a'), ('2026-10-06', '.trash')):
+        with pytest.raises(ValueError):
+            project_backup.auto_backup_file(root, day, project_id)
+
+
+def test_auto_backup_service_runs_in_the_background_once_per_interval():
+    from motion_web_bridge import auto_backup
+    now = [0.0]
+    started = []
+    service = auto_backup.AutoBackupService(
+        lambda: {'created': True, 'day': 'd', 'projects': ['a'], 'pruned': []},
+        log_info=lambda _m: None, log_error=lambda _m: None,
+        clock=lambda: now[0], start_thread=started.append,
+    )
+    assert service.tick() is False                       # 켠 직후는 기다린다
+    now[0] = auto_backup.FIRST_DELAY_SEC
+    assert service.tick() is True
+    assert service.tick() is False                       # 도는 중
+    started[0]()                                         # 스레드가 끝난다
+    assert service.last_result['projects'] == ['a']
+    assert service.tick() is False                       # 다음 확인은 30분 뒤
+    now[0] += auto_backup.CHECK_INTERVAL_SEC
+    assert service.tick() is True
+
+
+def test_auto_backup_failure_is_logged_not_raised():
+    from motion_web_bridge import auto_backup
+    errors = []
+
+    def broken():
+        raise OSError('disk full')
+
+    now = [0.0]
+    service = auto_backup.AutoBackupService(
+        broken, log_info=lambda _m: None, log_error=errors.append,
+        clock=lambda: now[0], start_thread=lambda work: work(),
+    )
+    now[0] = auto_backup.FIRST_DELAY_SEC
+    assert service.tick() is True
+    assert errors and 'disk full' in errors[0]
+    assert service.tick() is False

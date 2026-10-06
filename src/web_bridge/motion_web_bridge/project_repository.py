@@ -12,7 +12,7 @@ import shutil
 import time
 import uuid
 from pathlib import Path
-from typing import Any, Dict
+from typing import Any, Dict, List
 
 import yaml
 
@@ -593,6 +593,30 @@ class ProjectRepository:
     def list_trash(self) -> Dict[str, Any]:
         project_backup.prune_trash(self.root)
         return {'entries': project_backup.list_trash(self.root), 'keep_days': 7}
+
+    # -- 자동 백업 · 하루 1회 · 수정 목록 33-4 --------------------------------- #
+
+    def _project_dirs(self) -> List[Path]:
+        """`list_projects` 와 같은 기준 · 숨김 폴더(.trash · .backups) 빼고 project.json 이 있는 것"""
+        return [
+            path for path in sorted(self.root.iterdir(), key=lambda item: item.name.lower())
+            if path.is_dir() and not path.name.startswith('.') and (path / 'project.json').is_file()
+        ]
+
+    def auto_backup(self) -> Dict[str, Any]:
+        """오늘 백업이 없으면 만든다 · 자동 백업 서비스가 부른다"""
+        return project_backup.daily_backup(self.root, self._project_dirs())
+
+    def list_auto_backups(self) -> Dict[str, Any]:
+        return {
+            'success': True,
+            'days': project_backup.list_auto_backups(self.root),
+            'keep_days': project_backup.AUTO_BACKUP_KEEP_DAYS,
+        }
+
+    def auto_backup_file(self, day: Any, project_id: Any) -> Dict[str, Any]:
+        path = project_backup.auto_backup_file(self.root, str(day or ''), str(project_id or ''))
+        return {'path': str(path), 'filename': f'{path.stem}-{day}-auto.zip'}
 
     def restore_trash(self, entry: Any) -> Dict[str, Any]:
         project_id = project_backup.restore_from_trash(self.root, str(entry or ''))
