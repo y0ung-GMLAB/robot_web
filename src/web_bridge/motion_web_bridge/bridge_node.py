@@ -1840,6 +1840,11 @@ class MotionWebBridge(Node):
             mapping = files.get('motion_axis_matching') if isinstance(files.get('motion_axis_matching'), dict) else {}
             active_motion = str(motions.get('name') or '').strip()
             active_mapping = str(mapping.get('name') or '').strip()
+            # 재생 등록(매핑 파일의 `motion_file_id` = 재생 목록 1번)이 먼저다 ·
+            # 목록은 늘 1번부터 시작한다 · 수정 목록 35
+            registered = self._registered_motion_file(project_id, active_mapping)
+            if registered:
+                active_motion = registered
 
         filled = dict(payload if payload is not None else {})
         if not str(filled.get('motion_file_id') or '').strip():
@@ -1847,6 +1852,19 @@ class MotionWebBridge(Node):
         if not str(filled.get('mapping_file_id') or '').strip():
             filled['mapping_file_id'] = active_mapping
         return filled
+
+    def _registered_motion_file(self, project_id: str, mapping_id: str) -> str:
+        export_path = getattr(self.project_repository, 'export_path', None)
+        if not project_id or not mapping_id or export_path is None:
+            return ''
+        try:
+            path = export_path(
+                project_id, 'motion_axis_matching', mapping_id,
+            )
+            root = yaml.safe_load(path.read_text(encoding='utf-8')) or {}
+        except (OSError, ValueError, yaml.YAMLError):
+            return ''
+        return str(root.get('motion_file_id') or '').strip() if isinstance(root, dict) else ''
 
     def motion_automation_configure(
         self, payload: Dict[str, Any]
@@ -1890,7 +1908,7 @@ class MotionWebBridge(Node):
         return payload
 
     def _mapping_files_registering(self, project_id: str, motion_file_id: str) -> List[str]:
-        """이 프로젝트의 조인트 매핑 파일 중 `motion_file_id` 가 그 애니메이션인 것."""
+        """이 프로젝트의 조인트 매핑 파일 중 그 애니메이션을 재생 등록(목록 포함)한 것."""
         repository = self.project_repository
         try:
             tree = repository.get_project(project_id).get('tree') or []
@@ -1909,7 +1927,15 @@ class MotionWebBridge(Node):
                     mapping = yaml.safe_load(str(content.get('content') or '')) or {}
                 except (OSError, ValueError, yaml.YAMLError):
                     continue
-                if isinstance(mapping, dict) and str(mapping.get('motion_file_id') or '') == motion_file_id:
+                if not isinstance(mapping, dict):
+                    continue
+                # 재생 목록 안에 있어도 등록이다 · 지우면 그 차례에서 재생이 멈춘다 · 수정 목록 35
+                listed = mapping.get('motion_playlist')
+                listed = [str(item or '') for item in listed] if isinstance(listed, list) else []
+                if (
+                    str(mapping.get('motion_file_id') or '') == motion_file_id
+                    or motion_file_id in listed
+                ):
                     names.append(file_name)
         return sorted(names)
 

@@ -8,7 +8,9 @@ import time
 
 from motion_common import store
 from motion_common.repeat_policy import (
+    DEFAULT_GROUP_SYNC_MODE,
     DEFAULT_REPEAT_MODE,
+    GROUP_SYNC_MODES,
     REPEAT_MODES,
 )
 from pathlib import Path
@@ -23,6 +25,8 @@ def default_automation_state() -> Dict[str, Any]:
         'version': AUTOMATION_VERSION,
         'repeat_mode': DEFAULT_REPEAT_MODE,
         'dwell_sec': 0.0,
+        # 그룹 PC 사이 맞춤 · 마스터의 값으로 그룹을 시작한다 · 수정 목록 35
+        'group_sync_mode': DEFAULT_GROUP_SYNC_MODE,
         'motion_file_id': '',
         'mapping_file_id': '',
         'motion_sha256': '',
@@ -46,6 +50,12 @@ def normalize_automation_state(value: Any) -> Dict[str, Any]:
     if not math.isfinite(dwell_sec) or dwell_sec < 0.0:
         raise ValueError('자동 반복 대기 시간은 0초 이상이어야 합니다')
     state['dwell_sec'] = dwell_sec
+    group_sync_mode = str(
+        source.get('group_sync_mode') or DEFAULT_GROUP_SYNC_MODE
+    ).strip().lower()
+    if group_sync_mode not in GROUP_SYNC_MODES:
+        raise ValueError(f'지원하지 않는 그룹 맞춤 방식입니다: {group_sync_mode}')
+    state['group_sync_mode'] = group_sync_mode
     for key in (
         'motion_file_id',
         'mapping_file_id',

@@ -1,5 +1,7 @@
 import {
+  configureMotionAutomation,
   fetchCoordinationStatus,
+  fetchMotionRunStatus,
   sendCoordinationControl,
   saveCoordinationSettings,
 } from './api.js';
@@ -15,6 +17,7 @@ function text(value) {
 const stateLabels = {
   idle: '대기', preparing: '준비 확인', initializing: '초기위치 이동',
   armed: '시작 대기', start_scheduled: '예약됨', waiting: '예약 대기', running: '애니메이션 재생 중',
+  running_independent: '각자 재생 중',
   waiting_cycle_ready: '회차 준비 중', cycle_ready: '다음 시작 준비',
   stop_after_cycle: '현재 회차 후 정지 대기', releasing: '이전 그룹 실행 정리 확인 중',
   stopped: '정지', error: '오류',
@@ -36,7 +39,7 @@ function stateClass(value) {
 
 const activeStates = new Set([
   'preparing', 'initializing', 'armed', 'start_scheduled', 'waiting', 'running',
-  'waiting_cycle_ready', 'cycle_ready', 'stop_after_cycle',
+  'running_independent', 'waiting_cycle_ready', 'cycle_ready', 'stop_after_cycle',
   'releasing',
 ]);
 
@@ -557,6 +560,7 @@ export function createCoordinationController({ el }) {
   /** 그룹 실행에 넘길 반복 옵션 · 이 화면의 입력값을 그대로 쓴다. */
   function groupRunFields() {
     return {
+      sync_mode: String(el.coordinationSyncMode?.value || 'lockstep'),
       repeat_mode: String(el.coordinationRepeatMode?.value || 'reinitialize'),
       dwell_sec: Number(el.coordinationDwellSec?.value || 0),
       target_cycle_count: Math.max(
@@ -574,6 +578,8 @@ export function createCoordinationController({ el }) {
       // 지금은 `groupRunFields()` 가 늘 값을 채워 주지만, 기본값이 두 가지면
       // 언젠가 갈라진다 · 스케줄이 바로 그렇게 죽었다
       repeat_mode: String(overrides.repeat_mode || 'reinitialize'),
+      // 회차 맞춤 / 각자 재생 · 모르는 값은 서버가 회차 맞춤으로 읽는다 · 수정 목록 35
+      sync_mode: overrides.sync_mode === 'independent' ? 'independent' : 'lockstep',
       dwell_sec: Number.isFinite(dwellSec) && dwellSec >= 0 ? dwellSec : 0,
       target_cycle_count: Number.isFinite(targetCycleCount) && targetCycleCount >= 0
         ? targetCycleCount
@@ -734,8 +740,35 @@ export function createCoordinationController({ el }) {
     });
   }
 
+  /** PC 사이 맞춤 · 프로젝트 설정(자동 반복)에 저장 · 스케줄 시작도 이 값을 쓴다 · 수정 목록 35 */
+  async function loadSyncMode() {
+    if (!el.coordinationSyncMode) return;
+    try {
+      const payload = await fetchMotionRunStatus();
+      const mode = payload?.status?.automation?.group_sync_mode;
+      if (mode === 'independent' || mode === 'lockstep') el.coordinationSyncMode.value = mode;
+    } catch (_error) {
+      // 못 읽으면 화면 기본값(회차 맞춤) · 시작 때 고른 값은 그대로 간다
+    }
+  }
+
+  async function saveSyncMode() {
+    const mode = el.coordinationSyncMode?.value === 'independent' ? 'independent' : 'lockstep';
+    try {
+      const result = await configureMotionAutomation({ group_sync_mode: mode });
+      if (result?.success === false) throw new Error(result.message || '저장 실패');
+    } catch (error) {
+      await showAlert(
+        `PC 사이 맞춤을 저장하지 못했습니다 · 이번 수동 시작에는 고른 값이 쓰이지만 스케줄은 이전 값을 씁니다\n${error?.message || error}`,
+        { title: 'PC 사이 맞춤', confirmLabel: '확인', tone: 'warning' },
+      );
+    }
+  }
+
   function start() {
     bindEvents();
+    el.coordinationSyncMode?.addEventListener('change', saveSyncMode);
+    loadSyncMode();
     refresh();
     if (!timer) timer = window.setInterval(refresh, 1000);
   }

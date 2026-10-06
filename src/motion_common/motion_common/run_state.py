@@ -87,6 +87,8 @@ GROUP_ACTIVE_STATES = frozenset({
     'start_scheduled',
     'waiting',
     'running',
+    # 각자 재생 · 1회차 뒤로 PC 마다 제 목록을 돈다 · 수정 목록 35
+    'running_independent',
     'waiting_cycle_ready',
     'cycle_ready',
     'stop_after_cycle',

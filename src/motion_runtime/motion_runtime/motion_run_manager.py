@@ -624,6 +624,9 @@ class MotionRunManager(Node):
             **current,
             'repeat_mode': repeat_mode,
             'dwell_sec': dwell_sec,
+            'group_sync_mode': (
+                payload.get('group_sync_mode') or current.get('group_sync_mode')
+            ),
             'motion_file_id': motion_file_id if files_ready else '',
             'mapping_file_id': mapping_file_id if files_ready else '',
             'motion_sha256': '',

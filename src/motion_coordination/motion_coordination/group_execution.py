@@ -7,6 +7,12 @@ import uuid
 from dataclasses import dataclass, field
 from typing import Dict, Iterable, Optional
 
+from motion_common.repeat_policy import (
+    GROUP_INDEPENDENT,
+    GROUP_LOCKSTEP,
+    normalize_group_sync_mode,
+)
+
 
 @dataclass
 class Member:
@@ -123,6 +129,10 @@ class GroupExecution:
         self.dwell_sec = 0.0
         self.target_cycle_count = 0
         self.initialization_only = False
+        #: 회차 맞춤(lockstep) / 각자 재생(independent) · 수정 목록 35
+        self.sync_mode = GROUP_LOCKSTEP
+        #: 각자 재생에서 제 회차를 끝내고 멈췄다고 알린 PC
+        self.independent_stopped: set[str] = set()
         self.last_start_spread_ms: Optional[float] = None
         self.last_initialize_spread_ms: Optional[float] = None
         self.pending_command = ''
@@ -167,6 +177,7 @@ class GroupExecution:
         dwell_sec: float = 0.0,
         target_cycle_count: int = 0,
         initialization_only: bool = False,
+        sync_mode: str = GROUP_LOCKSTEP,
     ) -> str:
         selected = tuple(sorted(set(str(value) for value in participants if str(value))))
         if not 1 <= len(selected) <= 8:
@@ -186,6 +197,7 @@ class GroupExecution:
         self.dwell_sec = float(dwell_sec)
         self.target_cycle_count = int(target_cycle_count)
         self.initialization_only = bool(initialization_only)
+        self.sync_mode = normalize_group_sync_mode(sync_mode)
         self.state = 'preparing'
         return self.execution_id
 
@@ -253,7 +265,26 @@ class GroupExecution:
             values = list(self.triggered.values())
             self.last_start_spread_ms = (max(values) - min(values)) * 1000.0
             self.cycle_number = cycle_number
-            self.state = 'running'
+            # 각자 재생 · 1회차를 같이 시작한 뒤로는 회차 장벽이 없다 · 수정 목록 35
+            self.state = (
+                'running_independent'
+                if self.sync_mode == GROUP_INDEPENDENT and self.run_mode == 'continuous'
+                else 'running'
+            )
+
+    @property
+    def independent(self) -> bool:
+        return self.state == 'running_independent'
+
+    def mark_independent_stopped(self, pc_id: str) -> bool:
+        """각자 재생 · 모든 PC 가 제 회차를 끝내고 멈췄으면 참.
+
+        한 PC 가 먼저 멈췄다고 나머지를 끊지 않는다 · 회차 후 정지는 PC 마다
+        제 애니가 끝나는 시각이 다르다.
+        """
+        self._participant(pc_id)
+        self.independent_stopped.add(pc_id)
+        return self.independent_stopped >= set(self.participants)
 
     def mark_cycle_ready(self, pc_id: str, cycle_number: int) -> None:
         self._participant(pc_id)

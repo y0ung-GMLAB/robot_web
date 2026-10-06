@@ -22,6 +22,7 @@ from motion_common.values import finite_float, optional_int
 from . import motion_run_rules
 from .motion_automation_store import REPEAT_MODES
 from .motion_run_constants import CONTINUOUS_LOOP_TOLERANCE_DEG
+from .registered_motion_file import playlist_from_mapping
 
 
 def _axis_playback_spans(
@@ -193,13 +194,16 @@ class PlanBuilder:
         mapping = self.manager._load_mapping(mapping_path)
 
         mapping_motion_file_id = str(mapping.get('motion_file_id') or '').strip()
+        # 재생 목록 안의 파일이면 된다 · 수정 목록 35 · 목록이 없으면 옛 규칙(등록 파일 하나)
+        registered_playlist = playlist_from_mapping(mapping)
         if (
             mapping_motion_file_id
-            and mapping_motion_file_id != motion_file_id
+            and motion_file_id not in registered_playlist
             and not studio_request
             and not (initialization_only and not motion_file_id)
         ):
             raise ValueError(
+                f'재생 등록에 없는 애니메이션입니다 ({motion_file_id}) · '
                 f'mapping file expects motion file {mapping_motion_file_id}, not {motion_file_id}'
             )
 
@@ -574,6 +578,8 @@ class PlanBuilder:
             'group_cycle_number': int(payload.get('group_cycle_number') or 0),
             'motion_file_id': motion_file_id,
             'mapping_file_id': mapping_file_id,
+            # 매핑 파일의 재생 목록 · 재생기가 다음 애니를 고를 때 본다 · 수정 목록 35
+            'motion_playlist': list(registered_playlist),
             'run_mode': run_mode,
             'automation_run': automation_run,
             'repeat_mode': repeat_mode,

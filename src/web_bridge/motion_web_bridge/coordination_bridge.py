@@ -230,6 +230,10 @@ class CoordinationWebBridge:
                     ),
                     'dwell_sec': payload.get('dwell_sec', 0.0),
                     'target_cycle_count': payload.get('target_cycle_count', 0),
+                    # 회차 맞춤 / 각자 재생 · 수정 목록 35
+                    'sync_mode': repeat_policy.normalize_group_sync_mode(
+                        payload.get('sync_mode'),
+                    ),
                 })
             result = self._local_api('/control', request)
         except (OSError, ValueError) as exc:
@@ -437,6 +441,10 @@ def local_motion_control(bridge: Any, payload: Mapping[str, Any]) -> Dict[str, A
             'initialization_only': initialization_only,
             'repeat_mode': repeat_mode,
             'dwell_sec': float(dwell_sec or 0.0),
+            'sync_mode': repeat_policy.normalize_group_sync_mode(
+                payload.get('sync_mode'),
+            ),
+            'target_cycle_count': int(payload.get('target_cycle_count') or 0),
             # Direct repetition must use the same continuity validation as a
             # local continuous run. Reinitializing policies deliberately
             # bypass that check because every cycle returns to the start pose.

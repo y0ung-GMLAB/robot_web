@@ -30,6 +30,8 @@ def test_default_automation_is_a_repeat_policy_only():
         # 화면 선택칸의 기본값과 같다 · 초기 위치 이동 후 다음 · §6-135
         'repeat_mode': 'reinitialize',
         'dwell_sec': 0.0,
+        # 그룹 PC 사이 맞춤 · 옛 동작(회차 맞춤)이 기본 · 수정 목록 35
+        'group_sync_mode': 'lockstep',
         'motion_file_id': '',
         'mapping_file_id': '',
         'motion_sha256': '',
@@ -92,3 +94,13 @@ def test_store_rejects_invalid_or_external_project_paths(tmp_path, project_id):
 def test_invalid_repeat_policy_is_rejected(payload):
     with pytest.raises(ValueError):
         normalize_automation_state(payload)
+
+
+def test_group_sync_mode_is_validated():
+    """각자 재생도 저장된다 · 모르는 값은 거절 · 수정 목록 35"""
+    assert normalize_automation_state(
+        {'group_sync_mode': 'independent'}
+    )['group_sync_mode'] == 'independent'
+    assert normalize_automation_state({})['group_sync_mode'] == 'lockstep'
+    with pytest.raises(ValueError):
+        normalize_automation_state({'group_sync_mode': 'free'})

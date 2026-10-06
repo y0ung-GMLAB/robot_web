@@ -19,7 +19,12 @@ from motion_common.coordination import (
 from motion_common.paths import motion_projects_dir, workspace_root
 from motion_common import topics
 
-from motion_common.repeat_policy import DEFAULT_REPEAT_MODE, normalize_repeat_mode
+from motion_common.repeat_policy import (
+    DEFAULT_GROUP_SYNC_MODE,
+    DEFAULT_REPEAT_MODE,
+    normalize_group_sync_mode,
+    normalize_repeat_mode,
+)
 from motion_common.run_state import group_is_active, is_running
 from motion_common.schedule_models import ScheduleItem
 from motion_common.schedule_store import (
@@ -425,6 +430,7 @@ class MotionScheduleNode(Node):
         # 5° 이상 벌어진 모션은 "연속 동작할 수 없습니다" 로 죽었다.
         req_repeat_mode = DEFAULT_REPEAT_MODE
         req_dwell_sec = 0.0
+        req_sync_mode = DEFAULT_GROUP_SYNC_MODE
         automation_file = os.path.join(self.projects_dir, self.store.current_project_id, "runtime", "motion_automation.json")
         try:
             if os.path.exists(automation_file):
@@ -432,6 +438,7 @@ class MotionScheduleNode(Node):
                     auto_config = json.load(f)
                     req_repeat_mode = normalize_repeat_mode(auto_config.get("repeat_mode"))
                     req_dwell_sec = float(auto_config.get("dwell_sec", 0.0))
+                    req_sync_mode = normalize_group_sync_mode(auto_config.get("group_sync_mode"))
         except (OSError, ValueError) as exc:
             self.get_logger().warning(f"Failed to read motion_automation.json: {exc}")
             
@@ -441,6 +448,7 @@ class MotionScheduleNode(Node):
                 "run_mode": "continuous",
                 "repeat_mode": req_repeat_mode,
                 "dwell_sec": req_dwell_sec,
+                "sync_mode": req_sync_mode,
                 "target_cycle_count": 0,
                 "schedule_id": item.schedule_id,
             }

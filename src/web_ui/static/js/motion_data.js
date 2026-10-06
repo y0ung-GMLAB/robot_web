@@ -1,6 +1,13 @@
 import { createMotionFileManager } from './motion_file_manager.js';
 import { motionScheduleResumeNote } from './schedule_scope.js';
 import {
+  playlistProgressText,
+  playlistWithAdded,
+  playlistWithMoved,
+  playlistWithout,
+  registeredPlaylist,
+} from './motion_playlist.js';
+import {
   checkMotionRun,
   configureMotionAutomation,
   deleteMotionFile,
@@ -608,6 +615,8 @@ export function createMotionDataController({
   let selectedMappingId = null;
   let mappingDraft = emptyMappingDraft();
   let registeredMotionFileIdValue = '';
+  //: 재생 목록 · 1번 = `registeredMotionFileIdValue` · 수정 목록 35
+  let registeredPlaylistValue = [];
   let mappingValidation = null;
   let mappingMotionFileDetail = null;
   let loading = false;
@@ -1149,11 +1158,14 @@ export function createMotionDataController({
       ? ` [${formatInt(currentCycle)} / ${formatInt(targetCycle)}회차]` 
       : (currentCycle > 0 ? ` [${formatInt(currentCycle)}회차]` : '');
     
+    // 재생 목록이면 몇 번째인지 · 다음은 무엇인지 · 수정 목록 35
+    const playlistText = playlistProgressText(status);
+    const listText = playlistText ? ` · ${playlistText}` : '';
     if (state === 'initializing') {
-      return `초기 위치 이동 ${formatNumber(progress.elapsed_sec, 2)} / ${formatNumber(progress.duration_sec, 2)} s${cycleText}`;
+      return `초기 위치 이동 ${formatNumber(progress.elapsed_sec, 2)} / ${formatNumber(progress.duration_sec, 2)} s${cycleText}${listText}`;
     }
     if (state === 'running' || state === 'stopping') {
-      return `재생 진행 ${formatNumber(progress.elapsed_sec, 2)} / ${formatNumber(progress.duration_sec, 2)} s${cycleText}`;
+      return `재생 진행 ${formatNumber(progress.elapsed_sec, 2)} / ${formatNumber(progress.duration_sec, 2)} s${cycleText}${listText}`;
     }
     if (state === 'waiting') return String(status?.message || '반복 대기 중');
     if (state === 'verifying') return '최종 위치 확인 중';
@@ -1399,7 +1411,13 @@ export function createMotionDataController({
     // 아홉 칸을 같은 크기로 늘어놓으면 정작 알아야 할 "무엇이 재생되는가"가
     // 묻힌다. 실행 대상 셋을 크게 두고, 나머지 수치는 아래에 작게 붙인다.
     const targets = [
-      { label: '재생 파일', value: runFile?.filename || payload.motion_file_id || '등록된 파일 없음', missing: !runFile && !payload.motion_file_id },
+      {
+        label: registeredPlaylistValue.length > 1 ? '재생 목록' : '재생 파일',
+        value: registeredPlaylistValue.length > 1
+          ? `${registeredPlaylistValue.length}개 · ${registeredPlaylistValue.join(' → ')}`
+          : (runFile?.filename || payload.motion_file_id || '등록된 파일 없음'),
+        missing: !runFile && !payload.motion_file_id,
+      },
       { label: '조인트 매핑', value: mappingFile?.filename || payload.mapping_file_id || '선택 안 됨', missing: !mappingFile && !payload.mapping_file_id },
       { label: '상태', value: motionRunStateText(status.state) },
     ].map((item) => (
@@ -1656,10 +1674,15 @@ export function createMotionDataController({
 
   function renderMotionRunPanel() {
     // 같이 보기 토글 · 재생 등록된 파일의 계산이 끝났을 때만 켤 수 있다
-    const mujocoRegisteredFile = files.find(
-      (entry) => entry.id === registeredMotionFileIdValue,
+    // 재생 목록이면 **지금 도는(또는 다음으로 가는) 애니**를 따라간다 · 수정 목록 35 ·
+    // 초기 위치 이동 중에 이미 다음 파일 이름이 오므로 프레임을 미리 받아 둔다
+    const playingId = Number(motionRunStatus?.playlist_length) > 1
+      ? String(motionRunStatus?.motion_file_id || '')
+      : '';
+    const followTarget = files.find(
+      (entry) => entry.id === (playingId || registeredMotionFileIdValue),
     ) || null;
-    sim3d.update({ file: selectedFile, registeredFile: mujocoRegisteredFile });
+    sim3d.update({ file: selectedFile, registeredFile: followTarget });
     const payload = motionRunPayload();
     const status = motionRunStatus || {};
     const state = String(status.state || 'idle');
@@ -1833,12 +1856,18 @@ export function createMotionDataController({
       const selected = file.id === selectedFileId;
       // 재생 등록된 파일은 목록에서 바로 구분돼야 한다. 등록 여부를 알려면
       // 조인트 매핑을 열어봐야 했던 것이 가장 흔한 혼란이었다.
-      const registered = Boolean(registeredMotionFileIdValue)
-        && file.id === registeredMotionFileIdValue;
+      const positions = registeredPlaylistValue
+        .map((id, index) => (id === file.id ? index + 1 : 0))
+        .filter(Boolean);
+      const registered = positions.length > 0;
       const rowClass = [selected ? 'selected' : '', registered ? 'registered' : '']
         .filter(Boolean).join(' ');
+      // 목록이면 차례 번호까지 · 「재생 2·4」 = 목록의 2번째와 4번째
+      const badgeText = registeredPlaylistValue.length > 1
+        ? `재생 ${positions.join('·')}`
+        : '재생';
       const badge = (registered
-        ? '<span class="motion-registered-badge" title="이 파일이 재생 등록되어 있습니다">재생</span>'
+        ? `<span class="motion-registered-badge" title="이 파일이 재생 등록되어 있습니다">${badgeText}</span>`
         : '') + mujocoBadge(file);
       return (
         `<tr class="${rowClass}" data-motion-file-id="${displayText(file.id)}">
@@ -1859,7 +1888,12 @@ export function createMotionDataController({
    */
   function renderMotionFileActions() {
     const file = selectedFile;
-    const registered = Boolean(file && file.id === registeredMotionFileIdValue);
+    const registered = Boolean(file && registeredPlaylistValue.includes(file.id));
+    const listed = registeredPlaylistValue.length;
+    // 같이 보기 토글 · 재생 등록(목록 1번) 파일의 계산이 끝났을 때만 켤 수 있다
+    const mujocoRegisteredFile = files.find(
+      (entry) => entry.id === registeredMotionFileIdValue,
+    ) || null;
     if (el.deleteMotionFileButton) {
       el.deleteMotionFileButton.disabled = !file || loading;
       el.deleteMotionFileButton.title = registered
@@ -1920,22 +1954,30 @@ export function createMotionDataController({
     // 한 파일에 들어 있을 뿐 둘은 남남이다 · 재생 등록이 이미 그렇게
     // 떨어져 있다.
     if (el.registerMotionFileButton) {
+      // 목록이 비었으면 「재생 등록」 · 있으면 끝에 붙인다 (같은 파일 두 번도 된다) · 수정 목록 35
       el.registerMotionFileButton.disabled = (
-        !file || !selectedMappingId || loading || mappingLoading || registered
+        !file || !selectedMappingId || loading || mappingLoading
+        || (listed === 1 && registered)
       );
-      el.registerMotionFileButton.textContent = registered ? '재생 등록됨' : '재생 등록';
+      el.registerMotionFileButton.textContent = listed ? '재생 목록에 추가' : '재생 등록';
       el.registerMotionFileButton.title = !selectedMappingId
         ? '저장된 조인트 매핑을 먼저 선택하세요'
-        : '이 파일을 재생 등록합니다 · 조인트 매핑 편집과는 무관합니다';
+        : (listed
+          ? '재생 목록 끝에 붙입니다 · 목록을 차례로 돌고 끝나면 1번부터 다시 · 조인트 매핑 편집과는 무관합니다'
+          : '이 파일을 재생 등록합니다 · 조인트 매핑 편집과는 무관합니다');
     }
     if (el.unregisterMotionFileButton) {
       el.unregisterMotionFileButton.disabled = (
         !registered || !selectedMappingId || loading || mappingLoading
       );
+      el.unregisterMotionFileButton.textContent = listed > 1 ? '목록에서 빼기' : '재생 등록 해제';
       el.unregisterMotionFileButton.title = registered
-        ? '현재 조인트 매핑에서 이 파일의 재생 등록을 해제합니다'
+        ? (listed > 1
+          ? '재생 목록에서 이 파일을 모두 뺍니다 · 파일은 지우지 않습니다'
+          : '현재 조인트 매핑에서 이 파일의 재생 등록을 해제합니다')
         : '현재 재생 등록된 파일을 선택하세요';
     }
+    renderPlaylistPanel();
   }
 
   function renderMappingFileName() {
@@ -2318,6 +2360,7 @@ export function createMotionDataController({
         mappingRevision = '';
         mappingDraft = emptyMappingDraft();
         registeredMotionFileIdValue = '';
+        registeredPlaylistValue = [];
         mappingValidation = null;
         mappingDirty = false;
         mappingRevisionConflict = false;
@@ -2341,6 +2384,7 @@ export function createMotionDataController({
       selectedMappingId = null;
       mappingDraft = emptyMappingDraft();
       registeredMotionFileIdValue = '';
+      registeredPlaylistValue = [];
       mappingValidation = null;
       mappingMotionFileDetail = null;
       mappingDirty = false;
@@ -2397,6 +2441,7 @@ export function createMotionDataController({
       mappingFiles = Array.isArray(payload.files) ? payload.files : mappingFiles;
       mappingDraft = loadedDraft;
       registeredMotionFileIdValue = registeredMotionFileId(loadedDraft);
+      registeredPlaylistValue = registeredPlaylist(loadedDraft);
       upgradeLegacyMappingRefs();
       selectedMappingId = payload.file?.id || mappingDraft.file_id || requestedMappingId;
       mappingRevision = mappingFileRevision(payload.file);
@@ -2516,23 +2561,32 @@ export function createMotionDataController({
    * 창이 떴다 · 조인트 매핑과 재생 등록은 한 파일에 들어 있을 뿐
    * 서로 남남이다.
    */
-  async function applyMotionFileRegistration(fileId, detail, label) {
+  async function applyMotionFileRegistration(playlist, label) {
     setMappingMessage(label);
     mappingLoading = true;
     renderMappingPanel();
     try {
       const payload = await saveRegisteredMotionFile({
         file_id: selectedMappingId,
-        motion_file_id: fileId,
+        motion_file_id: playlist[0] || '',
+        motion_playlist: playlist,
       });
       if (payload.success === false) {
         setMappingMessage(`재생 등록 실패: ${payload.message || '저장하지 못했습니다'}`);
         return false;
       }
       // 편집 중인 조인트 매핑은 **그대로 둔다** · 우리가 바꾼 칸만 반영한다
-      mappingDraft.motion_file_id = fileId;
-      mappingMotionFileDetail = detail;
+      const saved = Array.isArray(payload.motion_playlist) ? payload.motion_playlist : playlist;
+      const first = saved[0] || '';
+      mappingDraft.motion_file_id = first;
+      if (saved.length > 1) mappingDraft.motion_playlist = [...saved];
+      else delete mappingDraft.motion_playlist;
+      if (mappingMotionFileDetail?.id !== first) {
+        mappingMotionFileDetail = selectedFile?.id === first ? selectedFile : null;
+      }
       registeredMotionFileIdValue = registeredMotionFileId(mappingDraft);
+      registeredPlaylistValue = registeredPlaylist(mappingDraft);
+      registeredPlaylistValue = registeredPlaylist(mappingDraft);
       syncMappingFileRevision(payload.file);
       setMappingMessage(payload.message || label);
       await onProjectFilesChange?.();
@@ -2556,35 +2610,102 @@ export function createMotionDataController({
       setMessage('검증에 실패한 애니메이션은 재생 등록할 수 없습니다');
       return;
     }
+    const current = registeredPlaylistValue;
+    const next = playlistWithAdded(current, selectedFile.id);
+    if (current.length && next.length === current.length) {
+      setMessage('재생 목록이 가득 찼습니다');
+      return;
+    }
     const confirmed = await showConfirm(
-      `${selectedFile.filename} 파일을 현재 조인트 매핑의 재생 파일로 등록합니다.\n`
-      + `${selectedMappingId}`,
-      { title: '애니메이션 재생 등록', confirmLabel: '재생 등록', tone: 'primary' },
+      current.length
+        ? `${selectedFile.filename} 파일을 재생 목록 ${next.length}번째로 붙입니다.\n`
+          + '목록을 차례로 돌고, 끝나면 1번부터 다시 돕니다.'
+        : `${selectedFile.filename} 파일을 현재 조인트 매핑의 재생 파일로 등록합니다.\n`
+          + `${selectedMappingId}`,
+      {
+        title: current.length ? '재생 목록에 추가' : '애니메이션 재생 등록',
+        confirmLabel: current.length ? '추가' : '재생 등록',
+        tone: 'primary',
+      },
     );
     if (!confirmed) return;
     await applyMotionFileRegistration(
-      selectedFile.id,
-      selectedFile,
+      next,
       `재생 등록 저장 중: ${selectedFile.filename}`,
     );
     render();
   }
 
+  /** 재생 목록 칸에서 옮기기·빼기 · 확인 창 없이 · 되돌리기도 같은 버튼이다 */
+  async function editPlaylist(action, index) {
+    if (!selectedMappingId || mappingLoading) return;
+    const current = registeredPlaylistValue;
+    const next = action === 'remove'
+      ? playlistWithout(current, index)
+      : playlistWithMoved(current, index, action === 'up' ? -1 : 1);
+    if (next.join('\n') === current.join('\n')) return;
+    await applyMotionFileRegistration(next, '재생 목록 저장 중');
+    if (!registeredMotionFileIdValue) {
+      motionRunStatus = null;
+      motionRunLastResult = null;
+      setMotionRunMessage('재생 등록된 애니메이션이 없습니다');
+    }
+    render();
+  }
+
+  function renderPlaylistPanel() {
+    const panel = el.motionPlaylistPanel;
+    if (!panel) return;
+    const list = registeredPlaylistValue;
+    panel.classList.toggle('hidden', list.length < 2);
+    if (list.length < 2) {
+      panel.innerHTML = '';
+      return;
+    }
+    const busy = loading || mappingLoading || !selectedMappingId;
+    const rows = list.map((id, index) => {
+      const file = files.find((entry) => entry.id === id);
+      const duration = Number(analysisOf(file || {}).time?.duration_sec);
+      const missing = !file;
+      return (
+        `<li class="motion-playlist-row${missing ? ' missing' : ''}">`
+        + `<span class="motion-playlist-index">${index + 1}</span>`
+        + `<span class="motion-playlist-name" title="${displayText(id)}">${displayText(file?.filename || id)}${missing ? ' · 파일 없음' : ''}</span>`
+        + `<span class="motion-playlist-time">${Number.isFinite(duration) ? `${formatNumber(duration, 1)} s` : '-'}</span>`
+        + `<button type="button" data-playlist-action="up" data-playlist-index="${index}" ${busy || index === 0 ? 'disabled' : ''} title="한 칸 위로">↑</button>`
+        + `<button type="button" data-playlist-action="down" data-playlist-index="${index}" ${busy || index === list.length - 1 ? 'disabled' : ''} title="한 칸 아래로">↓</button>`
+        + `<button type="button" class="danger" data-playlist-action="remove" data-playlist-index="${index}" ${busy ? 'disabled' : ''} title="목록에서 뺍니다 · 파일은 지우지 않습니다">빼기</button>`
+        + '</li>'
+      );
+    }).join('');
+    panel.innerHTML = (
+      `<div class="motion-playlist-head"><strong>재생 목록 · ${list.length}개</strong>`
+      + '<span>차례로 돌고 끝나면 1번부터 · 사이마다 다음 애니의 초기 위치로 이동</span></div>'
+      + `<ol class="motion-playlist-rows">${rows}</ol>`
+    );
+  }
+
   async function unregisterSelectedMotionFile() {
-    if (!selectedFile || !selectedMappingId || selectedFile.id !== registeredMotionFileIdValue) {
+    if (!selectedFile || !selectedMappingId || !registeredPlaylistValue.includes(selectedFile.id)) {
       setMessage('현재 재생 등록된 애니메이션을 선택하세요');
       return;
     }
     const registeredFilename = selectedFile.filename;
+    const next = registeredPlaylistValue.filter((id) => id !== selectedFile.id);
     const confirmed = await showConfirm(
-      `${registeredFilename} 파일의 재생 등록을 해제합니다.\n`
-      + '파일은 삭제되지 않으며, 다시 등록하기 전까지 애니메이션 재생은 차단됩니다.',
-      { title: '애니메이션 재생 등록 해제', confirmLabel: '등록 해제', tone: 'danger' },
+      next.length
+        ? `${registeredFilename} 파일을 재생 목록에서 뺍니다.\n파일은 삭제되지 않습니다.`
+        : `${registeredFilename} 파일의 재생 등록을 해제합니다.\n`
+          + '파일은 삭제되지 않으며, 다시 등록하기 전까지 애니메이션 재생은 차단됩니다.',
+      {
+        title: next.length ? '재생 목록에서 빼기' : '애니메이션 재생 등록 해제',
+        confirmLabel: next.length ? '빼기' : '등록 해제',
+        tone: 'danger',
+      },
     );
     if (!confirmed) return;
     await applyMotionFileRegistration(
-      '',
-      null,
+      next,
       `재생 등록 해제 저장 중: ${registeredFilename}`,
     );
     if (!registeredMotionFileIdValue) {
@@ -2643,6 +2764,7 @@ export function createMotionDataController({
       mappingFiles = Array.isArray(payload.files) ? payload.files : mappingFiles;
       mappingDraft = payload.mapping || mappingDraft;
       registeredMotionFileIdValue = registeredMotionFileId(mappingDraft);
+      registeredPlaylistValue = registeredPlaylist(mappingDraft);
       selectedMappingId = payload.file?.id || mappingDraft.file_id || selectedMappingId;
       mappingRevision = mappingFileRevision(payload.file);
       mappingDirty = false;
@@ -2871,6 +2993,7 @@ export function createMotionDataController({
     mappingRevision = '';
     mappingDraft = emptyMappingDraft();
     registeredMotionFileIdValue = '';
+    registeredPlaylistValue = [];
     mappingValidation = null;
     mappingMotionFileDetail = null;
     mappingDirty = false;
@@ -2899,7 +3022,7 @@ export function createMotionDataController({
     onProjectFilesChange: () => onProjectFilesChange?.(),
     setMessage: setMessage,
     setLoading: (l) => { loading = l; render(); },
-    checkIsFileRegistered: (id) => id === registeredMotionFileIdValue,
+    checkIsFileRegistered: (id) => registeredPlaylistValue.includes(id),
   });
 
   async function loadFiles(id) { return fileManager.loadFiles(id); }
@@ -3168,6 +3291,11 @@ export function createMotionDataController({
       });
     }
     el.registerMotionFileButton?.addEventListener('click', registerSelectedMotionFile);
+    el.motionPlaylistPanel?.addEventListener('click', (event) => {
+      const button = event.target.closest('[data-playlist-action]');
+      if (!button || button.disabled) return;
+      editPlaylist(button.dataset.playlistAction, Number(button.dataset.playlistIndex));
+    });
     el.unregisterMotionFileButton?.addEventListener('click', unregisterSelectedMotionFile);
     el.downloadMotionFileButton?.addEventListener('click', downloadSelectedMotionFile);
     el.previewMotionFileButton?.addEventListener('click', previewSelectedMotionFile);

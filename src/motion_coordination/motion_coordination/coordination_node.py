@@ -47,6 +47,7 @@ from .local_api import LocalCoordinationApi
 from .local_runtime_monitor import LocalRuntimeMonitor
 from .safety_stop import SafetyStopController, SafetyStopOutcome
 from motion_common import topics
+from motion_common.repeat_policy import normalize_group_sync_mode
 from .trigger_sync import (
     TriggerSyncEstimator,
     coordinator_to_local_ns,
@@ -772,6 +773,13 @@ class MotionCoordinationNode(Node):
                     self._execution.run_mode = str(
                         message.run_mode or 'continuous'
                     ).strip().lower()
+                    # 옛 PC 가 보낸 명령에는 칸이 없다 · 그때는 회차 맞춤 · 수정 목록 35
+                    self._execution.sync_mode = normalize_group_sync_mode(
+                        getattr(message, 'sync_mode', ''),
+                    )
+                    self._execution.target_cycle_count = int(
+                        getattr(message, 'target_cycle_count', 0) or 0
+                    )
                 result = self._local_readiness()
                 event = 'ready' if result.get('success') else 'rejected'
                 self._publish_event(
@@ -799,6 +807,8 @@ class MotionCoordinationNode(Node):
                     'dwell_sec': self._execution.dwell_sec,
                     'initialization_only': self._execution.initialization_only,
                     'run_mode': self._execution.run_mode,
+                    'sync_mode': self._execution.sync_mode,
+                    'target_cycle_count': self._execution.target_cycle_count,
                 })
                 event = (
                     'initialize_scheduled'
@@ -884,6 +894,21 @@ class MotionCoordinationNode(Node):
             if self._execution.coordinator_id != self._config.pc_id:
                 return
             try:
+                if self._execution.independent and message.event in {
+                    'motion_started', 'motion_completed', 'cycle_initialized',
+                    'armed',
+                }:
+                    # 각자 재생 · PC 마다 제 회차를 돈다 · 회차 장벽 보고는 받지 않는다
+                    return
+                if (
+                    self._execution.independent
+                    and message.event == 'stopped'
+                    and self._execution.pending_command != 'cancel_before_start'
+                ):
+                    # 모두 제 회차를 끝내고 멈춰야 그룹을 푼다 · 수정 목록 35
+                    if self._execution.mark_independent_stopped(message.pc_id):
+                        self._begin_group_release()
+                    return
                 if message.event == 'ready' and message.success:
                     self._record_schedule_ack(message)
                     self._execution.mark_ready(message.pc_id)
@@ -1415,6 +1440,7 @@ class MotionCoordinationNode(Node):
             raise ValueError('그룹 대기 시간은 0초 이상이어야 합니다')
         if repeat_mode not in {'dwell', 'dwell_reinitialize'}:
             dwell_sec = 0.0
+        sync_mode = normalize_group_sync_mode(request.get('sync_mode'))
         with self._lock:
             if self._duplicate_pc_boot_id:
                 raise ValueError('중복 PC ID를 수정하고 연동 서비스를 재시작하세요')
@@ -1454,6 +1480,7 @@ class MotionCoordinationNode(Node):
                 run_mode=run_mode, repeat_mode=repeat_mode, dwell_sec=dwell_sec,
                 target_cycle_count=target_cycle_count,
                 initialization_only=initialization_only,
+                sync_mode=sync_mode,
             )
             self._sync_estimators.clear()
             self._sync_sent_samples.clear()
@@ -1473,6 +1500,7 @@ class MotionCoordinationNode(Node):
                 target_cycle_count=target_cycle_count,
                 initialization_only=initialization_only,
                 run_mode=run_mode,
+                sync_mode=sync_mode,
             )
             self._execution.pending_command = 'prepare'
             self._execution.pending_command_id = command.command_id
@@ -1493,6 +1521,7 @@ class MotionCoordinationNode(Node):
             'run_mode': run_mode,
             'repeat_mode': repeat_mode,
             'dwell_sec': dwell_sec,
+            'sync_mode': sync_mode,
             'initialization_only': initialization_only,
         }
 
@@ -1757,6 +1786,7 @@ class MotionCoordinationNode(Node):
         target_cycle_count: int = 0,
         initialization_only: bool = False,
         run_mode: str = '',
+        sync_mode: str = '',
     ) -> GroupCommand:
         message = GroupCommand()
         message.group_id = self._config.group_id
@@ -1778,6 +1808,7 @@ class MotionCoordinationNode(Node):
         )
         message.initialization_only = bool(initialization_only)
         message.run_mode = str(run_mode)
+        _set_optional_message_field(message, 'sync_mode', str(sync_mode))
         return message
 
     def _publish_event(
@@ -2308,6 +2339,7 @@ class MotionCoordinationNode(Node):
                     'participants': list(participants),
                     'cycle_number': cycle_number,
                     'target_cycle_count': self._execution.target_cycle_count,
+                    'sync_mode': self._execution.sync_mode,
                     'stop_after_cycle': self._execution.stop_after_cycle,
                     'initialize_spread_ms': self._execution.last_initialize_spread_ms,
                     'start_spread_ms': self._execution.last_start_spread_ms,

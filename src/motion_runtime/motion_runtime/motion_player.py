@@ -73,21 +73,32 @@ class MotionPlayer:
                 initialization_only=True,
                 motors_snapshot=motors_snapshot,
             )
+            playlist = self._build_playlist_entries(
+                payload, plan, initialization_plan, motors_snapshot,
+            )
+            if playlist:
+                plan, initialization_plan = playlist[0]
             if self.manager._stop_event.is_set():
                 return
-            # 시작 전에도 **내가 쓸 축만** 본다 · §6-106
-            ownership_error = self.manager._playback_ownership_error(
-                axes=[
-                    int(axis_plan['motor_axis'])
-                    for axis_plan in self._playback_axes(plan, 0.0)
-                ]
-            )
-            if ownership_error:
-                raise ValueError(ownership_error)
-            guard_error = motion_run_rules._motion_auto_start_guard_error(plan)
-            if guard_error:
-                raise ValueError(guard_error)
-            self._run_initialization_then_motion(initialization_plan, plan)
+            # 시작 전에도 **내가 쓸 축만** 본다 · §6-106 · 목록이면 항목마다
+            for checked in ([entry[0] for entry in playlist] or [plan]):
+                ownership_error = self.manager._playback_ownership_error(
+                    axes=[
+                        int(axis_plan['motor_axis'])
+                        for axis_plan in self._playback_axes(checked, 0.0)
+                    ]
+                )
+                if ownership_error:
+                    raise ValueError(ownership_error)
+                guard_error = motion_run_rules._motion_auto_start_guard_error(checked)
+                if guard_error:
+                    raise ValueError(guard_error)
+            if playlist:
+                self._run_initialization_then_motion(
+                    initialization_plan, plan, playlist,
+                )
+            else:
+                self._run_initialization_then_motion(initialization_plan, plan)
         except InterruptedError:
             return
         except Exception as exc:
@@ -123,10 +134,72 @@ class MotionPlayer:
             if bool(payload.get('automation_run')):
                 self.manager._automation_failure(str(exc))
 
+    def _build_playlist_entries(
+        self,
+        payload: Dict[str, Any],
+        plan: Dict[str, Any],
+        initialization_plan: Dict[str, Any],
+        motors_snapshot: List[Dict[str, Any]],
+        *,
+        require_continuous: bool = True,
+    ) -> List[tuple]:
+        """재생 목록 · 수정 목록 35 · 항목마다 (재생 계획, 초기 위치 계획)
+
+        연속 재생이고 매핑 파일에 두 개 이상 등록됐을 때만 · 아니면 빈 목록
+        (옛 길 그대로). 시작 때 **모두** 만든다 · 셋째 파일이 깨져 있으면 한참
+        돌다 멈추는 대신 시작부터 거절하고 그 파일 이름을 알린다.
+
+        항목 순서는 목록 그대로 · 같은 파일이 두 번 있어도 된다 (계산은 한 번).
+        재시작은 늘 1번부터 · 등록이 첫 항목을 `motion_file_id` 로 두므로
+        요청 파일이 곧 1번이다.
+        """
+        names = [str(name) for name in (plan.get('motion_playlist') or [])]
+        if (
+            len(names) <= 1
+            or (
+                require_continuous
+                and str(plan.get('run_mode') or '') != 'continuous'
+            )
+            or str(plan.get('request_source') or '') == 'motion_studio'
+            or int(plan.get('synchronized_repeat_count') or 0)
+            or str(plan.get('motion_file_id') or '') != names[0]
+        ):
+            return []
+        built: Dict[str, tuple] = {names[0]: (plan, initialization_plan)}
+        entries: List[tuple] = []
+        for index, name in enumerate(names):
+            if name not in built:
+                item_payload = {**payload, 'motion_file_id': name}
+                try:
+                    built[name] = (
+                        self.manager._plan_builder.build(
+                            item_payload, motors_snapshot=motors_snapshot,
+                        ),
+                        self.manager._plan_builder.build(
+                            item_payload,
+                            initialization_only=True,
+                            motors_snapshot=motors_snapshot,
+                        ),
+                    )
+                except ValueError as exc:
+                    raise ValueError(
+                        f'재생 목록 {index + 1}번 {name}: {exc}'
+                    ) from exc
+            item_plan, item_init = built[name]
+            marks = {
+                'playlist_index': index,
+                'playlist_length': len(names),
+                'motion_playlist': list(names),
+            }
+            # 얕은 사본 · 샘플은 같이 쓰고 목록 위치만 따로 · 같은 파일 두 번이어도 번호가 맞게
+            entries.append(({**item_plan, **marks}, {**item_init, **marks}))
+        return entries
+
     def _run_initialization_then_motion(
         self,
         initialization_plan: Dict[str, Any],
         motion_plan: Dict[str, Any],
+        playlist: Optional[List[tuple]] = None,
     ) -> None:
         self._run_initialization(initialization_plan)
         if self.manager._stop_event.is_set():
@@ -146,7 +219,9 @@ class MotionPlayer:
                 '초기위치 이동 완료 후 자동 반복 정지',
             )
             return
-        if motion_plan.get('repeat_mode') in {'reinitialize', 'dwell_reinitialize'}:
+        if playlist:
+            self._run_motion(motion_plan, initialization_plan, playlist)
+        elif motion_plan.get('repeat_mode') in {'reinitialize', 'dwell_reinitialize'}:
             self._run_motion(motion_plan, initialization_plan)
         else:
             self._run_motion(motion_plan)
@@ -267,6 +342,7 @@ class MotionPlayer:
         self,
         plan: Dict[str, Any],
         initialization_plan: Optional[Dict[str, Any]] = None,
+        playlist: Optional[List[tuple]] = None,
     ) -> None:
         trace = None
         try:
@@ -415,7 +491,20 @@ class MotionPlayer:
                         dwell_sec,
                     ):
                         return
-                if repeat_mode in {'reinitialize', 'dwell_reinitialize'}:
+                if playlist:
+                    # 다음 애니로 · 사이는 **늘** 그 애니의 첫 프레임으로 초기 위치 이동 ·
+                    # 반복 방식이 바로 잇기여도 파일이 바뀌면 값이 튀므로 · 수정 목록 35
+                    plan, initialization_plan = playlist[cycle_count % len(playlist)]
+                    samples = plan['samples']
+                if plan.get('independent_group'):
+                    # 각자 재생 · 회차 번호는 이 PC 가 센다 · 화면 표시용
+                    plan = {**plan, 'group_cycle_number': cycle_count + 1}
+                    if initialization_plan is not None:
+                        initialization_plan = {
+                            **initialization_plan,
+                            'group_cycle_number': cycle_count + 1,
+                        }
+                if playlist or repeat_mode in {'reinitialize', 'dwell_reinitialize'}:
                     if initialization_plan is None:
                         raise RuntimeError('반복 초기위치 이동 계획이 없습니다')
                     self._run_initialization(initialization_plan)

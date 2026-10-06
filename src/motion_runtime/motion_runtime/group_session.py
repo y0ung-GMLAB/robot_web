@@ -49,7 +49,12 @@ class GroupSession:
                 return False
             self.session['stop_after_cycle'] = True
             self.manager._graceful_stop_event.set()
-            if current.get('state') not in {'running', 'verifying', 'motion_completed'}:
+            finishing = {'running', 'verifying', 'motion_completed'}
+            if self.session.get('independent'):
+                # 각자 재생 · 회차 사이(초기 위치 이동·대기)도 재생 루프 안이다 ·
+                # 루프가 회차 후 정지를 보고 멈춘다 · 움직이는 도중 끊지 않는다
+                finishing |= {'initializing', 'initialized', 'waiting'}
+            if current.get('state') not in finishing:
                 self.manager._stop_event.set()
             self.condition.notify_all()
             return True
@@ -279,9 +284,19 @@ class GroupSession:
             guard_error = motion_run_rules._motion_auto_start_guard_error(validation_plan)
             if guard_error:
                 raise ValueError(guard_error)
+            # 회차 맞춤 / 각자 재생 · 수정 목록 35
+            continuous = (
+                not payload.get('initialization_only')
+                and str(payload.get('run_mode') or 'once') == 'continuous'
+            )
+            independent = continuous and (
+                repeat_policy.normalize_group_sync_mode(payload.get('sync_mode'))
+                == repeat_policy.GROUP_INDEPENDENT
+            )
             motion_payload = {
                 **payload,
-                'run_mode': 'once',
+                # 각자 재생은 1회차 시작 뒤 이 PC 가 혼자 잇는다 · 로컬 연속 재생과 같은 길
+                'run_mode': 'continuous' if independent else 'once',
                 'automation_run': False,
                 'group_execution': True,
                 'request_source': 'group_control',
@@ -295,6 +310,16 @@ class GroupSession:
                 initialization_only=True,
                 motors_snapshot=motors_snapshot,
             )
+            # 재생 목록 · 회차 N 은 목록의 (N-1) 번째 · 이 PC 의 목록만 본다
+            playlist = (
+                self.manager._player._build_playlist_entries(
+                    motion_payload, plan, initialization_plan, motors_snapshot,
+                    require_continuous=False,
+                )
+                if continuous else []
+            )
+            if playlist:
+                plan, initialization_plan = playlist[0]
             if self.manager._stop_event.is_set():
                 return
             self.manager._wait_group_deadline(
@@ -341,10 +366,20 @@ class GroupSession:
                 )
                 if self.manager._stop_event.is_set():
                     break
-                plan['scheduled_start_at'] = 0.0
-                plan['group_execution'] = True
-                plan['execution_id'] = execution_id
-                plan['group_cycle_number'] = cycle_number
+                group_context = {
+                    'scheduled_start_at': 0.0,
+                    'group_execution': True,
+                    'execution_id': execution_id,
+                    'group_cycle_number': cycle_number,
+                }
+                if independent:
+                    self._run_independent(
+                        plan, initialization_plan, playlist, group_context,
+                    )
+                    return
+                if playlist:
+                    plan = playlist[(cycle_number - 1) % len(playlist)][0]
+                plan = {**plan, **group_context}
                 self.manager._player._run_motion(plan)
                 result = self.manager.status()
                 if result.get('state') == 'error' or self.manager._stop_event.is_set():
@@ -378,6 +413,11 @@ class GroupSession:
                 if scheduled_initialize is None:
                     break
                 initialized_cycle, initialize_at = scheduled_initialize
+                if playlist:
+                    # 다음 회차 애니의 첫 프레임으로 · 회차 N 다음은 목록의 N 번째
+                    initialization_plan = playlist[
+                        initialized_cycle % len(playlist)
+                    ][1]
                 initialization_plan = {
                     **initialization_plan,
                     'group_execution': True,
@@ -445,6 +485,43 @@ class GroupSession:
                     'message': '그룹 실행 정지',
                     'phase_finished_at': time.time(),
                 })
+
+    def _run_independent(
+        self,
+        plan: Dict[str, Any],
+        initialization_plan: Dict[str, Any],
+        playlist: List[tuple],
+        group_context: Dict[str, Any],
+    ) -> None:
+        """각자 재생 · 1회차 시작 시각만 그룹이 정했다 · 그 뒤는 이 PC 혼자 · 수정 목록 35
+
+        로컬 연속 재생과 같은 길(`_run_motion`)을 탄다 · 회차 사이 동작·재생
+        목록·목표 회차도 같다. 회차 후 정지는 `_graceful_stop_event` 로 오고
+        이 PC 의 현재 애니가 끝나면 멈춘다 · 끝나면 「정지」를 알려 조정 PC 가
+        모두 멈춘 것을 보고 그룹을 푼다.
+        """
+        with self.condition:
+            self.session['independent'] = True
+        marks = {**group_context, 'independent_group': True}
+        entries = [
+            ({**item_plan, **marks}, {**item_init, **marks})
+            for item_plan, item_init in playlist
+        ]
+        run_plan = entries[0][0] if entries else {**plan, **marks}
+        run_init = entries[0][1] if entries else {**initialization_plan, **marks}
+        if not entries and run_plan.get('repeat_mode') not in {
+            'reinitialize', 'dwell_reinitialize',
+        }:
+            run_init = None
+        self.manager._player._run_motion(run_plan, run_init, entries or None)
+        result = self.manager.status()
+        if result.get('state') == 'error' or self.manager._stop_event.is_set():
+            return
+        self._finish(
+            str(result.get('message') or '')
+            if result.get('state') == 'stopped'
+            else '각자 재생 · 현재 회차 완료 후 정지'
+        )
 
     def _wait_initialization(
         self, execution_id: str,

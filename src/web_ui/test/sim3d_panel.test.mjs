@@ -32,7 +32,8 @@ test('three.js is a vendored copy loaded lazily, never from a CDN', () => {
 test('the viewer follows the selected animation and the companion toggle drives it', () => {
   const data = read('../static/js/motion_data.js');
   assert.match(data, /const sim3d = createSim3dViewer\(\{ el, getLatestState \}\);/);
-  assert.match(data, /sim3d\.update\(\{ file: selectedFile, registeredFile: mujocoRegisteredFile \}\);/);
+  // 재생 목록이면 지금 도는 애니를 따라간다 · 수정 목록 35
+  assert.match(data, /sim3d\.update\(\{ file: selectedFile, registeredFile: followTarget \}\);/);
   // 「MuJoCo 같이 보기」 체크 = 웹 3D 따라가기 · 서버 뷰어 창 없음
   assert.match(data, /sim3d\.setFollow\(Boolean\(el\.motionRunMujocoToggle\?\.checked\), registered\)/);
   assert.doesNotMatch(data, /previewMotionFile\(|stopPreviewMotionFile|motionRunMujocoFps|with_mujoco/);

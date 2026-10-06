@@ -488,6 +488,18 @@ td.empty { color: #5b6673; }
   font-size: 10.5px;
 }
 
+/* 재생 목록 · 수정 목록 35 · 차례 번호 · 이름 · 길이 · 위/아래/빼기 */
+.motion-playlist { margin-top: 8px; border: 1px solid var(--line-strong); border-radius: 8px; background: var(--panel-2); padding: 8px 10px; }
+.motion-playlist-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 10px; margin-bottom: 6px; }
+.motion-playlist-head span { color: var(--muted); font-size: 12px; }
+.motion-playlist-rows { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 4px; }
+.motion-playlist-row { display: grid; grid-template-columns: 24px minmax(0, 1fr) auto auto auto auto; align-items: center; gap: 6px; }
+.motion-playlist-row.missing .motion-playlist-name { color: var(--red); }
+.motion-playlist-index { color: var(--blue); font-weight: 700; text-align: right; }
+.motion-playlist-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.motion-playlist-time { color: var(--muted); font-size: 12px; font-variant-numeric: tabular-nums; }
+.motion-playlist-row button { padding: 2px 8px; min-width: 0; }
+
 .mujoco-badge { border: 1px solid transparent; font-weight: 600; }
 .mujoco-badge.computing { background: var(--panel-2); border-color: var(--line-strong); color: var(--muted); }
 .mujoco-badge.ready { background: rgb(70 192 106 / 15%); border-color: rgb(70 192 106 / 45%); color: var(--green); }

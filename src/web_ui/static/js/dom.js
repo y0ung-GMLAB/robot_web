@@ -93,6 +93,7 @@ export function getElements() {
     // 그룹 실행은 연동 탭이 주인이다 · §6-100 · 마스터에서만 보인다
     coordinationGroupRunSection: document.getElementById('coordinationGroupRunSection'),
     coordinationRepeatMode: document.getElementById('coordinationRepeatMode'),
+    coordinationSyncMode: document.getElementById('coordinationSyncMode'),
     coordinationDwellSec: document.getElementById('coordinationDwellSec'),
     coordinationTargetCycle: document.getElementById('coordinationTargetCycle'),
     coordinationInitializeButton: document.getElementById('coordinationInitializeButton'),
@@ -259,6 +260,7 @@ export function getElements() {
     motionRunMujocoToggle: document.getElementById('motionRunMujocoToggle'),
     registerMotionFileButton: document.getElementById('registerMotionFileButton'),
     unregisterMotionFileButton: document.getElementById('unregisterMotionFileButton'),
+    motionPlaylistPanel: document.getElementById('motionPlaylistPanel'),
     deleteMotionFileButton: document.getElementById('deleteMotionFileButton'),
     motionFileMessage: document.getElementById('motionFileMessage'),
     motionFileCount: document.getElementById('motionFileCount'),

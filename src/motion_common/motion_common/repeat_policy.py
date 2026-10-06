@@ -48,3 +48,22 @@ def needs_loop_value_match(repeat_mode, *, unknown_needs_match: bool = True) -> 
     if mode not in REPEAT_MODES:
         return unknown_needs_match
     return mode in LOOPS_WITHOUT_REINITIALIZE
+
+
+# -- 그룹 PC 사이 맞춤 · 수정 목록 35 (2026-10-06) ---------------------------- #
+#
+# 회차 맞춤 · 매 회차 모든 PC 가 끝나야 다 같이 초기 위치 → 다음 회차 (옛 방식)
+# 각자 재생 · 처음 초기 위치 이동과 1회차 시작만 같이 · 그 뒤로는 PC 마다 제
+#             재생 목록을 제 속도로 돈다 · 정지·회차 후 정지는 그대로 그룹 전체
+GROUP_LOCKSTEP = 'lockstep'
+GROUP_INDEPENDENT = 'independent'
+
+GROUP_SYNC_MODES = frozenset({GROUP_LOCKSTEP, GROUP_INDEPENDENT})
+
+DEFAULT_GROUP_SYNC_MODE = GROUP_LOCKSTEP
+
+
+def normalize_group_sync_mode(value, default: str = DEFAULT_GROUP_SYNC_MODE) -> str:
+    """빈 값·모르는 값은 회차 맞춤 · 옛 PC 가 칸 없이 보내도 옛 동작 그대로."""
+    mode = str(value or '').strip().lower()
+    return mode if mode in GROUP_SYNC_MODES else default

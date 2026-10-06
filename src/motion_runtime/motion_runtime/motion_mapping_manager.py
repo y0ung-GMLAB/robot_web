@@ -24,6 +24,10 @@ from motion_runtime.midi_bank_store import (
     save_midi_banks,
 )
 from motion_runtime.registered_motion_file import (
+    load_registered_playlist,
+    normalize_playlist,
+    playlist_from_mapping,
+    save_registered_playlist,
     load_registered_motion_file,
     save_registered_motion_file,
 )
@@ -356,6 +360,19 @@ class MotionMappingManager(Node):
                 # MIDI owns this section. A normal motion-axis mapping save must
                 # preserve it even though it is not part of mapping validation.
                 mapping['midi_banks'] = midi_banks
+            # 재생 목록도 파일이 주인 · 조인트 매핑 저장이 목록을 지우거나 옛 화면
+            # 값으로 되돌리지 않는다 (수정 목록 35)
+            existing_file = source_path or path
+            if existing_file is not None and existing_file.is_file():
+                try:
+                    kept = load_registered_playlist(existing_file)
+                except (OSError, ValueError, yaml.YAMLError):
+                    kept = None
+                if kept is not None:
+                    mapping.pop('motion_playlist', None)
+                    mapping['motion_file_id'] = kept[0] if kept else mapping.get('motion_file_id', '')
+                    if len(kept) > 1:
+                        mapping['motion_playlist'] = kept
             mapping['file_id'] = path.name
             content = yaml.safe_dump(mapping, sort_keys=False, allow_unicode=True)
             backup = atomic_write_with_backup(
@@ -425,22 +442,34 @@ class MotionMappingManager(Node):
         저장 충돌」 로 막히던 것을 끊는다.
         """
         path = self._mapping_file_path(payload.get('file_id'))
-        motion_file_id = str(payload.get('motion_file_id') or '').strip()
-        backup = save_registered_motion_file(
+        # 재생 목록 · 수정 목록 35 · 2026-10-06 · `motion_playlist` 가 오면 목록 ·
+        # 아니면 옛 길처럼 파일 하나(= 목록 하나) · 같은 칸·같은 락
+        if 'motion_playlist' in payload:
+            playlist = normalize_playlist(payload.get('motion_playlist'))
+        else:
+            single = str(payload.get('motion_file_id') or '').strip()
+            playlist = [single] if single else []
+        backup = save_registered_playlist(
             path,
-            motion_file_id,
+            playlist,
             self.mappings_dir.parent / 'runtime' / 'history' / 'motion_axis_matching',
         )
+        verified_playlist = load_registered_playlist(path)
         verified = load_registered_motion_file(path)
-        if verified != motion_file_id:
+        if verified_playlist != playlist or verified != (playlist[0] if playlist else ''):
             raise ValueError('저장 후 재생 등록 파일 검증에 실패했습니다')
+        if len(playlist) > 1:
+            message = f'재생 목록 등록 완료: {len(playlist)}개 · ' + ' → '.join(playlist)
+        elif verified:
+            message = f'재생 등록 완료: {verified}'
+        else:
+            message = '재생 등록을 해제했습니다'
         return {
             'success': True,
-            'message': (
-                f'재생 등록 완료: {verified}' if verified else '재생 등록을 해제했습니다'
-            ),
+            'message': message,
             'file': self._mapping_file_summary(path),
             'motion_file_id': verified,
+            'motion_playlist': verified_playlist,
             'backup_file': str(backup) if backup else '',
         }
 
@@ -527,6 +556,7 @@ class MotionMappingManager(Node):
             'mapping_revision': self._mapping_revision(mapping),
             'name': mapping.get('name') if isinstance(mapping, dict) else path.stem,
             'motion_file_id': mapping.get('motion_file_id') if isinstance(mapping, dict) else '',
+            'motion_playlist': playlist_from_mapping(mapping),
             'mapping_count': len(mappings),
             'enabled_count': enabled_count,
             'mapped_count': mapped_count,
@@ -570,9 +600,10 @@ class MotionMappingManager(Node):
 
         어느 쪽에서 세든 같은 값이 나와야 한다.
         """
+        # 재생 목록(`motion_playlist`)도 재생 등록과 같은 주인 · 수정 목록 35
         counted = {
             key: value for key, value in mapping.items()
-            if key not in ('motion_file_id', 'midi_banks')
+            if key not in ('motion_file_id', 'midi_banks', 'motion_playlist')
         }
         encoded = json.dumps(
             counted,
@@ -628,7 +659,8 @@ class MotionMappingManager(Node):
                 'gear_ratio': self._optional_float(row.get('gear_ratio'), 1.0),
             })
 
-        return {
+        playlist = playlist_from_mapping(mapping)
+        normalized = {
             'file_id': str(mapping.get('file_id') or '').strip(),
             'name': name,
             'motion_file_id': motion_file_id,
@@ -636,6 +668,10 @@ class MotionMappingManager(Node):
             'updated_at': self._optional_float(mapping.get('updated_at'), None),
             'mappings': normalized_rows,
         }
+        # 두 개 이상일 때만 칸을 둔다 · 하나면 옛 파일 모양 그대로 (수정 목록 35)
+        if len(playlist) > 1:
+            normalized['motion_playlist'] = playlist
+        return normalized
 
     def _validate_mapping(
         self,
