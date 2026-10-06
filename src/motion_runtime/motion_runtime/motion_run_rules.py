@@ -223,6 +223,41 @@ def _motor_ready_error(motor: Dict[str, Any]) -> str:
         is_ac_servo=_motor_type(motor) == 'ac_servo',
     )
 
+#: 통신이 끊긴 축 · 모터 상태 모니터(`state_publisher`)가 붙이는 이름 · 수정 목록 3-1
+COMMUNICATION_LOST_STATES = {
+    'disconnected': '응답 없음',
+    'ethercat_down': '드라이버 전원 OFF 또는 EtherCAT 끊김',
+}
+
+
+def _communication_lost_error(axes, motors: List[Dict[str, Any]]) -> str:
+    """재생·초기 이동 중인 축 가운데 통신이 끊긴 축이 있으면 그 사유.
+
+    전에는 모터 상태 메시지가 **도착만 하면** 계속 보냈다 · 랜선이 빠진 축에도
+    목표를 보내며 재생이 끝까지 「정상」 으로 기록됐다.
+    """
+    if not axes:
+        return ''
+    by_axis = {}
+    for motor in motors or []:
+        index = motor.get('controller_index')
+        try:
+            by_axis[int(index)] = motor
+        except (TypeError, ValueError):
+            continue
+    lost = []
+    for axis in sorted({int(axis) for axis in axes}):
+        motor = by_axis.get(axis)
+        state = str((motor or {}).get('state') or '')
+        if motor is None:
+            lost.append(f'{axis}번 모터(모터 상태에 없음)')
+        elif state in COMMUNICATION_LOST_STATES:
+            lost.append(f'{axis}번 모터({COMMUNICATION_LOST_STATES[state]})')
+    if not lost:
+        return ''
+    return '통신이 끊긴 모터가 있어 재생을 멈춥니다 · ' + ', '.join(lost)
+
+
 def _motor_position_deg(motor: Optional[Dict[str, Any]]) -> Optional[float]:
     if motor is None:
         return None

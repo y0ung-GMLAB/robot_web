@@ -1226,10 +1226,17 @@ class MotionPlayer:
         `axes` 를 주면 **그 축들만** 본다 · 다른 축을 MIDI 가 잡고 있어도
         내 축이 비어 있으면 계속한다. 추가 녹화가 그 위에 선다.
         """
-        error = self.manager._playback_ownership_error(
-            axes=None if axes is None else [
-                int(axis_plan['motor_axis']) for axis_plan in axes
-            ]
-        )
+        axis_numbers = None if axes is None else [
+            int(axis_plan['motor_axis']) for axis_plan in axes
+        ]
+        error = self.manager._playback_ownership_error(axes=axis_numbers)
         if error:
             raise RuntimeError(error)
+        # 내 축 가운데 통신이 끊긴 축이 있으면 멈춘다 · 재생 기록에는 오류로 남는다 ·
+        # 수정 목록 3-1
+        if axis_numbers:
+            lost = motion_run_rules._communication_lost_error(
+                axis_numbers, self.manager._current_motors(),
+            )
+            if lost:
+                raise RuntimeError(lost)
