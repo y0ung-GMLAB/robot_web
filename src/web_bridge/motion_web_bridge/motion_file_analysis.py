@@ -143,6 +143,14 @@ def analyze_motion_json(content: str, *, include_records: bool) -> Dict[str, Any
     else:
         result['json_valid'] = True
         rows, headers, source = motion_table.extract_rows(payload)
+    # 각도 단위 · 헤더 `rotation_unit` · 모르는 단위는 거절 · 수정 목록 6-2
+    try:
+        rotation_unit = motion_table.rotation_unit_from_content(content)
+    except ValueError as exc:
+        result['message'] = str(exc)
+        result['errors'].append(str(exc))
+        return result
+    result['rotation_unit'] = rotation_unit
     result['format_valid'] = True
     result['headers'] = headers
     result['source'] = source
@@ -163,6 +171,8 @@ def analyze_motion_json(content: str, *, include_records: bool) -> Dict[str, Any
         parsed['row_index'] = index
         parsed_records.append(parsed)
 
+    # 화면 값·그래프·범위 검사는 재생과 같은 내부 단위로
+    motion_table.scale_record_values(parsed_records, rotation_unit)
     result['valid_records'] = len(parsed_records)
     if not parsed_records:
         result['message'] = 'valid motion records not found'

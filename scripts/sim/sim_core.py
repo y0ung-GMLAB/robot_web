@@ -27,6 +27,7 @@ import mujoco
 STACK_ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(STACK_ROOT / 'src' / 'motion_common'))
 
+from motion_common import motion_table  # noqa: E402
 from motion_common.robot_pack import Robot, load_robot  # noqa: E402
 
 #: 모션 파일 한 행 = 20 ms (motion_web 형식 · 50 fps 고정)
@@ -47,8 +48,15 @@ def env_float(name: str, default: float) -> float:
 
 
 def load_motion(motion_path, robot: Robot):
-    """motion_web JSON Lines → 축별 설정점(deg) · motion_id 완전 일치 · 없으면 0 + 경고."""
-    lines = open(motion_path, encoding='utf-8').read().split('\n')[1:]
+    """motion_web JSON Lines → 축별 설정점(deg) · motion_id 완전 일치 · 없으면 0 + 경고.
+
+    헤더 `rotation_unit` 이 rad 면 deg 로 바꾼다 · 재생 파서와 같은 함수 · 수정 목록 6-2
+    """
+    content = open(motion_path, encoding='utf-8').read()
+    scale = motion_table.rotation_unit_scale(
+        motion_table.rotation_unit_from_content(content), 'deg',
+    )
+    lines = content.split('\n')[1:]
     rows = [json.loads(line) for line in lines if line.strip()]
     tgt = {axis.joint: [] for axis in robot.axes}
     seen = set()
@@ -56,7 +64,7 @@ def load_motion(motion_path, robot: Robot):
         vals = {row[i]: row[i + 1] for i in range(2, len(row), 2)}
         seen.update(vals)
         for axis in robot.axes:
-            tgt[axis.joint].append(float(vals.get(axis.motion_id, 0.0)))
+            tgt[axis.joint].append(float(vals.get(axis.motion_id, 0.0)) * scale)
     missing = [a.motion_id for a in robot.axes if a.motion_id not in seen]
     if missing:
         print('warning: motion file has no %s -> held at 0 deg' % ', '.join(missing), file=sys.stderr)

@@ -15,7 +15,7 @@ from std_msgs.msg import String
 
 from motion_common.execution_context import verify_mapping_fingerprint
 from motion_common.paths import project_dir_for
-from motion_common import command_router, generation, topics, values
+from motion_common import command_router, generation, motion_table, topics, values
 from motion_common import store as common_store
 from motion_runtime.motion_run_constants import DEFAULT_INITIAL_MODE
 from motion_runtime.midi_bank_store import (
@@ -910,7 +910,12 @@ class MotionMappingManager(Node):
     def _motion_file_first_values(self, file_id: str) -> tuple[Dict[str, float], str]:
         try:
             path = self._motion_file_path(file_id)
-            rows = self._motion_rows_from_content(path.read_text(encoding='utf-8'))
+            content = path.read_text(encoding='utf-8')
+            rows = self._motion_rows_from_content(content)
+            # 파일 단위 → 내부 단위 · 재생 파서와 같은 함수 · 수정 목록 6-2
+            unit_scale = motion_table.rotation_unit_scale(
+                motion_table.rotation_unit_from_content(content),
+            )
         except (OSError, ValueError) as exc:
             return {}, f'motion file could not be read: {exc}'
 
@@ -925,7 +930,7 @@ class MotionMappingManager(Node):
                 time_number = self._finite_float(time_sec)
                 records.append({
                     'motion_id': str(motion_id),
-                    'value': value_number,
+                    'value': value_number * unit_scale,
                     'time_sec': time_number if time_number is not None else float(row_index),
                     'row_index': row_index,
                 })

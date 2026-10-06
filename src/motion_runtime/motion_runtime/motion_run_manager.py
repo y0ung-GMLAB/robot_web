@@ -1170,6 +1170,8 @@ class MotionRunManager(Node):
                     if isinstance(headers, list)
                     else []
                 )
+                # 헤더의 `rotation_unit` · rad 파일을 deg 로 읽던 것을 막는다 · 수정 목록 6-2
+                unit = motion_table.header_rotation_unit(first_payload)
                 records = []
                 row_index = 0
                 for raw_line in handle:
@@ -1188,6 +1190,7 @@ class MotionRunManager(Node):
                         records.append(record)
                 if not records:
                     raise ValueError('motion file has no valid records')
+                motion_table.scale_record_values(records, unit)
                 return sorted(
                     records,
                     key=lambda item: (
@@ -1208,6 +1211,9 @@ class MotionRunManager(Node):
             records.append(record)
         if not records:
             raise ValueError('motion file has no valid records')
+        motion_table.scale_record_values(
+            records, motion_table.rotation_unit_from_content(content),
+        )
         return sorted(records, key=lambda item: (item['time_sec'], str(item['motion_id']), item['row_index']))
 
     def _load_mapping(self, path: Path) -> Dict[str, Any]:

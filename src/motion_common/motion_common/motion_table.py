@@ -34,6 +34,86 @@ MISSING_HEADER_MESSAGE = 'required header not found: frame, time(sec), motion Id
 
 
 # --------------------------------------------------------------------------- #
+# 각도 단위 · 수정 목록 6-2 (2026-10-06)
+# --------------------------------------------------------------------------- #
+#
+# 애니메이션 파일은 헤더의 `rotation_unit` 으로 단위를 말한다 · Blender 내보내기는
+# 이제 `rad` 를 쓴다(사용자 결정 2026-10-06) · 옛 파일은 `deg` 이거나 칸이 없다.
+#
+# 전에는 이 칸을 **아무도 읽지 않았다** · rad 파일이 deg 로 읽혀 약 1/57 로만
+# 움직였다. 이제 파서가 모두 이 함수들을 거쳐 **내부 단위**로 바꿔 넘긴다.
+#
+# 내부 단위는 아직 deg 다 · 매핑·supervisor·화면이 rad 로 옮겨 가면(6-3~6-6)
+# `INTERNAL_ROTATION_UNIT` 하나만 바꾼다 · 파일 쪽 코드는 그대로다.
+
+INTERNAL_ROTATION_UNIT = 'deg'
+
+_UNIT_NAMES = {
+    'deg': 'deg', 'degree': 'deg', 'degrees': 'deg',
+    'rad': 'rad', 'radian': 'rad', 'radians': 'rad',
+}
+
+#: 칸이 없는 옛 파일 · 그동안 deg 로 읽혀 왔고 그렇게 만들어졌다
+LEGACY_ROTATION_UNIT = 'deg'
+
+
+def normalize_rotation_unit(value: Any) -> str:
+    """빈 값 = 옛 파일(deg) · 아는 이름 = deg/rad · 모르는 이름은 거절."""
+    text = str(value or '').strip().lower()
+    if not text:
+        return LEGACY_ROTATION_UNIT
+    unit = _UNIT_NAMES.get(text)
+    if unit is None:
+        raise ValueError(f'지원하지 않는 각도 단위입니다: {value} (deg 또는 rad)')
+    return unit
+
+
+def rotation_unit_scale(unit: Any, target: str = '') -> float:
+    """`unit` 값에 곱하면 `target`(기본 = 내부 단위) 값이 된다."""
+    source = normalize_rotation_unit(unit)
+    goal = normalize_rotation_unit(target or INTERNAL_ROTATION_UNIT)
+    if source == goal:
+        return 1.0
+    return math.degrees(1.0) if source == 'rad' else math.radians(1.0)
+
+
+def header_rotation_unit(header: Any) -> str:
+    """헤더 객체(또는 통짜 JSON 객체)의 단위 · 객체가 아니면 옛 파일."""
+    if isinstance(header, dict):
+        return normalize_rotation_unit(header.get('rotation_unit'))
+    return LEGACY_ROTATION_UNIT
+
+
+def rotation_unit_from_content(content: str) -> str:
+    """파일 본문의 단위 · JSON Lines 는 첫 줄 헤더 · 통짜 JSON 은 최상위 객체."""
+    try:
+        payload = json.loads(content)
+    except (json.JSONDecodeError, ValueError):
+        payload = None
+    if isinstance(payload, dict):
+        return header_rotation_unit(payload)
+    if payload is not None:
+        return LEGACY_ROTATION_UNIT
+    for line in str(content).splitlines():
+        text = line.strip().strip('﻿')
+        if not text or text.startswith('#'):
+            continue
+        if text.startswith('{'):
+            return header_rotation_unit(_literal_object(text))
+        return LEGACY_ROTATION_UNIT
+    return LEGACY_ROTATION_UNIT
+
+
+def scale_record_values(records: List[Dict[str, Any]], unit: Any) -> List[Dict[str, Any]]:
+    """레코드 `value` 를 내부 단위로 · 같은 단위면 손대지 않는다."""
+    scale = rotation_unit_scale(unit)
+    if scale != 1.0:
+        for record in records:
+            record['value'] = float(record['value']) * scale
+    return records
+
+
+# --------------------------------------------------------------------------- #
 # 값 변환
 # --------------------------------------------------------------------------- #
 
