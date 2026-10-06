@@ -2581,6 +2581,9 @@ export function createMotorConfigController({
           const drive = rowDriveView(row);
           const showAcServoControls = rowMotorType(row) === 'ac_servo' &&
             Boolean(row.motor && !row.motor.deleted && row.motor.enabled);
+          // 다이나믹셀 · 토크 ON/OFF · 재부팅(하드웨어 오류 해제) · 수정 목록 24
+          const showDynamixelControls = rowMotorType(row) === 'dynamixel' &&
+            Boolean(row.motor && !row.motor.deleted && row.motor.enabled);
           return {
             row,
             settingText,
@@ -2609,6 +2612,7 @@ export function createMotorConfigController({
             connection,
             drive,
             showAcServoControls,
+            showDynamixelControls,
             limits: Object.fromEntries([...AXIS_LIMIT_FIELDS, ...MINAS_RATE_FIELDS].map((field) => [field, {
               value: rowLimitOverride(row, field),
               placeholder: rowLimitPlaceholder(row, field),
@@ -2651,6 +2655,7 @@ export function createMotorConfigController({
         connection: view.connection,
         drive: view.drive,
         showAcServoControls: view.showAcServoControls,
+        showDynamixelControls: view.showDynamixelControls,
         limits: view.limits,
         driveParams: view.driveParams,
         driveRead: view.driveRead,
@@ -2723,6 +2728,13 @@ export function createMotorConfigController({
                     <button type="button" data-axis-maintenance="eeprom_save" data-axis-maintenance-index="${escapeHtml(view.axisValue ?? '')}">EEPROM 저장</button>
                     <button type="button" data-axis-maintenance="absolute_mode" data-axis-maintenance-index="${escapeHtml(view.axisValue ?? '')}">앱솔루트 방식</button>
                     <button type="button" class="danger" data-axis-maintenance="absolute_clear" data-axis-maintenance-index="${escapeHtml(view.axisValue ?? '')}">다회전 클리어</button>
+                  </div>
+                ` : ''}
+                ${view.showDynamixelControls ? `
+                  <div class="axis-inline-actions" title="다이나믹셀 · 재부팅은 하드웨어 오류(과부하·과열·전압)를 풀고 토크를 끕니다 (수정 목록 24)">
+                    <button type="button" data-axis-servo-action="servo_on" data-axis-servo-index="${escapeHtml(view.axisValue ?? '')}">토크 ON</button>
+                    <button type="button" data-axis-servo-action="servo_off" data-axis-servo-index="${escapeHtml(view.axisValue ?? '')}">토크 OFF</button>
+                    <button type="button" class="danger" data-axis-servo-action="fault_reset" data-axis-servo-index="${escapeHtml(view.axisValue ?? '')}">재부팅</button>
                   </div>
                 ` : ''}
               </td>
@@ -3572,7 +3584,7 @@ export function createMotorConfigController({
         event.stopPropagation();
         const axis = Number(button.dataset.axisServoIndex);
         if (!Number.isInteger(axis) || axis < 0) {
-          setAxisMessage('AC 서보 제어 모터 번호를 확인할 수 없습니다.', true);
+          setAxisMessage('서보·토크 제어 모터 번호를 확인할 수 없습니다.', true);
           return;
         }
         button.disabled = true;

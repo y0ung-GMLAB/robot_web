@@ -128,6 +128,20 @@ def register_motor_routes(app: FastAPI, bridge, project_call) -> None:
             body.get('range_recovery', False),
         )
 
+    @app.post('/api/motion-test/dynamixel/control')
+    async def dynamixel_control(request: Request):
+        """다이나믹셀 토크 켜기·끄기·재부팅 · 한 모터 · 수정 목록 24"""
+        body = await request.json()
+        try:
+            axis = int(body.get('axis'))
+        except (TypeError, ValueError):
+            return {'success': False, 'message': 'axis is required'}
+        return await asyncio.to_thread(
+            bridge.manual.dynamixel_torque_control,
+            body.get('action'),
+            [axis],
+        )
+
     @app.post('/api/motion-test/ac-servo/control')
     async def ac_servo_control(request: Request):
         body = await request.json()

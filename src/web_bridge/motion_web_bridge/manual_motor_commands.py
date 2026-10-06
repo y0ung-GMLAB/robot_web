@@ -472,10 +472,10 @@ class ManualMotorCommandService:
         }
 
     def dynamixel_torque_control(self, action: Any, axes: Any = None) -> Dict[str, Any]:
-        """다이나믹셀 토크 켜기·끄기 · 수정 목록 36 · axes 가 없으면 감지된 전부"""
+        """다이나믹셀 토크 켜기·끄기·재부팅 · 수정 목록 36 · 24 · axes 가 없으면 감지된 전부"""
         action_value = str(action or '').strip().lower().replace('-', '_')
-        if action_value not in ('torque_on', 'torque_off'):
-            return {'success': False, 'message': 'action must be torque_on or torque_off'}
+        if action_value not in ('torque_on', 'torque_off', 'reboot'):
+            return {'success': False, 'message': 'action must be torque_on, torque_off or reboot'}
         request_id = self.bridge.new_project_request_id('dynamixel-torque')
         payload = {
             'request_id': request_id,

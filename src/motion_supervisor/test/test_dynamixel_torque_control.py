@@ -48,6 +48,7 @@ def test_torque_on_can_target_listed_axes():
 
 def test_unknown_action_and_no_axes_are_refused():
     supervisor, published = _supervisor(MOTORS[:1])
+    assert supervisor._handle_dynamixel_torque_control({'action': 'explode'})[0] is False
     assert supervisor._handle_dynamixel_torque_control({'action': 'reboot'})[0] is False
     assert supervisor._handle_dynamixel_torque_control({'action': 'torque_off'})[0] is False
     assert published == []
@@ -56,3 +57,29 @@ def test_unknown_action_and_no_axes_are_refused():
 def test_torque_command_shares_the_servo_power_rules():
     assert 'dynamixel_torque_control' in supervisor_node.SERVO_POWER_COMMANDS
     assert 'ac_servo_control' in supervisor_node.SERVO_POWER_COMMANDS
+
+
+def test_reboot_sends_the_fault_reset_bit_which_the_serial_controller_turns_into_reboot():
+    """수정 목록 24 · 0x80 은 알람 중에도 지나가는 리셋 값 · Torque Enable 에는 쓰이지 않는다"""
+    supervisor, published = _supervisor(MOTORS)
+
+    success, message = supervisor._handle_dynamixel_torque_control({'action': 'reboot', 'axes': [2]})
+
+    assert success is True
+    assert published == [((2,), supervisor_node.DYNAMIXEL_REBOOT)]
+    assert supervisor_node.DYNAMIXEL_REBOOT == supervisor_node.CW_FAULT_RESET_MINAS == 0x80
+    assert '토크가 꺼진' in message
+
+
+def test_torque_on_is_refused_while_the_motor_reports_a_hardware_error():
+    motors = [dict(MOTORS[1], fault=True), MOTORS[2]]
+    supervisor, published = _supervisor(motors)
+
+    success, message = supervisor._handle_dynamixel_torque_control({'action': 'torque_on'})
+
+    assert success is False
+    assert '재부팅' in message
+    assert published == []
+    # 끄기와 재부팅은 오류 중에도 된다
+    assert supervisor._handle_dynamixel_torque_control({'action': 'torque_off'})[0] is True
+    assert supervisor._handle_dynamixel_torque_control({'action': 'reboot'})[0] is True

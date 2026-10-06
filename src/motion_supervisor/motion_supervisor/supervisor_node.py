@@ -42,6 +42,9 @@ CW_FAULT_RESET_MINAS = 0x0080
 CW_NEW_SET_POINT_MINAS = 0x003F
 DYNAMIXEL_TORQUE_ENABLE = 1
 DYNAMIXEL_TORQUE_DISABLE = 0
+#: 다이나믹셀 재부팅 · 고장 리셋 비트(MINAS 0x80 과 같은 값) · motor_manager 직렬 컨트롤러가
+#: Torque Enable 에 쓰지 않고 REBOOT 명령으로 바꾼다 · 알람 중에도 지나간다 · 수정 목록 24
+DYNAMIXEL_REBOOT = 0x0080
 #: 서보 전원 명령 · 알람 차단·조그 중 거절·소유권 규칙이 같다 · 수정 목록 36
 SERVO_POWER_COMMANDS = ('ac_servo_control', 'dynamixel_torque_control')
 CONTROLWORD_SEQUENCE_DELAY_SEC = 0.05
@@ -2235,10 +2238,13 @@ class MotionSupervisor(Node):
         전에는 끄는 길이 긴급 정지 하나뿐이었다 · 스케줄이 끝나 기준점에
         세운 뒤 끄려면 따로 있어야 한다. 켜기는 원래 재생·조그 명령마다
         토크 켜기(1)를 실어 보내므로 여기서는 「지금 켜기」 만 한다.
+
+        재부팅 · 수정 목록 24 (2026-10-06) · 하드웨어 오류(과부하·과열·전압)는
+        재부팅이나 전원 재투입으로만 풀린다 · 재부팅하면 토크가 꺼진다.
         """
         action = str(request.get('action') or '').strip().lower().replace('-', '_')
-        if action not in ('torque_on', 'torque_off'):
-            return False, 'action must be torque_on or torque_off'
+        if action not in ('torque_on', 'torque_off', 'reboot'):
+            return False, 'action must be torque_on, torque_off or reboot'
         motors = self._current_motors()
         if not motors:
             return False, 'current motion_state is unavailable'
@@ -2258,6 +2264,23 @@ class MotionSupervisor(Node):
         axes = sorted(set(axes))
         if not axes:
             return False, 'Dynamixel axis not found'
+        if action == 'reboot':
+            self._publish_controlword(motors, axes, DYNAMIXEL_REBOOT)
+            return True, (
+                f'Dynamixel reboot command sent: axes {self._axis_list_text(axes)} · '
+                '토크가 꺼진 채로 다시 켜집니다'
+            )
+        if action == 'torque_on':
+            # 하드웨어 오류 중에는 장치가 토크 켜기를 받지 않는다 · 먼저 재부팅
+            fault_axes = [
+                axis for axis in axes
+                if bool((self._motor_for_axis(axis, motors) or {}).get('fault', False))
+            ]
+            if fault_axes:
+                return False, (
+                    f'{fault_axes[0]}번 모터에 하드웨어 오류가 있습니다 · '
+                    '먼저 재부팅하세요'
+                )
         self._publish_controlword(
             motors, axes,
             DYNAMIXEL_TORQUE_ENABLE if action == 'torque_on' else DYNAMIXEL_TORQUE_DISABLE,
@@ -2333,9 +2356,11 @@ class MotionSupervisor(Node):
                 or self._servo_alarm_guard_instance().snapshot()['grade3_latched']
             ):
                 return
-            # 끄는 명령(MINAS 0x07 · 다이나믹셀 토크 0)은 알람 중에도 지나간다
+            # 끄는 명령(MINAS 0x07 · 다이나믹셀 토크 0)과 리셋(MINAS 0x80 · 다이나믹셀 재부팅)은
+            # 알람 중에도 지나간다
             if int(controlword) not in (
                 CW_DISABLE_OPERATION_MINAS, CW_FAULT_RESET_MINAS, DYNAMIXEL_TORQUE_DISABLE,
+                DYNAMIXEL_REBOOT,
             ):
                 if any(self._servo_alarm_block_reason(axis) for axis in axes):
                     return

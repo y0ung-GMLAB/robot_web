@@ -442,3 +442,7 @@ export const requestDriveMaintenance = (payload) =>
 
 export const requestAcServoControl = (payload) =>
   request('POST', '/api/motion-test/ac-servo/control', { body: payload });
+
+/** 다이나믹셀 토크 켜기·끄기·재부팅 · 한 모터 · 수정 목록 24 */
+export const requestDynamixelControl = (payload) =>
+  request('POST', '/api/motion-test/dynamixel/control', { body: payload });

@@ -5,12 +5,14 @@ protocol:
   status: 85
   bulk_read: 146
   bulk_write: 147
+  reboot: 8         # 선택 · 없으면 8 · 하드웨어 오류 해제 (수정 목록 24)
 
 model_file: ../src/motion_system/lib/motor_manager/hardware/dynamixel/control_table/xm540_w150.model
 
-# 부팅 때 장치에 쓰는 항목 · 토크 OFF 뒤 기록 (serial_controller addSlaveConfigItems)
+# 부팅 때 장치에 쓰는 항목 (serial_controller applyConfigItems) · 지금 값을 읽어 다를 때만 쓴다 ·
+# EEPROM 항목을 바꿔야 할 때만 토크 OFF (수정 목록 25 · 평소 재시작은 처짐 없음) · 재부팅 뒤 다시 쓴다(24)
 # Operating Mode 4 = Extended Position(멀티턴) · 값은 드라이버 설정 profile_position_value 로
-# 덮어쓴다 (motor_config_build.DYNAMIXEL_EXTENDED_POSITION_MODE) · EEPROM 항목이라 매 재시작 기록
+# 덮어쓴다 (motor_config_build.DYNAMIXEL_EXTENDED_POSITION_MODE) · EEPROM 항목
 # · ID · 보레이트 · Shutdown 등 다른 EEPROM 은 쓰지 않는다 (Dynamixel Wizard 사전 세팅) · 2026-10-04
 items:
   - { id: 30, name: "Operating Mode", type: s8, value: 4 }
