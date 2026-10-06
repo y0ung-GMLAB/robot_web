@@ -7,7 +7,6 @@ configuration or issue a motor command.
 
 from __future__ import annotations
 
-import io
 import json
 import shutil
 import time
@@ -1063,25 +1062,13 @@ class ProjectRepository:
                 if not isinstance(payload, dict):
                     raise ValueError('YAML 최상위 값은 객체여야 합니다')
             elif category == 'motions':
-                lines = (
-                    line.strip()
-                    for line in io.StringIO(content)
-                    if line.strip()
-                )
-                header_line = next(lines, '')
-                frame_line = next(lines, '')
-                if not header_line or not frame_line:
-                    raise ValueError('모션 헤더와 프레임 데이터가 필요합니다')
-                header = json.loads(header_line)
-                if not isinstance(header, dict) or header.get('type') != 'motion_header':
-                    raise ValueError('지원하지 않는 모션 파일 헤더입니다')
-                # 모르는 각도 단위는 받지 않는다 · deg·rad 만 · 수정 목록 6-2
-                motion_table.header_rotation_unit(header)
-                if not isinstance(json.loads(frame_line), list):
-                    raise ValueError('모션 프레임은 배열이어야 합니다')
-                for line in lines:
-                    if not isinstance(json.loads(line), list):
-                        raise ValueError('모션 프레임은 배열이어야 합니다')
+                # 검사 = 재생 파서 하나 · 수정 목록 31 (2026-10-06)
+                #
+                # 전에는 여기만의 규칙(첫 줄 motion_header + 대괄호 행)이 따로
+                # 있었다 · 재생 파서는 더 많은 형식을 읽는다 · 내보내기 형식이
+                # 바뀌면 한쪽만 고쳐 「올라가는데 안 돈다」 「도는데 안 올라간다」
+                # 가 생긴다 · 이제 재생이 읽을 수 있으면 올라간다.
+                motion_table.validate_motion_content(content)
             else:
                 if not isinstance(json.loads(content), dict):
                     raise ValueError('레이어 파일 최상위 값은 객체여야 합니다')

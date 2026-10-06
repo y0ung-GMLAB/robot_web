@@ -2785,7 +2785,8 @@ def test_import_rejects_path_escape_and_invalid_file(tmp_path):
 
     with pytest.raises(ValueError):
         repository.import_text(project_id, 'motions', '../escape.json', MOTION_TEXT)
-    with pytest.raises(ValueError, match='지원하지 않는 모션 파일 헤더'):
+    # 검사 = 재생 파서 · 사유도 파서 것 · 수정 목록 31
+    with pytest.raises(ValueError, match='재생할 수 있는 행이 없습니다'):
         repository.import_text(project_id, 'motions', 'bad.json', '{}\n[]')
 
 

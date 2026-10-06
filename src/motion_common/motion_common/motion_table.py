@@ -445,3 +445,33 @@ def parse_rows(rows: List[Any], headers: Any = None) -> List[Dict[str, Any]]:
         record['row_index'] = index
         records.append(record)
     return records
+
+
+# --------------------------------------------------------------------------- #
+# 올리기 검사 · 수정 목록 31 (2026-10-06)
+# --------------------------------------------------------------------------- #
+
+def validate_motion_content(content: str) -> int:
+    """재생 파서가 읽을 수 있는 파일인가 · 읽은 행 수 · 못 읽으면 사유와 함께 ValueError.
+
+    올리기 검사와 재생이 **같은 파서**를 쓴다 · 재생이 읽으면 올라가고, 올라간
+    것은 재생이 읽는다. 각도 단위도 같은 자리에서 본다(6-2).
+    """
+    text = str(content or '')
+    if not text.strip():
+        raise ValueError('빈 파일입니다')
+    normalize_rotation_unit(rotation_unit_from_content(text))
+    rows, headers, _source, warning = extract_rows_from_content(text)
+    if not rows:
+        raise ValueError(f'애니메이션 행을 찾지 못했습니다{f" · {warning}" if warning else ""}')
+    first_error = ''
+    count = 0
+    for row in rows:
+        record, error = parse_row(row, headers)
+        if record is None:
+            first_error = first_error or error
+            continue
+        count += 1
+    if count == 0:
+        raise ValueError(f'재생할 수 있는 행이 없습니다 · {first_error or "형식 확인"}')
+    return count
