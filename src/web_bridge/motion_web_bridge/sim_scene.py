@@ -158,6 +158,10 @@ def frames_payload(workspace_root: Path, motion_path: Path, *, max_hz: float = M
         'n_frames': n_frames,
         'nq': int(qpos.shape[1]),
         'duration_sec': round(duration, 4),
+        # 애니메이션 길이 · 끝의 정착 3초는 빼고 · 실물 따라가기는 여기서 회차를 끊는다 · 수정 목록 8
+        'motion_sec': round(
+            n_frames * 0.02 if n_frames else max(duration - 3.0, 0.0), 4,
+        ),
         'hz': round(source_hz / step, 3) if step else 0.0,
         'ref': ref,
         'result': str(result),

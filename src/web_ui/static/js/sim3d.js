@@ -17,7 +17,9 @@
  * 8번(별도) · 여기선 같은 순간에 출발만 한다 · 네이티브 뷰어 창은 없앴다(7).
  */
 import { exportPreviewScene, fetchPreviewFrames, fetchPreviewScene, fetchPreviewSceneData } from './api.js';
-import { bodyLocalPose, cameraPosition, frameIndexAt, jointsByBody } from './sim3d_math.js';
+import {
+  bodyLocalPose, cameraPosition, followEndSec, followRunKey, frameIndexAt, jointsByBody,
+} from './sim3d_math.js';
 
 const THREE_URL = '/static/vendor/three/three.module.js';
 const CONTROLS_URL = '/static/vendor/three/OrbitControls.js';
@@ -294,8 +296,10 @@ export function createSim3dViewer({ el, getLatestState = () => null }) {
       followRealRun();
       if (playing && frames) {
         playhead += dt * speed;
-        if (playhead > frames.duration_sec) {
-          playhead = frames.duration_sec;
+        // 따라가기는 애니메이션 길이에서 멈춘다 · 끝의 정착 3초는 실물에 없다
+        const end = follow ? followEndSec(frames) : frames.duration_sec;
+        if (playhead > end) {
+          playhead = end;
           playing = false;
           renderControls();
         }
@@ -315,8 +319,11 @@ export function createSim3dViewer({ el, getLatestState = () => null }) {
 
   function followRealRun() {
     if (!follow || !frames) return;
-    const state = String(getLatestState()?.motion_run_status?.state || '');
-    if (state === lastRunState) return;
+    const status = getLatestState()?.motion_run_status || {};
+    const state = String(status.state || '');
+    // 상태만이 아니라 회차·파일까지 · 바로 다음 반복도 회차마다 처음부터 (수정 목록 8)
+    const key = followRunKey(status);
+    if (key === lastRunState) return;
     if (FOLLOW_START_STATES.has(state)) {
       playhead = 0;
       playing = true;
@@ -325,7 +332,7 @@ export function createSim3dViewer({ el, getLatestState = () => null }) {
       playing = false;
       renderControls();
     }
-    lastRunState = state;
+    lastRunState = key;
   }
 
   function seek(seconds) {

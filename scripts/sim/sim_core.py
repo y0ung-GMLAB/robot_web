@@ -51,24 +51,45 @@ def load_motion(motion_path, robot: Robot):
     """motion_web JSON Lines → 축별 설정점(deg) · motion_id 완전 일치 · 없으면 0 + 경고.
 
     헤더 `rotation_unit` 이 rad 면 deg 로 바꾼다 · 재생 파서와 같은 함수 · 수정 목록 6-2
+    시간 열로 20 ms 마다 선형 보간한다 · 실물 재생(`plan_builder`)과 같은 방식 ·
+    전에는 줄 순서만 보고 줄 = 20 ms 로 쳤다 · 시간 간격이 고르지 않은 파일이면
+    시뮬과 실물이 어긋났다 · 수정 목록 8 (2026-10-06)
     """
     content = open(motion_path, encoding='utf-8').read()
     scale = motion_table.rotation_unit_scale(
         motion_table.rotation_unit_from_content(content), 'deg',
     )
-    lines = content.split('\n')[1:]
+    lines = content.splitlines()[1:]
     rows = [json.loads(line) for line in lines if line.strip()]
-    tgt = {axis.joint: [] for axis in robot.axes}
     seen = set()
-    for row in rows:
+    times = []
+    values = {axis.joint: [] for axis in robot.axes}
+    for index, row in enumerate(rows):
         vals = {row[i]: row[i + 1] for i in range(2, len(row), 2)}
         seen.update(vals)
+        try:
+            times.append(float(row[1]))
+        except (TypeError, ValueError, IndexError):
+            times.append(index * SETPOINT_S)
         for axis in robot.axes:
-            tgt[axis.joint].append(float(vals.get(axis.motion_id, 0.0)) * scale)
+            values[axis.joint].append(float(vals.get(axis.motion_id, 0.0)) * scale)
     missing = [a.motion_id for a in robot.axes if a.motion_id not in seen]
     if missing:
         print('warning: motion file has no %s -> held at 0 deg' % ', '.join(missing), file=sys.stderr)
-    return tgt, len(rows)
+    if not rows:
+        return {axis.joint: [] for axis in robot.axes}, 0
+    order = np.argsort(np.asarray(times), kind='stable')
+    time_axis = np.asarray(times, dtype=float)[order]
+    start, end = float(time_axis[0]), float(time_axis[-1])
+    count = max(1, int(math.floor((end - start) / SETPOINT_S + 1e-9)) + 1)
+    if end - (start + (count - 1) * SETPOINT_S) > 0.001:
+        count += 1
+    grid = np.minimum(start + np.arange(count) * SETPOINT_S, end)
+    tgt = {
+        joint: [float(v) for v in np.interp(grid, time_axis, np.asarray(series, dtype=float)[order])]
+        for joint, series in values.items()
+    }
+    return tgt, count
 
 
 def check_model(robot: Robot, model=None):

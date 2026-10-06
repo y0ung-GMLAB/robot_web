@@ -140,3 +140,22 @@ export function frameIndexAt(times, seconds) {
   }
   return seconds - times[lo] < times[hi] - seconds ? lo : hi;
 }
+
+/** 실물 따라가기 · 「새 회차가 시작됐나」 를 가리는 열쇠 · 수정 목록 8 (2026-10-06)
+ *
+ * 전에는 상태가 running 으로 **바뀔 때만** 처음부터 다시 그렸다 · 「바로 다음
+ * 회차」 반복은 상태가 running 그대로라 두 번째 회차부터 3D 가 멈춰 있었다 ·
+ * 회차 번호·재생 파일(재생 목록)이 바뀌어도 새로 시작한다.
+ */
+export function followRunKey(status = {}) {
+  const state = String(status?.state || '');
+  if (state !== 'running') return state;
+  return `running|${Number(status?.current_cycle) || 0}|${String(status?.motion_file_id || '')}`;
+}
+
+/** 실물 따라가기에서 한 회차의 끝 · 계산 결과 끝의 정착 3초는 빼고 애니메이션 길이만 */
+export function followEndSec(frames = {}) {
+  const motion = Number(frames?.motion_sec);
+  const total = Number(frames?.duration_sec) || 0;
+  return Number.isFinite(motion) && motion > 0 ? Math.min(motion, total || motion) : total;
+}

@@ -73,3 +73,20 @@ test('the project panel offers zip backup, zip restore and a trash with restore'
   assert.match(explorer, /if \(confirmed\) await restoreFromZip\(file, true\);/);
   assert.match(explorer, /휴지통으로 옮깁니다/);
 });
+
+// 시뮬·실물 반복 동기 · 수정 목록 8
+import { followEndSec, followRunKey } from '../static/js/sim3d_math.js';
+
+test('follow restarts on every new cycle and file, not only on state changes', () => {
+  const first = followRunKey({ state: 'running', current_cycle: 1, motion_file_id: 'a.json' });
+  const second = followRunKey({ state: 'running', current_cycle: 2, motion_file_id: 'a.json' });
+  const next = followRunKey({ state: 'running', current_cycle: 2, motion_file_id: 'b.json' });
+  assert.notEqual(first, second);
+  assert.notEqual(second, next);
+  assert.equal(followRunKey({ state: 'initializing', current_cycle: 3 }), 'initializing');
+});
+
+test('follow stops at the animation length, not at the settle tail', () => {
+  assert.equal(followEndSec({ motion_sec: 12.0, duration_sec: 15.0 }), 12.0);
+  assert.equal(followEndSec({ duration_sec: 15.0 }), 15.0);
+});
