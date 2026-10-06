@@ -2668,7 +2668,8 @@ def test_clear_motor_runtime_target_allows_project_delete(tmp_path):
     assert cleared['previous_project_id'] == project_id
     assert repository.runtime.motor_runtime_state().get('target_project_id') in ('', None)
     result = repository.delete_project(project_id)
-    assert result['permanently_deleted'] is True
+    # 삭제 = 휴지통 · 수정 목록 33
+    assert result['permanently_deleted'] is False
     assert not (tmp_path / 'projects' / project_id).exists()
 
 
@@ -2737,7 +2738,7 @@ def test_clear_motor_runtime_application_stops_and_allows_delete(
     assert bridge._motion_run_status['state'] == 'stopped'
     assert repository.runtime.motor_runtime_state().get('target_project_id') in ('', None)
     deleted = _project_of(bridge).delete_project(project_id)
-    assert deleted['permanently_deleted'] is True
+    assert deleted['permanently_deleted'] is False   # 휴지통 · 수정 목록 33
 
 
 def test_project_change_blocker_allows_stopping_only_when_requested(tmp_path):
@@ -2757,7 +2758,8 @@ def test_project_change_blocker_allows_stopping_only_when_requested(tmp_path):
     )
 
 
-def test_delete_project_permanently_removes_folder_and_older_archives(tmp_path):
+def test_delete_project_moves_folder_to_trash_and_keeps_older_archives(tmp_path):
+    """삭제 = 휴지통 · 7일 뒤 정리 · 되살리기 · 수정 목록 33 (전에는 영구 삭제)"""
     repository = ProjectRepository(tmp_path / 'projects')
     other_id = repository.create_project('keep me')['project']['project_id']
     project_id = repository.create_project('delete me')['project']['project_id']
@@ -2771,12 +2773,13 @@ def test_delete_project_permanently_removes_folder_and_older_archives(tmp_path):
     result = repository.delete_project(project_id)
 
     assert not project_dir.exists()
-    assert not archive.exists()
+    trashed = tmp_path / 'projects' / '.trash' / 'projects' / result['trash_entry']
+    assert (trashed / 'project.json').is_file()
+    assert archive.is_dir()          # 옛 보관본도 휴지통 규칙(7일)으로 정리된다
     assert (tmp_path / 'projects' / other_id).is_dir()
     assert other_archive.is_dir()
     assert result['selected_project_id'] == ''
-    assert result['permanently_deleted'] is True
-    assert 'trash_path' not in result
+    assert result['permanently_deleted'] is False
 
 
 def test_import_rejects_path_escape_and_invalid_file(tmp_path):

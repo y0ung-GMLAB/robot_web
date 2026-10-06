@@ -58,3 +58,18 @@ test('MINAS rows offer EEPROM save, absolute mode and multi-turn clear', () => {
   assert.match(motorConfig, /const payload = \{ action, axis, confirmed: true \};/);
   assert.match(api, /'\/api\/motor-config\/drive-maintenance'/);
 });
+
+// 프로젝트 백업·복원·휴지통 · 수정 목록 33
+test('the project panel offers zip backup, zip restore and a trash with restore', () => {
+  const html = read('../static/panels/03b-panel-project.html');
+  const explorer = read('../static/js/project_explorer.js');
+  const api = read('../static/js/api.js');
+  for (const id of ['projectExportButton', 'projectImportZipButton', 'projectImportZipInput', 'projectTrashButton']) {
+    assert.match(html, new RegExp(`id="${id}"`));
+  }
+  assert.match(api, /\/api\/project-import/);
+  assert.match(api, /\/api\/project-trash/);
+  // 같은 프로젝트가 있으면 확인 뒤에만 덮어쓴다
+  assert.match(explorer, /if \(confirmed\) await restoreFromZip\(file, true\);/);
+  assert.match(explorer, /휴지통으로 옮깁니다/);
+});

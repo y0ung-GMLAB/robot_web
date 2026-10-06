@@ -10,6 +10,10 @@ import {
   fetchReadOnlyProjectFile,
   fetchProjects,
   importProjectFile,
+  importProjectZip,
+  fetchProjectTrash,
+  restoreProjectTrash,
+  projectExportUrl,
   openProjectFileEditor,
   projectFileDownloadUrl,
   renameProjectFile,
@@ -68,6 +72,105 @@ export function createProjectExplorerController({
     if (!el.projectExplorerMessage) return;
     el.projectExplorerMessage.textContent = message || '';
     el.projectExplorerMessage.classList.toggle('error-text', error);
+  }
+
+  // -- 백업·복원·휴지통 · 수정 목록 33 ------------------------------------ //
+
+  function bindBackupControls() {
+    el.projectExportButton?.addEventListener('click', () => {
+      if (!state.project) return;
+      const anchor = document.createElement('a');
+      anchor.href = projectExportUrl(state.project.project_id);
+      anchor.download = `${state.project.project_id}.zip`;
+      anchor.click();
+      setMessage(`zip 내려받기 · ${state.project.name || state.project.project_id}`);
+    });
+    el.projectImportZipButton?.addEventListener('click', () => el.projectImportZipInput?.click());
+    el.projectImportZipInput?.addEventListener('change', async () => {
+      const file = el.projectImportZipInput.files?.[0];
+      el.projectImportZipInput.value = '';
+      if (file) await restoreFromZip(file);
+    });
+    el.projectTrashButton?.addEventListener('click', () => renderTrash(true));
+    el.projectTrashList?.addEventListener('click', async (event) => {
+      const button = event.target.closest('[data-trash-entry]');
+      if (!button) return;
+      await restoreTrashEntry(button.dataset.trashEntry);
+    });
+  }
+
+  async function afterRepositoryChange(result, message) {
+    if (Number.isInteger(Number(result?.project_generation))) {
+      state.projectGeneration = Number(result.project_generation);
+    }
+    if (Array.isArray(result?.projects)) state.projects = result.projects;
+    setMessage(message);
+    await refresh();
+  }
+
+  async function restoreFromZip(file, overwrite = false) {
+    state.busy = true;
+    renderControls();
+    try {
+      const result = await importProjectZip(file, overwrite);
+      if (result?.exists && !overwrite) {
+        const confirmed = await showConfirm(
+          `${result.message}\n덮어쓸까요?`,
+          { title: '같은 프로젝트가 있습니다', confirmLabel: '덮어쓰기', tone: 'warning' },
+        );
+        state.busy = false;
+        if (confirmed) await restoreFromZip(file, true);
+        return;
+      }
+      await afterRepositoryChange(result, result?.message || 'zip 으로 복원했습니다');
+      await showAlert(result?.message || 'zip 으로 복원했습니다', { title: '프로젝트 복원', tone: 'info' });
+    } catch (error) {
+      const message = `복원 실패 · ${error?.message || error}`;
+      setMessage(message, true);
+      await showAlert(message, { title: '프로젝트 복원 실패', tone: 'danger' });
+    } finally {
+      state.busy = false;
+      renderControls();
+    }
+  }
+
+  async function renderTrash(toggle = false) {
+    const box = el.projectTrashList;
+    if (!box) return;
+    if (toggle && !box.classList.contains('hidden')) {
+      box.classList.add('hidden');
+      return;
+    }
+    try {
+      const result = await fetchProjectTrash();
+      const entries = Array.isArray(result?.entries) ? result.entries : [];
+      box.innerHTML = entries.length
+        ? entries.map((entry) => (
+          `<div class="project-trash-row"><span>${escapeHtml(entry.name || entry.entry)}`
+          + ` · ${escapeHtml(new Date(Number(entry.deleted_at) * 1000).toLocaleString())}</span>`
+          + ` <button type="button" data-trash-entry="${escapeHtml(entry.entry)}">되살리기</button></div>`
+        )).join('')
+        : `휴지통이 비어 있습니다 · 지운 프로젝트는 ${Number(result?.keep_days) || 7}일 동안 여기 있습니다`;
+      box.classList.remove('hidden');
+    } catch (error) {
+      box.textContent = `휴지통을 읽지 못했습니다 · ${error?.message || error}`;
+      box.classList.remove('hidden');
+    }
+  }
+
+  async function restoreTrashEntry(entry) {
+    state.busy = true;
+    renderControls();
+    try {
+      const result = await restoreProjectTrash(entry);
+      await afterRepositoryChange(result, result?.message || '되살렸습니다');
+      await renderTrash();
+    } catch (error) {
+      setMessage(`되살리기 실패 · ${error?.message || error}`, true);
+    } finally {
+      state.busy = false;
+      renderControls();
+    }
   }
 
   function projectDeleteBlockedMessage(project = state.project, detail = '') {
@@ -332,6 +435,8 @@ export function createProjectExplorerController({
         : '해제할 모터 실행 적용이 없습니다';
     }
     if (el.projectDeleteButton) el.projectDeleteButton.disabled = state.busy || !hasProject;
+    if (el.projectExportButton) el.projectExportButton.disabled = !hasProject;
+    if (el.projectImportZipButton) el.projectImportZipButton.disabled = state.busy;
     // **보기만 하는 것은 막지 않는다** · §6-203
     //
     // 다른 일이 도는 중(`state.busy`)이라고 목록 갱신까지 막았다 · 정작
@@ -550,6 +655,7 @@ export function createProjectExplorerController({
     window.addEventListener('motion-project-files-changed', () => refresh(true));
     el.projectExplorerRefreshButton?.addEventListener('click', () => refresh());
     el.projectUsbRescanButton?.addEventListener('click', () => refresh());
+    bindBackupControls();
     el.projectMemoInput?.addEventListener('input', () => {
       state.memoDraft = el.projectMemoInput.value.slice(0, 4000);
       state.memoDirty = state.memoDraft !== String(state.project?.memo || '');
@@ -681,9 +787,9 @@ export function createProjectExplorerController({
       }
       const expected = String(state.project.name || '');
       const entered = await showPrompt(
-        `프로젝트와 관련 파일을 복구할 수 없도록 영구 삭제합니다.\n확인하려면 프로젝트 이름을 입력하세요.\n\n${expected}`,
+        `프로젝트를 휴지통으로 옮깁니다 · 7일 안에는 「휴지통」 에서 되살릴 수 있고, 그 뒤 자동으로 지워집니다.\n확인하려면 프로젝트 이름을 입력하세요.\n\n${expected}`,
         {
-          title: '프로젝트 영구 삭제',
+          title: '프로젝트 삭제 (휴지통)',
           defaultValue: '',
           confirmLabel: '삭제',
           tone: 'danger',
@@ -707,7 +813,7 @@ export function createProjectExplorerController({
         state.projectInfoFile = null;
         closeFileActionMenu();
         loadMemoDraft();
-        setMessage(result.message || '프로젝트와 관련 파일을 영구 삭제했습니다');
+        setMessage(result.message || '프로젝트를 휴지통으로 옮겼습니다');
         await onProjectChange(null, state.projectGeneration);
       } catch (error) {
         const blocked = projectDeleteBlockedMessage(

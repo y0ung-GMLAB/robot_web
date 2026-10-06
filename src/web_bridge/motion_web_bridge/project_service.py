@@ -305,6 +305,41 @@ class ProjectService:
             self.bridge.select_motor_axes_file()
         return result
 
+    # -- 백업·복원·휴지통 · 수정 목록 33 ----------------------------------- #
+
+    def export_project_zip(self, project_id: Any) -> Dict[str, Any]:
+        """내려받기는 읽기만 한다 · 어느 프로젝트든 · 도는 중에도"""
+        return self.repository.export_project_zip(project_id)
+
+    def import_project_zip(self, data: bytes, overwrite: bool = False) -> Dict[str, Any]:
+        from . import project_backup
+
+        target = project_backup.peek_project_id(data)
+        if target and target == self.runtime_project_id():
+            raise ValueError(
+                '지금 모터에 적용된 프로젝트는 덮어쓸 수 없습니다 · '
+                '「실행 적용 해제」 또는 다른 프로젝트를 적용한 뒤 다시 하세요'
+            )
+        if overwrite and target and target == self.repository.selected_project_id():
+            self.ensure_change_allowed()
+        try:
+            with self.bridge.changing_project():
+                return self.repository.import_project_zip(data, overwrite=overwrite)
+        except FileExistsError as exc:
+            return {
+                'success': False,
+                'exists': True,
+                'project_id': str(exc),
+                'message': f"같은 ID 의 프로젝트가 있습니다 ({exc}) · 덮어쓰면 지금 것은 휴지통으로 갑니다",
+            }
+
+    def list_trash(self) -> Dict[str, Any]:
+        return self.repository.list_trash()
+
+    def restore_trash(self, entry: Any) -> Dict[str, Any]:
+        with self.bridge.changing_project():
+            return self.repository.restore_trash(entry)
+
     def load_file(
         self, project_id: Any, category: Any, file_name: Any
     ) -> Dict[str, Any]:

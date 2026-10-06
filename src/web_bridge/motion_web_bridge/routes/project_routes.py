@@ -1,5 +1,5 @@
 from fastapi import FastAPI, HTTPException, Request
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, Response
 
 
 def register_project_routes(app: FastAPI, bridge, project_call) -> None:
@@ -13,6 +13,31 @@ def register_project_routes(app: FastAPI, bridge, project_call) -> None:
         if not isinstance(body, dict):
             raise HTTPException(status_code=400, detail='request body must be an object')
         return await project_call(bridge.project.create_project, body)
+
+    # 백업·복원·휴지통 · 수정 목록 33 · `/api/projects/{project_id}` 와 겹치지 않게 앞에 둔다
+    @app.get('/api/projects/{project_id}/export')
+    async def export_motion_project(project_id: str):
+        result = await project_call(bridge.project.export_project_zip, project_id)
+        return Response(
+            content=result['data'],
+            media_type='application/zip',
+            headers={'Content-Disposition': f'attachment; filename="{result["filename"]}"'},
+        )
+
+    @app.post('/api/project-import')
+    async def import_motion_project(request: Request, overwrite: bool = False):
+        data = await request.body()
+        if not data:
+            raise HTTPException(status_code=400, detail='zip 파일이 비어 있습니다')
+        return await project_call(bridge.project.import_project_zip, data, overwrite)
+
+    @app.get('/api/project-trash')
+    async def motion_project_trash():
+        return await project_call(bridge.project.list_trash)
+
+    @app.post('/api/project-trash/{entry}/restore')
+    async def restore_motion_project(entry: str):
+        return await project_call(bridge.project.restore_trash, entry)
 
     @app.get('/api/projects/{project_id}')
     async def motion_project(project_id: str):

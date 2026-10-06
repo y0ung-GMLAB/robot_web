@@ -285,6 +285,15 @@ export const fetchProjects = () => request('GET', '/api/projects');
 export const createProject = (payload) => request('POST', '/api/projects', { body: payload });
 
 export const deleteProject = (projectId) => request('DELETE', `/api/projects/${encodeURIComponent(projectId)}`);
+// 백업·복원·휴지통 · 수정 목록 33
+export const projectExportUrl = (projectId) => `/api/projects/${encodeURIComponent(projectId)}/export`;
+export const importProjectZip = (file, overwrite = false) =>
+  request('POST', `/api/project-import${overwrite ? '?overwrite=true' : ''}`, {
+    rawBody: file, contentType: 'application/zip', timeoutMs: 120000,
+  });
+export const fetchProjectTrash = () => request('GET', '/api/project-trash');
+export const restoreProjectTrash = (entry) =>
+  request('POST', `/api/project-trash/${encodeURIComponent(entry)}/restore`);
 
 
 export const fetchProject = (projectId) => request('GET', `/api/projects/${encodeURIComponent(projectId)}`);
