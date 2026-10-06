@@ -13,6 +13,12 @@ from motion_common.repeat_policy import (
     normalize_group_sync_mode,
 )
 
+#: PC 사이 메시지 약속 번호 · 메시지 칸을 바꿀 때마다 +1 · 수정 목록 30-7
+#:
+#: 1 · 칸 없음(옛 PC · 0 으로 읽힌다) · 2 · 2026-10-06 `GroupCommand.sync_mode` ·
+#: `GroupHeartbeat.operation_mode`·`web_url`·`protocol_version`
+GROUP_PROTOCOL_VERSION = 2
+
 
 @dataclass
 class Member:
@@ -36,6 +42,10 @@ class Member:
     motion_progress_ratio: float = 0.0
     current_cycle: int = 0
     display_step: str = ''
+    #: 그 PC 의 운전 모드(스케줄·수동·오프) · 웹 주소 · 약속 번호 · 수정 목록 30-6·30-7
+    operation_mode: str = ''
+    web_url: str = ''
+    protocol_version: int = 0
 
 
 class MemberRegistry:
@@ -133,6 +143,8 @@ class GroupExecution:
         self.sync_mode = GROUP_LOCKSTEP
         #: 각자 재생에서 제 회차를 끝내고 멈췄다고 알린 PC
         self.independent_stopped: set[str] = set()
+        #: 이번 실행에서 뺀 PC 와 이유 · 미접속·알람·오프 모드·명단 외 · 수정 목록 30
+        self.excluded: Dict[str, str] = {}
         self.last_start_spread_ms: Optional[float] = None
         self.last_initialize_spread_ms: Optional[float] = None
         self.pending_command = ''
@@ -200,6 +212,34 @@ class GroupExecution:
         self.sync_mode = normalize_group_sync_mode(sync_mode)
         self.state = 'preparing'
         return self.execution_id
+
+    def exclude(self, reasons: Dict[str, str]) -> tuple[str, ...]:
+        """참가자에서 뺀다 · 진행 PC 는 빼지 않는다 · 뺀 PC 목록을 돌려준다.
+
+        1대가 고장이어도 나머지는 돈다 · 수정 목록 30 · 빠진 PC 가 남긴 준비·
+        완료 표시도 같이 지워야 장벽이 나머지만 보고 넘어간다.
+        """
+        drop = tuple(sorted(
+            pc_id for pc_id in reasons
+            if pc_id in self.participants and pc_id != self.coordinator_id
+        ))
+        if not drop:
+            return ()
+        self.participants = tuple(
+            pc_id for pc_id in self.participants if pc_id not in drop
+        )
+        for pc_id in drop:
+            self.excluded[pc_id] = str(reasons[pc_id])
+        for bucket in (
+            self.ready, self.armed, self.cycle_ready, self.motion_completed,
+            self.cycle_initialized, self.scheduled, self.independent_stopped,
+            self.pending_acks,
+        ):
+            bucket.difference_update(drop)
+        for table in (self.initialize_triggered, self.triggered):
+            for pc_id in drop:
+                table.pop(pc_id, None)
+        return drop
 
     def mark_ready(self, pc_id: str) -> None:
         self._participant(pc_id)

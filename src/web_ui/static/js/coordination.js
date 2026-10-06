@@ -37,6 +37,9 @@ function stateClass(value) {
   return 'coordination-state-warn';
 }
 
+/** 운전 모드 표시 · 하트비트로 온다 · 옛 PC 는 빈 값 · 수정 목록 30-6 */
+const OPERATION_MODE_TEXT = { schedule: '스케줄', manual: '수동', off: '오프' };
+
 const activeStates = new Set([
   'preparing', 'initializing', 'armed', 'start_scheduled', 'waiting', 'running',
   'running_independent', 'waiting_cycle_ready', 'cycle_ready', 'stop_after_cycle',
@@ -90,14 +93,20 @@ export function createCoordinationController({ el }) {
   }
 
 
-  function peerRow(peer = {}, requiredPeers = new Set(), fixedParticipants = new Set()) {
+  function peerRow(
+    peer = {}, requiredPeers = new Set(), fixedParticipants = new Set(), excluded = {}, isLocal = false,
+  ) {
     const alarm = peer.alarm || {};
     const alarmText = Number(peer.servo_alarm_grade || 0) > 0
       ? `${Number(peer.servo_alarm_grade)} · ${alarm.message || alarm.error_code || '확인 필요'}`
       : '0';
     
     const isRequired = requiredPeers.has(peer.pc_id);
-    const pcNameHtml = `<strong>${text(peer.display_name || peer.pc_id || '-')}</strong><small>${peer.display_name ? text(peer.pc_id || '') : ''}</small>`;
+    // 슬레이브 웹 열기 · 모드 변경은 그 PC 화면에서 · 수정 목록 30-6
+    const webLink = !isLocal && /^http:\/\/[0-9.]+:\d+$/.test(String(peer.web_url || ''))
+      ? ` <a href="${text(peer.web_url)}" target="_blank" rel="noopener" title="이 PC 의 화면을 새 탭으로 엽니다">웹 열기</a>`
+      : '';
+    const pcNameHtml = `<strong>${text(peer.display_name || peer.pc_id || '-')}</strong><small>${peer.display_name ? text(peer.pc_id || '') : ''}</small>${webLink}`;
     // 색 이름은 `01-base.css` 의 것을 쓴다 · §6-147
     //
     // 전에는 `--color-primary` 를 썼는데 **이 프로젝트에 없는 이름**이다 ·
@@ -105,8 +114,19 @@ export function createCoordinationController({ el }) {
     // 「필수」가 안 보였다 · 이모지만 자기 색이라 ⭐ 하나만 남았다.
     const badgeHtml = isRequired ? `<span style="display: inline-block; margin-left: 6px; padding: 2px 6px; background-color: var(--green); color: white; border-radius: 4px; font-size: 10px; font-weight: bold;">⭐ 필수</span>` : '';
     
-    const executionStateText = fixedParticipants.has(peer.pc_id) ? '고정 참가' : (isRequired ? '명단 포함' : '대기');
-    const executionStateClass = fixedParticipants.has(peer.pc_id) ? 'coordination-state-ok' : (isRequired ? 'coordination-state-ok' : 'coordination-state-warn');
+    // 이번 실행에서 뺐으면 이유를 · 명단이 있는데 그 밖이면 「명단 외」 · 수정 목록 30
+    const excludedReason = excluded[peer.pc_id] || '';
+    const outsideRoster = !isLocal && requiredPeers.size > 0 && !isRequired;
+    const executionStateText = excludedReason
+      ? `제외 · ${excludedReason}`
+      : (fixedParticipants.has(peer.pc_id)
+        ? '고정 참가'
+        : (outsideRoster ? '명단 외' : (isRequired ? '명단 포함' : '대기')));
+    const executionStateClass = excludedReason
+      ? 'coordination-state-bad'
+      : (fixedParticipants.has(peer.pc_id) || isRequired ? 'coordination-state-ok' : 'coordination-state-warn');
+    const modeText = OPERATION_MODE_TEXT[peer.operation_mode] || '';
+    const versionText = peer.protocol_mismatch === true ? ' · 버전 불일치' : '';
     
     const actionButton = isRequired
       ? `<button type="button" class="danger remove-peer-btn" data-pc-id="${text(peer.pc_id)}" style="padding: 2px 8px; font-size: 11px; cursor: pointer;">명단 제외</button>`
@@ -122,7 +142,7 @@ export function createCoordinationController({ el }) {
     return {
       setup: `<tr>
       ${pcCell}
-      <td class="${stateClass(peer.state)}"><span class="peer-status-dot ${peer.state || 'offline'}"></span>${text(stateText(peer.state))}</td>
+      <td class="${peer.protocol_mismatch === true ? 'coordination-state-bad' : stateClass(peer.state)}"><span class="peer-status-dot ${peer.state || 'offline'}"></span>${text(stateText(peer.state))}${modeText ? ` · ${text(modeText)} 모드` : ''}${text(versionText)}</td>
       ${joinCell}
       <td title="${text(peer.git_message || '')}">[${text(peer.git_branch || '?')}] ${text(peer.git_hash || '-')}</td>
       <td style="text-align: center;">${actionButton}</td>
@@ -175,6 +195,7 @@ export function createCoordinationController({ el }) {
     const execution = runtime.execution || { state: 'idle', participants: [] };
     const peers = Array.isArray(runtime.peers) ? runtime.peers : [];
     const fixedParticipants = new Set(Array.isArray(execution.participants) ? execution.participants : []);
+    const excludedMap = execution.excluded && typeof execution.excluded === 'object' ? execution.excluded : {};
     const requiredPeersList = Array.isArray(config.required_peers) ? config.required_peers : [];
     const requiredPeers = new Set(requiredPeersList);
     const coordinationError = runtime.coordination_error || {};
@@ -260,7 +281,10 @@ export function createCoordinationController({ el }) {
       const limit = Number.isFinite(tolerance) ? ` / 허용 ${tolerance.toFixed(0)}ms` : '';
       const spread = execution.start_spread_ms == null
         ? '' : ` · 시작 편차 ${Number(execution.start_spread_ms).toFixed(3)}ms${limit}`;
-      el.coordinationExecutionState.textContent = `그룹 실행 · ${stateText(execution.state)}${coordinator}${cycle}${spread}`;
+      const excludedText = Object.keys(excludedMap).length
+        ? ` · 제외 ${Object.entries(excludedMap).map(([pc, why]) => `${pc}(${why})`).join(', ')}`
+        : '';
+      el.coordinationExecutionState.textContent = `그룹 실행 · ${stateText(execution.state)}${coordinator}${cycle}${spread}${excludedText}`;
       el.coordinationExecutionState.className = execution.start_within_tolerance === false
         ? 'coordination-state-bad' : stateClass(execution.state);
     }
@@ -365,22 +389,23 @@ export function createCoordinationController({ el }) {
           pc_id: localId,
           display_name: `${runtime.local?.display_name || runtimeConfig.display_name || config.pc_id} (이 PC)`,
           state: 'online',
-        }, requiredPeers, fixedParticipants));
+        }, requiredPeers, fixedParticipants, excludedMap, true));
         if (localId) seenPcs.add(localId);
       }
       
       peers.forEach((peer) => {
-        rows.push(peerRow(peer, requiredPeers, fixedParticipants));
+        rows.push(peerRow(peer, requiredPeers, fixedParticipants, excludedMap));
         if (peer.pc_id) seenPcs.add(peer.pc_id);
       });
       
       requiredPeers.forEach((requiredId) => {
         if (!seenPcs.has(requiredId)) {
+          // 명단에 있는데 안 보인다 · 🔴 미접속 · 시작은 나머지로 한다 · 수정 목록 30-2
           rows.push(peerRow({
             pc_id: requiredId,
-            display_name: '(통신 단절 / 재부팅 대기)',
+            display_name: '🔴 미접속',
             state: 'offline',
-          }, requiredPeers, fixedParticipants));
+          }, requiredPeers, fixedParticipants, excludedMap));
         }
       });
       
@@ -656,7 +681,7 @@ export function createCoordinationController({ el }) {
           `현재 접속된 아래 PC 인원으로 필수 참가 명단을 확정하고 시스템에 저장하시겠습니까?\n\n`
           + `[ 확정 명단 (${rosterList.length}대) ]\n`
           + `${rosterList.join(', ')}\n\n`
-          + `(부팅 자동 재생 시 위 PC들이 모두 켜진 후 애니메이션이 시작됩니다)`,
+          + '(그룹 시작 때 명단에서 빠진 PC 는 「미접속」 으로 표시되고, 나머지 PC 로 시작합니다)',
           {
             title: 'DDS 그룹 필수 참가 명단 확정',
             confirmLabel: '명단 확정 및 저장',
@@ -693,8 +718,8 @@ export function createCoordinationController({ el }) {
 
       const confirmed = await showConfirm(
         isRemoving
-          ? `PC [ ${targetPcId} ]를 그룹 필수 참가 명단에서 제외하시겠습니까?\n\n제외 후 저장하면 부팅 자동 재생 시 해당 PC를 기다리지 않고 애니메이션이 시작될 수 있습니다.`
-          : `PC [ ${targetPcId} ]를 그룹 필수 참가 명단에 추가하시겠습니까?\n\n추가 후 저장하면 부팅 자동 재생 시 해당 PC가 켜질 때까지 대기하게 됩니다.`,
+          ? `PC [ ${targetPcId} ]를 그룹 필수 참가 명단에서 제외하시겠습니까?\n\n제외 후 저장하면 이 PC 는 「명단 외」 가 되어 그룹 실행에 들어가지 않습니다.`
+          : `PC [ ${targetPcId} ]를 그룹 필수 참가 명단에 추가하시겠습니까?\n\n추가 후 저장하면 그룹 실행에 들어갑니다 · 꺼져 있으면 「미접속」 으로 표시되고 나머지 PC 로 시작합니다.`,
         {
           title: isRemoving ? '참가 PC 명단 제외 확인' : '참가 PC 명단 추가 확인',
           confirmLabel: isRemoving ? '명단에서 제외' : '명단에 추가',

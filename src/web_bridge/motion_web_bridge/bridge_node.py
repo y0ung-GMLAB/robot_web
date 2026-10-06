@@ -806,7 +806,22 @@ class MotionWebBridge(Node):
             'sampled_monotonic': time.monotonic(),
             'motion_run_status': motion_run_status,
             'safety_status': safety_status,
+            # 운전 모드 · 하트비트로 마스터에게 · 오프·수동 PC 는 그룹 시작에서 뺀다 · 수정 목록 30-6
+            'operation_mode': self._cached_operation_mode(),
         }
+
+    def _cached_operation_mode(self) -> str:
+        """50ms 마다 불린다 · 파일은 1초에 한 번만 읽는다."""
+        now = time.monotonic()
+        cached = getattr(self, '_operation_mode_cache', None)
+        if cached is not None and now - cached[0] < 1.0:
+            return cached[1]
+        try:
+            mode = run_mode_gate.current_run_mode(self)
+        except Exception:  # noqa: BLE001 · 못 읽으면 빈 값 · 시작 판정은 준비 단계가 다시 본다
+            mode = ''
+        self._operation_mode_cache = (now, str(mode or ''))
+        return self._operation_mode_cache[1]
 
     def _coordination_watchdog_callback(self) -> None:
         """Stop a local group run if its coordination process disappears."""

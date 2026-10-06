@@ -19,3 +19,6 @@ float64 motion_elapsed_sec
 float64 motion_duration_sec
 float64 motion_progress_ratio
 uint32 current_cycle
+string operation_mode
+string web_url
+uint32 protocol_version

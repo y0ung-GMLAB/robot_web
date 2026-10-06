@@ -58,6 +58,14 @@ state = {
     'targets': {axis: 0.0 for _, axis, *_ in JOINTS},
     'servo_on': True,
     'generation': 1,
+    # 재생 목록 흉내 · 수정 목록 35 · 「재생 등록」·「목록에 추가」·↑↓ 가 여기를 바꾼다
+    'playlist': [
+        'floating_no1_motion1.json',
+        'floating_no2_motion1.json',
+        'floating_animation_sample.json',
+    ],
+    'group_sync_mode': 'lockstep',
+    'run_started': None,
     'live_overrides': {},
 }
 
@@ -83,6 +91,55 @@ def mapping_rows():
         }
         for name, axis, gear, lower, upper in JOINTS
     ]
+
+
+FAKE_ITEM_SEC = 6.0      # 재생 목록 흉내 · 항목마다 초기 이동 2초 + 재생 4초
+
+
+def _fake_run_status():
+    """연속 시작을 누르면 목록을 차례로 도는 척한다 · 「2/3 · B · 다음 C」 확인용"""
+    playlist = list(state['playlist'])
+    if state['run_started'] is None or not playlist:
+        return {'state': 'ready', 'message': '프리뷰 · 실행 준비 검사 흉내',
+                'motion_file_id': playlist[0] if playlist else ''}
+    elapsed = time.time() - state['run_started']
+    cycle = int(elapsed // FAKE_ITEM_SEC)
+    within = elapsed - cycle * FAKE_ITEM_SEC
+    index = cycle % len(playlist)
+    initializing = within < 2.0 and cycle > 0
+    return {
+        'state': 'initializing' if initializing else 'running',
+        'phase': 'initializing' if initializing else 'running',
+        'message': '프리뷰 · 목록 재생 흉내',
+        'run_mode': 'continuous',
+        'motion_file_id': playlist[index],
+        'motion_playlist': playlist if len(playlist) > 1 else [],
+        'playlist_index': index,
+        'playlist_length': len(playlist) if len(playlist) > 1 else 0,
+        'cycle_count': cycle,
+        'current_cycle': cycle + 1,
+        'progress': {
+            'elapsed_sec': within if initializing else within - (0.0 if cycle == 0 else 2.0),
+            'duration_sec': 2.0 if initializing else 4.0,
+            'ratio': 0.0,
+            'sample_index': 0,
+            'active_axis_count': len(JOINTS),
+        },
+        'summary': {'target_cycle_count': 0},
+    }
+
+
+def _mapping_doc():
+    playlist = list(state['playlist'])
+    mapping = {
+        'name': 'motion_axis',
+        'file_id': 'motion_axis.yaml',
+        'motion_file_id': playlist[0] if playlist else '',
+        'mappings': mapping_rows(),
+    }
+    if len(playlist) > 1:
+        mapping['motion_playlist'] = playlist
+    return mapping
 
 
 def snapshot():
@@ -123,10 +180,12 @@ def snapshot():
         },
         'motion_state_age_sec': 0.0,
         'motion_run_status': {
-            'state': 'ready',
-            'message': '프리뷰 · 실행 준비 검사 흉내',
+            **_fake_run_status(),
             'live_overrides': state['live_overrides'],
-            'automation': {'repeat_mode': 'reinitialize'},
+            'automation': {
+                'repeat_mode': 'reinitialize',
+                'group_sync_mode': state['group_sync_mode'],
+            },
             'axes': [
                 {
                     'motion_id': name,
@@ -370,11 +429,54 @@ async def preview_motion_file(file_id: str, request: Request):
     return result
 
 
+@app.post('/api/motion-mappings/motion-file')
+async def save_registered_playlist(request: Request):
+    """재생 등록 · 재생 목록 흉내 · 메모리에만 · 수정 목록 35"""
+    body = await request.json()
+    if 'motion_playlist' in body:
+        playlist = [str(item) for item in body.get('motion_playlist') or [] if str(item)]
+    else:
+        single = str(body.get('motion_file_id') or '')
+        playlist = [single] if single else []
+    state['playlist'] = playlist
+    MAPPING_FILE['motion_file_id'] = playlist[0] if playlist else ''
+    message = (
+        f'재생 목록 등록 완료: {len(playlist)}개 · ' + ' → '.join(playlist)
+        if len(playlist) > 1
+        else (f'재생 등록 완료: {playlist[0]}' if playlist else '재생 등록을 해제했습니다')
+    )
+    return {'success': True, 'message': message, 'file': MAPPING_FILE,
+            'motion_file_id': MAPPING_FILE['motion_file_id'],
+            'motion_playlist': playlist,
+            'project_generation': state['generation']}
+
+
+@app.put('/api/motion-run/automation')
+async def configure_automation(request: Request):
+    body = await request.json()
+    if body.get('group_sync_mode') in ('lockstep', 'independent'):
+        state['group_sync_mode'] = body['group_sync_mode']
+    return {'success': True, 'message': '프리뷰 · 자동 반복 설정 저장',
+            'status': snapshot()['motion_run_status'],
+            'project_generation': state['generation']}
+
+
+@app.post('/api/motion-run/stop')
+@app.post('/api/motion-run/stop-after-cycle')
+async def stop_motion_run():
+    state['run_started'] = None
+    return {'success': True, 'message': '프리뷰 · 정지',
+            'status': {'state': 'stopped'},
+            'project_generation': state['generation']}
+
+
 @app.post('/api/motion-run/start')
 async def start_motion_run(request: Request):
     """가짜 재생 · with_mujoco 면 그 자리에서 뷰어를 같이 띄워 흐름을 보여 준다."""
     body = await request.json()
     message = '프리뷰 · 재생 흉내'
+    if body.get('run_mode') == 'continuous':
+        state['run_started'] = time.time()
     if body.get('with_mujoco'):
         motion = EXPORT_DIR / str(body.get('motion_file_id') or '')
         result = _launch_replay(motion, body.get('mujoco_fps'))
@@ -425,12 +527,7 @@ CANNED = {
         'success': True,
         'file': MAPPING_FILE,
         'files': [MAPPING_FILE],
-        'mapping': {
-            'name': 'motion_axis',
-            'file_id': 'motion_axis.yaml',
-            'motion_file_id': 'floating_no1_motion1.json',
-            'mappings': mapping_rows(),
-        },
+        'mapping': _mapping_doc(),
         'validation': None,
     },
     ('GET', '/api/projects'): lambda: {

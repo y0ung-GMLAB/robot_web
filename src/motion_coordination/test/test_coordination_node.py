@@ -611,13 +611,41 @@ def test_peer_restart_stops_local_then_broadcasts_and_clears_execution():
     assert node._coordination_error['code'] == 'GROUP_PARTICIPANT_FAILURE'
 
 
-def test_missing_prepare_ack_cancels_every_participant_before_start():
+def test_missing_prepare_ack_excludes_the_silent_pc_and_goes_on():
+    # 수정 목록 30 · 준비 확인에 답이 없는 PC 는 빼고 나머지로 · 전에는 전체 취소
+    node = _node()
+    node._execution = GroupExecution()
+    node._execution.begin('pc-a', ('pc-a', 'pc-b', 'pc-c'))
+    node._execution.pending_command = 'prepare'
+    node._execution.pending_command_id = 'prepare-command'
+    node._execution.pending_acks = {'pc-a', 'pc-b'}
+    node._execution.ready = {'pc-a', 'pc-b'}
+    node._execution.pending_ack_deadline = time.monotonic() - 0.1
+    sent = []
+    node._call_local_control = lambda payload, **_kwargs: (
+        sent.append(('local', payload['command'])) or {'success': True}
+    )
+    node._command_pub = _Publisher(sent)
+    synced = []
+    node._begin_trigger_sync = synced.append
+
+    node._enforce_schedule_ack_deadline()
+
+    assert sent == [('dds', 'update_participants')]
+    assert node._command_pub.messages[-1].participant_ids == ['pc-a', 'pc-b']
+    assert node._execution.participants == ('pc-a', 'pc-b')
+    assert node._execution.excluded == {'pc-c': '준비 응답 없음'}
+    assert node._execution.pending_command == ''
+    assert synced == ['initialize']
+
+
+def test_missing_own_prepare_ack_still_cancels_every_participant():
     node = _node()
     node._execution = GroupExecution()
     node._execution.begin('pc-a', ('pc-a', 'pc-b'))
     node._execution.pending_command = 'prepare'
     node._execution.pending_command_id = 'prepare-command'
-    node._execution.pending_acks = {'pc-a'}
+    node._execution.pending_acks = {'pc-b'}
     node._execution.pending_ack_deadline = time.monotonic() - 0.1
     sent = []
     node._call_local_control = lambda payload, **_kwargs: (
@@ -630,11 +658,6 @@ def test_missing_prepare_ack_cancels_every_participant_before_start():
 
     assert sent == [('local', 'group_cancel'), ('dds', 'cancel_before_start')]
     assert node._execution.state == 'releasing'
-    assert node._execution.pending_command == 'cancel_before_start'
-    _peer_release_ack(node)
-    assert node._execution.state == 'error'
-    assert node._execution.pending_command_id == ''
-    assert node._execution.execution_id == ''
 
 
 def test_late_start_ack_timeout_uses_stop_now_instead_of_cancel():
@@ -659,7 +682,7 @@ def test_late_start_ack_timeout_uses_stop_now_instead_of_cancel():
     assert node._execution.execution_id == ''
 
 
-def test_warning_joined_member_is_visible_and_blocks_partial_group_start():
+def test_warning_joined_member_is_visible_and_left_out_of_the_start():
     node = _node()
     node._joined = True
     node._execution = GroupExecution()
@@ -680,8 +703,12 @@ def test_warning_joined_member_is_visible_and_blocks_partial_group_start():
     snapshot = node.snapshot()
 
     assert snapshot['peers'][0]['state'] == 'warning'
-    with pytest.raises(ValueError, match=r'pc-b\(warning\)'):
-        node._start_group_execution()
+    node._command_pub = _Publisher()
+    result = node._start_group_execution()
+    # 수정 목록 30 · 빼고 이 PC 만으로 시작 · 이유를 같이 돌려준다
+    assert result['success'] is True
+    assert result['participants'] == ['pc-a']
+    assert result['excluded'] == {'pc-b': '응답 지연'}
 
 
 def test_leave_publishes_explicit_not_joined_heartbeat():
@@ -716,10 +743,37 @@ def test_leaving_releases_stale_prepare_without_peer_approval():
     assert node._heartbeat_pub.messages[-1].joined is False
 
 
+def test_rejected_prepare_from_a_slave_excludes_it_and_goes_on():
+    # 수정 목록 30-6 · 오프·수동 모드 슬레이브 = 고장 PC 와 같게 · 나머지로
+    node = _node()
+    node._execution = GroupExecution()
+    execution_id = node._execution.begin('pc-a', ('pc-a', 'pc-b', 'pc-c'))
+    node._execution.pending_command = 'prepare'
+    node._execution.pending_command_id = 'prepare-command'
+    node._execution.ready = {'pc-a', 'pc-c'}
+    node._execution.pending_acks = {'pc-a', 'pc-c'}
+    sent = []
+    node._command_pub = _Publisher(sent)
+    synced = []
+    node._begin_trigger_sync = synced.append
+
+    node._event_callback(GroupEvent(
+        group_id='stage-a', execution_id=execution_id, pc_id='pc-b',
+        event='rejected', success=False, message='오프 모드',
+    ))
+
+    assert sent == [('dds', 'update_participants')]
+    assert node._execution.participants == ('pc-a', 'pc-c')
+    assert node._execution.excluded['pc-b'].endswith('오프 모드')
+    assert node._execution.state == 'preparing'
+    assert synced == ['initialize']
+
+
 def test_rejected_prepare_cancels_execution_and_releases_lease():
     node = _node()
     node._execution = GroupExecution()
     execution_id = node._execution.begin('pc-a', ('pc-a', 'pc-b'))
+    node._execution.state = 'armed'
     node._execution.execution_id = execution_id
     node._execution.coordinator_id = 'pc-a'
     node._execution.participants = ('pc-a', 'pc-b')
@@ -800,7 +854,7 @@ def test_execution_claim_defaults_missing_target_cycle_count():
     assert node._execution.target_cycle_count == 0
 
 
-def test_execution_claim_rejects_different_local_joined_roster():
+def test_execution_claim_accepts_the_coordinators_roster():
     node = _node()
     node._registry.update(Member(
         pc_id='pc-b',
@@ -827,12 +881,94 @@ def test_execution_claim_rejects_different_local_joined_roster():
         sequence=1,
     ))
     command = GroupCommand(
-        group_id='stage-a', execution_id='exec-a', coordinator_id='pc-a',
+        group_id='stage-a', execution_id='exec-a', coordinator_id='pc-b',
         command='prepare', participant_ids=['pc-a', 'pc-b'],
     )
 
-    with pytest.raises(ValueError, match='참가 목록'):
-        node._accept_execution_claim(command, ('pc-a', 'pc-b'))
+    # 수정 목록 30-1 · 이 PC 가 기억하는 pc-c 가 빠졌어도 진행 PC 목록을 따른다
+    node._accept_execution_claim(command, ('pc-a', 'pc-b'))
+
+    assert node._execution.participants == ('pc-a', 'pc-b')
+    assert node._execution.coordinator_id == 'pc-b'
+
+
+def _member(pc_id, **overrides):
+    values = dict(
+        pc_id=pc_id, boot_id=f'boot-{pc_id}', joined=True, is_master=False,
+        state='ready', trigger_sync_state='idle', trigger_sync_uncertainty_ms=0.0,
+        alarm_grade=0, received_monotonic=time.monotonic(), sequence=1,
+        protocol_version=coordination_node.GROUP_PROTOCOL_VERSION,
+        operation_mode='schedule',
+    )
+    values.update(overrides)
+    return Member(**values)
+
+
+def test_start_leaves_out_broken_pcs_and_names_the_reason():
+    node = _node()
+    node._joined = True
+    node._command_pub = _Publisher()
+    node._registry.update(_member('pc-b'))
+    node._registry.update(_member('pc-c', received_monotonic=time.monotonic() - 10.0))
+    node._registry.update(_member('pc-d', alarm_grade=2))
+    node._registry.update(_member('pc-e', operation_mode='off'))
+    node._registry.update(_member('pc-f', protocol_version=1))
+
+    result = node._start_group_execution()
+
+    assert result['participants'] == ['pc-a', 'pc-b']
+    assert result['excluded'] == {
+        'pc-c': '통신 단절',
+        'pc-d': 'Servo 알람 2등급',
+        'pc-e': '오프 모드',
+        'pc-f': '버전 불일치 · 그 PC 에서 bash scripts/install.sh',
+    }
+    assert node._execution.excluded == result['excluded']
+    assert node.snapshot()['execution']['excluded'] == result['excluded']
+
+
+def test_roster_marks_missing_and_outside_pcs():
+    node = _node()
+    node._joined = True
+    node._command_pub = _Publisher()
+    node._config.required_peers = ('pc-a', 'pc-b', 'pc-c')
+    node._registry.update(_member('pc-b'))
+    node._registry.update(_member('pc-x'))   # 설치 복사 실수 · 명단 밖
+
+    result = node._start_group_execution()
+
+    assert result['participants'] == ['pc-a', 'pc-b']
+    assert result['excluded'] == {'pc-c': '미접속', 'pc-x': '명단 외'}
+
+
+def test_disconnect_error_does_not_keep_the_store_down():
+    # 수정 목록 30 · 끊긴 PC 를 빼고 다시 시작하면 그 오류는 닫힌다
+    node = _node()
+    node._joined = True
+    node._command_pub = _Publisher()
+    node._registry.update(_member('pc-b'))
+    node._coordination_error = {
+        'active': True, 'code': 'GROUP_PARTICIPANT_DISCONNECTED', 'message': 'pc-c 단절',
+    }
+
+    result = node._start_group_execution()
+
+    assert result['success'] is True
+    assert node._coordination_error == {}
+
+
+def test_slave_follows_the_shrunk_participant_list():
+    node = _node()
+    node._joined = True
+    node._execution.activate_claim('exec-a', 'pc-b', ('pc-a', 'pc-b', 'pc-c'))
+    node._publish_event = lambda *_args, **_kwargs: None
+
+    node._process_group_command(GroupCommand(
+        group_id='stage-a', execution_id='exec-a', coordinator_id='pc-b',
+        command='update_participants', participant_ids=['pc-a', 'pc-b'],
+    ))
+
+    assert node._execution.participants == ('pc-a', 'pc-b')
 
 
 def test_duplicate_pc_id_blocks_join_and_group_execution():
