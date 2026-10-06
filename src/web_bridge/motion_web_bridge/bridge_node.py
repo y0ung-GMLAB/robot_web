@@ -2115,6 +2115,10 @@ class MotionWebBridge(Node):
         path = sim_scene.scene_path(self.workspace_root)
         return path if path is not None and path.is_file() else None
 
+    def preview_blender_scene_path(self) -> Optional[Path]:
+        """팩의 Blender 뷰 장면(scene.glb) · 없으면 None · 수정 목록 50"""
+        return sim_scene.blender_scene_path(self.workspace_root)
+
     def preview_motion_frames(self, file_id: str) -> Dict[str, Any]:
         """선택한 애니메이션의 MuJoCo 계산 결과(t · qpos) · 브라우저 재생용."""
         project_id = self.project_repository.selected_project_id()

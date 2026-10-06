@@ -15,6 +15,11 @@
  * 애니메이션의 프레임을 받아 두었다가, 재생 상태가 running 으로 바뀌는 순간
  * 0초부터 틀고 stopped/error/completed 면 멈춘다 · 시작 동기의 정밀도는
  * 8번(별도) · 여기선 같은 순간에 출발만 한다 · 네이티브 뷰어 창은 없앴다(7).
+ *
+ * 「Blender 뷰」(수정 목록 50) · 팩에 `scene.glb` 가 있으면 체크가 보인다 · 켜면 MuJoCo
+ * 장면 대신 Blender 가 내보낸 glTF 장면(헤드 4대 · 매장 오브제)을 그린다 · 물리 없음 ·
+ * 시각은 실물 따라가기와 같은 시계(running · 회차 · 파일이 바뀌면 0 부터 · 멈추면 멈춤) ·
+ * 애니메이션은 `AnimationMixer.setTime(t)` · 계산(.sim.npz) 없이 바로 된다.
  */
 import { exportPreviewScene, fetchPreviewFrames, fetchPreviewScene, fetchPreviewSceneData } from './api.js';
 import {
@@ -23,6 +28,8 @@ import {
 
 const THREE_URL = '/static/vendor/three/three.module.js';
 const CONTROLS_URL = '/static/vendor/three/OrbitControls.js';
+const GLTF_LOADER_URL = '/static/vendor/three/GLTFLoader.js';
+const BLENDER_SCENE_URL = '/api/preview/blender-scene';
 const SCENE_POLL_MS = 3000;
 
 /** 재생 상태 → 「실물 따라가기」 동작 · 한 곳에만 적는다 */
@@ -54,6 +61,11 @@ export function createSim3dViewer({ el, getLatestState = () => null }) {
   let pollTimer = null;
   let message = '';
   let opened = false;
+  // Blender 뷰 · 수정 목록 50
+  let view = 'mujoco';        // 'mujoco' | 'blender'
+  let blenderInfo = null;     // 서버 · {available, size_bytes, fingerprint}
+  let blender = null;         // {scene, camera, controls, mixer, duration, fingerprint, home}
+  let blenderLoading = false;
 
   const has = (name) => Boolean(el[name]);
 
@@ -197,12 +209,15 @@ export function createSim3dViewer({ el, getLatestState = () => null }) {
   }
 
   function resize() {
-    if (!renderer || !camera || !has('sim3dCanvasWrap')) return;
+    if (!renderer || !has('sim3dCanvasWrap')) return;
     const width = Math.max(el.sim3dCanvasWrap.clientWidth, 200);
     const height = Math.max(el.sim3dCanvasWrap.clientHeight, 240);
     renderer.setSize(width, height, false);
-    camera.aspect = width / height;
-    camera.updateProjectionMatrix();
+    for (const cam of [camera, blender?.camera]) {
+      if (!cam) continue;
+      cam.aspect = width / height;
+      cam.updateProjectionMatrix();
+    }
   }
 
   // ------------------------------------------------------------------ //
@@ -216,6 +231,9 @@ export function createSim3dViewer({ el, getLatestState = () => null }) {
       setMessage(`3D 장면 상태 확인 실패: ${error?.message || error}`);
       return;
     }
+    blenderInfo = sceneState?.blender || null;
+    if (!blenderInfo?.available && view === 'blender') await setView('mujoco');
+    if (view === 'blender' && blender && blenderInfo?.fingerprint !== blender.fingerprint) await loadBlender();
     const state = sceneState?.state || '';
     if (state === 'ready') {
       if (!sceneJson) await loadSceneData();
@@ -272,9 +290,12 @@ export function createSim3dViewer({ el, getLatestState = () => null }) {
       }
       frames = payload;
       framesFileId = fileId;
-      playhead = 0;
       applyPose(frames.qpos[0] || null);
-      setMessage(`${fileId} · ${frames.duration_sec.toFixed(1)}초 · ${frames.t.length}프레임 (${frames.hz} Hz)`);
+      // Blender 뷰를 보는 중이면 그 시간축(재생 위치)·안내는 건드리지 않는다 · 수정 목록 50
+      if (view !== 'blender') {
+        playhead = 0;
+        setMessage(`${fileId} · ${frames.duration_sec.toFixed(1)}초 · ${frames.t.length}프레임 (${frames.hz} Hz)`);
+      }
     } catch (error) {
       frames = null; framesFileId = '';
       setMessage(`프레임 불러오기 실패: ${error?.message || error}`);
@@ -294,20 +315,24 @@ export function createSim3dViewer({ el, getLatestState = () => null }) {
       const dt = Math.min((now - lastTick) / 1000, 0.25);
       lastTick = now;
       followRealRun();
-      if (playing && frames) {
+      if (playing && hasTimeline()) {
         playhead += dt * speed;
-        // 따라가기는 애니메이션 길이에서 멈춘다 · 끝의 정착 3초는 실물에 없다
-        const end = follow ? followEndSec(frames) : frames.duration_sec;
+        const end = playEndSec();
         if (playhead > end) {
           playhead = end;
           playing = false;
           renderControls();
         }
-        applyPose(frames.qpos[frameIndexAt(frames.t, playhead)]);
+        showTime();
         renderTime();
       }
-      if (controls) controls.update();
-      if (renderer && scene3 && camera) renderer.render(scene3, camera);
+      if (blenderShown()) {
+        blender.controls.update();
+        renderer.render(blender.scene, blender.camera);
+      } else {
+        if (controls) controls.update();
+        if (renderer && scene3 && camera) renderer.render(scene3, camera);
+      }
     };
     rafId = window.requestAnimationFrame(tick);
   }
@@ -317,8 +342,39 @@ export function createSim3dViewer({ el, getLatestState = () => null }) {
     rafId = 0;
   }
 
+  /** 지금 보는 뷰에 시간축이 있나 · MuJoCo 는 계산 프레임 · Blender 는 glTF 애니메이션 */
+  function hasTimeline() {
+    return view === 'blender' ? Boolean(blender) : Boolean(frames);
+  }
+
+  function timelineSec() {
+    if (view === 'blender') return blender ? blender.duration : 0;
+    return frames ? frames.duration_sec : 0;
+  }
+
+  /** 재생이 멈추는 곳 · 따라가기는 애니메이션 길이(MuJoCo 끝의 정착 3초는 실물에 없다) */
+  function playEndSec() {
+    if (view === 'blender') return timelineSec();
+    return follow ? followEndSec(frames) : frames.duration_sec;
+  }
+
+  /** 지금 시각의 자세를 보는 뷰에 */
+  function showTime() {
+    if (view === 'blender') {
+      if (blender) blender.mixer.setTime(Math.min(playhead, blender.duration));
+    } else if (frames) {
+      applyPose(frames.qpos[frameIndexAt(frames.t, playhead)]);
+    }
+  }
+
+  function blenderShown() {
+    return view === 'blender' && Boolean(blender && renderer);
+  }
+
   function followRealRun() {
-    if (!follow || !frames) return;
+    // Blender 뷰는 늘 실물 재생을 따라간다 · 계산 없이 그리는 뷰라 같이 보기 체크와 상관없다
+    const following = view === 'blender' ? Boolean(blender) : (follow && Boolean(frames));
+    if (!following) return;
     const status = getLatestState()?.motion_run_status || {};
     const state = String(status.state || '');
     // 상태만이 아니라 회차·파일까지 · 바로 다음 반복도 회차마다 처음부터 (수정 목록 8)
@@ -336,21 +392,134 @@ export function createSim3dViewer({ el, getLatestState = () => null }) {
   }
 
   function seek(seconds) {
-    if (!frames) return;
-    playhead = Math.min(Math.max(seconds, 0), frames.duration_sec);
-    applyPose(frames.qpos[frameIndexAt(frames.t, playhead)]);
+    if (!hasTimeline()) return;
+    playhead = Math.min(Math.max(seconds, 0), timelineSec());
+    showTime();
     renderTime();
   }
 
   function renderTime() {
-    if (has('sim3dSlider') && frames && document.activeElement !== el.sim3dSlider) {
-      el.sim3dSlider.value = String(Math.round((playhead / Math.max(frames.duration_sec, 1e-6)) * 1000));
+    const total = timelineSec();
+    if (has('sim3dSlider') && hasTimeline() && document.activeElement !== el.sim3dSlider) {
+      el.sim3dSlider.value = String(Math.round((playhead / Math.max(total, 1e-6)) * 1000));
     }
     if (has('sim3dTime')) {
-      el.sim3dTime.textContent = frames
-        ? `${playhead.toFixed(2)} / ${frames.duration_sec.toFixed(2)} s`
+      el.sim3dTime.textContent = hasTimeline()
+        ? `${playhead.toFixed(2)} / ${total.toFixed(2)} s`
         : '-- / -- s';
     }
+  }
+
+  // ------------------------------------------------------------------ //
+  // Blender 뷰 · 수정 목록 50
+  // ------------------------------------------------------------------ //
+
+  /** 장면 전체가 보이게 · glTF 는 Y-up · Blender 의 정면(−Y)은 glTF +Z 쪽 */
+  function blenderHome(object) {
+    const box = new THREE.Box3().setFromObject(object);
+    const center = box.isEmpty() ? new THREE.Vector3() : box.getCenter(new THREE.Vector3());
+    const size = box.isEmpty() ? 2 : Math.max(box.getSize(new THREE.Vector3()).length(), 0.5);
+    return {
+      target: center,
+      position: center.clone().add(new THREE.Vector3(0, size * 0.15, size * 0.9)),
+      near: size / 1000,
+      far: size * 20,
+    };
+  }
+
+  function placeBlenderCamera() {
+    if (!blender) return;
+    const { home, camera: cam, controls: orbit } = blender;
+    cam.position.copy(home.position);
+    orbit.target.copy(home.target);
+    orbit.update();
+  }
+
+  async function loadBlender() {
+    if (!blenderInfo?.available || blenderLoading) return;
+    if (blender && blender.fingerprint === blenderInfo.fingerprint) return;
+    blenderLoading = true;
+    renderControls();
+    const sizeMb = (Number(blenderInfo.size_bytes) || 0) / 1e6;
+    setMessage(`Blender 장면 받는 중 · ${sizeMb.toFixed(1)} MB`);
+    try {
+      await ensureThree();
+      const { GLTFLoader } = await import(GLTF_LOADER_URL);
+      ensureRenderer();
+      const url = `${BLENDER_SCENE_URL}?v=${encodeURIComponent(blenderInfo.fingerprint || '')}`;
+      const gltf = await new GLTFLoader().loadAsync(url);
+      disposeBlender();
+      const scene = new THREE.Scene();
+      scene.add(new THREE.HemisphereLight(0xffffff, 0x445566, 1.2));
+      const sun = new THREE.DirectionalLight(0xffffff, 1.6);
+      sun.position.set(2, 4, 3);
+      scene.add(sun);
+      scene.add(gltf.scene);
+      const mixer = new THREE.AnimationMixer(gltf.scene);
+      let duration = 0;
+      for (const clip of gltf.animations || []) {
+        const action = mixer.clipAction(clip);
+        action.setLoop(THREE.LoopOnce, 1);
+        action.clampWhenFinished = true;
+        action.play();
+        duration = Math.max(duration, clip.duration);
+      }
+      const home = blenderHome(gltf.scene);
+      const cam = new THREE.PerspectiveCamera(40, 1, home.near, home.far);
+      const orbit = new OrbitControls(cam, renderer.domElement);
+      orbit.enabled = view === 'blender';
+      blender = {
+        scene, camera: cam, controls: orbit, mixer, duration, home,
+        fingerprint: blenderInfo.fingerprint,
+      };
+      placeBlenderCamera();
+      resize();
+      playhead = Math.min(playhead, duration);
+      showTime();
+      startLoop();
+      setMessage(`Blender 뷰 · 애니메이션 ${(gltf.animations || []).length}개 · ${duration.toFixed(1)}초 · ${sizeMb.toFixed(1)} MB`);
+    } catch (error) {
+      setMessage(`Blender 장면 불러오기 실패: ${error?.message || error}`);
+      view = 'mujoco';
+      if (has('sim3dBlenderToggle')) el.sim3dBlenderToggle.checked = false;
+    } finally {
+      blenderLoading = false;
+      renderControls();
+    }
+  }
+
+  function disposeBlender() {
+    if (!blender) return;
+    blender.mixer.stopAllAction();
+    blender.controls.dispose();
+    blender.scene.traverse((node) => {
+      if (node.geometry) node.geometry.dispose();
+      const materials = Array.isArray(node.material) ? node.material : (node.material ? [node.material] : []);
+      for (const material of materials) {
+        for (const value of Object.values(material)) {
+          if (value && value.isTexture) value.dispose();
+        }
+        material.dispose();
+      }
+    });
+    blender = null;
+  }
+
+  /** 체크 · 「Blender 뷰」 ↔ 「MuJoCo 계산」 · 같은 캔버스를 바꿔 그린다 */
+  async function setView(next) {
+    view = next === 'blender' && blenderInfo?.available ? 'blender' : 'mujoco';
+    playing = false;
+    playhead = 0;
+    lastRunState = '';                    // 바꾼 뷰가 지금 도는 재생을 곧바로 따라잡게
+    if (controls) controls.enabled = view === 'mujoco';
+    if (blender) blender.controls.enabled = view === 'blender';
+    if (view === 'blender') {
+      await loadBlender();
+    } else {
+      showTime();
+      if (frames) setMessage(`${framesFileId} · ${frames.duration_sec.toFixed(1)}초 · MuJoCo 계산`);
+    }
+    renderControls();
   }
 
   // ------------------------------------------------------------------ //
@@ -364,15 +533,22 @@ export function createSim3dViewer({ el, getLatestState = () => null }) {
       el.sim3dPrepareButton.disabled = state === 'unavailable' || state === 'computing' || ready;
       el.sim3dPrepareButton.textContent = state === 'failed' ? '3D 장면 다시 만들기' : '3D 장면 준비';
     }
+    if (has('sim3dBlenderLabel')) {
+      el.sim3dBlenderLabel.classList.toggle('hidden', !blenderInfo?.available);
+    }
+    if (has('sim3dBlenderToggle')) {
+      el.sim3dBlenderToggle.checked = view === 'blender';
+      el.sim3dBlenderToggle.disabled = blenderLoading;
+    }
     if (has('sim3dLoadButton')) {
-      el.sim3dLoadButton.disabled = !ready || !currentFile;
+      el.sim3dLoadButton.disabled = view === 'blender' || !ready || !currentFile;
       el.sim3dLoadButton.title = currentFile ? `${currentFile.id} 의 계산 결과를 불러옵니다` : '애니메이션을 먼저 선택하세요';
     }
     if (has('sim3dPlayButton')) {
-      el.sim3dPlayButton.disabled = !frames;
+      el.sim3dPlayButton.disabled = !hasTimeline();
       el.sim3dPlayButton.textContent = playing ? '일시정지' : '재생';
     }
-    if (has('sim3dSlider')) el.sim3dSlider.disabled = !frames;
+    if (has('sim3dSlider')) el.sim3dSlider.disabled = !hasTimeline();
     renderTime();
   }
 
@@ -380,17 +556,24 @@ export function createSim3dViewer({ el, getLatestState = () => null }) {
     el.sim3dPrepareButton?.addEventListener('click', () => requestExport());
     el.sim3dLoadButton?.addEventListener('click', () => currentFile && loadFrames(currentFile.id));
     el.sim3dPlayButton?.addEventListener('click', () => {
-      if (!frames) return;
-      if (!playing && playhead >= frames.duration_sec) playhead = 0;
+      if (!hasTimeline()) return;
+      if (!playing && playhead >= timelineSec()) playhead = 0;
       playing = !playing;
       renderControls();
     });
     el.sim3dSlider?.addEventListener('input', () => {
-      if (!frames) return;
-      seek((Number(el.sim3dSlider.value) / 1000) * frames.duration_sec);
+      if (!hasTimeline()) return;
+      seek((Number(el.sim3dSlider.value) / 1000) * timelineSec());
+    });
+    el.sim3dBlenderToggle?.addEventListener('change', () => {
+      setView(el.sim3dBlenderToggle.checked ? 'blender' : 'mujoco');
     });
     el.sim3dSpeed?.addEventListener('change', () => { speed = Number(el.sim3dSpeed.value) || 1; });
     el.sim3dResetViewButton?.addEventListener('click', () => {
+      if (view === 'blender') {
+        placeBlenderCamera();
+        return;
+      }
       if (sceneJson && camera && controls) {
         const p = cameraPosition(sceneJson.camera);
         camera.position.set(p[0], p[1], p[2]);
@@ -422,7 +605,8 @@ export function createSim3dViewer({ el, getLatestState = () => null }) {
     const changed = (target?.id || '') !== (currentFile?.id || '');
     currentFile = target;
     if (changed) {
-      frames = null; framesFileId = ''; playing = false;
+      frames = null; framesFileId = '';
+      if (view !== 'blender') playing = false;
       if (opened && sceneJson && usable(target)) loadFrames(target.id);
     }
     renderControls();
@@ -446,6 +630,7 @@ export function createSim3dViewer({ el, getLatestState = () => null }) {
     stopLoop();
     if (pollTimer) window.clearTimeout(pollTimer);
     disposeScene();
+    disposeBlender();
     if (renderer) { renderer.dispose(); renderer = null; }
     window.removeEventListener('resize', resize);
   }
@@ -453,7 +638,8 @@ export function createSim3dViewer({ el, getLatestState = () => null }) {
   bind();
   renderControls();
   return {
-    update, setFollow, refreshScene, loadFrames, seek, destroy,
+    update, setFollow, refreshScene, loadFrames, seek, destroy, setView,
     get frames() { return frames; }, get framesFileId() { return framesFileId; }, get following() { return follow; },
+    get view() { return view; },
   };
 }
