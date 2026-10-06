@@ -1,6 +1,7 @@
 #ifndef MOTOR_MANAGER_NODE_HPP_
 #define MOTOR_MANAGER_NODE_HPP_
 
+#include <atomic>
 #include <memory>
 #include <thread>
 
@@ -18,6 +19,10 @@ public:
     explicit MotorManagerNode(const rclcpp::NodeOptions& options = rclcpp::NodeOptions());
 
     ~MotorManagerNode();
+
+    // robot_web fix-list 3-2: true when MotorManager::run() ended with an
+    // exception. main() then exits non-zero so systemd restarts the service.
+    bool run_failed() const { return run_failed_.load(std::memory_order_acquire); }
 
 private:
     void motor_command_callback(const MotorStatus::SharedPtr msg);
@@ -39,6 +44,8 @@ private:
     std::unique_ptr<motor_manager::MotorManager> motor_manager_;
 
     std::thread manager_run_thread_;
+
+    std::atomic<bool> run_failed_{false};
 };
 
 #endif // MOTOR_MANAGER_NODE_HPP_

@@ -59,7 +59,16 @@ MotorManagerNode::MotorManagerNode(const rclcpp::NodeOptions& options)
         try {
             motor_manager_->run();
         } catch (const std::exception& e) {
-            RCLCPP_ERROR(get_logger(), "MotorManager::run() failed: %s", e.what());
+            // robot_web fix-list 3-2 (2026-10-06): the control loop is gone, so
+            // the node must not keep running with frozen status. Stop spinning;
+            // main() exits non-zero and systemd (Restart=on-failure) restarts it.
+            RCLCPP_FATAL(get_logger(), "MotorManager::run() failed: %s", e.what());
+            run_failed_.store(true, std::memory_order_release);
+            rclcpp::shutdown();
+        } catch (...) {
+            RCLCPP_FATAL(get_logger(), "MotorManager::run() failed: unknown exception");
+            run_failed_.store(true, std::memory_order_release);
+            rclcpp::shutdown();
         }
     });
 }
@@ -152,7 +161,11 @@ void MotorManagerNode::timer_callback()
 int main(int argc, char* argv[])
 {
     rclcpp::init(argc, argv);
-    rclcpp::spin(std::make_shared<MotorManagerNode>());
+    auto node = std::make_shared<MotorManagerNode>();
+    rclcpp::spin(node);
+    const bool failed = node->run_failed();
+    node.reset();
     rclcpp::shutdown();
-    return 0;
+    // 70 = EX_SOFTWARE · systemd restarts on non-zero (78 stays reserved for config errors)
+    return failed ? 70 : 0;
 }

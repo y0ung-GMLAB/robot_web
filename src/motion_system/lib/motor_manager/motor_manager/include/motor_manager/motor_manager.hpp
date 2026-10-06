@@ -96,6 +96,8 @@ private:
 
     void updateControllers(const std::vector<uint8_t>& controller_indices);
 
+    static bool isFaultResetOnly(const motor_interface::motor_frame_t& command);
+
     void applyControllerRequests(const std::vector<uint8_t>& controller_indices);
 
     void refreshEnabled();
@@ -150,6 +152,13 @@ private:
     uint64_t command_sequence_[motor_interface::MAX_CONTROLLER_SIZE]{};
 
     uint64_t applied_command_sequence_[motor_interface::MAX_CONTROLLER_SIZE]{};
+
+    // robot_web fix-list 1 (2026-10-06): last command sequence seen while the
+    // drive reported an alarm. Commands up to this sequence are dropped when
+    // the alarm clears so a stale position target is never replayed.
+    uint64_t alarm_command_sequence_[motor_interface::MAX_CONTROLLER_SIZE]{};
+
+    bool alarm_latched_[motor_interface::MAX_CONTROLLER_SIZE]{};
 
 
     // Serial
