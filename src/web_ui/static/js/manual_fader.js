@@ -18,6 +18,13 @@
 
 import { fetchMotionMapping, fetchMotionMappings } from './api.js';
 import { escapeHtml } from './format.js';
+import {
+  jointToMotor as mappingJointToMotor,
+  mappingAngle,
+  mappingGain,
+  mappingReference,
+  motorToJoint as mappingMotorToJoint,
+} from './joint_mapping.js';
 import { manualControlBlockReason } from './run_mode_state.js';
 
 //: 전송 주기 · supervisor 임대 0.15s 의 1/3 · 한 번 빠져도 임대가 산다
@@ -50,20 +57,18 @@ export function createManualFaderController({ el, getLatestState }) {
       .filter((row) => row?.enabled !== false)
       .map((row) => {
         const axis = Number(row?.motor_axis);
-        const lower = Number(row?.motion_lower_deg);
-        const upper = Number(row?.motion_upper_deg);
+        const lower = mappingAngle(row, 'motion_lower', 'deg');
+        const upper = mappingAngle(row, 'motion_upper', 'deg');
         return {
           motionId: String(row?.motion_id || ''),
           axis,
           lower,
           upper,
-          gear: numberOr(row?.gear_ratio, 1),
-          scale: numberOr(row?.scale, 1),
+          // 식은 `joint_mapping.js` 하나 · 여기는 표시·비교용 값만 (수정 목록 6)
+          source: row,
+          gear: mappingGain(row),
           sign: row?.invert ? -1 : 1,
-          offset: numberOr(row?.offset_deg, 0),
-          reference: row?.reference_enabled === false
-            ? 0
-            : numberOr(row?.reference_position_deg, 0),
+          reference: mappingReference(row, 'deg'),
         };
       })
       .filter((row) => (
@@ -75,13 +80,11 @@ export function createManualFaderController({ el, getLatestState }) {
   }
 
   function jointToMotor(row, jointDeg) {
-    return row.reference + (jointDeg + row.offset) * row.scale * row.sign * row.gear;
+    return mappingJointToMotor(row.source, jointDeg, 'deg');
   }
 
   function motorToJoint(row, motorDeg) {
-    const factor = row.scale * row.sign * row.gear;
-    if (!factor) return null;
-    return (motorDeg - row.reference) / factor - row.offset;
+    return mappingMotorToJoint(row.source, motorDeg, 'deg');
   }
 
   async function refresh() {
@@ -365,11 +368,6 @@ export function createManualFaderController({ el, getLatestState }) {
       setMessage('조인트 매핑 확인 중');
     },
   };
-}
-
-function numberOr(value, fallback) {
-  const number = Number(value);
-  return Number.isFinite(number) ? number : fallback;
 }
 
 function clamp(value, lower, upper) {

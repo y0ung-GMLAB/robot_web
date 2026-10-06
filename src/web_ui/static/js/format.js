@@ -161,3 +161,16 @@ export function maxOf(values, seed = -Infinity) {
   }
   return largest;
 }
+
+// 각도 단위 · 화면은 deg · 서버 값은 rad 로 옮겨 간다 · 변환은 여기 한 곳 · 수정 목록 6
+const DEG_PER_RAD = 180 / Math.PI;
+
+export function radToDeg(value) {
+  const number = Number(value);
+  return Number.isFinite(number) ? number * DEG_PER_RAD : null;
+}
+
+export function degToRad(value) {
+  const number = Number(value);
+  return Number.isFinite(number) ? number / DEG_PER_RAD : null;
+}

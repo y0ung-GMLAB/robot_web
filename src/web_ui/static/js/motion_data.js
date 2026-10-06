@@ -1,5 +1,6 @@
 import { createMotionFileManager } from './motion_file_manager.js';
 import { motionScheduleResumeNote } from './schedule_scope.js';
+import { mappingGain, motorToJoint } from './joint_mapping.js';
 import {
   playlistProgressText,
   playlistWithAdded,
@@ -2954,11 +2955,10 @@ export function createMotionDataController({
       row.reference_position_deg = position;
       row.reference_enabled = true;
     } else {
-      const gear = numericOr(row.gear_ratio, 1);
-      const factor = gear * numericOr(row.scale, 1) * (row.invert ? -1 : 1);
+      // 식은 `joint_mapping.js` 하나 · 수정 목록 6
+      const factor = mappingGain(row);
       if (!factor) return { success: false, message: '감속·기어비·배율이 0이라 환산할 수 없습니다' };
-      const reference = row.reference_enabled === false ? 0 : numericOr(row.reference_position_deg, 0);
-      const motion = (position - reference) / factor - numericOr(row.offset_deg, 0);
+      const motion = motorToJoint(row, position, 'deg');
       const motorUpper = kind === 'upper';
       const setsMotionUpper = motorUpper === (factor > 0);
       if (setsMotionUpper) {
