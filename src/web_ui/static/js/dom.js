@@ -229,8 +229,6 @@ export function getElements() {
     motionFileImportButton: document.getElementById('motionFileImportButton'),
     motionFileImportInput: document.getElementById('motionFileImportInput'),
     jogDialBlock: document.getElementById('jogDialBlock'),
-    jogDialEnabled: document.getElementById('jogDialEnabled'),
-    jogDialEnabledState: document.getElementById('jogDialEnabledState'),
     jogTargetInput: document.getElementById('jogTargetInput'),
     jogTargetMoveButton: document.getElementById('jogTargetMoveButton'),
     motionTestJogNegativeButton: document.getElementById('motionTestJogNegativeButton'),

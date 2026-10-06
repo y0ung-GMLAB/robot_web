@@ -48,7 +48,7 @@ def motor_target(row: Dict[str, Any], motion_value: float) -> float:
 
 
 def row_motor_limits(row: Dict[str, Any]) -> Tuple[float, float]:
-    """한 줄의 조인트 범위를 모터 설정 단위 (하한, 상한)으로 · 반전이면 뒤집혀 정렬된다."""
+    """한 줄의 조인트 범위를 모터 설정 단위 (하한, 상한)으로 · 방향 반전이면 뒤집혀 정렬된다."""
     lower = joint_mapping.angle(row, 'motion_lower', units.RAD)
     upper = joint_mapping.angle(row, 'motion_upper', units.RAD)
     first = wire_units.config_value(motor_target(row, lower))

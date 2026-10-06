@@ -894,9 +894,12 @@ td.mapping-disabled-cell { background: transparent !important; opacity: 0.55; }
 .coord-badge .coord-badge-label, .coord-badge small { color: var(--muted); }
 
 /* ---------- 18. 조그 다이얼 · 모터 deg 상대 이동 ---------- */
+/* 자리 고정 · 두 칸 모두 늘 보이고 위에 붙는다 · 줄 바꿈 없음 · 메시지 줄 수가
+ * 바뀌어도 다이얼이 위아래로 움직이지 않게(center 정렬이던 것) · 2026-10-06 */
 .jog-dial-block {
   display: flex;
-  align-items: center;
+  flex-wrap: nowrap;
+  align-items: flex-start;
   gap: 24px;
   margin-top: 12px;
   padding: 14px 16px;
@@ -905,7 +908,7 @@ td.mapping-disabled-cell { background: transparent !important; opacity: 0.55; }
   background: var(--panel-2);
 }
 
-/* 썸휠 · 원형 다이얼을 눕혀 옆에서 본 드럼 · 2026-10-04
+/* 다이얼 · 원형 다이얼을 눕혀 옆에서 본 드럼 · 2026-10-04
  * 띠를 좌우로 끌면 눈금이 굴러간다 · 한 칸 = 24px (드래그) · 끝없음 */
 .jog-wheel-column {
   display: flex;
@@ -974,7 +977,9 @@ td.mapping-disabled-cell { background: transparent !important; opacity: 0.55; }
 .jog-dial-side {
   display: grid;
   gap: 8px;
-  min-width: 220px;
+  flex: 1 1 auto;
+  min-width: 260px;
+  max-width: 420px;
 }
 
 .jog-dial-readout { display: flex; align-items: baseline; gap: 10px; }
@@ -988,11 +993,7 @@ td.mapping-disabled-cell { background: transparent !important; opacity: 0.55; }
 .jog-dial-capture button { min-width: 84px; }
 #jogDialSetReference { border-color: rgb(90 162 255 / 50%); color: var(--blue); }
 
-/* 다이얼 ON/OFF · OFF 면 목표 위치 입력 + 이동 (2026-10-02) */
-.jog-dial-toggle { display: flex; align-items: center; gap: 8px; font-size: 13px; cursor: pointer; }
-.jog-dial-toggle strong { font-size: 12px; color: var(--muted); }
-.jog-dial-block.dial-off .jog-dial-only,
-.jog-dial-block:not(.dial-off) .jog-target-only { display: none; }
+/* 목표 위치 입력 + 이동 · 다이얼과 늘 같이 보인다 (토글 삭제 2026-10-06) */
 .jog-target-row { display: flex; align-items: flex-end; gap: 8px; }
 .jog-target-row .manual-field { flex: 1; min-width: 0; }
 .jog-target-row button { min-width: 72px; }

@@ -1318,6 +1318,10 @@ class MotionRunManager(Node):
     # ------------------------------------------------------------------ #
 
     def live_override_snapshot(self) -> Dict[str, Dict[str, Any]]:
+        # 재생 시작이 이어 가기 기억을 비울 때도 부른다(40) · 노드 없이 만든
+        # 가벼운 관리자(시험)에는 오버라이드 칸이 없다 · 없으면 「오버라이드 없음」
+        if not hasattr(self, '_live_override_lock'):
+            return {}
         with self._live_override_lock:
             return {key: dict(value) for key, value in self._live_overrides.items()}
 

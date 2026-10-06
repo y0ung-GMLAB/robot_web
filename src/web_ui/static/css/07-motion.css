@@ -1303,6 +1303,32 @@
   width: 72px;
 }
 
+/* 실행 축 · 「사용」 즉시 적용 안내 · 꺼진 줄 표시 · 40 */
+.motion-run-axis-note {
+  margin: 4px 0 8px;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.live-mute-cell {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  white-space: nowrap;
+}
+
+.live-muted-badge {
+  padding: 1px 6px;
+  border-radius: 8px;
+  font-size: 11px;
+  color: var(--yellow);
+  border: 1px solid currentColor;
+}
+
+tr.live-muted td:not(:first-child) {
+  opacity: 0.45;
+}
+
 /* MuJoCo 상태 배지 · P7 · 계산 중 = 그레이 */
 .mujoco-badge {
   display: inline-block;

@@ -1531,11 +1531,12 @@ export function createMotionDataController({
       el.motionRunAxisRows.innerHTML = emptyRow(12, '실행 준비 검사를 누르면 표시됩니다');
       return;
     }
-    el.motionRunAxisRows.innerHTML = axes.map((axis) => (
-      `<tr>
-        <td><input type="checkbox" data-live-mute="${escapeHtml(axis.motion_id)}"
-          title="끄면 이 조인트 명령을 즉시 빼고 모터는 그 자리에 섭니다 (서보 유지)"
-          ${liveOverrideOf(axis.motion_id).muted ? '' : 'checked'}></td>
+    el.motionRunAxisRows.innerHTML = axes.map((axis) => {
+      const muted = Boolean(liveOverrideOf(axis.motion_id).muted);
+      return `<tr class="${muted ? 'live-muted' : ''}">
+        <td><label class="live-mute-cell"><input type="checkbox" data-live-mute="${escapeHtml(axis.motion_id)}"
+          title="즉시 적용 · 끄면 이 조인트 명령을 빼고 모터는 그 자리에 섭니다 (서보 유지) · 다시 켜면 초기 이동 시간 동안 천천히 이어 갑니다 · 저장 안 됨"
+          ${muted ? '' : 'checked'}>${muted ? '<span class="live-muted-badge">제외 중</span>' : ''}</label></td>
         <td class="mono">${displayText(axis.motion_id)}</td>
         <td class="mono">${formatInt(axis.motor_axis)}</td>
         <td>${displayText(axis.motor_type || '-')}</td>
@@ -1561,8 +1562,8 @@ export function createMotionDataController({
             value="${liveOverrideOf(axis.motion_id).clamp ? liveOverrideOf(axis.motion_id).clamp[1] : ''}"
             placeholder="${targetText(axis.motion_limit_upper_deg)}">
         </td>
-      </tr>`
-    )).join('');
+      </tr>`;
+    }).join('');
   }
 
   /** 사용 토글·라이브 리밋 변경 → 즉시 런타임에 반영 · 다음 20ms 틱부터 · P7 */
@@ -1606,7 +1607,7 @@ export function createMotionDataController({
       setMotionRunMessage(payload.muted !== undefined
         ? (payload.muted
           ? `조인트 이름 ${motionId} 제외 · 모터는 그 자리에 섭니다`
-          : `조인트 이름 ${motionId} 다시 사용`)
+          : `조인트 이름 ${motionId} 다시 사용 · 초기 이동 시간 동안 천천히 이어 갑니다`)
         : (payload.clamp
           ? `조인트 이름 ${motionId} 라이브 리밋 ${payload.clamp[0]} ~ ${payload.clamp[1]}°`
           : `조인트 이름 ${motionId} 라이브 리밋 해제`));
@@ -2105,7 +2106,7 @@ export function createMotionDataController({
             </select>
           </td>
           <td class="mapping-number-cell ${initialPositionDisabled ? 'mapping-disabled-cell' : ''}"><input class="numeric-input mapping-number-input" type="number" step="0.001" data-motion-mapping-field="initial_motion_position_deg" value="${displayText(initialPositionValue)}"${initialPositionDisabledAttr}></td>
-          <td><input type="checkbox" data-motion-mapping-field="invert" ${row.invert ? 'checked' : ''}></td>
+          <td><input type="checkbox" data-motion-mapping-field="invert" title="방향 반전 · 실물이 반대로 돌면 켭니다 · Blender 는 그대로" ${row.invert ? 'checked' : ''}></td>
           <td><span class="motion-state-pill ${status.className}">${displayText(status.text)}</span> <button class="mapping-mini-button" type="button" data-motion-mapping-action="delete">삭제</button></td>
         </tr>`
       );
@@ -2925,7 +2926,7 @@ export function createMotionDataController({
    * (+/− 는 **모터** 방향 · 다이얼이 모터 deg 로 움직이므로)
    *
    * 끝 → 모션 deg 환산 · motion = (motor − ref) ÷ (gear·scale·sign) − offset ·
-   * 반전(sign<0)이면 모터 + limit 이 모션 최소가 된다 · 경계는 안쪽으로 0.0001°
+   * 방향 반전(sign<0)이면 모터 + limit 이 모션 최소가 된다 · 경계는 안쪽으로 0.0001°
    * 반올림해 모터 리밋과 정확히 같은 값을 넘어서는 일이 없게 한다.
    *
    * 저장 안 한 편집이 있으면 거절한다 · 그것까지 같이 저장되면 안 된다.

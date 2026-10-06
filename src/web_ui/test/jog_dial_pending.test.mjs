@@ -69,10 +69,9 @@ function setup() {
   for (const name of [
     'jogDial', 'jogDialRing', 'jogDialStep', 'jogDialPosition', 'jogDialPending',
     'jogDialMessage', 'jogDialCancelPending', 'jogDialSetReference', 'jogDialSetLower',
-    'jogDialSetUpper', 'jogDialBlock', 'jogDialEnabled', 'jogDialEnabledState',
+    'jogDialSetUpper', 'jogDialBlock',
     'jogTargetInput', 'jogTargetMoveButton', 'jogDialMinus', 'jogDialPlus',
   ]) el[name] = fakeElement();
-  el.jogDialEnabled.checked = true;
   el.jogDialStep.value = '1';
   const state = {
     motors: [{
@@ -138,11 +137,10 @@ test('nothing selected means nothing moves · not motor 0', () => {
   for (const name of [
     'jogDial', 'jogDialRing', 'jogDialStep', 'jogDialPosition', 'jogDialPending',
     'jogDialMessage', 'jogDialCancelPending', 'jogDialSetReference', 'jogDialSetLower',
-    'jogDialSetUpper', 'jogDialBlock', 'jogDialEnabled', 'jogDialEnabledState',
+    'jogDialSetUpper', 'jogDialBlock',
     'jogTargetInput', 'jogTargetMoveButton', 'jogDialMinus', 'jogDialPlus',
   ]) el[name] = fakeElement();
   el.jogDialStep.value = '1';
-  el.jogDialEnabled.checked = true;
   const state = { motors: [{ controller_index: 0, state: 'detected', servo_on: true, fault: false, position_deg: 0, motor_type: 'ac_servo' }] };
   for (const selected of [null, '', undefined]) {
     const dial = createJogDialController({ el, getLatestState: () => state, getSelectedAxis: () => selected });
@@ -162,12 +160,8 @@ test('동작 취소 is always pressable', () => {
   assert.equal(el.jogDialCancelPending.disabled, false, '움직이는 중에도 켜져 있다');
 });
 
-test('dial OFF · typed target moves in motor deg and refuses outside the limits', async () => {
+test('typed target (always shown next to the dial) moves in motor deg and refuses outside the limits', async () => {
   const { el } = setup();
-  el.jogDialEnabled.checked = false;
-  el.jogDialEnabled.dispatch('change');
-  assert.ok(el.jogDialBlock.classList.contains('dial-off'));
-  assert.equal(el.jogDialEnabledState.textContent, 'OFF');
   assert.equal(el.jogTargetInput.value, '0', '안 고쳤으면 지금 모터 위치');
 
   el.jogTargetInput.value = '2000';     // 상한 1000 밖
@@ -194,6 +188,20 @@ test('dial OFF · typed target moves in motor deg and refuses outside the limits
   assert.match(el.jogDialMessage.textContent, /목표 250\.5° 로 이동 시작/);
 });
 
+// 다이얼과 목표 칸이 늘 같이 보인다 · 다이얼 양이 남았으면 목표 이동은 기다린다 · 2026-10-06
+test('typed target waits while dial ticks are still pending', async () => {
+  const { el, wheel, pendingText } = setup();
+  wheel();                         // 날아감
+  wheel();                         // 쌓임 +1
+  assert.match(pendingText(), /남은 이동/);
+  el.jogTargetInput.value = '10';
+  el.jogTargetInput.dispatch('input');
+  assert.equal(el.jogTargetMoveButton.disabled, true);
+  el.jogTargetInput.dispatch('keydown', { key: 'Enter' });
+  assert.equal(calls.filter((call) => /\/action$/.test(String(call.url))).length, 0);
+  assert.match(el.jogDialMessage.textContent, /앞 이동이 끝난 뒤에/);
+});
+
 test('the tick strip slides with input and there is no needle', () => {
   const { el, wheel } = setup();
   const before = el.jogDialRing.style.backgroundPositionX;
@@ -214,7 +222,7 @@ test('the tick strip slides with input and there is no needle', () => {
 });
 
 
-test('썸휠 · 오른쪽으로 24px 끌면 +1칸 · 왼쪽은 −1칸 · 띠는 손을 따라 밀린다', () => {
+test('다이얼 · 오른쪽으로 24px 끌면 +1칸 · 왼쪽은 −1칸 · 띠는 손을 따라 밀린다', () => {
   const { el, pendingText } = setup();
   el.jogDial.dispatch('pointerdown', { clientX: 100, clientY: 40, pointerId: 1 });
   el.jogDial.dispatch('pointermove', { clientX: 112, clientY: 40 });   // 반 칸 · 아직 안 쌓임
