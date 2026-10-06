@@ -330,7 +330,11 @@ class GroupSession:
             )
             initialize_triggered_at = time.time()
             initialize_triggered_monotonic = time.monotonic()
-            self.manager._player._run_initialization(initialization_plan)
+            # 재생이 뒤따르면 첫 프레임까지 잇는다 · 그룹 「초기 위치 이동」 만이면 초기 위치에 선다 · 13-1
+            self.manager._player._run_initialization({
+                **initialization_plan,
+                'blend_to_first_frame': not payload.get('initialization_only'),
+            })
             if self.manager._stop_event.is_set() or self.manager.status().get('state') != 'initialized':
                 return
             with self.condition:
@@ -433,7 +437,9 @@ class GroupSession:
                 )
                 if self.manager._stop_event.is_set():
                     break
-                self.manager._player._run_initialization(initialization_plan)
+                self.manager._player._run_initialization({
+                    **initialization_plan, 'blend_to_first_frame': True,
+                })
                 if self.manager._stop_event.is_set() or self.manager.status().get('state') != 'initialized':
                     break
                 with self.condition:

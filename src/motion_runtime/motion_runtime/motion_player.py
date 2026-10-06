@@ -201,7 +201,8 @@ class MotionPlayer:
         motion_plan: Dict[str, Any],
         playlist: Optional[List[tuple]] = None,
     ) -> None:
-        self._run_initialization(initialization_plan)
+        # 재생이 뒤따른다 · 초기 위치 끝에 첫 프레임까지 잇는다 · 13-1
+        self._run_initialization({**initialization_plan, 'blend_to_first_frame': True})
         if self.manager._stop_event.is_set():
             return
         if self.manager.status().get('state') != 'initialized':
@@ -300,10 +301,33 @@ class MotionPlayer:
             )
             if not reached:
                 raise RuntimeError(f'초기 위치 도달 확인 실패: {message}')
-            self._publish_motion_values({
+            motion_values = {
                 str(axis['motion_id']): float(axis['initial_motion_position_deg'])
                 for axis in init_axes
-            })
+            }
+            blend_targets = self._first_frame_targets(plan, init_axes, targets)
+            if blend_targets:
+                # 초기 위치 ≠ 첫 프레임 · 재생 첫 틱에 튀지 않게 여기서 잇는다 · 수정 목록 13-1
+                self.manager._update_status({
+                    'state': 'initializing',
+                    'phase': 'initializing',
+                    'message': '초기 위치 → 첫 프레임으로 잇는 중',
+                })
+                self._run_initial_position_stream(
+                    motors, init_axes, dict(targets), blend_targets, durations, max_duration,
+                )
+                reached, message = self._wait_for_targets(
+                    init_axes, blend_targets, self._target_settle_timeout_sec(),
+                )
+                if not reached:
+                    raise RuntimeError(f'첫 프레임 도달 확인 실패: {message}')
+                motion_values = {
+                    str(axis['motion_id']): float(
+                        axis.get('loop_start_motion_deg', axis['initial_motion_position_deg'])
+                    )
+                    for axis in init_axes
+                }
+            self._publish_motion_values(motion_values)
             initial_finished_at = time.time()
             status = motion_run_rules._status_from_plan('initialized', '초기 위치 이동 완료', plan)
             status['phase'] = 'initialized'
@@ -526,7 +550,7 @@ class MotionPlayer:
                 if playlist or repeat_mode in {'reinitialize', 'dwell_reinitialize'}:
                     if initialization_plan is None:
                         raise RuntimeError('반복 초기위치 이동 계획이 없습니다')
-                    self._run_initialization(initialization_plan)
+                    self._run_initialization({**initialization_plan, 'blend_to_first_frame': True})
                     if self.manager._stop_event.is_set():
                         return
                     if self.manager.status().get('state') != 'initialized':
@@ -620,6 +644,31 @@ class MotionPlayer:
         recorder = getattr(self.manager, '_motion_trace', None)
         if trace is not None and recorder is not None:
             recorder.finish(trace, result, message)
+
+    def _first_frame_targets(
+        self,
+        plan: Dict[str, Any],
+        axes: List[Dict[str, Any]],
+        targets: Dict[int, float],
+    ) -> Dict[int, float]:
+        """초기 위치에서 첫 프레임까지 이어야 할 목표 · 이을 일이 없으면 빈 dict · 13-1
+
+        재생이 뒤따르는 초기 이동만(`blend_to_first_frame`) · 「초기 위치 이동」
+        버튼과 스케줄 끝 주차는 초기 위치에 멈춘다.
+        """
+        if not plan.get('blend_to_first_frame'):
+            return {}
+        blended = dict(targets)
+        differs = False
+        for axis in axes:
+            motor_axis = int(axis['motor_axis'])
+            first = axis.get('first_frame_motor_target_deg')
+            if first is None or motor_axis not in targets:
+                continue
+            if abs(float(first) - float(targets[motor_axis])) > self._target_tolerance_deg(axis):
+                blended[motor_axis] = float(first)
+                differs = True
+        return blended if differs else {}
 
     def _run_initial_position_stream(
         self,

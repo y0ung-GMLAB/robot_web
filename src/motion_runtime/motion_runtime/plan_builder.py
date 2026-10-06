@@ -434,6 +434,10 @@ class PlanBuilder:
                 'target_min_deg': target_low,
                 'target_max_deg': target_high,
                 'loop_start_motion_deg': motion_run_rules._clamp_motion_value(motion_values[0], lower, upper),
+                # 첫 프레임 · 초기 위치와 다르면 초기 이동 끝에 여기까지 잇는다 · 수정 목록 13-1
+                'first_frame_motor_target_deg': motion_run_rules._motor_target(
+                    row, motion_run_rules._clamp_motion_value(motion_values[0], lower, upper),
+                ),
                 'loop_end_motion_deg': motion_run_rules._clamp_motion_value(motion_values[-1], lower, upper),
                 'row': row,
             }
