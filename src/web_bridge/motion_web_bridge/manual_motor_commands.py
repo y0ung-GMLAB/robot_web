@@ -470,6 +470,36 @@ class ManualMotorCommandService:
             **self.bridge.snapshot(),
         }
 
+    def dynamixel_torque_control(self, action: Any, axes: Any = None) -> Dict[str, Any]:
+        """다이나믹셀 토크 켜기·끄기 · 수정 목록 36 · axes 가 없으면 감지된 전부"""
+        action_value = str(action or '').strip().lower().replace('-', '_')
+        if action_value not in ('torque_on', 'torque_off'):
+            return {'success': False, 'message': 'action must be torque_on or torque_off'}
+        request_id = self.bridge.new_project_request_id('dynamixel-torque')
+        payload = {
+            'request_id': request_id,
+            'project_generation': self.bridge.current_project_generation(),
+            'command': 'dynamixel_torque_control',
+            'action': action_value,
+        }
+        if isinstance(axes, (list, tuple)):
+            payload['axes'] = [int(axis) for axis in axes]
+        self._jog_request_publisher.publish(
+            String(data=json.dumps(payload, ensure_ascii=False, separators=(',', ':')))
+        )
+        result = self.wait_for_jog_result(request_id, timeout_sec=2.0)
+        if result is None:
+            return {
+                'success': False,
+                'message': f'Dynamixel torque request timed out: {action_value}',
+                'request_id': request_id,
+            }
+        return {
+            'success': bool(result.get('success')),
+            'message': str(result.get('message') or 'motion_supervisor returned empty result'),
+            'request_id': request_id,
+        }
+
     def ac_servo_control(
         self,
         action: Any,

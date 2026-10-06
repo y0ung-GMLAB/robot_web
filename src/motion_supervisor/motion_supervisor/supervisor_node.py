@@ -40,6 +40,8 @@ CW_FAULT_RESET_MINAS = 0x0080
 CW_NEW_SET_POINT_MINAS = 0x003F
 DYNAMIXEL_TORQUE_ENABLE = 1
 DYNAMIXEL_TORQUE_DISABLE = 0
+#: 서보 전원 명령 · 알람 차단·조그 중 거절·소유권 규칙이 같다 · 수정 목록 36
+SERVO_POWER_COMMANDS = ('ac_servo_control', 'dynamixel_torque_control')
 CONTROLWORD_SEQUENCE_DELAY_SEC = 0.05
 JOG_TARGET_TOLERANCE_DEG = 0.05
 JOG_DONE_VELOCITY_DEG_SEC = 0.05
@@ -824,7 +826,7 @@ class MotionSupervisor(Node):
         ):
             success, message = False, EMERGENCY_LATCHED_MESSAGE
         elif (
-            command != 'ac_servo_control'
+            command not in SERVO_POWER_COMMANDS
             and self._servo_alarm_block_reason(self._optional_int(request.get('axis')))
         ):
             success, message = False, self._servo_alarm_block_reason(
@@ -832,14 +834,14 @@ class MotionSupervisor(Node):
             )
         elif time.monotonic() < self._motion_stop_block_until:
             success, message = False, 'motion stop is settling'
-        elif command == 'ac_servo_control' and (
+        elif command in SERVO_POWER_COMMANDS and (
             self._active_jogs or self._active_actions
         ):
             success, message = False, MANUAL_COMMAND_ACTIVE_MESSAGE
-        elif command in ('ac_servo_control', 'ac_servo_jog', 'dynamixel_jog'):
+        elif command in (*SERVO_POWER_COMMANDS, 'ac_servo_jog', 'dynamixel_jog'):
             lease_sec = (
                 MANUAL_CONTROL_OWNERSHIP_SEC
-                if command == 'ac_servo_control'
+                if command in SERVO_POWER_COMMANDS
                 else None
             )
             success, message = self._acquire_command_owner(
@@ -847,9 +849,13 @@ class MotionSupervisor(Node):
                 lease_sec=lease_sec,
             )
             if success:
-                if command == 'ac_servo_control':
+                if command in SERVO_POWER_COMMANDS:
                     try:
-                        success, message = self._handle_ac_servo_control(request)
+                        success, message = (
+                            self._handle_ac_servo_control(request)
+                            if command == 'ac_servo_control'
+                            else self._handle_dynamixel_torque_control(request)
+                        )
                     finally:
                         self._command_arbiter_instance().release(CommandOwner.MANUAL)
                 elif command == 'ac_servo_jog':
@@ -2157,6 +2163,46 @@ class MotionSupervisor(Node):
         self._publish_controlword(motors, axes, CW_SHUTDOWN_MINAS)
         return True, f'AC Servo Fault Reset command sent: axes {self._axis_list_text(axes)}'
 
+    def _handle_dynamixel_torque_control(
+        self, request: Dict[str, Any],
+    ) -> tuple[bool, str]:
+        """다이나믹셀 토크 켜기·끄기 · 수정 목록 36 (2026-10-06)
+
+        전에는 끄는 길이 긴급 정지 하나뿐이었다 · 스케줄이 끝나 기준점에
+        세운 뒤 끄려면 따로 있어야 한다. 켜기는 원래 재생·조그 명령마다
+        토크 켜기(1)를 실어 보내므로 여기서는 「지금 켜기」 만 한다.
+        """
+        action = str(request.get('action') or '').strip().lower().replace('-', '_')
+        if action not in ('torque_on', 'torque_off'):
+            return False, 'action must be torque_on or torque_off'
+        motors = self._current_motors()
+        if not motors:
+            return False, 'current motion_state is unavailable'
+        requested = request.get('axes')
+        axes = []
+        for motor in motors:
+            axis = self._optional_int(motor.get('controller_index'))
+            if axis is None or not self._is_dynamixel(motor):
+                continue
+            if str(motor.get('state') or '') != 'detected':
+                continue
+            if isinstance(requested, list) and axis not in {
+                self._optional_int(item) for item in requested
+            }:
+                continue
+            axes.append(axis)
+        axes = sorted(set(axes))
+        if not axes:
+            return False, 'Dynamixel axis not found'
+        self._publish_controlword(
+            motors, axes,
+            DYNAMIXEL_TORQUE_ENABLE if action == 'torque_on' else DYNAMIXEL_TORQUE_DISABLE,
+        )
+        return True, (
+            f'Dynamixel torque {"ON" if action == "torque_on" else "OFF"} '
+            f'command sent: axes {self._axis_list_text(axes)}'
+        )
+
     def _ac_servo_control_axes(
         self,
         request: Dict[str, Any],
@@ -2223,7 +2269,10 @@ class MotionSupervisor(Node):
                 or self._servo_alarm_guard_instance().snapshot()['grade3_latched']
             ):
                 return
-            if int(controlword) not in (CW_DISABLE_OPERATION_MINAS, CW_FAULT_RESET_MINAS):
+            # 끄는 명령(MINAS 0x07 · 다이나믹셀 토크 0)은 알람 중에도 지나간다
+            if int(controlword) not in (
+                CW_DISABLE_OPERATION_MINAS, CW_FAULT_RESET_MINAS, DYNAMIXEL_TORQUE_DISABLE,
+            ):
                 if any(self._servo_alarm_block_reason(axis) for axis in axes):
                     return
             if time.monotonic() < self._motion_stop_block_until:

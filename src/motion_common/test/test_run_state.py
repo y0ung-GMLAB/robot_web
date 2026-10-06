@@ -6,7 +6,7 @@ from motion_common import run_state
 
 
 @pytest.mark.parametrize('state', [
-    'running', 'preparing', 'initializing', 'initialized', 'countdown',
+    'running', 'preparing', 'initializing', 'countdown',
     'waiting', 'stopping', 'armed', 'start_scheduled', 'cycle_ready',
     'waiting_cycle_ready', 'cycle_initialize_scheduled', 'releasing',
 ])
@@ -17,6 +17,8 @@ def test_moving_states_are_running(state):
 @pytest.mark.parametrize('state', [
     'idle', 'off', 'ready', 'stopped', 'completed', 'motion_completed',
     'error', 'blocked',
+    # 초기 위치 이동이 끝나 서 있다 · 수동 초기 이동·스케줄 끝 주차 뒤 · 수정 목록 36
+    'initialized',
 ])
 def test_resting_states_are_idle(state):
     assert run_state.is_idle(state) is True

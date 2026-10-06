@@ -869,6 +869,7 @@ class MotionCoordinationNode(Node):
                     'command': 'stop_after_cycle',
                     'execution_id': message.execution_id,
                     'network_operation_id': message.command_id,
+                    'reason': str(getattr(message, 'stop_reason', '') or ''),
                 })
                 with self._lock:
                     if self._execution.coordinator_id == self._config.pc_id:
@@ -1442,7 +1443,9 @@ class MotionCoordinationNode(Node):
                     request=request, initialization_only=True,
                 )
             elif command == 'stop_after_cycle':
-                result = self._request_group_stop(after_cycle=True)
+                result = self._request_group_stop(
+                    after_cycle=True, reason=str(request.get('reason') or ''),
+                )
             elif command in {'stop_now', 'stop_motion'}:
                 result = self._request_group_stop(after_cycle=False)
             elif command == 'acknowledge_group_error':
@@ -1656,7 +1659,7 @@ class MotionCoordinationNode(Node):
         if start_sync:
             self._begin_trigger_sync('initialize')
 
-    def _request_group_stop(self, *, after_cycle: bool) -> Dict[str, Any]:
+    def _request_group_stop(self, *, after_cycle: bool, reason: str = '') -> Dict[str, Any]:
         with self._lock:
             if not self._execution.execution_id:
                 raise ValueError('활성 그룹 실행이 없습니다')
@@ -1668,11 +1671,14 @@ class MotionCoordinationNode(Node):
             stop_message = self._new_command(
                 command=command, execution_id=execution_id,
                 cycle_number=cycle_number, participants=participants,
+                stop_reason=reason,
             )
+            # 스케줄 끝이면 PC 마다 제 설정대로 기준점 주차 → 서보 OFF · 수정 목록 36
             local = self._call_local_control({
                 'command': command,
                 'execution_id': execution_id,
                 'network_operation_id': stop_message.command_id,
+                'reason': reason,
             })
             self._command_pub.publish(stop_message)
             dds_stop_published = True
@@ -1929,6 +1935,7 @@ class MotionCoordinationNode(Node):
         initialization_only: bool = False,
         run_mode: str = '',
         sync_mode: str = '',
+        stop_reason: str = '',
     ) -> GroupCommand:
         message = GroupCommand()
         message.group_id = self._config.group_id
@@ -1951,6 +1958,7 @@ class MotionCoordinationNode(Node):
         message.initialization_only = bool(initialization_only)
         message.run_mode = str(run_mode)
         _set_optional_message_field(message, 'sync_mode', str(sync_mode))
+        _set_optional_message_field(message, 'stop_reason', str(stop_reason))
         return message
 
     def _publish_event(

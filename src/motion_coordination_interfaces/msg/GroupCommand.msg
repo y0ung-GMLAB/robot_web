@@ -14,3 +14,4 @@ bool initialization_only
 string run_mode
 uint32 target_cycle_count
 string sync_mode
+string stop_reason

@@ -28,6 +28,7 @@ from .coordination_bridge import (
 from . import motion_file_analysis, motor_config_rules, run_mode_gate
 from .execution_context_service import ExecutionContextService
 from .manual_motor_commands import ManualMotorCommandService
+from .schedule_end import ScheduleEndService
 from .manual_stream import ManualStreamService
 from . import animation_preview, sim_scene
 from .motor_runtime_service import MotorRuntimeService
@@ -390,6 +391,15 @@ class MotionWebBridge(Node):
             action_publisher=self._action_request_publisher,
             jog_result_topic=self.jog_result_topic,
             action_result_topic=self.action_result_topic,
+        )
+        # 스케줄 끝 · 기준점 주차 → 서보 OFF · 다음 시작 전 다시 켜기 · 수정 목록 36
+        self.schedule_end = ScheduleEndService(
+            self,
+            fill_active_files=self._with_active_project_files,
+            ac_servo_control=self._manual.ac_servo_control,
+            dynamixel_torque_control=self._manual.dynamixel_torque_control,
+            load_motor_registry=lambda: self._motor_config.load().get('registry') or {},
+            alarm_grade=lambda: int((self._safety_status or {}).get('servo_alarm_grade') or 0),
         )
         self._manual_stream_request_publisher = self.create_publisher(
             String, self.manual_stream_request_topic, 10
@@ -1755,12 +1765,22 @@ class MotionWebBridge(Node):
             with self._motion_run_lock:
                 status = dict(self._motion_run_status) if self._motion_run_status else {}
             if status:
-                return {
+                result = {
                     'success': True,
                     'message': 'motion run status from cache',
                     'status': status,
                 }
+        end = getattr(self, 'schedule_end', None)
+        if end is not None and isinstance(result, dict):
+            result = {**result, 'schedule_end': end.status()}
         return result
+
+    def schedule_end_start_blocker(self, payload: Dict[str, Any]) -> str:
+        """스케줄 끝에 끈 서보를 켠다 · 주차 중이면 막는다 · 수정 목록 36"""
+        end = getattr(self, 'schedule_end', None)
+        if end is None or str(payload.get('request_source') or '') == 'schedule_end':
+            return ''
+        return end.start_blocker()
 
     def motion_run_check(self, payload: Dict[str, Any]) -> Dict[str, Any]:
         return self._request_motion_run('check', payload, timeout_sec=3.0)
@@ -1780,6 +1800,9 @@ class MotionWebBridge(Node):
         blocker = self.motor_runtime_control_blocker()
         if blocker:
             return {'success': False, 'message': f'초기 위치 이동 불가: {blocker}'}
+        parked = self.schedule_end_start_blocker(payload)
+        if parked:
+            return {'success': False, 'message': f'초기 위치 이동 불가: {parked}'}
         return self._request_motion_run('initialize', payload, timeout_sec=2.0)
 
     def schedule_start_blocked_by_manual_mode(self, payload: Dict[str, Any]) -> str:
@@ -1836,6 +1859,9 @@ class MotionWebBridge(Node):
         blocker = self.motor_runtime_control_blocker()
         if blocker:
             return {'success': False, 'message': f'모션 실행 불가: {blocker}'}
+        parked = self.schedule_end_start_blocker(payload)
+        if parked:
+            return {'success': False, 'message': f'모션 실행 불가: {parked}'}
         # 스케줄러처럼 화면 없는 호출자는 무엇을 재생할지 모른다 ·
         # 프로젝트가 정해 둔 활성 파일로 채운다 · §6-68
         filled = self._with_active_project_files(payload)
@@ -1997,8 +2023,22 @@ class MotionWebBridge(Node):
     def motion_run_stop(self) -> Dict[str, Any]:
         return self._request_motion_run('stop', {}, timeout_sec=2.0)
 
-    def motion_run_stop_after_cycle(self) -> Dict[str, Any]:
-        return self._request_motion_run('stop_after_cycle', {}, timeout_sec=2.0)
+    def motion_run_stop_after_cycle(self, payload: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+        """현재 회차 후 정지 · 스케줄 끝이면 그 뒤에 기준점 주차 → 서보 OFF · 수정 목록 36
+
+        `reason='schedule_end'` 는 스케줄(또는 그룹 마스터의 스케줄)이 보낸다 ·
+        사람이 누른 「현재 회차 후 정지」 는 옛 그대로 멈추기만 한다.
+        """
+        payload = payload if isinstance(payload, dict) else {}
+        end = getattr(self, 'schedule_end', None)
+        if end is not None and end.active():
+            # 1분마다 오는 스케줄 점검이 주차 중인 초기 위치 이동을 끊지 않게
+            return {'success': True, 'message': end.status().get('message') or '스케줄 끝 동작 중'}
+        result = self._request_motion_run('stop_after_cycle', {}, timeout_sec=2.0)
+        if str(payload.get('reason') or '') == 'schedule_end' and end is not None:
+            # 이미 멈춰 있어서 정지가 거절돼도 주차는 한다
+            result = {**result, 'schedule_end': end.begin()}
+        return result
 
     def motion_group_prepare(self, payload: Dict[str, Any]) -> Dict[str, Any]:
         # 오프 모드 · 원격 그룹 시작도 이 PC 에서는 받지 않는다 (준비 거절 →
@@ -2009,6 +2049,9 @@ class MotionWebBridge(Node):
         blocker = self.motor_runtime_control_blocker()
         if blocker:
             return {'success': False, 'message': f'그룹 실행 준비 불가: {blocker}'}
+        parked = self.schedule_end_start_blocker(payload)
+        if parked:
+            return {'success': False, 'message': f'그룹 실행 준비 불가: {parked}'}
         return self._request_motion_run('group_prepare', payload, timeout_sec=2.0)
 
     def motion_group_start_at(self, payload: Dict[str, Any]) -> Dict[str, Any]:

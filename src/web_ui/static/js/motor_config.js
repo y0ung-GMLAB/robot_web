@@ -1928,6 +1928,12 @@ export function createMotorConfigController({
         ...(next.config || {}),
         controller_index: axis,
       };
+    } else if (field === SCHEDULE_END_FIELD) {
+      // 스케줄 끝에 이 모터를 끌까 · 켬이 기본이라 끌 때만 적는다 · 수정 목록 36
+      const config = { ...(next.config || {}) };
+      if (value === false) config[field] = false;
+      else delete config[field];
+      next.config = config;
     } else if (CONFIG_EDIT_FIELDS.includes(field)) {
       // 모터별 운전 한계·드라이브 설정 · 빈 값이면 오버라이드를 거둔다
       const text = String(value ?? '').trim();
@@ -2023,6 +2029,13 @@ export function createMotorConfigController({
   };
   const CONFIG_EDIT_FIELDS = [...AXIS_LIMIT_FIELDS, ...DRIVE_PARAM_FIELDS];
 
+  /** 운영 시간이 끝나 기준점에 세운 뒤 이 모터 서보(토크)를 끈다 · 기본 켬 · 수정 목록 36 */
+  const SCHEDULE_END_FIELD = 'schedule_end_servo_off';
+
+  function rowTurnsOffAtEnd(row) {
+    return row?.motor?.config?.[SCHEDULE_END_FIELD] !== false;
+  }
+
   /** 화면 이름 · 칸 머리와 읽기용 이름 */
   const DRIVE_PARAM_LABELS = {
     brake_delay_stop_ms: ['브레이크·정지 (ms)', '브레이크 정지 지연 (ms)'],
@@ -2111,7 +2124,9 @@ export function createMotorConfigController({
     const row = rowById(rowId);
     if (!row) return;
 
-    if (field === 'name') {
+    if (field === SCHEDULE_END_FIELD) {
+      setAxisEditValue(row, field, Boolean(input.checked));
+    } else if (field === 'name') {
       setAxisEditValue(row, 'name', input.value);
     } else if (field === 'driver_model') {
       setAxisEditValue(row, 'driver_model', input.value);
@@ -2497,6 +2512,7 @@ export function createMotorConfigController({
             driveParams: Object.fromEntries(DRIVE_PARAM_FIELDS.map(
               (field) => [field, rowLimitOverride(row, field)],
             )),
+            endOff: rowTurnsOffAtEnd(row),
             driveRead: Object.fromEntries([...DRIVE_PARAM_FIELDS, ...DRIVE_READ_ONLY_FIELDS].map(
               (field) => [field, driveReadValue(row, field)],
             )),
@@ -2534,6 +2550,7 @@ export function createMotorConfigController({
         limits: view.limits,
         driveParams: view.driveParams,
         driveRead: view.driveRead,
+        endOff: view.endOff,
       })));
 
       if (renderSignature !== lastAxisRenderSignature) {
@@ -2563,6 +2580,9 @@ export function createMotorConfigController({
                   </label>`).join('')}
                 <label class="axis-limit-field axis-drive-field" title="${escapeHtml(DRIVE_PARAM_LABELS.encoder_absolute_mode[1])}"><span>${DRIVE_PARAM_LABELS.encoder_absolute_mode[0]}</span>
                   <span class="mono axis-drive-readonly">${escapeHtml(absoluteModeText(view.driveRead.encoder_absolute_mode))}</span>
+                </label>
+                <label class="axis-limit-field" title="운영 시간이 끝나 기준점에 세운 뒤 이 모터 서보(다이나믹셀은 토크)를 끕니다 · 다이나믹셀은 브레이크가 없어 처질 수 있으면 끄세요 · 다음 시작 때 다시 켭니다"><span>끝나면 서보 OFF</span>
+                  <input type="checkbox" data-axis-edit="${SCHEDULE_END_FIELD}" data-axis-row-id="${escapeHtml(row.id)}"${view.endOff ? ' checked' : ''}${disabled}>
                 </label>
               </td>
               <td class="axis-status-stack">

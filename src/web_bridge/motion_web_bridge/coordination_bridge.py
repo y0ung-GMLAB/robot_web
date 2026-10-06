@@ -222,6 +222,9 @@ class CoordinationWebBridge:
         start_generation = int(self._project_generation())
         try:
             request = {'command': command}
+            if command == 'stop_after_cycle':
+                # 스케줄 끝이면 PC 마다 기준점 주차 → 서보 OFF · 수정 목록 36
+                request['reason'] = str(payload.get('reason') or '')
             if command in {'start_group', 'initialize_group'}:
                 request.update({
                     'run_mode': payload.get('run_mode', 'continuous'),
@@ -366,6 +369,13 @@ def local_motion_readiness(
         selection = _local_motion_selection(bridge)
     except ValueError as exc:
         return {'success': False, 'message': str(exc)}
+    # 스케줄 끝에 끈 서보를 켜고 나서 본다 · 안 그러면 「서보가 꺼져 있습니다」 로
+    # 이 PC 가 그룹에서 빠진다 · 수정 목록 36
+    parked = getattr(bridge, 'schedule_end_start_blocker', None)
+    if callable(parked):
+        reason = parked({})
+        if reason:
+            return {'success': False, 'message': reason}
     return bridge.motion_run_check({
         **selection,
         'initial_move_time_sec': None,
@@ -396,7 +406,7 @@ def local_motion_control(bridge: Any, payload: Mapping[str, Any]) -> Dict[str, A
             }
         return result
     if command == 'stop_after_cycle':
-        result = bridge.motion_run_stop_after_cycle()
+        result = bridge.motion_run_stop_after_cycle({'reason': payload.get('reason') or ''})
         if (
             result.get('success') is False
             and '활성 그룹 실행이 없습니다' in str(result.get('message') or '')

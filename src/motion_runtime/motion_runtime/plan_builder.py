@@ -134,6 +134,13 @@ class PlanBuilder:
             if str(value or '').strip()
         }
         initial_move_time_override = motion_run_rules._initial_move_time_override_sec(payload)
+        # 스케줄이 끝나 기준점(조인트 0°)에 세울 때 · 매핑의 초기 방식과 상관없이 ·
+        # 초기 위치 이동에서만 받는다 · 수정 목록 36
+        initial_mode_override = str(payload.get('initial_mode_override') or '').strip()
+        if initial_mode_override and (
+            not initialization_only or initial_mode_override != 'reference'
+        ):
+            raise ValueError('초기 방식 덮어쓰기는 초기 위치 이동의 기준점(reference)만 됩니다')
         #: 초기 위치 이동만 할 때 등록 파일이 없거나 비었으면 「애니메이션 없음」처럼 간다
         #: (2026-10-02 · 전에는 그 자리에서 실패해 0° 대체 경로까지 못 갔다)
         unusable_motion_file_note = ''
@@ -316,7 +323,11 @@ class PlanBuilder:
                     # 나머지가 못 돌 이유가 없다 · 사용자가 보고 판단한다.
                     missing_motion_data_ids.append(motion_id)
                     continue
-                initial_mode = str(row.get('initial_mode') or motion_run_rules.DEFAULT_INITIAL_MODE)
+                initial_mode = str(
+                    initial_mode_override
+                    or row.get('initial_mode')
+                    or motion_run_rules.DEFAULT_INITIAL_MODE
+                )
                 fallback_value = (
                     finite_float(row.get('initial_motion_position_deg')) or 0.0
                     if initial_mode == 'manual'
@@ -386,7 +397,10 @@ class PlanBuilder:
             if limit_error:
                 errors.append(f'Motion ID {motion_id}: {limit_error}')
 
-            initial_motion_source_value = motion_run_rules._initial_motion_value(row, groups[motion_id])
+            initial_motion_source_value = motion_run_rules._initial_motion_value(
+                {**row, 'initial_mode': initial_mode_override} if initial_mode_override else row,
+                groups[motion_id],
+            )
             initial_motion_value = motion_run_rules._clamp_motion_value(
                 initial_motion_source_value,
                 lower,

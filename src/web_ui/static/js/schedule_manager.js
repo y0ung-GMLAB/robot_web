@@ -3,7 +3,9 @@
  * Connects with /api/schedule REST endpoints and handles Schedule Modal UI
  */
 import {
+    configureMotionAutomation,
     deleteSchedule as requestDeleteSchedule,
+    fetchMotionRunStatus,
     fetchScheduleList,
     fetchScheduleStatus,
     saveSchedule as requestSaveSchedule,
@@ -15,6 +17,7 @@ import {
     motionScheduleBadgeState,
     motionScheduleScopeNote,
     motionScheduleTimezoneDrift,
+    scheduleEndText,
 } from './schedule_scope.js';
 import { motionHeaderConditionsUpdate } from './header_conditions.js';
 import { showConfirm } from './ui_dialogs.js';
@@ -104,6 +107,11 @@ const ScheduleManager = {
         const modeSelect = document.getElementById('scheduleRunMode');
         if (modeSelect) {
             modeSelect.addEventListener('change', () => this.saveRunMode(modeSelect.value));
+        }
+
+        const endSelect = document.getElementById('scheduleEndAction');
+        if (endSelect) {
+            endSelect.addEventListener('change', () => this.saveEndAction(endSelect.value));
         }
 
         // 상단 세그먼트 · 모달을 열지 않고 어디서든 한 번에 바꾼다 · P5
@@ -263,7 +271,35 @@ const ScheduleManager = {
         const modalEl = document.getElementById('scheduleModal');
         if (modalEl) {
             modalEl.style.display = 'block';
-            await this.loadSchedules();
+            await Promise.all([this.loadSchedules(), this.loadEndAction()]);
+        }
+    },
+
+    /** 운영 시간이 끝나면 · 이 PC 프로젝트 설정 · 지난번 결과도 함께 · 수정 목록 36 */
+    async loadEndAction() {
+        const select = document.getElementById('scheduleEndAction');
+        const note = document.getElementById('scheduleEndStatus');
+        try {
+            const payload = await fetchMotionRunStatus();
+            const action = payload?.status?.automation?.schedule_end_action;
+            if (select && (action === 'park_servo_off' || action === 'hold')) select.value = action;
+            if (note) note.textContent = scheduleEndText(payload?.schedule_end);
+        } catch (_error) {
+            // 못 읽으면 기본값 그대로 · 저장은 고를 때 한다
+        }
+    },
+
+    async saveEndAction(value) {
+        const note = document.getElementById('scheduleEndStatus');
+        const action = value === 'hold' ? 'hold' : 'park_servo_off';
+        try {
+            const result = await configureMotionAutomation({ schedule_end_action: action });
+            if (result?.success === false) throw new Error(result.message || '저장 실패');
+            if (note) note.textContent = action === 'hold'
+                ? '저장 · 운영 시간이 끝나면 마지막 자세에서 서보를 켠 채 둡니다'
+                : '저장 · 운영 시간이 끝나면 기준점으로 이동한 뒤 서보를 끕니다';
+        } catch (error) {
+            if (note) note.textContent = `저장 실패 · ${error?.message || error}`;
         }
     },
 

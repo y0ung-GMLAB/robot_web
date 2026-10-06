@@ -26,6 +26,10 @@ IDLE_STATES = frozenset({
     'motion_completed',
     'error',
     'blocked',
+    # 초기 위치 이동이 끝나 서 있다 · 수동 「초기 위치 이동」 과 스케줄 끝 기준점
+    # 주차가 여기서 멈춘다 · 전에는 도는 중으로 읽혀 다음 스케줄이 시작을 못 했다 ·
+    # 수정 목록 36
+    'initialized',
 })
 
 

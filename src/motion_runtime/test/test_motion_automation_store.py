@@ -32,6 +32,8 @@ def test_default_automation_is_a_repeat_policy_only():
         'dwell_sec': 0.0,
         # 그룹 PC 사이 맞춤 · 옛 동작(회차 맞춤)이 기본 · 수정 목록 35
         'group_sync_mode': 'lockstep',
+        # 운영 시간이 끝나면 · 기준점 주차 → 서보 OFF · 수정 목록 36
+        'schedule_end_action': 'park_servo_off',
         'motion_file_id': '',
         'mapping_file_id': '',
         'motion_sha256': '',

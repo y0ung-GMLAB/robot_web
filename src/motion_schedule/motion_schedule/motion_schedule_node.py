@@ -359,7 +359,13 @@ class MotionScheduleNode(Node):
         # 규칙이다 · 사람이 손으로 켠 것도 구간이 끝나면 멈춘다.
         if wanted is None and running:
             self.get_logger().info("[점검] 구간 밖인데 돌고 있다 · 회차 후 정지")
-            self._execute_stop_after_cycle(None)
+            # 스케줄 모드에서 운영 시간이 끝났다 · 정지 뒤 PC 마다 제 설정대로
+            # 기준점 주차 → 서보 OFF · 수동·오프 모드는 멈추기만 (사람이 만지는 중일 수 있다) ·
+            # 수정 목록 36
+            self._execute_stop_after_cycle(
+                None,
+                reason='schedule_end' if self._run_mode == SCHEDULE_MODE else '',
+            )
             return
 
         # **원하는 대로 되어 있으면 지난 거부는 잊는다** · §6-287
@@ -465,7 +471,7 @@ class MotionScheduleNode(Node):
         }
         self._send_http_request("/api/motion-run/start", payload)
 
-    def _execute_stop_after_cycle(self, item=None):
+    def _execute_stop_after_cycle(self, item=None, reason: str = ''):
         name = getattr(item, 'schedule_name', '구간 밖')
         schedule_id = getattr(item, 'schedule_id', '')
         self.get_logger().info(f"[SCHEDULE TRIGGER] STOP-AFTER-CYCLE -> '{name}'")
@@ -473,10 +479,12 @@ class MotionScheduleNode(Node):
             self._send_http_request("/api/coordination/control", {
                 "command": "stop_after_cycle",
                 "schedule_id": schedule_id or 'reconcile',
+                "reason": reason,
             })
             return
         self._send_http_request("/api/motion-run/stop-after-cycle", {
             "schedule_id": schedule_id or 'reconcile',
+            "reason": reason,
         })
 
     def _publish_status(self, now: datetime):

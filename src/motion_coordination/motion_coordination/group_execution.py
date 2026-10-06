@@ -16,8 +16,9 @@ from motion_common.repeat_policy import (
 #: PC 사이 메시지 약속 번호 · 메시지 칸을 바꿀 때마다 +1 · 수정 목록 30-7
 #:
 #: 1 · 칸 없음(옛 PC · 0 으로 읽힌다) · 2 · 2026-10-06 `GroupCommand.sync_mode` ·
-#: `GroupHeartbeat.operation_mode`·`web_url`·`protocol_version`
-GROUP_PROTOCOL_VERSION = 2
+#: `GroupHeartbeat.operation_mode`·`web_url`·`protocol_version` ·
+#: 3 · 2026-10-06 `GroupCommand.stop_reason` (스케줄 끝 주차 · 수정 목록 36)
+GROUP_PROTOCOL_VERSION = 3
 
 
 @dataclass

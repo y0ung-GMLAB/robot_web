@@ -627,6 +627,9 @@ class MotionRunManager(Node):
             'group_sync_mode': (
                 payload.get('group_sync_mode') or current.get('group_sync_mode')
             ),
+            'schedule_end_action': (
+                payload.get('schedule_end_action') or current.get('schedule_end_action')
+            ),
             'motion_file_id': motion_file_id if files_ready else '',
             'mapping_file_id': mapping_file_id if files_ready else '',
             'motion_sha256': '',

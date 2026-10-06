@@ -19,6 +19,10 @@ from typing import Any, Dict
 
 AUTOMATION_VERSION = 1
 
+#: 운영 시간이 끝나면 · 이름은 `web_bridge/schedule_end.py` 와 같다 · 수정 목록 36
+SCHEDULE_END_ACTIONS = ('park_servo_off', 'hold')
+DEFAULT_SCHEDULE_END_ACTION = 'park_servo_off'
+
 
 def default_automation_state() -> Dict[str, Any]:
     return {
@@ -27,6 +31,8 @@ def default_automation_state() -> Dict[str, Any]:
         'dwell_sec': 0.0,
         # 그룹 PC 사이 맞춤 · 마스터의 값으로 그룹을 시작한다 · 수정 목록 35
         'group_sync_mode': DEFAULT_GROUP_SYNC_MODE,
+        # 운영 시간이 끝나면 · 기준점 주차 → 서보 OFF(기본) / 서보 유지 · 수정 목록 36
+        'schedule_end_action': DEFAULT_SCHEDULE_END_ACTION,
         'motion_file_id': '',
         'mapping_file_id': '',
         'motion_sha256': '',
@@ -56,6 +62,12 @@ def normalize_automation_state(value: Any) -> Dict[str, Any]:
     if group_sync_mode not in GROUP_SYNC_MODES:
         raise ValueError(f'지원하지 않는 그룹 맞춤 방식입니다: {group_sync_mode}')
     state['group_sync_mode'] = group_sync_mode
+    end_action = str(
+        source.get('schedule_end_action') or DEFAULT_SCHEDULE_END_ACTION
+    ).strip().lower()
+    if end_action not in SCHEDULE_END_ACTIONS:
+        raise ValueError(f'지원하지 않는 스케줄 끝 동작입니다: {end_action}')
+    state['schedule_end_action'] = end_action
     for key in (
         'motion_file_id',
         'mapping_file_id',

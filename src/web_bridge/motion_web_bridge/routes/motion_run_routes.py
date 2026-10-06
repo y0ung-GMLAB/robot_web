@@ -157,5 +157,12 @@ def register_motion_run_routes(app: FastAPI, bridge, safety_first_stop) -> None:
         )
 
     @app.post('/api/motion-run/stop-after-cycle')
-    async def motion_run_stop_after_cycle_api():
-        return await asyncio.to_thread(bridge.motion_run_stop_after_cycle)
+    async def motion_run_stop_after_cycle_api(request: Request):
+        # 몸통은 선택 · 스케줄은 `reason: schedule_end` 를 싣는다 · 수정 목록 36
+        try:
+            body = await request.json()
+        except Exception:  # noqa: BLE001 · 빈 몸통 = 사람이 누른 정지
+            body = {}
+        return await asyncio.to_thread(
+            bridge.motion_run_stop_after_cycle, body if isinstance(body, dict) else {},
+        )
