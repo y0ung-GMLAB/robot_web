@@ -1246,6 +1246,8 @@
 }
 
 .header-condition-badges span.on { background-color: var(--green); }
+/* 모터 제어(supervisor) 응답 없음 · 수정 목록 29 */
+.header-condition-badges span.bad { background-color: var(--red); color: #fff; font-weight: 700; }
 .header-condition-badges span.off { background-color: var(--muted); }
 
 

@@ -1,7 +1,9 @@
+import faulthandler
 import json
 import math
 import os
 import re
+import signal
 import threading
 import time
 from pathlib import Path
@@ -165,6 +167,9 @@ class MotionSupervisor(Node):
         self._action_threads: Dict[int, threading.Thread] = {}
         self._motor_config_cache: Optional[Dict[str, Any]] = None
         self._last_motion_run_command_at = 0.0
+        #: 재생 명령을 **받은** 시각 · 내보낸 시각(`_last_motion_run_command_at`)과 다르다 ·
+        #: 알람·잠김으로 버린 명령도 받은 것이다 · 브리지가 「수신 정지」 를 가린다 · 수정 목록 14
+        self._last_motion_run_received_at = 0.0
         self._emergency_latched = False
         self._servo_alarm_guard = ServoAlarmGuard()
         self._motion_stop_block_until = 0.0
@@ -363,6 +368,7 @@ class MotionSupervisor(Node):
 
     def _motion_run_command_callback(self, msg: MotorStatus) -> None:
         """Relay runtime commands through the sole final command publisher."""
+        self._last_motion_run_received_at = time.monotonic()
         shape_error = self._motor_command_shape_error(msg)
         if shape_error:
             self.get_logger().error(
@@ -2411,6 +2417,11 @@ class MotionSupervisor(Node):
             'command_owner': self._command_arbiter_instance().snapshot().owner.value,
             'command_axis_owners': self._command_arbiter_instance().axis_owners(),
             **self._manual_activity_snapshot(),
+            # 마지막 재생 명령을 받은 지 몇 초 · 받은 적 없으면 None · 수정 목록 14
+            'motion_run_received_age_sec': (
+                round(time.monotonic() - self._last_motion_run_received_at, 3)
+                if getattr(self, '_last_motion_run_received_at', 0.0) else None
+            ),
             'message': message,
             'stamp': time.time(),
         }
@@ -2687,7 +2698,31 @@ class MotionSupervisor(Node):
         return values.finite_float(value)
 
 
+#: 스레드 덤프 파일 · 쓰레기 수거로 닫히지 않게 붙들어 둔다
+_THREAD_DUMP_FILE = None
+
+
+def _register_thread_dump() -> None:
+    """SIGUSR1 → 모든 스레드의 스택을 파일로 · 수정 목록 14-2 (2026-10-06)
+
+    수신 정지는 원인을 못 찾은 결함이다 · 브리지가 재시작하기 직전에 이 신호를
+    보내 그 순간 각 스레드가 어디에 서 있었는지 남긴다.
+    """
+    global _THREAD_DUMP_FILE
+    if not hasattr(signal, 'SIGUSR1'):
+        return
+    workspace = Path(os.environ.get('MOTION_WORKSPACE') or Path.cwd()).expanduser()
+    path = workspace / 'log' / 'motion_supervisor_threads.log'
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        _THREAD_DUMP_FILE = open(path, 'a', encoding='utf-8')
+        faulthandler.register(signal.SIGUSR1, file=_THREAD_DUMP_FILE, all_threads=True)
+    except OSError:
+        _THREAD_DUMP_FILE = None
+
+
 def main(args=None) -> None:
+    _register_thread_dump()
     rclpy.init(args=args)
     node = MotionSupervisor()
     executor = MultiThreadedExecutor(num_threads=2)

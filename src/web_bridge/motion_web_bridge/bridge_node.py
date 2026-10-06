@@ -4,6 +4,7 @@ import copy
 import json
 import os
 import socket
+import subprocess
 import threading
 import time
 from pathlib import Path
@@ -29,6 +30,7 @@ from . import motion_file_analysis, motor_config_rules, run_mode_gate
 from .execution_context_service import ExecutionContextService
 from .manual_motor_commands import ManualMotorCommandService
 from .schedule_end import ScheduleEndService
+from .supervisor_watchdog import SupervisorWatchdog
 from .manual_stream import ManualStreamService
 from . import animation_preview, sim_scene
 from .motor_runtime_service import MotorRuntimeService
@@ -318,6 +320,12 @@ class MotionWebBridge(Node):
         self._coordination_watchdog_stop_execution_id = ''
         self._safety_status_lock = threading.Lock()
         self._safety_status: Dict[str, Any] = {}
+        # supervisor 생존·수신 감시 · 수정 목록 29 + 14 · 상태 콜백보다 먼저 만든다
+        self.supervisor_watchdog = SupervisorWatchdog(
+            log_dir=Path(self.workspace_root) / 'log',
+            restart=self._restart_upper_services_for_watchdog,
+            dump_threads=self._dump_supervisor_threads,
+        )
         self._monitoring_motion_mapping_lock = threading.Lock()
         self._monitoring_motion_mapping_context_id = ''
         self._monitoring_motion_mapping_rows: List[Dict[str, Any]] = []
@@ -483,6 +491,9 @@ class MotionWebBridge(Node):
         )
         self._coordination_watchdog_timer = self.create_timer(
             0.1, self._coordination_watchdog_callback
+        )
+        self._supervisor_watchdog_timer = self.create_timer(
+            1.0, self._supervisor_watchdog_tick
         )
 
     def _log_started(self) -> None:
@@ -670,6 +681,9 @@ class MotionWebBridge(Node):
         if isinstance(payload, dict):
             with self._safety_status_lock:
                 self._safety_status = payload
+            watchdog = getattr(self, 'supervisor_watchdog', None)
+            if watchdog is not None:
+                watchdog.safety_received(payload)
 
     def _wait_for_motion_mapping_result(
         self,
@@ -747,8 +761,11 @@ class MotionWebBridge(Node):
             motion_state['project_scope'] = project_scope
             motion_state['project_generation'] = current_generation
 
+        watchdog = getattr(self, 'supervisor_watchdog', None)
         return {
             'bridge_state': 'ok',
+            # supervisor 살아 있나 · 자동 재시작 횟수 · 수정 목록 29
+            'supervisor_watchdog': watchdog.snapshot() if watchdog is not None else {},
             'bridge_instance_id': str(getattr(self, '_bridge_instance_id', '')),
             'bridge_started_at': getattr(self, '_bridge_started_at', None),
             'project_generation': self.current_project_generation(),
@@ -998,7 +1015,49 @@ class MotionWebBridge(Node):
             )
         return self.motor_runtime_control_blocker()
 
+    def _supervisor_watchdog_tick(self) -> None:
+        with self._motion_run_lock:
+            state = str((self._motion_run_status or {}).get('state') or '')
+        reason = self.supervisor_watchdog.tick(state)
+        if reason:
+            self.get_logger().error(f'[supervisor 감시] {reason}')
+
+    def _restart_upper_services_for_watchdog(self) -> str:
+        """상위 서비스만 재시작 · Motor Manager 는 따로라 모터는 홀드 · 수정 목록 29-2
+
+        「프로그램 재시작」 버튼과 같은 서비스를 같은 방법으로 다시 띄운다 ·
+        다만 프로젝트 변경 잠금은 보지 않는다 · supervisor 가 죽었으면 어차피
+        아무것도 움직이지 못한다.
+        """
+        managed = str(os.environ.get('MOTION_CONTROL_SERVICE_UNIT') or '').strip()
+        if managed != 'motion-control.service':
+            return '자동실행 서비스가 아니라 재시작하지 않음'
+        services = [managed]
+        coordination = str(os.environ.get('MOTION_COORDINATION_SERVICE_UNIT') or '').strip()
+        if coordination == 'motion-coordination.service':
+            services.append(coordination)
+        try:
+            motor_config_rules.schedule_managed_service_restart(*services)
+        except (OSError, ValueError) as exc:
+            return f'재시작 요청 실패: {exc}'
+        return '재시작 요청: ' + ', '.join(services)
+
+    @staticmethod
+    def _dump_supervisor_threads() -> None:
+        """supervisor 에 SIGUSR1 · 스레드 스택이 log/motion_supervisor_threads.log 에 · 14-2"""
+        if os.name != 'posix':
+            return
+        subprocess.run(
+            ['/usr/bin/pkill', '-USR1', '-f', 'motion_supervisor/motion_supervisor'],
+            check=False, timeout=2.0,
+        )
+        time.sleep(0.5)
+
     def motor_runtime_control_blocker(self) -> str:
+        watchdog = getattr(self, 'supervisor_watchdog', None)
+        silent = watchdog.unresponsive_reason() if watchdog is not None else ''
+        if silent:
+            return silent
         lock = getattr(self, '_lock', None)
         if lock is None:
             motion_state = copy.deepcopy(getattr(self, '_motion_state', None))

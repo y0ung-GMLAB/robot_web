@@ -17,14 +17,30 @@ const state = {
   enabled: null,
   joined: null,
   inWindow: null,
+  // supervisor 응답 없음 사유 · 빈 글자면 정상 · 수정 목록 29 (2026-10-06)
+  supervisorProblem: '',
 };
 
+/** 문제가 있을 때만 붙는 빨간 칸 · 모터로 가는 명령을 내는 노드가 응답하지 않는다 */
+function supervisorCell(problem) {
+  return problem
+    ? [{
+      key: 'supervisor',
+      text: '모터 제어 응답 없음',
+      on: false,
+      bad: true,
+      title: `${problem} · 10초 넘게 계속되면 상위 프로그램을 자동으로 다시 띄웁니다 (모터는 제자리 홀드)`,
+    }]
+    : [];
+}
+
 /** 순수 계산 · 화면을 모른다 · 시험은 이것만 본다 */
-export function motionHeaderConditionCells({ enabled, joined, inWindow }) {
+export function motionHeaderConditionCells({ enabled, joined, inWindow, supervisorProblem = '' }) {
   if (enabled === null || joined === null) {
     return [
       { key: 'scope', text: '그룹?', on: false, title: '그룹 참여 상태 확인 중' },
       { key: 'window', text: '운영시간?', on: false, title: '스케줄 상태 확인 중' },
+      ...supervisorCell(supervisorProblem),
     ];
   }
   const grouped = Boolean(enabled) && Boolean(joined);
@@ -48,6 +64,7 @@ export function motionHeaderConditionCells({ enabled, joined, inWindow }) {
         ? '지금은 스케줄 운영시간입니다'
         : '지금은 스케줄 운영시간이 아닙니다 · 운영시간이 되면 스스로 켭니다',
     },
+    ...supervisorCell(supervisorProblem),
   ];
 }
 
@@ -62,7 +79,7 @@ function draw() {
   host.dataset.key = key;
   host.replaceChildren(...cells.map((cell) => {
     const node = document.createElement('span');
-    node.className = cell.on ? 'on' : 'off';
+    node.className = cell.bad ? 'bad' : (cell.on ? 'on' : 'off');
     node.textContent = cell.text;
     node.title = cell.title || '';
     return node;

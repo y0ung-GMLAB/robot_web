@@ -24,6 +24,7 @@ import { renderAccess, renderMonitoring } from './monitoring.js';
 import { createOperationProgressManager } from './operation_progress.js';
 import { installDialogManager, showConfirm } from './ui_dialogs.js';
 import { StatusSocket } from './socket.js';
+import { motionHeaderConditionsUpdate } from './header_conditions.js';
 import { TERMINAL_FAILURES } from './restart_tracking.js';
 import {
   canChangeProjectInWorkspace,
@@ -1409,6 +1410,10 @@ function connectSocket() {
     },
     onMessage: (payload) => {
       if (!acceptProjectPayload(payload)) return;
+      // supervisor 응답 없음 · 상단 빨간 칸 · 수정 목록 29
+      motionHeaderConditionsUpdate({
+        supervisorProblem: String(payload?.supervisor_watchdog?.message || ''),
+      });
       renderServiceManagement(payload);
       renderAccess(payload, el);
       renderLatestState(motionStateFromPayload(payload));
