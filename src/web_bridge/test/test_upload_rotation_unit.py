@@ -29,8 +29,10 @@ def test_analysis_shows_rad_files_in_the_same_unit_as_playback():
     graph = sorted(
         point['value'] for series in result['graph_series'] for point in series['points']
     )
-    assert preview == pytest.approx([10.0, 20.0])
-    assert graph == pytest.approx([10.0, 20.0])
+    # 값은 내부 단위(rad) · 화면이 deg 로 바꿔 보여 준다 · 수정 목록 6
+    assert result['value_unit'] == 'rad'
+    assert preview == pytest.approx([math.radians(10.0), math.radians(20.0)])
+    assert graph == pytest.approx([math.radians(10.0), math.radians(20.0)])
 
 
 def test_analysis_refuses_an_unknown_unit():

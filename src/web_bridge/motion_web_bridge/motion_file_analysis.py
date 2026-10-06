@@ -153,6 +153,9 @@ def analyze_motion_json(content: str, *, include_records: bool) -> Dict[str, Any
         result['errors'].append(str(exc))
         return result
     result['rotation_unit'] = rotation_unit
+    # 아래 값(첫·끝·최소·최대·그래프·미리보기)의 단위 · 파일 단위와 상관없이 내부 단위 ·
+    # 화면이 이것을 보고 deg 로 바꿔 보여 준다 · 수정 목록 6
+    result['value_unit'] = motion_table.INTERNAL_ROTATION_UNIT
     result['format_valid'] = True
     result['headers'] = headers
     result['source'] = source

@@ -43,6 +43,7 @@ import { createServoAlarmController } from './servo_alarm.js';
 import { createCoordinationController } from './coordination.js';
 import { createRobotPackController } from './robot_pack.js';
 import { guardDocumentDrops } from './drop_files.js';
+import { inDegView, motionRunStatusInDeg } from './unit_view.js';
 
 const el = getElements();
 const operationProgress = createOperationProgressManager({ el });
@@ -312,8 +313,12 @@ function motionStateFromPayload(payload) {
   if (!payload?.motion_state) return null;
   return {
     ...payload.motion_state,
+    // 조인트 값(`motion_value_rad`)·재생 상태는 서버가 rad · 화면은 deg (수정 목록 6)
+    motors: inDegView(payload.motion_state.motors),
     motion_test_limits: payload.motion_test_limits || payload.motion_state.motion_test_limits || {},
-    motion_run_status: payload.motion_run_status || payload.motion_state.motion_run_status || {},
+    motion_run_status: motionRunStatusInDeg(
+      payload.motion_run_status || payload.motion_state.motion_run_status || {},
+    ),
     motor_activity: payload.motor_activity || {},
     execution_context: payload.execution_context || {},
     service_management: payload.service_management || {},

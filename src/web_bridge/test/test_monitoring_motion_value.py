@@ -19,7 +19,7 @@ def test_monitoring_uses_received_control_motion_value_not_motor_position():
     motor = state['motors'][0]
     assert motor['motion_axis_configured'] is True
     assert motor['motion_id'] == '2-1'
-    assert motor['motion_value_deg'] == 2.125
+    assert motor['motion_value_rad'] == 2.125
     assert motor['motion_value_status'] == 'received'
     assert motor['motion_value_source'] == 'midi'
 
@@ -39,7 +39,7 @@ def test_monitoring_distinguishes_unmapped_from_motion_value_not_received():
     assert state['motors'][0]['motion_value_message'] == '조인트 미설정'
     assert state['motors'][1]['motion_value_status'] == 'missing'
     assert state['motors'][1]['motion_value_message'] == '모션값 토픽 미수신'
-    assert state['motors'][1]['motion_value_deg'] is None
+    assert state['motors'][1]['motion_value_rad'] is None
 
 
 def test_monitoring_resolves_mapping_motor_ref_for_topic_value():
@@ -60,7 +60,7 @@ def test_monitoring_resolves_mapping_motor_ref_for_topic_value():
     )
 
     motor = state['motors'][0]
-    assert motor['motion_value_deg'] == -7.5
+    assert motor['motion_value_rad'] == -7.5
     assert motor['motion_value_message'] == '모션 실행 제어 모션값 수신'
 
 
@@ -84,7 +84,7 @@ def test_monitoring_resolves_master_scoped_ac_ref():
         {'values': {'3-2': 4.5}, 'sources': {'3-2': 'motion_run'}},
     )
 
-    assert state['motors'][0]['motion_value_deg'] == 4.5
+    assert state['motors'][0]['motion_value_rad'] == 4.5
 
 
 def test_monitoring_does_not_guess_duplicated_legacy_alias():
@@ -121,4 +121,4 @@ def test_monitoring_does_not_calculate_when_topic_value_is_invalid():
 
     motor = state['motors'][0]
     assert motor['motion_value_status'] == 'missing'
-    assert motor['motion_value_deg'] is None
+    assert motor['motion_value_rad'] is None

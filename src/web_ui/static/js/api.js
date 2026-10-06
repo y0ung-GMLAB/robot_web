@@ -1,3 +1,10 @@
+import {
+  inDegView,
+  inRadPayload,
+  liveOverridePayloadInRad,
+  motionRunResponseInDeg,
+} from './unit_view.js';
+
 const PROJECT_GENERATION_KEY = '__motionProjectGeneration';
 
 /** 서버가 앞서 갔을 때 알릴 곳 · §6-140
@@ -343,30 +350,39 @@ export const fetchMotionFile = (fileId) => request('GET', `/api/motion-files/${e
 
 export const deleteMotionFile = (fileId) => request('DELETE', `/api/motion-files/${encodeURIComponent(fileId)}`);
 
-export const fetchMotionMappings = () => request('GET', '/api/motion-mappings');
+// 조인트 매핑·재생 상태는 서버가 rad · 화면은 deg · 바꾸는 곳은 `unit_view.js` 하나 (수정 목록 6)
+export const fetchMotionMappings = () => request('GET', '/api/motion-mappings').then(inDegView);
 
-export const fetchMotionMapping = (fileId) => request('GET', `/api/motion-mappings/${encodeURIComponent(fileId)}`);
+export const fetchMotionMapping = (fileId) =>
+  request('GET', `/api/motion-mappings/${encodeURIComponent(fileId)}`).then(inDegView);
 
-export const saveMotionMapping = (payload) => request('POST', '/api/motion-mappings', { body: payload });
+export const saveMotionMapping = (payload) =>
+  request('POST', '/api/motion-mappings', { body: inRadPayload(payload) }).then(inDegView);
 
-export const validateMotionMapping = (payload) => request('POST', '/api/motion-mappings/validate', { body: payload });
+export const validateMotionMapping = (payload) =>
+  request('POST', '/api/motion-mappings/validate', { body: inRadPayload(payload) }).then(inDegView);
 
 /** 재생 등록만 바꾼다 · 조인트 매핑은 안 건드린다 · §6-160 */
-export const saveRegisteredMotionFile = (payload) => request('POST', '/api/motion-mappings/motion-file', { body: payload });
+export const saveRegisteredMotionFile = (payload) =>
+  request('POST', '/api/motion-mappings/motion-file', { body: inRadPayload(payload) }).then(inDegView);
 
 
-export const fetchMotionRunStatus = () => request('GET', '/api/motion-run/status');
+export const fetchMotionRunStatus = () => request('GET', '/api/motion-run/status').then(motionRunResponseInDeg);
 
-export const checkMotionRun = (payload) => request('POST', '/api/motion-run/check', { body: payload });
+export const checkMotionRun = (payload) =>
+  request('POST', '/api/motion-run/check', { body: payload }).then(motionRunResponseInDeg);
 
-export const initializeMotionRun = (payload) => request('POST', '/api/motion-run/initialize', { body: payload });
+export const initializeMotionRun = (payload) =>
+  request('POST', '/api/motion-run/initialize', { body: payload }).then(motionRunResponseInDeg);
 
-export const startMotionRun = (payload) => request('POST', '/api/motion-run/start', { body: payload });
+export const startMotionRun = (payload) =>
+  request('POST', '/api/motion-run/start', { body: payload }).then(motionRunResponseInDeg);
 
-export const configureMotionAutomation = (payload) => request('PUT', '/api/motion-run/automation', { body: payload });
+export const configureMotionAutomation = (payload) =>
+  request('PUT', '/api/motion-run/automation', { body: payload }).then(motionRunResponseInDeg);
 
 
-export const stopMotionRun = () => request('POST', '/api/motion-run/stop');
+export const stopMotionRun = () => request('POST', '/api/motion-run/stop').then(motionRunResponseInDeg);
 
 /** 웹 3D 표시 · 7-a · 장면(팩 1회) · 프레임(.sim.npz) */
 export const fetchPreviewScene = () => request('GET', '/api/preview/scene');
@@ -381,9 +397,11 @@ export const precomputeMotionFile = (fileId) =>
 
 /** 재생 라이브 오버라이드 · 조인트 뮤트·좁힌 리밋 · 재생 중에도 듣는다 · P7 */
 export const setMotionRunLiveOverride = (payload) =>
-  request('POST', '/api/motion-run/live-override', { body: payload });
+  request('POST', '/api/motion-run/live-override', { body: liveOverridePayloadInRad(payload) })
+    .then(motionRunResponseInDeg);
 
-export const stopMotionRunAfterCycle = () => request('POST', '/api/motion-run/stop-after-cycle');
+export const stopMotionRunAfterCycle = () =>
+  request('POST', '/api/motion-run/stop-after-cycle').then(motionRunResponseInDeg);
 
 // 로봇 팩 · PC 전역 (PC 1대 = 로봇 1대) · 축·모터·환경·MuJoCo 모델 묶음
 export const fetchRobotPack = () => request('GET', '/api/robot-pack');

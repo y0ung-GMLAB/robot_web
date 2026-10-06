@@ -43,10 +43,10 @@ MISSING_HEADER_MESSAGE = 'required header not found: frame, time(sec), motion Id
 # 전에는 이 칸을 **아무도 읽지 않았다** · rad 파일이 deg 로 읽혀 약 1/57 로만
 # 움직였다. 이제 파서가 모두 이 함수들을 거쳐 **내부 단위**로 바꿔 넘긴다.
 #
-# 내부 단위는 아직 deg 다 · 매핑·supervisor·화면이 rad 로 옮겨 가면(6-3~6-6)
-# `INTERNAL_ROTATION_UNIT` 하나만 바꾼다 · 파일 쪽 코드는 그대로다.
+# 내부 단위는 rad 다(6-3 · 2026-10-06) · 재생·조인트 매핑·웹 검사 모두 이 단위로 받는다 ·
+# 화면은 받은 뒤 deg 로 바꿔 보여 준다.
 
-INTERNAL_ROTATION_UNIT = 'deg'
+INTERNAL_ROTATION_UNIT = 'rad'
 
 _UNIT_NAMES = {
     'deg': 'deg', 'degree': 'deg', 'degrees': 'deg',

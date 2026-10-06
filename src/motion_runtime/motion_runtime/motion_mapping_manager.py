@@ -15,7 +15,7 @@ from std_msgs.msg import String
 from motion_common import paths as common_paths
 from motion_common.execution_context import verify_mapping_fingerprint
 from motion_common.paths import project_dir_for
-from motion_common import command_router, generation, motion_table, topics, values
+from motion_common import command_router, generation, joint_mapping, motion_table, topics, units, values
 from motion_common import store as common_store
 from motion_runtime.motion_run_constants import DEFAULT_INITIAL_MODE
 from motion_runtime.midi_bank_store import (
@@ -36,8 +36,15 @@ from motion_runtime.registered_motion_file import (
 # 프로젝트 폴더는 `motion_common.paths` 하나가 정한다 · 파라미터로 받지 않는다 · 수정 목록 32
 DEFAULT_MOTION_PROJECTS_DIR = common_paths.motion_projects_dir()
 #: 초기 위치 · 첫 장면(first_frame) · 직접 지정(manual) · 기준점(reference = 모션 0°) · 2026-10-02
-#: 조인트 최대 속도(deg/s)·가속도(deg/s²) · 애니메이션이 넘으면 재생 거부 · 수정 목록 5-2
-MOTION_RATE_LIMIT_FIELDS = ('max_velocity_deg_s', 'max_acceleration_deg_s2')
+#: 조인트 최대 속도(rad/s)·가속도(rad/s²) · 애니메이션이 넘으면 재생 거부 · 수정 목록 5-2
+MOTION_RATE_LIMIT_FIELDS = ('max_velocity_rad_s', 'max_acceleration_rad_s2')
+#: 매핑 파일의 각도 단위 · 2026-10-06 부터 rad · 수정 목록 6-3
+#:
+#: 파일에는 rad 칸(`*_rad`)과 같은 값의 deg 사본(`*_deg`)을 함께 쓴다 · 사본은
+#: **읽지 않는다**(rad 칸이 있으면 그것만) · 옛 버전으로 되돌린 PC 가 기준점·범위를
+#: 0·±180 기본값으로 읽어 모터가 엉뚱한 곳으로 가는 일을 막으려는 것뿐이다 ·
+#: 옛 버전이 저장하면 rad 칸이 사라지고 deg 만 남는다 → 새 버전은 deg 를 읽는다.
+MAPPING_ANGLE_UNIT = units.RAD
 
 INITIAL_MODES = ('first_frame', 'manual', 'reference')
 
@@ -371,7 +378,9 @@ class MotionMappingManager(Node):
                     if len(kept) > 1:
                         mapping['motion_playlist'] = kept
             mapping['file_id'] = path.name
-            content = yaml.safe_dump(mapping, sort_keys=False, allow_unicode=True)
+            content = yaml.safe_dump(
+                self._with_deg_mirror(mapping), sort_keys=False, allow_unicode=True,
+            )
             backup = atomic_write_with_backup(
                 path,
                 content,
@@ -388,6 +397,25 @@ class MotionMappingManager(Node):
             'validation': validation,
             'backup_file': str(backup) if backup is not None else '',
         }
+
+    @staticmethod
+    def _with_deg_mirror(mapping: Dict[str, Any]) -> Dict[str, Any]:
+        """파일에 쓸 모양 · rad 칸 뒤에 deg 사본 · 사본은 읽지 않는다(`MAPPING_ANGLE_UNIT` 설명)"""
+        rows = []
+        for row in mapping.get('mappings') or []:
+            if not isinstance(row, dict):
+                continue
+            mirrored = dict(row)
+            for key, value in row.items():
+                number = values.finite_float(value)
+                if number is None:
+                    continue
+                for rad_suffix, deg_suffix in (('_rad', '_deg'), ('_rad_s', '_deg_s'), ('_rad_s2', '_deg_s2')):
+                    if key.endswith(rad_suffix):
+                        mirrored[key[:-len(rad_suffix)] + deg_suffix] = units.rad_to_deg(number)
+                        break
+            rows.append(mirrored)
+        return {**mapping, 'mappings': rows}
 
     def _load_midi_banks(self, file_id: Any) -> Dict[str, Any]:
         path = self._mapping_file_path(file_id)
@@ -633,8 +661,9 @@ class MotionMappingManager(Node):
                 str(row.get('initial_mode') or DEFAULT_INITIAL_MODE).strip() or DEFAULT_INITIAL_MODE
             )
             reference_enabled = bool(row.get('reference_enabled', True))
-            reference_position = self._optional_float(row.get('reference_position_deg'), 0.0)
-            initial_position = self._optional_float(row.get('initial_motion_position_deg'), 0.0)
+            # 각도 칸은 rad · 옛 파일(deg)도 여기서 rad 로 · 수정 목록 6-3
+            reference_position = joint_mapping.angle(row, 'reference_position', units.RAD)
+            initial_position = joint_mapping.angle(row, 'initial_motion_position', units.RAD)
             initial_move_time = self._optional_float(row.get('initial_move_time_sec'), 5.0)
             if not reference_enabled:
                 reference_position = 0.0
@@ -644,26 +673,27 @@ class MotionMappingManager(Node):
                 'motor_ref': str(row.get('motor_ref') or '').strip().lower(),
                 'motor_axis': self._optional_int(row.get('motor_axis'), None),
                 'reference_enabled': reference_enabled,
-                'reference_position_deg': reference_position,
-                'motion_lower_deg': self._optional_float(row.get('motion_lower_deg'), -180.0),
-                'motion_upper_deg': self._optional_float(row.get('motion_upper_deg'), 180.0),
+                'reference_position_rad': reference_position,
+                'motion_lower_rad': joint_mapping.angle(row, 'motion_lower', units.RAD),
+                'motion_upper_rad': joint_mapping.angle(row, 'motion_upper', units.RAD),
                 'initial_mode': initial_mode,
-                'initial_motion_position_deg': initial_position,
+                'initial_motion_position_rad': initial_position,
                 'initial_move_time_sec': initial_move_time,
                 'invert': bool(row.get('invert', False)),
-                'offset_deg': self._optional_float(row.get('offset_deg'), 0.0),
+                'offset_rad': joint_mapping.angle(row, 'offset', units.RAD),
                 'scale': self._optional_float(row.get('scale'), 1.0),
                 'gear_ratio': self._optional_float(row.get('gear_ratio'), 1.0),
             })
             # 조인트 최대 속도·가속도 · 비우면 검사 안 함 · 적은 것만 둔다(옛 파일 모양 유지) · 수정 목록 5-2
-            for field in MOTION_RATE_LIMIT_FIELDS:
-                value = self._optional_float(row.get(field), None)
+            for rate_name, field in zip(('max_velocity', 'max_acceleration'), MOTION_RATE_LIMIT_FIELDS):
+                value = joint_mapping.rate(row, rate_name, units.RAD)
                 if value is not None:
                     normalized_rows[-1][field] = value
 
         playlist = playlist_from_mapping(mapping)
         normalized = {
             'file_id': str(mapping.get('file_id') or '').strip(),
+            'angle_unit': MAPPING_ANGLE_UNIT,
             'name': name,
             'motion_file_id': motion_file_id,
             'created_at': self._optional_float(mapping.get('created_at'), None),
@@ -730,14 +760,15 @@ class MotionMappingManager(Node):
             enabled = bool(row.get('enabled'))
             motor_ref = str(row.get('motor_ref') or '').strip()
             motor_axis = row.get('motor_axis')
-            lower = self._finite_float(row.get('motion_lower_deg'))
-            upper = self._finite_float(row.get('motion_upper_deg'))
+            # 정규화를 거친 줄이라 각도 칸은 rad 이름뿐이다 · 수정 목록 6-3
+            lower = self._finite_float(row.get('motion_lower_rad'))
+            upper = self._finite_float(row.get('motion_upper_rad'))
             scale = self._finite_float(row.get('scale'))
             gear_ratio = self._finite_float(row.get('gear_ratio'))
-            offset = self._finite_float(row.get('offset_deg'))
-            reference = self._finite_float(row.get('reference_position_deg'))
+            offset = self._finite_float(row.get('offset_rad'))
+            reference = self._finite_float(row.get('reference_position_rad'))
             reference_enabled = bool(row.get('reference_enabled', True))
-            initial_position = self._finite_float(row.get('initial_motion_position_deg'))
+            initial_position = self._finite_float(row.get('initial_motion_position_rad'))
             initial_time = self._finite_float(row.get('initial_move_time_sec'))
             initial_mode = str(row.get('initial_mode') or '').strip()
 
@@ -764,17 +795,17 @@ class MotionMappingManager(Node):
                 if limit is None or limit <= 0:
                     row_errors.append(f'{field} must be > 0 (비우면 검사 안 함)')
             if offset is None:
-                row_errors.append('offset_deg must be numeric')
+                row_errors.append('offset_rad must be numeric')
             if reference is None:
-                row_errors.append('reference_position_deg must be numeric')
+                row_errors.append('reference_position_rad must be numeric')
             if lower is None or upper is None:
                 row_errors.append('motion range must be numeric')
             elif lower > upper:
-                row_errors.append('motion_lower_deg must be <= motion_upper_deg')
+                row_errors.append('motion_lower_rad must be <= motion_upper_rad')
             if initial_mode not in INITIAL_MODES:
                 row_errors.append(f'initial_mode must be one of: {", ".join(INITIAL_MODES)}')
             if initial_position is None:
-                row_errors.append('initial_motion_position_deg must be numeric')
+                row_errors.append('initial_motion_position_rad must be numeric')
             if initial_time is None or initial_time <= 0:
                 row_errors.append('initial_move_time_sec must be > 0')
             if (
@@ -789,23 +820,23 @@ class MotionMappingManager(Node):
                 row_warnings.append('first frame value not found in selected motion file')
             if initial_mode == 'first_frame' and motion_id in first_values:
                 initial_position = first_values[motion_id]
-                row['initial_motion_position_deg'] = initial_position
+                row['initial_motion_position_rad'] = initial_position
             if initial_mode == 'reference':
                 initial_position = 0.0
-                row['initial_motion_position_deg'] = 0.0
+                row['initial_motion_position_rad'] = 0.0
                 if lower is not None and upper is not None and not (lower <= 0.0 <= upper):
                     row_warnings.append('reference (0°) is outside motion range')
             effective_reference = reference if reference_enabled else 0.0
 
             preview: Dict[str, Any] = {
                 'reference_enabled': reference_enabled,
-                'reference_position_deg': effective_reference,
-                'stored_reference_position_deg': reference,
-                'motion_lower_deg': lower,
-                'motion_upper_deg': upper,
-                'initial_motion_position_deg': initial_position,
-                'stored_initial_motion_position_deg': initial_position,
-                'motion_offset_deg': offset,
+                'reference_position_rad': effective_reference,
+                'stored_reference_position_rad': reference,
+                'motion_lower_rad': lower,
+                'motion_upper_rad': upper,
+                'initial_motion_position_rad': initial_position,
+                'stored_initial_motion_position_rad': initial_position,
+                'motion_offset_rad': offset,
                 'scale': scale,
                 'gear_ratio': gear_ratio,
             }
@@ -825,24 +856,24 @@ class MotionMappingManager(Node):
                     else None
                 )
                 preview.update({
-                    'motion_lower_output_deg': lower_output,
-                    'motion_upper_output_deg': upper_output,
-                    'motion_output_min_deg': min(lower_output, upper_output),
-                    'motion_output_max_deg': max(lower_output, upper_output),
-                    'motion_lower_motor_target_deg': lower_target,
-                    'motion_upper_motor_target_deg': upper_target,
-                    'motion_motor_target_min_deg': min(lower_target, upper_target),
-                    'motion_motor_target_max_deg': max(lower_target, upper_target),
-                    'manual_initial_output_deg': manual_output,
-                    'manual_initial_motor_target_deg': manual_target,
+                    'motion_lower_output_rad': lower_output,
+                    'motion_upper_output_rad': upper_output,
+                    'motion_output_min_rad': min(lower_output, upper_output),
+                    'motion_output_max_rad': max(lower_output, upper_output),
+                    'motion_lower_motor_target_rad': lower_target,
+                    'motion_upper_motor_target_rad': upper_target,
+                    'motion_motor_target_min_rad': min(lower_target, upper_target),
+                    'motion_motor_target_max_rad': max(lower_target, upper_target),
+                    'manual_initial_output_rad': manual_output,
+                    'manual_initial_motor_target_rad': manual_target,
                 })
                 if motion_id in first_values:
                     first_motion_value = first_values[motion_id]
                     first_output_value = self._motion_to_output_value(row, first_motion_value)
                     preview.update({
-                        'first_frame_motion_position_deg': first_motion_value,
-                        'first_frame_output_deg': first_output_value,
-                        'first_frame_motor_target_deg': self._motion_to_motor_target(row, first_motion_value),
+                        'first_frame_motion_position_rad': first_motion_value,
+                        'first_frame_output_rad': first_output_value,
+                        'first_frame_motor_target_rad': self._motion_to_motor_target(row, first_motion_value),
                     })
 
             for message in row_errors:
@@ -899,22 +930,20 @@ class MotionMappingManager(Node):
         except (TypeError, ValueError):
             return False
 
-    def _motion_to_output_value(self, row: Dict[str, Any], motion_value_deg: Optional[float]) -> float:
-        motion_value = self._finite_float(motion_value_deg)
-        if motion_value is None:
-            motion_value = 0.0
+    def _motion_to_output_value(self, row: Dict[str, Any], motion_value: Optional[float]) -> float:
+        """조인트 값(rad) → 감속기 앞 출력축 값(rad) · 기어비 곱하기 전"""
+        number = self._finite_float(motion_value)
+        if number is None:
+            number = 0.0
         scale = self._finite_float(row.get('scale')) or 1.0
-        offset = self._finite_float(row.get('offset_deg')) or 0.0
+        offset = joint_mapping.angle(row, 'offset', units.RAD)
         sign = -1.0 if bool(row.get('invert')) else 1.0
-        return (motion_value + offset) * scale * sign
+        return (number + offset) * scale * sign
 
-    def _motion_to_motor_target(self, row: Dict[str, Any], motion_value_deg: Optional[float]) -> float:
-        reference = self._finite_float(row.get('reference_position_deg')) or 0.0
-        if not bool(row.get('reference_enabled', True)):
-            reference = 0.0
-        gear_ratio = self._finite_float(row.get('gear_ratio')) or 1.0
-        output_value = self._motion_to_output_value(row, motion_value_deg)
-        return reference + (output_value * gear_ratio)
+    def _motion_to_motor_target(self, row: Dict[str, Any], motion_value: Optional[float]) -> float:
+        """조인트 값(rad) → 모터 값(rad) · 식은 `joint_mapping` 하나"""
+        number = self._finite_float(motion_value)
+        return joint_mapping.motor_target(row, 0.0 if number is None else number, units.RAD)
 
     def _motion_file_first_values(self, file_id: str) -> tuple[Dict[str, float], str]:
         try:
@@ -923,7 +952,7 @@ class MotionMappingManager(Node):
             rows = self._motion_rows_from_content(content)
             # 파일 단위 → 내부 단위 · 재생 파서와 같은 함수 · 수정 목록 6-2
             unit_scale = motion_table.rotation_unit_scale(
-                motion_table.rotation_unit_from_content(content),
+                motion_table.rotation_unit_from_content(content), units.RAD,
             )
         except (OSError, ValueError) as exc:
             return {}, f'motion file could not be read: {exc}'

@@ -20,7 +20,7 @@ from motion_common import repeat_policy
 from motion_control_msgs.msg import MotorStatus
 from std_msgs.msg import Int8MultiArray
 
-from motion_common import motion_table, motor_readiness
+from motion_common import joint_mapping, motion_table, motor_readiness, units, wire_units
 from motion_common.values import finite_float, optional_int
 
 from .motion_run_constants import DEFAULT_INITIAL_MODE, INITIAL_MOVE_TIME_OPTIONS_SEC
@@ -71,25 +71,25 @@ def _status_from_plan(state: str, message: str, plan: Dict[str, Any]) -> Dict[st
                 'motion_id': axis['motion_id'],
                 'motor_axis': axis['motor_axis'],
                 'motor_type': axis['motor_type'],
-                'initial_motion_source_position_deg': axis['initial_motion_source_position_deg'],
-                'initial_motion_position_deg': axis['initial_motion_position_deg'],
-                'initial_motor_target_deg': axis['initial_motor_target_deg'],
-                'motion_limit_lower_deg': axis['motion_limit_lower_deg'],
-                'motion_limit_upper_deg': axis['motion_limit_upper_deg'],
-                'source_motion_min_deg': axis['source_motion_min_deg'],
-                'source_motion_max_deg': axis['source_motion_max_deg'],
-                'command_motion_min_deg': axis['command_motion_min_deg'],
-                'command_motion_max_deg': axis['command_motion_max_deg'],
+                'initial_motion_source_position_rad': axis['initial_motion_source_position_rad'],
+                'initial_motion_position_rad': axis['initial_motion_position_rad'],
+                'initial_motor_target_rad': axis['initial_motor_target_rad'],
+                'motion_limit_lower_rad': axis['motion_limit_lower_rad'],
+                'motion_limit_upper_rad': axis['motion_limit_upper_rad'],
+                'source_motion_min_rad': axis['source_motion_min_rad'],
+                'source_motion_max_rad': axis['source_motion_max_rad'],
+                'command_motion_min_rad': axis['command_motion_min_rad'],
+                'command_motion_max_rad': axis['command_motion_max_rad'],
                 'motion_clamped': axis['motion_clamped'],
-                'target_min_deg': axis['target_min_deg'],
-                'target_max_deg': axis['target_max_deg'],
-                'loop_start_motion_deg': axis['loop_start_motion_deg'],
-                'loop_end_motion_deg': axis['loop_end_motion_deg'],
-                'loop_start_target_deg': axis['loop_start_target_deg'],
-                'loop_end_target_deg': axis['loop_end_target_deg'],
-                'loop_delta_deg': axis['loop_delta_deg'],
-                'loop_motor_delta_deg': axis['loop_motor_delta_deg'],
-                'loop_tolerance_deg': axis['loop_tolerance_deg'],
+                'target_min_rad': axis['target_min_rad'],
+                'target_max_rad': axis['target_max_rad'],
+                'loop_start_motion_rad': axis['loop_start_motion_rad'],
+                'loop_end_motion_rad': axis['loop_end_motion_rad'],
+                'loop_start_target_rad': axis['loop_start_target_rad'],
+                'loop_end_target_rad': axis['loop_end_target_rad'],
+                'loop_delta_rad': axis['loop_delta_rad'],
+                'loop_motor_delta_rad': axis['loop_motor_delta_rad'],
+                'loop_tolerance_rad': axis['loop_tolerance_rad'],
             }
             for axis in plan.get('axes', [])
         ],
@@ -177,7 +177,7 @@ def _interpolated_value(
 def _continuous_capability(axes: List[Dict[str, Any]]) -> Dict[str, Any]:
     mismatched = [
         axis for axis in axes
-        if float(axis['loop_delta_deg']) > float(axis['loop_tolerance_deg'])
+        if float(axis['loop_delta_rad']) > float(axis['loop_tolerance_rad'])
     ]
     if not mismatched:
         return {
@@ -185,8 +185,8 @@ def _continuous_capability(axes: List[Dict[str, Any]]) -> Dict[str, Any]:
             'reason': '모든 축의 모션 시작·종료값이 5° 이내입니다',
         }
     details = ', '.join(
-        f"Axis {axis['motor_axis']} 모션값 차이 {axis['loop_delta_deg']:.3f}° "
-        f"(허용 {axis['loop_tolerance_deg']:.3f}°)"
+        f"Axis {axis['motor_axis']} 모션값 차이 {units.rad_to_deg(axis['loop_delta_rad']):.3f}° "
+        f"(허용 {units.rad_to_deg(axis['loop_tolerance_rad']):.3f}°)"
         for axis in mismatched[:4]
     )
     return {
@@ -258,34 +258,24 @@ def _communication_lost_error(axes, motors: List[Dict[str, Any]]) -> str:
     return '통신이 끊긴 모터가 있어 재생을 멈춥니다 · ' + ', '.join(lost)
 
 
-def _motor_position_deg(motor: Optional[Dict[str, Any]]) -> Optional[float]:
-    if motor is None:
-        return None
-    for key in (
-        'position_deg',
-        'position_actual_deg',
-        'output_position_deg',
-        'present_position_deg',
-        'position_actual',
-        'position',
-    ):
-        number = finite_float(motor.get(key))
-        if number is not None:
-            return number
-    return None
+def _motor_position(motor: Optional[Dict[str, Any]]) -> Optional[float]:
+    """모터 현재 위치 · rad · 모터 상태 단위는 `wire_units` 가 안다 · 수정 목록 6"""
+    return wire_units.motor_position(motor)
 
 def _target_range_limit_error(
     motor: Dict[str, Any],
     target_min: float,
     target_max: float,
 ) -> str:
-    lower = finite_float(motor.get('lower'))
-    upper = finite_float(motor.get('upper'))
+    """목표 범위(rad)가 모터 하한·상한 밖이면 사유 · 글은 deg"""
+    lower = wire_units.motor_limit(motor, 'lower')
+    upper = wire_units.motor_limit(motor, 'upper')
     axis = optional_int(motor.get('controller_index'))
+    deg = units.rad_to_deg
     if lower is not None and target_min < lower:
-        return f'{axis}번 모터 목표 최소 {target_min:.3f} 가 하한 {lower:.3f} 보다 작습니다'
+        return f'{axis}번 모터 목표 최소 {deg(target_min):.3f}° 가 하한 {deg(lower):.3f}° 보다 작습니다'
     if upper is not None and target_max > upper:
-        return f'{axis}번 모터 목표 최대 {target_max:.3f} 가 상한 {upper:.3f} 보다 큽니다'
+        return f'{axis}번 모터 목표 최대 {deg(target_max):.3f}° 가 상한 {deg(upper):.3f}° 보다 큽니다'
     return ''
 
 
@@ -314,15 +304,8 @@ def _sorted_controller_axes(values: Any) -> List[int]:
     return sorted(axes)
 
 def _motor_target(row: Dict[str, Any], motion_value: float) -> float:
-    sign = -1.0 if bool(row.get('invert')) else 1.0
-    reference = finite_float(row.get('reference_position_deg')) or 0.0
-    if row.get('reference_enabled') is False:
-        reference = 0.0
-    offset = finite_float(row.get('offset_deg')) or 0.0
-    scale = finite_float(row.get('scale')) or 1.0
-    gear_ratio = finite_float(row.get('gear_ratio')) or 1.0
-    output_axis_value = (float(motion_value) + offset) * scale * sign
-    return reference + (output_axis_value * gear_ratio)
+    """조인트 값(rad) → 모터 값(rad) · 식은 `joint_mapping` 하나 · 수정 목록 6"""
+    return joint_mapping.motor_target(row, motion_value, units.RAD)
 
 def _motion_groups(
     records: List[Dict[str, Any]],
@@ -377,7 +360,7 @@ def _initial_motion_value(
 ) -> float:
     mode = str(row.get('initial_mode') or DEFAULT_INITIAL_MODE)
     if mode == 'manual':
-        return finite_float(row.get('initial_motion_position_deg')) or 0.0
+        return float(joint_mapping.angle(row, 'initial_motion_position', units.RAD))
     if mode == 'reference':
         # 기준점 · 애니메이션과 상관없이 늘 모션 0° (기준점 캡처한 자세) · 2026-10-02
         return 0.0

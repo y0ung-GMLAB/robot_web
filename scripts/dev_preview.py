@@ -23,6 +23,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import math
 import sys
 import time
 from pathlib import Path
@@ -79,14 +80,15 @@ def mapping_rows():
             'motor_axis': axis,
             'gear_ratio': gear,
             'invert': False,
-            'offset_deg': 0.0,
+            # 서버처럼 각도 칸은 rad · 화면이 deg 로 바꿔 보여 준다 · 수정 목록 6
+            'offset_rad': 0.0,
             'scale': 1.0,
-            'reference_position_deg': 0.0,
+            'reference_position_rad': 0.0,
             'reference_enabled': True,
-            'motion_lower_deg': lower,
-            'motion_upper_deg': upper,
+            'motion_lower_rad': math.radians(lower),
+            'motion_upper_rad': math.radians(upper),
             'initial_mode': 'first_frame',
-            'initial_position_deg': 0.0,
+            'initial_motion_position_rad': 0.0,
             'initial_move_time_sec': 5.0,
         }
         for name, axis, gear, lower, upper in JOINTS
@@ -134,6 +136,7 @@ def _mapping_doc():
     mapping = {
         'name': 'motion_axis',
         'file_id': 'motion_axis.yaml',
+        'angle_unit': 'rad',
         'motion_file_id': playlist[0] if playlist else '',
         'mappings': mapping_rows(),
     }
@@ -191,15 +194,15 @@ def snapshot():
                     'motion_id': name,
                     'motor_axis': axis,
                     'motor_type': 'ac_servo',
-                    'motion_limit_lower_deg': lower,
-                    'motion_limit_upper_deg': upper,
-                    'initial_motor_target_deg': 0.0,
-                    'target_min_deg': lower * gear,
-                    'target_max_deg': upper * gear,
-                    'loop_start_motion_deg': 0.0,
-                    'loop_end_motion_deg': 0.0,
-                    'loop_delta_deg': 0.0,
-                    'loop_tolerance_deg': 5.0,
+                    'motion_limit_lower_rad': math.radians(lower),
+                    'motion_limit_upper_rad': math.radians(upper),
+                    'initial_motor_target_rad': 0.0,
+                    'target_min_rad': math.radians(lower * gear),
+                    'target_max_rad': math.radians(upper * gear),
+                    'loop_start_motion_rad': 0.0,
+                    'loop_end_motion_rad': 0.0,
+                    'loop_delta_rad': 0.0,
+                    'loop_tolerance_rad': math.radians(5.0),
                     'motion_clamped': False,
                 }
                 for name, axis, gear, lower, upper in JOINTS

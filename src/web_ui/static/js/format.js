@@ -162,8 +162,11 @@ export function maxOf(values, seed = -Infinity) {
   return largest;
 }
 
-// 각도 단위 · 화면은 deg · 서버 값은 rad 로 옮겨 간다 · 변환은 여기 한 곳 · 수정 목록 6
+// 각도 단위 · 화면은 deg · 서버 값은 rad · 변환은 여기 한 곳 · 수정 목록 6
+// 서버(`motion_common.units` · Python math.radians/degrees)와 같은 곱셈 · 같은 값을
+// 왕복해도 rad 값이 끝자리까지 그대로다.
 const DEG_PER_RAD = 180 / Math.PI;
+const RAD_PER_DEG = Math.PI / 180;
 
 export function radToDeg(value) {
   const number = Number(value);
@@ -172,5 +175,5 @@ export function radToDeg(value) {
 
 export function degToRad(value) {
   const number = Number(value);
-  return Number.isFinite(number) ? number / DEG_PER_RAD : null;
+  return Number.isFinite(number) ? number * RAD_PER_DEG : null;
 }

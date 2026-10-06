@@ -48,6 +48,7 @@ import {
 } from './ui_dialogs.js';
 import { draggingFiles, droppedEntries, walkEntry } from './drop_files.js';
 import { createSim3dViewer } from './sim3d.js';
+import { analysisInDeg } from './unit_view.js';
 
 /** 차트 색 · 화면 테마(CSS 토큰)를 따른다 · 리디자인 2026-10-02
  *
@@ -474,7 +475,8 @@ function timeText(epochSeconds) {
 }
 
 function analysisOf(file) {
-  return file?.analysis || {};
+  // 값은 서버 내부 단위(rad) · 화면은 deg (수정 목록 6)
+  return analysisInDeg(file?.analysis);
 }
 
 function statusText(file) {
@@ -990,8 +992,8 @@ export function createMotionDataController({
 
 
   function firstMotionValueFor(motionId) {
-    const motionIds = Array.isArray(mappingMotionFileDetail?.analysis?.motion_ids)
-      ? mappingMotionFileDetail.analysis.motion_ids
+    const motionIds = Array.isArray(analysisOf(mappingMotionFileDetail)?.motion_ids)
+      ? analysisOf(mappingMotionFileDetail).motion_ids
       : [];
     const found = motionIds.find((item) => String(item.motion_id) === String(motionId));
     const value = Number(found?.first_value);

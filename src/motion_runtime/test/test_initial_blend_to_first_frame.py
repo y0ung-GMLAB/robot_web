@@ -13,8 +13,8 @@ from motion_runtime.motion_player import MotionPlayer
 def _axis(axis, initial, first, motion_first):
     return {
         'motion_id': f'j{axis}', 'motor_axis': axis, 'motor_type': 'ac_servo',
-        'initial_motor_target_deg': initial, 'first_frame_motor_target_deg': first,
-        'initial_motion_position_deg': 0.0, 'loop_start_motion_deg': motion_first,
+        'initial_motor_target_rad': initial, 'first_frame_motor_target_rad': first,
+        'initial_motion_position_rad': 0.0, 'loop_start_motion_rad': motion_first,
         'initial_move_time_sec': 5.0,
     }
 
@@ -57,7 +57,7 @@ def _player(manager, streams, published):
     )
     player._wait_for_targets = lambda axes, targets, timeout: (True, 'ok')
     player._publish_motion_values = published.update
-    player._target_tolerance_deg = lambda _axis: 0.05
+    player._target_tolerance = lambda _axis: 0.05
     player._target_settle_timeout_sec = lambda: 1.0
     return player
 
@@ -74,7 +74,7 @@ def _plan(blend):
 
 def _patch(monkeypatch):
     monkeypatch.setattr(motion_run_rules, '_motor_ready_error', lambda _motor: '')
-    monkeypatch.setattr(motion_run_rules, '_motor_position_deg', lambda _motor: 0.0)
+    monkeypatch.setattr(motion_run_rules, '_motor_position', lambda _motor: 0.0)
     monkeypatch.setattr(motion_run_rules, '_status_from_plan', lambda state, message, _plan: {
         'state': state, 'message': message,
     })
@@ -107,7 +107,7 @@ def test_initial_move_alone_stops_at_the_initial_pose(monkeypatch):
 
 def test_no_blend_when_the_first_frame_is_already_the_initial_pose():
     player = MotionPlayer(_Manager())
-    player._target_tolerance_deg = lambda _axis: 0.05
+    player._target_tolerance = lambda _axis: 0.05
     plan = {'blend_to_first_frame': True}
     axes = [_axis(0, 5.0, 5.01, 0.0)]
 

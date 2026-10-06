@@ -1,3 +1,5 @@
+import math
+
 import pytest
 import yaml
 
@@ -72,7 +74,7 @@ def test_duplicate_axis_and_invalid_numeric_ranges_are_rejected():
     assert validation['valid'] is False
     text = '\n'.join(validation['errors'])
     assert 'duplicated motor target' in text
-    assert 'motion_lower_deg must be <=' in text
+    assert 'motion_lower_rad must be <=' in text
     assert 'scale must be a non-zero number' in text
     assert 'gear_ratio must be > 0' in text
     assert 'initial_move_time_sec must be > 0' in text
@@ -87,10 +89,12 @@ def test_reference_offset_scale_invert_and_gear_ratio_calculation_contract():
         invert=True,
         gear_ratio=3.0,
     )
-    assert manager._motion_to_output_value(row, 7.0) == -24.0
-    assert manager._motion_to_motor_target(row, 7.0) == -62.0
+    # 줄은 deg(옛 파일) · 계산은 rad · 수정 목록 6
+    deg = math.radians
+    assert manager._motion_to_output_value(row, deg(7.0)) == pytest.approx(deg(-24.0))
+    assert manager._motion_to_motor_target(row, deg(7.0)) == pytest.approx(deg(-62.0))
     row['reference_enabled'] = False
-    assert manager._motion_to_motor_target(row, 7.0) == -72.0
+    assert manager._motion_to_motor_target(row, deg(7.0)) == pytest.approx(deg(-72.0))
 
 
 def test_mapping_save_list_load_round_trip_stays_inside_selected_project(tmp_path):
@@ -199,3 +203,56 @@ def test_mapping_save_rejects_a_stale_mapping_section_revision(tmp_path):
             'base_mapping_revision': first['file']['mapping_revision'],
             'mapping': first['mapping'],
         })
+
+
+def test_mapping_file_is_written_in_rad_with_a_deg_copy_for_older_versions(tmp_path):
+    """수정 목록 6-3 · 파일은 rad 칸 + 같은 값 deg 사본 · 읽을 때는 rad 칸만"""
+    manager = _manager()
+    manager.mappings_dir = tmp_path / 'p' / 'motion_axis_matching'
+    manager.motion_files_dir = tmp_path / 'p' / 'motions'
+    manager.mappings_dir.mkdir(parents=True)
+    manager.motion_files_dir.mkdir(parents=True)
+
+    saved = manager._save_mapping({'mapping': {
+        'name': 'units', 'motion_file_id': '',
+        'mappings': [_row(reference_position_deg=1234.5, motion_lower_deg=-10.0, motion_upper_deg=13.0,
+                          max_velocity_deg_s=80.0)],
+    }})
+    assert saved['success'] is True
+    row = saved['mapping']['mappings'][0]
+    assert saved['mapping']['angle_unit'] == 'rad'
+    assert row['reference_position_rad'] == pytest.approx(math.radians(1234.5))
+    assert row['max_velocity_rad_s'] == pytest.approx(math.radians(80.0))
+    assert not any(key.endswith('_deg') or key.endswith('_deg_s') for key in row)
+
+    on_disk = yaml.safe_load((manager.mappings_dir / 'units.yaml').read_text(encoding='utf-8'))
+    disk_row = on_disk['mappings'][0]
+    assert disk_row['motion_upper_rad'] == pytest.approx(math.radians(13.0))
+    # 옛 버전이 읽는 사본 · 같은 값
+    assert disk_row['motion_upper_deg'] == pytest.approx(13.0)
+    assert disk_row['reference_position_deg'] == pytest.approx(1234.5)
+    assert disk_row['max_velocity_deg_s'] == pytest.approx(80.0)
+
+    # 사본만 고쳐도 새 버전은 rad 칸을 읽는다
+    disk_row['motion_upper_deg'] = 99.0
+    (manager.mappings_dir / 'units.yaml').write_text(yaml.safe_dump(on_disk), encoding='utf-8')
+    loaded = manager._load_mapping('units.yaml')
+    assert loaded['mapping']['mappings'][0]['motion_upper_rad'] == pytest.approx(math.radians(13.0))
+
+    # 옛 버전이 저장한 파일(rad 칸 없음) · deg 를 읽어 rad 로
+    del disk_row['motion_upper_rad']
+    (manager.mappings_dir / 'units.yaml').write_text(yaml.safe_dump(on_disk), encoding='utf-8')
+    loaded = manager._load_mapping('units.yaml')
+    assert loaded['mapping']['mappings'][0]['motion_upper_rad'] == pytest.approx(math.radians(99.0))
+
+
+def test_revision_is_the_same_from_the_save_reply_and_from_the_file(tmp_path):
+    """저장 응답의 개정 번호 = 파일을 다시 읽어 센 값 · deg 사본이 섞여도 (§6-242 와 같은 함정)"""
+    manager = _manager()
+    manager.mappings_dir = tmp_path / 'p' / 'motion_axis_matching'
+    manager.motion_files_dir = tmp_path / 'p' / 'motions'
+    manager.mappings_dir.mkdir(parents=True)
+    manager.motion_files_dir.mkdir(parents=True)
+    saved = manager._save_mapping({'mapping': {'name': 'rev', 'motion_file_id': '', 'mappings': [_row()]}})
+    loaded = manager._load_mapping('rev.yaml')
+    assert saved['file']['mapping_revision'] == loaded['file']['mapping_revision']

@@ -1,4 +1,5 @@
 import json
+import math
 import threading
 import time
 from pathlib import Path
@@ -17,6 +18,14 @@ from motion_runtime.motion_run_constants import (
 from motion_runtime.motion_run_manager import (
     MotionRunManager,
 )
+
+
+#: 재생 안쪽 값은 rad · 매핑 줄은 옛 파일처럼 deg 로 적어도 같은 값이 나온다 · 수정 목록 6
+R = math.radians
+
+
+def _approx_deg(value):
+    return pytest.approx(R(value), abs=1e-12)
 
 
 def _patch_rule(name, value):
@@ -75,13 +84,13 @@ def test_continuous_capability_accepts_values_inside_axis_tolerances():
     capability = motion_run_rules._continuous_capability([
         {
             'motor_axis': 0,
-            'loop_delta_deg': 4.9,
-            'loop_tolerance_deg': 5.0,
+            'loop_delta_rad': R(4.9),
+            'loop_tolerance_rad': R(5.0),
         },
         {
             'motor_axis': 1,
-            'loop_delta_deg': 5.0,
-            'loop_tolerance_deg': 5.0,
+            'loop_delta_rad': R(5.0),
+            'loop_tolerance_rad': R(5.0),
         },
     ])
 
@@ -122,9 +131,9 @@ def test_motion_run_publishes_final_control_motion_values():
 def test_four_degree_motion_seam_is_allowed_even_if_motor_delta_is_large():
     capability = motion_run_rules._continuous_capability([{
         'motor_axis': 0,
-        'loop_delta_deg': 4.0,
-        'loop_motor_delta_deg': 400.0,
-        'loop_tolerance_deg': 5.0,
+        'loop_delta_rad': R(4.0),
+        'loop_motor_delta_rad': R(400.0),
+        'loop_tolerance_rad': R(5.0),
     }])
 
     assert capability['available'] is True
@@ -182,7 +191,7 @@ def test_legacy_initial_disabled_setting_is_ignored():
         'initial_motion_position_deg': 12.5,
     }, [{'value': -3.0}])
 
-    assert initial == 12.5
+    assert initial == _approx_deg(12.5)
 
 
 def test_legacy_initial_disabled_mapping_keeps_initial_settings_and_drops_option():
@@ -201,7 +210,7 @@ def test_legacy_initial_disabled_mapping_keeps_initial_settings_and_drops_option
 
     row = normalized['mappings'][0]
     assert 'initial_enabled' not in row
-    assert row['initial_motion_position_deg'] == 12.5
+    assert row['initial_motion_position_rad'] == _approx_deg(12.5)
     assert row['initial_move_time_sec'] == 5.0
 
 
@@ -209,8 +218,8 @@ def test_continuous_capability_rejects_only_continuous_mode_on_seam_mismatch():
     capability = motion_run_rules._continuous_capability([
         {
             'motor_axis': 2,
-            'loop_delta_deg': 5.001,
-            'loop_tolerance_deg': 5.0,
+            'loop_delta_rad': R(5.001),
+            'loop_tolerance_rad': R(5.0),
         },
     ])
 
@@ -250,7 +259,8 @@ def test_motor_target_applies_reference_scale_direction_and_gear_ratio():
         'gear_ratio': 2.0,
     }
 
-    assert motion_run_rules._motor_target(row, 3.0) == -5.0
+    # (3 + 2) × 1.5 × −1 × 2 = −15 · 기준점 10 → −5 (deg 로 적은 줄 · rad 로 계산)
+    assert motion_run_rules._motor_target(row, R(3.0)) == _approx_deg(-5.0)
 
 
 def test_interpolation_uses_precomputed_time_index_for_irregular_samples():
@@ -304,9 +314,9 @@ def test_first_frame_initialization_without_motion_file_uses_motion_zero():
     )
 
     axis = plan['axes'][0]
-    assert axis['initial_motion_source_position_deg'] == 0.0
-    assert axis['initial_motion_position_deg'] == 0.0
-    assert axis['initial_motor_target_deg'] == 100.0
+    assert axis['initial_motion_source_position_rad'] == 0.0
+    assert axis['initial_motion_position_rad'] == 0.0
+    assert axis['initial_motor_target_rad'] == _approx_deg(100.0)
     assert plan['capabilities']['single_run']['available'] is False
     assert '첫 프레임 데이터가 없어 모션 0°' in plan['warnings'][0]
 
@@ -344,7 +354,7 @@ def test_reference_initial_mode_without_animation_needs_no_warning():
     mapping['mappings'][0]['initial_mode'] = 'reference'
     manager = _initialization_only_manager(mapping)
     plan = manager._plan_builder.build({'motion_file_id': '', 'mapping_file_id': 'mapping.yaml'}, initialization_only=True)
-    assert plan['axes'][0]['initial_motor_target_deg'] == 100.0
+    assert plan['axes'][0]['initial_motor_target_rad'] == _approx_deg(100.0)
     assert not any('첫 프레임 데이터가 없어' in item for item in plan['warnings'])
 
 
@@ -364,7 +374,7 @@ def test_initialization_with_a_deleted_registered_file_falls_back_to_zero():
         {'motion_file_id': 'gone.json', 'mapping_file_id': 'mapping.yaml'},
         initialization_only=True,
     )
-    assert plan['axes'][0]['initial_motor_target_deg'] == 100.0
+    assert plan['axes'][0]['initial_motor_target_rad'] == _approx_deg(100.0)
     assert '재생 등록된 애니메이션 gone.json 를 찾지 못했습니다' in plan['warnings'][0]
 
 
@@ -380,7 +390,7 @@ def test_initialization_with_an_empty_registered_file_falls_back_to_zero():
         {'motion_file_id': 'empty.json', 'mapping_file_id': 'mapping.yaml'},
         initialization_only=True,
     )
-    assert plan['axes'][0]['initial_motor_target_deg'] == 100.0
+    assert plan['axes'][0]['initial_motor_target_rad'] == _approx_deg(100.0)
     assert '쓸 수 있는 줄이 없습니다' in plan['warnings'][0]
 
 
@@ -472,7 +482,7 @@ def test_motion_run_initialization_uses_every_enabled_mapping_axis():
     }, initialization_only=True)
 
     assert [axis['motion_id'] for axis in plan['axes']] == ['1-1', '1-2']
-    assert [axis['initial_motion_position_deg'] for axis in plan['axes']] == [-2.0, 4.0]
+    assert [axis['initial_motion_position_rad'] for axis in plan['axes']] == [_approx_deg(-2.0), _approx_deg(4.0)]
     # 2026-10-02 · 화면 이름 「수동」 → 「직접 지정」 에 맞춘다
     assert 'Motion ID 1-1: 모션 데이터가 없어 직접 지정 초기위치 -2.000°를 사용' in plan['warnings']
     assert plan['samples'] == []
@@ -622,7 +632,7 @@ def test_motion_run_playback_uses_only_motion_ids_present_in_file():
     manager._mapping_file_path = lambda _file_id: None
     manager._load_motion_records = lambda _path: [
         {'time_sec': 0.02, 'motion_id': '1-2', 'value': 0.0},
-        {'time_sec': 0.04, 'motion_id': '1-2', 'value': 2.0},
+        {'time_sec': 0.04, 'motion_id': '1-2', 'value': R(2.0)},
     ]
     manager._load_mapping = lambda _path: {
         'motion_file_id': 'motion.json',
@@ -645,8 +655,8 @@ def test_motion_run_playback_uses_only_motion_ids_present_in_file():
     })
 
     assert [axis['motion_id'] for axis in plan['axes']] == ['1-2']
-    assert plan['samples'][0]['positions'] == {1: 10.0}
-    assert plan['samples'][-1]['positions'] == {1: 12.0}
+    assert plan['samples'][0]['positions'] == {1: _approx_deg(10.0)}
+    assert plan['samples'][-1]['positions'] == {1: _approx_deg(12.0)}
 
 
 def test_auto_start_runs_motion_only_after_initialization_completes():
@@ -931,7 +941,7 @@ def test_plan_keeps_single_run_available_when_continuous_seam_fails():
     manager._mapping_file_path = lambda _file_id: None
     manager._load_motion_records = lambda _path: [
         {'time_sec': 0.0, 'motion_id': 'joint', 'value': 0.0},
-        {'time_sec': 1.0, 'motion_id': 'joint', 'value': 6.0},
+        {'time_sec': 1.0, 'motion_id': 'joint', 'value': R(6.0)},
     ]
     manager._load_mapping = lambda _path: {
         'motion_file_id': 'motion.json',
@@ -956,13 +966,13 @@ def test_plan_keeps_single_run_available_when_continuous_seam_fails():
     assert plan['capabilities']['initial_position']['available'] is True
     assert plan['capabilities']['single_run']['available'] is True
     assert plan['capabilities']['continuous_run']['available'] is False
-    assert plan['axes'][0]['loop_start_motion_deg'] == 0.0
-    assert plan['axes'][0]['loop_end_motion_deg'] == 6.0
-    assert plan['axes'][0]['loop_start_target_deg'] == 10.0
-    assert plan['axes'][0]['loop_end_target_deg'] == 16.0
-    assert plan['axes'][0]['loop_delta_deg'] == 6.0
-    assert plan['axes'][0]['loop_motor_delta_deg'] == 6.0
-    assert plan['axes'][0]['loop_tolerance_deg'] == 5.0
+    assert plan['axes'][0]['loop_start_motion_rad'] == 0.0
+    assert plan['axes'][0]['loop_end_motion_rad'] == _approx_deg(6.0)
+    assert plan['axes'][0]['loop_start_target_rad'] == _approx_deg(10.0)
+    assert plan['axes'][0]['loop_end_target_rad'] == _approx_deg(16.0)
+    assert plan['axes'][0]['loop_delta_rad'] == _approx_deg(6.0)
+    assert plan['axes'][0]['loop_motor_delta_rad'] == _approx_deg(6.0)
+    assert plan['axes'][0]['loop_tolerance_rad'] == _approx_deg(5.0)
 
 
 def test_plan_resolves_current_axis_from_stable_alias_instead_of_saved_axis():
@@ -1058,9 +1068,9 @@ def test_plan_runs_with_out_of_range_data_and_clamps_every_command():
     manager._motion_file_path = lambda _file_id: None
     manager._mapping_file_path = lambda _file_id: None
     manager._load_motion_records = lambda _path: [
-        {'time_sec': 0.0, 'motion_id': 'joint', 'value': -35.0},
+        {'time_sec': 0.0, 'motion_id': 'joint', 'value': R(-35.0)},
         {'time_sec': 0.5, 'motion_id': 'joint', 'value': 0.0},
-        {'time_sec': 1.0, 'motion_id': 'joint', 'value': 35.0},
+        {'time_sec': 1.0, 'motion_id': 'joint', 'value': R(35.0)},
     ]
     manager._load_mapping = lambda _path: {
         'motion_file_id': 'motion.json',
@@ -1091,11 +1101,11 @@ def test_plan_runs_with_out_of_range_data_and_clamps_every_command():
     assert plan['capabilities']['single_run']['available'] is True
     assert len(plan['warnings']) == 2
     assert axis['motion_clamped'] is True
-    assert axis['initial_motion_source_position_deg'] == -35.0
-    assert axis['initial_motion_position_deg'] == -30.0
-    assert axis['initial_motor_target_deg'] == -30.0
-    assert min(commanded) == -30.0
-    assert max(commanded) == 30.0
+    assert axis['initial_motion_source_position_rad'] == _approx_deg(-35.0)
+    assert axis['initial_motion_position_rad'] == _approx_deg(-30.0)
+    assert axis['initial_motor_target_rad'] == _approx_deg(-30.0)
+    assert min(commanded) == _approx_deg(-30.0)
+    assert max(commanded) == _approx_deg(30.0)
 
 
 def test_motion_studio_can_use_read_only_mapping_with_generated_preview_file():
@@ -1108,7 +1118,7 @@ def test_motion_studio_can_use_read_only_mapping_with_generated_preview_file():
     manager._mapping_file_path = lambda _file_id: None
     manager._load_motion_records = lambda _path: [
         {'time_sec': 0.02, 'motion_id': '1-2', 'value': 0.0},
-        {'time_sec': 0.04, 'motion_id': '1-2', 'value': 2.0},
+        {'time_sec': 0.04, 'motion_id': '1-2', 'value': R(2.0)},
     ]
     manager._load_mapping = lambda _path: {
         'motion_file_id': 'original.json',
@@ -1133,7 +1143,7 @@ def test_motion_studio_can_use_read_only_mapping_with_generated_preview_file():
 
     assert plan['request_source'] == 'motion_studio'
     assert [axis['motion_id'] for axis in plan['axes']] == ['1-2']
-    assert plan['samples'][-1]['positions'] == {1: 12.0}
+    assert plan['samples'][-1]['positions'] == {1: _approx_deg(12.0)}
 
 
 def test_normal_motion_run_still_rejects_mapping_file_mismatch():

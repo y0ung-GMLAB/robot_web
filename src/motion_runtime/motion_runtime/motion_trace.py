@@ -13,8 +13,9 @@
     HHMMSS_c0001_<모션파일>.csv    회차 하나 · time_sec 과 축마다 target/actual/error
     index.jsonl                    회차마다 한 줄 · 파일 이름, 결과, 축별 최대·RMS 오차
 
-값은 **조인트 deg** (모션 파일과 같은 단위) · 모터 실제 위치를 조인트 매핑의
-변환식으로 되돌린 값이다 · Blender 에서 만든 곡선과 바로 견줄 수 있다.
+값은 **조인트 deg** · 모터 실제 위치를 조인트 매핑의 변환식으로 되돌린 값이다 ·
+사람이 열어 보는 파일이라 칸 이름(`_deg`)대로 deg 로 쓴다 · 재생 안쪽 값은 rad 라
+쓰기 직전에만 바꾼다(수정 목록 6).
 오차는 같은 줄의 목표와 실제의 차이 · 명령 한 틱 지연이 포함된다.
 """
 
@@ -32,7 +33,7 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Mapping, Optional, Tuple
 
-from motion_common import store
+from motion_common import joint_mapping, store, units
 from motion_common.values import finite_float
 
 TRACE_DIRNAME = 'motion_trace'
@@ -48,19 +49,9 @@ PRUNE_INTERVAL_SEC = 60.0
 Decoder = Callable[[Any], Dict[int, float]]
 
 
-def joint_from_motor(row: Mapping[str, Any], motor_deg: float) -> Optional[float]:
-    """motion_run_rules._motor_target 의 역 · 모터 deg → 모션값(모션 deg)."""
-    reference = finite_float(row.get('reference_position_deg')) or 0.0
-    if row.get('reference_enabled') is False:
-        reference = 0.0
-    offset = finite_float(row.get('offset_deg')) or 0.0
-    scale = finite_float(row.get('scale')) or 1.0
-    gear_ratio = finite_float(row.get('gear_ratio')) or 1.0
-    sign = -1.0 if bool(row.get('invert')) else 1.0
-    gain = scale * sign * gear_ratio
-    if gain == 0.0:
-        return None
-    return (float(motor_deg) - reference) / gain - offset
+def joint_from_motor(row: Mapping[str, Any], motor_rad: float) -> Optional[float]:
+    """motion_run_rules._motor_target 의 역 · 모터 rad → 조인트 rad · 식은 `joint_mapping` 하나."""
+    return joint_mapping.joint_from_motor(row, motor_rad, units.RAD)
 
 
 def _safe_stem(value: Any) -> str:
@@ -226,6 +217,9 @@ class MotionTraceRecorder:
                     joint_from_motor(axis.row, actual_motor[axis.motor_axis])
                     if axis.motor_axis in actual_motor else None
                 )
+                # 파일은 deg · 여기서만 바꾼다
+                target = None if target is None else units.rad_to_deg(target)
+                actual = None if actual is None else units.rad_to_deg(actual)
                 error = actual - target if actual is not None and target is not None else None
                 if error is not None:
                     s = stats[axis.motion_id]

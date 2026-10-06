@@ -20,7 +20,7 @@ from typing import Any, Dict, List, Mapping, Optional
 
 from motion_common import axis_ownership
 
-from motion_common import repeat_policy
+from motion_common import repeat_policy, units, wire_units
 
 from motion_common.values import finite_float
 from std_msgs.msg import Int8MultiArray, String
@@ -260,11 +260,11 @@ class MotionPlayer:
                 )
                 if motor_error:
                     raise RuntimeError(motor_error)
-                current = motion_run_rules._motor_position_deg(motor)
+                current = motion_run_rules._motor_position(motor)
                 if current is None:
                     raise RuntimeError(f'{motor_axis}번 모터의 현재 위치를 읽을 수 없습니다')
                 starts[motor_axis] = current
-                targets[motor_axis] = float(axis['initial_motor_target_deg'])
+                targets[motor_axis] = float(axis['initial_motor_target_rad'])
                 durations[motor_axis] = max(float(axis.get('initial_move_time_sec') or 0.0), self.manager.period_sec)
 
             max_duration = max(durations.values()) if durations else self.manager.period_sec
@@ -302,7 +302,7 @@ class MotionPlayer:
             if not reached:
                 raise RuntimeError(f'초기 위치 도달 확인 실패: {message}')
             motion_values = {
-                str(axis['motion_id']): float(axis['initial_motion_position_deg'])
+                str(axis['motion_id']): float(axis['initial_motion_position_rad'])
                 for axis in init_axes
             }
             blend_targets = self._first_frame_targets(plan, init_axes, targets)
@@ -323,7 +323,7 @@ class MotionPlayer:
                     raise RuntimeError(f'첫 프레임 도달 확인 실패: {message}')
                 motion_values = {
                     str(axis['motion_id']): float(
-                        axis.get('loop_start_motion_deg', axis['initial_motion_position_deg'])
+                        axis.get('loop_start_motion_rad', axis['initial_motion_position_rad'])
                     )
                     for axis in init_axes
                 }
@@ -662,10 +662,10 @@ class MotionPlayer:
         differs = False
         for axis in axes:
             motor_axis = int(axis['motor_axis'])
-            first = axis.get('first_frame_motor_target_deg')
+            first = axis.get('first_frame_motor_target_rad')
             if first is None or motor_axis not in targets:
                 continue
-            if abs(float(first) - float(targets[motor_axis])) > self._target_tolerance_deg(axis):
+            if abs(float(first) - float(targets[motor_axis])) > self._target_tolerance(axis):
                 blended[motor_axis] = float(first)
                 differs = True
         return blended if differs else {}
@@ -858,9 +858,9 @@ class MotionPlayer:
                 )
                 if ready_error:
                     return False, ready_error
-                current = motion_run_rules._motor_position_deg(motor)
+                current = motion_run_rules._motor_position(motor)
                 target = float(targets[motor_axis])
-                tolerance = self._target_tolerance_deg(axis_plan)
+                tolerance = self._target_tolerance(axis_plan)
                 if current is None:
                     ok = False
                     messages.append(f'{motor_axis}번 모터의 현재 위치를 읽을 수 없습니다')
@@ -869,8 +869,8 @@ class MotionPlayer:
                 if error > tolerance:
                     ok = False
                     messages.append(
-                        f'{motor_axis}번 모터 현재 {current:.3f} deg · '
-                        f'목표 {target:.3f} deg · 오차 {error:.3f} deg'
+                        f'{motor_axis}번 모터 현재 {units.rad_to_deg(current):.3f} deg · '
+                        f'목표 {units.rad_to_deg(target):.3f} deg · 오차 {units.rad_to_deg(error):.3f} deg'
                     )
             if ok:
                 return True, 'targets reached'
@@ -1168,7 +1168,8 @@ class MotionPlayer:
                 if axis_plan.get('motor_type') == 'dynamixel'
                 else CW_NEW_SET_POINT_MINAS
             )
-            command.position[slot] = float(target)
+            # 안쪽은 rad · 명령 토픽 단위로는 여기서만 바꾼다 · 수정 목록 6
+            command.position[slot] = wire_units.command_value(target)
         self.manager._command_pub.publish(command)
 
     def _publish_motion_values(self, values: Dict[str, float]) -> None:
@@ -1239,16 +1240,17 @@ class MotionPlayer:
             self.manager.target_settle_timeout_sec,
         )
 
-    def _target_tolerance_deg(self, axis_plan: Dict[str, Any]) -> float:
+    def _target_tolerance(self, axis_plan: Dict[str, Any]) -> float:
+        """도달 허용 오차 · rad · 파라미터는 사람이 적는 값이라 deg 그대로 둔다 · 수정 목록 6"""
         if axis_plan.get('motor_type') == 'dynamixel':
-            return self.manager._runtime_float_parameter(
+            return units.deg_to_rad(self.manager._runtime_float_parameter(
                 'dynamixel_target_tolerance_deg',
                 self.manager.dynamixel_target_tolerance_deg,
-            )
-        return self.manager._runtime_float_parameter(
+            ))
+        return units.deg_to_rad(self.manager._runtime_float_parameter(
             'ac_target_tolerance_deg',
             self.manager.ac_target_tolerance_deg,
-        )
+        ))
 
     @staticmethod
     def _playback_axes(

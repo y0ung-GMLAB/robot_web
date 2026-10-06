@@ -27,7 +27,7 @@ from typing import Any, Callable, Dict, List, Optional
 
 import yaml
 
-from motion_common import robot_pack
+from motion_common import joint_mapping, robot_pack, units
 from motion_common.store import atomic_write_json
 
 PREV_DIRNAME = robot_pack.PACK_DIRNAME + '.prev'
@@ -311,7 +311,7 @@ def mapping_diff(workspace_root: Path, mapping: Optional[Dict[str, Any]]) -> Dic
             entry['differences'].append('조인트 매핑에 motion_id 없음')
         else:
             ratio = row.get('gear_ratio', 1.0)
-            span = [row.get('motion_lower_deg', -180.0), row.get('motion_upper_deg', 180.0)]
+            span = _mapping_range_deg(row)
             entry.update(mapping_ratio=ratio, mapping_range=span)
             if not _close(ratio, axis.ratio):
                 entry['differences'].append('감속·기어비')
@@ -323,10 +323,18 @@ def mapping_diff(workspace_root: Path, mapping: Optional[Dict[str, Any]]) -> Dic
             'joint': '',
             'motion_id': motion_id,
             'mapping_ratio': row.get('gear_ratio', 1.0),
-            'mapping_range': [row.get('motion_lower_deg', -180.0), row.get('motion_upper_deg', 180.0)],
+            'mapping_range': _mapping_range_deg(row),
             'differences': ['팩에 motion_id 없음'],
         })
     return {'success': True, 'available': True, 'rows': rows}
+
+
+def _mapping_range_deg(row: Dict[str, Any]) -> List[float]:
+    """매핑 범위 · 팩(`range_deg`)과 견주려고 deg 로 · 매핑 파일은 rad(옛 파일 deg) · 수정 목록 6"""
+    return [
+        joint_mapping.angle(row, 'motion_lower', units.DEG),
+        joint_mapping.angle(row, 'motion_upper', units.DEG),
+    ]
 
 
 def active_mapping_diff(workspace_root: Path, repository) -> Dict[str, Any]:

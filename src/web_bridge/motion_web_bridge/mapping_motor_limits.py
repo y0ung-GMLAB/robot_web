@@ -1,13 +1,14 @@
 """조인트 매핑 범위 → 모터 운전 한계(drivers[].lower/upper) · 2026-10-02
 
-리밋의 원본은 **조인트 매핑의 최소·최대(조인트 deg) 하나**다 (사용자 결정).
-모터 설정의 `lower/upper`(모터 deg)는 사람이 따로 적는 값이 아니라 여기서
+리밋의 원본은 **조인트 매핑의 최소·최대 하나**다 (사용자 결정).
+모터 설정의 `lower/upper`(모터 쪽 값)는 사람이 따로 적는 값이 아니라 여기서
 환산해 넣는 값이다 · 그래서 재생 클리핑(plan_builder)과 드라이브 soft limit
 (MINAS 0x607D 등 · motor_manager 가 부팅 때 씀)이 늘 같은 범위를 쓴다.
 
     motor = ref + (motion + offset) × scale × sign × gear
 
-`motion_runtime.motion_run_rules._motor_target` 과 같은 식이다 (테스트로 고정).
+식은 `motion_common.joint_mapping` 하나다 · 매핑은 rad, 모터 설정 파일은
+`wire_units.MOTOR_CONFIG_UNIT`(motor_manager 입력이 rad 가 될 때까지 deg) · 수정 목록 6.
 Dynamixel 도 같은 식 · 감속·기어비는 줄에 적힌 값 그대로 (외부 기어 사용 사례) ·
 Dynamixel 은 Extended Position 모드라 드라이브 Min/Max Position Limit 이
 안 먹고, 한계는 supervisor·plan_builder 가 이 `lower/upper` 로 지킨다 ·
@@ -23,17 +24,14 @@ from typing import Any, Dict, Iterable, List, Optional, Tuple
 
 import yaml
 
+from motion_common import joint_mapping, units, wire_units
 from motion_common import motor_ref as motor_ref_rules
 from motion_common.values import optional_int
 
 from motion_web_bridge.motor_config_rules import expand_shared_driver_profiles
 
-#: 매핑 저장본의 범위 기본값 (motion_mapping_manager._normalize_mapping 과 같다)
-DEFAULT_MOTION_LOWER_DEG = -180.0
-DEFAULT_MOTION_UPPER_DEG = 180.0
-
-#: 파일에 적을 자릿수 · 모터 deg 0.001° 단위
-LIMIT_DECIMALS = 3
+#: 파일에 적을 자릿수 · deg 면 0.001° · rad 면 1e-6 rad(≈0.00006°)
+LIMIT_DECIMALS = 3 if wire_units.MOTOR_CONFIG_UNIT == units.DEG else 6
 
 
 def _float(value: Any, default: float) -> float:
@@ -45,23 +43,16 @@ def _float(value: Any, default: float) -> float:
 
 
 def motor_target(row: Dict[str, Any], motion_value: float) -> float:
-    """조인트 deg → 모터 deg · `motion_run_rules._motor_target` 과 같은 식."""
-    sign = -1.0 if bool(row.get('invert')) else 1.0
-    reference = _float(row.get('reference_position_deg'), 0.0)
-    if row.get('reference_enabled') is False:
-        reference = 0.0
-    offset = _float(row.get('offset_deg'), 0.0)
-    scale = _float(row.get('scale'), 1.0) or 1.0
-    gear_ratio = _float(row.get('gear_ratio'), 1.0) or 1.0
-    return reference + (float(motion_value) + offset) * scale * sign * gear_ratio
+    """조인트 rad → 모터 rad · `joint_mapping.motor_target` 그대로."""
+    return joint_mapping.motor_target(row, motion_value, units.RAD)
 
 
 def row_motor_limits(row: Dict[str, Any]) -> Tuple[float, float]:
-    """한 줄의 조인트 범위를 모터 deg (하한, 상한)으로 · 반전이면 뒤집혀 정렬된다."""
-    lower = _float(row.get('motion_lower_deg'), DEFAULT_MOTION_LOWER_DEG)
-    upper = _float(row.get('motion_upper_deg'), DEFAULT_MOTION_UPPER_DEG)
-    first = motor_target(row, lower)
-    second = motor_target(row, upper)
+    """한 줄의 조인트 범위를 모터 설정 단위 (하한, 상한)으로 · 반전이면 뒤집혀 정렬된다."""
+    lower = joint_mapping.angle(row, 'motion_lower', units.RAD)
+    upper = joint_mapping.angle(row, 'motion_upper', units.RAD)
+    first = wire_units.config_value(motor_target(row, lower))
+    second = wire_units.config_value(motor_target(row, upper))
     low, high = min(first, second), max(first, second)
     return round(low, LIMIT_DECIMALS), round(high, LIMIT_DECIMALS)
 

@@ -23,9 +23,11 @@ def test_unit_names_and_legacy_files():
 
 
 def test_scale_goes_to_the_internal_unit():
-    assert motion_table.INTERNAL_ROTATION_UNIT == 'deg'
-    assert motion_table.rotation_unit_scale('deg') == 1.0
-    assert motion_table.rotation_unit_scale('rad') == pytest.approx(180.0 / math.pi)
+    # 내부 단위는 rad · 수정 목록 6-3 (2026-10-06)
+    assert motion_table.INTERNAL_ROTATION_UNIT == 'rad'
+    assert motion_table.rotation_unit_scale('rad') == 1.0
+    assert motion_table.rotation_unit_scale('deg') == pytest.approx(math.pi / 180.0)
+    assert motion_table.rotation_unit_scale('rad', 'deg') == pytest.approx(180.0 / math.pi)
     assert motion_table.rotation_unit_scale('deg', 'rad') == pytest.approx(math.pi / 180.0)
     assert motion_table.rotation_unit_scale('rad', 'rad') == 1.0
 
@@ -41,12 +43,12 @@ def test_unit_is_read_from_the_header_line_or_the_whole_object():
 
 
 def test_records_are_scaled_in_place():
-    records = [{'value': math.pi / 2}, {'value': -math.pi}]
-    motion_table.scale_record_values(records, 'rad')
-    assert [round(r['value'], 9) for r in records] == [90.0, -180.0]
-    same = [{'value': 12.5}]
-    motion_table.scale_record_values(same, 'deg')
-    assert same == [{'value': 12.5}]
+    records = [{'value': 90.0}, {'value': -180.0}]
+    motion_table.scale_record_values(records, 'deg')
+    assert [round(r['value'], 9) for r in records] == [round(math.pi / 2, 9), round(-math.pi, 9)]
+    same = [{'value': 0.125}]
+    motion_table.scale_record_values(same, 'rad')
+    assert same == [{'value': 0.125}]
 
 
 def _converter():

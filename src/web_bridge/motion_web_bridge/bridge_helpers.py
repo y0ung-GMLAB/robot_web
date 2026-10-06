@@ -209,7 +209,7 @@ def add_monitoring_motion_values(
         motor.update({
             'motion_axis_configured': False,
             'motion_id': None,
-            'motion_value_deg': None,
+            'motion_value_rad': None,
             'motion_value_status': 'unmapped',
             'motion_value_message': '조인트 미설정',
             'motion_value_source': None,
@@ -244,7 +244,7 @@ def add_monitoring_motion_values(
         source = str(value_sources.get(motion_id) or '')
         source_label = {'stream': '수동 페이더', 'motion_run': '모션 실행'}.get(source, source)
         motor.update({
-            'motion_value_deg': round(motion_value, 6),
+            'motion_value_rad': round(motion_value, 9),
             'motion_value_status': 'received',
             'motion_value_message': (
                 f'{source_label} 제어 모션값 수신'

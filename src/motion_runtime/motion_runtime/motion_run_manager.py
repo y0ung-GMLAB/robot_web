@@ -12,7 +12,7 @@ import yaml
 from motion_common import paths as common_paths
 from motion_common.execution_context import confirm_context_id
 from motion_common.paths import project_dir_for
-from motion_common import command_router, generation as generation_mod, motion_table, topics
+from motion_common import command_router, generation as generation_mod, motion_table, topics, wire_units
 from motion_common.values import finite_float, optional_int
 from motion_control_msgs.msg import MotorStatus
 from rclpy.node import Node
@@ -46,9 +46,12 @@ DEFAULT_MOTION_PROJECTS_DIR = common_paths.motion_projects_dir()
 
 
 def _decode_motor_positions(raw: bytes) -> Dict[int, float]:
-    """모터 노드 상태 바이트 → {controller_index: 모터 deg} · 기록 쓰기 스레드가 부른다."""
+    """모터 노드 상태 바이트 → {controller_index: 모터 rad} · 기록 쓰기 스레드가 부른다."""
     msg = deserialize_message(raw, MotorStatus)
-    return {int(index): float(position) for index, position in zip(msg.controller_index, msg.position)}
+    return {
+        int(index): wire_units.from_motor_node(position)
+        for index, position in zip(msg.controller_index, msg.position)
+    }
 
 
 #: 재생이 **비켜 주지 않아도 되는** 주인 · §6-290
@@ -888,7 +891,7 @@ class MotionRunManager(Node):
                             if motor_error:
                                 error = motor_error
                                 break
-                            if motion_run_rules._motor_position_deg(motor) is None:
+                            if motion_run_rules._motor_position(motor) is None:
                                 error = f'{motor_axis}번 모터의 현재 위치를 읽을 수 없습니다'
                                 break
                     except ValueError as exc:

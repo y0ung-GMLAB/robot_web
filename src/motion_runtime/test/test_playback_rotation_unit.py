@@ -28,8 +28,9 @@ def _write(path: Path, unit):
 
 
 def _values(records, motion_id):
+    """재생 안쪽 값은 rad(수정 목록 6-3) · 읽기 쉽게 deg 로 바꿔 견준다"""
     return [
-        round(record['value'], 9)
+        round(math.degrees(record['value']), 9)
         for record in sorted(records, key=lambda item: item['time_sec'])
         if record['motion_id'] == motion_id
     ]
@@ -64,5 +65,5 @@ def test_mapping_screen_first_frame_uses_the_same_unit(tmp_path):
     values, error = manager._motion_file_first_values('r.json')
 
     assert error == ''
-    assert values['Neck_Yaw'] == pytest.approx(10.0)
-    assert values['Eye_Pitch'] == pytest.approx(-10.0)
+    assert values['Neck_Yaw'] == pytest.approx(math.radians(10.0))
+    assert values['Eye_Pitch'] == pytest.approx(math.radians(-10.0))
