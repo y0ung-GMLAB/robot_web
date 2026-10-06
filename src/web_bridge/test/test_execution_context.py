@@ -483,7 +483,7 @@ def test_range_recovery_flag_is_forwarded_to_motion_supervisor(monkeypatch):
         'project_generation': 1,
         'command': 'ac_servo_absolute_move',
         'axis': 0,
-        'target_deg': -1000.0,
+        'target_rad': -1000.0,
         'range_recovery': True,
     }]
 

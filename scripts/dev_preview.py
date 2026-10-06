@@ -158,9 +158,9 @@ def snapshot():
             'state': 'detected',
             'servo_on': state['servo_on'],
             'fault': False,
-            'position_deg': round(position, 3),
-            'position': round(position, 3),
-            'velocity_deg_s': 0.0,
+            # 서버처럼 rad · 화면이 deg 로 바꿔 보여 준다 · 수정 목록 6-5
+            'position_rad': math.radians(position),
+            'velocity_rad_s': 0.0,
             'torque_percent': 3.0,
             'motion_id': name,
             'lower': -36000.0,
@@ -297,7 +297,7 @@ async def ws_manual_stream(websocket: WebSocket):
             kind = message.get('type')
             if kind == 'target':
                 axis = int(message.get('axis'))
-                state['targets'][axis] = float(message.get('target_deg'))
+                state['targets'][axis] = math.degrees(float(message.get('target_rad')))
             elif kind == 'release':
                 for axis in message.get('axes') or []:
                     state['targets'][int(axis)] = state['positions'][int(axis)]
@@ -572,7 +572,7 @@ async def fake_jog(request: Request):
     """가짜 조그 · 목표에 상대 이동을 더한다 · 앞 조그가 덜 끝났으면 거절(실물과 같게)"""
     body = await request.json()
     axis = int(body.get('axis'))
-    delta = float(body.get('relative_deg') or 0.0)
+    delta = math.degrees(float(body.get('relative_rad') or 0.0))
     if state['run_mode'] == 'off':
         return {'success': False, 'message': '오프 모드 · 명령이 차단되어 있습니다',
                 'project_generation': state['generation']}

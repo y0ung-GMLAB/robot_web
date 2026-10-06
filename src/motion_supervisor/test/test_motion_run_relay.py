@@ -1,4 +1,5 @@
 import json
+import math
 import threading
 import time
 
@@ -28,6 +29,11 @@ class QuietLogger:
 
     def error(self, *_args, **_kwargs):
         pass
+
+
+#: supervisor 안쪽·요청은 rad · motor_manager 로 나가는 값은 아직 deg · 수정 목록 6-4
+#: 시험은 읽기 쉽게 deg 로 적고 들어가는 값만 rad 로 바꾼다 · 나간 값은 deg 로 그대로 견준다
+R = math.radians
 
 
 def _targets_by_axis(command):
@@ -68,10 +74,10 @@ def test_runtime_command_is_rejected_while_emergency_stop_is_latched():
 def test_ac_servo_jog_duration_uses_40ms_units_with_half_second_cap():
     supervisor = MotionSupervisor.__new__(MotionSupervisor)
     supervisor.action_period_sec = 0.02
-    supervisor._velocity_limit_deg_sec = lambda _motor: 18000.0
-    supervisor._acceleration_limit_deg_sec2 = lambda _motor: 180000.0
+    supervisor._velocity_limit = lambda _motor: R(18000.0)
+    supervisor._acceleration_limit = lambda _motor: R(180000.0)
 
-    corrected = supervisor._correct_jog_duration_sec({}, 0.0, 360.0)
+    corrected = supervisor._correct_jog_duration_sec({}, 0.0, R(360.0))
     steps = supervisor._jog_step_count(corrected['applied_sec'])
 
     assert corrected['applied_sec'] == pytest.approx(0.48)
@@ -82,10 +88,10 @@ def test_ac_servo_jog_duration_uses_40ms_units_with_half_second_cap():
 def test_ac_servo_jog_exceeds_half_second_for_lower_motor_limits():
     supervisor = MotionSupervisor.__new__(MotionSupervisor)
     supervisor.action_period_sec = 0.02
-    supervisor._velocity_limit_deg_sec = lambda _motor: 300.0
-    supervisor._acceleration_limit_deg_sec2 = lambda _motor: 3000.0
+    supervisor._velocity_limit = lambda _motor: R(300.0)
+    supervisor._acceleration_limit = lambda _motor: R(3000.0)
 
-    corrected = supervisor._correct_jog_duration_sec({}, 0.0, 360.0)
+    corrected = supervisor._correct_jog_duration_sec({}, 0.0, R(360.0))
     steps = supervisor._jog_step_count(corrected['applied_sec'])
 
     assert corrected['applied_sec'] == pytest.approx(1.8)
@@ -101,17 +107,17 @@ def test_range_recovery_accepts_only_the_violated_boundary():
         'upper': 1000.0,
     }
 
-    assert supervisor._range_recovery_target_error(motor, -1200.0, -1000.0) == ''
-    assert supervisor._range_recovery_target_error(motor, 1200.0, 1000.0) == ''
+    assert supervisor._range_recovery_target_error(motor, R(-1200.0), R(-1000.0)) == ''
+    assert supervisor._range_recovery_target_error(motor, R(1200.0), R(1000.0)) == ''
     assert '하한 한계값' in supervisor._range_recovery_target_error(
         motor,
-        -1200.0,
-        -900.0,
+        R(-1200.0),
+        R(-900.0),
     )
     assert '이미 위치 한계 안에 있습니다' in supervisor._range_recovery_target_error(
         motor,
         0.0,
-        -1000.0,
+        R(-1000.0),
     )
 
 
@@ -135,15 +141,15 @@ def test_range_recovery_sends_one_in_range_target_without_intermediate_targets()
         [motor],
         motor,
         0,
-        -1200.0,
-        -1000.0,
+        R(-1200.0),
+        R(-1000.0),
         'recovery-1',
         is_ac_servo=True,
     )
 
     assert success is True
     assert 'range recovery started' in message
-    assert published == [(0, -1000.0)]
+    assert published == [(0, R(-1000.0))]
     assert supervisor._active_actions[0]['steps'] == 1.0
     assert supervisor._active_actions[0]['last_step'] == 1.0
 
@@ -186,15 +192,15 @@ def test_midi_result_returns_the_exact_supervisor_approved_command_values():
         'axis': 2,
         'motion_id': '3-1',
         'mapping_file_id': 'mapping.yaml',
-        'motion_deg': 170.0,
-        'target_deg': 180.0,
+        'motion_rad': R(170.0),
+        'target_rad': R(180.0),
     }, True, 'accepted')
 
     assert result['success'] is True
     assert result['motion_id'] == '3-1'
     assert result['mapping_file_id'] == 'mapping.yaml'
-    assert result['motion_deg'] == 170.0
-    assert result['target_deg'] == 180.0
+    assert result['motion_rad'] == R(170.0)
+    assert result['target_rad'] == R(180.0)
 
 
 def test_midi_batch_publishes_multiple_axes_in_one_motor_status():
@@ -227,8 +233,8 @@ def test_midi_batch_publishes_multiple_axes_in_one_motor_status():
     supervisor._current_motors = lambda: motors
 
     success, _, results = supervisor._handle_manual_stream_batch([
-        {'request_id': 'one', 'channel': 1, 'axis': 1, 'target_deg': 10.0},
-        {'request_id': 'two', 'channel': 3, 'axis': 3, 'target_deg': -20.0},
+        {'request_id': 'one', 'channel': 1, 'axis': 1, 'target_rad': R(10.0)},
+        {'request_id': 'two', 'channel': 3, 'axis': 3, 'target_rad': R(-20.0)},
     ])
 
     assert success is True
@@ -236,7 +242,7 @@ def test_midi_batch_publishes_multiple_axes_in_one_motor_status():
     assert len(supervisor._command_pub.messages) == 1
     command = supervisor._command_pub.messages[0]
     # 안 모는 축은 아예 싣지 않는다 · 빈 칸이 남의 목표를 지운다 · §6-108
-    assert _targets_by_axis(command) == {1: 10.0, 3: -20.0}
+    assert _targets_by_axis(command) == pytest.approx({1: 10.0, 3: -20.0})
     assert list(command.controller_index) == [1, 3]
 
 
@@ -260,8 +266,8 @@ def test_linked_midi_group_blocks_every_axis_when_one_target_is_invalid():
 
     success, _, results = supervisor._handle_manual_stream_batch(
         [
-            {'request_id': 'one', 'channel': 0, 'axis': 1, 'target_deg': 10.0},
-            {'request_id': 'two', 'channel': 0, 'axis': 9, 'target_deg': 10.0},
+            {'request_id': 'one', 'channel': 0, 'axis': 1, 'target_rad': R(10.0)},
+            {'request_id': 'two', 'channel': 0, 'axis': 9, 'target_rad': R(10.0)},
         ],
         atomic_channels={0},
     )
@@ -309,7 +315,7 @@ def test_midi_select_off_holds_linked_axes_at_their_current_positions():
     assert all(result['operation'] == 'hold' for result in results)
     assert len(supervisor._command_pub.messages) == 1
     command = supervisor._command_pub.messages[0]
-    assert _targets_by_axis(command) == {1: 12.5, 3: -7.0}
+    assert _targets_by_axis(command) == pytest.approx({1: 12.5, 3: -7.0})
     # SELECT 를 놓으면 소유권도 놓는다 · 사실의 주인은 중재기 하나다 · §6-107
     assert supervisor._command_arbiter_instance().owns_any(CommandOwner.STREAM) is False
 
@@ -333,7 +339,7 @@ def test_normal_midi_position_keeps_short_command_ownership():
     }]
 
     success, _, _ = supervisor._handle_manual_stream_batch([
-        {'request_id': 'move', 'channel': 0, 'axis': 0, 'target_deg': 10.0},
+        {'request_id': 'move', 'channel': 0, 'axis': 0, 'target_rad': R(10.0)},
     ])
 
     assert success is True
@@ -362,7 +368,7 @@ def test_midi_blocks_every_ac_axis_with_live_internal_limit_status():
     }]
 
     success, _, results = supervisor._handle_manual_stream_batch([{
-        'request_id': 'limited', 'channel': 5, 'axis': 1, 'target_deg': 0.5,
+        'request_id': 'limited', 'channel': 5, 'axis': 1, 'target_rad': R(0.5),
     }])
 
     assert success is False
@@ -393,7 +399,7 @@ def test_playback_owner_blocks_midi_even_without_legacy_grace_flag():
     }]
 
     success, message, results = supervisor._handle_manual_stream_batch([
-        {'request_id': 'move', 'channel': 0, 'axis': 0, 'target_deg': 10.0},
+        {'request_id': 'move', 'channel': 0, 'axis': 0, 'target_rad': R(10.0)},
     ])
 
     assert success is False
@@ -424,7 +430,7 @@ def test_busy_playback_owner_rejects_manual_jog_before_handler_runs():
         'project_generation': 1,
         'command': 'ac_servo_jog',
         'axis': 0,
-        'relative_deg': 1.0,
+        'relative_rad': R(1.0),
     })))
 
     assert results == [('jog-1', False, '모션 재생 실행 중입니다')]
@@ -703,7 +709,7 @@ def test_motion_stop_holds_all_axes_without_emergency_latch():
     assert supervisor._command_arbiter.snapshot().owner is CommandOwner.NONE
     command = supervisor._command_pub.messages[-1]
     assert list(command.number_of_target_interfaces) == [2, 2]
-    assert list(command.position) == [15.0, -8.0]
+    assert list(command.position) == pytest.approx([15.0, -8.0])
 
 
 def test_emergency_stop_disables_ac_and_dynamixel_without_position_then_latches():
@@ -1006,7 +1012,7 @@ def test_midi_command_does_not_carry_the_axes_it_is_not_driving():
     supervisor = _midi_supervisor([0, 1, 2])
 
     success, _, _ = supervisor._handle_manual_stream_batch([
-        {'request_id': 'rec', 'channel': 2, 'axis': 2, 'target_deg': 10.0},
+        {'request_id': 'rec', 'channel': 2, 'axis': 2, 'target_rad': R(10.0)},
     ])
 
     assert success is True
@@ -1014,7 +1020,7 @@ def test_midi_command_does_not_carry_the_axes_it_is_not_driving():
     assert list(command.controller_index) == [2], (
         '안 모는 축이 빈 칸으로 실렸다 · 매니저가 그 축의 재생 목표를 지운다'
     )
-    assert _targets_by_axis(command) == {2: 10.0}
+    assert _targets_by_axis(command) == pytest.approx({2: 10.0})
     assert MotionSupervisor._motor_command_shape_error(command) is None
 
 
@@ -1023,12 +1029,12 @@ def test_compacting_keeps_the_real_axis_numbers():
     supervisor = _midi_supervisor([0, 1, 2, 3])
 
     supervisor._handle_manual_stream_batch([
-        {'request_id': 'a', 'channel': 3, 'axis': 3, 'target_deg': 5.0},
+        {'request_id': 'a', 'channel': 3, 'axis': 3, 'target_rad': R(5.0)},
     ])
 
     command = supervisor._command_pub.messages[0]
     assert list(command.controller_index) == [3]
-    assert command.position[0] == 5.0
+    assert command.position[0] == pytest.approx(5.0)
 
 
 def test_a_command_that_drives_every_axis_is_left_alone():
@@ -1036,13 +1042,13 @@ def test_a_command_that_drives_every_axis_is_left_alone():
     supervisor = _midi_supervisor([0, 1])
 
     supervisor._handle_manual_stream_batch([
-        {'request_id': 'a', 'channel': 0, 'axis': 0, 'target_deg': 1.0},
-        {'request_id': 'b', 'channel': 1, 'axis': 1, 'target_deg': 2.0},
+        {'request_id': 'a', 'channel': 0, 'axis': 0, 'target_rad': R(1.0)},
+        {'request_id': 'b', 'channel': 1, 'axis': 1, 'target_rad': R(2.0)},
     ])
 
     command = supervisor._command_pub.messages[0]
     assert list(command.controller_index) == [0, 1]
-    assert _targets_by_axis(command) == {0: 1.0, 1: 2.0}
+    assert _targets_by_axis(command) == pytest.approx({0: 1.0, 1: 2.0})
 
 
 # --------------------------------------------------------------------------- #
@@ -1079,7 +1085,7 @@ def _relay_with_position(supervisor, controller_indexes, driven_axes, positions)
     command = _command_for(controller_indexes, driven_axes)
     for slot, axis in enumerate(controller_indexes):
         if axis in positions:
-            command.position[slot] = positions[axis]
+            command.position[slot] = R(positions[axis])
     supervisor._motion_run_command_callback(command)
     return command
 
@@ -1088,26 +1094,27 @@ def test_playback_target_above_upper_is_clamped_and_still_published():
     supervisor = _limited_relay_supervisor({0: (-10.0, 10.0)})
     _relay_with_position(supervisor, [0], {0}, {0: 25.0})
     assert len(supervisor._command_pub.messages) == 1
-    assert _targets_by_axis(supervisor._command_pub.messages[0]) == {0: 10.0}
+    assert _targets_by_axis(supervisor._command_pub.messages[0]) == pytest.approx({0: 10.0})
 
 
 def test_playback_target_below_lower_is_clamped():
     supervisor = _limited_relay_supervisor({0: (-10.0, 10.0)})
     _relay_with_position(supervisor, [0], {0}, {0: -25.0})
-    assert _targets_by_axis(supervisor._command_pub.messages[0]) == {0: -10.0}
+    assert _targets_by_axis(supervisor._command_pub.messages[0]) == pytest.approx({0: -10.0})
 
 
 def test_playback_target_inside_limits_is_untouched():
     supervisor = _limited_relay_supervisor({0: (-10.0, 10.0)})
     command = _relay_with_position(supervisor, [0], {0}, {0: 5.0})
+    # 같은 메시지를 그대로 내보낸다 · 값만 motor_manager 단위(deg)로 바뀐다
     assert supervisor._command_pub.messages == [command]
-    assert _targets_by_axis(command) == {0: 5.0}
+    assert _targets_by_axis(command) == pytest.approx({0: 5.0})
 
 
 def test_axes_without_limits_or_with_inverted_limits_are_left_alone():
     supervisor = _limited_relay_supervisor({0: None, 1: (10.0, -10.0)})
     _relay_with_position(supervisor, [0, 1], {0, 1}, {0: 500.0, 1: 500.0})
-    assert _targets_by_axis(supervisor._command_pub.messages[0]) == {0: 500.0, 1: 500.0}
+    assert _targets_by_axis(supervisor._command_pub.messages[0]) == pytest.approx({0: 500.0, 1: 500.0})
 
 
 def test_slot_not_driven_or_without_target_position_is_left_alone():
@@ -1139,4 +1146,4 @@ def test_dynamixel_playback_target_is_clamped_to_motor_limits():
         {'controller_index': 0, 'motor_type': 'dynamixel', 'lower': -180.0, 'upper': 180.0},
     ]
     _relay_with_position(supervisor, [0], {0}, {0: 200.0})
-    assert _targets_by_axis(supervisor._command_pub.messages[0]) == {0: 180.0}
+    assert _targets_by_axis(supervisor._command_pub.messages[0]) == pytest.approx({0: 180.0})

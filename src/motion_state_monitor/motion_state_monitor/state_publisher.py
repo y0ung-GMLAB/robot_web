@@ -17,6 +17,7 @@ import time
 from copy import deepcopy
 from typing import Any, Dict, List, Optional
 
+from motion_common import units, wire_units
 from motion_control_msgs.msg import MotorStatus
 from std_msgs.msg import String
 
@@ -133,8 +134,9 @@ class StatePublisher:
     ) -> Dict[str, Any]:
         statusword = int(array_value(msg, 'statusword', index, 0))
         metadata = self._metadata_for(controller_index)
-        position = float(array_value(msg, 'position', index, 0.0))
-        velocity = float(array_value(msg, 'velocity', index, 0.0))
+        # motor_manager 토픽 단위 → rad · 발행은 rad 만 · 화면이 deg 로 바꿔 보여 준다 · 수정 목록 6-5
+        position = wire_units.from_motor_node(float(array_value(msg, 'position', index, 0.0)))
+        velocity = wire_units.from_motor_node(float(array_value(msg, 'velocity', index, 0.0)))
         effort = float(array_value(msg, 'effort', index, 0.0))
         raw_errorcode = int(array_value(msg, 'errorcode', index, 0))
         errorcode = normalized_errorcode(raw_errorcode, metadata)
@@ -160,7 +162,7 @@ class StatePublisher:
             else (bool(errorcode) if is_dynamixel else bool(statusword & 0x0008))
         )
         position_raw = (
-            dynamixel_position_raw(position, metadata)
+            dynamixel_position_raw(units.rad_to_deg(position), metadata)
             if is_dynamixel
             else None
         )
@@ -191,10 +193,8 @@ class StatePublisher:
                 )
             ),
             'station_alias_register': None,
-            'position': position,
-            'position_deg': position,
-            'velocity': velocity,
-            'velocity_deg_s': velocity,
+            'position_rad': position,
+            'velocity_rad_s': velocity,
             'torque': None if is_dynamixel else effort,
             'current': effort if is_dynamixel else None,
             # 과부하율 % · 모터별 선택 매핑(MINAS 4D29h) · 안 읽는 축은 None
@@ -381,10 +381,8 @@ class StatePublisher:
             'errorcode_hex': hex16(0),
             'error_text': 'No error',
             'station_alias_register': None,
-            'position': None,
-            'position_deg': None,
-            'velocity': None,
-            'velocity_deg_s': None,
+            'position_rad': None,
+            'velocity_rad_s': None,
             'torque': None,
             'current': None,
             'overload_ratio_pct': None,

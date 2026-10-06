@@ -18,6 +18,7 @@ from typing import Any, Dict, List, Optional
 from std_msgs.msg import String
 
 from motion_common import generation, motor_readiness, rpc
+from motion_common import units
 from motion_common.values import optional_float, optional_int
 
 from motion_web_bridge import motor_config_rules, run_mode_gate
@@ -144,12 +145,12 @@ class ManualMotorCommandService:
             return None
         return {'success': False, 'message': reason, **self.bridge.snapshot()}
 
-    def ac_servo_jog(self, axis: Any, relative_deg: Any) -> Dict[str, Any]:
+    def ac_servo_jog(self, axis: Any, relative_rad: Any) -> Dict[str, Any]:
         off = self._off_mode_block()
         if off is not None:
             return off
         axis_value = optional_int(axis, None)
-        relative_value = optional_float(relative_deg, None)
+        relative_value = optional_float(relative_rad, None)
         if axis_value is None:
             return {
                 'success': False,
@@ -159,7 +160,7 @@ class ManualMotorCommandService:
         if relative_value is None or math.isclose(relative_value, 0.0, abs_tol=1e-9):
             return {
                 'success': False,
-                'message': 'relative_deg is required',
+                'message': 'relative_rad is required',
                 **self.bridge.snapshot(),
             }
 
@@ -190,7 +191,7 @@ class ManualMotorCommandService:
             'project_generation': self.bridge.current_project_generation(),
             'command': 'ac_servo_jog',
             'axis': axis_value,
-            'relative_deg': relative_value,
+            'relative_rad': relative_value,
         }
         self._jog_request_publisher.publish(
             String(data=json.dumps(payload, ensure_ascii=False, separators=(',', ':')))
@@ -202,7 +203,7 @@ class ManualMotorCommandService:
                 'success': False,
                 'message': (
                     f'AC Servo jog request published, but motion_supervisor result '
-                    f'timed out: Axis {axis_value}, {relative_value:+.3f} deg'
+                    f'timed out: Axis {axis_value}, {units.rad_to_deg(relative_value):+.3f} deg'
                 ),
                 'request_id': request_id,
                 **self.bridge.snapshot(),
@@ -219,12 +220,12 @@ class ManualMotorCommandService:
             **self.bridge.snapshot(),
         }
 
-    def dynamixel_jog(self, axis: Any, relative_deg: Any) -> Dict[str, Any]:
+    def dynamixel_jog(self, axis: Any, relative_rad: Any) -> Dict[str, Any]:
         off = self._off_mode_block()
         if off is not None:
             return off
         axis_value = optional_int(axis, None)
-        relative_value = optional_float(relative_deg, None)
+        relative_value = optional_float(relative_rad, None)
         if axis_value is None:
             return {
                 'success': False,
@@ -234,7 +235,7 @@ class ManualMotorCommandService:
         if relative_value is None or math.isclose(relative_value, 0.0, abs_tol=1e-9):
             return {
                 'success': False,
-                'message': 'relative_deg is required',
+                'message': 'relative_rad is required',
                 **self.bridge.snapshot(),
             }
 
@@ -265,7 +266,7 @@ class ManualMotorCommandService:
             'project_generation': self.bridge.current_project_generation(),
             'command': 'dynamixel_jog',
             'axis': axis_value,
-            'relative_deg': relative_value,
+            'relative_rad': relative_value,
         }
         self._jog_request_publisher.publish(
             String(data=json.dumps(payload, ensure_ascii=False, separators=(',', ':')))
@@ -277,7 +278,7 @@ class ManualMotorCommandService:
                 'success': False,
                 'message': (
                     f'Dynamixel jog request published, but motion_supervisor result '
-                    f'timed out: Axis {axis_value}, {relative_value:+.3f} deg'
+                    f'timed out: Axis {axis_value}, {units.rad_to_deg(relative_value):+.3f} deg'
                 ),
                 'request_id': request_id,
                 **self.bridge.snapshot(),
@@ -297,7 +298,7 @@ class ManualMotorCommandService:
     def ac_servo_action(
         self,
         axis: Any,
-        target_deg: Any,
+        target_rad: Any,
         duration_sec: Any = None,
         range_recovery: Any = False,
     ) -> Dict[str, Any]:
@@ -305,7 +306,7 @@ class ManualMotorCommandService:
         if off is not None:
             return off
         axis_value = optional_int(axis, None)
-        target_value = optional_float(target_deg, None)
+        target_value = optional_float(target_rad, None)
         duration_value = optional_float(duration_sec, None)
         if axis_value is None:
             return {
@@ -316,7 +317,7 @@ class ManualMotorCommandService:
         if target_value is None:
             return {
                 'success': False,
-                'message': 'target_deg is required',
+                'message': 'target_rad is required',
                 **self.bridge.snapshot(),
             }
         if duration_sec not in (None, '') and (duration_value is None or duration_value <= 0):
@@ -353,7 +354,7 @@ class ManualMotorCommandService:
             'project_generation': self.bridge.current_project_generation(),
             'command': 'ac_servo_absolute_move',
             'axis': axis_value,
-            'target_deg': target_value,
+            'target_rad': target_value,
             'range_recovery': range_recovery is True,
         }
         if duration_value is not None:
@@ -368,7 +369,7 @@ class ManualMotorCommandService:
                 'success': False,
                 'message': (
                     f'AC Servo action request published, but motion_supervisor result '
-                    f'timed out: Axis {axis_value}, target {target_value:.3f} deg'
+                    f'timed out: Axis {axis_value}, target {units.rad_to_deg(target_value):.3f} deg'
                 ),
                 'request_id': request_id,
                 **self.bridge.snapshot(),
@@ -385,7 +386,7 @@ class ManualMotorCommandService:
     def dynamixel_action(
         self,
         axis: Any,
-        target_deg: Any,
+        target_rad: Any,
         duration_sec: Any = None,
         range_recovery: Any = False,
     ) -> Dict[str, Any]:
@@ -393,7 +394,7 @@ class ManualMotorCommandService:
         if off is not None:
             return off
         axis_value = optional_int(axis, None)
-        target_value = optional_float(target_deg, None)
+        target_value = optional_float(target_rad, None)
         duration_value = optional_float(duration_sec, None)
         if axis_value is None:
             return {
@@ -404,7 +405,7 @@ class ManualMotorCommandService:
         if target_value is None:
             return {
                 'success': False,
-                'message': 'target_deg is required',
+                'message': 'target_rad is required',
                 **self.bridge.snapshot(),
             }
         if duration_sec not in (None, '') and (duration_value is None or duration_value <= 0):
@@ -441,7 +442,7 @@ class ManualMotorCommandService:
             'project_generation': self.bridge.current_project_generation(),
             'command': 'dynamixel_absolute_move',
             'axis': axis_value,
-            'target_deg': target_value,
+            'target_rad': target_value,
             'range_recovery': range_recovery is True,
         }
         if duration_value is not None:
@@ -456,7 +457,7 @@ class ManualMotorCommandService:
                 'success': False,
                 'message': (
                     f'Dynamixel action request published, but motion_supervisor result '
-                    f'timed out: Axis {axis_value}, target {target_value:.3f} deg'
+                    f'timed out: Axis {axis_value}, target {units.rad_to_deg(target_value):.3f} deg'
                 ),
                 'request_id': request_id,
                 **self.bridge.snapshot(),

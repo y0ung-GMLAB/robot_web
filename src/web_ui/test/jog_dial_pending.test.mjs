@@ -25,6 +25,8 @@ window.fetch = (url, options) => new Promise((resolve) => {
   respond = reply;
 });
 const jogCalls = () => calls.filter((call) => String(call.url).includes('/jog'));
+// 화면은 모터 deg 로 부르고 서버에는 rad 로 간다 · 수정 목록 6-4 · 시험은 deg 로 되돌려 본다
+const sentDeg = (value) => Math.round((value * 180) / Math.PI * 1e9) / 1e9;
 window.setTimeout = (fn, ms) => setTimeout(fn, ms);
 window.clearTimeout = (id) => clearTimeout(id);
 window.setInterval = (fn, ms) => setInterval(fn, ms);
@@ -94,7 +96,7 @@ test('동작 취소 drops the unsent amount, stops motion, and the in-flight rep
   const { el, wheel, pendingText } = setup();
   wheel();                         // +1 · 바로 날아간다
   assert.equal(jogCalls().length, 1);
-  assert.equal(jogCalls()[0].body.relative_deg, 1);
+  assert.equal(sentDeg(jogCalls()[0].body.relative_rad), 1);
   const inFlightJog = jogCalls()[0];
   wheel(); wheel(); wheel();       // +3 · 앞 조그가 도는 동안 쌓인다
   assert.match(pendingText(), /남은 이동 \+3\.00°/);
@@ -181,7 +183,9 @@ test('dial OFF · typed target moves in motor deg and refuses outside the limits
   el.jogTargetInput.dispatch('keydown', { key: 'Enter' });
   assert.equal(calls.length, 1);
   assert.match(String(calls[0].url), /\/api\/motion-test\/ac-servo\/action$/);
-  assert.deepEqual(calls[0].body, { axis: 1, target_deg: 250.5 });
+  assert.deepEqual(Object.keys(calls[0].body), ['axis', 'target_rad']);
+  assert.equal(calls[0].body.axis, 1);
+  assert.equal(sentDeg(calls[0].body.target_rad), 250.5);
   // 앞 요청이 도는 동안엔 또 안 보낸다
   el.jogTargetMoveButton.dispatch('click');
   assert.equal(calls.length, 1);
@@ -219,7 +223,7 @@ test('썸휠 · 오른쪽으로 24px 끌면 +1칸 · 왼쪽은 −1칸 · 띠는
   assert.equal(jogCalls().length, 0);
   el.jogDial.dispatch('pointermove', { clientX: 148, clientY: 40 });   // 누적 48px = 2칸 · 바로 날아간다
   assert.equal(jogCalls().length, 1);
-  assert.equal(jogCalls()[0].body.relative_deg, 2);
+  assert.equal(sentDeg(jogCalls()[0].body.relative_rad), 2);
   el.jogDial.dispatch('pointermove', { clientX: 124, clientY: 40 });   // 왼쪽 24px = −1칸 · 앞 조그가 도는 동안 쌓임
   assert.match(pendingText(), /남은 이동 -1\.00°/);
   assert.equal(el.jogDialRing.style.backgroundPositionX, '24px');      // 띠는 손 위치 그대로 (100 → 124)
@@ -232,7 +236,7 @@ test('◀ ▶ 화살표 · 한 번에 한 칸 · 잡고 있으면 반복 · 놓�
   assert.equal(el.jogDialPlus.disabled, false, '모터가 골라져 있으면 화살표가 열린다');
   el.jogDialPlus.dispatch('pointerdown', { pointerId: 1 });
   assert.equal(jogCalls().length, 1);
-  assert.equal(jogCalls()[0].body.relative_deg, 1);
+  assert.equal(sentDeg(jogCalls()[0].body.relative_rad), 1);
   el.jogDialPlus.dispatch('pointerup', { pointerId: 1 });
   await new Promise((resolve) => setTimeout(resolve, 600));
   assert.doesNotMatch(pendingText(), /남은 이동/, '놓은 뒤에는 더 쌓이면 안 된다');

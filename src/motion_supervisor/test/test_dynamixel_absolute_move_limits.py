@@ -4,7 +4,12 @@ Extended Position(멀티턴) · 외부 기어 사례 · 한계는 조인트 매�
 이고 AC 서보 절대 이동과 같은 `_target_position_limit_error` 가 본다.
 """
 
+import math
+
 from motion_supervisor.supervisor_node import MotionSupervisor
+
+#: 요청은 rad · 하한·상한(모터 설정)은 아직 deg · 수정 목록 6-4
+R = math.radians
 
 
 def _supervisor(motors):
@@ -19,7 +24,7 @@ def _dynamixel(lower, upper):
 
 def test_target_outside_motor_limits_is_rejected_before_anything_else():
     supervisor = _supervisor([_dynamixel(-10.0, 10.0)])
-    success, message = supervisor._handle_dynamixel_absolute_move({'axis': 2, 'target_deg': 200.0})
+    success, message = supervisor._handle_dynamixel_absolute_move({'axis': 2, 'target_rad': R(200.0)})
     assert success is False
     assert '상한' in message and '200.000' in message
 
@@ -28,7 +33,7 @@ def test_target_beyond_one_turn_passes_when_motor_limits_allow_it():
     supervisor = _supervisor([_dynamixel(-720.0, 720.0)])
     # 한계 검사를 지나면 준비 상태 검사로 간다 · 거기서 멈춰 세워 통과를 확인한다
     supervisor._manual_readiness_error = lambda *_args, **_kwargs: 'stop here'
-    success, message = supervisor._handle_dynamixel_absolute_move({'axis': 2, 'target_deg': 400.0})
+    success, message = supervisor._handle_dynamixel_absolute_move({'axis': 2, 'target_rad': R(400.0)})
     assert (success, message) == (False, 'stop here')
 
 
@@ -36,6 +41,6 @@ def test_range_recovery_skips_the_limit_check():
     supervisor = _supervisor([_dynamixel(-10.0, 10.0)])
     supervisor._manual_readiness_error = lambda *_args, **_kwargs: 'stop here'
     success, message = supervisor._handle_dynamixel_absolute_move(
-        {'axis': 2, 'target_deg': 10.0, 'range_recovery': True}
+        {'axis': 2, 'target_rad': R(10.0), 'range_recovery': True}
     )
     assert (success, message) == (False, 'stop here')

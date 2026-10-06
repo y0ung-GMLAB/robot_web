@@ -1,8 +1,8 @@
 """수동 스트림(페이더) 중계 · 브라우저 → 브리지 → supervisor.
 
-브라우저가 20Hz 안팎으로 **모터 deg** 목표를 흘리면 그대로 수동 스트림
-토픽(`MANUAL_STREAM_REQUEST`)에 싣는다 · 조인트 deg → 모터 deg 변환은
-화면이 자기 매핑 행으로 한다 · 축별 소유 임대(0.15s)는 supervisor 가
+브라우저가 20Hz 안팎으로 **모터 rad** 목표를 흘리면 그대로 수동 스트림
+토픽(`MANUAL_STREAM_REQUEST`)에 싣는다 · 조인트 → 모터 변환은 화면이 자기
+매핑 행으로 한다(화면은 deg 로 계산하고 보낼 때 rad · 수정 목록 6) · 축별 소유 임대(0.15s)는 supervisor 가
 관리하므로 여기서는 응답을 기다리지 않는다(발사 후 망각) · 거부 사유는
 결과 구독으로 받아 **축별 마지막 것**만 들고 있다가 화면에 돌려준다.
 
@@ -82,25 +82,25 @@ class ManualStreamService:
     def send_target(
         self,
         axis: Any,
-        target_deg: Any,
+        target_rad: Any,
         *,
         motion_id: Any = None,
-        motion_deg: Any = None,
+        motion_rad: Any = None,
     ) -> Dict[str, Any]:
         axis_int = _optional_axis(axis)
         if axis_int is None:
             return {'success': False, 'message': '모터 번호(axis)가 필요합니다'}
-        target = _finite_float(target_deg)
+        target = _finite_float(target_rad)
         if target is None:
-            return {'success': False, 'message': '목표 위치(target_deg · 모터 deg)가 필요합니다'}
+            return {'success': False, 'message': '목표 위치(target_rad · 모터 rad)가 필요합니다'}
         request = self._base_request()
         request['axis'] = axis_int
-        request['target_deg'] = target
+        request['target_rad'] = target
         if motion_id:
             request['motion_id'] = str(motion_id)
-        joint_deg = _finite_float(motion_deg)
-        if joint_deg is not None:
-            request['motion_deg'] = joint_deg
+        joint_rad = _finite_float(motion_rad)
+        if joint_rad is not None:
+            request['motion_rad'] = joint_rad
         self._publish(request)
         return {'success': True, 'axis': axis_int, 'request_id': request['request_id']}
 

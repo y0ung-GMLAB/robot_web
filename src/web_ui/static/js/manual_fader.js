@@ -18,6 +18,7 @@
 
 import { fetchMotionMapping, fetchMotionMappings } from './api.js';
 import { escapeHtml } from './format.js';
+import { inRadPayload } from './unit_view.js';
 import {
   jointToMotor as mappingJointToMotor,
   mappingAngle,
@@ -192,7 +193,8 @@ export function createManualFaderController({ el, getLatestState }) {
 
   function sendNow(payload) {
     if (socket && socketReady && socket.readyState === WebSocket.OPEN) {
-      socket.send(JSON.stringify(payload));
+      // 화면은 deg(`target_deg`·`motion_deg`) · 서버에는 rad · 수정 목록 6-4
+      socket.send(JSON.stringify(inRadPayload(payload)));
       return true;
     }
     return false;

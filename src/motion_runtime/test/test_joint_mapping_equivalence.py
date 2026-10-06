@@ -61,8 +61,9 @@ def test_motor_command_on_the_wire_is_unchanged(row, joint_deg):
     joint = math.radians(joint_deg)
     for source in (row, _saved_rad_row(row)):
         target = motion_run_rules._motor_target(source, joint)
-        # 명령 토픽은 아직 deg · 50000° 대 값이라 상대 오차로 본다
-        assert wire_units.command_value(target) == pytest.approx(expected, rel=1e-12, abs=1e-9)
+        # 재생 → supervisor(명령 토픽) → motor_manager(아직 deg) · 50000° 대 값이라 상대 오차로 본다
+        on_wire = wire_units.to_motor_node(wire_units.from_command(wire_units.command_value(target)))
+        assert on_wire == pytest.approx(expected, rel=1e-12, abs=1e-9)
         back = trace_joint_from_motor(source, target)
         assert back == pytest.approx(joint, abs=1e-9)
 
@@ -113,7 +114,12 @@ def test_row_in_unit_renames_every_angle_field():
 def test_motor_state_positions_are_read_as_rad():
     assert wire_units.motor_position({'position_deg': 180.0}) == pytest.approx(math.pi)
     assert wire_units.motor_position({'position_rad': 1.0, 'position_deg': 999.0}) == 1.0
-    assert wire_units.motor_position({'position': 90.0}) == pytest.approx(math.pi / 2)
+    # 이름에 단위가 없는 칸은 상태 단위(rad) · `*_deg` 칸은 이름대로
+    assert wire_units.motor_position({'position': 0.5}) == pytest.approx(0.5)
+    assert wire_units.motor_velocity({'velocity_deg_s': 90.0}) == pytest.approx(math.pi / 2)
+    assert wire_units.motor_velocity({'velocity_rad_s': 0.25}) == 0.25
     assert wire_units.motor_position(None) is None
+    # 하한·상한은 모터 설정 파일에서 그대로 옮겨 실린 값 · 설정 단위(아직 deg)
     assert wire_units.motor_limit({'lower': -90.0}, 'lower') == pytest.approx(-math.pi / 2)
+    assert wire_units.motor_limit({'lower_rad': -1.0, 'lower': -90.0}, 'lower') == -1.0
     assert wire_units.motor_limit({}, 'upper') is None

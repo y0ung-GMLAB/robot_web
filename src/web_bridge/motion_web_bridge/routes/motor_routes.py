@@ -94,7 +94,7 @@ def register_motor_routes(app: FastAPI, bridge, project_call) -> None:
         return await asyncio.to_thread(
             bridge.manual.ac_servo_jog,
             body.get('axis'),
-            body.get('relative_deg'),
+            body.get('relative_rad'),
         )
 
     @app.post('/api/motion-test/dynamixel/jog')
@@ -103,7 +103,7 @@ def register_motor_routes(app: FastAPI, bridge, project_call) -> None:
         return await asyncio.to_thread(
             bridge.manual.dynamixel_jog,
             body.get('axis'),
-            body.get('relative_deg'),
+            body.get('relative_rad'),
         )
 
     @app.post('/api/motion-test/ac-servo/action')
@@ -112,7 +112,7 @@ def register_motor_routes(app: FastAPI, bridge, project_call) -> None:
         return await asyncio.to_thread(
             bridge.manual.ac_servo_action,
             body.get('axis'),
-            body.get('target_deg'),
+            body.get('target_rad'),
             body.get('duration_sec'),
             body.get('range_recovery', False),
         )
@@ -123,7 +123,7 @@ def register_motor_routes(app: FastAPI, bridge, project_call) -> None:
         return await asyncio.to_thread(
             bridge.manual.dynamixel_action,
             body.get('axis'),
-            body.get('target_deg'),
+            body.get('target_rad'),
             body.get('duration_sec'),
             body.get('range_recovery', False),
         )

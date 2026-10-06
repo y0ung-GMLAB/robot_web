@@ -419,15 +419,18 @@ export const requestMotionSafetyStop = () => request('POST', '/api/safety/motion
 
 export const requestEmergencySafetyStop = () => request('POST', '/api/safety/emergency-stop');
 
-export const requestAcServoJog = (payload) => request('POST', '/api/motion-test/ac-servo/jog', { body: payload });
+// 조그·절대 이동 · 화면은 `relative_deg`·`target_deg`(모터 deg) 로 부르고 서버에는 rad 로 (수정 목록 6-4)
+export const requestAcServoJog = (payload) =>
+  request('POST', '/api/motion-test/ac-servo/jog', { body: inRadPayload(payload) }).then(inDegView);
 
-export const requestDynamixelJog = (payload) => request('POST', '/api/motion-test/dynamixel/jog', { body: payload });
+export const requestDynamixelJog = (payload) =>
+  request('POST', '/api/motion-test/dynamixel/jog', { body: inRadPayload(payload) }).then(inDegView);
 
 export const requestAcServoAction = (payload) =>
-  request('POST', '/api/motion-test/ac-servo/action', { body: payload });
+  request('POST', '/api/motion-test/ac-servo/action', { body: inRadPayload(payload) }).then(inDegView);
 
 export const requestDynamixelAction = (payload) =>
-  request('POST', '/api/motion-test/dynamixel/action', { body: payload });
+  request('POST', '/api/motion-test/dynamixel/action', { body: inRadPayload(payload) }).then(inDegView);
 
 /** MINAS 정비 · EEPROM 저장 · 앱솔루트 방식 · 다회전 클리어 · 수정 목록 15 + 34-3 */
 export const requestDriveMaintenance = (payload) =>

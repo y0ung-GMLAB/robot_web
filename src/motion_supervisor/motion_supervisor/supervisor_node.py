@@ -20,7 +20,7 @@ from std_msgs.msg import Int8MultiArray, String
 
 from motion_supervisor.command_arbiter import CommandArbiter, CommandOwner
 from motion_supervisor.servo_alarm_guard import ServoAlarmGuard
-from motion_common import motor_readiness, values, topics
+from motion_common import motor_readiness, units, values, topics, wire_units
 
 
 #: 긴급정지가 걸렸을 때 하는 말 · §6-178
@@ -45,6 +45,7 @@ DYNAMIXEL_TORQUE_DISABLE = 0
 #: 서보 전원 명령 · 알람 차단·조그 중 거절·소유권 규칙이 같다 · 수정 목록 36
 SERVO_POWER_COMMANDS = ('ac_servo_control', 'dynamixel_torque_control')
 CONTROLWORD_SEQUENCE_DELAY_SEC = 0.05
+# 각도 상수는 사람이 읽기 쉽게 deg 로 적고 쓸 때 rad 로 바꾼다 · 안쪽 값은 rad · 수정 목록 6-4
 JOG_TARGET_TOLERANCE_DEG = 0.05
 JOG_DONE_VELOCITY_DEG_SEC = 0.05
 JOG_ACTIVE_TIMEOUT_SEC = 120.0
@@ -95,6 +96,10 @@ def motion_run_rejection_reason(
     if stream_command_active:
         return '수동 페이더 제어가 실행 중입니다'
     return None
+
+
+#: 글에 넣을 때만 deg · 안쪽 값은 rad
+_deg = units.rad_to_deg
 
 
 class MotionSupervisor(Node):
@@ -282,6 +287,10 @@ class MotionSupervisor(Node):
     def _clamp_motion_run_targets(self, msg: Any, motors: list) -> list:
         """재생 목표도 모터 운전 한계(`lower/upper`) 안으로 · 2026-10-04
 
+        단위도 여기서 바꾼다 · 들어온 위치(명령 토픽 단위)를 rad 로 읽어 한계와
+        견주고, 나갈 위치는 motor_manager 단위로 다시 적는다 · 목표 위치가 있는
+        슬롯은 모두(자르지 않은 것도) · 수정 목록 6-4
+
         수동 조그·절대이동·스트림은 `_target_position_limit_error` 가 막는데
         재생 중계만 검사가 없었다 · 계획(plan_builder)이 자르긴 하지만 매핑
         저장으로 `lower/upper` 가 바뀐 뒤 옛 계획이 돌 수 있다 · Dynamixel 은
@@ -310,26 +319,28 @@ class MotionSupervisor(Node):
                 continue
             if ID_TARGET_POSITION not in interface_ids:
                 continue
+            try:
+                raw_target = self._optional_float(msg.position[slot])
+            except (IndexError, TypeError):
+                continue
+            if raw_target is None:
+                continue
+            target = wire_units.from_command(raw_target)
+            msg.position[slot] = wire_units.to_motor_node(target)
             motor = self._motor_for_axis(int(axis), motors)
             if motor is None:
                 continue
-            lower = self._optional_float(motor.get('lower'))
-            upper = self._optional_float(motor.get('upper'))
+            lower = wire_units.motor_limit(motor, 'lower')
+            upper = wire_units.motor_limit(motor, 'upper')
             if lower is None or upper is None or lower > upper:
-                continue
-            try:
-                target = self._optional_float(msg.position[slot])
-            except (IndexError, TypeError):
-                continue
-            if target is None:
                 continue
             bounded = min(max(target, lower), upper)
             if bounded == target:
                 continue
-            msg.position[slot] = bounded
+            msg.position[slot] = wire_units.to_motor_node(bounded)
             clamped.append(
-                f'{int(axis)}번 {target:.3f}→{bounded:.3f} deg '
-                f'(한계 {lower:.3f}~{upper:.3f})'
+                f'{int(axis)}번 {_deg(target):.3f}→{_deg(bounded):.3f} deg '
+                f'(한계 {_deg(lower):.3f}~{_deg(upper):.3f})'
             )
         return clamped
 
@@ -553,9 +564,7 @@ class MotionSupervisor(Node):
         targets = []
         for axis in unique_axes:
             motor = self._motor_for_axis(axis, motors)
-            position = self._optional_float(
-                motor.get('position_deg', motor.get('position'))
-            ) if motor is not None else None
+            position = self._motor_position(motor) if motor is not None else None
             if position is None:
                 results = [
                     self._stream_target_result({
@@ -571,7 +580,7 @@ class MotionSupervisor(Node):
                 'request_id': f'stream-hold-{axis}',
                 'channel': channel,
                 'axis': axis,
-                'target_deg': position,
+                'target_rad': position,
                 'operation': 'hold',
             })
         atomic_channels = {channel} if channel is not None else set()
@@ -610,7 +619,7 @@ class MotionSupervisor(Node):
 
         for target in requests:
             axis = self._optional_int(target.get('axis'))
-            target_position = self._optional_float(target.get('target_deg'))
+            target_position = self._optional_float(target.get('target_rad'))
             error = ''
             controlword = 0
             motor = self._motor_for_axis(axis, motors) if axis is not None else None
@@ -619,7 +628,7 @@ class MotionSupervisor(Node):
             elif self._servo_alarm_block_reason(axis):
                 error = self._servo_alarm_block_reason(axis)
             elif target_position is None:
-                error = 'target_deg is required'
+                error = 'target_rad is required'
             elif axis in commanded_axes:
                 error = f'{axis}번 모터가 수동 스트림 묶음에 두 번 들어 있습니다'
             elif motor is None:
@@ -661,14 +670,14 @@ class MotionSupervisor(Node):
                 data=[ID_CONTROLWORD, ID_TARGET_POSITION]
             )
             command.controlword[axis] = int(controlword)
-            command.position[axis] = float(target_position)
-            motion_deg = self._optional_float(target.get('motion_deg'))
-            motion_text = '' if motion_deg is None else f', motion {motion_deg:.3f} deg'
+            command.position[axis] = wire_units.to_motor_node(target_position)
+            motion_rad = self._optional_float(target.get('motion_rad'))
+            motion_text = '' if motion_rad is None else f', motion {_deg(motion_rad):.3f} deg'
             results.append(self._stream_target_result(
                 target,
                 True,
                 f'stream target published: Axis {axis}{motion_text}, '
-                f'motor {target_position:.3f} deg (arrival not verified)',
+                f'motor {_deg(target_position):.3f} deg (arrival not verified)',
             ))
             success_count += 1
 
@@ -767,19 +776,19 @@ class MotionSupervisor(Node):
             'operation': request.get('operation'),
             'motion_id': request.get('motion_id'),
             'mapping_file_id': request.get('mapping_file_id'),
-            'motion_deg': request.get('motion_deg'),
-            'target_deg': request.get('target_deg'),
+            'motion_rad': request.get('motion_rad'),
+            'target_rad': request.get('target_rad'),
             'success': success,
             'message': message,
         }
 
     def _handle_manual_stream_request(self, request: Dict[str, Any]) -> tuple[bool, str]:
         axis = self._optional_int(request.get('axis'))
-        target_position = self._optional_float(request.get('target_deg'))
+        target_position = self._optional_float(request.get('target_rad'))
         if axis is None:
             return False, 'axis is required'
         if target_position is None:
-            return False, 'target_deg is required'
+            return False, 'target_rad is required'
         # 재생 여부는 축마다 따진다 · 소유권 획득에서 걸린다 · §6-72
         if self._active_jogs or self._active_actions:
             return False, MANUAL_COMMAND_ACTIVE_MESSAGE
@@ -815,11 +824,11 @@ class MotionSupervisor(Node):
             motors, motor, axis, target_position, controlword
         )
         if success:
-            motion_deg = self._optional_float(request.get('motion_deg'))
-            motion_text = '' if motion_deg is None else f', motion {motion_deg:.3f} deg'
+            motion_rad = self._optional_float(request.get('motion_rad'))
+            motion_text = '' if motion_rad is None else f', motion {_deg(motion_rad):.3f} deg'
             return True, (
                 f'stream target published: Axis {axis}{motion_text}, '
-                f'motor {target_position:.3f} deg (arrival not verified)'
+                f'motor {_deg(target_position):.3f} deg (arrival not verified)'
             )
         self._command_arbiter_instance().release(CommandOwner.STREAM)
         return False, message
@@ -838,8 +847,8 @@ class MotionSupervisor(Node):
             'axis': request.get('axis'),
             'motion_id': request.get('motion_id'),
             'mapping_file_id': request.get('mapping_file_id'),
-            'motion_deg': request.get('motion_deg'),
-            'target_deg': request.get('target_deg'),
+            'motion_rad': request.get('motion_rad'),
+            'target_rad': request.get('target_rad'),
             'success': success,
             'message': message,
             'stamp': time.time(),
@@ -1086,12 +1095,12 @@ class MotionSupervisor(Node):
 
     def _handle_ac_servo_jog(self, request: Dict[str, Any]) -> tuple[bool, str]:
         axis = self._optional_int(request.get('axis'))
-        relative_deg = self._optional_float(request.get('relative_deg'))
+        relative_rad = self._optional_float(request.get('relative_rad'))
         if axis is None:
             return False, 'axis is required'
-        if relative_deg is None or math.isclose(relative_deg, 0.0, abs_tol=1e-9):
-            return False, 'relative_deg is required'
-        if abs(relative_deg) > self.max_jog_delta_deg:
+        if relative_rad is None or math.isclose(relative_rad, 0.0, abs_tol=1e-9):
+            return False, 'relative_rad is required'
+        if abs(relative_rad) > units.deg_to_rad(self.max_jog_delta_deg):
             return False, f'jog delta exceeds limit: {self.max_jog_delta_deg:g} deg'
 
         motors = self._current_motors()
@@ -1104,9 +1113,7 @@ class MotionSupervisor(Node):
         if ready_error:
             return False, ready_error
 
-        current_position = self._optional_float(
-            motor.get('position_deg', motor.get('position'))
-        )
+        current_position = self._motor_position(motor)
         if current_position is None:
             return False, f'{axis}번 모터의 현재 위치를 읽을 수 없습니다'
 
@@ -1116,17 +1123,17 @@ class MotionSupervisor(Node):
             return (
                 False,
                 f'{axis}번 모터의 이전 조그가 아직 돌고 있습니다 · '
-                f'목표 {active["target_position"]:.3f} deg',
+                f'목표 {_deg(active["target_position"]):.3f} deg',
             )
         if axis in self._active_actions:
             active = self._active_actions[axis]
             return (
                 False,
                 f'{axis}번 모터의 이전 동작이 아직 돌고 있습니다 · '
-                f'목표 {active["target_position"]:.3f} deg',
+                f'목표 {_deg(active["target_position"]):.3f} deg',
             )
 
-        target_position = current_position + relative_deg
+        target_position = current_position + relative_rad
         limit_error = self._target_position_limit_error(motor, target_position)
         if limit_error:
             return False, limit_error
@@ -1162,19 +1169,19 @@ class MotionSupervisor(Node):
         return (
             True,
             f'AC Servo smooth jog started: Axis {axis}, '
-            f'{relative_deg:+.3f} deg, target {target_position:.3f} deg, '
+            f'{_deg(relative_rad):+.3f} deg, target {_deg(target_position):.3f} deg, '
             f'command interval {command_period_sec * 1000.0:.1f}ms, '
             f'steps {steps}, duration {steps * command_period_sec:.3f}s',
         )
 
     def _handle_dynamixel_jog(self, request: Dict[str, Any]) -> tuple[bool, str]:
         axis = self._optional_int(request.get('axis'))
-        relative_deg = self._optional_float(request.get('relative_deg'))
+        relative_rad = self._optional_float(request.get('relative_rad'))
         if axis is None:
             return False, 'axis is required'
-        if relative_deg is None or math.isclose(relative_deg, 0.0, abs_tol=1e-9):
-            return False, 'relative_deg is required'
-        if abs(relative_deg) > self.max_jog_delta_deg:
+        if relative_rad is None or math.isclose(relative_rad, 0.0, abs_tol=1e-9):
+            return False, 'relative_rad is required'
+        if abs(relative_rad) > units.deg_to_rad(self.max_jog_delta_deg):
             return False, f'jog delta exceeds limit: {self.max_jog_delta_deg:g} deg'
 
         motors = self._current_motors()
@@ -1187,9 +1194,7 @@ class MotionSupervisor(Node):
         if ready_error:
             return False, ready_error
 
-        current_position = self._optional_float(
-            motor.get('position_deg', motor.get('position'))
-        )
+        current_position = self._motor_position(motor)
         if current_position is None:
             return False, f'{axis}번 모터의 현재 위치를 읽을 수 없습니다'
 
@@ -1200,17 +1205,17 @@ class MotionSupervisor(Node):
             return (
                 False,
                 f'{axis}번 모터의 이전 조그가 아직 돌고 있습니다 · '
-                f'목표 {active["target_position"]:.3f} deg',
+                f'목표 {_deg(active["target_position"]):.3f} deg',
             )
         if axis in self._active_actions:
             active = self._active_actions[axis]
             return (
                 False,
                 f'{axis}번 모터의 이전 동작이 아직 돌고 있습니다 · '
-                f'목표 {active["target_position"]:.3f} deg',
+                f'목표 {_deg(active["target_position"]):.3f} deg',
             )
 
-        target_position = current_position + relative_deg
+        target_position = current_position + relative_rad
         success, message = self._publish_position_target(
             motors,
             motor,
@@ -1228,18 +1233,18 @@ class MotionSupervisor(Node):
         return (
             True,
             f'Dynamixel jog command sent: Axis {axis}, '
-            f'{relative_deg:+.3f} deg, target {target_position:.3f} deg',
+            f'{_deg(relative_rad):+.3f} deg, target {_deg(target_position):.3f} deg',
         )
 
     def _handle_ac_servo_absolute_move(self, request: Dict[str, Any]) -> tuple[bool, str]:
         request_id = str(request.get('request_id') or '')
         axis = self._optional_int(request.get('axis'))
-        target_position = self._optional_float(request.get('target_deg'))
+        target_position = self._optional_float(request.get('target_rad'))
         requested_duration = self._optional_float(request.get('duration_sec'))
         if axis is None:
             return False, 'axis is required'
         if target_position is None:
-            return False, 'target_deg is required'
+            return False, 'target_rad is required'
         if requested_duration is not None and requested_duration <= 0:
             return False, 'duration_sec must be greater than 0'
 
@@ -1252,9 +1257,7 @@ class MotionSupervisor(Node):
         ready_error = self._manual_readiness_error(motor, axis)
         if ready_error:
             return False, ready_error
-        current_position = self._optional_float(
-            motor.get('position_deg', motor.get('position'))
-        )
+        current_position = self._motor_position(motor)
         if current_position is None:
             return False, f'{axis}번 모터의 현재 위치를 읽을 수 없습니다'
 
@@ -1265,14 +1268,14 @@ class MotionSupervisor(Node):
             return (
                 False,
                 f'{axis}번 모터의 이전 조그가 아직 돌고 있습니다 · '
-                f'목표 {active["target_position"]:.3f} deg',
+                f'목표 {_deg(active["target_position"]):.3f} deg',
             )
         if axis in self._active_actions:
             active = self._active_actions[axis]
             return (
                 False,
                 f'{axis}번 모터의 이전 동작이 아직 돌고 있습니다 · '
-                f'목표 {active["target_position"]:.3f} deg',
+                f'목표 {_deg(active["target_position"]):.3f} deg',
             )
 
         if request.get('range_recovery') is True:
@@ -1328,20 +1331,20 @@ class MotionSupervisor(Node):
         return (
             True,
             f'AC Servo absolute trajectory started: Axis {axis}, '
-            f'current {current_position:.3f} deg, target {target_position:.3f} deg, '
+            f'current {_deg(current_position):.3f} deg, target {_deg(target_position):.3f} deg, '
             f'command interval {command_period_sec * 1000.0:.1f}ms, steps {steps}{limit_text}',
         )
 
     def _handle_dynamixel_absolute_move(self, request: Dict[str, Any]) -> tuple[bool, str]:
         request_id = str(request.get('request_id') or '')
         axis = self._optional_int(request.get('axis'))
-        target_position = self._optional_float(request.get('target_deg'))
+        target_position = self._optional_float(request.get('target_rad'))
         requested_duration = self._optional_float(request.get('duration_sec'))
         range_recovery = request.get('range_recovery') is True
         if axis is None:
             return False, 'axis is required'
         if target_position is None:
-            return False, 'target_deg is required'
+            return False, 'target_rad is required'
         if requested_duration is not None and requested_duration <= 0:
             return False, 'duration_sec must be greater than 0'
 
@@ -1360,9 +1363,7 @@ class MotionSupervisor(Node):
         ready_error = self._manual_readiness_error(motor, axis, is_ac_servo=False)
         if ready_error:
             return False, ready_error
-        current_position = self._optional_float(
-            motor.get('position_deg', motor.get('position'))
-        )
+        current_position = self._motor_position(motor)
         if current_position is None:
             return False, f'{axis}번 모터의 현재 위치를 읽을 수 없습니다'
 
@@ -1373,14 +1374,14 @@ class MotionSupervisor(Node):
             return (
                 False,
                 f'{axis}번 모터의 이전 조그가 아직 돌고 있습니다 · '
-                f'목표 {active["target_position"]:.3f} deg',
+                f'목표 {_deg(active["target_position"]):.3f} deg',
             )
         if axis in self._active_actions:
             active = self._active_actions[axis]
             return (
                 False,
                 f'{axis}번 모터의 이전 동작이 아직 돌고 있습니다 · '
-                f'목표 {active["target_position"]:.3f} deg',
+                f'목표 {_deg(active["target_position"]):.3f} deg',
             )
 
         if range_recovery:
@@ -1436,7 +1437,7 @@ class MotionSupervisor(Node):
         return (
             True,
             f'Dynamixel absolute trajectory started: Axis {axis}, '
-            f'current {current_position:.3f} deg, target {target_position:.3f} deg, '
+            f'current {_deg(current_position):.3f} deg, target {_deg(target_position):.3f} deg, '
             f'command interval {command_period_sec * 1000.0:.1f}ms, steps {steps}{limit_text}',
         )
 
@@ -1511,7 +1512,7 @@ class MotionSupervisor(Node):
             active['commands_sent_at'] = time.time()
             self.get_logger().info(
                 f'AC Servo smooth jog commands sent: Axis {axis}, '
-                f'sent {steps}/{steps} steps, target {target_position:.3f} deg'
+                f'sent {steps}/{steps} steps, target {_deg(target_position):.3f} deg'
             )
         self._jog_threads.pop(axis, None)
 
@@ -1588,7 +1589,7 @@ class MotionSupervisor(Node):
             active['commands_sent_at'] = time.time()
             self.get_logger().info(
                 f'AC Servo trajectory commands sent: Axis {axis}, '
-                f'sent {steps}/{steps} steps, target {target_position:.3f} deg'
+                f'sent {steps}/{steps} steps, target {_deg(target_position):.3f} deg'
             )
         self._action_threads.pop(axis, None)
 
@@ -1666,7 +1667,7 @@ class MotionSupervisor(Node):
             active['commands_sent_at'] = time.time()
             self.get_logger().info(
                 f'Dynamixel trajectory commands sent: Axis {axis}, '
-                f'sent {steps}/{steps} steps, target {target_position:.3f} deg'
+                f'sent {steps}/{steps} steps, target {_deg(target_position):.3f} deg'
             )
         self._action_threads.pop(axis, None)
 
@@ -1683,15 +1684,11 @@ class MotionSupervisor(Node):
                     active_targets.pop(axis, None)
                 continue
 
-            position = self._optional_float(
-                motor.get('position_deg', motor.get('position'))
-            )
-            velocity = self._optional_float(
-                motor.get('velocity_deg_s', motor.get('velocity'))
-            )
+            position = self._motor_position(motor)
+            velocity = self._motor_velocity(motor)
             target_position = active['target_position']
-            target_tolerance = self._target_tolerance_deg(motor)
-            done_velocity = self._done_velocity_deg_sec(motor)
+            target_tolerance = self._target_tolerance(motor)
+            done_velocity = self._done_velocity(motor)
             target_close = (
                 position is not None
                 and abs(position - target_position) <= target_tolerance
@@ -1739,15 +1736,11 @@ class MotionSupervisor(Node):
                     self._active_actions.pop(axis, None)
                 continue
 
-            position = self._optional_float(
-                motor.get('position_deg', motor.get('position'))
-            )
-            velocity = self._optional_float(
-                motor.get('velocity_deg_s', motor.get('velocity'))
-            )
+            position = self._motor_position(motor)
+            velocity = self._motor_velocity(motor)
             target_position = active['target_position']
-            target_tolerance = self._target_tolerance_deg(motor)
-            done_velocity = self._done_velocity_deg_sec(motor)
+            target_tolerance = self._target_tolerance(motor)
+            done_velocity = self._done_velocity(motor)
             target_close = (
                 position is not None
                 and abs(position - target_position) <= target_tolerance
@@ -1765,21 +1758,31 @@ class MotionSupervisor(Node):
                     (
                         f'{label} trajectory completed: Axis {axis}, '
                         f'sent {last_step}/{steps} steps, '
-                        f'target {target_position:.3f} deg'
+                        f'target {_deg(target_position):.3f} deg'
                     ),
                 )
                 continue
 
             if (settle_timeout and velocity_quiet) or timed_out:
                 self._active_actions.pop(axis, None)
-                position_text = 'unavailable' if position is None else f'{position:.3f} deg'
+                position_text = 'unavailable' if position is None else f'{_deg(position):.3f} deg'
                 message = (
                     f'{label} trajectory did not reach target: Axis {axis}, '
-                    f'current {position_text}, target {target_position:.3f} deg, '
+                    f'current {position_text}, target {_deg(target_position):.3f} deg, '
                     f'sent {last_step}/{steps} steps'
                 )
                 self._publish_action_result(request_id, False, message)
                 self.get_logger().warn(message)
+
+    @staticmethod
+    def _motor_position(motor: Optional[Dict[str, Any]]) -> Optional[float]:
+        """모터 상태의 현재 위치 · rad · 상태 단위는 `wire_units` 가 안다"""
+        return wire_units.motor_position(motor)
+
+    @staticmethod
+    def _motor_velocity(motor: Optional[Dict[str, Any]]) -> Optional[float]:
+        """모터 상태의 현재 속도 · rad/s"""
+        return wire_units.motor_velocity(motor)
 
     @staticmethod
     def _cubic_smoothstep(u: float) -> float:
@@ -1799,8 +1802,8 @@ class MotionSupervisor(Node):
 
         distance = abs(target_position - current_position)
         applied = requested
-        velocity_limit = self._velocity_limit_deg_sec(motor)
-        acceleration_limit = self._acceleration_limit_deg_sec2(motor)
+        velocity_limit = self._velocity_limit(motor)
+        acceleration_limit = self._acceleration_limit(motor)
 
         if distance > 0.0 and velocity_limit is not None and velocity_limit > 0.0:
             applied = max(
@@ -1817,8 +1820,8 @@ class MotionSupervisor(Node):
             'requested_sec': requested,
             'applied_sec': applied,
             'limited': applied > requested + 1e-9,
-            'velocity_limit_deg_sec': velocity_limit,
-            'acceleration_limit_deg_sec2': acceleration_limit,
+            'velocity_limit_rad_s': velocity_limit,
+            'acceleration_limit_rad_s2': acceleration_limit,
         }
 
     def _correct_jog_duration_sec(
@@ -1828,18 +1831,18 @@ class MotionSupervisor(Node):
         target_position: float,
     ) -> Dict[str, Any]:
         distance = abs(target_position - current_position)
-        configured_velocity = self._velocity_limit_deg_sec(motor)
-        configured_acceleration = self._acceleration_limit_deg_sec2(motor)
+        configured_velocity = self._velocity_limit(motor)
+        configured_acceleration = self._acceleration_limit(motor)
         applied = max(DEFAULT_JOG_MIN_DURATION_SEC, JOG_COMMAND_PERIOD_SEC)
         if distance > 0.0:
             nominal_duration = max(
                 CUBIC_SMOOTHSTEP_MAX_VELOCITY
                 * distance
-                / DEFAULT_JOG_VELOCITY_DEG_SEC,
+                / units.deg_to_rad(DEFAULT_JOG_VELOCITY_DEG_SEC),
                 math.sqrt(
                     CUBIC_SMOOTHSTEP_MAX_ACCELERATION
                     * distance
-                    / DEFAULT_JOG_ACCELERATION_DEG_SEC2
+                    / units.deg_to_rad(DEFAULT_JOG_ACCELERATION_DEG_SEC2)
                 ),
             )
             applied = max(
@@ -1864,8 +1867,8 @@ class MotionSupervisor(Node):
                 )
         return {
             'applied_sec': applied,
-            'velocity_limit_deg_sec': configured_velocity,
-            'acceleration_limit_deg_sec2': configured_acceleration,
+            'velocity_limit_rad_s': configured_velocity,
+            'acceleration_limit_rad_s2': configured_acceleration,
         }
 
     @staticmethod
@@ -1875,29 +1878,36 @@ class MotionSupervisor(Node):
             int(math.ceil((duration_sec - 1e-9) / JOG_COMMAND_PERIOD_SEC)),
         )
 
-    def _velocity_limit_deg_sec(self, motor: Dict[str, Any]) -> Optional[float]:
+    @staticmethod
+    def _config_rate(value: Optional[float]) -> Optional[float]:
+        """모터 설정 파일의 속도·가속도(설정 단위/s) → rad/s"""
+        if value is None:
+            return None
+        return units.convert(value, wire_units.MOTOR_CONFIG_UNIT, units.RAD)
+
+    def _velocity_limit(self, motor: Dict[str, Any]) -> Optional[float]:
+        """속도 상한 · rad/s"""
         driver = self._driver_config_for_motor(motor)
         candidates = [
-            self._optional_float((driver or {}).get('profile_velocity')),
+            self._config_rate(self._optional_float((driver or {}).get('profile_velocity'))),
         ]
         rated_speed_rpm = self._optional_float((driver or {}).get('rated_speed_rpm'))
         if rated_speed_rpm is None:
             rated_speed_rpm = self._optional_float(motor.get('rated_speed_rpm'))
         if rated_speed_rpm is not None:
-            candidates.append(rated_speed_rpm * 6.0)
+            candidates.append(units.rpm_to_rad_s(rated_speed_rpm))
 
         speed = self._optional_float((driver or {}).get('speed'))
         if speed is not None and speed <= 1_000_000.0:
-            candidates.append(speed)
+            candidates.append(self._config_rate(speed))
         return self._min_positive(candidates)
 
-    def _acceleration_limit_deg_sec2(self, motor: Dict[str, Any]) -> Optional[float]:
+    def _acceleration_limit(self, motor: Dict[str, Any]) -> Optional[float]:
+        """가속도 상한 · rad/s²"""
         driver = self._driver_config_for_motor(motor)
         candidates = [
-            self._optional_float((driver or {}).get('profile_acceleration')),
-            self._optional_float((driver or {}).get('profile_deceleration')),
-            self._optional_float((driver or {}).get('acceleration')),
-            self._optional_float((driver or {}).get('deceleration')),
+            self._config_rate(self._optional_float((driver or {}).get(key)))
+            for key in ('profile_acceleration', 'profile_deceleration', 'acceleration', 'deceleration')
         ]
         return self._min_positive(candidates)
 
@@ -1981,17 +1991,17 @@ class MotionSupervisor(Node):
     ) -> str:
         """Common limit guard for every upper-level position target."""
         axis = self._optional_int(motor.get('controller_index'))
-        lower = self._optional_float(motor.get('lower'))
-        upper = self._optional_float(motor.get('upper'))
+        lower = wire_units.motor_limit(motor, 'lower')
+        upper = wire_units.motor_limit(motor, 'upper')
         if lower is not None and target_position < lower:
             return (
-                f'{axis}번 모터 목표 위치 {target_position:.3f} deg 가 '
-                f'하한 {lower:.3f} deg 보다 작습니다'
+                f'{axis}번 모터 목표 위치 {_deg(target_position):.3f} deg 가 '
+                f'하한 {_deg(lower):.3f} deg 보다 작습니다'
             )
         if upper is not None and target_position > upper:
             return (
-                f'{axis}번 모터 목표 위치 {target_position:.3f} deg 가 '
-                f'상한 {upper:.3f} deg 보다 큽니다'
+                f'{axis}번 모터 목표 위치 {_deg(target_position):.3f} deg 가 '
+                f'상한 {_deg(upper):.3f} deg 보다 큽니다'
             )
         return ''
 
@@ -2002,8 +2012,8 @@ class MotionSupervisor(Node):
         target_position: float,
     ) -> str:
         axis = self._optional_int(motor.get('controller_index'))
-        lower = self._optional_float(motor.get('lower'))
-        upper = self._optional_float(motor.get('upper'))
+        lower = wire_units.motor_limit(motor, 'lower')
+        upper = wire_units.motor_limit(motor, 'upper')
         if lower is None or upper is None or lower > upper:
             return f'{axis}번 모터의 위치 한계값이 올바르지 않습니다'
 
@@ -2018,10 +2028,11 @@ class MotionSupervisor(Node):
         else:
             return f'{axis}번 모터는 이미 위치 한계 안에 있습니다'
 
-        if not math.isclose(target_position, expected_target, abs_tol=1e-6):
+        # 화면이 보낸 한계값(deg → rad) 과 비교 · deg 로 1e-6 에 해당하는 폭
+        if not math.isclose(target_position, expected_target, abs_tol=units.deg_to_rad(1e-6)):
             return (
                 f'{axis}번 모터 한계 복구는 {boundary_name} '
-                f'한계값 {expected_target:.3f} deg 를 목표로 해야 합니다'
+                f'한계값 {_deg(expected_target):.3f} deg 를 목표로 해야 합니다'
             )
         return ''
 
@@ -2083,9 +2094,13 @@ class MotionSupervisor(Node):
         }
         return (
             True,
-            f'{label} started: Axis {axis}, current {current_position:.3f} deg, '
-            f'target {target_position:.3f} deg',
+            f'{label} started: Axis {axis}, current {_deg(current_position):.3f} deg, '
+            f'target {_deg(target_position):.3f} deg',
         )
+
+    def _target_tolerance(self, motor: Dict[str, Any]) -> float:
+        """도달 허용 오차 · rad"""
+        return units.deg_to_rad(self._target_tolerance_deg(motor))
 
     def _target_tolerance_deg(self, motor: Dict[str, Any]) -> float:
         if not self._is_dynamixel(motor):
@@ -2104,10 +2119,11 @@ class MotionSupervisor(Node):
             DYNAMIXEL_TARGET_TOLERANCE_RAW_COUNTS / raw_per_degree,
         )
 
-    def _done_velocity_deg_sec(self, motor: Dict[str, Any]) -> float:
+    def _done_velocity(self, motor: Dict[str, Any]) -> float:
+        """멈췄다고 볼 속도 · rad/s"""
         if self._is_dynamixel(motor):
-            return DYNAMIXEL_DONE_VELOCITY_DEG_SEC
-        return JOG_DONE_VELOCITY_DEG_SEC
+            return units.deg_to_rad(DYNAMIXEL_DONE_VELOCITY_DEG_SEC)
+        return units.deg_to_rad(JOG_DONE_VELOCITY_DEG_SEC)
 
     def _publish_position_target(
         self,
@@ -2130,7 +2146,8 @@ class MotionSupervisor(Node):
             data=[ID_CONTROLWORD, ID_TARGET_POSITION]
         )
         command.controlword[axis] = int(controlword)
-        command.position[axis] = float(target_position)
+        # 안쪽은 rad · motor_manager 로 나가는 순간에만 그 단위로 · 수정 목록 6-4
+        command.position[axis] = wire_units.to_motor_node(target_position)
         with self._command_lock:
             if (
                 self._emergency_latched
@@ -2366,9 +2383,7 @@ class MotionSupervisor(Node):
                 axis = self._optional_int(motor.get('controller_index'))
                 if axis is None or axis < 0 or axis >= len(command.number_of_target_interfaces):
                     continue
-                position = self._optional_float(
-                    motor.get('position_deg', motor.get('position'))
-                )
+                position = self._motor_position(motor)
                 if emergency and (
                     self._is_ac_servo(motor) or self._is_dynamixel(motor)
                 ):
@@ -2395,7 +2410,8 @@ class MotionSupervisor(Node):
                     if self._is_ac_servo(motor)
                     else DYNAMIXEL_TORQUE_ENABLE
                 )
-                command.position[axis] = float(position)
+                # 현재 위치(rad) 에 세운다 · motor_manager 단위로 · 수정 목록 6-4
+                command.position[axis] = wire_units.to_motor_node(position)
                 affected_axes.append(axis)
             if affected_axes:
                 # Safety command is intentionally the final command and may bypass
