@@ -35,6 +35,10 @@ from .motion_run_constants import (
     STATE_TIMEOUT_SEC,
 )
 
+#: 사용 체크를 다시 켜거나 라이브 리밋을 바꾼 축을 잇는 시간 · 매핑 줄에
+#: `initial_move_time_sec` 이 없을 때만 · 40
+OVERRIDE_RESUME_DEFAULT_SEC = 5.0
+
 
 class MotionPlayer:
     def __init__(self, manager: Any) -> None:
@@ -46,6 +50,7 @@ class MotionPlayer:
         payload: Dict[str, Any],
         motors_snapshot: List[Dict[str, Any]],
     ) -> None:
+        self._reset_override_resume()
         try:
             if bool(payload.get('automation_run')):
                 self.manager._wait_for_automation_ready(payload)
@@ -1129,6 +1134,68 @@ class MotionPlayer:
                     )
         return out_positions, (out_values if motion_values else motion_values)
 
+    def _reset_override_resume(self) -> None:
+        """재생(또는 초기 이동)을 새로 시작할 때 · 이어 가기 기억을 비운다
+
+        지난 실행의 마지막 목표에서 이어 가면 그 사이 조그로 옮긴 모터가
+        옛 자리로 끌려간다 · 새 실행은 초기 이동이 지금 자리에서 출발한다.
+        지금 오버라이드를 「본 것」으로 적어 시작부터 잇기가 걸리지 않게 한다.
+        """
+        self._override_seen = {
+            key: dict(value)
+            for key, value in (self.manager.live_override_snapshot() or {}).items()
+        }
+        self._last_sent_positions = {}
+        self._resume_blends = {}
+
+    def _blend_override_changes(
+        self,
+        axes_by_index: Dict[int, Dict[str, Any]],
+        positions: Dict[int, float],
+        overrides: Mapping[str, Any],
+    ) -> Dict[int, float]:
+        """사용 체크·라이브 리밋이 바뀐 축은 마지막 목표에서 천천히 잇는다 · 40
+
+        다시 켠 축은 서 있던 자리와 지금 계획값이 다르다 · 그대로 보내면 PP
+        드라이브가 프로파일 속도로 한 번에 간다 · 그 축의 `initial_move_time_sec`
+        동안 smoothstep 으로 마지막 목표 → 계획값 (계획값은 그동안에도 움직인다).
+        끄는 쪽은 잇지 않는다 · 끄면 그 자리에 선다(명령을 안 보냄).
+        """
+        if not hasattr(self, '_override_seen'):
+            self._reset_override_resume()
+        now = time.monotonic()
+        # 바뀜은 **계획의 모든 축**에서 본다 · 꺼진 축은 positions 에서 이미 빠져
+        # 있어 여기서만 보면 「끔 → 켬」 이 「바뀜 없음」 으로 읽힌다
+        for motor_axis, axis_plan in axes_by_index.items():
+            motion_id = str(axis_plan.get('motion_id') or '')
+            if not motion_id:
+                continue
+            entry = dict((overrides or {}).get(motion_id) or {})
+            if entry == self._override_seen.get(motion_id, {}):
+                continue
+            self._override_seen[motion_id] = entry
+            last = self._last_sent_positions.get(int(motor_axis))
+            if entry.get('muted') or last is None:
+                continue
+            row = axis_plan.get('row') or {}
+            duration = finite_float(row.get('initial_move_time_sec'))
+            if duration is None or duration <= 0:
+                duration = OVERRIDE_RESUME_DEFAULT_SEC
+            self._resume_blends[int(motor_axis)] = (float(last), now, float(duration))
+        out = dict(positions)
+        for motor_axis, target in positions.items():
+            blend = self._resume_blends.get(int(motor_axis))
+            if blend is not None:
+                start, started_at, duration = blend
+                alpha = (now - started_at) / duration
+                if alpha >= 1.0:
+                    self._resume_blends.pop(int(motor_axis), None)
+                else:
+                    s = alpha * alpha * (3.0 - 2.0 * alpha)
+                    out[motor_axis] = start + (float(target) - start) * s
+            self._last_sent_positions[int(motor_axis)] = float(out[motor_axis])
+        return out
+
     def _publish_positions(
         self,
         motors: List[Dict[str, Any]],
@@ -1151,9 +1218,10 @@ class MotionPlayer:
                 }
                 if not positions:
                     return
+        axes_by_index = {int(axis['motor_axis']): axis for axis in axes}
+        positions = self._blend_override_changes(axes_by_index, positions, overrides)
         target_axes = motion_run_rules._sorted_controller_axes(positions.keys())
         command = motion_run_rules._empty_motor_command(target_axes)
-        axes_by_index = {int(axis['motor_axis']): axis for axis in axes}
         for slot, motor_axis in enumerate(target_axes):
             target = positions.get(motor_axis)
             if target is None:

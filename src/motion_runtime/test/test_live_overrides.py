@@ -126,3 +126,69 @@ def test_manager_clears_overrides_when_the_context_changes():
     )
     assert "router.register('set_live_override', self._set_live_override)" in text
     assert "result['live_overrides'] = self.live_override_snapshot()" in text
+
+
+class _Clock:
+    def __init__(self):
+        self.now = 1000.0
+
+    def __call__(self):
+        return self.now
+
+
+def _blend_player(monkeypatch, overrides):
+    import motion_runtime.motion_player as player_module
+    clock = _Clock()
+    monkeypatch.setattr(player_module.time, 'monotonic', clock)
+    player = _player({})
+    player.manager.live_override_snapshot = lambda: {k: dict(v) for k, v in overrides.items()}
+    player._reset_override_resume()
+    axes = {1: dict(AXES[0], row=dict(AXES[0]['row'], initial_move_time_sec=5.0))}
+    return player, clock, axes
+
+
+def test_unmute_ramps_from_where_it_stopped_instead_of_jumping(monkeypatch):
+    """다시 켠 축은 선 자리 → 계획값을 초기 이동 시간(5초) 동안 잇는다 · 40."""
+    overrides = {}
+    player, clock, axes = _blend_player(monkeypatch, overrides)
+    assert player._blend_override_changes(axes, {1: 100.0}, overrides) == {1: 100.0}
+
+    overrides['Neck_Yaw'] = {'muted': True}            # 끔 · 발행에서 빠진다
+    clock.now += 1.0
+    assert player._blend_override_changes(axes, {}, overrides) == {}
+
+    overrides.pop('Neck_Yaw')                           # 다시 켬 · 계획은 그새 900
+    clock.now += 1.0
+    first = player._blend_override_changes(axes, {1: 900.0}, overrides)[1]
+    assert first == 100.0, '켠 순간은 선 자리 그대로'
+    clock.now += 2.5                                   # 절반 · smoothstep 0.5
+    assert player._blend_override_changes(axes, {1: 900.0}, overrides)[1] == 500.0
+    clock.now += 2.6                                   # 5초 넘음 · 계획값
+    assert player._blend_override_changes(axes, {1: 900.0}, overrides)[1] == 900.0
+    clock.now += 0.02
+    assert player._blend_override_changes(axes, {1: 910.0}, overrides)[1] == 910.0
+
+
+def test_changing_the_live_limit_also_ramps(monkeypatch):
+    overrides = {'Neck_Yaw': {'clamp': [-1.0, 1.0]}}
+    player, clock, axes = _blend_player(monkeypatch, overrides)
+    assert player._blend_override_changes(axes, {1: 100.0}, overrides)[1] == 100.0
+    overrides.pop('Neck_Yaw')                           # 리밋 해제 · 계획 500
+    clock.now += 0.02
+    assert player._blend_override_changes(axes, {1: 500.0}, overrides)[1] == 100.0
+    clock.now += 2.5
+    assert player._blend_override_changes(axes, {1: 500.0}, overrides)[1] == 300.0
+
+
+def test_a_new_run_does_not_pull_toward_the_last_runs_target(monkeypatch):
+    """재생을 새로 시작하면 지난 실행의 마지막 목표에서 잇지 않는다 (그새 조그했을 수 있다)."""
+    overrides = {'Neck_Yaw': {'muted': True}}
+    player, clock, axes = _blend_player(monkeypatch, overrides)
+    player._last_sent_positions[1] = 100.0
+    overrides.pop('Neck_Yaw')                           # 멈춘 동안 다시 켬
+    player._reset_override_resume()                     # 새 실행 시작
+    clock.now += 1.0
+    assert player._blend_override_changes(axes, {1: 900.0}, overrides)[1] == 900.0
+    source = open(sys.modules['motion_runtime.motion_player'].__file__, encoding='utf-8').read()
+    run_start = source.index('def _prepare_and_run(')
+    assert source.index('self._reset_override_resume()', run_start) < source.index('try:', run_start)

@@ -57,7 +57,7 @@ def motor_target(row: Dict[str, Any], motion_value: float) -> float:
 
 
 def row_motor_limits(row: Dict[str, Any]) -> Tuple[float, float]:
-    """한 줄의 조인트 범위를 모터 deg (하한, 상한)으로 · 반전이면 뒤집혀 정렬된다."""
+    """한 줄의 조인트 범위를 모터 deg (하한, 상한)으로 · 방향 반전이면 뒤집혀 정렬된다."""
     lower = _float(row.get('motion_lower_deg'), DEFAULT_MOTION_LOWER_DEG)
     upper = _float(row.get('motion_upper_deg'), DEFAULT_MOTION_UPPER_DEG)
     first = motor_target(row, lower)

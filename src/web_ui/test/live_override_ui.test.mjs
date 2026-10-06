@@ -15,7 +15,7 @@ const api = readFileSync(new URL('../static/js/api.js', import.meta.url), 'utf8'
 
 test('the run-joints table carries the toggle and live-limit columns', () => {
   const head = html.slice(html.indexOf('애니메이션 재생 축'), html.indexOf('motionRunAxisRows'));
-  assert.match(head, /<th>사용<\/th>/);
+  assert.match(head, /<th>사용 \(즉시\)<\/th>/);
   assert.match(head, /<th>라이브 리밋 \(모션 deg\)<\/th>/);
   assert.match(html, /colspan="12" class="empty">실행 준비 검사를 누르면 표시됩니다/);
 });
@@ -44,4 +44,14 @@ test('live status updates do not clobber a cell being edited', () => {
   const start = controller.indexOf('function renderMotionRunAxes()');
   const body = controller.slice(start, start + 400);
   assert.match(body, /contains\(document\.activeElement\)\) return;/);
+});
+
+// 체크가 바로 들어가는지 화면에서 안 보였다 · 안내 한 줄 + 꺼진 줄 표시 · 40 · 2026-10-06
+test('the table says toggles apply at once, are not saved, and marks muted rows', () => {
+  const head = html.slice(html.indexOf('애니메이션 재생 축'), html.indexOf('motionRunAxisRows'));
+  assert.match(head, /누르는 즉시/);
+  assert.match(head, /저장되지 않고 「재생 등록」 때 모두 풀립니다/);
+  assert.match(controller, /<tr class="\$\{muted \? 'live-muted' : ''\}">/);
+  assert.match(controller, /live-muted-badge">제외 중</);
+  assert.match(controller, /다시 사용 · 초기 이동 시간 동안 천천히 이어 갑니다/);
 });
