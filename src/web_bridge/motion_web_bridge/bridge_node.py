@@ -32,6 +32,7 @@ from .execution_context_service import ExecutionContextService
 from .manual_motor_commands import ManualMotorCommandService
 from .schedule_end import ScheduleEndService
 from .supervisor_watchdog import SupervisorWatchdog
+from .auto_backup import AutoBackupService
 from .drive_maintenance import DriveMaintenance
 from .manual_stream import ManualStreamService
 from . import animation_preview, sim_scene
@@ -518,6 +519,13 @@ class MotionWebBridge(Node):
         self._supervisor_watchdog_timer = self.create_timer(
             1.0, self._supervisor_watchdog_tick
         )
+        # 프로젝트 자동 백업 · 하루 1회 · 만드는 일은 별도 스레드 · 수정 목록 33-4
+        self.auto_backup = AutoBackupService(
+            self.project_repository.auto_backup,
+            log_info=self.get_logger().info,
+            log_error=self.get_logger().error,
+        )
+        self._auto_backup_timer = self.create_timer(60.0, self.auto_backup.tick)
 
     def _log_started(self) -> None:
         """무엇을 물고 떴는지 남긴다 · 현장에서 이 줄 하나로 원인을 찾는다."""

@@ -299,6 +299,10 @@ export const importProjectZip = (file, overwrite = false) =>
     rawBody: file, contentType: 'application/zip', timeoutMs: 120000,
   });
 export const fetchProjectTrash = () => request('GET', '/api/project-trash');
+// 자동 백업 · 하루 1회 · 14일 · 수정 목록 33-4
+export const fetchProjectBackups = () => request('GET', '/api/project-backups');
+export const projectBackupUrl = (day, projectId) =>
+  `/api/project-backups/${encodeURIComponent(day)}/${encodeURIComponent(projectId)}`;
 export const restoreProjectTrash = (entry) =>
   request('POST', `/api/project-trash/${encodeURIComponent(entry)}/restore`);
 

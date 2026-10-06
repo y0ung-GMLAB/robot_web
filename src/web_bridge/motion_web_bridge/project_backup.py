@@ -7,6 +7,7 @@
     올려 복원  zip → 프로젝트 · 로봇 팩 올리기와 같은 검사(`..`·절대 경로·링크·크기)
                같은 ID 가 있으면 확인 뒤 덮어쓰기 · 덮이는 쪽은 휴지통으로
     휴지통     삭제 = `.trash/projects/<ID>-<시각>/` 로 옮김 · 7일 뒤 자동 삭제 · 되살리기
+    자동 백업  하루 1회 프로젝트마다 zip · `.backups/projects/<날짜>/` · 14일 보관 (33-4)
 """
 
 from __future__ import annotations
@@ -14,11 +15,12 @@ from __future__ import annotations
 import io
 import json
 import os
+import re
 import shutil
 import time
 import uuid
 import zipfile
-from datetime import datetime
+from datetime import date, datetime, timedelta
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional
 
@@ -182,3 +184,102 @@ def prune_trash(root: Path, *, keep_sec: float = TRASH_KEEP_SEC, now: Optional[f
             remove(path)
             removed.append(path.name)
     return removed
+
+
+# --------------------------------------------------------------------------- #
+# 자동 백업 · 하루 1회 · 수정 목록 33-4 (2026-10-06)
+#
+# 사람이 「zip 내려받기」 를 잊어도 하루 전 설정은 남는다 · 프로젝트마다 zip 하나라
+# 「zip 올려 복원」 에 그대로 올리면 된다 · 같은 디스크라 디스크 고장은 못 막는다 ·
+# 그건 내려받기(원격 브라우저) 몫 · 여기는 지움·잘못 저장·파일 깨짐을 되돌리는 용도.
+#
+#     .backups/projects/<YYYY-MM-DD>/<프로젝트 ID>.zip      14일 보관
+# --------------------------------------------------------------------------- #
+
+AUTO_BACKUP_DIR = Path('.backups') / 'projects'
+AUTO_BACKUP_KEEP_DAYS = 14
+_DAY_NAME = re.compile(r'^\d{4}-\d{2}-\d{2}$')
+
+
+def _today(today: Optional[date]) -> date:
+    return today or datetime.now().date()
+
+
+def daily_backup(root: Path, project_dirs: List[Path], *, today: Optional[date] = None) -> Dict[str, Any]:
+    """오늘 백업이 없으면 만든다 · 날짜 폴더는 다 쓴 뒤 한 번에 이름을 바꿔 반쯤 된 백업이 안 남는다"""
+    day = _today(today).isoformat()
+    base = Path(root) / AUTO_BACKUP_DIR
+    target = base / day
+    if target.is_dir():
+        return {'day': day, 'created': False, 'projects': [], 'pruned': []}
+    base.mkdir(parents=True, exist_ok=True)
+    work = base / f'.{day}-{uuid.uuid4().hex[:8]}'
+    work.mkdir()
+    saved = []
+    try:
+        for project_dir in project_dirs:
+            project_dir = Path(project_dir)
+            if not (project_dir / 'project.json').is_file():
+                continue
+            (work / f'{project_dir.name}.zip').write_bytes(export_project_zip(project_dir))
+            saved.append(project_dir.name)
+        os.replace(work, target)
+    except BaseException:
+        shutil.rmtree(work, ignore_errors=True)
+        raise
+    pruned = prune_auto_backups(root, today=today)
+    return {'day': day, 'created': True, 'projects': saved, 'pruned': pruned}
+
+
+def prune_auto_backups(root: Path, *, keep_days: int = AUTO_BACKUP_KEEP_DAYS,
+                       today: Optional[date] = None,
+                       remove: Callable[[Path], None] = shutil.rmtree) -> List[str]:
+    """보관 기간이 지난 날짜 폴더와 끝나지 못한 작업 폴더를 지운다 · 지운 이름 목록"""
+    base = Path(root) / AUTO_BACKUP_DIR
+    if not base.is_dir() or base.is_symlink():
+        return []
+    oldest = _today(today) - timedelta(days=keep_days - 1)
+    removed = []
+    for path in base.iterdir():
+        if not path.is_dir() or path.is_symlink():
+            continue
+        if _DAY_NAME.match(path.name):
+            try:
+                day = date.fromisoformat(path.name)
+            except ValueError:
+                continue
+            if day < oldest:
+                remove(path)
+                removed.append(path.name)
+        elif path.name.startswith('.') and time.time() - path.stat().st_mtime > 3600:
+            remove(path)                      # 도중에 꺼진 작업 폴더
+            removed.append(path.name)
+    return sorted(removed)
+
+
+def list_auto_backups(root: Path) -> List[Dict[str, Any]]:
+    """날짜 최신순 · 날짜마다 프로젝트 zip 목록"""
+    base = Path(root) / AUTO_BACKUP_DIR
+    if not base.is_dir():
+        return []
+    days = []
+    for path in sorted(base.iterdir(), key=lambda item: item.name, reverse=True):
+        if not path.is_dir() or path.is_symlink() or not _DAY_NAME.match(path.name):
+            continue
+        files = [
+            {'project_id': item.stem, 'size_bytes': item.stat().st_size}
+            for item in sorted(path.iterdir())
+            if item.is_file() and item.suffix == '.zip'
+        ]
+        days.append({'day': path.name, 'projects': files})
+    return days
+
+
+def auto_backup_file(root: Path, day: str, project_id: str) -> Path:
+    """내려받을 백업 파일 · 이름을 검사해 폴더 밖으로 못 나가게"""
+    if not _DAY_NAME.match(str(day or '')):
+        raise ValueError('백업 날짜 형식이 아닙니다')
+    path = Path(root) / AUTO_BACKUP_DIR / str(day) / f'{_valid_id(str(project_id or ""))}.zip'
+    if not path.is_file():
+        raise ValueError(f'백업이 없습니다: {day} · {project_id}')
+    return path

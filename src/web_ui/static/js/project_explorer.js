@@ -12,6 +12,8 @@ import {
   importProjectFile,
   importProjectZip,
   fetchProjectTrash,
+  fetchProjectBackups,
+  projectBackupUrl,
   restoreProjectTrash,
   projectExportUrl,
   openProjectFileEditor,
@@ -92,6 +94,7 @@ export function createProjectExplorerController({
       if (file) await restoreFromZip(file);
     });
     el.projectTrashButton?.addEventListener('click', () => renderTrash(true));
+    el.projectBackupsButton?.addEventListener('click', () => renderBackups(true));
     el.projectTrashList?.addEventListener('click', async (event) => {
       const button = event.target.closest('[data-trash-entry]');
       if (!button) return;
@@ -154,6 +157,36 @@ export function createProjectExplorerController({
       box.classList.remove('hidden');
     } catch (error) {
       box.textContent = `휴지통을 읽지 못했습니다 · ${error?.message || error}`;
+      box.classList.remove('hidden');
+    }
+  }
+
+  /** 자동 백업 목록 · 날짜마다 프로젝트 zip · 내려받아 「zip 올려 복원」 · 수정 목록 33-4 */
+  async function renderBackups(toggle = false) {
+    const box = el.projectBackupsList;
+    if (!box) return;
+    if (toggle && !box.classList.contains('hidden')) {
+      box.classList.add('hidden');
+      return;
+    }
+    try {
+      const result = await fetchProjectBackups();
+      const days = Array.isArray(result?.days) ? result.days : [];
+      const keep = Number(result?.keep_days) || 14;
+      box.innerHTML = days.length
+        ? `<div>하루 한 번 저절로 남깁니다 · ${keep}일 보관 · 내려받은 zip 을 「zip 올려 복원」</div>`
+          + days.map((day) => (
+            `<div class="project-trash-row"><span>${escapeHtml(day.day)}</span> `
+            + (day.projects || []).map((item) => (
+              `<a href="${escapeHtml(projectBackupUrl(day.day, item.project_id))}" download>`
+              + `${escapeHtml(item.project_id)} (${(Number(item.size_bytes) / 1e6).toFixed(1)} MB)</a>`
+            )).join(' · ')
+            + '</div>'
+          )).join('')
+        : `아직 자동 백업이 없습니다 · 프로그램을 켜 두면 하루 한 번 만들고 ${keep}일 보관합니다`;
+      box.classList.remove('hidden');
+    } catch (error) {
+      box.textContent = `자동 백업 목록을 읽지 못했습니다 · ${error?.message || error}`;
       box.classList.remove('hidden');
     }
   }

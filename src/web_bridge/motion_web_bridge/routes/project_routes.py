@@ -39,6 +39,20 @@ def register_project_routes(app: FastAPI, bridge, project_call) -> None:
     async def restore_motion_project(entry: str):
         return await project_call(bridge.project.restore_trash, entry)
 
+    # 자동 백업 · 하루 1회 · 14일 · 수정 목록 33-4
+    @app.get('/api/project-backups')
+    async def motion_project_backups():
+        return await project_call(bridge.project.list_auto_backups)
+
+    @app.get('/api/project-backups/{day}/{project_id}')
+    async def motion_project_backup_file(day: str, project_id: str):
+        result = await project_call(bridge.project.auto_backup_file, day, project_id)
+        return FileResponse(
+            result['path'],
+            media_type='application/zip',
+            headers={'Content-Disposition': f'attachment; filename="{result["filename"]}"'},
+        )
+
     @app.get('/api/projects/{project_id}')
     async def motion_project(project_id: str):
         return await project_call(bridge.project.load_project, project_id)
