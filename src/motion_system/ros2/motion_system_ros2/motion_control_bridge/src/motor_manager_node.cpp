@@ -7,6 +7,17 @@
 
 #include "motion_control_bridge/motor_manager_node.hpp"
 
+namespace {
+
+// 토픽(motor_command · motor_status)의 위치·속도는 rad · rad/s ·
+// motor_manager 와 드라이버·모터 설정 파일은 원본 그대로 deg 라서 여기서만 바꾼다 ·
+// robot_web 수정 목록 6-1 (2026-10-06 · 사용자 결정 「노드 경계만」)
+constexpr double kPi = 3.14159265358979323846;
+constexpr double kDegPerRad = 180.0 / kPi;
+constexpr double kRadPerDeg = kPi / 180.0;
+
+}  // namespace
+
 MotorManagerNode::MotorManagerNode(const rclcpp::NodeOptions& options)
     : Node("motor_manager_node", options)
 {
@@ -86,8 +97,8 @@ void MotorManagerNode::motor_command_callback(const MotorStatus::SharedPtr msg)
         motor_frame[i].controlword = msg->controlword[i];
         //motor_frame[i].statusword = msg->statusword[i];
         //motor_frame[i].errorcode = msg->errorcode[i];
-        motor_frame[i].position = msg->position[i];
-        motor_frame[i].velocity = msg->velocity[i];
+        motor_frame[i].position = msg->position[i] * kDegPerRad;
+        motor_frame[i].velocity = msg->velocity[i] * kDegPerRad;
         motor_frame[i].effort = msg->effort[i];
     }
 
@@ -129,8 +140,8 @@ void MotorManagerNode::timer_callback()
         msg.controlword[i] = status[i].controlword;
         msg.statusword[i] = status[i].statusword;
         msg.errorcode[i] = status[i].errorcode;
-        msg.position[i] = status[i].position;
-        msg.velocity[i] = status[i].velocity;
+        msg.position[i] = status[i].position * kRadPerDeg;
+        msg.velocity[i] = status[i].velocity * kRadPerDeg;
         msg.effort[i] = status[i].effort;
         msg.overload_ratio[i] = status[i].overload_ratio;   // 음수 = 읽지 않음
     }

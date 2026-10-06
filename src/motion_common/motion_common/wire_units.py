@@ -1,17 +1,19 @@
-"""모터 쪽 경계 단위 · 아직 deg 인 곳 · 수정 목록 6 (2026-10-06)
+"""모터 쪽 경계 단위 · 수정 목록 6 (2026-10-06)
 
-안쪽(조인트 매핑 · 재생 계획 · 조인트 값 · 재생 상태)은 rad 다 · 모터 쪽 세 곳은
-아직 deg 라서 그 경계에서만 바꾼다 · 경계는 이 모듈의 함수만 부른다.
+안쪽(조인트 매핑 · 재생 계획 · 조인트 값 · 재생 상태 · supervisor)은 rad 다 ·
+토픽 경계도 이제 모두 rad 이고, 사람이 적는 모터 설정 파일만 deg 로 남았다 ·
+경계는 이 모듈의 함수만 부른다.
 
     MOTOR_NODE_UNIT      motor_manager 토픽 (motor_status · motor_command 의 position)
-                         · motor_manager 입력이 rad 가 되면(6-1) rad
+                         · 6-1(2026-10-06)부터 rad · C++ 노드가 받아 deg 로 바꿔 드라이버에
+                           (`motor_manager_node.cpp` · 사용자 결정 「노드 경계만」)
     MOTOR_COMMAND_UNIT   재생 → supervisor 명령 토픽 (MotorStatus.position)
                          · 6-4(2026-10-06)부터 rad
     MOTOR_STATE_UNIT     motion_state JSON 의 motors[] 위치·속도 · 6-5(2026-10-06)부터 rad
                          (`position_rad` · `velocity_rad_s`) · 이름에 단위가 없는 옛 칸
                          (`position` · `velocity`)만 이 단위로 읽는다 · `*_deg` 칸은 이름대로 deg
-    MOTOR_CONFIG_UNIT    모터 설정 파일 drivers[].lower/upper (motion_state 에도 그대로 실린다)
-                         · motor_manager 입력이 rad 가 되면(6-1) rad
+    MOTOR_CONFIG_UNIT    모터 설정 파일 drivers[].lower/upper · profile_* (motion_state 에도 그대로 실린다)
+                         · deg 그대로 · 드라이버 4종이 원본대로 deg 로 읽는다
 
 상수 하나를 바꾸면 그 경계가 통째로 옮겨 간다.
 """
@@ -23,7 +25,7 @@ from typing import Any, Mapping, Optional
 from . import units
 from .values import finite_float
 
-MOTOR_NODE_UNIT = units.DEG
+MOTOR_NODE_UNIT = units.RAD
 MOTOR_COMMAND_UNIT = units.RAD
 MOTOR_STATE_UNIT = units.RAD
 MOTOR_CONFIG_UNIT = units.DEG

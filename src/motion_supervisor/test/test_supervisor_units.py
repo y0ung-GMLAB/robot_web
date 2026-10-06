@@ -1,7 +1,7 @@
 """supervisor 단위 경계 · 수정 목록 6-4 (2026-10-06)
 
-안쪽(요청 · 모터 상태 · 계산)은 rad · motor_manager 로 나가는 위치만 아직 deg ·
-들어오는 상태는 `position_rad` · 모터 설정의 하한·상한은 설정 단위(deg) 그대로.
+요청 · 모터 상태 · 계산 · motor_manager 토픽 모두 rad (노드가 받아 deg 로 바꿔 드라이버에) ·
+모터 설정의 하한·상한·프로파일은 설정 파일 단위(deg) 그대로 · 6-1 은 노드 경계만.
 """
 
 import math
@@ -44,13 +44,13 @@ def _supervisor(motors):
 def _published_positions(supervisor):
     command = supervisor._command_pub.messages[-1]
     return {
-        int(axis): float(command.position[slot])
+        int(axis): math.degrees(float(command.position[slot]))   # 노드가 드라이버에 넘기는 deg
         for slot, axis in enumerate(command.controller_index)
         if int(command.number_of_target_interfaces[slot]) == 2
     }
 
 
-def test_motion_stop_holds_the_rad_state_position_and_sends_motor_manager_deg():
+def test_motion_stop_holds_the_rad_state_position():
     supervisor = _supervisor([
         {'controller_index': 0, 'state': 'detected', 'motor_type': 'ac_servo', 'position_rad': R(1234.5)},
     ])

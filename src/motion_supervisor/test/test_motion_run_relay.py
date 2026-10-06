@@ -31,15 +31,16 @@ class QuietLogger:
         pass
 
 
-#: supervisor 안쪽·요청은 rad · motor_manager 로 나가는 값은 아직 deg · 수정 목록 6-4
-#: 시험은 읽기 쉽게 deg 로 적고 들어가는 값만 rad 로 바꾼다 · 나간 값은 deg 로 그대로 견준다
+#: supervisor 안팎은 rad · motor_manager 노드가 받아 deg 로 바꿔 드라이버에 넘긴다 · 수정 목록 6
+#: 시험은 읽기 쉽게 deg 로 적는다 · 들어가는 값은 rad 로 · 나간 값은 노드처럼 deg 로 바꿔 견준다
 R = math.radians
+D = math.degrees
 
 
 def _targets_by_axis(command):
     """모터 매니저가 읽는 방식 · 슬롯 번호가 아니라 `controller_index` 로 찾는다."""
     return {
-        int(axis): float(command.position[slot])
+        int(axis): D(float(command.position[slot]))
         for slot, axis in enumerate(command.controller_index)
         if int(command.number_of_target_interfaces[slot]) > 0
     }
@@ -709,7 +710,7 @@ def test_motion_stop_holds_all_axes_without_emergency_latch():
     assert supervisor._command_arbiter.snapshot().owner is CommandOwner.NONE
     command = supervisor._command_pub.messages[-1]
     assert list(command.number_of_target_interfaces) == [2, 2]
-    assert list(command.position) == pytest.approx([15.0, -8.0])
+    assert [D(value) for value in command.position] == pytest.approx([15.0, -8.0])
 
 
 def test_emergency_stop_disables_ac_and_dynamixel_without_position_then_latches():
@@ -1034,7 +1035,7 @@ def test_compacting_keeps_the_real_axis_numbers():
 
     command = supervisor._command_pub.messages[0]
     assert list(command.controller_index) == [3]
-    assert command.position[0] == pytest.approx(5.0)
+    assert D(command.position[0]) == pytest.approx(5.0)
 
 
 def test_a_command_that_drives_every_axis_is_left_alone():

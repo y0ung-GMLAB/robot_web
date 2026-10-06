@@ -33,3 +33,4 @@
 | 날짜 | 경로 | 수정 | 사유 |
 |---|---|---|---|
 | 2026-10-04 | `lib/motor_manager/hardware/dynamixel/src/dynamixel_driver.cpp` · `include/dynamixel/dynamixel_driver.hpp` | `position(double)` 한 바퀴(0~4095) 클램프 → Extended Position 허용 raw ±`extended_position_raw_limit_`(기본 1,048,575 · param yaml `extended_position_raw_limit`) | 다이나믹셀 멀티턴 · 외부 기어 사용 · 운전 한계는 상위 `lower/upper` 로 |
+| 2026-10-06 | `ros2/motion_system_ros2/motion_control_bridge/src/motor_manager_node.cpp` | 토픽 `motion_control/motor_command`·`motor_status` 의 `position`·`velocity` 를 rad · rad/s 로 (받을 때 ×180/π · 낼 때 ×π/180) · motor_manager·드라이버 4종·모터 설정 파일은 deg 그대로 | robot_web 수정 목록 6-1 · 사용자 결정 「노드 경계만」 · 같은 토픽을 쓰는 MIDI·robot_manager·rqt 노드는 robot_web 서비스가 띄우지 않아 고치지 않음(띄우면 rad 로 읽어야 함) |

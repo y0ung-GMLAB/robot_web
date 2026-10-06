@@ -61,8 +61,10 @@ def test_motor_command_on_the_wire_is_unchanged(row, joint_deg):
     joint = math.radians(joint_deg)
     for source in (row, _saved_rad_row(row)):
         target = motion_run_rules._motor_target(source, joint)
-        # 재생 → supervisor(명령 토픽) → motor_manager(아직 deg) · 50000° 대 값이라 상대 오차로 본다
-        on_wire = wire_units.to_motor_node(wire_units.from_command(wire_units.command_value(target)))
+        # 재생 → supervisor(명령 토픽) → motor_manager 토픽 → 노드가 deg 로(×180/π) 드라이버에 ·
+        # 50000° 대 값이라 상대 오차로 본다
+        on_topic = wire_units.to_motor_node(wire_units.from_command(wire_units.command_value(target)))
+        on_wire = units.convert(on_topic, wire_units.MOTOR_NODE_UNIT, units.DEG)
         assert on_wire == pytest.approx(expected, rel=1e-12, abs=1e-9)
         back = trace_joint_from_motor(source, target)
         assert back == pytest.approx(joint, abs=1e-9)
