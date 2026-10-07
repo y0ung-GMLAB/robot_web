@@ -8,6 +8,7 @@
                          속성 C · 재투입 때 EEPROM 에서 다시 읽는다 · 그래서 부팅 RAM
                          쓰기로는 반영이 안 됐다(수정 목록 34-1)
     다회전 클리어         0x4D01 = 0x0031 → 0x4D00:01 bit9 0→1 · **서보 OFF 일 때만** ·
+                         0x4D00:01 되읽어 bit9 확인(수정 목록 66) ·
                          끝나면 드라이브 전원 재투입 + 기준점 다시 캡처
 
 출처 · Panasonic SX-DSV03241 R10.0 (Pr0.15 p.176) · SX-DSV03242 R10.1 (1010h · 4D00h/4D01h p.259)
@@ -56,10 +57,36 @@ def command_plan(action: str, master: int, position: int, value: Optional[int] =
         return [
             base + ['-t', 'uint16', '0x4D01', '0', '0x0031'],
             # 0 을 먼저 써서 bit9 를 0→1 로 올린다 · 이미 1 이면 일어나지 않는다
-            base + ['-t', 'uint16', '0x4D00', '1', '0'],
-            base + ['-t', 'uint16', '0x4D00', '1', '0x0200'],
+            # 0x4D00:01 은 uint32(객체 사전) · uint16 이면 SDO 0x06070010 거부 · 수정 목록 66
+            base + ['-t', 'uint32', '0x4D00', '1', '0'],
+            base + ['-t', 'uint32', '0x4D00', '1', '0x0200'],
         ]
     raise ValueError(f'지원하지 않는 드라이브 정비입니다: {action}')
+
+
+#: 다회전 클리어 시작 비트 · 0x4D00:01 bit9
+ABSOLUTE_CLEAR_BIT = 0x0200
+
+
+def verify_command(action: str, master: int, position: int) -> Optional[List[str]]:
+    """쓰기 뒤 되읽기 · 다회전 클리어만 · 0x4D00:01 bit9 가 1 인지 본다 · 수정 목록 66"""
+    if action != ABSOLUTE_CLEAR:
+        return None
+    return [
+        'ethercat', 'upload', '-m', str(int(master)), '-p', str(int(position)),
+        '-t', 'uint32', '0x4D00', '1',
+    ]
+
+
+def parse_upload_value(text: str) -> Optional[int]:
+    """`ethercat upload` 출력 첫 칸(`0x00000200 512`) · 못 읽으면 None"""
+    tokens = str(text or '').split()
+    if not tokens:
+        return None
+    try:
+        return int(tokens[0], 0)
+    except ValueError:
+        return None
 
 
 def after_message(action: str, value: Optional[int] = None) -> str:
@@ -197,6 +224,24 @@ class DriveMaintenance:
                 if result.returncode != 0:
                     error = (result.stderr or result.stdout or '').strip() or f'종료 코드 {result.returncode}'
                     break
+            verify = verify_command(action, target['master'], target['position'])
+            if verify and not error:
+                result = self._runner(
+                    verify, check=False, capture_output=True, text=True,
+                    timeout=COMMAND_TIMEOUT_SEC,
+                )
+                read_value = parse_upload_value(result.stdout) if result.returncode == 0 else None
+                outputs.append({
+                    'command': ' '.join(verify),
+                    'returncode': result.returncode,
+                    'value': read_value,
+                })
+                if read_value is None:
+                    error = '되읽기 실패 · 0x4D00:01 · ' + (
+                        (result.stderr or result.stdout or '').strip() or f'종료 코드 {result.returncode}'
+                    )
+                elif not read_value & ABSOLUTE_CLEAR_BIT:
+                    error = f'되읽기 불일치 · 0x4D00:01 = 0x{read_value:08X} · bit9 가 1 이 아닙니다'
         except (OSError, RuntimeError, subprocess.TimeoutExpired) as exc:
             error = str(exc)
         finally:
