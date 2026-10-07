@@ -6,8 +6,9 @@ ROS 2 Humble 모션 제어 시스템(robot_web)의 DDS 트리거를 **구독만*
 2026-10-07 부터 robot_web 저장소 안(`robot_web/speaker_app`)에 있다 · 출처 [ORIGIN.md](ORIGIN.md) ·
 로봇 PC 와 **같은 robot_web 커밋**으로 맞춰야 한다(그룹 메시지 정의가 같아야 받는다).
 
-기존 3대 PC의 연동에 일절 관여하지 않는다. DDS 발행은 0건이며,
-이 PC가 꺼져 있거나 고장 나도 3대의 모션 실행은 영향을 받지 않는다.
+로봇 PC 의 연동에 관여하지 않는다. 모션 토픽에는 쓰지 않고, 발행은 「같은 망 PC 알림」
+(`/motion_group/presence` · 2초마다 이 PC 이름 · IP · 웹 주소) 하나뿐이다 · 로봇 PC 화면 「같은 망 PC」 표에
+스피커가 보이게 하는 용도다(수정 목록 75). 이 PC가 꺼져 있거나 고장 나도 로봇의 모션 실행은 영향을 받지 않는다.
 
 설계 근거와 대상 시스템 분석 결과는 [DESIGN.md](DESIGN.md)에 정리되어 있다.
 
@@ -38,10 +39,11 @@ ROS 2 Humble 모션 제어 시스템(robot_web)의 DDS 트리거를 **구독만*
 git clone https://github.com/y0ung-GMLAB/robot_web ~/robot_web
 cd ~/robot_web
 source /opt/ros/humble/setup.bash
-colcon build --packages-select motion_coordination_interfaces
+colcon build --packages-up-to motion_coordination_interfaces
 ```
 
-메시지 패키지 하나만 빌드한다(모터 쪽은 빌드하지 않는다). `run.sh` 는 `~/robot_web/install` 을 먼저 쓰고,
+메시지 패키지와 그것이 쓰는 `midi_msgs` 만 빌드한다(모터 쪽은 빌드하지 않는다 · `--packages-select` 로 하나만
+고르면 `midi_msgs` 가 없어 실패한다). `run.sh` 는 `~/robot_web/install` 을 먼저 쓰고,
 없을 때만 옛 `~/ros2_ws` 를 쓴다. 로봇 PC 를 새 커밋으로 올리면 **스피커 PC 도 `git pull` 뒤 다시 빌드**한다.
 ROS 2 Humble 자체가 없으면 먼저 설치한다.
 

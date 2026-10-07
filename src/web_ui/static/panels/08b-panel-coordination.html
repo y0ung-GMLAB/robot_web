@@ -10,6 +10,20 @@
              「통신 단절」로만 보이므로 여기서 말해 주지 않으면 원인을 못 찾는다 -->
         <div id="coordinationNetworkStaleBanner" class="registry-message"></div>
 
+        <!-- 같은 공유기 망의 PC · 그룹 참가와 상관없이 · IP 를 보고 각 PC 화면을 새 탭으로 연다 · 핵심 요구 4 -->
+        <section class="project-system-manager" aria-label="같은 망 PC">
+          <div class="section-head compact">
+            <strong>같은 망 PC</strong>
+            <span>로봇 PC · 스피커 PC 가 2초마다 알립니다 · 6초 넘게 소식이 없으면 끊김</span>
+          </div>
+          <div class="table-wrap">
+            <table class="coordination-peer-table">
+              <thead><tr><th>PC</th><th>역할</th><th>IP 주소</th><th>연동</th><th>상태</th><th>버전 (Git)</th><th>열기</th></tr></thead>
+              <tbody id="coordinationNetworkRows"><tr><td colspan="7" class="empty">연동 노드 확인 중</td></tr></tbody>
+            </table>
+          </div>
+        </section>
+
           <section class="project-system-manager coordination-settings-card" aria-label="연동 상태와 세션">
           <div class="section-head compact">
             <strong>1. 연동 상태와 참가</strong>

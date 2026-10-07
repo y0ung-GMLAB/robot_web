@@ -7,6 +7,7 @@ import {
 } from './api.js';
 import { showAlert, showConfirm, dismissAllDialogs } from './ui_dialogs.js';
 import { motionHeaderConditionsUpdate } from './header_conditions.js';
+import { networkPcRows } from './network_pcs.js';
 
 function text(value) {
   return String(value ?? '').replace(/[&<>"']/g, (character) => ({
@@ -386,6 +387,10 @@ export function createCoordinationController({ el }) {
       shownCoordinationError = '';
       dismissAllDialogs();
     }
+    // 같은 망 PC · 연동을 안 써도 보인다 · 노드가 꺼져 있으면 비어 있다
+    if (snapshot) setHtml(el.coordinationNetworkRows, snapshot.node_connected !== true
+      ? '<tr><td colspan="7" class="empty">PC 연동 서비스가 응답하지 않습니다 · 같은 망 PC 를 볼 수 없습니다</td></tr>'
+      : networkPcRows(runtime.network_pcs));
     if (el.coordinationPeerRows || el.motionRunPeerRows) {
       const rows = [];
       const seenPcs = new Set();

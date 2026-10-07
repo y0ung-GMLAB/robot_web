@@ -172,5 +172,5 @@ def collect(port):
         "git_url": _git_url(),
         "git_head": git_head(),
         "subscribe": "/motion_group/command, /motion_group/event",
-        "publish": "없음 (구독 전용)",
+        "publish": "/motion_group/presence (2초마다 · 같은 망 PC 표용 · 모션 토픽에는 쓰지 않음)",
     }

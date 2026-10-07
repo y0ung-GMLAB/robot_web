@@ -93,7 +93,7 @@ function render(s) {
     el.checked = el.value === s.mode;
   });
   let modeHint = isDds
-    ? "모션 PC의 시작 트리거를 받아 자동 재생합니다. 구독만 하며 발행은 하지 않습니다."
+    ? "모션 PC의 시작 트리거를 받아 자동 재생합니다. 이 PC 이름·주소를 2초마다 알려 로봇 PC 화면에 보이게 합니다."
     : "DDS와 무관하게 직접 재생합니다. 트리거는 받지 않습니다.";
   if (isDds && s.dds_status === "error" && s.dds_error) {
     modeHint = "DDS 오류: " + s.dds_error;
@@ -108,6 +108,7 @@ function render(s) {
   // 설정
   setValue($("domain_id"), cfg.domain_id);
   setValue($("group_id"), cfg.group_id);
+  setValue($("pc_name"), cfg.pc_name || "");
   setValue($("offset_sec"), cfg.offset_sec);
   const stopChk = $("stop_on_motion_stop");
   if (document.activeElement !== stopChk) stopChk.checked = !!cfg.stop_on_motion_stop;
@@ -377,6 +378,7 @@ $("btn-apply-dds").addEventListener("click", async () => {
   const ok = await api("/api/config", {
     domain_id: $("domain_id").value,
     group_id: $("group_id").value,
+    pc_name: $("pc_name").value,
   });
   if (ok) toast("연동 설정을 저장했습니다");
   poll();

@@ -4,7 +4,7 @@ from types import SimpleNamespace
 import pytest
 from rclpy.executors import ExternalShutdownException
 from motion_coordination_interfaces.msg import (
-    GroupAlarm, GroupCommand, GroupEvent, GroupHeartbeat, GroupTimeSync,
+    GroupAlarm, GroupCommand, GroupEvent, GroupHeartbeat, GroupTimeSync, PcPresence,
 )
 
 import motion_coordination.coordination_node as coordination_node
@@ -1810,3 +1810,62 @@ def test_group_start_at_carries_the_masters_animation_and_time_to_start():
     command = node._command_pub.messages[-1]
     assert command.motion_file_id == 'show_b.json'
     assert 0.3 < command.start_delay_sec <= 0.5
+
+
+def _presence(pc_id, role='robot', address='192.168.0.12', **fields):
+    message = PcPresence()
+    message.pc_id = pc_id
+    message.display_name = fields.pop('display_name', pc_id)
+    message.role = role
+    message.address = address
+    message.web_url = f'http://{address}:8000'
+    message.boot_id = fields.pop('boot_id', f'boot-{pc_id}')
+    fields = {'group_id': '', 'joined': False, 'is_master': False, 'git_hash': '',
+              'protocol_version': 5, **fields}
+    for key, value in fields.items():
+        setattr(message, key, value)
+    return message
+
+
+def test_presence_is_sent_even_when_not_joined_or_not_configured():
+    """같은 망 PC 표 · 연동을 안 써도 IP 와 웹 주소를 알린다 · 핵심 요구 4"""
+    node = _node()
+    node._config.configured = False
+    node._boot_lan_addresses = ('192.168.0.11',)
+    node._presence_pub = _Publisher()
+    node._publish_presence()
+    message = node._presence_pub.messages[-1]
+    assert message.pc_id == 'pc-a' and message.role == 'robot'
+    assert message.address == '192.168.0.11' and message.web_url == 'http://192.168.0.11:8000'
+    assert message.group_id == '' and message.joined is False
+
+
+def test_network_pcs_lists_this_pc_first_then_robots_then_the_speaker():
+    node = _node()
+    node._boot_lan_addresses = ('192.168.0.11',)
+    node._git_hash = 'abc1234'
+    node._presence_callback(_presence('speaker', role='speaker', address='192.168.0.20',
+                                      git_hash='abc1234'))
+    node._presence_callback(_presence('floating2', address='192.168.0.13', group_id='stage-a',
+                                      git_hash='old9999', protocol_version=4))
+    node._presence_callback(_presence('pc-a', boot_id='boot-a'))     # 내 알림이 돌아옴 · 무시
+
+    rows = node._network_pcs()
+    assert [(r['pc_id'], r['role']) for r in rows] == [
+        ('pc-a', 'robot'), ('floating2', 'robot'), ('speaker', 'speaker')]
+    assert rows[0]['is_local'] and rows[0]['address'] == '192.168.0.11'
+    assert rows[1]['same_group'] and rows[1]['version_differs'] and rows[1]['protocol_mismatch']
+    assert not rows[2]['protocol_mismatch'] and not rows[2]['version_differs']
+    assert all(r['online'] for r in rows)
+
+
+def test_network_pcs_marks_silent_pcs_offline_and_forgets_old_ones():
+    node = _node()
+    node._presence_callback(_presence('floating3'))
+    node._presence_callback(_presence('floating4', address='192.168.0.14'))
+    rows = {r['pc_id']: r for r in node._presence.values()}
+    rows['floating3']['received_monotonic'] -= coordination_node.PRESENCE_OFFLINE_SEC + 1
+    rows['floating4']['received_monotonic'] -= coordination_node.PRESENCE_FORGET_SEC + 1
+    listed = {r['pc_id']: r for r in node._network_pcs()}
+    assert listed['floating3']['online'] is False
+    assert 'floating4' not in listed

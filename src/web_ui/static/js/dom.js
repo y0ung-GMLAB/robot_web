@@ -90,6 +90,8 @@ export function getElements() {
     coordinationMasterName: document.getElementById('coordinationMasterName'),
     coordinationPeerCount: document.getElementById('coordinationPeerCount'),
     coordinationPeerRows: document.getElementById('coordinationPeerRows'),
+    // 같은 망 PC 표 · 그룹 참가와 상관없이 · 핵심 요구 4
+    coordinationNetworkRows: document.getElementById('coordinationNetworkRows'),
     // 그룹 실행은 연동 탭이 주인이다 · §6-100 · 마스터에서만 보인다
     coordinationGroupRunSection: document.getElementById('coordinationGroupRunSection'),
     coordinationRepeatMode: document.getElementById('coordinationRepeatMode'),

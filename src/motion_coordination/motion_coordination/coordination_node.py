@@ -26,6 +26,7 @@ from motion_coordination_interfaces.msg import (
     GroupHeartbeat,
     GroupTimeSync,
     GroupSystemInfo,
+    PcPresence,
 )
 from dataclasses import replace
 
@@ -92,6 +93,15 @@ LOCAL_RUNTIME_HTTP_TIMEOUT_SEC = 0.30
 TRIGGER_PROBE_QOS = QoSProfile(
     depth=32, reliability=ReliabilityPolicy.BEST_EFFORT,
 )
+
+#: 같은 망 PC 알림 · 그룹 참가와 상관없이 늘 보낸다 · 마스터 화면에서 IP 를 보고 탭을 연다
+#: 최선형 · 스피커 앱(최선형 구독·발행)과도 맞물린다 · 하나 빠져도 2초 뒤 다음 것
+PRESENCE_QOS = QoSProfile(depth=8, reliability=ReliabilityPolicy.BEST_EFFORT)
+PRESENCE_INTERVAL_SEC = 2.0
+#: 이만큼 소식이 없으면 「끊김」 · 알림 3번
+PRESENCE_OFFLINE_SEC = 6.5
+#: 이만큼 지나면 표에서 뺀다 · 이름을 바꾼 PC 의 옛 줄이 남지 않게
+PRESENCE_FORGET_SEC = 600.0
 
 
 def _stamp_to_float(stamp: Any) -> float:
@@ -249,6 +259,15 @@ class MotionCoordinationNode(Node):
             GroupTimeSync, topics.GROUP_TIME_PROBE,
             self._time_sync_callback, probe_qos,
         )
+        # 같은 망 PC 표 · 그룹과 상관없이 · 핵심 요구 4
+        self._presence: Dict[tuple, Dict[str, Any]] = {}
+        self._presence_lock = threading.Lock()
+        self._presence_pub = self.create_publisher(
+            PcPresence, topics.GROUP_PRESENCE, PRESENCE_QOS
+        )
+        self._presence_sub = self.create_subscription(
+            PcPresence, topics.GROUP_PRESENCE, self._presence_callback, PRESENCE_QOS
+        )
 
         local_port = int(os.environ.get('MOTION_COORDINATION_LOCAL_PORT') or 8011)
         self._local_api = LocalCoordinationApi(
@@ -259,6 +278,7 @@ class MotionCoordinationNode(Node):
             self._config.heartbeat_sec, self._heartbeat_tick
         )
         self._state_timer = self.create_timer(0.1, self._state_tick)
+        self._presence_timer = self.create_timer(PRESENCE_INTERVAL_SEC, self._publish_presence)
         self.get_logger().info(
             'DDS group coordination initialized · '
             f'pc={self._config.pc_id} · group={self._config.group_id or "none"} · '
@@ -382,6 +402,95 @@ class MotionCoordinationNode(Node):
     def _web_url(self) -> str:
         addresses = tuple(getattr(self, '_boot_lan_addresses', ()) or ())
         return f'http://{addresses[0]}:8000' if addresses else ''
+
+    def _lan_address(self) -> str:
+        addresses = tuple(getattr(self, '_boot_lan_addresses', ()) or ())
+        return str(addresses[0]) if addresses else ''
+
+    def _publish_presence(self) -> None:
+        """같은 망 PC 알림 · 연동을 안 써도 · 나가 있어도 보낸다 · 핵심 요구 4"""
+        message = PcPresence()
+        message.pc_id = self._config.pc_id
+        message.display_name = self._config.display_name
+        message.role = 'robot'
+        message.address = self._lan_address()
+        message.web_url = self._web_url()
+        message.group_id = self._config.group_id if self._config.configured else ''
+        message.joined = bool(self._joined)
+        message.is_master = bool(self._config.is_master)
+        message.boot_id = self._boot_id
+        message.git_hash = str(self._git_hash or '')
+        message.protocol_version = GROUP_PROTOCOL_VERSION
+        _set_stamp(message.sent_at, time.time())
+        self._presence_pub.publish(message)
+
+    def _presence_callback(self, message: PcPresence) -> None:
+        if message.pc_id == self._config.pc_id and message.boot_id == self._boot_id:
+            return
+        row = {
+            'pc_id': str(message.pc_id),
+            'display_name': str(message.display_name or message.pc_id),
+            'role': str(message.role or 'robot'),
+            'address': str(message.address),
+            'web_url': str(message.web_url),
+            'group_id': str(message.group_id),
+            'joined': bool(message.joined),
+            'is_master': bool(message.is_master),
+            'git_hash': str(message.git_hash),
+            'protocol_version': _message_uint32(message, 'protocol_version'),
+            'received_monotonic': time.monotonic(),
+        }
+        # 같은 이름의 PC 가 둘이면(설정 실수) 두 줄로 보인다 · 주소로 가른다
+        key = (row['role'], row['pc_id'], row['address'])
+        if getattr(self, '_presence', None) is None:
+            self._presence, self._presence_lock = {}, threading.Lock()
+        with self._presence_lock:
+            self._presence[key] = row
+
+    def _network_pcs(self) -> list:
+        """같은 망 PC 표 · 이 PC 가 맨 위 · 로봇 다음 스피커 · 이름순"""
+        now = time.monotonic()
+        presence = getattr(self, '_presence', None)
+        if presence is None:
+            self._presence, self._presence_lock = {}, threading.Lock()
+        with self._presence_lock:
+            for key in [k for k, row in self._presence.items()
+                        if now - row['received_monotonic'] > PRESENCE_FORGET_SEC]:
+                del self._presence[key]
+            others = [dict(row) for row in self._presence.values()]
+        my_group = self._config.group_id if self._config.configured else ''
+        rows = [{
+            'pc_id': self._config.pc_id,
+            'display_name': self._config.display_name,
+            'role': 'robot',
+            'address': self._lan_address(),
+            'web_url': self._web_url(),
+            'group_id': my_group,
+            'joined': bool(self._joined),
+            'is_master': bool(self._config.is_master),
+            'git_hash': str(self._git_hash or ''),
+            'protocol_version': GROUP_PROTOCOL_VERSION,
+            'is_local': True,
+            'online': True,
+            'age_sec': 0.0,
+        }]
+        for row in sorted(others, key=lambda r: (r['role'] != 'robot', r['display_name'], r['address'])):
+            age = now - row.pop('received_monotonic')
+            row.update({
+                'is_local': False,
+                'online': age <= PRESENCE_OFFLINE_SEC,
+                'age_sec': round(age, 1),
+            })
+            rows.append(row)
+        for row in rows:
+            row['same_group'] = bool(my_group) and row['group_id'] == my_group
+            row['version_differs'] = bool(
+                row['git_hash'] and rows[0]['git_hash'] and row['git_hash'] != rows[0]['git_hash']
+            )
+            row['protocol_mismatch'] = (
+                row['role'] == 'robot' and row['protocol_version'] != GROUP_PROTOCOL_VERSION
+            )
+        return rows
 
     def _state_tick(self) -> None:
         with self._lock:
@@ -2936,6 +3045,7 @@ class MotionCoordinationNode(Node):
                 'joined': self._joined,
                 'local': local_peer,
                 'peers': peers,
+                'network_pcs': self._network_pcs(),
                 'alarms': [
                     dict(self._alarm_registry.alarms[pc_id])
                     for pc_id in sorted(self._alarm_registry.alarms)

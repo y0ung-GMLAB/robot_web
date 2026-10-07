@@ -11,7 +11,8 @@ SOUNDS_DIR = os.path.join(APP_DIR, "sounds")
 
 DEFAULTS = {
     "mode": "dds",                      # dds | standalone
-    "dds": {"domain_id": 21, "group_id": "test1"},
+    # pc_name · 로봇 PC 화면 「같은 망 PC」 표에 보이는 이름
+    "dds": {"domain_id": 21, "group_id": "test1", "pc_name": "speaker"},
     "audio": {
         "device": "plughw:1,0",
         "sounds_dir": SOUNDS_DIR,
@@ -50,6 +51,8 @@ def validate(cfg):
     except (TypeError, ValueError):
         cfg["dds"]["domain_id"] = DEFAULTS["dds"]["domain_id"]
     cfg["dds"]["group_id"] = str(cfg["dds"].get("group_id") or "")
+    name = str(cfg["dds"].get("pc_name") or "").strip()[:64]
+    cfg["dds"]["pc_name"] = name or "speaker"
     try:
         cfg["trigger"]["offset_sec"] = _clamp(float(cfg["trigger"]["offset_sec"]), -10.0, 10.0)
     except (TypeError, ValueError):

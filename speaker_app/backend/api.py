@@ -90,6 +90,8 @@ def create_app(state):
             patch["domain_id"] = _as_int(payload["domain_id"], 21)
         if "group_id" in payload:
             patch["group_id"] = str(payload["group_id"])
+        if "pc_name" in payload:
+            patch["pc_name"] = str(payload["pc_name"])
         if "offset_sec" in payload:
             patch["offset_sec"] = _as_float(payload["offset_sec"], 0.0)
         if "stop_on_motion_stop" in payload:

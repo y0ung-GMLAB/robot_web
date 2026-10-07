@@ -505,8 +505,38 @@ MAPPING_FILE = {
     'mapped_count': len(JOINTS),
 }
 
+def _preview_network_pcs():
+    """같은 망 PC 표 · 로봇 3대 + 스피커 · 하나는 끊김 · 핵심 요구 4"""
+    def pc(pc_id, address, **extra):
+        row = {
+            'pc_id': pc_id, 'display_name': pc_id, 'role': 'robot', 'address': address,
+            'web_url': f'http://{address}:8000', 'group_id': 'stage-a', 'joined': True,
+            'is_master': False, 'git_hash': 'cadddb6', 'protocol_version': 5,
+            'is_local': False, 'online': True, 'age_sec': 0.4, 'same_group': True,
+            'version_differs': False, 'protocol_mismatch': False,
+        }
+        row.update(extra)
+        return row
+    return [
+        pc('floating1', '192.168.0.11', is_master=True, is_local=True, age_sec=0.0),
+        pc('floating2', '192.168.0.12'),
+        pc('floating3', '192.168.0.13', joined=False, git_hash='454d49b', version_differs=True),
+        pc('floating4', '192.168.0.14', online=False, age_sec=42.0),
+        pc('speaker', '192.168.0.20', role='speaker', web_url='http://192.168.0.20:8100',
+           protocol_version=0, joined=False),
+    ]
+
+
 CANNED = {
     ('GET', '/api/status'): snapshot,
+    ('GET', '/api/coordination'): lambda: {
+        'success': True, 'node_connected': True, 'config_error': '',
+        'config': {'pc_id': 'floating1', 'display_name': 'floating1', 'enabled': False,
+                   'group_id': '', 'dds_domain_id': 21, 'is_master': False, 'required_peers': []},
+        'runtime': {'node_connected': True, 'joined': False, 'peers': [],
+                    'config': {'pc_id': 'floating1', 'enabled': False},
+                    'execution': {'state': 'idle'}, 'network_pcs': _preview_network_pcs()},
+    },
     ('GET', '/api/schedule/status'): lambda: {
         'run_mode': state['run_mode'],
         'schedules': [],

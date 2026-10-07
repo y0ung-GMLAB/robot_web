@@ -2,6 +2,7 @@ mode: dds
 dds:
   domain_id: 21
   group_id: test1
+  pc_name: speaker
 audio:
   device: plughw:1,0
   sounds_dir: /home/speaker/robot_web/speaker_app/sounds

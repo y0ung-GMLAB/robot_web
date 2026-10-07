@@ -30,6 +30,7 @@ class AppState:
         self.started_at = time.time()
         self.trigger_count = 0
         self._trigger_times = deque(maxlen=20)
+        self._boot_id = "boot-%d" % int(time.time() * 1000)
         self._seen_motions = {}          # motion_file_id → 마지막으로 받은 시각 · 화면 표에 쓴다
         self.system = sysinfo.collect(int(self.cfg["web"]["port"]))
         self._lock = threading.Lock()
@@ -80,11 +81,14 @@ class AppState:
         cfg = self.cfg
         old_domain = cfg["dds"]["domain_id"]
         old_group = cfg["dds"]["group_id"]
+        old_name = cfg["dds"]["pc_name"]
         old_watch_stop = cfg["trigger"]["stop_on_motion_stop"]
         if "domain_id" in patch:
             cfg["dds"]["domain_id"] = patch["domain_id"]
         if "group_id" in patch:
             cfg["dds"]["group_id"] = patch["group_id"]
+        if "pc_name" in patch:
+            cfg["dds"]["pc_name"] = patch["pc_name"]
         if "offset_sec" in patch:
             cfg["trigger"]["offset_sec"] = patch["offset_sec"]
         if "stop_on_motion_stop" in patch:
@@ -116,6 +120,8 @@ class AppState:
             elif cfg["dds"]["group_id"] != old_group:
                 self.dds.set_group_id(cfg["dds"]["group_id"])
                 self.log.add("그룹 변경 (%s → %s)" % (old_group, cfg["dds"]["group_id"]))
+        if cfg["dds"]["pc_name"] != old_name:
+            self.log.add("PC 이름 변경 (%s → %s)" % (old_name, cfg["dds"]["pc_name"]))
         self.log.add("설정 저장")
         return True, ""
 
@@ -313,7 +319,19 @@ class AppState:
             self._on_trigger,
             on_stop=self._on_stop,
             watch_stop=self.cfg["trigger"]["stop_on_motion_stop"],
+            presence=self._presence_info,
         )
+
+    def _presence_info(self):
+        """같은 망 PC 알림 내용 · 로봇 PC 화면 「같은 망 PC」 표에 이 이름·주소로 보인다"""
+        head = (sysinfo.git_head() or "").split()
+        return {
+            "pc_id": self.cfg["dds"]["pc_name"],
+            "display_name": self.cfg["dds"]["pc_name"],
+            "port": int(self.cfg["web"]["port"]),
+            "boot_id": self._boot_id,
+            "git_hash": head[0] if head and head[0] != "-" else "",
+        }
 
     def _stats(self):
         times = list(self._trigger_times)
@@ -341,6 +359,7 @@ class AppState:
             "config": {
                 "domain_id": cfg["dds"]["domain_id"],
                 "group_id": cfg["dds"]["group_id"],
+                "pc_name": cfg["dds"]["pc_name"],
                 "offset_sec": cfg["trigger"]["offset_sec"],
                 "stop_on_motion_stop": cfg["trigger"]["stop_on_motion_stop"],
                 "device": cfg["audio"]["device"],

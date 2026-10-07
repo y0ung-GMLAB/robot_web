@@ -3,7 +3,9 @@
 이 파일이 rclpy를 import하는 유일한 곳이다. 나머지 모듈은 ROS를 모른다.
 따라서 ROS가 없거나 DDS가 붙지 않아도 재생과 웹 UI는 정상 동작한다.
 
-원칙: 발행(publish) 0건. 어떤 토픽에도 쓰지 않는다.
+원칙: 모션 토픽에는 쓰지 않는다. 발행은 「같은 망 PC 알림」(`/motion_group/presence`) 하나뿐이다 ·
+2초마다 이 PC 이름·IP·웹 주소를 알려 로봇 PC 화면 「같은 망 PC」 표에 스피커가 보이게 한다 ·
+메시지가 없는 옛 빌드면 알림만 건너뛴다(트리거 수신은 그대로).
 """
 import os
 import threading
@@ -14,6 +16,8 @@ import sysinfo
 
 TOPIC = "/motion_group/command"
 EVENT_TOPIC = "/motion_group/event"
+PRESENCE_TOPIC = "/motion_group/presence"
+PRESENCE_INTERVAL_SEC = 2.0
 
 # 이 상태가 오면 재생을 멈춘다. motion_completed(정상 사이클 종료)는 제외한다.
 STOP_STATES = ("stopped", "error")
@@ -52,6 +56,7 @@ class DdsListener:
         self._bound_ip = ""
         self._bound_iface = ""
         self._started_at = 0.0
+        self._presence = None       # 알림 내용을 돌려주는 함수 · 없으면 알리지 않는다
 
     # ---- 조회 -------------------------------------------------------
     @property
@@ -94,8 +99,9 @@ class DdsListener:
         self._log.add("DDS 시작 실패: %s" % message)
 
     # ---- 제어 -------------------------------------------------------
-    def start(self, domain_id, group_id, on_trigger, on_stop=None, watch_stop=False):
+    def start(self, domain_id, group_id, on_trigger, on_stop=None, watch_stop=False, presence=None):
         self.stop()
+        self._presence = presence
         self._domain_id = int(domain_id)
         self._group_id = str(group_id)
         self._on_trigger = on_trigger
@@ -190,6 +196,8 @@ class DdsListener:
                 # event 토픽도 VOLATILE 이라 발행자에게 부담이 없다
                 node.create_subscription(GroupEvent, EVENT_TOPIC, self._on_event, qos)
 
+            presence_pub = self._create_presence_publisher(node, qos)
+
             executor = SingleThreadedExecutor(context=context)
             executor.add_node(node)
             with self._lock:
@@ -202,10 +210,14 @@ class DdsListener:
                              " / 정지신호 수신" if self._watch_stop else ""))
 
             last_check = 0.0
+            last_presence = 0.0
             was_connected = False
             while not stop_event.is_set():
                 executor.spin_once(timeout_sec=0.2)
                 now = time.time()
+                if presence_pub is not None and now - last_presence >= PRESENCE_INTERVAL_SEC:
+                    last_presence = now
+                    self._publish_presence(presence_pub, ip)
                 if now - last_check >= 1.0:
                     last_check = now
                     connected = node.count_publishers(TOPIC) > 0
@@ -237,6 +249,42 @@ class DdsListener:
                 pass
         self._set_status(OFF)
         self._log.add("DDS 리스너 정지")
+
+    def _create_presence_publisher(self, node, qos):
+        if self._presence is None:
+            return None
+        try:
+            from motion_coordination_interfaces.msg import PcPresence
+        except ImportError:
+            self._log.add("같은 망 PC 알림 꺼짐 — 메시지 빌드가 옛것입니다 (robot_web 에서 다시 빌드)")
+            return None
+        self._presence_type = PcPresence
+        return node.create_publisher(PcPresence, PRESENCE_TOPIC, qos)
+
+    def _publish_presence(self, publisher, ip):
+        if self._presence is None:
+            return
+        try:
+            info = self._presence() or {}
+            msg = self._presence_type()
+            msg.pc_id = str(info.get("pc_id") or "speaker")
+            msg.display_name = str(info.get("display_name") or msg.pc_id)
+            msg.role = "speaker"
+            msg.address = ip
+            msg.web_url = "http://%s:%d" % (ip, int(info.get("port") or 8100))
+            msg.group_id = self._group_id
+            msg.joined = False
+            msg.is_master = False
+            msg.boot_id = str(info.get("boot_id") or "")
+            msg.git_hash = str(info.get("git_hash") or "")
+            msg.protocol_version = 0
+            now = time.time()
+            msg.sent_at.sec = int(now)
+            msg.sent_at.nanosec = int((now - int(now)) * 1e9)
+            publisher.publish(msg)
+        except Exception as exc:
+            self._log.add("같은 망 PC 알림 실패: %s" % exc)
+            self._presence = None       # 같은 오류를 2초마다 되풀이하지 않는다
 
     def _on_message(self, msg):
         # 1) 우리 그룹인가

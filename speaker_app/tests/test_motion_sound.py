@@ -127,3 +127,23 @@ def test_mapping_survives_a_reload(app):
     app.upload("a.wav")
     app.set_motion_sound("wave_01", "a.wav")
     assert config.load()["audio"]["by_motion"] == {"wave_01": "a.wav"}
+
+
+def test_presence_tells_robot_pcs_this_is_the_speaker(app):
+    """같은 망 PC 표 · 스피커가 이름·주소·웹 주소를 알린다 · 핵심 요구 4"""
+    import dds_listener
+
+    class Msg:
+        def __init__(self):
+            self.sent_at = SimpleNamespace(sec=0, nanosec=0)
+
+    sent = []
+    listener = dds_listener.DdsListener(app.log)
+    listener._presence = app._presence_info
+    listener._presence_type = Msg
+    listener._group_id = "test1"
+    app.update_config({"pc_name": "speaker-1"})
+    listener._publish_presence(SimpleNamespace(publish=sent.append), "192.168.0.20")
+    msg = sent[0]
+    assert (msg.pc_id, msg.role, msg.address) == ("speaker-1", "speaker", "192.168.0.20")
+    assert msg.web_url == "http://192.168.0.20:8100" and msg.group_id == "test1"
