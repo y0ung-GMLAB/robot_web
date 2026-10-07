@@ -8,6 +8,8 @@
  * 여기는 값 계산만 · 화면과 저장은 `motion_data.js`.
  */
 
+import { displayText, formatNumber } from './format.js';
+
 /** 서버와 같은 상한 (`registered_motion_file.MAX_PLAYLIST_LENGTH`) */
 export const MAX_PLAYLIST_LENGTH = 50;
 
@@ -47,4 +49,44 @@ export function playlistProgressText(status = {}) {
   if (length < 2 || list.length !== length) return '';
   const index = Math.min(Math.max(Number(status?.playlist_index) || 0, 0), length - 1);
   return `재생 목록 ${index + 1}/${length} · ${list[index]} · 다음 ${list[(index + 1) % length]}`;
+}
+
+
+/** 재생 목록 칸 · 0개 · 1개여도 늘 보인다 · 수정 목록 59
+ *
+ * 전에는 2개 이상일 때만 보여서, 하나를 빼 1개가 되면 칸이 통째로 사라져 헷갈렸다 ·
+ * 저장 형식은 그대로(1개면 옛 `motion_file_id`) · 화면만.
+ * `fileOf(id)` → `{ filename, durationSec }` 또는 null(파일 없음).
+ */
+export function playlistPanelHtml(list, { fileOf = () => null, busy = false } = {}) {
+  if (!list.length) {
+    return (
+      '<div class="motion-playlist-head"><strong>재생 목록 · 비어 있음</strong>'
+      + '<span>애니메이션 파일을 고르고 「재생 등록」 을 누르세요</span></div>'
+    );
+  }
+  const rows = list.map((id, index) => {
+    const file = fileOf(id);
+    const duration = Number(file?.durationSec);
+    const missing = !file;
+    const only = list.length === 1;
+    return (
+      `<li class="motion-playlist-row${missing ? ' missing' : ''}">`
+      + `<span class="motion-playlist-index">${index + 1}</span>`
+      + `<span class="motion-playlist-name" title="${displayText(file?.filename || id)}">${displayText(file?.filename || id)}${missing ? ' · 파일 없음' : ''}</span>`
+      + `<span class="motion-playlist-time">${Number.isFinite(duration) ? `${formatNumber(duration, 1)} s` : '-'}</span>`
+      + `<button type="button" data-playlist-action="up" data-playlist-index="${index}" ${busy || index === 0 ? 'disabled' : ''} title="한 칸 위로">↑</button>`
+      + `<button type="button" data-playlist-action="down" data-playlist-index="${index}" ${busy || index === list.length - 1 ? 'disabled' : ''} title="한 칸 아래로">↓</button>`
+      + `<button type="button" class="danger" data-playlist-action="remove" data-playlist-index="${index}" ${busy ? 'disabled' : ''} title="${only ? '재생 등록을 해제합니다 · 파일은 지우지 않습니다' : '목록에서 뺍니다 · 파일은 지우지 않습니다'}">${only ? '등록 해제' : '빼기'}</button>`
+      + '</li>'
+    );
+  }).join('');
+  const note = list.length === 1
+    ? '이 애니메이션만 반복 · 다른 파일을 「재생 등록」 하면 뒤에 붙어 차례로 돕니다'
+    : '차례로 돌고 끝나면 1번부터 · 사이마다 다음 애니의 초기 위치로 이동';
+  return (
+    `<div class="motion-playlist-head"><strong>재생 목록 · ${list.length}개</strong>`
+    + `<span>${note}</span></div>`
+    + `<ol class="motion-playlist-rows">${rows}</ol>`
+  );
 }

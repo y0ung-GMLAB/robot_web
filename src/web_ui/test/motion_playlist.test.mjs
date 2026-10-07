@@ -61,3 +61,19 @@ test('group start carries the sync mode', () => {
   assert.match(source, /sync_mode: String\(el\.coordinationSyncMode/);
   assert.match(source, /group_sync_mode: mode/);
 });
+
+test('수정 목록 59 · 재생 목록 칸은 0개 · 1개여도 보인다 · 1개의 빼기는 등록 해제', async () => {
+  const { playlistPanelHtml } = await import('../static/js/motion_playlist.js');
+  assert.match(playlistPanelHtml([]), /재생 목록 · 비어 있음/);
+  const one = playlistPanelHtml(['a.json'], { fileOf: () => ({ filename: 'a_long_name.json', durationSec: 12.34 }) });
+  assert.match(one, /재생 목록 · 1개/);
+  assert.match(one, />등록 해제</);
+  assert.match(one, /title="a_long_name\.json"/);
+  assert.equal((one.match(/disabled/g) || []).length, 2);          // ↑ ↓ 꺼짐
+  const two = playlistPanelHtml(['a.json', 'gone.json'], { fileOf: (id) => (id === 'a.json' ? { filename: 'a.json' } : null) });
+  assert.match(two, /재생 목록 · 2개/);
+  assert.match(two, /gone\.json · 파일 없음/);
+  assert.doesNotMatch(two, />등록 해제</);
+  const source = readFileSync(new URL('../static/js/motion_data.js', import.meta.url), 'utf8');
+  assert.match(source, /if \(!next\.length\) \{\s*const confirmed = await showConfirm/);
+});

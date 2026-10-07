@@ -2,6 +2,7 @@ import { createMotionFileManager } from './motion_file_manager.js';
 import { motionScheduleResumeNote } from './schedule_scope.js';
 import { mappingGain, motorToJoint } from './joint_mapping.js';
 import {
+  playlistPanelHtml,
   playlistProgressText,
   playlistWithAdded,
   playlistWithMoved,
@@ -647,7 +648,11 @@ export function createMotionDataController({
   const motionRunGraphHiddenIds = new Set();
 
   function setMessage(message) {
-    if (el.motionFileMessage) el.motionFileMessage.textContent = message;
+    if (el.motionFileMessage) {
+      el.motionFileMessage.textContent = message;
+      // 칸이 좁아 「…」 로 잘린다 · 마우스를 올리면 전체 · 수정 목록 55
+      el.motionFileMessage.title = String(message ?? '');
+    }
   }
 
   /** 실패는 작은 글씨만으론 놓친다 · 창으로도 띄운다 (2026-10-02) */
@@ -1774,6 +1779,20 @@ export function createMotionDataController({
               ? '줄마다 「초기 위치」대로 이동합니다 · 첫 프레임 = 애니메이션 첫 줄 · 직접 지정 = 그 값 · 기준점 = 0°'
               : '애니메이션이 없어 「첫 프레임」 줄은 모션 0°(기준점)로 · 「직접 지정」 줄은 그 값으로 이동합니다';
     }
+    if (el.manualInitializeButton) {
+      // 수동 조작 화면 · 늘 이 PC · 조그·다이얼·동작이 움직이는 중이면 끔(두 이동이 겹치지 않게) · 수정 목록 58
+      const activity = getLatestState()?.motor_activity || {};
+      const manualMoving = Boolean(activity.active) && activity.source === 'motion_supervisor';
+      el.manualInitializeButton.disabled = motionRunLoading || running
+        || !contextReady || !hasMappingFile || manualMoving;
+      el.manualInitializeButton.title = manualMoving
+        ? `${activity.label || '수동 동작'} · 멈춘 뒤 누르세요`
+        : !contextReady
+          ? contextMessage
+          : !hasMappingFile
+            ? '조인트 매핑이 없습니다'
+            : running ? '재생 중에는 쓸 수 없습니다' : '줄마다 「초기 위치」대로 이동합니다';
+    }
     if (el.motionRunStartButton) {
       el.motionRunStartButton.disabled = motionRunLoading || running || blocked;
       el.motionRunStartButton.title = blocked
@@ -1882,7 +1901,7 @@ export function createMotionDataController({
         : '') + mujocoBadge(file);
       return (
         `<tr class="${rowClass}" data-motion-file-id="${displayText(file.id)}">
-          <td class="motion-file-name-cell"><div class="motion-file-name-inner">${badge}<button type="button" class="link-button" data-motion-file-id="${displayText(file.id)}">${displayText(file.filename)}</button></div></td>
+          <td class="motion-file-name-cell"><div class="motion-file-name-inner">${badge}<button type="button" class="link-button" data-motion-file-id="${displayText(file.id)}" title="${displayText(file.filename)}">${displayText(file.filename)}</button></div></td>
           <td><span class="motion-state-pill ${statusClass(file)}">${statusText(file)}</span></td>
           <td>${formatNumber(analysis.time?.duration_sec, 3)} s</td>
           <td class="motion-file-moment" title="마지막으로 바뀐 시각">${displayText(formatMoment(file.updated_at))}</td>
@@ -2733,7 +2752,15 @@ export function createMotionDataController({
       ? playlistWithout(current, index)
       : playlistWithMoved(current, index, action === 'up' ? -1 : 1);
     if (next.join('\n') === current.join('\n')) return;
-    await applyMotionFileRegistration(next, '재생 목록 저장 중');
+    // 마지막 하나를 빼면 재생 등록 해제와 같다 · 같은 확인을 받는다 · 수정 목록 59
+    if (!next.length) {
+      const confirmed = await showConfirm(
+        '재생 등록을 해제합니다.\n파일은 삭제되지 않으며, 다시 등록하기 전까지 애니메이션 재생은 차단됩니다.',
+        { title: '애니메이션 재생 등록 해제', confirmLabel: '등록 해제', tone: 'danger' },
+      );
+      if (!confirmed) return;
+    }
+    await applyMotionFileRegistration(next, next.length ? '재생 목록 저장 중' : '재생 등록 해제 저장 중');
     if (!registeredMotionFileIdValue) {
       motionRunStatus = null;
       motionRunLastResult = null;
@@ -2745,33 +2772,15 @@ export function createMotionDataController({
   function renderPlaylistPanel() {
     const panel = el.motionPlaylistPanel;
     if (!panel) return;
-    const list = registeredPlaylistValue;
-    panel.classList.toggle('hidden', list.length < 2);
-    if (list.length < 2) {
-      panel.innerHTML = '';
-      return;
-    }
-    const busy = loading || mappingLoading || !selectedMappingId;
-    const rows = list.map((id, index) => {
-      const file = files.find((entry) => entry.id === id);
-      const duration = Number(analysisOf(file || {}).time?.duration_sec);
-      const missing = !file;
-      return (
-        `<li class="motion-playlist-row${missing ? ' missing' : ''}">`
-        + `<span class="motion-playlist-index">${index + 1}</span>`
-        + `<span class="motion-playlist-name" title="${displayText(id)}">${displayText(file?.filename || id)}${missing ? ' · 파일 없음' : ''}</span>`
-        + `<span class="motion-playlist-time">${Number.isFinite(duration) ? `${formatNumber(duration, 1)} s` : '-'}</span>`
-        + `<button type="button" data-playlist-action="up" data-playlist-index="${index}" ${busy || index === 0 ? 'disabled' : ''} title="한 칸 위로">↑</button>`
-        + `<button type="button" data-playlist-action="down" data-playlist-index="${index}" ${busy || index === list.length - 1 ? 'disabled' : ''} title="한 칸 아래로">↓</button>`
-        + `<button type="button" class="danger" data-playlist-action="remove" data-playlist-index="${index}" ${busy ? 'disabled' : ''} title="목록에서 뺍니다 · 파일은 지우지 않습니다">빼기</button>`
-        + '</li>'
-      );
-    }).join('');
-    panel.innerHTML = (
-      `<div class="motion-playlist-head"><strong>재생 목록 · ${list.length}개</strong>`
-      + '<span>차례로 돌고 끝나면 1번부터 · 사이마다 다음 애니의 초기 위치로 이동</span></div>'
-      + `<ol class="motion-playlist-rows">${rows}</ol>`
-    );
+    // 0개 · 1개여도 늘 보인다 · 수정 목록 59
+    panel.classList.remove('hidden');
+    panel.innerHTML = playlistPanelHtml(registeredPlaylistValue, {
+      busy: loading || mappingLoading || !selectedMappingId,
+      fileOf: (id) => {
+        const file = files.find((entry) => entry.id === id);
+        return file ? { filename: file.filename, durationSec: analysisOf(file).time?.duration_sec } : null;
+      },
+    });
   }
 
   async function unregisterSelectedMotionFile() {
@@ -3409,6 +3418,8 @@ export function createMotionDataController({
         'click', () => initializeCurrentMotionRun(),
       );
     }
+    // 수동 조작 화면 · 새 경로 없이 같은 함수 · 같은 확인 창 · 수정 목록 58
+    el.manualInitializeButton?.addEventListener('click', () => initializeCurrentMotionRun());
     if (el.motionRunStartButton) {
       el.motionRunStartButton.addEventListener(
         'click', () => startCurrentMotionRun('once'),

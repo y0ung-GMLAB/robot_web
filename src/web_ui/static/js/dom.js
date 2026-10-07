@@ -298,6 +298,8 @@ export function getElements() {
     motionRunTargetCycle: document.getElementById('motionRunTargetCycle'),
     motionRunCheckButton: document.getElementById('motionRunCheckButton'),
     motionRunInitializeButton: document.getElementById('motionRunInitializeButton'),
+    // 수동 조작 화면의 같은 버튼 · 수정 목록 58
+    manualInitializeButton: document.getElementById('manualInitializeButton'),
     motionRunStartButton: document.getElementById('motionRunStartButton'),
     motionRunContinuousStartButton: document.getElementById('motionRunContinuousStartButton'),
     motionRunStopButton: document.getElementById('motionRunStopButton'),
