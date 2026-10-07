@@ -55,6 +55,29 @@ def register_motor_routes(app: FastAPI, bridge, project_call) -> None:
             raise HTTPException(status_code=400, detail='request body must be an object')
         return await asyncio.to_thread(bridge.minas_drive_maintenance, body)
 
+    # MINAS 「앱솔루트 설정」 · 수정 목록 62 ③④
+    @app.get('/api/motor-config/absolute-setup')
+    async def absolute_setup_status():
+        return await asyncio.to_thread(bridge.absolute_setup.status)
+
+    @app.post('/api/motor-config/absolute-setup/preview')
+    async def absolute_setup_preview(request: Request):
+        body = await request.json()
+        if not isinstance(body, dict):
+            raise HTTPException(status_code=400, detail='request body must be an object')
+        return await asyncio.to_thread(bridge.absolute_setup_preview, body)
+
+    @app.post('/api/motor-config/absolute-setup')
+    async def absolute_setup_start(request: Request):
+        body = await request.json()
+        if not isinstance(body, dict):
+            raise HTTPException(status_code=400, detail='request body must be an object')
+        return await asyncio.to_thread(bridge.absolute_setup_start, body)
+
+    @app.post('/api/motor-config/absolute-setup/cancel')
+    async def absolute_setup_cancel():
+        return await asyncio.to_thread(bridge.absolute_setup.cancel)
+
     @app.post('/api/motor-config/apply')
     async def apply_motor_config():
         return await asyncio.to_thread(bridge.motor_config.apply)

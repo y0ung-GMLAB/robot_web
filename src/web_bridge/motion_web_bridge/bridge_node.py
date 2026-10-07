@@ -33,6 +33,7 @@ from .manual_motor_commands import ManualMotorCommandService
 from .schedule_end import ScheduleEndService
 from .supervisor_watchdog import SupervisorWatchdog
 from .auto_backup import AutoBackupService
+from .absolute_setup import AbsoluteSetup
 from .drive_maintenance import DriveMaintenance
 from .manual_stream import ManualStreamService
 from . import animation_preview, sim_scene
@@ -412,6 +413,28 @@ class MotionWebBridge(Node):
             read_slaves=self.ethercat_alias_manager.read_slaves,
             registry_motor=self._registry_motor_for_axis,
             current_motor=self._current_motor_for_axis,
+            # 앱솔루트 설정이 도는 동안은 낱개 정비를 막는다 · 같은 드라이브를 두 길로 만지지 않게 · 62
+            safety_blocker=lambda: (
+                self.absolute_setup.blocker()
+                or self._motor_runtime.ethercat_scan_safety_blocker(require_fresh_motor_state=True)
+            ),
+            lifecycle_lock=self._motor_lifecycle_lock,
+            motor_service=_managed_motor_service,
+            service_active=self._motor_runtime.managed_service_active,
+            run_service=lambda action, service: self._motor_runtime.run_managed_service(action, service),
+            wait_release=lambda: motor_config_rules.wait_for_ethercat_release(timeout_sec=5.0),
+            wait_recovery=lambda service, axes: self._motor_runtime.wait_for_runtime_recovery(
+                axes, timeout_sec=12.0, motor_service=service,
+            ),
+            expected_axes=self._detected_axes,
+            record=self._record_drive_maintenance,
+        )
+        # MINAS 「앱솔루트 설정」 · 앱솔루트 + 다회전 클리어 · 전원 재투입 감지 · 수정 목록 62 ③④
+        self.absolute_setup = AbsoluteSetup(
+            minas_absolute_state=lambda: (self.motion_state() or {}).get('minas_absolute'),
+            visible_slaves=self._visible_ethercat_slaves,
+            current_motor=self._current_motor_for_axis,
+            servo_off=lambda axis: self._manual.ac_servo_control('servo_off', axis, 'selected'),
             safety_blocker=lambda: self._motor_runtime.ethercat_scan_safety_blocker(
                 require_fresh_motor_state=True,
             ),
@@ -424,7 +447,7 @@ class MotionWebBridge(Node):
                 axes, timeout_sec=12.0, motor_service=service,
             ),
             expected_axes=self._detected_axes,
-            record=self._record_drive_maintenance,
+            record=self._record_absolute_setup,
         )
         # 스케줄 끝 · 기준점 주차 → 서보 OFF · 다음 시작 전 다시 켜기 · 수정 목록 36
         self.schedule_end = ScheduleEndService(
@@ -1160,6 +1183,9 @@ class MotionWebBridge(Node):
             return f'온라인이 아닌 축이 있습니다: {", ".join(unavailable)}'
         if faulted:
             return f'오류 축이 있습니다: {", ".join(faulted)}'
+        setup = getattr(self, 'absolute_setup', None)
+        if setup is not None and setup.active():
+            return setup.blocker()
         # 연결된 MINAS 드라이브 전부 앱솔루트 확인 전에는 막는다 · 등록 안 된 드라이브도 ·
         # 축 연결·오류 사유가 더 구체적이라 그 뒤에 본다 · 수정 목록 62
         return minas_absolute.block_reason(motion_state.get('minas_absolute'))
@@ -1928,6 +1954,29 @@ class MotionWebBridge(Node):
             if isinstance(motor, dict) and motor.get('controller_index') is not None
             and str(motor.get('state') or '') == 'detected'
         )
+
+    def _visible_ethercat_slaves(self) -> Optional[List[Dict[str, Any]]]:
+        """지금 보이는 슬레이브 · 하나도 없으면 [] (전원이 꺼진 것) · 목록을 못 읽으면 None(모름)"""
+        try:
+            return self.ethercat_alias_manager.read_slaves()
+        except EthercatAliasError as exc:
+            return [] if '찾지 못했습니다' in str(exc) else None
+
+    def _record_absolute_setup(self, entry: Dict[str, Any]) -> None:
+        targets = ', '.join(str(item.get('label')) for item in entry.get('targets') or [])
+        self._motor_event_log.append(
+            category='system',
+            event_type=str(entry.get('event_type') or 'minas_absolute_setup'),
+            target=f'MINAS 드라이브 · {targets}',
+            content=str(entry.get('message') or ''),
+            details=entry,
+        )
+
+    def absolute_setup_preview(self, payload: Dict[str, Any]) -> Dict[str, Any]:
+        return self.absolute_setup.preview(payload if isinstance(payload, dict) else {})
+
+    def absolute_setup_start(self, payload: Dict[str, Any]) -> Dict[str, Any]:
+        return self.absolute_setup.start(payload if isinstance(payload, dict) else {})
 
     def _record_drive_maintenance(self, entry: Dict[str, Any]) -> None:
         self._motor_event_log.append(

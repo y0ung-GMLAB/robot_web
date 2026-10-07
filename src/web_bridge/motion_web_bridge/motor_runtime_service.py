@@ -104,6 +104,10 @@ class MotorRuntimeService:
         )
         if blocker:
             return blocker
+        # 앱솔루트 설정이 도는 동안은 모터 검색·정비·Alias 쓰기를 막는다 · 수정 목록 62 ③
+        setup = getattr(self.bridge, 'absolute_setup', None)
+        if setup is not None and setup.active():
+            return setup.blocker()
 
         motion_state, received_at = self.bridge.motion_state_with_time()
         if not isinstance(motion_state, dict) or received_at is None:

@@ -8,6 +8,10 @@ import {
   writeEthercatAlias,
   saveMotorConfig,
   requestDriveMaintenance,
+  fetchAbsoluteSetup,
+  previewAbsoluteSetup,
+  startAbsoluteSetup,
+  cancelAbsoluteSetup,
 } from './api.js';
 import {
   clone,
@@ -2158,6 +2162,123 @@ export function createMotorConfigController({
     return drive && drive.status !== 'ok' ? `앱솔루트 미확인 · ${drive.problem || drive.status}` : '';
   }
 
+  /** 이 축의 MINAS 드라이브(지금 상태) · 없으면 null · 수정 목록 62 ③ */
+  function liveAbsoluteDrive(axis) {
+    const drives = getLatestState?.()?.minas_absolute?.drives || [];
+    if (axis === null || axis === undefined || axis === '') return null;
+    return drives.find((item) => item?.axis !== null && String(item?.axis) === String(axis)) || null;
+  }
+
+  /** 줄의 「앱솔루트 설정」 · 정상이면 끔(다시 클리어하면 기준점 소실) · 진행 중이면 끔 */
+  function absoluteSetupButton(axis) {
+    const drive = liveAbsoluteDrive(axis);
+    if (!drive) return '';
+    const normal = drive.status === 'ok';
+    const disabled = normal || absoluteSetupRunning ? ' disabled' : '';
+    const title = normal
+      ? '정상 · 이미 앱솔루트 · 다시 클리어하면 기준점이 사라져 막아 둡니다'
+      : '앱솔루트(Pr0.15 = 0) + 다회전 클리어 · 드라이브 전원 재투입 2회 필요 (수정 목록 62)';
+    return `<button type="button" class="danger" data-axis-absolute-setup
+      data-master-index="${escapeHtml(drive.master_index ?? 0)}" data-slave-position="${escapeHtml(drive.slave_position)}"
+      title="${escapeHtml(title)}"${disabled}>${normal ? '앱솔루트 정상' : '앱솔루트 설정'}</button>`;
+  }
+
+  /** 앱솔루트 설정 진행 · 서버가 단계를 돌린다 · 화면은 1초마다 받아 보여 준다 · 수정 목록 62 ③ */
+  let absoluteSetupRunning = false;
+  let absoluteSetupTimer = null;
+
+  function renderAbsoluteSetup(job) {
+    const running = job?.state === 'running';
+    absoluteSetupRunning = running;
+    if (el.absoluteSetupAllButton) el.absoluteSetupAllButton.disabled = running;
+    el.axisRows?.querySelectorAll('button[data-axis-absolute-setup]').forEach((button) => {
+      if (running) button.disabled = true;
+    });
+    if (!el.absoluteSetupStatus) return;
+    const visible = Boolean(job && job.state && job.state !== 'idle');
+    el.absoluteSetupStatus.classList.toggle('hidden', !visible);
+    if (!visible) return;
+    const stepText = running
+      ? `앱솔루트 설정 ${job.step_index || 0}/${job.step_count || 7} · ${job.step_label || ''}`
+      : (job.state === 'done' ? '앱솔루트 설정 완료' : `앱솔루트 설정 실패 · ${job.step_label || ''}`);
+    if (el.absoluteSetupStep) el.absoluteSetupStep.textContent = stepText;
+    if (el.absoluteSetupMessage) el.absoluteSetupMessage.textContent = job.message || '';
+    if (el.absoluteSetupTargets) {
+      el.absoluteSetupTargets.textContent = (job.targets || []).length
+        ? `대상 ${(job.targets || []).map((item) => item.label).join(', ')}`
+        : '';
+    }
+    el.absoluteSetupStatus.classList.toggle('failed', job.state === 'failed');
+    if (el.absoluteSetupCancelButton) el.absoluteSetupCancelButton.hidden = !running;
+  }
+
+  async function pollAbsoluteSetup() {
+    let job;
+    try {
+      job = await fetchAbsoluteSetup();
+    } catch (error) {
+      if (el.absoluteSetupMessage) el.absoluteSetupMessage.textContent = `상태를 받지 못했습니다: ${error?.message || error}`;
+      return;
+    }
+    const wasRunning = absoluteSetupRunning;
+    renderAbsoluteSetup(job);
+    if (job?.state === 'running') {
+      if (!absoluteSetupTimer) absoluteSetupTimer = window.setInterval(pollAbsoluteSetup, 1000);
+      return;
+    }
+    if (absoluteSetupTimer) {
+      window.clearInterval(absoluteSetupTimer);
+      absoluteSetupTimer = null;
+    }
+    if (wasRunning && job?.state === 'done') {
+      await showAlert(job.message, { title: '앱솔루트 설정 완료', tone: 'warning' });
+    } else if (wasRunning && job?.state === 'failed') {
+      await showAlert(job.message, { title: '앱솔루트 설정 실패', tone: 'danger' });
+    }
+  }
+
+  async function runAbsoluteSetup(payload) {
+    let preview;
+    try {
+      preview = await previewAbsoluteSetup(payload);
+    } catch (error) {
+      setAxisMessage(`앱솔루트 설정 확인 실패: ${error?.message || error}`, true);
+      return;
+    }
+    if (!preview?.success) {
+      await showAlert(preview?.message || '앱솔루트 설정을 할 수 없습니다', { title: '앱솔루트 설정', tone: 'warning' });
+      return;
+    }
+    const line = (item) => `· ${item.label}${item.problem ? ` (${item.problem})` : ''}`;
+    const body = [
+      '처리 대상',
+      ...(preview.targets || []).map(line),
+      ...((preview.skipped || []).length ? ['', '정상 · 건너뜀', ...preview.skipped.map(line)] : []),
+      '',
+      '순서',
+      ...(preview.steps || []).map((step, index) => `${index + 1}. ${step}`),
+      '',
+      '대상 축 서보를 끄고 Motor Manager 를 두 번 잠시 멈춥니다.',
+      '중간에 드라이브 전원을 두 번 껐다 켜야 합니다(화면이 알려 줍니다).',
+      '끝나면 위치가 바뀌므로 기준점을 다시 캡처하세요.',
+    ].join('\n');
+    const confirmed = await showConfirm(body, {
+      title: '앱솔루트 설정', confirmLabel: '시작', tone: 'danger',
+    });
+    if (!confirmed) return;
+    try {
+      const result = await startAbsoluteSetup({ ...payload, confirmed: true });
+      if (!result?.success) {
+        await showAlert(result?.message || '앱솔루트 설정을 시작하지 못했습니다', { title: '앱솔루트 설정', tone: 'danger' });
+        return;
+      }
+      renderAbsoluteSetup(result.job);
+      await pollAbsoluteSetup();
+    } catch (error) {
+      setAxisMessage(`앱솔루트 설정 시작 실패: ${error?.message || error}`, true);
+    }
+  }
+
   /** 앱솔루트 칸 · 읽은 값과 뜻 · 고칠 수 없음 */
   function absoluteModeText(read) {
     if (read.state === 'ok') {
@@ -2741,6 +2862,7 @@ export function createMotorConfigController({
                     <button type="button" data-axis-maintenance="eeprom_save" data-axis-maintenance-index="${escapeHtml(view.axisValue ?? '')}">EEPROM 저장</button>
                     <button type="button" data-axis-maintenance="absolute_mode" data-axis-maintenance-index="${escapeHtml(view.axisValue ?? '')}">앱솔루트 방식</button>
                     <button type="button" class="danger" data-axis-maintenance="absolute_clear" data-axis-maintenance-index="${escapeHtml(view.axisValue ?? '')}">다회전 클리어</button>
+                    ${absoluteSetupButton(view.axisValue)}
                   </div>
                 ` : ''}
                 ${view.showDynamixelControls ? `
@@ -3578,6 +3700,18 @@ export function createMotorConfigController({
       });
     }
 
+    // 앱솔루트 설정 (전체) · 진행 중이던 것이 있으면 이어서 보여 준다 · 수정 목록 62 ③
+    el.absoluteSetupAllButton?.addEventListener('click', () => runAbsoluteSetup({ scope: 'all' }));
+    el.absoluteSetupCancelButton?.addEventListener('click', async () => {
+      try {
+        const result = await cancelAbsoluteSetup();
+        if (el.absoluteSetupMessage) el.absoluteSetupMessage.textContent = result?.message || '';
+      } catch (error) {
+        if (el.absoluteSetupMessage) el.absoluteSetupMessage.textContent = `취소 실패: ${error?.message || error}`;
+      }
+    });
+    pollAbsoluteSetup();
+
     if (el.axisRows) {
       el.axisRows.addEventListener('change', (event) => {
         const input = event.target.closest('[data-axis-edit]');
@@ -3586,9 +3720,23 @@ export function createMotorConfigController({
       });
 
       el.axisRows.addEventListener('click', async (event) => {
+        const absoluteSetup = event.target.closest('button[data-axis-absolute-setup]');
+        if (absoluteSetup) {
+          event.stopPropagation();
+          await runAbsoluteSetup({
+            scope: 'one',
+            master_index: Number(absoluteSetup.dataset.masterIndex || 0),
+            slave_position: Number(absoluteSetup.dataset.slavePosition),
+          });
+          return;
+        }
         const maintenance = event.target.closest('button[data-axis-maintenance]');
         if (maintenance) {
           event.stopPropagation();
+          if (absoluteSetupRunning) {
+            setAxisMessage('앱솔루트 설정 진행 중 · 끝난 뒤에 정비하세요', true);
+            return;
+          }
           await runDriveMaintenance(maintenance);
           return;
         }

@@ -1066,3 +1066,18 @@ th {
   color: var(--yellow);
   font-weight: 700;
 }
+
+/* 앱솔루트 설정 진행 · 수정 목록 62 ③ */
+.absolute-setup-status {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 12px;
+  margin-top: 8px;
+  padding: 8px 10px;
+  border: 1px solid var(--yellow);
+  border-radius: 6px;
+}
+.absolute-setup-status.hidden { display: none; }
+.absolute-setup-status.failed { border-color: var(--red); }
+.absolute-setup-status small { flex-basis: 100%; color: var(--muted); }

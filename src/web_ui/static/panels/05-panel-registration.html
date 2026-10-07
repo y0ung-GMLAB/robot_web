@@ -10,6 +10,14 @@
           <div class="registry-actions">
             <button id="allAcServoOnButton" class="primary" type="button" disabled>전체 AC 서보 켜기</button>
             <button id="allAcServoOffButton" class="off" type="button" disabled>전체 AC 서보 끄기</button>
+            <!-- 연결된 MINAS 드라이브 중 앱솔루트 미확인 전부 · 정상은 건너뜀 · 수정 목록 62 ③ -->
+            <button id="absoluteSetupAllButton" class="danger" type="button" title="연결된 MINAS 드라이브 중 앱솔루트로 확인되지 않은 것을 모두 앱솔루트 + 다회전 클리어 · 드라이브 전원 재투입 2회 필요">앱솔루트 설정 (전체)</button>
+          </div>
+          <div id="absoluteSetupStatus" class="absolute-setup-status hidden" role="status" aria-live="polite">
+            <strong id="absoluteSetupStep"></strong>
+            <span id="absoluteSetupMessage"></span>
+            <small id="absoluteSetupTargets"></small>
+            <button id="absoluteSetupCancelButton" type="button">취소</button>
           </div>
         </section>
 

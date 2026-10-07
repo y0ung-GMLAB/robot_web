@@ -440,6 +440,14 @@ export const requestDynamixelAction = (payload) =>
 export const requestDriveMaintenance = (payload) =>
   request('POST', '/api/motor-config/drive-maintenance', { body: payload });
 
+/** MINAS 「앱솔루트 설정」 · 앱솔루트 + 다회전 클리어 · 전원 재투입 감지 · 수정 목록 62 ③ */
+export const fetchAbsoluteSetup = () => request('GET', '/api/motor-config/absolute-setup');
+export const previewAbsoluteSetup = (payload) =>
+  request('POST', '/api/motor-config/absolute-setup/preview', { body: payload });
+export const startAbsoluteSetup = (payload) =>
+  request('POST', '/api/motor-config/absolute-setup', { body: payload });
+export const cancelAbsoluteSetup = () => request('POST', '/api/motor-config/absolute-setup/cancel', { body: {} });
+
 export const requestAcServoControl = (payload) =>
   request('POST', '/api/motion-test/ac-servo/control', { body: payload });
 
