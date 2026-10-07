@@ -4,8 +4,8 @@ dds:
   group_id: test1
 audio:
   device: plughw:1,0
-  sounds_dir: /home/speaker/speaker_app/sounds
-  file_path: /home/speaker/speaker_app/sounds/클로닝_전체_9분16초.wav
+  sounds_dir: /home/speaker/robot_web/speaker_app/sounds
+  file_path: /home/speaker/robot_web/speaker_app/sounds/클로닝_전체_9분16초.wav
 trigger:
   offset_sec: 0.0
   stop_on_motion_stop: true

@@ -15,7 +15,8 @@ DEFAULTS = {
     "audio": {
         "device": "plughw:1,0",
         "sounds_dir": SOUNDS_DIR,
-        "file_path": "",                # 비어 있으면 sounds 폴더에서 자동 선택
+        "file_path": "",                # 기본 음원 · 비어 있으면 sounds 폴더에서 자동 선택
+        "by_motion": {},                # 애니메이션(motion_file_id) → 음원 파일 이름 · 없으면 기본 음원
     },
     "trigger": {"offset_sec": 0.0, "stop_on_motion_stop": True},
     "standalone": {"repeat": 0, "dwell_sec": 2.0},
@@ -69,6 +70,12 @@ def validate(cfg):
     cfg["audio"]["device"] = str(cfg["audio"].get("device") or DEFAULTS["audio"]["device"])
     cfg["audio"]["sounds_dir"] = str(cfg["audio"].get("sounds_dir") or SOUNDS_DIR)
     cfg["audio"]["file_path"] = str(cfg["audio"].get("file_path") or "")
+    by_motion = cfg["audio"].get("by_motion")
+    cfg["audio"]["by_motion"] = {
+        str(motion): os.path.basename(str(name))
+        for motion, name in (by_motion.items() if isinstance(by_motion, dict) else [])
+        if str(motion) and str(name or "")
+    }
     return cfg
 
 
@@ -102,9 +109,18 @@ def list_sounds(sounds_dir):
     return sorted(names)
 
 
-def resolve_file(cfg):
-    """실제로 재생할 파일 경로. 지정이 없거나 사라졌으면 폴더에서 자동 선택."""
+def resolve_file(cfg, motion_file_id=""):
+    """실제로 재생할 파일 경로.
+
+    애니메이션에 정해 둔 음원이 있으면 그것 · 없거나 사라졌으면 기본 음원 ·
+    기본도 없으면 폴더에서 이름순 첫 파일.
+    """
     sounds_dir = cfg["audio"]["sounds_dir"]
+    mapped = cfg["audio"].get("by_motion", {}).get(str(motion_file_id or ""), "")
+    if mapped:
+        mapped_path = os.path.join(sounds_dir, mapped)
+        if os.path.isfile(mapped_path):
+            return mapped_path
     path = cfg["audio"]["file_path"]
     if path and os.path.isfile(path):
         return path

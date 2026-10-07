@@ -161,7 +161,10 @@ def collect(port):
         "app_dir": APP_DIR,
         "config_path": os.path.join(APP_DIR, "config", "speaker.yaml"),
         "sounds_dir": os.path.join(APP_DIR, "sounds"),
-        "ros_workspace": os.path.expanduser("~/ros2_ws"),
+        # run.sh 와 같은 순서 · robot_web 빌드가 있으면 그것, 없으면 옛 ~/ros2_ws
+        "ros_workspace": (os.path.dirname(APP_DIR)
+                          if os.path.isfile(os.path.join(os.path.dirname(APP_DIR), "install", "setup.bash"))
+                          else os.path.expanduser("~/ros2_ws")),
         "ros_distro": os.environ.get("ROS_DISTRO", "-"),
         "rmw": os.environ.get("RMW_IMPLEMENTATION", "rmw_fastrtps_cpp (기본값)"),
         "os": "%s %s" % (platform.system(), platform.release()),

@@ -1,6 +1,5 @@
 """앱 상태의 단일 소스. 각 모듈을 조립하고 스레드 간 공유 상태를 관리한다."""
 import os
-import shutil
 import threading
 import time
 from collections import deque
@@ -31,6 +30,7 @@ class AppState:
         self.started_at = time.time()
         self.trigger_count = 0
         self._trigger_times = deque(maxlen=20)
+        self._seen_motions = {}          # motion_file_id → 마지막으로 받은 시각 · 화면 표에 쓴다
         self.system = sysinfo.collect(int(self.cfg["web"]["port"]))
         self._lock = threading.Lock()
         self._timer = None
@@ -164,17 +164,17 @@ class AppState:
         return ok, message
 
     # ---- 음원 파일 ---------------------------------------------------
-    def _clear_sounds(self):
-        """폴더에 파일 하나만 두는 규칙 — 기존 wav와 변환 캐시를 모두 지운다."""
+    # 애니메이션마다 다른 음원을 쓰므로 폴더에 여러 개를 둔다 · 같은 이름은 덮어쓴다.
+    def _remove_sound_file(self, name):
         sounds_dir = self.cfg["audio"]["sounds_dir"]
-        for name in config.list_sounds(sounds_dir):
+        for path in (os.path.join(sounds_dir, name),
+                     os.path.join(sounds_dir, audio_prep.CACHE_DIRNAME, name)):
             try:
-                os.remove(os.path.join(sounds_dir, name))
+                os.remove(path)
             except OSError:
                 pass
-        shutil.rmtree(os.path.join(sounds_dir, audio_prep.CACHE_DIRNAME), ignore_errors=True)
 
-    def replace_sound(self, name, tmp_path):
+    def add_sound(self, name, tmp_path):
         try:
             with wave.open(tmp_path, "rb") as w:
                 w.getnframes()
@@ -184,45 +184,101 @@ class AppState:
             except OSError:
                 pass
             return False, "wav 파일이 아니거나 읽을 수 없습니다"
-        self.stop_playback()
-        self._clear_sounds()
+        replacing = name in config.list_sounds(self.cfg["audio"]["sounds_dir"])
+        if replacing:
+            self.stop_playback()
+            self._remove_sound_file(name)      # 옛 스테레오 변환본도 지운다
         dest = os.path.join(self.cfg["audio"]["sounds_dir"], name)
         try:
             os.replace(tmp_path, dest)
         except OSError as exc:
             return False, "저장 실패: %s" % exc
-        self.cfg["audio"]["file_path"] = dest
+        if not os.path.isfile(self.cfg["audio"]["file_path"] or ""):
+            self.cfg["audio"]["file_path"] = dest      # 기본 음원이 없으면 첫 업로드가 기본
         config.save(self.cfg)
-        self.log.add("음원 업로드: %s" % name)
+        self.log.add("음원 %s: %s" % ("교체" if replacing else "추가", name))
         return True, ""
 
-    def delete_sound(self):
-        if not config.list_sounds(self.cfg["audio"]["sounds_dir"]):
+    def delete_sound(self, name=""):
+        """음원 하나를 지운다 · 이름이 없으면 기본 음원 · 그 음원을 쓰던 애니메이션은 기본으로 돌아간다"""
+        sounds_dir = self.cfg["audio"]["sounds_dir"]
+        name = os.path.basename(name) if name else os.path.basename(config.resolve_file(self.cfg))
+        if not name or name not in config.list_sounds(sounds_dir):
             return False, "삭제할 음원이 없습니다"
-        self.stop_playback()
-        self._clear_sounds()
-        self.cfg["audio"]["file_path"] = ""
+        if os.path.basename(self.player.current_file) == name:
+            self.stop_playback()
+        self._remove_sound_file(name)
+        if os.path.basename(self.cfg["audio"]["file_path"]) == name:
+            self.cfg["audio"]["file_path"] = ""
+        by_motion = self.cfg["audio"]["by_motion"]
+        for motion in [m for m, n in by_motion.items() if n == name]:
+            del by_motion[motion]
         config.save(self.cfg)
-        self.log.add("음원 삭제")
+        self.log.add("음원 삭제: %s" % name)
         return True, ""
 
-    def sound_path(self):
+    def set_default_sound(self, name):
+        name = os.path.basename(name or "")
+        if name not in config.list_sounds(self.cfg["audio"]["sounds_dir"]):
+            return False, "그 음원이 폴더에 없습니다"
+        self.cfg["audio"]["file_path"] = os.path.join(self.cfg["audio"]["sounds_dir"], name)
+        config.save(self.cfg)
+        self.log.add("기본 음원: %s" % name)
+        return True, ""
+
+    def set_motion_sound(self, motion_file_id, name):
+        """애니메이션 하나의 음원을 정한다 · 이름이 비면 기본 음원으로 돌린다"""
+        motion_file_id = str(motion_file_id or "").strip()
+        if not motion_file_id:
+            return False, "애니메이션 이름이 없습니다"
+        name = os.path.basename(name or "")
+        by_motion = self.cfg["audio"]["by_motion"]
+        if not name:
+            by_motion.pop(motion_file_id, None)
+            self.log.add("음원 지정 해제: %s → 기본 음원" % motion_file_id)
+        else:
+            if name not in config.list_sounds(self.cfg["audio"]["sounds_dir"]):
+                return False, "그 음원이 폴더에 없습니다"
+            by_motion[motion_file_id] = name
+            self.log.add("음원 지정: %s → %s" % (motion_file_id, name))
+        config.save(self.cfg)
+        return True, ""
+
+    def sound_path(self, name=""):
+        if name:
+            path = os.path.join(self.cfg["audio"]["sounds_dir"], os.path.basename(name))
+            return path if os.path.isfile(path) else ""
         return config.resolve_file(self.cfg)
 
     # ---- 트리거 -----------------------------------------------------
     def _on_trigger(self, msg):
         cycle = int(msg.cycle_number)
         offset = float(self.cfg["trigger"]["offset_sec"])
-        delay = max(0.0, offset)   # 수신보다 먼저 재생할 수는 없다
-        self.last_trigger = {"cycle_number": cycle, "at": time.strftime("%H:%M:%S")}
+        # 로봇 PC 가 「시작까지 남은 초」를 실어 보낸다(약속 번호 5) · 옛 메시지는 0
+        start_delay = float(getattr(msg, "start_delay_sec", 0.0) or 0.0)
+        motion = str(getattr(msg, "motion_file_id", "") or "")
+        wanted = start_delay + offset
+        delay = max(0.0, wanted)   # 수신보다 먼저 재생할 수는 없다
+        path = config.resolve_file(self.cfg, motion)
+        name = os.path.basename(path) if path else ""
+        mapped = bool(motion) and self.cfg["audio"]["by_motion"].get(motion) == name
+        self.last_trigger = {"cycle_number": cycle, "at": time.strftime("%H:%M:%S"),
+                             "motion_file_id": motion, "file_name": name}
+        if motion:
+            self._seen_motions[motion] = time.time()
         self.trigger_count += 1
         self._trigger_times.append(time.time())
-        if delay > 0:
-            self.log.add("start_at 수신 (cycle %d) → %.1f초 후 재생" % (cycle, delay))
+        what = "%s · %s" % (motion or "애니메이션 이름 없음",
+                            (name or "음원 없음") + ("" if mapped else " (기본)"))
+        if wanted < -0.05:
+            self.log.add("start_at 수신 (cycle %d · %s) → 모션보다 %.1f초 늦게 재생"
+                         % (cycle, what, -wanted))
+        elif delay > 0:
+            self.log.add("start_at 수신 (cycle %d · %s) → %.1f초 후 재생" % (cycle, what, delay))
         else:
-            self.log.add("start_at 수신 (cycle %d) → 재생" % cycle)
+            self.log.add("start_at 수신 (cycle %d · %s) → 재생" % (cycle, what))
         self._cancel_timer()
-        timer = threading.Timer(delay, self._play_trigger)
+        timer = threading.Timer(delay, self._play_trigger, args=(path,))
         timer.daemon = True
         with self._lock:
             self._timer = timer
@@ -236,12 +292,12 @@ class AppState:
         self.player.stop()
         self.log.add("모션 정지 신호 수신 (%s) → 재생 정지" % msg.state)
 
-    def _play_trigger(self):
-        self.player.play(self._playable_path(), self.cfg["audio"]["device"])
+    def _play_trigger(self, path=""):
+        self.player.play(self._playable_path(path), self.cfg["audio"]["device"])
 
-    def _playable_path(self):
+    def _playable_path(self, path=""):
         """모노 음원은 스테레오 변환본으로 재생한다(양쪽 이어폰 출력)."""
-        return audio_prep.ensure_stereo(config.resolve_file(self.cfg), self.log)
+        return audio_prep.ensure_stereo(path or config.resolve_file(self.cfg), self.log)
 
     def _cancel_timer(self):
         with self._lock:
@@ -290,11 +346,16 @@ class AppState:
                 "device": cfg["audio"]["device"],
                 "sounds_dir": cfg["audio"]["sounds_dir"],
                 "file_name": os.path.basename(path) if path else "",
+                "by_motion": dict(cfg["audio"]["by_motion"]),
                 "repeat": cfg["standalone"]["repeat"],
                 "dwell_sec": cfg["standalone"]["dwell_sec"],
             },
             "files": config.list_sounds(cfg["audio"]["sounds_dir"]),
             "last_trigger": self.last_trigger,
+            "seen_motions": [
+                {"motion_file_id": motion, "at": time.strftime("%m-%d %H:%M", time.localtime(at))}
+                for motion, at in sorted(self._seen_motions.items(), key=lambda kv: -kv[1])
+            ],
             "system": {**self.system, "git_head": sysinfo.git_head(),
                        "ip": ip, "interface": iface,
                        "web_url": "http://%s:%d" % (ip, int(cfg["web"]["port"]))},

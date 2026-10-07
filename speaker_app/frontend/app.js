@@ -115,12 +115,11 @@ function render(s) {
   setValue($("dwell_sec"), cfg.dwell_sec);
   $("sounds_dir").textContent = cfg.sounds_dir;
 
-  // 현재 음원
+  // 기본 음원 · 음원 목록 · 애니메이션별 음원
   const hasFile = !!cfg.file_name;
-  $("cur_file").textContent = hasFile ? cfg.file_name : "(없음 — 업로드해 주세요)";
-  $("btn-download").disabled = !hasFile;
-  $("btn-delete").disabled = !hasFile;
+  $("cur_file").textContent = hasFile ? cfg.file_name : "(없음 — 추가해 주세요)";
   $("btn-test").disabled = !hasFile;
+  renderSounds(s);
 
   // 볼륨
   const vol = s.volume;
@@ -151,8 +150,11 @@ function render(s) {
 
   let hint = "";
   if (isDds) {
-    hint = s.last_trigger
-      ? "최근 트리거: cycle " + s.last_trigger.cycle_number + " / " + s.last_trigger.at
+    const t = s.last_trigger;
+    hint = t
+      ? "최근 트리거: cycle " + t.cycle_number + " / " + t.at +
+        (t.motion_file_id ? " / " + t.motion_file_id : "") +
+        (t.file_name ? " → " + t.file_name : "")
       : "아직 트리거를 받지 못했습니다.";
   }
   $("play-hint").textContent = hint;
@@ -182,6 +184,117 @@ function render(s) {
       list.appendChild(li);
     });
   }
+}
+
+function button(label, cls, onClick) {
+  const b = document.createElement("button");
+  b.textContent = label;
+  if (cls) b.className = cls;
+  b.addEventListener("click", onClick);
+  return b;
+}
+
+function fileSelect(files, selected, defaultLabel) {
+  const sel = document.createElement("select");
+  const none = document.createElement("option");
+  none.value = "";
+  none.textContent = defaultLabel;
+  sel.appendChild(none);
+  files.forEach((name) => {
+    const opt = document.createElement("option");
+    opt.value = name;
+    opt.textContent = name;
+    sel.appendChild(opt);
+  });
+  sel.value = files.includes(selected) ? selected : "";
+  return sel;
+}
+
+// 1초마다 다시 그리면 펼친 선택 상자가 닫힌다 · 내용이 바뀔 때만, 표 안을 만지는 중이 아닐 때만 그린다
+let soundsKey = "";
+
+function renderSounds(s) {
+  const cfg = s.config;
+  const files = s.files || [];
+  const byMotion = cfg.by_motion || {};
+  const seen = s.seen_motions || [];
+  const key = JSON.stringify([files, cfg.file_name, byMotion, seen.map((m) => m.motion_file_id)]);
+  const active = document.activeElement;
+  const editing = active && (active.closest("#motion-map") || active.closest("#sound-list") ||
+    active.id === "new_motion_file");
+  if (key === soundsKey || editing) return;
+  soundsKey = key;
+
+  const list = $("sound-list");
+  list.innerHTML = "";
+  if (files.length === 0) {
+    list.insertRow().insertCell().outerHTML = '<td class="empty">음원이 없습니다</td>';
+  }
+  files.forEach((name) => {
+    const tr = list.insertRow();
+    const td = tr.insertCell();
+    td.className = "name";
+    td.textContent = name;
+    if (name === cfg.file_name) {
+      const tag = document.createElement("span");
+      tag.className = "tag";
+      tag.textContent = "기본";
+      td.appendChild(tag);
+    }
+    const act = tr.insertCell();
+    act.className = "act";
+    if (name !== cfg.file_name) {
+      act.appendChild(button("기본으로", "ghost", async () => {
+        if (await api("/api/sound/default", { name })) toast("기본 음원: " + name);
+        poll();
+      }));
+    }
+    act.appendChild(button("다운로드", "ghost", () => {
+      window.location.href = "/api/sound/download?name=" + encodeURIComponent(name);
+    }));
+    act.appendChild(button("삭제", "danger", async () => {
+      const users = Object.keys(byMotion).filter((m) => byMotion[m] === name);
+      const note = users.length ? "\n이 음원을 쓰는 애니메이션(" + users.join(", ") + ")은 기본 음원으로 돌아갑니다." : "";
+      if (!window.confirm(name + " 을(를) 삭제할까요?" + note)) return;
+      if (await api("/api/sound/delete", { name })) toast("삭제했습니다: " + name);
+      poll();
+    }));
+  });
+
+  const seenAt = {};
+  seen.forEach((m) => { seenAt[m.motion_file_id] = m.at; });
+  const motions = seen.map((m) => m.motion_file_id);
+  Object.keys(byMotion).sort().forEach((m) => { if (!motions.includes(m)) motions.push(m); });
+  const defaultLabel = "기본 음원" + (cfg.file_name ? " (" + cfg.file_name + ")" : "");
+  const table = $("motion-map");
+  table.innerHTML = "";
+  if (motions.length === 0) {
+    table.insertRow().insertCell().outerHTML =
+      '<td class="empty">아직 받은 애니메이션이 없습니다 · 모두 기본 음원을 틉니다</td>';
+  }
+  motions.forEach((motion) => {
+    const tr = table.insertRow();
+    const name = tr.insertCell();
+    name.className = "name";
+    name.textContent = motion;
+    const pick = tr.insertCell();
+    const sel = fileSelect(files, byMotion[motion] || "", defaultLabel);
+    sel.addEventListener("change", async () => {
+      sel.blur();
+      if (await api("/api/motion-sound", { motion_file_id: motion, file_name: sel.value })) {
+        toast(motion + " → " + (sel.value || "기본 음원"));
+      }
+      poll();
+    });
+    pick.appendChild(sel);
+    const when = tr.insertCell();
+    when.className = "when";
+    when.textContent = seenAt[motion] ? "최근 " + seenAt[motion] : "";
+  });
+
+  const add = $("new_motion_file");
+  const keep = add.value;
+  add.replaceWith(Object.assign(fileSelect(files, keep, "음원 선택"), { id: "new_motion_file" }));
 }
 
 function renderInfo(s) {
@@ -298,13 +411,15 @@ $("btn-upload").addEventListener("click", async () => {
   poll();
 });
 
-$("btn-download").addEventListener("click", () => {
-  window.location.href = "/api/sound/download";
-});
-
-$("btn-delete").addEventListener("click", async () => {
-  if (!window.confirm("현재 음원을 삭제할까요?")) return;
-  if (await api("/api/sound/delete")) toast("음원을 삭제했습니다");
+$("btn-add-motion").addEventListener("click", async () => {
+  const motion = $("new_motion").value.trim();
+  const file = $("new_motion_file").value;
+  if (!motion) { toast("애니메이션 이름을 넣으세요"); return; }
+  if (!file) { toast("음원을 고르세요"); return; }
+  if (await api("/api/motion-sound", { motion_file_id: motion, file_name: file })) {
+    toast(motion + " → " + file);
+    $("new_motion").value = "";
+  }
   poll();
 });
 

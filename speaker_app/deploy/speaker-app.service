@@ -4,7 +4,7 @@ After=network-online.target sound.target
 
 [Service]
 Type=simple
-ExecStart=%h/speaker_app/run.sh
+ExecStart=%h/robot_web/speaker_app/run.sh
 Restart=on-failure
 RestartSec=3
 KillSignal=SIGINT

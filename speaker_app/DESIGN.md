@@ -2,6 +2,10 @@
 
 최종 갱신: 2026-08-20
 
+> 2026-10-07 robot_web 으로 옮기며 바뀐 것(이 문서 본문은 옛 설계 그대로 둔다) · 앱 위치 `~/robot_web/speaker_app` ·
+> 메시지는 robot_web 빌드 · 음원 여러 개 + 애니메이션별 음원(`audio.by_motion`) · PC 1대 재생도 트리거 ·
+> `start_delay_sec` 반영 · 자세한 것은 [README.md](README.md) · robot_web `docs/수정_목록.md` 38
+
 ---
 
 ## 1. 배경

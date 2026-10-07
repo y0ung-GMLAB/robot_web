@@ -142,17 +142,30 @@ def create_app(state):
             except OSError:
                 pass
             return _result(False, "빈 파일입니다")
-        ok, message = state.replace_sound(name, tmp)
+        ok, message = state.add_sound(name, tmp)
         return _result(ok, message)
 
     @app.post("/api/sound/delete")
-    def delete_sound():
-        ok, message = state.delete_sound()
+    def delete_sound(payload: dict = Body(default={})):
+        # 이름이 없으면 기본 음원(옛 화면과 같은 동작)
+        ok, message = state.delete_sound(os.path.basename(str((payload or {}).get("name") or "")))
+        return _result(ok, message)
+
+    @app.post("/api/sound/default")
+    def default_sound(payload: dict = Body(...)):
+        ok, message = state.set_default_sound(str(payload.get("name") or ""))
+        return _result(ok, message)
+
+    @app.post("/api/motion-sound")
+    def motion_sound(payload: dict = Body(...)):
+        """애니메이션 → 음원 · 이름이 비면 기본 음원으로 돌린다"""
+        ok, message = state.set_motion_sound(
+            str(payload.get("motion_file_id") or ""), str(payload.get("file_name") or ""))
         return _result(ok, message)
 
     @app.get("/api/sound/download")
-    def download_sound():
-        path = state.sound_path()
+    def download_sound(name: str = ""):
+        path = state.sound_path(name)
         if not path or not os.path.isfile(path):
             return Response("음원이 없습니다", status_code=404)
         name = os.path.basename(path)
