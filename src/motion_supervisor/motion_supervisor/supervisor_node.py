@@ -2252,7 +2252,12 @@ class MotionSupervisor(Node):
         self._publish_controlword(motors, axes, CW_FAULT_RESET_MINAS)
         time.sleep(CONTROLWORD_SEQUENCE_DELAY_SEC)
         self._publish_controlword(motors, axes, CW_SHUTDOWN_MINAS)
-        return True, f'AC Servo Fault Reset command sent: axes {self._axis_list_text(axes)}'
+        # 리셋 뒤 0x06 으로 「켤 준비」 상태가 되어 서보가 꺼진 채로 남는다 · 의도(사람이 원인을
+        # 보고 직접 켠다 · 사용자 결정 2026-10-07) · 다음 할 일을 문구에 적는다 · 수정 목록 71
+        return True, (
+            f'AC Servo Fault Reset command sent: axes {self._axis_list_text(axes)} · '
+            '오류 초기화 완료 · 서보가 꺼졌습니다 · 알람 원인을 확인한 뒤 「서보 켜기」 를 누르세요'
+        )
 
     def _handle_dynamixel_torque_control(
         self, request: Dict[str, Any],

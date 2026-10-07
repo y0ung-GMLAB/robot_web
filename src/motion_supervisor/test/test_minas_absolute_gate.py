@@ -131,3 +131,11 @@ def test_safety_status_blocks_commands_so_playback_schedule_and_screen_stop_too(
     supervisor._publish_safety_status()
     payload = supervisor._safety_status_pub.payloads[-1]
     assert payload['commands_blocked'] is False and payload['message'] == '동작 가능'
+
+
+def test_fault_reset_says_the_servo_is_now_off_and_what_to_do_next():
+    """수정 목록 71 · 리셋 뒤 서보가 꺼진 채로 남는 것은 의도 · 다음 할 일을 알린다"""
+    supervisor = _supervisor({'state': 'ok'})
+    success, message = supervisor._handle_ac_servo_control({'action': 'fault_reset', 'scope': 'all'})
+    assert success is True
+    assert '서보가 꺼졌습니다' in message and '서보 켜기' in message
