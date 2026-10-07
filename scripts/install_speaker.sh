@@ -177,16 +177,23 @@ else:
 PY
 fi
 
-if [[ -n "${SPEAKER_PC_NAME:-}" && "${DRY_RUN}" != true ]]; then
-  # bootstrap --name · 「같은 망 PC」 표에 보이는 이름
-  APP_DIR="${APP_DIR}" python3 - "${SPEAKER_PC_NAME}" <<'PY'
-import os, sys
+if [[ "${DRY_RUN}" != true ]]; then
+  # 「같은 망 PC」 표에 보이는 이름 · bootstrap --name 이 있으면 그것 · 없으면 컴퓨터 이름(이미 정해 둔 이름은 그대로)
+  APP_DIR="${APP_DIR}" python3 - "${SPEAKER_PC_NAME:-}" "$(hostname)" <<'PY'
+import os, sys, yaml
 sys.path.insert(0, os.path.join(os.environ["APP_DIR"], "backend"))
 import config
+given, host = sys.argv[1], sys.argv[2]
+local = {}
+if os.path.isfile(config.CONFIG_PATH):
+    local = yaml.safe_load(open(config.CONFIG_PATH, encoding="utf-8")) or {}
+already = str(((local.get("dds") or {}).get("pc_name")) or "")
+name = given or already or host
 cfg = config.load()
-cfg["dds"]["pc_name"] = sys.argv[1]
-config.save(cfg)
-print("  · PC 이름 · %s" % sys.argv[1])
+if cfg["dds"]["pc_name"] != name or not already:
+    cfg["dds"]["pc_name"] = name
+    config.save(cfg)
+print("  · PC 이름 · %s" % name)
 PY
 fi
 
@@ -209,6 +216,7 @@ echo "코드     · $(git -C "${WORKSPACE_DIR}" log --oneline -1 2>/dev/null || 
 echo "서비스   · ${UNIT}=$(systemctl --user is-active "${UNIT}" 2>/dev/null; true)"
 echo "스피커 화면 · http://${ip_addr:-<이 PC IP>}:${port}"
 echo "음원     · $(find "${APP_DIR}/sounds" -maxdepth 1 -iname '*.wav' 2>/dev/null | wc -l)개 · 없으면 스피커 화면에서 추가"
+echo "설치 확인 · bash ${WORKSPACE_DIR}/scripts/check.sh"
 echo "맞출 것  · 로봇 PC 와 같은 robot_web 커밋 · 같은 DDS Domain ID · 같은 그룹 ID(스피커 화면 「연동 설정」)"
 if site_needs_reboot; then
   echo

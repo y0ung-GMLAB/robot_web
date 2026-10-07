@@ -591,6 +591,7 @@ done
 echo
 echo "웹 주소: http://localhost:8000"
 echo "상태 확인: systemctl --user status --no-pager motion-control.service motion-coordination.service"
+echo "설치 확인: bash ${WORKSPACE_DIR}/scripts/check.sh"
 if [[ "${ROS_DAEMON_UPDATED}" == true ]]; then
   echo "ROS 2 daemon 초기화 완료"
 fi
