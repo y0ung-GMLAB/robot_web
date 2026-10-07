@@ -1165,3 +1165,7 @@ td.mapping-disabled-cell { background: transparent !important; opacity: 0.55; }
   border-color: var(--line-strong) !important;
   color: var(--muted) !important;
 }
+
+/* 수동 조작 · 초기 위치 이동 줄 · 정지 줄 모양을 빌리되 위험색은 아님 · 수정 목록 58 */
+.motion-test-stop-bar.manual-initialize-bar strong { color: var(--ink) !important; }
+.manual-initialize-bar button { white-space: nowrap; }
