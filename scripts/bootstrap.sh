@@ -11,13 +11,27 @@
 #
 # 스피커 PC · 끝에 `-s -- --speaker` 를 붙인다 · 코드는 ~/robot_web · scripts/install_speaker.sh 로 이어간다
 #   curl -fsSL https://raw.githubusercontent.com/y0ung-GMLAB/robot_web/main/scripts/bootstrap.sh | bash -s -- --speaker
+#
+# PC 이름 · `--name floating1` · 컴퓨터 이름(hostname)을 바꾼다 · 로봇 PC 는 이것이 `이 PC ID`(웹에서 못 바꿈) ·
+#   스피커 PC 는 「같은 망 PC」 표의 이름 · 예) ... | bash -s -- --name floating1 · ... | bash -s -- --speaker --name speaker
 set -Eeuo pipefail
 
 SPEAKER=false
+PC_NAME=""
 ARGS=()
-for arg in "$@"; do
-  if [[ "${arg}" == "--speaker" ]]; then SPEAKER=true; else ARGS+=("${arg}"); fi
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --speaker) SPEAKER=true ;;
+    --name) PC_NAME="${2:-}"; shift ;;
+    --name=*) PC_NAME="${1#--name=}" ;;
+    *) ARGS+=("$1") ;;
+  esac
+  shift
 done
+if [[ -n "${PC_NAME}" && ! "${PC_NAME}" =~ ^[A-Za-z0-9][A-Za-z0-9-]{0,62}$ ]]; then
+  echo "PC 이름은 영문·숫자·- 만 · 예) floating1 · speaker (지금: ${PC_NAME})" >&2
+  exit 2
+fi
 
 REPO="${MOTION_REPO:-https://github.com/y0ung-GMLAB/robot_web.git}"
 BRANCH="${MOTION_BRANCH:-main}"
@@ -34,6 +48,7 @@ echo "========================================="
 echo "저장소   · ${REPO} (${BRANCH})"
 echo "작업공간 · ${WORKSPACE}"
 echo "계정     · $(id -un) (이 계정이 자동 로그인 계정이 됩니다)"
+echo "PC 이름  · ${PC_NAME:-$(hostname) (그대로)}"
 
 if [[ -f /etc/os-release ]]; then
   # shellcheck disable=SC1091
@@ -50,6 +65,18 @@ fi
 
 echo "관리자 권한이 필요합니다 · 비밀번호를 한 번만 입력하세요"
 sudo -v
+
+if [[ -n "${PC_NAME}" && "${PC_NAME}" != "$(hostname)" ]]; then
+  old_name="$(hostname)"
+  sudo hostnamectl set-hostname "${PC_NAME}"
+  # sudo 가 「이름을 못 찾음」 경고를 내지 않게 · 127.0.1.1 줄을 새 이름으로
+  if grep -q '^127\.0\.1\.1' /etc/hosts; then
+    sudo sed -i "s/^127\.0\.1\.1.*/127.0.1.1\t${PC_NAME}/" /etc/hosts
+  else
+    printf '127.0.1.1\t%s\n' "${PC_NAME}" | sudo tee -a /etc/hosts >/dev/null
+  fi
+  echo "PC 이름 바꿈 · ${old_name} → ${PC_NAME}"
+fi
 
 if ! command -v git >/dev/null 2>&1 || ! command -v curl >/dev/null 2>&1; then
   sudo apt-get update
@@ -79,6 +106,12 @@ else
 fi
 
 cd "${WORKSPACE}"
+# 이미 연동 설정을 저장한 로봇 PC 는 그 안의 pc_id 가 우선이다 · 알려만 준다
+if [[ -n "${PC_NAME}" && "${SPEAKER}" != true && -f config/motion_coordination.yaml ]] \
+   && ! grep -q "^pc_id: ['\"]\?${PC_NAME}['\"]\?$" config/motion_coordination.yaml; then
+  echo "!! 연동 설정에 저장된 이 PC ID 가 $(grep '^pc_id:' config/motion_coordination.yaml) 입니다 · 새 이름을 쓰려면 config/motion_coordination.yaml 의 pc_id 를 고치세요" >&2
+fi
+export SPEAKER_PC_NAME="${PC_NAME}"
 if [[ "${SPEAKER}" == true ]]; then
   exec bash scripts/install_speaker.sh ${ARGS[@]+"${ARGS[@]}"}
 fi

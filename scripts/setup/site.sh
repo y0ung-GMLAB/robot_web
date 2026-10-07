@@ -375,6 +375,11 @@ site_selfcheck() {
   site_check_row "$([[ -f "${SITE_GDM_CONF}" ]] && grep -q '^AutomaticLoginEnable=true' "${SITE_GDM_CONF}" && echo 1 || echo 0)" "자동 로그인" "${SITE_GDM_CONF}"
   tz="$(timedatectl show -p Timezone --value 2>/dev/null || echo 미상)"
   site_check_row 1 "시간대" "${tz}"
+  if command -v mokutil >/dev/null 2>&1; then
+    local sb
+    sb="$(mokutil --sb-state 2>/dev/null | head -1 || true)"
+    site_check_row "$(printf '%s' "${sb}" | grep -qi enabled && echo 0 || echo 1)" "Secure Boot 꺼짐 (EtherCAT 모듈)" "${sb:-미상}"
+  fi
   site_check_row "$(systemctl is-enabled unattended-upgrades 2>/dev/null | grep -q masked && echo 1 || echo 0)" "자동 업데이트" "$(systemctl is-enabled unattended-upgrades 2>/dev/null || echo 없음)"
   for unit in motion-control motion-motor motion-coordination; do
     site_check_row "$(systemctl --user is-active --quiet "${unit}.service" && echo 1 || echo 0)" "${unit}.service" "$(systemctl --user is-active "${unit}.service" 2>/dev/null || echo unknown)"

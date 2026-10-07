@@ -177,6 +177,19 @@ else:
 PY
 fi
 
+if [[ -n "${SPEAKER_PC_NAME:-}" && "${DRY_RUN}" != true ]]; then
+  # bootstrap --name · 「같은 망 PC」 표에 보이는 이름
+  APP_DIR="${APP_DIR}" python3 - "${SPEAKER_PC_NAME}" <<'PY'
+import os, sys
+sys.path.insert(0, os.path.join(os.environ["APP_DIR"], "backend"))
+import config
+cfg = config.load()
+cfg["dds"]["pc_name"] = sys.argv[1]
+config.save(cfg)
+print("  · PC 이름 · %s" % sys.argv[1])
+PY
+fi
+
 step "7. 자동 시작 등록 (${UNIT})"
 if [[ "${DRY_RUN}" == true ]]; then
   echo "  [dry-run] ${UNIT_DIR}/${UNIT} · ExecStart=${APP_DIR}/run.sh"

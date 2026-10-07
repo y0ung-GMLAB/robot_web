@@ -92,6 +92,10 @@ preflight_checks() {
   if [[ "${avail_gb}" -lt 5 ]]; then
     echo "!! 저장 공간이 5GB 미만입니다 · 전체 빌드가 중간에 멈출 수 있습니다" >&2
   fi
+  # Secure Boot 가 켜져 있으면 직접 빌드한 EtherCAT 커널 모듈(서명 없음)이 안 올라간다 · BIOS 에서 끈다
+  if command -v mokutil >/dev/null 2>&1 && mokutil --sb-state 2>/dev/null | grep -qi 'enabled'; then
+    echo "!! Secure Boot 가 켜져 있습니다 · EtherCAT(AC 서보)이 안 될 수 있습니다 · BIOS 에서 Secure Boot 를 끄세요 (docs/설치_101.md)" >&2
+  fi
   # sudo 는 여러 단계에서 쓴다 · 중간에 물어 멈추지 않게 여기서 한 번만 받는다
   if [[ "${DRY_RUN}" == true ]]; then
     echo "[dry-run] 바꾸지 않습니다 · 할 일만 찍습니다"

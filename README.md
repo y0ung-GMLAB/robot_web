@@ -99,6 +99,8 @@ ros2_ws/
 
 ## 새 PC 설치 · 우분투 설치 직후부터
 
+> **처음이면 [설치 101](docs/설치_101.md) 부터** · 우분투만 깔린 PC 에서 로봇 PC 4대 + 스피커 PC 까지 · BIOS 등 사람이 할 일 포함 · 한 장짜리 순서표
+
 ### 한 줄 설치 (권장 · 2026-10-04)
 
 우분투 22.04 를 깐 직후, **늘 쓸 계정**으로 로그인해 터미널에서 한 줄만 칩니다.
@@ -113,6 +115,8 @@ curl -fsSL https://raw.githubusercontent.com/y0ung-GMLAB/robot_web/main/scripts/
 - 첫 설치는 중간에 **재부팅 1회**가 필요합니다 · 15초 뒤 스스로 재부팅하고, 자동 로그인 뒤 **저절로 이어서** 끝냅니다
   (기록 · `~/ros2_ws/log/site_setup/`) · 끝에 자가 점검표가 찍힙니다
 - **수작업으로 남는 것** · 1단계 BIOS(전원 복구 시 켜기) · 웹에서 로봇 팩 업로드 · 모터 관리 → 전체 모터 검색 → 설정 적용
+- **PC 이름** 은 `-s -- --name floating1` 로 같이 정합니다 · 컴퓨터 이름(hostname)이 바뀌고 그것이 `이 PC ID` 가 됩니다(웹에서는 못 바꿈)
+- **BIOS** · `Secure Boot` 를 끕니다 · 켜져 있으면 EtherCAT 커널 모듈이 안 올라갑니다 · 설치가 켜져 있으면 경고합니다
 - **스피커 PC** 는 끝에 `-s -- --speaker` 를 붙입니다 · `... bootstrap.sh | bash -s -- --speaker` · 스피커 앱만 깔고 모터·웹은 깔지 않습니다 · 자세한 것은 [speaker_app/README.md](speaker_app/README.md)
 
 | 상황 | 할 일 |
