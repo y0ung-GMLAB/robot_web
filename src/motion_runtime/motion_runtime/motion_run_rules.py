@@ -262,6 +262,10 @@ def _motor_position(motor: Optional[Dict[str, Any]]) -> Optional[float]:
     """모터 현재 위치 · rad · 모터 상태 단위는 `wire_units` 가 안다 · 수정 목록 6"""
     return wire_units.motor_position(motor)
 
+#: 한계 비교 여유 · 부동소수 찌꺼기만 넘긴다 · 0.00006°
+LIMIT_EPSILON_RAD = 1e-6
+
+
 def _target_range_limit_error(
     motor: Dict[str, Any],
     target_min: float,
@@ -272,9 +276,11 @@ def _target_range_limit_error(
     upper = wire_units.motor_limit(motor, 'upper')
     axis = optional_int(motor.get('controller_index'))
     deg = units.rad_to_deg
-    if lower is not None and target_min < lower:
+    # 범위로 자른 값을 다시 견주면 부동소수 찌꺼기로 「−1073.998° 가 −1073.998° 보다 작습니다」 가 났다 ·
+    # 1e-6 rad(0.00006°) 안은 같은 값 · 실물 테스트 38 관찰
+    if lower is not None and target_min < lower - LIMIT_EPSILON_RAD:
         return f'{axis}번 모터 목표 최소 {deg(target_min):.3f}° 가 하한 {deg(lower):.3f}° 보다 작습니다'
-    if upper is not None and target_max > upper:
+    if upper is not None and target_max > upper + LIMIT_EPSILON_RAD:
         return f'{axis}번 모터 목표 최대 {deg(target_max):.3f}° 가 상한 {deg(upper):.3f}° 보다 큽니다'
     return ''
 
