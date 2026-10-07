@@ -31,3 +31,10 @@ def test_launch_ends_when_supervisor_or_monitor_dies():
     assert "_shutdown_when_it_exits(supervisor_node, 'motion_supervisor')" in text
     assert "_shutdown_when_it_exits(monitor_node, 'motion_state_monitor')" in text
     assert 'OnProcessExit' in text and 'Shutdown(' in text
+
+
+def test_launch_leaves_a_crash_marker_unless_it_is_already_shutting_down():
+    """수정 목록 72 · 다시 뜬 웹 브리지가 운영 로그에 남기게"""
+    text = (ROOT / 'src/motion_state_monitor/launch/motion_monitor.launch.py').read_text(encoding='utf-8')
+    assert 'upper_restart.write_marker(WORKSPACE, name,' in text
+    assert "getattr(context, 'is_shutdown', False)" in text

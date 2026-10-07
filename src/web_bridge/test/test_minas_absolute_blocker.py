@@ -72,3 +72,24 @@ def test_motor_event_log_records_block_and_release_once(tmp_path):
 
     log.record_minas_absolute_transition({'minas_absolute': {'state': 'ok'}})
     assert [event['event_type'] for event in events] == ['minas_absolute_blocked', 'minas_absolute_confirmed']
+
+
+def test_bridge_moves_the_crash_marker_into_one_motor_event(tmp_path):
+    """수정 목록 72"""
+    from types import SimpleNamespace
+
+    from motion_common import upper_restart
+
+    upper_restart.write_marker(tmp_path, 'motion_supervisor', -9, now=1000.0)
+    events = []
+    bridge = MotionWebBridge.__new__(MotionWebBridge)
+    bridge.workspace_root = tmp_path
+    bridge.get_logger = lambda: SimpleNamespace(error=lambda *_: None)
+    bridge._motor_event_log = SimpleNamespace(append=lambda **event: events.append(event))
+
+    bridge._record_upper_service_crash()
+    bridge._record_upper_service_crash()          # 표지는 한 번만
+
+    assert [event['event_type'] for event in events] == ['upper_service_crashed']
+    assert events[0]['target'] == 'motion_supervisor'
+    assert '코드 -9' in events[0]['content']

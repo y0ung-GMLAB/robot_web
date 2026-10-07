@@ -14,7 +14,7 @@ import rclpy
 import uvicorn
 import yaml
 from fastapi import FastAPI, HTTPException, Request
-from motion_common import generation, minas_absolute, rpc, topics
+from motion_common import generation, minas_absolute, rpc, topics, upper_restart
 from motion_common import paths as common_paths
 from motion_common import motor_ref as motor_ref_rules
 from fastapi.responses import JSONResponse
@@ -296,6 +296,8 @@ class MotionWebBridge(Node):
             runtime_project_id=lambda: self._project.runtime_project_id(),
             logger=self.get_logger,
         )
+        # 직전에 supervisor·상태 모니터가 죽어 상위 서비스가 다시 떴으면 1건 · 수정 목록 72
+        self._record_upper_service_crash()
         # 회차별 모션 기록 조회 · 쓰는 쪽은 motion_runtime.motion_trace
         self.motion_trace = MotionTraceService(self.project_repository)
         self.web_publish_hz = float(self.declare_parameter('web_publish_hz', 10.0).value)
@@ -568,6 +570,21 @@ class MotionWebBridge(Node):
             self._motion_state_received_at = time.time()
         self._motor_event_log.record_motor_error_transitions(payload)
         self._motor_event_log.record_minas_absolute_transition(payload)
+
+    def _record_upper_service_crash(self) -> None:
+        """launch 가 남긴 비정상 종료 표지를 모터 이벤트로 옮긴다 · 수정 목록 72"""
+        marker = upper_restart.take_marker(self.workspace_root)
+        if not marker:
+            return
+        content = upper_restart.event_content(marker)
+        self.get_logger().error(f'[상위 서비스 재시작] {content}')
+        self._motor_event_log.append(
+            category='system',
+            event_type='upper_service_crashed',
+            target=str(marker.get('node') or '상위 서비스'),
+            content=content,
+            details=marker,
+        )
 
     def _motion_value_callback(self, msg: String) -> None:
         try:
