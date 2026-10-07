@@ -1963,7 +1963,9 @@ export function createMotionDataController({
     const registeredState = mujocoState(mujocoRegisteredFile);
     if (el.motionRunMujocoToggle) {
       // stale(팩 변경 뒤 옛 결과)도 같이 보기는 허용 · 다시 계산은 MuJoCo 버튼
-      const usable = registeredState === 'ready' || registeredState === 'stale';
+      // 계산이 실패해도 옛 결과가 있으면 보기는 된다 · 수정 목록 54
+      const usable = registeredState === 'ready' || registeredState === 'stale'
+        || (registeredState === 'failed' && mujocoRegisteredFile?.preview?.has_result === true);
       el.motionRunMujocoToggle.disabled = !usable;
       if (!usable && el.motionRunMujocoToggle.checked) {
         el.motionRunMujocoToggle.checked = false;
@@ -2585,7 +2587,11 @@ export function createMotionDataController({
     const state = mujocoState(file);
     if (state === 'computing') return '<span class="mujoco-badge computing" title="무거운 물리 계산이 도는 중 · 끝나면 같이 보기가 켜집니다">MuJoCo 계산 중</span>';
     if (state === 'ready') return '<span class="mujoco-badge ready" title="계산 완료 · MuJoCo 재생·같이 보기 가능">MuJoCo 준비됨</span>';
-    if (state === 'failed') return '<span class="mujoco-badge failed" title="마지막 계산이 실패했습니다 · 다시 계산을 누르세요">계산 실패</span>';
+    if (state === 'failed') {
+      // 이유(코드 · 기록 파일 · 옛 결과 있음)를 그대로 · 수정 목록 54
+      const why = escapeHtml(`${file?.preview?.message || '마지막 계산이 실패했습니다'} · 다시 계산을 누르세요`);
+      return `<span class="mujoco-badge failed" title="${why}">계산 실패</span>`;
+    }
     if (state === 'stale') {
       const why = escapeHtml(file?.preview?.message || '로봇 팩 변경');
       return `<span class="mujoco-badge stale" title="${why}">다시 계산 필요</span>`;

@@ -665,7 +665,10 @@ export function createSim3dViewer({ el, getLatestState = () => null }) {
   }
 
   function usable(file) {
-    return Boolean(file) && (file.preview?.state === 'ready' || file.preview?.state === 'stale');
+    const state = file?.preview?.state;
+    // 계산 실패여도 옛 결과가 있으면 보기는 허용 · 수정 목록 54
+    return Boolean(file) && (state === 'ready' || state === 'stale'
+      || (state === 'failed' && file.preview?.has_result === true));
   }
 
   /** 애니메이션 선택이 바뀌었을 때 · 모션 패널이 그릴 때마다 부른다 (싸다)

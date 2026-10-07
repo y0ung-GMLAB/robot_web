@@ -40,6 +40,7 @@ stdout·stderr 는 `log/animation_preview/<애니메이션>.precompute.log` 에 
 from __future__ import annotations
 
 import json
+import time
 import subprocess
 import threading
 from pathlib import Path
@@ -158,6 +159,16 @@ def meta_path_for(result: Path) -> Path:
     return Path(result).with_suffix('.meta.json')
 
 
+def pending_path_for(result: Path) -> Path:
+    """`x.sim.npz` → `x.sim.pending.json` · 계산을 **시작할 때** 쓴 팩 기록 · 수정 목록 54
+
+    팩 기록(`meta`)은 브리지가 끝난 계산을 거둘 때(`_reap`)만 썼다 · 긴 계산(9분 나레이션) 중에
+    브리지가 다시 뜨면 거둘 사람이 없어 기록이 안 남고 결과가 영영 「다시 계산 필요」 였다 ·
+    시작할 때 남겨 두고, 결과 파일이 그보다 새것이면 그 계산이 끝낸 것으로 본다.
+    """
+    return Path(result).with_suffix('.pending.json')
+
+
 def _pack_stamp(workspace_root: Path) -> Dict[str, Any]:
     pack_dir = robot_pack.pack_root(workspace_root)
     info = robot_pack.read_pack_info(pack_dir)
@@ -207,8 +218,32 @@ def _reap() -> None:
         if code == 0 and meta is not None:
             try:
                 atomic_write_json(meta_path_for(Path(key)), {'pack': meta})
+                pending_path_for(Path(key)).unlink(missing_ok=True)
             except OSError:
                 pass  # 기록 실패 = 팩 정보 없음 = stale 로 보인다 · 안전한 쪽
+
+
+def _pending_stamp(result: Path) -> Dict[str, Any]:
+    """시작 때 쓴 기록 · 없거나 틀리면 빈 dict"""
+    try:
+        payload = json.loads(pending_path_for(result).read_text(encoding='utf-8'))
+    except (OSError, ValueError):
+        return {}
+    stamp = payload.get('pack') if isinstance(payload, dict) else None
+    return stamp if isinstance(stamp, dict) else {}
+
+
+def _finished_after_pending(result: Path) -> Optional[bool]:
+    """시작 기록이 있으면 · 결과 파일이 그 뒤에 써졌나 · 기록이 없으면 None"""
+    pending = pending_path_for(result)
+    try:
+        started = pending.stat().st_mtime
+    except OSError:
+        return None
+    try:
+        return result.stat().st_mtime >= started
+    except OSError:
+        return False
 
 
 def _stale_reason(workspace_root: Path, result: Path) -> str:
@@ -222,6 +257,15 @@ def _stale_reason(workspace_root: Path, result: Path) -> str:
         stamp = meta.get('pack') or {}
     except (OSError, ValueError, AttributeError):
         stamp = {}
+    if (not isinstance(stamp, dict) or not stamp.get('fingerprint')) and _finished_after_pending(result):
+        # 브리지가 다시 떠서 못 거둔 계산 · 시작 기록을 결과 기록으로 올린다 · 수정 목록 54
+        stamp = _pending_stamp(result)
+        if stamp.get('fingerprint'):
+            try:
+                atomic_write_json(meta_path_for(result), {'pack': stamp})
+                pending_path_for(result).unlink(missing_ok=True)
+            except OSError:
+                pass
     if not isinstance(stamp, dict) or not stamp.get('fingerprint'):
         return '로봇 팩 기록 없는 계산 결과 · 다시 계산 필요'
     if stamp['fingerprint'] == current:
@@ -252,15 +296,29 @@ def preview_state(workspace_root: Path, motion_path: Path) -> Dict[str, Any]:
     with _LOCK:
         if key in _RUNNING:
             return {'state': 'computing'}
-    if result.is_file():
+    with _LOCK:
+        last_rc = _LAST_RC.get(key)
+    has_result = result.is_file()
+    log_name = log_path_for(Path(workspace_root), Path(motion_path), 'precompute').name
+    # 실패를 먼저 본다 · 옛 결과가 있어도 마지막 계산이 실패했으면 「계산 실패」 · 보기는 옛 결과로 허용 · 수정 목록 54
+    if last_rc not in (None, 0):
+        return {
+            'state': 'failed', 'has_result': has_result,
+            'message': f'마지막 계산이 실패했습니다 (코드 {last_rc}) · 기록 {log_name}'
+            + (' · 옛 결과 있음' if has_result else ''),
+        }
+    if last_rc is None and _finished_after_pending(result) is False:
+        # 시작 기록보다 새 결과가 없고 도는 계산도 없다 · 브리지가 다시 뜨며 중간에 끊긴 계산
+        return {
+            'state': 'failed', 'has_result': has_result,
+            'message': f'마지막 계산이 끝까지 가지 못했습니다(실패 또는 중간에 멈춤) · 기록 {log_name}'
+            + (' · 옛 결과 있음' if has_result else ''),
+        }
+    if has_result:
         reason = _stale_reason(Path(workspace_root), result)
         if reason:
             return {'state': 'stale', 'message': reason}
         return {'state': 'ready'}
-    with _LOCK:
-        last_rc = _LAST_RC.get(key)
-    if last_rc not in (None, 0):
-        return {'state': 'failed', 'message': f'마지막 계산이 실패했습니다 (코드 {last_rc})'}
     return {'state': 'missing'}
 
 
@@ -323,6 +381,10 @@ def launch_precompute(
         _RUNNING[key] = handle
         _LAST_RC.pop(key, None)
         _PENDING_META[key] = stamp
+    try:
+        atomic_write_json(pending_path_for(result), {'pack': stamp, 'started_at': time.time()})
+    except OSError:
+        pass  # 없으면 옛 동작(브리지가 거둘 때만 기록)
     return {
         'success': True,
         'message': f'MuJoCo 계산 시작: {motion_path.name} · 끝나면 같이 보기가 켜집니다',

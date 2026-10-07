@@ -298,7 +298,54 @@ def test_failed_recompute_does_not_bless_the_old_result(tmp_path):
     animation_preview.launch_precompute(
         workspace, motion, spawn=lambda *a, **k: SimpleNamespace(poll=lambda: 1),
     )
-    assert animation_preview.preview_state(workspace, motion)['state'] == 'stale'
+    # 수정 목록 54 · 실패가 먼저 보인다 · 옛 결과는 보기만 허용하고 기록(meta)은 안 남긴다
+    state = animation_preview.preview_state(workspace, motion)
+    assert state['state'] == 'failed' and state['has_result'] is True
+    assert '옛 결과 있음' in state['message'] and 'precompute.log' in state['message']
+    result = Path(str(motion)[:-len('.json')] + '.sim.npz')
+    assert not animation_preview.meta_path_for(result).exists()
+
+
+def test_a_finished_compute_survives_a_bridge_restart(tmp_path):
+    """수정 목록 54 · 긴 계산 중 브리지가 다시 떠도 · 결과가 시작 기록보다 새것이면 준비됨"""
+    import os
+    import time as _time
+
+    workspace = _workspace(tmp_path)
+    _pack(workspace)
+    motion = _motion(tmp_path)
+    result = Path(str(motion)[:-len('.json')] + '.sim.npz')
+    animation_preview.launch_precompute(
+        workspace, motion, spawn=lambda *a, **k: SimpleNamespace(poll=lambda: None),
+    )
+    assert animation_preview.pending_path_for(result).exists()
+    # 브리지 재시작 · 메모리가 비었다 · 계산은 끝까지 가서 결과를 썼다
+    animation_preview._RUNNING.clear()
+    animation_preview._LAST_RC.clear()
+    animation_preview._PENDING_META.clear()
+    result.write_bytes(b'npz')
+    later = _time.time() + 5
+    os.utime(result, (later, later))
+    assert animation_preview.preview_state(workspace, motion)['state'] == 'ready'
+    assert animation_preview.meta_path_for(result).exists()
+
+
+def test_an_interrupted_compute_shows_failed_not_stale(tmp_path):
+    import os
+
+    workspace = _workspace(tmp_path)
+    _pack(workspace)
+    motion = _motion(tmp_path)
+    result = Path(str(motion)[:-len('.json')] + '.sim.npz')
+    result.write_bytes(b'npz')                                 # 옛 결과
+    os.utime(result, (1_000_000, 1_000_000))
+    animation_preview.launch_precompute(
+        workspace, motion, spawn=lambda *a, **k: SimpleNamespace(poll=lambda: None),
+    )
+    animation_preview._RUNNING.clear()
+    animation_preview._LAST_RC.clear()
+    state = animation_preview.preview_state(workspace, motion)
+    assert state['state'] == 'failed' and state['has_result'] is True
 
 
 def test_without_a_pack_nothing_is_stale(tmp_path):
