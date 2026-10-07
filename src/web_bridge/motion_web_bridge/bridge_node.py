@@ -1956,6 +1956,9 @@ class MotionWebBridge(Node):
         off = run_mode_gate.motion_command_block_reason(self)
         if off:
             return {'success': False, 'message': f'초기 위치 이동 불가: {off}'}
+        human = run_mode_gate.human_start_block_reason(self, payload)
+        if human:
+            return {'success': False, 'message': f'초기 위치 이동 불가: {human}'}
         if str(payload.get('request_source') or '') != 'network_control':
             conflict = self.coordination_execution_blocker()
             if conflict:
@@ -2011,6 +2014,9 @@ class MotionWebBridge(Node):
         off = run_mode_gate.motion_command_block_reason(self)
         if off:
             return {'success': False, 'message': f'모션 실행 불가: {off}'}
+        human = run_mode_gate.human_start_block_reason(self, payload)
+        if human:
+            return {'success': False, 'message': f'모션 실행 불가: {human}'}
         manual = self.schedule_start_blocked_by_manual_mode(payload)
         if manual:
             self.get_logger().warn(f'스케줄 시작 거절 · {manual}')

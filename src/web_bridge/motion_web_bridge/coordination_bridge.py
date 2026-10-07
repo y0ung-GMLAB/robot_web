@@ -219,6 +219,10 @@ class CoordinationWebBridge:
             off = run_mode_gate.motion_command_block_reason(self._node)
             if off:
                 return {'success': False, 'message': off}
+            # 스케줄 모드에서 사람이 누른 그룹 시작은 막는다 · 스케줄이 보낸 것만 · 수정 목록 70
+            human = run_mode_gate.human_start_block_reason(self._node, dict(payload))
+            if human:
+                return {'success': False, 'message': human}
         start_generation = int(self._project_generation())
         try:
             request = {'command': command}

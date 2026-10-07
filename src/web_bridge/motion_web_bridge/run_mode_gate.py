@@ -88,3 +88,25 @@ def manual_control_block_reason(bridge: Any) -> str:
         return SCHEDULE_MANUAL_BLOCK_MESSAGE
     # MANUAL_MODE 또는 프로젝트 없음('')
     return ''
+
+
+#: 사람이 누른 것이 아닌 시작 · 스케줄·연동·스케줄 끝 정리가 보낸다
+AUTOMATED_REQUEST_SOURCES = frozenset({'network_control', 'network_readiness', 'schedule_end'})
+
+
+def human_start_block_reason(bridge: Any, payload: Any) -> str:
+    """사람이 누른 재생·초기 위치 이동·그룹 시작의 문 · 수정 목록 70 (사용자 결정 2026-10-07)
+
+    스케줄 모드에서는 **스케줄이 보낸 시작만** 받는다 · 조그·페이더가 「수동」 에서만
+    되는 것과 같은 이유다 · 스케줄이 1분마다 맞추는 사이에 사람이 재생을 섞으면 둘이
+    부딪힌다 (실물 2026-10-07 시험 19 · 스케줄 모드에서 화면 「1회 재생」 이 초기 이동까지 감).
+
+    스케줄이 보낸 것(`schedule_id`)·연동이 보낸 것(`request_source`)은 통과 · 오프는
+    `motion_command_block_reason` 이 이미 막는다 · 모드를 못 읽으면 막는다(18).
+    """
+    request = payload if isinstance(payload, dict) else {}
+    if str(request.get('schedule_id') or '').strip():
+        return ''
+    if str(request.get('request_source') or '') in AUTOMATED_REQUEST_SOURCES:
+        return ''
+    return manual_control_block_reason(bridge)

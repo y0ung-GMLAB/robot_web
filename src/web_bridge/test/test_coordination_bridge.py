@@ -278,3 +278,21 @@ def test_invalid_group_settings_do_not_replace_valid_file(tmp_path, monkeypatch)
     else:
         raise AssertionError('invalid settings accepted')
     assert (tmp_path / 'config/motion_coordination.yaml').read_text(encoding='utf-8') == original
+
+
+def test_human_group_start_is_refused_in_schedule_mode_but_schedule_start_passes(tmp_path, monkeypatch):
+    """수정 목록 70 · 스케줄 모드에서는 스케줄이 보낸 그룹 시작만"""
+    monkeypatch.setattr(run_mode_gate, 'current_run_mode', lambda _node: 'schedule')
+    node = _Node()
+    service = CoordinationWebBridge(node, tmp_path, lambda: node.generation[0])
+    calls = []
+    service._local_api = lambda path, payload=None: (
+        calls.append((path, payload)) or {'success': True}
+    )
+
+    refused = service.request_control({'command': 'start_group'})
+    assert refused['success'] is False and '스케줄 모드' in refused['message']
+    assert calls == []
+
+    accepted = service.request_control({'command': 'start_group', 'schedule_id': 's1'})
+    assert accepted['success'] is True and len(calls) == 1
