@@ -20,7 +20,7 @@ from typing import Any, Dict, List, Mapping, Optional
 
 from motion_common import axis_ownership
 
-from motion_common import cycle_failure, repeat_policy, units, wire_units
+from motion_common import cycle_failure, joint_mapping, repeat_policy, units, wire_units
 
 from motion_common.values import finite_float
 from std_msgs.msg import Int8MultiArray, String
@@ -47,6 +47,21 @@ AUTO_RECOVERY_WINDOW_SEC = 600.0
 AUTO_RECOVERY_DELAY_SEC = 5.0
 AUTO_RECOVERY_RESET_CYCLES = 3
 
+
+
+def ac_target_tolerance_motor_deg(row: Any, floor_deg: float, joint_deg: float) -> float:
+    """AC 서보 도달 허용 오차 · 모터 deg · 관절 허용 × |모터 deg / 관절 deg| 와 바닥 중 큰 값 · 수정 목록 57
+
+    매핑 줄이 없거나 이득이 0 이면 바닥값 · 이득은 `joint_mapping.gain`(감속비 × 기어비 × scale) 하나.
+    """
+    floor = max(float(floor_deg or 0.0), 0.0)
+    if not isinstance(row, Mapping) or not joint_deg:
+        return floor
+    try:
+        factor = abs(float(joint_mapping.gain(row)))
+    except Exception:  # noqa: BLE001 - 이득을 못 구하면 옛 값(바닥)으로
+        return floor
+    return max(floor, max(float(joint_deg), 0.0) * factor)
 
 class MotionPlayer:
     def __init__(self, manager: Any) -> None:
@@ -1419,16 +1434,25 @@ class MotionPlayer:
         )
 
     def _target_tolerance(self, axis_plan: Dict[str, Any]) -> float:
-        """도달 허용 오차 · rad · 파라미터는 사람이 적는 값이라 deg 그대로 둔다 · 수정 목록 6"""
+        """도달 허용 오차 · 모터 rad · 파라미터는 사람이 적는 값이라 deg 그대로 둔다 · 수정 목록 6
+
+        AC 서보는 **관절** 허용 오차 × |감속비 × scale| 를 모터로 환산 · 모터 값은 바닥 · 수정 목록 57 ·
+        다이나믹셀은 그대로(모터 deg 고정).
+        """
         if axis_plan.get('motor_type') == 'dynamixel':
             return units.deg_to_rad(self.manager._runtime_float_parameter(
                 'dynamixel_target_tolerance_deg',
                 self.manager.dynamixel_target_tolerance_deg,
             ))
-        return units.deg_to_rad(self.manager._runtime_float_parameter(
+        floor_deg = self.manager._runtime_float_parameter(
             'ac_target_tolerance_deg',
             self.manager.ac_target_tolerance_deg,
-        ))
+        )
+        joint_deg = self.manager._runtime_float_parameter(
+            'ac_target_tolerance_joint_deg',
+            getattr(self.manager, 'ac_target_tolerance_joint_deg', 0.0),
+        )
+        return units.deg_to_rad(ac_target_tolerance_motor_deg(axis_plan.get('row'), floor_deg, joint_deg))
 
     @staticmethod
     def _playback_axes(

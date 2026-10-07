@@ -25,6 +25,7 @@ from .motion_run_constants import (
     STATE_TIMEOUT_SEC,
     SAFETY_STATUS_TIMEOUT_SEC,
     AC_TARGET_TOLERANCE_DEG,
+    AC_TARGET_TOLERANCE_JOINT_DEG,
     DYNAMIXEL_TARGET_TOLERANCE_DEG,
     TARGET_SETTLE_TIMEOUT_SEC,
 )
@@ -174,6 +175,12 @@ class MotionRunManager(Node):
         self._automation_last_attempt_at = 0.0
         self.ac_target_tolerance_deg = max(
             float(self.declare_parameter('ac_target_tolerance_deg', AC_TARGET_TOLERANCE_DEG).value),
+            0.0,
+        )
+        self.ac_target_tolerance_joint_deg = max(
+            float(self.declare_parameter(
+                'ac_target_tolerance_joint_deg', AC_TARGET_TOLERANCE_JOINT_DEG,
+            ).value),
             0.0,
         )
         self.dynamixel_target_tolerance_deg = max(
