@@ -119,6 +119,9 @@
                    위 ◀ ▶ 는 한 칸씩(길게 누르면 반복) · 휠·←→ 키 그대로 ·
                    바늘·기준 표시 없음 · 상대 이동이라 0점으로 읽히는 표시를 두지 않는다 -->
               <div class="jog-wheel-column">
+                <!-- 다이얼 ON/OFF · 끄면 다이얼만 잠근다 · 칸은 그대로(옆 칸 밀림 없음) · 수정 목록 52 -->
+                <button id="jogDialEnabledSwitch" type="button" class="jog-dial-switch on" role="switch" aria-checked="true"
+                  title="다이얼 켜기·끄기 · 끄면 끌기·휠·방향키·◀ ▶ 를 무시합니다 · 목표 위치 이동은 그대로">다이얼 ON</button>
                 <div class="jog-wheel-arrows" role="group" aria-label="한 칸씩 이동">
                   <button id="jogDialMinus" type="button" class="jog-wheel-arrow" disabled aria-label="한 칸 −" title="한 칸 − · 길게 누르면 반복">◀</button>
                   <button id="jogDialPlus" type="button" class="jog-wheel-arrow" disabled aria-label="한 칸 +" title="한 칸 + · 길게 누르면 반복">▶</button>
@@ -134,7 +137,7 @@
                     min="0.001" max="360" step="any" value="1"
                     title="한 칸에 움직일 모터 각도 · 0.001 ~ 360 deg">
                 </label>
-                <small class="jog-dial-help">좌우로 끌기 · 휠 한 칸 · ←/→ 한 칸 · 오른쪽 = +</small>
+                <small class="jog-dial-help">좌우로 끌기 · 휠 · ←/→ 한 칸 · 오른쪽 = + · Shift = 1/10 칸</small>
               </div>
               <div class="jog-dial-side">
                 <div class="jog-dial-readout">
@@ -144,7 +147,7 @@
                 <div class="jog-dial-pending-row">
                   <div id="jogDialPending" class="jog-dial-pending mono">대기</div>
                   <button id="jogDialCancelPending" class="off" type="button"
-                    title="아직 안 보낸 다이얼 이동을 버리고 움직이는 조그·이동을 멈춥니다 · 서보 ON 유지">동작 취소</button>
+                    title="다이얼이 몰던 것을 놓고 움직이는 이동을 멈춥니다 · 서보 ON 유지">동작 취소</button>
                 </div>
                 <div class="jog-target-row">
                   <label class="manual-field">

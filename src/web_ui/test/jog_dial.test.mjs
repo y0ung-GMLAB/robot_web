@@ -36,19 +36,20 @@ test('step size is a free numeric input in motor deg', () => {
   assert.match(dial, /const STEP_MAX_DEG = 360;/);
 });
 
-test('it sends raw motor deg through the existing jog path, never the gear ratio', () => {
-  assert.match(dial, /relative_deg: delta/);
-  assert.match(dial, /requestAcServoJog/);
-  assert.match(dial, /requestDynamixelJog/);
+test('it streams raw motor deg like the fader, never the gear ratio · 56', () => {
+  // 조그를 하나씩 보내지 않는다 · 페이더와 같은 실시간 스트림 · 단위는 모터 deg(감속비 없음)
+  assert.match(dial, /\/ws\/manual-stream/);
+  assert.match(dial, /type: 'target', axis: session\.axis, target_deg: next/);
+  assert.match(dial, /send\(\{ type: 'release', axes: \[axis\] \}\)/);
+  assert.doesNotMatch(dial, /requestAcServoJog|requestDynamixelJog|relative_deg/);
   assert.doesNotMatch(dial, /gear_ratio|gearRatio|jointRowForAxis/);
 });
 
-test('ticks accumulate while a jog is running and retry on "previous jog"', () => {
-  assert.match(dial, /if \(inFlight \|\| retryTimer/);
-  assert.match(dial, /message\.includes\('이전 조그'\)/);
-  assert.match(dial, /pendingDeg \+= delta;\s*\n\s*scheduleRetry\(\);/);
-  // 다른 거절은 쌓인 양을 버린다
-  assert.match(dial, /pendingDeg = 0;\s*\n\s*lastMessage = message;/);
+test('the streamed target moves at most the speed cap per tick and only after it was sent · 56', () => {
+  assert.match(dial, /const MAX_SPEED_DEG_S = 1125;/);
+  assert.match(dial, /const maxStep = MAX_SPEED_DEG_S \* \(SEND_PERIOD_MS \/ 1000\);/);
+  // 보낸 것만 앞으로 간다 · 연결 전 혼자 앞서 나가면 연결 직후 튄다
+  assert.match(dial, /if \(!send\(\{ type: 'target'[^]*?\}\)\) \{\s*\n\s*render\(\);\s*\n\s*return;\s*\n\s*\}\s*\n\s*session\.commanded = next;/);
 });
 
 test('switching motor or project drops the pending amount', () => {
@@ -87,11 +88,14 @@ test('dial and typed target are always shown together in the same jog block', ()
   const block = html.indexOf('id="jogDialBlock"');
   assert.ok(html.indexOf('id="jogTargetInput"') > block, '목표 칸은 다이얼 블록 안');
   assert.match(html, /목표 위치 \(모터 deg · 감속·기어비 미적용\)/);
-  assert.doesNotMatch(html, /jogDialEnabled|jog-dial-toggle|jog-dial-only|jog-target-only|썸휠/);
-  assert.doesNotMatch(dom, /jogDialEnabled/);
-  assert.doesNotMatch(dial, /dialEnabled|dial-off|localStorage/);
+  // 41 · 칸을 숨겨 옆 칸이 밀리던 옛 토글은 없다 · 52 · 스위치는 다이얼만 잠근다(숨기지 않음)
+  assert.doesNotMatch(html, /jog-dial-toggle|jog-dial-only|jog-target-only|썸휠/);
+  assert.doesNotMatch(dial, /dial-off|style\.display|classList\.toggle\('hidden'/);
   const css = readFileSync(new URL('../static/css/14-redesign.css', import.meta.url), 'utf8');
   assert.doesNotMatch(css, /dial-off|jog-dial-only|jog-target-only/);
+  assert.match(html, /id="jogDialEnabledSwitch"[^>]*role="switch"/);
+  assert.match(dom, /jogDialEnabledSwitch: document\.getElementById\('jogDialEnabledSwitch'\)/);
+  assert.match(css, /\.jog-dial\.locked \{/);
   const column = html.indexOf('class="jog-wheel-column"');
   assert.ok(html.indexOf('id="jogDialPlus"') > column && html.indexOf('id="jogDial" class="jog-dial jog-wheel"') > column);
   assert.match(html, /오른쪽 = \+/);
@@ -107,7 +111,7 @@ test('the typed target goes through the existing absolute move path in motor deg
   assert.match(dial, /if \(reason \|\| inFlight \|\| hasPending\(\)\) \{/);
   assert.match(dial, /const limitReason = targetLimitReason\(motor, target\);/);
   // 모터를 바꾸면 목표 칸을 새 모터 위치로 다시 채운다
-  assert.match(dial, /targetTouched = false;\s*\n\s*clearPending\(''\);/);
+  assert.match(dial, /targetTouched = false;\s*\n\s*endSession\(true\);/);
 });
 
 test('the old action tab with a hand-typed gear ratio is gone', () => {

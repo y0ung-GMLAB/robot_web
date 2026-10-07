@@ -227,6 +227,7 @@ export function getElements() {
     jogDialMinus: document.getElementById('jogDialMinus'),
     jogDialPlus: document.getElementById('jogDialPlus'),
     jogDialCancelPending: document.getElementById('jogDialCancelPending'),
+    jogDialEnabledSwitch: document.getElementById('jogDialEnabledSwitch'),
     jogDialStep: document.getElementById('jogDialStep'),
     jogDialPosition: document.getElementById('jogDialPosition'),
     jogDialPending: document.getElementById('jogDialPending'),
