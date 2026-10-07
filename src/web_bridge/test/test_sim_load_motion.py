@@ -1,5 +1,6 @@
 """시뮬 로더가 실물처럼 시간 열로 20 ms 보간한다 · 수정 목록 8 (2026-10-06)"""
 
+import importlib.util
 import json
 import sys
 from pathlib import Path
@@ -7,9 +8,13 @@ from types import SimpleNamespace
 
 import pytest
 
-pytest.importorskip('mujoco')
-sys.path.insert(0, str(Path(__file__).resolve().parents[3] / 'scripts' / 'sim'))
-import sim_core  # noqa: E402
+# 모듈 수준 `pytest.importorskip` 은 pytest 6.2.5(우분투 22.04)에서 수집 전체를 끊었다
+# (`pytest` 그대로 0건 수집) · 표시(skipif)로 이 파일만 건너뛴다 · 수정 목록 63
+HAS_MUJOCO = importlib.util.find_spec('mujoco') is not None
+pytestmark = pytest.mark.skipif(not HAS_MUJOCO, reason='mujoco 가 없다')
+if HAS_MUJOCO:
+    sys.path.insert(0, str(Path(__file__).resolve().parents[3] / 'scripts' / 'sim'))
+    import sim_core  # noqa: E402
 
 ROBOT = SimpleNamespace(axes=[SimpleNamespace(joint='j1', motion_id='a')])
 

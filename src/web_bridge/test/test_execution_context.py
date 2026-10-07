@@ -12,6 +12,7 @@ import pytest
 from std_msgs.msg import String
 
 from motion_web_bridge import run_mode_gate
+from motion_web_bridge.manual_stream import ManualStreamService
 from motion_web_bridge.motor_config_service import MotorConfigService
 from motion_web_bridge.execution_context_service import ExecutionContextService
 from motion_web_bridge.manual_motor_commands import ManualMotorCommandService
@@ -773,6 +774,9 @@ def test_project_change_deletes_previous_project_values_from_bridge_memory():
     bridge._motion_run_store = rpc.ResultStore()
     bridge._motion_run_store.store('old', {'project_id': 'old-project'})
     bridge._motion_run_status = {'project_id': 'old-project', 'axes': [1]}
+    # 수동 스트림 결과도 프로젝트 기억이다 · 2026-10-06 코드에 들어간 뒤 시험 스텁이 빠져 있었다 · 수정 목록 63
+    bridge.manual_stream = ManualStreamService(bridge, publisher=None)
+    bridge.manual_stream._last_results[0] = {'success': True}
 
     _project_of(bridge).clear_scoped_memory()
 
@@ -785,6 +789,7 @@ def test_project_change_deletes_previous_project_values_from_bridge_memory():
     assert bridge._motion_mapping_store.pending_count() == 0
     assert bridge._motion_run_store.pending_count() == 0
     assert bridge._motion_run_status == {}
+    assert bridge.manual_stream._last_results == {}
 
 
 def test_previous_runtime_motor_state_is_not_cached_after_project_change():

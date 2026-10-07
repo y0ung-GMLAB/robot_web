@@ -286,7 +286,8 @@ site_pick_ethercat_nic_from() {
       sub(/@.*/, "", name)
       if (name !~ /^(en|eth)/) next
       if (name in used) next
-      if (mac !~ /^([0-9a-f]{2}:){5}[0-9a-f]{2}$/) next
+      # `{2}` `{5}` 반복 표기는 우분투 22.04 기본 mawk 1.3.4-20200120 이 못 읽는다 · 풀어 쓴다 · 수정 목록 63
+      if (mac !~ /^[0-9a-f][0-9a-f]:[0-9a-f][0-9a-f]:[0-9a-f][0-9a-f]:[0-9a-f][0-9a-f]:[0-9a-f][0-9a-f]:[0-9a-f][0-9a-f]$/) next
       total++
       if (state == "UP") { up++; upname = name; upmac = mac }
       anyname = name; anymac = mac
