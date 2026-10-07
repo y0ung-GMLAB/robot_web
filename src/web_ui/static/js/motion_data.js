@@ -362,6 +362,20 @@ export function motionMotorTargetKey(motor) {
   return Number.isFinite(axis) ? `axis:${axis}` : '';
 }
 
+const JOINT_NAME_LIST_ID = 'motionMappingJointNames';
+
+/** 자동 완성 후보 · 애니메이션 조인트 이름 − 이미 쓴 이름 · 순서는 애니메이션 그대로 · 수정 목록 68 */
+export function jointNameSuggestions(motionIds = [], used = new Set()) {
+  const seen = new Set();
+  return (Array.isArray(motionIds) ? motionIds : [])
+    .map((item) => String(item?.motion_id ?? item ?? '').trim())
+    .filter((name) => {
+      if (!name || used.has(name) || seen.has(name)) return false;
+      seen.add(name);
+      return true;
+    });
+}
+
 function defaultMotionAxisRow(motionId, motorAxis = null) {
   return {
     motion_id: String(motionId), enabled: motorAxis !== null,
@@ -400,26 +414,14 @@ export function buildGeneratedMotionAxisRows(motors = [], previousRows = []) {
   const preservedRows = motors.map((motor) => (
     previousByTarget.get(motionMotorTargetKey(motor)) || null
   ));
-  const usedMotionIds = new Set(preservedRows
-    .map((row) => String(row?.motion_id || '').trim())
-    .filter(Boolean));
-  let nextMotionNumber = 1;
-  const nextSuggestedMotionId = () => {
-    let candidate = `1-${nextMotionNumber}`;
-    while (usedMotionIds.has(candidate)) {
-      nextMotionNumber += 1;
-      candidate = `1-${nextMotionNumber}`;
-    }
-    usedMotionIds.add(candidate);
-    nextMotionNumber += 1;
-    return candidate;
-  };
+  // 새 줄의 조인트 이름은 비워 둔다 · 예전 `1-1`·`1-2` 는 Blender 본 이름과 무관해
+  // 결국 다 고쳐 써야 했다 · 빈 칸은 저장 전 검사가 막는다 · 수정 목록 68
   return motors.map((motor, index) => {
     const motorRef = motionMotorRef(motor);
     const motorAxis = Number(motor?.controller_index);
     const existing = preservedRows[index];
     return {
-      ...(existing || defaultMotionAxisRow(nextSuggestedMotionId(), motorAxis)),
+      ...(existing || defaultMotionAxisRow('', motorAxis)),
       motor_ref: motorRef,
       motor_axis: motorAxis,
     };
@@ -2069,6 +2071,8 @@ export function createMotionDataController({
       return;
     }
     const duplicateCounts = mappingDuplicateAxisCounts();
+    const pendingEdit = focusedMappingEdit();
+    renderJointNameDatalist(rows);
     el.motionMappingRows.innerHTML = rows.map((row, index) => {
       const status = mappingValidationRowStatus(row, mappingRowStatus(row, duplicateCounts));
       const initialMode = row.initial_mode || 'reference';   // 칸 없으면 기준점 · 서버와 같다 (13-3)
@@ -2086,7 +2090,7 @@ export function createMotionDataController({
           : ' title="직접 지정 · 재생 전 이 값(조인트 deg)으로 이동합니다"';
       return (
         `<tr data-mapping-index="${index}">
-          <td class="motion-id-cell"><input class="motion-id-input mono" type="text" title="Blender 본 이름 그대로 입력하세요 (구 파일의 1-1 형식도 그대로 사용 가능)" data-motion-mapping-field="motion_id" value="${displayText(row.motion_id)}" placeholder="예: Neck_Yaw" autocomplete="off" autocapitalize="off" spellcheck="false"></td>
+          <td class="motion-id-cell"><input class="motion-id-input mono${String(row.motion_id || '').trim() ? '' : ' motion-id-empty'}" type="text" list="${JOINT_NAME_LIST_ID}" title="Blender 본 이름 그대로 입력하세요 · 등록된 애니메이션의 조인트 이름은 목록에서 고를 수 있습니다 (구 파일의 1-1 형식도 그대로 사용 가능)" data-motion-mapping-field="motion_id" value="${escapeHtml(row.motion_id ?? '')}" placeholder="Blender 본 이름" autocomplete="off" autocapitalize="off" spellcheck="false"></td>
           <td><input type="checkbox" data-motion-mapping-field="enabled" ${row.enabled ? 'checked' : ''}></td>
           <td class="mapping-motor-cell">${motorSelectHtml(row)}</td>
           <td class="mapping-number-cell"><input class="numeric-input mapping-number-input" type="number" min="0.0001" step="0.0001" data-motion-mapping-field="gear_ratio" value="${displayText(gearRatioValue)}"></td>
@@ -2111,6 +2115,76 @@ export function createMotionDataController({
         </tr>`
       );
     }).join('');
+    restoreMappingEdit(pendingEdit);
+  }
+
+  /** 입력 중인 칸 · 표를 통째로 다시 그리면 친 글자와 커서가 사라진다 · 수정 목록 68
+   *
+   * 칸 값은 `change`(칸을 떠날 때)에야 초안에 들어간다 · 그 전에 애니메이션 목록
+   * 새로 고침(MuJoCo 계산 중 5초마다 등)이 `render()` 로 표를 다시 그리면, 친 이름이
+   * 초안의 옛 값(`1-2` 등)으로 되돌아갔다 · 다시 그리기 전에 칸·글자·커서를 적어
+   * 두고 새 칸에 돌려놓는다. */
+  function focusedMappingEdit() {
+    const active = document.activeElement;
+    if (!active || !el.motionMappingRows?.contains(active)) return null;
+    const field = active.dataset?.motionMappingField;
+    const row = active.closest?.('tr[data-mapping-index]');
+    if (!field || !row || !['text', 'number'].includes(active.type)) return null;
+    let selection = null;
+    try {
+      selection = [active.selectionStart, active.selectionEnd];
+    } catch {
+      selection = null;   // number 칸은 커서 위치를 못 읽는다
+    }
+    return {
+      index: row.dataset.mappingIndex,
+      field,
+      value: active.value,
+      // 초안에 아직 안 들어간 글자인지 · 다시 그린 칸의 기본값과 비교한다
+      defaultValue: active.defaultValue,
+      selection,
+    };
+  }
+
+  function restoreMappingEdit(edit) {
+    if (!edit) return;
+    const input = el.motionMappingRows?.querySelector(
+      `tr[data-mapping-index="${edit.index}"] [data-motion-mapping-field="${edit.field}"]`,
+    );
+    if (!input || input.disabled) return;
+    input.value = edit.value;
+    input.focus();
+    if (edit.selection && edit.selection[0] !== null) {
+      try {
+        input.setSelectionRange(edit.selection[0], edit.selection[1]);
+      } catch {
+        // number 칸 · 커서 위치는 못 돌린다
+      }
+    }
+    // 코드로 넣은 값은 칸을 떠날 때 `change` 가 안 난다 · 직접 낸다
+    if (edit.value !== edit.defaultValue) {
+      input.addEventListener('blur', () => {
+        if (input.isConnected && input.value !== input.defaultValue) {
+          input.dispatchEvent(new Event('change', { bubbles: true }));
+        }
+      }, { once: true });
+    }
+  }
+
+  /** 조인트 이름 칸 자동 완성 · 조인트 매핑에 등록된 애니메이션의 조인트 이름 · 수정 목록 68
+   *
+   * 이미 다른 줄이 쓴 이름은 뺀다 · 목록에 없는 이름도 그대로 칠 수 있다 ·
+   * `<datalist>` 는 표 안(`tbody`)에 둘 수 없어 문서 끝에 하나 둔다. */
+  function renderJointNameDatalist(rows) {
+    let list = document.getElementById(JOINT_NAME_LIST_ID);
+    if (!list) {
+      list = document.createElement('datalist');
+      list.id = JOINT_NAME_LIST_ID;
+      document.body.appendChild(list);
+    }
+    const used = new Set(rows.map((row) => String(row.motion_id || '').trim()).filter(Boolean));
+    const names = jointNameSuggestions(analysisOf(mappingMotionFileDetail)?.motion_ids, used);
+    list.innerHTML = names.map((name) => `<option value="${displayText(name)}"></option>`).join('');
   }
 
   function renderMappingValidation() {
@@ -2299,7 +2373,7 @@ export function createMotionDataController({
     mappingDraft.mappings = buildGeneratedMotionAxisRows(motors, mappingDraft.mappings);
     mappingValidation = null;
     markMappingDirty();
-    setMappingMessage(`${motors.length}개 모터 행을 만들었습니다 · 조인트 이름을 Blender 본 이름으로 바꾸세요`);
+    setMappingMessage(`${motors.length}개 모터 행을 만들었습니다 · 빈 조인트 이름 칸에 Blender 본 이름을 넣으세요`);
     renderMappingPanel();
   }
 
@@ -2322,8 +2396,12 @@ export function createMotionDataController({
     const rows = Array.isArray(mappingDraft.mappings) ? mappingDraft.mappings : [];
     if (!rows.length) return '조인트 이름을 먼저 추가하세요';
     // 조인트 이름 = Blender 본 이름 · 임의 문자열이라 형식 제한이 없다 (구 1-1 식도 그대로 동작)
-    const emptyJoint = rows.find((row) => !String(row.motion_id || '').trim());
-    if (emptyJoint) return '조인트 이름이 비어 있습니다';
+    const emptyIndex = rows.findIndex((row) => !String(row.motion_id || '').trim());
+    if (emptyIndex >= 0) {
+      const motor = motorForMapping(rows[emptyIndex]);
+      const motorText = motor ? ` · ${motorOptionLabel(motor)}` : '';
+      return `조인트 이름이 비어 있습니다 · ${emptyIndex + 1}번째 줄${motorText}`;
+    }
     const motionIdCounts = rows.reduce((counts, row) => {
       const motionId = String(row.motion_id || '').trim();
       counts[motionId] = (counts[motionId] || 0) + 1;

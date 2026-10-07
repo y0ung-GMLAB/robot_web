@@ -4,6 +4,7 @@ import { readFileSync } from 'node:fs';
 
 import {
   buildGeneratedMotionAxisRows,
+  jointNameSuggestions,
   mergeConfiguredMotionMotors,
   motionMappingTargetKey,
   motionMotorIdentityLabel,
@@ -173,7 +174,8 @@ test('automatic generation repairs five duplicated Alias 0 rows', () => {
   }));
 
   const generated = buildGeneratedMotionAxisRows(motors, corruptedRows);
-  assert.deepEqual(generated.map((row) => row.motion_id), ['1-1', '1-2', '1-3', '1-4', '1-5']);
+  // 겹친 줄은 어느 모터 것인지 몰라 버린다 · 새 줄 이름은 빈 칸 · 수정 목록 68
+  assert.deepEqual(generated.map((row) => row.motion_id), ['', '', '', '', '']);
   assert.deepEqual(generated.map((row) => row.motor_axis), [0, 1, 2, 3, 4]);
   assert.deepEqual(generated.map((row) => row.motor_ref), [
     'ac_servo:master:0:slave:0',
@@ -203,7 +205,7 @@ test('automatic generation preserves valid per-axis edits', () => {
   const generated = buildGeneratedMotionAxisRows(motors, previous);
   assert.equal(generated[1].motion_id, '2-3');
   assert.equal(generated[1].offset_deg, 12.5);
-  assert.equal(generated[0].motion_id, '1-1');
+  assert.equal(generated[0].motion_id, '');
 });
 
 test('automatic generation upgrades one unambiguous legacy ref', () => {
@@ -268,4 +270,35 @@ test('the motor select compares references without case', () => {
     /const selected = selectionValue === value/,
     '저장 뒤 선택이 풀린다',
   );
+});
+
+
+test('automatic generation leaves new joint names blank · 68', () => {
+  const motors = [0, 1, 2].map((controllerIndex) => ({
+    controller_index: controllerIndex,
+    motor_type: 'ac_servo',
+    ethercat_master_index: 0,
+    alias: 0,
+    slave_position: controllerIndex,
+  }));
+  const generated = buildGeneratedMotionAxisRows(motors, [{
+    motion_id: 'Neck_Yaw', enabled: true, motor_ref: '', motor_axis: 2,
+  }]);
+  assert.deepEqual(generated.map((row) => row.motion_id), ['', '', 'Neck_Yaw']);
+});
+
+test('joint name suggestions = animation joints minus used names · 68', () => {
+  const motionIds = [
+    { motion_id: 'Neck_Yaw' }, { motion_id: 'Head_Pitch' }, { motion_id: 'Arm_L' }, { motion_id: 'Head_Pitch' },
+  ];
+  assert.deepEqual(jointNameSuggestions(motionIds, new Set(['Neck_Yaw'])), ['Head_Pitch', 'Arm_L']);
+  assert.deepEqual(jointNameSuggestions(undefined, new Set()), []);
+});
+
+test('mapping table keeps a half-typed value across a re-render · 68', () => {
+  const source = readFileSync(new URL('../static/js/motion_data.js', import.meta.url), 'utf8');
+  const body = source.slice(source.indexOf('function renderMappingRows()'), source.indexOf('function renderMappingValidation()'));
+  assert.match(body, /const pendingEdit = focusedMappingEdit\(\);/);
+  assert.match(body, /restoreMappingEdit\(pendingEdit\);/);
+  assert.match(body, /dispatchEvent\(new Event\('change'/);
 });

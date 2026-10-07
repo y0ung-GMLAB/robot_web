@@ -527,6 +527,12 @@
   text-align: left;
 }
 
+/* 빈 조인트 이름 · 자동 생성은 이름을 비워 둔다 · 저장 전에 채워야 한다 · 수정 목록 68 */
+.motion-mapping-table .motion-id-input.motion-id-empty {
+  border-color: var(--red);
+  box-shadow: inset 0 0 0 1px var(--red);
+}
+
 .motion-mapping-table .motion-id-head,
 .motion-mapping-table .motion-id-cell {
   width: 112px;
