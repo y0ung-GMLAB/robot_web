@@ -1418,6 +1418,8 @@ function connectSocket() {
       // supervisor 응답 없음 · 상단 빨간 칸 · 수정 목록 29
       motionHeaderConditionsUpdate({
         supervisorProblem: String(payload?.supervisor_watchdog?.message || ''),
+        // 앱솔루트 미확인 · 상단 빨간 칸 · 판단은 서버 · 수정 목록 62
+        absoluteProblem: String(payload?.minas_absolute_blocker || ''),
       });
       renderServiceManagement(payload);
       renderAccess(payload, el);
@@ -1672,6 +1674,19 @@ if (el.motionRunOpenCoordinationButton) {
 }
 
 if (el.workspaceTabs) {
+  // 상단 빨간 칸 중 「누르면 그 화면으로」 · 앱솔루트 미확인 → 모터 관리 · 수정 목록 62
+  const headerBadges = document.getElementById('headerConditionBadges');
+  const openHeaderAction = (event) => {
+    const cell = event.target.closest('[data-header-action]');
+    if (!cell) return;
+    if (event.type === 'keydown' && event.key !== 'Enter' && event.key !== ' ') return;
+    const target = setActiveWorkspace(cell.dataset.headerAction);
+    if (!target) return;
+    renderLatestState();
+    if (target === 'config') motorConfig.fetchRegistry();
+  };
+  headerBadges?.addEventListener('click', openHeaderAction);
+  headerBadges?.addEventListener('keydown', openHeaderAction);
   el.workspaceTabs.addEventListener('click', (event) => {
     const groupButton = event.target.closest('button[data-workspace-group]');
     if (groupButton) {

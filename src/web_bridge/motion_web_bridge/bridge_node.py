@@ -14,7 +14,7 @@ import rclpy
 import uvicorn
 import yaml
 from fastapi import FastAPI, HTTPException, Request
-from motion_common import generation, rpc, topics
+from motion_common import generation, minas_absolute, rpc, topics
 from motion_common import paths as common_paths
 from motion_common import motor_ref as motor_ref_rules
 from fastapi.responses import JSONResponse
@@ -567,6 +567,7 @@ class MotionWebBridge(Node):
             self._motion_state = payload
             self._motion_state_received_at = time.time()
         self._motor_event_log.record_motor_error_transitions(payload)
+        self._motor_event_log.record_minas_absolute_transition(payload)
 
     def _motion_value_callback(self, msg: String) -> None:
         try:
@@ -827,6 +828,8 @@ class MotionWebBridge(Node):
                 safety_status=safety_status,
                 execution_context=execution_context,
             ),
+            # 연결된 MINAS 드라이브 앱솔루트 미확인 사유 · 상단 빨간 칸 · 수정 목록 62
+            'minas_absolute_blocker': self.minas_absolute_blocker(),
             'motion_run_status': motion_run_status,
             'motor_activity': motor_activity_snapshot(
                 motion_run_status,
@@ -1140,7 +1143,9 @@ class MotionWebBridge(Node):
             return f'온라인이 아닌 축이 있습니다: {", ".join(unavailable)}'
         if faulted:
             return f'오류 축이 있습니다: {", ".join(faulted)}'
-        return ''
+        # 연결된 MINAS 드라이브 전부 앱솔루트 확인 전에는 막는다 · 등록 안 된 드라이브도 ·
+        # 축 연결·오류 사유가 더 구체적이라 그 뒤에 본다 · 수정 목록 62
+        return minas_absolute.block_reason(motion_state.get('minas_absolute'))
 
     def establish_project_generation_boundary(self, *, force: bool = False) -> None:
         """Synchronize the persistent project generation with the command owner.
@@ -1924,7 +1929,24 @@ class MotionWebBridge(Node):
         return end.start_blocker()
 
     def motion_run_check(self, payload: Dict[str, Any]) -> Dict[str, Any]:
+        # 검사·그룹 참가 준비(`local_motion_readiness`)도 앱솔루트 확인 뒤에만 · 수정 목록 62
+        absolute = self.minas_absolute_blocker()
+        if absolute:
+            return {'success': False, 'message': f'실행 준비 검사 실패: {absolute}'}
         return self._request_motion_run('check', payload, timeout_sec=3.0)
+
+    def minas_absolute_blocker(self) -> str:
+        """연결된 MINAS 드라이브 앱솔루트 미확인이면 그 이유 · 상태를 못 받았으면 빈 문자열
+        (상태 없음은 다른 검사가 막는다) · 판정은 `motion_common.minas_absolute` · 수정 목록 62"""
+        lock = getattr(self, '_lock', None)
+        if lock is None:
+            motion_state = getattr(self, '_motion_state', None)
+        else:
+            with lock:
+                motion_state = getattr(self, '_motion_state', None)
+        if not isinstance(motion_state, dict):
+            return ''
+        return minas_absolute.block_reason(motion_state.get('minas_absolute'))
 
     def coordination_execution_blocker(self) -> str:
         service = getattr(self, '_coordination_web_bridge', None)

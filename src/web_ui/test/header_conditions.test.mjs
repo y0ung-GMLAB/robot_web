@@ -44,3 +44,19 @@ test('아직 모르면 물음표로 둔다', () => {
   // 모르는 것을 「그룹 미참여」로 단정하면 없는 문제를 만든다
   assert.deepEqual(texts({ enabled: null, joined: null, inWindow: null }), ['그룹?', '운영시간?']);
 });
+
+test('앱솔루트 미확인이면 빨간 칸이 붙고 누르면 모터 관리로 간다 · 수정 목록 62', () => {
+  const cells = motionHeaderConditionCells({
+    enabled: true, joined: false, inWindow: true,
+    absoluteProblem: '앱솔루트 미확인 · 1번 모터 Pr0.15=1(인크리멘털)',
+  });
+  const absolute = cells.find((cell) => cell.key === 'absolute');
+
+  assert.equal(absolute.text, '앱솔루트 미확인');
+  assert.equal(absolute.bad, true);
+  assert.equal(absolute.action, 'config');
+  assert.match(absolute.title, /1번 모터 Pr0\.15=1/);
+  // 상태를 아직 몰라도 붙는다 · 모든 화면에서 보여야 한다
+  assert.ok(texts({ enabled: null, joined: null, inWindow: null, absoluteProblem: 'x' }).includes('앱솔루트 미확인'));
+  assert.ok(!texts({ enabled: true, joined: true, inWindow: true }).includes('앱솔루트 미확인'));
+});

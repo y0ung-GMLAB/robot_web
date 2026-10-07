@@ -115,6 +115,8 @@ class MotionStateMonitor(Node):
         self._last_ethercat_physical_scan: Dict[str, Any] = {}
         # EtherCAT 물리 스캔은 별도 객체가 맡는다 (§6-32)
         self._ethercat = EthercatScanner(self)
+        # 연결된 MINAS 드라이브 전부 앱솔루트 확인 · 폴링이 구성 변화를 보면 읽는다 · 수정 목록 62
+        self._ethercat.enable_absolute_check()
         self._dynamixel = DynamixelScanner(self)
         self._scan_sequence = 0
         self._active_scan_id = ''

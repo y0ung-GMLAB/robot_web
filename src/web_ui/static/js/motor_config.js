@@ -2146,6 +2146,18 @@ export function createMotorConfigController({
     overload_monitor: [[0, '끔'], [1, '켬']],
   };
 
+  /** 이 축 드라이브의 앱솔루트 문제 · 지금 상태(`minas_absolute`)에서 · 판단은 서버 · 수정 목록 62
+   *
+   * 확인 중이면 그렇게 말한다 · 정상이면 빈 글자 · 미등록 드라이브는 상단 빨간 칸이 말한다.
+   */
+  function liveAbsoluteProblem(axis) {
+    const summary = getLatestState?.()?.minas_absolute;
+    if (!summary || axis === null || axis === undefined || axis === '') return '';
+    if (summary.state === 'checking') return '앱솔루트 확인 중';
+    const drive = (summary.drives || []).find((item) => item?.axis !== null && String(item?.axis) === String(axis));
+    return drive && drive.status !== 'ok' ? `앱솔루트 미확인 · ${drive.problem || drive.status}` : '';
+  }
+
   /** 앱솔루트 칸 · 읽은 값과 뜻 · 고칠 수 없음 */
   function absoluteModeText(read) {
     if (read.state === 'ok') {
@@ -2697,6 +2709,7 @@ export function createMotorConfigController({
                   </label>`).join('')}
                 <label class="axis-limit-field axis-drive-field" title="${escapeHtml(DRIVE_PARAM_LABELS.encoder_absolute_mode[1])}"><span>${DRIVE_PARAM_LABELS.encoder_absolute_mode[0]}</span>
                   <span class="mono axis-drive-readonly">${escapeHtml(absoluteModeText(view.driveRead.encoder_absolute_mode))}</span>
+                  ${liveAbsoluteProblem(view.axisValue) ? `<small class="axis-absolute-warning" role="alert">${escapeHtml(liveAbsoluteProblem(view.axisValue))}</small>` : ''}
                 </label>
                 <label class="axis-limit-field" title="운영 시간이 끝나 기준점에 세운 뒤 이 모터 서보(다이나믹셀은 토크)를 끕니다 · 다이나믹셀은 브레이크가 없어 처질 수 있으면 끄세요 · 다음 시작 때 다시 켭니다"><span>끝나면 서보 OFF</span>
                   <input type="checkbox" data-axis-edit="${SCHEDULE_END_FIELD}" data-axis-row-id="${escapeHtml(row.id)}"${view.endOff ? ' checked' : ''}${disabled}>

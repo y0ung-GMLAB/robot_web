@@ -20,7 +20,7 @@ from std_msgs.msg import Int8MultiArray, String
 
 from motion_supervisor.command_arbiter import CommandArbiter, CommandOwner
 from motion_supervisor.servo_alarm_guard import ServoAlarmGuard
-from motion_common import motor_readiness, units, values, topics, wire_units
+from motion_common import minas_absolute, motor_readiness, units, values, topics, wire_units
 
 
 #: 긴급정지가 걸렸을 때 하는 말 · §6-178
@@ -411,7 +411,7 @@ class MotionSupervisor(Node):
             manual_command_active=bool(self._active_jogs or self._active_actions),
             emergency_latched=self._emergency_latched,
         )
-        alarm_reason = self._servo_alarm_block_reason()
+        alarm_reason = self._motion_block_reason()
         if reason is None and alarm_reason:
             reason = alarm_reason
         if reason is None and time.monotonic() < self._motion_stop_block_until:
@@ -518,7 +518,7 @@ class MotionSupervisor(Node):
                 request, False, EMERGENCY_LATCHED_MESSAGE
             )
             return
-        alarm_reason = self._servo_alarm_block_reason(
+        alarm_reason = self._motion_block_reason(
             self._optional_int(request.get('axis'))
         )
         if alarm_reason:
@@ -628,8 +628,8 @@ class MotionSupervisor(Node):
             motor = self._motor_for_axis(axis, motors) if axis is not None else None
             if axis is None:
                 error = 'axis is required'
-            elif self._servo_alarm_block_reason(axis):
-                error = self._servo_alarm_block_reason(axis)
+            elif self._motion_block_reason(axis):
+                error = self._motion_block_reason(axis)
             elif target_position is None:
                 error = 'target_rad is required'
             elif axis in commanded_axes:
@@ -735,7 +735,7 @@ class MotionSupervisor(Node):
             with self._command_lock:
                 alarm_axes = [
                     axis for axis in commanded_axes
-                    if self._servo_alarm_block_reason(axis)
+                    if self._motion_block_reason(axis)
                 ]
                 if (
                     self._emergency_latched
@@ -744,7 +744,7 @@ class MotionSupervisor(Node):
                 ):
                     self._command_arbiter_instance().release(CommandOwner.STREAM)
                     message = (
-                        self._servo_alarm_block_reason(alarm_axes[0])
+                        self._motion_block_reason(alarm_axes[0])
                         if alarm_axes
                         else 'motor command blocked by safety stop'
                     )
@@ -886,9 +886,9 @@ class MotionSupervisor(Node):
             success, message = False, EMERGENCY_LATCHED_MESSAGE
         elif (
             command not in SERVO_POWER_COMMANDS
-            and self._servo_alarm_block_reason(self._optional_int(request.get('axis')))
+            and self._motion_block_reason(self._optional_int(request.get('axis')))
         ):
-            success, message = False, self._servo_alarm_block_reason(
+            success, message = False, self._motion_block_reason(
                 self._optional_int(request.get('axis'))
             )
         elif time.monotonic() < self._motion_stop_block_until:
@@ -969,8 +969,8 @@ class MotionSupervisor(Node):
             or self._servo_alarm_guard_instance().snapshot()['grade3_latched']
         ):
             success, message = False, EMERGENCY_LATCHED_MESSAGE
-        elif self._servo_alarm_block_reason(self._optional_int(request.get('axis'))):
-            success, message = False, self._servo_alarm_block_reason(
+        elif self._motion_block_reason(self._optional_int(request.get('axis'))):
+            success, message = False, self._motion_block_reason(
                 self._optional_int(request.get('axis'))
             )
         elif time.monotonic() < self._motion_stop_block_until:
@@ -1079,6 +1079,21 @@ class MotionSupervisor(Node):
 
     def _servo_alarm_block_reason(self, axis: Optional[int] = None) -> str:
         return self._servo_alarm_guard_instance().block_reason(axis)
+
+    def _absolute_block_reason(self) -> str:
+        """연결된 MINAS 드라이브 전부 앱솔루트 확인 전에는 모든 모터 동작 거부 · 수정 목록 62
+
+        판정은 `motion_common.minas_absolute` 하나 · 값은 motion_state 의 `minas_absolute` ·
+        상태를 아직 못 받았으면 여기서는 말하지 않는다(모터 상태 없음으로 이미 막힘).
+        """
+        state = getattr(self, '_latest_state', None)
+        if not isinstance(state, dict):
+            return ''
+        return minas_absolute.block_reason(state.get('minas_absolute'))
+
+    def _motion_block_reason(self, axis: Optional[int] = None) -> str:
+        """움직이는 명령의 공통 관문 · 서보 알람 · 앱솔루트 미확인(62)"""
+        return self._servo_alarm_block_reason(axis) or self._absolute_block_reason()
 
     def _servo_alarm_guard_instance(self) -> ServoAlarmGuard:
         guard = getattr(self, '_servo_alarm_guard', None)
@@ -2145,7 +2160,7 @@ class MotionSupervisor(Node):
         target_position: float,
         controlword: int,
     ) -> tuple[bool, str]:
-        alarm_reason = self._servo_alarm_block_reason(axis)
+        alarm_reason = self._motion_block_reason(axis)
         if alarm_reason:
             return False, alarm_reason
         limit_error = self._target_position_limit_error(motor, target_position)
@@ -2210,10 +2225,10 @@ class MotionSupervisor(Node):
         if action == 'servo_on':
             blocked = [
                 axis for axis in axes
-                if self._servo_alarm_block_reason(axis)
+                if self._motion_block_reason(axis)
             ]
             if blocked:
-                return False, self._servo_alarm_block_reason(blocked[0])
+                return False, self._motion_block_reason(blocked[0])
             fault_axes = [
                 axis for axis in axes
                 if bool((self._motor_for_axis(axis, motors) or {}).get('fault', False))
@@ -2280,6 +2295,10 @@ class MotionSupervisor(Node):
                 '토크가 꺼진 채로 다시 켜집니다'
             )
         if action == 'torque_on':
+            # 토크 켜기도 서보 ON 과 같이 앱솔루트 확인 뒤에만 · 수정 목록 62
+            absolute_reason = self._absolute_block_reason()
+            if absolute_reason:
+                return False, absolute_reason
             # 하드웨어 오류 중에는 장치가 토크 켜기를 받지 않는다 · 먼저 재부팅
             fault_axes = [
                 axis for axis in axes
@@ -2373,6 +2392,12 @@ class MotionSupervisor(Node):
             ):
                 if any(self._servo_alarm_block_reason(axis) for axis in axes):
                     return
+            # 켜는 명령(MINAS 0x0F · 새 목표 0x3F · 다이나믹셀 토크 1)은 앱솔루트 확인 뒤에만 ·
+            # 끄기·리셋·0x06(전원 차단 상태로)은 막지 않는다 · 수정 목록 62
+            if int(controlword) in (
+                CW_ENABLE_OPERATION_MINAS, CW_NEW_SET_POINT_MINAS, DYNAMIXEL_TORQUE_ENABLE,
+            ) and self._absolute_block_reason():
+                return
             if time.monotonic() < self._motion_stop_block_until:
                 return
             self._command_pub.publish(self._only_driven_axes(command))
@@ -2476,6 +2501,8 @@ class MotionSupervisor(Node):
         servo_grade = alarm_state['grade']
         servo_grade3_latched = alarm_state['grade3_latched']
         servo_blocked = bool(servo_grade >= 2 or servo_grade3_latched)
+        # 앱솔루트 미확인 · 모든 모터 동작 차단 · 재생·스케줄·화면이 이 값을 본다 · 수정 목록 62
+        absolute_reason = self._absolute_block_reason()
         if servo_grade3_latched:
             message = '3등급 서보 에러 · 프로그램 재시작 필요'
         elif servo_grade >= 2:
@@ -2485,16 +2512,22 @@ class MotionSupervisor(Node):
             message = f'1등급 서보 에러 · {axes} 동작 차단'
         elif self._emergency_latched:
             message = '긴급정지 잠김 · 상위 프로그램 재시작 필요'
+        elif absolute_reason:
+            message = absolute_reason
         elif settling:
             message = '전체 동작 정지 처리 중'
         else:
             message = '동작 가능'
+        if absolute_reason and absolute_reason not in message and message.startswith('1등급'):
+            # 1등급(축별) 문구만 보이면 전체가 막힌 이유가 가려진다
+            message = f'{message} · {absolute_reason}'
         payload = {
             'emergency_latched': bool(self._emergency_latched),
             'motion_stop_settling': settling,
             'commands_blocked': bool(
-                self._emergency_latched or settling or servo_blocked
+                self._emergency_latched or settling or servo_blocked or absolute_reason
             ),
+            'minas_absolute_blocked': bool(absolute_reason),
             'servo_alarm_grade': servo_grade,
             'servo_alarm_grade3_latched': servo_grade3_latched,
             'servo_alarm_blocked_axes': alarm_state['blocked_axes'],

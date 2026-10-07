@@ -1055,6 +1055,12 @@ th {
   margin-top: 3px;
 }
 
+/* 앱솔루트 미확인 · 지금 상태에서 · 수정 목록 62 */
+.axis-absolute-warning {
+  color: var(--red);
+  font-weight: 700;
+}
+
 /* 주의 · 과부하율 80% 이상 등 · 위험(빨강) 전 단계 */
 .status-warning {
   color: var(--yellow);

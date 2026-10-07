@@ -19,6 +19,8 @@ const EVENT_TYPE_LABELS = {
   motion_started: '재생 시작',
   ethercat_alias_written: 'EEPROM Alias 변경',
   group_excluded: '그룹 실행 · PC 제외',
+  minas_absolute_blocked: '앱솔루트 미확인 · 동작 차단',
+  minas_absolute_confirmed: '앱솔루트 확인 · 차단 해제',
 };
 
 function eventTimeText(event) {

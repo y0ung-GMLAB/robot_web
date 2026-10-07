@@ -19,7 +19,23 @@ const state = {
   inWindow: null,
   // supervisor 응답 없음 사유 · 빈 글자면 정상 · 수정 목록 29 (2026-10-06)
   supervisorProblem: '',
+  // 앱솔루트 미확인 사유 · 판단은 서버(`minas_absolute_blocker`) · 수정 목록 62
+  absoluteProblem: '',
 };
+
+/** 앱솔루트 미확인 · 모든 화면 · 누르면 모터 관리 · 수정 목록 62 */
+function absoluteCell(problem) {
+  return problem
+    ? [{
+      key: 'absolute',
+      text: '앱솔루트 미확인',
+      on: false,
+      bad: true,
+      action: 'config',
+      title: `${problem} · 모든 모터 동작이 막혀 있습니다 · 누르면 모터 관리로 갑니다`,
+    }]
+    : [];
+}
 
 /** 문제가 있을 때만 붙는 빨간 칸 · 모터로 가는 명령을 내는 노드가 응답하지 않는다 */
 function supervisorCell(problem) {
@@ -35,12 +51,15 @@ function supervisorCell(problem) {
 }
 
 /** 순수 계산 · 화면을 모른다 · 시험은 이것만 본다 */
-export function motionHeaderConditionCells({ enabled, joined, inWindow, supervisorProblem = '' }) {
+export function motionHeaderConditionCells({
+  enabled, joined, inWindow, supervisorProblem = '', absoluteProblem = '',
+}) {
   if (enabled === null || joined === null) {
     return [
       { key: 'scope', text: '그룹?', on: false, title: '그룹 참여 상태 확인 중' },
       { key: 'window', text: '운영시간?', on: false, title: '스케줄 상태 확인 중' },
       ...supervisorCell(supervisorProblem),
+      ...absoluteCell(absoluteProblem),
     ];
   }
   const grouped = Boolean(enabled) && Boolean(joined);
@@ -65,6 +84,7 @@ export function motionHeaderConditionCells({ enabled, joined, inWindow, supervis
         : '지금은 스케줄 운영시간이 아닙니다 · 운영시간이 되면 스스로 켭니다',
     },
     ...supervisorCell(supervisorProblem),
+    ...absoluteCell(absoluteProblem),
   ];
 }
 
@@ -74,7 +94,7 @@ function draw() {
   const host = document.getElementById('headerConditionBadges');
   if (!host) return;
   const cells = motionHeaderConditionCells(state);
-  const key = cells.map((cell) => `${cell.text}:${cell.on}`).join('|');
+  const key = cells.map((cell) => `${cell.text}:${cell.on}:${cell.title || ''}`).join('|');
   if (host.dataset.key === key) return;
   host.dataset.key = key;
   host.replaceChildren(...cells.map((cell) => {
@@ -82,6 +102,12 @@ function draw() {
     node.className = cell.bad ? 'bad' : (cell.on ? 'on' : 'off');
     node.textContent = cell.text;
     node.title = cell.title || '';
+    if (cell.action) {
+      // 누르면 그 화면으로 · 실제 이동은 main.js 가 한다(`data-header-action`)
+      node.dataset.headerAction = cell.action;
+      node.setAttribute('role', 'button');
+      node.tabIndex = 0;
+    }
     return node;
   }));
 }
