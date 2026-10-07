@@ -20,7 +20,7 @@ from typing import Any, Dict, List, Mapping, Optional
 
 from motion_common import axis_ownership
 
-from motion_common import repeat_policy, units, wire_units
+from motion_common import cycle_failure, repeat_policy, units, wire_units
 
 from motion_common.values import finite_float
 from std_msgs.msg import Int8MultiArray, String
@@ -305,7 +305,7 @@ class MotionPlayer:
                 self._target_settle_timeout_sec(),
             )
             if not reached:
-                raise RuntimeError(f'초기 위치 도달 확인 실패: {message}')
+                raise RuntimeError(cycle_failure.tagged(f'초기 위치 도달 확인 실패: {message}'))
             motion_values = {
                 str(axis['motion_id']): float(axis['initial_motion_position_rad'])
                 for axis in init_axes
@@ -325,7 +325,7 @@ class MotionPlayer:
                     init_axes, blend_targets, self._target_settle_timeout_sec(),
                 )
                 if not reached:
-                    raise RuntimeError(f'첫 프레임 도달 확인 실패: {message}')
+                    raise RuntimeError(cycle_failure.tagged(f'첫 프레임 도달 확인 실패: {message}'))
                 motion_values = {
                     str(axis['motion_id']): float(
                         axis.get('loop_start_motion_rad', axis['initial_motion_position_rad'])
@@ -607,7 +607,7 @@ class MotionPlayer:
                     self._target_settle_timeout_sec(),
                 )
                 if not reached:
-                    raise RuntimeError(f'모션 최종 위치 도달 확인 실패: {message}')
+                    raise RuntimeError(cycle_failure.tagged(f'모션 최종 위치 도달 확인 실패: {message}'))
             motion_finished_at = time.time()
             status = motion_run_rules._status_from_plan('completed', '모션 실행 완료', plan)
             status['phase'] = 'completed'

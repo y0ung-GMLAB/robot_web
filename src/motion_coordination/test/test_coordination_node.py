@@ -1671,3 +1671,51 @@ def test_start_without_left_out_pcs_writes_nothing(monkeypatch):
     node._call_local_control = lambda payload, **_kwargs: sent.append(payload) or {'success': True}
     node._start_group_execution()
     assert sent == []
+
+
+def _running_group(node):
+    node._execution = GroupExecution()
+    execution_id = node._execution.begin('pc-a', ('pc-a', 'pc-b'))
+    for pc_id in ('pc-a', 'pc-b'):
+        node._execution.mark_ready(pc_id)
+    node._execution.initialize_action(now=1.0)
+    for pc_id in ('pc-a', 'pc-b'):
+        node._execution.mark_armed(pc_id)
+    node._execution.start_action(now=2.0)
+    stops, errors = [], []
+    node._issue_stop_now = lambda **kwargs: stops.append(kwargs)
+    node._publish_coordination_error = lambda **kwargs: errors.append(kwargs)
+    node._clear_active_execution = lambda: node._execution.clear_active()
+    node.get_logger = lambda: SimpleNamespace(
+        warning=lambda *_: None, error=lambda *_: None, warn=lambda *_: None, info=lambda *_: None,
+    )
+    return execution_id, stops, errors
+
+
+def test_cycle_failure_stops_this_run_without_locking_the_group():
+    """수정 목록 67 · 도달 확인 실패는 그 회차만 · 그룹 오류(2등급)를 걸지 않는다"""
+    node = _node()
+    execution_id, stops, errors = _running_group(node)
+
+    node._event_callback(GroupEvent(
+        group_id='stage-a', execution_id=execution_id, pc_id='pc-b', event='error',
+        success=False,
+        message='그룹 모션 실행 실패: [회차 실패] 모션 최종 위치 도달 확인 실패: 2번 모터 오차 3.5',
+    ))
+
+    assert len(stops) == 1 and stops[0]['execution_id'] == execution_id
+    assert errors == []                        # 잠그지 않음 · 다음 스케줄 점검에서 다시 시작
+    assert not node._execution.execution_id
+
+
+def test_other_runtime_errors_still_lock_the_group():
+    node = _node()
+    execution_id, stops, errors = _running_group(node)
+
+    node._event_callback(GroupEvent(
+        group_id='stage-a', execution_id=execution_id, pc_id='pc-b', event='error',
+        success=False, message='그룹 모션 실행 실패: 통신이 끊긴 모터가 있어 재생을 멈춥니다',
+    ))
+
+    assert len(stops) == 1
+    assert [error['code'] for error in errors] == ['GROUP_PARTICIPANT_FAILURE']

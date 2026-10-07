@@ -34,7 +34,7 @@ from rclpy.node import Node
 from rclpy.qos import DurabilityPolicy, QoSProfile, ReliabilityPolicy
 from .alarm_registry import AlarmRegistry
 from .command_dispatcher import CommandDispatcher
-from motion_common import net_ready
+from motion_common import cycle_failure, net_ready
 from motion_common.group_config import (
     GroupConfig,
     load_group_config,
@@ -949,6 +949,7 @@ class MotionCoordinationNode(Node):
         cancel_reason = ''
         spread_failure: Optional[Dict[str, Any]] = None
         runtime_error = ''
+        cycle_error = ''
         exclude_reasons: Dict[str, str] = {}
         with self._lock:
             if (
@@ -1145,10 +1146,15 @@ class MotionCoordinationNode(Node):
                     elif self._execution.state != 'releasing':
                         self._execution.stop_now()
                 elif message.event == 'error':
-                    runtime_error = (
+                    text = (
                         f'{message.pc_id} 로컬 그룹 실행 오류: '
                         f'{message.message or "확인 필요"}'
                     )
+                    # 도달 확인 실패 같은 회차 단위 실패는 잠그지 않는다 · 수정 목록 67
+                    if cycle_failure.is_cycle_failure(message.message):
+                        cycle_error = text
+                    else:
+                        runtime_error = text
             except ValueError as exc:
                 self.get_logger().warn(f'Group event rejected: {exc}')
         if exclude_reasons:
@@ -1159,6 +1165,8 @@ class MotionCoordinationNode(Node):
             self._handle_trigger_spread_exceeded(spread_failure)
         if runtime_error:
             self._stop_for_peer_failure(runtime_error)
+        elif cycle_error:
+            self._stop_for_cycle_failure(cycle_error)
 
     _LOCAL_WORKER_RELEASE_TIMEOUT_SEC = 5.0
 
@@ -2973,6 +2981,30 @@ class MotionCoordinationNode(Node):
                 ):
                     unhealthy.append(pc_id)
         return sorted(set(unhealthy))
+
+    def _stop_for_cycle_failure(self, reason: str) -> None:
+        """회차 하나가 실패 · 이번 실행만 끝내고 잠그지 않는다 · 수정 목록 67 (사용자 결정 2026-10-07)
+
+        `_stop_for_peer_failure` 와 같이 모든 참가 PC 를 세우지만 그룹 오류(2등급)는 걸지 않는다 ·
+        그래서 스케줄이 다음 점검(1분)에 다시 시작한다 · 서보 알람·통신 끊김은 이 길로 오지 않는다.
+        """
+        with self._lock:
+            if not self._execution.execution_id:
+                return
+            execution_id = self._execution.execution_id
+            participants = self._execution.participants
+            cycle_number = self._execution.cycle_number
+        self._issue_stop_now(
+            execution_id=execution_id, participants=participants,
+            cycle_number=cycle_number,
+            command_id=f'cycle-failure-{uuid.uuid4().hex}',
+        )
+        with self._lock:
+            self._execution.stop_now(error=True)
+            self._clear_active_execution()
+        self.get_logger().warning(
+            f'그룹 회차 실패 · 이번 실행 정지 · 잠그지 않음(다음 스케줄 점검에서 다시 시작): {reason}'
+        )
 
     def _stop_for_peer_failure(self, reason: str) -> None:
         with self._lock:
