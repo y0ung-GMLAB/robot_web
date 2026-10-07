@@ -8,14 +8,28 @@
 #   · 다른 용도로 쓰던 PC 도 됨 · 있는 프로그램은 지우지 않고 **더하기만** 한다 ·
 #     단 자동 로그인·자동 업데이트 끄기·절전 끄기는 전시 PC 전제라 그대로 적용된다
 #   · 수작업으로 남는 것 · BIOS 「전원 복구 시 켜기」 · 로봇 팩·모터 설정(웹)
+#
+# 스피커 PC · 끝에 `-s -- --speaker` 를 붙인다 · 코드는 ~/robot_web · scripts/install_speaker.sh 로 이어간다
+#   curl -fsSL https://raw.githubusercontent.com/y0ung-GMLAB/robot_web/main/scripts/bootstrap.sh | bash -s -- --speaker
 set -Eeuo pipefail
+
+SPEAKER=false
+ARGS=()
+for arg in "$@"; do
+  if [[ "${arg}" == "--speaker" ]]; then SPEAKER=true; else ARGS+=("${arg}"); fi
+done
 
 REPO="${MOTION_REPO:-https://github.com/y0ung-GMLAB/robot_web.git}"
 BRANCH="${MOTION_BRANCH:-main}"
-WORKSPACE="${MOTION_WORKSPACE:-${HOME}/ros2_ws}"
+# 스피커 PC 는 ~/robot_web · 옛 스피커 앱이 쓰던 ~/ros2_ws(옛 메시지 빌드)와 섞이지 않게
+if [[ "${SPEAKER}" == true ]]; then
+  WORKSPACE="${MOTION_WORKSPACE:-${HOME}/robot_web}"
+else
+  WORKSPACE="${MOTION_WORKSPACE:-${HOME}/ros2_ws}"
+fi
 
 echo "========================================="
-echo "robot_web 한 줄 설치"
+echo "robot_web 한 줄 설치$([[ "${SPEAKER}" == true ]] && echo ' · 스피커 PC')"
 echo "========================================="
 echo "저장소   · ${REPO} (${BRANCH})"
 echo "작업공간 · ${WORKSPACE}"
@@ -65,4 +79,7 @@ else
 fi
 
 cd "${WORKSPACE}"
-exec bash scripts/install.sh --site "$@"
+if [[ "${SPEAKER}" == true ]]; then
+  exec bash scripts/install_speaker.sh ${ARGS[@]+"${ARGS[@]}"}
+fi
+exec bash scripts/install.sh --site ${ARGS[@]+"${ARGS[@]}"}

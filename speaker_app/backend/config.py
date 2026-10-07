@@ -1,4 +1,9 @@
-"""설정 로드/저장. 앱의 유일한 영속 상태."""
+"""설정 로드/저장. 앱의 유일한 영속 상태.
+
+두 파일 · `config/speaker.yaml`(저장소 · 기본값) 위에 `config/speaker.local.yaml`(이 PC · 저장소 밖)을 덮는다 ·
+웹에서 바꾼 값은 local 에만 쓴다 · 그래서 `git pull` 이 이 PC 설정과 부딪히지 않는다.
+경로는 상대로 적어도 된다 · sounds_dir 는 앱 폴더 기준 · file_path 는 sounds_dir 기준.
+"""
 import copy
 import os
 import threading
@@ -6,7 +11,8 @@ import threading
 import yaml
 
 APP_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-CONFIG_PATH = os.path.join(APP_DIR, "config", "speaker.yaml")
+DEFAULT_CONFIG_PATH = os.path.join(APP_DIR, "config", "speaker.yaml")
+CONFIG_PATH = os.path.join(APP_DIR, "config", "speaker.local.yaml")
 SOUNDS_DIR = os.path.join(APP_DIR, "sounds")
 
 DEFAULTS = {
@@ -71,8 +77,11 @@ def validate(cfg):
     except (TypeError, ValueError):
         cfg["log"]["max_entries"] = 100
     cfg["audio"]["device"] = str(cfg["audio"].get("device") or DEFAULTS["audio"]["device"])
-    cfg["audio"]["sounds_dir"] = str(cfg["audio"].get("sounds_dir") or SOUNDS_DIR)
-    cfg["audio"]["file_path"] = str(cfg["audio"].get("file_path") or "")
+    sounds_dir = str(cfg["audio"].get("sounds_dir") or SOUNDS_DIR)
+    cfg["audio"]["sounds_dir"] = os.path.normpath(os.path.join(APP_DIR, sounds_dir))
+    file_path = str(cfg["audio"].get("file_path") or "")
+    cfg["audio"]["file_path"] = (
+        os.path.join(cfg["audio"]["sounds_dir"], file_path) if file_path else "")
     by_motion = cfg["audio"].get("by_motion")
     cfg["audio"]["by_motion"] = {
         str(motion): os.path.basename(str(name))
@@ -82,16 +91,21 @@ def validate(cfg):
     return cfg
 
 
+def _read(path):
+    if not os.path.isfile(path):
+        return {}
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            raw = yaml.safe_load(f) or {}
+    except Exception:
+        return {}
+    return raw if isinstance(raw, dict) else {}
+
+
 def load():
     with _lock:
-        raw = {}
-        if os.path.isfile(CONFIG_PATH):
-            try:
-                with open(CONFIG_PATH, "r", encoding="utf-8") as f:
-                    raw = yaml.safe_load(f) or {}
-            except Exception:
-                raw = {}
-        return validate(_merge(DEFAULTS, raw))
+        merged = _merge(_merge(DEFAULTS, _read(DEFAULT_CONFIG_PATH)), _read(CONFIG_PATH))
+        return validate(merged)
 
 
 def save(cfg):

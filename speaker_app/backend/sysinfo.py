@@ -159,7 +159,7 @@ def collect(port):
         "ip": ip,
         "interface": _iface(),
         "app_dir": APP_DIR,
-        "config_path": os.path.join(APP_DIR, "config", "speaker.yaml"),
+        "config_path": os.path.join(APP_DIR, "config", "speaker.local.yaml"),
         "sounds_dir": os.path.join(APP_DIR, "sounds"),
         # run.sh 와 같은 순서 · robot_web 빌드가 있으면 그것, 없으면 옛 ~/ros2_ws
         "ros_workspace": (os.path.dirname(APP_DIR)

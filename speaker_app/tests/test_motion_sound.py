@@ -60,7 +60,8 @@ def _wav(path):
 def app(tmp_path, monkeypatch):
     sounds = tmp_path / "sounds"
     sounds.mkdir()
-    monkeypatch.setattr(config, "CONFIG_PATH", str(tmp_path / "speaker.yaml"))
+    monkeypatch.setattr(config, "CONFIG_PATH", str(tmp_path / "speaker.local.yaml"))
+    monkeypatch.setattr(config, "DEFAULT_CONFIG_PATH", str(tmp_path / "speaker.yaml"))
     monkeypatch.setitem(config.DEFAULTS["audio"], "sounds_dir", str(sounds))
     monkeypatch.setattr(state_module, "Player", FakePlayer)
     monkeypatch.setattr(state_module.sysinfo, "collect", lambda _port: {})
@@ -147,3 +148,18 @@ def test_presence_tells_robot_pcs_this_is_the_speaker(app):
     msg = sent[0]
     assert (msg.pc_id, msg.role, msg.address) == ("speaker-1", "speaker", "192.168.0.20")
     assert msg.web_url == "http://192.168.0.20:8100" and msg.group_id == "test1"
+
+
+def test_repo_defaults_with_relative_paths_and_local_overrides(tmp_path, monkeypatch):
+    """저장소 기본값(상대 경로) 위에 이 PC 값 · 웹 저장은 local 에만 · 설치 위치와 무관"""
+    (tmp_path / "speaker.yaml").write_text(
+        "audio:\n  sounds_dir: sounds\n  file_path: a.wav\ndds:\n  group_id: g1\n", encoding="utf-8")
+    (tmp_path / "speaker.local.yaml").write_text("dds:\n  group_id: g2\n", encoding="utf-8")
+    monkeypatch.setattr(config, "DEFAULT_CONFIG_PATH", str(tmp_path / "speaker.yaml"))
+    monkeypatch.setattr(config, "CONFIG_PATH", str(tmp_path / "speaker.local.yaml"))
+    cfg = config.load()
+    assert cfg["audio"]["sounds_dir"] == os.path.join(config.APP_DIR, "sounds")
+    assert cfg["audio"]["file_path"] == os.path.join(config.APP_DIR, "sounds", "a.wav")
+    assert cfg["dds"]["group_id"] == "g2"
+    config.save(cfg)
+    assert "g1" in (tmp_path / "speaker.yaml").read_text(encoding="utf-8")

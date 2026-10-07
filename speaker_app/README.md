@@ -31,6 +31,27 @@ ROS 2 Humble 모션 제어 시스템(robot_web)의 DDS 트리거를 **구독만*
 - robot_web 에서 `motion_coordination_interfaces` 빌드 완료(아래 1)
 - ALSA (`aplay`)
 
+## 한 번에 설치 (권장 · 2026-10-07)
+
+우분투 22.04 를 깐 직후, 늘 쓸 계정으로 로그인해 터미널에서 한 줄만 친다.
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/y0ung-GMLAB/robot_web/main/scripts/bootstrap.sh | bash -s -- --speaker
+```
+
+- sudo 비밀번호 1회 · 나머지 자동 · 코드는 `~/robot_web` · 로봇 PC 서비스(모터 · 웹 `:8000` · 연동)는 깔지 않는다
+- 아래 1~6 을 전부 대신한다 · ROS 2(기본만) · 그룹 메시지 빌드 · 사운드 장치 독점 · **사운드 카드 자동 선택**(HDMI 아닌 첫 카드) ·
+  자동 시작 등록 · 로그아웃해도 유지(linger) · 자동 업데이트·절전 끄기 · 방화벽 같은 망 허용
+- 옛 `~/speaker_app` 이 있으면 음원과 설정(도메인 · 그룹 · 출력 장치 · 오프셋)을 옮겨 온다
+- 끝에 스피커 화면 주소가 찍힌다 · 「재부팅 1회 필요」가 찍히면 `sudo reboot`(audio 그룹을 처음 넣었을 때)
+- **갱신**도 같은 한 줄 또는 `bash ~/robot_web/scripts/install_speaker.sh` · 로봇 PC 를 올렸으면 스피커 PC 도 같이
+- 미리 보기만 · `bash ~/robot_web/scripts/install_speaker.sh --dry-run`
+- 남는 수작업 · 음원이 없으면 스피커 화면에서 추가 · 그룹 ID 를 로봇 PC 와 맞추기(스피커 화면 「연동 설정」)
+- 설정은 `config/speaker.yaml`(저장소 기본값) 위에 `config/speaker.local.yaml`(이 PC · 저장소 밖)을 덮는다 ·
+  웹에서 바꾼 값은 local 에만 저장돼 갱신과 부딪히지 않는다
+
+아래는 손으로 할 때의 순서다(한 번에 설치가 하는 일과 같다).
+
 ## 설치 — 새 PC 기준 순서대로
 
 ### 1. robot_web 받기 + 메시지 빌드 (연동 모드 필수)
@@ -76,7 +97,7 @@ card 1: Generic_1 [HD-Audio Generic], device 0: CX20632 Analog
         plughw:1,0
 ```
 
-번호가 다르면 `config/speaker.yaml` 의 `audio.device` 를 고친다. 웹 UI 설정에서 바꿔도 된다.
+번호가 다르면 웹 UI 설정에서 바꾼다(`config/speaker.local.yaml` 에 저장된다).
 
 ### 4. 음원 파일 넣기
 
@@ -117,8 +138,8 @@ systemctl --user status speaker-app
 | 4 wav 파일 | 재생할 음원이 없음 |
 | 5 `enable` + `enable-linger` | **재부팅해도 안 뜸** |
 
-설정(`config/speaker.yaml`)은 저장소에 포함되어 도메인·그룹 값이 그대로 따라온다.
-새 PC에서 손댈 것은 **카드 번호(3)와 음원 파일(4)** 둘뿐이다.
+기본 설정(`config/speaker.yaml`)은 저장소에 포함되어 도메인·그룹 값이 그대로 따라온다 · 이 PC 에서 바꾼 값은
+`config/speaker.local.yaml`(저장소 밖). 새 PC에서 손댈 것은 **카드 번호(3)와 음원 파일(4)** 둘뿐이다.
 
 ## 수동 실행
 
