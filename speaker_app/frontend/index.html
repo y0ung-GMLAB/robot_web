@@ -1,0 +1,96 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>스피커 트리거</title>
+<link rel="stylesheet" href="/style.css">
+</head>
+<body>
+<div class="wrap">
+
+  <header>
+    <h1>스피커 트리거</h1>
+    <span id="dds-badge" class="badge">-</span>
+  </header>
+
+  <section class="card">
+    <h2>모드</h2>
+    <div class="row">
+      <label class="radio"><input type="radio" name="mode" value="dds"> 연동 모드</label>
+      <label class="radio"><input type="radio" name="mode" value="standalone"> 단독 모드</label>
+    </div>
+    <p class="hint" id="mode-hint">연동 모드는 모션 PC의 시작 트리거를 받아 자동 재생합니다.</p>
+  </section>
+
+  <section class="card">
+    <h2>연동 설정</h2>
+    <div class="row">
+      <label>도메인 ID <input type="number" id="domain_id" min="0" max="232"></label>
+      <label>그룹 ID <input type="text" id="group_id"></label>
+      <button id="btn-apply-dds">적용</button>
+      <button id="btn-reconnect-dds" class="ghost">다시 연결</button>
+    </div>
+    <p class="dds-state" id="dds-state">-</p>
+    <p class="hint">도메인을 바꾸면 DDS가 잠시 재연결됩니다. 그룹 ID는 즉시 반영됩니다.</p>
+  </section>
+
+  <section class="card">
+    <h2>음성 파일</h2>
+    <p class="path">폴더: <code id="sounds_dir">-</code></p>
+    <p class="path">현재 파일: <code id="cur_file">-</code></p>
+    <div class="row">
+      <input type="file" id="file_input" accept=".wav,audio/wav">
+      <button id="btn-upload" class="primary">업로드</button>
+      <button id="btn-download" class="ghost">다운로드</button>
+      <button id="btn-delete" class="danger">삭제</button>
+      <button id="btn-test" class="ghost">테스트 재생</button>
+    </div>
+    <p class="hint">업로드하면 기존 음원은 지워지고 새 파일로 교체됩니다 (폴더에 항상 1개 유지).</p>
+    <div class="row">
+      <label>오프셋 <input type="number" id="offset_sec" step="0.1" min="-10" max="10"> 초</label>
+      <button id="btn-apply-offset">적용</button>
+    </div>
+    <p class="hint">0 = 트리거 수신 즉시 재생(모션보다 약 0.5초 빠름). 늦추려면 양수를 넣으세요.</p>
+    <div class="row">
+      <label class="check"><input type="checkbox" id="stop_on_motion_stop"> 모션 정지 시 소리도 정지</label>
+    </div>
+    <p class="hint">모션이 정지되거나 오류가 나면 재생을 멈춥니다. 사이클 정상 종료에는 반응하지 않습니다.</p>
+  </section>
+
+  <section class="card">
+    <h2>재생</h2>
+    <p class="status">상태: <strong id="playback">-</strong></p>
+    <div class="row">
+      <label class="vol">볼륨 <input type="range" id="volume" min="0" max="100" step="1"></label>
+      <span id="volume_val" class="volnum">-</span>
+    </div>
+    <div class="row" id="standalone-opts">
+      <label>반복 <input type="number" id="repeat" min="0"> 회</label>
+      <label>간격 <input type="number" id="dwell_sec" step="0.5" min="0"> 초</label>
+      <button id="btn-apply-standalone">적용</button>
+    </div>
+    <div class="row">
+      <button id="btn-play" class="primary">재생</button>
+      <button id="btn-pause">일시정지</button>
+      <button id="btn-resume">재개</button>
+      <button id="btn-stop" class="danger">정지</button>
+    </div>
+    <p class="hint" id="play-hint"></p>
+  </section>
+
+  <section class="card">
+    <h2>시스템 정보</h2>
+    <dl class="info" id="info"></dl>
+  </section>
+
+  <section class="card">
+    <h2>로그 <span class="sub">최근 100건</span></h2>
+    <ul id="logs" class="logs"></ul>
+  </section>
+
+</div>
+<div id="toast" class="toast"></div>
+<script src="/app.js"></script>
+</body>
+</html>

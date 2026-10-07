@@ -1,0 +1,13 @@
+[Unit]
+Description=Speaker Trigger App (DDS 트리거 음성 재생)
+After=network-online.target sound.target
+
+[Service]
+Type=simple
+ExecStart=%h/speaker_app/run.sh
+Restart=on-failure
+RestartSec=3
+KillSignal=SIGINT
+
+[Install]
+WantedBy=default.target

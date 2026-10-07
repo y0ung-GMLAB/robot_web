@@ -1,0 +1,18 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+
+# 음성 파일 — 용량이 크고 배포마다 다르므로 저장소에 넣지 않는다
+sounds/*.wav
+sounds/*.mp3
+sounds/*.ogg
+sounds/*.flac
+
+# audio_prep 이 자동 생성하는 스테레오 변환 캐시
+sounds/.stereo_cache/
+
+# 런타임 산출물
+*.log
