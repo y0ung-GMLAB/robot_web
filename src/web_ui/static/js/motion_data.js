@@ -1080,6 +1080,8 @@ export function createMotionDataController({
       running: '재생 중',
       waiting: '반복 대기 중',
       verifying: '위치 확인 중',
+      // 연속 재생 가벼운 오류 · 제자리에서 기다렸다 초기 위치부터 다시 · 수정 목록 73
+      recovering: '자동 복구 대기',
       stopping: '정지 중',
       stopped: '정지',
       completed: '재생 완료',
@@ -1097,6 +1099,7 @@ export function createMotionDataController({
       || key === 'initializing'
       || key === 'verifying'
       || key === 'stopping'
+      || key === 'recovering'
     ) return 'warn';
     if (key === 'ready' || key === 'initialized' || key === 'completed') return 'ok';
     return 'warn';
@@ -1692,8 +1695,10 @@ export function createMotionDataController({
     const payload = motionRunPayload();
     const status = motionRunStatus || {};
     const state = String(status.state || 'idle');
+    // 자동 복구 대기도 도는 중 · 정지 버튼이 살아 있어야 한다 · 73
     const running = state === 'running' || state === 'initializing'
-      || state === 'verifying' || state === 'stopping' || state === 'waiting';
+      || state === 'verifying' || state === 'stopping' || state === 'waiting'
+      || state === 'recovering';
     const hasMappingFile = Boolean(payload.mapping_file_id);
     const hasMotionFile = Boolean(payload.motion_file_id);
     const hasRequiredFiles = hasMappingFile && hasMotionFile;

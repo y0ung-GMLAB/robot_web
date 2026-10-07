@@ -39,6 +39,14 @@ from .motion_run_constants import (
 #: `initial_move_time_sec` 이 없을 때만 · 40
 OVERRIDE_RESUME_DEFAULT_SEC = 5.0
 
+#: 연속 재생 자동 복구 · 수정 목록 73 (사용자 결정 2026-10-07)
+#: 가벼운 오류(회차 실패 표지)면 서보 ON 제자리 → 기다림 → 초기 위치부터 다시 ·
+#: 창 안에서 한도를 넘기면 최종 오류 · 회차가 이만큼 연속 성공하면 횟수를 지운다
+AUTO_RECOVERY_LIMIT = 3
+AUTO_RECOVERY_WINDOW_SEC = 600.0
+AUTO_RECOVERY_DELAY_SEC = 5.0
+AUTO_RECOVERY_RESET_CYCLES = 3
+
 
 class MotionPlayer:
     def __init__(self, manager: Any) -> None:
@@ -50,6 +58,90 @@ class MotionPlayer:
         payload: Dict[str, Any],
         motors_snapshot: List[Dict[str, Any]],
     ) -> None:
+        """한 번 돌리고 · 연속 재생의 가벼운 오류는 스스로 다시 · 수정 목록 73
+
+        가벼운 오류 = 회차 실패 표지(`cycle_failure` · 도달 확인 실패 · 재생 명령 폐기 0.5 s) ·
+        그 밖의 오류와 1회 재생·초기 위치 이동은 지금처럼 바로 오류로 멈춘다 ·
+        다시 하기 전에 안전 차단(긴급 정지 · 서보 알람 · 앱솔루트 미확인 등)을 보고 걸려 있으면
+        다시 하지 않는다 · 기다리는 동안 모터는 서보 ON 제자리(명령을 안 보냄 · PP 드라이브가 홀드).
+        """
+        failures: List[float] = []
+        while True:
+            exc = self._prepare_and_run_once(mode, payload, motors_snapshot)
+            if exc is None:
+                return
+            if self.manager._stop_event.is_set():
+                return
+            reason = self._auto_recovery_refusal(mode, payload, exc, failures)
+            if reason:
+                self._report_run_failure(mode, payload, exc, exhausted=reason)
+                return
+            if not self._wait_before_recovery(payload, exc, failures):
+                return
+            motors_snapshot = self.manager._current_motors()
+
+    def _auto_recovery_refusal(
+        self, mode: str, payload: Dict[str, Any], exc: BaseException, failures: List[float],
+    ) -> str:
+        """다시 하지 않을 이유 · 빈 글자면 다시 한다 · 다시 할 때는 `failures` 에 이번 실패를 더한다"""
+        if mode == 'initialize' or str(payload.get('run_mode') or 'once') != 'continuous':
+            return 'not_continuous'
+        if not cycle_failure.is_cycle_failure(str(exc)):
+            return 'not_light'
+        now = time.monotonic()
+        # 회차가 연속으로 충분히 돌았으면 지난 실패는 지운다
+        completed = int((self.manager.status() or {}).get('cycle_count') or 0)
+        if completed >= AUTO_RECOVERY_RESET_CYCLES:
+            failures.clear()
+        failures[:] = [at for at in failures if now - at < AUTO_RECOVERY_WINDOW_SEC]
+        if len(failures) >= AUTO_RECOVERY_LIMIT:
+            return 'exhausted'
+        blocked = self.manager._playback_ownership_error()
+        if blocked:
+            return f'blocked:{blocked}'
+        failures.append(now)
+        return ''
+
+    def _wait_before_recovery(
+        self, payload: Dict[str, Any], exc: BaseException, failures: List[float],
+    ) -> bool:
+        attempt = len(failures)
+        text = (
+            f'자동 복구 {attempt}/{AUTO_RECOVERY_LIMIT} · {exc} · '
+            f'{AUTO_RECOVERY_DELAY_SEC:.0f}초 뒤 초기 위치부터 다시'
+        )
+        self.manager.get_logger().warning(f'[자동 복구] {text}')
+        status = motion_run_rules._empty_status()
+        status.update({
+            'state': 'recovering',
+            'phase': 'recovering',
+            'message': text,
+            'project_id': str(payload.get('project_id') or ''),
+            'motion_file_id': str(payload.get('motion_file_id') or ''),
+            'mapping_file_id': str(payload.get('mapping_file_id') or ''),
+            'run_mode': str(payload.get('run_mode') or 'once'),
+            'automation_run': bool(payload.get('automation_run')),
+            'request_source': str(payload.get('request_source') or 'motion_run'),
+            'auto_recovery': {
+                'attempt': attempt,
+                'limit': AUTO_RECOVERY_LIMIT,
+                'last_error': str(exc),
+            },
+            'phase_finished_at': time.time(),
+        })
+        self.manager._set_status(status)
+        # 멈춤 요청이 오면 바로 빠진다
+        if self.manager._stop_event.wait(AUTO_RECOVERY_DELAY_SEC):
+            return False
+        return True
+
+    def _prepare_and_run_once(
+        self,
+        mode: str,
+        payload: Dict[str, Any],
+        motors_snapshot: List[Dict[str, Any]],
+    ) -> Optional[BaseException]:
+        """한 번 · 끝까지 갔거나 멈춤이면 None · 오류면 그 예외(보고는 부른 쪽)"""
         self._reset_override_resume()
         try:
             if bool(payload.get('automation_run')):
@@ -105,39 +197,56 @@ class MotionPlayer:
             else:
                 self._run_initialization_then_motion(initialization_plan, plan)
         except InterruptedError:
-            return
+            return None
         except Exception as exc:
             if self.manager._stop_event.is_set():
-                return
+                return None
             self.manager.get_logger().error(
                 f'motion run preparation failed: {mode}\n{traceback.format_exc()}'
             )
-            status = motion_run_rules._empty_status()
-            status.update({
-                'state': 'error',
-                'phase': 'error',
-                # 무엇을 하다 실패했는지 · 초기 위치 이동만 눌렀는데 「모션 실행」이라 하면 헷갈린다
-                'message': (
-                    f'초기 위치 이동 준비 실패: {exc}'
-                    if mode == 'initialize'
-                    else f'모션 실행 준비 실패: {exc}'
-                ),
-                'project_id': str(payload.get('project_id') or ''),
-                'motion_file_id': str(payload.get('motion_file_id') or ''),
-                'mapping_file_id': str(payload.get('mapping_file_id') or ''),
-                'run_mode': str(payload.get('run_mode') or 'once'),
-                'automation_run': bool(payload.get('automation_run')),
-                'operation_generation': int(
-                    payload.get('operation_generation') or 0
-                ),
-                'request_source': str(
-                    payload.get('request_source') or 'motion_run'
-                ),
-                'phase_finished_at': time.time(),
-            })
-            self.manager._set_status(status)
-            if bool(payload.get('automation_run')):
-                self.manager._automation_failure(str(exc))
+            return exc
+        return None
+
+    def _report_run_failure(
+        self, mode: str, payload: Dict[str, Any], exc: BaseException, *, exhausted: str = '',
+    ) -> None:
+        """최종 오류 · 서보는 켠 채 제자리 · 자동 복구 한도를 넘었으면 그렇게 적는다(73)"""
+        status = motion_run_rules._empty_status()
+        status.update({
+            'state': 'error',
+            'phase': 'error',
+            # 무엇을 하다 실패했는지 · 초기 위치 이동만 눌렀는데 「모션 실행」이라 하면 헷갈린다
+            'message': (
+                f'초기 위치 이동 준비 실패: {exc}'
+                if mode == 'initialize'
+                else f'모션 실행 준비 실패: {exc}'
+            ),
+            'project_id': str(payload.get('project_id') or ''),
+            'motion_file_id': str(payload.get('motion_file_id') or ''),
+            'mapping_file_id': str(payload.get('mapping_file_id') or ''),
+            'run_mode': str(payload.get('run_mode') or 'once'),
+            'automation_run': bool(payload.get('automation_run')),
+            'operation_generation': int(
+                payload.get('operation_generation') or 0
+            ),
+            'request_source': str(
+                payload.get('request_source') or 'motion_run'
+            ),
+            'phase_finished_at': time.time(),
+        })
+        if exhausted == 'exhausted':
+            # 스케줄은 이 표시를 보고 다시 시작하지 않는다(사람 확인) · 73
+            status['auto_recovery_exhausted'] = True
+            status['message'] = (
+                f'자동 복구 {AUTO_RECOVERY_LIMIT}번 실패 · 멈춤 · 서보는 켠 채 제자리 · {exc}'
+            )
+        elif exhausted.startswith('blocked:'):
+            status['message'] = f'{status["message"]} · 자동 복구 안 함({exhausted[8:]})'
+        self.manager._set_status(status)
+        if bool(payload.get('automation_run')):
+            self.manager._automation_failure(
+                str(status['message']) if exhausted == 'exhausted' else str(exc)
+            )
 
     def _build_playlist_entries(
         self,
@@ -445,7 +554,8 @@ class MotionPlayer:
                         self._latest_safety_status(), cycle_started_wall,
                     )
                     if dropped:
-                        raise RuntimeError(dropped)
+                        # 가벼운 오류 · 자동 복구 대상 · 위험한 원인(알람·차단)이면 복구 전 검사가 막는다 · 73
+                        raise RuntimeError(cycle_failure.tagged(dropped))
                     if automation_run and self._current_servo_alarm_grade() == 1:
                         grade1_seen = True
                     positions = self._owned_positions(

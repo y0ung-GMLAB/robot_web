@@ -1719,3 +1719,17 @@ def test_other_runtime_errors_still_lock_the_group():
 
     assert len(stops) == 1
     assert [error['code'] for error in errors] == ['GROUP_PARTICIPANT_FAILURE']
+
+
+def test_repeated_cycle_failures_lock_the_group_after_the_limit():
+    """수정 목록 73 · 10분 안 3번까지는 잠그지 않고 넷째에 잠근다"""
+    node = _node()
+    codes = []
+    for attempt in range(4):
+        execution_id, _stops, errors = _running_group(node)
+        node._event_callback(GroupEvent(
+            group_id='stage-a', execution_id=execution_id, pc_id='pc-b', event='error',
+            success=False, message='[회차 실패] 모션 최종 위치 도달 확인 실패',
+        ))
+        codes.append([error['code'] for error in errors])
+    assert codes == [[], [], [], ['GROUP_AUTO_RECOVERY_EXHAUSTED']]

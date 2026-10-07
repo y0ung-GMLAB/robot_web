@@ -2982,6 +2982,10 @@ class MotionCoordinationNode(Node):
                     unhealthy.append(pc_id)
         return sorted(set(unhealthy))
 
+    #: 그룹 회차 실패 자동 복구 한도 · 런타임(`motion_player.AUTO_RECOVERY_*`)과 같은 값 · 73
+    _CYCLE_FAILURE_LIMIT = 3
+    _CYCLE_FAILURE_WINDOW_SEC = 600.0
+
     def _stop_for_cycle_failure(self, reason: str) -> None:
         """회차 하나가 실패 · 이번 실행만 끝내고 잠그지 않는다 · 수정 목록 67 (사용자 결정 2026-10-07)
 
@@ -3002,8 +3006,29 @@ class MotionCoordinationNode(Node):
         with self._lock:
             self._execution.stop_now(error=True)
             self._clear_active_execution()
+        # 자동 복구 한도 · 10분 안 3번을 넘기면 그때는 잠근다(사람 확인) · 수정 목록 73
+        now = time.monotonic()
+        recent = [
+            at for at in getattr(self, '_cycle_failure_times', [])
+            if now - at < self._CYCLE_FAILURE_WINDOW_SEC
+        ]
+        if len(recent) >= self._CYCLE_FAILURE_LIMIT:
+            self._cycle_failure_times = []
+            self.get_logger().error(f'그룹 회차 실패 자동 복구 한도 초과 · 잠금: {reason}')
+            self._publish_coordination_error(
+                code='GROUP_AUTO_RECOVERY_EXHAUSTED',
+                message=(
+                    f'그룹 회차 실패가 {self._CYCLE_FAILURE_WINDOW_SEC / 60:.0f}분 안 '
+                    f'{self._CYCLE_FAILURE_LIMIT + 1}번 · 자동 복구 멈춤: {reason}'
+                ),
+                execution_id=execution_id,
+            )
+            return
+        recent.append(now)
+        self._cycle_failure_times = recent
         self.get_logger().warning(
-            f'그룹 회차 실패 · 이번 실행 정지 · 잠그지 않음(다음 스케줄 점검에서 다시 시작): {reason}'
+            f'그룹 회차 실패 · 이번 실행 정지 · 잠그지 않음(다음 스케줄 점검에서 다시 시작 · '
+            f'{len(recent)}/{self._CYCLE_FAILURE_LIMIT}): {reason}'
         )
 
     def _stop_for_peer_failure(self, reason: str) -> None:
