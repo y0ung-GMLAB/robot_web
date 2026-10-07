@@ -19,8 +19,10 @@ from motion_common.repeat_policy import (
 #: `GroupHeartbeat.operation_mode`·`web_url`·`protocol_version` ·
 #: 3 · 2026-10-06 `GroupCommand.stop_reason` (스케줄 끝 주차 · 수정 목록 36) ·
 #: 4 · 2026-10-06 도는 그룹 복귀 · 명령 `join` · `update_participants` 가 참가자를 늘릴 수 있음 ·
-#: 사건 `join_ready` (수정 목록 30-3)
-GROUP_PROTOCOL_VERSION = 4
+#: 사건 `join_ready` (수정 목록 30-3) ·
+#: 5 · 2026-10-07 `GroupCommand.motion_file_id`·`start_delay_sec` · PC 1대 재생도 `start_at` 알림
+#: (스피커 연동 · 수정 목록 38)
+GROUP_PROTOCOL_VERSION = 5
 
 
 @dataclass

@@ -1733,3 +1733,80 @@ def test_repeated_cycle_failures_lock_the_group_after_the_limit():
         ))
         codes.append([error['code'] for error in errors])
     assert codes == [[], [], [], ['GROUP_AUTO_RECOVERY_EXHAUSTED']]
+
+
+def _solo_node(status):
+    node = _node()
+    node._config.configured = True
+    node._local_status = {'motion_run_status': status}
+    node._command_pub = _Publisher()
+    node._event_pub = _Publisher()
+    node._boot_id = 'boot-a'
+    return node
+
+
+def test_solo_run_announces_start_at_once_per_cycle_for_the_speaker():
+    """수정 목록 38 · PC 1대 재생도 스피커가 듣게 · 참가자는 이 PC 하나"""
+    import time as _time
+    started = _time.time() - 0.08
+    status = {
+        'state': 'running', 'group_execution': False, 'motion_file_id': 'show_a.json',
+        'phase_started_at': started, 'current_cycle': 1, 'run_mode': 'continuous',
+    }
+    node = _solo_node(status)
+
+    node._announce_solo_motion()
+    node._announce_solo_motion()                     # 같은 회차 · 다시 안 보냄
+
+    sent = node._command_pub.messages
+    assert len(sent) == 1
+    command = sent[0]
+    assert command.command == 'start_at' and command.initialization_only is False
+    assert list(command.participant_ids) == ['pc-a'] and command.group_id == 'stage-a'
+    assert command.motion_file_id == 'show_a.json'
+    assert -1.0 < command.start_delay_sec < 0.0      # 이미 시작 · 음수
+    assert command.command_id in node._seen_commands  # 내 명령 처리로 돌아오지 않게
+
+    status.update({'current_cycle': 2, 'phase_started_at': started + 20.0})
+    node._announce_solo_motion()
+    assert len(sent) == 2 and sent[1].cycle_number == 2
+
+
+def test_solo_stop_sends_a_stop_event_and_group_runs_are_left_to_the_master():
+    status = {
+        'state': 'running', 'group_execution': False, 'motion_file_id': 'a.json',
+        'phase_started_at': 1000.0, 'current_cycle': 1,
+    }
+    node = _solo_node(status)
+    node._announce_solo_motion()
+    status.update({'state': 'stopped', 'message': '즉시 정지'})
+    node._announce_solo_motion()
+    events = node._event_pub.messages
+    assert len(events) == 1 and events[0].state == 'stopped' and events[0].event == 'solo_stopped'
+
+    group = _solo_node({'state': 'running', 'group_execution': True, 'phase_started_at': 1.0})
+    group._announce_solo_motion()
+    assert group._command_pub.messages == []
+
+
+def test_no_group_id_means_no_solo_announcement():
+    node = _solo_node({'state': 'running', 'phase_started_at': 1000.0, 'current_cycle': 1})
+    node._config.group_id = ''
+    node._announce_solo_motion()
+    assert node._command_pub.messages == []
+
+
+def test_group_start_at_carries_the_masters_animation_and_time_to_start():
+    node = _node()
+    node._local_status = {'motion_run_status': {'motion_file_id': 'show_b.json'}}
+    node._command_pub = _Publisher()
+    node._execution = GroupExecution()
+    execution_id = node._execution.begin('pc-a', ('pc-a', 'pc-b'))
+    action = SimpleNamespace(
+        command='start_at', execution_id=execution_id, cycle_number=3,
+        command_id='cmd-x', scheduled_at=time.monotonic() + 0.5,
+    )
+    node._publish_action(action)
+    command = node._command_pub.messages[-1]
+    assert command.motion_file_id == 'show_b.json'
+    assert 0.3 < command.start_delay_sec <= 0.5

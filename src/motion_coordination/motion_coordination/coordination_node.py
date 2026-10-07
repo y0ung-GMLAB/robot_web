@@ -386,9 +386,11 @@ class MotionCoordinationNode(Node):
     def _state_tick(self) -> None:
         with self._lock:
             execution_active = bool(self._execution.execution_id)
-        self._local_runtime_monitor.set_active(execution_active)
+        # PC 1대 재생 중에도 빨리 읽는다 · 스피커 알림이 늦지 않게 · 수정 목록 38
+        self._local_runtime_monitor.set_active(execution_active or self._local_motion_busy())
         self._consume_local_runtime_status()
         self._emit_local_runtime_event()
+        self._announce_solo_motion()
         self._enforce_execution_membership()
         self._enforce_schedule_ack_deadline()
         self._enforce_motion_start_report_deadline()
@@ -2082,6 +2084,13 @@ class MotionCoordinationNode(Node):
         }
 
     def _publish_action(self, action: ScheduledAction) -> None:
+        sound = {}
+        if action.command == 'start_at':
+            # 스피커 · 이 시작의 애니메이션 · 시작까지 남은 초 · 수정 목록 38
+            sound = {
+                'motion_file_id': self._local_motion_file_id(),
+                'start_delay_sec': float(action.scheduled_at) - time.monotonic(),
+            }
         command = self._new_command(
             command=action.command,
             execution_id=action.execution_id,
@@ -2089,6 +2098,7 @@ class MotionCoordinationNode(Node):
             participants=self._execution.participants,
             command_id=action.command_id,
             scheduled_monotonic=action.scheduled_at,
+            **sound,
         )
         self._execution.pending_command = action.command
         self._execution.pending_command_id = action.command_id
@@ -2299,6 +2309,8 @@ class MotionCoordinationNode(Node):
         run_mode: str = '',
         sync_mode: str = '',
         stop_reason: str = '',
+        motion_file_id: str = '',
+        start_delay_sec: float = 0.0,
     ) -> GroupCommand:
         message = GroupCommand()
         message.group_id = self._config.group_id
@@ -2322,6 +2334,8 @@ class MotionCoordinationNode(Node):
         message.run_mode = str(run_mode)
         _set_optional_message_field(message, 'sync_mode', str(sync_mode))
         _set_optional_message_field(message, 'stop_reason', str(stop_reason))
+        _set_optional_message_field(message, 'motion_file_id', str(motion_file_id))
+        _set_optional_message_field(message, 'start_delay_sec', float(start_delay_sec))
         return message
 
     def _publish_event(
@@ -2687,6 +2701,85 @@ class MotionCoordinationNode(Node):
         with self._lock:
             self._local_status = dict(result)
         self._publish_local_alarm_if_changed()
+
+    #: PC 1대 재생에서 「돌고 있다」 로 보는 단계 · 초기 이동부터 빨리 읽어 첫 회차 시작을 놓치지 않는다
+    _SOLO_BUSY_STATES = frozenset({'initializing', 'running', 'verifying', 'waiting', 'recovering'})
+
+    def _local_motion_status(self) -> Mapping[str, Any]:
+        with self._lock:
+            status = (getattr(self, '_local_status', None) or {}).get('motion_run_status')
+        return status if isinstance(status, Mapping) else {}
+
+    def _local_motion_file_id(self) -> str:
+        return str(self._local_motion_status().get('motion_file_id') or '')
+
+    def _local_motion_busy(self) -> bool:
+        status = self._local_motion_status()
+        return (
+            not status.get('group_execution')
+            and str(status.get('state') or '') in self._SOLO_BUSY_STATES
+        )
+
+    def _announce_solo_motion(self) -> None:
+        """PC 1대 재생도 스피커가 듣게 · 회차마다 `start_at` 한 번 · 멈추면 정지 사건 · 수정 목록 38
+
+        그룹 재생은 마스터가 `start_at` 을 보내므로 여기서는 안 보낸다 · 참가자를 **이 PC 하나**로
+        적어 같은 그룹의 다른 로봇 PC 는 무시한다(`_command_callback` 이 참가자를 본다) ·
+        그룹 ID 가 없으면(연동 미설정) 보내지 않는다 · 스피커는 같은 그룹 ID 로 듣는다.
+        """
+        if not getattr(self._config, 'configured', False) or not self._config.group_id:
+            return
+        status = self._local_motion_status()
+        if status.get('group_execution'):
+            self._solo_announced_key = None
+            return
+        state = str(status.get('state') or '')
+        previous = getattr(self, '_solo_announced_key', None)
+        if state == 'running':
+            started_at = float(status.get('phase_started_at') or 0.0)
+            cycle = int(status.get('current_cycle') or status.get('cycle_count') or 1)
+            key = (str(status.get('motion_file_id') or ''), cycle, round(started_at, 3))
+            if not started_at or key == previous:
+                return
+            self._solo_announced_key = key
+            execution_id = f'solo-{self._config.pc_id}-{int(started_at * 1000)}'
+            command = self._new_command(
+                command='start_at',
+                execution_id=execution_id,
+                cycle_number=cycle,
+                participants=(self._config.pc_id,),
+                command_id=f'solo-{uuid.uuid4().hex}',
+                run_mode=str(status.get('run_mode') or ''),
+                motion_file_id=key[0],
+                # 이미 시작했다 · 음수 · 스피커가 받은 시각에서 빼서 같은 순간에 맞춘다
+                start_delay_sec=started_at - time.time(),
+            )
+            self._remember_own_command(command.command_id)
+            self._command_pub.publish(command)
+            return
+        if previous is not None and state in {'stopped', 'error', 'idle', 'completed'}:
+            self._solo_announced_key = None
+            if state in {'stopped', 'error'}:
+                event = GroupEvent()
+                event.group_id = self._config.group_id
+                event.execution_id = f'solo-{self._config.pc_id}'
+                event.command_id = ''
+                event.pc_id = self._config.pc_id
+                event.boot_id = self._boot_id
+                event.event = 'solo_stopped'
+                event.state = state
+                event.sequence = self._next_sequence()
+                _set_stamp(event.occurred_at, time.time())
+                event.success = state != 'error'
+                event.message = str(status.get('message') or state)[:512]
+                self._event_pub.publish(event)
+
+    def _remember_own_command(self, command_id: str) -> None:
+        """내가 보낸 PC 1대 알림이 내 명령 처리로 돌아오지 않게 · 이미 본 명령으로 적어 둔다"""
+        with self._lock:
+            seen = getattr(self, '_seen_commands', None)
+            if isinstance(seen, dict):
+                seen[command_id] = time.monotonic()
 
     def _publish_local_alarm_if_changed(self) -> None:
         safety = self._local_status.get('safety_status')
