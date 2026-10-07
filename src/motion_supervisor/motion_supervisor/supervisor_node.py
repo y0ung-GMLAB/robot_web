@@ -1257,6 +1257,15 @@ class MotionSupervisor(Node):
             return False, f'{axis}번 모터를 모터 상태에서 찾을 수 없습니다'
         if not self._is_ac_servo(motor):
             return False, f'{axis}번 모터는 AC 서보가 아닙니다'
+        # 운전 한계(`lower/upper`) 밖 목표는 시작 전에 거절 · 다이나믹셀·조그와 같은 검사 ·
+        # 빠져 있어 300° 를 success 로 받고 궤적 도중 스텝 검사에 걸려 고속 구간에서
+        # 끊겼다(실물 2026-10-07 · 시험 16 · 수정 목록 69) · 범위 복귀는 자체 검사
+        # (`_range_recovery_target_error`)
+        range_recovery = request.get('range_recovery') is True
+        if not range_recovery:
+            limit_error = self._target_position_limit_error(motor, target_position)
+            if limit_error:
+                return False, limit_error
         ready_error = self._manual_readiness_error(motor, axis)
         if ready_error:
             return False, ready_error
@@ -1281,7 +1290,7 @@ class MotionSupervisor(Node):
                 f'목표 {_deg(active["target_position"]):.3f} deg',
             )
 
-        if request.get('range_recovery') is True:
+        if range_recovery:
             return self._start_range_recovery(
                 motors,
                 motor,
