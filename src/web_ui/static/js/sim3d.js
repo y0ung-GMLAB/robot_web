@@ -27,7 +27,7 @@
  */
 import { exportPreviewScene, fetchPreviewFrames, fetchPreviewScene, fetchPreviewSceneData } from './api.js';
 import {
-  actualQpos, bodyLocalPose, cameraPosition, followEndSec, followRunKey, frameIndexAt, jointsByBody,
+  actualQpos, blenderHoldsAnimation, bodyLocalPose, cameraPosition, followEndSec, followRunKey, frameIndexAt, jointsByBody,
 } from './sim3d_math.js';
 
 const THREE_URL = '/static/vendor/three/three.module.js';
@@ -290,7 +290,7 @@ export function createSim3dViewer({ el, getLatestState = () => null }) {
       return;
     }
     blenderInfo = sceneState?.blender || null;
-    if (!blenderInfo?.available && view === 'blender') await setView('mujoco');
+    if (view === 'blender' && !blenderAllowed()) await setView('mujoco');
     if (view === 'blender' && blender && blenderInfo?.fingerprint !== blender.fingerprint) await loadBlender();
     const state = sceneState?.state || '';
     if (state === 'ready') {
@@ -565,8 +565,13 @@ export function createSim3dViewer({ el, getLatestState = () => null }) {
   }
 
   /** 체크 · 「Blender 뷰」 ↔ 「MuJoCo 계산」 · 같은 캔버스를 바꿔 그린다 */
+  /** 지금 보는(같이 보기면 등록) 애니메이션이 glb 에 들어 있을 때만 · 수정 목록 60 */
+  function blenderAllowed() {
+    return blenderHoldsAnimation(blenderInfo, currentFile);
+  }
+
   async function setView(next) {
-    view = next === 'blender' && blenderInfo?.available ? 'blender' : 'mujoco';
+    view = next === 'blender' && blenderAllowed() ? 'blender' : 'mujoco';
     playing = false;
     playhead = 0;
     lastRunState = '';                    // 바꾼 뷰가 지금 도는 재생을 곧바로 따라잡게
@@ -596,8 +601,15 @@ export function createSim3dViewer({ el, getLatestState = () => null }) {
       el.sim3dBlenderLabel.classList.toggle('hidden', !blenderInfo?.available);
     }
     if (has('sim3dBlenderToggle')) {
+      const allowed = blenderAllowed();
       el.sim3dBlenderToggle.checked = view === 'blender';
-      el.sim3dBlenderToggle.disabled = blenderLoading;
+      el.sim3dBlenderToggle.disabled = blenderLoading || !allowed;
+      const why = !(blenderInfo?.animations || []).length
+        ? '로봇 팩에 이 장면이 담은 애니메이션 이름이 없어 Blender 뷰를 끕니다 (pack.yaml scene_glb.animations) · MuJoCo 뷰'
+        : `이 애니메이션의 Blender 장면 없음 · MuJoCo 뷰 (장면: ${(blenderInfo.animations || []).join(', ')})`;
+      const tip = allowed ? 'Blender 에서 구운 장면으로 봅니다' : why;
+      el.sim3dBlenderToggle.title = tip;
+      if (has('sim3dBlenderLabel')) el.sim3dBlenderLabel.title = tip;
     }
     if (has('sim3dActualToggle')) {
       el.sim3dActualToggle.checked = showActual;
@@ -671,6 +683,11 @@ export function createSim3dViewer({ el, getLatestState = () => null }) {
     if (changed) {
       frames = null; framesFileId = '';
       if (view !== 'blender') playing = false;
+      // 고른 애니메이션이 장면에 없으면 Blender 뷰를 닫고 MuJoCo 로 · 수정 목록 60
+      if (view === 'blender' && !blenderAllowed()) {
+        setView('mujoco');
+        setMessage('이 애니메이션의 Blender 장면이 없어 MuJoCo 뷰로 돌아갑니다');
+      }
       if (opened && sceneJson && usable(target)) loadFrames(target.id);
     }
     renderControls();

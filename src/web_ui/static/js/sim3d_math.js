@@ -201,3 +201,18 @@ export function followEndSec(frames = {}) {
   const total = Number(frames?.duration_sec) || 0;
   return Number.isFinite(motion) && motion > 0 ? Math.min(motion, total || motion) : total;
 }
+
+
+/** Blender 장면(glb)이 이 애니메이션을 담았나 · 수정 목록 60
+ *
+ * 서버 `blender.animations` = 팩 `pack.yaml` `scene_glb.animations` · 이름 = 파일 이름(확장자 뺌) ·
+ * 대소문자 무시 · 이름이 안 적힌 옛 팩은 알 수 없으므로 **안 보인다**.
+ */
+export function blenderHoldsAnimation(info, file) {
+  if (!info?.available || !file) return false;
+  const names = (Array.isArray(info.animations) ? info.animations : [])
+    .map((name) => String(name || '').trim().toLowerCase()).filter(Boolean);
+  if (!names.length) return false;
+  const stem = (value) => String(value || '').trim().replace(/\.json$/i, '').toLowerCase();
+  return [file.id, file.filename].some((value) => value && names.includes(stem(value)));
+}

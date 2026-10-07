@@ -5,6 +5,7 @@
 웹 업로드 검사(브리지)와 sim 실행기(`scripts/sim`)가 **같은 검사**를 쓴다.
 
     pack.yaml       name, version, created
+                    scene_glb: {animations: [floating_narration_all]}   # scene.glb 가 담은 애니메이션 (수정 목록 60)
     robot.yaml      axes: [{joint, motion_id, motor, reducer, ratio, range_deg, servo_bw_hz}]
                     drive: {profile_velocity_deg_s, profile_accel_deg_s2}   # 모터축 기준
                     env:   {settle_body, settle_s, torsion_k, torsion_c,
@@ -354,6 +355,11 @@ def inspect_pack(pack_dir: Path) -> PackReport:
     scene_glb = scene_glb_path(pack_dir)
     if scene_glb is not None:
         errors += check_scene_glb(scene_glb)
+        if not scene_glb_animations(pack_dir):
+            report.warnings.append(
+                'pack.yaml · scene_glb.animations 없음 · Blender 뷰 꺼짐 '
+                '(scene.glb 가 담은 애니메이션 이름을 적으면 그 애니메이션에서만 켜짐)'
+            )
     return report
 
 
@@ -370,6 +376,25 @@ def scene_glb_path(pack_dir: Path) -> Optional[Path]:
     """팩에 Blender 뷰 장면이 있으면 그 경로 · 없으면 None (검사는 `inspect_pack`)"""
     path = Path(pack_dir) / SCENE_GLB_NAME
     return path if path.is_file() else None
+
+
+def scene_glb_animations(pack_dir: Path) -> List[str]:
+    """scene.glb 가 담은 애니메이션 이름 · `pack.yaml` `scene_glb: {animations: [...]}` · 수정 목록 60
+
+    glb 의 클립 이름은 리그 이름(`FH_Rig_1` …)이라 어떤 애니메이션인지 알 수 없다 · 사람이 적는다 ·
+    이름 = 애니메이션 파일 이름(확장자 뺌) · 안 적힌 옛 팩은 빈 목록 → 화면이 Blender 뷰를 끈다.
+    """
+    try:
+        payload = yaml.safe_load((Path(pack_dir) / 'pack.yaml').read_text(encoding='utf-8'))
+    except (OSError, yaml.YAMLError):
+        return []
+    scene = payload.get('scene_glb') if isinstance(payload, dict) else None
+    names = scene.get('animations') if isinstance(scene, dict) else None
+    if isinstance(names, str):
+        names = [names]
+    if not isinstance(names, list):
+        return []
+    return [str(name).strip() for name in names if str(name or '').strip()]
 
 
 def check_scene_glb(path: Path) -> List[str]:
