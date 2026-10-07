@@ -352,7 +352,7 @@ export function createSim3dViewer({ el, getLatestState = () => null }) {
       // Blender 뷰를 보는 중이면 그 시간축(재생 위치)·안내는 건드리지 않는다 · 수정 목록 50
       if (view !== 'blender') {
         playhead = 0;
-        setMessage(`${fileId} · ${frames.duration_sec.toFixed(1)}초 · ${frames.t.length}프레임 (${frames.hz} Hz)`);
+        setMessage(`${fileId} · ${followEndSec(frames).toFixed(1)}초 · ${frames.t.length}프레임 (${frames.hz} Hz)`);
       }
     } catch (error) {
       frames = null; framesFileId = '';
@@ -406,15 +406,15 @@ export function createSim3dViewer({ el, getLatestState = () => null }) {
     return view === 'blender' ? Boolean(blender) : Boolean(frames);
   }
 
+  /** 재생 · 슬라이더 · 길이 표시 모두 애니메이션 길이 · MuJoCo 끝의 정착 3초는 실물에 없다 · 수정 목록 61
+   * 꼬리는 계산 결과 파일·CSV(분석)에만 남는다 · `motion_sec` 없는 옛 결과는 전체 길이 */
   function timelineSec() {
     if (view === 'blender') return blender ? blender.duration : 0;
-    return frames ? frames.duration_sec : 0;
+    return frames ? followEndSec(frames) : 0;
   }
 
-  /** 재생이 멈추는 곳 · 따라가기는 애니메이션 길이(MuJoCo 끝의 정착 3초는 실물에 없다) */
   function playEndSec() {
-    if (view === 'blender') return timelineSec();
-    return follow ? followEndSec(frames) : frames.duration_sec;
+    return timelineSec();
   }
 
   /** 지금 시각의 자세를 보는 뷰에 */
@@ -576,7 +576,7 @@ export function createSim3dViewer({ el, getLatestState = () => null }) {
       await loadBlender();
     } else {
       showTime();
-      if (frames) setMessage(`${framesFileId} · ${frames.duration_sec.toFixed(1)}초 · MuJoCo 계산`);
+      if (frames) setMessage(`${framesFileId} · ${followEndSec(frames).toFixed(1)}초 · MuJoCo 계산`);
     }
     renderControls();
   }
