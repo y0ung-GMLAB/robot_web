@@ -195,6 +195,9 @@ export const fetchSystemTime = () => request('GET', '/api/system/time', { projec
 /** 모든 PC 업데이트 · 같은 망 로봇 PC 마다 install.sh --code-only · 프로젝트와 무관 (2026-10-08) */
 export const fetchSystemUpdateAll = () => request('GET', '/api/system/update-all', { projectScoped: false, timeoutMs: 20000 });
 export const requestSystemUpdateAll = () => request('POST', '/api/system/update-all', { projectScoped: false, timeoutMs: 60000 });
+/** 시간대 · 이 PC · 같은 망 로봇 PC 전부 · 프로젝트와 무관 · 수정 목록 79 */
+export const applyTimezone = (zone) => request('POST', '/api/system/timezone', { body: { zone }, projectScoped: false, timeoutMs: 30000 });
+export const applyTimezoneAll = (zone) => request('POST', '/api/system/timezone-all', { body: { zone }, projectScoped: false, timeoutMs: 90000 });
 /** Wi-Fi · 이 PC · 프로젝트와 무관 · 수정 목록 81 */
 export const fetchWifiStatus = () => request('GET', '/api/system/wifi', { projectScoped: false });
 export const scanWifi = () => request('POST', '/api/system/wifi/scan', { projectScoped: false, timeoutMs: 40000 });

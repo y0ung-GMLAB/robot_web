@@ -26,6 +26,7 @@ from std_srvs.srv import SetBool, Trigger
 from .access_log import install_access_log_filter
 from .system_update import SystemUpdate, blocker_from_run_status
 from .wifi_settings import WifiSettings
+from .system_timezone import SystemTimezone
 from .ethercat_alias_manager import EthercatAliasError, EthercatAliasManager
 from .coordination_bridge import (
     CoordinationWebBridge, local_motion_control, local_motion_readiness,
@@ -543,6 +544,10 @@ class MotionWebBridge(Node):
         # Wi-Fi · 재생 중이면 바꾸지 않는다 (연동이 끊긴다) · 수정 목록 81
         self._wifi = WifiSettings(
             self.workspace_root,
+            blocker=lambda: blocker_from_run_status(self._cached_motion_run_status()),
+        )
+        # 시간대 · 재생 중이면 바꾸지 않는다 (바꾼 뒤 프로그램을 다시 띄운다) · 수정 목록 79
+        self._system_timezone = SystemTimezone(
             blocker=lambda: blocker_from_run_status(self._cached_motion_run_status()),
         )
         self._startup_project_context_timer = self.create_timer(
@@ -1424,6 +1429,11 @@ class MotionWebBridge(Node):
     def system_update(self):
         """이 PC 코드 갱신 (`install.sh --code-only`) · 「모든 PC 업데이트」 의 한 칸"""
         return self._system_update
+
+    @property
+    def system_timezone(self):
+        """이 PC 시간대 바꾸기 (polkit · sudo 없이) · 수정 목록 79"""
+        return self._system_timezone
 
     @property
     def wifi(self):

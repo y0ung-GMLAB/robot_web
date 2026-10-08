@@ -1175,3 +1175,4 @@ td.mapping-disabled-cell { background: transparent !important; opacity: 0.55; }
 .wifi-static:not(.hidden) { display: contents; }
 .wifi-pending:not(.hidden) { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; border-color: var(--yellow); }
 .wifi-pending > span { flex: 1 1 260px; }
+#systemTimezoneMessage { white-space: pre-line; }

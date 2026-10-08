@@ -127,11 +127,14 @@ def test_start_all_asks_each_online_robot_then_this_pc_last():
     local = _Local()
     result = system_update.start_all(PCS, local, http=http)
 
-    assert calls == [('POST', 'http://10.0.0.11:8000/api/system/update')]
+    assert calls == [
+        ('POST', 'http://10.0.0.20:8100/api/system/update'),   # 스피커도 같은 주소로 (2026-10-08)
+        ('POST', 'http://10.0.0.11:8000/api/system/update'),
+    ]
     assert local.started is True
     by_id = {row['pc_id']: row for row in result['pcs']}
     assert by_id['floating2']['state'] == 'offline'
-    assert by_id['speaker']['state'] == 'manual'
+    assert by_id['speaker']['state'] == 'running'
     assert [row['pc_id'] for row in result['pcs']][-1] == 'floating4', '이 PC 는 맨 뒤'
     assert result['success'] is True
 
@@ -157,3 +160,21 @@ def test_status_all_reports_whether_robot_versions_match():
     assert system_update.status_all(pcs, local, http=http)['same_version'] is True
     local.status = lambda: {'state': 'done', 'git_hash': 'other'}
     assert system_update.status_all(pcs, local, http=http)['same_version'] is False
+
+
+def test_an_old_speaker_app_without_the_endpoint_gets_the_terminal_hint():
+    def http(url, *, method='GET', timeout):
+        if ':8100/' in url:
+            raise OSError('404')
+        return {'success': True, 'state': 'running'}
+
+    result = system_update.start_all(PCS, _Local(), http=http)
+    speaker = next(row for row in result['pcs'] if row['pc_id'] == 'speaker')
+    assert speaker['state'] == 'manual' and 'install_speaker.sh' in speaker['message']
+
+
+def test_the_speaker_runs_its_own_installer(tmp_path):
+    runner = _Runner()
+    SystemUpdate(tmp_path, run=runner, command=system_update.SPEAKER_COMMAND).start()
+    [launch] = [c for c in runner.calls if c[0] == 'systemd-run']
+    assert 'bash scripts/install_speaker.sh --code-only' in launch[-1]

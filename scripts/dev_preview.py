@@ -584,7 +584,28 @@ def _preview_wifi_confirm():
     return {**_preview_wifi_status(), 'message': 'office 유지'}
 
 
+_TZ = {'zone': 'Asia/Seoul'}
+
+
+def _preview_time():
+    return {'clock': {'timezone': _TZ['zone'], 'utc_offset': '+0900' if _TZ['zone'] == 'Asia/Seoul' else '+0200',
+                      'ntp_synced': True, 'local_time': time.strftime('%Y-%m-%dT%H:%M:%S')},
+            'timezones': ['Asia/Seoul', 'Europe/Paris', 'America/New_York', 'Asia/Taipei']}
+
+
+def _preview_tz_all():
+    _TZ['zone'] = 'Europe/Paris'
+    rows = [{'pc_id': pc['pc_id'], 'display_name': pc['pc_id'], 'role': pc['role'], 'is_local': pc['is_local'],
+             'success': pc['online'] or pc['is_local'],
+             'message': ('스피커 · 스케줄이 없어 시간대와 무관 · 건너뜀' if pc['role'] == 'speaker'
+                         else ('Asia/Seoul → Europe/Paris · 2초 뒤 프로그램을 다시 띄웁니다' if pc['online'] else '연결 안 됨 · 건너뜀'))}
+            for pc in _preview_network_pcs()]
+    return {'success': False, 'message': '로봇 PC 3/4대 Europe/Paris', 'pcs': rows, 'clock': _preview_time()['clock']}
+
+
 CANNED = {
+    ('GET', '/api/system/time'): _preview_time,
+    ('POST', '/api/system/timezone-all'): _preview_tz_all,
     ('GET', '/api/system/wifi'): _preview_wifi_status,
     ('POST', '/api/system/wifi/scan'): lambda: {'success': True, 'message': '3개 찾음', 'networks': [
         {'ssid': 'shop-5G', 'signal': 78, 'security': 'WPA2', 'in_use': True},

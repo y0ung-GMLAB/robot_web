@@ -49,6 +49,17 @@ def _as_int(value, fallback=0):
         return fallback
 
 
+def _updater():
+    """robot_web 의 같은 업데이트 모듈 · 이 앱은 robot_web/speaker_app 안에서 돈다"""
+    import sys
+    workspace = os.path.dirname(APP_DIR)
+    bridge_src = os.path.join(workspace, "src", "web_bridge")
+    if bridge_src not in sys.path:
+        sys.path.insert(0, bridge_src)
+    from motion_web_bridge.system_update import SPEAKER_COMMAND, SystemUpdate
+    return SystemUpdate(workspace, command=SPEAKER_COMMAND)
+
+
 def create_app(state):
     app = FastAPI(title="스피커 트리거", docs_url=None, redoc_url=None)
 
@@ -71,6 +82,15 @@ def create_app(state):
     @app.get("/api/state")
     def get_state():
         return JSONResponse(state.snapshot())
+
+    # ---- 업데이트 · 로봇 PC 의 「모든 PC 업데이트」 가 부른다 (2026-10-08) ----
+    @app.get("/api/system/update")
+    def system_update_status():
+        return JSONResponse(_updater().status())
+
+    @app.post("/api/system/update")
+    def system_update_start():
+        return JSONResponse(_updater().start())
 
     # ---- 모드 ---------------------------------------------------------
     @app.post("/api/mode")

@@ -60,6 +60,7 @@ test('프로젝트와 무관한 것만 검사를 건너뛴다', () => {
 
   // 모든 PC 업데이트는 프로젝트와 무관 · PC 의 코드를 바꾼다 (2026-10-08)
   assert.deepEqual(skipped.sort(), [
+    'applyTimezone', 'applyTimezoneAll',
     'confirmWifi', 'connectWifi', 'fetchDocument', 'fetchDocumentList', 'fetchSystemTime',
     'fetchSystemUpdateAll', 'fetchWifiStatus', 'requestSystemUpdateAll', 'rollbackWifi', 'scanWifi',
   ]);

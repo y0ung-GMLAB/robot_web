@@ -30,6 +30,9 @@ TAIL_LINES = 15
 REMOTE_START_TIMEOUT_SEC = 5.0
 REMOTE_STATUS_TIMEOUT_SEC = 2.5
 SPEAKER_HINT = '스피커 PC 는 그 PC 터미널에서 · bash ~/robot_web/scripts/install_speaker.sh'
+ROBOT_COMMAND = 'bash scripts/install.sh --code-only'
+#: 스피커 PC · speaker_app 이 이 모듈을 그대로 쓴다(같은 저장소) · 2026-10-08
+SPEAKER_COMMAND = 'bash scripts/install_speaker.sh --code-only'
 
 
 class SystemUpdate:
@@ -42,11 +45,13 @@ class SystemUpdate:
         run: Callable[..., Any] = subprocess.run,
         now: Callable[[], float] = time.time,
         blocker: Callable[[], str] = lambda: '',
+        command: str = ROBOT_COMMAND,
     ) -> None:
         self.workspace_root = Path(workspace_root)
         self._run = run
         self._now = now
         self._blocker = blocker
+        self._command = command
 
     # ------------------------------------------------------------------ #
 
@@ -141,7 +146,7 @@ class SystemUpdate:
         log = self.log_dir / f'update-{stamp}.log'
         rc = self.log_dir / f'update-{stamp}.rc'
         unit = f'robot-web-update-{stamp}'
-        shell = f'bash scripts/install.sh --code-only > "{log}" 2>&1; echo $? > "{rc}"'
+        shell = f'{self._command} > "{log}" 2>&1; echo $? > "{rc}"'
         command = [
             'systemd-run', '--user', '--unit', unit, '--collect', '--quiet',
             f'--working-directory={self.workspace_root}',
@@ -165,9 +170,10 @@ class SystemUpdate:
 # 같은 망의 로봇 PC 전부
 # ---------------------------------------------------------------------- #
 
-def _http_json(url: str, *, method: str = 'GET', timeout: float) -> Dict[str, Any]:
+def _http_json(url: str, *, method: str = 'GET', timeout: float, body: Optional[Mapping[str, Any]] = None) -> Dict[str, Any]:
+    data = json.dumps(dict(body or {})).encode('utf-8') if method == 'POST' else None
     request = urllib.request.Request(
-        url, method=method, data=b'{}' if method == 'POST' else None,
+        url, method=method, data=data,
         headers={'Content-Type': 'application/json'},
     )
     with urllib.request.urlopen(request, timeout=timeout) as response:  # noqa: S310 · 같은 망 PC
@@ -206,10 +212,17 @@ def start_all(
         if not isinstance(pc, Mapping):
             continue
         row = _row(pc)
-        if row['role'] == 'speaker':
-            rows.append({**row, 'state': 'manual', 'message': SPEAKER_HINT})
-        elif not pc.get('online', True) and not row['is_local']:
+        if not pc.get('online', True) and not row['is_local']:
             rows.append({**row, 'state': 'offline', 'message': '연결 안 됨 · 건너뜀'})
+        elif row['role'] == 'speaker' and row['web_url']:
+            # 스피커 PC · 그 앱의 같은 주소를 부른다 · 옛 스피커 앱이면 안내만
+            try:
+                result = http(f"{row['web_url']}/api/system/update", method='POST', timeout=REMOTE_START_TIMEOUT_SEC)
+                rows.append({**row, **result, 'state': result.get('state') or ('running' if result.get('success') else 'failed')})
+            except (OSError, ValueError, urllib.error.URLError):
+                rows.append({**row, 'state': 'manual', 'message': SPEAKER_HINT})
+        elif row['role'] == 'speaker':
+            rows.append({**row, 'state': 'manual', 'message': SPEAKER_HINT})
     for target in robot_targets([pc for pc in (network_pcs or []) if isinstance(pc, Mapping)
                                  and (pc.get('online', True) or pc.get('is_local'))]):
         if target['is_local']:
@@ -242,6 +255,12 @@ def status_all(
             continue
         row = _row(pc)
         if row['role'] == 'speaker':
+            if pc.get('online', True) and row['web_url']:
+                try:
+                    rows.append({**row, **http(f"{row['web_url']}/api/system/update", timeout=REMOTE_STATUS_TIMEOUT_SEC)})
+                    continue
+                except (OSError, ValueError, urllib.error.URLError):
+                    pass
             rows.append({**row, 'state': 'manual', 'message': SPEAKER_HINT, 'git_hash': str(pc.get('git_hash') or '')})
             continue
         if row['is_local']:

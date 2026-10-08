@@ -10,7 +10,7 @@ from fastapi.responses import FileResponse, Response
 from ament_index_python.packages import get_package_share_directory
 from motion_common import local_clock
 
-from motion_web_bridge import desktop_shortcut, system_update
+from motion_web_bridge import desktop_shortcut, system_timezone, system_update
 from motion_web_bridge.index_composer import IndexComposer
 
 
@@ -164,6 +164,21 @@ def register_system_routes(app: FastAPI, bridge, project_call) -> None:
     @app.post('/api/system/update')
     async def system_update_start():
         return await asyncio.to_thread(bridge.system_update.start)
+
+    # 시간대 · 이 PC · 같은 망 로봇 PC 전부 · 수정 목록 79 (2026-10-08)
+    @app.post('/api/system/timezone')
+    async def system_timezone_apply(request: Request):
+        body = await request.json()
+        zone = body.get('zone') if isinstance(body, dict) else ''
+        return await asyncio.to_thread(bridge.system_timezone.apply, zone)
+
+    @app.post('/api/system/timezone-all')
+    async def system_timezone_apply_all(request: Request):
+        body = await request.json()
+        zone = body.get('zone') if isinstance(body, dict) else ''
+        return await asyncio.to_thread(
+            lambda: system_timezone.apply_all(_network_pcs(), zone, bridge.system_timezone)
+        )
 
     # Wi-Fi · 이 PC · 수정 목록 81 (2026-10-08)
     @app.get('/api/system/wifi')

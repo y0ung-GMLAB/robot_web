@@ -19,14 +19,21 @@ OLD_APP_DIR="${HOME}/speaker_app"
 UNIT_DIR="${HOME}/.config/systemd/user"
 UNIT="speaker-app.service"
 DRY_RUN=false
+CODE_ONLY=false
 
 for arg in "$@"; do
   case "${arg}" in
     --dry-run) DRY_RUN=true; export SITE_DRY_RUN=1 ;;
+    # 관리자 비밀번호 없이 · 코드 받기 → 그룹 메시지 빌드 → 앱 재시작 (웹 「모든 PC 업데이트」 · 2026-10-08)
+    --code-only) CODE_ONLY=true ;;
     -h|--help) sed -n '2,13p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; exit 0 ;;
-    *) echo "알 수 없는 옵션: ${arg} (--dry-run)" >&2; exit 2 ;;
+    *) echo "알 수 없는 옵션: ${arg} (--dry-run · --code-only)" >&2; exit 2 ;;
   esac
 done
+if [[ "${CODE_ONLY}" == true ]]; then
+  # 물을 사람이 없다 · sudo 가 필요해지면 묻지 말고 바로 실패
+  sudo() { command sudo -n "$@"; }
+fi
 
 step() { echo; echo "== $*"; }
 run() {
@@ -50,11 +57,14 @@ if [[ "${ID:-}" != "ubuntu" || "${VERSION_ID:-}" != "22.04" ]]; then
 fi
 echo "작업공간 · ${WORKSPACE_DIR}"
 echo "스피커 앱 · ${APP_DIR}"
-if [[ "${DRY_RUN}" != true ]] && ! sudo -n true 2>/dev/null; then
+if [[ "${DRY_RUN}" != true && "${CODE_ONLY}" != true ]] && ! sudo -n true 2>/dev/null; then
   echo "관리자 권한이 필요합니다 · 비밀번호를 한 번만 입력하세요"
   sudo -v
 fi
 
+if [[ "${CODE_ONLY}" == true ]]; then
+  step "1. 건너뜀 · 코드만 갱신 (현장 준비는 첫 설치 때 끝남)"
+else
 step "1. 자동 업데이트·절전 끄기 · 로그아웃해도 유지 · 방화벽 같은 망 허용"
 site_disable_interruptions
 if loginctl show-user "$(id -un)" 2>/dev/null | grep -q '^Linger=yes'; then
@@ -63,6 +73,7 @@ else
   site_run sudo loginctl enable-linger "$(id -un)"
 fi
 site_firewall
+fi
 
 step "2. 코드 갱신"
 if git -C "${WORKSPACE_DIR}" remote get-url origin >/dev/null 2>&1; then
@@ -74,6 +85,9 @@ if git -C "${WORKSPACE_DIR}" remote get-url origin >/dev/null 2>&1; then
 fi
 echo "코드 · $(git -C "${WORKSPACE_DIR}" log --oneline -1 2>/dev/null || echo '(git 아님)')"
 
+if [[ "${CODE_ONLY}" == true ]]; then
+  step "3. 건너뜀 · 코드만 갱신 (프로그램은 첫 설치 때 깔림)"
+else
 step "3. 프로그램 설치 (ROS 2 기본 · 빌드 도구 · 파이썬 · ALSA)"
 if [[ ! -f /etc/apt/sources.list.d/ros2.list ]]; then
   run sudo apt-get update
@@ -94,6 +108,7 @@ run sudo apt-get install -y \
 if ! id -nG "$(id -un)" | tr ' ' '\n' | grep -qx audio; then
   run sudo usermod -aG audio "$(id -un)"
   site_mark_reboot "audio 그룹"
+fi
 fi
 
 step "4. 그룹 메시지 빌드 (모터 쪽은 빌드하지 않음)"
@@ -149,7 +164,9 @@ else
 fi
 
 step "6. 사운드 장치 독점 · 카드 자동 선택"
-run bash "${APP_DIR}/deploy/setup-audio.sh" || echo "!! 사운드 장치 독점 실패 · 소리가 안 나면 다시 실행" >&2
+if [[ "${CODE_ONLY}" != true ]]; then
+  run bash "${APP_DIR}/deploy/setup-audio.sh" || echo "!! 사운드 장치 독점 실패 · 소리가 안 나면 다시 실행" >&2
+fi
 if [[ "${DRY_RUN}" != true ]]; then
   # 지금 설정된 카드가 없으면 HDMI 가 아닌 첫 카드로 · 이미 있으면 손대지 않는다
   APP_DIR="${APP_DIR}" python3 - <<'PY' || true

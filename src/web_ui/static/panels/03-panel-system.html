@@ -115,6 +115,28 @@
             </div>
           </section>
 
+          <!-- 시간대 · 이 PC 또는 같은 망 로봇 PC 전부 · 수정 목록 79 (2026-10-08 · §6-291 「화면에서 뺌」 을 대체)
+               설치가 이 계정에 시간대 변경만 허용(polkit) · 바꾸면 2초 뒤 프로그램을 다시 띄워 스케줄이 새 시간대로 -->
+          <section class="project-system-manager timezone-card" aria-label="시간대">
+            <div class="section-head compact">
+              <strong>시간대</strong>
+              <span>스케줄은 이 PC 시각 기준 · 로봇 PC 는 모두 같아야 · 도시 이름으로</span>
+            </div>
+            <div class="status-strip">
+              <div><span>지금</span><strong id="systemTimezoneNow">-</strong></div>
+            </div>
+            <div class="wifi-form">
+              <label class="manual-field"><span>시간대 (예 Asia/Seoul · Europe/Paris)</span>
+                <input id="systemTimezonePick" type="text" list="systemTimezoneList" autocomplete="off" spellcheck="false">
+                <datalist id="systemTimezoneList"></datalist>
+              </label>
+              <button id="systemTimezoneApplyButton" type="button">이 PC 에 적용</button>
+              <button id="systemTimezoneApplyAllButton" class="primary" type="button">모든 로봇 PC 에 적용</button>
+            </div>
+            <div id="systemTimezoneMismatch" class="registry-message hidden" role="status"></div>
+            <div id="systemTimezoneMessage" class="registry-message hidden" role="status"></div>
+          </section>
+
           <!-- Wi-Fi · 이 PC · 바꾸면 60초 안에 「유지」 안 누르면 이전 연결로 되돌림 · 수정 목록 81 (2026-10-08) -->
           <section class="project-system-manager wifi-card" aria-label="Wi-Fi">
             <div class="section-head compact">
