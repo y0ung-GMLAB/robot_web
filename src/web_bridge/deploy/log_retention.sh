@@ -30,3 +30,52 @@ prepare_ros_log_dir() {
   export ROS_LOG_DIR="${dir}"
   return 0
 }
+
+# 크기로 돌리기 · 수정 목록 77 (2026-10-08) · 날짜 정리(위)는 파일 단위라 오래 도는 프로세스의
+# 파일 하나는 줄지 않는다(밤샘 13 h · 110 MB) · <파일> 이 <최대 MB> 를 넘으면 .1 .2 … 로 밀고
+# 지금 파일은 비운다(copytruncate · 쓰는 쪽이 `>>` 이어 쓰기라 안전 · 옮기는 순간 몇 줄은 빠질 수 있음)
+#
+#   rotate_log_by_size <파일> [최대 MB] [남길 개수]   한 번 검사
+#   watch_log_size <파일>                              부른 셸이 살아 있는 동안 LOG_CHECK_SEC 마다 검사
+#
+# LOG_MAX_MB (기본 50) · LOG_KEEP (기본 3 · 최대 ~200 MB) · LOG_CHECK_SEC (기본 300) · 0 이면 끔
+
+LOG_MAX_MB="${LOG_MAX_MB:-50}"
+LOG_KEEP="${LOG_KEEP:-3}"
+LOG_CHECK_SEC="${LOG_CHECK_SEC:-300}"
+
+rotate_log_by_size() {
+  local file="$1"
+  local max_mb="${2:-${LOG_MAX_MB}}"
+  local keep="${3:-${LOG_KEEP}}"
+  [[ -f "${file}" ]] || return 0
+  [[ "${max_mb}" =~ ^[0-9]+$ && "${keep}" =~ ^[0-9]+$ ]] || return 0
+  (( max_mb > 0 && keep > 0 )) || return 0
+  local size
+  size="$(stat -c %s -- "${file}" 2>/dev/null)" || return 0
+  (( size > max_mb * 1024 * 1024 )) || return 0
+  local i
+  for (( i = keep - 1; i >= 1; i-- )); do
+    if [[ -f "${file}.${i}" ]]; then
+      mv -f -- "${file}.${i}" "${file}.$((i + 1))" 2>/dev/null || true
+    fi
+  done
+  cp -f -- "${file}" "${file}.1" 2>/dev/null || return 0
+  : > "${file}" 2>/dev/null || true
+  return 0
+}
+
+watch_log_size() {
+  local file="$1"
+  local parent="$$"
+  [[ "${LOG_CHECK_SEC}" =~ ^[0-9]+$ ]] || return 0
+  (( LOG_CHECK_SEC > 0 )) || return 0
+  # 부른 셸이 끝나면(정상 · 강제 종료 모두) 같이 끝난다 · 남아 도는 감시가 없게
+  (
+    while kill -0 "${parent}" 2>/dev/null; do
+      sleep "${LOG_CHECK_SEC}" || break
+      rotate_log_by_size "${file}" || true
+    done
+  ) </dev/null >/dev/null 2>&1 &
+  return 0
+}

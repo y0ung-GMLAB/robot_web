@@ -23,6 +23,7 @@ from rclpy.qos import DurabilityPolicy, QoSProfile, ReliabilityPolicy
 from std_msgs.msg import String
 from std_srvs.srv import SetBool, Trigger
 
+from .access_log import install_access_log_filter
 from .ethercat_alias_manager import EthercatAliasError, EthercatAliasManager
 from .coordination_bridge import (
     CoordinationWebBridge, local_motion_control, local_motion_readiness,
@@ -2530,7 +2531,11 @@ def main(args=None) -> None:
 
     app = create_app(bridge)
     try:
-        uvicorn.run(app, host=bridge.host, port=bridge.port, log_level='info')
+        # 로깅 설정은 Config 가 만들 때 한다 · 그 뒤에 거름망을 달아야 지워지지 않는다 ·
+        # 성공한 GET(화면 폴링) 접속 기록을 버린다 · 수정 목록 77
+        config = uvicorn.Config(app, host=bridge.host, port=bridge.port, log_level='info')
+        install_access_log_filter()
+        uvicorn.Server(config).run()
     finally:
         bridge.destroy_node()
         if rclpy.ok():
