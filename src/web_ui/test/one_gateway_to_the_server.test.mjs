@@ -58,7 +58,10 @@ test('프로젝트와 무관한 것만 검사를 건너뛴다', () => {
   const skipped = [...API.matchAll(/export const (\w+)[^;]*projectScoped: false/g)]
     .map((match) => match[1]);
 
-  assert.deepEqual(skipped.sort(), ['fetchDocument', 'fetchDocumentList', 'fetchSystemTime']);
+  // 모든 PC 업데이트는 프로젝트와 무관 · PC 의 코드를 바꾼다 (2026-10-08)
+  assert.deepEqual(skipped.sort(), [
+    'fetchDocument', 'fetchDocumentList', 'fetchSystemTime', 'fetchSystemUpdateAll', 'requestSystemUpdateAll',
+  ]);
 });
 
 test('스케줄은 프로젝트에 매인 것으로 다룬다', () => {

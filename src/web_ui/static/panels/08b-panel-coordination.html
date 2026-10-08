@@ -24,6 +24,25 @@
           </div>
         </section>
 
+        <!-- 모든 PC 업데이트 · 같은 망 로봇 PC 마다 코드 받기 → 빌드 → 재시작 (install.sh --code-only) · 2026-10-08 -->
+        <section class="project-system-manager" aria-label="모든 PC 업데이트">
+          <div class="section-head compact">
+            <strong>모든 PC 업데이트</strong>
+            <span>같은 망 로봇 PC 를 최신 코드로 · 재생 중인 PC 는 거절 · 이 PC 는 맨 마지막 · 스피커 PC 는 그 PC 터미널에서</span>
+          </div>
+          <div class="registry-actions">
+            <button id="systemUpdateAllButton" class="primary" type="button">모든 PC 업데이트</button>
+            <button id="systemUpdateRefreshButton" type="button">상태 보기</button>
+          </div>
+          <div id="systemUpdateMessage" class="registry-message hidden" role="status"></div>
+          <div class="table-wrap">
+            <table class="coordination-peer-table">
+              <thead><tr><th>PC</th><th>업데이트</th><th>버전 (Git)</th><th>마지막 줄</th></tr></thead>
+              <tbody id="systemUpdateRows"><tr><td colspan="4" class="empty">「상태 보기」 를 누르면 PC 마다 보입니다</td></tr></tbody>
+            </table>
+          </div>
+        </section>
+
           <section class="project-system-manager coordination-settings-card" aria-label="연동 상태와 세션">
           <div class="section-head compact">
             <strong>1. 연동 상태와 참가</strong>

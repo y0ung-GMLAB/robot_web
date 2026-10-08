@@ -41,6 +41,7 @@ import {
 import { installFeedbackPresentation } from './ui_feedback.js';
 import { createServoAlarmController } from './servo_alarm.js';
 import { createCoordinationController } from './coordination.js';
+import { createSystemUpdateController } from './system_update.js';
 import { createRobotPackController } from './robot_pack.js';
 import { guardDocumentDrops } from './drop_files.js';
 import { inDegView, motionRunStatusInDeg } from './unit_view.js';
@@ -81,6 +82,8 @@ const appState = {
 };
 const workspaceRouteState = createWorkspaceRouteState('monitoring');
 const coordination = createCoordinationController({ el });
+// 모든 PC 업데이트 · 같은 망 PC 표 아래 (2026-10-08)
+const systemUpdate = createSystemUpdateController({ el });
 const robotPack = createRobotPackController({ el });
 let projectExplorer = null;
 const RESTART_READY_STABLE_MS = 3500;
@@ -1745,6 +1748,7 @@ servoAlarm.bindEvents();
 robotPack.bindEvents();
 robotPack.refresh();
 coordination.start();
+systemUpdate.bindEvents();
 renderWorkspacePanel();
 connectSocket();
 fetchStatus();

@@ -24,6 +24,7 @@ from std_msgs.msg import String
 from std_srvs.srv import SetBool, Trigger
 
 from .access_log import install_access_log_filter
+from .system_update import SystemUpdate, blocker_from_run_status
 from .ethercat_alias_manager import EthercatAliasError, EthercatAliasManager
 from .coordination_bridge import (
     CoordinationWebBridge, local_motion_control, local_motion_readiness,
@@ -532,6 +533,11 @@ class MotionWebBridge(Node):
             self,
             self.workspace_root,
             self.current_project_generation,
+        )
+        # 웹에서 업데이트 · 재생 중이면 거절 (재시작이 모터를 세운다) · 2026-10-08
+        self._system_update = SystemUpdate(
+            self.workspace_root,
+            blocker=lambda: blocker_from_run_status(self._cached_motion_run_status()),
         )
         self._startup_project_context_timer = self.create_timer(
             1.0, self._execution_context.schedule_reconcile
@@ -1407,6 +1413,15 @@ class MotionWebBridge(Node):
     def motor_event_log(self):
         """모터 사건 기록"""
         return self._motor_event_log
+
+    @property
+    def system_update(self):
+        """이 PC 코드 갱신 (`install.sh --code-only`) · 「모든 PC 업데이트」 의 한 칸"""
+        return self._system_update
+
+    def _cached_motion_run_status(self) -> Dict[str, Any]:
+        with self._motion_run_lock:
+            return dict(self._motion_run_status) if self._motion_run_status else {}
 
     @property
     def coordination(self):

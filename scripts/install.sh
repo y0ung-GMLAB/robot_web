@@ -62,23 +62,35 @@ trap 'report_failure "$?" "${LINENO}" "${BASH_COMMAND}"' ERR
 #   --resume     재부팅 뒤 이어가기 (motion-site-resume.service 가 부른다 · 손으로 쳐도 됨)
 #   --dry-run    바꾸지 않고 할 일만 찍는다 (빌드·설치는 건너뜀)
 #   --no-reboot  재부팅이 필요해도 스스로 재부팅하지 않는다
+#   --code-only  관리자 비밀번호 없이 · 코드 받기 → 빌드 → 서비스 재시작만 (웹 「모든 PC 업데이트」 가 쓴다 ·
+#                이미 한 번 설치된 PC 전용 · 새 시스템 패키지가 필요하면 멈추고 터미널 설치를 안내)
 # 옵션 없이 치면 전과 같다 · 이미 설치된 PC 의 코드 갱신 (현장 준비는 손대지 않는다)
 SITE_MODE=false
 RESUME_MODE=false
 DRY_RUN=false
 AUTO_REBOOT=true
+CODE_ONLY=false
 for arg in "$@"; do
   case "${arg}" in
     --site) SITE_MODE=true ;;
     --resume) RESUME_MODE=true ;;
     --dry-run) DRY_RUN=true; export SITE_DRY_RUN=1 ;;
     --no-reboot) AUTO_REBOOT=false ;;
+    --code-only) CODE_ONLY=true ;;
     -h|--help)
       sed -n '/^# 옵션 · 수정 목록 11/,/^# 옵션 없이/p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'
       exit 0 ;;
-    *) echo "알 수 없는 옵션: ${arg} (--site · --resume · --dry-run · --no-reboot)" >&2; exit 2 ;;
+    *) echo "알 수 없는 옵션: ${arg} (--site · --resume · --dry-run · --no-reboot · --code-only)" >&2; exit 2 ;;
   esac
 done
+if [[ "${CODE_ONLY}" == true && ( "${SITE_MODE}" == true || "${RESUME_MODE}" == true ) ]]; then
+  echo "--code-only 는 --site · --resume 과 같이 쓸 수 없습니다" >&2
+  exit 2
+fi
+if [[ "${CODE_ONLY}" == true ]]; then
+  # 비밀번호를 물을 사람이 없다(웹에서 돈다) · sudo 가 필요해지면 묻지 말고 바로 실패한다
+  sudo() { command sudo -n "$@"; }
+fi
 # shellcheck disable=SC1091
 source "${SCRIPT_DIR}/setup/site.sh"
 if [[ "${MOTION_SITE_RESUME:-}" == "1" ]]; then RESUME_MODE=true; fi
@@ -97,6 +109,10 @@ preflight_checks() {
     echo "!! Secure Boot 가 켜져 있습니다 · EtherCAT(AC 서보)이 안 될 수 있습니다 · BIOS 에서 Secure Boot 를 끄세요 (docs/설치_101.md)" >&2
   fi
   # sudo 는 여러 단계에서 쓴다 · 중간에 물어 멈추지 않게 여기서 한 번만 받는다
+  if [[ "${CODE_ONLY}" == true ]]; then
+    echo "코드만 갱신 · 관리자 비밀번호 없이 (코드 받기 → 빌드 → 서비스 재시작)"
+    return 0
+  fi
   if [[ "${DRY_RUN}" == true ]]; then
     echo "[dry-run] 바꾸지 않습니다 · 할 일만 찍습니다"
     return 0
@@ -331,7 +347,15 @@ build_workspace() {
   set +u
   source /opt/ros/humble/setup.bash
   set -u
-  rosdep install --from-paths "${WORKSPACE_DIR}/src" --ignore-src -r -y
+  if [[ "${CODE_ONLY}" == true ]]; then
+    # 새 시스템 패키지를 깔려면 관리자 권한이 필요하다 · 빠진 것이 있으면 여기서 알리고 멈춘다
+    if ! rosdep check --from-paths "${WORKSPACE_DIR}/src" --ignore-src; then
+      echo "!! 이번 코드에 새 시스템 패키지가 필요합니다 · 이 PC 터미널에서 bash scripts/install.sh 로 설치하세요" >&2
+      return 1
+    fi
+  else
+    rosdep install --from-paths "${WORKSPACE_DIR}/src" --ignore-src -r -y
+  fi
   # 지우고 처음부터 빌드한다 · §6-99
   #
   # `colcon` 은 **지워진 파일을 정리하지 않는다** · 꾸러미에서 파일이 빠지면
@@ -523,20 +547,24 @@ fi
 print_step "2. Git 코드 수신"
 sync_git_repository
 
-print_step "3. ROS 2 저장소 확인"
-ensure_ros_apt_source
+if [[ "${CODE_ONLY}" == true ]]; then
+  print_step "3~6. 건너뜀 · 코드만 갱신 (시스템 패키지 · 권한 · rosdep 은 첫 설치 때 끝남)"
+else
+  print_step "3. ROS 2 저장소 확인"
+  ensure_ros_apt_source
 
-print_step "4. 필수 프로그램 설치"
-install_system_packages
+  print_step "4. 필수 프로그램 설치"
+  install_system_packages
 
-print_step "4-1. 로봇 팩 검사기 (uv · MuJoCo)"
-install_uv_and_mujoco
+  print_step "4-1. 로봇 팩 검사기 (uv · MuJoCo)"
+  install_uv_and_mujoco
 
-print_step "5. 사용자 권한·언어 설정"
-configure_locale_and_groups
+  print_step "5. 사용자 권한·언어 설정"
+  configure_locale_and_groups
 
-print_step "6. rosdep 초기화"
-initialize_rosdep
+  print_step "6. rosdep 초기화"
+  initialize_rosdep
+fi
 
 print_step "7. EtherCAT 경로 확인"
 resolve_ethercat_paths

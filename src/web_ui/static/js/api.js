@@ -192,6 +192,9 @@ export const deleteSchedule = (scheduleId) =>
 // --------------------------------------------------------------------------- //
 
 export const fetchSystemTime = () => request('GET', '/api/system/time', { projectScoped: false });
+/** 모든 PC 업데이트 · 같은 망 로봇 PC 마다 install.sh --code-only · 프로젝트와 무관 (2026-10-08) */
+export const fetchSystemUpdateAll = () => request('GET', '/api/system/update-all', { projectScoped: false, timeoutMs: 20000 });
+export const requestSystemUpdateAll = () => request('POST', '/api/system/update-all', { projectScoped: false, timeoutMs: 60000 });
 
 export const fetchDocumentList = () => request('GET', '/api/docs', { projectScoped: false });
 

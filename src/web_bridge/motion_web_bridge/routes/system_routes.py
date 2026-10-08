@@ -10,7 +10,7 @@ from fastapi.responses import FileResponse, Response
 from ament_index_python.packages import get_package_share_directory
 from motion_common import local_clock
 
-from motion_web_bridge import desktop_shortcut
+from motion_web_bridge import desktop_shortcut, system_update
 from motion_web_bridge.index_composer import IndexComposer
 
 
@@ -155,6 +155,31 @@ def register_system_routes(app: FastAPI, bridge, project_call) -> None:
     @app.get('/api/coordination')
     async def coordination_status():
         return await asyncio.to_thread(bridge.coordination.snapshot)
+
+    # 웹에서 업데이트 · 이 PC · 같은 망 로봇 PC 전부 (2026-10-08)
+    @app.get('/api/system/update')
+    async def system_update_status():
+        return await asyncio.to_thread(bridge.system_update.status)
+
+    @app.post('/api/system/update')
+    async def system_update_start():
+        return await asyncio.to_thread(bridge.system_update.start)
+
+    def _network_pcs():
+        runtime = bridge.coordination.snapshot().get('runtime') or {}
+        return runtime.get('network_pcs') if isinstance(runtime, dict) else []
+
+    @app.get('/api/system/update-all')
+    async def system_update_all_status():
+        return await asyncio.to_thread(
+            lambda: system_update.status_all(_network_pcs(), bridge.system_update)
+        )
+
+    @app.post('/api/system/update-all')
+    async def system_update_all_start():
+        return await asyncio.to_thread(
+            lambda: system_update.start_all(_network_pcs(), bridge.system_update)
+        )
 
     @app.put('/api/coordination/settings')
     async def update_coordination_settings(request: Request):

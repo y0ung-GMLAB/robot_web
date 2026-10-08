@@ -527,7 +527,41 @@ def _preview_network_pcs():
     ]
 
 
+_UPDATE = {'started': None}
+
+
+def _preview_update_rows():
+    """모든 PC 업데이트 흉내 · 누르면 업데이트 중 → 응답 없음 → 완료 (몇 초) · 2026-10-08"""
+    started = _UPDATE['started']
+    rows = []
+    for index, pc in enumerate(_preview_network_pcs()):
+        row = {k: pc[k] for k in ('pc_id', 'display_name', 'role', 'is_local', 'git_hash')}
+        if pc['role'] == 'speaker':
+            row.update(state='manual', message='스피커 PC 는 그 PC 터미널에서 · bash ~/robot_web/scripts/install_speaker.sh')
+        elif not pc['online']:
+            row.update(state='offline', message='연결 안 됨')
+        elif started is None:
+            row.update(state='idle')
+        else:
+            age = time.time() - started - index * 2
+            if age < 4:
+                row.update(state='running', before_hash=pc['git_hash'], tail=['== 8. 전체 빌드', '2/2 · 나머지 전부'])
+            elif age < 7:
+                row.update(state='unreachable', message='응답 없음 · 업데이트 중이면 잠시 뒤 돌아옵니다')
+            else:
+                row.update(state='done', before_hash=pc['git_hash'], git_hash='d00d123', exit_code=0, tail=['설치 완료'])
+        rows.append(row)
+    return {'success': True, 'pcs': rows, 'same_version': started is not None}
+
+
+def _preview_update_start():
+    _UPDATE['started'] = time.time()
+    return {**_preview_update_rows(), 'message': '3대 업데이트 시작 · 이 PC 웹은 잠깐 끊겼다 돌아옵니다'}
+
+
 CANNED = {
+    ('GET', '/api/system/update-all'): _preview_update_rows,
+    ('POST', '/api/system/update-all'): _preview_update_start,
     ('GET', '/api/status'): snapshot,
     ('GET', '/api/coordination'): lambda: {
         'success': True, 'node_connected': True, 'config_error': '',
