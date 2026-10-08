@@ -330,7 +330,9 @@ clean_dead_dds_segments() {
     fi
   done
   local count
-  count=$(ls -1 /dev/shm/fastrtps_* 2>/dev/null | wc -l)
+  # `ls … | wc -l` 은 조각이 하나도 없으면 ls 가 실패하고 pipefail 로 설치가 멈췄다(8단계 · 실물 2026-10-08) ·
+  # find 는 없어도 성공한다
+  count=$( { find /dev/shm -maxdepth 1 -name 'fastrtps_*' 2>/dev/null || true; } | wc -l)
   if [[ "${count}" -gt 0 ]]; then
     rm -f /dev/shm/fastrtps_* 2>/dev/null || true
     echo "죽은 공유메모리 조각 ${count}개 정리"
