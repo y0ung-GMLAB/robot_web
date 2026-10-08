@@ -2077,7 +2077,7 @@ export function createMotorConfigController({
     absolute_clear: {
       title: '앱솔루트 다회전 클리어',
       body: '엔코더의 회전 수 기록을 0 으로 지웁니다 · 위치 기준이 바뀝니다.\n'
-        + '서보가 꺼져 있어야 합니다 · 끝나면 드라이브 전원을 껐다 켜고 기준점을 다시 캡처하세요.\n'
+        + '서보가 꺼져 있어야 합니다 · 끝나면 드라이브 전원을 껐다 켜세요 · 위치 숫자가 바뀌어 기준점을 다시 캡처해야 합니다.\n'
         + '그 전에는 재생하지 마세요.',
     },
   };
@@ -2260,7 +2260,7 @@ export function createMotorConfigController({
       '',
       '대상 축 서보를 끄고 Motor Manager 를 두 번 잠시 멈춥니다.',
       '중간에 드라이브 전원을 두 번 껐다 켜야 합니다(화면이 알려 줍니다).',
-      '끝나면 위치가 바뀌므로 기준점을 다시 캡처하세요.',
+      '끝나면 위치 숫자가 바뀌어 기준점을 다시 캡처해야 합니다.',
     ].join('\n');
     const confirmed = await showConfirm(body, {
       title: '앱솔루트 설정', confirmLabel: '시작', tone: 'danger',

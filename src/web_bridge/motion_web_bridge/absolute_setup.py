@@ -236,7 +236,7 @@ class AbsoluteSetup:
         except Exception as exc:  # noqa: BLE001 · 어떤 실패도 그 단계에서 멈추고 남긴다
             self._finish('failed', f'예상하지 못한 오류 · {exc}')
             return
-        self._finish('done', '앱솔루트 설정 완료 · 기준점을 다시 캡처하세요(클리어로 위치가 바뀌었습니다)')
+        self._finish('done', '앱솔루트 설정 완료 · 위치 숫자가 바뀌어 기준점을 다시 캡처해야 합니다')
 
     def _step(self, key: str, message: str) -> None:
         if self._cancel.is_set():
