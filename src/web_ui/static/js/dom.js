@@ -305,6 +305,8 @@ export function getElements() {
     motionPlaylistPanel: document.getElementById('motionPlaylistPanel'),
     deleteMotionFileButton: document.getElementById('deleteMotionFileButton'),
     motionFileMessage: document.getElementById('motionFileMessage'),
+    motionBusy: document.getElementById('motionBusy'),
+    motionBusyText: document.getElementById('motionBusyText'),
     motionFileCount: document.getElementById('motionFileCount'),
     motionFileRows: document.getElementById('motionFileRows'),
     addMotionIdButton: document.getElementById('addMotionIdButton'),

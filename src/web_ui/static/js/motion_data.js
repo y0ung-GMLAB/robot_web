@@ -49,6 +49,7 @@ import {
 } from './ui_dialogs.js';
 import { draggingFiles, droppedEntries, walkEntry } from './drop_files.js';
 import { createSim3dViewer } from './sim3d.js';
+import { createBusyIndicator } from './motion_busy.js';
 import { analysisInDeg } from './unit_view.js';
 
 /** 차트 색 · 화면 테마(CSS 토큰)를 따른다 · 리디자인 2026-10-02
@@ -634,6 +635,8 @@ export function createMotionDataController({
   const INITIALIZE_WATCH_MS = 30000;
   // 웹 3D 표시 · 7-a · 선택한 애니메이션을 따라간다 · 접혀 있으면 아무것도 받지 않는다
   const sim3d = createSim3dViewer({ el, getLatestState });
+  // 오래 걸리는 일 표시 · 올리기 · 읽기 · 재생 등록 · 87
+  const busy = createBusyIndicator({ el });
   let fileLoadToken = 0;
   let mappingLoadToken = 0;
   let mappingRevision = '';
@@ -690,10 +693,20 @@ export function createMotionDataController({
       reportImportFailure(`애니메이션은 .json 만 받습니다: ${wrongType.name}`);
       return;
     }
+    try {
+      await uploadAndRefresh(picked, projectId);
+    } finally {
+      busy.end('upload');
+    }
+  }
+
+  async function uploadAndRefresh(picked, projectId) {
     let imported = 0;
     const uploadedNames = [];
-    for (const file of picked) {
+    for (const [index, file] of picked.entries()) {
       try {
+        const size = `${(Number(file.size || 0) / 1e6).toFixed(1)} MB`;
+        busy.begin('upload', `올리는 중 ${index + 1}/${picked.length} · ${file.name} (${size}) · 서버가 검사하는 중`);
         const content = await file.text();
         await importProjectFile(projectId, {
           category: 'motions', file_name: file.name, content,
@@ -712,6 +725,7 @@ export function createMotionDataController({
     }
     if (imported) {
       if (imported === picked.length) setMessage(`애니메이션 ${imported}개 업로드 완료`);
+      busy.begin('upload', `${imported}개 올림 · 목록 다시 읽는 중 (긴 애니는 분석에 몇 초)`);
       await loadFiles();
       await onProjectFilesChange?.();
       // MuJoCo 구성(계산형)이면 올라온 것부터 바로 계산을 돌린다 · P7
@@ -2656,6 +2670,10 @@ export function createMotionDataController({
     setMappingMessage(label);
     mappingLoading = true;
     renderMappingPanel();
+    // 등록 버튼·목록 버튼도 바로 잠근다 · 전에는 끝날 때까지 다시 눌렸다 (87)
+    renderMotionFileActions();
+    renderPlaylistPanel();
+    busy.begin('register', `${label} · 로봇 프로그램에 적용하는 중 (긴 애니는 몇 초)`);
     try {
       const payload = await saveRegisteredMotionFile({
         file_id: selectedMappingId,
@@ -2687,11 +2705,13 @@ export function createMotionDataController({
       return false;
     } finally {
       mappingLoading = false;
+      busy.end('register');
       renderMappingPanel();
     }
   }
 
   async function registerSelectedMotionFile() {
+    if (mappingLoading) return;
     if (!selectedFile || !selectedMappingId) {
       setMessage('재생 등록할 애니메이션과 저장된 조인트 매핑을 먼저 선택하세요');
       return;
@@ -3106,7 +3126,12 @@ export function createMotionDataController({
     onFileSelected: (id, file) => { selectedFileId = id; selectedFile = file; render(); },
     onProjectFilesChange: () => onProjectFilesChange?.(),
     setMessage: setMessage,
-    setLoading: (l) => { loading = l; render(); },
+    setLoading: (l) => {
+      loading = l;
+      if (l) busy.begin('files', '애니메이션 읽는 중 · 긴 애니는 몇 초 걸립니다');
+      else busy.end('files');
+      render();
+    },
     checkIsFileRegistered: (id) => registeredPlaylistValue.includes(id),
   });
 

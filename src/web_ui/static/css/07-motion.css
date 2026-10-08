@@ -1365,3 +1365,28 @@ tr.live-muted td:not(:first-child) {
   background: #fdf3e1;
   color: var(--yellow);
 }
+
+/* 오래 걸리는 일 표시 · 올리기 · 읽기 · 재생 등록 · 수정 목록 87 */
+.motion-busy:not(.hidden) {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 0 0 8px;
+  padding: 8px 12px;
+  border: 1px solid rgb(59 130 246 / 55%);
+  border-radius: 8px;
+  background: rgb(59 130 246 / 14%);
+  color: var(--ink, #e2e8f0);
+  font-size: 13px;
+  font-weight: 600;
+}
+.motion-busy-spinner {
+  flex: 0 0 auto;
+  width: 16px;
+  height: 16px;
+  border: 2px solid rgb(59 130 246 / 35%);
+  border-top-color: #3b82f6;
+  border-radius: 50%;
+  animation: motion-busy-spin 0.8s linear infinite;
+}
+@keyframes motion-busy-spin { to { transform: rotate(360deg); } }

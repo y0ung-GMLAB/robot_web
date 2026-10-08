@@ -18,6 +18,11 @@
                 <strong>1. 재생할 애니메이션</strong>
                 <span id="motionRunMessage">애니메이션과 매핑 파일을 선택하세요</span>
               </div>
+              <!-- 오래 걸리는 일 표시 · 올리기 · 읽기 · 재생 등록 · 0.4초 넘을 때만 · 수정 목록 87 -->
+              <div id="motionBusy" class="motion-busy hidden" role="status" aria-live="polite">
+                <span class="motion-busy-spinner" aria-hidden="true"></span>
+                <span id="motionBusyText"></span>
+              </div>
               <div class="motion-run-columns">
               <div class="motion-run-side">
                 <section class="motion-file-column" aria-label="애니메이션 목록">
