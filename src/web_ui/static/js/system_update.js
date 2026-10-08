@@ -32,8 +32,10 @@ export function systemUpdateRows(pcs) {
     const local = pc.is_local ? ' <small>(이 PC)</small>' : '';
     const tail = Array.isArray(pc.tail) && pc.tail.length ? pc.tail[pc.tail.length - 1] : '';
     const note = pc.message || tail || '';
-    const version = pc.before_hash && pc.git_hash && pc.before_hash !== pc.git_hash
-      ? `${pc.before_hash} → ${pc.git_hash}`
+    // 「옛 → 새」 는 끝까지 된 때만 · 실패면 지금 버전만 (82 · 그 사이 생긴 커밋을 결과처럼 보였다)
+    const after = pc.after_hash || pc.git_hash || '';   // 옛 버전 PC 는 after_hash 가 없다
+    const version = pc.state === 'done' && pc.before_hash && after && pc.before_hash !== after
+      ? `${pc.before_hash} → ${after}`
       : (pc.git_hash || '-');
     return `<tr>
       <td><strong>${escapeHtml(name)}</strong>${local}</td>

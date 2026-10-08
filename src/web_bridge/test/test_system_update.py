@@ -178,3 +178,53 @@ def test_the_speaker_runs_its_own_installer(tmp_path):
     SystemUpdate(tmp_path, run=runner, command=system_update.SPEAKER_COMMAND).start()
     [launch] = [c for c in runner.calls if c[0] == 'systemd-run']
     assert 'bash scripts/install_speaker.sh --code-only' in launch[-1]
+
+
+# ---- 수정 목록 82 · 실물 2026-10-08 (floating4 · floating3) ---------------------------------- #
+
+def _finished(tmp_path, log_text, rc):
+    update = SystemUpdate(tmp_path, run=_Runner(), now=lambda: 1_700_000_000.0)
+    update.start()
+    state = update._read_state()
+    open(state['log'], 'w', encoding='utf-8').write(log_text)
+    open(state['rc'], 'w', encoding='utf-8').write(f'{rc}\n')
+    return update, state
+
+
+def test_a_failure_says_why_from_the_installer_log(tmp_path):
+    log = ('참고 · rosdep 이 모르는 이름\n'
+           '!! 이번 코드에 새 시스템 패키지가 필요합니다 · libfoo-dev · 이 PC 터미널에서 bash scripts/install.sh 로 설치하세요\n'
+           + '줄\n' * 30
+           + '설치 실패\n멈춘 단계 · 7-1. 새 시스템 패키지 검사\n'
+           '!! 업데이트 실패 · 이전 상태로 되돌립니다\n   서비스를 다시 켰습니다\n')
+    update, _ = _finished(tmp_path, log, 1)
+    status = update.status()
+    assert status['state'] == 'failed'
+    assert status['message'].startswith('이번 코드에 새 시스템 패키지가 필요합니다'), status['message']
+    assert 'after_hash' not in status, '실패면 「옛 → 새」 를 보이지 않는다'
+
+
+def test_without_a_marked_line_the_stopped_step_is_the_reason(tmp_path):
+    update, _ = _finished(tmp_path, '설치 실패\n멈춘 단계 · 8. 전체 빌드\n', 1)
+    assert update.status()['message'] == '멈춘 단계 · 8. 전체 빌드'
+
+
+def test_a_later_terminal_install_clears_the_old_failure(tmp_path):
+    import json
+    import os
+    update, state = _finished(tmp_path, '멈춘 단계 · 8. 전체 빌드\n', 1)
+    os.utime(state['rc'], (1_700_000_100, 1_700_000_100))
+    success = update.log_dir / system_update.SUCCESS_FILE
+    success.write_text(json.dumps({'time': 1_700_000_050, 'hash': 'aaa'}), encoding='utf-8')
+    assert update.status()['state'] == 'failed', '실패보다 먼저 끝난 설치는 복구가 아니다'
+
+    success.write_text(json.dumps({'time': 1_700_000_200, 'hash': 'fff1234'}), encoding='utf-8')
+    status = update.status()
+    assert status['state'] == 'done' and status['after_hash'] == 'fff1234'
+    assert '복구' in status['message']
+
+
+def test_success_reports_the_new_version(tmp_path):
+    update, _ = _finished(tmp_path, '설치 완료\n', 0)
+    status = update.status()
+    assert status['after_hash'] == 'abc1234' and status['before_hash'] == 'abc1234'

@@ -26,6 +26,8 @@ from typing import Any, Callable, Dict, List, Mapping, Optional
 
 LOG_DIR = Path('log') / 'system_update'
 STATE_FILE = 'state.json'
+#: install.sh 가 끝까지 가면 쓴다 · 웹 업데이트 실패 뒤 터미널 설치로 복구됐는지 (82)
+SUCCESS_FILE = 'last_success.json'
 TAIL_LINES = 15
 REMOTE_START_TIMEOUT_SEC = 5.0
 REMOTE_STATUS_TIMEOUT_SEC = 2.5
@@ -94,6 +96,25 @@ class SystemUpdate:
             return False
         return getattr(result, 'returncode', 1) == 0
 
+    def _last_success(self) -> Dict[str, Any]:
+        try:
+            data = json.loads((self.log_dir / SUCCESS_FILE).read_text(encoding='utf-8'))
+        except (OSError, ValueError):
+            return {}
+        return data if isinstance(data, dict) else {}
+
+    @staticmethod
+    def _failure_reason(tail: List[str]) -> str:
+        """로그에서 사람이 읽을 이유 · install.sh 의 `!!` 줄 · 없으면 「멈춘 단계」 줄."""
+        for line in tail:
+            text = line.strip()
+            if text.startswith('!!') and '되돌립니다' not in text and '되돌림' not in text and '다시 켰습니다' not in text:
+                return text.lstrip('! ').strip()
+        for line in tail:
+            if line.strip().startswith('멈춘 단계'):
+                return line.strip()
+        return ''
+
     @staticmethod
     def _tail(path: Path, lines: int = TAIL_LINES) -> List[str]:
         try:
@@ -122,16 +143,34 @@ class SystemUpdate:
                 code = int(rc_path.read_text(encoding='utf-8').strip() or '1')
             except ValueError:
                 code = 1
+            finished = rc_path.stat().st_mtime
             out.update({
                 'state': 'done' if code == 0 else 'failed',
                 'exit_code': code,
-                'finished_at': rc_path.stat().st_mtime,
+                'finished_at': finished,
             })
+            if code == 0:
+                out['after_hash'] = out.get('git_hash', '')
+            else:
+                out['message'] = self._failure_reason(self._tail(log, 80) if log.name else []) or f'실패 (종료 코드 {code})'
+                success = self._last_success()
+                if float(success.get('time') or 0) > finished:
+                    # 그 뒤 터미널에서 설치가 끝까지 됐다 · 실패만 남겨 두면 지금 상태를 잘못 읽는다
+                    out.update({
+                        'state': 'done', 'after_hash': str(success.get('hash') or out.get('git_hash', '')),
+                        'message': '웹 업데이트는 실패했지만 그 뒤 설치로 복구됨',
+                    })
             return out
         if self._unit_active(str(state.get('unit') or '')):
             out['state'] = 'running'
             return out
         out.update({'state': 'failed', 'message': '업데이트 작업이 결과 없이 끝났습니다 · 로그를 보세요'})
+        success = self._last_success()
+        if float(success.get('time') or 0) > float(state.get('started_at') or 0):
+            out.update({
+                'state': 'done', 'after_hash': str(success.get('hash') or out.get('git_hash', '')),
+                'message': '웹 업데이트는 결과 없이 끝났지만 그 뒤 설치로 복구됨',
+            })
         return out
 
     def start(self) -> Dict[str, Any]:

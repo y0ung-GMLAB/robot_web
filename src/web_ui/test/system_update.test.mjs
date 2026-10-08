@@ -37,3 +37,16 @@ test('rows show state, version change and the last line', () => {
   assert.match(html, /새 시스템 패키지가 필요합니다/);
   assert.match(systemUpdateRows([]), /같은 망 PC 를 기다리는 중/);
 });
+
+test('a failed update shows only the current version, not before → after (82)', () => {
+  const html = systemUpdateRows([
+    { pc_id: 'floating3', state: 'failed', before_hash: 'aaa', git_hash: 'ccc', message: '멈춘 단계 · 8. 전체 빌드' },
+  ]);
+  assert.doesNotMatch(html, /→/);
+  assert.match(html, />ccc</);
+  assert.match(html, /멈춘 단계 · 8\. 전체 빌드/);
+  const recovered = systemUpdateRows([
+    { pc_id: 'floating3', state: 'done', before_hash: 'aaa', git_hash: 'ccc', after_hash: 'ddd', message: '그 뒤 설치로 복구됨' },
+  ]);
+  assert.match(recovered, /aaa → ddd/);
+});
