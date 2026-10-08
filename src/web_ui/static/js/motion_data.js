@@ -2020,9 +2020,11 @@ export function createMotionDataController({
     // 새로고침」·「현재 설정 파일 삭제」가 다 쓸모없는 손잡이였다 · 그것들이
     // 만들 수 있는 어긋난 상태(등록된 파일과 다른 것을 편집하고 있다)만
     // 남았다.
+    // 화면에는 「조인트 매핑 편집」 제목만 · 파일 이름은 툴팁으로 (2026-10-08 · 「연결 파일」 칸 삭제)
     if (!el.motionMappingFileName) return;
     const file = mappingFiles.find((item) => item.id === selectedMappingId);
-    el.motionMappingFileName.textContent = file?.filename || selectedMappingId || '아직 없음 · 저장하면 만들어집니다';
+    const name = file?.filename || selectedMappingId || '아직 없음 · 저장하면 만들어집니다';
+    el.motionMappingFileName.title = `조인트 매핑 파일 · ${name}`;
   }
 
   function mappingDuplicateAxisCounts() {

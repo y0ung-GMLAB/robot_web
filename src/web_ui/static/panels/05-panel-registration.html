@@ -101,24 +101,14 @@
             <span>조인트 이름(= Blender 본 이름)를 모터에 연결하고 변환값을 설정합니다 · 애니메이션 재생 전에 필요합니다</span>
           </div>
           <div class="motion-mapping-layout">
-            <section class="motion-file-subsection settings-step-card" aria-label="조인트 매핑 파일">
-              <div class="section-head compact">
-                <strong>연결 파일</strong>
-                <span id="motionMappingMessage">현재 매칭 확인 중</span>
-              </div>
-              <div class="motion-mapping-form">
-                <label class="manual-field">
-                  <span>설정 파일</span>
-                  <strong id="motionMappingFileName" class="mono">-</strong>
-                </label>
-              </div>
-            </section>
-
+            <!-- 「연결 파일」 칸 삭제 · 프로젝트마다 파일 하나라 이름을 볼 일이 없었다 · 저장 결과 글만
+                 표 위로 옮기고 파일 이름은 제목 툴팁으로 (사용자 2026-10-08) -->
             <section class="motion-file-subsection settings-step-card" aria-label="조인트 매핑 표">
               <div class="section-head compact">
-                <strong>조인트 매핑 편집</strong>
+                <strong id="motionMappingFileName">조인트 매핑 편집</strong>
                 <span>조인트 이름(= Blender 본 이름)를 AC 서보·다이나믹셀 모터에 연결</span>
               </div>
+              <div id="motionMappingMessage" class="registry-message">현재 매칭 확인 중</div>
               <div class="registry-actions settings-step-actions">
                 <button id="addMotionIdButton" type="button">조인트 이름 추가</button>
                 <button id="generateMotionIdsButton" type="button">자동 생성</button>

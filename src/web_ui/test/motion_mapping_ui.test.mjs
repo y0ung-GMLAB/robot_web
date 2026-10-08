@@ -45,8 +45,10 @@ test('the mapping file is the one the project registered · no picking, no delet
   assert.doesNotMatch(controller, /selectMapping\(mappingFiles\[0\]\.id\)/);
   // 이름은 고정이다 · 사람이 지을 일이 없다
   assert.match(controller, /const DEFAULT_MAPPING_NAME = 'motion_axis'/);
-  // 파일 이름은 보여주기만 한다
-  assert.match(html, /id="motionMappingFileName"/);
+  // 파일 이름은 편집 제목의 툴팁으로만 (2026-10-08 · 「연결 파일」 칸 삭제)
+  assert.match(html, /<strong id="motionMappingFileName">조인트 매핑 편집<\/strong>/);
+  assert.match(controller, /el\.motionMappingFileName\.title = `조인트 매핑 파일 · \$\{name\}`/);
+  assert.match(html, /<div id="motionMappingMessage" class="registry-message">/);
   assert.match(controller, /function renderMappingFileName\(\)/);
   // 지우는 길 자체가 없다
   assert.doesNotMatch(api, /deleteMotionMapping/);
