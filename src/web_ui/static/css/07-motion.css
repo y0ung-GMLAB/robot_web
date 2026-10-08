@@ -945,13 +945,12 @@
   font-weight: 700;
 }
 
-/* 파일명은 길다 · 줄바꿈 대신 잘라내고 전체는 title 로 보여준다. */
+/* 파일명은 길다 · 자르지 않고 칸 안에서 좌우 스크롤 (85) · 전체는 title 로도 */
 .motion-run-target-item > strong {
   display: block;
-  overflow: hidden;
+  overflow-x: auto;
   font-size: 15px;
   line-height: 1.3;
-  text-overflow: ellipsis;
   white-space: nowrap;
 }
 
@@ -1360,12 +1359,6 @@ tr.live-muted td:not(:first-child) {
 .mujoco-badge.failed {
   background: var(--red, #b23b3b);
   color: #fff;
-}
-
-.mujoco-companion-field {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
 }
 
 .mujoco-badge.stale {

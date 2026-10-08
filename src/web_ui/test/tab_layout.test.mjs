@@ -41,7 +41,7 @@ test('이 PC 의 모션은 모션 실행 탭에 있다', () => {
 });
 
 test('그룹에 관한 것은 전부 PC 연동 설정 탭에 있다', () => {
-  assert.equal(panelOf('coordinationJoinButton'), 'coordination', '그룹 참가');
+  assert.equal(panelOf('coordinationJoinSwitch'), 'coordination', '그룹 참여');
   assert.equal(panelOf('coordinationPeerRows'), 'coordination', '참가 PC 명단');
   assert.equal(panelOf('coordinationConfirmRosterButton'), 'coordination', '명단 확정');
   assert.equal(panelOf('coordinationSaveButton'), 'coordination', '이 PC 연동 설정');

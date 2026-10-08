@@ -71,6 +71,12 @@ def resolve_master_role(
     if not bool(settings.get('enabled', False)):
         return MasterRole(True, '연동 비활성 · 단독 동작으로 간주')
 
+    # 「그룹 참여」 를 꺼 둔 PC 는 마스터든 아니든 혼자 돈다 · 스케줄도 이 PC 혼자 (수정 목록 83)
+    # 전에는 꺼 둔 슬레이브는 스케줄이 아예 안 돌았다 · 「이 PC 혼자 재생」 이라는 화면 말과 달랐다 ·
+    # 값 읽기는 정본 로더(group_config)와 같다 · version 2 에 joined 가 없으면 enabled 를 따른다
+    if int(settings.get('version') or 1) == 2 and not bool(settings.get('joined', True)):
+        return MasterRole(True, '그룹 참여 꺼짐 · 단독 동작으로 간주')
+
     # 정본 로더(motion_coordination.group_configuration)와 같은 기본값을 쓴다
     is_master = bool(settings.get('is_master', False))
     pc_id = str(settings.get('pc_id') or '').strip() or '(pc_id 없음)'

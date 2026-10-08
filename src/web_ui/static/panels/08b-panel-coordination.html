@@ -43,19 +43,23 @@
           </div>
         </section>
 
-          <section class="project-system-manager coordination-settings-card" aria-label="연동 상태와 세션">
+          <section class="project-system-manager coordination-settings-card" aria-label="그룹 상태">
           <div class="section-head compact">
-            <strong>1. 연동 상태와 참가</strong>
+            <strong>그룹 상태</strong>
             <span id="coordinationUpdatedAt">-</span>
           </div>
               <div class="coordination-dashboard">
-                <div class="coord-badge" id="coordJoinBadge">
-                  <div class="coord-badge-icon"></div>
-                  <div class="coord-badge-info">
-                    <span>그룹 참가</span>
-                    <strong id="coordinationJoinState">나감</strong>
-                  </div>
-                </div>
+                <!-- 스위치 하나 · 켜면 다른 PC 와 같이 · 끄면 이 PC 혼자 · 2026-10-09 (사용자 · 수정 목록 83)
+                     전에는 「연동 사용」(설정) 과 참가·탈퇴 버튼이 따로 있어 둘 다 맞춰야 했다 -->
+                <label class="coord-badge coord-join-switch" id="coordJoinBadge"
+                  title="켜면 다른 PC 와 같이 시작·정지 · 끄면 이 PC 혼자 재생(스케줄도 이 PC 혼자)">
+                  <input id="coordinationJoinSwitch" type="checkbox" role="switch" disabled>
+                  <span class="coord-join-track" aria-hidden="true"></span>
+                  <span class="coord-badge-info">
+                    <span>그룹 참여</span>
+                    <strong id="coordinationJoinState">확인 중</strong>
+                  </span>
+                </label>
                 <div class="coord-badge coord-badge-master" id="coordMasterBadge" style="display: none;">
                   <div class="coord-badge-info">
                     <span>👑 현재 마스터</span>
@@ -74,22 +78,14 @@
                     <strong id="coordinationGroupDomain">-</strong>
                   </div>
                 </div>
-                <!-- 들어오거나 나가거나 둘 뿐이다 · §6-164
-                     전에는 「그룹 나가기」와 「지금 빠지기」가 따로 있었다 ·
-                     멈춰 있을 때는 완전히 같은 일이었고 도는 중일 때만 갈렸다 ·
-                     사용자가 매번 어느 쪽인지 골라야 했다 · 하나로 합친다. -->
-                <div class="coord-badge coord-badge-actions">
-                  <button id="coordinationJoinButton" type="button" disabled>연동 참가</button>
-                  <button id="coordinationLeaveButton" type="button" disabled>연동 탈퇴</button>
-                </div>
               </div>
               <p class="coordination-persistence-note">
-                연동 애니메이션이 도는 중에는 탈퇴할 수 없습니다 · 먼저 정지하세요 ·
-                탈퇴하면 프로그램을 다시 켜도 나간 채로 있습니다 · 참가도 그대로 유지됩니다.
+                그룹 재생이 도는 중에는 끌 수 없습니다 · 먼저 정지하세요 ·
+                켜고 끈 것은 프로그램을 다시 켜도 그대로 유지됩니다.
               </p>
             <details class="coordination-settings-details" open>
               <summary class="section-head compact">
-                <strong>이 PC 연동 설정</strong>
+                <strong>이 PC 그룹 설정 (처음 한 번)</strong>
                 <span id="coordinationNodeState">연동 노드 확인 중</span>
               </summary>
               <!-- 화면에는 **사람이 정하는 것**만 둔다 · §6-283
@@ -97,17 +93,7 @@
                    쓰이고 저장도 유지된다 · 명단은 아래 「현재 접속 PC로 명단
                    확정」이 채운다. -->
               <div class="coordination-settings-fields">
-                <!-- 사람이 정하는 것부터 · 읽기만 하는 것은 뒤로 · §6-283
-                     「연동 사용」이 맨 앞이다 · 이 칸이 정하는 것은 쓸지 말지다 ·
-                     표시 이름과 필수 참가 명단은 화면에서 뺐다 · 값은 그대로
-                     쓰이고 저장도 유지된다 · 명단은 아래 「현재 접속 PC로 명단
-                     확정」이 채운다. -->
-                <label class="compact-field"><span>연동 사용</span>
-                  <select id="coordinationEnabled" class="compact-select">
-                    <option value="false">사용 안 함</option>
-                    <option value="true">사용</option>
-                  </select>
-                </label>
+                <!-- 쓸지 말지는 위 「그룹 참여」 스위치가 정한다 · 여기는 어느 그룹인지 · 역할만 (83) -->
                 <label class="compact-field"><span>역할</span>
                   <select id="coordinationIsMaster" class="compact-select">
                     <option value="false">참가자 (슬레이브)</option>
@@ -140,7 +126,7 @@
                진행을 못 보면 탭을 왔다갔다 하게 된다 -->
           <section id="coordinationRosterSection" class="motion-file-subsection hidden" aria-label="그룹 참가 PC">
           <div class="section-head compact">
-            <strong>2. 그룹 참가 PC</strong>
+            <strong>그룹 참가 PC</strong>
             <span>경고 1.5초 · 통신 단절 3초 · 실행 참가 목록은 시작 시 고정</span>
             <button type="button" id="coordinationConfirmRosterButton" class="secondary">현재 접속 PC로 명단 확정</button>
           </div>
@@ -159,7 +145,7 @@
              **마스터에서만 보인다** · 조정 노드가 슬레이브를 거부한다 -->
         <section id="coordinationGroupRunSection" class="motion-file-subsection hidden" aria-label="그룹 실행">
           <div class="section-head compact">
-            <strong>3. 그룹 실행</strong>
+            <strong>그룹 실행</strong>
             <span id="coordinationExecutionState">그룹 실행 · 대기</span>
             <span id="coordinationControlSummary">제어 명령 대기</span>
           </div>

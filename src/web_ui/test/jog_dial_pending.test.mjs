@@ -123,6 +123,7 @@ function setup({ position = 0, lower = -1000, upper = 1000, jointRow = null, joi
   });
   dial.bindEvents();
   dial.renderRuntimeState();
+  el.jogDialEnabledSwitch.dispatch('click');                             // 화면을 열면 OFF · 켠다 (84)
   const wheel = (up = true) => el.jogDial.dispatch('wheel', { deltaY: up ? -100 : 100, deltaMode: 0 });
   const pendingText = () => el.jogDialPending.textContent;
   return { el, dial, motor, wheel, pendingText };
@@ -388,6 +389,8 @@ test('모터를 고르면(reset) 돌리던 것이 없어도 다시 그린다 · 
   dial.reset();                        // main.js · 모터 고르기 change → reset
   assert.equal(el.jogDialMessage.textContent, '');
   assert.equal(el.jogDialPosition.textContent, '3.00°');
+  assert.equal(el.jogDial.getAttribute('aria-disabled'), 'true', '화면을 열면 OFF (84)');
+  el.jogDialEnabledSwitch.dispatch('click');
   assert.equal(el.jogDial.getAttribute('aria-disabled'), 'false');
 });
 
@@ -452,4 +455,25 @@ test('체크를 바꾸면 돌리던 것을 세우고 목표 칸을 새 단위로
   el.motionTestJogJointMode.dispatch('change');
   assert.deepEqual(releases().at(-1), { type: 'release', axes: [1] });
   assert.equal(el.jogTargetInput.value, '1000', '모터 deg 로 다시 채움');
+});
+
+test('화면을 열면 다이얼은 OFF · 켜야 돈다 · 기억하지 않는다 · 84', async () => {
+  calls.length = 0;
+  sockets.length = 0;
+  const el = {};
+  for (const name of ELEMENTS) el[name] = fakeElement();
+  el.jogDialStep.value = '1';
+  const state = { motors: [{ controller_index: 1, state: 'detected', servo_on: true, fault: false, position_deg: 0, motor_type: 'ac_servo' }] };
+  const dial = createJogDialController({ el, getLatestState: () => state, getSelectedAxis: () => 1 });
+  dial.bindEvents();
+  dial.renderRuntimeState();
+  assert.equal(el.jogDialEnabledSwitch.getAttribute('aria-checked'), 'false');
+  assert.equal(el.jogDialEnabledSwitch.textContent, '다이얼 OFF');
+  assert.ok(el.jogDial.classList.contains('locked'));
+  el.jogDial.dispatch('wheel', { deltaY: -100, deltaMode: 0 });
+  assert.equal(sockets.length, 0, 'OFF 에서는 움직이지 않는다');
+  el.jogDialEnabledSwitch.dispatch('click');
+  assert.equal(el.jogDialEnabledSwitch.textContent, '다이얼 ON');
+  assert.ok(el.jogDialEnabledSwitch.classList.contains('on'));
+  dial.reset();
 });

@@ -11,10 +11,11 @@
  * three.js 는 탭을 열 때 처음 한 번만 동적으로 받는다(1.2 MB · 벤더 사본 ·
  * `static/vendor/three/`) · 초기 화면 무게에 얹지 않는다.
  *
- * 「MuJoCo 같이 보기」(모션 패널 체크) · 켜면 이 구역을 열고 **재생 등록된**
- * 애니메이션의 프레임을 받아 두었다가, 재생 상태가 running 으로 바뀌는 순간
- * 0초부터 틀고 stopped/error/completed 면 멈춘다 · 시작 동기의 정밀도는
- * 8번(별도) · 여기선 같은 순간에 출발만 한다 · 네이티브 뷰어 창은 없앴다(7).
+ * 「실물과 같이」(이 구역 체크 · **기본 켬** · 수정 목록 86) · **재생 등록된** 애니메이션의
+ * 프레임을 받아 두었다가, 재생 상태가 running 으로 바뀌는 순간 0초부터 틀고
+ * stopped/error/completed 면 멈춘다 · 켜 있으면 재생 버튼·슬라이더는 잠긴다(실물이 시계) ·
+ * 끄면 목록에서 고른 애니를 직접 재생·슬라이더로 본다 · 전에는 모션 패널의 「MuJoCo 같이
+ * 보기」(기본 끔)가 따로 있어, 기본이 「직접 재생」 이라 디지털 트윈으로 쓰는 뜻이 없었다.
  *
  * 「Blender 뷰」(수정 목록 50) · 팩에 `scene.glb` 가 있으면 체크가 보인다 · 켜면 MuJoCo
  * 장면 대신 Blender 가 내보낸 glTF 장면(헤드 4대 · 매장 오브제)을 그린다 · 물리 없음 ·
@@ -59,7 +60,7 @@ export function createSim3dViewer({ el, getLatestState = () => null }) {
   let speed = 1;
   let lastTick = 0;
   let rafId = 0;
-  let follow = false;
+  let follow = true;          // 「실물과 같이」 · 기본 켬 (86)
   let followFile = null;      // 같이 보기 대상 · 재생 등록된 애니메이션
   let lastRunState = '';
   let pollTimer = null;
@@ -431,8 +432,8 @@ export function createSim3dViewer({ el, getLatestState = () => null }) {
   }
 
   function followRealRun() {
-    // Blender 뷰는 늘 실물 재생을 따라간다 · 계산 없이 그리는 뷰라 같이 보기 체크와 상관없다
-    const following = view === 'blender' ? Boolean(blender) : (follow && Boolean(frames));
+    // MuJoCo 뷰 · Blender 뷰 모두 「실물과 같이」 를 따른다 (86)
+    const following = follow && (view === 'blender' ? Boolean(blender) : Boolean(frames));
     if (!following) return;
     const status = getLatestState()?.motion_run_status || {};
     const state = String(status.state || '');
@@ -619,25 +620,33 @@ export function createSim3dViewer({ el, getLatestState = () => null }) {
       el.sim3dLoadButton.disabled = view === 'blender' || !ready || !currentFile;
       el.sim3dLoadButton.title = currentFile ? `${currentFile.id} 의 계산 결과를 불러옵니다` : '애니메이션을 먼저 선택하세요';
     }
+    if (has('sim3dFollowToggle')) el.sim3dFollowToggle.checked = follow;
+    // 실물과 같이 볼 때는 실물이 시계다 · 직접 재생·끌기는 끄고 나서 (86)
+    const followTip = '실물과 같이 보는 중 · 직접 재생하려면 「실물과 같이」 를 끄세요';
     if (has('sim3dPlayButton')) {
-      el.sim3dPlayButton.disabled = !hasTimeline();
-      el.sim3dPlayButton.textContent = playing ? '일시정지' : '재생';
+      el.sim3dPlayButton.disabled = follow || !hasTimeline();
+      el.sim3dPlayButton.textContent = follow ? (playing ? '실물 재생 중' : '실물 대기') : (playing ? '일시정지' : '재생');
+      el.sim3dPlayButton.title = follow ? followTip : '고른 애니메이션을 직접 재생합니다';
     }
-    if (has('sim3dSlider')) el.sim3dSlider.disabled = !hasTimeline();
+    if (has('sim3dSlider')) {
+      el.sim3dSlider.disabled = follow || !hasTimeline();
+      el.sim3dSlider.title = follow ? followTip : '재생 위치';
+    }
     renderTime();
   }
 
   function bind() {
     el.sim3dPrepareButton?.addEventListener('click', () => requestExport());
     el.sim3dLoadButton?.addEventListener('click', () => currentFile && loadFrames(currentFile.id));
+    el.sim3dFollowToggle?.addEventListener('change', () => setFollow(el.sim3dFollowToggle.checked, followFile));
     el.sim3dPlayButton?.addEventListener('click', () => {
-      if (!hasTimeline()) return;
+      if (follow || !hasTimeline()) return;
       if (!playing && playhead >= timelineSec()) playhead = 0;
       playing = !playing;
       renderControls();
     });
     el.sim3dSlider?.addEventListener('input', () => {
-      if (!hasTimeline()) return;
+      if (follow || !hasTimeline()) return;
       seek((Number(el.sim3dSlider.value) / 1000) * timelineSec());
     });
     el.sim3dActualToggle?.addEventListener('change', () => setShowActual(el.sim3dActualToggle.checked));
@@ -677,9 +686,10 @@ export function createSim3dViewer({ el, getLatestState = () => null }) {
    * 눌러도 바뀌지 않는다 (실물이 재생할 것은 등록 파일이다)
    */
   function update({ file = null, registeredFile = null } = {}) {
-    if (follow && followFile && registeredFile && registeredFile.id !== followFile.id) {
-      followFile = registeredFile;           // 등록이 바뀌면 그쪽으로
+    if (registeredFile && registeredFile.id !== followFile?.id) {
+      followFile = registeredFile;           // 등록이 바뀌면 그쪽으로 · 끈 동안도 기억해 둔다
     }
+    selectedFile = file;
     const target = follow ? (followFile || registeredFile) : file;
     const changed = (target?.id || '') !== (currentFile?.id || '');
     currentFile = target;
@@ -692,22 +702,24 @@ export function createSim3dViewer({ el, getLatestState = () => null }) {
         setMessage('이 애니메이션의 Blender 장면이 없어 MuJoCo 뷰로 돌아갑니다');
       }
       if (opened && sceneJson && usable(target)) loadFrames(target.id);
+      // 실물과 같이 볼 것이 없으면 왜 안 움직이는지 말한다 (86)
+      if (opened && sceneJson && view !== 'blender' && follow) {
+        if (!target) setMessage('실물과 같이 · 재생 등록된 애니메이션이 없습니다 · 「실물과 같이」 를 끄면 고른 애니를 직접 봅니다');
+        else if (!usable(target)) setMessage(`실물과 같이 · ${target.id} 의 MuJoCo 계산 결과가 없습니다 · 「MuJoCo 계산」 을 누르거나 「실물과 같이」 를 끄세요`);
+      }
     }
     renderControls();
   }
 
-  /** 「MuJoCo 같이 보기」 체크 · 켜면 구역을 열고 등록 파일 프레임을 받아 둔다 */
+  /** 「실물과 같이」 체크 · 켜면 등록 파일을 실물과 같이 · 끄면 고른 파일을 직접 (86) */
+  let selectedFile = null;
   async function setFollow(enabled, registeredFile = null) {
     follow = Boolean(enabled);
     lastRunState = '';
-    followFile = follow ? registeredFile : null;
-    if (!follow) { playing = false; renderControls(); return; }
-    if (has('sim3dSection') && !el.sim3dSection.open) {
-      el.sim3dSection.open = true;             // toggle 이벤트가 refreshScene 을 부른다
-    } else if (opened) {
-      await refreshScene();
-    }
-    update({ file: currentFile, registeredFile });
+    playing = false;
+    if (registeredFile) followFile = registeredFile;
+    if (follow && opened) await refreshScene();
+    update({ file: selectedFile, registeredFile: followFile });
   }
 
   function destroy() {

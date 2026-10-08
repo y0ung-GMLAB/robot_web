@@ -29,15 +29,22 @@ test('three.js is a vendored copy loaded lazily, never from a CDN', () => {
   assert.doesNotMatch(viewer, /https?:\/\/(cdn|unpkg|jsdelivr)/);
 });
 
-test('the viewer follows the selected animation and the companion toggle drives it', () => {
+test('the viewer follows the registered animation by default · 「실물과 같이」 in the 3D toolbar · 86', () => {
   const data = read('../static/js/motion_data.js');
   assert.match(data, /const sim3d = createSim3dViewer\(\{ el, getLatestState \}\);/);
   // 재생 목록이면 지금 도는 애니를 따라간다 · 수정 목록 35
   assert.match(data, /sim3d\.update\(\{ file: selectedFile, registeredFile: followTarget \}\);/);
-  // 「MuJoCo 같이 보기」 체크 = 웹 3D 따라가기 · 서버 뷰어 창 없음
-  assert.match(data, /sim3d\.setFollow\(Boolean\(el\.motionRunMujocoToggle\?\.checked\), registered\)/);
+  // 「실물과 같이」 = 3D 구역 안 체크 · 기본 켬 · 모션 패널의 「MuJoCo 같이 보기」 는 없앴다 (86)
+  assert.match(indexHtml, /<input id="sim3dFollowToggle" type="checkbox" checked><span>실물과 같이<\/span>/);
+  assert.doesNotMatch(indexHtml, /motionRunMujocoToggle|MuJoCo 같이 보기/);
+  assert.doesNotMatch(data, /motionRunMujocoToggle|toggleMujocoCompanion/);
+  const viewer = read('../static/js/sim3d.js');
+  assert.match(viewer, /let follow = true;/);
+  // 같이 볼 때는 직접 재생·슬라이더를 잠근다 · 실물이 시계
+  assert.match(viewer, /el\.sim3dPlayButton\.disabled = follow \|\| !hasTimeline\(\)/);
+  assert.match(viewer, /el\.sim3dSlider\.disabled = follow \|\| !hasTimeline\(\)/);
   assert.doesNotMatch(data, /previewMotionFile\(|stopPreviewMotionFile|motionRunMujocoFps|with_mujoco/);
-  assert.doesNotMatch(indexHtml, /motionRunMujocoFps|stopPreviewMotionFileButton|sim3dFollowToggle/);
+  assert.doesNotMatch(indexHtml, /motionRunMujocoFps|stopPreviewMotionFileButton/);
   const api = read('../static/js/api.js');
   for (const route of ["'/api/preview/scene'", "'/api/preview/scene/export'", "'/api/preview/scene/data'", 'preview-frames']) {
     assert.ok(api.includes(route), route);
@@ -76,5 +83,5 @@ test('Blender view loads the pack glb with the vendored loader and follows the r
   assert.match(viewer, /import\(GLTF_LOADER_URL\)/);
   // 시각은 실물 따라가기 시계 · glTF 애니메이션은 setTime
   assert.match(viewer, /blender\.mixer\.setTime\(/);
-  assert.match(viewer, /const following = view === 'blender' \? Boolean\(blender\) : \(follow && Boolean\(frames\)\);/);
+  assert.match(viewer, /const following = follow && \(view === 'blender' \? Boolean\(blender\) : Boolean\(frames\)\);/);
 });

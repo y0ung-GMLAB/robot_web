@@ -119,9 +119,10 @@
                    위 ◀ ▶ 는 한 칸씩(길게 누르면 반복) · 휠·←→ 키 그대로 ·
                    바늘·기준 표시 없음 · 상대 이동이라 0점으로 읽히는 표시를 두지 않는다 -->
               <div class="jog-wheel-column">
-                <!-- 다이얼 ON/OFF · 끄면 다이얼만 잠근다 · 칸은 그대로(옆 칸 밀림 없음) · 수정 목록 52 -->
-                <button id="jogDialEnabledSwitch" type="button" class="jog-dial-switch on" role="switch" aria-checked="true"
-                  title="다이얼 켜기·끄기 · 끄면 끌기·휠·방향키·◀ ▶ 를 무시합니다 · 목표 위치 이동은 그대로">다이얼 ON</button>
+                <!-- 다이얼 ON/OFF · 끄면 다이얼만 잠근다 · 칸은 그대로(옆 칸 밀림 없음) · 수정 목록 52
+                     화면을 열면 늘 OFF (84) -->
+                <button id="jogDialEnabledSwitch" type="button" class="jog-dial-switch" role="switch" aria-checked="false"
+                  title="다이얼 켜기·끄기 · 끄면 끌기·휠·방향키·◀ ▶ 를 무시합니다 · 목표 위치 이동은 그대로 · 화면을 열면 늘 OFF">다이얼 OFF</button>
                 <div class="jog-wheel-arrows" role="group" aria-label="한 칸씩 이동">
                   <button id="jogDialMinus" type="button" class="jog-wheel-arrow" disabled aria-label="한 칸 −" title="한 칸 − · 길게 누르면 반복">◀</button>
                   <button id="jogDialPlus" type="button" class="jog-wheel-arrow" disabled aria-label="한 칸 +" title="한 칸 + · 길게 누르면 반복">▶</button>

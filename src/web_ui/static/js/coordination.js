@@ -84,9 +84,6 @@ export function createCoordinationController({ el }) {
     if (el.coordinationDisplayName) el.coordinationDisplayName.value = config.display_name || '';
     if (el.coordinationGroupId) el.coordinationGroupId.value = config.group_id || '';
     if (el.coordinationDomainId) el.coordinationDomainId.value = Number(config.dds_domain_id ?? 21);
-    if (el.coordinationEnabled && el.coordinationEnabled.value !== String(config.enabled === true)) {
-      el.coordinationEnabled.value = String(config.enabled === true);
-    }
     if (el.coordinationIsMaster && el.coordinationIsMaster.value !== String(config.is_master === true)) {
       el.coordinationIsMaster.value = String(config.is_master === true);
     }
@@ -254,8 +251,8 @@ export function createCoordinationController({ el }) {
       el.coordinationGroupDomain.textContent = `${config.group_id || '-'} · ${config.dds_domain_id ?? '-'}`;
     }
     if (el.coordinationJoinState) {
-      el.coordinationJoinState.textContent = joined ? '참가 중' : '나감';
-      el.coordinationJoinState.className = joined ? 'coordination-state-ok' : 'coordination-state-warn';
+      el.coordinationJoinState.textContent = joined ? '켬 · 같이 재생' : '끔 · 이 PC 혼자';
+      el.coordinationJoinState.className = joined ? 'coordination-state-ok' : '';
       if (el.coordJoinBadge) {
         el.coordJoinBadge.classList.toggle('active', joined);
       }
@@ -317,23 +314,18 @@ export function createCoordinationController({ el }) {
         }
       }
     }
-    // 빠져 있을 때만 「다시 참가」가 보인다 · §6-132
+    // 「그룹 참여」 스위치 하나 · 수정 목록 83 (2026-10-09 사용자)
     //
-    // 참가 초기값은 「연동 사용」 설정이다 (`_joined = configured`) · 그래서
-    // 평소에는 이미 참가한 채로 뜨고, 참가 버튼은 누를 일이 없다 · 늘 보이면
-    // "눌러야 하나" 를 매번 묻게 된다.
-    if (el.coordinationJoinButton) {
-      el.coordinationJoinButton.hidden = joined;
-      el.coordinationJoinButton.disabled = loading || !nodeReady || joined || active;
-      el.coordinationJoinButton.title = '이 PC 를 그룹에 넣습니다';
-    }
-    // 도는 중에는 못 나간다 · 먼저 정지 · §6-164
-    if (el.coordinationLeaveButton) {
-      el.coordinationLeaveButton.hidden = !joined;
-      el.coordinationLeaveButton.disabled = loading || !nodeReady || !joined || active;
-      el.coordinationLeaveButton.title = active
-        ? '연동 재생이 도는 중입니다 · 먼저 정지한 뒤 탈퇴하세요'
-        : '이 PC 를 그룹에서 빼 단독 재생을 사용합니다';
+    // 전에는 「연동 사용」(설정 · 저장·재시작) 과 「연동 참가 · 탈퇴」(버튼) 를 둘 다 맞춰야
+    // 그룹으로 돌았다 · 켜기는 설정이 꺼져 있으면 설정까지 켜고(재시작 한 번) 참가한다 ·
+    // 끄기는 나가기만 한다(재시작 없음 · 설정은 그대로라 다시 켜면 바로 들어간다) ·
+    // 도는 중에는 못 끈다 · 먼저 정지 · §6-164
+    if (el.coordinationJoinSwitch) {
+      el.coordinationJoinSwitch.checked = joined;
+      el.coordinationJoinSwitch.disabled = loading || snapshot?.node_connected !== true || active;
+      el.coordinationJoinSwitch.title = active
+        ? '그룹 재생이 도는 중입니다 · 먼저 정지한 뒤 끄세요'
+        : (joined ? '끄면 이 PC 혼자 재생합니다' : '켜면 같은 그룹 PC 들과 같이 재생합니다');
     }
     // 실행 제어는 애니메이션 재생 화면으로 옮겼다 · 여기서는 왜 못 하는지만 알린다 · §6-65
     if (el.coordinationRunAvailability) {
@@ -470,8 +462,8 @@ export function createCoordinationController({ el }) {
       //
       // 서버는 안 온 항목을 지금 값 그대로 둔다 · 빈 값으로 보내면 표시 이름과
       // 필수 참가 명단이 저장할 때마다 지워진다.
+      // 켤지 말지는 「그룹 참여」 스위치가 정한다 · 여기서는 보내지 않는다(서버가 지금 값 유지) · 83
       const payload = {
-        enabled: el.coordinationEnabled?.value === 'true',
         is_master: el.coordinationIsMaster?.value === 'true',
         group_id: el.coordinationGroupId?.value?.trim() || '',
         dds_domain_id: Number(el.coordinationDomainId?.value ?? 21),
@@ -578,21 +570,49 @@ export function createCoordinationController({ el }) {
     }
   }
 
-  /** 연동 탈퇴 · 도는 중에는 못 나간다 · §6-164 */
+  /** 「그룹 참여」 끄기 · 도는 중에는 못 끈다 · §6-164 · 83 */
   async function leaveGroup() {
     if (loading) return;
     const confirmed = await showConfirm(
       '이 PC 를 그룹에서 뺍니다.\n\n'
-      + '단독 재생을 사용할 수 있습니다.\n'
-      + '프로그램을 다시 켜도 나간 채로 있습니다 · 다시 쓰려면 「연동 참가」를 누르세요.',
+      + '이 PC 혼자 재생합니다 (스케줄도 이 PC 혼자 돕니다).\n'
+      + '프로그램을 다시 켜도 꺼진 채로 있습니다 · 다시 같이 돌리려면 「그룹 참여」를 켜세요.',
       {
-        title: '연동 탈퇴',
-        confirmLabel: '탈퇴',
+        title: '그룹 참여 끄기',
+        confirmLabel: '끄기',
         tone: 'warning',
       },
     );
     if (!confirmed) return;
     await control('leave');
+  }
+
+  /** 「그룹 참여」 켜기 · 설정이 꺼져 있으면 설정까지 켠다(연동 서비스 재시작 한 번) · 83 */
+  async function joinGroup() {
+    if (loading) return;
+    const config = snapshot?.config || {};
+    const groupId = String(config.group_id || el.coordinationGroupId?.value || '').trim();
+    if (!groupId) {
+      await showAlert('그룹 ID 가 없습니다 · 아래 「이 PC 그룹 설정」 에서 그룹 ID 를 넣은 뒤 켜세요.', {
+        title: '그룹 ID 필요', confirmLabel: '확인', tone: 'warning',
+      });
+      return;
+    }
+    if (config.enabled === true) {
+      await control('join');
+      return;
+    }
+    await save('그룹 참여를 켰습니다 · 같은 그룹 PC 들과 같이 재생합니다', '그룹 참여', {
+      enabled: true, joined: true, group_id: groupId,
+    });
+  }
+
+  async function onJoinSwitch() {
+    const want = el.coordinationJoinSwitch?.checked === true;
+    // 결과가 올 때까지 지금 상태로 되돌려 둔다 · 실패하거나 취소하면 그대로 맞다
+    if (el.coordinationJoinSwitch) el.coordinationJoinSwitch.checked = snapshot?.runtime?.joined === true;
+    if (want) await joinGroup();
+    else await leaveGroup();
   }
 
   /** 그룹 실행에 넘길 반복 옵션 · 이 화면의 입력값을 그대로 쓴다. */
@@ -659,7 +679,7 @@ export function createCoordinationController({ el }) {
 
   function bindEvents() {
     el.coordinationSaveButton?.addEventListener('click', save);
-    el.coordinationJoinButton?.addEventListener('click', () => control('join'));
+    el.coordinationJoinSwitch?.addEventListener('change', onJoinSwitch);
     // 그룹 실행은 **여기가 주인**이다 · §6-100
     //
     // 그룹 실행은 애니메이션을 들고 가지 않는다 · 참가한 PC 들에게 시작·정지
@@ -676,10 +696,9 @@ export function createCoordinationController({ el }) {
       'click', () => groupRun.stopNow());
     el.coordinationStopAfterButton?.addEventListener(
       'click', () => groupRun.stopAfterCycle());
-    el.coordinationLeaveButton?.addEventListener('click', leaveGroup);
 
     el.coordinationAcknowledgeErrorButton?.addEventListener('click', () => control('acknowledge_group_error'));
-    [el.coordinationGroupId, el.coordinationDomainId, el.coordinationEnabled, el.coordinationIsMaster]
+    [el.coordinationGroupId, el.coordinationDomainId, el.coordinationIsMaster]
       .forEach((field) => field?.addEventListener('input', () => { formDirty = true; }));
 
     el.coordinationConfirmRosterButton?.addEventListener('click', async () => {

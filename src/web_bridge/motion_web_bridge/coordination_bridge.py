@@ -128,15 +128,18 @@ class CoordinationWebBridge:
                 '연동 모션이 도는 중에는 연동 설정을 바꿀 수 없습니다 · '
                 '먼저 정지한 뒤 바꾸세요'
             )
-        allowed = {'enabled', 'group_id', 'dds_domain_id', 'display_name', 'is_master', 'required_peers'}
+        # `joined` · 「그룹 참여」 스위치가 설정이 꺼진 PC 를 켤 때 설정과 참가를 한 번에 (83)
+        allowed = {'enabled', 'joined', 'group_id', 'dds_domain_id', 'display_name', 'is_master', 'required_peers'}
         if set(payload).difference(allowed):
             raise ValueError('허용되지 않은 연동 설정 항목이 있습니다')
-        if 'enabled' in payload and not isinstance(payload['enabled'], bool):
-            raise ValueError('enabled는 true 또는 false여야 합니다')
+        for key in ('enabled', 'joined'):
+            if key in payload and not isinstance(payload[key], bool):
+                raise ValueError(f'{key}는 true 또는 false여야 합니다')
         current = load_group_config(self._config_path)
         config = replace(
             current,
             enabled=bool(payload.get('enabled', current.enabled)),
+            joined=bool(payload.get('joined', current.joined)),
             is_master=bool(payload.get('is_master', current.is_master)),
             required_peers=tuple(str(x).strip() for x in payload.get('required_peers', current.required_peers) if str(x).strip()),
             group_id=str(payload.get('group_id', current.group_id)).strip(),

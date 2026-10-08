@@ -52,7 +52,7 @@
                     <button id="registerMotionFileButton" class="primary" type="button" disabled>재생 등록</button>
                     <button id="unregisterMotionFileButton" type="button" class="danger" disabled>재생 등록 해제</button>
                     <button id="downloadMotionFileButton" type="button" title="이 파일을 지금 보고 있는 PC 에 저장합니다" disabled>내 PC로 저장</button>
-                    <button id="previewMotionFileButton" type="button" title="MuJoCo 물리 계산을 시작합니다 · 끝나면 「3D 보기 (웹)」와 「MuJoCo 같이 보기」가 켜집니다" disabled>MuJoCo 계산</button>
+                    <button id="previewMotionFileButton" type="button" title="MuJoCo 물리 계산을 시작합니다 · 끝나면 「3D 보기 (웹)」 에서 실물과 같이 볼 수 있습니다" disabled>MuJoCo 계산</button>
                     <button id="deleteMotionFileButton" type="button" class="danger" disabled>삭제</button>
                   </div>
                   </div>
@@ -87,11 +87,6 @@
                           <option value="10">10초 일괄 적용</option>
                         </select>
                       </label>
-                      <div class="compact-field"><span>MuJoCo 같이 보기</span>
-                        <span class="mujoco-companion-field" title="계산이 끝난 재생 등록 애니메이션만 · 켜면 아래 「3D 보기 (웹)」가 열리고 재생이 running 으로 바뀌는 순간 0초부터 같이 출발합니다 · 이 브라우저에서 그립니다(원격 접속자 포함)">
-                          <input id="motionRunMujocoToggle" type="checkbox" disabled>
-                        </span>
-                      </div>
                       <label class="compact-field"><span>회차 사이 동작</span>
                         <select id="motionAutomationRepeatMode" class="compact-select" disabled>
                           <option value="direct">바로 다음 회차</option>
@@ -132,9 +127,15 @@
             <details id="sim3dSection" class="motion-file-subsection sim3d-section" aria-label="3D 보기 (웹)">
               <summary class="section-head compact sim3d-summary">
                 <strong>3D 보기 (웹)</strong>
-                <span id="sim3dStatus">펼치면 로봇 팩의 3D 장면을 불러옵니다 · 실물과 같이 보려면 위 「MuJoCo 같이 보기」</span>
+                <span id="sim3dStatus">펼치면 로봇 팩의 3D 장면을 불러옵니다 · 기본은 실물 재생과 같이 움직입니다</span>
               </summary>
               <div class="sim3d-toolbar">
+                <!-- 「실물과 같이」 · 기본 켬 = 디지털 트윈 · 재생 등록 애니를 실물 재생과 같은 순간에 ·
+                     끄면 목록에서 고른 애니를 직접 재생·슬라이더로 본다 · 2026-10-09 사용자 · 수정 목록 86 -->
+                <label class="compact-field sim3d-view-toggle sim3d-follow-toggle"
+                  title="켜면 실물 재생과 같이 움직입니다(재생 등록 애니) · 끄면 고른 애니를 직접 재생합니다">
+                  <input id="sim3dFollowToggle" type="checkbox" checked><span>실물과 같이</span>
+                </label>
                 <button id="sim3dPrepareButton" type="button" title="로봇 팩에서 3D 장면을 만듭니다 · 팩마다 한 번">3D 장면 준비</button>
                 <button id="sim3dLoadButton" type="button" disabled title="선택한 애니메이션의 MuJoCo 계산 결과를 불러옵니다">프레임 불러오기</button>
                 <button id="sim3dPlayButton" type="button" class="primary" disabled>재생</button>

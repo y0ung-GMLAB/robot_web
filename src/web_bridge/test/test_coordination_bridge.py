@@ -1,3 +1,4 @@
+import pytest
 from pathlib import Path
 
 from motion_common.paths import NO_PROJECT_SELECTED
@@ -296,3 +297,27 @@ def test_human_group_start_is_refused_in_schedule_mode_but_schedule_start_passes
 
     accepted = service.request_control({'command': 'start_group', 'schedule_id': 's1'})
     assert accepted['success'] is True and len(calls) == 1
+
+
+def test_the_group_switch_turns_settings_and_participation_on_together(tmp_path, monkeypatch):
+    """수정 목록 83 · 설정이 꺼진 PC 에서 「그룹 참여」 를 켜면 enabled 와 joined 를 한 번에 저장한다."""
+    from motion_common.group_config import load_group_config
+    service = _idle_service(_Node(), tmp_path)
+    monkeypatch.setattr(service, '_restart_coordination_service', lambda: {
+        'service_installed': True, 'restart_pending': True, 'message': 'ok',
+    })
+    service.update_settings({'enabled': False, 'joined': False, 'group_id': 'stage-a', 'dds_domain_id': 21})
+    path = tmp_path / 'config/motion_coordination.yaml'
+    assert load_group_config(path).joined is False
+
+    service.update_settings({'enabled': True, 'joined': True, 'group_id': 'stage-a'})
+    config = load_group_config(path)
+    assert config.enabled is True and config.joined is True
+
+    # 화면은 더 이상 enabled 를 보내지 않는다 · 안 오면 지금 값 그대로
+    service.update_settings({'group_id': 'stage-b'})
+    config = load_group_config(path)
+    assert config.enabled is True and config.joined is True and config.group_id == 'stage-b'
+
+    with pytest.raises(ValueError):
+        service.update_settings({'joined': 'yes'})

@@ -70,9 +70,7 @@ export function motionHeaderConditionCells({
       on: grouped,
       title: grouped
         ? '그룹 참여 중 · 다른 PC 들과 함께 재생합니다'
-        : (enabled
-          ? '연동을 쓰지만 그룹에서 나가 있습니다 · 이 PC 혼자 재생합니다'
-          : '연동을 쓰지 않습니다 · 이 PC 혼자 재생합니다'),
+        : '「그룹 참여」 꺼짐 · 이 PC 혼자 재생합니다 (PC 연동 설정 탭에서 켬)',
     },
     {
       key: 'window',

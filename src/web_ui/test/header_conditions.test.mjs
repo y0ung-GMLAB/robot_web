@@ -33,11 +33,11 @@ test('둘 다 맞으면 둘 다 켜진다', () => {
   assert.ok(cells.every((cell) => cell.on));
 });
 
-test('연동을 켜 두고 나가 있으면 그룹 미참여라고 말한다', () => {
+test('그룹 참여를 꺼 두면 그룹 미참여 · 혼자 재생이라고 말한다 · 83', () => {
   const [scope] = motionHeaderConditionCells({ enabled: true, joined: false, inWindow: false });
 
   assert.equal(scope.text, '그룹 미참여');
-  assert.match(scope.title, /그룹에서 나가/);
+  assert.match(scope.title, /그룹 참여」 꺼짐 · 이 PC 혼자 재생합니다/);
 });
 
 test('아직 모르면 물음표로 둔다', () => {

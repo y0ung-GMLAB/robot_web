@@ -864,7 +864,7 @@ export function createMotionDataController({
     await showAlert(
       blockedByCoordination
         ? `${detail}\n\n`
-          + 'PC 연동 화면에서 그룹 실행을 종료하거나 「연동 탈퇴」를 누른 뒤 다시 시도하세요.'
+          + 'PC 연동 화면에서 그룹 실행을 종료하거나 「그룹 참여」를 끈 뒤 다시 시도하세요.'
         : detail,
       {
         title: blockedByCoordination ? 'DDS 그룹 실행 중' : title,
@@ -1690,7 +1690,7 @@ export function createMotionDataController({
 
 
   function renderMotionRunPanel() {
-    // 같이 보기 토글 · 재생 등록된 파일의 계산이 끝났을 때만 켤 수 있다
+    // 3D 보기 「실물과 같이」(기본 켬 · 86) 가 따라갈 파일
     // 재생 목록이면 **지금 도는(또는 다음으로 가는) 애니**를 따라간다 · 수정 목록 35 ·
     // 초기 위치 이동 중에 이미 다음 파일 이름이 오므로 프레임을 미리 받아 둔다
     const playingId = Number(motionRunStatus?.playlist_length) > 1
@@ -1923,10 +1923,6 @@ export function createMotionDataController({
     const file = selectedFile;
     const registered = Boolean(file && registeredPlaylistValue.includes(file.id));
     const listed = registeredPlaylistValue.length;
-    // 같이 보기 토글 · 재생 등록(목록 1번) 파일의 계산이 끝났을 때만 켤 수 있다
-    const mujocoRegisteredFile = files.find(
-      (entry) => entry.id === registeredMotionFileIdValue,
-    ) || null;
     if (el.deleteMotionFileButton) {
       el.deleteMotionFileButton.disabled = !file || loading;
       el.deleteMotionFileButton.title = registered
@@ -1958,27 +1954,10 @@ export function createMotionDataController({
             : (state === 'stale'
               ? `${file.preview?.message || '로봇 팩 변경'} · 누르면 지금 팩으로 다시 계산합니다`
               : (state === 'missing' || state === 'failed'
-                ? '무거운 물리 계산을 시작합니다 · 끝나면 「3D 보기 (웹)」와 같이 보기가 켜집니다'
+                ? '무거운 물리 계산을 시작합니다 · 끝나면 「3D 보기 (웹)」 에서 봅니다'
                 : (state === 'ready'
                   ? '계산이 끝났습니다 · 아래 「3D 보기 (웹)」에서 봅니다'
                   : '계산(precompute)이 없는 구성입니다 · 웹 3D 로 볼 결과가 없습니다')))));
-    }
-    const registeredState = mujocoState(mujocoRegisteredFile);
-    if (el.motionRunMujocoToggle) {
-      // stale(팩 변경 뒤 옛 결과)도 같이 보기는 허용 · 다시 계산은 MuJoCo 버튼
-      // 계산이 실패해도 옛 결과가 있으면 보기는 된다 · 수정 목록 54
-      const usable = registeredState === 'ready' || registeredState === 'stale'
-        || (registeredState === 'failed' && mujocoRegisteredFile?.preview?.has_result === true);
-      el.motionRunMujocoToggle.disabled = !usable;
-      if (!usable && el.motionRunMujocoToggle.checked) {
-        el.motionRunMujocoToggle.checked = false;
-        sim3d.setFollow(false);
-      }
-      el.motionRunMujocoToggle.title = usable
-        ? '켜면 아래 「3D 보기 (웹)」가 열리고 재생 시작과 함께 0초부터 같이 출발합니다'
-        : (registeredState === 'computing'
-          ? 'MuJoCo 계산 중입니다 · 끝나면 켤 수 있습니다'
-          : '재생 등록된 애니메이션의 MuJoCo 계산이 끝나야 켤 수 있습니다');
     }
     // 재생 등록은 **조인트 매핑 편집과 상관없다** · §6-160
     //
@@ -2589,8 +2568,8 @@ export function createMotionDataController({
 
   function mujocoBadge(file) {
     const state = mujocoState(file);
-    if (state === 'computing') return '<span class="mujoco-badge computing" title="무거운 물리 계산이 도는 중 · 끝나면 같이 보기가 켜집니다">MuJoCo 계산 중</span>';
-    if (state === 'ready') return '<span class="mujoco-badge ready" title="계산 완료 · MuJoCo 재생·같이 보기 가능">MuJoCo 준비됨</span>';
+    if (state === 'computing') return '<span class="mujoco-badge computing" title="무거운 물리 계산이 도는 중 · 끝나면 3D 보기가 켜집니다">MuJoCo 계산 중</span>';
+    if (state === 'ready') return '<span class="mujoco-badge ready" title="MuJoCo 계산 완료 · 3D 보기 가능">MuJoCo</span>';
     if (state === 'failed') {
       // 이유(코드 · 기록 파일 · 옛 결과 있음)를 그대로 · 수정 목록 54
       const why = escapeHtml(`${file?.preview?.message || '마지막 계산이 실패했습니다'} · 다시 계산을 누르세요`);
@@ -2619,12 +2598,6 @@ export function createMotionDataController({
     } catch (error) {
       setMessage(`MuJoCo 계산 실패: ${error?.message || error}`);
     }
-  }
-
-  /** 「MuJoCo 같이 보기」 · 웹 3D 뷰어가 재생 등록 파일을 따라간다 (7) */
-  function toggleMujocoCompanion() {
-    const registered = files.find((entry) => entry.id === registeredMotionFileIdValue) || null;
-    sim3d.setFollow(Boolean(el.motionRunMujocoToggle?.checked), registered);
   }
 
   /** 계산이 도는 동안은 목록을 몇 초마다 다시 읽어 상태를 갱신한다 */
@@ -3411,7 +3384,6 @@ export function createMotionDataController({
     el.unregisterMotionFileButton?.addEventListener('click', unregisterSelectedMotionFile);
     el.downloadMotionFileButton?.addEventListener('click', downloadSelectedMotionFile);
     el.previewMotionFileButton?.addEventListener('click', previewSelectedMotionFile);
-    el.motionRunMujocoToggle?.addEventListener('change', toggleMujocoCompanion);
     if (el.deleteMotionFileButton) {
       el.deleteMotionFileButton.addEventListener('click', deleteSelectedFile);
     }

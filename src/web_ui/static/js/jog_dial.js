@@ -63,8 +63,6 @@ const RELEASE_AFTER_MS = 1000;
 const WHEEL_PX_PER_TICK = 100;
 //: Shift · 한 칸의 1/10
 const FINE_FACTOR = 0.1;
-//: 스위치 상태 · 브라우저마다 기억 · 옛 키 그대로(41 전 「썸휠 ON/OFF」)
-const ENABLED_KEY = 'robot_web.jogDialEnabled';
 
 //: 한 칸 크기 허용 범위 (모터 deg) · 화면 입력칸 min/max 와 같다
 const STEP_MIN_DEG = 0.001;
@@ -87,7 +85,8 @@ export function createJogDialController({
   //: 눈금 띠 표시 위치 · **화면 느낌 전용** · 기준 위치가 아니다
   let ringOffsetPx = 0;
   let lastMessage = '';
-  let enabled = loadEnabled();
+  // 화면을 열면 늘 OFF · 켜야 돈다 · 기억하지 않는다 (2026-10-09 사용자 · 수정 목록 84)
+  let enabled = false;
 
   //: 스트림 한 번(잡은 순간부터 놓을 때까지)
   //:   axis · anchor(잡은 순간 모터 위치) · target(돌린 만큼 옮긴 목표) · commanded(보낸 목표)
@@ -96,22 +95,6 @@ export function createJogDialController({
   let sendTimer = null;
   let socket = null;
   let socketReady = false;
-
-  function loadEnabled() {
-    try {
-      return window.localStorage?.getItem(ENABLED_KEY) !== '0';
-    } catch {
-      return true;
-    }
-  }
-
-  function saveEnabled(value) {
-    try {
-      window.localStorage?.setItem(ENABLED_KEY, value ? '1' : '0');
-    } catch {
-      // 기억 못 해도 지금 화면에서는 된다
-    }
-  }
 
   function selectedMotor() {
     // 고른 게 없으면 없다 · Number(null) 은 0 이라 0번 모터가 움직였다 (2026-10-02 사용자 보고)
@@ -689,7 +672,6 @@ export function createJogDialController({
 
   function setEnabled(value) {
     enabled = Boolean(value);
-    saveEnabled(enabled);
     if (!enabled) {
       // 끄면 잠근다 · 돌리던 것은 지금 자리에 세운다 · 칸은 그대로 둔다(41)
       endSession(true);

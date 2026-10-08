@@ -141,3 +141,14 @@ test('motion range conversion respects invert and rounds inward', () => {
   assert.match(limits, /if \(hasMotorConfigDataChanges\(\) \|\| hasAxisChanges\(\)\) \{/);
   assert.match(data, /if \(payload\.motor_limits\?\.changed\?\.length\) await onMotorLimitsChange\?\.\(payload\.motor_limits\.changed\);/);
 });
+
+test('다이얼 ON 과 OFF 가 한눈에 갈린다 · 화면을 열면 OFF · 84', () => {
+  const css = readFileSync(new URL('../static/css/14-redesign.css', import.meta.url), 'utf8');
+  // 마우스를 올려도(hover) 파랑 그대로
+  assert.match(css, /\.jog-dial-switch\.on,\s*button\.jog-dial-switch\.on:hover:not\(:disabled\) \{[^}]*background: #2563eb/);
+  assert.match(css, /\.jog-dial:not\(\.locked\) \{[^}]*border: 2px solid #3b82f6/);
+  assert.match(css, /\.jog-dial\.locked \{[^}]*border: 2px dashed/);
+  assert.match(css, /\.jog-dial\.locked::after \{[^}]*content: '다이얼 꺼짐/);
+  assert.match(html, /id="jogDialEnabledSwitch"[^>]*aria-checked="false"[\s\S]*?>다이얼 OFF</);
+  assert.doesNotMatch(readFileSync(new URL('../static/js/jog_dial.js', import.meta.url), 'utf8'), /localStorage/);
+});

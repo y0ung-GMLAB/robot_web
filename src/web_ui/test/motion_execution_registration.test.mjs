@@ -52,7 +52,6 @@ test('one-shot and continuous start include whole-axis initialization automatica
   assert.match(startBody, /startMotionRun\(\{\s*\.\.\.motionRunPayload\(\),\s*run_mode: runMode,/);
   // MuJoCo 같이 보기는 브라우저 몫이다 · 서버에 실어 보내지 않는다 (7 · 네이티브 뷰어 없음)
   assert.doesNotMatch(startBody, /with_mujoco/);
-  assert.match(controller, /el\.motionRunMujocoToggle\?\.addEventListener\('change', toggleMujocoCompanion\)/);
 });
 
 test('motion file list does not arbitrarily select the first file', () => {
@@ -225,11 +224,11 @@ test('DDS execution blocks show a recovery popup and expose the way out', () => 
   assert.match(controller, /async function showMotionRunFailure/);
   assert.match(controller, /DDS 그룹 실행이 로컬 애니메이션 재생을 사용 중입니다/);
   // 버튼 이름이 바뀌면 이 안내문도 같이 바뀌어야 한다 · §6-132
-  assert.match(controller, /「연동 탈퇴」를 누른 뒤 다시 시도하세요/);
-  assert.match(html, /id="coordinationLeaveButton"[^>]*>연동 탈퇴</);
-  assert.match(dom, /coordinationLeaveButton/);
+  assert.match(controller, /「그룹 참여」를 끈 뒤 다시 시도하세요/);
+  assert.match(html, /id="coordinationJoinSwitch"/);
+  assert.match(dom, /coordinationJoinSwitch/);
   assert.match(coordination, /control\('leave'\)/);
-  assert.match(coordination, /단독 재생을 사용할 수 있습니다/);
+  assert.match(coordination, /이 PC 혼자 재생합니다/);
   // 들어오거나 나가거나 둘 뿐이다 · 「지금 빠지기」는 없앴다 · §6-164
   assert.doesNotMatch(html, /coordinationTemporaryDisableButton/);
   assert.doesNotMatch(dom, /coordinationTemporaryDisableButton/);
