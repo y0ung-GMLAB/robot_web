@@ -858,7 +858,8 @@
 
 .motion-run-columns {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+  /* 왼쪽 애니메이션 목록을 넓게 · 파일명이 잘리고 오른쪽 요약이 비던 것 (사용자 2026-10-08) */
+  grid-template-columns: minmax(0, 1.7fr) minmax(300px, 1fr);
   gap: 10px;
   /* 파일이 늘면 왼쪽만 길어져 아래가 어긋난다 · 두 칸을 같은 높이로 늘린다. */
   align-items: stretch;
@@ -923,7 +924,8 @@
    아홉 칸 격자에서는 이 셋이 나머지 수치에 묻히고 파일명이 줄바꿈됐다. */
 .motion-run-targets {
   display: grid;
-  grid-template-columns: minmax(0, 1.4fr) minmax(0, 1.4fr) minmax(0, 0.8fr);
+  /* 오른쪽 칸이 좁아졌다 · 재생 목록·조인트 매핑·상태를 위아래로 쌓는다 (2026-10-08) */
+  grid-template-columns: minmax(0, 1fr);
   gap: 8px;
   margin-bottom: 8px;
 }
