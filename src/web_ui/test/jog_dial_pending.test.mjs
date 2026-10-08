@@ -101,7 +101,7 @@ function fakeElement() {
   };
 }
 
-function setup({ position = 0, lower = -1000, upper = 1000 } = {}) {
+function setup({ position = 0, lower = -1000, upper = 1000, jointRow = null, jointMode = false } = {}) {
   calls.length = 0;
   sockets.length = 0;
   respond = null;
@@ -113,8 +113,13 @@ function setup({ position = 0, lower = -1000, upper = 1000 } = {}) {
     position_deg: position, motor_type: 'ac_servo', lower, upper,
   };
   const state = { motors: [motor] };
+  // 조그 칸의 「조인트 deg 기준」 체크 · 다이얼도 따른다 · 76
+  el.motionTestJogJointMode = fakeElement();
+  el.motionTestJogJointMode.checked = jointMode;
+  for (const name of ['jogDialStepLabel', 'jogDialPositionLabel', 'jogTargetLabel']) el[name] = fakeElement();
   const dial = createJogDialController({
     el, getLatestState: () => state, getSelectedAxis: () => 1,
+    getJointRow: (axis) => (axis === 1 ? jointRow : null),
   });
   dial.bindEvents();
   dial.renderRuntimeState();
@@ -243,7 +248,7 @@ test('typed target (always shown next to the dial) moves in motor deg and refuse
   assert.equal(el.jogTargetMoveButton.disabled, true);
   el.jogTargetMoveButton.dispatch('click');
   assert.equal(calls.length, 0);
-  assert.match(el.jogDialMessage.textContent, /상한 1000° 밖/);
+  assert.match(el.jogDialMessage.textContent, /운전 범위\(-1000° ~ 1000°\) 밖/);
 
   el.jogTargetInput.value = '250.5';
   el.jogTargetInput.dispatch('input');
@@ -384,4 +389,67 @@ test('모터를 고르면(reset) 돌리던 것이 없어도 다시 그린다 · 
   assert.equal(el.jogDialMessage.textContent, '');
   assert.equal(el.jogDialPosition.textContent, '3.00°');
   assert.equal(el.jogDial.getAttribute('aria-disabled'), 'false');
+});
+
+// ---- 조인트 deg 체크를 다이얼도 따른다 · 수정 목록 76 (2026-10-08) ----
+// 목 상하처럼 감속 150 · 방향 반전 · 기준점 1000 (모터 deg)
+const NECK = { motion_id: '1-1', gear_ratio: 150, scale: 1, invert: true, reference_position_deg: 1000, offset_deg: 0 };
+
+test('체크 켜짐 · 한 칸 1° = 조인트 1° = 모터 −150° (감속비 × 방향) · 표시도 조인트 deg · 76', async () => {
+  const { el, dial, wheel, pendingText } = setup({ position: 1000, lower: -100000, upper: 100000, jointRow: NECK, jointMode: true });
+  assert.equal(el.jogDialPositionLabel.textContent, '조인트 위치');
+  assert.equal(el.jogDialPosition.textContent, '0.000°', '기준점 = 조인트 0°');
+  assert.equal(el.jogDialStepLabel.textContent, '다이얼 한 칸 = (조인트 deg)');
+  assert.equal(el.jogTargetLabel.textContent, '목표 위치 (조인트 deg)');
+  wheel();
+  assert.match(pendingText(), /남은 이동 \+1\.00°/, '남은 양도 조인트 deg');
+  await wait(200);
+  assert.equal(sentDeg(targets().at(-1).target_rad), 1000 - 150, '모터에는 −150°');
+  dial.reset();
+});
+
+test('체크 꺼짐 · 매핑이 있어도 한 칸 = 모터 deg (지금까지와 같음) · 76', async () => {
+  const { el, dial, wheel } = setup({ position: 1000, lower: -100000, upper: 100000, jointRow: NECK, jointMode: false });
+  assert.equal(el.jogDialPositionLabel.textContent, '모터 위치');
+  wheel();
+  await wait(120);
+  assert.equal(sentDeg(targets().at(-1).target_rad), 1001);
+  dial.reset();
+});
+
+test('매핑이 없으면 체크가 켜져 있어도 모터 deg · 76', async () => {
+  const { el, dial, wheel } = setup({ position: 5, jointRow: null, jointMode: true });
+  assert.equal(el.jogDialPositionLabel.textContent, '모터 위치');
+  wheel();
+  await wait(120);
+  assert.equal(sentDeg(targets().at(-1).target_rad), 6);
+  dial.reset();
+});
+
+test('목표 위치 · 조인트 deg 로 받아 매핑 식으로 모터 deg 로 보낸다 · 범위 글도 조인트 · 76', async () => {
+  // 모터 한계 −500 ~ 2500 = 조인트 (1000 − m) / 150 → −10 ~ +10
+  const { el } = setup({ position: 1000, lower: -500, upper: 2500, jointRow: NECK, jointMode: true });
+  assert.equal(el.jogTargetInput.value, '0', '지금 위치를 조인트 deg 로 채움');
+  el.jogTargetInput.value = '12';
+  el.jogTargetInput.dispatch('input');
+  assert.equal(el.jogTargetMoveButton.disabled, true);
+  el.jogTargetMoveButton.dispatch('click');
+  assert.match(el.jogDialMessage.textContent, /목표 12° 가 운전 범위\(-10° ~ 10°\) 밖/);
+  el.jogTargetInput.value = '2';
+  el.jogTargetInput.dispatch('input');
+  el.jogTargetMoveButton.dispatch('click');
+  assert.equal(calls.length, 1);
+  assert.equal(sentDeg(calls[0].body.target_rad), 1000 - 300, '조인트 2° = 모터 700°');
+  respond({ success: true });
+  await tick(); await tick();
+});
+
+test('체크를 바꾸면 돌리던 것을 세우고 목표 칸을 새 단위로 다시 채운다 · 76', async () => {
+  const { el, wheel } = setup({ position: 1000, lower: -100000, upper: 100000, jointRow: NECK, jointMode: true });
+  wheel();
+  await wait(60);
+  el.motionTestJogJointMode.checked = false;
+  el.motionTestJogJointMode.dispatch('change');
+  assert.deepEqual(releases().at(-1), { type: 'release', axes: [1] });
+  assert.equal(el.jogTargetInput.value, '1000', '모터 deg 로 다시 채움');
 });

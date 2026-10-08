@@ -132,7 +132,7 @@
                   <div class="jog-wheel-shade" aria-hidden="true"></div>
                 </div>
                 <label class="manual-field">
-                  <span>다이얼 한 칸 = (모터 deg · 감속·기어비 미적용)</span>
+                  <span id="jogDialStepLabel">다이얼 한 칸 = (모터 deg · 감속·기어비 미적용)</span>
                   <input id="jogDialStep" class="mono" type="number" inputmode="decimal"
                     min="0.001" max="360" step="any" value="1"
                     title="한 칸에 움직일 모터 각도 · 0.001 ~ 360 deg">
@@ -141,7 +141,7 @@
               </div>
               <div class="jog-dial-side">
                 <div class="jog-dial-readout">
-                  <span>모터 위치</span>
+                  <span id="jogDialPositionLabel">모터 위치</span>
                   <strong id="jogDialPosition" class="mono">-</strong>
                 </div>
                 <div class="jog-dial-pending-row">
@@ -151,7 +151,7 @@
                 </div>
                 <div class="jog-target-row">
                   <label class="manual-field">
-                    <span>목표 위치 (모터 deg · 감속·기어비 미적용)</span>
+                    <span id="jogTargetLabel">목표 위치 (모터 deg · 감속·기어비 미적용)</span>
                     <input id="jogTargetInput" class="mono" type="number" inputmode="decimal" step="any"
                       title="이동할 모터 위치 · 모터 운전 한계 안 · 「이동」 또는 Enter · 속도·가속은 모터 설정 한계를 따릅니다">
                   </label>

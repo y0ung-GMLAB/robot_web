@@ -1160,6 +1160,8 @@ const jogDial = createJogDialController({
   getLatestState: () => appState.latestState,
   getSelectedAxis: () => motionTest.getSelectedAxis(),
   onCapture: captureJogPoint,
+  // 조그 칸 「조인트 deg 기준」 체크를 다이얼도 따른다 · 수정 목록 76
+  getJointRow: (axis) => motionData?.jointRowForAxis?.(axis) || null,
 });
 
 /** 수동 조작 화면의 모드 안내 띠 · 수동 모드에서만 조작 가능 · 2026-10-02 */
