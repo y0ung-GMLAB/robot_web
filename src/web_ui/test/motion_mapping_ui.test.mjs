@@ -48,7 +48,10 @@ test('the mapping file is the one the project registered · no picking, no delet
   // 파일 이름은 편집 제목의 툴팁으로만 (2026-10-08 · 「연결 파일」 칸 삭제)
   assert.match(html, /<strong id="motionMappingFileName">조인트 매핑 편집<\/strong>/);
   assert.match(controller, /el\.motionMappingFileName\.title = `조인트 매핑 파일 · \$\{name\}`/);
-  assert.match(html, /<div id="motionMappingMessage" class="registry-message">/);
+  // 안내 줄은 할 말이 있을 때만 · 잘 읽힌 상태에서는 숨김 (2026-10-08)
+  assert.match(html, /<div id="motionMappingMessage" class="registry-message hidden" role="status"><\/div>/);
+  assert.match(controller, /el\.motionMappingMessage\.classList\.toggle\('hidden', !message\)/);
+  assert.doesNotMatch(controller, /setMappingMessage\(`조인트 매핑: \$\{mappingFileName\}/);
   assert.match(controller, /function renderMappingFileName\(\)/);
   // 지우는 길 자체가 없다
   assert.doesNotMatch(api, /deleteMotionMapping/);

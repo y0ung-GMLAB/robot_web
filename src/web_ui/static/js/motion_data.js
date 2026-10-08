@@ -775,8 +775,11 @@ export function createMotionDataController({
     });
   }
 
+  /** 조인트 매핑 안내 줄 · 할 말이 없으면 줄을 숨긴다 · 잘 읽힌 상태(파일 이름 나열)는 보이지 않는다 (2026-10-08) */
   function setMappingMessage(message) {
-    if (el.motionMappingMessage) el.motionMappingMessage.textContent = message;
+    if (!el.motionMappingMessage) return;
+    el.motionMappingMessage.textContent = message || '';
+    el.motionMappingMessage.classList.toggle('hidden', !message);
   }
 
   function markMappingDirty() {
@@ -2477,7 +2480,7 @@ export function createMotionDataController({
         mappingDirty = false;
         mappingRevisionConflict = false;
       }
-      setMappingMessage(payload.message || '매핑 목록 갱신 완료');
+      setMappingMessage('');
     } catch (error) {
       if (loadToken !== mappingLoadToken || error?.staleProjectResponse) return;
       setMappingMessage(`매핑 목록 실패: ${error?.message || error}`);
@@ -2561,9 +2564,8 @@ export function createMotionDataController({
       mappingMotionFileDetail = loadedMotionFileDetail;
       mappingDirty = false;
       mappingRevisionConflict = false;
-      const mappingFileName = payload.file?.filename || payload.file?.id || selectedMappingId || '-';
-      const motionFileName = mappingDraft.motion_file_id || '-';
-      setMappingMessage(`조인트 매핑: ${mappingFileName} · 애니메이션: ${motionFileName}`);
+      // 잘 읽었으면 할 말이 없다 · 파일 이름 줄이 늘 떠 있던 것 (사용자 2026-10-08)
+      setMappingMessage('');
     } catch (error) {
       if (loadToken !== mappingLoadToken || error?.staleProjectResponse) return;
       setMappingMessage(`매핑 파일 실패: ${error?.message || error}`);
