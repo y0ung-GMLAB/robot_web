@@ -112,10 +112,10 @@ test('motor management actions follow control, edit, save and apply groups', () 
 // 못 읽은 축이 있으면 확인창에서 말로 알린다 · 막지는 않는다.
 test('an unreadable model stops neither the save nor the apply', () => {
   const saveFlow = controller.match(
-    /async function saveAxisConfig\(\)[\s\S]*?async function applyConfigRestart\(\)/,
+    /async function saveAxisConfig\(\)[\s\S]*?async function applyConfigRestart\(options = \{\}\)/,
   )?.[0] || '';
   const applyFlow = controller.match(
-    /async function applyConfigRestart\(\)[\s\S]*?const confirmed = await showConfirm/,
+    /async function applyConfigRestart\(options = \{\}\)[\s\S]*?const confirmed = await showConfirm/,
   )?.[0] || '';
 
   assert.doesNotMatch(saveFlow, /unverifiedAcModels/);

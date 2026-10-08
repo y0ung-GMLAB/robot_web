@@ -66,7 +66,13 @@ test('capture buttons save the current motor position, with a confirm first', ()
   assert.match(mainSource, /async function captureJogPoint\(kind, \{ axis, motorDeg \}\)/);
   assert.match(mainSource, /await showConfirm\(/);
   // 리밋 원본은 조인트 매핑 하나 · 모터 운전 한계는 매핑 저장 때 서버가 환산 (2026-10-02)
-  assert.match(mainSource, /return motionData\.saveCapturedPoint\(axis, kind, motorDeg\);/);
+  assert.match(mainSource, /const saved = await motionData\.saveCapturedPoint\(axis, kind, motorDeg\);/);
+  // 저장 직후 운전 한계도 옮길지(적용·재시작) 바로 묻는다 · 안 하면 리밋이 옛 기준 (2026-10-08)
+  assert.match(mainSource, /await motorConfig\.applyConfigRestart\(\{\s*reason:/);
+  assert.match(mainSource, /운전 한계 미적용 · 「장비에 적용 · 모터 재시작」 필요/);
+  const motorConfigSource = readFileSync(new URL('../static/js/motor_config.js', import.meta.url), 'utf8');
+  assert.match(motorConfigSource, /applyConfigRestart: \(options\) => applyConfigRestart\(options\)/);
+  assert.match(motorConfigSource, /reasonText\s*\+ unsavedWarning/);
   assert.doesNotMatch(mainSource, /saveMotorLimit/);
   // 매핑 저장이 모터 설정 파일을 바꾸면 모터 관리 화면이 다시 읽는다
   assert.match(mainSource, /onMotorLimitsChange: \(changed\) => motorConfig\.reloadIfClean\(changed\)/);

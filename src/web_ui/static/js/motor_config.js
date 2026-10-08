@@ -3325,7 +3325,9 @@ export function createMotorConfigController({
     }
   }
 
-  async function applyConfigRestart() {
+  /** options.reason · 다른 화면이 부를 때 확인 창 맨 앞에 붙일 이유 (다이얼 기준점 지정 · 2026-10-08) */
+  async function applyConfigRestart(options = {}) {
+    const reasonText = typeof options?.reason === 'string' && options.reason ? `${options.reason}\n\n` : '';
     // **「설정 적용 · 모터 재시작」은 파일을 바꾸지 않는다** · §6-221
     //
     // 한때 여기서 저장을 대신 눌러 줬다 · 그러면 사람이 「설정 저장」을
@@ -3361,7 +3363,8 @@ export function createMotorConfigController({
     // 모델을 몰라도 막지 않는다 · 확인창에서 말로 알린다 · §6-213
     const modelWarning = modelWarningMessage ? `${modelWarningMessage}\n\n` : '';
     const confirmed = await showConfirm(
-      unsavedWarning
+      reasonText
+      + unsavedWarning
       + modelWarning
       + recoveryWarning
       + '주의: 설정 적용 중 motor_manager_node를 재시작합니다.\n\n'
@@ -3807,6 +3810,8 @@ export function createMotorConfigController({
     reloadIfClean,
     /** 조인트 매핑 편집 상태가 바뀌면 main.js 가 부른다 */
     renderCommitBar: () => renderCommitBar(),
+    /** 「장비에 적용 · 모터 재시작」 · 다이얼 기준점·limit 지정 뒤 바로 묻는다 · 확인 창은 여기 것 하나 */
+    applyConfigRestart: (options) => applyConfigRestart(options),
     /** 모터 관리에 저장 안 한 편집이 있나 · 상단 설정 상태 배지가 본다 */
     hasUnsavedChanges: () => hasMotorConfigDataChanges() || hasAxisChanges(),
     fetchRegistry,

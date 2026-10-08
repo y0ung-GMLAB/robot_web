@@ -1207,11 +1207,21 @@ async function captureJogPoint(kind, { axis, motorDeg }) {
     : '조인트 매핑 범위(모션 deg)';
   const confirmed = await showConfirm(
     `모터 ${axis}의 지금 위치 ${motorDeg.toFixed(3)}° 를 저장합니다.\n\n저장 위치: ${where}`
-      + '\n\n모터 운전 한계는 조인트 매핑에서 자동 계산 · 드라이브 반영은 「장비에 적용 · 모터 재시작」 후입니다.',
+      + '\n\n저장한 뒤 운전 한계(소프트 리밋)도 새 값으로 옮길지 바로 묻습니다 (장비에 적용 · 모터 재시작).',
     { title, confirmLabel: '저장', tone: 'warning' },
   );
   if (!confirmed) return { success: false, message: '취소했습니다' };
-  return motionData.saveCapturedPoint(axis, kind, motorDeg);
+  const saved = await motionData.saveCapturedPoint(axis, kind, motorDeg);
+  if (!saved?.success) return saved;
+  // 기준점·범위가 바뀌면 모터 운전 한계(드라이브 소프트 리밋 · 다이얼·페이더·조그 경계)는
+  // 「장비에 적용 · 모터 재시작」 뒤에야 바뀐다 · 안 하면 기준점만 새것이고 리밋은 옛 기준으로 남는다
+  // (실물 2026-10-08) · 그래서 저장 직후 바로 묻는다 · 확인 창은 적용 쪽 것 하나
+  const applied = await motorConfig.applyConfigRestart({
+    reason: `${title} 저장됨 · 운전 한계(소프트 리밋)도 새 기준으로 옮기려면 지금 장비에 적용·재시작해야 합니다.`,
+  });
+  return applied
+    ? { success: true, message: `${saved.message} · 장비에 적용·재시작 중` }
+    : { success: true, message: `${saved.message} · 운전 한계 미적용 · 「장비에 적용 · 모터 재시작」 필요` };
 }
 
 const motionData = createMotionDataController({
