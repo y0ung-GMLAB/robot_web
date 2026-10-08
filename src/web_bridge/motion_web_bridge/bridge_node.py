@@ -25,6 +25,7 @@ from std_srvs.srv import SetBool, Trigger
 
 from .access_log import install_access_log_filter
 from .system_update import SystemUpdate, blocker_from_run_status
+from .wifi_settings import WifiSettings
 from .ethercat_alias_manager import EthercatAliasError, EthercatAliasManager
 from .coordination_bridge import (
     CoordinationWebBridge, local_motion_control, local_motion_readiness,
@@ -536,6 +537,11 @@ class MotionWebBridge(Node):
         )
         # 웹에서 업데이트 · 재생 중이면 거절 (재시작이 모터를 세운다) · 2026-10-08
         self._system_update = SystemUpdate(
+            self.workspace_root,
+            blocker=lambda: blocker_from_run_status(self._cached_motion_run_status()),
+        )
+        # Wi-Fi · 재생 중이면 바꾸지 않는다 (연동이 끊긴다) · 수정 목록 81
+        self._wifi = WifiSettings(
             self.workspace_root,
             blocker=lambda: blocker_from_run_status(self._cached_motion_run_status()),
         )
@@ -1418,6 +1424,11 @@ class MotionWebBridge(Node):
     def system_update(self):
         """이 PC 코드 갱신 (`install.sh --code-only`) · 「모든 PC 업데이트」 의 한 칸"""
         return self._system_update
+
+    @property
+    def wifi(self):
+        """이 PC Wi-Fi 보기·바꾸기 · 60초 확인 없으면 되돌림 · 수정 목록 81"""
+        return self._wifi
 
     def _cached_motion_run_status(self) -> Dict[str, Any]:
         with self._motion_run_lock:

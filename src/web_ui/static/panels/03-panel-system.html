@@ -115,6 +115,42 @@
             </div>
           </section>
 
+          <!-- Wi-Fi · 이 PC · 바꾸면 60초 안에 「유지」 안 누르면 이전 연결로 되돌림 · 수정 목록 81 (2026-10-08) -->
+          <section class="project-system-manager wifi-card" aria-label="Wi-Fi">
+            <div class="section-head compact">
+              <strong>Wi-Fi</strong>
+              <span>이 PC 의 무선 연결 · 바꾸면 60초 안에 「유지」 · 안 누르면 이전 연결로 되돌림</span>
+            </div>
+            <div class="status-strip">
+              <div><span>지금 연결</span><strong id="wifiCurrent">-</strong></div>
+              <div><span>IP</span><strong id="wifiAddress" class="mono">-</strong></div>
+              <div><span>주소 방식</span><strong id="wifiMethod">-</strong></div>
+              <div><span>Wi-Fi 절전</span><strong id="wifiPowersave">-</strong></div>
+            </div>
+            <div id="wifiPendingBox" class="registry-message wifi-pending hidden" role="alert">
+              <span id="wifiPendingText"></span>
+              <button id="wifiKeepButton" class="primary" type="button">유지</button>
+              <button id="wifiRevertButton" type="button">되돌리기</button>
+            </div>
+            <div class="registry-actions">
+              <button id="wifiScanButton" type="button">주변 Wi-Fi 찾기</button>
+              <button id="wifiRefreshButton" type="button">새로 보기</button>
+            </div>
+            <div class="wifi-form">
+              <label class="manual-field"><span>Wi-Fi</span><select id="wifiNetworkSelect"><option value="">「주변 Wi-Fi 찾기」 를 누르세요</option></select></label>
+              <label class="manual-field"><span>또는 이름(SSID) 직접 · 숨긴 Wi-Fi</span><input id="wifiSsidInput" type="text" autocomplete="off" spellcheck="false"></label>
+              <label class="manual-field"><span>비밀번호 (열린 Wi-Fi 면 비움)</span><input id="wifiPasswordInput" type="password" autocomplete="new-password"></label>
+              <label class="compact-field"><input id="wifiStaticToggle" type="checkbox"><span>고정 IP (공유기 「DHCP 예약」 이 더 간단)</span></label>
+              <div id="wifiStaticFields" class="wifi-static hidden">
+                <label class="manual-field"><span>주소 (예 192.168.0.13/24)</span><input id="wifiStaticAddress" type="text" class="mono"></label>
+                <label class="manual-field"><span>게이트웨이 (공유기 · 예 192.168.0.1)</span><input id="wifiStaticGateway" type="text" class="mono"></label>
+                <label class="manual-field"><span>DNS (비우면 게이트웨이)</span><input id="wifiStaticDns" type="text" class="mono"></label>
+              </div>
+              <button id="wifiConnectButton" class="primary" type="button">이 Wi-Fi 로 바꾸기</button>
+            </div>
+            <div id="wifiMessage" class="registry-message" role="status"></div>
+          </section>
+
         </div>
 
       </section>

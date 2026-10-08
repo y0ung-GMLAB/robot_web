@@ -175,6 +175,43 @@ site_autologin() {
   site_mark_reboot "autologin"
 }
 
+# 웹에서 하는 관리 · 이 계정만 · 수정 목록 81 (Wi-Fi) · 79 (시간대) · 2026-10-08
+#
+# 웹 서비스는 systemd 사용자 서비스라 로그인 세션 밖이다 · polkit 이 「비활성」 으로 보고
+# NetworkManager 설정 변경·시간대 변경을 막는다 · 이 계정에만 그 두 가지를 허용한다 ·
+# 우분투 22.04 polkit 0.105 는 .pkla 를 읽는다
+SITE_POLKIT_FILE="${SITE_POLKIT_FILE:-/etc/polkit-1/localauthority/50-local.d/50-robot-web.pkla}"
+
+site_render_polkit() {
+  local user="$1"
+  cat <<PKLA
+[robot_web wifi]
+Identity=unix-user:${user}
+Action=org.freedesktop.NetworkManager.*
+ResultAny=yes
+ResultInactive=yes
+ResultActive=yes
+
+[robot_web timezone]
+Identity=unix-user:${user}
+Action=org.freedesktop.timedate1.set-timezone
+ResultAny=yes
+ResultInactive=yes
+ResultActive=yes
+PKLA
+}
+
+site_web_admin_permissions() {
+  local user="${1:-$(id -un)}"
+  echo "웹에서 Wi-Fi · 시간대 바꾸기 허용 (${user} 만)"
+  if [[ -f "${SITE_POLKIT_FILE}" ]] && grep -q "unix-user:${user}$" "${SITE_POLKIT_FILE}"; then
+    site_note "이미 허용됨 · ${SITE_POLKIT_FILE}"
+    return 0
+  fi
+  site_run sudo mkdir -p "$(dirname "${SITE_POLKIT_FILE}")"
+  site_render_polkit "${user}" | site_write_root_file "${SITE_POLKIT_FILE}"
+}
+
 # ------------------------------------------------------------------ #
 # 4단계 · 시간대
 # ------------------------------------------------------------------ #

@@ -1169,3 +1169,9 @@ td.mapping-disabled-cell { background: transparent !important; opacity: 0.55; }
 /* 수동 조작 · 초기 위치 이동 줄 · 정지 줄 모양을 빌리되 위험색은 아님 · 수정 목록 58 */
 .motion-test-stop-bar.manual-initialize-bar strong { color: var(--ink) !important; }
 .manual-initialize-bar button { white-space: nowrap; }
+
+/* Wi-Fi · 시스템 정보 · 수정 목록 81 (2026-10-08) */
+.wifi-form { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 8px; align-items: end; margin-top: 8px; }
+.wifi-static:not(.hidden) { display: contents; }
+.wifi-pending:not(.hidden) { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; border-color: var(--yellow); }
+.wifi-pending > span { flex: 1 1 260px; }

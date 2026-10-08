@@ -165,6 +165,35 @@ def register_system_routes(app: FastAPI, bridge, project_call) -> None:
     async def system_update_start():
         return await asyncio.to_thread(bridge.system_update.start)
 
+    # Wi-Fi · 이 PC · 수정 목록 81 (2026-10-08)
+    @app.get('/api/system/wifi')
+    async def wifi_status():
+        return await asyncio.to_thread(bridge.wifi.status)
+
+    @app.post('/api/system/wifi/scan')
+    async def wifi_scan():
+        return await asyncio.to_thread(bridge.wifi.scan)
+
+    @app.post('/api/system/wifi/connect')
+    async def wifi_connect(request: Request):
+        body = await request.json()
+        if not isinstance(body, dict):
+            raise HTTPException(status_code=400, detail='request body must be an object')
+        static = body.get('static') if isinstance(body.get('static'), dict) else None
+        return await asyncio.to_thread(
+            lambda: bridge.wifi.connect(
+                body.get('ssid'), body.get('password'), static, security=body.get('security'),
+            )
+        )
+
+    @app.post('/api/system/wifi/confirm')
+    async def wifi_confirm():
+        return await asyncio.to_thread(bridge.wifi.confirm)
+
+    @app.post('/api/system/wifi/rollback')
+    async def wifi_rollback():
+        return await asyncio.to_thread(bridge.wifi.rollback)
+
     def _network_pcs():
         runtime = bridge.coordination.snapshot().get('runtime') or {}
         return runtime.get('network_pcs') if isinstance(runtime, dict) else []

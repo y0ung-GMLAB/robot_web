@@ -559,7 +559,40 @@ def _preview_update_start():
     return {**_preview_update_rows(), 'message': '3대 업데이트 시작 · 이 PC 웹은 잠깐 끊겼다 돌아옵니다'}
 
 
+_WIFI = {'ssid': 'shop-5G', 'pending': None}
+
+
+def _preview_wifi_status():
+    """Wi-Fi 흉내 · 수정 목록 81"""
+    out = {'success': True, 'available': True, 'device': 'wlp2s0', 'state': 'connected',
+           'connection': f"robot-wifi-{_WIFI['ssid']}", 'ssid': _WIFI['ssid'], 'signal': 78,
+           'address': '192.168.0.11/24', 'gateway': '192.168.0.1', 'method': 'auto', 'powersave': '꺼짐'}
+    pending = _WIFI['pending']
+    if pending and pending['deadline'] > time.time():
+        out['pending'] = {'ssid': pending['ssid'], 'seconds_left': round(pending['deadline'] - time.time())}
+    return out
+
+
+def _preview_wifi_connect():
+    _WIFI['pending'] = {'ssid': 'office', 'deadline': time.time() + 60}
+    _WIFI['ssid'] = 'office'
+    return {**_preview_wifi_status(), 'message': 'office 연결됨 · 60초 안에 「유지」 를 누르세요'}
+
+
+def _preview_wifi_confirm():
+    _WIFI['pending'] = None
+    return {**_preview_wifi_status(), 'message': 'office 유지'}
+
+
 CANNED = {
+    ('GET', '/api/system/wifi'): _preview_wifi_status,
+    ('POST', '/api/system/wifi/scan'): lambda: {'success': True, 'message': '3개 찾음', 'networks': [
+        {'ssid': 'shop-5G', 'signal': 78, 'security': 'WPA2', 'in_use': True},
+        {'ssid': 'office', 'signal': 55, 'security': 'WPA2 WPA3', 'in_use': False},
+        {'ssid': 'guest', 'signal': 31, 'security': '--', 'in_use': False}]},
+    ('POST', '/api/system/wifi/connect'): _preview_wifi_connect,
+    ('POST', '/api/system/wifi/confirm'): _preview_wifi_confirm,
+    ('POST', '/api/system/wifi/rollback'): _preview_wifi_confirm,
     ('GET', '/api/system/update-all'): _preview_update_rows,
     ('POST', '/api/system/update-all'): _preview_update_start,
     ('GET', '/api/status'): snapshot,

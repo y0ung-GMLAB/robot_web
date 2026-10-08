@@ -151,6 +151,8 @@ prepare_site() {
   site_timezone
   echo "-- 방화벽 (같은 망 허용)"
   site_firewall
+  echo "-- 웹 관리 권한 (Wi-Fi · 시간대)"
+  site_web_admin_permissions "$(id -un)"
   echo "-- EtherLab (빌드에 필수 · motor_manager 가 libethercat 에 링크)"
   site_ethercat_install
   echo "-- EtherCAT 랜카드"
