@@ -184,6 +184,16 @@ def snapshot():
             'motor_identity': {'ok': True},
         },
         'motion_state_age_sec': 0.0,
+        # 새 UI(v2) 상단 바 · 홈이 읽는다 · 실제 브리지 스냅샷과 같은 자리
+        'system_info': {'hostname': 'floating1'},
+        'supervisor_watchdog': {},
+        'minas_absolute_blocker': '',
+        'coordination': {
+            'node_connected': True,
+            'config': {'pc_id': 'floating1', 'enabled': True, 'group_id': 'stage-a', 'is_master': True},
+            'runtime': {'joined': True, 'network_pcs': _preview_network_pcs(), 'coordination_error': {},
+                        'execution': {'participants': ['floating1', 'floating2']}},
+        },
         'motion_run_status': {
             **_fake_run_status(),
             'live_overrides': state['live_overrides'],
@@ -243,6 +253,13 @@ composer = IndexComposer(STATIC / 'index.html')
 async def index():
     html, _etag = composer.compose()
     return HTMLResponse(html)
+
+
+@app.get('/v2')
+@app.get('/v2/')
+async def index_v2():
+    # 새 UI · 뼈대 + 홈 · 설계안 2026-10-09
+    return FileResponse(STATIC / 'v2' / 'index.html')
 
 
 @app.get('/favicon.ico')
@@ -603,6 +620,15 @@ def _preview_tz_all():
     return {'success': False, 'message': '로봇 PC 3/4대 Europe/Paris', 'pcs': rows, 'clock': _preview_time()['clock']}
 
 
+#: 새 UI(v2) 홈 「오늘 스케줄」 · 매일 10~18 · 금토 저녁
+_PREVIEW_SCHEDULES = [
+    {'schedule_id': 'a', 'schedule_name': '매장 운영', 'start_time': '10:00:00', 'stop_time': '18:00:00',
+     'repeat_type': 'daily', 'repeat_days': [], 'enabled': True},
+    {'schedule_id': 'b', 'schedule_name': '저녁 시연', 'start_time': '19:00:00', 'stop_time': '21:00:00',
+     'repeat_type': 'weekly', 'repeat_days': ['FRI', 'SAT'], 'enabled': True},
+]
+
+
 CANNED = {
     ('GET', '/api/system/time'): _preview_time,
     ('POST', '/api/system/timezone-all'): _preview_tz_all,
@@ -629,7 +655,7 @@ CANNED = {
         'run_mode': state['run_mode'],
         'schedules': [],
         'enabled': True,
-        'active_schedule_id': '',
+        'active_schedule_id': 'a' if 10 <= time.localtime().tm_hour < 18 else '',
         'coordination_enabled': False,
         'coordination_joined': False,
         'is_master': True,
@@ -639,7 +665,12 @@ CANNED = {
             'timezone': 'Asia/Seoul',
         },
     },
-    ('GET', '/api/schedule/list'): lambda: {'schedules': []},
+    ('GET', '/api/schedule/list'): lambda: {'schedules': _PREVIEW_SCHEDULES},
+    ('GET', '/api/motor-events'): lambda: {'success': True, 'events': [
+        {'timestamp_text': time.strftime('%Y-%m-%dT%H:%M:%S.000'), 'content': '3회차 시작 · 2대 · 시작 편차 6 ms'},
+        {'timestamp_text': time.strftime('%Y-%m-%dT10:03:12.000'), 'content': '자동 복구 1/3 · 2번 모터 도달 확인 실패 0.094°'},
+        {'timestamp_text': time.strftime('%Y-%m-%dT10:00:00.000'), 'content': '매장 운영 시작'},
+    ]},
     ('GET', '/api/motion-mappings'): lambda: {
         'success': True,
         'files': [MAPPING_FILE],

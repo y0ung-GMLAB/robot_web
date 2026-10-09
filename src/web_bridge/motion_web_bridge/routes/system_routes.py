@@ -73,6 +73,15 @@ def register_system_routes(app: FastAPI, bridge, project_call) -> None:
             return Response(status_code=304, headers=headers)
         return Response(content=html, media_type='text/html; charset=utf-8', headers=headers)
 
+    @app.get('/v2')
+    @app.get('/v2/')
+    async def index_v2(request: Request = None):
+        """새 UI · 뼈대 + 홈부터 · 설계안 2026-10-09 · 기존 화면(/)은 그대로 · 파일은 static/v2/"""
+        asset = ui_share / 'v2' / 'index.html'
+        if not asset.is_file():
+            raise HTTPException(status_code=404, detail='Not Found')
+        return _asset_response(asset, request)
+
     @app.get('/favicon.ico')
     async def favicon():
         """탭 아이콘 · 없어도 되지만 **404 를 남기지 않는다** · §6-223
