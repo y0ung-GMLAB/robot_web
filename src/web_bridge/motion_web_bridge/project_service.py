@@ -396,12 +396,20 @@ class ProjectService:
                 '모터 설정과 조인트 매핑은 이 PC 에서 직접 만드세요'
             )
         self._ensure_motion_import_target(project_id)
-        return self.repository.import_text(
+        result = self.repository.import_text(
             project_id,
             payload.get('category'),
             payload.get('file_name'),
             payload.get('content'),
         )
+        # 화면이 곧바로 목록·상세를 부른다 · 여기서 한 번 분석해 두면 그쪽은 기다리지 않는다 (88)
+        from motion_web_bridge import motion_file_analysis
+        name = Path(str(payload.get('file_name') or '')).name
+        if name:
+            motion_file_analysis.prime_motion_file_cache(
+                self.motion_projects_dir / str(project_id) / 'motions' / name
+            )
+        return result
 
     def _ensure_motion_import_target(self, project_id: Any) -> None:
         """조인트 매핑이 없는 프로젝트는 모션 파일을 받지 않는다.

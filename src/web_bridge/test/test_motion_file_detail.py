@@ -59,7 +59,8 @@ def motion_file_bridge(tmp_path, registered_motion_file_id=''):
     return bridge, repository, project_id
 
 
-def test_motion_file_detail_contains_complete_original_content(tmp_path):
+def test_motion_file_detail_does_not_carry_the_file_body(tmp_path):
+    """수정 목록 88 · 화면이 안 쓰는 본문(9분 나레이션 15 MB)을 누를 때마다 보냈다 · 뺐다."""
     content = f'header\n{"x" * 15000}\nlast-frame'
     path = tmp_path / 'motion.json'
     path.write_text(content, encoding='utf-8')
@@ -72,10 +73,9 @@ def test_motion_file_detail_contains_complete_original_content(tmp_path):
     detail = motion_file_analysis.motion_file_entry(path, include_detail=True)
     summary = motion_file_analysis.motion_file_entry(path, include_detail=False)
 
-    assert detail['content'] == content
-    assert detail['content'].endswith('last-frame')
-    assert len(detail['content']) > 12000
+    assert 'content' not in detail and 'content_preview' not in detail
     assert 'content' not in summary
+    assert detail['size_bytes'] == path.stat().st_size
 
 
 def test_external_motion_file_upload_route_is_not_available():

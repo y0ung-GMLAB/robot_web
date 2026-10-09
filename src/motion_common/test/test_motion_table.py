@@ -219,3 +219,20 @@ def test_display_and_runtime_paths_agree_on_multi_pair_text_file():
         (2, '1-1', 4.0),
         (2, '1-2', 11.0),
     ]
+
+
+def test_header_mapping_reuse_follows_the_header_contents():
+    """수정 목록 88 · 앞 헤더 결과를 다시 쓰되 · 헤더가 바뀌면(순서·종류) 새로 본다."""
+    first = ['frame', 'time_sec', 'motion_id', 'value']
+    swapped = ['value', 'motion_id', 'time_sec', 'frame']
+    row = [1, 0.5, '1-1', 2.0]
+    swapped_row = [2.0, '1-1', 0.5, 1]
+    expected = {'frame': 1, 'time_sec': 0.5, 'motion_id': '1-1', 'value': 2.0}
+    assert motion_table.parse_row(row, first)[0] == expected
+    assert motion_table.parse_row(swapped_row, swapped)[0] == expected
+    assert motion_table.parse_row(row, tuple(first))[0] == expected
+    # 같은 목록을 고쳐 써도 내용으로 비교하니 틀리지 않는다
+    headers = list(first)
+    motion_table.parse_row(row, headers)
+    headers[:] = swapped
+    assert motion_table.parse_row(swapped_row, headers)[0] == expected
