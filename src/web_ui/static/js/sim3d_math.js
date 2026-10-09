@@ -195,6 +195,34 @@ export function followRunKey(status = {}) {
   return `running|${Number(status?.current_cycle) || 0}|${String(status?.motion_file_id || '')}`;
 }
 
+/** 서버 시계 − 브라우저 시계 (초) · 상태를 받을 때마다 · 수정 목록 92
+ *
+ * 받은 순간 기준이라 늘 전송 지연만큼 작게 나온다 · 최근 것 중 **가장 큰 값**(가장 덜 늦은 것)을 쓴다 ·
+ * `samples` 는 최근 값 목록(바꿔서 돌려준다) · 30개까지.
+ */
+export function nextClockOffset(samples, serverTimeSec, receivedAtSec, keep = 30) {
+  const list = Array.isArray(samples) ? samples.slice(-(keep - 1)) : [];
+  const server = Number(serverTimeSec);
+  const received = Number(receivedAtSec);
+  if (Number.isFinite(server) && Number.isFinite(received) && server > 0) list.push(server - received);
+  return { samples: list, offset: list.length ? Math.max(...list) : 0 };
+}
+
+/** 실물이 지금 그 회차 몇 초째인가 (서버 시계) · 모르면 null · 수정 목록 92
+ *
+ * 재생 상태의 `progress.elapsed_sec` 는 런타임이 `updated_at`(서버 시계) 에 적은 값 · 그 뒤 흐른 시간을 더한다 ·
+ * 브라우저 시계는 서버와 다를 수 있어 `offsetSec`(서버 − 브라우저)으로 고친다.
+ */
+export function followPlayheadSec(status, browserNowSec, offsetSec = 0) {
+  if (String(status?.state || '') !== 'running') return null;
+  const elapsed = Number(status?.progress?.elapsed_sec);
+  if (!Number.isFinite(elapsed)) return null;
+  const updated = Number(status?.updated_at);
+  const serverNow = Number(browserNowSec) + (Number(offsetSec) || 0);
+  const since = Number.isFinite(updated) && updated > 0 ? Math.max(0, serverNow - updated) : 0;
+  return elapsed + Math.min(since, 5);   // 상태가 5초 넘게 안 오면 더 앞서 나가지 않는다
+}
+
 /** 실물 따라가기에서 한 회차의 끝 · 계산 결과 끝의 정착 3초는 빼고 애니메이션 길이만 */
 export function followEndSec(frames = {}) {
   const motion = Number(frames?.motion_sec);

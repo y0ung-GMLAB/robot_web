@@ -28,7 +28,8 @@
  */
 import { exportPreviewScene, fetchPreviewFrames, fetchPreviewScene, fetchPreviewSceneData } from './api.js';
 import {
-  actualQpos, blenderHoldsAnimation, bodyLocalPose, cameraPosition, followEndSec, followRunKey, frameIndexAt, jointsByBody,
+  actualQpos, blenderHoldsAnimation, bodyLocalPose, cameraPosition, followEndSec, followPlayheadSec, followRunKey,
+  frameIndexAt, jointsByBody,
 } from './sim3d_math.js';
 
 const THREE_URL = '/static/vendor/three/three.module.js';
@@ -40,6 +41,8 @@ const SCENE_POLL_MS = 3000;
 /** 재생 상태 → 「실물 따라가기」 동작 · 한 곳에만 적는다 */
 const FOLLOW_START_STATES = new Set(['running']);
 const FOLLOW_STOP_STATES = new Set(['stopped', 'error', 'completed', 'idle', 'ready']);
+//: 실물과 이만큼(초) 넘게 벌어지면 다시 맞춘다 · 그 안은 브라우저 시계로 부드럽게 · 92
+const FOLLOW_RESYNC_SEC = 0.1;
 
 export function createSim3dViewer({ el, getLatestState = () => null }) {
   let THREE = null;
@@ -435,9 +438,26 @@ export function createSim3dViewer({ el, getLatestState = () => null }) {
     // MuJoCo 뷰 · Blender 뷰 모두 「실물과 같이」 를 따른다 (86)
     const following = follow && (view === 'blender' ? Boolean(blender) : Boolean(frames));
     if (!following) return;
-    const status = getLatestState()?.motion_run_status || {};
+    const latest = getLatestState() || {};
+    const status = latest.motion_run_status || {};
     const state = String(status.state || '');
-    // 상태만이 아니라 회차·파일까지 · 바로 다음 반복도 회차마다 처음부터 (수정 목록 8)
+    // 재생 위치는 **서버 시각**으로 · 도중에 열어도 · 새로고침해도 · 9분짜리도 그 자리 · 수정 목록 92
+    // (전에는 running 이 되는 순간 0초부터 브라우저 시계로 틀어 도중에 열면 다음 회차까지 안 맞고 점점 벌어졌다)
+    const target = followPlayheadSec(status, Date.now() / 1000, latest.server_clock_offset_sec);
+    if (target !== null && FOLLOW_START_STATES.has(state)) {
+      const clamped = Math.min(Math.max(target, 0), timelineSec());
+      if (!playing || Math.abs(playhead - clamped) > FOLLOW_RESYNC_SEC) {
+        playhead = clamped;
+        showTime();
+      }
+      if (!playing) {
+        playing = true;
+        renderControls();
+      }
+      lastRunState = followRunKey(status);
+      return;
+    }
+    // 위치를 모르는 옛 서버 · 회차가 바뀌는 순간 0초부터 (수정 목록 8)
     const key = followRunKey(status);
     if (key === lastRunState) return;
     if (FOLLOW_START_STATES.has(state)) {

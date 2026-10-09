@@ -102,6 +102,9 @@ PRESENCE_INTERVAL_SEC = 2.0
 PRESENCE_OFFLINE_SEC = 6.5
 #: 이만큼 지나면 표에서 뺀다 · 이름을 바꾼 PC 의 옛 줄이 남지 않게
 PRESENCE_FORGET_SEC = 600.0
+#: 시각 맞추기 · 불확실성이 크면 설정 측정 수(5)의 이만큼 배까지 더 잰다 · 수정 목록 93
+#: Wi-Fi 실측(2026-10-08) · 평균 6 ms · 1 % 가 20 ms 넘음 · 가끔 250 ms · 한두 번 튀어도 더 재면 빠른 왕복이 나온다
+SYNC_MAX_ROUNDS = 4
 
 
 def _stamp_to_float(stamp: Any) -> float:
@@ -706,16 +709,26 @@ class MotionCoordinationNode(Node):
                     t3_ns=int(message.t3_monotonic_ns),
                     t4_ns=time.monotonic_ns(),
                 )
-                if not accepted or estimator.sample_count < self._config.trigger_sync_samples:
+                wanted = self._sync_wanted_samples(pc_id)
+                if not accepted or estimator.sample_count < wanted:
                     return
                 estimate = estimator.estimate()
                 if (
                     estimate.uncertainty_ms
                     > self._config.max_trigger_sync_uncertainty_ms
                 ):
+                    # Wi-Fi 가 잠깐 튀었을 수 있다 · 바로 멈추지 말고 더 잰다(가장 빠른 왕복들로 다시) ·
+                    # 한도까지 재도 크면 그때 멈춘다 · 기준(20 ms)은 그대로 · 수정 목록 93 (2026-10-09 사용자)
+                    if estimator.sample_count < self._config.trigger_sync_samples * SYNC_MAX_ROUNDS:
+                        self._sync_wanted[pc_id] = wanted + self._config.trigger_sync_samples
+                        self.get_logger().warn(
+                            f'{pc_id} DDS 트리거 동기화 불확실성 {estimate.uncertainty_ms:.3f}ms · '
+                            f'{estimator.sample_count}번 잼 · 더 잽니다'
+                        )
+                        return
                     self._fail_trigger_sync(
                         f'{pc_id} DDS 트리거 동기화 불확실성 '
-                        f'{estimate.uncertainty_ms:.3f}ms'
+                        f'{estimate.uncertainty_ms:.3f}ms ({estimator.sample_count}번 잼)'
                     )
                     return
                 result = GroupTimeSync()
@@ -778,6 +791,7 @@ class MotionCoordinationNode(Node):
                 pc_id: TriggerSyncEstimator() for pc_id in remote
             }
             self._sync_sent_samples = {pc_id: 0 for pc_id in remote}
+            self._sync_wanted = {}
             self._sync_probes = {}
             self._sync_ready = {self._config.pc_id}
             self._sync_next_action = next_action
@@ -809,14 +823,14 @@ class MotionCoordinationNode(Node):
             if now - self._sync_last_probe_at < 0.05:
                 return
             self._sync_last_probe_at = now
-            max_attempts = self._config.trigger_sync_samples * 3
             for pc_id, estimator in self._sync_estimators.items():
                 if pc_id in self._sync_ready:
                     continue
                 sent = self._sync_sent_samples.get(pc_id, 0)
-                if estimator.sample_count >= self._config.trigger_sync_samples:
+                wanted = self._sync_wanted_samples(pc_id)
+                if estimator.sample_count >= wanted:
                     continue
-                if sent >= max_attempts:
+                if sent >= wanted * 3:
                     continue
                 probe = GroupTimeSync()
                 probe.group_id = self._config.group_id
@@ -831,6 +845,11 @@ class MotionCoordinationNode(Node):
                     probe.t1_monotonic_ns
                 )
                 self._time_probe_pub.publish(probe)
+
+    def _sync_wanted_samples(self, pc_id: str) -> int:
+        """이 PC 에서 모을 측정 수 · 처음엔 설정값(5) · 불확실성이 크면 늘어난다(93)"""
+        wanted = getattr(self, '_sync_wanted', None) or {}
+        return int(wanted.get(pc_id) or self._config.trigger_sync_samples)
 
     def _complete_trigger_sync_if_ready(self) -> None:
         if not self._sync_next_action:

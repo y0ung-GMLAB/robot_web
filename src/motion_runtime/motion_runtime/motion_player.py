@@ -234,7 +234,7 @@ class MotionPlayer:
             'message': (
                 f'초기 위치 이동 준비 실패: {exc}'
                 if mode == 'initialize'
-                else f'모션 실행 준비 실패: {exc}'
+                else (f'모션 실행 실패: {exc}' if cycle_failure.is_cycle_failure(str(exc)) else f'모션 실행 준비 실패: {exc}')
             ),
             'project_id': str(payload.get('project_id') or ''),
             'motion_file_id': str(payload.get('motion_file_id') or ''),
@@ -755,6 +755,9 @@ class MotionPlayer:
         except Exception as exc:
             self._trace_finish(trace, 'error', str(exc))
             self.manager.get_logger().error(f'motion run failed\n{traceback.format_exc()}')
+            if self._hand_to_auto_recovery(plan, exc):
+                # 자동 복구가 받는다(`_prepare_and_run`) · 오류 상태는 거기서 정한다 · 실물 확인 대기 68
+                raise
             status = motion_run_rules._status_from_plan('error', f'모션 실행 실패: {exc}', plan)
             status['phase'] = 'error'
             status['phase_finished_at'] = time.time()
@@ -762,6 +765,20 @@ class MotionPlayer:
             self.manager._set_status(status)
             if bool(plan.get('automation_run')):
                 self.manager._automation_failure(str(exc))
+
+    @staticmethod
+    def _hand_to_auto_recovery(plan: Dict[str, Any], exc: BaseException) -> bool:
+        """재생 **도중** 의 가벼운 오류도 자동 복구로 · 실물 2026-10-09 (실물 확인 대기 68 · 수정 목록 93)
+
+        전에는 자동 복구 고리가 준비·첫 초기 이동의 예외만 받았다 · 회차 사이 초기 이동(reinitialize)
+        이나 회차 끝 도달 확인 실패는 여기서 바로 「오류」 로 끝나 4분을 기다려도 다시 안 했다 ·
+        연속 재생(그룹 아님)의 회차 실패 표지면 위로 넘긴다 · 그룹은 코디네이터가 정한다(67).
+        """
+        return (
+            str(plan.get('run_mode') or 'once') == 'continuous'
+            and not plan.get('group_execution')
+            and cycle_failure.is_cycle_failure(str(exc))
+        )
 
     def _trace_begin(self, plan: Dict[str, Any], cycle_count: int):
         """회차 기록 열기 · 기록기가 없는 관리자(시험용 가짜 등)면 기록하지 않는다."""

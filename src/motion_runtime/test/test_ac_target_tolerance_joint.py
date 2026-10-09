@@ -49,3 +49,26 @@ def test_limit_check_ignores_float_noise_but_still_rejects_real_overruns():
     noisy = lower - 1e-12
     assert _target_range_limit_error(motor, noisy, upper) == ''
     assert '하한' in _target_range_limit_error(motor, lower - math.radians(0.01), upper)
+
+
+def test_a_clamped_animation_is_not_refused_for_the_limit_rounding_and_never_passes_the_limit():
+    """실물 2026-10-09 · 확인 대기 72 · 「72.518° 가 하한 72.518° 보다 작습니다」
+
+    모터 한계는 조인트 범위를 0.001° 로 반올림해 적는다 · 범위로 자른 애니가 그만큼(최대 0.0005°) 넘어
+    거절됐다 · 이제 그만큼은 한계로 잘라 보내고 거절하지 않는다 · 정말 넓으면 차이와 이유를 적어 거절.
+    """
+    import math
+
+    from motion_runtime.motion_run_rules import _clamp_to_motor_limits, _target_range_limit_error
+    lower, upper = math.radians(72.518), math.radians(552.518)
+    motor = {'controller_index': 0, 'lower_rad': lower, 'upper_rad': upper}
+    rounded_past = lower - math.radians(0.0004)
+    assert _target_range_limit_error(motor, rounded_past, upper) == ''
+    assert _clamp_to_motor_limits(rounded_past, motor) == lower, '드라이브 한계를 넘는 명령은 안 보낸다'
+    assert _clamp_to_motor_limits(upper + math.radians(0.0004), motor) == upper
+    assert _clamp_to_motor_limits(math.radians(100.0), motor) == math.radians(100.0)
+    far = lower - math.radians(2.0)
+    message = _target_range_limit_error(motor, far, upper)
+    assert '70.518° 가 하한 72.518° 보다 2.000° 작습니다' in message
+    assert '장비에 적용' in message
+    assert _clamp_to_motor_limits(far, motor) == far, '정말 넘는 것은 자르지 않는다(거절 대상)'

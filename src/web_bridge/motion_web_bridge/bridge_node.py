@@ -875,6 +875,8 @@ class MotionWebBridge(Node):
                 'runtime': runtime_status,
             },
             'motion_state_topic': self.motion_state_topic,
+            # 서버 시각 · 웹 3D 가 실물 재생 위치를 서버 시계로 맞춘다 · 수정 목록 92
+            'server_time': time.time(),
             'motion_state_received_at': received_at,
             'motion_state_age_sec': None if received_at is None else round(time.time() - received_at, 3),
             'motion_test_limits': {

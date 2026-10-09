@@ -83,3 +83,11 @@ test('올리기 · 읽기 · 재생 등록이 표시를 쓴다 · 등록 중엔 
   const css = readFileSync(new URL('../static/css/07-motion.css', import.meta.url), 'utf8');
   assert.match(css, /@keyframes motion-busy-spin/);
 });
+
+test('재생 등록 실패는 이 화면에 창으로 보인다 · 90', () => {
+  const data = readFileSync(new URL('../static/js/motion_data.js', import.meta.url), 'utf8');
+  const body = data.match(/function reportRegistrationFailure\(reason\) \{[\s\S]*?\n  \}/)?.[0] || '';
+  assert.match(body, /showAlert\(text, \{ title: '재생 등록 실패'/);
+  assert.match(body, /setMessage\(text\)/);
+  assert.equal((data.match(/reportRegistrationFailure\(/g) || []).length, 3);
+});

@@ -39,7 +39,11 @@ stdout·stderr 는 `log/animation_preview/<애니메이션>.precompute.log` 에 
 
 from __future__ import annotations
 
+import hashlib
 import json
+import os
+import shlex
+import shutil
 import time
 import subprocess
 import threading
@@ -205,6 +209,118 @@ def _close_log(handle: Any) -> None:
             pass
 
 
+# --------------------------------------------------------------------------- #
+# 계산을 웹 서비스 밖에서 · 수정 목록 93-86 (실물 2026-10-09 · 실물 확인 대기 86)
+# --------------------------------------------------------------------------- #
+#
+# 계산은 웹 서비스(motion-control)의 자식이었다 · 서비스를 다시 띄우면(설정 저장 · 업데이트 ·
+# 시간대) 9분 나레이션 계산이 같은 순간 같이 죽었다 · systemd 사용자 작업으로 따로 띄워
+# 서비스가 다시 떠도 계속 돈다 · 끝나면 종료 코드를 파일에 남긴다 · 다시 뜬 브리지는
+# 시작 기록(pending)에 적힌 작업 이름으로 「아직 도는지」 를 묻고 다시 붙는다.
+
+#: 「도는가」 를 systemctl 에 물은 결과를 이만큼 쓴다 · 목록이 파일마다 묻는다
+_ACTIVE_CACHE_SEC = 2.0
+_ACTIVE_CACHE: Dict[str, Any] = {}
+
+
+def rc_path_for(result: Path) -> Path:
+    """`x.sim.npz` → `x.sim.rc` · 따로 띄운 계산의 종료 코드"""
+    return Path(result).with_suffix('.rc')
+
+
+def job_unit_for(result: Path) -> str:
+    digest = hashlib.sha1(str(result).encode('utf-8')).hexdigest()[:12]
+    return f'robot-web-sim-{digest}'
+
+
+def detach_available() -> bool:
+    """systemd 사용자 세션이 있는 리눅스 · 아니면(개발 PC · 시험) 예전처럼 자식으로"""
+    return bool(shutil.which('systemd-run') and os.environ.get('XDG_RUNTIME_DIR'))
+
+
+def _unit_active(unit: str, run=subprocess.run) -> bool:
+    now = time.monotonic()
+    cached = _ACTIVE_CACHE.get(unit)
+    if cached and now - cached[0] < _ACTIVE_CACHE_SEC:
+        return cached[1]
+    try:
+        result = run(['systemctl', '--user', 'is-active', '--quiet', unit],
+                     capture_output=True, text=True, timeout=5)
+        active = getattr(result, 'returncode', 1) == 0
+    except (OSError, subprocess.SubprocessError):
+        active = False
+    _ACTIVE_CACHE[unit] = (now, active)
+    return active
+
+
+class DetachedJob:
+    """Popen 처럼 `poll()` 만 · 종료 코드 파일이 있으면 그 값 · 작업이 돌면 None · 둘 다 아니면 1"""
+
+    def __init__(self, unit: str, rc_path: Path, *, run=subprocess.run) -> None:
+        self.unit = unit
+        self.rc_path = Path(rc_path)
+        self._run = run
+
+    def poll(self) -> Optional[int]:
+        try:
+            text = self.rc_path.read_text(encoding='utf-8').strip()
+        except OSError:
+            text = ''
+        if text:
+            try:
+                return int(text)
+            except ValueError:
+                return 1
+        if _unit_active(self.unit, self._run):
+            return None
+        # 작업이 사라졌는데 코드가 없다 · 막 끝나 파일을 쓰는 중일 수 있어 한 번 더 본다
+        try:
+            text = self.rc_path.read_text(encoding='utf-8').strip()
+            return int(text) if text else 1
+        except (OSError, ValueError):
+            return 1
+
+
+def spawn_detached(args: List[str], *, cwd: str, log_path: Path, result: Path,
+                   run=subprocess.run) -> DetachedJob:
+    unit = job_unit_for(result)
+    rc_path = rc_path_for(result)
+    rc_path.unlink(missing_ok=True)
+    inner = (
+        f'{" ".join(shlex.quote(str(a)) for a in args)} > {shlex.quote(str(log_path))} 2>&1; '
+        f'echo $? > {shlex.quote(str(rc_path))}'
+    )
+    command = [
+        'systemd-run', '--user', '--unit', unit, '--collect', '--quiet',
+        f'--working-directory={cwd}', '/bin/bash', '-c', inner,
+    ]
+    completed = run(command, capture_output=True, text=True, timeout=15)
+    if getattr(completed, 'returncode', 1) != 0:
+        raise OSError(str(getattr(completed, 'stderr', '') or '').strip() or 'systemd-run 실패')
+    _ACTIVE_CACHE.pop(unit, None)
+    return DetachedJob(unit, rc_path, run=run)
+
+
+def _adopt_detached(result: Path, *, run=subprocess.run) -> None:
+    """브리지가 다시 떴다 · 시작 기록에 적힌 작업을 다시 붙든다 (도는 중이면 computing · 끝났으면 거둠)"""
+    key = str(result)
+    with _LOCK:
+        if key in _RUNNING or key in _LAST_RC:
+            return
+    try:
+        payload = json.loads(pending_path_for(result).read_text(encoding='utf-8'))
+    except (OSError, ValueError):
+        return
+    unit = str(payload.get('unit') or '') if isinstance(payload, dict) else ''
+    if not unit:
+        return
+    with _LOCK:
+        _RUNNING.setdefault(key, DetachedJob(unit, rc_path_for(result), run=run))
+        stamp = payload.get('pack')
+        if isinstance(stamp, dict):
+            _PENDING_META.setdefault(key, stamp)
+
+
 def _reap() -> None:
     finished = []
     with _LOCK:
@@ -291,6 +407,7 @@ def preview_state(workspace_root: Path, motion_path: Path) -> Dict[str, Any]:
     result = result_path_for(config, Path(motion_path))
     if result is None:
         return {'state': 'direct'}
+    _adopt_detached(result)
     _reap()
     key = str(result)
     with _LOCK:
@@ -350,9 +467,19 @@ def launch_precompute(
     workspace_root: Path,
     motion_path: Path,
     *,
-    spawn=subprocess.Popen,
+    spawn=None,
+    detach: Optional[bool] = None,
+    run=subprocess.run,
 ) -> Dict[str, Any]:
-    """무거운 계산을 시작한다 · 이미 돌고 있으면 그대로 둔다."""
+    """무거운 계산을 시작한다 · 이미 돌고 있으면 그대로 둔다.
+
+    리눅스(systemd 사용자 세션)면 웹 서비스 밖 작업으로 띄운다(93-86) · `spawn` 을 주면(시험)
+    예전처럼 자식으로.
+    """
+    if detach is None:
+        detach = spawn is None and detach_available()
+    if spawn is None:
+        spawn = subprocess.Popen
     config = preview_config(Path(workspace_root))
     if config is None:
         return {'success': False, 'message': NOT_CONFIGURED_MESSAGE}
@@ -362,6 +489,7 @@ def launch_precompute(
     motion_path = Path(motion_path)
     if not motion_path.is_file():
         return {'success': False, 'message': f'애니메이션 파일이 없습니다: {motion_path.name}'}
+    _adopt_detached(result, run=run)
     _reap()
     key = str(result)
     with _LOCK:
@@ -370,19 +498,29 @@ def launch_precompute(
     args = _fill(config['precompute']['command'], motion_path, result=key, config=config)
     cwd = str(config.get('cwd') or workspace_root)
     stamp = _pack_stamp(Path(workspace_root))
-    log = _open_log(workspace_root, motion_path, 'precompute')
-    try:
-        handle = spawn(args, cwd=cwd, stdout=log, stderr=log, shell=False)
-    except OSError as exc:
+    unit = ''
+    if detach:
+        log_path = log_path_for(Path(workspace_root), motion_path, 'precompute')
+        try:
+            log_path.parent.mkdir(parents=True, exist_ok=True)
+            handle = spawn_detached(args, cwd=cwd, log_path=log_path, result=result, run=run)
+        except (OSError, subprocess.SubprocessError) as exc:
+            return {'success': False, 'message': f'계산 시작 실패: {exc}'}
+        unit = handle.unit
+    else:
+        log = _open_log(workspace_root, motion_path, 'precompute')
+        try:
+            handle = spawn(args, cwd=cwd, stdout=log, stderr=log, shell=False)
+        except OSError as exc:
+            _close_log(log)
+            return {'success': False, 'message': f'계산 시작 실패: {exc}'}
         _close_log(log)
-        return {'success': False, 'message': f'계산 시작 실패: {exc}'}
-    _close_log(log)
     with _LOCK:
         _RUNNING[key] = handle
         _LAST_RC.pop(key, None)
         _PENDING_META[key] = stamp
     try:
-        atomic_write_json(pending_path_for(result), {'pack': stamp, 'started_at': time.time()})
+        atomic_write_json(pending_path_for(result), {'pack': stamp, 'started_at': time.time(), 'unit': unit})
     except OSError:
         pass  # 없으면 옛 동작(브리지가 거둘 때만 기록)
     return {

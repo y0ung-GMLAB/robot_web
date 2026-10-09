@@ -2666,6 +2666,14 @@ export function createMotionDataController({
    * 창이 떴다 · 조인트 매핑과 재생 등록은 한 파일에 들어 있을 뿐
    * 서로 남남이다.
    */
+  /** 재생 등록 실패 · 이 화면에서 보이게 · 전에는 모터 관리 탭의 숨은 칸에만 적혀 「안 들어감」 으로만 보였다 (90) */
+  function reportRegistrationFailure(reason) {
+    const text = `재생 등록 실패: ${reason}`;
+    setMappingMessage(text);
+    setMessage(text);
+    showAlert(text, { title: '재생 등록 실패', tone: 'warning' });
+  }
+
   async function applyMotionFileRegistration(playlist, label) {
     setMappingMessage(label);
     mappingLoading = true;
@@ -2681,7 +2689,7 @@ export function createMotionDataController({
         motion_playlist: playlist,
       });
       if (payload.success === false) {
-        setMappingMessage(`재생 등록 실패: ${payload.message || '저장하지 못했습니다'}`);
+        reportRegistrationFailure(payload.message || '저장하지 못했습니다');
         return false;
       }
       // 편집 중인 조인트 매핑은 **그대로 둔다** · 우리가 바꾼 칸만 반영한다
@@ -2701,7 +2709,7 @@ export function createMotionDataController({
       await onProjectFilesChange?.();
       return true;
     } catch (error) {
-      setMappingMessage(`재생 등록 실패: ${error?.message || error}`);
+      reportRegistrationFailure(error?.message || error);
       return false;
     } finally {
       mappingLoading = false;

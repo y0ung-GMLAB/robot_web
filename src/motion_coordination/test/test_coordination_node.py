@@ -1869,3 +1869,61 @@ def test_network_pcs_marks_silent_pcs_offline_and_forgets_old_ones():
     listed = {r['pc_id']: r for r in node._network_pcs()}
     assert listed['floating3']['online'] is False
     assert 'floating4' not in listed
+
+
+# --------------------------------------------------------------------------- #
+# 수정 목록 93 · 불확실성이 크면 바로 멈추지 않고 더 잰다 (2026-10-09 사용자)
+# --------------------------------------------------------------------------- #
+# Wi-Fi 실측 · 평균 6 ms · 1 % 가 20 ms 넘음 · 가끔 250 ms · 처음 몇 번이 튀어도 더 재면 빠른 왕복이 나온다
+
+
+def _sync_node():
+    node = _node()
+    node._joined = True
+    node._execution = GroupExecution()
+    execution_id = node._execution.begin('pc-a', ('pc-a', 'pc-b'))
+    node._execution.execution_id = execution_id
+    node._execution.coordinator_id = 'pc-a'
+    node._execution.participants = ('pc-a', 'pc-b')
+    node._time_probe_pub = _Publisher()
+    node._time_sync_pub = _Publisher()
+    warnings = []
+    node.get_logger = lambda: SimpleNamespace(warn=warnings.append, error=warnings.append, info=lambda _m: None)
+    node._begin_trigger_sync('start')
+    return node, warnings
+
+
+def _answer(node, number, rtt_ms):
+    now = time.monotonic_ns()
+    t1 = now - int(rtt_ms * 1_000_000)
+    node._sync_probes[('pc-b', number)] = t1
+    half = int(rtt_ms * 500_000)
+    node._time_sync_callback(GroupTimeSync(
+        group_id='stage-a', execution_id=node._execution.execution_id, coordinator_id='pc-a',
+        target_pc_id='pc-b', responder_pc_id='pc-b', kind='response', sample_number=number,
+        t1_monotonic_ns=t1, t2_monotonic_ns=t1 + half, t3_monotonic_ns=t1 + half,
+    ))
+
+
+def test_a_noisy_first_round_measures_more_instead_of_stopping():
+    node, warnings = _sync_node()
+    for number in range(1, 4):                       # 3번(설정) 모두 250 ms 튐
+        _answer(node, number, 250)
+    assert node._trigger_sync_status['trigger_sync_state'] != 'failed'
+    assert node._sync_wanted_samples('pc-b') == 6, '설정 수만큼 더 잰다'
+    assert any('더 잽니다' in str(w) for w in warnings)
+    for number in range(4, 7):                       # 그다음은 빠름
+        _answer(node, number, 4)
+    assert [m.kind for m in node._time_sync_pub.messages] == ['result'], '좋은 값으로 시각을 맞춘다'
+
+
+def test_it_still_stops_when_the_network_stays_bad_up_to_the_limit():
+    node, _warnings = _sync_node()
+    events = []
+    node._call_local_control = lambda payload, **_kwargs: events.append(payload['command']) or {'success': True}
+    node._command_pub = _Publisher()
+    limit = node._config.trigger_sync_samples * coordination_node.SYNC_MAX_ROUNDS
+    for number in range(1, limit + 1):
+        _answer(node, number, 250)
+    assert node._trigger_sync_status['trigger_sync_state'] == 'failed'
+    assert f'({limit}번 잼)' in node._trigger_sync_status['message']

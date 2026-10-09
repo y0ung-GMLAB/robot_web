@@ -16,7 +16,7 @@ import math
 import time
 from typing import Any, Dict, List, Mapping, Optional
 
-from motion_common import joint_mapping, repeat_policy, units
+from motion_common import joint_mapping, repeat_policy, units, wire_units
 from motion_common.values import finite_float, optional_int
 
 from . import motion_run_rules
@@ -427,7 +427,9 @@ class PlanBuilder:
                 'initial_move_time_sec': initial_move_time,
                 'initial_motion_source_position_rad': initial_motion_source_value,
                 'initial_motion_position_rad': initial_motion_value,
-                'initial_motor_target_rad': motion_run_rules._motor_target(row, initial_motion_value),
+                'initial_motor_target_rad': motion_run_rules._clamp_to_motor_limits(
+                    motion_run_rules._motor_target(row, initial_motion_value), motor,
+                ),
                 'motion_limit_lower_rad': lower,
                 'motion_limit_upper_rad': upper,
                 'source_motion_min_rad': motion_min,
@@ -439,15 +441,22 @@ class PlanBuilder:
                 'target_max_rad': target_high,
                 'loop_start_motion_rad': motion_run_rules._clamp_motion_value(motion_values[0], lower, upper),
                 # 첫 프레임 · 초기 위치와 다르면 초기 이동 끝에 여기까지 잇는다 · 수정 목록 13-1
-                'first_frame_motor_target_rad': motion_run_rules._motor_target(
-                    row, motion_run_rules._clamp_motion_value(motion_values[0], lower, upper),
+                'first_frame_motor_target_rad': motion_run_rules._clamp_to_motor_limits(
+                    motion_run_rules._motor_target(
+                        row, motion_run_rules._clamp_motion_value(motion_values[0], lower, upper),
+                    ),
+                    motor,
                 ),
                 'loop_end_motion_rad': motion_run_rules._clamp_motion_value(motion_values[-1], lower, upper),
                 'row': row,
+                # 반올림 차이만큼은 모터 한계로 잘라 보낸다 · 93-72
+                'motor_for_limits': {
+                    'lower_rad': wire_units.motor_limit(motor, 'lower') if motor else None,
+                    'upper_rad': wire_units.motor_limit(motor, 'upper') if motor else None,
+                },
             }
-            axis_plan['loop_start_target_rad'] = motion_run_rules._motor_target(
-                row,
-                axis_plan['loop_start_motion_rad'],
+            axis_plan['loop_start_target_rad'] = motion_run_rules._clamp_to_motor_limits(
+                motion_run_rules._motor_target(row, axis_plan['loop_start_motion_rad']), motor,
             )
             axis_plan['loop_end_target_rad'] = motion_run_rules._motor_target(
                 row,
@@ -542,9 +551,9 @@ class PlanBuilder:
                         axis.get('motion_limit_lower_rad'),
                         axis.get('motion_limit_upper_rad'),
                     )
-                    positions[int(axis['motor_axis'])] = motion_run_rules._motor_target(
-                        axis['row'],
-                        motion_value,
+                    positions[int(axis['motor_axis'])] = motion_run_rules._clamp_to_motor_limits(
+                        motion_run_rules._motor_target(axis['row'], motion_value),
+                        axis.get('motor_for_limits'),
                     )
                     motion_values[motion_id] = float(motion_value)
                 samples.append({

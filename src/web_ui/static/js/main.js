@@ -1,3 +1,4 @@
+import { nextClockOffset } from './sim3d_math.js';
 import {
   createDesktopShortcut,
   fetchStatusSnapshot,
@@ -315,9 +316,14 @@ function showEmergencyLatched() {
   el.emergencyStopBanner?.classList.toggle('hidden', !latched);
 }
 
+//: 서버 시계 − 브라우저 시계 · 웹 3D 가 실물 위치를 서버 시계로 맞춘다 · 수정 목록 92
+let serverClock = { samples: [], offset: 0 };
+
 function motionStateFromPayload(payload) {
   if (!payload?.motion_state) return null;
+  if (payload.server_time) serverClock = nextClockOffset(serverClock.samples, payload.server_time, Date.now() / 1000);
   return {
+    server_clock_offset_sec: serverClock.offset,
     ...payload.motion_state,
     // 조인트 값(`motion_value_rad`)·재생 상태는 서버가 rad · 화면은 deg (수정 목록 6)
     motors: inDegView(payload.motion_state.motors),

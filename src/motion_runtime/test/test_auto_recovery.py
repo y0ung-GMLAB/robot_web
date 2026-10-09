@@ -123,3 +123,39 @@ def test_stop_during_wait_ends_quietly(monkeypatch):
     manager._stop_event.set()
     player._prepare_and_run('start', dict(CONTINUOUS), [])
     assert len(calls) == 1 and manager.statuses == []
+
+
+# ---- 실물 2026-10-09 · 재생 도중(회차 사이 초기 이동) 실패도 자동 복구로 · 실물 확인 대기 68 ----
+
+def _failing_run(plan, monkeypatch):
+    manager = Manager()
+    player = MotionPlayer(manager)
+
+    def refuse(_axes):
+        raise RuntimeError('초기 위치 이동 실패: ' + cycle_failure.tagged('초기 위치 도달 확인 실패 · 2번 모터 오차 0.094°'))
+
+    player._require_playback_command_allowed = refuse
+    player._playback_axes = lambda _plan, _t: []
+    manager._current_lifecycle = lambda: {}
+    return manager, player
+
+
+def test_a_light_failure_during_continuous_play_goes_up_to_auto_recovery(monkeypatch):
+    plan = {'run_mode': 'continuous', 'axes': []}
+    manager, player = _failing_run(plan, monkeypatch)
+    try:
+        player._run_motion(plan)
+    except RuntimeError as exc:
+        assert cycle_failure.is_cycle_failure(str(exc))
+    else:
+        raise AssertionError('위로 넘겨야 자동 복구가 받는다')
+    assert not [s for s in manager.statuses if s.get('state') == 'error'], '오류 상태는 복구 쪽이 정한다'
+
+
+def test_once_group_and_heavy_failures_still_end_in_error_right_there(monkeypatch):
+    for plan in ({'run_mode': 'once', 'axes': []},
+                 {'run_mode': 'continuous', 'group_execution': True, 'axes': []}):
+        manager, player = _failing_run(plan, monkeypatch)
+        player._run_motion(plan)                     # 넘기지 않는다
+        assert manager.statuses[-1]['state'] == 'error'
+    assert MotionPlayer._hand_to_auto_recovery({'run_mode': 'continuous'}, RuntimeError('서보 알람')) is False

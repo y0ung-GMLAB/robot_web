@@ -112,6 +112,12 @@ class ProjectService:
         }
         if allow_run_stopping:
             blocked_run_states.discard('stopping')
+        # 「초기 위치 이동」 만 끝나 제자리에 서 있음 · 아무것도 안 돈다 · 재생은 시작할 때 늘 지금 자리에서
+        # 새 애니의 첫 프레임까지 다시 천천히 간다(`_run_initialization_then_motion`) · 그래서 막을 이유가
+        # 없다 · 실물 2026-10-08 「나레이션을 재생 목록에 못 넣음」 (실물 확인 대기 84 · 수정 목록 90) ·
+        # 그룹 초기 위치 이동 뒤(그룹 시작을 기다림)는 그대로 막는다
+        if run_state == 'initialized' and not bool((run_status or {}).get('group_execution')):
+            blocked_run_states.discard('initialized')
         if run_state in blocked_run_states:
             return f'모션 동작 상태가 {run_state}이므로 프로젝트를 변경할 수 없습니다'
         return ''

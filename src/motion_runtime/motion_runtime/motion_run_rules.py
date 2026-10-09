@@ -264,6 +264,23 @@ def _motor_position(motor: Optional[Dict[str, Any]]) -> Optional[float]:
 
 #: 한계 비교 여유 · 부동소수 찌꺼기만 넘긴다 · 0.00006°
 LIMIT_EPSILON_RAD = 1e-6
+#: 모터 한계는 조인트 매핑 범위를 모터 deg 로 바꿔 **0.001° 로 반올림**해 적는다(`mapping_motor_limits`) ·
+#: 범위로 자른 애니가 그 반올림(최대 0.0005° = 8.7e-6 rad)만큼 한계를 넘어 「72.518° 가 하한 72.518° 보다
+#: 작습니다」 로 거절됐다(실물 2026-10-09 · 실물 확인 대기 72) · 이만큼은 한계로 **잘라서** 보낸다 · 그 이상은 거절
+MOTOR_LIMIT_ROUNDING_RAD = 1e-5
+
+
+def _clamp_to_motor_limits(target: float, motor: Optional[Dict[str, Any]]) -> float:
+    """반올림 차이만큼 넘은 목표를 모터 한계로 · 드라이브 소프트 리밋을 넘는 명령은 안 보낸다 (93-72)"""
+    if not motor:
+        return target
+    lower = wire_units.motor_limit(motor, 'lower')
+    upper = wire_units.motor_limit(motor, 'upper')
+    if lower is not None and lower - MOTOR_LIMIT_ROUNDING_RAD <= target < lower:
+        return float(lower)
+    if upper is not None and upper < target <= upper + MOTOR_LIMIT_ROUNDING_RAD:
+        return float(upper)
+    return target
 
 
 def _target_range_limit_error(
@@ -276,12 +293,16 @@ def _target_range_limit_error(
     upper = wire_units.motor_limit(motor, 'upper')
     axis = optional_int(motor.get('controller_index'))
     deg = units.rad_to_deg
-    # 범위로 자른 값을 다시 견주면 부동소수 찌꺼기로 「−1073.998° 가 −1073.998° 보다 작습니다」 가 났다 ·
-    # 1e-6 rad(0.00006°) 안은 같은 값 · 실물 테스트 38 관찰
-    if lower is not None and target_min < lower - LIMIT_EPSILON_RAD:
-        return f'{axis}번 모터 목표 최소 {deg(target_min):.3f}° 가 하한 {deg(lower):.3f}° 보다 작습니다'
-    if upper is not None and target_max > upper + LIMIT_EPSILON_RAD:
-        return f'{axis}번 모터 목표 최대 {deg(target_max):.3f}° 가 상한 {deg(upper):.3f}° 보다 큽니다'
+    # 범위로 자른 값을 다시 견주면 반올림 차이로 같은 숫자끼리 비교하는 글이 났다 · 실물 테스트 38 · 확인 대기 72 ·
+    # 한계를 적을 때의 반올림(0.001°)만큼은 같은 값(보낼 때 한계로 자름 · `_clamp_to_motor_limits`)
+    # 그보다 넘으면 조인트 매핑 범위가 모터 설정 한계보다 넓다 · 적용 안 한 매핑이 흔한 원인
+    hint = ' · 조인트 매핑 범위가 모터 설정 한계보다 넓습니다 · 매핑 저장 뒤 「장비에 적용 · 모터 재시작」'
+    if lower is not None and target_min < lower - MOTOR_LIMIT_ROUNDING_RAD:
+        return (f'{axis}번 모터 목표 최소 {deg(target_min):.3f}° 가 하한 {deg(lower):.3f}° 보다 '
+                f'{deg(lower - target_min):.3f}° 작습니다{hint}')
+    if upper is not None and target_max > upper + MOTOR_LIMIT_ROUNDING_RAD:
+        return (f'{axis}번 모터 목표 최대 {deg(target_max):.3f}° 가 상한 {deg(upper):.3f}° 보다 '
+                f'{deg(target_max - upper):.3f}° 큽니다{hint}')
     return ''
 
 
