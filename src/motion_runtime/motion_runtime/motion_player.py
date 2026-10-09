@@ -357,6 +357,8 @@ class MotionPlayer:
             self._run_motion(motion_plan)
 
     def _run_initialization(self, plan: Dict[str, Any]) -> None:
+        # 회차가 새로 시작된다 · 다시 체크한 축은 이 초기 위치 이동에서 같이 출발(95)
+        self._release_held_axes()
         try:
             if self.manager._stop_event.is_set():
                 raise InterruptedError()
@@ -545,6 +547,9 @@ class MotionPlayer:
             cycle_count = 0
             grade1_seen = False
             while True:
+                if cycle_count > 0 and not (playlist or repeat_mode in {'reinitialize', 'dwell_reinitialize'}):
+                    # 초기 이동 없이 바로 잇는 반복 · 회차 시작에서 합류(천천히 잇기 · 95)
+                    self._release_held_axes()
                 cycle_started = time.monotonic()
                 cycle_started_wall = time.time()
                 trace = self._trace_begin(plan, cycle_count)
@@ -995,9 +1000,17 @@ class MotionPlayer:
             motors = self.manager._current_motors()
             ok = True
             messages = []
+            # 꺼 둔 축(·다음 회차를 기다리는 축)은 명령을 안 보냈다 · 도착을 묻지 않는다 ·
+            # 전에는 회차 끝 「최종 위치 확인 실패」 가 났다(실물 2026-10-07 테스트 32) · 95
+            skipped = {
+                motion_id for motion_id, entry in self._effective_overrides(self._override_snapshot()).items()
+                if entry.get('muted')
+            }
             for axis_plan in axes:
                 motor_axis = int(axis_plan['motor_axis'])
                 if motor_axis not in targets:
+                    continue
+                if str(axis_plan.get('motion_id') or '') in skipped:
                     continue
                 motor = self.manager._motor_for_axis(motor_axis, motors)
                 ready_error = motion_run_rules._motor_ready_error(
@@ -1248,7 +1261,7 @@ class MotionPlayer:
         리밋 · 모션값을 좁힌 범위로 자르고 **그 축만** 매핑 식으로 모터
         목표를 다시 계산한다 · 계획은 건드리지 않아 되돌리면 즉시 원래대로.
         """
-        overrides = self.manager.live_override_snapshot()
+        overrides = self._effective_overrides(self.manager.live_override_snapshot())
         if not overrides:
             return positions, motion_values
         out_positions = dict(positions)
@@ -1283,12 +1296,54 @@ class MotionPlayer:
         옛 자리로 끌려간다 · 새 실행은 초기 이동이 지금 자리에서 출발한다.
         지금 오버라이드를 「본 것」으로 적어 시작부터 잇기가 걸리지 않게 한다.
         """
+        self._release_held_axes()
         self._override_seen = {
             key: dict(value)
-            for key, value in (self.manager.live_override_snapshot() or {}).items()
+            for key, value in self._effective_overrides(self.manager.live_override_snapshot()).items()
         }
         self._last_sent_positions = {}
         self._resume_blends = {}
+
+    def _effective_overrides(self, overrides: Optional[Mapping[str, Any]]) -> Dict[str, Dict[str, Any]]:
+        """이번 회차에 실제로 쓸 뮤트 · 회차 도중 다시 체크해도 **다음 회차부터** 합류 · 수정 목록 95
+
+        사용자 2026-10-09 · 끈 축을 도중에 다시 켜면 그 자리에서 바로 움직였다(천천히 잇기 · 40) ·
+        사람이 손대는 중일 수 있어 위험 · 한 번 꺼진 축은 이 회차 끝까지 서 있고, 다음 회차의 초기
+        위치 이동(또는 바로 잇는 반복이면 회차 시작의 천천히 잇기)에서 같이 출발한다.
+        """
+        held = getattr(self, '_held_ids', None)
+        if held is None:
+            held = self._held_ids = set()
+        out = {str(key): dict(value or {}) for key, value in (overrides or {}).items()}
+        for motion_id, entry in out.items():
+            if entry.get('muted'):
+                held.add(motion_id)
+        for motion_id in held:
+            entry = out.setdefault(motion_id, {})
+            if not entry.get('muted'):
+                entry['muted'] = True
+                entry['held'] = True
+        return out
+
+    def _release_held_axes(self) -> None:
+        """회차가 새로 시작될 때 · 다시 체크한 축이 여기서 합류 (지금 꺼져 있는 축만 남긴다) · 95"""
+        self._held_ids = {
+            str(key) for key, value in self._override_snapshot().items()
+            if (value or {}).get('muted')
+        }
+
+    def _override_snapshot(self) -> Dict[str, Any]:
+        """오버라이드가 없는 가벼운 관리자(시험)면 빈 것"""
+        snapshot = getattr(self.manager, 'live_override_snapshot', None)
+        return dict(snapshot() or {}) if snapshot is not None else {}
+
+    def held_motion_ids(self) -> List[str]:
+        """다시 체크했지만 다음 회차를 기다리는 조인트 · 화면 「다음 회차부터」"""
+        muted = {
+            str(key) for key, value in self._override_snapshot().items()
+            if (value or {}).get('muted')
+        }
+        return sorted(set(getattr(self, '_held_ids', set()) or set()) - muted)
 
     def _blend_override_changes(
         self,
@@ -1345,8 +1400,8 @@ class MotionPlayer:
         positions: Dict[int, float],
     ) -> None:
         # 뮤트는 초기 위치 이동을 포함한 **모든 발행 길목**에서 거른다 · P7
-        # 고장난 모터는 초기 이동도 하면 안 된다
-        overrides = self.manager.live_override_snapshot()
+        # 고장난 모터는 초기 이동도 하면 안 된다 · 다시 체크해도 다음 회차까지는 뮤트(95)
+        overrides = self._effective_overrides(self.manager.live_override_snapshot())
         if overrides:
             muted_axes = {
                 int(axis_plan['motor_axis'])

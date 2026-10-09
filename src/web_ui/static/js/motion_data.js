@@ -1558,12 +1558,18 @@ export function createMotionDataController({
       el.motionRunAxisRows.innerHTML = emptyRow(12, '실행 준비 검사를 누르면 표시됩니다');
       return;
     }
+    const held = new Set((motionRunStatus?.held_motion_ids || []).map(String));
     el.motionRunAxisRows.innerHTML = axes.map((axis) => {
       const muted = Boolean(liveOverrideOf(axis.motion_id).muted);
-      return `<tr class="${muted ? 'live-muted' : ''}">
+      // 다시 체크했지만 이 회차는 서 있음 · 다음 회차부터 합류 (95)
+      const waiting = !muted && held.has(String(axis.motion_id));
+      const badge = muted
+        ? '<span class="live-muted-badge">제외 중</span>'
+        : (waiting ? '<span class="live-muted-badge">다음 회차부터</span>' : '');
+      return `<tr class="${muted || waiting ? 'live-muted' : ''}">
         <td><label class="live-mute-cell"><input type="checkbox" data-live-mute="${escapeHtml(axis.motion_id)}"
-          title="즉시 적용 · 끄면 이 조인트 명령을 빼고 모터는 그 자리에 섭니다 (서보 유지) · 다시 켜면 초기 이동 시간 동안 천천히 이어 갑니다 · 저장 안 됨"
-          ${muted ? '' : 'checked'}>${muted ? '<span class="live-muted-badge">제외 중</span>' : ''}</label></td>
+          title="즉시 적용 · 끄면 이 조인트 명령을 빼고 모터는 그 자리에 섭니다 (서보 유지) · 다시 켜도 이 회차는 그대로 서 있고 다음 회차(초기 위치 이동)부터 같이 움직입니다 · 저장 안 됨"
+          ${muted ? '' : 'checked'}>${badge}</label></td>
         <td class="mono">${displayText(axis.motion_id)}</td>
         <td class="mono">${formatInt(axis.motor_axis)}</td>
         <td>${displayText(axis.motor_type || '-')}</td>
@@ -1634,7 +1640,7 @@ export function createMotionDataController({
       setMotionRunMessage(payload.muted !== undefined
         ? (payload.muted
           ? `조인트 이름 ${motionId} 제외 · 모터는 그 자리에 섭니다`
-          : `조인트 이름 ${motionId} 다시 사용 · 초기 이동 시간 동안 천천히 이어 갑니다`)
+          : `조인트 이름 ${motionId} 다시 사용 · 재생 중이면 다음 회차부터 같이 움직입니다`)
         : (payload.clamp
           ? `조인트 이름 ${motionId} 라이브 리밋 ${payload.clamp[0]} ~ ${payload.clamp[1]}°`
           : `조인트 이름 ${motionId} 라이브 리밋 해제`));

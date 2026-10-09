@@ -1320,6 +1320,9 @@ class MotionRunManager(Node):
             }
             result['automation'] = self._automation_snapshot()
         result['live_overrides'] = self.live_override_snapshot()
+        # 다시 체크했지만 다음 회차를 기다리는 조인트 · 95
+        player = getattr(self, '_player', None)
+        result['held_motion_ids'] = player.held_motion_ids() if player is not None else []
         return result
 
     # ------------------------------------------------------------------ #
