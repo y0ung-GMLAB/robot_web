@@ -42,7 +42,8 @@ ROBOT_ENDPOINTS = (
 )
 SPEAKER_ENDPOINTS = (
     '/api/system/update',
-    '/api/status',
+    '/api/config',
+    '/api/state',
 )
 
 #: 늘 바뀌는 칸 · 이름 그대로
