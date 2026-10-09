@@ -51,7 +51,7 @@ def test_missing_permission_points_to_the_one_line_fix():
     assert len(run.calls) == 1, '실패하면 다시 띄우지 않는다'
 
 
-def test_apply_all_does_every_online_robot_then_this_pc_and_skips_the_speaker():
+def test_apply_all_does_every_online_robot_and_the_speaker_then_this_pc():
     pcs = [
         {'pc_id': 'floating4', 'is_local': True, 'online': True, 'web_url': 'http://10.0.0.14:8000'},
         {'pc_id': 'floating1', 'online': True, 'web_url': 'http://10.0.0.11:8000'},
@@ -66,9 +66,38 @@ def test_apply_all_does_every_online_robot_then_this_pc_and_skips_the_speaker():
 
     result = system_timezone.apply_all(pcs, 'Europe/Paris', _tz(_Run()), http=http)
 
-    assert sent == [('POST', 'http://10.0.0.11:8000/api/system/timezone', {'zone': 'Europe/Paris'})]
+    # 스피커도 같은 주소로 (89 · 2026-10-09)
+    assert sent == [
+        ('POST', 'http://10.0.0.11:8000/api/system/timezone', {'zone': 'Europe/Paris'}),
+        ('POST', 'http://10.0.0.20:8100/api/system/timezone', {'zone': 'Europe/Paris'}),
+    ]
     assert [row['pc_id'] for row in result['pcs']][-1] == 'floating4'
     by_id = {row['pc_id']: row for row in result['pcs']}
     assert by_id['floating2']['success'] is False
-    assert '무관' in by_id['speaker']['message']
+    assert by_id['speaker']['message'] == 'ok'
     assert result['success'] is False, '끊긴 로봇 PC 가 있으면 전부 됨이 아니다'
+
+
+def test_an_old_speaker_without_the_endpoint_is_skipped_not_failed():
+    pcs = [
+        {'pc_id': 'floating4', 'is_local': True, 'online': True, 'web_url': 'http://10.0.0.14:8000'},
+        {'pc_id': 'speaker', 'role': 'speaker', 'online': True, 'web_url': 'http://10.0.0.20:8100'},
+    ]
+
+    def http(url, *, method='GET', timeout, body=None):
+        raise OSError('404')
+
+    result = system_timezone.apply_all(pcs, 'Europe/Paris', _tz(_Run()), http=http)
+    speaker = next(row for row in result['pcs'] if row['pc_id'] == 'speaker')
+    assert speaker['success'] is True and '옛 스피커 앱' in speaker['message']
+
+
+def test_the_speaker_changes_the_zone_without_restarting_robot_services():
+    run = _Run()
+    tz = system_timezone.SystemTimezone(
+        run=run, zones=lambda: ['Asia/Seoul', 'Europe/Paris'],
+        snapshot=lambda: {'timezone': 'Asia/Seoul'}, restart_unit='', workspace_hint='~/robot_web',
+    )
+    result = tz.apply('Europe/Paris')
+    assert result['success'] is True
+    assert [c[0] for c in run.calls] == ['timedatectl'], '스피커는 다시 띄울 로봇 서비스가 없다'

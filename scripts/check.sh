@@ -158,6 +158,11 @@ if [[ "${ROLE}" == "speaker" ]]; then
   row "$([[ "${state}" == "active" ]] && echo 1 || echo 0)" "speaker-app" "${state:-unknown}"
   row "$([[ -f "${WORKSPACE_DIR}/install/motion_coordination_interfaces/share/motion_coordination_interfaces/msg/PcPresence.msg" ]] && echo 1 || echo 0)" "그룹 메시지 빌드" "$([[ -d "${WORKSPACE_DIR}/install/motion_coordination_interfaces" ]] && echo "${WORKSPACE_DIR}/install" || echo '없음 · bash scripts/install_speaker.sh')"
   port="$(python3 -c 'import os,sys; sys.path.insert(0, sys.argv[1] + "/speaker_app/backend"); import config; print(config.load()["web"]["port"])' "${WORKSPACE_DIR}" 2>/dev/null || echo 8100)"
+  # 웹 터미널 · 웹 관리 권한 · 로봇 PC 와 같은 것 (수정 목록 89)
+  tstate="$(systemctl --user is-active motion-terminal.service 2>/dev/null; true)"
+  row "$([[ "${tstate}" == "active" ]] && echo 1 || echo 0)" "웹 터미널 :8081" "${tstate:-없음} $([[ "${tstate}" == "active" ]] || echo '· bash scripts/install_speaker.sh (ttyd 설치 · 관리자 비밀번호)')"
+  pkla="/etc/polkit-1/localauthority/50-local.d/50-robot-web.pkla"
+  row "$(grep -qs "unix-user:$(id -un)$" "${pkla}" && echo 1 || echo 0)" "웹 Wi-Fi·시간대 권한" "$(grep -qs "unix-user:$(id -un)$" "${pkla}" && echo 있음 || echo '없음 · bash scripts/allow_web_admin.sh')"
   sstate="$(http_json "http://localhost:${port}/api/state")"
   row "$([[ -n "${sstate}" ]] && echo 1 || echo 0)" "스피커 화면 :${port}" "$([[ -n "${sstate}" ]] && echo "http://${ip_addr:-localhost}:${port}" || echo '응답 없음 · journalctl --user -u speaker-app')"
   if [[ -n "${sstate}" ]]; then

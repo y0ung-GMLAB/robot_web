@@ -37,11 +37,16 @@ class SystemTimezone:
         zones: Callable[[], Iterable[str]] = local_clock.timezones,
         snapshot: Callable[[], Dict[str, Any]] = local_clock.snapshot,
         blocker: Callable[[], str] = lambda: '',
+        restart_unit: str = 'motion-control.service',
+        workspace_hint: str = '~/ros2_ws',
     ) -> None:
         self._run = run
         self._zones = zones
         self._snapshot = snapshot
         self._blocker = blocker
+        #: 바꾼 뒤 다시 띄울 서비스 · 빈 값이면 안 띄운다(스피커 · 스케줄 없음 · 89)
+        self._restart_unit = restart_unit
+        self._workspace_hint = workspace_hint
 
     def _cmd(self, args):
         try:
@@ -70,11 +75,15 @@ class SystemTimezone:
         if code != 0:
             low = err.lower()
             denied = 'interactive authentication required' in low or 'access denied' in low or 'not authorized' in low
-            return {'success': False, 'message': NOT_ALLOWED_HINT if denied else f'바꾸지 못했습니다 · {err.strip()}'}
+            hint = NOT_ALLOWED_HINT.replace('~/ros2_ws', self._workspace_hint)
+            return {'success': False, 'message': hint if denied else f'바꾸지 못했습니다 · {err.strip()}'}
+        if not self._restart_unit:
+            return {'success': True, 'changed': True, 'clock': self._snapshot(),
+                    'message': f'{current or "?"} → {zone}'}
         # 스케줄이 새 시간대로 돌게 · 응답이 나간 뒤 다시 띄운다
         self._cmd([
             'systemd-run', '--user', '--on-active=2', '--unit', RESTART_UNIT, '--collect',
-            'systemctl', '--user', 'restart', 'motion-control.service',
+            'systemctl', '--user', 'restart', self._restart_unit,
         ])
         return {
             'success': True, 'changed': True, 'clock': self._snapshot(),
@@ -98,7 +107,15 @@ def apply_all(
             continue
         row = _row(pc)
         if row['role'] == 'speaker':
-            rows.append({**row, 'success': True, 'message': '스피커 · 스케줄이 없어 시간대와 무관 · 건너뜀'})
+            # 스피커도 바꾼다(로그 시각 · 89) · 옛 스피커 앱(주소 없음)이면 건너뜀 · 결과는 성공·실패 집계에 안 넣는다
+            if not pc.get('online', True):
+                rows.append({**row, 'success': True, 'message': '스피커 · 연결 안 됨 · 건너뜀'})
+                continue
+            try:
+                result = http(f"{row['web_url']}/api/system/timezone", method='POST', timeout=25.0, body={'zone': zone})
+                rows.append({**row, **result})
+            except (OSError, ValueError, urllib.error.URLError):
+                rows.append({**row, 'success': True, 'message': '스피커 · 옛 스피커 앱 · 건너뜀 (그 PC 터미널에서 install_speaker.sh 뒤 됨)'})
             continue
         if row['is_local']:
             local_row = row

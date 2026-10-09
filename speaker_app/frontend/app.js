@@ -462,5 +462,146 @@ $("btn-pause").addEventListener("click", async () => { await api("/api/pause"); 
 $("btn-resume").addEventListener("click", async () => { await api("/api/resume"); poll(); });
 $("btn-stop").addEventListener("click", async () => { await api("/api/stop"); poll(); });
 
+// ---- PC 관리 · 로봇 PC 와 같은 것 · 수정 목록 89 (2026-10-09) ----------------
+// 결과 JSON 을 그대로 받는 요청 · api() 는 ok 만 돌려준다
+async function call(path, body) {
+  const opts = body === undefined
+    ? {}
+    : { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body || {}) };
+  try {
+    const res = await fetch(path, opts);
+    return await res.json().catch(() => ({}));
+  } catch (err) {
+    return { success: false, message: "서버에 연결할 수 없습니다" };
+  }
+}
+
+function sayResult(data, fallback) {
+  const text = (data && data.message) || fallback || "";
+  if (text) toast(text);
+}
+
+const host = window.location.hostname;
+$("link-terminal").href = "http://" + host + ":8081";
+$("link-btop").href = "http://" + host + ":8080";
+
+$("btn-docs").addEventListener("click", async () => {
+  const box = $("docs");
+  if (!box.classList.contains("hidden")) { box.classList.add("hidden"); return; }
+  const data = await call("/api/docs");
+  box.textContent = data.text || "사용법을 불러오지 못했습니다";
+  box.classList.remove("hidden");
+});
+
+$("btn-restart-app").addEventListener("click", async () => {
+  if (!confirm("스피커 앱을 다시 시작합니다. 재생 중이면 소리가 끊깁니다. 계속할까요?")) return;
+  sayResult(await call("/api/system/restart", {}));
+});
+
+const UPDATE_TEXT = { idle: "대기", running: "업데이트 중", done: "완료", failed: "실패" };
+async function refreshUpdate() {
+  const data = await call("/api/system/update");
+  const state = UPDATE_TEXT[data.state] || data.state || "-";
+  const version = data.state === "done" && data.before_hash && data.after_hash && data.before_hash !== data.after_hash
+    ? data.before_hash + " → " + data.after_hash
+    : (data.git_hash || "-");
+  $("update-state").textContent = state + " · " + version + (data.message ? " · " + data.message : "");
+  $("btn-update").disabled = data.state === "running";
+}
+$("btn-update").addEventListener("click", async () => {
+  if (!confirm("이 PC 를 최신 코드로 업데이트합니다 (몇 분 · 그동안 스피커 앱이 다시 뜹니다). 계속할까요?")) return;
+  sayResult(await call("/api/system/update", {}), "업데이트 시작");
+  refreshUpdate();
+});
+
+async function refreshTime() {
+  const data = await call("/api/system/time");
+  const clock = data.clock || {};
+  const local = String(clock.local_time || "").slice(0, 19).replace("T", " ");
+  $("tz-now").textContent = (clock.timezone || "-") + " · " + local;
+  const list = $("tz-list");
+  if (!list.children.length && Array.isArray(data.timezones)) {
+    data.timezones.forEach((zone) => {
+      const option = document.createElement("option");
+      option.value = zone;
+      list.appendChild(option);
+    });
+  }
+}
+$("btn-tz").addEventListener("click", async () => {
+  const zone = $("tz-pick").value.trim();
+  if (!zone) { toast("시간대를 고르세요 (예 Asia/Seoul)"); return; }
+  sayResult(await call("/api/system/timezone", { zone }));
+  refreshTime();
+});
+
+async function refreshWifi() {
+  const data = await call("/api/system/wifi");
+  if (data.available === false) {
+    $("wifi-now").textContent = data.message || "Wi-Fi 장치 없음";
+  } else {
+    $("wifi-now").textContent = (data.ssid || "(연결 안 됨)")
+      + (data.signal != null ? " · 신호 " + data.signal : "")
+      + (data.address ? " · " + data.address : "")
+      + (data.method ? " · " + data.method : "")
+      + (data.powersave ? " · 절전 " + data.powersave : "");
+  }
+  const pending = data.pending;
+  $("wifi-pending").classList.toggle("hidden", !pending);
+  if (pending) {
+    const left = Math.max(0, Math.round(Number(pending.deadline || 0) - Date.now() / 1000));
+    $("wifi-pending-text").textContent = pending.ssid + " 로 바꿈 · " + left + "초 안에 「유지」 를 누르세요";
+  }
+}
+$("btn-wifi-scan").addEventListener("click", async () => {
+  toast("Wi-Fi 찾는 중");
+  const data = await call("/api/system/wifi/scan", {});
+  const select = $("wifi-ssid");
+  select.innerHTML = "";
+  (data.networks || []).forEach((net) => {
+    const option = document.createElement("option");
+    option.value = net.ssid;
+    option.dataset.security = net.security || "";
+    option.textContent = net.ssid + " · " + (net.signal != null ? net.signal : "-")
+      + (net.security ? " · " + net.security : " · 열림") + (net.in_use ? " · 지금" : "");
+    select.appendChild(option);
+  });
+  if (!select.children.length) select.innerHTML = '<option value="">찾은 Wi-Fi 없음</option>';
+  sayResult(data);
+});
+$("wifi-static-on").addEventListener("change", (ev) => {
+  $("wifi-static").classList.toggle("hidden", !ev.target.checked);
+});
+$("btn-wifi-connect").addEventListener("click", async () => {
+  const select = $("wifi-ssid");
+  const ssid = select.value;
+  if (!ssid) { toast("먼저 「찾기」 로 Wi-Fi 를 고르세요"); return; }
+  if (!confirm(ssid + " 로 바꿉니다. 60초 안에 「유지」 를 눌러야 남습니다. 계속할까요?")) return;
+  const option = select.selectedOptions[0];
+  const body = {
+    ssid,
+    password: $("wifi-password").value,
+    security: option ? option.dataset.security : "",
+    static: $("wifi-static-on").checked ? {
+      address: $("wifi-static-address").value.trim(),
+      gateway: $("wifi-static-gateway").value.trim(),
+      dns: $("wifi-static-dns").value.trim(),
+    } : null,
+  };
+  sayResult(await call("/api/system/wifi/connect", body));
+  $("wifi-password").value = "";
+  refreshWifi();
+});
+$("btn-wifi-keep").addEventListener("click", async () => { sayResult(await call("/api/system/wifi/confirm", {})); refreshWifi(); });
+$("btn-wifi-back").addEventListener("click", async () => { sayResult(await call("/api/system/wifi/rollback", {})); refreshWifi(); });
+
+function refreshPcCard() {
+  refreshUpdate();
+  refreshTime();
+  refreshWifi();
+}
+refreshPcCard();
+setInterval(refreshPcCard, 5000);
+
 poll();
 setInterval(poll, 1000);

@@ -265,7 +265,8 @@ class WifiSettings:
             add += ['wifi-sec.key-mgmt', self.key_mgmt(security), 'wifi-sec.psk', password]
         code, _, err = self._nmcli(*add)
         if code != 0:
-            return {'success': False, 'message': NOT_ALLOWED_HINT if _permission_denied(err) else f'연결 설정을 만들지 못했습니다 · {err.strip()}'}
+            hint = NOT_ALLOWED_HINT.replace('~/ros2_ws', str(self.workspace_root))
+            return {'success': False, 'message': hint if _permission_denied(err) else f'연결 설정을 만들지 못했습니다 · {err.strip()}'}
 
         # 바꾸기 **전에** 되돌리기를 건다 · 확인 못 하면 이전 연결 다시 켜고 새 것은 지운다
         back = f'nmcli connection up {shlex.quote(previous)}; ' if previous else ''

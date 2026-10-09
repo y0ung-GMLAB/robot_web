@@ -49,15 +49,53 @@ def _as_int(value, fallback=0):
         return fallback
 
 
-def _updater():
-    """robot_web 의 같은 업데이트 모듈 · 이 앱은 robot_web/speaker_app 안에서 돈다"""
+WORKSPACE = os.path.dirname(APP_DIR)
+#: 이 앱 서비스 이름 · 「다시 시작」 이 쓴다 (install_speaker.sh 의 UNIT)
+SPEAKER_UNIT = "speaker-app.service"
+
+
+def _robot_modules():
+    """robot_web 의 같은 모듈을 쓴다 · 이 앱은 robot_web/speaker_app 안에서 돈다"""
     import sys
-    workspace = os.path.dirname(APP_DIR)
-    bridge_src = os.path.join(workspace, "src", "web_bridge")
-    if bridge_src not in sys.path:
-        sys.path.insert(0, bridge_src)
+    for sub in ("web_bridge", "motion_common"):
+        path = os.path.join(WORKSPACE, "src", sub)
+        if path not in sys.path:
+            sys.path.insert(0, path)
+
+
+def _updater():
+    _robot_modules()
     from motion_web_bridge.system_update import SPEAKER_COMMAND, SystemUpdate
-    return SystemUpdate(workspace, command=SPEAKER_COMMAND)
+    return SystemUpdate(WORKSPACE, command=SPEAKER_COMMAND)
+
+
+def _wifi():
+    """로봇 PC 와 같은 Wi-Fi 설정 · 수정 목록 89 (2026-10-09)"""
+    _robot_modules()
+    from motion_web_bridge.wifi_settings import WifiSettings
+    return WifiSettings(WORKSPACE)
+
+
+def _timezone():
+    """로봇 PC 와 같은 시간대 · 스피커는 스케줄이 없어 바꾼 뒤 다시 띄우지 않는다 (89)"""
+    _robot_modules()
+    from motion_web_bridge.system_timezone import SystemTimezone
+    return SystemTimezone(restart_unit="", workspace_hint=WORKSPACE)
+
+
+def restart_command(unit=SPEAKER_UNIT):
+    """응답이 나간 뒤 1초 있다가 이 앱을 다시 띄운다 · 앱이 제 손으로 죽으면 응답이 안 간다"""
+    return ["systemd-run", "--user", "--on-active=1", "--unit", "speaker-app-restart", "--collect",
+            "systemctl", "--user", "restart", unit]
+
+
+def read_docs():
+    """스피커 사용법 · 이 앱 README 글자 그대로 (89)"""
+    try:
+        with open(os.path.join(APP_DIR, "README.md"), encoding="utf-8") as f:
+            return f.read()
+    except OSError:
+        return "사용법 문서(speaker_app/README.md)를 찾지 못했습니다"
 
 
 def create_app(state):
@@ -228,5 +266,53 @@ def create_app(state):
     def test():
         ok, message = state.test_play()
         return _result(ok, message)
+
+    # ---- PC 관리 · 로봇 PC 와 같은 것 · 수정 목록 89 (2026-10-09) ----------
+    # 스피커 PC 도 화면·키보드를 꽂기 어려운 곳에 있다 · 웹으로 다 한다
+    @app.get("/api/system/wifi")
+    def wifi_status():
+        return JSONResponse(_wifi().status())
+
+    @app.post("/api/system/wifi/scan")
+    def wifi_scan():
+        return JSONResponse(_wifi().scan())
+
+    @app.post("/api/system/wifi/connect")
+    def wifi_connect(payload: dict = Body(default={})):
+        payload = payload or {}
+        static = payload.get("static") if isinstance(payload.get("static"), dict) else None
+        return JSONResponse(_wifi().connect(payload.get("ssid"), payload.get("password"), static,
+                                            security=payload.get("security")))
+
+    @app.post("/api/system/wifi/confirm")
+    def wifi_confirm():
+        return JSONResponse(_wifi().confirm())
+
+    @app.post("/api/system/wifi/rollback")
+    def wifi_rollback():
+        return JSONResponse(_wifi().rollback())
+
+    @app.get("/api/system/time")
+    def system_time():
+        return JSONResponse(_timezone().status())
+
+    @app.post("/api/system/timezone")
+    def system_timezone(payload: dict = Body(default={})):
+        return JSONResponse(_timezone().apply((payload or {}).get("zone")))
+
+    @app.post("/api/system/restart")
+    def system_restart():
+        import subprocess
+        try:
+            result = subprocess.run(restart_command(), capture_output=True, text=True, timeout=10)
+        except (OSError, subprocess.SubprocessError) as exc:
+            return _result(False, "다시 시작 예약 실패 · %s" % exc)
+        if result.returncode != 0:
+            return _result(False, "다시 시작 예약 실패 · %s" % (result.stderr.strip() or result.returncode))
+        return _result(True, "1초 뒤 스피커 앱을 다시 띄웁니다 · 몇 초 뒤 화면이 다시 붙습니다")
+
+    @app.get("/api/docs")
+    def docs():
+        return JSONResponse({"ok": True, "text": read_docs()})
 
     return app

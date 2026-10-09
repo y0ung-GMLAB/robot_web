@@ -65,7 +65,7 @@ fi
 if [[ "${CODE_ONLY}" == true ]]; then
   step "1. 건너뜀 · 코드만 갱신 (현장 준비는 첫 설치 때 끝남)"
 else
-step "1. 자동 업데이트·절전 끄기 · 로그아웃해도 유지 · 방화벽 같은 망 허용"
+step "1. 자동 업데이트·절전 끄기 · 로그아웃해도 유지 · 방화벽 같은 망 허용 · 시간대 · 웹 관리 권한"
 site_disable_interruptions
 if loginctl show-user "$(id -un)" 2>/dev/null | grep -q '^Linger=yes'; then
   site_note "linger 이미 켜짐"
@@ -73,6 +73,9 @@ else
   site_run sudo loginctl enable-linger "$(id -un)"
 fi
 site_firewall
+# 로봇 PC 와 같은 것 · 2026-10-09 (사용자 · 수정 목록 89) · 시간대 · 웹에서 Wi-Fi·시간대 바꾸기 허용
+site_timezone
+site_web_admin_permissions "$(id -un)"
 fi
 
 step "2. 코드 갱신"
@@ -105,6 +108,8 @@ run sudo apt-get install -y \
   alsa-utils git build-essential cmake \
   python3-colcon-common-extensions python3-fastapi python3-uvicorn python3-yaml \
   ros-humble-ros-base
+# 웹 터미널 · PC 성능 화면 · 없어도 설치는 끝난다 (89 · 로봇 PC 와 같은 것)
+run sudo apt-get install -y ttyd btop || echo "  !! ttyd · btop 설치 실패 · 웹 터미널·PC 성능 화면 없이 계속" >&2
 if ! id -nG "$(id -un)" | tr ' ' '\n' | grep -qx audio; then
   run sudo usermod -aG audio "$(id -un)"
   site_mark_reboot "audio 그룹"
@@ -221,17 +226,34 @@ else
   mkdir -p "${UNIT_DIR}"
   chmod +x "${APP_DIR}/run.sh"
   sed "s#^ExecStart=.*#ExecStart=${APP_DIR}/run.sh#" "${APP_DIR}/deploy/${UNIT}" > "${UNIT_DIR}/${UNIT}"
+  # 웹 터미널(:8081) · PC 성능(:8080) · 로봇 PC 와 같은 유닛 · ttyd 가 있을 때만 (89)
+  # 터미널은 **멈추지 않는다** · 이 설치를 그 터미널에서 돌리고 있을 수 있다 · 꺼져 있을 때만 켠다
+  if [[ -x /usr/bin/ttyd ]]; then
+    sed -e "s|@WORKSPACE@|${WORKSPACE_DIR//&/\\&}|g" \
+      "${WORKSPACE_DIR}/src/web_bridge/deploy/motion-terminal.service.in" > "${UNIT_DIR}/motion-terminal.service"
+    if [[ -x /usr/bin/btop ]]; then
+      install -m 0644 "${WORKSPACE_DIR}/src/web_bridge/deploy/motion-btop.service" "${UNIT_DIR}/motion-btop.service"
+    fi
+  else
+    echo "  ttyd 가 없어 웹 터미널은 건너뜀 · sudo apt install ttyd btop 뒤 이 스크립트 다시" >&2
+  fi
   systemctl --user daemon-reload
   systemctl --user enable "${UNIT}" >/dev/null
   systemctl --user restart "${UNIT}"
+  for extra in motion-terminal.service motion-btop.service; do
+    if [[ -f "${UNIT_DIR}/${extra}" ]]; then
+      systemctl --user enable "${extra}" >/dev/null
+      systemctl --user is-active --quiet "${extra}" || systemctl --user start "${extra}" || true
+    fi
+  done
 fi
 
 step "설치 완료"
 ip_addr="$(ip -o -4 route get 1.1.1.1 2>/dev/null | awk '{for (i = 1; i <= NF; i++) if ($i == "src") print $(i + 1)}' || true)"
 port="$(APP_DIR="${APP_DIR}" python3 -c 'import os,sys; sys.path.insert(0, os.environ["APP_DIR"] + "/backend"); import config; print(config.load()["web"]["port"])' 2>/dev/null || echo 8100)"
 echo "코드     · $(git -C "${WORKSPACE_DIR}" log --oneline -1 2>/dev/null || echo '-')"
-echo "서비스   · ${UNIT}=$(systemctl --user is-active "${UNIT}" 2>/dev/null; true)"
-echo "스피커 화면 · http://${ip_addr:-<이 PC IP>}:${port}"
+echo "서비스   · ${UNIT}=$(systemctl --user is-active "${UNIT}" 2>/dev/null; true) · 웹 터미널=$(systemctl --user is-active motion-terminal.service 2>/dev/null; true)"
+echo "스피커 화면 · http://${ip_addr:-<이 PC IP>}:${port} · 웹 터미널 :8081 · PC 성능 :8080"
 echo "음원     · $(find "${APP_DIR}/sounds" -maxdepth 1 -iname '*.wav' 2>/dev/null | wc -l)개 · 없으면 스피커 화면에서 추가"
 echo "설치 확인 · bash ${WORKSPACE_DIR}/scripts/check.sh"
 echo "맞출 것  · 로봇 PC 와 같은 robot_web 커밋 · 같은 DDS Domain ID · 같은 그룹 ID(스피커 화면 「연동 설정」)"
