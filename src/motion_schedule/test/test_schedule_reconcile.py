@@ -280,3 +280,34 @@ def test_manual_mode_also_forgets_when_it_matches(tmp_path):
     node._reconcile(DAY.replace(hour=13))
 
     assert node._last_failure == {}
+
+
+def test_schedule_does_not_restart_after_auto_recovery_is_exhausted(tmp_path):
+    """수정 목록 73 · 런타임이 자동 복구를 다 쓰고 멈췄으면 사람이 볼 때까지 다시 시작하지 않는다"""
+    node = _node(tmp_path, run_state='error', schedules=[_day_schedule()])
+    node._local_run_status = lambda: {'state': 'error', 'auto_recovery_exhausted': True}
+    noon = DAY.replace(hour=12)
+
+    node._reconcile(noon)
+    assert node.sent == []
+
+    # 사람이 수동으로 바꿨다 돌아옴 · 다시 시작
+    node._run_mode = 'manual'
+    node._reconcile(noon)
+    node._run_mode = 'schedule'
+    node._reconcile(noon)
+    assert [endpoint for endpoint, _ in node.sent] == ['/api/motion-run/start']
+
+
+def test_an_old_mode_change_does_not_count_as_acknowledgement(tmp_path):
+    node = _node(tmp_path, run_state='idle', schedules=[_day_schedule()])
+    node._local_run_status = lambda: {'state': 'idle'}
+    noon = DAY.replace(hour=12)
+    node._run_mode = 'manual'
+    node._reconcile(noon)
+    node._run_mode = 'schedule'
+
+    node._local_run_state = lambda: 'error'
+    node._local_run_status = lambda: {'state': 'error', 'auto_recovery_exhausted': True}
+    node._reconcile(noon)
+    assert node.sent == []

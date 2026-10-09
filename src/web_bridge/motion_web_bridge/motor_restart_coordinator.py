@@ -5,6 +5,7 @@ restart.  The web bridge supplies runtime readiness rules, but it does not
 schedule the restart or decide when that restart operation is complete.
 """
 
+import os
 import subprocess
 import threading
 import time
@@ -290,12 +291,27 @@ class MotorRestartCoordinator:
                 f'{service} 실행 식별정보를 해석할 수 없습니다'
             ) from exc
 
+    @staticmethod
+    def start_limit_path(service: str) -> str:
+        """`deploy/start_limit.sh` 의 `start_limit_file` 과 같은 자리 · 모터 서비스만"""
+        name = 'motor' if service == 'motion-motor.service' else service.split('.')[0]
+        return os.path.join(os.environ.get('XDG_RUNTIME_DIR') or '/tmp', 'robot-web', f'{name}-starts')
+
+    @classmethod
+    def _clear_start_limit(cls, service: str) -> None:
+        try:
+            os.remove(cls.start_limit_path(service))
+        except OSError:
+            pass
+
     @classmethod
     def _restart_managed_service(cls, service: str) -> None:
         cls._validate_service(service)
         # 모터 통신 루프가 되풀이해 죽으면 systemd 가 재시작 횟수 제한(60초에 5번)에
         # 걸어 세운다 · 사람이 웹에서 누른 재시작은 그 제한과 상관없이 되게 먼저 푼다 ·
         # 실패해도 그대로 재시작을 시도한다(그 유닛에 기록이 없으면 실패한다) · 수정 목록 3-2
+        # 실행 스크립트가 세는 재기동 기록도 지운다 · 사람이 누른 재시작은 상한과 상관없이 · 수정 목록 65
+        cls._clear_start_limit(service)
         try:
             subprocess.run(
                 ['/usr/bin/systemctl', '--user', 'reset-failed', service],

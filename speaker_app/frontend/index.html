@@ -1,0 +1,155 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>스피커 트리거</title>
+<link rel="stylesheet" href="/style.css">
+</head>
+<body>
+<div class="wrap">
+
+  <header>
+    <h1>스피커 트리거</h1>
+    <span id="dds-badge" class="badge">-</span>
+  </header>
+
+  <section class="card">
+    <h2>모드</h2>
+    <div class="row">
+      <label class="radio"><input type="radio" name="mode" value="dds"> 연동 모드</label>
+      <label class="radio"><input type="radio" name="mode" value="standalone"> 단독 모드</label>
+    </div>
+    <p class="hint" id="mode-hint">연동 모드는 모션 PC의 시작 트리거를 받아 자동 재생합니다.</p>
+  </section>
+
+  <section class="card">
+    <h2>연동 설정</h2>
+    <div class="row">
+      <label>도메인 ID <input type="number" id="domain_id" min="0" max="232"></label>
+      <label>그룹 ID <input type="text" id="group_id"></label>
+      <label>PC 이름 <input type="text" id="pc_name" maxlength="64"></label>
+      <button id="btn-apply-dds">적용</button>
+      <button id="btn-reconnect-dds" class="ghost">다시 연결</button>
+    </div>
+    <p class="dds-state" id="dds-state">-</p>
+    <p class="hint">도메인을 바꾸면 DDS가 잠시 재연결됩니다. 그룹 ID는 즉시 반영됩니다. PC 이름은 로봇 PC 화면 「같은 망 PC」 표에 보이는 이름입니다.</p>
+  </section>
+
+  <section class="card">
+    <h2>음성 파일</h2>
+    <p class="path">폴더: <code id="sounds_dir">-</code></p>
+    <p class="path">기본 음원: <code id="cur_file">-</code></p>
+    <div class="row">
+      <input type="file" id="file_input" accept=".wav,audio/wav">
+      <button id="btn-upload" class="primary">추가</button>
+      <button id="btn-test" class="ghost">기본 음원 테스트 재생</button>
+    </div>
+    <p class="hint">여러 개를 올려 둘 수 있습니다. 같은 이름으로 올리면 그 파일만 교체됩니다.</p>
+    <table class="tbl" id="sound-list"></table>
+    <div class="row">
+      <label>오프셋 <input type="number" id="offset_sec" step="0.1" min="-10" max="10"> 초</label>
+      <button id="btn-apply-offset">적용</button>
+    </div>
+    <p class="hint">0 = 트리거 수신 즉시 재생(모션보다 약 0.5초 빠름). 늦추려면 양수를 넣으세요.</p>
+    <div class="row">
+      <label class="check"><input type="checkbox" id="stop_on_motion_stop"> 모션 정지 시 소리도 정지</label>
+    </div>
+    <p class="hint">모션이 정지되거나 오류가 나면 재생을 멈춥니다. 사이클 정상 종료에는 반응하지 않습니다.</p>
+  </section>
+
+  <section class="card">
+    <h2>애니메이션별 음원</h2>
+    <table class="tbl" id="motion-map"></table>
+    <div class="row">
+      <label>애니메이션 이름 <input type="text" id="new_motion"></label>
+      <select id="new_motion_file"></select>
+      <button id="btn-add-motion">정하기</button>
+    </div>
+    <p class="hint">로봇이 애니메이션을 재생하면 그 이름이 이 표에 저절로 생깁니다. 음원을 정하지 않은 애니메이션은 기본 음원을 틉니다.</p>
+  </section>
+
+  <section class="card">
+    <h2>재생</h2>
+    <p class="status">상태: <strong id="playback">-</strong></p>
+    <div class="row">
+      <label class="vol">볼륨 <input type="range" id="volume" min="0" max="100" step="1"></label>
+      <span id="volume_val" class="volnum">-</span>
+    </div>
+    <div class="row" id="standalone-opts">
+      <label>반복 <input type="number" id="repeat" min="0"> 회</label>
+      <label>간격 <input type="number" id="dwell_sec" step="0.5" min="0"> 초</label>
+      <button id="btn-apply-standalone">적용</button>
+    </div>
+    <div class="row">
+      <button id="btn-play" class="primary">재생</button>
+      <button id="btn-pause">일시정지</button>
+      <button id="btn-resume">재개</button>
+      <button id="btn-stop" class="danger">정지</button>
+    </div>
+    <p class="hint" id="play-hint"></p>
+  </section>
+
+  <section class="card">
+    <h2>시스템 정보</h2>
+    <dl class="info" id="info"></dl>
+  </section>
+
+  <!-- PC 관리 · 로봇 PC 와 같은 것 · 스피커 PC 도 열기 어려운 곳에 있다 · 수정 목록 89 (2026-10-09) -->
+  <section class="card">
+    <h2>PC 관리</h2>
+    <div class="row">
+      <a id="link-terminal" class="btn-link" target="_blank" rel="noopener">웹 터미널</a>
+      <a id="link-btop" class="btn-link" target="_blank" rel="noopener">PC 성능</a>
+      <button id="btn-docs" class="ghost">사용법</button>
+      <button id="btn-restart-app" class="ghost">스피커 앱 다시 시작</button>
+    </div>
+    <pre id="docs" class="docs hidden"></pre>
+
+    <h3>업데이트</h3>
+    <div class="row">
+      <span id="update-state" class="mono">-</span>
+      <button id="btn-update">이 PC 업데이트</button>
+    </div>
+    <p class="hint">보통은 로봇 마스터 화면 「모든 PC 업데이트」 가 같이 합니다 · 여기는 이 PC 만</p>
+
+    <h3>시간대</h3>
+    <div class="row">
+      <span id="tz-now" class="mono">-</span>
+      <input id="tz-pick" list="tz-list" placeholder="예 Asia/Seoul">
+      <datalist id="tz-list"></datalist>
+      <button id="btn-tz">바꾸기</button>
+    </div>
+
+    <h3>Wi-Fi</h3>
+    <p id="wifi-now" class="mono">-</p>
+    <div id="wifi-pending" class="pending hidden">
+      <span id="wifi-pending-text"></span>
+      <button id="btn-wifi-keep">유지</button>
+      <button id="btn-wifi-back" class="ghost">되돌리기</button>
+    </div>
+    <div class="row">
+      <button id="btn-wifi-scan" class="ghost">찾기</button>
+      <select id="wifi-ssid"><option value="">찾기를 누르세요</option></select>
+      <input id="wifi-password" type="password" placeholder="비밀번호 (열린 Wi-Fi 면 비움)" autocomplete="new-password">
+      <label class="radio"><input type="checkbox" id="wifi-static-on"> 고정 IP</label>
+      <button id="btn-wifi-connect">연결</button>
+    </div>
+    <div id="wifi-static" class="row hidden">
+      <label>IP/접두 <input id="wifi-static-address" placeholder="192.168.0.30/24"></label>
+      <label>게이트웨이 <input id="wifi-static-gateway" placeholder="192.168.0.1"></label>
+      <label>DNS <input id="wifi-static-dns" placeholder="8.8.8.8"></label>
+    </div>
+    <p class="hint">바꾸면 60초 안에 「유지」 를 눌러야 남습니다 · 안 누르면 이전 Wi-Fi 로 돌아갑니다(원격으로 바꾸다 끊겨도 다시 붙게) · 비밀번호가 틀리면 바로 되돌립니다 · 처음 한 번 이 PC 터미널에서 <code>bash ~/robot_web/scripts/allow_web_admin.sh</code></p>
+  </section>
+
+  <section class="card">
+    <h2>로그 <span class="sub">최근 100건</span></h2>
+    <ul id="logs" class="logs"></ul>
+  </section>
+
+</div>
+<div id="toast" class="toast"></div>
+<script src="/app.js"></script>
+</body>
+</html>

@@ -12,6 +12,8 @@ source "${WORKSPACE}/src/web_bridge/deploy/log_retention.sh"
 prune_old_entries "${LOG_DIR}"
 prepare_ros_log_dir "${WORKSPACE}"
 exec >> "${LOG_DIR}/restart-${STAMP}.log" 2>&1
+# 오래 돌면 한 파일이 커진다 · 크기로 돌린다(50 MB × 3) · 수정 목록 77
+watch_log_size "${LOG_DIR}/restart-${STAMP}.log"
 
 log() {
   echo "[$(date +%Y%m%d-%H%M%S.%3N)] $*"

@@ -192,6 +192,18 @@ export const deleteSchedule = (scheduleId) =>
 // --------------------------------------------------------------------------- //
 
 export const fetchSystemTime = () => request('GET', '/api/system/time', { projectScoped: false });
+/** 모든 PC 업데이트 · 같은 망 로봇 PC 마다 install.sh --code-only · 프로젝트와 무관 (2026-10-08) */
+export const fetchSystemUpdateAll = () => request('GET', '/api/system/update-all', { projectScoped: false, timeoutMs: 20000 });
+export const requestSystemUpdateAll = () => request('POST', '/api/system/update-all', { projectScoped: false, timeoutMs: 60000 });
+/** 시간대 · 이 PC · 같은 망 로봇 PC 전부 · 프로젝트와 무관 · 수정 목록 79 */
+export const applyTimezone = (zone) => request('POST', '/api/system/timezone', { body: { zone }, projectScoped: false, timeoutMs: 30000 });
+export const applyTimezoneAll = (zone) => request('POST', '/api/system/timezone-all', { body: { zone }, projectScoped: false, timeoutMs: 90000 });
+/** Wi-Fi · 이 PC · 프로젝트와 무관 · 수정 목록 81 */
+export const fetchWifiStatus = () => request('GET', '/api/system/wifi', { projectScoped: false });
+export const scanWifi = () => request('POST', '/api/system/wifi/scan', { projectScoped: false, timeoutMs: 40000 });
+export const connectWifi = (payload) => request('POST', '/api/system/wifi/connect', { body: payload, projectScoped: false, timeoutMs: 60000 });
+export const confirmWifi = () => request('POST', '/api/system/wifi/confirm', { projectScoped: false });
+export const rollbackWifi = () => request('POST', '/api/system/wifi/rollback', { projectScoped: false, timeoutMs: 60000 });
 
 export const fetchDocumentList = () => request('GET', '/api/docs', { projectScoped: false });
 
@@ -439,6 +451,14 @@ export const requestDynamixelAction = (payload) =>
 /** MINAS 정비 · EEPROM 저장 · 앱솔루트 방식 · 다회전 클리어 · 수정 목록 15 + 34-3 */
 export const requestDriveMaintenance = (payload) =>
   request('POST', '/api/motor-config/drive-maintenance', { body: payload });
+
+/** MINAS 「앱솔루트 설정」 · 앱솔루트 + 다회전 클리어 · 전원 재투입 감지 · 수정 목록 62 ③ */
+export const fetchAbsoluteSetup = () => request('GET', '/api/motor-config/absolute-setup');
+export const previewAbsoluteSetup = (payload) =>
+  request('POST', '/api/motor-config/absolute-setup/preview', { body: payload });
+export const startAbsoluteSetup = (payload) =>
+  request('POST', '/api/motor-config/absolute-setup', { body: payload });
+export const cancelAbsoluteSetup = () => request('POST', '/api/motor-config/absolute-setup/cancel', { body: {} });
 
 export const requestAcServoControl = (payload) =>
   request('POST', '/api/motion-test/ac-servo/control', { body: payload });

@@ -102,7 +102,8 @@ test('settings workflows preserve action IDs and expose their defined steps', ()
   assert.doesNotMatch(html, /3\. 저장하고 설정 적용/);
   assert.doesNotMatch(html, /4\. 실제 시스템 적용/);
   assert.match(html, /3\. 조인트 매핑/);
-  assert.match(html, />연결 파일</);
+  // 「연결 파일」 칸은 없앴다 · 저장 결과 글은 편집 칸 위 (2026-10-08)
+  assert.doesNotMatch(html, />연결 파일</);
   assert.match(html, />조인트 매핑 편집</);
   assert.match(html, />검증 결과<\/strong>/);
   assert.doesNotMatch(html, /id="saveMotionMappingButton"/);

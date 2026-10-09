@@ -2,6 +2,7 @@ import { createMotionFileManager } from './motion_file_manager.js';
 import { motionScheduleResumeNote } from './schedule_scope.js';
 import { mappingGain, motorToJoint } from './joint_mapping.js';
 import {
+  playlistPanelHtml,
   playlistProgressText,
   playlistWithAdded,
   playlistWithMoved,
@@ -48,6 +49,7 @@ import {
 } from './ui_dialogs.js';
 import { draggingFiles, droppedEntries, walkEntry } from './drop_files.js';
 import { createSim3dViewer } from './sim3d.js';
+import { createBusyIndicator } from './motion_busy.js';
 import { analysisInDeg } from './unit_view.js';
 
 /** 차트 색 · 화면 테마(CSS 토큰)를 따른다 · 리디자인 2026-10-02
@@ -362,6 +364,20 @@ export function motionMotorTargetKey(motor) {
   return Number.isFinite(axis) ? `axis:${axis}` : '';
 }
 
+const JOINT_NAME_LIST_ID = 'motionMappingJointNames';
+
+/** 자동 완성 후보 · 애니메이션 조인트 이름 − 이미 쓴 이름 · 순서는 애니메이션 그대로 · 수정 목록 68 */
+export function jointNameSuggestions(motionIds = [], used = new Set()) {
+  const seen = new Set();
+  return (Array.isArray(motionIds) ? motionIds : [])
+    .map((item) => String(item?.motion_id ?? item ?? '').trim())
+    .filter((name) => {
+      if (!name || used.has(name) || seen.has(name)) return false;
+      seen.add(name);
+      return true;
+    });
+}
+
 function defaultMotionAxisRow(motionId, motorAxis = null) {
   return {
     motion_id: String(motionId), enabled: motorAxis !== null,
@@ -400,26 +416,14 @@ export function buildGeneratedMotionAxisRows(motors = [], previousRows = []) {
   const preservedRows = motors.map((motor) => (
     previousByTarget.get(motionMotorTargetKey(motor)) || null
   ));
-  const usedMotionIds = new Set(preservedRows
-    .map((row) => String(row?.motion_id || '').trim())
-    .filter(Boolean));
-  let nextMotionNumber = 1;
-  const nextSuggestedMotionId = () => {
-    let candidate = `1-${nextMotionNumber}`;
-    while (usedMotionIds.has(candidate)) {
-      nextMotionNumber += 1;
-      candidate = `1-${nextMotionNumber}`;
-    }
-    usedMotionIds.add(candidate);
-    nextMotionNumber += 1;
-    return candidate;
-  };
+  // 새 줄의 조인트 이름은 비워 둔다 · 예전 `1-1`·`1-2` 는 Blender 본 이름과 무관해
+  // 결국 다 고쳐 써야 했다 · 빈 칸은 저장 전 검사가 막는다 · 수정 목록 68
   return motors.map((motor, index) => {
     const motorRef = motionMotorRef(motor);
     const motorAxis = Number(motor?.controller_index);
     const existing = preservedRows[index];
     return {
-      ...(existing || defaultMotionAxisRow(nextSuggestedMotionId(), motorAxis)),
+      ...(existing || defaultMotionAxisRow('', motorAxis)),
       motor_ref: motorRef,
       motor_axis: motorAxis,
     };
@@ -631,6 +635,8 @@ export function createMotionDataController({
   const INITIALIZE_WATCH_MS = 30000;
   // 웹 3D 표시 · 7-a · 선택한 애니메이션을 따라간다 · 접혀 있으면 아무것도 받지 않는다
   const sim3d = createSim3dViewer({ el, getLatestState });
+  // 오래 걸리는 일 표시 · 올리기 · 읽기 · 재생 등록 · 87
+  const busy = createBusyIndicator({ el });
   let fileLoadToken = 0;
   let mappingLoadToken = 0;
   let mappingRevision = '';
@@ -645,7 +651,11 @@ export function createMotionDataController({
   const motionRunGraphHiddenIds = new Set();
 
   function setMessage(message) {
-    if (el.motionFileMessage) el.motionFileMessage.textContent = message;
+    if (el.motionFileMessage) {
+      el.motionFileMessage.textContent = message;
+      // 칸이 좁아 「…」 로 잘린다 · 마우스를 올리면 전체 · 수정 목록 55
+      el.motionFileMessage.title = String(message ?? '');
+    }
   }
 
   /** 실패는 작은 글씨만으론 놓친다 · 창으로도 띄운다 (2026-10-02) */
@@ -683,10 +693,20 @@ export function createMotionDataController({
       reportImportFailure(`애니메이션은 .json 만 받습니다: ${wrongType.name}`);
       return;
     }
+    try {
+      await uploadAndRefresh(picked, projectId);
+    } finally {
+      busy.end('upload');
+    }
+  }
+
+  async function uploadAndRefresh(picked, projectId) {
     let imported = 0;
     const uploadedNames = [];
-    for (const file of picked) {
+    for (const [index, file] of picked.entries()) {
       try {
+        const size = `${(Number(file.size || 0) / 1e6).toFixed(1)} MB`;
+        busy.begin('upload', `올리는 중 ${index + 1}/${picked.length} · ${file.name} (${size}) · 서버가 검사하는 중`);
         const content = await file.text();
         await importProjectFile(projectId, {
           category: 'motions', file_name: file.name, content,
@@ -705,6 +725,7 @@ export function createMotionDataController({
     }
     if (imported) {
       if (imported === picked.length) setMessage(`애니메이션 ${imported}개 업로드 완료`);
+      busy.begin('upload', `${imported}개 올림 · 목록 다시 읽는 중 (긴 애니는 분석에 몇 초)`);
       await loadFiles();
       await onProjectFilesChange?.();
       // MuJoCo 구성(계산형)이면 올라온 것부터 바로 계산을 돌린다 · P7
@@ -768,8 +789,11 @@ export function createMotionDataController({
     });
   }
 
+  /** 조인트 매핑 안내 줄 · 할 말이 없으면 줄을 숨긴다 · 잘 읽힌 상태(파일 이름 나열)는 보이지 않는다 (2026-10-08) */
   function setMappingMessage(message) {
-    if (el.motionMappingMessage) el.motionMappingMessage.textContent = message;
+    if (!el.motionMappingMessage) return;
+    el.motionMappingMessage.textContent = message || '';
+    el.motionMappingMessage.classList.toggle('hidden', !message);
   }
 
   function markMappingDirty() {
@@ -854,7 +878,7 @@ export function createMotionDataController({
     await showAlert(
       blockedByCoordination
         ? `${detail}\n\n`
-          + 'PC 연동 화면에서 그룹 실행을 종료하거나 「연동 탈퇴」를 누른 뒤 다시 시도하세요.'
+          + 'PC 연동 화면에서 그룹 실행을 종료하거나 「그룹 참여」를 끈 뒤 다시 시도하세요.'
         : detail,
       {
         title: blockedByCoordination ? 'DDS 그룹 실행 중' : title,
@@ -1078,6 +1102,8 @@ export function createMotionDataController({
       running: '재생 중',
       waiting: '반복 대기 중',
       verifying: '위치 확인 중',
+      // 연속 재생 가벼운 오류 · 제자리에서 기다렸다 초기 위치부터 다시 · 수정 목록 73
+      recovering: '자동 복구 대기',
       stopping: '정지 중',
       stopped: '정지',
       completed: '재생 완료',
@@ -1095,6 +1121,7 @@ export function createMotionDataController({
       || key === 'initializing'
       || key === 'verifying'
       || key === 'stopping'
+      || key === 'recovering'
     ) return 'warn';
     if (key === 'ready' || key === 'initialized' || key === 'completed') return 'ok';
     return 'warn';
@@ -1531,12 +1558,18 @@ export function createMotionDataController({
       el.motionRunAxisRows.innerHTML = emptyRow(12, '실행 준비 검사를 누르면 표시됩니다');
       return;
     }
+    const held = new Set((motionRunStatus?.held_motion_ids || []).map(String));
     el.motionRunAxisRows.innerHTML = axes.map((axis) => {
       const muted = Boolean(liveOverrideOf(axis.motion_id).muted);
-      return `<tr class="${muted ? 'live-muted' : ''}">
+      // 다시 체크했지만 이 회차는 서 있음 · 다음 회차부터 합류 (95)
+      const waiting = !muted && held.has(String(axis.motion_id));
+      const badge = muted
+        ? '<span class="live-muted-badge">제외 중</span>'
+        : (waiting ? '<span class="live-muted-badge">다음 회차부터</span>' : '');
+      return `<tr class="${muted || waiting ? 'live-muted' : ''}">
         <td><label class="live-mute-cell"><input type="checkbox" data-live-mute="${escapeHtml(axis.motion_id)}"
-          title="즉시 적용 · 끄면 이 조인트 명령을 빼고 모터는 그 자리에 섭니다 (서보 유지) · 다시 켜면 초기 이동 시간 동안 천천히 이어 갑니다 · 저장 안 됨"
-          ${muted ? '' : 'checked'}>${muted ? '<span class="live-muted-badge">제외 중</span>' : ''}</label></td>
+          title="즉시 적용 · 끄면 이 조인트 명령을 빼고 모터는 그 자리에 섭니다 (서보 유지) · 다시 켜도 이 회차는 그대로 서 있고 다음 회차(초기 위치 이동)부터 같이 움직입니다 · 저장 안 됨"
+          ${muted ? '' : 'checked'}>${badge}</label></td>
         <td class="mono">${displayText(axis.motion_id)}</td>
         <td class="mono">${formatInt(axis.motor_axis)}</td>
         <td>${displayText(axis.motor_type || '-')}</td>
@@ -1607,7 +1640,7 @@ export function createMotionDataController({
       setMotionRunMessage(payload.muted !== undefined
         ? (payload.muted
           ? `조인트 이름 ${motionId} 제외 · 모터는 그 자리에 섭니다`
-          : `조인트 이름 ${motionId} 다시 사용 · 초기 이동 시간 동안 천천히 이어 갑니다`)
+          : `조인트 이름 ${motionId} 다시 사용 · 재생 중이면 다음 회차부터 같이 움직입니다`)
         : (payload.clamp
           ? `조인트 이름 ${motionId} 라이브 리밋 ${payload.clamp[0]} ~ ${payload.clamp[1]}°`
           : `조인트 이름 ${motionId} 라이브 리밋 해제`));
@@ -1677,7 +1710,7 @@ export function createMotionDataController({
 
 
   function renderMotionRunPanel() {
-    // 같이 보기 토글 · 재생 등록된 파일의 계산이 끝났을 때만 켤 수 있다
+    // 3D 보기 「실물과 같이」(기본 켬 · 86) 가 따라갈 파일
     // 재생 목록이면 **지금 도는(또는 다음으로 가는) 애니**를 따라간다 · 수정 목록 35 ·
     // 초기 위치 이동 중에 이미 다음 파일 이름이 오므로 프레임을 미리 받아 둔다
     const playingId = Number(motionRunStatus?.playlist_length) > 1
@@ -1690,8 +1723,10 @@ export function createMotionDataController({
     const payload = motionRunPayload();
     const status = motionRunStatus || {};
     const state = String(status.state || 'idle');
+    // 자동 복구 대기도 도는 중 · 정지 버튼이 살아 있어야 한다 · 73
     const running = state === 'running' || state === 'initializing'
-      || state === 'verifying' || state === 'stopping' || state === 'waiting';
+      || state === 'verifying' || state === 'stopping' || state === 'waiting'
+      || state === 'recovering';
     const hasMappingFile = Boolean(payload.mapping_file_id);
     const hasMotionFile = Boolean(payload.motion_file_id);
     const hasRequiredFiles = hasMappingFile && hasMotionFile;
@@ -1766,6 +1801,20 @@ export function createMotionDataController({
             : hasMotionFile
               ? '줄마다 「초기 위치」대로 이동합니다 · 첫 프레임 = 애니메이션 첫 줄 · 직접 지정 = 그 값 · 기준점 = 0°'
               : '애니메이션이 없어 「첫 프레임」 줄은 모션 0°(기준점)로 · 「직접 지정」 줄은 그 값으로 이동합니다';
+    }
+    if (el.manualInitializeButton) {
+      // 수동 조작 화면 · 늘 이 PC · 조그·다이얼·동작이 움직이는 중이면 끔(두 이동이 겹치지 않게) · 수정 목록 58
+      const activity = getLatestState()?.motor_activity || {};
+      const manualMoving = Boolean(activity.active) && activity.source === 'motion_supervisor';
+      el.manualInitializeButton.disabled = motionRunLoading || running
+        || !contextReady || !hasMappingFile || manualMoving;
+      el.manualInitializeButton.title = manualMoving
+        ? `${activity.label || '수동 동작'} · 멈춘 뒤 누르세요`
+        : !contextReady
+          ? contextMessage
+          : !hasMappingFile
+            ? '조인트 매핑이 없습니다'
+            : running ? '재생 중에는 쓸 수 없습니다' : '줄마다 「초기 위치」대로 이동합니다';
     }
     if (el.motionRunStartButton) {
       el.motionRunStartButton.disabled = motionRunLoading || running || blocked;
@@ -1875,7 +1924,7 @@ export function createMotionDataController({
         : '') + mujocoBadge(file);
       return (
         `<tr class="${rowClass}" data-motion-file-id="${displayText(file.id)}">
-          <td class="motion-file-name-cell"><div class="motion-file-name-inner">${badge}<button type="button" class="link-button" data-motion-file-id="${displayText(file.id)}">${displayText(file.filename)}</button></div></td>
+          <td class="motion-file-name-cell"><div class="motion-file-name-inner">${badge}<button type="button" class="link-button" data-motion-file-id="${displayText(file.id)}" title="${displayText(file.filename)}">${displayText(file.filename)}</button></div></td>
           <td><span class="motion-state-pill ${statusClass(file)}">${statusText(file)}</span></td>
           <td>${formatNumber(analysis.time?.duration_sec, 3)} s</td>
           <td class="motion-file-moment" title="마지막으로 바뀐 시각">${displayText(formatMoment(file.updated_at))}</td>
@@ -1894,10 +1943,6 @@ export function createMotionDataController({
     const file = selectedFile;
     const registered = Boolean(file && registeredPlaylistValue.includes(file.id));
     const listed = registeredPlaylistValue.length;
-    // 같이 보기 토글 · 재생 등록(목록 1번) 파일의 계산이 끝났을 때만 켤 수 있다
-    const mujocoRegisteredFile = files.find(
-      (entry) => entry.id === registeredMotionFileIdValue,
-    ) || null;
     if (el.deleteMotionFileButton) {
       el.deleteMotionFileButton.disabled = !file || loading;
       el.deleteMotionFileButton.title = registered
@@ -1929,25 +1974,10 @@ export function createMotionDataController({
             : (state === 'stale'
               ? `${file.preview?.message || '로봇 팩 변경'} · 누르면 지금 팩으로 다시 계산합니다`
               : (state === 'missing' || state === 'failed'
-                ? '무거운 물리 계산을 시작합니다 · 끝나면 「3D 보기 (웹)」와 같이 보기가 켜집니다'
+                ? '무거운 물리 계산을 시작합니다 · 끝나면 「3D 보기 (웹)」 에서 봅니다'
                 : (state === 'ready'
                   ? '계산이 끝났습니다 · 아래 「3D 보기 (웹)」에서 봅니다'
                   : '계산(precompute)이 없는 구성입니다 · 웹 3D 로 볼 결과가 없습니다')))));
-    }
-    const registeredState = mujocoState(mujocoRegisteredFile);
-    if (el.motionRunMujocoToggle) {
-      // stale(팩 변경 뒤 옛 결과)도 같이 보기는 허용 · 다시 계산은 MuJoCo 버튼
-      const usable = registeredState === 'ready' || registeredState === 'stale';
-      el.motionRunMujocoToggle.disabled = !usable;
-      if (!usable && el.motionRunMujocoToggle.checked) {
-        el.motionRunMujocoToggle.checked = false;
-        sim3d.setFollow(false);
-      }
-      el.motionRunMujocoToggle.title = usable
-        ? '켜면 아래 「3D 보기 (웹)」가 열리고 재생 시작과 함께 0초부터 같이 출발합니다'
-        : (registeredState === 'computing'
-          ? 'MuJoCo 계산 중입니다 · 끝나면 켤 수 있습니다'
-          : '재생 등록된 애니메이션의 MuJoCo 계산이 끝나야 켤 수 있습니다');
     }
     // 재생 등록은 **조인트 매핑 편집과 상관없다** · §6-160
     //
@@ -1992,9 +2022,11 @@ export function createMotionDataController({
     // 새로고침」·「현재 설정 파일 삭제」가 다 쓸모없는 손잡이였다 · 그것들이
     // 만들 수 있는 어긋난 상태(등록된 파일과 다른 것을 편집하고 있다)만
     // 남았다.
+    // 화면에는 「조인트 매핑 편집」 제목만 · 파일 이름은 툴팁으로 (2026-10-08 · 「연결 파일」 칸 삭제)
     if (!el.motionMappingFileName) return;
     const file = mappingFiles.find((item) => item.id === selectedMappingId);
-    el.motionMappingFileName.textContent = file?.filename || selectedMappingId || '아직 없음 · 저장하면 만들어집니다';
+    const name = file?.filename || selectedMappingId || '아직 없음 · 저장하면 만들어집니다';
+    el.motionMappingFileName.title = `조인트 매핑 파일 · ${name}`;
   }
 
   function mappingDuplicateAxisCounts() {
@@ -2069,6 +2101,8 @@ export function createMotionDataController({
       return;
     }
     const duplicateCounts = mappingDuplicateAxisCounts();
+    const pendingEdit = focusedMappingEdit();
+    renderJointNameDatalist(rows);
     el.motionMappingRows.innerHTML = rows.map((row, index) => {
       const status = mappingValidationRowStatus(row, mappingRowStatus(row, duplicateCounts));
       const initialMode = row.initial_mode || 'reference';   // 칸 없으면 기준점 · 서버와 같다 (13-3)
@@ -2086,7 +2120,7 @@ export function createMotionDataController({
           : ' title="직접 지정 · 재생 전 이 값(조인트 deg)으로 이동합니다"';
       return (
         `<tr data-mapping-index="${index}">
-          <td class="motion-id-cell"><input class="motion-id-input mono" type="text" title="Blender 본 이름 그대로 입력하세요 (구 파일의 1-1 형식도 그대로 사용 가능)" data-motion-mapping-field="motion_id" value="${displayText(row.motion_id)}" placeholder="예: Neck_Yaw" autocomplete="off" autocapitalize="off" spellcheck="false"></td>
+          <td class="motion-id-cell"><input class="motion-id-input mono${String(row.motion_id || '').trim() ? '' : ' motion-id-empty'}" type="text" list="${JOINT_NAME_LIST_ID}" title="Blender 본 이름 그대로 입력하세요 · 등록된 애니메이션의 조인트 이름은 목록에서 고를 수 있습니다 (구 파일의 1-1 형식도 그대로 사용 가능)" data-motion-mapping-field="motion_id" value="${escapeHtml(row.motion_id ?? '')}" placeholder="Blender 본 이름" autocomplete="off" autocapitalize="off" spellcheck="false"></td>
           <td><input type="checkbox" data-motion-mapping-field="enabled" ${row.enabled ? 'checked' : ''}></td>
           <td class="mapping-motor-cell">${motorSelectHtml(row)}</td>
           <td class="mapping-number-cell"><input class="numeric-input mapping-number-input" type="number" min="0.0001" step="0.0001" data-motion-mapping-field="gear_ratio" value="${displayText(gearRatioValue)}"></td>
@@ -2111,6 +2145,76 @@ export function createMotionDataController({
         </tr>`
       );
     }).join('');
+    restoreMappingEdit(pendingEdit);
+  }
+
+  /** 입력 중인 칸 · 표를 통째로 다시 그리면 친 글자와 커서가 사라진다 · 수정 목록 68
+   *
+   * 칸 값은 `change`(칸을 떠날 때)에야 초안에 들어간다 · 그 전에 애니메이션 목록
+   * 새로 고침(MuJoCo 계산 중 5초마다 등)이 `render()` 로 표를 다시 그리면, 친 이름이
+   * 초안의 옛 값(`1-2` 등)으로 되돌아갔다 · 다시 그리기 전에 칸·글자·커서를 적어
+   * 두고 새 칸에 돌려놓는다. */
+  function focusedMappingEdit() {
+    const active = document.activeElement;
+    if (!active || !el.motionMappingRows?.contains(active)) return null;
+    const field = active.dataset?.motionMappingField;
+    const row = active.closest?.('tr[data-mapping-index]');
+    if (!field || !row || !['text', 'number'].includes(active.type)) return null;
+    let selection = null;
+    try {
+      selection = [active.selectionStart, active.selectionEnd];
+    } catch {
+      selection = null;   // number 칸은 커서 위치를 못 읽는다
+    }
+    return {
+      index: row.dataset.mappingIndex,
+      field,
+      value: active.value,
+      // 초안에 아직 안 들어간 글자인지 · 다시 그린 칸의 기본값과 비교한다
+      defaultValue: active.defaultValue,
+      selection,
+    };
+  }
+
+  function restoreMappingEdit(edit) {
+    if (!edit) return;
+    const input = el.motionMappingRows?.querySelector(
+      `tr[data-mapping-index="${edit.index}"] [data-motion-mapping-field="${edit.field}"]`,
+    );
+    if (!input || input.disabled) return;
+    input.value = edit.value;
+    input.focus();
+    if (edit.selection && edit.selection[0] !== null) {
+      try {
+        input.setSelectionRange(edit.selection[0], edit.selection[1]);
+      } catch {
+        // number 칸 · 커서 위치는 못 돌린다
+      }
+    }
+    // 코드로 넣은 값은 칸을 떠날 때 `change` 가 안 난다 · 직접 낸다
+    if (edit.value !== edit.defaultValue) {
+      input.addEventListener('blur', () => {
+        if (input.isConnected && input.value !== input.defaultValue) {
+          input.dispatchEvent(new Event('change', { bubbles: true }));
+        }
+      }, { once: true });
+    }
+  }
+
+  /** 조인트 이름 칸 자동 완성 · 조인트 매핑에 등록된 애니메이션의 조인트 이름 · 수정 목록 68
+   *
+   * 이미 다른 줄이 쓴 이름은 뺀다 · 목록에 없는 이름도 그대로 칠 수 있다 ·
+   * `<datalist>` 는 표 안(`tbody`)에 둘 수 없어 문서 끝에 하나 둔다. */
+  function renderJointNameDatalist(rows) {
+    let list = document.getElementById(JOINT_NAME_LIST_ID);
+    if (!list) {
+      list = document.createElement('datalist');
+      list.id = JOINT_NAME_LIST_ID;
+      document.body.appendChild(list);
+    }
+    const used = new Set(rows.map((row) => String(row.motion_id || '').trim()).filter(Boolean));
+    const names = jointNameSuggestions(analysisOf(mappingMotionFileDetail)?.motion_ids, used);
+    list.innerHTML = names.map((name) => `<option value="${displayText(name)}"></option>`).join('');
   }
 
   function renderMappingValidation() {
@@ -2299,7 +2403,7 @@ export function createMotionDataController({
     mappingDraft.mappings = buildGeneratedMotionAxisRows(motors, mappingDraft.mappings);
     mappingValidation = null;
     markMappingDirty();
-    setMappingMessage(`${motors.length}개 모터 행을 만들었습니다 · 조인트 이름을 Blender 본 이름으로 바꾸세요`);
+    setMappingMessage(`${motors.length}개 모터 행을 만들었습니다 · 빈 조인트 이름 칸에 Blender 본 이름을 넣으세요`);
     renderMappingPanel();
   }
 
@@ -2322,8 +2426,12 @@ export function createMotionDataController({
     const rows = Array.isArray(mappingDraft.mappings) ? mappingDraft.mappings : [];
     if (!rows.length) return '조인트 이름을 먼저 추가하세요';
     // 조인트 이름 = Blender 본 이름 · 임의 문자열이라 형식 제한이 없다 (구 1-1 식도 그대로 동작)
-    const emptyJoint = rows.find((row) => !String(row.motion_id || '').trim());
-    if (emptyJoint) return '조인트 이름이 비어 있습니다';
+    const emptyIndex = rows.findIndex((row) => !String(row.motion_id || '').trim());
+    if (emptyIndex >= 0) {
+      const motor = motorForMapping(rows[emptyIndex]);
+      const motorText = motor ? ` · ${motorOptionLabel(motor)}` : '';
+      return `조인트 이름이 비어 있습니다 · ${emptyIndex + 1}번째 줄${motorText}`;
+    }
     const motionIdCounts = rows.reduce((counts, row) => {
       const motionId = String(row.motion_id || '').trim();
       counts[motionId] = (counts[motionId] || 0) + 1;
@@ -2371,7 +2479,7 @@ export function createMotionDataController({
         mappingDirty = false;
         mappingRevisionConflict = false;
       }
-      setMappingMessage(payload.message || '매핑 목록 갱신 완료');
+      setMappingMessage('');
     } catch (error) {
       if (loadToken !== mappingLoadToken || error?.staleProjectResponse) return;
       setMappingMessage(`매핑 목록 실패: ${error?.message || error}`);
@@ -2455,9 +2563,8 @@ export function createMotionDataController({
       mappingMotionFileDetail = loadedMotionFileDetail;
       mappingDirty = false;
       mappingRevisionConflict = false;
-      const mappingFileName = payload.file?.filename || payload.file?.id || selectedMappingId || '-';
-      const motionFileName = mappingDraft.motion_file_id || '-';
-      setMappingMessage(`조인트 매핑: ${mappingFileName} · 애니메이션: ${motionFileName}`);
+      // 잘 읽었으면 할 말이 없다 · 파일 이름 줄이 늘 떠 있던 것 (사용자 2026-10-08)
+      setMappingMessage('');
     } catch (error) {
       if (loadToken !== mappingLoadToken || error?.staleProjectResponse) return;
       setMappingMessage(`매핑 파일 실패: ${error?.message || error}`);
@@ -2481,9 +2588,13 @@ export function createMotionDataController({
 
   function mujocoBadge(file) {
     const state = mujocoState(file);
-    if (state === 'computing') return '<span class="mujoco-badge computing" title="무거운 물리 계산이 도는 중 · 끝나면 같이 보기가 켜집니다">MuJoCo 계산 중</span>';
-    if (state === 'ready') return '<span class="mujoco-badge ready" title="계산 완료 · MuJoCo 재생·같이 보기 가능">MuJoCo 준비됨</span>';
-    if (state === 'failed') return '<span class="mujoco-badge failed" title="마지막 계산이 실패했습니다 · 다시 계산을 누르세요">계산 실패</span>';
+    if (state === 'computing') return '<span class="mujoco-badge computing" title="무거운 물리 계산이 도는 중 · 끝나면 3D 보기가 켜집니다">MuJoCo 계산 중</span>';
+    if (state === 'ready') return '<span class="mujoco-badge ready" title="MuJoCo 계산 완료 · 3D 보기 가능">MuJoCo</span>';
+    if (state === 'failed') {
+      // 이유(코드 · 기록 파일 · 옛 결과 있음)를 그대로 · 수정 목록 54
+      const why = escapeHtml(`${file?.preview?.message || '마지막 계산이 실패했습니다'} · 다시 계산을 누르세요`);
+      return `<span class="mujoco-badge failed" title="${why}">계산 실패</span>`;
+    }
     if (state === 'stale') {
       const why = escapeHtml(file?.preview?.message || '로봇 팩 변경');
       return `<span class="mujoco-badge stale" title="${why}">다시 계산 필요</span>`;
@@ -2507,12 +2618,6 @@ export function createMotionDataController({
     } catch (error) {
       setMessage(`MuJoCo 계산 실패: ${error?.message || error}`);
     }
-  }
-
-  /** 「MuJoCo 같이 보기」 · 웹 3D 뷰어가 재생 등록 파일을 따라간다 (7) */
-  function toggleMujocoCompanion() {
-    const registered = files.find((entry) => entry.id === registeredMotionFileIdValue) || null;
-    sim3d.setFollow(Boolean(el.motionRunMujocoToggle?.checked), registered);
   }
 
   /** 계산이 도는 동안은 목록을 몇 초마다 다시 읽어 상태를 갱신한다 */
@@ -2567,10 +2672,22 @@ export function createMotionDataController({
    * 창이 떴다 · 조인트 매핑과 재생 등록은 한 파일에 들어 있을 뿐
    * 서로 남남이다.
    */
+  /** 재생 등록 실패 · 이 화면에서 보이게 · 전에는 모터 관리 탭의 숨은 칸에만 적혀 「안 들어감」 으로만 보였다 (90) */
+  function reportRegistrationFailure(reason) {
+    const text = `재생 등록 실패: ${reason}`;
+    setMappingMessage(text);
+    setMessage(text);
+    showAlert(text, { title: '재생 등록 실패', tone: 'warning' });
+  }
+
   async function applyMotionFileRegistration(playlist, label) {
     setMappingMessage(label);
     mappingLoading = true;
     renderMappingPanel();
+    // 등록 버튼·목록 버튼도 바로 잠근다 · 전에는 끝날 때까지 다시 눌렸다 (87)
+    renderMotionFileActions();
+    renderPlaylistPanel();
+    busy.begin('register', `${label} · 로봇 프로그램에 적용하는 중 (긴 애니는 몇 초)`);
     try {
       const payload = await saveRegisteredMotionFile({
         file_id: selectedMappingId,
@@ -2578,7 +2695,7 @@ export function createMotionDataController({
         motion_playlist: playlist,
       });
       if (payload.success === false) {
-        setMappingMessage(`재생 등록 실패: ${payload.message || '저장하지 못했습니다'}`);
+        reportRegistrationFailure(payload.message || '저장하지 못했습니다');
         return false;
       }
       // 편집 중인 조인트 매핑은 **그대로 둔다** · 우리가 바꾼 칸만 반영한다
@@ -2598,15 +2715,17 @@ export function createMotionDataController({
       await onProjectFilesChange?.();
       return true;
     } catch (error) {
-      setMappingMessage(`재생 등록 실패: ${error?.message || error}`);
+      reportRegistrationFailure(error?.message || error);
       return false;
     } finally {
       mappingLoading = false;
+      busy.end('register');
       renderMappingPanel();
     }
   }
 
   async function registerSelectedMotionFile() {
+    if (mappingLoading) return;
     if (!selectedFile || !selectedMappingId) {
       setMessage('재생 등록할 애니메이션과 저장된 조인트 매핑을 먼저 선택하세요');
       return;
@@ -2650,7 +2769,15 @@ export function createMotionDataController({
       ? playlistWithout(current, index)
       : playlistWithMoved(current, index, action === 'up' ? -1 : 1);
     if (next.join('\n') === current.join('\n')) return;
-    await applyMotionFileRegistration(next, '재생 목록 저장 중');
+    // 마지막 하나를 빼면 재생 등록 해제와 같다 · 같은 확인을 받는다 · 수정 목록 59
+    if (!next.length) {
+      const confirmed = await showConfirm(
+        '재생 등록을 해제합니다.\n파일은 삭제되지 않으며, 다시 등록하기 전까지 애니메이션 재생은 차단됩니다.',
+        { title: '애니메이션 재생 등록 해제', confirmLabel: '등록 해제', tone: 'danger' },
+      );
+      if (!confirmed) return;
+    }
+    await applyMotionFileRegistration(next, next.length ? '재생 목록 저장 중' : '재생 등록 해제 저장 중');
     if (!registeredMotionFileIdValue) {
       motionRunStatus = null;
       motionRunLastResult = null;
@@ -2662,33 +2789,15 @@ export function createMotionDataController({
   function renderPlaylistPanel() {
     const panel = el.motionPlaylistPanel;
     if (!panel) return;
-    const list = registeredPlaylistValue;
-    panel.classList.toggle('hidden', list.length < 2);
-    if (list.length < 2) {
-      panel.innerHTML = '';
-      return;
-    }
-    const busy = loading || mappingLoading || !selectedMappingId;
-    const rows = list.map((id, index) => {
-      const file = files.find((entry) => entry.id === id);
-      const duration = Number(analysisOf(file || {}).time?.duration_sec);
-      const missing = !file;
-      return (
-        `<li class="motion-playlist-row${missing ? ' missing' : ''}">`
-        + `<span class="motion-playlist-index">${index + 1}</span>`
-        + `<span class="motion-playlist-name" title="${displayText(id)}">${displayText(file?.filename || id)}${missing ? ' · 파일 없음' : ''}</span>`
-        + `<span class="motion-playlist-time">${Number.isFinite(duration) ? `${formatNumber(duration, 1)} s` : '-'}</span>`
-        + `<button type="button" data-playlist-action="up" data-playlist-index="${index}" ${busy || index === 0 ? 'disabled' : ''} title="한 칸 위로">↑</button>`
-        + `<button type="button" data-playlist-action="down" data-playlist-index="${index}" ${busy || index === list.length - 1 ? 'disabled' : ''} title="한 칸 아래로">↓</button>`
-        + `<button type="button" class="danger" data-playlist-action="remove" data-playlist-index="${index}" ${busy ? 'disabled' : ''} title="목록에서 뺍니다 · 파일은 지우지 않습니다">빼기</button>`
-        + '</li>'
-      );
-    }).join('');
-    panel.innerHTML = (
-      `<div class="motion-playlist-head"><strong>재생 목록 · ${list.length}개</strong>`
-      + '<span>차례로 돌고 끝나면 1번부터 · 사이마다 다음 애니의 초기 위치로 이동</span></div>'
-      + `<ol class="motion-playlist-rows">${rows}</ol>`
-    );
+    // 0개 · 1개여도 늘 보인다 · 수정 목록 59
+    panel.classList.remove('hidden');
+    panel.innerHTML = playlistPanelHtml(registeredPlaylistValue, {
+      busy: loading || mappingLoading || !selectedMappingId,
+      fileOf: (id) => {
+        const file = files.find((entry) => entry.id === id);
+        return file ? { filename: file.filename, durationSec: analysisOf(file).time?.duration_sec } : null;
+      },
+    });
   }
 
   async function unregisterSelectedMotionFile() {
@@ -3031,7 +3140,12 @@ export function createMotionDataController({
     onFileSelected: (id, file) => { selectedFileId = id; selectedFile = file; render(); },
     onProjectFilesChange: () => onProjectFilesChange?.(),
     setMessage: setMessage,
-    setLoading: (l) => { loading = l; render(); },
+    setLoading: (l) => {
+      loading = l;
+      if (l) busy.begin('files', '애니메이션 읽는 중 · 긴 애니는 몇 초 걸립니다');
+      else busy.end('files');
+      render();
+    },
     checkIsFileRegistered: (id) => registeredPlaylistValue.includes(id),
   });
 
@@ -3309,7 +3423,6 @@ export function createMotionDataController({
     el.unregisterMotionFileButton?.addEventListener('click', unregisterSelectedMotionFile);
     el.downloadMotionFileButton?.addEventListener('click', downloadSelectedMotionFile);
     el.previewMotionFileButton?.addEventListener('click', previewSelectedMotionFile);
-    el.motionRunMujocoToggle?.addEventListener('change', toggleMujocoCompanion);
     if (el.deleteMotionFileButton) {
       el.deleteMotionFileButton.addEventListener('click', deleteSelectedFile);
     }
@@ -3326,6 +3439,8 @@ export function createMotionDataController({
         'click', () => initializeCurrentMotionRun(),
       );
     }
+    // 수동 조작 화면 · 새 경로 없이 같은 함수 · 같은 확인 창 · 수정 목록 58
+    el.manualInitializeButton?.addEventListener('click', () => initializeCurrentMotionRun());
     if (el.motionRunStartButton) {
       el.motionRunStartButton.addEventListener(
         'click', () => startCurrentMotionRun('once'),

@@ -175,6 +175,43 @@ site_autologin() {
   site_mark_reboot "autologin"
 }
 
+# 웹에서 하는 관리 · 이 계정만 · 수정 목록 81 (Wi-Fi) · 79 (시간대) · 2026-10-08
+#
+# 웹 서비스는 systemd 사용자 서비스라 로그인 세션 밖이다 · polkit 이 「비활성」 으로 보고
+# NetworkManager 설정 변경·시간대 변경을 막는다 · 이 계정에만 그 두 가지를 허용한다 ·
+# 우분투 22.04 polkit 0.105 는 .pkla 를 읽는다
+SITE_POLKIT_FILE="${SITE_POLKIT_FILE:-/etc/polkit-1/localauthority/50-local.d/50-robot-web.pkla}"
+
+site_render_polkit() {
+  local user="$1"
+  cat <<PKLA
+[robot_web wifi]
+Identity=unix-user:${user}
+Action=org.freedesktop.NetworkManager.*
+ResultAny=yes
+ResultInactive=yes
+ResultActive=yes
+
+[robot_web timezone]
+Identity=unix-user:${user}
+Action=org.freedesktop.timedate1.set-timezone
+ResultAny=yes
+ResultInactive=yes
+ResultActive=yes
+PKLA
+}
+
+site_web_admin_permissions() {
+  local user="${1:-$(id -un)}"
+  echo "웹에서 Wi-Fi · 시간대 바꾸기 허용 (${user} 만)"
+  if [[ -f "${SITE_POLKIT_FILE}" ]] && grep -q "unix-user:${user}$" "${SITE_POLKIT_FILE}"; then
+    site_note "이미 허용됨 · ${SITE_POLKIT_FILE}"
+    return 0
+  fi
+  site_run sudo mkdir -p "$(dirname "${SITE_POLKIT_FILE}")"
+  site_render_polkit "${user}" | site_write_root_file "${SITE_POLKIT_FILE}"
+}
+
 # ------------------------------------------------------------------ #
 # 4단계 · 시간대
 # ------------------------------------------------------------------ #
@@ -286,7 +323,8 @@ site_pick_ethercat_nic_from() {
       sub(/@.*/, "", name)
       if (name !~ /^(en|eth)/) next
       if (name in used) next
-      if (mac !~ /^([0-9a-f]{2}:){5}[0-9a-f]{2}$/) next
+      # `{2}` `{5}` 반복 표기는 우분투 22.04 기본 mawk 1.3.4-20200120 이 못 읽는다 · 풀어 쓴다 · 수정 목록 63
+      if (mac !~ /^[0-9a-f][0-9a-f]:[0-9a-f][0-9a-f]:[0-9a-f][0-9a-f]:[0-9a-f][0-9a-f]:[0-9a-f][0-9a-f]:[0-9a-f][0-9a-f]$/) next
       total++
       if (state == "UP") { up++; upname = name; upmac = mac }
       anyname = name; anymac = mac
@@ -374,6 +412,11 @@ site_selfcheck() {
   site_check_row "$([[ -f "${SITE_GDM_CONF}" ]] && grep -q '^AutomaticLoginEnable=true' "${SITE_GDM_CONF}" && echo 1 || echo 0)" "자동 로그인" "${SITE_GDM_CONF}"
   tz="$(timedatectl show -p Timezone --value 2>/dev/null || echo 미상)"
   site_check_row 1 "시간대" "${tz}"
+  if command -v mokutil >/dev/null 2>&1; then
+    local sb
+    sb="$(mokutil --sb-state 2>/dev/null | head -1 || true)"
+    site_check_row "$(printf '%s' "${sb}" | grep -qi enabled && echo 0 || echo 1)" "Secure Boot 꺼짐 (EtherCAT 모듈)" "${sb:-미상}"
+  fi
   site_check_row "$(systemctl is-enabled unattended-upgrades 2>/dev/null | grep -q masked && echo 1 || echo 0)" "자동 업데이트" "$(systemctl is-enabled unattended-upgrades 2>/dev/null || echo 없음)"
   for unit in motion-control motion-motor motion-coordination; do
     site_check_row "$(systemctl --user is-active --quiet "${unit}.service" && echo 1 || echo 0)" "${unit}.service" "$(systemctl --user is-active "${unit}.service" 2>/dev/null || echo unknown)"

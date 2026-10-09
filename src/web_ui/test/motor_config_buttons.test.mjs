@@ -46,7 +46,7 @@ test('the scan result is the list · nothing to add by hand', () => {
 // 「설정 적용 · 모터 재시작」은 파일을 바꾸지 않는다 · §6-221
 // 파일은 「설정 저장」을 눌렀을 때만 바뀐다.
 test('apply and restart never writes the project file', () => {
-  const start = controller.indexOf('async function applyConfigRestart()');
+  const start = controller.indexOf('async function applyConfigRestart(options = {})');
   assert.ok(start >= 0, 'applyConfigRestart function missing');
   const body = controller.slice(start, controller.indexOf('\n  }\n', start));
 

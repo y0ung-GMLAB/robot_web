@@ -17,7 +17,22 @@ import pytest
 WEB_UI = Path(__file__).resolve().parents[1]
 
 
+def _node_major():
+    """node 주 버전 · 못 읽으면 0 · `node --test` 는 18 부터 · 수정 목록 63"""
+    try:
+        out = subprocess.run(['node', '--version'], capture_output=True, text=True, timeout=10).stdout
+        return int(out.strip().lstrip('v').split('.')[0])
+    except (OSError, ValueError, subprocess.SubprocessError):
+        return 0
+
+
+# 우분투 22.04 기본 node 는 12 · `node --test` 가 없어 실패로 보였다(실물 2026-10-07) ·
+# node 18 설치는 현장 결정이라 여기서는 건너뛴다 · 수정 목록 63
 @pytest.mark.skipif(shutil.which('node') is None, reason='node 가 없다')
+@pytest.mark.skipif(
+    shutil.which('node') is not None and _node_major() < 18,
+    reason='node 18 미만 · `node --test` 없음',
+)
 def test_frontend_mjs_suite_passes():
     # 디렉터리 인자(`node --test test/`)는 Node 22 에서 모듈로 해석돼 실패한다 ·
     # 파일을 직접 나열하면 Node 18 ~ 22 어디서나 같다 (수정 목록 10 · 2026-10-03)

@@ -20,7 +20,7 @@ from typing import Any, Dict, List, Mapping, Optional
 
 from motion_common import axis_ownership
 
-from motion_common import repeat_policy, units, wire_units
+from motion_common import cycle_failure, joint_mapping, repeat_policy, units, wire_units
 
 from motion_common.values import finite_float
 from std_msgs.msg import Int8MultiArray, String
@@ -39,6 +39,29 @@ from .motion_run_constants import (
 #: `initial_move_time_sec` 이 없을 때만 · 40
 OVERRIDE_RESUME_DEFAULT_SEC = 5.0
 
+#: 연속 재생 자동 복구 · 수정 목록 73 (사용자 결정 2026-10-07)
+#: 가벼운 오류(회차 실패 표지)면 서보 ON 제자리 → 기다림 → 초기 위치부터 다시 ·
+#: 창 안에서 한도를 넘기면 최종 오류 · 회차가 이만큼 연속 성공하면 횟수를 지운다
+AUTO_RECOVERY_LIMIT = 3
+AUTO_RECOVERY_WINDOW_SEC = 600.0
+AUTO_RECOVERY_DELAY_SEC = 5.0
+AUTO_RECOVERY_RESET_CYCLES = 3
+
+
+
+def ac_target_tolerance_motor_deg(row: Any, floor_deg: float, joint_deg: float) -> float:
+    """AC 서보 도달 허용 오차 · 모터 deg · 관절 허용 × |모터 deg / 관절 deg| 와 바닥 중 큰 값 · 수정 목록 57
+
+    매핑 줄이 없거나 이득이 0 이면 바닥값 · 이득은 `joint_mapping.gain`(감속비 × 기어비 × scale) 하나.
+    """
+    floor = max(float(floor_deg or 0.0), 0.0)
+    if not isinstance(row, Mapping) or not joint_deg:
+        return floor
+    try:
+        factor = abs(float(joint_mapping.gain(row)))
+    except Exception:  # noqa: BLE001 - 이득을 못 구하면 옛 값(바닥)으로
+        return floor
+    return max(floor, max(float(joint_deg), 0.0) * factor)
 
 class MotionPlayer:
     def __init__(self, manager: Any) -> None:
@@ -50,6 +73,90 @@ class MotionPlayer:
         payload: Dict[str, Any],
         motors_snapshot: List[Dict[str, Any]],
     ) -> None:
+        """한 번 돌리고 · 연속 재생의 가벼운 오류는 스스로 다시 · 수정 목록 73
+
+        가벼운 오류 = 회차 실패 표지(`cycle_failure` · 도달 확인 실패 · 재생 명령 폐기 0.5 s) ·
+        그 밖의 오류와 1회 재생·초기 위치 이동은 지금처럼 바로 오류로 멈춘다 ·
+        다시 하기 전에 안전 차단(긴급 정지 · 서보 알람 · 앱솔루트 미확인 등)을 보고 걸려 있으면
+        다시 하지 않는다 · 기다리는 동안 모터는 서보 ON 제자리(명령을 안 보냄 · PP 드라이브가 홀드).
+        """
+        failures: List[float] = []
+        while True:
+            exc = self._prepare_and_run_once(mode, payload, motors_snapshot)
+            if exc is None:
+                return
+            if self.manager._stop_event.is_set():
+                return
+            reason = self._auto_recovery_refusal(mode, payload, exc, failures)
+            if reason:
+                self._report_run_failure(mode, payload, exc, exhausted=reason)
+                return
+            if not self._wait_before_recovery(payload, exc, failures):
+                return
+            motors_snapshot = self.manager._current_motors()
+
+    def _auto_recovery_refusal(
+        self, mode: str, payload: Dict[str, Any], exc: BaseException, failures: List[float],
+    ) -> str:
+        """다시 하지 않을 이유 · 빈 글자면 다시 한다 · 다시 할 때는 `failures` 에 이번 실패를 더한다"""
+        if mode == 'initialize' or str(payload.get('run_mode') or 'once') != 'continuous':
+            return 'not_continuous'
+        if not cycle_failure.is_cycle_failure(str(exc)):
+            return 'not_light'
+        now = time.monotonic()
+        # 회차가 연속으로 충분히 돌았으면 지난 실패는 지운다
+        completed = int((self.manager.status() or {}).get('cycle_count') or 0)
+        if completed >= AUTO_RECOVERY_RESET_CYCLES:
+            failures.clear()
+        failures[:] = [at for at in failures if now - at < AUTO_RECOVERY_WINDOW_SEC]
+        if len(failures) >= AUTO_RECOVERY_LIMIT:
+            return 'exhausted'
+        blocked = self.manager._playback_ownership_error()
+        if blocked:
+            return f'blocked:{blocked}'
+        failures.append(now)
+        return ''
+
+    def _wait_before_recovery(
+        self, payload: Dict[str, Any], exc: BaseException, failures: List[float],
+    ) -> bool:
+        attempt = len(failures)
+        text = (
+            f'자동 복구 {attempt}/{AUTO_RECOVERY_LIMIT} · {exc} · '
+            f'{AUTO_RECOVERY_DELAY_SEC:.0f}초 뒤 초기 위치부터 다시'
+        )
+        self.manager.get_logger().warning(f'[자동 복구] {text}')
+        status = motion_run_rules._empty_status()
+        status.update({
+            'state': 'recovering',
+            'phase': 'recovering',
+            'message': text,
+            'project_id': str(payload.get('project_id') or ''),
+            'motion_file_id': str(payload.get('motion_file_id') or ''),
+            'mapping_file_id': str(payload.get('mapping_file_id') or ''),
+            'run_mode': str(payload.get('run_mode') or 'once'),
+            'automation_run': bool(payload.get('automation_run')),
+            'request_source': str(payload.get('request_source') or 'motion_run'),
+            'auto_recovery': {
+                'attempt': attempt,
+                'limit': AUTO_RECOVERY_LIMIT,
+                'last_error': str(exc),
+            },
+            'phase_finished_at': time.time(),
+        })
+        self.manager._set_status(status)
+        # 멈춤 요청이 오면 바로 빠진다
+        if self.manager._stop_event.wait(AUTO_RECOVERY_DELAY_SEC):
+            return False
+        return True
+
+    def _prepare_and_run_once(
+        self,
+        mode: str,
+        payload: Dict[str, Any],
+        motors_snapshot: List[Dict[str, Any]],
+    ) -> Optional[BaseException]:
+        """한 번 · 끝까지 갔거나 멈춤이면 None · 오류면 그 예외(보고는 부른 쪽)"""
         self._reset_override_resume()
         try:
             if bool(payload.get('automation_run')):
@@ -105,39 +212,56 @@ class MotionPlayer:
             else:
                 self._run_initialization_then_motion(initialization_plan, plan)
         except InterruptedError:
-            return
+            return None
         except Exception as exc:
             if self.manager._stop_event.is_set():
-                return
+                return None
             self.manager.get_logger().error(
                 f'motion run preparation failed: {mode}\n{traceback.format_exc()}'
             )
-            status = motion_run_rules._empty_status()
-            status.update({
-                'state': 'error',
-                'phase': 'error',
-                # 무엇을 하다 실패했는지 · 초기 위치 이동만 눌렀는데 「모션 실행」이라 하면 헷갈린다
-                'message': (
-                    f'초기 위치 이동 준비 실패: {exc}'
-                    if mode == 'initialize'
-                    else f'모션 실행 준비 실패: {exc}'
-                ),
-                'project_id': str(payload.get('project_id') or ''),
-                'motion_file_id': str(payload.get('motion_file_id') or ''),
-                'mapping_file_id': str(payload.get('mapping_file_id') or ''),
-                'run_mode': str(payload.get('run_mode') or 'once'),
-                'automation_run': bool(payload.get('automation_run')),
-                'operation_generation': int(
-                    payload.get('operation_generation') or 0
-                ),
-                'request_source': str(
-                    payload.get('request_source') or 'motion_run'
-                ),
-                'phase_finished_at': time.time(),
-            })
-            self.manager._set_status(status)
-            if bool(payload.get('automation_run')):
-                self.manager._automation_failure(str(exc))
+            return exc
+        return None
+
+    def _report_run_failure(
+        self, mode: str, payload: Dict[str, Any], exc: BaseException, *, exhausted: str = '',
+    ) -> None:
+        """최종 오류 · 서보는 켠 채 제자리 · 자동 복구 한도를 넘었으면 그렇게 적는다(73)"""
+        status = motion_run_rules._empty_status()
+        status.update({
+            'state': 'error',
+            'phase': 'error',
+            # 무엇을 하다 실패했는지 · 초기 위치 이동만 눌렀는데 「모션 실행」이라 하면 헷갈린다
+            'message': (
+                f'초기 위치 이동 준비 실패: {exc}'
+                if mode == 'initialize'
+                else (f'모션 실행 실패: {exc}' if cycle_failure.is_cycle_failure(str(exc)) else f'모션 실행 준비 실패: {exc}')
+            ),
+            'project_id': str(payload.get('project_id') or ''),
+            'motion_file_id': str(payload.get('motion_file_id') or ''),
+            'mapping_file_id': str(payload.get('mapping_file_id') or ''),
+            'run_mode': str(payload.get('run_mode') or 'once'),
+            'automation_run': bool(payload.get('automation_run')),
+            'operation_generation': int(
+                payload.get('operation_generation') or 0
+            ),
+            'request_source': str(
+                payload.get('request_source') or 'motion_run'
+            ),
+            'phase_finished_at': time.time(),
+        })
+        if exhausted == 'exhausted':
+            # 스케줄은 이 표시를 보고 다시 시작하지 않는다(사람 확인) · 73
+            status['auto_recovery_exhausted'] = True
+            status['message'] = (
+                f'자동 복구 {AUTO_RECOVERY_LIMIT}번 실패 · 멈춤 · 서보는 켠 채 제자리 · {exc}'
+            )
+        elif exhausted.startswith('blocked:'):
+            status['message'] = f'{status["message"]} · 자동 복구 안 함({exhausted[8:]})'
+        self.manager._set_status(status)
+        if bool(payload.get('automation_run')):
+            self.manager._automation_failure(
+                str(status['message']) if exhausted == 'exhausted' else str(exc)
+            )
 
     def _build_playlist_entries(
         self,
@@ -233,6 +357,8 @@ class MotionPlayer:
             self._run_motion(motion_plan)
 
     def _run_initialization(self, plan: Dict[str, Any]) -> None:
+        # 회차가 새로 시작된다 · 다시 체크한 축은 이 초기 위치 이동에서 같이 출발(95)
+        self._release_held_axes()
         try:
             if self.manager._stop_event.is_set():
                 raise InterruptedError()
@@ -305,7 +431,7 @@ class MotionPlayer:
                 self._target_settle_timeout_sec(),
             )
             if not reached:
-                raise RuntimeError(f'초기 위치 도달 확인 실패: {message}')
+                raise RuntimeError(cycle_failure.tagged(f'초기 위치 도달 확인 실패: {message}'))
             motion_values = {
                 str(axis['motion_id']): float(axis['initial_motion_position_rad'])
                 for axis in init_axes
@@ -325,7 +451,7 @@ class MotionPlayer:
                     init_axes, blend_targets, self._target_settle_timeout_sec(),
                 )
                 if not reached:
-                    raise RuntimeError(f'첫 프레임 도달 확인 실패: {message}')
+                    raise RuntimeError(cycle_failure.tagged(f'첫 프레임 도달 확인 실패: {message}'))
                 motion_values = {
                     str(axis['motion_id']): float(
                         axis.get('loop_start_motion_rad', axis['initial_motion_position_rad'])
@@ -421,6 +547,9 @@ class MotionPlayer:
             cycle_count = 0
             grade1_seen = False
             while True:
+                if cycle_count > 0 and not (playlist or repeat_mode in {'reinitialize', 'dwell_reinitialize'}):
+                    # 초기 이동 없이 바로 잇는 반복 · 회차 시작에서 합류(천천히 잇기 · 95)
+                    self._release_held_axes()
                 cycle_started = time.monotonic()
                 cycle_started_wall = time.time()
                 trace = self._trace_begin(plan, cycle_count)
@@ -445,7 +574,8 @@ class MotionPlayer:
                         self._latest_safety_status(), cycle_started_wall,
                     )
                     if dropped:
-                        raise RuntimeError(dropped)
+                        # 가벼운 오류 · 자동 복구 대상 · 위험한 원인(알람·차단)이면 복구 전 검사가 막는다 · 73
+                        raise RuntimeError(cycle_failure.tagged(dropped))
                     if automation_run and self._current_servo_alarm_grade() == 1:
                         grade1_seen = True
                     positions = self._owned_positions(
@@ -607,7 +737,7 @@ class MotionPlayer:
                     self._target_settle_timeout_sec(),
                 )
                 if not reached:
-                    raise RuntimeError(f'모션 최종 위치 도달 확인 실패: {message}')
+                    raise RuntimeError(cycle_failure.tagged(f'모션 최종 위치 도달 확인 실패: {message}'))
             motion_finished_at = time.time()
             status = motion_run_rules._status_from_plan('completed', '모션 실행 완료', plan)
             status['phase'] = 'completed'
@@ -630,6 +760,9 @@ class MotionPlayer:
         except Exception as exc:
             self._trace_finish(trace, 'error', str(exc))
             self.manager.get_logger().error(f'motion run failed\n{traceback.format_exc()}')
+            if self._hand_to_auto_recovery(plan, exc):
+                # 자동 복구가 받는다(`_prepare_and_run`) · 오류 상태는 거기서 정한다 · 실물 확인 대기 68
+                raise
             status = motion_run_rules._status_from_plan('error', f'모션 실행 실패: {exc}', plan)
             status['phase'] = 'error'
             status['phase_finished_at'] = time.time()
@@ -637,6 +770,20 @@ class MotionPlayer:
             self.manager._set_status(status)
             if bool(plan.get('automation_run')):
                 self.manager._automation_failure(str(exc))
+
+    @staticmethod
+    def _hand_to_auto_recovery(plan: Dict[str, Any], exc: BaseException) -> bool:
+        """재생 **도중** 의 가벼운 오류도 자동 복구로 · 실물 2026-10-09 (실물 확인 대기 68 · 수정 목록 93)
+
+        전에는 자동 복구 고리가 준비·첫 초기 이동의 예외만 받았다 · 회차 사이 초기 이동(reinitialize)
+        이나 회차 끝 도달 확인 실패는 여기서 바로 「오류」 로 끝나 4분을 기다려도 다시 안 했다 ·
+        연속 재생(그룹 아님)의 회차 실패 표지면 위로 넘긴다 · 그룹은 코디네이터가 정한다(67).
+        """
+        return (
+            str(plan.get('run_mode') or 'once') == 'continuous'
+            and not plan.get('group_execution')
+            and cycle_failure.is_cycle_failure(str(exc))
+        )
 
     def _trace_begin(self, plan: Dict[str, Any], cycle_count: int):
         """회차 기록 열기 · 기록기가 없는 관리자(시험용 가짜 등)면 기록하지 않는다."""
@@ -853,9 +1000,17 @@ class MotionPlayer:
             motors = self.manager._current_motors()
             ok = True
             messages = []
+            # 꺼 둔 축(·다음 회차를 기다리는 축)은 명령을 안 보냈다 · 도착을 묻지 않는다 ·
+            # 전에는 회차 끝 「최종 위치 확인 실패」 가 났다(실물 2026-10-07 테스트 32) · 95
+            skipped = {
+                motion_id for motion_id, entry in self._effective_overrides(self._override_snapshot()).items()
+                if entry.get('muted')
+            }
             for axis_plan in axes:
                 motor_axis = int(axis_plan['motor_axis'])
                 if motor_axis not in targets:
+                    continue
+                if str(axis_plan.get('motion_id') or '') in skipped:
                     continue
                 motor = self.manager._motor_for_axis(motor_axis, motors)
                 ready_error = motion_run_rules._motor_ready_error(
@@ -1106,7 +1261,7 @@ class MotionPlayer:
         리밋 · 모션값을 좁힌 범위로 자르고 **그 축만** 매핑 식으로 모터
         목표를 다시 계산한다 · 계획은 건드리지 않아 되돌리면 즉시 원래대로.
         """
-        overrides = self.manager.live_override_snapshot()
+        overrides = self._effective_overrides(self.manager.live_override_snapshot())
         if not overrides:
             return positions, motion_values
         out_positions = dict(positions)
@@ -1141,12 +1296,54 @@ class MotionPlayer:
         옛 자리로 끌려간다 · 새 실행은 초기 이동이 지금 자리에서 출발한다.
         지금 오버라이드를 「본 것」으로 적어 시작부터 잇기가 걸리지 않게 한다.
         """
+        self._release_held_axes()
         self._override_seen = {
             key: dict(value)
-            for key, value in (self.manager.live_override_snapshot() or {}).items()
+            for key, value in self._effective_overrides(self.manager.live_override_snapshot()).items()
         }
         self._last_sent_positions = {}
         self._resume_blends = {}
+
+    def _effective_overrides(self, overrides: Optional[Mapping[str, Any]]) -> Dict[str, Dict[str, Any]]:
+        """이번 회차에 실제로 쓸 뮤트 · 회차 도중 다시 체크해도 **다음 회차부터** 합류 · 수정 목록 95
+
+        사용자 2026-10-09 · 끈 축을 도중에 다시 켜면 그 자리에서 바로 움직였다(천천히 잇기 · 40) ·
+        사람이 손대는 중일 수 있어 위험 · 한 번 꺼진 축은 이 회차 끝까지 서 있고, 다음 회차의 초기
+        위치 이동(또는 바로 잇는 반복이면 회차 시작의 천천히 잇기)에서 같이 출발한다.
+        """
+        held = getattr(self, '_held_ids', None)
+        if held is None:
+            held = self._held_ids = set()
+        out = {str(key): dict(value or {}) for key, value in (overrides or {}).items()}
+        for motion_id, entry in out.items():
+            if entry.get('muted'):
+                held.add(motion_id)
+        for motion_id in held:
+            entry = out.setdefault(motion_id, {})
+            if not entry.get('muted'):
+                entry['muted'] = True
+                entry['held'] = True
+        return out
+
+    def _release_held_axes(self) -> None:
+        """회차가 새로 시작될 때 · 다시 체크한 축이 여기서 합류 (지금 꺼져 있는 축만 남긴다) · 95"""
+        self._held_ids = {
+            str(key) for key, value in self._override_snapshot().items()
+            if (value or {}).get('muted')
+        }
+
+    def _override_snapshot(self) -> Dict[str, Any]:
+        """오버라이드가 없는 가벼운 관리자(시험)면 빈 것"""
+        snapshot = getattr(self.manager, 'live_override_snapshot', None)
+        return dict(snapshot() or {}) if snapshot is not None else {}
+
+    def held_motion_ids(self) -> List[str]:
+        """다시 체크했지만 다음 회차를 기다리는 조인트 · 화면 「다음 회차부터」"""
+        muted = {
+            str(key) for key, value in self._override_snapshot().items()
+            if (value or {}).get('muted')
+        }
+        return sorted(set(getattr(self, '_held_ids', set()) or set()) - muted)
 
     def _blend_override_changes(
         self,
@@ -1203,8 +1400,8 @@ class MotionPlayer:
         positions: Dict[int, float],
     ) -> None:
         # 뮤트는 초기 위치 이동을 포함한 **모든 발행 길목**에서 거른다 · P7
-        # 고장난 모터는 초기 이동도 하면 안 된다
-        overrides = self.manager.live_override_snapshot()
+        # 고장난 모터는 초기 이동도 하면 안 된다 · 다시 체크해도 다음 회차까지는 뮤트(95)
+        overrides = self._effective_overrides(self.manager.live_override_snapshot())
         if overrides:
             muted_axes = {
                 int(axis_plan['motor_axis'])
@@ -1309,16 +1506,25 @@ class MotionPlayer:
         )
 
     def _target_tolerance(self, axis_plan: Dict[str, Any]) -> float:
-        """도달 허용 오차 · rad · 파라미터는 사람이 적는 값이라 deg 그대로 둔다 · 수정 목록 6"""
+        """도달 허용 오차 · 모터 rad · 파라미터는 사람이 적는 값이라 deg 그대로 둔다 · 수정 목록 6
+
+        AC 서보는 **관절** 허용 오차 × |감속비 × scale| 를 모터로 환산 · 모터 값은 바닥 · 수정 목록 57 ·
+        다이나믹셀은 그대로(모터 deg 고정).
+        """
         if axis_plan.get('motor_type') == 'dynamixel':
             return units.deg_to_rad(self.manager._runtime_float_parameter(
                 'dynamixel_target_tolerance_deg',
                 self.manager.dynamixel_target_tolerance_deg,
             ))
-        return units.deg_to_rad(self.manager._runtime_float_parameter(
+        floor_deg = self.manager._runtime_float_parameter(
             'ac_target_tolerance_deg',
             self.manager.ac_target_tolerance_deg,
-        ))
+        )
+        joint_deg = self.manager._runtime_float_parameter(
+            'ac_target_tolerance_joint_deg',
+            getattr(self.manager, 'ac_target_tolerance_joint_deg', 0.0),
+        )
+        return units.deg_to_rad(ac_target_tolerance_motor_deg(axis_plan.get('row'), floor_deg, joint_deg))
 
     @staticmethod
     def _playback_axes(

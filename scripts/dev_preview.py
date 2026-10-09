@@ -66,7 +66,12 @@ state = {
         'floating_animation_sample.json',
     ],
     'group_sync_mode': 'lockstep',
+    'repeat_mode': 'reinitialize',
+    'dwell_sec': 0.0,
     'run_started': None,
+    # 새 UI(v2) 공연 · 매장 전체로 시작했나 · 돌던 중 다시 켠 축(다음 회차부터)
+    'group_run': False,
+    'held': set(),
     'live_overrides': {},
 }
 
@@ -184,11 +189,24 @@ def snapshot():
             'motor_identity': {'ok': True},
         },
         'motion_state_age_sec': 0.0,
+        # 새 UI(v2) 상단 바 · 홈이 읽는다 · 실제 브리지 스냅샷과 같은 자리
+        'system_info': {'hostname': 'floating1'},
+        'supervisor_watchdog': {},
+        'minas_absolute_blocker': '',
+        'coordination': {
+            'node_connected': True,
+            'config': {'pc_id': 'floating1', 'enabled': True, 'group_id': 'stage-a', 'is_master': True},
+            'runtime': {'joined': True, 'network_pcs': _preview_network_pcs(), 'coordination_error': {},
+                        **_preview_group_runtime()},
+        },
         'motion_run_status': {
             **_fake_run_status(),
             'live_overrides': state['live_overrides'],
+            'held_motion_ids': sorted(state['held']),
+            'group_execution': state['group_run'] and state['run_started'] is not None,
             'automation': {
-                'repeat_mode': 'reinitialize',
+                'repeat_mode': state['repeat_mode'],
+                'dwell_sec': state['dwell_sec'],
                 'group_sync_mode': state['group_sync_mode'],
             },
             'axes': [
@@ -243,6 +261,13 @@ composer = IndexComposer(STATIC / 'index.html')
 async def index():
     html, _etag = composer.compose()
     return HTMLResponse(html)
+
+
+@app.get('/v2')
+@app.get('/v2/')
+async def index_v2():
+    # 새 UI · 뼈대 + 홈 · 설계안 2026-10-09
+    return FileResponse(STATIC / 'v2' / 'index.html')
 
 
 @app.get('/favicon.ico')
@@ -338,6 +363,15 @@ def _mujoco_state(motion: Path) -> str:
     return 'ready' if npz.is_file() else 'missing'
 
 
+def _motion_duration(path):
+    """마지막 줄 [frame, time_sec, ...] 의 시간 · 못 읽으면 None"""
+    try:
+        lines = path.read_text(encoding='utf-8').strip().splitlines()
+        return float(json.loads(lines[-1])[1])
+    except (OSError, ValueError, IndexError, TypeError, KeyError):
+        return None
+
+
 def export_files():
     if not EXPORT_DIR.is_dir():
         return []
@@ -347,6 +381,8 @@ def export_files():
             'size_bytes': path.stat().st_size,
             'updated_at': path.stat().st_mtime,
             'valid': True, 'message': '',
+            # 서버 모양 · 검사 결과와 길이는 analysis 아래 · 새 UI(v2) 가 여기서 읽는다
+            'analysis': {'valid': True, 'message': '', 'time': {'duration_sec': _motion_duration(path)}},
             'preview': {'state': _mujoco_state(path)},
         }
         for path in sorted(EXPORT_DIR.glob('*.json'))
@@ -461,6 +497,10 @@ async def configure_automation(request: Request):
     body = await request.json()
     if body.get('group_sync_mode') in ('lockstep', 'independent'):
         state['group_sync_mode'] = body['group_sync_mode']
+    if body.get('repeat_mode') in ('reinitialize', 'direct', 'dwell', 'dwell_reinitialize'):
+        state['repeat_mode'] = body['repeat_mode']
+    if 'dwell_sec' in body:
+        state['dwell_sec'] = max(0.0, float(body['dwell_sec'] or 0))
     return {'success': True, 'message': '프리뷰 · 자동 반복 설정 저장',
             'status': snapshot()['motion_run_status'],
             'project_generation': state['generation']}
@@ -470,9 +510,28 @@ async def configure_automation(request: Request):
 @app.post('/api/motion-run/stop-after-cycle')
 async def stop_motion_run():
     state['run_started'] = None
+    state['group_run'] = False
+    state['held'].clear()
     return {'success': True, 'message': '프리뷰 · 정지',
             'status': {'state': 'stopped'},
             'project_generation': state['generation']}
+
+
+@app.post('/api/coordination/control')
+async def coordination_control(request: Request):
+    """그룹 명령 흉내 · 시작이면 이 PC 재생 흉내도 같이 · 새 UI(v2) 공연"""
+    body = await request.json()
+    command = body.get('command')
+    if command == 'start_group':
+        state['run_started'] = time.time()
+        state['group_run'] = True
+        return {'success': True, 'message': '프리뷰 · 매장 전체 시작 · 2대 · floating3 빠짐(버전 다름)'}
+    if command in ('stop_now', 'stop_after_cycle'):
+        state['run_started'] = None
+        state['group_run'] = False
+        state['held'].clear()
+        return {'success': True, 'message': '프리뷰 · 매장 전체 정지'}
+    return {'success': True, 'message': f'프리뷰 · {command}'}
 
 
 @app.post('/api/motion-run/start')
@@ -480,8 +539,9 @@ async def start_motion_run(request: Request):
     """가짜 재생 · with_mujoco 면 그 자리에서 뷰어를 같이 띄워 흐름을 보여 준다."""
     body = await request.json()
     message = '프리뷰 · 재생 흉내'
-    if body.get('run_mode') == 'continuous':
+    if body.get('run_mode') in ('continuous', 'once'):
         state['run_started'] = time.time()
+        state['group_run'] = False
     if body.get('with_mujoco'):
         motion = EXPORT_DIR / str(body.get('motion_file_id') or '')
         result = _launch_replay(motion, body.get('mujoco_fps'))
@@ -505,13 +565,167 @@ MAPPING_FILE = {
     'mapped_count': len(JOINTS),
 }
 
+def _preview_group_runtime():
+    """그룹 실행 흉내 · 조정 노드 /status 의 peers · local · execution 모양 · 새 UI(v2) 공연"""
+    running = state['group_run'] and state['run_started'] is not None
+    cycle = int((time.time() - state['run_started']) // FAKE_ITEM_SEC) + 1 if running else 0
+
+    def peer(pc_id, **extra):
+        row = {'pc_id': pc_id, 'display_name': pc_id, 'state': 'online', 'servo_alarm_grade': 0,
+               'motion_cycle_text': f'{cycle}회차' if running else '-',
+               'motion_step': '재생 중' if running else '그룹 대기',
+               'motion_progress': ''}
+        row.update(extra)
+        return row
+    return {
+        'local': peer('floating1', is_master=True),
+        'peers': [peer('floating2'), peer('floating3', motion_cycle_text='-', motion_step='그룹 대기'),
+                  peer('floating4', state='offline', motion_cycle_text='-', motion_step='-')],
+        'execution': {
+            'state': 'running' if running else 'idle',
+            'execution_id': 'preview-exec' if running else '',
+            'participants': ['floating1', 'floating2'] if running else [],
+            'excluded': {'floating3': '버전 다름 · 업데이트하면 다음 실행부터'} if running else {},
+            'joining': {},
+            'start_spread_ms': 6.0 if running else None,
+        },
+    }
+
+
+def _preview_network_pcs():
+    """같은 망 PC 표 · 로봇 3대 + 스피커 · 하나는 끊김 · 핵심 요구 4"""
+    def pc(pc_id, address, **extra):
+        row = {
+            'pc_id': pc_id, 'display_name': pc_id, 'role': 'robot', 'address': address,
+            'web_url': f'http://{address}:8000', 'group_id': 'stage-a', 'joined': True,
+            'is_master': False, 'git_hash': 'cadddb6', 'protocol_version': 5,
+            'is_local': False, 'online': True, 'age_sec': 0.4, 'same_group': True,
+            'version_differs': False, 'protocol_mismatch': False,
+        }
+        row.update(extra)
+        return row
+    return [
+        pc('floating1', '192.168.0.11', is_master=True, is_local=True, age_sec=0.0),
+        pc('floating2', '192.168.0.12'),
+        pc('floating3', '192.168.0.13', joined=False, git_hash='454d49b', version_differs=True),
+        pc('floating4', '192.168.0.14', online=False, age_sec=42.0),
+        pc('speaker', '192.168.0.20', role='speaker', web_url='http://192.168.0.20:8100',
+           protocol_version=0, joined=False),
+    ]
+
+
+_UPDATE = {'started': None}
+
+
+def _preview_update_rows():
+    """모든 PC 업데이트 흉내 · 누르면 업데이트 중 → 응답 없음 → 완료 (몇 초) · 2026-10-08"""
+    started = _UPDATE['started']
+    rows = []
+    for index, pc in enumerate(_preview_network_pcs()):
+        row = {k: pc[k] for k in ('pc_id', 'display_name', 'role', 'is_local', 'git_hash')}
+        if pc['role'] == 'speaker':
+            row.update(state='manual', message='스피커 PC 는 그 PC 터미널에서 · bash ~/robot_web/scripts/install_speaker.sh')
+        elif not pc['online']:
+            row.update(state='offline', message='연결 안 됨')
+        elif started is None:
+            row.update(state='idle')
+        else:
+            age = time.time() - started - index * 2
+            if age < 4:
+                row.update(state='running', before_hash=pc['git_hash'], tail=['== 8. 전체 빌드', '2/2 · 나머지 전부'])
+            elif age < 7:
+                row.update(state='unreachable', message='응답 없음 · 업데이트 중이면 잠시 뒤 돌아옵니다')
+            else:
+                row.update(state='done', before_hash=pc['git_hash'], git_hash='d00d123', exit_code=0, tail=['설치 완료'])
+        rows.append(row)
+    return {'success': True, 'pcs': rows, 'same_version': started is not None}
+
+
+def _preview_update_start():
+    _UPDATE['started'] = time.time()
+    return {**_preview_update_rows(), 'message': '3대 업데이트 시작 · 이 PC 웹은 잠깐 끊겼다 돌아옵니다'}
+
+
+_WIFI = {'ssid': 'shop-5G', 'pending': None}
+
+
+def _preview_wifi_status():
+    """Wi-Fi 흉내 · 수정 목록 81"""
+    out = {'success': True, 'available': True, 'device': 'wlp2s0', 'state': 'connected',
+           'connection': f"robot-wifi-{_WIFI['ssid']}", 'ssid': _WIFI['ssid'], 'signal': 78,
+           'address': '192.168.0.11/24', 'gateway': '192.168.0.1', 'method': 'auto', 'powersave': '꺼짐'}
+    pending = _WIFI['pending']
+    if pending and pending['deadline'] > time.time():
+        out['pending'] = {'ssid': pending['ssid'], 'seconds_left': round(pending['deadline'] - time.time())}
+    return out
+
+
+def _preview_wifi_connect():
+    _WIFI['pending'] = {'ssid': 'office', 'deadline': time.time() + 60}
+    _WIFI['ssid'] = 'office'
+    return {**_preview_wifi_status(), 'message': 'office 연결됨 · 60초 안에 「유지」 를 누르세요'}
+
+
+def _preview_wifi_confirm():
+    _WIFI['pending'] = None
+    return {**_preview_wifi_status(), 'message': 'office 유지'}
+
+
+_TZ = {'zone': 'Asia/Seoul'}
+
+
+def _preview_time():
+    return {'clock': {'timezone': _TZ['zone'], 'utc_offset': '+0900' if _TZ['zone'] == 'Asia/Seoul' else '+0200',
+                      'ntp_synced': True, 'local_time': time.strftime('%Y-%m-%dT%H:%M:%S')},
+            'timezones': ['Asia/Seoul', 'Europe/Paris', 'America/New_York', 'Asia/Taipei']}
+
+
+def _preview_tz_all():
+    _TZ['zone'] = 'Europe/Paris'
+    rows = [{'pc_id': pc['pc_id'], 'display_name': pc['pc_id'], 'role': pc['role'], 'is_local': pc['is_local'],
+             'success': pc['online'] or pc['is_local'],
+             'message': ('스피커 · 스케줄이 없어 시간대와 무관 · 건너뜀' if pc['role'] == 'speaker'
+                         else ('Asia/Seoul → Europe/Paris · 2초 뒤 프로그램을 다시 띄웁니다' if pc['online'] else '연결 안 됨 · 건너뜀'))}
+            for pc in _preview_network_pcs()]
+    return {'success': False, 'message': '로봇 PC 3/4대 Europe/Paris', 'pcs': rows, 'clock': _preview_time()['clock']}
+
+
+#: 새 UI(v2) 홈 「오늘 스케줄」 · 매일 10~18 · 금토 저녁
+_PREVIEW_SCHEDULES = [
+    {'schedule_id': 'a', 'schedule_name': '매장 운영', 'start_time': '10:00:00', 'stop_time': '18:00:00',
+     'repeat_type': 'daily', 'repeat_days': [], 'enabled': True},
+    {'schedule_id': 'b', 'schedule_name': '저녁 시연', 'start_time': '19:00:00', 'stop_time': '21:00:00',
+     'repeat_type': 'weekly', 'repeat_days': ['FRI', 'SAT'], 'enabled': True},
+]
+
+
 CANNED = {
+    ('GET', '/api/system/time'): _preview_time,
+    ('POST', '/api/system/timezone-all'): _preview_tz_all,
+    ('GET', '/api/system/wifi'): _preview_wifi_status,
+    ('POST', '/api/system/wifi/scan'): lambda: {'success': True, 'message': '3개 찾음', 'networks': [
+        {'ssid': 'shop-5G', 'signal': 78, 'security': 'WPA2', 'in_use': True},
+        {'ssid': 'office', 'signal': 55, 'security': 'WPA2 WPA3', 'in_use': False},
+        {'ssid': 'guest', 'signal': 31, 'security': '--', 'in_use': False}]},
+    ('POST', '/api/system/wifi/connect'): _preview_wifi_connect,
+    ('POST', '/api/system/wifi/confirm'): _preview_wifi_confirm,
+    ('POST', '/api/system/wifi/rollback'): _preview_wifi_confirm,
+    ('GET', '/api/system/update-all'): _preview_update_rows,
+    ('POST', '/api/system/update-all'): _preview_update_start,
     ('GET', '/api/status'): snapshot,
+    ('GET', '/api/coordination'): lambda: {
+        'success': True, 'node_connected': True, 'config_error': '',
+        'config': {'pc_id': 'floating1', 'display_name': 'floating1', 'enabled': False,
+                   'group_id': '', 'dds_domain_id': 21, 'is_master': False, 'required_peers': []},
+        'runtime': {'node_connected': True, 'joined': False, 'peers': [],
+                    'config': {'pc_id': 'floating1', 'enabled': False},
+                    'execution': {'state': 'idle'}, 'network_pcs': _preview_network_pcs()},
+    },
     ('GET', '/api/schedule/status'): lambda: {
         'run_mode': state['run_mode'],
         'schedules': [],
         'enabled': True,
-        'active_schedule_id': '',
+        'active_schedule_id': 'a' if 10 <= time.localtime().tm_hour < 18 else '',
         'coordination_enabled': False,
         'coordination_joined': False,
         'is_master': True,
@@ -521,7 +735,12 @@ CANNED = {
             'timezone': 'Asia/Seoul',
         },
     },
-    ('GET', '/api/schedule/list'): lambda: {'schedules': []},
+    ('GET', '/api/schedule/list'): lambda: {'schedules': _PREVIEW_SCHEDULES},
+    ('GET', '/api/motor-events'): lambda: {'success': True, 'events': [
+        {'timestamp_text': time.strftime('%Y-%m-%dT%H:%M:%S.000'), 'content': '3회차 시작 · 2대 · 시작 편차 6 ms'},
+        {'timestamp_text': time.strftime('%Y-%m-%dT10:03:12.000'), 'content': '자동 복구 1/3 · 2번 모터 도달 확인 실패 0.094°'},
+        {'timestamp_text': time.strftime('%Y-%m-%dT10:00:00.000'), 'content': '매장 운영 시작'},
+    ]},
     ('GET', '/api/motion-mappings'): lambda: {
         'success': True,
         'files': [MAPPING_FILE],
@@ -555,6 +774,11 @@ async def set_live_override(request: Request):
     entry = dict(state['live_overrides'].get(motion_id) or {})
     if 'muted' in body:
         entry['muted'] = bool(body['muted'])
+        # 돌던 중 다시 켜면 다음 회차부터 · 서버 held_motion_ids 흉내
+        if not entry['muted'] and state['run_started'] is not None:
+            state['held'].add(motion_id)
+        elif entry['muted']:
+            state['held'].discard(motion_id)
     if 'clamp' in body:
         if body['clamp'] is None:
             entry.pop('clamp', None)

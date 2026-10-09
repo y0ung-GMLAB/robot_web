@@ -121,3 +121,34 @@ def test_motor_config_history_is_capped_at_fifty(tmp_path, monkeypatch):
     assert names[0] == '20250101-000003-motor_axes.yaml'
     assert names[-1].endswith('-motor_axes.yaml') and not names[-1].startswith('20250101')
     assert selected.read_text(encoding='utf-8') == 'period: 2\n'
+
+
+# 크기로 돌리기 · 수정 목록 77 (2026-10-08) · 밤샘 13 h 에 한 파일 110 MB
+
+def test_a_log_over_the_size_limit_is_shifted_and_emptied(tmp_path):
+    log = tmp_path / 'restart-1.log'
+    log.write_bytes(b'x' * (1024 * 1024 + 10))
+    (tmp_path / 'restart-1.log.1').write_text('older')
+
+    result = _bash(f'rotate_log_by_size "{log}" 1 3')
+
+    assert result.returncode == 0, result.stderr
+    assert log.exists() and log.stat().st_size == 0
+    assert (tmp_path / 'restart-1.log.1').stat().st_size == 1024 * 1024 + 10
+    assert (tmp_path / 'restart-1.log.2').read_text() == 'older'
+
+
+def test_a_small_log_or_zero_limit_is_left_alone(tmp_path):
+    log = tmp_path / 'restart-1.log'
+    log.write_text('short')
+
+    assert _bash(f'rotate_log_by_size "{log}" 1 3').returncode == 0
+    assert _bash(f'rotate_log_by_size "{log}" 0 3').returncode == 0
+    assert log.read_text() == 'short'
+    assert not (tmp_path / 'restart-1.log.1').exists()
+
+
+def test_the_restart_launcher_watches_its_log_size():
+    script = (WORKSPACE / 'scripts/restart_motion_monitor.sh').read_text(encoding='utf-8')
+    assert 'watch_log_size "${LOG_DIR}/restart-${STAMP}.log"' in script
+    assert script.index('exec >> "${LOG_DIR}/restart-${STAMP}.log"') < script.index('watch_log_size')

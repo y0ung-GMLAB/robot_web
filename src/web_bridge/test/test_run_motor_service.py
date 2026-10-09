@@ -17,6 +17,13 @@ def test_ethercat_error_recovery_keeps_master_and_slave_position_together(
     config_file.write_text('masters: []\n', encoding='utf-8')
     (workspace / 'install').mkdir(parents=True)
     (workspace / 'install' / 'setup.bash').write_text('', encoding='utf-8')
+    # 실행 스크립트가 작업공간의 기록 보존 스크립트를 읽는다 · 수정 목록 21 뒤 시험 작업공간에 빠져 있었다 · 63
+    retention = workspace / 'src' / 'web_bridge' / 'deploy' / 'log_retention.sh'
+    retention.parent.mkdir(parents=True)
+    retention.write_text(
+        (Path(__file__).resolve().parents[1] / 'deploy' / 'log_retention.sh').read_text(encoding='utf-8'),
+        encoding='utf-8',
+    )
 
     command_log = tmp_path / 'ethercat.log'
     recovery_state = tmp_path / 'recovery'

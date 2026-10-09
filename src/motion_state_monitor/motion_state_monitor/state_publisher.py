@@ -228,6 +228,11 @@ class StatePublisher:
             'last_motor_status_at': self.last_status_at,
             'last_ethercat_status_at': self.monitor._ethercat.last_status_at,
             'ethercat': self.monitor._ethercat._current_ethercat_status(now),
+            # 연결된 MINAS 드라이브 전부의 앱솔루트 확인 · 막는 판정은 받는 쪽 · 수정 목록 62
+            'minas_absolute': (
+                self.monitor._ethercat.absolute.snapshot()
+                if self.monitor._ethercat.absolute is not None else None
+            ),
             'motor_type_catalog': MOTOR_TYPE_CATALOG,
             'stale_timeout_sec': self.monitor.stale_timeout_sec,
             'disconnected_timeout_sec': self.monitor.disconnected_timeout_sec,

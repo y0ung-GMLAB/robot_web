@@ -20,12 +20,12 @@ function element() {
 function fixture() {
   const names = [
     'coordinationPcId', 'coordinationDisplayName', 'coordinationGroupId',
-    'coordinationDomainId', 'coordinationEnabled', 'coordinationNodeState',
+    'coordinationDomainId', 'coordinationNodeState',
     'coordinationConfigMessage', 'coordinationUpdatedAt',
     'coordinationMachineId', 'coordinationGroupDomain',
     'coordinationJoinState', 'coordinationPeerCount',
-    'coordinationExecutionState', 'coordinationJoinButton',
-    'coordinationLeaveButton', 'coordinationRunAvailability',
+    'coordinationExecutionState', 'coordinationJoinSwitch',
+    'coordinationRunAvailability',
     'coordinationAcknowledgeErrorButton', 'coordinationErrorSummary',
     'coordinationPeerRows',
   ];

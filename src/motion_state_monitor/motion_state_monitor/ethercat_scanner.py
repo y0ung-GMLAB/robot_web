@@ -18,6 +18,7 @@ import time
 from copy import deepcopy
 from typing import Any, Dict, List, Optional
 
+from .absolute_check import MinasAbsoluteCheck
 from .motor_values import parse_int
 
 
@@ -50,6 +51,32 @@ class EthercatScanner:
         #: 마지막으로 관측한 버스 상태
         self.status: Dict[str, Any] = {}
         self.last_status_at: Optional[float] = None
+        #: 연결된 MINAS 드라이브 전부의 앱솔루트 확인 · 수정 목록 62 · 노드가 켠다
+        #: (`enable_absolute_check`) · 안 켜면 motion_state 에 None → 받는 쪽은 막는다
+        self.absolute: Optional[MinasAbsoluteCheck] = None
+
+    def enable_absolute_check(self) -> None:
+        self.absolute = MinasAbsoluteCheck(
+            parse_slaves=self._parse_ethercat_slaves,
+            axis_for_slave=self._axis_for_slave,
+            log_warning=self._log_warning,
+        )
+
+    def _log_warning(self, message: str) -> None:
+        get_logger = getattr(self.monitor, 'get_logger', None)
+        if callable(get_logger):
+            get_logger().warning(message)
+
+    def _axis_for_slave(self, master_index: int, slave_position: int) -> Optional[int]:
+        """모터 설정에 등록된 축 번호 · 링 위치로 찾는다 · 없으면 None(미등록)"""
+        for axis, metadata in getattr(self.monitor, '_motor_metadata', {}).items():
+            if str(metadata.get('transport') or '').lower() != 'ethercat':
+                continue
+            if (parse_int(metadata.get('ethercat_master_index')) or 0) != int(master_index):
+                continue
+            if parse_int(metadata.get('slave_position')) == int(slave_position):
+                return int(axis)
+        return None
 
     def _poll_ethercat_bus_status(self) -> None:
         now = time.time()
@@ -174,6 +201,8 @@ class EthercatScanner:
             'error': ' / '.join(errors),
         }
         self.last_status_at = now
+        if self.absolute is not None:
+            self.absolute.observe(masters)
 
     def _current_ethercat_status(self, now: float) -> Dict[str, Any]:
         if not self.status:

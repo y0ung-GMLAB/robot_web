@@ -1,3 +1,4 @@
+import { nextClockOffset } from './sim3d_math.js';
 import {
   createDesktopShortcut,
   fetchStatusSnapshot,
@@ -39,8 +40,11 @@ import {
   workspaceForProjectCategory,
 } from './workspace_navigation.js';
 import { installFeedbackPresentation } from './ui_feedback.js';
+import { initResizableBlocks } from './resizable_blocks.js';
 import { createServoAlarmController } from './servo_alarm.js';
 import { createCoordinationController } from './coordination.js';
+import { createSystemUpdateController } from './system_update.js';
+import { createWifiController } from './wifi_settings.js';
 import { createRobotPackController } from './robot_pack.js';
 import { guardDocumentDrops } from './drop_files.js';
 import { inDegView, motionRunStatusInDeg } from './unit_view.js';
@@ -55,6 +59,8 @@ window.alert = (message) => {
   });
 };
 installFeedbackPresentation(document);
+// 애니메이션 화면 블록 · 끌어서 높이 조절 · 크기 기억 (96)
+initResizableBlocks(document);
 const appState = {
   latestState: null,
   rawMode: false,
@@ -81,6 +87,10 @@ const appState = {
 };
 const workspaceRouteState = createWorkspaceRouteState('monitoring');
 const coordination = createCoordinationController({ el });
+// 모든 PC 업데이트 · 같은 망 PC 표 아래 (2026-10-08)
+const systemUpdate = createSystemUpdateController({ el });
+// Wi-Fi · 시스템 정보 · 수정 목록 81
+const wifi = createWifiController({ el });
 const robotPack = createRobotPackController({ el });
 let projectExplorer = null;
 const RESTART_READY_STABLE_MS = 3500;
@@ -309,9 +319,14 @@ function showEmergencyLatched() {
   el.emergencyStopBanner?.classList.toggle('hidden', !latched);
 }
 
+//: 서버 시계 − 브라우저 시계 · 웹 3D 가 실물 위치를 서버 시계로 맞춘다 · 수정 목록 92
+let serverClock = { samples: [], offset: 0 };
+
 function motionStateFromPayload(payload) {
   if (!payload?.motion_state) return null;
+  if (payload.server_time) serverClock = nextClockOffset(serverClock.samples, payload.server_time, Date.now() / 1000);
   return {
+    server_clock_offset_sec: serverClock.offset,
     ...payload.motion_state,
     // 조인트 값(`motion_value_rad`)·재생 상태는 서버가 rad · 화면은 deg (수정 목록 6)
     motors: inDegView(payload.motion_state.motors),
@@ -1160,6 +1175,8 @@ const jogDial = createJogDialController({
   getLatestState: () => appState.latestState,
   getSelectedAxis: () => motionTest.getSelectedAxis(),
   onCapture: captureJogPoint,
+  // 조그 칸 「조인트 deg 기준」 체크를 다이얼도 따른다 · 수정 목록 76
+  getJointRow: (axis) => motionData?.jointRowForAxis?.(axis) || null,
 });
 
 /** 수동 조작 화면의 모드 안내 띠 · 수동 모드에서만 조작 가능 · 2026-10-02 */
@@ -1205,11 +1222,21 @@ async function captureJogPoint(kind, { axis, motorDeg }) {
     : '조인트 매핑 범위(모션 deg)';
   const confirmed = await showConfirm(
     `모터 ${axis}의 지금 위치 ${motorDeg.toFixed(3)}° 를 저장합니다.\n\n저장 위치: ${where}`
-      + '\n\n모터 운전 한계는 조인트 매핑에서 자동 계산 · 드라이브 반영은 「장비에 적용 · 모터 재시작」 후입니다.',
+      + '\n\n저장한 뒤 운전 한계(소프트 리밋)도 새 값으로 옮길지 바로 묻습니다 (장비에 적용 · 모터 재시작).',
     { title, confirmLabel: '저장', tone: 'warning' },
   );
   if (!confirmed) return { success: false, message: '취소했습니다' };
-  return motionData.saveCapturedPoint(axis, kind, motorDeg);
+  const saved = await motionData.saveCapturedPoint(axis, kind, motorDeg);
+  if (!saved?.success) return saved;
+  // 기준점·범위가 바뀌면 모터 운전 한계(드라이브 소프트 리밋 · 다이얼·페이더·조그 경계)는
+  // 「장비에 적용 · 모터 재시작」 뒤에야 바뀐다 · 안 하면 기준점만 새것이고 리밋은 옛 기준으로 남는다
+  // (실물 2026-10-08) · 그래서 저장 직후 바로 묻는다 · 확인 창은 적용 쪽 것 하나
+  const applied = await motorConfig.applyConfigRestart({
+    reason: `${title} 저장됨 · 운전 한계(소프트 리밋)도 새 기준으로 옮기려면 지금 장비에 적용·재시작해야 합니다.`,
+  });
+  return applied
+    ? { success: true, message: `${saved.message} · 장비에 적용·재시작 중` }
+    : { success: true, message: `${saved.message} · 운전 한계 미적용 · 「장비에 적용 · 모터 재시작」 필요` };
 }
 
 const motionData = createMotionDataController({
@@ -1418,6 +1445,8 @@ function connectSocket() {
       // supervisor 응답 없음 · 상단 빨간 칸 · 수정 목록 29
       motionHeaderConditionsUpdate({
         supervisorProblem: String(payload?.supervisor_watchdog?.message || ''),
+        // 앱솔루트 미확인 · 상단 빨간 칸 · 판단은 서버 · 수정 목록 62
+        absoluteProblem: String(payload?.minas_absolute_blocker || ''),
       });
       renderServiceManagement(payload);
       renderAccess(payload, el);
@@ -1672,6 +1701,19 @@ if (el.motionRunOpenCoordinationButton) {
 }
 
 if (el.workspaceTabs) {
+  // 상단 빨간 칸 중 「누르면 그 화면으로」 · 앱솔루트 미확인 → 모터 관리 · 수정 목록 62
+  const headerBadges = document.getElementById('headerConditionBadges');
+  const openHeaderAction = (event) => {
+    const cell = event.target.closest('[data-header-action]');
+    if (!cell) return;
+    if (event.type === 'keydown' && event.key !== 'Enter' && event.key !== ' ') return;
+    const target = setActiveWorkspace(cell.dataset.headerAction);
+    if (!target) return;
+    renderLatestState();
+    if (target === 'config') motorConfig.fetchRegistry();
+  };
+  headerBadges?.addEventListener('click', openHeaderAction);
+  headerBadges?.addEventListener('keydown', openHeaderAction);
   el.workspaceTabs.addEventListener('click', (event) => {
     const groupButton = event.target.closest('button[data-workspace-group]');
     if (groupButton) {
@@ -1718,6 +1760,9 @@ servoAlarm.bindEvents();
 robotPack.bindEvents();
 robotPack.refresh();
 coordination.start();
+systemUpdate.bindEvents();
+wifi.bindEvents();
+wifi.refresh();
 renderWorkspacePanel();
 connectSocket();
 fetchStatus();

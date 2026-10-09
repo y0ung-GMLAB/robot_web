@@ -174,7 +174,7 @@ test('any scan replaces the whole list', () => {
 
 test('only pressing 설정 저장 writes the file', () => {
   const code = readFileSync(new URL('../static/js/motor_config.js', import.meta.url), 'utf8');
-  const apply = code.slice(code.indexOf('async function applyConfigRestart()'));
+  const apply = code.slice(code.indexOf('async function applyConfigRestart(options = {})'));
   const body = apply.slice(0, apply.indexOf('\n  }\n'));
 
   assert.doesNotMatch(body, /saveAxisConfig/);

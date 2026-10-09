@@ -42,8 +42,8 @@ def test_coordination_lives_in_one_screen():
     # 그룹에 관한 것은 전부 연동 화면에 있다
     for marker in (
         'id="coordinationGroupId"', 'id="coordinationDomainId"',
-        # 들어오거나 나가거나 둘 뿐이다 · 「지금 빠지기」는 없앴다 · §6-164
-        'id="coordinationJoinButton"', 'id="coordinationLeaveButton"',
+        # 「그룹 참여」 스위치 하나 · 수정 목록 83
+        'id="coordinationJoinSwitch"',
         'id="coordinationPeerRows"', 'id="coordinationRunAvailability"',
         'id="coordinationAcknowledgeErrorButton"',
         'id="coordinationErrorSummary"', '실행 참가',

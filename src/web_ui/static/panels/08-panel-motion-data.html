@@ -18,6 +18,11 @@
                 <strong>1. 재생할 애니메이션</strong>
                 <span id="motionRunMessage">애니메이션과 매핑 파일을 선택하세요</span>
               </div>
+              <!-- 오래 걸리는 일 표시 · 올리기 · 읽기 · 재생 등록 · 0.4초 넘을 때만 · 수정 목록 87 -->
+              <div id="motionBusy" class="motion-busy hidden" role="status" aria-live="polite">
+                <span class="motion-busy-spinner" aria-hidden="true"></span>
+                <span id="motionBusyText"></span>
+              </div>
               <div class="motion-run-columns">
               <div class="motion-run-side">
                 <section class="motion-file-column" aria-label="애니메이션 목록">
@@ -29,7 +34,7 @@
                        두 줄을 차지해 위아래로 길었다 -->
                   <div class="motion-file-drop-hint">「불러오기」 또는 .json 파일·폴더를 이 화면에 끌어다 놓으면 추가됩니다</div>
                   <div class="motion-file-body">
-                  <div class="table-wrap motion-file-table-wrap">
+                  <div class="table-wrap motion-file-table-wrap user-resizable" data-resize-key="anim.files" title="오른쪽 아래 모서리를 끌면 늘어납니다 · 두 번 누르면 원래 크기">
                     <table class="motion-file-table motion-file-table-compact">
                       <thead>
                         <tr>
@@ -52,12 +57,12 @@
                     <button id="registerMotionFileButton" class="primary" type="button" disabled>재생 등록</button>
                     <button id="unregisterMotionFileButton" type="button" class="danger" disabled>재생 등록 해제</button>
                     <button id="downloadMotionFileButton" type="button" title="이 파일을 지금 보고 있는 PC 에 저장합니다" disabled>내 PC로 저장</button>
-                    <button id="previewMotionFileButton" type="button" title="MuJoCo 물리 계산을 시작합니다 · 끝나면 「3D 보기 (웹)」와 「MuJoCo 같이 보기」가 켜집니다" disabled>MuJoCo 계산</button>
+                    <button id="previewMotionFileButton" type="button" title="MuJoCo 물리 계산을 시작합니다 · 끝나면 「3D 보기 (웹)」 에서 실물과 같이 볼 수 있습니다" disabled>MuJoCo 계산</button>
                     <button id="deleteMotionFileButton" type="button" class="danger" disabled>삭제</button>
                   </div>
                   </div>
                   <!-- 재생 목록 · 두 개 이상 등록하면 보인다 · 수정 목록 35 -->
-                  <div id="motionPlaylistPanel" class="motion-playlist hidden" aria-label="재생 목록"></div>
+                  <div id="motionPlaylistPanel" class="motion-playlist user-resizable" data-resize-key="anim.playlist" aria-label="재생 목록"></div>
                 </section>
               </div>
                 <div class="motion-run-main">
@@ -87,11 +92,6 @@
                           <option value="10">10초 일괄 적용</option>
                         </select>
                       </label>
-                      <div class="compact-field"><span>MuJoCo 같이 보기</span>
-                        <span class="mujoco-companion-field" title="계산이 끝난 재생 등록 애니메이션만 · 켜면 아래 「3D 보기 (웹)」가 열리고 재생이 running 으로 바뀌는 순간 0초부터 같이 출발합니다 · 이 브라우저에서 그립니다(원격 접속자 포함)">
-                          <input id="motionRunMujocoToggle" type="checkbox" disabled>
-                        </span>
-                      </div>
                       <label class="compact-field"><span>회차 사이 동작</span>
                         <select id="motionAutomationRepeatMode" class="compact-select" disabled>
                           <option value="direct">바로 다음 회차</option>
@@ -132,9 +132,15 @@
             <details id="sim3dSection" class="motion-file-subsection sim3d-section" aria-label="3D 보기 (웹)">
               <summary class="section-head compact sim3d-summary">
                 <strong>3D 보기 (웹)</strong>
-                <span id="sim3dStatus">펼치면 로봇 팩의 3D 장면을 불러옵니다 · 실물과 같이 보려면 위 「MuJoCo 같이 보기」</span>
+                <span id="sim3dStatus">펼치면 로봇 팩의 3D 장면을 불러옵니다 · 기본은 실물 재생과 같이 움직입니다</span>
               </summary>
               <div class="sim3d-toolbar">
+                <!-- 「실물과 같이」 · 기본 켬 = 디지털 트윈 · 재생 등록 애니를 실물 재생과 같은 순간에 ·
+                     끄면 목록에서 고른 애니를 직접 재생·슬라이더로 본다 · 2026-10-09 사용자 · 수정 목록 86 -->
+                <label class="compact-field sim3d-view-toggle sim3d-follow-toggle"
+                  title="켜면 실물 재생과 같이 움직입니다(재생 등록 애니) · 끄면 고른 애니를 직접 재생합니다">
+                  <input id="sim3dFollowToggle" type="checkbox" checked><span>실물과 같이</span>
+                </label>
                 <button id="sim3dPrepareButton" type="button" title="로봇 팩에서 3D 장면을 만듭니다 · 팩마다 한 번">3D 장면 준비</button>
                 <button id="sim3dLoadButton" type="button" disabled title="선택한 애니메이션의 MuJoCo 계산 결과를 불러옵니다">프레임 불러오기</button>
                 <button id="sim3dPlayButton" type="button" class="primary" disabled>재생</button>
@@ -160,7 +166,7 @@
                   <input id="sim3dBlenderToggle" type="checkbox"><span>Blender 뷰</span>
                 </label>
               </div>
-              <div id="sim3dCanvasWrap" class="sim3d-canvas-wrap" aria-label="3D 화면"></div>
+              <div id="sim3dCanvasWrap" class="sim3d-canvas-wrap user-resizable" data-resize-key="anim.3d" aria-label="3D 화면"></div>
             </details>
 
             <section class="motion-file-subsection" aria-label="진행 상황">
@@ -188,7 +194,10 @@
                       <div id="motionRunProgressFill" class="motion-run-progress-fill"></div>
                     </div>
                   </div>
-                  <canvas id="motionRunGraphCanvas" class="motion-run-graph"></canvas>
+                  <!-- 끌어서 높이 조절 · 그래프는 다음 그리기에서 새 높이로 (96) -->
+                  <div class="motion-run-graph-box user-resizable" data-resize-key="anim.graph">
+                    <canvas id="motionRunGraphCanvas" class="motion-run-graph"></canvas>
+                  </div>
                   <div id="motionRunGraphAxisToggles" class="motion-run-graph-axis-toggles" aria-label="그래프 축 표시 선택"></div>
                 </section>
 
@@ -209,9 +218,9 @@
                   </div>
                   <!-- 「사용」·라이브 리밋은 누르는 즉시 재생에 들어간다 · 저장하지 않는다 · 40 -->
                   <p class="motion-run-axis-note">「사용」 체크·라이브 리밋은 <strong>누르는 즉시</strong> 재생에 반영됩니다 ·
-                    끄면 그 모터는 그 자리에 섭니다(서보 유지) · 다시 켜면 초기 이동 시간 동안 천천히 이어 갑니다 ·
+                    끄면 그 모터는 그 자리에 섭니다(서보 유지) · 다시 켜도 이 회차는 서 있고 다음 회차부터 같이 움직입니다 ·
                     매핑 파일에는 저장되지 않고 「재생 등록」 때 모두 풀립니다</p>
-                  <div class="table-wrap">
+                  <div class="table-wrap user-resizable" data-resize-key="anim.axes">
                     <table>
                       <thead>
                         <tr>

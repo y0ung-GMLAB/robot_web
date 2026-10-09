@@ -8,15 +8,24 @@
  * 위 ◀ ▶ 버튼 = 한 칸(길게 누르면 반복) · 초점이 있을 때 ←/→ 또는 ↓/↑ = 한 칸 ·
  * 한 칸 = 화면에서 고른 단위(모터 deg).
  *
- * 보내는 법 · supervisor 는 **앞 조그가 끝나기 전 새 조그를 거절**한다
- * (`이전 조그가 아직 돌고 있습니다`) · 그래서 돌린 양을 쌓아 두고, 앞 요청이
- * 끝나는 대로 쌓인 만큼을 한 번에 보낸다 · 빨리 돌려도 칸을 잃지 않는다 ·
- * 그 거절이 오면 쌓인 양을 지키고 잠깐 뒤 다시 보낸다 · 다른 거절(리밋·
- * 오프 모드·서보 꺼짐)은 쌓인 양을 버리고 사유를 보여 준다.
+ * 보내는 법 (2026-10-07 · 수정 목록 56) · 페이더와 같은 **실시간 스트림** `/ws/manual-stream` ·
+ * 전에는 조그를 한 번에 하나씩 보냈다 · supervisor 가 앞 조그가 끝나기 전 새 조그를
+ * 거절해서(최소 0.15 s + 정지 판정) 칸마다 가다 서다 하고 늦게 따라왔다(실물 2026-10-07).
+ * 지금은 처음 돌린 순간 모터 위치를 잡고, 돌린 칸만큼 목표를 옮겨 50 ms 마다 보낸다 ·
+ * 한 번에 옮기는 양은 `MAX_SPEED_DEG_S` × 50 ms 로 자른다(휙 돌려도 최고속으로 튀지 않음) ·
+ * 목표는 모터 운전 한계(lower/upper) 안으로 자른다(서버도 다시 자른다) ·
+ * 입력이 멈추고 도착하면(또는 잠시 뒤) `release` → supervisor 가 지금 자리에 세운다.
+ * 오프·스케줄 모드 · 서보 꺼짐 · 리밋은 서버가 다시 본다 · 거절은 그대로 보여 준다.
  *
- * 경로는 기존 조그 그대로(`requestAcServoJog` · `requestDynamixelJog`) ·
- * 오프 모드·리밋·서보 상태 검사는 서버가 한다 · 화면은 리밋을 넘는 양을
- * 미리 잘라 보내지 않을 뿐이다.
+ * ON/OFF 스위치 (수정 목록 52) · 끄면 다이얼만 잠근다(끌기·휠·키·◀ ▶ 무시 · 진행 중이면
+ * 세움) · 칸은 숨기지 않는다(옆 칸이 밀리지 않게 · 41) · 목표 위치 입력·「이동」 은 스위치와 무관.
+ *
+ * 조인트 deg (수정 목록 76 · 2026-10-08) · 조그 칸의 「조인트 deg 기준 · 감속·기어비·방향 적용」
+ * 체크를 다이얼도 따른다 · 켜져 있고 조인트 매핑이 있으면 한 칸 · 위치 · 목표 위치 · 남은 이동을
+ * **조인트 deg** 로 보이고 받는다 · 보낼 때 매핑 식(`jointToMotor` · 감속비 × scale × 방향 +
+ * 기준점·보정)으로 모터 deg 로 바꾼다 · 안쪽(스트림 목표 · 리밋 자름)은 늘 모터 deg ·
+ * 전에는 체크와 상관없이 한 칸 = 모터축 deg 라 1:150 축에서 출력이 0.0067° 씩만 움직였다.
+ * 「− limit · 기준점 지정 · + limit」 은 지금처럼 모터 위치를 넘긴다(저장 쪽이 환산).
  *
  * 목표 위치 (2026-10-02) · 목표 위치(모터 deg)를 적고 「이동」 ·
  * 기존 절대 이동 경로(`requestAcServoAction` · `requestDynamixelAction`) ·
@@ -28,13 +37,13 @@
 
 import {
   requestAcServoAction,
-  requestAcServoJog,
   requestDynamixelAction,
-  requestDynamixelJog,
   requestMotionSafetyStop,
 } from './api.js';
 import { normalizeMotorTypeKey } from './format.js';
+import { jointToMotor, mappingGain, motorToJoint } from './joint_mapping.js';
 import { manualControlBlockReason } from './run_mode_state.js';
+import { inRadPayload } from './unit_view.js';
 
 //: 한 바퀴를 몇 칸으로 나누는가 · 15° 마다 한 칸
 //: 드래그 한 칸 · 눈금 간격(CSS `.jog-dial-ticks` 24px)과 같다
@@ -42,10 +51,18 @@ const PX_PER_TICK = 24;
 //: ◀ ▶ 길게 누르기 · 처음 대기 · 반복 간격
 const HOLD_DELAY_MS = 400;
 const HOLD_REPEAT_MS = 120;
-//: 한 번에 보내는 최대 이동량 · 서버 조그 상한(모터 360°)과 같다
-const MAX_SEND_DEG = 360;
-//: 앞 조그가 아직 돌 때 다시 보낼 간격
-const RETRY_MS = 120;
+//: 스트림 전송 주기 · 페이더와 같다 · supervisor 임대 0.15 s 의 1/3
+const SEND_PERIOD_MS = 50;
+//: 한 번에 옮기는 목표의 상한 속도 · supervisor 기본 조그 속도(모터 deg/s) · 56
+const MAX_SPEED_DEG_S = 1125;
+//: 이만큼 안쪽이면 도착 · 놓는다 (모터 deg)
+const ARRIVE_DEG = 0.05;
+//: 목표에 다 보낸 뒤 이만큼 지나도 도착이 안 보이면 놓는다(서버가 지금 자리에 세움)
+const RELEASE_AFTER_MS = 1000;
+//: 휠 · 이만큼 굴리면 한 칸 (px) · 트랙패드가 한 번에 수십 칸 가지 않게 · 56
+const WHEEL_PX_PER_TICK = 100;
+//: Shift · 한 칸의 1/10
+const FINE_FACTOR = 0.1;
 
 //: 한 칸 크기 허용 범위 (모터 deg) · 화면 입력칸 min/max 와 같다
 const STEP_MIN_DEG = 0.001;
@@ -54,23 +71,30 @@ const STEP_MAX_DEG = 360;
 //: 이만큼 안쪽이면 이미 그 위치 · 보내지 않는다 (모터 deg)
 const TARGET_EPSILON_DEG = 1e-4;
 
-export function createJogDialController({ el, getLatestState, getSelectedAxis, onCapture = null }) {
+export function createJogDialController({
+  el, getLatestState, getSelectedAxis, onCapture = null, getJointRow = () => null,
+}) {
   //: 사람이 목표 칸을 고쳤나 · 안 고쳤으면 지금 모터 위치를 채워 둔다
   let targetTouched = false;
-  let pendingDeg = 0;
+  //: 목표 위치 「이동」 요청 중
   let inFlight = false;
-  let retryTimer = null;
   let dragging = false;
   let lastX = null;
-  let carry = 0;           // 드래그 중 한 칸이 안 된 나머지 각도
-  //: 눈금 링 표시 각도 · **화면 느낌 전용** · 기준 위치가 아니다
-  //: (바늘을 없앤 이유 · 상대 이동인데 바늘이 「0점」처럼 읽혔다 · 2026-10-02)
-  //: 눈금 24칸이 모두 같아서 서 있을 때는 어느 쪽이 기준인지 읽히지 않는다
+  let carry = 0;           // 드래그 중 한 칸이 안 된 나머지 픽셀
+  let wheelCarry = 0;      // 휠 · 한 칸이 안 된 나머지 픽셀
+  //: 눈금 띠 표시 위치 · **화면 느낌 전용** · 기준 위치가 아니다
   let ringOffsetPx = 0;
-  //: 쌓인 양을 비울 때마다 올린다 · 이미 날아간 요청의 응답이 비운 양을
-  //: 되살리지 못하게 한다 (「이전 조그」 거절 → 다시 쌓기 경로)
-  let pendingEpoch = 0;
   let lastMessage = '';
+  // 화면을 열면 늘 OFF · 켜야 돈다 · 기억하지 않는다 (2026-10-09 사용자 · 수정 목록 84)
+  let enabled = false;
+
+  //: 스트림 한 번(잡은 순간부터 놓을 때까지)
+  //:   axis · anchor(잡은 순간 모터 위치) · target(돌린 만큼 옮긴 목표) · commanded(보낸 목표)
+  //:   lastInputAt · sentAllAt(commanded 가 target 에 닿은 시각)
+  let session = null;
+  let sendTimer = null;
+  let socket = null;
+  let socketReady = false;
 
   function selectedMotor() {
     // 고른 게 없으면 없다 · Number(null) 은 0 이라 0번 모터가 움직였다 (2026-10-02 사용자 보고)
@@ -80,6 +104,49 @@ export function createJogDialController({ el, getLatestState, getSelectedAxis, o
     const motors = getLatestState()?.motors;
     if (!Number.isInteger(axis) || !Array.isArray(motors)) return null;
     return motors.find((motor) => Number(motor?.controller_index) === axis) || null;
+  }
+
+  function motorForAxis(axis) {
+    const motors = getLatestState()?.motors;
+    if (!Array.isArray(motors)) return null;
+    return motors.find((motor) => Number(motor?.controller_index) === axis) || null;
+  }
+
+  /** 조인트 deg 로 다루나 · 체크가 켜져 있고 이 모터에 쓸 수 있는 조인트 매핑이 있을 때만 · 76
+   *
+   * 체크는 조그 칸(`motionTestJogJointMode`)과 같은 것 · 매핑이 없으면 조그 쪽이 체크를
+   * 끄고 잠그므로 여기서도 모터 deg 가 된다.
+   */
+  function jointRow(motor) {
+    const box = el.motionTestJogJointMode;
+    if (!box?.checked || box.disabled) return null;
+    const axis = Number(motor?.controller_index);
+    if (!Number.isInteger(axis)) return null;
+    const row = getJointRow(axis);
+    return row && mappingGain(row) ? row : null;
+  }
+
+  /** 모터 deg → 화면 단위 (조인트 deg 또는 모터 deg) */
+  function toView(motor, motorDeg) {
+    if (motorDeg === null || motorDeg === undefined) return null;
+    const row = jointRow(motor);
+    return row ? motorToJoint(row, motorDeg) : motorDeg;
+  }
+
+  /** 화면 단위 → 모터 deg */
+  function fromView(motor, viewDeg) {
+    const row = jointRow(motor);
+    return row ? jointToMotor(row, viewDeg) : viewDeg;
+  }
+
+  /** 화면 단위의 변화량 → 모터 deg 변화량 (상대 이동 · 기준점·보정은 끼지 않는다) */
+  function deltaToMotor(motor, viewDelta) {
+    const row = jointRow(motor);
+    return row ? viewDelta * mappingGain(row) : viewDelta;
+  }
+
+  function unitText(motor) {
+    return jointRow(motor) ? '조인트 deg · 감속·기어비·방향 적용' : '모터 deg · 감속·기어비 미적용';
   }
 
   /** 입력칸 값 · 범위 밖이거나 숫자가 아니면 null (돌려도 아무것도 안 보낸다) */
@@ -114,26 +181,151 @@ export function createJogDialController({ el, getLatestState, getSelectedAxis, o
     return '';
   }
 
-  /** 리밋 안으로 자른 이동량 · 리밋을 모르면 그대로 */
-  function clampToLimits(motor, delta) {
-    const current = positionDeg(motor);
-    if (current === null) return delta;
+  /** 다이얼만의 사유 · 스위치가 꺼졌으면 잠금 (목표 위치 이동은 무관) */
+  function dialBlockReason(motor) {
+    if (!enabled) return '다이얼 OFF · 위 스위치로 켜세요';
+    return blockReason(motor);
+  }
+
+  /** 모터 운전 한계 안으로 · 모르면 그대로 */
+  function clampToLimits(motor, target) {
     const lower = Number(motor?.lower);
     const upper = Number(motor?.upper);
-    let target = current + delta;
-    if (Number.isFinite(lower)) target = Math.max(lower, target);
-    if (Number.isFinite(upper)) target = Math.min(upper, target);
-    return target - current;
+    let out = target;
+    if (Number.isFinite(lower)) out = Math.max(lower, out);
+    if (Number.isFinite(upper)) out = Math.min(upper, out);
+    return out;
   }
 
   // ---------------------------------------------------------------- //
-  // 보내기
+  // 스트림
   // ---------------------------------------------------------------- //
 
-  function addTicks(ticks) {
+  function ensureSocket() {
+    if (socket) return;
+    const Socket = globalThis.WebSocket;
+    if (typeof Socket !== 'function') {
+      lastMessage = '이 브라우저에서 실시간 연결을 열 수 없습니다';
+      return;
+    }
+    const protocol = globalThis.location?.protocol === 'https:' ? 'wss' : 'ws';
+    socket = new Socket(`${protocol}://${globalThis.location?.host || ''}/ws/manual-stream`);
+    socketReady = false;
+    socket.onopen = () => {
+      // 다이얼은 모터 deg 를 바로 보낸다 · 조인트 매핑 변환이 없어 개정 확인이 필요 없다
+      socket?.send(JSON.stringify({ type: 'hello' }));
+    };
+    socket.onmessage = (event) => {
+      let payload = null;
+      try {
+        payload = JSON.parse(event.data);
+      } catch {
+        return;
+      }
+      if (payload?.type === 'hello_ok') {
+        socketReady = true;
+        return;
+      }
+      if (payload?.type === 'error') {
+        lastMessage = payload.message || '서버가 다이얼 연결을 거절했습니다';
+        render();
+        return;   // 서버가 곧 닫는다 · onclose 가 정리한다
+      }
+      if (payload?.type === 'result' && payload.success === false) {
+        // 거절(리밋 · 서보 꺼짐 · 모드 등) · 이번 돌림은 끝낸다 · 서버가 세운다
+        lastMessage = String(payload.message || '다이얼 이동 거부');
+        endSession(true);
+      }
+    };
+    socket.onclose = () => {
+      socket = null;
+      socketReady = false;
+      // 끊기면 서버가 만진 축을 지금 자리에 세운다 · 화면도 이번 돌림을 끝낸다
+      if (session) {
+        session = null;
+        stopTimer();
+        render();
+      }
+    };
+    socket.onerror = () => {};
+  }
+
+  function send(payload) {
+    if (!socket || !socketReady || socket.readyState !== 1) return false;
+    // 화면은 모터 deg · 서버에는 rad · 수정 목록 6-4
+    socket.send(JSON.stringify(inRadPayload(payload)));
+    return true;
+  }
+
+  function startTimer() {
+    if (sendTimer) return;
+    sendTimer = window.setInterval(tickStream, SEND_PERIOD_MS);
+  }
+
+  function stopTimer() {
+    if (sendTimer) {
+      window.clearInterval(sendTimer);
+      sendTimer = null;
+    }
+  }
+
+  /** 50 ms 마다 · 보낸 목표를 돌린 목표 쪽으로 속도 상한만큼 옮겨 보낸다 */
+  function tickStream() {
+    if (!session) {
+      stopTimer();
+      return;
+    }
+    const motor = motorForAxis(session.axis);
+    const reason = blockReason(motor);
+    if (reason) {
+      lastMessage = reason;
+      endSession(true);
+      return;
+    }
+    const now = Date.now();
+    const maxStep = MAX_SPEED_DEG_S * (SEND_PERIOD_MS / 1000);
+    const diff = session.target - session.commanded;
+    const next = session.commanded + Math.max(-maxStep, Math.min(maxStep, diff));
+    // **보낸 것만** 앞으로 간다 · 연결 전에 혼자 앞서 나가면 연결 직후 큰 목표가 한 번에 간다(튐)
+    if (!send({ type: 'target', axis: session.axis, target_deg: next })) {
+      render();
+      return;
+    }
+    session.commanded = next;
+    if (Math.abs(session.target - session.commanded) < 1e-9) {
+      if (!session.sentAllAt) session.sentAllAt = now;
+    } else {
+      session.sentAllAt = 0;
+    }
+    // 입력이 멈췄고 목표를 다 보냈으면 · 도착했거나 잠시 지나면 놓는다
+    const position = positionDeg(motor);
+    const arrived = position !== null && Math.abs(position - session.target) < ARRIVE_DEG;
+    const idle = now - session.lastInputAt > SEND_PERIOD_MS * 4;
+    if (session.sentAllAt && idle && (arrived || now - session.sentAllAt > RELEASE_AFTER_MS)) {
+      endSession(true);
+      return;
+    }
+    render();
+  }
+
+  /** 이번 돌림을 끝낸다 · `release` 면 서버가 지금 자리에 세운다 */
+  function endSession(release) {
+    if (!session) return;
+    const axis = session.axis;
+    session = null;
+    stopTimer();
+    if (release) send({ type: 'release', axes: [axis] });
+    render();
+  }
+
+  // ---------------------------------------------------------------- //
+  // 입력 → 목표
+  // ---------------------------------------------------------------- //
+
+  function addTicks(ticks, fine = false) {
     if (!ticks) return;
     const motor = selectedMotor();
-    const reason = blockReason(motor);
+    const reason = dialBlockReason(motor);
     if (reason) {
       lastMessage = reason;
       render();
@@ -145,97 +337,35 @@ export function createJogDialController({ el, getLatestState, getSelectedAxis, o
       render();
       return;
     }
-    pendingDeg += ticks * step;
+    const axis = Number(motor.controller_index);
+    if (session && session.axis !== axis) endSession(true);
+    if (!session) {
+      const position = positionDeg(motor);
+      if (position === null) {
+        lastMessage = '모터 위치를 아직 모릅니다';
+        render();
+        return;
+      }
+      session = {
+        axis, anchor: position, target: position, commanded: position,
+        lastInputAt: Date.now(), sentAllAt: 0,
+      };
+      lastMessage = '';
+    }
+    // 한 칸은 화면 단위(조인트 deg 면 감속비·방향을 곱해 모터 deg) · 76
+    const wanted = session.target + deltaToMotor(motor, ticks * step * (fine ? FINE_FACTOR : 1));
+    const bounded = clampToLimits(motor, wanted);
+    if (Math.abs(bounded - wanted) > 1e-9) {
+      lastMessage = wanted > bounded ? '상한에 닿았습니다' : '하한에 닿았습니다';
+    }
+    session.target = bounded;
+    session.lastInputAt = Date.now();
+    session.sentAllAt = 0;
     // 드래그는 손을 따라 이미 밀었다(onPointerMove) · 휠·방향키·화살표만 한 칸씩 민다
     if (!dragging) ringOffsetPx += ticks * PX_PER_TICK;
+    ensureSocket();
+    startTimer();
     render();
-    pump();
-  }
-
-  /** 아직 안 보낸 쌓인 양만 버린다 · 이미 움직이는 조그는 끝까지 간다
-   *
-   * 정지 명령을 보내지 않는다 · 날아간 요청은 그대로 두고, 그 응답이
-   * 「이전 조그」 거절이어도 세대가 바뀌었으면 다시 쌓지 않는다.
-   */
-  function clearPending(message) {
-    const had = Math.abs(pendingDeg) > 1e-9 || Boolean(retryTimer);
-    pendingDeg = 0;
-    pendingEpoch += 1;
-    if (retryTimer) {
-      window.clearTimeout(retryTimer);
-      retryTimer = null;
-    }
-    if (had && message) lastMessage = message;
-    render();
-    return had;
-  }
-
-  async function pump() {
-    if (inFlight || retryTimer || Math.abs(pendingDeg) < 1e-9) return;
-    const motor = selectedMotor();
-    const reason = blockReason(motor);
-    if (reason) {
-      pendingDeg = 0;
-      lastMessage = reason;
-      render();
-      return;
-    }
-    let delta = Math.max(-MAX_SEND_DEG, Math.min(MAX_SEND_DEG, pendingDeg));
-    const clamped = clampToLimits(motor, delta);
-    if (Math.abs(clamped) < 1e-9) {
-      pendingDeg = 0;
-      lastMessage = delta > 0 ? '상한에 닿았습니다' : '하한에 닿았습니다';
-      render();
-      return;
-    }
-    if (clamped !== delta) {
-      // 리밋에서 남는 양은 버린다 · 계속 쌓이면 리밋에 붙은 채 헛돈다
-      lastMessage = '리밋까지만 이동합니다';
-      pendingDeg = clamped;
-      delta = clamped;
-    }
-    pendingDeg -= delta;
-    inFlight = true;
-    const epoch = pendingEpoch;
-    render();
-    try {
-      const send = isDynamixel(motor) ? requestDynamixelJog : requestAcServoJog;
-      const response = await send({
-        axis: Number(motor.controller_index),
-        relative_deg: delta,
-      });
-      if (response?.success === false) {
-        const message = String(response?.message || '조그 거부');
-        if (message.includes('이전 조그')) {
-          // 앞 조그가 아직 돈다 · 이번 양을 되돌려 쌓고 잠깐 뒤 다시
-          // 그 사이 사람이 쌓인 양을 비웠으면(세대 바뀜) 되살리지 않는다
-          if (epoch === pendingEpoch) {
-            pendingDeg += delta;
-            scheduleRetry();
-          }
-        } else {
-          pendingDeg = 0;
-          lastMessage = message;
-        }
-      } else if (!lastMessage.startsWith('리밋')) {
-        lastMessage = `${formatDeg(delta)} 보냄`;
-      }
-    } catch (error) {
-      pendingDeg = 0;
-      lastMessage = `조그 실패: ${error?.message || error}`;
-    } finally {
-      inFlight = false;
-      render();
-      if (!retryTimer) pump();
-    }
-  }
-
-  function scheduleRetry() {
-    if (retryTimer) return;
-    retryTimer = window.setTimeout(() => {
-      retryTimer = null;
-      pump();
-    }, RETRY_MS);
   }
 
   // ---------------------------------------------------------------- //
@@ -254,13 +384,20 @@ export function createJogDialController({ el, getLatestState, getSelectedAxis, o
   function targetLimitReason(motor, target) {
     const lower = Number(motor?.lower);
     const upper = Number(motor?.upper);
-    if (Number.isFinite(lower) && target < lower) {
-      return `목표 ${target}° 가 하한 ${lower}° 밖입니다 · 리밋은 조인트 매핑에서 정합니다`;
+    const below = Number.isFinite(lower) && target < lower;
+    const above = Number.isFinite(upper) && target > upper;
+    if (!below && !above) return '';
+    // 비교는 모터 deg · 글은 화면 단위 · 조인트면 방향 반전으로 하한·상한이 뒤바뀔 수 있어 범위로 적는다
+    const shown = (value) => Math.round(toView(motor, value) * 1000) / 1000;
+    let bounds;
+    if (Number.isFinite(lower) && Number.isFinite(upper)) {
+      const a = shown(lower);
+      const b = shown(upper);
+      bounds = `${Math.min(a, b)}° ~ ${Math.max(a, b)}°`;
+    } else {
+      bounds = below ? `한계 ${shown(lower)}°` : `한계 ${shown(upper)}°`;
     }
-    if (Number.isFinite(upper) && target > upper) {
-      return `목표 ${target}° 가 상한 ${upper}° 밖입니다 · 리밋은 조인트 매핑에서 정합니다`;
-    }
-    return '';
+    return `목표 ${shown(target)}° 가 운전 범위(${bounds}) 밖입니다 · 리밋은 조인트 매핑에서 정합니다`;
   }
 
   async function moveToTarget() {
@@ -271,12 +408,13 @@ export function createJogDialController({ el, getLatestState, getSelectedAxis, o
       render();
       return;
     }
-    const target = targetDeg();
-    if (target === null) {
-      lastMessage = '목표 위치(모터 deg)를 숫자로 입력하세요';
+    const typed = targetDeg();
+    if (typed === null) {
+      lastMessage = `목표 위치(${jointRow(motor) ? '조인트' : '모터'} deg)를 숫자로 입력하세요`;
       render();
       return;
     }
+    const target = fromView(motor, typed);
     const limitReason = targetLimitReason(motor, target);
     if (limitReason) {
       lastMessage = limitReason;
@@ -290,18 +428,18 @@ export function createJogDialController({ el, getLatestState, getSelectedAxis, o
       return;
     }
     inFlight = true;
-    lastMessage = `목표 ${target}° 로 이동 요청 중`;
+    lastMessage = `목표 ${typed}° 로 이동 요청 중`;
     render();
     try {
-      const send = isDynamixel(motor) ? requestDynamixelAction : requestAcServoAction;
+      const sendAction = isDynamixel(motor) ? requestDynamixelAction : requestAcServoAction;
       // duration_sec 없음 · supervisor 가 모터 설정 속도·가속 한계로 시간을 정한다
-      const response = await send({
+      const response = await sendAction({
         axis: Number(motor.controller_index),
         target_deg: target,
       });
       lastMessage = response?.success === false
         ? String(response?.message || '이동 거부')
-        : `목표 ${target}° 로 이동 시작`;
+        : `목표 ${typed}° 로 이동 시작`;
     } catch (error) {
       lastMessage = `이동 실패: ${error?.message || error}`;
     } finally {
@@ -310,9 +448,9 @@ export function createJogDialController({ el, getLatestState, getSelectedAxis, o
     }
   }
 
-  /** 아직 안 보낸 다이얼 양이 있나 (다시 보내기 대기 포함) */
+  /** 다이얼이 아직 모터를 몰고 있나 (돌린 목표에 도착해 놓기 전까지) */
   function hasPending() {
-    return Math.abs(pendingDeg) > 1e-9 || Boolean(retryTimer);
+    return Boolean(session);
   }
 
   // ---------------------------------------------------------------- //
@@ -341,7 +479,7 @@ export function createJogDialController({ el, getLatestState, getSelectedAxis, o
     const ticks = Math.trunc(carry / PX_PER_TICK);
     if (ticks) {
       carry -= ticks * PX_PER_TICK;
-      addTicks(ticks);   // 오른쪽으로 끌면 + (▶ · ArrowRight 와 같은 방향)
+      addTicks(ticks, Boolean(event.shiftKey));   // 오른쪽으로 끌면 +
     }
   }
 
@@ -367,10 +505,11 @@ export function createJogDialController({ el, getLatestState, getSelectedAxis, o
     button.addEventListener('pointerdown', (event) => {
       if (button.disabled) return;
       event.preventDefault();
-      addTicks(direction);
+      const fine = Boolean(event.shiftKey);
+      addTicks(direction, fine);
       stop();
       holdTimer = window.setTimeout(() => {
-        repeatTimer = window.setInterval(() => addTicks(direction), HOLD_REPEAT_MS);
+        repeatTimer = window.setInterval(() => addTicks(direction, fine), HOLD_REPEAT_MS);
       }, HOLD_DELAY_MS);
     });
     for (const type of ['pointerup', 'pointercancel', 'pointerleave', 'blur']) {
@@ -378,10 +517,18 @@ export function createJogDialController({ el, getLatestState, getSelectedAxis, o
     }
   }
 
+  /** 휠 · 굴린 양(`deltaY`)을 픽셀로 맞춰 쌓는다 · 트랙패드의 잔 이벤트가 한 칸씩 되지 않게 · 56 */
   function onWheel(event) {
     if (el.jogDial.getAttribute('aria-disabled') === 'true') return;
     event.preventDefault();
-    addTicks(event.deltaY < 0 ? 1 : -1);
+    const mode = Number(event.deltaMode) || 0;   // 0 px · 1 줄 · 2 쪽
+    const scale = mode === 1 ? 40 : (mode === 2 ? 800 : 1);
+    wheelCarry += -Number(event.deltaY || 0) * scale;   // 위로 굴리면 +
+    const ticks = Math.trunc(wheelCarry / WHEEL_PX_PER_TICK);
+    if (ticks) {
+      wheelCarry -= ticks * WHEEL_PX_PER_TICK;
+      addTicks(ticks, Boolean(event.shiftKey));
+    }
   }
 
   function onKeyDown(event) {
@@ -389,7 +536,8 @@ export function createJogDialController({ el, getLatestState, getSelectedAxis, o
     const minus = event.key === 'ArrowLeft' || event.key === 'ArrowDown';
     if (!plus && !minus) return;
     event.preventDefault();
-    addTicks(plus ? 1 : -1);
+    // 잠금 검사는 addTicks 가 한다(스위치 OFF 포함) · 52
+    addTicks(plus ? 1 : -1, Boolean(event.shiftKey));
   }
 
   // ---------------------------------------------------------------- //
@@ -411,21 +559,30 @@ export function createJogDialController({ el, getLatestState, getSelectedAxis, o
     el.jogDialRing.classList.toggle('dragging', dragging);
   }
 
+  function renderSwitch() {
+    const button = el.jogDialEnabledSwitch;
+    if (!button) return;
+    button.setAttribute('aria-checked', enabled ? 'true' : 'false');
+    button.textContent = enabled ? '다이얼 ON' : '다이얼 OFF';
+    button.classList.toggle('on', enabled);
+    el.jogDial?.classList.toggle('locked', !enabled);
+  }
+
   function renderTarget(motor, reason) {
     if (!el.jogTargetInput) return;
-    // 안 고쳤으면 지금 모터 위치를 채운다 · 다이얼 표시와 같은 값
-    const position = positionDeg(motor);
+    // 안 고쳤으면 지금 위치를 채운다 · 다이얼 표시와 같은 값 · 같은 단위
+    const position = toView(motor, positionDeg(motor));
     if (!targetTouched && document.activeElement !== el.jogTargetInput) {
       el.jogTargetInput.value = position === null ? '' : String(Math.round(position * 1000) / 1000);
     }
     el.jogTargetInput.disabled = Boolean(reason);
     if (el.jogTargetMoveButton) {
-      const target = targetDeg();
-      const limitReason = target === null ? '' : targetLimitReason(motor, target);
+      const typed = targetDeg();
+      const limitReason = typed === null ? '' : targetLimitReason(motor, fromView(motor, typed));
       el.jogTargetMoveButton.disabled = Boolean(reason) || inFlight || hasPending()
-        || target === null || Boolean(limitReason);
+        || typed === null || Boolean(limitReason);
       el.jogTargetMoveButton.title = reason || limitReason
-        || (target === null ? '목표 위치를 입력하세요' : `모터 ${target}° 로 이동`);
+        || (typed === null ? '목표 위치를 입력하세요' : `${jointRow(motor) ? '조인트' : '모터'} ${typed}° 로 이동`);
     }
   }
 
@@ -433,40 +590,54 @@ export function createJogDialController({ el, getLatestState, getSelectedAxis, o
     if (!el.jogDial) return;
     const motor = selectedMotor();
     const reason = blockReason(motor);
+    const dialReason = dialBlockReason(motor);
+    renderSwitch();
     renderTarget(motor, reason);
-    el.jogDial.setAttribute('aria-disabled', reason ? 'true' : 'false');
-    el.jogDial.title = reason || '좌우로 끌면 모터가 그만큼 움직입니다 · 휠·방향키·◀ ▶ 도 됩니다 · 단위 = 모터 deg';
+    el.jogDial.setAttribute('aria-disabled', dialReason ? 'true' : 'false');
+    el.jogDial.title = dialReason || `좌우로 끌면 모터가 그만큼 움직입니다 · 휠·방향키·◀ ▶ 도 됩니다 · Shift = 1/10 칸 · 단위 = ${unitText(motor)}`;
+    const joint = Boolean(jointRow(motor));
+    // 라벨은 짧게(줄 넘침 방지) · 자세한 뜻은 조그 칸 체크 글과 다이얼 툴팁에
+    const shortUnit = joint ? '조인트 deg' : '모터 deg · 감속·기어비 미적용';
+    if (el.jogDialStepLabel) el.jogDialStepLabel.textContent = `다이얼 한 칸 = (${shortUnit})`;
+    if (el.jogTargetLabel) el.jogTargetLabel.textContent = `목표 위치 (${shortUnit})`;
+    if (el.jogDialPositionLabel) el.jogDialPositionLabel.textContent = joint ? '조인트 위치' : '모터 위치';
     for (const arrow of [el.jogDialMinus, el.jogDialPlus]) {
-      if (arrow) arrow.disabled = Boolean(reason);
+      if (arrow) arrow.disabled = Boolean(dialReason);
     }
     paintRing();
     if (el.jogDialPosition) {
-      const position = positionDeg(motor);
-      el.jogDialPosition.textContent = position === null ? '-' : `${position.toFixed(2)}°`;
+      const position = toView(motor, positionDeg(motor));
+      el.jogDialPosition.textContent = position === null ? '-' : `${position.toFixed(joint ? 3 : 2)}°`;
     }
     if (el.jogDialPending) {
-      const pending = pendingDeg;
-      el.jogDialPending.textContent = Math.abs(pending) < 1e-9
-        ? (inFlight ? '이동 중' : '대기')
-        : `남은 이동 ${formatDeg(pending)}`;
+      let text = inFlight ? '이동 중' : '대기';
+      if (session) {
+        const position = positionDeg(motorForAxis(session.axis));
+        const left = position === null ? session.target - session.commanded : session.target - position;
+        // 남은 양은 화면 단위로 · 조인트면 감속비·방향으로 나눈다 · 76
+        const row = jointRow(motorForAxis(session.axis));
+        const shown = row ? left / mappingGain(row) : left;
+        text = Math.abs(left) < ARRIVE_DEG ? '이동 중' : `남은 이동 ${formatDeg(shown)}`;
+      }
+      el.jogDialPending.textContent = text;
     }
     if (el.jogDialMessage) {
       el.jogDialMessage.textContent = reason || lastMessage || '';
     }
-    const busy = Boolean(reason) || inFlight || Math.abs(pendingDeg) > 1e-9;
+    const busy = Boolean(reason) || inFlight || hasPending();
     for (const button of [el.jogDialSetReference, el.jogDialSetLower, el.jogDialSetUpper]) {
       if (button) button.disabled = busy;
     }
     // 「동작 취소」는 늘 누를 수 있다 · 누를 일이 생긴 순간 찾기 쉬워야 한다 (2026-10-02)
   }
 
-  /** 동작 취소 · 남은 다이얼 이동을 버리고 움직이는 조그·이동을 멈춘다 · 서보 ON 유지
+  /** 동작 취소 · 다이얼이 몰던 것을 놓고 움직이는 이동을 멈춘다 · 서보 ON 유지
    *
    * 정지는 「모터 동작 정지」와 같은 경로(`requestMotionSafetyStop`) · 수동 모드가
    * 아니어도 막지 않는다 (정지는 모든 모드에서 된다).
    */
   async function cancelMotion() {
-    clearPending('');
+    endSession(true);
     lastMessage = '동작 취소 요청 중';
     render();
     try {
@@ -484,7 +655,7 @@ export function createJogDialController({ el, getLatestState, getSelectedAxis, o
   async function capture(kind) {
     const motor = selectedMotor();
     const reason = blockReason(motor);
-    if (reason || inFlight || Math.abs(pendingDeg) > 1e-9) {
+    if (reason || inFlight || hasPending()) {
       lastMessage = reason || '이동이 끝난 뒤에 지정하세요';
       render();
       return;
@@ -499,8 +670,21 @@ export function createJogDialController({ el, getLatestState, getSelectedAxis, o
     render();
   }
 
+  function setEnabled(value) {
+    enabled = Boolean(value);
+    if (!enabled) {
+      // 끄면 잠근다 · 돌리던 것은 지금 자리에 세운다 · 칸은 그대로 둔다(41)
+      endSession(true);
+      wheelCarry = 0;
+      carry = 0;
+      lastMessage = '';
+    }
+    render();
+  }
+
   function bindEvents() {
     el.jogDialCancelPending?.addEventListener('click', cancelMotion);
+    el.jogDialEnabledSwitch?.addEventListener('click', () => setEnabled(!enabled));
     el.jogDialSetReference?.addEventListener('click', () => capture('reference'));
     el.jogDialSetLower?.addEventListener('click', () => capture('lower'));
     el.jogDialSetUpper?.addEventListener('click', () => capture('upper'));
@@ -523,22 +707,36 @@ export function createJogDialController({ el, getLatestState, getSelectedAxis, o
     el.jogDial.addEventListener('keydown', onKeyDown);
     bindArrow(el.jogDialMinus, -1);
     bindArrow(el.jogDialPlus, 1);
+    el.motionTestJogJointMode?.addEventListener('change', () => {
+      // 단위가 바뀌면 돌리던 것은 지금 자리에 세우고 목표 칸을 새 단위로 다시 채운다 · 76
+      lastMessage = session ? '단위를 바꿔 지금 자리에 세웠습니다' : '';
+      endSession(true);
+      targetTouched = false;
+      render();
+    });
     el.jogDialStep?.addEventListener('input', () => {
-      // 단위를 바꾸면 옛 단위로 쌓인 양은 의미가 바뀐다 · 아직 안 보낸 것은 버린다
-      lastMessage = '';
-      clearPending('한 칸 크기를 바꿔 쌓인 양을 비웠습니다');
+      // 단위를 바꾸면 돌리던 것은 지금 자리에 세운다 · 새 단위로 다시 돌린다
+      lastMessage = session ? '한 칸 크기를 바꿔 지금 자리에 세웠습니다' : '';
+      endSession(true);
+      render();
+    });
+    window.addEventListener?.('beforeunload', () => {
+      endSession(true);
+      socket?.close();
     });
   }
 
   return {
     bindEvents,
     renderRuntimeState: render,
-    /** 모터를 바꾸거나 프로젝트가 바뀌면 쌓인 양을 버린다 · 엉뚱한 모터로 가면 안 된다 */
+    /** 모터를 바꾸거나 프로젝트가 바뀌면 돌리던 것을 세운다 · 엉뚱한 모터로 가면 안 된다 */
     reset: () => {
       lastMessage = '';
       // 다른 모터의 목표값이 남으면 엉뚱한 곳으로 간다 · 새 모터 위치로 다시 채운다
       targetTouched = false;
-      clearPending('');
+      endSession(true);
+      // 돌리던 것이 없어도 다시 그린다 · 새 모터가 골라졌다(안 그리면 「모터를 먼저 선택하세요」 가 남음)
+      render();
     },
   };
 }

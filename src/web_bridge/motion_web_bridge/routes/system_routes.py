@@ -10,7 +10,7 @@ from fastapi.responses import FileResponse, Response
 from ament_index_python.packages import get_package_share_directory
 from motion_common import local_clock
 
-from motion_web_bridge import desktop_shortcut
+from motion_web_bridge import desktop_shortcut, system_timezone, system_update
 from motion_web_bridge.index_composer import IndexComposer
 
 
@@ -72,6 +72,15 @@ def register_system_routes(app: FastAPI, bridge, project_call) -> None:
         if request_headers is not None and request_headers.get('if-none-match') == etag:
             return Response(status_code=304, headers=headers)
         return Response(content=html, media_type='text/html; charset=utf-8', headers=headers)
+
+    @app.get('/v2')
+    @app.get('/v2/')
+    async def index_v2(request: Request = None):
+        """새 UI · 뼈대 + 홈부터 · 설계안 2026-10-09 · 기존 화면(/)은 그대로 · 파일은 static/v2/"""
+        asset = ui_share / 'v2' / 'index.html'
+        if not asset.is_file():
+            raise HTTPException(status_code=404, detail='Not Found')
+        return _asset_response(asset, request)
 
     @app.get('/favicon.ico')
     async def favicon():
@@ -155,6 +164,75 @@ def register_system_routes(app: FastAPI, bridge, project_call) -> None:
     @app.get('/api/coordination')
     async def coordination_status():
         return await asyncio.to_thread(bridge.coordination.snapshot)
+
+    # 웹에서 업데이트 · 이 PC · 같은 망 로봇 PC 전부 (2026-10-08)
+    @app.get('/api/system/update')
+    async def system_update_status():
+        return await asyncio.to_thread(bridge.system_update.status)
+
+    @app.post('/api/system/update')
+    async def system_update_start():
+        return await asyncio.to_thread(bridge.system_update.start)
+
+    # 시간대 · 이 PC · 같은 망 로봇 PC 전부 · 수정 목록 79 (2026-10-08)
+    @app.post('/api/system/timezone')
+    async def system_timezone_apply(request: Request):
+        body = await request.json()
+        zone = body.get('zone') if isinstance(body, dict) else ''
+        return await asyncio.to_thread(bridge.system_timezone.apply, zone)
+
+    @app.post('/api/system/timezone-all')
+    async def system_timezone_apply_all(request: Request):
+        body = await request.json()
+        zone = body.get('zone') if isinstance(body, dict) else ''
+        return await asyncio.to_thread(
+            lambda: system_timezone.apply_all(_network_pcs(), zone, bridge.system_timezone)
+        )
+
+    # Wi-Fi · 이 PC · 수정 목록 81 (2026-10-08)
+    @app.get('/api/system/wifi')
+    async def wifi_status():
+        return await asyncio.to_thread(bridge.wifi.status)
+
+    @app.post('/api/system/wifi/scan')
+    async def wifi_scan():
+        return await asyncio.to_thread(bridge.wifi.scan)
+
+    @app.post('/api/system/wifi/connect')
+    async def wifi_connect(request: Request):
+        body = await request.json()
+        if not isinstance(body, dict):
+            raise HTTPException(status_code=400, detail='request body must be an object')
+        static = body.get('static') if isinstance(body.get('static'), dict) else None
+        return await asyncio.to_thread(
+            lambda: bridge.wifi.connect(
+                body.get('ssid'), body.get('password'), static, security=body.get('security'),
+            )
+        )
+
+    @app.post('/api/system/wifi/confirm')
+    async def wifi_confirm():
+        return await asyncio.to_thread(bridge.wifi.confirm)
+
+    @app.post('/api/system/wifi/rollback')
+    async def wifi_rollback():
+        return await asyncio.to_thread(bridge.wifi.rollback)
+
+    def _network_pcs():
+        runtime = bridge.coordination.snapshot().get('runtime') or {}
+        return runtime.get('network_pcs') if isinstance(runtime, dict) else []
+
+    @app.get('/api/system/update-all')
+    async def system_update_all_status():
+        return await asyncio.to_thread(
+            lambda: system_update.status_all(_network_pcs(), bridge.system_update)
+        )
+
+    @app.post('/api/system/update-all')
+    async def system_update_all_start():
+        return await asyncio.to_thread(
+            lambda: system_update.start_all(_network_pcs(), bridge.system_update)
+        )
 
     @app.put('/api/coordination/settings')
     async def update_coordination_settings(request: Request):

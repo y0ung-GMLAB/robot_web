@@ -26,6 +26,7 @@ from motion_coordination_interfaces.msg import (
     GroupHeartbeat,
     GroupTimeSync,
     GroupSystemInfo,
+    PcPresence,
 )
 from dataclasses import replace
 
@@ -34,7 +35,7 @@ from rclpy.node import Node
 from rclpy.qos import DurabilityPolicy, QoSProfile, ReliabilityPolicy
 from .alarm_registry import AlarmRegistry
 from .command_dispatcher import CommandDispatcher
-from motion_common import net_ready
+from motion_common import cycle_failure, net_ready
 from motion_common.group_config import (
     GroupConfig,
     load_group_config,
@@ -92,6 +93,18 @@ LOCAL_RUNTIME_HTTP_TIMEOUT_SEC = 0.30
 TRIGGER_PROBE_QOS = QoSProfile(
     depth=32, reliability=ReliabilityPolicy.BEST_EFFORT,
 )
+
+#: 같은 망 PC 알림 · 그룹 참가와 상관없이 늘 보낸다 · 마스터 화면에서 IP 를 보고 탭을 연다
+#: 최선형 · 스피커 앱(최선형 구독·발행)과도 맞물린다 · 하나 빠져도 2초 뒤 다음 것
+PRESENCE_QOS = QoSProfile(depth=8, reliability=ReliabilityPolicy.BEST_EFFORT)
+PRESENCE_INTERVAL_SEC = 2.0
+#: 이만큼 소식이 없으면 「끊김」 · 알림 3번
+PRESENCE_OFFLINE_SEC = 6.5
+#: 이만큼 지나면 표에서 뺀다 · 이름을 바꾼 PC 의 옛 줄이 남지 않게
+PRESENCE_FORGET_SEC = 600.0
+#: 시각 맞추기 · 불확실성이 크면 설정 측정 수(5)의 이만큼 배까지 더 잰다 · 수정 목록 93
+#: Wi-Fi 실측(2026-10-08) · 평균 6 ms · 1 % 가 20 ms 넘음 · 가끔 250 ms · 한두 번 튀어도 더 재면 빠른 왕복이 나온다
+SYNC_MAX_ROUNDS = 4
 
 
 def _stamp_to_float(stamp: Any) -> float:
@@ -249,6 +262,15 @@ class MotionCoordinationNode(Node):
             GroupTimeSync, topics.GROUP_TIME_PROBE,
             self._time_sync_callback, probe_qos,
         )
+        # 같은 망 PC 표 · 그룹과 상관없이 · 핵심 요구 4
+        self._presence: Dict[tuple, Dict[str, Any]] = {}
+        self._presence_lock = threading.Lock()
+        self._presence_pub = self.create_publisher(
+            PcPresence, topics.GROUP_PRESENCE, PRESENCE_QOS
+        )
+        self._presence_sub = self.create_subscription(
+            PcPresence, topics.GROUP_PRESENCE, self._presence_callback, PRESENCE_QOS
+        )
 
         local_port = int(os.environ.get('MOTION_COORDINATION_LOCAL_PORT') or 8011)
         self._local_api = LocalCoordinationApi(
@@ -259,6 +281,7 @@ class MotionCoordinationNode(Node):
             self._config.heartbeat_sec, self._heartbeat_tick
         )
         self._state_timer = self.create_timer(0.1, self._state_tick)
+        self._presence_timer = self.create_timer(PRESENCE_INTERVAL_SEC, self._publish_presence)
         self.get_logger().info(
             'DDS group coordination initialized · '
             f'pc={self._config.pc_id} · group={self._config.group_id or "none"} · '
@@ -383,12 +406,103 @@ class MotionCoordinationNode(Node):
         addresses = tuple(getattr(self, '_boot_lan_addresses', ()) or ())
         return f'http://{addresses[0]}:8000' if addresses else ''
 
+    def _lan_address(self) -> str:
+        addresses = tuple(getattr(self, '_boot_lan_addresses', ()) or ())
+        return str(addresses[0]) if addresses else ''
+
+    def _publish_presence(self) -> None:
+        """같은 망 PC 알림 · 연동을 안 써도 · 나가 있어도 보낸다 · 핵심 요구 4"""
+        message = PcPresence()
+        message.pc_id = self._config.pc_id
+        message.display_name = self._config.display_name
+        message.role = 'robot'
+        message.address = self._lan_address()
+        message.web_url = self._web_url()
+        message.group_id = self._config.group_id if self._config.configured else ''
+        message.joined = bool(self._joined)
+        message.is_master = bool(self._config.is_master)
+        message.boot_id = self._boot_id
+        message.git_hash = str(self._git_hash or '')
+        message.protocol_version = GROUP_PROTOCOL_VERSION
+        _set_stamp(message.sent_at, time.time())
+        self._presence_pub.publish(message)
+
+    def _presence_callback(self, message: PcPresence) -> None:
+        if message.pc_id == self._config.pc_id and message.boot_id == self._boot_id:
+            return
+        row = {
+            'pc_id': str(message.pc_id),
+            'display_name': str(message.display_name or message.pc_id),
+            'role': str(message.role or 'robot'),
+            'address': str(message.address),
+            'web_url': str(message.web_url),
+            'group_id': str(message.group_id),
+            'joined': bool(message.joined),
+            'is_master': bool(message.is_master),
+            'git_hash': str(message.git_hash),
+            'protocol_version': _message_uint32(message, 'protocol_version'),
+            'received_monotonic': time.monotonic(),
+        }
+        # 같은 이름의 PC 가 둘이면(설정 실수) 두 줄로 보인다 · 주소로 가른다
+        key = (row['role'], row['pc_id'], row['address'])
+        if getattr(self, '_presence', None) is None:
+            self._presence, self._presence_lock = {}, threading.Lock()
+        with self._presence_lock:
+            self._presence[key] = row
+
+    def _network_pcs(self) -> list:
+        """같은 망 PC 표 · 이 PC 가 맨 위 · 로봇 다음 스피커 · 이름순"""
+        now = time.monotonic()
+        presence = getattr(self, '_presence', None)
+        if presence is None:
+            self._presence, self._presence_lock = {}, threading.Lock()
+        with self._presence_lock:
+            for key in [k for k, row in self._presence.items()
+                        if now - row['received_monotonic'] > PRESENCE_FORGET_SEC]:
+                del self._presence[key]
+            others = [dict(row) for row in self._presence.values()]
+        my_group = self._config.group_id if self._config.configured else ''
+        rows = [{
+            'pc_id': self._config.pc_id,
+            'display_name': self._config.display_name,
+            'role': 'robot',
+            'address': self._lan_address(),
+            'web_url': self._web_url(),
+            'group_id': my_group,
+            'joined': bool(self._joined),
+            'is_master': bool(self._config.is_master),
+            'git_hash': str(self._git_hash or ''),
+            'protocol_version': GROUP_PROTOCOL_VERSION,
+            'is_local': True,
+            'online': True,
+            'age_sec': 0.0,
+        }]
+        for row in sorted(others, key=lambda r: (r['role'] != 'robot', r['display_name'], r['address'])):
+            age = now - row.pop('received_monotonic')
+            row.update({
+                'is_local': False,
+                'online': age <= PRESENCE_OFFLINE_SEC,
+                'age_sec': round(age, 1),
+            })
+            rows.append(row)
+        for row in rows:
+            row['same_group'] = bool(my_group) and row['group_id'] == my_group
+            row['version_differs'] = bool(
+                row['git_hash'] and rows[0]['git_hash'] and row['git_hash'] != rows[0]['git_hash']
+            )
+            row['protocol_mismatch'] = (
+                row['role'] == 'robot' and row['protocol_version'] != GROUP_PROTOCOL_VERSION
+            )
+        return rows
+
     def _state_tick(self) -> None:
         with self._lock:
             execution_active = bool(self._execution.execution_id)
-        self._local_runtime_monitor.set_active(execution_active)
+        # PC 1대 재생 중에도 빨리 읽는다 · 스피커 알림이 늦지 않게 · 수정 목록 38
+        self._local_runtime_monitor.set_active(execution_active or self._local_motion_busy())
         self._consume_local_runtime_status()
         self._emit_local_runtime_event()
+        self._announce_solo_motion()
         self._enforce_execution_membership()
         self._enforce_schedule_ack_deadline()
         self._enforce_motion_start_report_deadline()
@@ -595,16 +709,26 @@ class MotionCoordinationNode(Node):
                     t3_ns=int(message.t3_monotonic_ns),
                     t4_ns=time.monotonic_ns(),
                 )
-                if not accepted or estimator.sample_count < self._config.trigger_sync_samples:
+                wanted = self._sync_wanted_samples(pc_id)
+                if not accepted or estimator.sample_count < wanted:
                     return
                 estimate = estimator.estimate()
                 if (
                     estimate.uncertainty_ms
                     > self._config.max_trigger_sync_uncertainty_ms
                 ):
+                    # Wi-Fi 가 잠깐 튀었을 수 있다 · 바로 멈추지 말고 더 잰다(가장 빠른 왕복들로 다시) ·
+                    # 한도까지 재도 크면 그때 멈춘다 · 기준(20 ms)은 그대로 · 수정 목록 93 (2026-10-09 사용자)
+                    if estimator.sample_count < self._config.trigger_sync_samples * SYNC_MAX_ROUNDS:
+                        self._sync_wanted[pc_id] = wanted + self._config.trigger_sync_samples
+                        self.get_logger().warn(
+                            f'{pc_id} DDS 트리거 동기화 불확실성 {estimate.uncertainty_ms:.3f}ms · '
+                            f'{estimator.sample_count}번 잼 · 더 잽니다'
+                        )
+                        return
                     self._fail_trigger_sync(
                         f'{pc_id} DDS 트리거 동기화 불확실성 '
-                        f'{estimate.uncertainty_ms:.3f}ms'
+                        f'{estimate.uncertainty_ms:.3f}ms ({estimator.sample_count}번 잼)'
                     )
                     return
                 result = GroupTimeSync()
@@ -667,6 +791,7 @@ class MotionCoordinationNode(Node):
                 pc_id: TriggerSyncEstimator() for pc_id in remote
             }
             self._sync_sent_samples = {pc_id: 0 for pc_id in remote}
+            self._sync_wanted = {}
             self._sync_probes = {}
             self._sync_ready = {self._config.pc_id}
             self._sync_next_action = next_action
@@ -698,14 +823,14 @@ class MotionCoordinationNode(Node):
             if now - self._sync_last_probe_at < 0.05:
                 return
             self._sync_last_probe_at = now
-            max_attempts = self._config.trigger_sync_samples * 3
             for pc_id, estimator in self._sync_estimators.items():
                 if pc_id in self._sync_ready:
                     continue
                 sent = self._sync_sent_samples.get(pc_id, 0)
-                if estimator.sample_count >= self._config.trigger_sync_samples:
+                wanted = self._sync_wanted_samples(pc_id)
+                if estimator.sample_count >= wanted:
                     continue
-                if sent >= max_attempts:
+                if sent >= wanted * 3:
                     continue
                 probe = GroupTimeSync()
                 probe.group_id = self._config.group_id
@@ -720,6 +845,11 @@ class MotionCoordinationNode(Node):
                     probe.t1_monotonic_ns
                 )
                 self._time_probe_pub.publish(probe)
+
+    def _sync_wanted_samples(self, pc_id: str) -> int:
+        """이 PC 에서 모을 측정 수 · 처음엔 설정값(5) · 불확실성이 크면 늘어난다(93)"""
+        wanted = getattr(self, '_sync_wanted', None) or {}
+        return int(wanted.get(pc_id) or self._config.trigger_sync_samples)
 
     def _complete_trigger_sync_if_ready(self) -> None:
         if not self._sync_next_action:
@@ -949,6 +1079,7 @@ class MotionCoordinationNode(Node):
         cancel_reason = ''
         spread_failure: Optional[Dict[str, Any]] = None
         runtime_error = ''
+        cycle_error = ''
         exclude_reasons: Dict[str, str] = {}
         with self._lock:
             if (
@@ -1145,10 +1276,15 @@ class MotionCoordinationNode(Node):
                     elif self._execution.state != 'releasing':
                         self._execution.stop_now()
                 elif message.event == 'error':
-                    runtime_error = (
+                    text = (
                         f'{message.pc_id} 로컬 그룹 실행 오류: '
                         f'{message.message or "확인 필요"}'
                     )
+                    # 도달 확인 실패 같은 회차 단위 실패는 잠그지 않는다 · 수정 목록 67
+                    if cycle_failure.is_cycle_failure(message.message):
+                        cycle_error = text
+                    else:
+                        runtime_error = text
             except ValueError as exc:
                 self.get_logger().warn(f'Group event rejected: {exc}')
         if exclude_reasons:
@@ -1159,6 +1295,8 @@ class MotionCoordinationNode(Node):
             self._handle_trigger_spread_exceeded(spread_failure)
         if runtime_error:
             self._stop_for_peer_failure(runtime_error)
+        elif cycle_error:
+            self._stop_for_cycle_failure(cycle_error)
 
     _LOCAL_WORKER_RELEASE_TIMEOUT_SEC = 5.0
 
@@ -2074,6 +2212,13 @@ class MotionCoordinationNode(Node):
         }
 
     def _publish_action(self, action: ScheduledAction) -> None:
+        sound = {}
+        if action.command == 'start_at':
+            # 스피커 · 이 시작의 애니메이션 · 시작까지 남은 초 · 수정 목록 38
+            sound = {
+                'motion_file_id': self._local_motion_file_id(),
+                'start_delay_sec': float(action.scheduled_at) - time.monotonic(),
+            }
         command = self._new_command(
             command=action.command,
             execution_id=action.execution_id,
@@ -2081,6 +2226,7 @@ class MotionCoordinationNode(Node):
             participants=self._execution.participants,
             command_id=action.command_id,
             scheduled_monotonic=action.scheduled_at,
+            **sound,
         )
         self._execution.pending_command = action.command
         self._execution.pending_command_id = action.command_id
@@ -2291,6 +2437,8 @@ class MotionCoordinationNode(Node):
         run_mode: str = '',
         sync_mode: str = '',
         stop_reason: str = '',
+        motion_file_id: str = '',
+        start_delay_sec: float = 0.0,
     ) -> GroupCommand:
         message = GroupCommand()
         message.group_id = self._config.group_id
@@ -2314,6 +2462,8 @@ class MotionCoordinationNode(Node):
         message.run_mode = str(run_mode)
         _set_optional_message_field(message, 'sync_mode', str(sync_mode))
         _set_optional_message_field(message, 'stop_reason', str(stop_reason))
+        _set_optional_message_field(message, 'motion_file_id', str(motion_file_id))
+        _set_optional_message_field(message, 'start_delay_sec', float(start_delay_sec))
         return message
 
     def _publish_event(
@@ -2680,6 +2830,85 @@ class MotionCoordinationNode(Node):
             self._local_status = dict(result)
         self._publish_local_alarm_if_changed()
 
+    #: PC 1대 재생에서 「돌고 있다」 로 보는 단계 · 초기 이동부터 빨리 읽어 첫 회차 시작을 놓치지 않는다
+    _SOLO_BUSY_STATES = frozenset({'initializing', 'running', 'verifying', 'waiting', 'recovering'})
+
+    def _local_motion_status(self) -> Mapping[str, Any]:
+        with self._lock:
+            status = (getattr(self, '_local_status', None) or {}).get('motion_run_status')
+        return status if isinstance(status, Mapping) else {}
+
+    def _local_motion_file_id(self) -> str:
+        return str(self._local_motion_status().get('motion_file_id') or '')
+
+    def _local_motion_busy(self) -> bool:
+        status = self._local_motion_status()
+        return (
+            not status.get('group_execution')
+            and str(status.get('state') or '') in self._SOLO_BUSY_STATES
+        )
+
+    def _announce_solo_motion(self) -> None:
+        """PC 1대 재생도 스피커가 듣게 · 회차마다 `start_at` 한 번 · 멈추면 정지 사건 · 수정 목록 38
+
+        그룹 재생은 마스터가 `start_at` 을 보내므로 여기서는 안 보낸다 · 참가자를 **이 PC 하나**로
+        적어 같은 그룹의 다른 로봇 PC 는 무시한다(`_command_callback` 이 참가자를 본다) ·
+        그룹 ID 가 없으면(연동 미설정) 보내지 않는다 · 스피커는 같은 그룹 ID 로 듣는다.
+        """
+        if not getattr(self._config, 'configured', False) or not self._config.group_id:
+            return
+        status = self._local_motion_status()
+        if status.get('group_execution'):
+            self._solo_announced_key = None
+            return
+        state = str(status.get('state') or '')
+        previous = getattr(self, '_solo_announced_key', None)
+        if state == 'running':
+            started_at = float(status.get('phase_started_at') or 0.0)
+            cycle = int(status.get('current_cycle') or status.get('cycle_count') or 1)
+            key = (str(status.get('motion_file_id') or ''), cycle, round(started_at, 3))
+            if not started_at or key == previous:
+                return
+            self._solo_announced_key = key
+            execution_id = f'solo-{self._config.pc_id}-{int(started_at * 1000)}'
+            command = self._new_command(
+                command='start_at',
+                execution_id=execution_id,
+                cycle_number=cycle,
+                participants=(self._config.pc_id,),
+                command_id=f'solo-{uuid.uuid4().hex}',
+                run_mode=str(status.get('run_mode') or ''),
+                motion_file_id=key[0],
+                # 이미 시작했다 · 음수 · 스피커가 받은 시각에서 빼서 같은 순간에 맞춘다
+                start_delay_sec=started_at - time.time(),
+            )
+            self._remember_own_command(command.command_id)
+            self._command_pub.publish(command)
+            return
+        if previous is not None and state in {'stopped', 'error', 'idle', 'completed'}:
+            self._solo_announced_key = None
+            if state in {'stopped', 'error'}:
+                event = GroupEvent()
+                event.group_id = self._config.group_id
+                event.execution_id = f'solo-{self._config.pc_id}'
+                event.command_id = ''
+                event.pc_id = self._config.pc_id
+                event.boot_id = self._boot_id
+                event.event = 'solo_stopped'
+                event.state = state
+                event.sequence = self._next_sequence()
+                _set_stamp(event.occurred_at, time.time())
+                event.success = state != 'error'
+                event.message = str(status.get('message') or state)[:512]
+                self._event_pub.publish(event)
+
+    def _remember_own_command(self, command_id: str) -> None:
+        """내가 보낸 PC 1대 알림이 내 명령 처리로 돌아오지 않게 · 이미 본 명령으로 적어 둔다"""
+        with self._lock:
+            seen = getattr(self, '_seen_commands', None)
+            if isinstance(seen, dict):
+                seen[command_id] = time.monotonic()
+
     def _publish_local_alarm_if_changed(self) -> None:
         safety = self._local_status.get('safety_status')
         safety = safety if isinstance(safety, Mapping) else {}
@@ -2835,6 +3064,7 @@ class MotionCoordinationNode(Node):
                 'joined': self._joined,
                 'local': local_peer,
                 'peers': peers,
+                'network_pcs': self._network_pcs(),
                 'alarms': [
                     dict(self._alarm_registry.alarms[pc_id])
                     for pc_id in sorted(self._alarm_registry.alarms)
@@ -2973,6 +3203,55 @@ class MotionCoordinationNode(Node):
                 ):
                     unhealthy.append(pc_id)
         return sorted(set(unhealthy))
+
+    #: 그룹 회차 실패 자동 복구 한도 · 런타임(`motion_player.AUTO_RECOVERY_*`)과 같은 값 · 73
+    _CYCLE_FAILURE_LIMIT = 3
+    _CYCLE_FAILURE_WINDOW_SEC = 600.0
+
+    def _stop_for_cycle_failure(self, reason: str) -> None:
+        """회차 하나가 실패 · 이번 실행만 끝내고 잠그지 않는다 · 수정 목록 67 (사용자 결정 2026-10-07)
+
+        `_stop_for_peer_failure` 와 같이 모든 참가 PC 를 세우지만 그룹 오류(2등급)는 걸지 않는다 ·
+        그래서 스케줄이 다음 점검(1분)에 다시 시작한다 · 서보 알람·통신 끊김은 이 길로 오지 않는다.
+        """
+        with self._lock:
+            if not self._execution.execution_id:
+                return
+            execution_id = self._execution.execution_id
+            participants = self._execution.participants
+            cycle_number = self._execution.cycle_number
+        self._issue_stop_now(
+            execution_id=execution_id, participants=participants,
+            cycle_number=cycle_number,
+            command_id=f'cycle-failure-{uuid.uuid4().hex}',
+        )
+        with self._lock:
+            self._execution.stop_now(error=True)
+            self._clear_active_execution()
+        # 자동 복구 한도 · 10분 안 3번을 넘기면 그때는 잠근다(사람 확인) · 수정 목록 73
+        now = time.monotonic()
+        recent = [
+            at for at in getattr(self, '_cycle_failure_times', [])
+            if now - at < self._CYCLE_FAILURE_WINDOW_SEC
+        ]
+        if len(recent) >= self._CYCLE_FAILURE_LIMIT:
+            self._cycle_failure_times = []
+            self.get_logger().error(f'그룹 회차 실패 자동 복구 한도 초과 · 잠금: {reason}')
+            self._publish_coordination_error(
+                code='GROUP_AUTO_RECOVERY_EXHAUSTED',
+                message=(
+                    f'그룹 회차 실패가 {self._CYCLE_FAILURE_WINDOW_SEC / 60:.0f}분 안 '
+                    f'{self._CYCLE_FAILURE_LIMIT + 1}번 · 자동 복구 멈춤: {reason}'
+                ),
+                execution_id=execution_id,
+            )
+            return
+        recent.append(now)
+        self._cycle_failure_times = recent
+        self.get_logger().warning(
+            f'그룹 회차 실패 · 이번 실행 정지 · 잠그지 않음(다음 스케줄 점검에서 다시 시작 · '
+            f'{len(recent)}/{self._CYCLE_FAILURE_LIMIT}): {reason}'
+        )
 
     def _stop_for_peer_failure(self, reason: str) -> None:
         with self._lock:

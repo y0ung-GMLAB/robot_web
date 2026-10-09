@@ -51,7 +51,10 @@ test('the table says toggles apply at once, are not saved, and marks muted rows'
   const head = html.slice(html.indexOf('애니메이션 재생 축'), html.indexOf('motionRunAxisRows'));
   assert.match(head, /누르는 즉시/);
   assert.match(head, /저장되지 않고 「재생 등록」 때 모두 풀립니다/);
-  assert.match(controller, /<tr class="\$\{muted \? 'live-muted' : ''\}">/);
+  assert.match(controller, /<tr class="\$\{muted \|\| waiting \? 'live-muted' : ''\}">/);
   assert.match(controller, /live-muted-badge">제외 중</);
-  assert.match(controller, /다시 사용 · 초기 이동 시간 동안 천천히 이어 갑니다/);
+  // 도중에 다시 켜도 이 회차는 서 있고 다음 회차부터 · 95
+  assert.match(controller, /live-muted-badge">다음 회차부터</);
+  assert.match(controller, /held_motion_ids/);
+  assert.match(controller, /다시 사용 · 재생 중이면 다음 회차부터 같이 움직입니다/);
 });

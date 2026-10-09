@@ -166,3 +166,16 @@ def test_blender_scene_route_streams_the_file():
     assert "media_type='model/gltf-binary'" in routes
     bridge = (BRIDGE_DIR / 'bridge_node.py').read_text(encoding='utf-8')
     assert 'return sim_scene.blender_scene_path(self.workspace_root)' in bridge
+
+
+def test_blender_scene_names_the_animations_it_holds(tmp_path):
+    """수정 목록 60 · pack.yaml scene_glb.animations · 없으면 빈 목록(화면이 Blender 뷰를 끈다)"""
+    from motion_common import robot_pack
+
+    pack = _pack(tmp_path)
+    (pack / 'scene.glb').write_bytes(b'glTF' + b'\x00' * 20)
+    assert sim_scene.scene_state(tmp_path)['blender']['animations'] == []
+    text = (pack / 'pack.yaml').read_text(encoding='utf-8')
+    (pack / 'pack.yaml').write_text(text + '\nscene_glb:\n  animations: [floating_narration_all]\n', encoding='utf-8')
+    assert sim_scene.scene_state(tmp_path)['blender']['animations'] == ['floating_narration_all']
+    assert robot_pack.scene_glb_animations(pack) == ['floating_narration_all']

@@ -39,7 +39,12 @@ stdout·stderr 는 `log/animation_preview/<애니메이션>.precompute.log` 에 
 
 from __future__ import annotations
 
+import hashlib
 import json
+import os
+import shlex
+import shutil
+import time
 import subprocess
 import threading
 from pathlib import Path
@@ -158,6 +163,16 @@ def meta_path_for(result: Path) -> Path:
     return Path(result).with_suffix('.meta.json')
 
 
+def pending_path_for(result: Path) -> Path:
+    """`x.sim.npz` → `x.sim.pending.json` · 계산을 **시작할 때** 쓴 팩 기록 · 수정 목록 54
+
+    팩 기록(`meta`)은 브리지가 끝난 계산을 거둘 때(`_reap`)만 썼다 · 긴 계산(9분 나레이션) 중에
+    브리지가 다시 뜨면 거둘 사람이 없어 기록이 안 남고 결과가 영영 「다시 계산 필요」 였다 ·
+    시작할 때 남겨 두고, 결과 파일이 그보다 새것이면 그 계산이 끝낸 것으로 본다.
+    """
+    return Path(result).with_suffix('.pending.json')
+
+
 def _pack_stamp(workspace_root: Path) -> Dict[str, Any]:
     pack_dir = robot_pack.pack_root(workspace_root)
     info = robot_pack.read_pack_info(pack_dir)
@@ -194,6 +209,118 @@ def _close_log(handle: Any) -> None:
             pass
 
 
+# --------------------------------------------------------------------------- #
+# 계산을 웹 서비스 밖에서 · 수정 목록 93-86 (실물 2026-10-09 · 실물 확인 대기 86)
+# --------------------------------------------------------------------------- #
+#
+# 계산은 웹 서비스(motion-control)의 자식이었다 · 서비스를 다시 띄우면(설정 저장 · 업데이트 ·
+# 시간대) 9분 나레이션 계산이 같은 순간 같이 죽었다 · systemd 사용자 작업으로 따로 띄워
+# 서비스가 다시 떠도 계속 돈다 · 끝나면 종료 코드를 파일에 남긴다 · 다시 뜬 브리지는
+# 시작 기록(pending)에 적힌 작업 이름으로 「아직 도는지」 를 묻고 다시 붙는다.
+
+#: 「도는가」 를 systemctl 에 물은 결과를 이만큼 쓴다 · 목록이 파일마다 묻는다
+_ACTIVE_CACHE_SEC = 2.0
+_ACTIVE_CACHE: Dict[str, Any] = {}
+
+
+def rc_path_for(result: Path) -> Path:
+    """`x.sim.npz` → `x.sim.rc` · 따로 띄운 계산의 종료 코드"""
+    return Path(result).with_suffix('.rc')
+
+
+def job_unit_for(result: Path) -> str:
+    digest = hashlib.sha1(str(result).encode('utf-8')).hexdigest()[:12]
+    return f'robot-web-sim-{digest}'
+
+
+def detach_available() -> bool:
+    """systemd 사용자 세션이 있는 리눅스 · 아니면(개발 PC · 시험) 예전처럼 자식으로"""
+    return bool(shutil.which('systemd-run') and os.environ.get('XDG_RUNTIME_DIR'))
+
+
+def _unit_active(unit: str, run=subprocess.run) -> bool:
+    now = time.monotonic()
+    cached = _ACTIVE_CACHE.get(unit)
+    if cached and now - cached[0] < _ACTIVE_CACHE_SEC:
+        return cached[1]
+    try:
+        result = run(['systemctl', '--user', 'is-active', '--quiet', unit],
+                     capture_output=True, text=True, timeout=5)
+        active = getattr(result, 'returncode', 1) == 0
+    except (OSError, subprocess.SubprocessError):
+        active = False
+    _ACTIVE_CACHE[unit] = (now, active)
+    return active
+
+
+class DetachedJob:
+    """Popen 처럼 `poll()` 만 · 종료 코드 파일이 있으면 그 값 · 작업이 돌면 None · 둘 다 아니면 1"""
+
+    def __init__(self, unit: str, rc_path: Path, *, run=subprocess.run) -> None:
+        self.unit = unit
+        self.rc_path = Path(rc_path)
+        self._run = run
+
+    def poll(self) -> Optional[int]:
+        try:
+            text = self.rc_path.read_text(encoding='utf-8').strip()
+        except OSError:
+            text = ''
+        if text:
+            try:
+                return int(text)
+            except ValueError:
+                return 1
+        if _unit_active(self.unit, self._run):
+            return None
+        # 작업이 사라졌는데 코드가 없다 · 막 끝나 파일을 쓰는 중일 수 있어 한 번 더 본다
+        try:
+            text = self.rc_path.read_text(encoding='utf-8').strip()
+            return int(text) if text else 1
+        except (OSError, ValueError):
+            return 1
+
+
+def spawn_detached(args: List[str], *, cwd: str, log_path: Path, result: Path,
+                   run=subprocess.run) -> DetachedJob:
+    unit = job_unit_for(result)
+    rc_path = rc_path_for(result)
+    rc_path.unlink(missing_ok=True)
+    inner = (
+        f'{" ".join(shlex.quote(str(a)) for a in args)} > {shlex.quote(str(log_path))} 2>&1; '
+        f'echo $? > {shlex.quote(str(rc_path))}'
+    )
+    command = [
+        'systemd-run', '--user', '--unit', unit, '--collect', '--quiet',
+        f'--working-directory={cwd}', '/bin/bash', '-c', inner,
+    ]
+    completed = run(command, capture_output=True, text=True, timeout=15)
+    if getattr(completed, 'returncode', 1) != 0:
+        raise OSError(str(getattr(completed, 'stderr', '') or '').strip() or 'systemd-run 실패')
+    _ACTIVE_CACHE.pop(unit, None)
+    return DetachedJob(unit, rc_path, run=run)
+
+
+def _adopt_detached(result: Path, *, run=subprocess.run) -> None:
+    """브리지가 다시 떴다 · 시작 기록에 적힌 작업을 다시 붙든다 (도는 중이면 computing · 끝났으면 거둠)"""
+    key = str(result)
+    with _LOCK:
+        if key in _RUNNING or key in _LAST_RC:
+            return
+    try:
+        payload = json.loads(pending_path_for(result).read_text(encoding='utf-8'))
+    except (OSError, ValueError):
+        return
+    unit = str(payload.get('unit') or '') if isinstance(payload, dict) else ''
+    if not unit:
+        return
+    with _LOCK:
+        _RUNNING.setdefault(key, DetachedJob(unit, rc_path_for(result), run=run))
+        stamp = payload.get('pack')
+        if isinstance(stamp, dict):
+            _PENDING_META.setdefault(key, stamp)
+
+
 def _reap() -> None:
     finished = []
     with _LOCK:
@@ -207,8 +334,32 @@ def _reap() -> None:
         if code == 0 and meta is not None:
             try:
                 atomic_write_json(meta_path_for(Path(key)), {'pack': meta})
+                pending_path_for(Path(key)).unlink(missing_ok=True)
             except OSError:
                 pass  # 기록 실패 = 팩 정보 없음 = stale 로 보인다 · 안전한 쪽
+
+
+def _pending_stamp(result: Path) -> Dict[str, Any]:
+    """시작 때 쓴 기록 · 없거나 틀리면 빈 dict"""
+    try:
+        payload = json.loads(pending_path_for(result).read_text(encoding='utf-8'))
+    except (OSError, ValueError):
+        return {}
+    stamp = payload.get('pack') if isinstance(payload, dict) else None
+    return stamp if isinstance(stamp, dict) else {}
+
+
+def _finished_after_pending(result: Path) -> Optional[bool]:
+    """시작 기록이 있으면 · 결과 파일이 그 뒤에 써졌나 · 기록이 없으면 None"""
+    pending = pending_path_for(result)
+    try:
+        started = pending.stat().st_mtime
+    except OSError:
+        return None
+    try:
+        return result.stat().st_mtime >= started
+    except OSError:
+        return False
 
 
 def _stale_reason(workspace_root: Path, result: Path) -> str:
@@ -222,6 +373,15 @@ def _stale_reason(workspace_root: Path, result: Path) -> str:
         stamp = meta.get('pack') or {}
     except (OSError, ValueError, AttributeError):
         stamp = {}
+    if (not isinstance(stamp, dict) or not stamp.get('fingerprint')) and _finished_after_pending(result):
+        # 브리지가 다시 떠서 못 거둔 계산 · 시작 기록을 결과 기록으로 올린다 · 수정 목록 54
+        stamp = _pending_stamp(result)
+        if stamp.get('fingerprint'):
+            try:
+                atomic_write_json(meta_path_for(result), {'pack': stamp})
+                pending_path_for(result).unlink(missing_ok=True)
+            except OSError:
+                pass
     if not isinstance(stamp, dict) or not stamp.get('fingerprint'):
         return '로봇 팩 기록 없는 계산 결과 · 다시 계산 필요'
     if stamp['fingerprint'] == current:
@@ -247,20 +407,35 @@ def preview_state(workspace_root: Path, motion_path: Path) -> Dict[str, Any]:
     result = result_path_for(config, Path(motion_path))
     if result is None:
         return {'state': 'direct'}
+    _adopt_detached(result)
     _reap()
     key = str(result)
     with _LOCK:
         if key in _RUNNING:
             return {'state': 'computing'}
-    if result.is_file():
+    with _LOCK:
+        last_rc = _LAST_RC.get(key)
+    has_result = result.is_file()
+    log_name = log_path_for(Path(workspace_root), Path(motion_path), 'precompute').name
+    # 실패를 먼저 본다 · 옛 결과가 있어도 마지막 계산이 실패했으면 「계산 실패」 · 보기는 옛 결과로 허용 · 수정 목록 54
+    if last_rc not in (None, 0):
+        return {
+            'state': 'failed', 'has_result': has_result,
+            'message': f'마지막 계산이 실패했습니다 (코드 {last_rc}) · 기록 {log_name}'
+            + (' · 옛 결과 있음' if has_result else ''),
+        }
+    if last_rc is None and _finished_after_pending(result) is False:
+        # 시작 기록보다 새 결과가 없고 도는 계산도 없다 · 브리지가 다시 뜨며 중간에 끊긴 계산
+        return {
+            'state': 'failed', 'has_result': has_result,
+            'message': f'마지막 계산이 끝까지 가지 못했습니다(실패 또는 중간에 멈춤) · 기록 {log_name}'
+            + (' · 옛 결과 있음' if has_result else ''),
+        }
+    if has_result:
         reason = _stale_reason(Path(workspace_root), result)
         if reason:
             return {'state': 'stale', 'message': reason}
         return {'state': 'ready'}
-    with _LOCK:
-        last_rc = _LAST_RC.get(key)
-    if last_rc not in (None, 0):
-        return {'state': 'failed', 'message': f'마지막 계산이 실패했습니다 (코드 {last_rc})'}
     return {'state': 'missing'}
 
 
@@ -292,9 +467,19 @@ def launch_precompute(
     workspace_root: Path,
     motion_path: Path,
     *,
-    spawn=subprocess.Popen,
+    spawn=None,
+    detach: Optional[bool] = None,
+    run=subprocess.run,
 ) -> Dict[str, Any]:
-    """무거운 계산을 시작한다 · 이미 돌고 있으면 그대로 둔다."""
+    """무거운 계산을 시작한다 · 이미 돌고 있으면 그대로 둔다.
+
+    리눅스(systemd 사용자 세션)면 웹 서비스 밖 작업으로 띄운다(93-86) · `spawn` 을 주면(시험)
+    예전처럼 자식으로.
+    """
+    if detach is None:
+        detach = spawn is None and detach_available()
+    if spawn is None:
+        spawn = subprocess.Popen
     config = preview_config(Path(workspace_root))
     if config is None:
         return {'success': False, 'message': NOT_CONFIGURED_MESSAGE}
@@ -304,6 +489,7 @@ def launch_precompute(
     motion_path = Path(motion_path)
     if not motion_path.is_file():
         return {'success': False, 'message': f'애니메이션 파일이 없습니다: {motion_path.name}'}
+    _adopt_detached(result, run=run)
     _reap()
     key = str(result)
     with _LOCK:
@@ -312,17 +498,31 @@ def launch_precompute(
     args = _fill(config['precompute']['command'], motion_path, result=key, config=config)
     cwd = str(config.get('cwd') or workspace_root)
     stamp = _pack_stamp(Path(workspace_root))
-    log = _open_log(workspace_root, motion_path, 'precompute')
-    try:
-        handle = spawn(args, cwd=cwd, stdout=log, stderr=log, shell=False)
-    except OSError as exc:
+    unit = ''
+    if detach:
+        log_path = log_path_for(Path(workspace_root), motion_path, 'precompute')
+        try:
+            log_path.parent.mkdir(parents=True, exist_ok=True)
+            handle = spawn_detached(args, cwd=cwd, log_path=log_path, result=result, run=run)
+        except (OSError, subprocess.SubprocessError) as exc:
+            return {'success': False, 'message': f'계산 시작 실패: {exc}'}
+        unit = handle.unit
+    else:
+        log = _open_log(workspace_root, motion_path, 'precompute')
+        try:
+            handle = spawn(args, cwd=cwd, stdout=log, stderr=log, shell=False)
+        except OSError as exc:
+            _close_log(log)
+            return {'success': False, 'message': f'계산 시작 실패: {exc}'}
         _close_log(log)
-        return {'success': False, 'message': f'계산 시작 실패: {exc}'}
-    _close_log(log)
     with _LOCK:
         _RUNNING[key] = handle
         _LAST_RC.pop(key, None)
         _PENDING_META[key] = stamp
+    try:
+        atomic_write_json(pending_path_for(result), {'pack': stamp, 'started_at': time.time(), 'unit': unit})
+    except OSError:
+        pass  # 없으면 옛 동작(브리지가 거둘 때만 기록)
     return {
         'success': True,
         'message': f'MuJoCo 계산 시작: {motion_path.name} · 끝나면 같이 보기가 켜집니다',

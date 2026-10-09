@@ -75,3 +75,17 @@ def test_load_returns_none_for_missing_file(tmp_path):
 def test_is_master_pc_shorthand_matches_resolve(tmp_path):
     path = write(tmp_path / 'c.yaml', {'enabled': True, 'is_master': False})
     assert coordination.is_master_pc(path) is False
+
+
+def test_a_pc_with_group_participation_off_runs_alone(tmp_path):
+    """수정 목록 83 · 「그룹 참여」 를 끈 슬레이브도 스케줄이 이 PC 혼자 돈다."""
+    path = write(tmp_path / 'c.yaml', {'version': 2, 'enabled': True, 'joined': False, 'is_master': False})
+    role = coordination.resolve_master_role(path)
+    assert role.is_master is True
+    assert '그룹 참여 꺼짐' in role.reason
+
+    path = write(tmp_path / 'c.yaml', {'version': 2, 'enabled': True, 'joined': True, 'is_master': False})
+    assert coordination.resolve_master_role(path).is_master is False, '참여 중인 슬레이브는 그대로 아님'
+    # joined 가 없는 옛 v2 설정은 enabled 를 따라 참여로 본다(정본 로더와 같음)
+    path = write(tmp_path / 'c.yaml', {'version': 2, 'enabled': True, 'is_master': False})
+    assert coordination.resolve_master_role(path).is_master is False

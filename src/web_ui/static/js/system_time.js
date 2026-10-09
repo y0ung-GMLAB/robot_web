@@ -1,6 +1,12 @@
-import { fetchSystemTime } from './api.js';
+import { applyTimezone, applyTimezoneAll, fetchSystemTime } from './api.js';
+import { showConfirm } from './ui_dialogs.js';
 
-/** 시간대 바꾸기 · §6-150
+/** 시간대 바꾸기 · §6-150 · **2026-10-08 화면에서 바로 적용** (수정 목록 79 · 사용자 결정)
+ *
+ * 아래 옛 설명(root 권한이 위험해 명령만 만든다)은 polkit 규칙으로 바뀌었다 · 설치가 이 계정에
+ * 시간대 변경 하나만 허용한다 · 「이 PC 에 적용」 · 「모든 로봇 PC 에 적용」(같은 망 PC 표 ·
+ * 스피커 제외) · 바꾸면 2초 뒤 프로그램이 다시 떠 스케줄이 새 시간대로 돈다 · 권한이 없으면
+ * 서버가 `allow_web_admin.sh` 를 안내한다 · 자동 감지는 여전히 하지 않는다.
  *
  * 해외 설치에서 사람이 직접 해야 하는 유일한 일이다 · NTP 는 절대 시각(UTC)만
  * 맞추고 **시간대는 안 바꾼다** · PC 를 파리에 들고 가서 네트워크에 붙여도
@@ -90,7 +96,50 @@ const SystemTime = {
     pick.addEventListener('input', () => this.renderCommand());
     document.getElementById('btnCopyTimezoneCommand')
       ?.addEventListener('click', () => this.copyCommand());
+    document.getElementById('systemTimezoneApplyButton')
+      ?.addEventListener('click', () => this.apply(false));
+    document.getElementById('systemTimezoneApplyAllButton')
+      ?.addEventListener('click', () => this.apply(true));
     await this.load();
+  },
+
+  setMessage(text) {
+    const box = document.getElementById('systemTimezoneMessage');
+    if (!box) return;
+    box.textContent = text || '';
+    box.classList.toggle('hidden', !text);
+  },
+
+  /** 적용 · all = 같은 망 로봇 PC 전부 (이 PC 는 맨 뒤) · 79 */
+  async apply(all) {
+    const zone = this.chosen();
+    const { note } = this.decide();
+    if (!zone || (note && note.startsWith('목록에 없는'))) {
+      this.setMessage(note || '시간대를 고르세요');
+      return;
+    }
+    const confirmed = await showConfirm(
+      `${all ? '같은 망의 로봇 PC 전부' : '이 PC'} 의 시간대를 「${zone}」 로 바꿉니다.\n\n`
+      + '· 스케줄이 이 시각 기준으로 바뀝니다\n'
+      + '· 바꾼 PC 는 2초 뒤 프로그램을 다시 띄웁니다(재생 중인 PC 는 거절)\n\n계속할까요?',
+      { title: '시간대 바꾸기', confirmLabel: '바꾸기', tone: 'warning' },
+    );
+    if (!confirmed) return;
+    this.setMessage('바꾸는 중');
+    try {
+      const payload = all ? await applyTimezoneAll(zone) : await applyTimezone(zone);
+      const rows = Array.isArray(payload.pcs)
+        ? payload.pcs.map((pc) => `${pc.display_name || pc.pc_id} · ${pc.message || (pc.success ? '됨' : '안 됨')}`).join('\n')
+        : '';
+      this.setMessage([payload.message, rows].filter(Boolean).join('\n'));
+      if (payload.clock) {
+        this.current = payload.clock.timezone || this.current;
+        this.render(payload.clock);
+      }
+    } catch (error) {
+      // 이 PC 를 다시 띄우는 중이면 응답이 끊길 수 있다
+      this.setMessage(`응답 없음 · 프로그램을 다시 띄우는 중일 수 있습니다 · 잠시 뒤 새로고침 · ${error?.message || error}`);
+    }
   },
 
   async load() {
@@ -132,6 +181,7 @@ const SystemTime = {
       mismatch.textContent = guess && this.current && guess !== this.current
         ? `⚠️ 보고 계신 기기는 ${guess} 인데 이 PC 는 ${this.current} 입니다 · 다른 곳에서 보고 있다면 정상입니다`
         : '';
+      mismatch.classList.toggle('hidden', !mismatch.textContent);
     }
 
     this.renderCommand();

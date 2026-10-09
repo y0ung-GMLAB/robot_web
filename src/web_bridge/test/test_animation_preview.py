@@ -298,7 +298,54 @@ def test_failed_recompute_does_not_bless_the_old_result(tmp_path):
     animation_preview.launch_precompute(
         workspace, motion, spawn=lambda *a, **k: SimpleNamespace(poll=lambda: 1),
     )
-    assert animation_preview.preview_state(workspace, motion)['state'] == 'stale'
+    # 수정 목록 54 · 실패가 먼저 보인다 · 옛 결과는 보기만 허용하고 기록(meta)은 안 남긴다
+    state = animation_preview.preview_state(workspace, motion)
+    assert state['state'] == 'failed' and state['has_result'] is True
+    assert '옛 결과 있음' in state['message'] and 'precompute.log' in state['message']
+    result = Path(str(motion)[:-len('.json')] + '.sim.npz')
+    assert not animation_preview.meta_path_for(result).exists()
+
+
+def test_a_finished_compute_survives_a_bridge_restart(tmp_path):
+    """수정 목록 54 · 긴 계산 중 브리지가 다시 떠도 · 결과가 시작 기록보다 새것이면 준비됨"""
+    import os
+    import time as _time
+
+    workspace = _workspace(tmp_path)
+    _pack(workspace)
+    motion = _motion(tmp_path)
+    result = Path(str(motion)[:-len('.json')] + '.sim.npz')
+    animation_preview.launch_precompute(
+        workspace, motion, spawn=lambda *a, **k: SimpleNamespace(poll=lambda: None),
+    )
+    assert animation_preview.pending_path_for(result).exists()
+    # 브리지 재시작 · 메모리가 비었다 · 계산은 끝까지 가서 결과를 썼다
+    animation_preview._RUNNING.clear()
+    animation_preview._LAST_RC.clear()
+    animation_preview._PENDING_META.clear()
+    result.write_bytes(b'npz')
+    later = _time.time() + 5
+    os.utime(result, (later, later))
+    assert animation_preview.preview_state(workspace, motion)['state'] == 'ready'
+    assert animation_preview.meta_path_for(result).exists()
+
+
+def test_an_interrupted_compute_shows_failed_not_stale(tmp_path):
+    import os
+
+    workspace = _workspace(tmp_path)
+    _pack(workspace)
+    motion = _motion(tmp_path)
+    result = Path(str(motion)[:-len('.json')] + '.sim.npz')
+    result.write_bytes(b'npz')                                 # 옛 결과
+    os.utime(result, (1_000_000, 1_000_000))
+    animation_preview.launch_precompute(
+        workspace, motion, spawn=lambda *a, **k: SimpleNamespace(poll=lambda: None),
+    )
+    animation_preview._RUNNING.clear()
+    animation_preview._LAST_RC.clear()
+    state = animation_preview.preview_state(workspace, motion)
+    assert state['state'] == 'failed' and state['has_result'] is True
 
 
 def test_without_a_pack_nothing_is_stale(tmp_path):
@@ -306,3 +353,79 @@ def test_without_a_pack_nothing_is_stale(tmp_path):
     motion = _motion(tmp_path)
     Path(str(motion)[:-len('.json')] + '.sim.npz').write_bytes(b'npz')
     assert animation_preview.preview_state(workspace, motion)['state'] == 'ready'
+
+
+# ---- 계산을 웹 서비스 밖에서 · 서비스를 다시 띄워도 안 죽음 · 실물 확인 대기 86 (2026-10-09) ----
+
+class _SystemdRun:
+    """systemd-run · systemctl is-active 대역"""
+
+    def __init__(self):
+        self.calls = []
+        self.active = True
+
+    def __call__(self, command, **_kwargs):
+        self.calls.append(command)
+        if command[0] == 'systemd-run':
+            return SimpleNamespace(returncode=0, stdout='', stderr='')
+        if command[:3] == ['systemctl', '--user', 'is-active']:
+            return SimpleNamespace(returncode=0 if self.active else 3, stdout='', stderr='')
+        raise AssertionError(command)
+
+
+def test_compute_runs_as_its_own_job_and_survives_a_bridge_restart(tmp_path):
+    workspace = _workspace(tmp_path, GATED)
+    motion = _motion(tmp_path)
+    run = _SystemdRun()
+    started = animation_preview.launch_precompute(workspace, motion, detach=True, run=run)
+    assert started['success'] is True
+    [launch] = [c for c in run.calls if c[0] == 'systemd-run']
+    assert launch[:4] == ['systemd-run', '--user', '--unit', animation_preview.job_unit_for(tmp_path / 'demo.sim.npz')]
+    assert '--collect' in launch and 'echo $? >' in launch[-1] and 'demo.sim.rc' in launch[-1]
+
+    # 브리지가 다시 떴다 · 메모리는 비었다 · 시작 기록의 작업 이름으로 다시 붙는다
+    setup_function(None)
+    animation_preview._ACTIVE_CACHE.clear()
+    import motion_web_bridge.animation_preview as module
+    original = module._unit_active
+    module._unit_active = lambda unit, _run=None: run.active
+    try:
+        assert animation_preview.preview_state(workspace, motion)['state'] == 'computing'
+        # 끝남 · 결과와 종료 코드 0 · 팩 기록이 남고 준비됨
+        (tmp_path / 'demo.sim.npz').write_bytes(b'npz')
+        (tmp_path / 'demo.sim.rc').write_text('0\n', encoding='utf-8')
+        run.active = False
+        state = animation_preview.preview_state(workspace, motion)
+        assert state['state'] in ('ready', 'stale'), state      # 팩 없음 = stale/ready 는 팩 지문 유무
+        assert state['state'] != 'failed'
+    finally:
+        module._unit_active = original
+
+
+def test_a_detached_job_that_vanished_without_a_code_is_failed(tmp_path):
+    workspace = _workspace(tmp_path, GATED)
+    motion = _motion(tmp_path)
+    run = _SystemdRun()
+    animation_preview.launch_precompute(workspace, motion, detach=True, run=run)
+    setup_function(None)
+    import motion_web_bridge.animation_preview as module
+    original = module._unit_active
+    module._unit_active = lambda unit, _run=None: False
+    try:
+        state = animation_preview.preview_state(workspace, motion)
+    finally:
+        module._unit_active = original
+    assert state['state'] == 'failed'
+
+
+def test_without_systemd_it_still_spawns_a_child_like_before(tmp_path, monkeypatch):
+    monkeypatch.setattr(animation_preview, 'detach_available', lambda: False)
+    workspace = _workspace(tmp_path, GATED)
+    spawned = []
+
+    def spawn(args, **kwargs):
+        spawned.append(args)
+        return SimpleNamespace(poll=lambda: None)
+
+    assert animation_preview.launch_precompute(workspace, _motion(tmp_path), spawn=spawn)['success'] is True
+    assert spawned and spawned[0][0] == 'simulate'

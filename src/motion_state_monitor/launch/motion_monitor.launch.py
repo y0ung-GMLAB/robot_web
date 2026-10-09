@@ -14,7 +14,7 @@ from launch.events import Shutdown
 from launch.launch_description_sources import PythonLaunchDescriptionSource
 from launch.substitutions import LaunchConfiguration
 from launch_ros.actions import Node
-from motion_common import topics
+from motion_common import topics, upper_restart
 
 
 WORKSPACE = Path(os.environ.get('MOTION_WORKSPACE', Path.cwd())).expanduser()
@@ -28,10 +28,15 @@ def _shutdown_when_it_exits(node, name):
     `Restart=always` 가 발동하지 않았다 · supervisor 가 죽으면 모터는 홀드(안전)지만
     아무도 다시 띄우지 않았다 · launch 를 끝내면 서비스가 통째로 다시 뜬다.
     """
-    return RegisterEventHandler(OnProcessExit(
-        target_action=node,
-        on_exit=[EmitEvent(event=Shutdown(reason=f'{name} 종료 · 서비스 재시작'))],
-    ))
+    def on_exit(event, context):
+        # 다시 뜬 웹 브리지가 운영 로그에 1건 남기게 표지를 쓴다 · 수정 목록 72 ·
+        # launch 가 이미 끝나는 중(서비스 정지 · 프로그램 재시작)이면 쓰지 않는다 ·
+        # 늦게 끝난 노드가 강제 종료(-9)돼도 비정상으로 적지 않게
+        if not getattr(context, 'is_shutdown', False):
+            upper_restart.write_marker(WORKSPACE, name, getattr(event, 'returncode', None))
+        return [EmitEvent(event=Shutdown(reason=f'{name} 종료 · 서비스 재시작'))]
+
+    return RegisterEventHandler(OnProcessExit(target_action=node, on_exit=on_exit))
 
 
 def generate_launch_description():

@@ -946,8 +946,32 @@ class MotionMappingManager(Node):
         return joint_mapping.motor_target(row, 0.0 if number is None else number, units.RAD)
 
     def _motion_file_first_values(self, file_id: str) -> tuple[Dict[str, float], str]:
+        """조인트마다 첫 프레임 값 · 파일이 그대로면 앞 결과를 쓴다 · 수정 목록 88 (2026-10-09)
+
+        재생 등록·매핑 열기마다 불린다 · 9분 나레이션(기록 55만 개)은 전체를 읽고 정렬하는 데
+        0.4 초 넘게 걸렸고 노드 응답 제한(2 초)에 가까웠다 · (경로 · 수정 시각 · 크기) 가 같으면
+        같은 파일이다 · 정렬 대신 한 번 훑어 가장 이른 기록을 고른다(결과는 정렬과 같다).
+        """
         try:
             path = self._motion_file_path(file_id)
+            stat = path.stat()
+        except (OSError, ValueError) as exc:
+            return {}, f'motion file could not be read: {exc}'
+        key = (str(path), stat.st_mtime_ns, stat.st_size)
+        cache = getattr(self, '_first_values_cache', None)
+        if cache is None:
+            cache = self._first_values_cache = {}
+        hit = cache.get(key)
+        if hit is not None:
+            return dict(hit[0]), hit[1]
+        values, error = self._read_motion_file_first_values(path)
+        if len(cache) >= 16:
+            cache.clear()
+        cache[key] = (dict(values), error)
+        return values, error
+
+    def _read_motion_file_first_values(self, path: Path) -> tuple[Dict[str, float], str]:
+        try:
             content = path.read_text(encoding='utf-8')
             rows = self._motion_rows_from_content(content)
             # 파일 단위 → 내부 단위 · 재생 파서와 같은 함수 · 수정 목록 6-2
@@ -957,7 +981,8 @@ class MotionMappingManager(Node):
         except (OSError, ValueError) as exc:
             return {}, f'motion file could not be read: {exc}'
 
-        records = []
+        # 조인트마다 (시각, 행 번호) 가 가장 이른 기록 · 같으면 먼저 나온 것 (안정 정렬과 같다)
+        earliest: Dict[str, tuple] = {}
         for row_index, row in enumerate(rows):
             for motion_id, value, time_sec in self._motion_records_from_row(row):
                 if motion_id is None:
@@ -966,20 +991,15 @@ class MotionMappingManager(Node):
                 if value_number is None:
                     continue
                 time_number = self._finite_float(time_sec)
-                records.append({
-                    'motion_id': str(motion_id),
-                    'value': value_number * unit_scale,
-                    'time_sec': time_number if time_number is not None else float(row_index),
-                    'row_index': row_index,
-                })
+                order = (time_number if time_number is not None else float(row_index), row_index)
+                name = str(motion_id)
+                current = earliest.get(name)
+                if current is None or order < current[0]:
+                    earliest[name] = (order, value_number * unit_scale)
 
-        if not records:
+        if not earliest:
             return {}, 'motion file has no readable motion values'
-
-        first_values: Dict[str, float] = {}
-        for record in sorted(records, key=lambda item: (item['time_sec'], item['row_index'])):
-            first_values.setdefault(record['motion_id'], record['value'])
-        return first_values, ''
+        return {name: value for name, (_order, value) in earliest.items()}, ''
 
     def _motion_file_path(self, file_id: Any) -> Path:
         name = str(file_id or '').strip()

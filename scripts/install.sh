@@ -7,6 +7,19 @@ WORKSPACE_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
 export DEBIAN_FRONTEND=noninteractive
 ROS_DAEMON_UPDATED=false
 CURRENT_STEP="시작 전"
+# 받은 코드에서 이 스크립트가 바뀌면 새 스크립트로 처음부터 다시 돈다 · bash 는 이미 읽은 함수를
+# 계속 쓰므로 고친 줄을 받고도 같은 자리에서 또 실패했다 (수정 목록 82 · floating3 · floating4)
+ORIG_ARGS=("$@")
+SCRIPT_PATH="${SCRIPT_DIR}/$(basename "${BASH_SOURCE[0]}")"
+script_fingerprint() {
+  { cat "${SCRIPT_PATH}" "${SCRIPT_DIR}/setup/site.sh" 2>/dev/null || true; } | cksum
+}
+SCRIPT_FINGERPRINT_BEFORE="$(script_fingerprint)"
+# 코드만 갱신 · 실패하면 되돌릴 것들 (82)
+# 새 스크립트로 다시 돌 때는 이미 받은 뒤라 처음 값을 넘겨받는다
+BEFORE_HEAD="${MOTION_INSTALL_BEFORE_HEAD:-$(git -C "${WORKSPACE_DIR}" rev-parse HEAD 2>/dev/null || true)}"
+SERVICES_STOPPED=false
+BUILD_BACKUP=false
 
 print_step() {
   CURRENT_STEP="$1"
@@ -14,6 +27,27 @@ print_step() {
   echo "========================================="
   echo "$1"
   echo "========================================="
+}
+
+# 코드만 갱신(웹 업데이트) 중 실패 · 사람이 없다 · 코드·빌드를 원래대로 돌리고 서비스를 다시 켠다 (82)
+recover_code_only_failure() {
+  [[ "${CODE_ONLY:-false}" == true ]] || return 0
+  trap - ERR
+  set +e
+  echo "!! 업데이트 실패 · 이전 상태로 되돌립니다" >&2
+  if [[ "${BUILD_BACKUP}" == true ]]; then
+    rm -rf "${WORKSPACE_DIR}/build" "${WORKSPACE_DIR}/install"
+    [[ -d "${WORKSPACE_DIR}/build.prev" ]] && mv "${WORKSPACE_DIR}/build.prev" "${WORKSPACE_DIR}/build"
+    [[ -d "${WORKSPACE_DIR}/install.prev" ]] && mv "${WORKSPACE_DIR}/install.prev" "${WORKSPACE_DIR}/install"
+    echo "   옛 빌드로 되돌림" >&2
+  fi
+  if [[ -n "${BEFORE_HEAD}" && "$(git -C "${WORKSPACE_DIR}" rev-parse HEAD 2>/dev/null)" != "${BEFORE_HEAD}" ]]; then
+    git -C "${WORKSPACE_DIR}" reset -q --hard "${BEFORE_HEAD}" && echo "   코드도 업데이트 전(${BEFORE_HEAD:0:7})으로 되돌림" >&2
+  fi
+  if [[ "${SERVICES_STOPPED}" == true ]]; then
+    systemctl --user start motion-motor.service motion-control.service motion-coordination.service \
+      && echo "   서비스를 다시 켰습니다 · 로봇은 업데이트 전 버전으로 돕니다" >&2
+  fi
 }
 
 # 멈추면 **어디서 왜 멈췄는지**를 마지막 화면에 남긴다 · §6-102
@@ -52,6 +86,7 @@ report_failure() {
   echo >&2
   echo "이 화면 그대로(위 20줄 포함) 알려 주시면 됩니다." >&2
   echo "=========================================" >&2
+  recover_code_only_failure
   exit "${exit_code}"
 }
 trap 'report_failure "$?" "${LINENO}" "${BASH_COMMAND}"' ERR
@@ -62,23 +97,35 @@ trap 'report_failure "$?" "${LINENO}" "${BASH_COMMAND}"' ERR
 #   --resume     재부팅 뒤 이어가기 (motion-site-resume.service 가 부른다 · 손으로 쳐도 됨)
 #   --dry-run    바꾸지 않고 할 일만 찍는다 (빌드·설치는 건너뜀)
 #   --no-reboot  재부팅이 필요해도 스스로 재부팅하지 않는다
+#   --code-only  관리자 비밀번호 없이 · 코드 받기 → 빌드 → 서비스 재시작만 (웹 「모든 PC 업데이트」 가 쓴다 ·
+#                이미 한 번 설치된 PC 전용 · 새 시스템 패키지가 필요하면 멈추고 터미널 설치를 안내)
 # 옵션 없이 치면 전과 같다 · 이미 설치된 PC 의 코드 갱신 (현장 준비는 손대지 않는다)
 SITE_MODE=false
 RESUME_MODE=false
 DRY_RUN=false
 AUTO_REBOOT=true
+CODE_ONLY=false
 for arg in "$@"; do
   case "${arg}" in
     --site) SITE_MODE=true ;;
     --resume) RESUME_MODE=true ;;
     --dry-run) DRY_RUN=true; export SITE_DRY_RUN=1 ;;
     --no-reboot) AUTO_REBOOT=false ;;
+    --code-only) CODE_ONLY=true ;;
     -h|--help)
       sed -n '/^# 옵션 · 수정 목록 11/,/^# 옵션 없이/p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'
       exit 0 ;;
-    *) echo "알 수 없는 옵션: ${arg} (--site · --resume · --dry-run · --no-reboot)" >&2; exit 2 ;;
+    *) echo "알 수 없는 옵션: ${arg} (--site · --resume · --dry-run · --no-reboot · --code-only)" >&2; exit 2 ;;
   esac
 done
+if [[ "${CODE_ONLY}" == true && ( "${SITE_MODE}" == true || "${RESUME_MODE}" == true ) ]]; then
+  echo "--code-only 는 --site · --resume 과 같이 쓸 수 없습니다" >&2
+  exit 2
+fi
+if [[ "${CODE_ONLY}" == true ]]; then
+  # 비밀번호를 물을 사람이 없다(웹에서 돈다) · sudo 가 필요해지면 묻지 말고 바로 실패한다
+  sudo() { command sudo -n "$@"; }
+fi
 # shellcheck disable=SC1091
 source "${SCRIPT_DIR}/setup/site.sh"
 if [[ "${MOTION_SITE_RESUME:-}" == "1" ]]; then RESUME_MODE=true; fi
@@ -92,7 +139,15 @@ preflight_checks() {
   if [[ "${avail_gb}" -lt 5 ]]; then
     echo "!! 저장 공간이 5GB 미만입니다 · 전체 빌드가 중간에 멈출 수 있습니다" >&2
   fi
+  # Secure Boot 가 켜져 있으면 직접 빌드한 EtherCAT 커널 모듈(서명 없음)이 안 올라간다 · BIOS 에서 끈다
+  if command -v mokutil >/dev/null 2>&1 && mokutil --sb-state 2>/dev/null | grep -qi 'enabled'; then
+    echo "!! Secure Boot 가 켜져 있습니다 · EtherCAT(AC 서보)이 안 될 수 있습니다 · BIOS 에서 Secure Boot 를 끄세요 (docs/설치_101.md)" >&2
+  fi
   # sudo 는 여러 단계에서 쓴다 · 중간에 물어 멈추지 않게 여기서 한 번만 받는다
+  if [[ "${CODE_ONLY}" == true ]]; then
+    echo "코드만 갱신 · 관리자 비밀번호 없이 (코드 받기 → 빌드 → 서비스 재시작)"
+    return 0
+  fi
   if [[ "${DRY_RUN}" == true ]]; then
     echo "[dry-run] 바꾸지 않습니다 · 할 일만 찍습니다"
     return 0
@@ -131,6 +186,8 @@ prepare_site() {
   site_timezone
   echo "-- 방화벽 (같은 망 허용)"
   site_firewall
+  echo "-- 웹 관리 권한 (Wi-Fi · 시간대)"
+  site_web_admin_permissions "$(id -un)"
   echo "-- EtherLab (빌드에 필수 · motor_manager 가 libethercat 에 링크)"
   site_ethercat_install
   echo "-- EtherCAT 랜카드"
@@ -308,16 +365,43 @@ clean_dead_dds_segments() {
     fi
   done
   local count
-  count=$(ls -1 /dev/shm/fastrtps_* 2>/dev/null | wc -l)
+  # `ls … | wc -l` 은 조각이 하나도 없으면 ls 가 실패하고 pipefail 로 설치가 멈췄다(8단계 · 실물 2026-10-08) ·
+  # find 는 없어도 성공한다
+  count=$( { find /dev/shm -maxdepth 1 -name 'fastrtps_*' 2>/dev/null || true; } | wc -l)
   if [[ "${count}" -gt 0 ]]; then
     rm -f /dev/shm/fastrtps_* 2>/dev/null || true
     echo "죽은 공유메모리 조각 ${count}개 정리"
   fi
 }
 
+# 코드만 갱신 · 새 시스템 패키지가 필요한가 · 서비스를 끄기 **전에** 본다 (82)
+#
+# `rosdep check` 는 원래부터 못 푸는 이름(`ament_python` · package.xml 의 buildtool ·
+# `librtmidi-dev` · xtouch_midi)에서도 실패한다 · 일반 설치는 `rosdep install -r`(오류 무시)라
+# 몰랐다 · 그래서 「설치 안 된 시스템 패키지」(`System dependencies have not been satisfied:`
+# 아래 `apt <패키지>`) 만 실패로 본다 · 모르는 이름은 참고로 찍는다.
+code_only_dependency_check() {
+  local out missing unresolved
+  out="$( (set +u; source /opt/ros/humble/setup.bash; set -u; \
+    rosdep check --from-paths "${WORKSPACE_DIR}/src" --ignore-src) 2>&1 || true)"
+  missing="$(printf '%s\n' "${out}" | awk '/System dependencies have not been satisfied/ {f = 1; next} f && /^(apt|pip|pip3)[ \t]/ {print $2}' | sort -u | tr '\n' ' ')"
+  unresolved="$(printf '%s\n' "${out}" | grep -o 'Cannot locate rosdep definition for \[[^]]*\]' | sed 's/.*\[\(.*\)\]/\1/' | sort -u | tr '\n' ' ' || true)"
+  if [[ -n "${unresolved// /}" ]]; then
+    echo "참고 · rosdep 이 모르는 이름 (원래부터 · 무시) · ${unresolved}"
+  fi
+  if [[ -n "${missing// /}" ]]; then
+    echo "!! 이번 코드에 새 시스템 패키지가 필요합니다 · ${missing}· 이 PC 터미널에서 bash scripts/install.sh 로 설치하세요" >&2
+    return 1
+  fi
+  echo "새 시스템 패키지 필요 없음"
+}
+
 build_workspace() {
+  SERVICES_STOPPED=true
   systemctl --user stop motion-control.service motion-motor.service motion-coordination.service 2>/dev/null || true
   systemctl --user reset-failed 2>/dev/null || true
+  # 모터 서비스 재기동 상한 기록도 비운다 · 설치 뒤 다시 띄우는 것은 고장 되풀이가 아니다 · 수정 목록 65
+  rm -f "${XDG_RUNTIME_DIR:-/tmp}/robot-web/motor-starts" 2>/dev/null || true
   clean_dead_dds_segments
   # 옛 작업공간이 환경에 남아 있으면 그쪽 경로를 먼저 본다 · 깨끗한 ROS 만 켠다
   unset AMENT_PREFIX_PATH CMAKE_PREFIX_PATH COLCON_PREFIX_PATH || true
@@ -327,7 +411,10 @@ build_workspace() {
   set +u
   source /opt/ros/humble/setup.bash
   set -u
-  rosdep install --from-paths "${WORKSPACE_DIR}/src" --ignore-src -r -y
+  # 코드만 갱신은 7단계 뒤에 따로 검사했다(서비스를 끄기 전 · 82)
+  if [[ "${CODE_ONLY}" != true ]]; then
+    rosdep install --from-paths "${WORKSPACE_DIR}/src" --ignore-src -r -y
+  fi
   # 지우고 처음부터 빌드한다 · §6-99
   #
   # `colcon` 은 **지워진 파일을 정리하지 않는다** · 꾸러미에서 파일이 빠지면
@@ -336,7 +423,15 @@ build_workspace() {
   #
   # 이 스크립트는 설치·업데이트 때만 돈다 · 1~2분 더 걸리는 대신 **늘 같은
   # 결과**가 나온다 · 빌드 상태를 사람이 추측할 일이 없어진다.
-  rm -rf "${WORKSPACE_DIR}/build" "${WORKSPACE_DIR}/install"
+  if [[ "${CODE_ONLY}" == true ]]; then
+    # 웹 업데이트 · 실패하면 되돌릴 수 있게 지우지 않고 비켜 둔다 (82)
+    rm -rf "${WORKSPACE_DIR}/build.prev" "${WORKSPACE_DIR}/install.prev"
+    [[ -d "${WORKSPACE_DIR}/build" ]] && mv "${WORKSPACE_DIR}/build" "${WORKSPACE_DIR}/build.prev"
+    [[ -d "${WORKSPACE_DIR}/install" ]] && mv "${WORKSPACE_DIR}/install" "${WORKSPACE_DIR}/install.prev"
+    BUILD_BACKUP=true
+  else
+    rm -rf "${WORKSPACE_DIR}/build" "${WORKSPACE_DIR}/install"
+  fi
 
   # `robot_manager` 는 심볼릭 링크로 깔지 않는다 · §6-102
   #
@@ -367,6 +462,10 @@ build_workspace() {
   echo "2/2 · 나머지 전부"
   colcon build --symlink-install --base-paths "${WORKSPACE_DIR}/src" \
     --packages-skip-up-to robot_manager
+  if [[ "${BUILD_BACKUP}" == true ]]; then
+    rm -rf "${WORKSPACE_DIR}/build.prev" "${WORKSPACE_DIR}/install.prev"
+    BUILD_BACKUP=false
+  fi
   if command -v ros2 >/dev/null 2>&1; then
     ros2 daemon stop || true
     ros2 daemon start || true
@@ -518,24 +617,38 @@ fi
 
 print_step "2. Git 코드 수신"
 sync_git_repository
+if [[ "$(script_fingerprint)" != "${SCRIPT_FINGERPRINT_BEFORE}" && "${MOTION_INSTALL_REEXEC:-}" != "1" ]]; then
+  echo "설치 스크립트가 바뀌었습니다 · 새 스크립트로 처음부터 다시 시작합니다 (82)"
+  export MOTION_INSTALL_REEXEC=1 MOTION_WEB_SKIP_GIT_PULL=1 MOTION_INSTALL_BEFORE_HEAD="${BEFORE_HEAD}"
+  exec bash "${SCRIPT_PATH}" ${ORIG_ARGS[@]+"${ORIG_ARGS[@]}"}
+fi
 
-print_step "3. ROS 2 저장소 확인"
-ensure_ros_apt_source
+if [[ "${CODE_ONLY}" == true ]]; then
+  print_step "3~6. 건너뜀 · 코드만 갱신 (시스템 패키지 · 권한 · rosdep 은 첫 설치 때 끝남)"
+else
+  print_step "3. ROS 2 저장소 확인"
+  ensure_ros_apt_source
 
-print_step "4. 필수 프로그램 설치"
-install_system_packages
+  print_step "4. 필수 프로그램 설치"
+  install_system_packages
 
-print_step "4-1. 로봇 팩 검사기 (uv · MuJoCo)"
-install_uv_and_mujoco
+  print_step "4-1. 로봇 팩 검사기 (uv · MuJoCo)"
+  install_uv_and_mujoco
 
-print_step "5. 사용자 권한·언어 설정"
-configure_locale_and_groups
+  print_step "5. 사용자 권한·언어 설정"
+  configure_locale_and_groups
 
-print_step "6. rosdep 초기화"
-initialize_rosdep
+  print_step "6. rosdep 초기화"
+  initialize_rosdep
+fi
 
 print_step "7. EtherCAT 경로 확인"
 resolve_ethercat_paths
+
+if [[ "${CODE_ONLY}" == true ]]; then
+  print_step "7-1. 새 시스템 패키지 검사 (서비스를 끄기 전)"
+  code_only_dependency_check
+fi
 
 print_step "8. 전체 빌드"
 cd "${WORKSPACE_DIR}"
@@ -576,6 +689,12 @@ print_step "10. 서비스 적용"
 restart_user_services
 
 print_step "설치 완료"
+# 웹 「모든 PC 업데이트」 가 본다 · 웹 업데이트가 실패한 뒤 터미널 설치로 복구됐는지 (82)
+mkdir -p "${WORKSPACE_DIR}/log/system_update"
+printf '{"time": %s, "hash": "%s", "mode": "%s"}\n' "$(date +%s)" \
+  "$(git -C "${WORKSPACE_DIR}" rev-parse --short HEAD 2>/dev/null || true)" \
+  "$([[ "${CODE_ONLY}" == true ]] && echo code-only || echo full)" \
+  > "${WORKSPACE_DIR}/log/system_update/last_success.json" || true
 # 끝났는지 **눈으로 한 번에** 보이게 · 단계 제목만 지나가면 끝난 줄 알기 어렵다
 echo "작업공간 · ${WORKSPACE_DIR}"
 echo "코드     · $(git -C "${WORKSPACE_DIR}" log --oneline -1 2>/dev/null || echo '(git 아님)')"
@@ -587,6 +706,7 @@ done
 echo
 echo "웹 주소: http://localhost:8000"
 echo "상태 확인: systemctl --user status --no-pager motion-control.service motion-coordination.service"
+echo "설치 확인: bash ${WORKSPACE_DIR}/scripts/check.sh"
 if [[ "${ROS_DAEMON_UPDATED}" == true ]]; then
   echo "ROS 2 daemon 초기화 완료"
 fi

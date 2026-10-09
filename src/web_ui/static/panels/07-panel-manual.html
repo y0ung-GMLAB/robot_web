@@ -119,6 +119,10 @@
                    위 ◀ ▶ 는 한 칸씩(길게 누르면 반복) · 휠·←→ 키 그대로 ·
                    바늘·기준 표시 없음 · 상대 이동이라 0점으로 읽히는 표시를 두지 않는다 -->
               <div class="jog-wheel-column">
+                <!-- 다이얼 ON/OFF · 끄면 다이얼만 잠근다 · 칸은 그대로(옆 칸 밀림 없음) · 수정 목록 52
+                     화면을 열면 늘 OFF (84) -->
+                <button id="jogDialEnabledSwitch" type="button" class="jog-dial-switch" role="switch" aria-checked="false"
+                  title="다이얼 켜기·끄기 · 끄면 끌기·휠·방향키·◀ ▶ 를 무시합니다 · 목표 위치 이동은 그대로 · 화면을 열면 늘 OFF">다이얼 OFF</button>
                 <div class="jog-wheel-arrows" role="group" aria-label="한 칸씩 이동">
                   <button id="jogDialMinus" type="button" class="jog-wheel-arrow" disabled aria-label="한 칸 −" title="한 칸 − · 길게 누르면 반복">◀</button>
                   <button id="jogDialPlus" type="button" class="jog-wheel-arrow" disabled aria-label="한 칸 +" title="한 칸 + · 길게 누르면 반복">▶</button>
@@ -129,26 +133,26 @@
                   <div class="jog-wheel-shade" aria-hidden="true"></div>
                 </div>
                 <label class="manual-field">
-                  <span>다이얼 한 칸 = (모터 deg · 감속·기어비 미적용)</span>
+                  <span id="jogDialStepLabel">다이얼 한 칸 = (모터 deg · 감속·기어비 미적용)</span>
                   <input id="jogDialStep" class="mono" type="number" inputmode="decimal"
                     min="0.001" max="360" step="any" value="1"
                     title="한 칸에 움직일 모터 각도 · 0.001 ~ 360 deg">
                 </label>
-                <small class="jog-dial-help">좌우로 끌기 · 휠 한 칸 · ←/→ 한 칸 · 오른쪽 = +</small>
+                <small class="jog-dial-help">좌우로 끌기 · 휠 · ←/→ 한 칸 · 오른쪽 = + · Shift = 1/10 칸</small>
               </div>
               <div class="jog-dial-side">
                 <div class="jog-dial-readout">
-                  <span>모터 위치</span>
+                  <span id="jogDialPositionLabel">모터 위치</span>
                   <strong id="jogDialPosition" class="mono">-</strong>
                 </div>
                 <div class="jog-dial-pending-row">
                   <div id="jogDialPending" class="jog-dial-pending mono">대기</div>
                   <button id="jogDialCancelPending" class="off" type="button"
-                    title="아직 안 보낸 다이얼 이동을 버리고 움직이는 조그·이동을 멈춥니다 · 서보 ON 유지">동작 취소</button>
+                    title="다이얼이 몰던 것을 놓고 움직이는 이동을 멈춥니다 · 서보 ON 유지">동작 취소</button>
                 </div>
                 <div class="jog-target-row">
                   <label class="manual-field">
-                    <span>목표 위치 (모터 deg · 감속·기어비 미적용)</span>
+                    <span id="jogTargetLabel">목표 위치 (모터 deg · 감속·기어비 미적용)</span>
                     <input id="jogTargetInput" class="mono" type="number" inputmode="decimal" step="any"
                       title="이동할 모터 위치 · 모터 운전 한계 안 · 「이동」 또는 Enter · 속도·가속은 모터 설정 한계를 따릅니다">
                   </label>
@@ -175,6 +179,14 @@
                 <span>수동 조작의 조그·동작을 멈추고 서보 ON 상태를 유지합니다</span>
               </div>
               <button id="motionTestStopButton" class="off motion-test-stop-button" type="button">모터 동작 정지</button>
+            </div>
+            <!-- 수동으로 만지다가 초기 위치로 · 애니메이션 화면 버튼과 같은 함수 · 수정 목록 58 -->
+            <div class="motion-test-stop-bar manual-initialize-bar">
+              <div>
+                <strong>초기 위치 이동</strong>
+                <span>조인트 매핑의 「초기 위치」대로 천천히 이동합니다 · 조그·다이얼이 움직이는 중에는 꺼집니다</span>
+              </div>
+              <button id="manualInitializeButton" class="primary" type="button" disabled>초기 위치 이동</button>
             </div>
             <div class="motion-command-position">
               <div class="section-head compact">

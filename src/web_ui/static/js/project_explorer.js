@@ -284,7 +284,7 @@ export function createProjectExplorerController({
         + `title="${escapeHtml(node.relative_path || node.name)} · 원문 보기(읽기 전용)">`
         + `<span class="project-tree-branch">${last ? '└' : '├'}</span>`
         + '<span class="project-tree-readonly-icon">·</span>'
-        + `<span class="project-tree-name">${escapeHtml(node.name)}</span>`
+        + `<span class="project-tree-name" title="${escapeHtml(node.name)}">${escapeHtml(node.name)}</span>`
         + `<small>${formatBytes(node.size)}</small>`
         + '<span class="project-tree-readonly-badge">읽기 전용</span></button>';
     }).join('');
@@ -318,7 +318,7 @@ export function createProjectExplorerController({
           + `data-project-category="${escapeHtml(file.category)}" data-project-file="${escapeHtml(file.name)}">`
           + `<button type="button" class="project-tree-file" ${isLogFile ? 'data-project-log-open' : 'data-project-open'} title="${escapeHtml(file.name)} · ${isLogFile ? '로그 탭에서 보기' : '기능에서 열기'}">`
           + `<span class="project-tree-branch">${fileIndex === folder.children.length - 1 ? '└' : '├'}</span>`
-          + `<span class="project-tree-name">${escapeHtml(file.name)}</span>`
+          + `<span class="project-tree-name" title="${escapeHtml(file.name)}">${escapeHtml(file.name)}</span>`
           + `${fileBadge}</button>`
           + `${isLogFile || managedInFeature || !fileManagementAllowed ? '' : `<button type="button" class="project-tree-action" data-project-manage title="파일 관리" aria-label="${escapeHtml(file.name)} 관리">⋮</button>`}`
           + `</div>${bankTree}</div>`;

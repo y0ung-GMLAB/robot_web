@@ -103,7 +103,10 @@ def test_dry_run_site_install_changes_nothing_and_lists_every_step(tmp_path):
     out = result.stdout
     for title in ['0. 사전 확인', '1. Ubuntu 버전 확인', '1-1. 현장 준비', 'dry-run 끝']:
         assert title in out, title
-    for command in ['20auto-upgrades', 'AutomaticLoginEnable=true', 'loginctl enable-linger',
+    # linger 가 이미 켜진 PC 는 명령 대신 「이미 켜져 있음」 을 찍는다 · 둘 다 정상 · 수정 목록 63
+    linger = out.split('(linger)', 1)[-1].split('자동 로그인', 1)[0]
+    assert 'loginctl enable-linger' in linger or '이미 켜져 있음' in linger, linger
+    for command in ['20auto-upgrades', 'AutomaticLoginEnable=true',
                     'timedatectl set-timezone Asia/Seoul', '--enable-generic=yes', '99-ethercat.rules',
                     'ethercat-rebuild.service', 'UPDOWN_INTERFACES="eth9"', 'systemctl enable --now ethercat']:
         assert command in out, command

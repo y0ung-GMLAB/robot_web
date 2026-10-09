@@ -276,13 +276,43 @@ class MotionScheduleNode(Node):
             return False
         return runtime.get('joined') is True
 
-    def _local_run_state(self) -> str:
-        """이 PC 의 모션이 지금 어느 단계인가 · 못 읽으면 빈 문자열."""
+    def _local_run_status(self) -> dict:
+        """이 PC 의 모션 상태 · 못 읽으면 빈 것."""
         payload = self._read_json('/api/motion-run/status')
         if not isinstance(payload, dict):
-            return ''
+            return {}
         status = payload.get('status') if isinstance(payload.get('status'), dict) else payload
-        return str(status.get('state') or '')
+        return status if isinstance(status, dict) else {}
+
+    def _local_run_state(self) -> str:
+        """이 PC 의 모션이 지금 어느 단계인가 · 못 읽으면 빈 문자열."""
+        return str(self._local_run_status().get('state') or '')
+
+    def _recovery_exhausted(self) -> bool:
+        """자동 복구 한도 초과로 멈춘 상태인가 · `error` 일 때만 상태 전체를 읽는다"""
+        if self._local_run_state() != 'error':
+            return False
+        return bool(self._local_run_status().get('auto_recovery_exhausted'))
+
+    def _auto_recovery_hold(self) -> bool:
+        """런타임이 자동 복구를 다 쓰고 멈췄으면 스케줄도 다시 시작하지 않는다 · 수정 목록 73
+
+        사람이 보고 풀어야 한다 · 운전 모드를 「수동」 으로 바꿨다 「스케줄」 로 돌아오면 풀린다
+        (모드를 바꾸는 것이 사람의 확인) · 수동 모드에서 재생·초기 이동을 하면 상태가 바뀌어 풀린다.
+        """
+        exhausted = self._recovery_exhausted()
+        acknowledged = getattr(self, '_auto_recovery_ack_mode_seen', False)
+        if not exhausted:
+            self._auto_recovery_ack_mode_seen = False
+            return False
+        if acknowledged:
+            return False
+        if not getattr(self, '_auto_recovery_hold_logged', False):
+            self.get_logger().warning(
+                "[점검] 자동 복구 한도 초과로 멈춤 · 스케줄 다시 시작 안 함 · 모드를 바꿨다 돌아오면 다시 시작"
+            )
+            self._auto_recovery_hold_logged = True
+        return True
 
     def _group_execution(self) -> dict:
         """지금 살아 있는 그룹 실행 · 없으면 빈 것."""
@@ -390,6 +420,10 @@ class MotionScheduleNode(Node):
             return
 
         if self._run_mode != SCHEDULE_MODE:
+            # 자동 복구 한도 초과로 멈춘 **동안** 사람이 모드를 바꿨다 · 스케줄로 돌아오면 다시 시작한다 · 73
+            # (그 전의 모드 변경은 확인으로 치지 않는다 · 나중 한도 초과를 그냥 넘기면 안 된다)
+            if self._recovery_exhausted():
+                self._auto_recovery_ack_mode_seen = True
             # 수동 모드 · 스케줄은 **새로 시작하지 않는다** · §6-143
             #
             # 전에는 「사람이 멈췄나」를 요청 내용으로 추측했다 · 그룹 정지나
@@ -398,6 +432,9 @@ class MotionScheduleNode(Node):
             return
 
         if wanted is not None and not running:
+            if self._auto_recovery_hold():
+                return
+            self._auto_recovery_hold_logged = False
             self.get_logger().info(
                 f"[점검] 구간 안인데 멈춰 있다 · 시작 · {wanted.schedule_name}"
             )

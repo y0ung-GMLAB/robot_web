@@ -21,13 +21,19 @@ def test_unchanged_files_are_not_parsed_again(tmp_path, monkeypatch):
     first = motion_file_analysis.motion_file_entry(path, include_detail=False)
     second = motion_file_analysis.motion_file_entry(path, include_detail=False)
 
-    assert calls == [False]
+    # 처음 한 번만 · 상세로 만들어 두고 목록은 거기서 뺀다 (88)
+    assert calls == [True]
     assert first['analysis'] == second['analysis']
+    assert 'graph_series' not in first['analysis']
+    detail = motion_file_analysis.motion_file_entry(path, include_detail=True)
+    assert calls == [True], '상세도 같은 캐시'
+    assert 'graph_series' in detail['analysis']
+    assert 'content' not in detail, '파일 본문은 싣지 않는다 (88)'
     second['analysis']['valid'] = 'changed by caller'
     assert motion_file_analysis.motion_file_entry(path, include_detail=False)['analysis']['valid'] is True
 
 
-def test_a_changed_file_is_read_again_and_detail_is_never_cached(tmp_path, monkeypatch):
+def test_a_changed_file_is_read_again(tmp_path, monkeypatch):
     motion_file_analysis._SUMMARY_CACHE.clear()
     path = tmp_path / 'a.json'
     path.write_text(CONTENT, encoding='utf-8')
@@ -45,5 +51,5 @@ def test_a_changed_file_is_read_again_and_detail_is_never_cached(tmp_path, monke
     refreshed = motion_file_analysis.motion_file_entry(path, include_detail=False)
     motion_file_analysis.motion_file_entry(path, include_detail=True)
 
-    assert calls == [False, False, True]
+    assert calls == [True, True]
     assert refreshed['analysis']['valid_records'] == 2

@@ -14,7 +14,7 @@ import rclpy
 import uvicorn
 import yaml
 from fastapi import FastAPI, HTTPException, Request
-from motion_common import generation, rpc, topics
+from motion_common import generation, minas_absolute, rpc, topics, upper_restart
 from motion_common import paths as common_paths
 from motion_common import motor_ref as motor_ref_rules
 from fastapi.responses import JSONResponse
@@ -23,6 +23,10 @@ from rclpy.qos import DurabilityPolicy, QoSProfile, ReliabilityPolicy
 from std_msgs.msg import String
 from std_srvs.srv import SetBool, Trigger
 
+from .access_log import install_access_log_filter
+from .system_update import SystemUpdate, blocker_from_run_status
+from .wifi_settings import WifiSettings
+from .system_timezone import SystemTimezone
 from .ethercat_alias_manager import EthercatAliasError, EthercatAliasManager
 from .coordination_bridge import (
     CoordinationWebBridge, local_motion_control, local_motion_readiness,
@@ -33,6 +37,7 @@ from .manual_motor_commands import ManualMotorCommandService
 from .schedule_end import ScheduleEndService
 from .supervisor_watchdog import SupervisorWatchdog
 from .auto_backup import AutoBackupService
+from .absolute_setup import AbsoluteSetup
 from .drive_maintenance import DriveMaintenance
 from .manual_stream import ManualStreamService
 from . import animation_preview, sim_scene
@@ -296,6 +301,8 @@ class MotionWebBridge(Node):
             runtime_project_id=lambda: self._project.runtime_project_id(),
             logger=self.get_logger,
         )
+        # 직전에 supervisor·상태 모니터가 죽어 상위 서비스가 다시 떴으면 1건 · 수정 목록 72
+        self._record_upper_service_crash()
         # 회차별 모션 기록 조회 · 쓰는 쪽은 motion_runtime.motion_trace
         self.motion_trace = MotionTraceService(self.project_repository)
         self.web_publish_hz = float(self.declare_parameter('web_publish_hz', 10.0).value)
@@ -410,6 +417,28 @@ class MotionWebBridge(Node):
             read_slaves=self.ethercat_alias_manager.read_slaves,
             registry_motor=self._registry_motor_for_axis,
             current_motor=self._current_motor_for_axis,
+            # 앱솔루트 설정이 도는 동안은 낱개 정비를 막는다 · 같은 드라이브를 두 길로 만지지 않게 · 62
+            safety_blocker=lambda: (
+                self.absolute_setup.blocker()
+                or self._motor_runtime.ethercat_scan_safety_blocker(require_fresh_motor_state=True)
+            ),
+            lifecycle_lock=self._motor_lifecycle_lock,
+            motor_service=_managed_motor_service,
+            service_active=self._motor_runtime.managed_service_active,
+            run_service=lambda action, service: self._motor_runtime.run_managed_service(action, service),
+            wait_release=lambda: motor_config_rules.wait_for_ethercat_release(timeout_sec=5.0),
+            wait_recovery=lambda service, axes: self._motor_runtime.wait_for_runtime_recovery(
+                axes, timeout_sec=12.0, motor_service=service,
+            ),
+            expected_axes=self._detected_axes,
+            record=self._record_drive_maintenance,
+        )
+        # MINAS 「앱솔루트 설정」 · 앱솔루트 + 다회전 클리어 · 전원 재투입 감지 · 수정 목록 62 ③④
+        self.absolute_setup = AbsoluteSetup(
+            minas_absolute_state=lambda: (self.motion_state() or {}).get('minas_absolute'),
+            visible_slaves=self._visible_ethercat_slaves,
+            current_motor=self._current_motor_for_axis,
+            servo_off=lambda axis: self._manual.ac_servo_control('servo_off', axis, 'selected'),
             safety_blocker=lambda: self._motor_runtime.ethercat_scan_safety_blocker(
                 require_fresh_motor_state=True,
             ),
@@ -422,7 +451,7 @@ class MotionWebBridge(Node):
                 axes, timeout_sec=12.0, motor_service=service,
             ),
             expected_axes=self._detected_axes,
-            record=self._record_drive_maintenance,
+            record=self._record_absolute_setup,
         )
         # 스케줄 끝 · 기준점 주차 → 서보 OFF · 다음 시작 전 다시 켜기 · 수정 목록 36
         self.schedule_end = ScheduleEndService(
@@ -507,6 +536,20 @@ class MotionWebBridge(Node):
             self.workspace_root,
             self.current_project_generation,
         )
+        # 웹에서 업데이트 · 재생 중이면 거절 (재시작이 모터를 세운다) · 2026-10-08
+        self._system_update = SystemUpdate(
+            self.workspace_root,
+            blocker=lambda: blocker_from_run_status(self._cached_motion_run_status()),
+        )
+        # Wi-Fi · 재생 중이면 바꾸지 않는다 (연동이 끊긴다) · 수정 목록 81
+        self._wifi = WifiSettings(
+            self.workspace_root,
+            blocker=lambda: blocker_from_run_status(self._cached_motion_run_status()),
+        )
+        # 시간대 · 재생 중이면 바꾸지 않는다 (바꾼 뒤 프로그램을 다시 띄운다) · 수정 목록 79
+        self._system_timezone = SystemTimezone(
+            blocker=lambda: blocker_from_run_status(self._cached_motion_run_status()),
+        )
         self._startup_project_context_timer = self.create_timer(
             1.0, self._execution_context.schedule_reconcile
         )
@@ -567,6 +610,22 @@ class MotionWebBridge(Node):
             self._motion_state = payload
             self._motion_state_received_at = time.time()
         self._motor_event_log.record_motor_error_transitions(payload)
+        self._motor_event_log.record_minas_absolute_transition(payload)
+
+    def _record_upper_service_crash(self) -> None:
+        """launch 가 남긴 비정상 종료 표지를 모터 이벤트로 옮긴다 · 수정 목록 72"""
+        marker = upper_restart.take_marker(self.workspace_root)
+        if not marker:
+            return
+        content = upper_restart.event_content(marker)
+        self.get_logger().error(f'[상위 서비스 재시작] {content}')
+        self._motor_event_log.append(
+            category='system',
+            event_type='upper_service_crashed',
+            target=str(marker.get('node') or '상위 서비스'),
+            content=content,
+            details=marker,
+        )
 
     def _motion_value_callback(self, msg: String) -> None:
         try:
@@ -816,6 +875,8 @@ class MotionWebBridge(Node):
                 'runtime': runtime_status,
             },
             'motion_state_topic': self.motion_state_topic,
+            # 서버 시각 · 웹 3D 가 실물 재생 위치를 서버 시계로 맞춘다 · 수정 목록 92
+            'server_time': time.time(),
             'motion_state_received_at': received_at,
             'motion_state_age_sec': None if received_at is None else round(time.time() - received_at, 3),
             'motion_test_limits': {
@@ -827,6 +888,8 @@ class MotionWebBridge(Node):
                 safety_status=safety_status,
                 execution_context=execution_context,
             ),
+            # 연결된 MINAS 드라이브 앱솔루트 미확인 사유 · 상단 빨간 칸 · 수정 목록 62
+            'minas_absolute_blocker': self.minas_absolute_blocker(),
             'motion_run_status': motion_run_status,
             'motor_activity': motor_activity_snapshot(
                 motion_run_status,
@@ -1140,7 +1203,12 @@ class MotionWebBridge(Node):
             return f'온라인이 아닌 축이 있습니다: {", ".join(unavailable)}'
         if faulted:
             return f'오류 축이 있습니다: {", ".join(faulted)}'
-        return ''
+        setup = getattr(self, 'absolute_setup', None)
+        if setup is not None and setup.active():
+            return setup.blocker()
+        # 연결된 MINAS 드라이브 전부 앱솔루트 확인 전에는 막는다 · 등록 안 된 드라이브도 ·
+        # 축 연결·오류 사유가 더 구체적이라 그 뒤에 본다 · 수정 목록 62
+        return minas_absolute.block_reason(motion_state.get('minas_absolute'))
 
     def establish_project_generation_boundary(self, *, force: bool = False) -> None:
         """Synchronize the persistent project generation with the command owner.
@@ -1358,6 +1426,25 @@ class MotionWebBridge(Node):
     def motor_event_log(self):
         """모터 사건 기록"""
         return self._motor_event_log
+
+    @property
+    def system_update(self):
+        """이 PC 코드 갱신 (`install.sh --code-only`) · 「모든 PC 업데이트」 의 한 칸"""
+        return self._system_update
+
+    @property
+    def system_timezone(self):
+        """이 PC 시간대 바꾸기 (polkit · sudo 없이) · 수정 목록 79"""
+        return self._system_timezone
+
+    @property
+    def wifi(self):
+        """이 PC Wi-Fi 보기·바꾸기 · 60초 확인 없으면 되돌림 · 수정 목록 81"""
+        return self._wifi
+
+    def _cached_motion_run_status(self) -> Dict[str, Any]:
+        with self._motion_run_lock:
+            return dict(self._motion_run_status) if self._motion_run_status else {}
 
     @property
     def coordination(self):
@@ -1907,6 +1994,29 @@ class MotionWebBridge(Node):
             and str(motor.get('state') or '') == 'detected'
         )
 
+    def _visible_ethercat_slaves(self) -> Optional[List[Dict[str, Any]]]:
+        """지금 보이는 슬레이브 · 하나도 없으면 [] (전원이 꺼진 것) · 목록을 못 읽으면 None(모름)"""
+        try:
+            return self.ethercat_alias_manager.read_slaves()
+        except EthercatAliasError as exc:
+            return [] if '찾지 못했습니다' in str(exc) else None
+
+    def _record_absolute_setup(self, entry: Dict[str, Any]) -> None:
+        targets = ', '.join(str(item.get('label')) for item in entry.get('targets') or [])
+        self._motor_event_log.append(
+            category='system',
+            event_type=str(entry.get('event_type') or 'minas_absolute_setup'),
+            target=f'MINAS 드라이브 · {targets}',
+            content=str(entry.get('message') or ''),
+            details=entry,
+        )
+
+    def absolute_setup_preview(self, payload: Dict[str, Any]) -> Dict[str, Any]:
+        return self.absolute_setup.preview(payload if isinstance(payload, dict) else {})
+
+    def absolute_setup_start(self, payload: Dict[str, Any]) -> Dict[str, Any]:
+        return self.absolute_setup.start(payload if isinstance(payload, dict) else {})
+
     def _record_drive_maintenance(self, entry: Dict[str, Any]) -> None:
         self._motor_event_log.append(
             category='system',
@@ -1924,7 +2034,24 @@ class MotionWebBridge(Node):
         return end.start_blocker()
 
     def motion_run_check(self, payload: Dict[str, Any]) -> Dict[str, Any]:
+        # 검사·그룹 참가 준비(`local_motion_readiness`)도 앱솔루트 확인 뒤에만 · 수정 목록 62
+        absolute = self.minas_absolute_blocker()
+        if absolute:
+            return {'success': False, 'message': f'실행 준비 검사 실패: {absolute}'}
         return self._request_motion_run('check', payload, timeout_sec=3.0)
+
+    def minas_absolute_blocker(self) -> str:
+        """연결된 MINAS 드라이브 앱솔루트 미확인이면 그 이유 · 상태를 못 받았으면 빈 문자열
+        (상태 없음은 다른 검사가 막는다) · 판정은 `motion_common.minas_absolute` · 수정 목록 62"""
+        lock = getattr(self, '_lock', None)
+        if lock is None:
+            motion_state = getattr(self, '_motion_state', None)
+        else:
+            with lock:
+                motion_state = getattr(self, '_motion_state', None)
+        if not isinstance(motion_state, dict):
+            return ''
+        return minas_absolute.block_reason(motion_state.get('minas_absolute'))
 
     def coordination_execution_blocker(self) -> str:
         service = getattr(self, '_coordination_web_bridge', None)
@@ -1934,6 +2061,9 @@ class MotionWebBridge(Node):
         off = run_mode_gate.motion_command_block_reason(self)
         if off:
             return {'success': False, 'message': f'초기 위치 이동 불가: {off}'}
+        human = run_mode_gate.human_start_block_reason(self, payload)
+        if human:
+            return {'success': False, 'message': f'초기 위치 이동 불가: {human}'}
         if str(payload.get('request_source') or '') != 'network_control':
             conflict = self.coordination_execution_blocker()
             if conflict:
@@ -1989,6 +2119,9 @@ class MotionWebBridge(Node):
         off = run_mode_gate.motion_command_block_reason(self)
         if off:
             return {'success': False, 'message': f'모션 실행 불가: {off}'}
+        human = run_mode_gate.human_start_block_reason(self, payload)
+        if human:
+            return {'success': False, 'message': f'모션 실행 불가: {human}'}
         manual = self.schedule_start_blocked_by_manual_mode(payload)
         if manual:
             self.get_logger().warn(f'스케줄 시작 거절 · {manual}')
@@ -2436,7 +2569,11 @@ def main(args=None) -> None:
 
     app = create_app(bridge)
     try:
-        uvicorn.run(app, host=bridge.host, port=bridge.port, log_level='info')
+        # 로깅 설정은 Config 가 만들 때 한다 · 그 뒤에 거름망을 달아야 지워지지 않는다 ·
+        # 성공한 GET(화면 폴링) 접속 기록을 버린다 · 수정 목록 77
+        config = uvicorn.Config(app, host=bridge.host, port=bridge.port, log_level='info')
+        install_access_log_filter()
+        uvicorn.Server(config).run()
     finally:
         bridge.destroy_node()
         if rclpy.ok():

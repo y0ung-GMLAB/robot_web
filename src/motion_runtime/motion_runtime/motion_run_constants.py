@@ -26,6 +26,9 @@ STATE_TIMEOUT_SEC = 1.0
 SAFETY_STATUS_TIMEOUT_SEC = 2.0
 #: 목표 도달 판정 허용 오차
 AC_TARGET_TOLERANCE_DEG = 0.1
+#: AC 서보 도달 허용 오차 · **관절** deg · 모터로는 × |감속비 × scale| · 위의 모터 0.1° 가 바닥 · 수정 목록 57
+#: 모터 0.1° 고정은 1:150 에서 관절 0.00067° 라 감속기 백래시보다 수십 배 작았다 · 값은 실물에서 조정
+AC_TARGET_TOLERANCE_JOINT_DEG = 0.05
 DYNAMIXEL_TARGET_TOLERANCE_DEG = 1.0
 TARGET_SETTLE_TIMEOUT_SEC = 3.0
 #: 연속 재생 이음매 허용 오차

@@ -1,0 +1,21 @@
+# 저장소 기본값 · 웹에서 바꾼 값은 speaker.local.yaml(저장소 밖)에 저장된다 · 경로는 앱 폴더 기준
+mode: dds
+dds:
+  domain_id: 21
+  group_id: test1
+  pc_name: speaker
+audio:
+  device: plughw:1,0
+  sounds_dir: sounds
+  file_path: 클로닝_전체_9분16초.wav
+trigger:
+  offset_sec: 0.0
+  stop_on_motion_stop: true
+standalone:
+  repeat: 0
+  dwell_sec: 2.0
+web:
+  host: 0.0.0.0
+  port: 8100
+log:
+  max_entries: 100

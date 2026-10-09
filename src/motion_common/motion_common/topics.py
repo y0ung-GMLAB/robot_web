@@ -223,6 +223,8 @@ GROUP_TIME_SYNC = '/motion_group/time_sync'
 #: 그만이다 (`trigger_sync_samples * 3` 까지).
 GROUP_TIME_PROBE = '/motion_group/time_probe'
 GROUP_SYSTEM_INFO = '/motion_group/system_info'
+#: 같은 망 PC 알림 · 그룹 참가와 상관없이 · 로봇 PC 와 스피커 PC 가 2초마다 · 최선형
+GROUP_PRESENCE = '/motion_group/presence'
 
 # --------------------------------------------------------------------------- #
 # /motion_schedule · 스케줄

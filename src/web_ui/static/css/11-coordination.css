@@ -321,15 +321,36 @@
   color: #0f172a;
 }
 
-/* 세션 버튼도 같은 줄에 · 뱃지 높이에 맞춘다 */
-.coord-badge-actions > button {
-  padding: 4px 10px;
-  font-size: 12px;
+/* 「그룹 참여」 스위치 · 83 · 켜면 초록 · 끄면 회색 */
+.coord-join-switch { align-items: center; cursor: pointer; user-select: none; }
+.coord-join-switch input { position: absolute; opacity: 0; width: 1px; height: 1px; pointer-events: none; }
+.coord-join-track {
+  position: relative;
+  flex: 0 0 auto;
+  width: 34px;
+  height: 18px;
+  border-radius: 9px;
+  background: #cbd5e1;
+  transition: background 0.15s;
 }
+.coord-join-track::after {
+  content: '';
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: #ffffff;
+  box-shadow: 0 1px 2px rgb(0 0 0 / 30%);
+  transition: left 0.15s;
+}
+.coord-join-switch input:checked + .coord-join-track { background: #22c55e; }
+.coord-join-switch input:checked + .coord-join-track::after { left: 18px; }
+.coord-join-switch input:focus-visible + .coord-join-track { outline: 2px solid var(--focus, #2563eb); outline-offset: 2px; }
+.coord-join-switch:has(input:disabled) { cursor: not-allowed; opacity: 0.6; }
 
-/* 무엇이 남고 무엇이 풀리는지 · §6-132
-   「연동 사용」은 설정 파일에 영구히 남고, 「지금 빠지기」는 노드 메모리만
-   바꾼다 · 화면에서는 둘 다 그냥 선택지라 구분할 길이 없었다. */
+/* 무엇이 남는지 · §6-132 */
 .coordination-persistence-note {
   margin: 8px 0 0;
   font-size: 12px;

@@ -87,6 +87,8 @@ def blender_scene_info(workspace_root: Path) -> Dict[str, Any]:
         'available': True,
         'size_bytes': path.stat().st_size,
         'fingerprint': robot_pack.current_fingerprint(pack_dir)[:16],
+        # 이 장면이 담은 애니메이션 · 화면은 고른 애니메이션이 여기 있을 때만 Blender 뷰를 켠다 · 수정 목록 60
+        'animations': robot_pack.scene_glb_animations(pack_dir),
     }
 
 

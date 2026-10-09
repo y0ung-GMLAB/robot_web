@@ -178,6 +178,26 @@ def header_map(headers: Any) -> Dict[str, int]:
     return mapping if all(key in mapping for key in REQUIRED_COLUMNS) else {}
 
 
+#: 바로 앞에 쓴 헤더와 그 결과 · 수정 목록 88 (2026-10-09)
+#:
+#: `parse_row` 는 기록마다 불린다 · 9분 나레이션은 55만 번 · 그때마다 헤더 정리(`column_key`)를
+#: 다시 해서 읽는 시간의 60 % 가 여기 갔다 · 한 파일 안에서 헤더는 같으니 앞 결과를 쓴다 ·
+#: 내용으로 비교한다(같은 자리의 다른 목록이어도 틀리지 않게).
+_LAST_HEADER_MAP: Tuple[Any, Dict[str, int]] = (None, {})
+
+
+def _row_header_map(headers: Any) -> Dict[str, int]:
+    if not isinstance(headers, (list, tuple)):
+        return {}
+    snapshot, mapping = _LAST_HEADER_MAP
+    # 같은 종류끼리 `==` · 파이썬 안쪽(C)에서 비교해 빠르다
+    if snapshot is not None and type(snapshot) is type(headers) and snapshot == headers:
+        return mapping
+    mapping = header_map(headers)
+    globals()['_LAST_HEADER_MAP'] = (type(headers)(headers), mapping)
+    return mapping
+
+
 def header_has_required(headers: Any) -> bool:
     """헤더가 필수 4개 컬럼을 모두 담고 있는지 판정한다."""
     return bool(header_map(headers))
@@ -398,7 +418,7 @@ def parse_row(row: Any, headers: Any = None) -> Tuple[Optional[Dict[str, Any]], 
         motion_id = column_value(row, 'motion_id')
         value = column_value(row, 'value')
     elif isinstance(row, list):
-        mapping = header_map(headers)
+        mapping = _row_header_map(headers)
         if not mapping and len(row) >= 4:
             mapping = {'frame': 0, 'time': 1, 'motion_id': 2, 'value': 3}
         try:

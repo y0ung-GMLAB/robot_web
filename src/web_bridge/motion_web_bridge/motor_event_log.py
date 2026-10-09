@@ -73,12 +73,15 @@ class MotorEventLog:
         self._lock = threading.RLock()
         self._active_motor_errors: Dict[str, str] = {}
         self._last_motion_run_state: Optional[str] = None
+        #: 마지막으로 적은 앱솔루트 차단 문구 · '' = 막히지 않음 · None = 아직 모름 · 수정 목록 62
+        self._last_minas_absolute_message: Optional[str] = None
 
     def clear_project_memory(self) -> None:
         """프로젝트가 바뀌면 전이 판정 기준을 지운다."""
         with self._lock:
             self._active_motor_errors = {}
             self._last_motion_run_state = None
+            self._last_minas_absolute_message = None
 
     def record_motor_error_transitions(self, payload: Dict[str, Any]) -> None:
         motors = payload.get('motors')
@@ -133,6 +136,37 @@ class MotorEventLog:
 
         for event in new_events:
             self.append(**event)
+
+    def record_minas_absolute_transition(self, payload: Dict[str, Any]) -> None:
+        """앱솔루트 미확인으로 막힘 · 풀림 · 바뀔 때만 1건 · 「확인 중」 은 적지 않는다 · 수정 목록 62"""
+        summary = payload.get('minas_absolute') if isinstance(payload, dict) else None
+        if not isinstance(summary, dict):
+            return
+        state = str(summary.get('state') or '')
+        if state == 'checking':
+            return
+        message = str(summary.get('message') or '') if state == 'blocked' else ''
+        with self._lock:
+            previous = self._last_minas_absolute_message
+            if previous == message:
+                return
+            self._last_minas_absolute_message = message
+        if message:
+            self.append(
+                category='error',
+                event_type='minas_absolute_blocked',
+                target='MINAS 드라이브',
+                content=f'{message} · 모든 모터 동작 차단',
+                details={'drives': summary.get('drives') or []},
+            )
+        elif previous:
+            self.append(
+                category='system',
+                event_type='minas_absolute_confirmed',
+                target='MINAS 드라이브',
+                content='앱솔루트 확인됨 · 모터 동작 차단 해제',
+                details={'drives': summary.get('drives') or []},
+            )
 
     def record_motion_run_transition(self, status: Dict[str, Any]) -> None:
         state = str(status.get('state') or 'idle')

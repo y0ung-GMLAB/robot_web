@@ -53,15 +53,15 @@ test('목록을 못 받았어도 막히지 않는다', () => {
   assert.equal(command, 'sudo timedatectl set-timezone Europe/Paris');
 });
 
-test('시간대 바꾸기는 화면에서 뺐다', () => {
-  // 해외 설치는 우분투에서 직접 바꾼다 · `sudo timedatectl set-timezone …`
-  // 한 줄이면 되고, 화면에 자리를 차지할 만큼 자주 하는 일이 아니다 · §6-291
+test('시간대는 화면에서 바로 바꾼다 · 이 PC · 모든 로봇 PC · 79 (2026-10-08 · §6-291 대체)', () => {
+  // 설치가 이 계정에 시간대 변경 하나만 허용한다(polkit) · 칠 명령 대신 적용 버튼
   for (const id of [
     'systemTimezoneNow', 'systemTimezonePick', 'systemTimezoneList',
-    'systemTimezoneCommand', 'btnCopyTimezoneCommand', 'systemTimezoneMismatch',
+    'systemTimezoneApplyButton', 'systemTimezoneApplyAllButton', 'systemTimezoneMessage',
   ]) {
-    assert.ok(!indexHtml.includes(`id="${id}"`), `${id} 가 아직 화면에 있다`);
+    assert.ok(indexHtml.includes(`id="${id}"`), `${id} 가 화면에 없다`);
   }
+  assert.ok(!indexHtml.includes('id="btnCopyTimezoneCommand"'), '명령 복사 버튼은 이제 없다');
 });
 
 test('명령을 만드는 코드는 그대로 둔다', () => {

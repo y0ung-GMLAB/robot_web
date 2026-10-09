@@ -4,7 +4,7 @@ from types import SimpleNamespace
 import pytest
 from rclpy.executors import ExternalShutdownException
 from motion_coordination_interfaces.msg import (
-    GroupAlarm, GroupCommand, GroupEvent, GroupHeartbeat, GroupTimeSync,
+    GroupAlarm, GroupCommand, GroupEvent, GroupHeartbeat, GroupTimeSync, PcPresence,
 )
 
 import motion_coordination.coordination_node as coordination_node
@@ -1671,3 +1671,259 @@ def test_start_without_left_out_pcs_writes_nothing(monkeypatch):
     node._call_local_control = lambda payload, **_kwargs: sent.append(payload) or {'success': True}
     node._start_group_execution()
     assert sent == []
+
+
+def _running_group(node):
+    node._execution = GroupExecution()
+    execution_id = node._execution.begin('pc-a', ('pc-a', 'pc-b'))
+    for pc_id in ('pc-a', 'pc-b'):
+        node._execution.mark_ready(pc_id)
+    node._execution.initialize_action(now=1.0)
+    for pc_id in ('pc-a', 'pc-b'):
+        node._execution.mark_armed(pc_id)
+    node._execution.start_action(now=2.0)
+    stops, errors = [], []
+    node._issue_stop_now = lambda **kwargs: stops.append(kwargs)
+    node._publish_coordination_error = lambda **kwargs: errors.append(kwargs)
+    node._clear_active_execution = lambda: node._execution.clear_active()
+    node.get_logger = lambda: SimpleNamespace(
+        warning=lambda *_: None, error=lambda *_: None, warn=lambda *_: None, info=lambda *_: None,
+    )
+    return execution_id, stops, errors
+
+
+def test_cycle_failure_stops_this_run_without_locking_the_group():
+    """수정 목록 67 · 도달 확인 실패는 그 회차만 · 그룹 오류(2등급)를 걸지 않는다"""
+    node = _node()
+    execution_id, stops, errors = _running_group(node)
+
+    node._event_callback(GroupEvent(
+        group_id='stage-a', execution_id=execution_id, pc_id='pc-b', event='error',
+        success=False,
+        message='그룹 모션 실행 실패: [회차 실패] 모션 최종 위치 도달 확인 실패: 2번 모터 오차 3.5',
+    ))
+
+    assert len(stops) == 1 and stops[0]['execution_id'] == execution_id
+    assert errors == []                        # 잠그지 않음 · 다음 스케줄 점검에서 다시 시작
+    assert not node._execution.execution_id
+
+
+def test_other_runtime_errors_still_lock_the_group():
+    node = _node()
+    execution_id, stops, errors = _running_group(node)
+
+    node._event_callback(GroupEvent(
+        group_id='stage-a', execution_id=execution_id, pc_id='pc-b', event='error',
+        success=False, message='그룹 모션 실행 실패: 통신이 끊긴 모터가 있어 재생을 멈춥니다',
+    ))
+
+    assert len(stops) == 1
+    assert [error['code'] for error in errors] == ['GROUP_PARTICIPANT_FAILURE']
+
+
+def test_repeated_cycle_failures_lock_the_group_after_the_limit():
+    """수정 목록 73 · 10분 안 3번까지는 잠그지 않고 넷째에 잠근다"""
+    node = _node()
+    codes = []
+    for attempt in range(4):
+        execution_id, _stops, errors = _running_group(node)
+        node._event_callback(GroupEvent(
+            group_id='stage-a', execution_id=execution_id, pc_id='pc-b', event='error',
+            success=False, message='[회차 실패] 모션 최종 위치 도달 확인 실패',
+        ))
+        codes.append([error['code'] for error in errors])
+    assert codes == [[], [], [], ['GROUP_AUTO_RECOVERY_EXHAUSTED']]
+
+
+def _solo_node(status):
+    node = _node()
+    node._config.configured = True
+    node._local_status = {'motion_run_status': status}
+    node._command_pub = _Publisher()
+    node._event_pub = _Publisher()
+    node._boot_id = 'boot-a'
+    return node
+
+
+def test_solo_run_announces_start_at_once_per_cycle_for_the_speaker():
+    """수정 목록 38 · PC 1대 재생도 스피커가 듣게 · 참가자는 이 PC 하나"""
+    import time as _time
+    started = _time.time() - 0.08
+    status = {
+        'state': 'running', 'group_execution': False, 'motion_file_id': 'show_a.json',
+        'phase_started_at': started, 'current_cycle': 1, 'run_mode': 'continuous',
+    }
+    node = _solo_node(status)
+
+    node._announce_solo_motion()
+    node._announce_solo_motion()                     # 같은 회차 · 다시 안 보냄
+
+    sent = node._command_pub.messages
+    assert len(sent) == 1
+    command = sent[0]
+    assert command.command == 'start_at' and command.initialization_only is False
+    assert list(command.participant_ids) == ['pc-a'] and command.group_id == 'stage-a'
+    assert command.motion_file_id == 'show_a.json'
+    assert -1.0 < command.start_delay_sec < 0.0      # 이미 시작 · 음수
+    assert command.command_id in node._seen_commands  # 내 명령 처리로 돌아오지 않게
+
+    status.update({'current_cycle': 2, 'phase_started_at': started + 20.0})
+    node._announce_solo_motion()
+    assert len(sent) == 2 and sent[1].cycle_number == 2
+
+
+def test_solo_stop_sends_a_stop_event_and_group_runs_are_left_to_the_master():
+    status = {
+        'state': 'running', 'group_execution': False, 'motion_file_id': 'a.json',
+        'phase_started_at': 1000.0, 'current_cycle': 1,
+    }
+    node = _solo_node(status)
+    node._announce_solo_motion()
+    status.update({'state': 'stopped', 'message': '즉시 정지'})
+    node._announce_solo_motion()
+    events = node._event_pub.messages
+    assert len(events) == 1 and events[0].state == 'stopped' and events[0].event == 'solo_stopped'
+
+    group = _solo_node({'state': 'running', 'group_execution': True, 'phase_started_at': 1.0})
+    group._announce_solo_motion()
+    assert group._command_pub.messages == []
+
+
+def test_no_group_id_means_no_solo_announcement():
+    node = _solo_node({'state': 'running', 'phase_started_at': 1000.0, 'current_cycle': 1})
+    node._config.group_id = ''
+    node._announce_solo_motion()
+    assert node._command_pub.messages == []
+
+
+def test_group_start_at_carries_the_masters_animation_and_time_to_start():
+    node = _node()
+    node._local_status = {'motion_run_status': {'motion_file_id': 'show_b.json'}}
+    node._command_pub = _Publisher()
+    node._execution = GroupExecution()
+    execution_id = node._execution.begin('pc-a', ('pc-a', 'pc-b'))
+    action = SimpleNamespace(
+        command='start_at', execution_id=execution_id, cycle_number=3,
+        command_id='cmd-x', scheduled_at=time.monotonic() + 0.5,
+    )
+    node._publish_action(action)
+    command = node._command_pub.messages[-1]
+    assert command.motion_file_id == 'show_b.json'
+    assert 0.3 < command.start_delay_sec <= 0.5
+
+
+def _presence(pc_id, role='robot', address='192.168.0.12', **fields):
+    message = PcPresence()
+    message.pc_id = pc_id
+    message.display_name = fields.pop('display_name', pc_id)
+    message.role = role
+    message.address = address
+    message.web_url = f'http://{address}:8000'
+    message.boot_id = fields.pop('boot_id', f'boot-{pc_id}')
+    fields = {'group_id': '', 'joined': False, 'is_master': False, 'git_hash': '',
+              'protocol_version': 5, **fields}
+    for key, value in fields.items():
+        setattr(message, key, value)
+    return message
+
+
+def test_presence_is_sent_even_when_not_joined_or_not_configured():
+    """같은 망 PC 표 · 연동을 안 써도 IP 와 웹 주소를 알린다 · 핵심 요구 4"""
+    node = _node()
+    node._config.configured = False
+    node._boot_lan_addresses = ('192.168.0.11',)
+    node._presence_pub = _Publisher()
+    node._publish_presence()
+    message = node._presence_pub.messages[-1]
+    assert message.pc_id == 'pc-a' and message.role == 'robot'
+    assert message.address == '192.168.0.11' and message.web_url == 'http://192.168.0.11:8000'
+    assert message.group_id == '' and message.joined is False
+
+
+def test_network_pcs_lists_this_pc_first_then_robots_then_the_speaker():
+    node = _node()
+    node._boot_lan_addresses = ('192.168.0.11',)
+    node._git_hash = 'abc1234'
+    node._presence_callback(_presence('speaker', role='speaker', address='192.168.0.20',
+                                      git_hash='abc1234'))
+    node._presence_callback(_presence('floating2', address='192.168.0.13', group_id='stage-a',
+                                      git_hash='old9999', protocol_version=4))
+    node._presence_callback(_presence('pc-a', boot_id='boot-a'))     # 내 알림이 돌아옴 · 무시
+
+    rows = node._network_pcs()
+    assert [(r['pc_id'], r['role']) for r in rows] == [
+        ('pc-a', 'robot'), ('floating2', 'robot'), ('speaker', 'speaker')]
+    assert rows[0]['is_local'] and rows[0]['address'] == '192.168.0.11'
+    assert rows[1]['same_group'] and rows[1]['version_differs'] and rows[1]['protocol_mismatch']
+    assert not rows[2]['protocol_mismatch'] and not rows[2]['version_differs']
+    assert all(r['online'] for r in rows)
+
+
+def test_network_pcs_marks_silent_pcs_offline_and_forgets_old_ones():
+    node = _node()
+    node._presence_callback(_presence('floating3'))
+    node._presence_callback(_presence('floating4', address='192.168.0.14'))
+    rows = {r['pc_id']: r for r in node._presence.values()}
+    rows['floating3']['received_monotonic'] -= coordination_node.PRESENCE_OFFLINE_SEC + 1
+    rows['floating4']['received_monotonic'] -= coordination_node.PRESENCE_FORGET_SEC + 1
+    listed = {r['pc_id']: r for r in node._network_pcs()}
+    assert listed['floating3']['online'] is False
+    assert 'floating4' not in listed
+
+
+# --------------------------------------------------------------------------- #
+# 수정 목록 93 · 불확실성이 크면 바로 멈추지 않고 더 잰다 (2026-10-09 사용자)
+# --------------------------------------------------------------------------- #
+# Wi-Fi 실측 · 평균 6 ms · 1 % 가 20 ms 넘음 · 가끔 250 ms · 처음 몇 번이 튀어도 더 재면 빠른 왕복이 나온다
+
+
+def _sync_node():
+    node = _node()
+    node._joined = True
+    node._execution = GroupExecution()
+    execution_id = node._execution.begin('pc-a', ('pc-a', 'pc-b'))
+    node._execution.execution_id = execution_id
+    node._execution.coordinator_id = 'pc-a'
+    node._execution.participants = ('pc-a', 'pc-b')
+    node._time_probe_pub = _Publisher()
+    node._time_sync_pub = _Publisher()
+    warnings = []
+    node.get_logger = lambda: SimpleNamespace(warn=warnings.append, error=warnings.append, info=lambda _m: None)
+    node._begin_trigger_sync('start')
+    return node, warnings
+
+
+def _answer(node, number, rtt_ms):
+    now = time.monotonic_ns()
+    t1 = now - int(rtt_ms * 1_000_000)
+    node._sync_probes[('pc-b', number)] = t1
+    half = int(rtt_ms * 500_000)
+    node._time_sync_callback(GroupTimeSync(
+        group_id='stage-a', execution_id=node._execution.execution_id, coordinator_id='pc-a',
+        target_pc_id='pc-b', responder_pc_id='pc-b', kind='response', sample_number=number,
+        t1_monotonic_ns=t1, t2_monotonic_ns=t1 + half, t3_monotonic_ns=t1 + half,
+    ))
+
+
+def test_a_noisy_first_round_measures_more_instead_of_stopping():
+    node, warnings = _sync_node()
+    for number in range(1, 4):                       # 3번(설정) 모두 250 ms 튐
+        _answer(node, number, 250)
+    assert node._trigger_sync_status['trigger_sync_state'] != 'failed'
+    assert node._sync_wanted_samples('pc-b') == 6, '설정 수만큼 더 잰다'
+    assert any('더 잽니다' in str(w) for w in warnings)
+    for number in range(4, 7):                       # 그다음은 빠름
+        _answer(node, number, 4)
+    assert [m.kind for m in node._time_sync_pub.messages] == ['result'], '좋은 값으로 시각을 맞춘다'
+
+
+def test_it_still_stops_when_the_network_stays_bad_up_to_the_limit():
+    node, _warnings = _sync_node()
+    events = []
+    node._call_local_control = lambda payload, **_kwargs: events.append(payload['command']) or {'success': True}
+    node._command_pub = _Publisher()
+    limit = node._config.trigger_sync_samples * coordination_node.SYNC_MAX_ROUNDS
+    for number in range(1, limit + 1):
+        _answer(node, number, 250)
+    assert node._trigger_sync_status['trigger_sync_state'] == 'failed'
+    assert f'({limit}번 잼)' in node._trigger_sync_status['message']

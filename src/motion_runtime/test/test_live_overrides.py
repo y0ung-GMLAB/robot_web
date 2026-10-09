@@ -192,3 +192,64 @@ def test_a_new_run_does_not_pull_toward_the_last_runs_target(monkeypatch):
     source = open(sys.modules['motion_runtime.motion_player'].__file__, encoding='utf-8').read()
     run_start = source.index('def _prepare_and_run(')
     assert source.index('self._reset_override_resume()', run_start) < source.index('try:', run_start)
+
+
+# ---- 수정 목록 95 · 도중에 다시 체크해도 다음 회차부터 합류 (사용자 2026-10-09 · 안전) ----
+
+def test_a_rechecked_joint_stays_still_until_the_next_cycle():
+    overrides = {}
+    player = _player({})
+    player.manager.live_override_snapshot = lambda: {k: dict(v) for k, v in overrides.items()}
+    player._reset_override_resume()
+    plan_positions = {1: 100.0, 2: 50.0}
+
+    overrides['Neck_Yaw'] = {'muted': True}                         # 끔 · 그 자리에 섬
+    positions, _ = player._apply_live_overrides(AXES, dict(plan_positions), {})
+    assert 1 not in positions
+
+    overrides.pop('Neck_Yaw')                                        # 회차 도중 다시 켬
+    positions, _ = player._apply_live_overrides(AXES, dict(plan_positions), {})
+    assert 1 not in positions, '이 회차는 그대로 서 있다'
+    assert player.held_motion_ids() == ['Neck_Yaw'], '화면 「다음 회차부터」'
+
+    player._release_held_axes()                                      # 다음 회차 시작(초기 이동)
+    positions, _ = player._apply_live_overrides(AXES, dict(plan_positions), {})
+    assert positions[1] == 100.0
+    assert player.held_motion_ids() == []
+
+
+def test_a_joint_still_unchecked_at_the_next_cycle_stays_out():
+    overrides = {'Neck_Yaw': {'muted': True}}
+    player = _player({})
+    player.manager.live_override_snapshot = lambda: {k: dict(v) for k, v in overrides.items()}
+    player._reset_override_resume()
+    player._release_held_axes()
+    positions, _ = player._apply_live_overrides(AXES, {1: 1.0, 2: 2.0}, {})
+    assert 1 not in positions and positions[2] == 2.0
+
+
+def test_every_cycle_start_is_where_rechecked_joints_join():
+    source = open(sys.modules['motion_runtime.motion_player'].__file__, encoding='utf-8').read()
+    init = source[source.index('def _run_initialization(self'):]
+    assert init.index('self._release_held_axes()') < init.index('try:')
+    loop = source[source.index("while True:\n                if cycle_count > 0 and not (playlist"):]
+    assert 'self._release_held_axes()' in loop[:400], '바로 잇는 반복은 회차 시작에서'
+    assert 'overrides = self._effective_overrides(self.manager.live_override_snapshot())' in source
+
+
+def test_a_stopped_joint_is_not_asked_to_arrive():
+    """꺼 둔 축 때문에 회차 끝 「최종 위치 확인 실패」 가 나던 것 (10-07 테스트 32) · 자동 복구가 헛돌지 않게 · 95"""
+    overrides = {'Neck_Yaw': {'muted': True}}
+    player = _player({})
+    player.manager.live_override_snapshot = lambda: {k: dict(v) for k, v in overrides.items()}
+    motors = [{'controller_index': 1, 'state': 'detected', 'servo_on': True, 'fault': False, 'position_rad': 0.0},
+              {'controller_index': 2, 'state': 'detected', 'servo_on': True, 'fault': False, 'position_rad': 0.5}]
+    player.manager._current_motors = lambda: motors
+    player.manager._motor_for_axis = lambda axis, items: next(m for m in items if m['controller_index'] == axis)
+    player._target_tolerance = lambda _axis: 0.01
+    reached, message = player._wait_for_targets(AXES, {1: 3.0, 2: 0.5}, 0.0)
+    assert reached is True, message
+    overrides.clear()
+    player._release_held_axes()
+    reached, _message = player._wait_for_targets(AXES, {1: 3.0, 2: 0.5}, 0.0)
+    assert reached is False, '다시 들어오면 묻는다'

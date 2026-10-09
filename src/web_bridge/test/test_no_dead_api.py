@@ -35,6 +35,8 @@ ALLOWED = {
     '/api/coordination/local-readiness',
     # 화면 자체를 내주는 길
     '/',
+    '/v2',
+    '/v2/',
     '/static/{asset_path:path}',
     # 브라우저가 알아서 부르는 길 · 없으면 콘솔에 404 가 남아 진짜 오류가 묻힌다
     '/favicon.ico',

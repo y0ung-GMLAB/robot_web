@@ -26,7 +26,7 @@ uv run --no-project --with mujoco --with numpy --with pyyaml python scripts/sim/
 ## 로봇 팩 형식 (터미널 세션과 공유하는 계약)
 
 ```
-pack.yaml       name, version, created
+pack.yaml       name, version, created · scene.glb 가 있으면 scene_glb: {animations: [애니메이션 파일 이름(확장자 뺌)]}
 robot.yaml      axes: [{joint, motion_id, motor, reducer, ratio, range_deg: [min, max], servo_bw_hz}]
                 drive: {profile_velocity_deg_s, profile_accel_deg_s2}     # 모터축 기준
                 env:   {settle_body, settle_s, torsion_k, torsion_c,
@@ -53,6 +53,8 @@ scene.glb       웹 3D 「Blender 뷰」 장면 (선택 · glTF 2.0 바이너리
   같은 파일을 모든 PC 팩에 넣는다 · 있으면 웹 3D 에 「Blender 뷰」 체크가 생기고 실제 재생 시각을 따라 애니메이션을 그린다 ·
   담기지 않는 것 · 오디오 · Blender 화면 설정 · 절차적 재질(굽거나 단순색으로) · Area 라이트 · HDRI(조명은 웹에서) ·
   검사 · 머리말(glTF 2) · 길이 · 크기만 · 좌표는 glTF 기본(Y-up · Blender 내보내기 기본값 +Y Up)
+- scene.glb 를 넣으면 `pack.yaml` 에 그 장면이 담은 애니메이션 이름을 적는다 · 예) `scene_glb: {animations: [floating_narration_all]}` ·
+  웹은 지금 보는 애니메이션이 이 목록에 있을 때만 「Blender 뷰」 를 켠다 · 안 적으면 Blender 뷰가 꺼지고 팩 검사가 경고한다 · 수정 목록 60
 
 ## 웹 업로드
 
