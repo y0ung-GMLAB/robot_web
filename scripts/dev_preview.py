@@ -66,7 +66,12 @@ state = {
         'floating_animation_sample.json',
     ],
     'group_sync_mode': 'lockstep',
+    'repeat_mode': 'reinitialize',
+    'dwell_sec': 0.0,
     'run_started': None,
+    # 새 UI(v2) 공연 · 매장 전체로 시작했나 · 돌던 중 다시 켠 축(다음 회차부터)
+    'group_run': False,
+    'held': set(),
     'live_overrides': {},
 }
 
@@ -192,13 +197,16 @@ def snapshot():
             'node_connected': True,
             'config': {'pc_id': 'floating1', 'enabled': True, 'group_id': 'stage-a', 'is_master': True},
             'runtime': {'joined': True, 'network_pcs': _preview_network_pcs(), 'coordination_error': {},
-                        'execution': {'participants': ['floating1', 'floating2']}},
+                        **_preview_group_runtime()},
         },
         'motion_run_status': {
             **_fake_run_status(),
             'live_overrides': state['live_overrides'],
+            'held_motion_ids': sorted(state['held']),
+            'group_execution': state['group_run'] and state['run_started'] is not None,
             'automation': {
-                'repeat_mode': 'reinitialize',
+                'repeat_mode': state['repeat_mode'],
+                'dwell_sec': state['dwell_sec'],
                 'group_sync_mode': state['group_sync_mode'],
             },
             'axes': [
@@ -355,6 +363,15 @@ def _mujoco_state(motion: Path) -> str:
     return 'ready' if npz.is_file() else 'missing'
 
 
+def _motion_duration(path):
+    """마지막 줄 [frame, time_sec, ...] 의 시간 · 못 읽으면 None"""
+    try:
+        lines = path.read_text(encoding='utf-8').strip().splitlines()
+        return float(json.loads(lines[-1])[1])
+    except (OSError, ValueError, IndexError, TypeError, KeyError):
+        return None
+
+
 def export_files():
     if not EXPORT_DIR.is_dir():
         return []
@@ -364,6 +381,8 @@ def export_files():
             'size_bytes': path.stat().st_size,
             'updated_at': path.stat().st_mtime,
             'valid': True, 'message': '',
+            # 서버 모양 · 검사 결과와 길이는 analysis 아래 · 새 UI(v2) 가 여기서 읽는다
+            'analysis': {'valid': True, 'message': '', 'time': {'duration_sec': _motion_duration(path)}},
             'preview': {'state': _mujoco_state(path)},
         }
         for path in sorted(EXPORT_DIR.glob('*.json'))
@@ -478,6 +497,10 @@ async def configure_automation(request: Request):
     body = await request.json()
     if body.get('group_sync_mode') in ('lockstep', 'independent'):
         state['group_sync_mode'] = body['group_sync_mode']
+    if body.get('repeat_mode') in ('reinitialize', 'direct', 'dwell', 'dwell_reinitialize'):
+        state['repeat_mode'] = body['repeat_mode']
+    if 'dwell_sec' in body:
+        state['dwell_sec'] = max(0.0, float(body['dwell_sec'] or 0))
     return {'success': True, 'message': '프리뷰 · 자동 반복 설정 저장',
             'status': snapshot()['motion_run_status'],
             'project_generation': state['generation']}
@@ -487,9 +510,28 @@ async def configure_automation(request: Request):
 @app.post('/api/motion-run/stop-after-cycle')
 async def stop_motion_run():
     state['run_started'] = None
+    state['group_run'] = False
+    state['held'].clear()
     return {'success': True, 'message': '프리뷰 · 정지',
             'status': {'state': 'stopped'},
             'project_generation': state['generation']}
+
+
+@app.post('/api/coordination/control')
+async def coordination_control(request: Request):
+    """그룹 명령 흉내 · 시작이면 이 PC 재생 흉내도 같이 · 새 UI(v2) 공연"""
+    body = await request.json()
+    command = body.get('command')
+    if command == 'start_group':
+        state['run_started'] = time.time()
+        state['group_run'] = True
+        return {'success': True, 'message': '프리뷰 · 매장 전체 시작 · 2대 · floating3 빠짐(버전 다름)'}
+    if command in ('stop_now', 'stop_after_cycle'):
+        state['run_started'] = None
+        state['group_run'] = False
+        state['held'].clear()
+        return {'success': True, 'message': '프리뷰 · 매장 전체 정지'}
+    return {'success': True, 'message': f'프리뷰 · {command}'}
 
 
 @app.post('/api/motion-run/start')
@@ -497,8 +539,9 @@ async def start_motion_run(request: Request):
     """가짜 재생 · with_mujoco 면 그 자리에서 뷰어를 같이 띄워 흐름을 보여 준다."""
     body = await request.json()
     message = '프리뷰 · 재생 흉내'
-    if body.get('run_mode') == 'continuous':
+    if body.get('run_mode') in ('continuous', 'once'):
         state['run_started'] = time.time()
+        state['group_run'] = False
     if body.get('with_mujoco'):
         motion = EXPORT_DIR / str(body.get('motion_file_id') or '')
         result = _launch_replay(motion, body.get('mujoco_fps'))
@@ -521,6 +564,33 @@ MAPPING_FILE = {
     'enabled_count': len(JOINTS),
     'mapped_count': len(JOINTS),
 }
+
+def _preview_group_runtime():
+    """그룹 실행 흉내 · 조정 노드 /status 의 peers · local · execution 모양 · 새 UI(v2) 공연"""
+    running = state['group_run'] and state['run_started'] is not None
+    cycle = int((time.time() - state['run_started']) // FAKE_ITEM_SEC) + 1 if running else 0
+
+    def peer(pc_id, **extra):
+        row = {'pc_id': pc_id, 'display_name': pc_id, 'state': 'online', 'servo_alarm_grade': 0,
+               'motion_cycle_text': f'{cycle}회차' if running else '-',
+               'motion_step': '재생 중' if running else '그룹 대기',
+               'motion_progress': ''}
+        row.update(extra)
+        return row
+    return {
+        'local': peer('floating1', is_master=True),
+        'peers': [peer('floating2'), peer('floating3', motion_cycle_text='-', motion_step='그룹 대기'),
+                  peer('floating4', state='offline', motion_cycle_text='-', motion_step='-')],
+        'execution': {
+            'state': 'running' if running else 'idle',
+            'execution_id': 'preview-exec' if running else '',
+            'participants': ['floating1', 'floating2'] if running else [],
+            'excluded': {'floating3': '버전 다름 · 업데이트하면 다음 실행부터'} if running else {},
+            'joining': {},
+            'start_spread_ms': 6.0 if running else None,
+        },
+    }
+
 
 def _preview_network_pcs():
     """같은 망 PC 표 · 로봇 3대 + 스피커 · 하나는 끊김 · 핵심 요구 4"""
@@ -704,6 +774,11 @@ async def set_live_override(request: Request):
     entry = dict(state['live_overrides'].get(motion_id) or {})
     if 'muted' in body:
         entry['muted'] = bool(body['muted'])
+        # 돌던 중 다시 켜면 다음 회차부터 · 서버 held_motion_ids 흉내
+        if not entry['muted'] and state['run_started'] is not None:
+            state['held'].add(motion_id)
+        elif entry['muted']:
+            state['held'].discard(motion_id)
     if 'clamp' in body:
         if body['clamp'] is None:
             entry.pop('clamp', None)

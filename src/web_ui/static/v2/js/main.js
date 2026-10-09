@@ -8,9 +8,14 @@ import { api, poll, StatusStream } from './net.js';
 import { createShell, routeLabel } from './shell.js';
 import { renderHome } from './pages/home.js';
 import { renderPlaceholder } from './pages/placeholder.js';
+import { loadPlay, renderPlay } from './pages/play.js';
 
 const state = { snap: null, sched: null, schedules: [], events: [], connected: false };
-const PAGES = { home: renderHome };
+/** 화면 · render 는 상태로 그리기만 · load 는 그 화면만 쓰는 값을 받아 온다(들어올 때 + reloadMs 마다) */
+const PAGES = {
+  home: { render: renderHome },
+  play: { render: renderPlay, load: loadPlay, reloadMs: 15000 },
+};
 const PAGE_INTERVAL_MS = 500;
 
 function currentRoute() {
@@ -36,8 +41,20 @@ function renderPage() {
   if (pointerDown) return;
   lastPageAt = Date.now();
   const route = currentRoute();
-  const render = PAGES[route];
-  replace(shell.main, render ? render(state, { navigate }) : renderPlaceholder(route, routeLabel(route)));
+  const page = PAGES[route];
+  replace(shell.main, page ? page.render(state, { navigate, changed }) : renderPlaceholder(route, routeLabel(route)));
+}
+
+let loadTimer = null;
+function startLoading(route) {
+  clearInterval(loadTimer);
+  loadTimer = null;
+  const page = PAGES[route];
+  if (!page?.load) return;
+  page.load(state, changed);
+  if (page.reloadMs) {
+    loadTimer = setInterval(() => { if (!document.hidden) page.load(state, changed); }, page.reloadMs);
+  }
 }
 
 function schedulePage() {
@@ -56,6 +73,7 @@ window.addEventListener('hashchange', () => {
   const route = currentRoute();
   shell.setRoute(route);
   document.title = `${routeLabel(route)} · Robot Web`;
+  startLoading(route);
   lastPageAt = 0;
   renderPage();
   shell.main.focus({ preventScroll: true });
@@ -79,5 +97,6 @@ poll(async () => {
 }, 10000);
 
 shell.setRoute(currentRoute());
+startLoading(currentRoute());
 document.title = `${routeLabel(currentRoute())} · Robot Web`;
 changed();

@@ -21,7 +21,9 @@ export function h(tag, props = {}, ...children) {
 /** 안을 통째로 바꾼다 · 입력 중인 칸이 있으면 그대로 둔다(덮어써서 글이 날아가지 않게) */
 export function replace(container, ...children) {
   if (!container) return;
-  if (container.contains(document.activeElement) && document.activeElement.matches('input, textarea, select')) return;
+  // 스위치·체크칸은 누른 뒤에도 초점이 남는다 · 그것까지 막으면 화면이 통째로 멈춘다 → 글 넣는 칸만
+  if (container.contains(document.activeElement)
+    && document.activeElement.matches('textarea, select, input:not([type=checkbox]):not([type=radio]):not([type=button])')) return;
   container.replaceChildren(...children.flat(Infinity).filter(Boolean));
 }
 

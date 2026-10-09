@@ -89,7 +89,7 @@ test('오늘 스케줄 · 매일 · 요일 · 한 번 · 자정 넘김 · 꺼진
 });
 
 test('새 UI 는 기존 화면 코드를 가져다 쓰지 않는다 · 따로 선다', () => {
-  for (const file of ['main.js', 'shell.js', 'net.js', 'actions.js', 'pages/home.js']) {
+  for (const file of ['main.js', 'shell.js', 'net.js', 'actions.js', 'play_model.js', 'pages/home.js', 'pages/play.js']) {
     const text = readFileSync(new URL(`../static/v2/js/${file}`, import.meta.url), 'utf8');
     assert.doesNotMatch(text, /from '\.\.\/(\.\.\/)?js\//, file);
     assert.doesNotMatch(text, /innerHTML/, `${file} · 글은 textContent 로`);

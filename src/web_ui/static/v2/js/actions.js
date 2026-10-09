@@ -77,3 +77,57 @@ export async function restartProgram() {
 export function ackGroupError() {
   return attempt(() => api('POST', '/api/coordination/control', { body: { command: 'acknowledge_group_error' } }), '그룹 오류를 풀었습니다');
 }
+
+/* ---------- 공연 ---------- */
+
+const control = (body) => api('POST', '/api/coordination/control', { body, timeoutMs: 7000 });
+
+/** 이 PC · 시작(1회·연속) · 초기 위치로 */
+export function startLocal(payload) {
+  return attempt(() => api('POST', '/api/motion-run/start', { body: payload, timeoutMs: 30000 }),
+    payload.run_mode === 'once' ? '1회 시작 · 먼저 첫 자세로 천천히 갑니다' : '연속 시작 · 먼저 첫 자세로 천천히 갑니다');
+}
+
+export function initializeLocal(payload) {
+  return attempt(() => api('POST', '/api/motion-run/initialize', { body: payload, timeoutMs: 30000 }),
+    '첫 자세로 천천히 갑니다');
+}
+
+/** 매장 전체 · 마스터가 그룹에 시작을 건다 · 각 PC 는 자기 재생 목록 */
+export function startGroup(settings) {
+  return attempt(() => control({ command: 'start_group', ...settings }),
+    (r) => r?.message || '매장 전체 시작 · PC 마다 첫 자세로 간 뒤 같이 시작합니다');
+}
+
+export function initializeGroup() {
+  return attempt(() => control({ command: 'initialize_group' }), (r) => r?.message || '매장 전체 · 첫 자세로 갑니다');
+}
+
+/** 지금 멈춤 · 재생만 멈춘다 · 서보는 켠 채 그 자리 */
+export function stopNow(group) {
+  return attempt(() => (group ? control({ command: 'stop_now' }) : api('POST', '/api/motion-run/stop')),
+    group ? '매장 전체를 멈췄습니다' : '멈췄습니다');
+}
+
+export function stopGroupAfterCycle(command) {
+  return attempt(() => control({ command }),
+    command === 'stop_now' ? '아직 출발 전이라 바로 멈췄습니다' : '이번 회차가 끝나면 매장 전체가 멈춥니다');
+}
+
+/** 반복 설정 · 서버에 남는다(스케줄이 다음에 돌릴 때도 이것으로) · 보낸 칸만 바뀐다 */
+export function saveAutomation(partial) {
+  return attempt(() => api('PUT', '/api/motion-run/automation', { body: partial }));
+}
+
+/** 실행 축 사용 · 끄면 그 자리에 선다 · 다시 켜면 다음 회차부터 · 매핑 파일에는 안 남는다 */
+export function setAxisMuted(motionId, muted) {
+  return attempt(() => api('POST', '/api/motion-run/live-override', { body: { motion_id: motionId, muted } }),
+    muted ? `${motionId} 끔 · 그 자리에 섭니다` : `${motionId} 켬 · 돌던 중이면 다음 회차부터`);
+}
+
+/** 재생 목록 저장 · 목록 통째로 · 첫 줄이 등록 파일 */
+export function savePlaylist(mappingId, list) {
+  return attempt(() => api('POST', '/api/motion-mappings/motion-file', {
+    body: { file_id: mappingId, motion_file_id: list[0] || '', motion_playlist: list },
+  }), '재생 목록을 저장했습니다');
+}
