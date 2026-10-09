@@ -268,6 +268,8 @@ export function createSim3dViewer({ el, getLatestState = () => null }) {
     renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
     el.sim3dCanvasWrap.appendChild(renderer.domElement);
     window.addEventListener('resize', resize);
+    // 칸을 끌어 높이를 바꾸면 그 크기로 다시 그린다 · 96
+    if (globalThis.ResizeObserver && has('sim3dCanvasWrap')) new ResizeObserver(() => resize()).observe(el.sim3dCanvasWrap);
   }
 
   function resize() {

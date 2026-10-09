@@ -34,7 +34,7 @@
                        두 줄을 차지해 위아래로 길었다 -->
                   <div class="motion-file-drop-hint">「불러오기」 또는 .json 파일·폴더를 이 화면에 끌어다 놓으면 추가됩니다</div>
                   <div class="motion-file-body">
-                  <div class="table-wrap motion-file-table-wrap">
+                  <div class="table-wrap motion-file-table-wrap user-resizable" data-resize-key="anim.files" title="오른쪽 아래 모서리를 끌면 늘어납니다 · 두 번 누르면 원래 크기">
                     <table class="motion-file-table motion-file-table-compact">
                       <thead>
                         <tr>
@@ -62,7 +62,7 @@
                   </div>
                   </div>
                   <!-- 재생 목록 · 두 개 이상 등록하면 보인다 · 수정 목록 35 -->
-                  <div id="motionPlaylistPanel" class="motion-playlist" aria-label="재생 목록"></div>
+                  <div id="motionPlaylistPanel" class="motion-playlist user-resizable" data-resize-key="anim.playlist" aria-label="재생 목록"></div>
                 </section>
               </div>
                 <div class="motion-run-main">
@@ -166,7 +166,7 @@
                   <input id="sim3dBlenderToggle" type="checkbox"><span>Blender 뷰</span>
                 </label>
               </div>
-              <div id="sim3dCanvasWrap" class="sim3d-canvas-wrap" aria-label="3D 화면"></div>
+              <div id="sim3dCanvasWrap" class="sim3d-canvas-wrap user-resizable" data-resize-key="anim.3d" aria-label="3D 화면"></div>
             </details>
 
             <section class="motion-file-subsection" aria-label="진행 상황">
@@ -194,7 +194,10 @@
                       <div id="motionRunProgressFill" class="motion-run-progress-fill"></div>
                     </div>
                   </div>
-                  <canvas id="motionRunGraphCanvas" class="motion-run-graph"></canvas>
+                  <!-- 끌어서 높이 조절 · 그래프는 다음 그리기에서 새 높이로 (96) -->
+                  <div class="motion-run-graph-box user-resizable" data-resize-key="anim.graph">
+                    <canvas id="motionRunGraphCanvas" class="motion-run-graph"></canvas>
+                  </div>
                   <div id="motionRunGraphAxisToggles" class="motion-run-graph-axis-toggles" aria-label="그래프 축 표시 선택"></div>
                 </section>
 
@@ -217,7 +220,7 @@
                   <p class="motion-run-axis-note">「사용」 체크·라이브 리밋은 <strong>누르는 즉시</strong> 재생에 반영됩니다 ·
                     끄면 그 모터는 그 자리에 섭니다(서보 유지) · 다시 켜도 이 회차는 서 있고 다음 회차부터 같이 움직입니다 ·
                     매핑 파일에는 저장되지 않고 「재생 등록」 때 모두 풀립니다</p>
-                  <div class="table-wrap">
+                  <div class="table-wrap user-resizable" data-resize-key="anim.axes">
                     <table>
                       <thead>
                         <tr>

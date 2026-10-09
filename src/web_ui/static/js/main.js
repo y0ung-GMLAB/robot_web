@@ -40,6 +40,7 @@ import {
   workspaceForProjectCategory,
 } from './workspace_navigation.js';
 import { installFeedbackPresentation } from './ui_feedback.js';
+import { initResizableBlocks } from './resizable_blocks.js';
 import { createServoAlarmController } from './servo_alarm.js';
 import { createCoordinationController } from './coordination.js';
 import { createSystemUpdateController } from './system_update.js';
@@ -58,6 +59,8 @@ window.alert = (message) => {
   });
 };
 installFeedbackPresentation(document);
+// 애니메이션 화면 블록 · 끌어서 높이 조절 · 크기 기억 (96)
+initResizableBlocks(document);
 const appState = {
   latestState: null,
   rawMode: false,

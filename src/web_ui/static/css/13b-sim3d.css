@@ -46,3 +46,6 @@
   width: 100% !important;
   height: 100% !important;
 }
+
+/* 끌어서 높이 조절 · 96 · 캔버스는 칸 크기를 따라감(sim3d ResizeObserver) */
+.sim3d-canvas-wrap.user-resizable { min-height: 240px; }
