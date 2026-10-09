@@ -400,6 +400,8 @@ build_workspace() {
   SERVICES_STOPPED=true
   systemctl --user stop motion-control.service motion-motor.service motion-coordination.service 2>/dev/null || true
   systemctl --user reset-failed 2>/dev/null || true
+  # 모터 서비스 재기동 상한 기록도 비운다 · 설치 뒤 다시 띄우는 것은 고장 되풀이가 아니다 · 수정 목록 65
+  rm -f "${XDG_RUNTIME_DIR:-/tmp}/robot-web/motor-starts" 2>/dev/null || true
   clean_dead_dds_segments
   # 옛 작업공간이 환경에 남아 있으면 그쪽 경로를 먼저 본다 · 깨끗한 ROS 만 켠다
   unset AMENT_PREFIX_PATH CMAKE_PREFIX_PATH COLCON_PREFIX_PATH || true

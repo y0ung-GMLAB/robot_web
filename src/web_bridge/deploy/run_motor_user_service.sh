@@ -2,6 +2,15 @@
 set -Eeuo pipefail
 
 WORKSPACE="${MOTION_WORKSPACE:?MOTION_WORKSPACE is required}"
+# 되풀이 재기동 상한 · 60초에 5번 · 넘으면 78(유닛이 다시 안 띄움) · 수정 목록 65
+START_LIMIT_HELPER="${WORKSPACE}/src/web_bridge/deploy/start_limit.sh"
+if [[ -f "${START_LIMIT_HELPER}" ]]; then
+  # shellcheck disable=SC1090
+  source "${START_LIMIT_HELPER}"
+  if ! start_limit_check "$(start_limit_file motor)"       "${MOTION_MOTOR_START_LIMIT_BURST:-5}" "${MOTION_MOTOR_START_LIMIT_SEC:-60}"; then
+    exit 78
+  fi
+fi
 # 네트워크를 여는가 · §6-96
 #
 # 전에는 모터 쪽 노드를 이 컴퓨터 안에 가둬 뒀다(`ROS_LOCALHOST_ONLY=1`) ·
