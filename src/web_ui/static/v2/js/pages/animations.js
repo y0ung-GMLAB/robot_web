@@ -10,6 +10,7 @@ import { loadPlay } from './play.js';
 import { api } from '../net.js';
 import { toast } from '../dialog.js';
 import * as act from '../actions.js';
+import { playlistCard } from './playlist_card.js';
 
 const ui = { selected: '', detail: null, detailFor: '', busy: '', upload: '' };
 let current = { state: null, changed: () => {} };
@@ -204,7 +205,7 @@ function detailCard(state, changed, navigate) {
       downloadUrl ? h('a', { class: 'btn', href: downloadUrl, download: ui.selected }, '내 PC 로 저장') : null,
       h('span', { class: 'spacer' }),
       h('button', { class: 'btn', type: 'button', disabled: inPlaylist || running,
-        title: inPlaylist ? '재생 목록에 들어 있습니다 · 공연 화면에서 먼저 빼세요' : '',
+        title: inPlaylist ? '재생 목록에 들어 있습니다 · 재생 목록에서 먼저 빼세요' : '',
         onclick: async () => {
           if (await act.deleteAnimation(ui.selected)) {
             ui.selected = '';
@@ -212,14 +213,22 @@ function detailCard(state, changed, navigate) {
             await loadAnimations(state, changed);
           }
         } }, '삭제…')),
-    inPlaylist ? h('p', { class: 'muted small' }, '재생 목록에 들어 있어 지울 수 없습니다 · ', h('a', { href: '#/play', text: '공연 화면에서 빼기' })) : null);
+    inPlaylist ? h('p', { class: 'muted small', text: '재생 목록에 들어 있어 지울 수 없습니다 · 재생 목록에서 먼저 빼세요' }) : null);
 }
 
 export function renderAnimations(state, { navigate, changed }) {
   current = { state, changed };
   return [
     h('div', { class: 'page-head' }, h('h1', { text: '애니메이션' })),
-    listCard(state, changed),
+    h('div', { class: 'anim-grid' },
+      listCard(state, changed),
+      playlistCard(state, changed, {
+        link: ['#/play', '공연 화면'],
+        adding: false,
+        selected: ui.selected,
+        onPick: (id) => { ui.selected = id; ui.detail = null; changed(); loadDetail(state, changed); },
+        reload: loadPlay,
+      })),
     detailCard(state, changed, navigate),
   ];
 }

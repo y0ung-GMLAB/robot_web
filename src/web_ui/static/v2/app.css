@@ -253,7 +253,11 @@ p { margin: 0; }
 .pc-links { margin-top: auto; padding-top: 6px; }
 .table td.wrap { white-space: normal; min-width: 200px; }
 
-/* 애니메이션 */
+/* 애니메이션 · 파일 목록 옆에 재생 목록 */
+.anim-grid { display: grid; grid-template-columns: minmax(0, 1.7fr) minmax(340px, 1fr); gap: 16px; align-items: start; }
+@media (max-width: 1280px) { .anim-grid { grid-template-columns: 1fr; } }
+.playlist-row .link-button.name { padding: 0; color: var(--ink); }
+.playlist-row .link-button.picked { color: var(--blue-ink); font-weight: 700; }
 body.drop-active .main { outline: 2px dashed var(--blue); outline-offset: -8px; }
 .busy-line { display: flex; align-items: center; gap: 10px; padding: 10px 14px; border-radius: 10px; background: #1E2A40; color: var(--blue-ink); }
 .spinner { width: 16px; height: 16px; border-radius: 50%; border: 2px solid var(--blue-soft); border-top-color: var(--blue); animation: spin 0.8s linear infinite; }

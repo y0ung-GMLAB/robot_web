@@ -6,12 +6,13 @@
 import { h, dot } from '../dom.js';
 import { runSummary } from '../model.js';
 import {
-  INITIAL_MOVE_OPTIONS, PLAYLIST_MAX, REPEAT_MODES,
-  axisRows, defaultScope, fileInfo, formatDuration, groupRows, groupRuntime, groupScopeBlocker, groupStopCommand,
-  isRunning, phaseSteps, playHeadline, playlistAdd, playlistMove, playlistRemove, registeredPlaylist, runStatus, startBlocker,
+  INITIAL_MOVE_OPTIONS, REPEAT_MODES,
+  axisRows, defaultScope, groupRows, groupRuntime, groupScopeBlocker, groupStopCommand,
+  isRunning, phaseSteps, playHeadline, registeredPlaylist, runStatus, startBlocker,
 } from '../play_model.js';
 import { api } from '../net.js';
 import * as act from '../actions.js';
+import { playlistCard } from './playlist_card.js';
 
 /** 이 화면에서 고른 것 · 페이지를 떠나도 남는다(새로고침하면 서버 값으로) */
 const ui = {
@@ -21,7 +22,6 @@ const ui = {
   syncMode: null,
   initialMove: null,
   targetCycles: 0,
-  addPick: '',
   busy: false,
 };
 
@@ -196,47 +196,6 @@ function groupCard(state) {
 
 /* ---------- 재생 목록 ---------- */
 
-function playlistCard(state, changed) {
-  const play = state.play || {};
-  const status = runStatus(state.snap);
-  const list = registeredPlaylist(play.mapping);
-  const files = new Map((play.files || []).map((file) => [String(file.id || file.filename), fileInfo(file)]));
-  const locked = isRunning(status) || ui.busy || !play.mappingId;
-  const playingIndex = isRunning(status) && Number.isInteger(Number(status.playlist_index)) ? Number(status.playlist_index) : (isRunning(status) ? 0 : -1);
-  const save = (next) => busy(async () => {
-    if (await act.savePlaylist(play.mappingId, next)) await loadPlay(state, changed);
-  }, state, changed);
-
-  const choices = [...files.values()].filter((file) => file.check !== 'bad');
-  if (!choices.some((file) => file.id === ui.addPick)) ui.addPick = choices[0]?.id || '';
-
-  return h('section', { class: 'card', 'aria-label': '재생 목록' },
-    h('div', { class: 'card-head' }, h('h2', { text: `이 PC 재생 목록 · ${list.length}` }), h('a', { href: '#/animations', text: '애니메이션' })),
-    h('p', { class: 'muted small', text: '차례로 돌고 끝나면 1번부터 · 사이마다 다음 애니메이션의 첫 자세로 천천히 갑니다' }),
-    play.error ? h('p', { class: 'tone-text-bad', text: play.error }) : null,
-    list.length
-      ? h('ol', { class: 'playlist' }, list.map((id, index) => {
-        const info = files.get(id) || { name: id, duration: null, check: 'unknown', checkText: '목록에 없는 파일' };
-        return h('li', { class: `playlist-row${index === playingIndex ? ' playing' : ''}` },
-          h('span', { class: 'mono muted num', text: String(index + 1) }),
-          h('span', { class: 'grow name', title: info.name, text: info.name }),
-          h('span', { class: 'mono muted', text: formatDuration(info.duration) }),
-          h('span', { class: `small tone-text-${info.check === 'bad' ? 'bad' : info.check === 'ok' ? 'ok' : 'warn'}`, text: index === playingIndex ? '지금' : info.checkText }),
-          h('span', { class: 'row-actions' },
-            h('button', { class: 'btn btn-mini', type: 'button', disabled: locked || index === 0, 'aria-label': `${info.name} 위로`, onclick: () => save(playlistMove(list, index, -1)) }, '↑'),
-            h('button', { class: 'btn btn-mini', type: 'button', disabled: locked || index === list.length - 1, 'aria-label': `${info.name} 아래로`, onclick: () => save(playlistMove(list, index, 1)) }, '↓'),
-            h('button', { class: 'btn btn-mini', type: 'button', disabled: locked, onclick: () => save(playlistRemove(list, index)) }, '빼기')));
-      }))
-      : h('p', { class: 'muted', text: '비었습니다 · 아래에서 애니메이션을 넣으세요' }),
-    h('div', { class: 'row add-row' },
-      h('select', { class: 'select grow', 'aria-label': '넣을 애니메이션', disabled: locked || !choices.length,
-        onchange: (event) => { ui.addPick = event.target.value; } },
-      choices.map((file) => h('option', { value: file.id, selected: file.id === ui.addPick }, `${file.name} · ${formatDuration(file.duration)}`))),
-      h('button', { class: 'btn', type: 'button', disabled: locked || !ui.addPick || list.length >= PLAYLIST_MAX,
-        onclick: () => save(playlistAdd(list, ui.addPick)) }, '넣기')),
-    locked && isRunning(status) ? h('p', { class: 'muted small', text: '재생 중에는 목록을 못 바꿉니다 · 멈춘 뒤에' } ) : null);
-}
-
 /* ---------- 반복 ---------- */
 
 function repeatCard(state, changed) {
@@ -316,7 +275,9 @@ export function renderPlay(state, { navigate, changed }) {
     scopeHeader(state, changed),
     nowCard(state, changed, navigate),
     ui.scope === 'group' ? groupCard(state) : null,
-    h('div', { class: 'grid-2' }, playlistCard(state, changed), repeatCard(state, changed)),
+    h('div', { class: 'grid-2' },
+      playlistCard(state, changed, { link: ['#/animations', '애니메이션'], reload: loadPlay }),
+      repeatCard(state, changed)),
     axesCard(state),
     previewCard(),
   ];
