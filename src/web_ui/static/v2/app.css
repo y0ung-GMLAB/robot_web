@@ -220,6 +220,27 @@ p { margin: 0; }
 .row-actions { display: flex; gap: 6px; margin-left: auto; }
 .add-row { flex-wrap: nowrap; }
 
+/* 스케줄 */
+.week { display: flex; flex-direction: column; gap: 6px; }
+.week-row { display: grid; grid-template-columns: 64px 1fr; align-items: center; gap: 10px; }
+.week-row .timeline { height: 30px; }
+.week-day { font-size: 14px; color: var(--ink-2); white-space: nowrap; }
+.week-row.today .week-day { color: var(--blue-ink); font-weight: 700; }
+.week-row.today .timeline { outline: 1px solid var(--blue); }
+.timeline-window { display: flex; align-items: center; overflow: hidden; }
+.timeline-window.selected { background: #2B6A4D; outline: 2px solid var(--ok); }
+.window-label { padding: 0 8px; font-size: 12px; color: var(--ok-ink); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.sched-list { gap: 4px; }
+.sched-row { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; padding: 10px 12px; border-radius: 10px; }
+.sched-row.editing { background: var(--blue-soft); }
+.sched-row.off strong { color: var(--muted); }
+.sched-text { display: flex; flex-direction: column; gap: 2px; }
+.end-action { margin-top: 8px; padding-top: 14px; border-top: 1px solid var(--line); }
+.day-picks { display: flex; flex-wrap: wrap; gap: 6px; }
+.seg.day { min-width: 48px; border: 1px solid var(--line); border-radius: 10px; }
+.row.end { justify-content: flex-end; }
+.edit-card .row .field { flex: 1 1 140px; }
+
 /* 확인 창 · 알림 */
 dialog.confirm { max-width: 480px; width: calc(100% - 32px); padding: 24px; border: 1px solid var(--line); border-radius: 14px; background: var(--panel); color: var(--ink); }
 dialog.confirm::backdrop { background: rgb(0 0 0 / 60%); }

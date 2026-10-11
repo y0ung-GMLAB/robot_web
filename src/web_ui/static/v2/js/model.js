@@ -184,9 +184,9 @@ export function pcRows(snap) {
   });
 }
 
-const DAY_CODES = ['SUN', 'MON', 'TUE', 'WED', 'THU', 'FRI', 'SAT'];
+export const DAY_CODES = ['SUN', 'MON', 'TUE', 'WED', 'THU', 'FRI', 'SAT'];
 
-function toMinutes(text) {
+export function toMinutes(text) {
   const match = /^(\d{1,2}):(\d{2})/.exec(String(text || ''));
   if (!match) return null;
   return Number(match[1]) * 60 + Number(match[2]);

@@ -68,6 +68,7 @@ state = {
     'group_sync_mode': 'lockstep',
     'repeat_mode': 'reinitialize',
     'dwell_sec': 0.0,
+    'schedule_end_action': 'park_servo_off',
     'run_started': None,
     # 새 UI(v2) 공연 · 매장 전체로 시작했나 · 돌던 중 다시 켠 축(다음 회차부터)
     'group_run': False,
@@ -501,6 +502,8 @@ async def configure_automation(request: Request):
         state['repeat_mode'] = body['repeat_mode']
     if 'dwell_sec' in body:
         state['dwell_sec'] = max(0.0, float(body['dwell_sec'] or 0))
+    if body.get('schedule_end_action') in ('park_servo_off', 'hold'):
+        state['schedule_end_action'] = body['schedule_end_action']
     return {'success': True, 'message': '프리뷰 · 자동 반복 설정 저장',
             'status': snapshot()['motion_run_status'],
             'project_generation': state['generation']}
@@ -691,6 +694,46 @@ def _preview_tz_all():
 
 
 #: 새 UI(v2) 홈 「오늘 스케줄」 · 매일 10~18 · 금토 저녁
+@app.post('/api/schedule/save')
+async def save_preview_schedule(request: Request):
+    """스케줄 저장 흉내 · 메모리에만 · 새 UI(v2) 스케줄"""
+    body = await request.json()
+    item = {k: body.get(k) for k in ('schedule_name', 'start_time', 'stop_time', 'repeat_type', 'repeat_days', 'run_date')}
+    item['enabled'] = body.get('enabled', True) is not False
+    item['saved_timezone'] = 'Asia/Seoul'
+    item['schedule_id'] = body.get('schedule_id') or f'p{int(time.time() * 1000)}'
+    for index, old in enumerate(_PREVIEW_SCHEDULES):
+        if old['schedule_id'] == item['schedule_id']:
+            _PREVIEW_SCHEDULES[index] = item
+            break
+    else:
+        _PREVIEW_SCHEDULES.append(item)
+    return {'status': 'ok', 'schedule': item}
+
+
+@app.post('/api/schedule/{schedule_id}/{action}')
+async def toggle_preview_schedule(schedule_id: str, action: str):
+    for item in _PREVIEW_SCHEDULES:
+        if item['schedule_id'] == schedule_id:
+            item['enabled'] = action == 'enable'
+    return {'status': 'ok', 'schedule_id': schedule_id, 'enabled': action == 'enable'}
+
+
+@app.delete('/api/schedule/{schedule_id}')
+async def delete_preview_schedule(schedule_id: str):
+    _PREVIEW_SCHEDULES[:] = [item for item in _PREVIEW_SCHEDULES if item['schedule_id'] != schedule_id]
+    return {'status': 'ok', 'deleted_id': schedule_id}
+
+
+@app.get('/api/motion-run/status')
+async def preview_motion_run_status():
+    """서버 모양 · status + 운영 시간 끝 결과 · 새 UI(v2) 스케줄이 끝 동작을 읽는다"""
+    status = snapshot()['motion_run_status']
+    status['automation']['schedule_end_action'] = state['schedule_end_action']
+    return {'success': True, 'message': '', 'status': status,
+            'schedule_end': {'state': 'done', 'message': '어제 18:00 · 기준점 도착 → 서보 끔 · 정상'}}
+
+
 _PREVIEW_SCHEDULES = [
     {'schedule_id': 'a', 'schedule_name': '매장 운영', 'start_time': '10:00:00', 'stop_time': '18:00:00',
      'repeat_type': 'daily', 'repeat_days': [], 'enabled': True},
@@ -733,6 +776,7 @@ CANNED = {
             'local_time': time.strftime('%Y-%m-%dT%H:%M:%S'),
             'utc_offset': '+0900',
             'timezone': 'Asia/Seoul',
+            'ntp_synced': True,
         },
     },
     ('GET', '/api/schedule/list'): lambda: {'schedules': _PREVIEW_SCHEDULES},

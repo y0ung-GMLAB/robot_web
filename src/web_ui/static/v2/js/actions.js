@@ -131,3 +131,26 @@ export function savePlaylist(mappingId, list) {
     body: { file_id: mappingId, motion_file_id: list[0] || '', motion_playlist: list },
   }), '재생 목록을 저장했습니다');
 }
+
+/* ---------- 스케줄 ---------- */
+
+export function saveSchedule(payload) {
+  return attempt(() => api('POST', '/api/schedule/save', { body: payload }), '스케줄을 저장했습니다');
+}
+
+export function setScheduleEnabled(id, enabled) {
+  return attempt(() => api('POST', `/api/schedule/${encodeURIComponent(id)}/${enabled ? 'enable' : 'disable'}`),
+    enabled ? '켰습니다' : '껐습니다 · 지우지는 않았습니다');
+}
+
+export async function deleteSchedule(id, name) {
+  const ok = await confirmBox({ title: `「${name}」 을 지울까요?`, body: '되돌릴 수 없습니다. 잠깐 쉬게 하려면 지우지 말고 끄세요.', confirmLabel: '지우기', tone: 'danger' });
+  if (!ok) return null;
+  return attempt(() => api('DELETE', `/api/schedule/${encodeURIComponent(id)}`), '지웠습니다');
+}
+
+/** 운영 시간이 끝나면 · park_servo_off(기준점 → 서보 끔) | hold(그 자세로 버팀) */
+export function saveEndAction(action) {
+  return attempt(() => api('PUT', '/api/motion-run/automation', { body: { schedule_end_action: action } }),
+    action === 'hold' ? '운영 시간이 끝나면 회차 끝난 자세로 버팁니다(서보 켠 채)' : '운영 시간이 끝나면 기준점으로 가서 서보를 끕니다');
+}
