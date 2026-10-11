@@ -25,6 +25,7 @@ import asyncio
 import json
 import math
 import sys
+import tempfile
 import time
 from pathlib import Path
 
@@ -377,45 +378,135 @@ def _motion_duration(path):
         return None
 
 
-def export_files():
-    if not EXPORT_DIR.is_dir():
-        return []
-    return [
-        {
-            'id': path.name, 'filename': path.name,
-            'size_bytes': path.stat().st_size,
-            'updated_at': path.stat().st_mtime,
-            'valid': True, 'message': '',
-            # 서버 모양 · 검사 결과와 길이는 analysis 아래 · 새 UI(v2) 가 여기서 읽는다
-            'analysis': {'valid': True, 'message': '', 'time': {'duration_sec': _motion_duration(path)}},
-            'preview': {'state': _mujoco_state(path)},
+#: 새 UI(v2) 애니메이션 · 프리뷰에서 올린 파일은 여기에만 · 원본 내보내기 폴더는 건드리지 않는다
+UPLOAD_DIR = Path(tempfile.gettempdir()) / 'robot_web_preview_uploads'
+_ANALYSIS_CACHE = {}
+
+
+def _motion_paths():
+    dirs = [d for d in (EXPORT_DIR, UPLOAD_DIR) if d.is_dir()]
+    return sorted((p for d in dirs for p in d.glob('*.json')), key=lambda p: p.name)
+
+
+def _find_motion(file_id):
+    name = Path(str(file_id)).name
+    return next((p for p in _motion_paths() if p.name == name), None)
+
+
+def _preview_analysis(path, detail=False):
+    """서버 analyze_motion_json 흉내 · 조인트별 최소·최대(rad) · 길이 · 그래프 · mtime 캐시"""
+    key = (str(path), path.stat().st_mtime_ns)
+    if key not in _ANALYSIS_CACHE:
+        groups, times, unit, error = {}, [], 'deg', ''
+        try:
+            with path.open(encoding='utf-8') as handle:
+                header = json.loads(handle.readline())
+                unit = str(header.get('rotation_unit') or 'deg')
+                scale = 1.0 if unit == 'rad' else math.pi / 180.0
+                for line in handle:
+                    if not line.strip():
+                        continue
+                    row = json.loads(line)
+                    t = float(row[1])
+                    times.append(t)
+                    for i in range(2, len(row) - 1, 2):
+                        groups.setdefault(str(row[i]), []).append((t, float(row[i + 1]) * scale))
+        except (OSError, ValueError, IndexError, TypeError, AttributeError) as exc:
+            error = f'형식 · {exc}'
+        stats = [{'motion_id': mid, 'count': len(v), 'first_value': v[0][1], 'last_value': v[-1][1],
+                  'min_value': min(x for _, x in v), 'max_value': max(x for _, x in v)} for mid, v in sorted(groups.items())]
+        series = []
+        for mid, v in sorted(groups.items())[:12]:
+            stride = max(1, math.ceil(len(v) / 300))
+            series.append({'motion_id': mid, 'points': [{'time_sec': t, 'value': x} for t, x in v[::stride]]})
+        duration = (max(times) - min(times)) if times else 0.0
+        _ANALYSIS_CACHE[key] = {
+            'valid': not error and bool(groups), 'message': error or ('motion data valid' if groups else '데이터 줄 없음'),
+            'errors': [error] if error else [], 'warnings': [], 'value_unit': 'rad', 'source_unit': unit,
+            'motion_ids': stats, 'motion_id_count': len(stats),
+            'time': {'start_sec': min(times) if times else 0.0, 'end_sec': max(times) if times else 0.0, 'duration_sec': duration},
+            'interpolation': {'period_sec': 0.02, 'sample_count': int(duration / 0.02) + 1 if times else 0},
+            'graph_series': series,
         }
-        for path in sorted(EXPORT_DIR.glob('*.json'))
-    ]
+    result = dict(_ANALYSIS_CACHE[key])
+    if not detail:
+        result.pop('graph_series', None)
+    return result
+
+
+def _file_entry(path, detail=False):
+    analysis = _preview_analysis(path, detail)
+    return {
+        'id': path.name, 'filename': path.name,
+        'size_bytes': path.stat().st_size,
+        'updated_at': path.stat().st_mtime,
+        'valid': analysis['valid'], 'message': analysis['message'],
+        # 서버 모양 · 검사 결과와 길이는 analysis 아래 · 새 UI(v2) 가 여기서 읽는다
+        'analysis': analysis,
+        'preview': {'state': _mujoco_state(path)},
+    }
+
+
+def export_files():
+    return [_file_entry(path) for path in _motion_paths()]
+
+
+@app.post('/api/projects/{project_id}/files')
+async def preview_import_file(project_id: str, request: Request):
+    """올리기 흉내 · 임시 폴더에만 · 이름이 겹치면 서버처럼 거절"""
+    body = await request.json()
+    name = Path(str(body.get('file_name') or '')).name
+    if not name.lower().endswith('.json'):
+        return JSONResponse({'detail': '애니메이션은 .json 만 받습니다'}, status_code=400)
+    if _find_motion(name):
+        return JSONResponse({'detail': f'같은 이름이 이미 있습니다: {name}'}, status_code=409)
+    content = str(body.get('content') or '')
+    try:
+        json.loads(content.splitlines()[0])
+    except (ValueError, IndexError):
+        return JSONResponse({'detail': '첫 줄이 motion_header JSON 이 아닙니다'}, status_code=400)
+    UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
+    (UPLOAD_DIR / name).write_text(content, encoding='utf-8', newline='')
+    return {'success': True, 'message': f'올림: {name}'}
+
+
+@app.delete('/api/motion-files/{file_id}')
+async def preview_delete_motion(file_id: str):
+    path = _find_motion(file_id)
+    if path is None:
+        return {'success': False, 'message': f'파일이 없습니다: {file_id}'}
+    if path.name in state['playlist']:
+        return {'success': False, 'message': f'재생 등록된 애니메이션입니다: {path.name} · 재생 등록을 해제한 뒤 삭제하세요'}
+    if path.parent != UPLOAD_DIR:
+        return {'success': False, 'message': '프리뷰 · 원본 내보내기 폴더 파일은 지우지 않습니다(프리뷰에서 올린 것만)'}
+    path.unlink()
+    return {'success': True, 'message': f'애니메이션 삭제 완료: {path.name}'}
+
+
+@app.get('/api/projects/{project_id}/files/motions/{file_name}/download')
+async def preview_download_motion(project_id: str, file_name: str):
+    path = _find_motion(file_name)
+    if path is None:
+        return JSONResponse({'detail': 'Not Found'}, status_code=404)
+    return FileResponse(str(path), filename=path.name, media_type='application/json')
 
 
 @app.get('/api/motion-files')
 async def motion_files():
     files = export_files()
-    return {'success': True, 'files': files,
+    return {'success': True, 'files': files, 'project_id': 'preview',
             'project_generation': state['generation']}
 
 
 @app.get('/api/motion-files/{file_id}')
 async def motion_file_detail(file_id: str):
-    motion = (EXPORT_DIR / Path(file_id).name)
-    if not motion.is_file():
+    motion = _find_motion(file_id)
+    if motion is None:
         return {'success': False, 'message': f'파일이 없습니다: {file_id}',
                 'files': export_files(), 'project_generation': state['generation']}
     return {
         'success': True,
-        'file': {
-            'id': motion.name, 'filename': motion.name,
-            'size_bytes': motion.stat().st_size,
-            'updated_at': motion.stat().st_mtime,
-            'valid': True, 'message': '',
-            'preview': {'state': _mujoco_state(motion)},
-        },
+        'file': _file_entry(motion, detail=True),
         'files': export_files(),
         'project_generation': state['generation'],
     }

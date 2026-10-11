@@ -36,6 +36,8 @@ export async function loadPlay(state, changed) {
       : null;
     const files = await api('GET', '/api/motion-files');
     play.files = Array.isArray(files?.files) ? files.files : [];
+    // 올리기·내려받기 주소에 쓰는 프로젝트 번호 · 목록 응답이 실어 온다(기존 화면과 같은 출처)
+    play.projectId = String(files?.project_id || play.projectId || '');
     play.error = '';
   } catch (error) {
     play.error = error.message || String(error);

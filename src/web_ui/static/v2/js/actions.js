@@ -191,3 +191,28 @@ export async function saveRoster(list) {
   if (!ok) return null;
   return attempt(() => api('PUT', '/api/coordination/settings', { body: { required_peers: list }, timeoutMs: 20000 }), '필수 명단을 저장했습니다');
 }
+
+/* ---------- 애니메이션 ---------- */
+
+/** 하나 올리기 · 서버가 형식을 검사하고 거절하면 그 이유 · 큰 파일은 오래 걸린다 */
+export function uploadAnimation(projectId, fileName, content) {
+  return api('POST', `/api/projects/${encodeURIComponent(projectId)}/files`, {
+    body: { category: 'motions', file_name: fileName, content }, timeoutMs: 240000,
+  });
+}
+
+export function precompute(fileId) {
+  return attempt(() => api('POST', `/api/motion-files/${encodeURIComponent(fileId)}/preview-precompute`),
+    (r) => r?.message || '3D 계산을 시작했습니다');
+}
+
+/** 재생 목록에 든 것은 서버가 거절한다 · 화면은 먼저 버튼을 끈다 */
+export async function deleteAnimation(fileId) {
+  const ok = await confirmBox({
+    title: `「${fileId}」 를 지울까요?`,
+    body: '이 PC 에서 지웁니다. 되돌릴 수 없습니다.',
+    confirmLabel: '지우기', tone: 'danger',
+  });
+  if (!ok) return null;
+  return attempt(() => api('DELETE', `/api/motion-files/${encodeURIComponent(fileId)}`), '지웠습니다');
+}
