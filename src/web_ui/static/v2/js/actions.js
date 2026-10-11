@@ -154,3 +154,40 @@ export function saveEndAction(action) {
   return attempt(() => api('PUT', '/api/motion-run/automation', { body: { schedule_end_action: action } }),
     action === 'hold' ? '운영 시간이 끝나면 회차 끝난 자세로 버팁니다(서보 켠 채)' : '운영 시간이 끝나면 기준점으로 가서 서보를 끕니다');
 }
+
+/* ---------- 매장 PC ---------- */
+
+/** 그룹 참여 켜기 · 설정이 꺼져 있으면 설정까지 켠다(연동 서비스 한 번 다시 시작) · 수정 목록 83 */
+export function joinGroup(config) {
+  if (config?.enabled === true) {
+    return attempt(() => api('POST', '/api/coordination/control', { body: { command: 'join' }, timeoutMs: 7000 }),
+      '그룹 참여 · 같은 그룹 PC 들과 같이 재생합니다');
+  }
+  if (!String(config?.group_id || '').trim()) {
+    toast('그룹 ID 가 없습니다 · 네트워크·시간 화면에서 그룹 ID 를 넣은 뒤 켜세요', 'warn');
+    return Promise.resolve(null);
+  }
+  return attempt(() => api('PUT', '/api/coordination/settings', { body: { enabled: true, joined: true, group_id: config.group_id }, timeoutMs: 20000 }),
+    '그룹 참여 · 같은 그룹 PC 들과 같이 재생합니다');
+}
+
+export async function leaveGroup() {
+  const ok = await confirmBox({
+    title: '그룹 참여 끄기',
+    body: '이 PC 혼자 재생합니다(스케줄도 이 PC 혼자 돕니다).\n프로그램을 다시 켜도 꺼진 채로 있습니다 · 다시 같이 돌리려면 「그룹 참여」 를 켜세요.',
+    confirmLabel: '끄기', tone: 'warning',
+  });
+  if (!ok) return null;
+  return attempt(() => api('POST', '/api/coordination/control', { body: { command: 'leave' }, timeoutMs: 7000 }), '그룹에서 빠졌습니다 · 이 PC 혼자');
+}
+
+/** 필수 명단 · 그룹 시작 때 빠지면 「미접속」 으로 적고 나머지로 시작 */
+export async function saveRoster(list) {
+  const ok = await confirmBox({
+    title: '필수 명단 다시 정하기',
+    body: `지금 보이는 ${list.length}대로 정합니다.\n${list.join(' · ')}\n\n그룹 시작 때 이 중 빠진 PC 는 「미접속」 으로 적고 나머지로 시작합니다. 연동 서비스가 한 번 다시 시작합니다.`,
+    confirmLabel: '정하기',
+  });
+  if (!ok) return null;
+  return attempt(() => api('PUT', '/api/coordination/settings', { body: { required_peers: list }, timeoutMs: 20000 }), '필수 명단을 저장했습니다');
+}

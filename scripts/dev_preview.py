@@ -72,6 +72,9 @@ state = {
     'run_started': None,
     # 새 UI(v2) 공연 · 매장 전체로 시작했나 · 돌던 중 다시 켠 축(다음 회차부터)
     'group_run': False,
+    # 새 UI(v2) 매장 PC · 그룹 참여 스위치 · 필수 명단
+    'joined': True,
+    'required_peers': ['floating1', 'floating2', 'floating3', 'floating4'],
     'held': set(),
     'live_overrides': {},
 }
@@ -196,8 +199,9 @@ def snapshot():
         'minas_absolute_blocker': '',
         'coordination': {
             'node_connected': True,
-            'config': {'pc_id': 'floating1', 'enabled': True, 'group_id': 'stage-a', 'is_master': True},
-            'runtime': {'joined': True, 'network_pcs': _preview_network_pcs(), 'coordination_error': {},
+            'config': {'pc_id': 'floating1', 'enabled': True, 'group_id': 'stage-a', 'is_master': True,
+                       'dds_domain_id': 21, 'required_peers': list(state['required_peers'])},
+            'runtime': {'joined': state['joined'], 'network_pcs': _preview_network_pcs(), 'coordination_error': {},
                         **_preview_group_runtime()},
         },
         'motion_run_status': {
@@ -534,7 +538,20 @@ async def coordination_control(request: Request):
         state['group_run'] = False
         state['held'].clear()
         return {'success': True, 'message': '프리뷰 · 매장 전체 정지'}
+    if command in ('join', 'leave'):
+        state['joined'] = command == 'join'
     return {'success': True, 'message': f'프리뷰 · {command}'}
+
+
+@app.put('/api/coordination/settings')
+async def coordination_settings(request: Request):
+    """설정 저장 흉내 · 보낸 칸만 · 새 UI(v2) 매장 PC"""
+    body = await request.json()
+    if isinstance(body.get('required_peers'), list):
+        state['required_peers'] = [str(item) for item in body['required_peers']]
+    if body.get('joined') is not None:
+        state['joined'] = bool(body['joined'])
+    return {'success': True, 'message': '프리뷰 · 연동 설정 저장'}
 
 
 @app.post('/api/motion-run/start')
@@ -608,7 +625,7 @@ def _preview_network_pcs():
         row.update(extra)
         return row
     return [
-        pc('floating1', '192.168.0.11', is_master=True, is_local=True, age_sec=0.0),
+        pc('floating1', '192.168.0.11', is_master=True, is_local=True, age_sec=0.0, joined=state['joined']),
         pc('floating2', '192.168.0.12'),
         pc('floating3', '192.168.0.13', joined=False, git_hash='454d49b', version_differs=True),
         pc('floating4', '192.168.0.14', online=False, age_sec=42.0),

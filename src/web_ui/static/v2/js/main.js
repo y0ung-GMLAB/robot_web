@@ -10,6 +10,7 @@ import { renderHome } from './pages/home.js';
 import { renderPlaceholder } from './pages/placeholder.js';
 import { loadPlay, renderPlay } from './pages/play.js';
 import { loadSchedule, renderSchedule } from './pages/schedule.js';
+import { loadStore, renderStore } from './pages/store.js';
 
 const state = { snap: null, sched: null, schedules: [], events: [], connected: false };
 /** 화면 · render 는 상태로 그리기만 · load 는 그 화면만 쓰는 값을 받아 온다(들어올 때 + reloadMs 마다) */
@@ -17,6 +18,7 @@ const PAGES = {
   home: { render: renderHome },
   play: { render: renderPlay, load: loadPlay, reloadMs: 15000 },
   schedule: { render: renderSchedule, load: loadSchedule, reloadMs: 30000 },
+  store: { render: renderStore, load: loadStore, reloadMs: 10000 },
 };
 const PAGE_INTERVAL_MS = 500;
 
