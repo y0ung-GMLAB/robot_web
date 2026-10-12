@@ -73,6 +73,10 @@ state = {
     'run_started': None,
     # 새 UI(v2) 공연 · 매장 전체로 시작했나 · 돌던 중 다시 켠 축(다음 회차부터)
     'group_run': False,
+    # 새 UI(v2) 모터·드라이브 · 설정 이름·속도 · 앱솔루트 설정 흉내
+    'motor_registry': None,
+    'abs_done': False,
+    'abs_job': {'state': 'idle'},
     # 새 UI(v2) 매장 PC · 그룹 참여 스위치 · 필수 명단
     'joined': True,
     'required_peers': ['floating1', 'floating2', 'floating3', 'floating4'],
@@ -192,6 +196,13 @@ def snapshot():
         'bridge_state': 'ok',
         'selected_project_id': 'preview',
         'motion_state': {
+            # 새 UI(v2) 모터·드라이브 · 앱솔루트 확인 흉내(서버 minas_absolute 모양)
+            'minas_absolute': {'state': 'ok', 'drives': [
+                {'axis': axis, 'master_index': 0, 'slave_position': axis,
+                 'absolute_mode': 0 if axis != 4 or state['abs_done'] else 1,
+                 'status': 'ok' if axis != 4 or state['abs_done'] else 'not_absolute',
+                 'problem': '' if axis != 4 or state['abs_done'] else 'Pr0.15=1(인크리멘털)'}
+                for _, axis, *_ in JOINTS]},
             'project_id': 'preview',
             'selected_project_id': 'preview',
             'project_generation': state['generation'],
@@ -203,7 +214,7 @@ def snapshot():
         # 새 UI(v2) 상단 바 · 홈이 읽는다 · 실제 브리지 스냅샷과 같은 자리
         'system_info': {'hostname': 'floating1'},
         'supervisor_watchdog': {},
-        'minas_absolute_blocker': '',
+        'minas_absolute_blocker': '' if state['abs_done'] else '앱솔루트 미확인 · 4번 모터 Pr0.15=1(인크리멘털) · 모터 관리에서 앱솔루트 설정',
         'coordination': {
             'node_connected': True,
             'config': {'pc_id': 'floating1', 'enabled': True, 'group_id': 'stage-a', 'is_master': True,
@@ -1070,6 +1081,94 @@ async def preview_save_mapping(request: Request):
 @app.post('/api/motor-config/apply')
 async def preview_apply_motor_config():
     return {'success': True, 'message': '프리뷰 · 장비에 적용 (실제로는 아무것도 안 함)'}
+
+
+def _preview_registry():
+    if state['motor_registry'] is None:
+        state['motor_registry'] = {'motors': [
+            {'id': f'ac_servo_master_0_alias_{100 + axis}', 'enabled': True, 'axis': axis, 'name': name,
+             'motor_type': 'ac_servo', 'driver_family': 'minas', 'transport': 'ethercat',
+             'identity': {'ethercat_master_index': 0, 'ethercat_alias': 100 + axis, 'slave_position': axis, 'vendor_id': '0x066f'},
+             'profile': {'driver_model': 'MINAS A6B', 'model_confirmed': True},
+             'config': {'controller_index': axis, 'position': axis, 'profile_velocity': 18000, 'profile_acceleration': 180000,
+                        'acceleration': 180000, 'max_speed_rpm': 3000, 'overload_monitor': 1}}
+            for name, axis, *_ in JOINTS]}
+    return state['motor_registry']
+
+
+@app.get('/api/motor-config')
+async def preview_motor_config():
+    import hashlib
+    registry = _preview_registry()
+    revision = hashlib.sha256(json.dumps(registry, sort_keys=True, ensure_ascii=False).encode()).hexdigest()
+    return {'success': True, 'saved': True, 'config_file': 'motor_axes/motor_axes.yaml', 'config_revision': revision, 'registry': registry}
+
+
+@app.put('/api/motor-config')
+async def preview_save_motor_config(request: Request):
+    body = await request.json()
+    current = await preview_motor_config()
+    if body.get('base_revision') != current['config_revision']:
+        return {'success': False, 'message': 'failed to save motor config YAML: 설정 파일이 화면을 불러온 뒤 변경됐습니다'}
+    for motor in (body.get('registry') or {}).get('motors') or []:
+        config = motor.get('config') or {}
+        pv, rpm = float(config.get('profile_velocity') or 0), float(config.get('max_speed_rpm') or 0)
+        if pv and rpm and pv > rpm * 6:
+            return {'success': False, 'message': f"failed to save motor config YAML: {motor['axis']}번 모터 · 프로파일 속도 {pv:g} deg/s 가 최대 속도 {rpm:g} rpm ({rpm * 6:g} deg/s) 보다 큽니다"}
+    state['motor_registry'] = body.get('registry')
+    return {**(await preview_motor_config()), 'message': '프리뷰 · 모터 설정 저장 · 드라이브 반영은 「장비에 적용」'}
+
+
+@app.post('/api/motion-test/ac-servo/control')
+async def preview_servo_control(request: Request):
+    body = await request.json()
+    action = body.get('action')
+    if action in ('servo_on', 'servo_off'):
+        state['servo_on'] = action == 'servo_on'
+    return {'success': True, 'message': {'servo_on': '서보 켬', 'servo_off': '서보 끔', 'fault_reset': '오류 초기화 · 서보는 꺼진 채'}.get(action, action)}
+
+
+@app.post('/api/motor-config/drive-maintenance')
+async def preview_drive_maintenance(request: Request):
+    body = await request.json()
+    action = body.get('action')
+    return {'success': True, 'action': action, 'axis': body.get('axis'), 'power_cycle_required': action in ('absolute_mode', 'absolute_clear'),
+            'message': f"프리뷰 · {body.get('axis')}번 {action} (실제로는 아무것도 안 함)"}
+
+
+@app.get('/api/motor-config/absolute-setup')
+async def preview_absolute_job():
+    job = state['abs_job']
+    if job.get('state') == 'running':
+        step = min(7, int((time.time() - job['started']) // 2) + 1)
+        labels = ['서보 끄기', '모드 쓰기 + EEPROM', '전원 껐다 켜기 1', '확인', '다회전 클리어', '전원 껐다 켜기 2', '검증']
+        if step >= 7 and time.time() - job['started'] > 14:
+            state['abs_done'] = True
+            state['abs_job'] = {'state': 'done', 'message': '완료 · 위치 숫자가 바뀌어 기준점을 다시 캡처해야 합니다'}
+            return state['abs_job']
+        return {'state': 'running', 'step_index': step, 'step_count': 7, 'step_label': labels[step - 1],
+                'message': '프리뷰 · 몇 초씩 지나갑니다'}
+    return job
+
+
+@app.post('/api/motor-config/absolute-setup/preview')
+async def preview_absolute_preview(request: Request):
+    targets = [] if state['abs_done'] else [{'label': '4번 · Eye_Yaw_R', 'axis': 4, 'problem': 'Pr0.15=1(인크리멘털)'}]
+    skipped = [{'label': f'{axis}번 · {name}', 'axis': axis, 'reason': '이미 정상'} for name, axis, *_ in JOINTS if axis != 4 or state['abs_done']]
+    return {'success': True, 'targets': targets, 'skipped': skipped,
+            'steps': ['서보 끄기', 'Pr0.15 = 0 · EEPROM', '드라이브 전원 껐다 켜기', '확인', '다회전 클리어', '드라이브 전원 한 번 더', '검증']}
+
+
+@app.post('/api/motor-config/absolute-setup')
+async def preview_absolute_start(request: Request):
+    state['abs_job'] = {'state': 'running', 'started': time.time()}
+    return {'success': True, 'message': '프리뷰 · 앱솔루트 설정 시작'}
+
+
+@app.post('/api/motor-config/absolute-setup/cancel')
+async def preview_absolute_cancel():
+    state['abs_job'] = {'state': 'failed', 'message': '취소함'}
+    return {'success': True, 'message': '취소했습니다'}
 
 
 _PREVIEW_DOCS = [

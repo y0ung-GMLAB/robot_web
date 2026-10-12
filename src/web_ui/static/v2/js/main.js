@@ -20,6 +20,7 @@ import { loadBackup, renderBackup } from './pages/backup.js';
 import { loadPack, renderPack } from './pages/pack.js';
 import { loadRecords, renderRecords } from './pages/records.js';
 import { loadMapping, renderMapping } from './pages/mapping.js';
+import { loadMotors, renderMotors } from './pages/motors.js';
 
 const state = { snap: null, sched: null, schedules: [], events: [], connected: false };
 /** 화면 · render 는 상태로 그리기만 · load 는 그 화면만 쓰는 값을 받아 온다(들어올 때 + reloadMs 마다) */
@@ -36,6 +37,7 @@ const PAGES = {
   pack: { render: renderPack, load: loadPack, reloadMs: 5000 },
   records: { render: renderRecords, load: loadRecords, reloadMs: 15000 },
   mapping: { render: renderMapping, load: loadMapping, reloadMs: 10000 },
+  'maintain-motors': { render: renderMotors, load: loadMotors, reloadMs: 10000 },
   // static · 들어올 때 한 번만 그린다 · iframe 을 다시 그리면 터미널 세션이 끊긴다
   tools: { render: renderTools, static: true },
 };
