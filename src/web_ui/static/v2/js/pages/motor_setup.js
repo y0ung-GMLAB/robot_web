@@ -12,7 +12,7 @@ import { loadMapping, mappingActions, mappingBody, mappingDraft, mappingNote, re
 
 const SETUP_PARTS = [
   ['part-motors', '① 모터·드라이브', '실제 모터 · 검색 · 이름 · 속도 · 브레이크 · 서보 · 앱솔루트'],
-  ['part-mapping', '② 조인트 매핑', '애니메이션 조인트 값을 모터 값으로 바꾸는 규칙 · 감속 기어비 · 방향 · 기준점 · 범위'],
+  ['part-mapping', '② 조인트 매핑', '애니메이션 조인트 값을 모터 값으로 바꾸는 규칙 · 감속·기어비 · 방향 · 기준점 · 범위'],
 ];
 
 const ui = { busy: false, scrolledFor: '' };

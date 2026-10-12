@@ -53,7 +53,7 @@ test('바뀐 것 · 칸 · 더함 · 뺌', () => {
   const a = { ...rowToDraft(serverRow), _key: 'k1' };
   const b = { ...rowToDraft({ ...serverRow, motion_id: 'Yaw', motor_axis: 1 }), _key: 'k2' };
   assert.deepEqual(changeSummary([a, b], [a, b]), []);
-  assert.deepEqual(changeSummary([a, b], [{ ...a, gear_ratio: 120 }]), ['Neck_Pitch 감속 기어비 150 → 120', 'Yaw 삭제']);
+  assert.deepEqual(changeSummary([a, b], [{ ...a, gear_ratio: 120 }]), ['Neck_Pitch 감속·기어비 150 → 120', 'Yaw 삭제']);
   assert.deepEqual(changeSummary([a], [a, { ...newRow(2, 'New'), _key: 'k9' }]), ['New 추가']);
 });
 

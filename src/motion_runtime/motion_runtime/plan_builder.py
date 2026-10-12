@@ -249,7 +249,7 @@ class PlanBuilder:
         initialization_fallback_used = False
         if not motors:
             raise ValueError(
-                '모터 상태를 아직 못 받았습니다 · 모터 관리에서 적용·재시작이 끝났는지 확인하세요 '
+                '모터 상태를 아직 받지 못했습니다 · 모터 설정에서 장비에 적용이 끝났는지 확인하세요 '
                 '(current motion_state is unavailable)'
             )
 

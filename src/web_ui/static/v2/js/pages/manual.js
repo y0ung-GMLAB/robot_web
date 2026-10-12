@@ -203,6 +203,7 @@ async function dialInput(item, steps, fine = false) {
   const now = performance.now();
   if (!ui.session || ui.session.axis !== item.axis) {
     endSession(true);
+    releaseAllFaders();
     try {
       await stream.open({ mapping_file_id: ui.fileId, base_mapping_revision: ui.revision });
     } catch (error) {
@@ -432,6 +433,7 @@ function faderView(state, changed, list) {
   const blocker = manualBlocker(state, usable[0] || null);
   const grab = async (item, joint) => {
     if (manualBlocker(state, item)) return;
+    if (ui.session) endSession(true);
     if (!ui.faders.has(item.axis)) {
       try { await stream.open({ mapping_file_id: ui.fileId, base_mapping_revision: ui.revision }); } catch (error) { ui.message = error.message; changed(); return; }
     }
@@ -443,7 +445,7 @@ function faderView(state, changed, list) {
     stream.release([item.axis]);
     ui.faders.delete(item.axis);
   };
-  return h('section', { class: 'card', 'aria-label': '페이더' },
+  return h('section', { class: 'card', 'aria-label': '페이더 (전체)' },
     blocker && blocker.fix !== 'servo-on' && blocker.fix !== 'reset' ? h('div', { class: 'blocker' }, dot('warn'), h('span', { class: 'grow', text: blocker.text }), fixButton(blocker, null, changed)) : null,
     h('p', { class: 'muted small', text: '페이더를 드래그하는 동안에만 모터가 따라 움직이고, 손을 떼면 그 위치에서 정지합니다. 범위는 조인트 매핑의 최소·최대입니다.' }),
     usable.length ? h('ul', { class: 'list fader-list' }, usable.map((item) => {
@@ -479,16 +481,18 @@ export function renderManual(state, { changed }) {
   return [
     h('div', { class: 'page-head' },
       h('h1', { text: '수동 조작' }),
-      h('div', { class: 'segmented', role: 'group', 'aria-label': '보기' },
-        [['axis', '모터별'], ['faders', '페이더 (전체)']].map(([value, label]) => h('button', {
-          class: 'seg', type: 'button', 'aria-pressed': String(ui.mode === value), onclick: () => { endSession(true); releaseAllFaders(); ui.mode = value; changed(); },
-        }, label))),
+      h('nav', { class: 'row part-jumps', 'aria-label': '구획 바로 가기' },
+        [['part-axis', '① 모터별'], ['part-faders', '② 페이더 (전체)']].map(([id, label]) => h('a', { class: 'btn btn-mini', href: '#/manual',
+          onclick: (event) => { event.preventDefault(); document.getElementById(id)?.scrollIntoView({ behavior: 'smooth', block: 'start' }); } }, label))),
       h('span', { class: 'spacer' }),
       h('button', { class: 'btn', type: 'button', disabled: initDisabled, title: initDisabled && pcBlocker ? pcBlocker.text : '',
         onclick: initialize }, '초기 위치로')),
-    !list.length ? h('section', { class: 'card' }, h('p', { class: 'muted', text: '인식된 모터가 없습니다' }))
-      : ui.mode === 'faders' ? faderView(state, changed, list)
-        : h('div', { class: 'manual-grid' },
+    !list.length ? h('section', { class: 'card' }, h('p', { class: 'muted', text: '인식된 모터가 없습니다' })) : [
+      // 한 페이지에 두 구획(사용자 2026-10-12 · 모터 설정과 같게) · 한쪽을 잡으면 다른 쪽 세션은 놓는다
+      h('section', { class: 'setup-part', id: 'part-axis', 'aria-label': '모터별' },
+        h('div', { class: 'part-head' }, h('h2', { text: '① 모터별' })),
+        h('p', { class: 'muted small', text: '모터 하나를 골라 다이얼 · 목표 위치로 움직입니다.' }),
+        h('div', { class: 'manual-grid' },
           h('section', { class: 'card axis-list', 'aria-label': '모터' },
             h('ul', { class: 'list' }, list.map((a) => h('li', {},
               h('button', { class: `axis-pick${a.axis === ui.axis ? ' on' : ''}`, type: 'button', 'aria-pressed': String(a.axis === ui.axis),
@@ -497,6 +501,10 @@ export function renderManual(state, { changed }) {
                 h('span', { class: 'mono', 'data-live': 'joint', 'data-axis': String(a.axis), text: a.joint === null ? '-' : `${signedDeg(a.joint, 2)}°` })),
               h('span', { class: 'axis-pick-meta' }, dot(a.fault ? 'bad' : a.servoOn ? 'ok' : 'warn'),
                 h('span', { class: 'muted small', text: `${a.fault ? '알람' : a.servoOn ? '서보 켜짐' : '서보 꺼짐'} · ${a.axis}번 · ${a.ac ? 'AC' : 'DXL'}${a.row ? ` · 1:${a.row.gear_ratio}` : ' · 매핑 없음'}` }))))))),
-          item ? axisPanel(state, changed, item) : null),
+          item ? axisPanel(state, changed, item) : null)),
+      h('section', { class: 'setup-part', id: 'part-faders', 'aria-label': '페이더' },
+        h('div', { class: 'part-head' }, h('h2', { text: '② 페이더 (전체)' })),
+        faderView(state, changed, list)),
+    ],
   ];
 }

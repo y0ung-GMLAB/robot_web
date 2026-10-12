@@ -89,7 +89,7 @@ def blocked_message(drives: Iterable[Mapping[str, Any]]) -> str:
     ]
     if not parts:
         return ''
-    return '앱솔루트 미확인 · ' + ' · '.join(parts) + ' · 모터 관리에서 앱솔루트 설정'
+    return '앱솔루트 미확인 · ' + ' · '.join(parts) + ' · 모터 설정에서 「앱솔루트 설정」을 누르세요'
 
 
 def summary(drives: List[Dict[str, Any]], *, checked_at: Optional[float]) -> Dict[str, Any]:
