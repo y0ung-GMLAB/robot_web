@@ -76,7 +76,7 @@ export function renderAlarms(state, { changed }) {
 
   return [
     h('div', { class: 'page-head' },
-      h('h1', { text: '알람 정책' }),
+      h('h1', { text: '드라이브 알람' }),
       h('p', { class: 'muted small', text: '드라이브 알람이 발생했을 때 어느 범위까지 멈출지 정합니다. 이 프로젝트에만 적용됩니다. 현재 발생한 알람은 상단 상태 표시와 「모터·드라이브」 화면에서 확인하세요.' })),
     page.error ? h('p', { class: 'tone-text-bad', text: page.error }) : null,
     notApplied ? h('div', { class: 'blocker' }, dot('warn'),

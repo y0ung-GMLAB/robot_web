@@ -103,7 +103,7 @@ async function save(state, changed, { apply = false } = {}) {
 function partHead([id, label, hint], status, actions, note) {
   return [
     h('div', { class: 'part-head' },
-      h('h2', {}, `${status.done ? '✓ ' : ''}${label}`, status.note ? h('small', { class: `part-note${status.done ? ' ok' : ''}`, text: ` · ${status.note}` }) : null),
+      h('h2', {}, label, status.note ? h('small', { class: `part-note${status.done ? ' ok' : ''}`, text: ` · ${status.note}` }) : null),
       h('span', { class: 'spacer' }),
       actions),
     note || h('p', { class: 'muted small', text: hint }),

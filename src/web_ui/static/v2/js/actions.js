@@ -164,7 +164,7 @@ export function joinGroup(config) {
       '그룹에 참여했습니다. 같은 그룹의 PC들과 함께 재생합니다.');
   }
   if (!String(config?.group_id || '').trim()) {
-    toast('그룹 ID가 없습니다. 「그룹」 화면에서 그룹 ID를 입력한 뒤 켜세요.', 'warn');
+    toast('그룹 ID가 없습니다. 「네트워크·시간·그룹」 화면에서 그룹 ID를 입력한 뒤 켜세요.', 'warn');
     return Promise.resolve(null);
   }
   return attempt(() => api('PUT', '/api/coordination/settings', { body: { enabled: true, joined: true, group_id: config.group_id }, timeoutMs: 20000 }),
@@ -221,7 +221,7 @@ export async function deleteAnimation(fileId) {
 
 export function saveAlarmPolicy(overrides) {
   return attempt(() => api('PUT', '/api/servo-alarm-policy', { body: { overrides } }),
-    (r) => r?.message || '알람 정책을 저장하고 Supervisor에 적용했습니다');
+    (r) => r?.message || '드라이브 알람 등급을 저장하고 모터 제어 프로그램에 적용했습니다');
 }
 
 /* ---------- 장비에 적용 · 모터 재시작 (모터·드라이브 · 조인트 매핑 같이 씀) ---------- */

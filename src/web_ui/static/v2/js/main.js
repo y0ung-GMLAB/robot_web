@@ -15,7 +15,7 @@ import { loadAnimations, renderAnimations } from './pages/animations.js';
 import { loadDocs, renderDocs } from './pages/docs.js';
 import { renderTools } from './pages/tools.js';
 import { loadAlarms, renderAlarms } from './pages/alarms.js';
-import { loadNetwork, renderNetwork, renderTime, renderGroup } from './pages/network.js';
+import { loadNetwork, renderNetwork } from './pages/network.js';
 import { loadBackup, renderBackup } from './pages/backup.js';
 import { loadPack, renderPack } from './pages/pack.js';
 import { loadRecords, renderRecords } from './pages/records.js';
@@ -33,8 +33,6 @@ const PAGES = {
   docs: { render: renderDocs, load: loadDocs },
   alarms: { render: renderAlarms, load: loadAlarms, reloadMs: 30000 },
   network: { render: renderNetwork, load: loadNetwork, reloadMs: 15000 },
-  time: { render: renderTime, load: loadNetwork, reloadMs: 15000 },
-  group: { render: renderGroup, load: loadNetwork, reloadMs: 15000 },
   backup: { render: renderBackup, load: loadBackup, reloadMs: 5000 },
   pack: { render: renderPack, load: loadPack, reloadMs: 5000 },
   records: { render: renderRecords, load: loadRecords, reloadMs: 15000 },
