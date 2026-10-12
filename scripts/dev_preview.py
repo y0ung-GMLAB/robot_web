@@ -879,6 +879,88 @@ async def preview_version():
     return {'branch': 'ui-v2', 'hash': 'cadddb6', 'message': '프리뷰', 'is_main': False}
 
 
+_PREVIEW_PROJECTS = [
+    {'project_id': 'preview', 'name': '프리뷰', 'memo': '10-07 앱솔루트 설정 · 기준점 다시 캡처함',
+     'counts': {'motions': 10, 'motion_axis_matching': 1, 'motor_axes': 1}},
+    {'project_id': 'floating4_1800', 'name': 'floating4_1800', 'memo': '', 'counts': {'motions': 3}},
+]
+_PREVIEW_TRASH = [{'entry': 'old-1', 'project_id': 'old_test', 'name': 'old_test', 'deleted_at': '2026-10-08T11:20:00'}]
+_SELF_UPDATE = {'started': None}
+
+
+@app.get('/api/system/update')
+async def preview_self_update():
+    """이 PC 업데이트 흉내 · 누르면 몇 초 돌다 완료"""
+    started = _SELF_UPDATE['started']
+    if started is None:
+        return {'success': True, 'git_hash': 'cadddb6', 'state': 'idle'}
+    if time.time() - started < 6:
+        return {'success': True, 'git_hash': 'cadddb6', 'state': 'running', 'before_hash': 'cadddb6',
+                'tail': ['== 2. 코드 받기', '== 7. 의존성 확인', '== 8. 빌드 1/2']}
+    return {'success': True, 'git_hash': 'd00d123', 'state': 'done', 'before_hash': 'cadddb6', 'after_hash': 'd00d123',
+            'finished_at': started + 6}
+
+
+@app.post('/api/system/update')
+async def preview_self_update_start():
+    _SELF_UPDATE['started'] = time.time()
+    return {'success': True, 'state': 'running', 'message': '프리뷰 · 이 PC 업데이트 시작'}
+
+
+@app.get('/api/projects')
+async def preview_projects():
+    return {'success': True, 'projects': _PREVIEW_PROJECTS, 'selected_project_id': 'preview'}
+
+
+@app.post('/api/projects')
+async def preview_create_project(request: Request):
+    body = await request.json()
+    name = str(body.get('name') or '').strip()
+    _PREVIEW_PROJECTS.append({'project_id': name, 'name': name, 'memo': '', 'counts': {}})
+    return {'success': True, 'message': f'프리뷰 · {name} 만듦'}
+
+
+@app.patch('/api/projects/{project_id}')
+async def preview_project_memo(project_id: str, request: Request):
+    body = await request.json()
+    for project in _PREVIEW_PROJECTS:
+        if project['project_id'] == project_id:
+            project['memo'] = str(body.get('memo') or '')
+    return {'success': True}
+
+
+@app.delete('/api/projects/{project_id}')
+async def preview_delete_project(project_id: str):
+    if project_id == 'preview':
+        return {'success': False, 'message': '지금 고른 프로젝트는 지울 수 없습니다'}
+    _PREVIEW_PROJECTS[:] = [p for p in _PREVIEW_PROJECTS if p['project_id'] != project_id]
+    _PREVIEW_TRASH.append({'entry': f'{project_id}-t', 'project_id': project_id, 'name': project_id,
+                           'deleted_at': time.strftime('%Y-%m-%dT%H:%M:%S')})
+    return {'success': True}
+
+
+@app.get('/api/project-backups')
+async def preview_project_backups():
+    return {'success': True, 'keep_days': 14, 'days': [
+        {'day': d, 'projects': [{'project_id': 'preview', 'size_bytes': 18_400_000}]}
+        for d in ('2026-10-12', '2026-10-11', '2026-10-10')]}
+
+
+@app.get('/api/project-trash')
+async def preview_project_trash():
+    return {'success': True, 'keep_days': 7, 'entries': _PREVIEW_TRASH}
+
+
+@app.post('/api/project-trash/{entry}/restore')
+async def preview_restore_trash(entry: str):
+    item = next((t for t in _PREVIEW_TRASH if t['entry'] == entry), None)
+    if item is None:
+        return {'success': False, 'message': '없는 항목'}
+    _PREVIEW_TRASH.remove(item)
+    _PREVIEW_PROJECTS.append({'project_id': item['project_id'], 'name': item['name'], 'memo': '', 'counts': {}})
+    return {'success': True, 'message': f"프리뷰 · {item['name']} 되살림"}
+
+
 _PREVIEW_DOCS = [
     {'id': 'usage', 'title': '사용법', 'subtitle': '화면 하나하나', 'path': 'docs/사용법.md'},
     {'id': 'install', 'title': '설치법', 'subtitle': 'README', 'path': 'README.md'},
