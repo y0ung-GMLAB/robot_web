@@ -24,7 +24,18 @@ const ui = {
   initialMove: null,
   targetCycles: 0,
   busy: false,
+  show3d: null,   // 처음 그릴 때 브라우저 기억에서 읽는다
 };
+
+/** 3D 동시 재생 켬·끔 · 브라우저마다 기억 · 처음엔 끔
+ *  3D 는 보는 쪽 브라우저가 계속 그린다(그래픽·CPU) · 로봇 PC 에서 화면을 띄워 둘 때 부담이 없게 */
+const SHOW3D_KEY = 'robot_web.v2.play3d';
+function readShow3d() {
+  try { return localStorage.getItem(SHOW3D_KEY) === 'on'; } catch { return false; }
+}
+function writeShow3d(on) {
+  try { localStorage.setItem(SHOW3D_KEY, on ? 'on' : 'off'); } catch { /* 기억 못 해도 된다 */ }
+}
 
 /** 서버에서 따로 받아 오는 것 · 매핑(재생 목록 · 축) · 애니메이션 파일 목록 */
 export async function loadPlay(state, changed) {
@@ -263,12 +274,22 @@ function axesCard(state) {
 }
 
 /** 3D · 실물 재생과 같이 · 도는 애니메이션(없으면 재생 목록 1번 첫 자세) · 칸은 한 번 만들어 계속 쓴다 */
-function previewCard(state) {
+function previewCard(state, changed) {
   const status = runStatus(state.snap);
   const fileId = String(status.motion_file_id || registeredPlaylist(state.play?.mapping)[0] || '');
+  if (ui.show3d === null) ui.show3d = readShow3d();
+  // 끄면 칸을 빼기만 한다 · 화면에서 빠진 3D 는 그리기를 멈추고 서버에도 묻지 않는다(viewer3d.js)
   return h('section', { class: 'card', 'aria-label': '3D' },
-    h('div', { class: 'card-head' }, h('h2', { text: '3D 동시 재생' }), h('a', { href: '#/pack', text: '로봇 팩·3D' })),
-    getViewer3d().update(state, { fileId }));
+    h('div', { class: 'card-head' },
+      h('label', { class: 'switch' },
+        h('input', { type: 'checkbox', role: 'switch', checked: ui.show3d, 'aria-label': '3D 동시 재생',
+          onchange: (event) => { ui.show3d = event.target.checked; writeShow3d(ui.show3d); changed(); } }),
+        h('span', { class: 'switch-track', 'aria-hidden': 'true' })),
+      h('h2', { class: 'grow', text: `3D 동시 재생 · ${ui.show3d ? '켬' : '끔'}` }),
+      h('a', { href: '#/pack', text: '로봇 팩·3D' })),
+    ui.show3d
+      ? getViewer3d().update(state, { fileId })
+      : h('p', { class: 'muted small', text: '켜면 실물 재생에 맞춰 3D 로봇이 같이 움직입니다. 보는 PC의 그래픽을 계속 쓰므로 필요할 때만 켜세요(이 브라우저에 기억됩니다).' }));
 }
 
 export function renderPlay(state, { navigate, changed }) {
@@ -280,7 +301,7 @@ export function renderPlay(state, { navigate, changed }) {
     scopeHeader(state, changed),
     nowCard(state, changed, navigate),
     ui.scope === 'group' ? groupCard(state) : null,
-    previewCard(state),
+    previewCard(state, changed),
     h('div', { class: 'grid-2' },
       playlistCard(state, changed, { link: ['#/animations', '애니메이션'], reload: loadPlay }),
       repeatCard(state, changed)),
