@@ -281,6 +281,17 @@ function createViewer3d() {
     return blenderViewAllowed(sceneInfo?.blender, latest.fileId ? { id: latest.fileId } : null);
   }
 
+  /** Blender 를 골랐는데 못 그리는 이유 · 빈 글이면 그릴 수 있다 · 수정 목록 104 */
+  function blenderBlockedReason() {
+    const info = sceneInfo?.blender;
+    if (!info?.available) return '로봇 팩에 Blender 장면(scene.glb)이 없습니다';
+    if (!latest.fileId) return '보여 줄 애니메이션이 없습니다';
+    if (blenderAllowed()) return '';
+    const held = (Array.isArray(info.animations) ? info.animations : []).filter(Boolean);
+    return `${latest.fileId}은(는) 이 팩의 Blender 장면에 없습니다${held.length ? ` · 들어 있는 것 · ${held.join(', ')}` : ''}`
+      + ' · 어떤 애니메이션이든 Blender 로 보려면 조인트(joints) 팩이 필요합니다 · 지금은 MuJoCo';
+  }
+
   function setView(next) {
     view = next;
     try { localStorage.setItem(VIEW_KEY, next); } catch { /* 기억 못 해도 된다 */ }
@@ -291,8 +302,10 @@ function createViewer3d() {
   function paintButtons() {
     const allowed = blenderAllowed();
     viewButtons.blender.disabled = !sceneInfo?.blender?.available;
+    // 장면은 있는데 이 애니메이션이 없으면 흐리게 · 눌러도 고장처럼 보이지 않게 이유는 상태 줄에 (104)
+    viewButtons.blender.setAttribute('aria-disabled', String(Boolean(sceneInfo?.blender?.available) && !allowed));
     viewButtons.blender.title = !sceneInfo?.blender?.available ? '로봇 팩에 Blender 장면(scene.glb)이 없습니다'
-      : allowed ? '' : '이 애니메이션은 Blender 장면에 없습니다(이전 버전 팩)';
+      : allowed ? '' : '이 팩의 Blender 장면에 이 애니메이션이 없습니다';
     const shown = view === 'blender' && allowed ? 'blender' : 'mujoco';
     viewButtons.mujoco.setAttribute('aria-pressed', String(shown === 'mujoco'));
     viewButtons.blender.setAttribute('aria-pressed', String(shown === 'blender'));
@@ -345,7 +358,10 @@ function createViewer3d() {
       poseMujoco(ok ? frames.qpos[frameIndexAt(frames.t, Math.min(playhead, duration))] : null);
       mj.controls.update();
       renderer.render(mj.scene, mj.camera);
-      if (ok) say(`MuJoCo · ${latest.fileId}${running ? ' · 동시 재생 중' : ' · 대기 상태(초기 위치)'}`);
+      // Blender 를 골라 뒀는데 이 애니메이션이 장면에 없으면 이유를 그대로 · 그 애니메이션이 되면 저절로 Blender (104)
+      const blocked = view === 'blender' ? blenderBlockedReason() : '';
+      if (blocked) say(blocked);
+      else if (ok) say(`MuJoCo · ${latest.fileId}${running ? ' · 동시 재생 중' : ' · 대기 상태(초기 위치)'}`);
     }
     timeLabel.textContent = duration ? `${Math.min(playhead, duration).toFixed(1)} / ${duration.toFixed(1)} s` : '';
     raf = requestAnimationFrame(frame);
@@ -361,6 +377,7 @@ function createViewer3d() {
       clock = nextClockOffset(clock.samples, serverTime, Date.now() / 1000);
     }
     if ((fileId && fileId !== framesFor && fileId !== valuesFor) || !sceneInfo || Date.now() - sceneCheckedAt > SCENE_RECHECK_MS) prepare();
+    paintButtons();
     if (!raf) raf = requestAnimationFrame(frame);
     return node;
   }

@@ -473,3 +473,6 @@ dialog.confirm::backdrop { background: rgb(0 0 0 / 60%); }
   .issues-drawer { left: 50%; top: auto; bottom: 12px; }
 }
 details.raw pre.raw-file { max-height: 480px; }
+
+/* 3D 보기 · 이 애니메이션은 Blender 장면에 없음 · 흐리게(누르면 이유가 상태 줄에) · 104 */
+.seg[aria-disabled="true"] { opacity: 0.45; }
