@@ -2,13 +2,13 @@
 import { h } from './dom.js';
 
 /** 확인 · true/false · tone = primary | warning | danger */
-export function confirmBox({ title, body, confirmLabel = '확인', tone = 'primary' }) {
+export function confirmBox({ title, body, confirmLabel = '확인', cancelLabel = '취소', tone = 'primary' }) {
   return new Promise((resolve) => {
     const dialog = h('dialog', { class: 'confirm' },
       h('h2', { text: title }),
       h('p', { class: 'confirm-body', text: body }),
       h('div', { class: 'confirm-actions' },
-        h('button', { class: 'btn', value: 'cancel', type: 'button', onclick: () => dialog.close('cancel') }, '취소'),
+        h('button', { class: 'btn', value: 'cancel', type: 'button', onclick: () => dialog.close('cancel') }, cancelLabel),
         h('button', { class: `btn btn-${tone}`, value: 'ok', type: 'button', onclick: () => dialog.close('ok') }, confirmLabel)));
     dialog.addEventListener('close', () => { dialog.remove(); resolve(dialog.returnValue === 'ok'); });
     document.body.append(dialog);

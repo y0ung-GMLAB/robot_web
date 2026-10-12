@@ -84,8 +84,9 @@ function payload() {
   };
 }
 
-/** 조인트 매핑만 저장 · 저장했으면 메시지 · 검사 실패·충돌은 여기서 알리고 null · 장비 적용은 motor_setup.js */
-export async function saveMapping(state, changed) {
+/** 조인트 매핑만 저장 · 저장했으면 메시지 · 검사 실패·충돌은 여기서 알리고 null · 장비 적용은 motor_setup.js
+ *  충돌(화면을 연 뒤 파일이 바뀜)이면 「계속 저장」 으로 바로 덮어쓰고 이어 간다 · 재생 목록은 서버가 원래 것을 지킨다 */
+export async function saveMapping(state, changed, { retried = false } = {}) {
   ui.busy = '저장 중';
   changed();
   try {
@@ -99,22 +100,35 @@ export async function saveMapping(state, changed) {
     await loadMapping(state, changed, { force: true });
     return String(result?.message || '조인트 매핑을 저장했습니다');
   } catch (error) {
-    if (isRevisionConflict(error.message)) {
-      const reload = await confirmBox({
+    if (isRevisionConflict(error.message) && !retried) {
+      const go = await confirmBox({
         title: '조인트 매핑 파일이 화면을 연 뒤 바뀌었습니다',
-        body: '이 화면을 연 다음에 누군가 같은 파일을 저장했습니다. 이런 때 생깁니다 · 다른 화면(이전 UI · 다른 PC 브라우저)에서 저장 · 재생 목록 변경(재생 목록도 같은 파일에 저장) · 수동 조작에서 기준점·하한점·상한점 지정.\n\n「버리고 다시 불러오기」 · 최신 파일을 받고, 이 화면에서 고친 것은 버립니다.\n「취소」 · 고친 것을 그대로 두고, 다시 「저장」하면 이 화면 내용으로 덮어씁니다.',
-        confirmLabel: '버리고 다시 불러오기', tone: 'warning',
+        body: '이 화면을 연 다음에 같은 파일이 저장됐습니다(다른 화면에서 저장 · 수동 조작에서 기준점·하한점·상한점 지정 등).\n\n「계속 저장」 · 이 화면 내용으로 덮어쓰고 이어서 진행합니다. 재생 목록은 바뀌지 않습니다.\n「저장 안 함」 · 아무것도 저장하지 않습니다. 고친 내용은 화면에 남아 있습니다.',
+        confirmLabel: '계속 저장', cancelLabel: '저장 안 함', tone: 'warning',
       });
-      if (reload) await loadMapping(state, changed, { force: true });
-      else if (error.data?.file?.mapping_revision) ui.revision = error.data.file.mapping_revision;
-    } else {
-      if (error.data?.validation) ui.validation = error.data.validation;
-      toast(error.message || String(error), 'bad');
+      if (!go) return null;
+      ui.revision = await latestRevision(error);
+      ui.busy = '';
+      return saveMapping(state, changed, { retried: true });
     }
+    if (error.data?.validation) ui.validation = error.data.validation;
+    toast(error.message || String(error), 'bad');
     return null;
   } finally {
     ui.busy = '';
     changed();
+  }
+}
+
+/** 지금 파일의 버전 · 충돌 응답에 있으면 그것 · 없으면 다시 묻는다 */
+async function latestRevision(error) {
+  const fromError = error?.data?.file?.mapping_revision;
+  if (fromError) return String(fromError);
+  try {
+    const data = await api('GET', `/api/motion-mappings/${encodeURIComponent(ui.fileId)}`);
+    return String(data?.file?.mapping_revision || data?.file?.revision || ui.revision);
+  } catch {
+    return ui.revision;
   }
 }
 
