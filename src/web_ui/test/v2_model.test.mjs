@@ -13,7 +13,7 @@ const pcs = (...extra) => ({ coordination: { runtime: { network_pcs: [
 
 test('정상이면 한 문장 · 모드와 운영 시간', () => {
   const sched = { run_mode: 'schedule', active_schedule_id: 'a' };
-  assert.deepEqual(headline(pcs(), sched).text, '정상 · 자동 운영 중');
+  assert.deepEqual(headline(pcs(), sched).text, '정상 · 스케줄 운영 중');
   assert.equal(headline(pcs(), { run_mode: 'schedule' }).text, '정상 · 운영 시간 외');
   assert.equal(headline(pcs(), { run_mode: 'manual' }).tone, 'info');
   assert.equal(modePhrase({ run_mode: 'off' }), '끔 · 명령 차단');
@@ -28,7 +28,7 @@ test('나쁜 문제가 있으면 그 문제가 한 문장 · 주의만 있으면
   assert.equal(line.issues[0].action.kind, 'open');
   const warnOnly = headline(pcs({ pc_id: 'floating2', online: true, version_differs: true }), { run_mode: 'schedule', active_schedule_id: 'a' });
   assert.equal(warnOnly.tone, 'warn');
-  assert.equal(warnOnly.text, '자동 운영 중 · 확인할 일 1개');
+  assert.equal(warnOnly.text, '스케줄 운영 중 · 확인할 일 1개');
   assert.equal(warnOnly.issues[0].action.kind, 'update-all');
 });
 

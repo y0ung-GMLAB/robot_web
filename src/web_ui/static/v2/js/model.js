@@ -4,7 +4,7 @@
  * 입력 · `snap` = `/ws/status` 한 장 · `sched` = `GET /api/schedule/status` · `connected` = 소켓 살아 있나
  */
 
-export const RUN_MODE_LABEL = { schedule: '자동', manual: '수동', off: '끔' };
+export const RUN_MODE_LABEL = { schedule: '스케줄', manual: '수동', off: '끔' };
 
 const RUNNING_STATES = new Set(['running', 'verifying', 'waiting']);
 const MOVING_STATES = new Set(['running', 'verifying', 'waiting', 'initializing', 'recovering']);
@@ -19,7 +19,7 @@ export function modePhrase(sched) {
   const mode = runMode(sched);
   if (mode === 'manual') return '수동';
   if (mode === 'off') return '끔 · 명령 차단';
-  if (mode === 'schedule') return sched?.active_schedule_id ? '자동 운영 중' : '운영 시간 외';
+  if (mode === 'schedule') return sched?.active_schedule_id ? '스케줄 운영 중' : '운영 시간 외';
   return '상태 확인 중';
 }
 

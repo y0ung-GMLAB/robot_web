@@ -29,7 +29,7 @@ from typing import Any
 
 from fastapi import WebSocketDisconnect
 
-from .run_mode_gate import manual_control_block_reason
+from .run_mode_gate import manual_motion_block_reason
 
 #: 오프 전환 재확인 주기 · 매 프레임 파일을 읽지 않는다
 BLOCK_RECHECK_SEC = 0.5
@@ -43,7 +43,7 @@ STALE_MAPPING_MESSAGE = (
 
 def _stream_block_reason(bridge: Any) -> str:
     """페이더 연결·0.5초마다 · 운전 모드 + 조인트 범위 확인(수정 목록 97)"""
-    reason = manual_control_block_reason(bridge)
+    reason = manual_motion_block_reason(bridge)
     if reason:
         return reason
     range_blocker = getattr(bridge, 'manual_range_blocker', None)

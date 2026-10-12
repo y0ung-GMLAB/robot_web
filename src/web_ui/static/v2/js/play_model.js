@@ -154,7 +154,7 @@ export function startBlocker(snap, sched, { scope, playlist, mappingId }) {
   const mode = sched?.run_mode;
   if (safety.emergency_latched) return { text: '긴급 정지 상태입니다. 프로그램을 다시 시작해야 해제됩니다.', fix: 'restart-program' };
   if (mode === 'off') return { text: '끔 모드라서 움직임 명령이 차단되어 있습니다', fix: 'mode-manual' };
-  if (mode === 'schedule') return { text: '자동 모드에서는 스케줄이 재생을 관리합니다. 지금 멈춰도 스케줄이 곧 다시 시작합니다. 직접 재생하려면 수동 모드로 바꾸세요.', fix: 'mode-manual' };
+  if (mode === 'schedule') return { text: '스케줄 모드에서는 스케줄이 재생을 관리합니다. 지금 멈춰도 스케줄이 곧 다시 시작합니다. 직접 재생하려면 수동 모드로 바꾸세요.', fix: 'mode-manual' };
   if (scope === 'group') {
     const blocker = groupScopeBlocker(snap);
     if (blocker) return { text: blocker };

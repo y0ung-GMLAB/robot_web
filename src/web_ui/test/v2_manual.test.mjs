@@ -52,3 +52,13 @@ test('막는 순서 · 긴급 정지 > 모드 > 범위 미확인 > 앱솔루트 
   assert.match(manualBlocker({ snap: {}, sched: manual }, { ...item, row: null }).text, /매핑 줄이 없습니다/);
   assert.match(manualBlocker({ snap: {}, sched: manual }, { ...item, detected: false }).text, /통신 없음/);
 });
+
+test('초기 위치에서 대기 중 · 재생 중이면 「정지」 뒤에만 · 서버와 같은 문구 (2026-10-12)', () => {
+  const manual = { run_mode: 'manual' };
+  const item = { axis: 0, detected: true, servoOn: true, ac: true, row: { motion_id: 'a' } };
+  const initialized = manualBlocker({ snap: { motion_run_status: { state: 'initialized' } }, sched: manual }, item);
+  assert.equal(initialized.text, '초기 위치에서 대기 중입니다. 「정지」를 누른 뒤 수동 조작을 하세요.');
+  assert.equal(initialized.fix, 'stop');
+  assert.match(manualBlocker({ snap: { motion_run_status: { state: 'running' } }, sched: manual }, item).text, /재생 중입니다/);
+  assert.equal(manualBlocker({ snap: { motion_run_status: { state: 'stopped' } }, sched: manual }, item), null);
+});

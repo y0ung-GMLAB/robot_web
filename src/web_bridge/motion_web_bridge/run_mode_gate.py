@@ -23,6 +23,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from motion_common import run_state
 from motion_common.schedule_store import OFF_MODE, SCHEDULE_MODE, ScheduleStore
 
 OFF_BLOCK_MESSAGE = '오프 모드라 모든 명령이 차단되어 있습니다. 상단에서 모드를 바꾸세요.'
@@ -87,6 +88,44 @@ def manual_control_block_reason(bridge: Any) -> str:
     if mode == SCHEDULE_MODE:
         return SCHEDULE_MANUAL_BLOCK_MESSAGE
     # MANUAL_MODE 또는 프로젝트 없음('')
+    return ''
+
+
+#: 초기 위치 이동이 끝나 재생이 축을 쥐고 서 있다 · 손으로 움직이면 재생 계획과 어긋난다 (사용자 2026-10-12)
+INITIALIZED_MANUAL_BLOCK_MESSAGE = '초기 위치에서 대기 중입니다. 「정지」를 누른 뒤 수동 조작을 하세요.'
+#: 재생 · 초기 위치 이동 · 회차 사이 대기 중
+PLAYING_MANUAL_BLOCK_MESSAGE = '재생 중입니다. 「정지」를 누른 뒤 수동 조작을 하세요.'
+
+
+def _current_run_state(bridge: Any) -> str:
+    """이 PC 재생 상태 · 브리지가 받아 둔 마지막 값 · 못 읽으면 ''(막지 않는다 · 운전 모드 문이 이미 있다)"""
+    lock = getattr(bridge, '_motion_run_lock', None)
+    try:
+        if lock is not None:
+            with lock:
+                status = dict(getattr(bridge, '_motion_run_status', None) or {})
+        else:
+            status = dict(getattr(bridge, '_motion_run_status', None) or {})
+    except (TypeError, ValueError):
+        return ''
+    return str(status.get('state') or '').strip().lower()
+
+
+def manual_motion_block_reason(bridge: Any) -> str:
+    """손으로 모터를 움직이는 명령(조그·다이얼·목표 이동·범위 복귀·페이더)의 문 · 2026-10-12
+
+    운전 모드 문(`manual_control_block_reason`) 다음에 **재생 상태**를 본다 ·
+    초기 위치에서 대기 중이거나 재생 중이면 정지한 뒤에만 · 재생 시작 문에는 쓰지 않는다
+    (초기 위치에서 대기 중일 때 「1회 시작」 은 되어야 한다).
+    """
+    reason = manual_control_block_reason(bridge)
+    if reason:
+        return reason
+    state = _current_run_state(bridge)
+    if state == 'initialized':
+        return INITIALIZED_MANUAL_BLOCK_MESSAGE
+    if state and run_state.is_running(state):
+        return PLAYING_MANUAL_BLOCK_MESSAGE
     return ''
 
 

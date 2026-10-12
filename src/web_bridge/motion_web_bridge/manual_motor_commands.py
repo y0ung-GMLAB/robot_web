@@ -143,7 +143,7 @@ class ManualMotorCommandService:
 
         정지·서보 제어는 여기 안 온다 (모든 모드에서 된다).
         """
-        reason = run_mode_gate.manual_control_block_reason(self.bridge)
+        reason = run_mode_gate.manual_motion_block_reason(self.bridge)
         if not reason:
             range_blocker = getattr(self.bridge, 'manual_range_blocker', None)
             reason = range_blocker(axis) if callable(range_blocker) else ''

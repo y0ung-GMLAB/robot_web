@@ -22,7 +22,7 @@ function nowCard(state, navigate) {
       h('div', { class: 'progress-fill', style: { width: `${(run.ratio * 100).toFixed(1)}%` } })));
     body.push(h('div', { class: 'now-meta' }, h('span', { class: 'mono', text: run.timeText }), h('span', { text: endHint(state) })));
   } else {
-    body.push(h('p', { class: 'muted', text: endHint(state) || '재생은 재생 화면에서 시작합니다. 자동 모드에서는 스케줄이 시작합니다.' }));
+    body.push(h('p', { class: 'muted', text: endHint(state) || '재생은 재생 화면에서 시작합니다. 스케줄 모드에서는 스케줄이 시작합니다.' }));
   }
   body.push(h('div', { class: 'row' },
     h('a', { class: 'btn btn-primary', href: '#/play' }, '재생 화면 열기'),

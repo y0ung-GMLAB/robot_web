@@ -18,7 +18,7 @@ export function stopAll() {
   return attempt(async () => {
     await api('POST', '/api/safety/motion-stop');
     await api('POST', '/api/motion-run/stop').catch(() => null);
-  }, '멈췄습니다. 서보는 켜진 채 그 자리에 있습니다.');
+  }, '정지했습니다. 서보 토크 유지.');
 }
 
 /** 긴급 정지 · 서보 끔 · 잠김 */
@@ -30,7 +30,7 @@ export function emergencyStop() {
 }
 
 const MODE_CONFIRM = {
-  schedule: { title: '자동 모드로 전환할까요?', body: '스케줄에 따라 운영 시간에 재생을 시작하고 멈춥니다. 지금이 운영 시간이면 곧 움직이기 시작합니다.', tone: 'warning' },
+  schedule: { title: '스케줄 모드로 전환할까요?', body: '스케줄에 따라 운영 시간에 재생을 시작하고 멈춥니다. 지금이 운영 시간이면 곧 움직이기 시작합니다.', tone: 'warning' },
   off: { title: '끔 모드로 전환할까요?', body: '모든 움직임 명령이 차단됩니다. 진행 중인 재생은 이번 회차가 끝나면 멈춥니다. 서보는 켜진 채로 현재 위치를 유지합니다.', tone: 'warning' },
 };
 
@@ -38,7 +38,7 @@ export async function setRunMode(mode) {
   const ask = MODE_CONFIRM[mode];
   if (ask && !(await confirmBox({ ...ask, confirmLabel: '전환' }))) return null;
   return attempt(() => api('PUT', '/api/schedule/mode', { body: { run_mode: mode } }),
-    `${{ schedule: '자동', manual: '수동', off: '끔' }[mode]} 모드로 전환했습니다`);
+    `${{ schedule: '스케줄', manual: '수동', off: '끔' }[mode]} 모드로 전환했습니다`);
 }
 
 export function stopAfterCycle(group) {
@@ -67,7 +67,7 @@ export async function faultReset() {
 export async function restartProgram() {
   const ok = await confirmBox({
     title: '프로그램 다시 시작',
-    body: '로봇 프로그램을 다시 시작합니다. 30초 정도 화면 연결이 끊깁니다. 모터는 서보가 켜진 채로 현재 위치를 유지합니다.',
+    body: '로봇 프로그램을 다시 시작합니다. 30초 정도 화면 연결이 끊깁니다. 모터는 서보 토크를 유지한 채 현재 위치에 있습니다.',
     confirmLabel: '다시 시작', tone: 'warning',
   });
   if (!ok) return null;
@@ -106,12 +106,12 @@ export function initializeGroup(settings = {}) {
 /** 지금 멈춤 · 재생만 멈춘다 · 서보는 켠 채 그 자리 */
 export function stopNow(group) {
   return attempt(() => (group ? control({ command: 'stop_now' }) : api('POST', '/api/motion-run/stop')),
-    group ? '매장 전체를 멈췄습니다' : '멈췄습니다');
+    group ? '매장 전체를 정지했습니다. 서보 토크 유지.' : '정지했습니다. 서보 토크 유지.');
 }
 
 export function stopGroupAfterCycle(command) {
   return attempt(() => control({ command }),
-    command === 'stop_now' ? '아직 시작 전이어서 바로 멈췄습니다' : '이번 회차가 끝나면 매장 전체가 멈춥니다');
+    command === 'stop_now' ? '아직 시작 전이어서 바로 정지했습니다' : '이번 회차가 끝나면 매장 전체가 정지합니다');
 }
 
 /** 반복 설정 · 서버에 남는다(스케줄이 다음에 돌릴 때도 이것으로) · 보낸 칸만 바뀐다 */
@@ -232,8 +232,8 @@ export function confirmApplyMotorConfig(reason = '') {
     title: '장비에 적용 및 모터 재시작',
     body: `${reason ? `${reason}\n\n` : ''}주의: 저장된 설정을 적용하기 위해 Motor Manager를 다시 시작합니다.\n`
       + '다시 시작하는 동안 AC 서보와 다이나믹셀 통신이 잠시 끊기거나 다시 초기화될 수 있습니다.\n'
-      + '지금 부하를 지탱하고 있는 모터는 순간적으로 토크가 풀려 부하를 놓칠 수 있습니다. 중력, 외력, 기구 하중 때문에 예상하지 못한 움직임이 생길 수 있습니다.\n'
-      + '기구를 안전하게 받치고 사람이 접근하지 못하게 한 뒤, 움직여도 위험하지 않을 때만 진행하세요.\n'
+      + '브레이크 보드가 연결된 모터는 토크가 풀리는 동안 브레이크가 잡아 줍니다. 브레이크가 없는 모터는 순간적으로 토크가 풀려 부하를 놓칠 수 있습니다. 중력, 외력, 기구 하중 때문에 예상하지 못한 움직임이 생길 수 있습니다.\n'
+      + '브레이크가 없는 모터가 부하를 지탱하고 있다면 기구를 안전하게 받치고 사람이 접근하지 못하게 한 뒤, 움직여도 위험하지 않을 때만 진행하세요.\n'
       + '웹 연결은 잠시 끊겼다가 자동으로 다시 연결됩니다.',
     confirmLabel: '적용 및 재시작', tone: 'danger',
   });
@@ -257,7 +257,7 @@ export async function servoControl(motor, action) {
   if (action === 'off') {
     const ok = await confirmBox({
       title: `${label} ${ac ? '서보' : '토크'} 끄기`,
-      body: ac ? '서보를 끕니다.\n서보가 꺼지면 부하를 지탱하지 못할 수 있습니다(브레이크가 없는 축은 처집니다).'
+      body: ac ? '서보를 끕니다.\n브레이크 보드가 연결된 모터는 브레이크가 잡아 주지만, 브레이크가 없는 모터는 부하를 지탱하지 못해 처질 수 있습니다.'
         : '토크를 끕니다.\n다이나믹셀은 브레이크가 없어 관절이 처질 수 있습니다.',
       confirmLabel: '끄기', tone: 'warning',
     });
@@ -276,5 +276,5 @@ export async function servoControl(motor, action) {
 
 /** 움직이던 것 멈춤 · 서보는 켠 채 그 자리 · 늘 된다 */
 export function motionStop() {
-  return attempt(() => api('POST', '/api/safety/motion-stop'), '멈췄습니다. 서보는 켜진 채 그 자리에 있습니다.');
+  return attempt(() => api('POST', '/api/safety/motion-stop'), '정지했습니다. 서보 토크 유지.');
 }

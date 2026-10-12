@@ -107,11 +107,18 @@ function gain(item) {
 }
 
 /** 움직일 수 없는 이유 · 먼저 걸리는 것 하나 · 해결 버튼 종류 */
+/** 서버 `motion_common.run_state.IDLE_STATES` 와 같다 · 여기 없으면 도는 중 */
+const RUN_IDLE = new Set(['idle', 'off', 'ready', 'stopped', 'completed', 'motion_completed', 'error', 'blocked', 'initialized']);
+
 export function manualBlocker(state, item) {
   const snap = state.snap || {};
   if (snap.safety_status?.emergency_latched) return { text: '긴급 정지 상태입니다. 프로그램을 다시 시작해야 해제됩니다.', fix: 'restart' };
   const mode = state.sched?.run_mode;
-  if (mode && mode !== 'manual') return { text: `지금은 ${mode === 'off' ? '끔' : '자동'} 모드입니다. 수동 조작은 「수동」 모드에서만 할 수 있습니다.`, fix: 'mode-manual' };
+  if (mode && mode !== 'manual') return { text: `지금은 ${mode === 'off' ? '끔' : '스케줄'} 모드입니다. 수동 조작은 「수동」 모드에서만 할 수 있습니다.`, fix: 'mode-manual' };
+  // 서버 run_mode_gate.manual_motion_block_reason 과 같은 문구 · 초기 위치 대기 · 재생 중이면 정지 뒤에만 (2026-10-12)
+  const runState = String(snap.motion_run_status?.state || '');
+  if (runState === 'initialized') return { text: '초기 위치에서 대기 중입니다. 「정지」를 누른 뒤 수동 조작을 하세요.', fix: 'stop' };
+  if (runState && !RUN_IDLE.has(runState)) return { text: '재생 중입니다. 「정지」를 누른 뒤 수동 조작을 하세요.', fix: 'stop' };
   if (snap.mapping_range_blocker) return { text: `수동 조작 불가 · ${snap.mapping_range_blocker}`, fix: 'open-mapping' };
   if (snap.minas_absolute_blocker) return { text: String(snap.minas_absolute_blocker), fix: 'open-motors' };
   if (snap.motor_action_blocker) return { text: String(snap.motor_action_blocker) };
@@ -126,6 +133,7 @@ export function manualBlocker(state, item) {
 function fixButton(blocker, item, changed) {
   const map = {
     'mode-manual': ['수동으로 바꾸기', () => act.setRunMode('manual')],
+    stop: ['정지', act.stopAll],
     restart: ['프로그램 다시 시작', act.restartProgram],
     'open-mapping': ['조인트 매핑 열기', () => { location.hash = '#/mapping'; }],
     'open-motors': ['모터·드라이브 열기', () => { location.hash = '#/maintain-motors'; }],
@@ -438,7 +446,7 @@ function faderView(state, changed, list) {
   };
   return h('section', { class: 'card', 'aria-label': '페이더' },
     blocker && blocker.fix !== 'servo-on' && blocker.fix !== 'reset' ? h('div', { class: 'blocker' }, dot('warn'), h('span', { class: 'grow', text: blocker.text }), fixButton(blocker, null, changed)) : null,
-    h('p', { class: 'muted small', text: '페이더를 끄는 동안에만 따라 움직이고, 놓으면 그 자리에서 멈춥니다. 범위는 조인트 매핑의 최소·최대 값입니다.' }),
+    h('p', { class: 'muted small', text: '페이더를 끄는 동안에만 따라 움직이고, 놓으면 그 위치에서 정지합니다. 범위는 조인트 매핑의 최소·최대 값입니다.' }),
     usable.length ? h('ul', { class: 'list fader-list' }, usable.map((item) => {
       const own = manualBlocker(state, item);
       return h('li', { class: 'fader-row' },

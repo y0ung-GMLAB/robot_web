@@ -52,10 +52,10 @@ export function createShell(root, { navigate }) {
   const pcRole = h('span', { class: 'pc-role', text: '' });
   const pill = h('button', { class: 'status-pill tone-info', type: 'button', 'aria-expanded': 'false', 'aria-controls': 'issues-drawer' },
     dot('info'), h('span', { class: 'status-text', text: '연결 중' }));
-  const modeButtons = Object.entries({ schedule: '자동', manual: '수동', off: '끔' }).map(([mode, label]) =>
+  const modeButtons = Object.entries({ schedule: '스케줄', manual: '수동', off: '끔' }).map(([mode, label]) =>
     h('button', { class: 'seg', type: 'button', 'data-mode': mode, 'aria-pressed': 'false', onclick: () => act.setRunMode(mode) }, label));
   const modeGroup = h('div', { class: 'segmented', role: 'group', 'aria-label': '운전 모드' }, modeButtons);
-  const stopButton = h('button', { class: 'btn btn-stop', type: 'button', title: '모든 움직임을 멈춥니다. 서보는 켜진 채 그 자리에 있습니다.', onclick: act.stopAll }, '정지');
+  const stopButton = h('button', { class: 'btn btn-stop', type: 'button', title: '모든 움직임을 정지합니다. 서보 토크는 유지됩니다.', onclick: act.stopAll }, '정지');
   const estopButton = h('button', { class: 'btn btn-estop', type: 'button', title: '서보를 끄고 잠급니다. 프로그램을 다시 시작해야 해제됩니다.', onclick: act.emergencyStop }, '긴급 정지');
   const drawer = h('section', { id: 'issues-drawer', class: 'issues-drawer', hidden: true, 'aria-label': '확인할 일' });
   const menuButton = h('button', { class: 'btn btn-icon menu-toggle', type: 'button', 'aria-label': '메뉴', 'aria-expanded': 'false' }, '≡');
