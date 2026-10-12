@@ -24,7 +24,45 @@ export function replace(container, ...children) {
   // 스위치·체크칸은 누른 뒤에도 초점이 남는다 · 그것까지 막으면 화면이 통째로 멈춘다 → 글 넣는 칸만
   if (container.contains(document.activeElement)
     && document.activeElement.matches('textarea, select, input:not([type=checkbox]):not([type=radio]):not([type=button])')) return;
+  const scrolled = scrollPositions(container);
   container.replaceChildren(...children.flat(Infinity).filter(Boolean));
+  restoreScroll(container, scrolled);
+}
+
+/** 다시 그려도 표의 가로 스크롤 등이 맨 왼쪽으로 돌아가지 않게 · 칸 이름(aria-label)·클래스·순서로 같은 칸을 찾는다 */
+function scrollKey(el, container) {
+  const section = el.closest('[aria-label]');
+  return `${section && container.contains(section) ? section.getAttribute('aria-label') : ''}|${el.tagName}.${el.className}`;
+}
+
+function scrollPositions(container) {
+  const seen = new Map();
+  const out = [];
+  for (const el of container.querySelectorAll('*')) {
+    if (el.scrollWidth <= el.clientWidth && el.scrollHeight <= el.clientHeight) continue;
+    const key = scrollKey(el, container);
+    const index = seen.get(key) || 0;
+    seen.set(key, index + 1);
+    if (el.scrollLeft || el.scrollTop) out.push({ key, index, left: el.scrollLeft, top: el.scrollTop });
+  }
+  return out;
+}
+
+function restoreScroll(container, saved) {
+  if (!saved.length) return;
+  const seen = new Map();
+  const found = new Map();
+  for (const el of container.querySelectorAll('*')) {
+    if (el.scrollWidth <= el.clientWidth && el.scrollHeight <= el.clientHeight) continue;
+    const key = scrollKey(el, container);
+    const index = seen.get(key) || 0;
+    seen.set(key, index + 1);
+    found.set(`${key}#${index}`, el);
+  }
+  for (const item of saved) {
+    const el = found.get(`${item.key}#${item.index}`);
+    if (el) { el.scrollLeft = item.left; el.scrollTop = item.top; }
+  }
 }
 
 export function dot(tone) {

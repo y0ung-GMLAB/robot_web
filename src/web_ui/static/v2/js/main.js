@@ -44,6 +44,7 @@ const PAGES = {
   tools: { render: renderTools, static: true },
 };
 const PAGE_INTERVAL_MS = 500;
+const SCROLL_QUIET_MS = 400;
 
 function currentRoute() {
   const route = location.hash.replace(/^#\/?/, '').split('?')[0];
@@ -64,11 +65,21 @@ let lastPageAt = 0;
 document.addEventListener('pointerdown', () => { pointerDown = true; }, true);
 document.addEventListener('pointerup', () => { pointerDown = false; schedulePage(); }, true);
 document.addEventListener('pointercancel', () => { pointerDown = false; }, true);
+// 스크롤바를 끄는 중에 칸이 바뀌면 끌기가 끊긴다 · 화면 안 칸이 스크롤되는 동안은 다시 그리기를 미룬다(창 전체 스크롤은 상관없음)
+let lastInnerScrollAt = 0;
+document.addEventListener('scroll', (event) => {
+  if (event.target instanceof Element && shell.main?.contains(event.target)) lastInnerScrollAt = Date.now();
+}, true);
 
 let drawnRoute = '';
 function renderPage() {
   pagePending = false;
   if (pointerDown) return;
+  if (Date.now() - lastInnerScrollAt < SCROLL_QUIET_MS) {
+    pagePending = true;
+    setTimeout(() => requestAnimationFrame(renderPage), SCROLL_QUIET_MS);
+    return;
+  }
   lastPageAt = Date.now();
   const route = currentRoute();
   const page = PAGES[route];
