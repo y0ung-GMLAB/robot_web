@@ -60,7 +60,7 @@ test('지금 카드 · 재생 중이면 파일 · 회차 · 진행 · 매장 전
   assert.equal(run.subtitle, '매장 전체 4대 · 3회차 · 연속');
   assert.equal(run.timeText, '04:16 / 09:16');
   assert.ok(run.moving && Math.abs(run.ratio - 256 / 556) < 1e-9);
-  assert.equal(runSummary({ motion_run_status: { state: 'idle' } }).title, '서 있음');
+  assert.equal(runSummary({ motion_run_status: { state: 'idle' } }).title, '재생 안 함');
   assert.equal(runSummary({}).moving, false);
 });
 

@@ -169,13 +169,13 @@ export function playHeadline(snap) {
   const STATE_TEXT = {
     initializing: '첫 자세로 천천히 가는 중', countdown: '곧 시작', running: '재생 중', verifying: '도착 확인 중',
     waiting: '다음 회차 기다리는 중', recovering: '자동 복구 중', stopping: '멈추는 중', preparing: '준비 중',
-    completed: '끝남', stopped: '멈춤', error: '오류로 멈춤', initialized: '첫 자세에 섬',
+    completed: '끝남', stopped: '멈춤', error: '오류로 멈춤', initialized: '첫 자세에서 기다림',
   };
   const moving = isRunning(status);
   return {
     moving,
     tone: state === 'error' ? 'bad' : moving ? 'ok' : 'idle',
-    title: moving && cycle ? `${cycle}회차 ${STATE_TEXT[state] || state}` : (STATE_TEXT[state] || '서 있음'),
+    title: moving && cycle ? `${cycle}회차 ${STATE_TEXT[state] || state}` : (STATE_TEXT[state] || '재생 안 함'),
     file: moving || state === 'initialized' ? file : '',
     detail: parts.join(' · '),
     message: state === 'error' ? String(status.message || '') : '',

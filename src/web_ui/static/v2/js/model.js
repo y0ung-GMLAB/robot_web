@@ -151,11 +151,11 @@ export function runSummary(snap) {
   const duration = Number(progress.duration_sec) || 0;
   const ratio = duration > 0 ? Math.min(1, Math.max(0, elapsed / duration)) : 0;
   const continuous = String(run.run_mode || '') === 'continuous';
-  let title = '서 있음';
+  let title = '재생 안 함';
   if (RUNNING_STATES.has(state)) title = `${file || '애니메이션'} 재생 중`;
   else if (state === 'initializing') title = '첫 자세로 천천히 가는 중';
   else if (state === 'recovering') title = '자동 복구 중';
-  else if (state === 'initialized') title = '첫 자세에 서 있음';
+  else if (state === 'initialized') title = '첫 자세에서 기다림';
   else if (state === 'error') title = '오류로 멈춤';
   const parts = [scope];
   if (cycle > 0 && MOVING_STATES.has(state)) parts.push(`${cycle}회차`);
