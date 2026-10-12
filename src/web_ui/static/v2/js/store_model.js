@@ -31,7 +31,7 @@ export function storeRows(snap) {
     let status = speaker ? '스피커' : String(peer.motion_step || (pc.joined ? '그룹 대기' : '단독'));
     let tone = 'ok';
     let note = '';
-    if (pc.online === false) { status = '연결 안 됨'; tone = 'bad'; note = 'PC가 꺼졌거나 Wi-Fi 연결이 끊겼습니다'; }
+    if (pc.online === false) { status = '연결 안 됨'; tone = 'bad'; note = 'PC가 꺼져 있거나 Wi-Fi 연결이 끊겼을 수 있습니다'; }
     else if (pc.protocol_mismatch) { status = '연동 버전 다름'; tone = 'bad'; note = '함께 재생할 수 없습니다. 모든 PC를 업데이트하세요.'; }
     else if (pc.version_differs && !speaker) { status = '버전 다름'; tone = 'warn'; note = '그룹 재생에서 제외됩니다. 업데이트하면 다음 회차부터 참여합니다.'; }
     else if (Number(peer.servo_alarm_grade || 0) > 0) { status = '알람'; tone = 'bad'; }

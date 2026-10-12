@@ -27,7 +27,7 @@ export function modePhrase(sched) {
 export function motorErrorText(motor) {
   const text = String(motor?.error_text || '').trim();
   if (text && text !== 'No error') {
-    return text === 'Communication unavailable' ? '통신 불가' : text.replace(/^Error\s+/i, '오류 ');
+    return text === 'Communication unavailable' ? '통신 없음' : text.replace(/^Error\s+/i, '오류 ');
   }
   const code = Number(motor?.errorcode);
   return Number.isFinite(code) && code !== 0 ? `오류 ${code}` : '';
@@ -74,7 +74,7 @@ export function collectIssues(snap, sched, { connected = true } = {}) {
   const absolute = String(snap.minas_absolute_blocker || '');
   if (absolute) {
     bad('앱솔루트 방식이 확인되지 않아 모터를 움직일 수 없습니다', absolute,
-      { kind: 'open', target: 'maintain-motors', label: '모터·드라이브에서 설정' });
+      { kind: 'open', target: 'maintain-motors', label: '모터 설정 열기' });
   }
   // 조인트 범위 미확인 · 재생·초기 이동·수동 조작이 막혀 있다 · 판정은 서버 · 수정 목록 97
   const range = String(snap.mapping_range_blocker || '');
@@ -95,7 +95,7 @@ export function collectIssues(snap, sched, { connected = true } = {}) {
   }
   const group = snap.coordination?.runtime?.coordination_error || {};
   if (group.active) {
-    bad('그룹 오류', String(group.message || ''), { kind: 'ack-group-error', label: '확인 후 해제' });
+    bad('그룹 오류', String(group.message || ''), { kind: 'ack-group-error', label: '그룹 오류 해제' });
   }
   const failure = sched?.last_failure || {};
   const failCount = Number(failure.count) || 0;
@@ -115,7 +115,7 @@ export function collectIssues(snap, sched, { connected = true } = {}) {
   }
   const offline = pcs.filter((pc) => !pc.is_local && pc.online === false);
   if (offline.length) {
-    warn(`${offline.map(pcName).join(' · ')} 연결 안 됨`, 'PC가 꺼졌거나 Wi-Fi 연결이 끊겼습니다');
+    warn(`${offline.map(pcName).join(' · ')} 연결 안 됨`, 'PC가 꺼져 있거나 Wi-Fi 연결이 끊겼을 수 있습니다');
   }
   return issues.sort((a, b) => (a.tone === b.tone ? 0 : a.tone === 'bad' ? -1 : 1));
 }
@@ -162,7 +162,7 @@ export function runSummary(snap) {
   else if (state === 'initializing') title = '초기 위치로 천천히 이동 중';
   else if (state === 'recovering') title = '자동 복구 중';
   else if (state === 'initialized') title = '초기 위치에서 대기 중';
-  else if (state === 'error') title = '오류로 멈춤';
+  else if (state === 'error') title = '오류로 정지';
   // 대기·오류일 땐 범위가 의미 없다 · 움직이거나 초기 위치에서 기다릴 때만
   const parts = MOVING_STATES.has(state) || state === 'initialized' ? [scope] : [];
   if (cycle > 0 && MOVING_STATES.has(state)) parts.push(`${cycle}회차`);
@@ -197,7 +197,7 @@ export function motorChips(snap) {
       tone,
       value: deg === null ? '-' : `${deg >= 0 ? '+' : '−'}${Math.abs(deg).toFixed(2)}°`,
       unit: Number.isFinite(joint) ? '조인트' : '모터',
-      note: note || (Number.isFinite(load) ? `부하 ${Math.round(load)}%` : ''),
+      note: note || (Number.isFinite(load) ? `과부하율 ${Math.round(load)}%` : ''),
     };
   });
 }

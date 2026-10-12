@@ -39,7 +39,7 @@ function endHint(state) {
   const minutes = now.getHours() * 60 + now.getMinutes();
   const windows = todayWindows(state.schedules, now);
   const current = windows.find((w) => w.start <= minutes && minutes < w.end);
-  if (current) return `오늘 ${hhmm(current.end)}에 운영 종료 · 진행 중인 회차가 끝나면 멈춥니다`;
+  if (current) return `오늘 ${hhmm(current.end)}에 운영 종료 · 진행 중인 회차가 끝나면 정지합니다`;
   const next = windows.find((w) => w.start > minutes);
   return next ? `다음 시작 ${hhmm(next.start)}` : '오늘 운영 종료';
 }
@@ -87,7 +87,7 @@ function scheduleCard(state) {
 
 function motorCard(state) {
   const chips = motorChips(state.snap);
-  return card('모터', [h('h2', { text: `모터 ${chips.length || ''}`.trim() }), h('a', { href: '#/maintain-motors', text: '모터·드라이브' })],
+  return card('모터', [h('h2', { text: `모터 ${chips.length || ''}`.trim() }), h('a', { href: '#/maintain-motors', text: '모터 설정' })],
     chips.length
       ? h('ul', { class: 'list' }, chips.map((chip) => h('li', { class: 'list-row' },
         dot(chip.tone),

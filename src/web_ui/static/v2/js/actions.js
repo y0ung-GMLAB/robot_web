@@ -30,8 +30,8 @@ export function emergencyStop() {
 }
 
 const MODE_CONFIRM = {
-  schedule: { title: '스케줄 모드로 전환할까요?', body: '스케줄에 따라 운영 시간에 재생을 시작하고 멈춥니다. 지금이 운영 시간이면 곧 움직이기 시작합니다.', tone: 'warning' },
-  off: { title: '끔 모드로 전환할까요?', body: '모든 움직임 명령이 차단됩니다. 진행 중인 재생은 이번 회차가 끝나면 멈춥니다. 서보는 켜진 채로 현재 위치를 유지합니다.', tone: 'warning' },
+  schedule: { title: '스케줄 모드로 전환할까요?', body: '운영 시간에 맞춰 재생을 시작하고 정지합니다. 지금이 운영 시간이면 곧 재생을 시작합니다.', tone: 'warning' },
+  off: { title: '끔 모드로 전환할까요?', body: '모든 움직임 명령을 차단합니다. 진행 중인 재생은 이번 회차가 끝나면 정지합니다. 서보 토크는 유지됩니다.', tone: 'warning' },
 };
 
 export async function setRunMode(mode) {
@@ -46,13 +46,13 @@ export function stopAfterCycle(group) {
     () => (group
       ? api('POST', '/api/coordination/control', { body: { command: 'stop_after_cycle' } })
       : api('POST', '/api/motion-run/stop-after-cycle')),
-    '이번 회차가 끝나면 멈춥니다');
+    '이번 회차가 끝나면 정지합니다');
 }
 
 export async function updateAll() {
   const ok = await confirmBox({
     title: '모든 PC 업데이트',
-    body: '같은 네트워크에 있는 모든 PC를 최신 버전으로 업데이트합니다(PC마다 몇 분 걸립니다). 업데이트 중인 PC는 재생이 멈추고 화면 연결이 잠시 끊깁니다. 재생 중인 PC는 업데이트하지 않습니다. 운영 시간이 아닐 때 진행하세요.',
+    body: '같은 네트워크에 있는 모든 PC를 최신 버전으로 업데이트합니다(PC마다 몇 분 걸립니다). 업데이트하는 동안 해당 PC는 재생할 수 없고 화면 연결이 잠시 끊깁니다. 재생 중인 PC는 업데이트하지 않습니다. 운영 시간이 아닐 때 진행하세요.',
     confirmLabel: '업데이트', tone: 'warning',
   });
   if (!ok) return null;
@@ -67,7 +67,7 @@ export async function faultReset() {
 export async function restartProgram() {
   const ok = await confirmBox({
     title: '프로그램 다시 시작',
-    body: '로봇 프로그램을 다시 시작합니다. 30초 정도 화면 연결이 끊깁니다. 모터는 서보 토크를 유지한 채 현재 위치에 있습니다.',
+    body: '로봇 프로그램을 다시 시작합니다. 30초 정도 화면 연결이 끊깁니다. 서보 토크는 유지됩니다.',
     confirmLabel: '다시 시작', tone: 'warning',
   });
   if (!ok) return null;
@@ -122,7 +122,7 @@ export function saveAutomation(partial) {
 /** 실행 축 사용 · 끄면 그 자리에 선다 · 다시 켜면 다음 회차부터 · 매핑 파일에는 안 남는다 */
 export function setAxisMuted(motionId, muted) {
   return attempt(() => api('POST', '/api/motion-run/live-override', { body: { motion_id: motionId, muted } }),
-    muted ? `${motionId} 축을 껐습니다. 현재 위치에서 멈춥니다.` : `${motionId} 축을 켰습니다. 재생 중이면 다음 회차부터 적용됩니다.`);
+    muted ? `${motionId} 조인트를 껐습니다. 현재 위치에서 정지합니다.` : `${motionId} 조인트를 켰습니다. 재생 중이면 다음 회차부터 적용됩니다.`);
 }
 
 /** 재생 목록 저장 · 목록 통째로 · 첫 줄이 등록 파일 */
@@ -144,7 +144,7 @@ export function setScheduleEnabled(id, enabled) {
 }
 
 export async function deleteSchedule(id, name) {
-  const ok = await confirmBox({ title: `「${name}」 스케줄을 삭제할까요?`, body: '삭제하면 되돌릴 수 없습니다. 잠시 쉬게 하려면 삭제하지 말고 끄세요.', confirmLabel: '삭제', tone: 'danger' });
+  const ok = await confirmBox({ title: `「${name}」 스케줄을 삭제할까요?`, body: '삭제하면 되돌릴 수 없습니다. 잠시 중지하려면 삭제하지 말고 끄세요.', confirmLabel: '삭제', tone: 'danger' });
   if (!ok) return null;
   return attempt(() => api('DELETE', `/api/schedule/${encodeURIComponent(id)}`), '삭제했습니다');
 }
@@ -152,7 +152,7 @@ export async function deleteSchedule(id, name) {
 /** 운영 시간이 끝나면 · park_servo_off(기준점 → 서보 끔) | hold(그 자세로 버팀) */
 export function saveEndAction(action) {
   return attempt(() => api('PUT', '/api/motion-run/automation', { body: { schedule_end_action: action } }),
-    action === 'hold' ? '운영 시간이 끝나면 회차가 끝난 자세를 유지합니다(서보 켜짐).' : '운영 시간이 끝나면 기준점으로 이동한 뒤 서보를 끕니다');
+    action === 'hold' ? '운영 시간이 끝나면 회차가 끝난 자세에서 정지합니다. 서보 토크 유지.' : '운영 시간이 끝나면 기준점으로 이동한 뒤 서보를 끕니다');
 }
 
 /* ---------- 매장 PC ---------- */
@@ -161,14 +161,14 @@ export function saveEndAction(action) {
 export function joinGroup(config) {
   if (config?.enabled === true) {
     return attempt(() => api('POST', '/api/coordination/control', { body: { command: 'join' }, timeoutMs: 7000 }),
-      '그룹에 참여했습니다. 같은 그룹의 PC들과 함께 재생합니다.');
+      '그룹에 참여했습니다. 같은 그룹의 PC와 함께 재생합니다.');
   }
   if (!String(config?.group_id || '').trim()) {
     toast('그룹 ID가 없습니다. 「네트워크·시간·그룹」 화면에서 그룹 ID를 입력한 뒤 켜세요.', 'warn');
     return Promise.resolve(null);
   }
   return attempt(() => api('PUT', '/api/coordination/settings', { body: { enabled: true, joined: true, group_id: config.group_id }, timeoutMs: 20000 }),
-    '그룹에 참여했습니다. 같은 그룹의 PC들과 함께 재생합니다.');
+    '그룹에 참여했습니다. 같은 그룹의 PC와 함께 재생합니다.');
 }
 
 export async function leaveGroup() {
@@ -185,7 +185,7 @@ export async function leaveGroup() {
 export async function saveRoster(list) {
   const ok = await confirmBox({
     title: '필수 명단 다시 지정',
-    body: `지금 보이는 ${list.length}대를 필수 명단으로 지정합니다.\n${list.join(' · ')}\n\n그룹을 시작할 때 이 중 빠진 PC는 「미접속」으로 기록하고 나머지 PC로 시작합니다. 연동 서비스가 한 번 다시 시작됩니다.`,
+    body: `현재 연결된 ${list.length}대를 필수 명단으로 지정합니다.\n${list.join(' · ')}\n\n그룹을 시작할 때 이 중 빠진 PC는 「미접속」으로 기록하고 나머지 PC로 시작합니다. 연동 서비스가 한 번 다시 시작됩니다.`,
     confirmLabel: '지정',
   });
   if (!ok) return null;
@@ -221,7 +221,7 @@ export async function deleteAnimation(fileId) {
 
 export function saveAlarmPolicy(overrides) {
   return attempt(() => api('PUT', '/api/servo-alarm-policy', { body: { overrides } }),
-    (r) => r?.message || '드라이브 알람 등급을 저장하고 모터 제어 프로그램에 적용했습니다');
+    (r) => r?.message || '드라이브 알람 등급을 저장하고 모터 프로그램에 적용했습니다');
 }
 
 /* ---------- 장비에 적용 · 모터 재시작 (모터·드라이브 · 조인트 매핑 같이 씀) ---------- */
@@ -230,9 +230,9 @@ export function saveAlarmPolicy(overrides) {
 export function confirmApplyMotorConfig(reason = '') {
   return confirmBox({
     title: '장비에 적용 및 모터 재시작',
-    body: `${reason ? `${reason}\n\n` : ''}주의: 저장된 설정을 적용하기 위해 Motor Manager를 다시 시작합니다.\n`
+    body: `${reason ? `${reason}\n\n` : ''}주의: 저장된 설정을 적용하기 위해 모터 프로그램을 다시 시작합니다.\n`
       + '다시 시작하는 동안 AC 서보와 다이나믹셀 통신이 잠시 끊기거나 다시 초기화될 수 있습니다.\n'
-      + '브레이크 보드가 연결된 모터는 토크가 풀리는 동안 브레이크가 잡아 줍니다. 브레이크가 없는 모터는 순간적으로 토크가 풀려 부하를 놓칠 수 있습니다. 중력, 외력, 기구 하중 때문에 예상하지 못한 움직임이 생길 수 있습니다.\n'
+      + '브레이크 보드가 연결된 모터는 토크가 해제되는 동안 브레이크가 잡아 줍니다. 브레이크가 없는 모터는 순간적으로 토크가 해제되어 부하를 놓칠 수 있습니다. 중력, 외력, 기구 하중 때문에 예상하지 못한 움직임이 생길 수 있습니다.\n'
       + '브레이크가 없는 모터가 부하를 지탱하고 있다면 기구를 안전하게 받치고 사람이 접근하지 못하게 한 뒤, 움직여도 위험하지 않을 때만 진행하세요.\n'
       + '웹 연결은 잠시 끊겼다가 자동으로 다시 연결됩니다.',
     confirmLabel: '적용 및 재시작', tone: 'danger',
@@ -242,7 +242,7 @@ export function confirmApplyMotorConfig(reason = '') {
 /** 저장된 파일을 적용(파일은 안 고침 · §6-221) · 확인은 부르는 쪽에서 */
 export function applyMotorConfig() {
   return attempt(() => api('POST', '/api/motor-config/apply', { timeoutMs: 60000 }),
-    (r) => r?.message || '적용했습니다. 모터가 잠시 멈췄다가 다시 켜지고, 화면도 다시 연결됩니다.');
+    (r) => r?.message || '적용했습니다. 모터 프로그램이 다시 시작되고 화면이 다시 연결됩니다.');
 }
 
 /* ---------- 서보 · 한 축 (모터·드라이브 · 수동 조작 같이 씀) ---------- */

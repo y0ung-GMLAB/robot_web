@@ -153,12 +153,12 @@ function table(state, changed) {
     const unknown = !found && (row.motor_ref || row.motor_axis !== null);
     return [
       h('option', { value: '', selected: !found && !unknown }, '없음'),
-      unknown ? h('option', { value: 'keep', selected: true }, `${row.motor_axis !== null ? `${row.motor_axis}번` : row.motor_ref} (지금 안 보임)`) : null,
+      unknown ? h('option', { value: 'keep', selected: true }, `${row.motor_axis !== null ? `${row.motor_axis}번` : row.motor_ref} (인식 안 됨)`) : null,
       motors.map((m) => h('option', { value: String(m.axis), selected: found === m }, `${m.label} (${m.where})`)),
     ];
   };
   return h('div', { class: 'table-wrap' }, h('table', { class: 'table mapping-table' },
-    h('thead', {}, h('tr', {}, ['사용', '조인트', '모터', '감속·기어비', '방향 반전', '기준점 (모터°)', '범위 (조인트°)', '범위 확인', '최대 속도 · 가속', '시작 자세', '상태', ''].map((text) => h('th', { scope: 'col', text })))),
+    h('thead', {}, h('tr', {}, ['사용', '조인트', '모터', '감속비', '방향 반전', '기준점 (모터°)', '범위 (조인트°)', '범위 확인', '최대 속도 · 가속', '초기 위치', '상태', ''].map((text) => h('th', { scope: 'col', text })))),
     h('tbody', {}, ui.rows.map((row, index) => {
       const status = rowStatus(row);
       const motor = motorForRow(row, motors);
@@ -179,7 +179,7 @@ function table(state, changed) {
           row.motor_ref = motor ? motor.ref : '';
           changed();
         } }, motorOptions(row))),
-      h('td', {}, numberInput(row, 'gear_ratio', changed, { label: '감속·기어비' })),
+      h('td', {}, numberInput(row, 'gear_ratio', changed, { label: '감속비' })),
       h('td', {}, h('input', { type: 'checkbox', checked: row.invert, 'aria-label': `${index + 1}번 줄 방향 반전`, onchange: (e) => { row.invert = e.target.checked; changed(); } })),
       h('td', {}, h('div', { class: 'cell-row' },
         numberInput(row, 'reference_position_deg', changed, { label: '기준점 모터 deg' }),
@@ -191,13 +191,13 @@ function table(state, changed) {
         numberInput(row, 'motion_upper_deg', changed, { label: '최대', after: autoConfirmRange }))),
       h('td', { class: row.enabled && !rangeConfirmed(row) ? 'range-unconfirmed' : '' },
         h('input', { type: 'checkbox', checked: rangeConfirmed(row), 'aria-label': `${index + 1}번 줄 범위 확인`,
-          title: '최소·최대가 이 로봇의 실제 기계 범위인지 확인하는 칸입니다. 확인하고 저장하기 전에는 재생, 초기 이동, 수동 조작을 할 수 없습니다. 최소·최대를 둘 다 수정하면 자동으로 체크됩니다.',
+          title: '최소·최대가 이 로봇의 실제 기계 범위인지 확인하는 칸입니다. 확인하고 저장하기 전에는 재생, 초기 위치 이동, 수동 조작을 할 수 없습니다. 최소·최대를 둘 다 수정하면 자동으로 체크됩니다.',
           onchange: (e) => { row.range_confirmed = e.target.checked; changed(); } })),
       h('td', {}, h('div', { class: 'cell-row' },
         numberInput(row, 'max_velocity_deg_s', changed, { label: '최대 속도 deg/s', placeholder: '없음' }),
         numberInput(row, 'max_acceleration_deg_s2', changed, { label: '최대 가속 deg/s²', placeholder: '없음' }))),
       h('td', {}, h('div', { class: 'cell-row' },
-        h('select', { class: 'select select-sm', 'aria-label': '시작 자세', onchange: (e) => {
+        h('select', { class: 'select select-sm', 'aria-label': '초기 위치', onchange: (e) => {
           row.initial_mode = e.target.value;
           if (row.initial_mode === 'reference') row.initial_motion_position_deg = 0;
           changed();
@@ -243,7 +243,7 @@ export function mappingActions(state, changed) {
       ui.rows.push({ ...newRow(motor.axis, ''), motor_ref: motor.ref, _key: `k${keySeq += 1}` });
       added += 1;
     }
-    toast(added ? `모터 ${added}개의 줄을 추가했습니다. 조인트 이름(Blender 본 이름)을 입력하세요.` : '모든 모터에 이미 매핑 줄이 있습니다', added ? 'ok' : 'warn');
+    toast(added ? `매핑 줄 ${added}개를 추가했습니다(모터마다 한 줄). 조인트 이름(Blender 본 이름)을 입력하세요.` : '모든 모터에 이미 매핑 줄이 있습니다', added ? 'ok' : 'warn');
     changed();
   };
   return [
@@ -269,7 +269,7 @@ export function mappingBody(state, changed) {
   return [
     ui.loadError ? h('div', { class: 'blocker' }, dot('warn'), h('span', { class: 'grow', text: `다시 불러오기 실패 · ${ui.loadError} · 수정 중인 내용은 그대로 남아 있습니다` })) : null,
     unconfirmedRows(ui.rows).length ? h('div', { class: 'blocker bad' }, dot('bad'),
-      h('span', { class: 'grow', text: `범위 미확인 · ${unconfirmedRows(ui.rows).map((r) => r.motion_id).join(', ')}. 실제 기계 범위(최소·최대)를 입력하거나 「범위 확인」을 체크한 뒤 저장하세요. 그 전에는 재생, 초기 이동, 수동 조작이 차단됩니다.` })) : null,
+      h('span', { class: 'grow', text: `범위 미확인 · ${unconfirmedRows(ui.rows).map((r) => r.motion_id).join(', ')}. 실제 기계 범위(최소·최대)를 입력하거나 「범위 확인」을 체크한 뒤 저장하세요. 그 전에는 재생, 초기 위치 이동, 수동 조작이 차단됩니다.` })) : null,
     state.snap?.mapping_range_blocker && !unconfirmedRows(ui.rows).length && changeSummary(ui.saved, ui.rows).length
       ? h('p', { class: 'muted small', text: '저장하면 범위 미확인 상태가 해제됩니다' }) : null,
     h('section', { class: 'card', 'aria-label': '조인트' },

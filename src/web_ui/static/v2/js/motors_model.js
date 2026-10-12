@@ -123,7 +123,7 @@ export function motorChanges(saved, draft) {
     const old = before.get(motor.id);
     if (!old) { out.push(`${motor.axis}번 ${motor.name || ''} 추가`.replace('  ', ' ')); continue; }
     if (Number(old.axis) !== Number(motor.axis)) out.push(`${motor.name || motor.id} 번호 ${old.axis} → ${motor.axis}`);
-    for (const field of EDIT_FIELDS.concat([{ key: 'overload_monitor', label: '과부하 감시' }, { key: 'schedule_end_servo_off', label: '운영 종료 시 서보 끄기' }])) {
+    for (const field of EDIT_FIELDS.concat([{ key: 'overload_monitor', label: '과부하율 읽기' }, { key: 'schedule_end_servo_off', label: '운영 시간이 끝나면 서보 끄기' }])) {
       const a = field.top ? old[field.key] : old.config?.[field.key];
       const b = field.top ? motor[field.key] : motor.config?.[field.key];
       const same = (a ?? '') === (b ?? '') || (Number.isFinite(Number(a)) && Number.isFinite(Number(b)) && a !== '' && b !== '' && Number(a) === Number(b));

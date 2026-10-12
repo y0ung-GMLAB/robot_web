@@ -36,7 +36,7 @@ function isDirty(data) {
 
 const GRADE_TEXT = {
   1: '해당 모터만 정지 · 나머지는 계속 동작',
-  2: '재생 전체 중단 · 오류 초기화 후 다시 시작',
+  2: '재생 전체 정지 · 오류 초기화 후 다시 시작',
   3: '모든 모터 명령 차단 · 프로그램 재시작 필요',
 };
 
@@ -77,10 +77,10 @@ export function renderAlarms(state, { changed }) {
   return [
     h('div', { class: 'page-head' },
       h('h1', { text: '드라이브 알람' }),
-      h('p', { class: 'muted small', text: '드라이브 알람이 발생했을 때 어느 범위까지 멈출지 정합니다. 이 프로젝트에만 적용됩니다. 현재 발생한 알람은 상단 상태 표시와 「모터·드라이브」 화면에서 확인하세요.' })),
+      h('p', { class: 'muted small', text: '드라이브 알람이 발생했을 때 어디까지 정지할지 등급으로 정합니다. 이 프로젝트에만 적용됩니다. 현재 발생한 알람은 상단 상태 표시와 「모터 설정」 화면에서 확인하세요.' })),
     page.error ? h('p', { class: 'tone-text-bad', text: page.error }) : null,
     notApplied ? h('div', { class: 'blocker' }, dot('warn'),
-      h('span', { class: 'grow', text: '저장된 정책과 현재 적용 중인 정책이 다릅니다. 「저장」을 한 번 더 누르면 다시 적용합니다.' })) : null,
+      h('span', { class: 'grow', text: '저장된 알람 등급과 현재 적용된 등급이 다릅니다. 「저장」을 한 번 더 누르면 다시 적용합니다.' })) : null,
     h('section', { class: 'card', 'aria-label': '등급' },
       h('ul', { class: 'list grade-list' }, [1, 2, 3].map((grade) => h('li', { class: 'list-row' },
         gradeChip(grade), h('strong', { text: `${grade}등급` }), h('span', { class: 'muted', text: GRADE_TEXT[grade] }))))),
@@ -114,7 +114,7 @@ export function renderAlarms(state, { changed }) {
             h('td', { class: 'wrap muted', text: row.guidance || '' }));
         })))) : h('p', { class: 'muted', text: data ? '검색 결과 없음' : '불러오는 중…' })),
     h('div', { class: 'apply-bar' },
-      h('span', { class: 'grow', text: dirty ? `저장하지 않은 변경 ${changedCount}개` : `변경 ${changedCount}개 · 저장됨` }),
+      h('span', { class: 'grow', text: dirty ? `저장하지 않은 변경 ${changedCount}개` : `기본값과 다른 항목 ${changedCount}개 · 저장됨` }),
       h('button', { class: 'btn', type: 'button', disabled: ui.busy || !dirty, onclick: () => { ui.draft = { ...(data?.overrides || {}) }; changed(); } }, '되돌리기'),
       h('button', { class: 'btn', type: 'button', disabled: ui.busy || !data, onclick: () => save({}) }, '모두 기본값으로 저장'),
       h('button', { class: 'btn btn-primary', type: 'button', disabled: ui.busy || !data, onclick: () => save({ ...draft }) }, '저장')),

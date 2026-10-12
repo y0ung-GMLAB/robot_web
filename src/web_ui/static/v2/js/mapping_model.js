@@ -169,15 +169,15 @@ export function draftProblems(rows) {
     if (!name) problems.push(`${at} · 조인트 이름이 비어 있습니다${row.motor_axis !== null ? ` (${row.motor_axis}번 모터)` : ''}`);
     else if (names.has(name)) problems.push(`${at} · 「${name}」 이름이 ${names.get(name) + 1}번 줄과 중복됩니다`);
     else names.set(name, index);
-    if (!(Number(row.gear_ratio) > 0)) problems.push(`${at} · 감속·기어비는 0보다 커야 합니다`);
-    if (!Number(row.scale)) problems.push(`${at} · scale이 0입니다`);
+    if (!(Number(row.gear_ratio) > 0)) problems.push(`${at} · 감속비는 0보다 커야 합니다`);
+    if (!Number(row.scale)) problems.push(`${at} · 배율(scale)이 0입니다 · 매핑 파일을 확인하세요`);
     const lower = Number(row.motion_lower_deg);
     const upper = Number(row.motion_upper_deg);
     if (!Number.isFinite(lower) || !Number.isFinite(upper)) problems.push(`${at} · 범위를 입력하세요`);
     else if (lower > upper) problems.push(`${at} · 범위 최소가 최대보다 큽니다`);
     if (row.enabled) {
       const target = rowTarget(row);
-      if (!target) problems.push(`${at} · 사용 중인 줄에 모터가 지정되지 않았습니다`);
+      if (!target) problems.push(`${at} · 「사용」이 켜진 줄에 모터가 지정되지 않았습니다`);
       else if (targets.has(target)) problems.push(`${at} · ${targets.get(target) + 1}번 줄과 같은 모터를 사용합니다`);
       else targets.set(target, index);
     }
@@ -210,9 +210,9 @@ export function previewRow(row) {
 }
 
 const LABELS = {
-  motion_id: '이름', enabled: '사용', motor_axis: '모터', gear_ratio: '감속비', invert: '방향',
+  motion_id: '이름', enabled: '사용', motor_axis: '모터', gear_ratio: '감속비', invert: '방향 반전',
   reference_position_deg: '기준점', motion_lower_deg: '최소', motion_upper_deg: '최대',
-  max_velocity_deg_s: '최대 속도', max_acceleration_deg_s2: '최대 가속', initial_mode: '시작 자세',
+  max_velocity_deg_s: '최대 속도', max_acceleration_deg_s2: '최대 가속', initial_mode: '초기 위치',
   initial_motion_position_deg: '지정 값', range_confirmed: '범위 확인',
 };
 

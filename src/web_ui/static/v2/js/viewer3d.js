@@ -338,7 +338,7 @@ function createViewer3d() {
       poseBlender(Math.min(playhead, duration || playhead), latest.fileId);
       bl.controls.update();
       renderer.render(bl.scene, bl.camera);
-      say(`Blender · ${latest.fileId || '애니메이션 없음'}${bl.jointMode ? ' · json 값' : ' · 구운 장면'}${running ? ' · 동시 재생 중' : ' · 대기 상태(초기 위치)'}`);
+      say(`Blender · ${latest.fileId || '애니메이션 없음'}${bl.jointMode ? ' · 애니메이션 값' : ' · 장면 내장 동작'}${running ? ' · 동시 재생 중' : ' · 대기 상태(초기 위치)'}`);
     } else if (mj) {
       const ok = frames && framesFor === latest.fileId;
       duration = ok ? followEndSec(frames) : 0;

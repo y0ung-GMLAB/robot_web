@@ -154,7 +154,7 @@ export function startBlocker(snap, sched, { scope, playlist, mappingId }) {
   const mode = sched?.run_mode;
   if (safety.emergency_latched) return { text: '긴급 정지 상태입니다. 프로그램을 다시 시작해야 해제됩니다.', fix: 'restart-program' };
   if (mode === 'off') return { text: '끔 모드라서 움직임 명령이 차단되어 있습니다', fix: 'mode-manual' };
-  if (mode === 'schedule') return { text: '스케줄 모드에서는 스케줄이 재생을 관리합니다. 지금 멈춰도 스케줄이 곧 다시 시작합니다. 직접 재생하려면 수동 모드로 바꾸세요.', fix: 'mode-manual' };
+  if (mode === 'schedule') return { text: '스케줄 모드에서는 스케줄이 재생을 관리합니다. 지금 정지해도 스케줄이 곧 다시 시작합니다. 직접 재생하려면 수동 모드로 전환하세요.', fix: 'mode-manual' };
   if (scope === 'group') {
     const blocker = groupScopeBlocker(snap);
     if (blocker) return { text: blocker };
@@ -188,8 +188,8 @@ export function playHeadline(snap) {
   if (status.group_execution) parts.push(status.automation?.group_sync_mode === 'independent' ? '각자 재생' : '회차 맞춤');
   const STATE_TEXT = {
     initializing: '초기 위치로 천천히 이동 중', countdown: '곧 시작', running: '재생 중', verifying: '도착 확인 중',
-    waiting: '다음 회차 기다리는 중', recovering: '자동 복구 중', stopping: '멈추는 중', preparing: '준비 중',
-    completed: '완료', stopped: '멈춤', error: '오류로 멈춤', initialized: '초기 위치에서 대기 중',
+    waiting: '다음 회차 대기 중', recovering: '자동 복구 중', stopping: '정지 중', preparing: '준비 중',
+    completed: '완료', stopped: '정지됨', error: '오류로 정지', initialized: '초기 위치에서 대기 중',
   };
   const moving = isRunning(status);
   return {
@@ -272,7 +272,7 @@ export function axisRows(snap, mapping) {
     const muted = overrides[id]?.muted === true;
     let state = moving ? '재생 중' : '대기';
     let tone = moving ? 'ok' : 'idle';
-    if (muted) { state = '꺼짐 · 제자리 정지'; tone = 'warn'; }
+    if (muted) { state = '꺼짐 · 현재 위치에서 정지'; tone = 'warn'; }
     else if (held.has(id)) { state = '다음 회차부터 적용'; tone = 'info'; }
     return {
       id,
@@ -280,7 +280,7 @@ export function axisRows(snap, mapping) {
       motorType: String(row.motor_type || plan.motor_type || motor.motor_type || '') === 'dynamixel' ? 'DXL' : 'AC',
       range: lower === null || upper === null ? '-' : `${signedDeg(lower)} ~ ${signedDeg(upper)}°`,
       now: signedDeg(deg(motor.motion_actual_rad), 2),
-      clamped: plan.motion_clamped === true ? '범위 제한' : plan.motion_id ? '없음' : '-',
+      clamped: plan.motion_clamped === true ? '잘라서 재생' : plan.motion_id ? '없음' : '-',
       muted,
       state,
       tone,

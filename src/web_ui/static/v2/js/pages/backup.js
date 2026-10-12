@@ -51,7 +51,7 @@ function updateCard(state, changed) {
   const start = async () => {
     const ok = await confirmBox({
       title: `${localName(state)}만 업데이트`,
-      body: `${localName(state)} PC를 최신 버전으로 업데이트합니다(몇 분 걸립니다). 그동안 재생이 멈추고 화면 연결이 잠시 끊깁니다. 재생 중이면 업데이트하지 않습니다. 실패하면 이전 버전으로 되돌아가 계속 동작합니다.\n같은 그룹의 PC는 버전이 같아야 함께 재생할 수 있습니다. 보통은 PC 현황 화면의 「모든 PC 업데이트」를 사용하세요.`,
+      body: `${localName(state)} PC를 최신 버전으로 업데이트합니다(몇 분 걸립니다). 그동안 재생할 수 없고 화면 연결이 잠시 끊깁니다. 재생 중이면 업데이트하지 않습니다. 실패하면 이전 버전으로 되돌아가 계속 동작합니다.\n같은 그룹의 PC는 버전이 같아야 함께 재생할 수 있습니다. 보통은 PC 현황 화면의 「모든 PC 업데이트」를 사용하세요.`,
       confirmLabel: '업데이트', tone: 'warning',
     });
     if (!ok) return;
@@ -89,7 +89,7 @@ function projectCard(state, changed) {
   const pick = async (project) => {
     const ok = await confirmBox({
       title: '프로젝트 전환',
-      body: `「${project.name || project.project_id}」 프로젝트로 전환합니다.\n화면의 매핑, 애니메이션, 스케줄이 이 프로젝트의 것으로 바뀝니다. 장비(모터)에는 아직 적용되지 않으므로, 전환한 뒤 「모터·드라이브」 화면에서 「저장 후 장비에 적용」을 누르세요.`,
+      body: `「${project.name || project.project_id}」 프로젝트로 전환합니다.\n화면의 매핑, 애니메이션, 스케줄이 이 프로젝트의 것으로 바뀝니다. 장비(모터)에는 아직 적용되지 않으므로, 전환한 뒤 「모터 설정」 화면에서 「저장 후 장비에 적용」을 누르세요.`,
       confirmLabel: '전환', tone: 'warning',
     });
     if (!ok) return;
@@ -134,7 +134,7 @@ function projectCard(state, changed) {
   return h('section', { class: 'card', 'aria-label': '프로젝트' },
     h('div', { class: 'card-head' }, h('h2', { text: '프로젝트' }),
       h('button', { class: 'btn btn-mini', type: 'button', disabled: Boolean(ui.busy), onclick: create }, '새로 만들기')),
-    h('p', { class: 'muted small', text: '로봇 한 대에 프로젝트 하나를 씁니다. 프로젝트를 바꾼 뒤에는 모터·드라이브 화면에서 장비에 적용해야 합니다.' }),
+    h('p', { class: 'muted small', text: '로봇 한 대에 프로젝트 하나를 씁니다. 프로젝트를 바꾼 뒤에는 「모터 설정」 화면에서 「저장 후 장비에 적용」을 눌러야 합니다.' }),
     data.error ? h('p', { class: 'tone-text-bad small', text: data.error }) : null,
     current ? [
       h('p', {}, h('strong', { text: current.name || current.project_id }), ' ',
@@ -164,13 +164,13 @@ function backupCard(state, changed) {
   const picker = h('input', { type: 'file', accept: '.zip,application/zip', hidden: true, onchange: (e) => restore(e.target.files?.[0]) });
   async function restore(file) {
     if (!file) return;
-    const ok = await confirmBox({ title: 'zip으로 복원', body: `「${file.name}」(${sizeText(file.size)}) 파일을 프로젝트로 가져옵니다. 같은 이름의 프로젝트가 있으면 한 번 더 확인합니다.`, confirmLabel: '가져오기' });
+    const ok = await confirmBox({ title: 'zip 파일로 복원', body: `「${file.name}」(${sizeText(file.size)}) 파일로 프로젝트를 복원합니다. 같은 이름의 프로젝트가 있으면 덮어쓸지 한 번 더 확인합니다.`, confirmLabel: '복원' });
     if (!ok) return;
     await busy('import', async () => {
       const send = (overwrite) => api('POST', `/api/project-import${overwrite ? '?overwrite=true' : ''}`, { raw: file, contentType: 'application/zip', timeoutMs: 120000 });
       try {
         const result = await send(false);
-        toast(result?.message || '가져왔습니다. 프로젝트를 선택한 뒤 「모터·드라이브」에서 「저장 후 장비에 적용」을 누르세요.', 'ok');
+        toast(result?.message || '복원했습니다. 목록에서 프로젝트를 「선택」한 뒤 「모터 설정」에서 「저장 후 장비에 적용」을 누르세요.', 'ok');
       } catch (error) {
         if (error.data?.exists) {
           const again = await confirmBox({ title: '같은 이름의 프로젝트가 있습니다', body: `${error.data.project_id} 프로젝트가 이미 있습니다. 덮어쓸까요? 기존 프로젝트는 휴지통으로 옮겨집니다(7일 보관).`, confirmLabel: '덮어쓰기', tone: 'danger' });
@@ -194,7 +194,7 @@ function backupCard(state, changed) {
     h('p', { class: 'muted small', text: '매핑, 모터 설정, 애니메이션, 스케줄을 zip 파일 하나로 백업합니다.' }),
     h('div', { class: 'row' },
       selectedId ? h('a', { class: 'btn btn-primary', href: `/api/projects/${encodeURIComponent(selectedId)}/export`, download: '' }, 'zip 다운로드') : null,
-      h('button', { class: 'btn', type: 'button', disabled: Boolean(ui.busy), onclick: () => picker.click() }, ui.busy === 'import' ? '가져오는 중…' : 'zip 파일로 복원'),
+      h('button', { class: 'btn', type: 'button', disabled: Boolean(ui.busy), onclick: () => picker.click() }, ui.busy === 'import' ? '복원 중…' : 'zip 파일로 복원'),
       picker),
     h('div', { class: 'field' },
       h('span', { class: 'field-label', text: `자동 백업 · 매일 · ${data.backups?.keep_days ?? 14}일 보관 · 누르면 다운로드` }),
@@ -220,6 +220,6 @@ export function renderBackup(state, { changed }) {
     running ? h('div', { class: 'blocker' }, dot('info'), h('span', { class: 'grow', text: '업데이트 중입니다. 끝나면 화면 연결이 잠시 끊겼다가 다시 연결됩니다.' })) : null,
     h('div', { class: 'grid-2' }, updateCard(state, changed), projectCard(state, changed)),
     backupCard(state, changed),
-    h('p', { class: 'muted small' }, '프로그램만 다시 시작하려면 ', h('button', { class: 'link-button inline-link', type: 'button', onclick: act.restartProgram }, '프로그램 다시 시작'), ' (모터와 서보 상태는 유지됩니다)'),
+    h('p', { class: 'muted small' }, '프로그램만 다시 시작하려면 ', h('button', { class: 'link-button inline-link', type: 'button', onclick: act.restartProgram }, '프로그램 다시 시작'), ' (서보 토크는 유지됩니다)'),
   ];
 }

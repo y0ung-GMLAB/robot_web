@@ -51,9 +51,9 @@ function joinCard(state, changed) {
       h('div', { class: 'grow' },
         h('strong', { text: `그룹 참여 · ${joined ? '켬' : '끔'}` }),
         h('p', { class: 'muted small', text: joined
-          ? '다른 PC와 함께 재생합니다. 끄면 단독으로 재생합니다(스케줄 포함).'
-          : '단독으로 재생합니다. 켜면 같은 그룹의 PC들과 함께 재생합니다.' }),
-        joined && groupActive ? h('p', { class: 'tone-text-warn small', text: '그룹 재생 중에는 끌 수 없습니다. 재생을 멈춘 뒤 끄세요.' }) : null)),
+          ? '같은 그룹의 PC와 함께 재생합니다. 끄면 스케줄을 포함해 단독으로 재생합니다.'
+          : '단독으로 재생합니다. 켜면 같은 그룹의 PC와 함께 재생합니다.' }),
+        joined && groupActive ? h('p', { class: 'tone-text-warn small', text: '그룹 재생 중에는 끌 수 없습니다. 재생을 정지한 뒤 끄세요.' }) : null)),
     coord.node_connected === false ? h('p', { class: 'tone-text-warn small', text: '연동 서비스가 응답하지 않습니다. 프로그램을 다시 시작해 보세요.' }) : null);
 }
 
@@ -105,12 +105,12 @@ function rosterCard(state, changed) {
   const same = roster.length === candidates.length && roster.every((id) => candidates.includes(id));
   return h('section', { class: 'card', 'aria-label': '필수 명단' },
     h('div', { class: 'card-head' }, h('h2', { text: `필수 명단 · ${roster.length}대` })),
-    h('p', { class: roster.length ? 'mono' : 'muted', text: roster.length ? roster.join(' · ') : '없음 · 그룹을 시작할 때 보이는 PC로 시작합니다' }),
+    h('p', { class: roster.length ? 'mono' : 'muted', text: roster.length ? roster.join(' · ') : '없음 · 그룹을 시작할 때 연결된 PC로 시작합니다' }),
     h('p', { class: 'muted small', text: '그룹을 시작할 때 이 중 빠진 PC는 「미접속」으로 기록하고 나머지 PC로 시작합니다' }),
     config.is_master ? h('div', { class: 'row' },
       h('button', { class: 'btn', type: 'button', disabled: ui.busy || !candidates.length || same,
-        title: same ? '지금 보이는 PC와 같습니다' : '',
-        onclick: () => busy(() => act.saveRoster(candidates), state, changed) }, `지금 보이는 ${candidates.length}대로 다시 지정`)) : h('p', { class: 'muted small', text: '필수 명단은 마스터 PC에서 지정합니다' }));
+        title: same ? '현재 연결된 PC와 같습니다' : '',
+        onclick: () => busy(() => act.saveRoster(candidates), state, changed) }, `현재 연결된 ${candidates.length}대로 다시 지정`)) : h('p', { class: 'muted small', text: '필수 명단은 마스터 PC에서 지정합니다' }));
 }
 
 export function renderStore(state, { changed }) {
@@ -119,7 +119,7 @@ export function renderStore(state, { changed }) {
   return [
     h('div', { class: 'page-head' },
       h('h1', { text: 'PC 현황' }),
-      h('p', { class: 'muted small', text: `같은 네트워크에 보이는 PC · 그룹 ${config.group_id || '-'} · Domain ${config.dds_domain_id ?? '-'}` })),
+      h('p', { class: 'muted small', text: `같은 네트워크의 PC · 그룹 ${config.group_id || '-'} · Domain ${config.dds_domain_id ?? '-'}` })),
     joinCard(state, changed),
     rows.length
       ? h('ul', { class: 'pc-grid', 'aria-label': 'PC 목록' }, rows.map(pcCard))

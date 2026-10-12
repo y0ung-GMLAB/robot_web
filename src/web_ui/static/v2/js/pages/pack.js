@@ -42,7 +42,7 @@ async function upload(blob, label) {
     return;
   }
   if (ui.busy) return;
-  ui.busy = `검사 중 · ${label} (${(blob.size / 1e6).toFixed(1)} MB) · 모델 로드 검사까지 수십 초 걸릴 수 있습니다`;
+  ui.busy = `검사 중 · ${label} (${(blob.size / 1e6).toFixed(1)} MB) · 모델 불러오기 검사까지 수십 초 걸릴 수 있습니다`;
   ui.result = null;
   changed();
   try {
@@ -104,7 +104,7 @@ function packCard(state, changed) {
       uploadFolder(items, `${items[0].path.split('/')[0]}/`);
     } });
   const rollback = async () => {
-    const ok = await confirmBox({ title: '이전 팩으로 되돌리기', body: `이전 로봇 팩(${previous?.name || ''} ${previous?.version || ''})으로 되돌립니다. 지금 팩은 이전 팩으로 보관됩니다.\n3D 계산 결과는 다시 계산해야 합니다.`, confirmLabel: '되돌리기', tone: 'warning' });
+    const ok = await confirmBox({ title: '이전 팩으로 되돌리기', body: `이전 로봇 팩(${previous?.name || ''} ${previous?.version || ''})으로 되돌립니다. 현재 팩은 이전 팩으로 보관됩니다.\n애니메이션 3D 계산을 다시 해야 합니다.`, confirmLabel: '되돌리기', tone: 'warning' });
     if (!ok) return;
     ui.busy = '되돌리는 중';
     changed();

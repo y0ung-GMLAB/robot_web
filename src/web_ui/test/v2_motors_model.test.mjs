@@ -37,7 +37,7 @@ test('막는 것 · 빈 이름 · 겹친 이름 · 범위 · 프로파일 > 최�
 test('바뀐 것 · 이름 · 설정 칸 · 체크', () => {
   const saved = [motor(0, 'A')];
   const draft = [{ ...motor(0, 'B'), config: { ...motor(0, 'B').config, schedule_end_servo_off: true } }];
-  assert.deepEqual(motorChanges(saved, draft), ['0번 이름 A → B', '0번 운영 종료 시 서보 끄기 - → true']);
+  assert.deepEqual(motorChanges(saved, draft), ['0번 이름 A → B', '0번 운영 시간이 끝나면 서보 끄기 - → true']);
   assert.deepEqual(motorChanges(saved, [motor(0, 'A')]), []);
   // 검색 제안 · 뺌 · 더함 · 번호 (수정 목록 100)
   const two = [motor(0, 'A'), motor(1, 'B')];

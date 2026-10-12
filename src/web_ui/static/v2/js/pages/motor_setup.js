@@ -12,7 +12,7 @@ import { loadMapping, mappingActions, mappingBody, mappingDraft, mappingNote, re
 
 const SETUP_PARTS = [
   ['part-motors', '① 모터·드라이브', '실제 모터 · 검색 · 이름 · 속도 · 브레이크 · 서보 · 앱솔루트'],
-  ['part-mapping', '② 조인트 매핑', '애니메이션 조인트 값을 어느 모터에 어떻게 보낼지 · 감속비 · 방향 · 기준점 · 범위'],
+  ['part-mapping', '② 조인트 매핑', '애니메이션 조인트 값을 모터 값으로 바꾸는 규칙 · 감속비 · 방향 · 기준점 · 범위'],
 ];
 
 const ui = { busy: false, scrolledFor: '' };
@@ -30,7 +30,7 @@ export function setupStatus(snap, { dirty = false } = {}) {
   return {
     motors: { done: motors.length > 0 && detected === motors.length, note: `${detected}/${motors.length}대 연결` },
     mapping: { done: !snap?.mapping_range_blocker, note: snap?.mapping_range_blocker ? '범위 미확인' : '' },
-    apply: applied ? (dirty ? ['장비에 적용됨 · 바꾼 것은 저장 필요', 'warn'] : ['장비에 적용됨', 'ok']) : ['장비에 적용 필요', 'warn'],
+    apply: applied ? (dirty ? ['장비에 적용됨 · 저장하지 않은 변경 있음', 'warn'] : ['장비에 적용됨', 'ok']) : ['장비에 적용 필요', 'warn'],
   };
 }
 
@@ -129,7 +129,7 @@ export function renderSetup(state, { changed }) {
   return [
     h('div', { class: 'page-head' },
       h('h1', { text: '모터 설정' }),
-      h('nav', { class: 'row part-jumps', 'aria-label': '구획으로 이동' },
+      h('nav', { class: 'row part-jumps', 'aria-label': '바로 가기' },
         SETUP_PARTS.map(([id, label]) => h('a', { class: 'btn btn-mini', href: `#/${id === 'part-mapping' ? 'mapping' : 'maintain-motors'}`,
           onclick: (event) => { event.preventDefault(); jumpTo(id); } }, label))),
       h('span', { class: `chip chip-${status.apply[1]}`, text: status.apply[0] })),

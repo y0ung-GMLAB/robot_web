@@ -49,7 +49,7 @@ test('막는 순서 · 긴급 정지 > 모드 > 범위 미확인 > 앱솔루트 
   assert.equal(manualBlocker({ snap: {}, sched: manual }, { ...item, fault: true }).fix, 'reset');
   assert.equal(manualBlocker({ snap: {}, sched: manual }, { ...item, servoOn: false }).fix, 'servo-on');
   assert.equal(manualBlocker({ snap: {}, sched: manual }, { ...item, ac: false, servoOn: false }), null, 'DXL 은 서보 검사 안 함');
-  assert.match(manualBlocker({ snap: {}, sched: manual }, { ...item, row: null }).text, /매핑 줄이 없습니다/);
+  assert.match(manualBlocker({ snap: {}, sched: manual }, { ...item, row: null }).text, /「사용」이 꺼져 있습니다/);
   assert.match(manualBlocker({ snap: {}, sched: manual }, { ...item, detected: false }).text, /통신 없음/);
 });
 

@@ -45,11 +45,11 @@ export function playlistCard(state, changed, { link = null, adding = true, onPic
     h('div', { class: 'card-head' },
       h('h2', { text: `재생 목록 · ${list.length}` }),
       link ? h('a', { href: link[0], text: link[1] }) : null),
-    h('p', { class: 'muted small', text: `전체 ${formatDuration(total || null)} · 순서대로 재생하고, 끝나면 1번부터 다시 재생합니다. 애니메이션 사이마다 다음 애니메이션의 첫 자세로 천천히 이동합니다.` }),
+    h('p', { class: 'muted small', text: `전체 ${formatDuration(total || null)} · 순서대로 재생하고, 끝나면 1번부터 다시 재생합니다. 애니메이션 사이에는 다음 애니메이션의 초기 위치로 천천히 이동합니다.` }),
     play.error ? h('p', { class: 'tone-text-bad', text: play.error }) : null,
     list.length
       ? h('ol', { class: 'playlist' }, list.map((id, index) => {
-        const info = files.get(id) || { name: id, duration: null, check: 'unknown', checkText: '목록에 없는 파일' };
+        const info = files.get(id) || { name: id, duration: null, check: 'unknown', checkText: '파일 없음' };
         const name = onPick
           ? h('button', { class: `link-button grow name${id === selected ? ' picked' : ''}`, type: 'button', title: info.name, onclick: () => onPick(id) }, info.name)
           : h('span', { class: 'grow name', title: info.name, text: info.name });
@@ -58,7 +58,7 @@ export function playlistCard(state, changed, { link = null, adding = true, onPic
           name,
           h('span', { class: 'mono muted', text: formatDuration(info.duration) }),
           h('span', { class: `small tone-text-${index === playingIndex ? 'ok' : info.check === 'bad' ? 'bad' : info.check === 'ok' ? 'ok' : 'warn'}`,
-            text: index === playingIndex ? '지금' : info.checkText }),
+            text: index === playingIndex ? '재생 중' : info.checkText }),
           h('span', { class: 'row-actions' },
             h('button', { class: 'btn btn-mini', type: 'button', disabled: locked || index === 0, 'aria-label': `${info.name} 위로`, onclick: () => save(playlistMove(list, index, -1)) }, '↑'),
             h('button', { class: 'btn btn-mini', type: 'button', disabled: locked || index === list.length - 1, 'aria-label': `${info.name} 아래로`, onclick: () => save(playlistMove(list, index, 1)) }, '↓'),
@@ -71,5 +71,5 @@ export function playlistCard(state, changed, { link = null, adding = true, onPic
       choices.map((file) => h('option', { value: file.id, selected: file.id === ui.addPick }, `${file.name} · ${formatDuration(file.duration)}`))),
       h('button', { class: 'btn', type: 'button', disabled: locked || !ui.addPick || list.length >= PLAYLIST_MAX,
         onclick: () => save(playlistAdd(list, ui.addPick)) }, '추가')) : null,
-    running ? h('p', { class: 'muted small', text: '재생 중에는 목록을 바꿀 수 없습니다. 재생을 멈춘 뒤 바꾸세요.' }) : null);
+    running ? h('p', { class: 'muted small', text: '재생 중에는 목록을 바꿀 수 없습니다. 재생을 정지한 뒤 바꾸세요.' }) : null);
 }

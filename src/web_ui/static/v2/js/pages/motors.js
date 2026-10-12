@@ -85,7 +85,7 @@ async function servo(row, action, state, changed) {
 
 async function maintenance(row, action, state, changed) {
   const texts = {
-    eeprom_save: { title: `${row.axis}번 드라이브에 저장 (EEPROM)`, body: '드라이브의 현재 설정값을 전원을 꺼도 유지되도록 저장합니다. Motor Manager를 잠시 멈췄다가 다시 시작하며(몇 초), 그동안 서보가 풀립니다. 브레이크가 없는 모터는 처질 수 있습니다.\n저장하는 동안(최대 10초) 드라이브 전원을 끄지 마세요.', tone: 'warning', label: '저장' },
+    eeprom_save: { title: `${row.axis}번 드라이브에 저장 (EEPROM)`, body: '드라이브의 현재 설정값을 전원을 꺼도 유지되도록 저장합니다. 모터 프로그램을 잠시 정지했다가 다시 시작하며(몇 초), 그동안 서보 토크가 해제됩니다. 브레이크가 없는 모터는 처질 수 있습니다.\n저장하는 동안(최대 10초) 드라이브 전원을 끄지 마세요.', tone: 'warning', label: '저장' },
     absolute_clear: { title: `${row.axis}번 다회전 클리어`, body: '엔코더의 회전 수 기록을 0으로 초기화합니다. 위치 기준이 바뀝니다.\n서보가 꺼져 있어야 합니다. 끝나면 드라이브 전원을 껐다 켜세요. 위치 값이 바뀌므로 기준점을 다시 캡처해야 하며, 그 전에는 재생하지 마세요.', tone: 'danger', label: '클리어' },
   }[action];
   if (action === 'absolute_clear' && row.servoOn) { toast('서보를 먼저 끄세요. 다회전 클리어는 서보가 꺼진 상태에서만 할 수 있습니다.', 'warn'); return; }
@@ -110,7 +110,7 @@ async function absoluteSetup(scope, row, state, changed) {
   if (!targets.length) { toast(preview?.message || '설정할 모터가 없습니다. 모두 이미 앱솔루트 방식입니다.', 'ok'); return; }
   const ok = await confirmBox({
     title: '앱솔루트 설정',
-    body: `대상\n${targets.join('\n')}${skipped.length ? `\n\n건너뜀(이미 정상 · 다시 하면 기준점이 사라짐)\n${skipped.join('\n')}` : ''}\n\n${(preview?.steps || []).map((s, i) => `${i + 1}. ${s.label || s}`).join('\n')}\n\n대상 축의 서보를 끄고 Motor Manager를 두 번 잠시 멈춥니다. 중간에 드라이브 전원을 두 번 껐다 켜야 합니다(화면에 안내가 나옵니다). 끝나면 위치 값이 바뀌므로 기준점을 다시 캡처해야 합니다.`,
+    body: `대상\n${targets.join('\n')}${skipped.length ? `\n\n건너뜀(이미 정상 · 다시 하면 기준점이 사라짐)\n${skipped.join('\n')}` : ''}\n\n${(preview?.steps || []).map((s, i) => `${i + 1}. ${s.label || s}`).join('\n')}\n\n대상 모터의 서보를 끄고 모터 프로그램을 두 번 잠시 정지합니다. 중간에 드라이브 전원을 두 번 껐다 켜야 합니다(화면에 안내가 나옵니다). 끝나면 위치 값이 바뀌므로 기준점을 다시 캡처해야 합니다.`,
     confirmLabel: '시작', tone: 'danger',
   });
   if (!ok) return;
@@ -130,7 +130,7 @@ async function scan(kind, state, changed) {
   const ok = await confirmBox({
     title: `모터 검색 · ${spec.label}`,
     body: `${kind === 'dxl' ? '다이나믹셀' : kind === 'ac' ? 'AC 서보(EtherCAT)' : 'AC 서보와 다이나믹셀'} 모터를 검색합니다(수십 초 걸리며, 실패하면 몇 번 다시 시도합니다).\n`
-      + '검색하는 동안 모터 프로그램(Motor Manager)이 잠시 멈췄다가 다시 켜집니다. 그동안 서보가 풀립니다. 브레이크 보드가 연결된 모터는 브레이크가 잡아 주지만, 브레이크가 없는 모터는 처질 수 있으니 기구를 받치고, 움직이는 모터가 없을 때 진행하세요.\n\n'
+      + '검색하는 동안 모터 프로그램이 잠시 정지했다가 다시 시작됩니다. 그동안 서보 토크가 해제됩니다. 브레이크 보드가 연결된 모터는 브레이크가 잡아 주지만, 브레이크가 없는 모터는 처질 수 있으니 기구를 받치고, 움직이는 모터가 없을 때 진행하세요.\n\n'
       + `검색 결과는 저장하기 전까지 화면에만 표시됩니다. ${kind === 'all' ? '' : '검색하지 않은 종류의 모터는 그대로 둡니다. '}모터 이름과 드라이브 설정값은 유지됩니다.`
       + (dirty() ? '\n\n저장하지 않은 변경 내용은 검색 결과로 대체됩니다.' : ''),
     confirmLabel: '검색', tone: 'warning',
@@ -169,7 +169,7 @@ async function scan(kind, state, changed) {
 }
 
 async function cancelScan(changed) {
-  try { toast((await api('POST', '/api/motors/scan/cancel'))?.message || '다음 장치 종류를 검색하기 전에 멈춥니다', 'ok'); } catch (error) { toast(error.message || String(error), 'bad'); }
+  try { toast((await api('POST', '/api/motors/scan/cancel'))?.message || '다음 종류의 모터를 검색하기 전에 중지합니다', 'ok'); } catch (error) { toast(error.message || String(error), 'bad'); }
   changed();
 }
 
@@ -226,7 +226,7 @@ function detailCard(state, changed, row) {
     const value = getField(motor, field.key);
     return h('label', { class: 'field' }, h('span', { class: 'field-label', text: `${field.label}${field.unit ? ` (${field.unit})` : ''}` }),
       h('input', { class: `input${field.top ? '' : ' mono'}`, type: field.top ? 'text' : 'number', step: 'any', value: value ?? '',
-        placeholder: field.top ? '' : '드라이브 설정값 유지',
+        placeholder: field.top ? '' : '비워 두면 드라이브 값 유지',
         oninput: (e) => setField(motor, field.key, field.top ? e.target.value : (e.target.value === '' ? null : Number(e.target.value))),
         onchange: () => changed() }));
   };
@@ -235,7 +235,7 @@ function detailCard(state, changed, row) {
     h('div', { class: 'row form-row' }, EDIT_FIELDS.map(input)),
     row.ac ? h('label', { class: 'inline' }, h('input', { type: 'checkbox', checked: Number(motor.config?.overload_monitor) === 1,
       onchange: (e) => { setField(motor, 'overload_monitor', e.target.checked ? 1 : 0); changed(); } }),
-    '과부하율 읽기 (드라이브 소프트웨어 Ver1.03 이상만 지원 · 그 미만이면 Motor Manager가 시작되지 않음)') : null,
+    '과부하율 읽기 (드라이브 소프트웨어 Ver1.03 이상 필요 · 낮은 버전에서 켜면 모터 프로그램이 시작되지 않음)') : null,
     h('label', { class: 'inline' }, h('input', { type: 'checkbox', checked: motor.config?.schedule_end_servo_off === true,
       onchange: (e) => { setField(motor, 'schedule_end_servo_off', e.target.checked); changed(); } }), '운영 시간이 끝나면 서보 끄기'),
     h('div', { class: 'field' },

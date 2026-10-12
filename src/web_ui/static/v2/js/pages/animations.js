@@ -189,7 +189,7 @@ function detailCard(state, changed, navigate) {
       analysis.value_unit ? ` · 단위 ${analysis.value_unit}` : ''),
     check.tone === 'bad' ? h('div', { class: 'blocker bad' }, dot('bad'), h('span', { class: 'grow', text: `${check.text} · 이 파일은 재생할 수 없습니다. Blender에서 다시 내보내세요.` })) : null,
     issues.length ? h('div', { class: 'blocker' }, dot('warn'),
-      h('span', { class: 'grow', text: `범위 초과 조인트 ${issues.length}개 · ${issues.slice(0, 3).map((i) => `${i.id} ${signedDeg(i.min)} ~ ${signedDeg(i.max)}° (범위 ${signedDeg(i.lower)} ~ ${signedDeg(i.upper)}°)`).join(' · ')} · 재생은 범위로 잘라서 돕니다 · 고치려면 Blender 에서 다시 내보내기` })) : null,
+      h('span', { class: 'grow', text: `범위 초과 조인트 ${issues.length}개 · ${issues.slice(0, 3).map((i) => `${i.id} ${signedDeg(i.min)} ~ ${signedDeg(i.max)}° (범위 ${signedDeg(i.lower)} ~ ${signedDeg(i.upper)}°)`).join(' · ')} · 범위를 넘는 값은 잘라서 재생합니다 · 고치려면 Blender에서 다시 내보내세요` })) : null,
     detail?.error ? h('p', { class: 'tone-text-bad small', text: detail.error }) : null,
     series.length
       ? h('div', { class: 'charts' }, series.map((item) => chart(item, rows.get(String(item.motion_id)))))

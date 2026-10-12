@@ -68,10 +68,10 @@ test('실행 축 · 끔 = 그 자리 · 다시 켬 = 다음 회차부터 · 지�
     motion_state: { motors: [{ controller_index: 0, motion_actual_rad: Math.PI / 180 * 2.5 }] },
   };
   const rows = axisRows(snap, mapping);
-  assert.deepEqual(rows.map((r) => [r.id, r.state]), [['A', '꺼짐 · 제자리 정지'], ['B', '다음 회차부터 적용'], ['C', '재생 중']]);
+  assert.deepEqual(rows.map((r) => [r.id, r.state]), [['A', '꺼짐 · 현재 위치에서 정지'], ['B', '다음 회차부터 적용'], ['C', '재생 중']]);
   assert.equal(rows[0].range, '−10.0 ~ +10.0°');
   assert.equal(rows[0].now, '+2.50');
-  assert.equal(rows[2].clamped, '범위 제한');
+  assert.equal(rows[2].clamped, '잘라서 재생');
 });
 
 test('그룹 PC 줄 · 빠진 PC 는 이유 · 연결 안 됨 · 출발 전 멈춤은 지금 멈춤', () => {

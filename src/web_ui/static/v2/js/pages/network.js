@@ -101,7 +101,7 @@ function wifiCard(state, changed) {
     const ok = await confirmBox({
       title: 'Wi-Fi 변경',
       body: `「${ui.pick}」 Wi-Fi에 연결합니다.\n연결이 바뀌면 이 화면이 잠시 끊길 수 있습니다. 새 주소로 다시 접속해 60초 안에 「유지」를 누르세요.\n누르지 않으면(연결이 끊겨 누르지 못한 경우 포함) 60초 뒤 원래 Wi-Fi로 돌아갑니다.${ui.useStatic ? '\n\n고정 IP가 필요하면 공유기에서 「DHCP 예약」을 쓰는 것이 더 안전합니다(주소가 겹치지 않습니다).' : ''}`,
-      confirmLabel: '전환', tone: 'warning',
+      confirmLabel: '연결', tone: 'warning',
     });
     if (!ok) return;
     ui.wifiBusy = true;
@@ -169,7 +169,7 @@ function wifiCard(state, changed) {
       problem ? h('p', { class: 'tone-text-warn small', text: problem }) : null,
       h('div', { class: 'row' }, h('button', { class: 'btn btn-warn', type: 'button', disabled: Boolean(problem) || ui.wifiBusy || Boolean(pending), onclick: connect }, '이 Wi-Fi에 연결')),
     ] : null,
-    h('p', { class: 'muted small', text: '원격으로 변경하다 연결이 끊겨도 60초 뒤 원래 Wi-Fi로 돌아갑니다. 비밀번호가 틀리면 바로 되돌립니다. 회사 인증(802.1X) Wi-Fi는 우분투 설정에서 연결하세요. 재생 중에는 변경할 수 없습니다.' }));
+    h('p', { class: 'muted small', text: '원격으로 변경하다가 연결이 끊겨도 60초 뒤 원래 Wi-Fi로 돌아갑니다. 비밀번호가 틀리면 바로 되돌립니다. 회사 인증(802.1X) Wi-Fi는 우분투 설정에서 연결하세요. 재생 중에는 변경할 수 없습니다.' }));
 }
 
 /* ---------- 시간대 ---------- */
@@ -183,7 +183,7 @@ function timeCard(state, changed) {
     const ok = await confirmBox({
       title: all ? '모든 PC 시간대 변경' : `${localName(state)} 시간대 변경`,
       body: `${all ? '모든 PC(스피커 포함)' : localName(state)}의 시간대를 「${ui.zone}」에 맞춥니다.\n스케줄은 바뀐 시각을 기준으로 동작합니다. 시간대를 바꾼 PC는 2초 뒤 프로그램을 다시 시작합니다(재생 중인 PC는 변경하지 않습니다).`,
-      confirmLabel: '전환', tone: 'warning',
+      confirmLabel: '변경', tone: 'warning',
     });
     if (!ok) return;
     ui.zoneBusy = true;
@@ -257,7 +257,7 @@ function groupCard(state, changed) {
   if (!config.pc_id) {
     return h('section', { class: 'card', 'aria-label': '그룹 설정' },
       h('div', { class: 'card-head' }, h('h2', { text: '그룹 설정 (처음 한 번만)' })),
-      h('p', { class: 'muted', text: coord.config_error || '연동 설정을 불러오는 중…' }));
+      h('p', { class: 'muted', text: coord.config_error || '그룹 설정을 불러오는 중…' }));
   }
   if (!ui.group) {
     ui.group = { is_master: config.is_master === true, group_id: config.group_id || '', dds_domain_id: config.dds_domain_id ?? 21, display_name: config.display_name || '' };
@@ -272,7 +272,7 @@ function groupCard(state, changed) {
       const name = otherMaster.display_name || otherMaster.pc_id;
       const go = await confirmBox({
         title: '마스터가 이미 있습니다',
-        body: `그룹에 이미 마스터가 있습니다: ${name}\n마스터가 둘이면 그룹 오류로 실행이 멈춥니다.\n계속하려면 먼저 ${name}의 마스터 설정을 해제하세요.`,
+        body: `그룹에 이미 마스터가 있습니다: ${name}\n마스터가 둘이면 그룹 오류로 재생이 정지됩니다.\n계속하려면 먼저 ${name}의 마스터 설정을 해제하세요.`,
         confirmLabel: '그래도 저장', tone: 'danger',
       });
       if (!go) return;

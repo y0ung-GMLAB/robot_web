@@ -72,7 +72,7 @@ test('모터 · 조인트 값이 있으면 조인트 deg · 알람·서보 꺼�
     { controller_index: 3, name: '빈 조인트', motion_actual_rad: null, position_rad: 0, servo_on: true, error_text: 'No error' },
   ] } });
   assert.deepEqual(chips.map((c) => [c.value, c.unit, c.tone, c.note]), [
-    ['+2.31°', '조인트', 'ok', '부하 18%'], ['−80.40°', '모터', 'warn', '서보 꺼짐'], ['-', '모터', 'bad', '알람 Err16.0'],
+    ['+2.31°', '조인트', 'ok', '과부하율 18%'], ['−80.40°', '모터', 'warn', '서보 꺼짐'], ['-', '모터', 'bad', '알람 Err16.0'],
     ['+0.00°', '모터', 'ok', ''],
   ]);
 });

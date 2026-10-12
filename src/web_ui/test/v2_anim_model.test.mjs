@@ -24,7 +24,7 @@ test('범위 넘음 · 이 PC 매핑에 있는 것만 · 반올림 정도는 넘
 
 test('검사 칸 · 오류 > 범위 넘음 > 이 PC 조인트 없음 > 경고 > 정상', () => {
   assert.deepEqual(checkState({ analysis: { valid: false, errors: ['헤더 없음'] } }, mapping), { text: '오류 · 헤더 없음', tone: 'bad' });
-  assert.equal(checkState({ analysis }, mapping).text, '경고 · 범위 초과 1');
+  assert.equal(checkState({ analysis }, mapping).text, '경고 · 범위 초과 1개');
   assert.equal(checkState({ analysis: { valid: true, motion_ids: [{ motion_id: 'X', min_value: 0, max_value: 0 }] } }, mapping).text, '경고 · 매핑된 조인트 없음');
   assert.equal(checkState({ analysis: { valid: true, motion_ids: [], warnings: ['보간 필요'] } }, mapping).text, '경고 · 보간 필요');
   assert.equal(checkState({ analysis: { valid: true, motion_ids: [{ motion_id: 'A', min_value: 0, max_value: 0 }] } }, mapping).tone, 'ok');

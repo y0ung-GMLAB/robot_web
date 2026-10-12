@@ -126,17 +126,17 @@ export function manualBlocker(state, item) {
   if (!item.detected) return { text: `${item.axis}번 모터 통신 없음` };
   if (item.fault) return { text: `${item.axis}번 모터 알람 · 오류를 초기화한 뒤 서보를 켜세요`, fix: 'reset' };
   if (item.ac && !item.servoOn) return { text: `${item.axis}번 서보가 꺼져 있습니다`, fix: 'servo-on' };
-  if (!item.row) return { text: `${item.axis}번 모터를 「사용」하는 조인트 매핑 줄이 없습니다. 매핑에 없는 모터는 움직이지 않습니다.`, fix: 'open-mapping' };
+  if (!item.row) return { text: `조인트 매핑에 ${item.axis}번 모터를 쓰는 줄이 없거나 「사용」이 꺼져 있습니다. 매핑에 없는 모터는 수동 조작할 수 없습니다.`, fix: 'open-mapping' };
   return null;
 }
 
 function fixButton(blocker, item, changed) {
   const map = {
-    'mode-manual': ['수동으로 바꾸기', () => act.setRunMode('manual')],
+    'mode-manual': ['수동 모드로 전환', () => act.setRunMode('manual')],
     stop: ['정지', act.stopAll],
     restart: ['프로그램 다시 시작', act.restartProgram],
     'open-mapping': ['조인트 매핑 열기', () => { location.hash = '#/mapping'; }],
-    'open-motors': ['모터·드라이브 열기', () => { location.hash = '#/maintain-motors'; }],
+    'open-motors': ['모터 설정 열기', () => { location.hash = '#/maintain-motors'; }],
     reset: ['오류 초기화', async () => { await act.servoControl(item, 'reset'); changed(); }],
     'servo-on': ['서보 켜기', async () => { await act.servoControl(item, 'on'); changed(); }],
   };
@@ -185,7 +185,7 @@ function updateLive(list) {
     else if (kind === 'motor') node.textContent = item.position === null ? '-' : `모터 ${signedDeg(item.position, 1)}°`;
     else if (kind === 'pending') {
       const left = ui.session && ui.session.axis === item.axis && item.position !== null ? ui.session.target - item.position : 0;
-      node.textContent = ui.session?.axis === item.axis ? `남은 이동 ${signedDeg(left / (ui.unit === 'joint' && item.row ? gain(item) : 1), 3)}°${ui.session.hitLimit ? ` · ${ui.session.hitLimit}에 닿았습니다` : ''}` : '대기';
+      node.textContent = ui.session?.axis === item.axis ? `남은 이동 ${signedDeg(left / (ui.unit === 'joint' && item.row ? gain(item) : 1), 3)}°${ui.session.hitLimit ? ` · ${ui.session.hitLimit} 도달` : ''}` : '대기';
     } else if (kind === 'slider' && !ui.faders.has(item.axis) && item.joint !== null && document.activeElement !== node) {
       node.value = String(item.joint);
     }
@@ -241,7 +241,7 @@ async function cancelMotion() {
 async function moveTo(item, changed) {
   const blocker = manualBlocker(ctx.state, item);
   if (blocker) { toast(blocker.text, 'warn'); return; }
-  if (ui.session) { toast('다이얼로 이동 중입니다. 멈춘 뒤 다시 시도하세요.', 'warn'); return; }
+  if (ui.session) { toast('다이얼로 이동 중입니다. 이동이 끝난 뒤 다시 시도하세요.', 'warn'); return; }
   const value = Number(ui.goal);
   if (ui.goal === '' || !Number.isFinite(value)) { toast('목표 위치를 숫자로 입력하세요', 'warn'); return; }
   const motorDeg = ui.unit === 'joint' && item.row ? jointToMotor(item.row, value) : value;
@@ -313,8 +313,8 @@ async function capture(item, kind, changed) {
     });
     toast(result?.message || '저장했습니다', 'ok');
     await loadManual(ctx.state, changed);
-    if (await act.confirmApplyMotorConfig('운전 한계(소프트 리밋)도 새 기준으로 바꾸려면 지금 장비에 적용하고 모터를 재시작해야 합니다.')) await act.applyMotorConfig();
-    else toast('운전 한계가 아직 적용되지 않았습니다. 「저장 후 장비에 적용」을 누르세요.', 'warn');
+    if (await act.confirmApplyMotorConfig('운전 한계(소프트 리밋)도 새 기준으로 바꾸려면 장비에 적용하고 모터를 재시작해야 합니다.')) await act.applyMotorConfig();
+    else toast('운전 한계가 아직 적용되지 않았습니다. 「모터 설정」에서 「저장 후 장비에 적용」을 누르세요.', 'warn');
   } catch (error) {
     toast(error.message || String(error), 'bad');
   }
@@ -388,7 +388,7 @@ function axisPanel(state, changed, item) {
     rangeBar(item),
     h('div', { class: 'row' },
       ['lower', 'reference', 'upper'].map((kind) => h('button', { class: 'btn btn-mini', type: 'button', disabled: !canCapture,
-        title: canCapture ? '' : '조인트 매핑 줄이 있고, 모터 설정이 장비에 적용되어 있고, 다이얼이 멈춰 있어야 사용할 수 있습니다.',
+        title: canCapture ? '' : '조인트 매핑 줄이 있고 모터 설정이 장비에 적용된 상태에서, 다이얼 이동이 끝나 있을 때 사용할 수 있습니다.',
         onclick: () => capture(item, kind, changed) }, { lower: '현재 위치를 하한으로', reference: '현재 위치를 기준점(0)으로', upper: '현재 위치를 상한으로' }[kind]))),
     h('p', { class: 'muted small', text: '변경하면 조인트 매핑에 저장되고, 이어서 장비에 적용(모터 재시작)할지 확인합니다.' }),
     outside ? h('div', { class: 'blocker bad' }, dot('bad'), h('span', { class: 'grow', text: '운전 한계를 벗어나 있습니다. 다이얼과 목표 위치 이동을 사용할 수 없습니다.' }),
@@ -446,7 +446,7 @@ function faderView(state, changed, list) {
   };
   return h('section', { class: 'card', 'aria-label': '페이더' },
     blocker && blocker.fix !== 'servo-on' && blocker.fix !== 'reset' ? h('div', { class: 'blocker' }, dot('warn'), h('span', { class: 'grow', text: blocker.text }), fixButton(blocker, null, changed)) : null,
-    h('p', { class: 'muted small', text: '페이더를 끄는 동안에만 따라 움직이고, 놓으면 그 위치에서 정지합니다. 범위는 조인트 매핑의 최소·최대 값입니다.' }),
+    h('p', { class: 'muted small', text: '페이더를 드래그하는 동안에만 모터가 따라 움직이고, 손을 떼면 그 위치에서 정지합니다. 범위는 조인트 매핑의 최소·최대입니다.' }),
     usable.length ? h('ul', { class: 'list fader-list' }, usable.map((item) => {
       const own = manualBlocker(state, item);
       return h('li', { class: 'fader-row' },
@@ -472,7 +472,7 @@ export function renderManual(state, { changed }) {
   const pcBlocker = manualBlocker(state, null);
   const initDisabled = Boolean(pcBlocker && pcBlocker.text !== '모터를 선택하세요') || !ui.fileId;
   const initialize = async () => {
-    const ok = await confirmBox({ title: '초기 위치로', body: `재생 목록 1번(${playlist[0] || '없음'})의 첫 자세로 천천히 이동합니다.`, confirmLabel: '이동' });
+    const ok = await confirmBox({ title: '초기 위치로', body: `재생 목록 1번(${playlist[0] || '없음'}) 애니메이션의 초기 위치로 천천히 이동합니다.`, confirmLabel: '이동' });
     if (!ok) return;
     endSession(true);
     await act.initializeLocal({ motion_file_id: playlist[0] || '', mapping_file_id: ui.fileId, initial_move_time_sec: null, run_mode: 'once', repeat_mode: 'direct', dwell_sec: 0, target_cycle_count: 0 });

@@ -124,7 +124,7 @@ export function timezoneDrift(items, timezone) {
     .filter(Boolean));
   stamps.delete(now);
   if (!stamps.size) return '';
-  return `${[...stamps].sort().join(', ')} 시간대에서 만든 스케줄인데, 지금 PC 시간대는 ${now}입니다. 시각을 다시 확인하세요.`;
+  return `${[...stamps].sort().join(', ')} 시간대에서 만든 스케줄입니다. 현재 PC 시간대는 ${now}이므로 시각을 다시 확인하세요.`;
 }
 
 /** 슬레이브면 마스터 화면 주소 · 같은 망 표에서 */
