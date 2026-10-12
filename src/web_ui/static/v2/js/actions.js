@@ -216,3 +216,10 @@ export async function deleteAnimation(fileId) {
   if (!ok) return null;
   return attempt(() => api('DELETE', `/api/motion-files/${encodeURIComponent(fileId)}`), '지웠습니다');
 }
+
+/* ---------- 알람 정책 ---------- */
+
+export function saveAlarmPolicy(overrides) {
+  return attempt(() => api('PUT', '/api/servo-alarm-policy', { body: { overrides } }),
+    (r) => r?.message || '알람 정책을 저장했습니다 · Supervisor 에 적용됨');
+}

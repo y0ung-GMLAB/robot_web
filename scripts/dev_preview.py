@@ -845,6 +845,27 @@ async def preview_motion_run_status():
             'schedule_end': {'state': 'done', 'message': '어제 18:00 · 기준점 도착 → 서보 끔 · 정상'}}
 
 
+@app.get('/api/servo-alarm-policy')
+async def preview_alarm_policy():
+    """진짜 카탈로그로 · 메모리에만 · 새 UI(v2) 알람 정책"""
+    from motion_web_bridge import servo_alarm_policy as policy
+    overrides = policy.normalize_overrides(state.get('alarm_overrides') or {})
+    grades = policy.effective_grade_map(overrides)
+    catalog = policy.catalog_payload(overrides)
+    return {'success': True, 'project_id': 'preview', 'catalog_version': policy.CATALOG_VERSION,
+            'grade_definitions': policy.GRADE_DEFINITIONS, 'overrides': overrides, 'effective_grades': grades,
+            'policy_revision': policy.policy_revision(grades, policy.CATALOG_VERSION),
+            'counts': policy.configured_counts(catalog), 'catalog': catalog}
+
+
+@app.put('/api/servo-alarm-policy')
+async def preview_save_alarm_policy(request: Request):
+    body = await request.json()
+    state['alarm_overrides'] = body.get('overrides') or {}
+    payload = await preview_alarm_policy()
+    return {**payload, 'saved': True, 'message': f"프리뷰 · 알람 정책 저장 · 바꾼 것 {len(payload['overrides'])}"}
+
+
 _PREVIEW_DOCS = [
     {'id': 'usage', 'title': '사용법', 'subtitle': '화면 하나하나', 'path': 'docs/사용법.md'},
     {'id': 'install', 'title': '설치법', 'subtitle': 'README', 'path': 'README.md'},
