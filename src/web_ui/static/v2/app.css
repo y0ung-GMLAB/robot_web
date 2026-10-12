@@ -342,6 +342,16 @@ body.drop-active .drop-zone { border-color: var(--blue); background: var(--blue-
 .blocker.ok { background: var(--ok-soft); border-color: #24513A; color: var(--ok-ink); }
 .blocker .list { margin-top: 6px; }
 
+/* 기록 */
+.trace-charts { grid-template-columns: repeat(auto-fill, minmax(420px, 1fr)); }
+.trace-charts svg { height: 120px; }
+.chart .trace-actual { fill: none; stroke: var(--warn); stroke-width: 1.5; stroke-dasharray: 5 3; vector-effect: non-scaling-stroke; }
+.legend { display: inline-block; width: 22px; height: 0; vertical-align: middle; border-top: 2px solid var(--blue); }
+.legend-actual { border-top: 2px dashed var(--warn); }
+.event-list .chip { flex: 0 0 auto; }
+.wrap-text { overflow-wrap: anywhere; }
+@media (max-width: 560px) { .trace-charts { grid-template-columns: 1fr; } }
+
 /* 확인 창 · 알림 */
 dialog.confirm { max-width: 480px; width: calc(100% - 32px); padding: 24px; border: 1px solid var(--line); border-radius: 14px; background: var(--panel); color: var(--ink); }
 dialog.confirm::backdrop { background: rgb(0 0 0 / 60%); }

@@ -961,6 +961,70 @@ async def preview_restore_trash(entry: str):
     return {'success': True, 'message': f"프리뷰 · {item['name']} 되살림"}
 
 
+_PREVIEW_EVENTS = [
+    {'timestamp_text': '2026-10-12T14:27:01.000', 'category': 'coordination', 'event_type': 'group_cycle', 'content': '그룹 3회차 시작 · 2대 · 시작 편차 6 ms'},
+    {'timestamp_text': '2026-10-12T10:03:12.000', 'category': 'error', 'event_type': 'motor_error', 'content': '2번 모터 0x1800 Err24.0 위치 편차 과대 · 자동 복구 1/3'},
+    {'timestamp_text': '2026-10-12T10:00:02.000', 'category': 'initial_position', 'event_type': 'initial_move', 'content': '첫 자세로 천천히 · 5.0 s'},
+    {'timestamp_text': '2026-10-12T10:00:00.000', 'category': 'motion', 'event_type': 'continuous_motion_started', 'content': '스케줄 매장 운영 시작 · 연속 재생'},
+    {'timestamp_text': '2026-10-11T18:00:00.000', 'category': 'system', 'event_type': 'schedule_end', 'content': '운영 시간 끝 · 기준점 도착 → 서보 끔'},
+]
+
+
+@app.get('/api/motor-events')
+async def preview_motor_events(category: str = 'all', limit: int = 200, file_name: str = 'all'):
+    """운영 로그 흉내 · 카테고리 · 날짜 파일로 거른다 · 새 UI(v2) 기록"""
+    rows = [e for e in _PREVIEW_EVENTS if category == 'all' or e['category'] == category]
+    if file_name != 'all':
+        rows = [e for e in rows if e['timestamp_text'].startswith(file_name.replace('.jsonl', ''))]
+    return {'success': True, 'events': rows[:limit], 'category': category, 'files': [
+        {'name': '2026-10-12.jsonl', 'size': 2048, 'record_count': 4}, {'name': '2026-10-11.jsonl', 'size': 512, 'record_count': 1}]}
+
+
+def _preview_runs():
+    def axes(scale):
+        return [{'motion_id': name, 'motor_axis': axis, 'max_abs_error_deg': round(0.05 * scale * (axis + 1), 3),
+                 'max_abs_error_at_sec': 1.2 + axis, 'rms_error_deg': 0.02} for name, axis, *_ in JOINTS]
+    return [
+        {'file': '142701_c3.csv', 'started_text': '2026-10-12T14:27:01+09:00', 'cycle': 3, 'motion_file_id': 'floating_no1_motion1.json',
+         'result': 'completed', 'group_execution': True, 'axes': axes(1.0)},
+        {'file': '141800_c2.csv', 'started_text': '2026-10-12T14:18:00+09:00', 'cycle': 2, 'motion_file_id': 'floating_1800_dir_test.json',
+         'result': 'stopped', 'message': '회차 도중 정지', 'axes': axes(0.6)},
+        {'file': '100000_c1.csv', 'started_text': '2026-10-12T10:00:00+09:00', 'cycle': 1, 'motion_file_id': 'floating_no1_motion1.json',
+         'result': 'error', 'message': '2번 모터 도달 확인 실패 0.094°', 'axes': axes(2.0)},
+    ]
+
+
+@app.get('/api/motion-trace/days')
+async def preview_trace_days():
+    return {'success': True, 'days': [{'date': '2026-10-12', 'cycle_count': 3, 'file_count': 3, 'bytes': 120000},
+                                      {'date': '2026-10-11', 'cycle_count': 0, 'file_count': 0, 'bytes': 0}]}
+
+
+@app.get('/api/motion-trace/runs')
+async def preview_trace_runs(date: str):
+    return {'success': True, 'date': date, 'runs': _preview_runs() if date == '2026-10-12' else []}
+
+
+@app.get('/api/motion-trace/trace')
+async def preview_trace(date: str, file: str):
+    """목표는 사인 · 실제는 조금 늦고 작게 · 축마다 다르게"""
+    times = [i * 0.05 for i in range(400)]
+    axes = []
+    for name, axis, *_ in JOINTS:
+        amp = 4.0 + axis * 2
+        target = [round(amp * math.sin(t * (0.5 + axis * 0.15)), 4) for t in times]
+        actual = [round(amp * 0.98 * math.sin((t - 0.04) * (0.5 + axis * 0.15)), 4) for t in times]
+        axes.append({'motion_id': name, 'target': target, 'actual': actual,
+                     'error': [round(a - b, 4) for a, b in zip(actual, target)]})
+    record = next((r for r in _preview_runs() if r['file'] == file), {})
+    return {'success': True, 'date': date, 'file': file, 'sample_count': 400, 'decimation': 1, 'time': times, 'axes': axes, 'record': record}
+
+
+@app.get('/api/motion-trace/download')
+async def preview_trace_download(date: str, file: str):
+    return HTMLResponse('time_sec,Neck_Pitch_target_deg,Neck_Pitch_actual_deg\n0,0,0\n', media_type='text/csv')
+
+
 _PREVIEW_DOCS = [
     {'id': 'usage', 'title': '사용법', 'subtitle': '화면 하나하나', 'path': 'docs/사용법.md'},
     {'id': 'install', 'title': '설치법', 'subtitle': 'README', 'path': 'README.md'},
@@ -1045,7 +1109,7 @@ CANNED = {
         },
     },
     ('GET', '/api/schedule/list'): lambda: {'schedules': _PREVIEW_SCHEDULES},
-    ('GET', '/api/motor-events'): lambda: {'success': True, 'events': [
+    ('GET', '/api/motor-events-canned-old'): lambda: {'success': True, 'events': [
         {'timestamp_text': time.strftime('%Y-%m-%dT%H:%M:%S.000'), 'content': '3회차 시작 · 2대 · 시작 편차 6 ms'},
         {'timestamp_text': time.strftime('%Y-%m-%dT10:03:12.000'), 'content': '자동 복구 1/3 · 2번 모터 도달 확인 실패 0.094°'},
         {'timestamp_text': time.strftime('%Y-%m-%dT10:00:00.000'), 'content': '매장 운영 시작'},
