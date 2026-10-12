@@ -335,6 +335,13 @@ textarea.input.memo { min-height: 64px; padding: 10px 12px; resize: vertical; li
 .link-button.inline-link { display: inline; padding: 0; color: #7FB0FF; text-decoration: underline; }
 .confirm .input { width: 100%; margin-top: 6px; }
 
+/* 로봇 팩 */
+.pack-name { font-size: 18px; }
+.drop-zone { display: flex; flex-direction: column; gap: 8px; padding: 16px; border: 1px dashed var(--line-strong); border-radius: 12px; }
+body.drop-active .drop-zone { border-color: var(--blue); background: var(--blue-soft); }
+.blocker.ok { background: var(--ok-soft); border-color: #24513A; color: var(--ok-ink); }
+.blocker .list { margin-top: 6px; }
+
 /* 확인 창 · 알림 */
 dialog.confirm { max-width: 480px; width: calc(100% - 32px); padding: 24px; border: 1px solid var(--line); border-radius: 14px; background: var(--panel); color: var(--ink); }
 dialog.confirm::backdrop { background: rgb(0 0 0 / 60%); }
