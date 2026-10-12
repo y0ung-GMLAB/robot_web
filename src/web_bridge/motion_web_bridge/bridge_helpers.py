@@ -41,8 +41,8 @@ def motor_activity_snapshot(
         return active('initializing', '초기 위치 이동 중', 'motion_run')
     if run_state_rules.is_moving(run_state):
         if bool(run.get('automation_run')):
-            return active('automation', '자동 반복 모션 동작 중', 'motion_run')
-        return active('motion_run', '모션 동작 중', 'motion_run')
+            return active('automation', '자동 반복 재생 중', 'motion_run')
+        return active('motion_run', '애니메이션 재생 중', 'motion_run')
     if run_state == 'countdown':
         return {
             'active': False,
@@ -52,9 +52,9 @@ def motor_activity_snapshot(
             'warning': False,
         }
     if 'action' in manual_modes:
-        return active('action', '동작 모드 동작 중', 'motion_supervisor')
+        return active('action', '목표 위치 이동 중', 'motion_supervisor')
     if 'jog' in manual_modes:
-        return active('jog', '조그 모드 동작 중', 'motion_supervisor')
+        return active('jog', '조그 이동 중', 'motion_supervisor')
     if owner == 'stream':
         return active('stream', '수동 페이더 제어 중', 'motion_supervisor')
 
@@ -228,7 +228,7 @@ def add_monitoring_motion_values(
             motor.update({
                 'motion_value_status': 'missing',
                 'motion_value_message': (
-                    '활성 조인트 중복 설정로 모션값을 연결할 수 없음'
+                    '사용 중인 조인트가 중복 설정되어 모션값을 연결할 수 없음'
                 ),
             })
             continue
@@ -248,7 +248,7 @@ def add_monitoring_motion_values(
             })
             continue
         source = str(value_sources.get(motion_id) or '')
-        source_label = {'stream': '수동 페이더', 'motion_run': '모션 실행'}.get(source, source)
+        source_label = {'stream': '수동 페이더', 'motion_run': '애니메이션 재생'}.get(source, source)
         motor.update({
             'motion_value_rad': round(motion_value, 9),
             'motion_value_status': 'received',

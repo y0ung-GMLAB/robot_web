@@ -408,7 +408,7 @@ def list_motion_files(
     return {
         'success': True,
         'message': (
-            '현재 프로젝트 모션 파일을 불러왔습니다'
+            '현재 프로젝트의 애니메이션을 불러왔습니다'
             if repository.selected_project_id()
             else NO_PROJECT_SELECTED
         ),

@@ -2,7 +2,7 @@
      셋을 담고 있어 탭 이름과 내용이 어긋났다 · 프로젝트 쪽을 갈랐다 · §6-67 -->
       <section class="system-panel workspace-panel hidden" data-workspace-panel="project" aria-label="프로젝트 관리">
         <div class="section-head workspace-page-head">
-          <div><strong>프로젝트 관리</strong><small>프로젝트를 만들고 애니메이션을 불러옵니다</small></div>
+          <div><strong>프로젝트 관리</strong><small>프로젝트를 만들고 백업하거나 애니메이션을 가져옵니다</small></div>
         </div>
 
         <div class="system-project-grid">
@@ -14,16 +14,16 @@
               <div class="project-sidebar-actions">
                 <button id="projectCreateButton" type="button">새 프로젝트</button>
                 <button id="projectUsbRescanButton" type="button">프로젝트 목록 갱신</button>
-                <button id="clearMotorRuntimeButton" type="button" disabled title="Motor Manager 실행 적용을 해제해 프로젝트 삭제가 가능하게 합니다">실행 적용 해제</button>
+                <button id="clearMotorRuntimeButton" type="button" disabled title="장비에 적용된 설정을 해제해 현재 프로젝트를 삭제할 수 있게 합니다">실행 적용 해제</button>
                 <button id="projectDeleteButton" class="danger" type="button" disabled>현재 프로젝트 삭제</button>
               </div>
               <!-- 백업·복원·휴지통 · 수정 목록 33 · PC 디스크가 고장 나도 매장 설정을 잃지 않게 -->
               <div class="project-sidebar-actions">
-                <button id="projectExportButton" type="button" disabled title="모터 설정·조인트 매핑·애니메이션·스케줄을 zip 하나로 이 브라우저에 내려받습니다 (기록 제외)">zip 내려받기</button>
-                <button id="projectImportZipButton" type="button" title="내려받은 zip 으로 프로젝트를 복원합니다 · 같은 프로젝트가 있으면 확인 뒤 덮어쓰고 있던 것은 휴지통으로">zip 올려 복원</button>
+                <button id="projectExportButton" type="button" disabled title="모터 설정, 조인트 매핑, 애니메이션, 스케줄을 zip 파일 하나로 다운로드합니다(기록 제외)">zip 다운로드</button>
+                <button id="projectImportZipButton" type="button" title="다운로드한 zip 파일로 프로젝트를 복원합니다. 같은 프로젝트가 있으면 한 번 더 확인한 뒤 덮어쓰고, 기존 프로젝트는 휴지통으로 옮깁니다.">zip 파일로 복원</button>
                 <input id="projectImportZipInput" type="file" class="hidden" accept=".zip,application/zip">
-                <button id="projectTrashButton" type="button" title="지운 프로젝트 · 7일 뒤 자동 정리">휴지통</button>
-                <button id="projectBackupsButton" type="button" title="하루 한 번 이 PC 에 저절로 남기는 프로젝트 zip · 14일 보관 · 내려받아 「zip 올려 복원」">자동 백업</button>
+                <button id="projectTrashButton" type="button" title="삭제한 프로젝트 · 7일 뒤 자동 삭제">휴지통</button>
+                <button id="projectBackupsButton" type="button" title="하루에 한 번 자동으로 만드는 프로젝트 zip입니다(14일 보관). 다운로드한 뒤 「zip 파일로 복원」으로 복원하세요.">자동 백업</button>
               </div>
               <div id="projectTrashList" class="project-usb-help hidden"></div>
               <div id="projectBackupsList" class="project-usb-help hidden"></div>
@@ -32,7 +32,7 @@
                    조인트 매핑은 받는 PC 의 하드웨어에 매인 값이라 옮기면 꼬인다 ·
                    종류를 고르는 칸이 없으니 고를 일도 없다 -->
               <div class="project-import-row">
-                <button id="projectImportFileButton" type="button" disabled>내 PC에서 가져오기</button>
+                <button id="projectImportFileButton" type="button" disabled>애니메이션 파일 가져오기</button>
                 <input id="projectImportFileInput" type="file" class="hidden" accept=".json">
               </div>
             </div>
@@ -43,9 +43,9 @@
               <strong>프로젝트 메모</strong>
               <span id="projectMemoCount">0 / 4000</span>
             </div>
-            <textarea id="projectMemoInput" maxlength="4000" rows="6" placeholder="프로젝트 메모" disabled></textarea>
+            <textarea id="projectMemoInput" maxlength="4000" rows="6" placeholder="다음 작업자에게 남길 내용" disabled></textarea>
             <div class="system-project-memo-footer">
-              <span id="projectMemoStatus">프로젝트 선택 필요</span>
+              <span id="projectMemoStatus">프로젝트를 선택하세요</span>
               <button id="projectMemoSaveButton" class="primary" type="button" disabled>메모 저장</button>
             </div>
           </section>
@@ -57,7 +57,7 @@
               <strong>프로젝트 정보 파일</strong>
               <span id="projectFileEditorTitle">project.json</span>
             </div>
-            <span id="projectFileInfo">프로젝트 선택 필요</span>
+            <span id="projectFileInfo">프로젝트를 선택하세요</span>
           </div>
           <div class="project-file-manager-layout">
             <section class="project-file-editor-panel">

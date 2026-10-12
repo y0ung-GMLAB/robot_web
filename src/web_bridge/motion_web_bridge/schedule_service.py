@@ -86,8 +86,8 @@ class ScheduleService:
         role = resolve_master_role(package_hint=PACKAGE_HINT)
         if not role.is_master:
             raise ScheduleOwnershipError(
-                '이 PC 는 연동 슬레이브라 스케줄을 설정할 수 없습니다 · '
-                '마스터 PC 에서 설정하세요 · ' + role.reason
+                '슬레이브 PC라서 스케줄을 설정할 수 없습니다. '
+                '마스터 PC에서 설정하세요 · ' + role.reason
             )
 
     # ----------------------------------------------------------------- #
@@ -189,7 +189,7 @@ class ScheduleService:
         item.saved_timezone = local_clock.timezone_name() or None
         if not self.store.upsert_schedule(item):
             raise RuntimeError(
-                f'프로젝트 {self.store.current_project_id!r} 에 스케줄을 저장하지 못했습니다'
+                f'프로젝트 {self.store.current_project_id!r}에 스케줄을 저장하지 못했습니다'
             )
         return {'status': 'ok', 'schedule': item.to_dict()}
 
@@ -197,12 +197,12 @@ class ScheduleService:
         self._follow_selected_project()
         self._require_owner()
         if not self.store.delete_schedule(schedule_id):
-            raise ScheduleNotFound('그 스케줄이 없거나 지우지 못했습니다')
+            raise ScheduleNotFound('해당 스케줄이 없거나 삭제하지 못했습니다')
         return {'status': 'ok', 'deleted_id': schedule_id}
 
     def set_enabled(self, schedule_id: str, enabled: bool) -> Dict[str, Any]:
         self._follow_selected_project()
         self._require_owner()
         if not self.store.set_enabled(schedule_id, enabled):
-            raise ScheduleNotFound('그 스케줄이 없습니다')
+            raise ScheduleNotFound('해당 스케줄이 없습니다')
         return {'status': 'ok', 'schedule_id': schedule_id, 'enabled': enabled}

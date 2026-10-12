@@ -67,7 +67,7 @@ if (panel) {
     runRows.appendChild(row);
   }
 
-  function clearDetail(title = '회차를 고르세요') {
+  function clearDetail(title = '회차를 선택하세요') {
     state.file = '';
     detailTitle.textContent = title;
     downloadLink.classList.add('hidden');
@@ -94,7 +94,7 @@ if (panel) {
     if (!payload?.project_id) {
       summary.textContent = payload?.message || '프로젝트를 먼저 선택하세요';
     } else if (!state.days.length) {
-      summary.textContent = '아직 기록된 회차가 없습니다 · 애니메이션을 실행하면 회차마다 남습니다';
+      summary.textContent = '아직 재생 기록이 없습니다. 재생하면 회차마다 기록이 남습니다.';
     }
   }
 
@@ -115,7 +115,7 @@ if (panel) {
       cell(row, `${Number(run.duration_sec || 0).toFixed(1)}s`);
       cell(row, worst ? `${worst.value.toFixed(2)}° (${worst.motionId})` : '-');
       if (!run.file_exists) {
-        row.title = 'CSV 파일이 보존 기간·용량 정리로 지워졌습니다 · 요약만 남아 있습니다';
+        row.title = '보관 기간이나 용량 제한으로 CSV 파일이 삭제되어 요약만 남아 있습니다';
         row.classList.add('muted');
       }
       return row;
@@ -244,7 +244,7 @@ if (panel) {
   deleteDayButton.addEventListener('click', async () => {
     if (!state.date) return;
     const confirmed = await showConfirm(
-      `${state.date} 의 재생 기록(CSV ${state.runs.length}회차)을 모두 삭제합니다.\n삭제한 기록은 복구할 수 없습니다.`,
+      `${state.date}의 재생 기록(CSV ${state.runs.length}회차)을 모두 삭제합니다.\n삭제한 기록은 복구할 수 없습니다.`,
       { title: '재생 기록 삭제', confirmLabel: '삭제', tone: 'danger' },
     );
     if (!confirmed) return;

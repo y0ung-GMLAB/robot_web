@@ -43,11 +43,11 @@ test('one-shot and continuous start include whole-axis initialization automatica
   assert.doesNotMatch(renderBody, /startReady/);
   assert.match(
     startBody,
-    /전체 활성 축를 초기 위치로 이동한 뒤 연속 재생을 시작/,
+    /사용 중인 모든 조인트를 초기 위치로 옮긴 뒤 연속 재생을 시작/,
   );
   assert.match(
     startBody,
-    /전체 활성 축를 초기 위치로 이동한 뒤 현재 애니메이션을 1회 실행/,
+    /사용 중인 모든 조인트를 초기 위치로 옮긴 뒤 애니메이션을 1회 재생/,
   );
   assert.match(startBody, /startMotionRun\(\{\s*\.\.\.motionRunPayload\(\),\s*run_mode: runMode,/);
   // MuJoCo 같이 보기는 브라우저 몫이다 · 서버에 실어 보내지 않는다 (7 · 네이티브 뷰어 없음)
@@ -182,7 +182,7 @@ test('registered motion file deletion is blocked with an alert before delete req
 test('motion files leave and arrive as plain files · one door each', () => {
   // 나가는 문 · 모션 실행 화면의 「파일로 저장」 · 이미 있는 프로젝트 파일
   // 경로를 그대로 쓴다 · 전용 업로드/다운로드 API 를 새로 내지 않는다.
-  assert.match(html, /id="downloadMotionFileButton"[^>]*>내 PC로 저장</);
+  assert.match(html, /id="downloadMotionFileButton"[^>]*>다운로드</);
   assert.match(dom, /downloadMotionFileButton/);
   assert.match(controller, /function downloadSelectedMotionFile/);
   assert.match(controller, /projectFileDownloadUrl\(motionProjectId, 'motions', file\.id\)/);
@@ -193,7 +193,7 @@ test('motion files leave and arrive as plain files · one door each', () => {
 
   // 들어오는 문 · 프로젝트 관리의 「모션 파일 불러오기」 하나뿐 ·
   // 모션 실행 화면에는 불러오기 입력을 두지 않는다
-  assert.match(html, /id="projectImportFileButton"[^>]*>내 PC에서 가져오기</);
+  assert.match(html, /id="projectImportFileButton"[^>]*>애니메이션 파일 가져오기</);
   assert.doesNotMatch(html, /uploadMotionFileButton|motionFileInput/);
   assert.doesNotMatch(dom, /uploadMotionFileButton|motionFileInput/);
   assert.doesNotMatch(controller, /uploadSelectedFile|uploadMotionFile/);
@@ -222,13 +222,13 @@ test('DDS execution blocks show a recovery popup and expose the way out', () => 
     'utf8',
   );
   assert.match(controller, /async function showMotionRunFailure/);
-  assert.match(controller, /DDS 그룹 실행이 로컬 애니메이션 재생을 사용 중입니다/);
+  assert.match(controller, /그룹 재생 중이라 단독 재생을 할 수 없습니다/);
   // 버튼 이름이 바뀌면 이 안내문도 같이 바뀌어야 한다 · §6-132
   assert.match(controller, /「그룹 참여」를 끈 뒤 다시 시도하세요/);
   assert.match(html, /id="coordinationJoinSwitch"/);
   assert.match(dom, /coordinationJoinSwitch/);
   assert.match(coordination, /control\('leave'\)/);
-  assert.match(coordination, /이 PC 혼자 재생합니다/);
+  assert.match(coordination, /단독으로 재생합니다/);
   // 들어오거나 나가거나 둘 뿐이다 · 「지금 빠지기」는 없앴다 · §6-164
   assert.doesNotMatch(html, /coordinationTemporaryDisableButton/);
   assert.doesNotMatch(dom, /coordinationTemporaryDisableButton/);

@@ -142,7 +142,7 @@ function renderWorkspacePanel() {
     el.projectExplorerSelect.classList.toggle('hidden', !projectSelectionAllowed);
     el.projectExplorerSelect.title = projectSelectionAllowed
       ? '현재 프로젝트 변경'
-      : '프로젝트 변경은 프로젝트·장비 > 시스템 정보에서만 가능합니다';
+      : '프로젝트 변경은 설정 > 시스템 정보에서만 할 수 있습니다';
   }
   if (el.workspaceTabs) {
     el.workspaceTabs.querySelectorAll('[data-workspace-group]').forEach((button) => {
@@ -373,7 +373,7 @@ function renderServiceManagement(payload) {
     // 어느 PC 의 화면인지 상단바에 늘 둔다 · §6-100
     const hostname = String(systemInfo.hostname || '').trim();
     el.globalPcName.textContent = hostname ? `🖥 ${hostname}` : '';
-    el.globalPcName.title = hostname ? `이 화면은 ${hostname} 의 것입니다` : '';
+    el.globalPcName.title = hostname ? `${hostname} PC의 화면입니다` : '';
     el.globalPcName.style.display = hostname ? '' : 'none';
   }
   if (el.systemWorkspacePath) {
@@ -388,22 +388,22 @@ function renderServiceManagement(payload) {
   }
   if (el.serviceMode) {
     el.serviceMode.textContent = managed
-      ? (motorManaged ? '분리 자동 실행 · 자동 복구' : '분리 서비스 설치 필요')
+      ? (motorManaged ? '자동 실행 · 자동 복구' : '모터 제어 서비스 설치 필요')
       : '수동 실행';
     el.serviceMode.classList.toggle('warning-text', !managed || !motorManaged);
   }
   const programRestartBlockedReason = !managed
-    ? '상위 프로그램 자동 실행 서비스가 설치되지 않았습니다'
+    ? '프로그램 자동 실행 서비스가 설치되지 않았습니다'
     : !motorManaged
-      ? 'Motor Manager 분리 서비스가 설치되지 않았습니다'
+      ? '모터 제어 서비스가 설치되지 않았습니다'
       : '';
   if (el.programRestartButton) {
     el.programRestartButton.disabled = Boolean(programRestartBlockedReason);
-    el.programRestartButton.title = programRestartBlockedReason || '상위 프로그램을 재시작합니다';
+    el.programRestartButton.title = programRestartBlockedReason || '프로그램을 재시작합니다(모터 제어와 서보 상태는 그대로)';
   }
   if (el.headerProgramRestartButton) {
     el.headerProgramRestartButton.disabled = Boolean(programRestartBlockedReason);
-    el.headerProgramRestartButton.title = programRestartBlockedReason || '상위 프로그램을 재시작합니다';
+    el.headerProgramRestartButton.title = programRestartBlockedReason || '프로그램을 재시작합니다(모터 제어와 서보 상태는 그대로)';
   }
   appState.emergencyLatched = Boolean(payload?.safety_status?.emergency_latched);
   // 「모터를 움직일 수 있나」의 답 · 판단은 서버가 한다 · §6-171
@@ -427,7 +427,7 @@ function renderServiceManagement(payload) {
     el.executionContextState.classList.toggle('warning-text', !badge.ok);
   }
   if (appState.emergencyLatched && el.summaryText) {
-    el.summaryText.textContent = '긴급정지 잠김 · 프로그램 재시작 필요';
+    el.summaryText.textContent = '긴급 정지 잠김 · 프로그램 재시작 필요';
   }
   if (el.programHealthDetail) {
     const age = Number(payload?.motion_state_age_sec);
@@ -437,10 +437,10 @@ function renderServiceManagement(payload) {
     el.programHealthDetail.textContent = managed
       ? (
         motorManaged
-          ? `분리 자동실행 정상 · ${stateText}`
-          : `상위 서비스만 설치됨 · ${stateText} · 최초 서비스 설치 다시 실행 필요`
+          ? `자동 실행 정상 · ${stateText}`
+          : `프로그램 서비스만 설치됨 · ${stateText} · 서비스 설치를 다시 실행하세요`
       )
-      : `수동 실행 중 · ${stateText} · 최초 서비스 설치 필요`;
+      : `수동 실행 중 · ${stateText} · 서비스 설치가 필요합니다`;
     el.programHealthDetail.classList.toggle(
       'warning-text',
       !managed || !motorManaged || !(Number.isFinite(age) && age <= 1.0),
@@ -461,13 +461,13 @@ function contextBadge(context) {
     try { return Boolean(read()); } catch { return false; }
   };
   const unsaved = [];
-  if (asks(() => motorConfig.hasUnsavedChanges())) unsaved.push('모터 관리');
+  if (asks(() => motorConfig.hasUnsavedChanges())) unsaved.push('모터 설정');
   if (asks(() => motionData.hasUnsavedMappingChanges())) unsaved.push('조인트 매핑');
   if (unsaved.length) {
     return {
       ok: false,
       text: '저장 안 한 변경',
-      detail: `${unsaved.join(' · ')} 에 저장하지 않은 편집이 있습니다 · 저장 전에는 장비에 안 들어갑니다 · 누르면 모터 관리로`,
+      detail: `${unsaved.join(' · ')}에 저장하지 않은 변경이 있습니다. 저장해야 장비에 적용됩니다. 누르면 모터 설정으로 이동합니다.`,
       target: 'config',
     };
   }
@@ -476,7 +476,7 @@ function contextBadge(context) {
     return {
       ok: true,
       text: '설정 적용됨',
-      detail: '저장한 모터 설정·조인트 매핑이 지금 장비에서 돌고 있습니다',
+      detail: '저장한 모터 설정과 조인트 매핑이 장비에 적용되어 있습니다',
       target: '',
     };
   }
@@ -484,7 +484,7 @@ function contextBadge(context) {
     return {
       ok: false,
       text: '모터 적용 필요',
-      detail: `${context?.message || '저장은 됐지만 장비에 아직 안 들어갔습니다'} · 누르면 모터 관리로 (「장비에 적용 · 모터 재시작」)`,
+      detail: `${context?.message || '저장했지만 아직 장비에 적용되지 않았습니다'} · 누르면 모터 설정으로 이동합니다 (「장비에 적용 · 모터 재시작」)`,
       target: 'config',
     };
   }
@@ -492,7 +492,7 @@ function contextBadge(context) {
     return {
       ok: false,
       text: '설정 파일 필요',
-      detail: `${context?.message || '모터 설정과 조인트 매핑 파일을 확정하세요'} · 누르면 모터 관리로`,
+      detail: `${context?.message || '모터 설정과 조인트 매핑 파일을 확정하세요'} · 누르면 모터 설정으로 이동합니다`,
       target: 'config',
     };
   }
@@ -724,7 +724,7 @@ function motorErrorDetailRows(motor) {
   if (alarm) {
     rows.push(['에러 내용', `${alarm.code_label} · ${alarm.name}`]);
     rows.push(['적용 등급', `${alarm.effective_grade || alarm.default_grade}등급 · ${alarm.action}`]);
-    rows.push(['사용자 대처', alarm.guidance]);
+    rows.push(['조치 방법', alarm.guidance]);
   }
   return rows;
 }
@@ -819,7 +819,7 @@ function dismissMotorErrorPopup() {
  */
 function missingAxisDetail(payload, state) {
   const served = String(payload?.motor_operation?.error || '').trim();
-  if (served.includes('올라오지 않았습니다')) return served;
+  if (served.includes('연결되지 않았습니다')) return served;
 
   const expected = payload?.motor_operation?.details?.expected_axes;
   if (!Array.isArray(expected) || expected.length === 0) return '';
@@ -831,9 +831,9 @@ function missingAxisDetail(payload, state) {
   const missing = expected.map(Number).filter((axis) => !online.has(axis));
   if (missing.length === 0) return '';
   return (
-    `${missing.join(', ')}번 모터가 올라오지 않았습니다 · `
-    + '전원·통신선·드라이버 상태를 확인하세요 '
-    + `(붙은 모터 ${expected.length - missing.length}/${expected.length})`
+    `${missing.join(', ')}번 모터가 연결되지 않았습니다. `
+    + '전원, 통신선, 드라이버 상태를 확인하세요 '
+    + `(연결된 모터 ${expected.length - missing.length}/${expected.length})`
   );
 }
 
@@ -875,7 +875,7 @@ function restartReadyState(payload) {
     return {
       ready: false,
       title: '웹 재연결 대기',
-      detail: 'motion_web_bridge 재시작을 기다리는 중',
+      detail: '웹 서버 재시작을 기다리는 중',
     };
   }
   const motorOperation = payload?.motor_operation || {};
@@ -910,7 +910,7 @@ function restartReadyState(payload) {
       return {
         ready: false,
         title: '프로그램 재시작 확인 중',
-        detail: '새 motion_web_bridge 인스턴스 확인 대기',
+        detail: '웹 서버가 다시 시작되기를 기다리는 중',
       };
     }
     return {
@@ -924,7 +924,7 @@ function restartReadyState(payload) {
     return {
       ready: false,
       failed: true,
-      title: '모터 관리 노드 시작 차단',
+      title: '모터 제어 프로그램 시작 차단',
       detail: runtime.message || 'EtherCAT 오류 상태를 먼저 해제해야 합니다.',
     };
   }
@@ -932,7 +932,7 @@ function restartReadyState(payload) {
     return {
       ready: false,
       failed: true,
-      title: '모터 관리 노드 미실행',
+      title: '모터 제어 프로그램 실행 안 됨',
       detail: `${runtime.message || '모터 실행 설정이 없습니다.'} · ${runtime.runtime_config_file || '-'}`,
     };
   }
@@ -940,14 +940,14 @@ function restartReadyState(payload) {
     return {
       ready: false,
       title: '설정 적용·재시작 중입니다',
-      detail: 'motion_state 수신 대기',
+      detail: '모터 상태 수신 대기',
     };
   }
   if (state.monitoring_enabled !== true) {
     return {
       ready: false,
       title: '모니터링 시작 대기',
-      detail: 'monitoring_enabled=true 상태 대기',
+      detail: '모니터링이 켜지기를 기다리는 중',
     };
   }
 
@@ -962,13 +962,13 @@ function restartReadyState(payload) {
         ready: false,
         failed: true,
         title: '모터 상태 수신 실패',
-        detail: `30초 안에 motor_status를 받지 못했습니다 · ${runtime.runtime_config_file || '실행 설정 확인 필요'}`,
+        detail: `30초 동안 모터 상태를 받지 못했습니다 · ${runtime.runtime_config_file || '실행 설정 확인 필요'}`,
       };
     }
     return {
       ready: false,
       title: '모터 상태 수신 대기',
-      detail: `경과 ${elapsedSec.toFixed(1)}초 · /motion_control/motor_status 대기`,
+      detail: `경과 ${elapsedSec.toFixed(1)}초 · 모터 상태를 기다리는 중`,
     };
   }
   if (
@@ -979,7 +979,7 @@ function restartReadyState(payload) {
     return {
       ready: false,
       title: '모터 상태 갱신 대기',
-      detail: `마지막 motor_status age ${Math.max(generatedAt - lastMotorStatusAt, 0).toFixed(2)}초`,
+      detail: `마지막 모터 상태 수신 후 ${Math.max(generatedAt - lastMotorStatusAt, 0).toFixed(2)}초`,
     };
   }
   const motors = Array.isArray(state.motors) ? state.motors : [];
@@ -987,7 +987,7 @@ function restartReadyState(payload) {
     return {
       ready: false,
       title: '모터 목록 수신 대기',
-      detail: '설정 모터와 런타임 모터 상태 대기',
+      detail: '설정된 모터의 상태를 기다리는 중',
     };
   }
 
@@ -1028,14 +1028,14 @@ function restartReadyState(payload) {
       ready: false,
       failed: true,
       title: '모터 연결 실패',
-      detail: '모터 검색 여부와 관계없이 제어 런타임에서 통신 중인 모터가 없습니다.',
+      detail: '통신 중인 모터가 하나도 없습니다. 모터 전원과 통신선을 확인하세요.',
     };
   }
   return {
     ready: true,
     title: '설정 적용·재시작 완료',
     detail: [
-      `런타임 온라인 ${connectedMotors.length}개`,
+      `연결 ${connectedMotors.length}개`,
       discovery.hasDirectScan ? `버스 검색 감지 ${Number(discovery.discoveredCount || 0)}개` : '',
       discovery.ethercatScanned ? `EtherCAT ${discovery.ethercatCount}개` : '',
       discovery.dynamixelScanned ? `다이나믹셀 ${discovery.dynamixelCount}개` : '',
@@ -1052,8 +1052,8 @@ function updateRestartProgress(payload = null) {
   const message = programRestart
     ? '웹·Supervisor·애니메이션 재생이 다시 연결됐는지 확인하는 중입니다.'
     : [
-      'motor_manager_node, motion_state_monitor, motion_supervisor, motion_web_bridge 상태를 확인하는 중입니다.',
-      'YAML 등록 수가 아니라 직접 검색되거나 실제 감지된 모터를 기준으로 확인합니다.',
+      '모터 제어, 상태 감시, 재생 관리, 웹 서버가 다시 시작됐는지 확인하는 중입니다.',
+      '설정 파일에 등록된 수가 아니라 실제로 감지된 모터를 기준으로 확인합니다.',
     ].join(' ');
 
   if (state.failed) {
@@ -1146,7 +1146,7 @@ const motorConfig = createMotorConfigController({
     setRestartOverlay(
       true,
       '설정 적용·재시작 중입니다',
-      'motor_manager_node, motion_state_monitor, motion_supervisor, motion_web_bridge가 다시 시작될 때까지 기다려 주세요.',
+      '모터 제어, 상태 감시, 재생 관리, 웹 서버가 다시 시작될 때까지 기다려 주세요.',
       '재시작 요청 전송 중',
     );
     startRestartProgressPolling();
@@ -1193,8 +1193,8 @@ function renderManualModeBanner() {
   }
   if (el.manualModeBannerDetail) {
     el.manualModeBannerDetail.textContent = mode === 'off'
-      ? '움직임 명령이 전부 차단돼 있습니다 · 수동 조작은 「수동」 모드에서 하세요'
-      : '수동 조작(조그·다이얼·동작·페이더)은 「수동」 모드에서만 됩니다 · 스케줄이 빈틈에 재생을 켜면 만지던 모터가 움직일 수 있습니다';
+      ? '모든 움직임 명령이 차단되어 있습니다. 수동 조작은 「수동」 모드에서 하세요.'
+      : '수동 조작(조그·다이얼·페이더)은 「수동」 모드에서만 할 수 있습니다. 스케줄 모드에서는 조작하는 중에 스케줄이 재생을 시작해 모터가 움직일 수 있습니다.';
   }
 }
 
@@ -1224,8 +1224,8 @@ async function captureJogPoint(kind, { axis, motorDeg }) {
     ? '조인트 매핑의 기준점(모션 0°)'
     : '조인트 매핑 범위(모션 deg)';
   const confirmed = await showConfirm(
-    `모터 ${axis}의 지금 위치 ${motorDeg.toFixed(3)}° 를 저장합니다.\n\n저장 위치: ${where}`
-      + '\n\n저장한 뒤 운전 한계(소프트 리밋)도 새 값으로 옮길지 바로 묻습니다 (장비에 적용 · 모터 재시작).',
+    `모터 ${axis}의 현재 위치 ${motorDeg.toFixed(3)}°를 저장합니다.\n\n저장 위치: ${where}`
+      + '\n\n저장한 뒤 운전 한계(소프트 리밋)도 새 값으로 바꿀지 묻습니다(「장비에 적용 · 모터 재시작」).',
     { title, confirmLabel: '저장', tone: 'warning' },
   );
   if (!confirmed) return { success: false, message: '취소했습니다' };
@@ -1235,7 +1235,7 @@ async function captureJogPoint(kind, { axis, motorDeg }) {
   // 「장비에 적용 · 모터 재시작」 뒤에야 바뀐다 · 안 하면 기준점만 새것이고 리밋은 옛 기준으로 남는다
   // (실물 2026-10-08) · 그래서 저장 직후 바로 묻는다 · 확인 창은 적용 쪽 것 하나
   const applied = await motorConfig.applyConfigRestart({
-    reason: `${title} 저장됨 · 운전 한계(소프트 리밋)도 새 기준으로 옮기려면 지금 장비에 적용·재시작해야 합니다.`,
+    reason: `${title}을 저장했습니다. 운전 한계(소프트 리밋)도 새 기준으로 바꾸려면 「장비에 적용 · 모터 재시작」을 해야 합니다.`,
   });
   return applied
     ? { success: true, message: `${saved.message} · 장비에 적용·재시작 중` }
@@ -1539,8 +1539,8 @@ if (el.programRestartButton) {
   el.programRestartButton.addEventListener('click', async () => {
     const confirmed = await appDialogs.confirm(
       '프로그램을 재시작합니다.\n\n'
-      + 'Motor Manager와 EtherCAT은 계속 실행되며 현재 서보 ON/OFF 상태를 유지합니다.\n'
-      + '재생이 정지된 상태인지 확인했습니까?',
+      + '모터 제어와 EtherCAT은 계속 실행되고, 서보 ON/OFF 상태도 그대로 유지됩니다.\n'
+      + '재생이 정지된 상태인지 확인했나요?',
       { title: '프로그램 재시작', confirmLabel: '재시작', tone: 'warning' },
     );
     if (!confirmed) return;
@@ -1571,7 +1571,7 @@ if (el.programRestartButton) {
 if (el.headerProgramRestartButton) {
   el.headerProgramRestartButton.addEventListener('click', () => {
     if (!el.programRestartButton || el.programRestartButton.disabled) {
-      window.alert('프로그램 재시작을 사용할 수 없습니다. 시스템 정보에서 프로그램 상태를 확인하세요.');
+      window.alert('프로그램을 재시작할 수 없습니다. 설정 > 시스템 정보에서 프로그램 상태를 확인하세요.');
       return;
     }
     el.programRestartButton.click();
@@ -1583,9 +1583,9 @@ async function runSafetyStop(emergency) {
   if (!button || button.disabled) return;
   const originalText = button.textContent;
   button.disabled = true;
-  button.textContent = emergency ? '긴급정지 요청 중' : '동작 정지 중';
+  button.textContent = emergency ? '긴급 정지 요청 중' : '동작 정지 중';
   if (el.summaryText) {
-    el.summaryText.textContent = emergency ? '긴급정지 요청 중' : '전체 동작 정지 요청 중';
+    el.summaryText.textContent = emergency ? '긴급 정지 요청 중' : '전체 동작 정지 요청 중';
   }
 
   try {
@@ -1624,14 +1624,14 @@ async function runSafetyStop(emergency) {
     if (safetyFailure) failures.unshift(`최종 모터 출력: ${safetyFailure}`);
     if (el.summaryText) {
       el.summaryText.textContent = emergency
-        ? '긴급정지 잠김 · 프로그램 재시작 필요'
+        ? '긴급 정지 잠김 · 프로그램 재시작 필요'
         : failures.length ? '전체 동작 정지 · 일부 상태 확인 필요' : '전체 동작 정지 완료';
     }
     if (failures.length) {
-      window.alert(`정지 요청 후 다음 상태를 확인해야 합니다.\n\n${failures.join('\n')}`);
+      window.alert(`정지를 요청했습니다. 다음 항목을 확인하세요.\n\n${failures.join('\n')}`);
     }
   } catch (error) {
-    if (el.summaryText) el.summaryText.textContent = '안전 정지 실패 · 즉시 장비 상태 확인';
+    if (el.summaryText) el.summaryText.textContent = '안전 정지 실패 · 즉시 장비 상태를 확인하세요';
     window.alert(error?.message || String(error));
   } finally {
     button.textContent = originalText;

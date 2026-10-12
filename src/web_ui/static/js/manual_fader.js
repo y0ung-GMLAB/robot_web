@@ -102,14 +102,14 @@ export function createManualFaderController({ el, getLatestState }) {
       const fileId = String(listing?.active_file_id || '');
       if (!fileId) {
         mapping = null;
-        setMessage('조인트 매핑이 없습니다 · 모터 관리 화면에서 먼저 만드세요');
+        setMessage('조인트 매핑이 없습니다. 「모터 설정」 화면에서 먼저 만드세요');
         render();
         return;
       }
       const payload = await fetchMotionMapping(fileId);
       if (payload?.success === false || !payload?.mapping) {
         // 못 읽었으면 들고 있던 것을 유지한다 · §6-237 과 같은 이유 · 대신 곧 다시 읽는다
-        if (!mapping) setMessage('조인트 매핑을 아직 못 읽었습니다 · 잠시 후 다시 시도합니다');
+        if (!mapping) setMessage('조인트 매핑을 아직 읽지 못했습니다. 잠시 후 다시 읽습니다');
         retryAt = Date.now() + RETRY_MS;
         return;
       }
@@ -122,8 +122,8 @@ export function createManualFaderController({ el, getLatestState }) {
       };
       disconnect();
       setMessage(mapping.rows.length
-        ? '페이더를 잡는 동안만 전송합니다 · 놓으면 그 자리에 섭니다'
-        : '모션 범위(최소·최대)가 설정된 조인트 이름이 없습니다');
+        ? '페이더를 잡고 있는 동안에만 움직이고, 놓으면 그 자리에서 정지합니다'
+        : '범위(최소·최대)가 설정된 조인트가 없습니다');
       render();
     } catch (error) {
       if (!mapping) setMessage(`조인트 매핑 확인 실패: ${error?.message || error}`);
@@ -244,11 +244,11 @@ export function createManualFaderController({ el, getLatestState }) {
   function faderBlockReason(motor) {
     const modeReason = manualControlBlockReason();
     if (modeReason) return modeReason;
-    if (!motor) return '런타임에서 이 모터를 찾지 못했습니다';
+    if (!motor) return '모터 프로그램에서 이 모터를 찾지 못했습니다';
     if (String(motor.state || '') !== 'detected') return '모터가 감지되지 않았습니다';
-    if (motor.fault) return '모터에 에러가 있습니다';
+    if (motor.fault) return '모터에 오류가 있습니다';
     if (motor.servo_on !== true && String(motor.motor_type || '') !== 'dynamixel') {
-      return '서보가 켜진 상태가 아닙니다';
+      return '서보가 꺼져 있습니다';
     }
     return '';
   }
@@ -268,10 +268,10 @@ export function createManualFaderController({ el, getLatestState }) {
       <div class="manual-fader-row" data-fader-axis="${row.axis}">
         <div class="manual-fader-label">
           <strong>${escapeHtml(row.motionId)}</strong>
-          <span>모터 ${row.axis}</span>
+          <span>${row.axis}번 모터</span>
         </div>
         <input type="range" class="manual-fader-slider"
-          aria-label="${escapeHtml(row.motionId)} 모션 각도 (deg)"
+          aria-label="${escapeHtml(row.motionId)} 조인트 각도 (deg)"
           min="${row.lower}" max="${row.upper}" step="0.05" value="${row.lower}"
           data-fader-slider="${row.axis}">
         <div class="manual-fader-value mono">

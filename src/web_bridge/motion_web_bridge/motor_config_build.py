@@ -254,15 +254,15 @@ def axis_speed_limit_error(motor: Dict[str, Any]) -> str:
     max_rpm = number('max_speed_rpm')
     if profile_velocity and max_rpm and profile_velocity > max_rpm * 6.0 + 1e-6:
         return (
-            f'{axis}번 모터 · 프로파일 속도 {profile_velocity:g} deg/s 가 '
-            f'최대 속도 {max_rpm:g} rpm ({max_rpm * 6.0:g} deg/s) 보다 큽니다'
+            f'{axis}번 모터 · 프로파일 속도 {profile_velocity:g} deg/s가 '
+            f'최대 속도 {max_rpm:g} rpm ({max_rpm * 6.0:g} deg/s)보다 큽니다'
         )
     profile_acceleration = number('profile_acceleration')
     max_acceleration = number('acceleration')
     if profile_acceleration and max_acceleration and profile_acceleration > max_acceleration + 1e-6:
         return (
-            f'{axis}번 모터 · 프로파일 가속도 {profile_acceleration:g} deg/s² 가 '
-            f'최대 가속도 {max_acceleration:g} deg/s² 보다 큽니다'
+            f'{axis}번 모터 · 프로파일 가속도 {profile_acceleration:g} deg/s²가 '
+            f'최대 가속도 {max_acceleration:g} deg/s²보다 큽니다'
         )
     return ''
 

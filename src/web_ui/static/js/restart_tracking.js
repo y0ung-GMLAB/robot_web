@@ -6,7 +6,7 @@ export function trackedMotorRestartState(operation, expectedOperationId) {
   if (!expectedId) {
     return {
       state: 'waiting',
-      detail: '재시작 요청의 작업 ID를 기다리는 중입니다.',
+      detail: '재시작 요청을 보내고 응답을 기다리는 중입니다.',
     };
   }
   const operationId = String(operation?.operation_id || '').trim();
@@ -14,7 +14,7 @@ export function trackedMotorRestartState(operation, expectedOperationId) {
   if (operationId !== expectedId || operationType !== 'motor_restart') {
     return {
       state: 'waiting',
-      detail: `현재 재시작 작업 ${expectedId} 상태 수신 대기`,
+      detail: `재시작 작업(${expectedId}) 상태를 기다리는 중입니다.`,
     };
   }
   const status = String(operation?.status || '').trim();

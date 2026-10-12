@@ -86,7 +86,7 @@ def test_serial_disconnection_has_dynamixel_checklist():
     )
 
     assert result['failure_code'] == 'serial_not_ready'
-    assert 'Dynamixel 통신 연결' in result['message']
+    assert '다이나믹셀 통신 연결' in result['message']
     assert 'USB/직렬 케이블 및 포트 상태' in result['message']
 
 
@@ -94,7 +94,7 @@ def test_service_failure_guidance_does_not_claim_ethercat_is_the_cause():
     message = motor_restart_service_failure('service exited')
 
     assert '원인: service exited.' in message
-    assert 'AC Servo 사용 시' in message
+    assert 'AC 서보를 사용한다면' in message
 
 
 def test_motor_restart_timeout_persists_diagnosis_for_the_popup(

@@ -211,7 +211,7 @@ def test_active_dds_execution_blocks_local_start(tmp_path):
     service._local_api = lambda *_args, **_kwargs: {
         'execution': {'state': 'running', 'execution_id': 'exec-a'},
     }
-    assert 'DDS 그룹 실행' in service.local_execution_blocker()
+    assert '그룹 재생 중이라 단독 재생을' in service.local_execution_blocker()
 
 
 def test_stale_dds_display_state_without_lease_does_not_block_local_start(tmp_path):

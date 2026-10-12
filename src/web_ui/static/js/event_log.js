@@ -18,7 +18,7 @@ const EVENT_TYPE_LABELS = {
   continuous_motion_started: '연속 재생 시작',
   motion_started: '재생 시작',
   ethercat_alias_written: 'EEPROM Alias 변경',
-  group_excluded: '그룹 실행 · PC 제외',
+  group_excluded: '그룹 재생에서 PC 제외',
   minas_absolute_blocked: '앱솔루트 미확인 · 동작 차단',
   minas_absolute_confirmed: '앱솔루트 확인 · 차단 해제',
   upper_service_crashed: '상위 서비스 비정상 종료 · 자동 재시작',
@@ -143,7 +143,7 @@ export function createMotorEventLogController({ el }) {
         );
         el.motorEventLogStorage.textContent = (
           `${logFiles.length}/${Number(payload.max_files) || 0}개 파일 · ${totalRecords}/${Number(payload.max_records) || 0}건`
-          + ` · ${Number(payload.retention_days) || 0}일 · 최대 ${maxMb}MB`
+          + ` · ${Number(payload.retention_days) || 0}일 보관 · 최대 ${maxMb}MB`
         );
       }
     } catch (error) {

@@ -72,7 +72,7 @@ def test_records_motion_lifecycle_transitions(tmp_path):
         'initial_position_completed',
         'single_motion_started',
     ]
-    assert events[-1]['content'].startswith('1회 모션 시작')
+    assert events[-1]['content'].startswith('1회 재생 시작')
     assert events[-1]['details']['run_mode'] == 'once'
 
 
@@ -90,7 +90,7 @@ def test_records_continuous_motion_start_separately(tmp_path):
 
     event = bridge.events()['events'][0]
     assert event['event_type'] == 'continuous_motion_started'
-    assert event['content'].startswith('연속 모션 시작')
+    assert event['content'].startswith('연속 재생 시작')
     assert event['details']['run_mode'] == 'continuous'
 
 

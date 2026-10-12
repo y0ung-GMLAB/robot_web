@@ -56,11 +56,11 @@ test('슬레이브 PC 는 왜 시작할 수 없는지 글로 말한다', () => {
    * 더 그렇다. */
   const view = motionRunBlockView({
     scope: 'group',
-    availability: { ok: false, active: false, reason: '이 PC 는 슬레이브입니다 · 마스터 PC 에서 시작하세요' },
+    availability: { ok: false, active: false, reason: '슬레이브 PC입니다. 마스터 PC에서 시작하세요' },
   });
 
   assert.equal(view.blocked, true);
-  assert.match(view.reason, /마스터 PC 에서 시작하세요/);
+  assert.match(view.reason, /마스터 PC에서 시작하세요/);
 });
 
 test('그룹이 도는 중은 막힌 것이 아니다', () => {

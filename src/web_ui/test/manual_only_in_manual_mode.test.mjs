@@ -20,7 +20,7 @@ test('only manual mode opens the gate · unknown mode does not block', () => {
   setRunMode('manual');
   assert.equal(manualControlBlockReason(), '');
   setRunMode('schedule');
-  assert.match(manualControlBlockReason(), /스케줄 모드 · 수동 조작은 「수동」 모드에서만/);
+  assert.match(manualControlBlockReason(), /스케줄 모드에서는 수동 조작과 직접 재생을 할 수 없습니다/);
   setRunMode('off');
   assert.match(manualControlBlockReason(), /오프 모드/);
 });

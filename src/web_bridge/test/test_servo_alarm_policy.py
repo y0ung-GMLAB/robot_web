@@ -61,7 +61,7 @@ def test_invalid_or_unknown_project_overrides_are_discarded():
 def test_effective_action_changes_with_project_grade():
     rows = {row['code']: row for row in catalog_payload({'16': 3})}
 
-    assert rows[16]['default_action'] == '해당 에러축 정지'
+    assert rows[16]['default_action'] == '해당 모터만 정지'
     assert rows[16]['effective_grade'] == 3
     assert rows[16]['action'] == '전체 모터 제어 차단'
 

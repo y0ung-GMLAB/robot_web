@@ -217,7 +217,7 @@ test('한 칸 크기를 바꾸면 돌리던 것을 지금 자리에 세운다', 
   el.jogDialStep.value = '0.1';
   el.jogDialStep.dispatch('input');
   assert.doesNotMatch(pendingText(), /남은 이동/);
-  assert.match(el.jogDialMessage.textContent, /한 칸 크기를 바꿔 지금 자리에 세웠습니다/);
+  assert.match(el.jogDialMessage.textContent, /한 칸 값을 바꿔 현재 위치에서 정지했습니다/);
   assert.deepEqual(releases().at(-1), { type: 'release', axes: [1] });
 });
 
@@ -265,7 +265,7 @@ test('typed target (always shown next to the dial) moves in motor deg and refuse
   assert.equal(calls.length, 1);
   respond({ success: true, message: 'ok' });
   await tick(); await tick();
-  assert.match(el.jogDialMessage.textContent, /목표 250\.5° 로 이동 시작/);
+  assert.match(el.jogDialMessage.textContent, /목표 250\.5°로 이동 시작/);
 });
 
 // 다이얼과 목표 칸이 늘 같이 보인다 · 다이얼이 몰고 있으면 목표 이동은 기다린다 · 2026-10-06
@@ -277,7 +277,7 @@ test('typed target waits while the dial is still driving', async () => {
   assert.equal(el.jogTargetMoveButton.disabled, true);
   el.jogTargetInput.dispatch('keydown', { key: 'Enter' });
   assert.equal(calls.filter((call) => /\/action$/.test(String(call.url))).length, 0);
-  assert.match(el.jogDialMessage.textContent, /앞 이동이 끝난 뒤에/);
+  assert.match(el.jogDialMessage.textContent, /이전 이동이 끝난 뒤에/);
   dial.reset();
 });
 
@@ -437,7 +437,7 @@ test('목표 위치 · 조인트 deg 로 받아 매핑 식으로 모터 deg 로 
   el.jogTargetInput.dispatch('input');
   assert.equal(el.jogTargetMoveButton.disabled, true);
   el.jogTargetMoveButton.dispatch('click');
-  assert.match(el.jogDialMessage.textContent, /목표 12° 가 운전 범위\(-10° ~ 10°\) 밖/);
+  assert.match(el.jogDialMessage.textContent, /목표 12°가 운전 범위\(-10° ~ 10°\) 밖/);
   el.jogTargetInput.value = '2';
   el.jogTargetInput.dispatch('input');
   el.jogTargetMoveButton.dispatch('click');

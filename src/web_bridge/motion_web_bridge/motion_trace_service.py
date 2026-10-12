@@ -45,7 +45,7 @@ class MotionTraceService:
             raise ValueError('날짜 형식이 올바르지 않습니다 (YYYY-MM-DD)')
         day = root / text
         if day.is_symlink() or not day.is_dir():
-            raise ValueError(f'그 날짜의 기록이 없습니다: {text}')
+            raise ValueError(f'해당 날짜의 기록이 없습니다: {text}')
         return day
 
     def file_path(self, date: Any, file_name: Any) -> Path:
@@ -165,4 +165,4 @@ class MotionTraceService:
             raise ValueError(NO_PROJECT_SELECTED)
         day = self._day_dir(root, date)
         shutil.rmtree(day)
-        return {'success': True, 'message': f'{day.name} 모션 기록을 삭제했습니다', **self.days()}
+        return {'success': True, 'message': f'{day.name} 재생 기록을 삭제했습니다', **self.days()}

@@ -504,7 +504,7 @@ class ScanOrchestrator:
         handle.cancel_goal_async()
         return {
             'success': True,
-            'message': '모터 검색 취소를 요청했습니다 · 진행 중인 장치 검색은 끝난 뒤 중단됩니다',
+            'message': '모터 검색 취소를 요청했습니다. 진행 중인 장치 종류의 검색이 끝나면 중지합니다',
         }
 
     def _call_service_locked(
@@ -621,7 +621,7 @@ class ScanOrchestrator:
         if blocker:
             return {
                 'success': False,
-                'message': f'AC Servo 검색 미실행: {blocker}',
+                'message': f'AC 서보 검색을 하지 않았습니다: {blocker}',
                 'scan': None,
                 'scan_blocked': True,
                 'project_id': self.repository.selected_project_id(),
@@ -639,7 +639,7 @@ class ScanOrchestrator:
             if blocker:
                 return {
                     'success': False,
-                    'message': f'AC Servo 검색 미실행: {blocker}',
+                    'message': f'AC 서보 검색을 하지 않았습니다: {blocker}',
                     'scan': None,
                     'scan_blocked': True,
                     'project_id': self.repository.selected_project_id(),
@@ -669,7 +669,7 @@ class ScanOrchestrator:
             return {
                 'success': False,
                 'message': (
-                    'AC Servo 검색 미실행: 실행 설정에서 복구 대상 EtherCAT 축을 '
+                    'AC 서보 검색을 하지 않았습니다: 실행 설정에서 검색 뒤 다시 켤 EtherCAT 모터를 '
                     '확인할 수 없습니다'
                 ),
                 'scan': None,
@@ -682,7 +682,7 @@ class ScanOrchestrator:
             return {
                 'success': False,
                 'message': (
-                    'AC Servo 검색 미실행: 실행 설정에서 복구 대상 전체 모터축을 '
+                    'AC 서보 검색을 하지 않았습니다: 실행 설정에서 검색 뒤 다시 켤 모터 목록을 '
                     '확인할 수 없습니다'
                 ),
                 'scan': None,
@@ -724,7 +724,7 @@ class ScanOrchestrator:
         except (OSError, RuntimeError, subprocess.TimeoutExpired) as exc:
             result = {
                 'success': False,
-                'message': f'AC Servo 검색 미실행: {exc}',
+                'message': f'AC 서보 검색을 하지 않았습니다: {exc}',
                 'scan': None,
                 'scan_blocked': True,
                 'project_id': self.repository.selected_project_id(),
@@ -764,7 +764,7 @@ class ScanOrchestrator:
                     # 「직접 검색 실패」가 떴다 · 축 목록은 제대로 갱신됐는데도.
                     if not recovery.get('recovered'):
                         if not recovery.get('service_active'):
-                            restore_error = 'Motor Manager 가 다시 실행되지 않았습니다'
+                            restore_error = 'Motor Manager가 다시 실행되지 않았습니다'
                         else:
                             missing = recovery.get('missing_axes') or []
                             result['missing_axes'] = missing
@@ -780,23 +780,23 @@ class ScanOrchestrator:
         result['runtime_handoff'] = runtime_handoff
         if runtime_handoff['required'] and result.get('success') is True:
             result['message'] = (
-                f'{result.get("message") or "AC Servo 검색 완료"} / '
-                '이전 프로젝트 모터 실행은 정지되었습니다. '
-                '현재 프로젝트 설정을 저장한 뒤 장비에 적용 · 모터 재시작하세요'
+                f'{result.get("message") or "AC 서보 검색 완료"}. '
+                '이전 프로젝트의 모터 실행은 정지했습니다. '
+                '현재 프로젝트 설정을 저장한 뒤 「장비에 적용 · 모터 재시작」을 누르세요'
             )
         missing_axes = result.get('missing_axes') or []
         if missing_axes and not restore_error:
             # 검색 결과는 그대로 살린다 · 무엇이 없었는지만 덧붙인다
             result['message'] = (
-                f'{result.get("message") or "AC Servo 검색 완료"} / '
+                f'{result.get("message") or "AC 서보 검색 완료"}. '
                 f'검색 전 설정의 {", ".join(str(a) for a in missing_axes)}번 모터가 '
-                '돌아오지 않았습니다 · 빠졌거나 알람 상태인지 확인하세요'
+                '다시 연결되지 않았습니다. 연결이 빠졌거나 알람 상태인지 확인하세요'
             )
         if restore_error:
             result['success'] = False
             result['restore_error'] = restore_error
             result['message'] = (
-                f'{result.get("message") or "AC Servo 검색 종료"} / '
+                f'{result.get("message") or "AC 서보 검색 종료"}. '
                 f'Motor Manager 복구 실패: {restore_error}'
             )
         return result

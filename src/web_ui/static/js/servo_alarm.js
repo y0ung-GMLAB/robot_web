@@ -4,9 +4,9 @@ import {
 } from './api.js';
 
 const FALLBACK_GRADE_LABELS = Object.freeze({
-  1: '1등급 · 해당 에러 모터 정지',
-  2: '2등급 · 전체 재생 종료',
-  3: '3등급 · 전체 모터 제어 차단',
+  1: '1등급 · 해당 모터만 정지',
+  2: '2등급 · 재생 전체 중단',
+  3: '3등급 · 모든 모터 명령 차단',
 });
 
 function normalizedCode(value) {
@@ -76,7 +76,7 @@ export function createServoAlarmController({ el, getLatestState }) {
       el.servoAlarmSaveButton.disabled = loading || !projectId;
       el.servoAlarmSaveButton.title = dirty
         ? '변경한 서보 에러 정책을 저장합니다.'
-        : '바뀐 내용은 없지만 지금 값 그대로 다시 저장합니다.';
+        : '바뀐 내용은 없지만 현재 값으로 다시 저장합니다.';
     }
     if (el.servoAlarmResetAllButton) {
       el.servoAlarmResetAllButton.disabled = loading || current.modified === 0;
@@ -197,8 +197,8 @@ export function createServoAlarmController({ el, getLatestState }) {
       applyPayload(payload);
       setStatus(
         payload?.supervisor_applied
-          ? '저장 완료 · Supervisor 적용 확인'
-          : `저장 완료 · Supervisor 적용 미확인${payload?.supervisor_message ? ` · ${payload.supervisor_message}` : ''}`,
+          ? '저장 완료 · 모터 제어 프로그램에 적용됨'
+          : `저장 완료 · 모터 제어 프로그램 적용 확인 안 됨${payload?.supervisor_message ? ` · ${payload.supervisor_message}` : ''}`,
         payload?.supervisor_applied ? 'ready' : 'warning',
       );
     } catch (error) {
@@ -233,11 +233,11 @@ export function createServoAlarmController({ el, getLatestState }) {
       banner.classList.add('grade-2');
       const title = banner.querySelector('strong');
       const detail = banner.querySelector('span');
-      if (title) title.textContent = '서보 에러 정책 적용 확인 필요';
+      if (title) title.textContent = '서보 에러 정책이 아직 적용되지 않았습니다';
       if (detail) {
         detail.textContent = appliedProjectId
-          ? '저장된 프로젝트 등급과 Supervisor 적용 등급이 일치하지 않습니다.'
-          : 'Supervisor의 프로젝트 정책 응답을 기다리고 있습니다.';
+          ? '저장한 등급과 현재 적용 중인 등급이 다릅니다.'
+          : '모터 제어 프로그램이 정책을 적용하기를 기다리는 중입니다.';
       }
       return;
     }
@@ -248,11 +248,11 @@ export function createServoAlarmController({ el, getLatestState }) {
     const title = banner.querySelector('strong');
     const detail = banner.querySelector('span');
     if (latched) {
-      if (title) title.textContent = '3등급 차단 유지 · 프로그램 재시작 필요';
+      if (title) title.textContent = '3등급 차단 중 · 프로그램을 다시 시작해야 해제됩니다';
       if (detail) {
         detail.textContent = active.length
           ? active.map((item) => `모터 ${item.axis} Err${item.code}.*`).join(' · ')
-          : '실제 에러가 해제됐더라도 프로그램 재시작 전까지 모터 제어를 차단합니다.';
+          : '에러가 사라져도 프로그램을 다시 시작하기 전까지 모든 모터 명령을 차단합니다.';
       }
       return;
     }
@@ -261,8 +261,8 @@ export function createServoAlarmController({ el, getLatestState }) {
         ? safety.servo_alarm_recovery_hold_axes
         : [];
       if (grade === 1 && heldAxes.length) {
-        if (title) title.textContent = '1등급 에러 해제 확인 · 현재 재생에서는 해당 모터 유지 차단';
-        if (detail) detail.textContent = `${heldAxes.map((axis) => `모터 ${axis}`).join(', ')} · 다음 동작부터 정상 제어`;
+        if (title) title.textContent = '1등급 에러 해제됨 · 이번 재생이 끝날 때까지 해당 모터는 계속 차단됩니다';
+        if (detail) detail.textContent = `${heldAxes.map((axis) => `모터 ${axis}`).join(', ')} · 다음 동작부터 다시 제어합니다`;
       } else {
         if (title) title.textContent = '현재 서보 에러 없음';
         if (detail) detail.textContent = '실시간 모터 상태 기준';
@@ -285,7 +285,7 @@ export function createServoAlarmController({ el, getLatestState }) {
       overrides = {};
       dirty = true;
       renderCatalog();
-      setStatus('전체 항목을 기본 등급으로 변경 · 저장 필요', 'warning');
+      setStatus('모든 항목을 기본 등급으로 바꿨습니다. 「프로젝트 등급 저장」을 눌러야 적용됩니다.', 'warning');
     });
     el.servoAlarmRows?.addEventListener('change', (event) => {
       const select = event.target.closest('select[data-servo-alarm-code]');
@@ -295,7 +295,7 @@ export function createServoAlarmController({ el, getLatestState }) {
       else overrides[code] = Number(select.value);
       dirty = true;
       renderCatalog();
-      setStatus('프로젝트 등급 변경 있음 · 저장 필요', 'warning');
+      setStatus('변경한 등급이 있습니다. 「프로젝트 등급 저장」을 눌러야 적용됩니다.', 'warning');
     });
   }
 

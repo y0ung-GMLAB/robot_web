@@ -58,9 +58,9 @@ from motion_common.store import atomic_write_json
 CONFIG_NAME = 'animation_preview.yaml'
 PACK_CONFIG_NAME = 'preview.yaml'
 NOT_CONFIGURED_MESSAGE = (
-    '미리보기 명령이 설정되지 않았습니다 · '
-    '로봇 팩(preview.yaml)을 올리거나 config/animation_preview.yaml 을 만드세요 '
-    '(본보기: config/animation_preview.example.yaml)'
+    '미리보기 명령이 설정되지 않았습니다. '
+    '로봇 팩(preview.yaml)을 올리거나 config/animation_preview.yaml을 만드세요 '
+    '(예시: config/animation_preview.example.yaml)'
 )
 
 #: 도는 계산들 · {결과 경로: Popen} · 끝난 것은 보일 때 거둔다
@@ -383,11 +383,11 @@ def _stale_reason(workspace_root: Path, result: Path) -> str:
             except OSError:
                 pass
     if not isinstance(stamp, dict) or not stamp.get('fingerprint'):
-        return '로봇 팩 기록 없는 계산 결과 · 다시 계산 필요'
+        return '로봇 팩 정보가 없는 계산 결과입니다. 다시 계산해야 합니다'
     if stamp['fingerprint'] == current:
         return ''
     label = ' '.join(str(stamp.get(k) or '') for k in ('name', 'version')).strip() or '이전 팩'
-    return f'로봇 팩 변경 · 다시 계산 필요 (계산 당시: {label})'
+    return f'로봇 팩이 바뀌었습니다. 다시 계산해야 합니다 (계산 당시: {label})'
 
 
 def preview_state(workspace_root: Path, motion_path: Path) -> Dict[str, Any]:
@@ -421,15 +421,15 @@ def preview_state(workspace_root: Path, motion_path: Path) -> Dict[str, Any]:
     if last_rc not in (None, 0):
         return {
             'state': 'failed', 'has_result': has_result,
-            'message': f'마지막 계산이 실패했습니다 (코드 {last_rc}) · 기록 {log_name}'
-            + (' · 옛 결과 있음' if has_result else ''),
+            'message': f'마지막 계산이 실패했습니다(코드 {last_rc}). 기록 파일: {log_name}'
+            + ('. 이전 결과는 볼 수 있습니다' if has_result else ''),
         }
     if last_rc is None and _finished_after_pending(result) is False:
         # 시작 기록보다 새 결과가 없고 도는 계산도 없다 · 브리지가 다시 뜨며 중간에 끊긴 계산
         return {
             'state': 'failed', 'has_result': has_result,
-            'message': f'마지막 계산이 끝까지 가지 못했습니다(실패 또는 중간에 멈춤) · 기록 {log_name}'
-            + (' · 옛 결과 있음' if has_result else ''),
+            'message': f'마지막 계산이 끝나지 않았습니다(실패 또는 중간 정지). 기록 파일: {log_name}'
+            + ('. 이전 결과는 볼 수 있습니다' if has_result else ''),
         }
     if has_result:
         reason = _stale_reason(Path(workspace_root), result)
@@ -485,7 +485,7 @@ def launch_precompute(
         return {'success': False, 'message': NOT_CONFIGURED_MESSAGE}
     result = result_path_for(config, Path(motion_path))
     if result is None:
-        return {'success': True, 'message': '계산이 필요 없는 구성입니다 · 바로 재생됩니다'}
+        return {'success': True, 'message': '계산이 필요 없는 구성입니다. 바로 재생할 수 있습니다'}
     motion_path = Path(motion_path)
     if not motion_path.is_file():
         return {'success': False, 'message': f'애니메이션 파일이 없습니다: {motion_path.name}'}
@@ -525,5 +525,5 @@ def launch_precompute(
         pass  # 없으면 옛 동작(브리지가 거둘 때만 기록)
     return {
         'success': True,
-        'message': f'MuJoCo 계산 시작: {motion_path.name} · 끝나면 같이 보기가 켜집니다',
+        'message': f'MuJoCo 계산을 시작했습니다: {motion_path.name}. 끝나면 3D 동시 재생을 볼 수 있습니다',
     }

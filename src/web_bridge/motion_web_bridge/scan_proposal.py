@@ -192,7 +192,7 @@ def proposed_registry(registry: Dict[str, Any], scan: Dict[str, Any], axis_rows:
             picked.append((old_axis if old_axis is not None else 10_000, order, copy.deepcopy(motor), old_axis, False))
             counts['kept'] += 1
         elif row['state'] == 'missing':
-            notes.append(f'{_label(motor)} · 검색에서 안 보여 목록에서 뺍니다 · 선·전원을 확인하세요')
+            notes.append(f'{_label(motor)} · 검색되지 않아 목록에서 뺍니다. 배선과 전원을 확인하세요.')
             counts['removed'] += 1
         else:
             raw = _raw_slave(slaves, row['scanned']) if motor.get('transport') == 'ethercat' else _raw_device(devices, row['scanned'])
@@ -200,7 +200,7 @@ def proposed_registry(registry: Dict[str, Any], scan: Dict[str, Any], axis_rows:
             picked.append((old_axis if old_axis is not None else 10_000, order, matched, old_axis, True))
             counts['matched'] += 1
             if row.get('confirmation_required'):
-                notes.append(f'{_label(motor)} · 위치만 같아 짝지었습니다 · 같은 드라이브가 맞는지 확인하세요')
+                notes.append(f'{_label(motor)} · 위치만 같아서 연결했습니다. 같은 드라이브가 맞는지 확인하세요.')
             if row.get('changed'):
                 notes.append(f'{_label(motor)} · 바뀐 값 {", ".join(row["changed"])}')
         order += 1
@@ -211,7 +211,7 @@ def proposed_registry(registry: Dict[str, Any], scan: Dict[str, Any], axis_rows:
         picked.append((row['proposed_axis'], order, motor, None, True))
         counts['added'] += 1
         if row.get('association_candidates'):
-            notes.append(f'새 장치 {motor["name"]} · 같은 위치의 모터가 여럿({", ".join(str(a) for a in row["association_candidates"])}번)이라 새로 넣었습니다 · 어느 것인지 확인하세요')
+            notes.append(f'새 장치 {motor["name"]} · 같은 위치의 모터가 여럿({", ".join(str(a) for a in row["association_candidates"])}번)이라 새로 추가했습니다. 어느 모터인지 확인하세요.')
         order += 1
 
     # 번호 · 0 부터 빈칸 없이 · 순서는 지금 번호대로
@@ -228,7 +228,7 @@ def proposed_registry(registry: Dict[str, Any], scan: Dict[str, Any], axis_rows:
             renumbered.append(f'{old_axis}번 → {index}번' + (f' ({name})' if name else ''))
         motors.append(motor)
     if renumbered:
-        notes.append(f'모터 번호가 바뀝니다 · {" · ".join(renumbered)} · 번호로 가리킨 조인트 매핑 줄을 확인하세요')
+        notes.append(f'모터 번호가 바뀝니다 · {" · ".join(renumbered)}. 번호로 연결된 조인트 매핑 줄을 확인하세요.')
 
     return {
         'registry': {'version': int(registry.get('version') or 1), 'motors': motors},

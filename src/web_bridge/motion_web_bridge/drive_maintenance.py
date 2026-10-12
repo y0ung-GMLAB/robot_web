@@ -38,7 +38,7 @@ COMMAND_TIMEOUT_SEC = 15.0
 
 LABELS = {
     EEPROM_SAVE: 'EEPROM 저장',
-    ABSOLUTE_MODE: '앱솔루트 방식 바꾸기',
+    ABSOLUTE_MODE: '앱솔루트 방식 변경',
     ABSOLUTE_CLEAR: '앱솔루트 다회전 클리어',
 }
 
@@ -91,15 +91,15 @@ def parse_upload_value(text: str) -> Optional[int]:
 
 def after_message(action: str, value: Optional[int] = None) -> str:
     if action == EEPROM_SAVE:
-        return 'EEPROM 저장 완료 · 드라이브 전원을 꺼도 지금 값이 남습니다'
+        return 'EEPROM에 저장했습니다. 드라이브 전원을 꺼도 현재 값이 유지됩니다'
     if action == ABSOLUTE_MODE:
         return (
-            f'앱솔루트 방식 {value} ({ABSOLUTE_MODES.get(value, "?")}) 저장 완료 · '
-            '드라이브 전원을 껐다 켜야 적용됩니다 · 켠 뒤 모터 검색으로 값을 확인하세요'
+            f'앱솔루트 방식 {value} ({ABSOLUTE_MODES.get(value, "?")})을 저장했습니다. '
+            '드라이브 전원을 껐다 켜야 적용됩니다. 전원을 켠 뒤 모터 검색으로 값을 확인하세요'
         )
     return (
-        '다회전 클리어 완료 · 드라이브 전원을 껐다 켜세요 · 위치 숫자가 바뀌어 기준점을 다시 캡처해야 합니다 · '
-        '그 전에는 위치가 맞지 않을 수 있어 재생하지 마세요'
+        '다회전 클리어를 마쳤습니다. 드라이브 전원을 껐다 켜세요. 위치 값이 바뀌므로 기준점을 다시 캡처해야 합니다. '
+        '그 전에는 위치가 맞지 않을 수 있으니 재생하지 마세요'
     )
 
 
@@ -147,7 +147,7 @@ class DriveMaintenance:
             position = int(identity.get('slave_position'))
             master = int(identity.get('ethercat_master_index', config.get('ethercat_master_index', 0)) or 0)
         except (TypeError, ValueError) as exc:
-            raise ValueError(f'{axis}번 모터의 EtherCAT 슬레이브 위치를 모릅니다 · 모터 검색 먼저') from exc
+            raise ValueError(f'{axis}번 모터의 EtherCAT 슬레이브 위치를 알 수 없습니다. 먼저 모터 검색을 실행하세요') from exc
         # 지금 그 자리에 **MINAS 가** 있는지 다시 본다 · 랜선을 옮겨 꽂았으면 남의 드라이브다
         matches = [
             slave for slave in self._read_slaves()
@@ -162,7 +162,7 @@ class DriveMaintenance:
         except (TypeError, ValueError):
             vendor_id = -1
         if vendor_id != MINAS_VENDOR_ID:
-            raise ValueError(f'{axis}번 모터 자리의 드라이브가 MINAS 가 아닙니다 (vendor {vendor})')
+            raise ValueError(f'{axis}번 모터 자리의 드라이브가 MINAS가 아닙니다(vendor {vendor})')
         return {'master': master, 'position': position}
 
     # -- 실행 ------------------------------------------------------------ #
@@ -193,7 +193,7 @@ class DriveMaintenance:
             if motor.get('servo_on') is not False:
                 return {
                     'success': False,
-                    'message': f'{LABELS[action]} 불가 · {axis}번 모터 서보를 먼저 끄세요 (매뉴얼 · 서보 OFF 일 때만)',
+                    'message': f'{LABELS[action]} 불가 · {axis}번 모터의 서보를 먼저 끄세요(서보가 꺼져 있을 때만 할 수 있습니다)',
                 }
         if not self._lock.acquire(blocking=False):
             return {'success': False, 'message': f'{LABELS[action]} 불가 · 다른 모터 작업이 진행 중입니다'}
@@ -241,7 +241,7 @@ class DriveMaintenance:
                         (result.stderr or result.stdout or '').strip() or f'종료 코드 {result.returncode}'
                     )
                 elif not read_value & ABSOLUTE_CLEAR_BIT:
-                    error = f'되읽기 불일치 · 0x4D00:01 = 0x{read_value:08X} · bit9 가 1 이 아닙니다'
+                    error = f'되읽기 불일치 · 0x4D00:01 = 0x{read_value:08X} · bit9가 1이 아닙니다'
         except (OSError, RuntimeError, subprocess.TimeoutExpired) as exc:
             error = str(exc)
         finally:
@@ -250,7 +250,7 @@ class DriveMaintenance:
                     self._run_service('start', service)
                     recovery = self._wait_recovery(service, axes) or {}
                     if not recovery.get('service_active', True):
-                        restore_error = 'Motor Manager 가 다시 실행되지 않았습니다'
+                        restore_error = 'Motor Manager가 다시 실행되지 않았습니다'
                 except (OSError, RuntimeError, subprocess.TimeoutExpired) as exc:
                     restore_error = str(exc)
         success = not error and not restore_error

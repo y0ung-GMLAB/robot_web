@@ -109,7 +109,7 @@ def test_verify_only_for_absolute_clear():
 
 
 @pytest.mark.parametrize('upload_stdout, returncodes, text', [
-    ('0x00000000 0\n', None, 'bit9 가 1 이 아닙니다'),
+    ('0x00000000 0\n', None, 'bit9가 1이 아닙니다'),
     ('', None, '되읽기 실패'),
     ('', [0, 0, 0, 1], '되읽기 실패'),
 ])
@@ -141,7 +141,7 @@ def test_a_failed_write_stops_the_sequence_but_still_restores_motor_manager():
     ({}, {'action': EEPROM_SAVE, 'axis': 1}, '확인이 필요'),
     ({}, {'action': 'reboot', 'axis': 1, 'confirmed': True}, '지원하지 않는'),
     ({}, {'action': EEPROM_SAVE, 'axis': 9, 'confirmed': True}, '모터 설정에 없습니다'),
-    ({'vendor': 0x0002}, {'action': EEPROM_SAVE, 'axis': 1, 'confirmed': True}, 'MINAS 가 아닙니다'),
+    ({'vendor': 0x0002}, {'action': EEPROM_SAVE, 'axis': 1, 'confirmed': True}, 'MINAS가 아닙니다'),
     ({'blocker': '모션이 실행 중입니다'}, {'action': EEPROM_SAVE, 'axis': 1, 'confirmed': True}, '모션이 실행 중'),
 ])
 def test_refusals_touch_nothing(kwargs, payload, text):

@@ -237,7 +237,7 @@ class EthercatAliasManager:
             'product_code': actual['product_code'],
             'serial_number': actual['serial_number'],
             'message': (
-                'EEPROM Alias 쓰기 완료. 서보 드라이버 제어 전원을 재투입한 뒤 '
-                '전체 모터 검색을 실행하세요.'
+                'EEPROM Alias 쓰기 완료. 서보 드라이브 제어 전원을 껐다 켠 뒤 '
+                '모터 검색을 다시 실행하세요.'
             ),
         }

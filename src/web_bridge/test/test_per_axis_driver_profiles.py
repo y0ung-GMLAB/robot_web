@@ -51,7 +51,7 @@ def _slave(config, axis):
         for slave in master.get('slaves', []):
             if slave.get('controller_index') == axis:
                 return slave
-    raise AssertionError(f'축 {axis} 슬레이브가 없다')
+    raise AssertionError(f'{axis}번 모터 슬레이브가 없다')
 
 
 def _driver(config, driver_id):

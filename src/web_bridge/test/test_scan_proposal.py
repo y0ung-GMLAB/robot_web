@@ -55,7 +55,7 @@ def test_missing_motor_is_removed_with_a_note_and_numbers_close_up():
     motors = _by_axis(result)
     assert sorted(motors) == [0, 1]
     assert motors[1]['identity']['ethercat_alias'] == 103
-    assert any('1번 · alias 102 · 검색에서 안 보여' in note for note in result['notes'])
+    assert any('1번 · alias 102 · 검색되지 않아' in note for note in result['notes'])
     assert any('모터 번호가 바뀝니다 · 2번 → 1번' in note for note in result['notes'])
     assert result['summary'] == {'matched': 2, 'added': 0, 'removed': 1, 'kept': 0, 'renumbered': 1, 'scanned_transports': ['ethercat']}
 
@@ -93,7 +93,7 @@ def test_position_only_match_is_adopted_with_a_warning():
     servo['identity'].pop('serial_number')
     result = _propose([servo], _scan(slaves=[_slave(alias=0, slave=2, serial=None)], dynamixel=False))
     assert result['summary']['matched'] == 1
-    assert any('위치만 같아 짝지었습니다' in note for note in result['notes'])
+    assert any('위치만 같아서 연결했습니다' in note for note in result['notes'])
 
 
 def test_unknown_scanned_model_keeps_the_saved_one():

@@ -1113,7 +1113,7 @@ class MotionWebBridge(Node):
             with self._safety_status_lock:
                 safety_status = dict(self._safety_status or {})
         if safety_status.get('emergency_latched'):
-            return '긴급정지 잠김 상태입니다. 프로그램 재시작이 필요합니다.'
+            return '긴급정지 잠김 상태입니다. 「프로그램 재시작」을 누르세요.'
         if safety_status.get('commands_blocked'):
             return str(
                 safety_status.get('message')
@@ -1189,7 +1189,7 @@ class MotionWebBridge(Node):
             if isinstance(motor, dict)
         ]
         if not motors:
-            return '실행할 모터축이 없습니다'
+            return '실행할 모터가 없습니다'
 
         unavailable = []
         faulted = []
@@ -1206,9 +1206,9 @@ class MotionWebBridge(Node):
             ):
                 unavailable.append(str(axis))
         if unavailable:
-            return f'온라인이 아닌 축이 있습니다: {", ".join(unavailable)}'
+            return f'연결되지 않은 모터가 있습니다: {", ".join(unavailable)}'
         if faulted:
-            return f'오류 축이 있습니다: {", ".join(faulted)}'
+            return f'오류 상태인 모터가 있습니다: {", ".join(faulted)}'
         setup = getattr(self, 'absolute_setup', None)
         if setup is not None and setup.active():
             return setup.blocker()
@@ -1244,7 +1244,7 @@ class MotionWebBridge(Node):
             acknowledged = self._manual.wait_for_action_result(boundary_id, timeout_sec=1.0)
             if not isinstance(acknowledged, dict) or acknowledged.get('success') is not True:
                 raise ValueError(
-                    '최종 모터 명령 노드가 프로젝트 세대 전환을 확인하지 않았습니다'
+                    '모터 명령 노드가 프로젝트 전환을 확인하지 않았습니다'
                 )
         policy_result = self.publish_servo_alarm_policy()
         if policy_result.get('success') is not True:
@@ -1332,7 +1332,7 @@ class MotionWebBridge(Node):
         if payload.get('confirmed') is not True:
             return {
                 'success': False,
-                'message': '사용자 확인값이 없어 EEPROM Alias 쓰기를 중단했습니다.',
+                'message': '확인을 받지 못해 EEPROM Alias 쓰기를 중단했습니다.',
             }
         try:
             master_index = int(payload.get('master_index', 0))
@@ -1353,7 +1353,7 @@ class MotionWebBridge(Node):
             }
         expected = payload.get('expected')
         if not isinstance(expected, dict):
-            return {'success': False, 'message': '선택 장비 확인값이 없습니다.'}
+            return {'success': False, 'message': '선택한 장비의 확인 정보가 없습니다.'}
         try:
             result = self.ethercat_alias_manager.write_alias(
                 slave_position,
@@ -1761,7 +1761,7 @@ class MotionWebBridge(Node):
         if not project_id:
             result['message'] = NO_PROJECT_SELECTED
         else:
-            result['message'] = '현재 프로젝트 조인트 매핑을 불러왔습니다'
+            result['message'] = '현재 프로젝트의 조인트 매핑을 불러왔습니다'
         # 어느 것이 **등록된** 파일인가를 같이 말한다 · §6-238
         #
         # 전에는 안 말해줬다 · 그래서 화면은 목록의 **첫 번째**를 골랐다 ·
@@ -1812,7 +1812,7 @@ class MotionWebBridge(Node):
         rows = validation.get('rows')
         if not isinstance(rows, dict):
             return
-        message = '이 모터가 모터축 설정에 없습니다 · 재생할 때 이 축은 건너뜁니다'
+        message = '이 모터는 모터 설정에 없습니다. 재생할 때 이 모터는 건너뜁니다'
         warnings = validation.setdefault('warnings', [])
         for row in mapping.get('mappings') or []:
             if not isinstance(row, dict) or row.get('enabled') is False:
@@ -1899,23 +1899,23 @@ class MotionWebBridge(Node):
             result['runtime_applied'] = bool(execution_context.get('ready'))
             if result['runtime_applied']:
                 result['message'] = (
-                    '조인트 매핑 저장 완료 · 실행 컨텍스트에 적용했습니다'
+                    '조인트 매핑을 저장하고 재생에 반영했습니다'
                 )
             else:
                 runtime_message = str(
                     execution_context.get('message')
-                    or '실행 컨텍스트 적용 대기'
+                    or '재생 반영 대기'
                 )
                 result['runtime_apply_warning'] = runtime_message
                 result['message'] = (
-                    '조인트 매핑은 저장됐지만 실행 컨텍스트 적용 대기 중입니다: '
+                    '조인트 매핑은 저장됐지만 아직 재생에 반영되지 않았습니다: '
                     f'{runtime_message}'
                 )
             if limits.get('changed'):
                 axes = ', '.join(str(item.get('controller_index')) for item in limits['changed'])
                 result['message'] += (
-                    f' · 모터 {axes} 운전 한계 갱신 · 드라이브 반영은 '
-                    '모터 관리 「장비에 적용 · 모터 재시작」'
+                    f'. {axes}번 모터의 운전 한계를 바꿨습니다. 드라이브에 반영하려면 '
+                    '모터 설정에서 「장비에 적용 · 모터 재시작」을 누르세요'
                 )
             elif limits.get('success') is False:
                 result['message'] += f" · {limits.get('message')}"
@@ -2126,7 +2126,7 @@ class MotionWebBridge(Node):
             )
             if store.mode != SCHEDULE_MODE:
                 label = '오프' if store.mode == 'off' else '수동'
-                return f'운전 모드가 「{label}」입니다 · 스케줄은 시작시키지 않습니다'
+                return f'운전 모드가 「{label}」입니다. 스케줄을 시작하지 않습니다'
         except (OSError, ValueError) as exc:
             self.get_logger().warn(f'스케줄 시작 확인 실패: {exc}')
         return ''
@@ -2224,7 +2224,7 @@ class MotionWebBridge(Node):
             return {'success': False, 'message': NO_PROJECT_SELECTED}
         name = str(file_id or '').strip()
         if not name:
-            return {'success': False, 'message': '삭제할 애니메이션이 정해지지 않았습니다'}
+            return {'success': False, 'message': '삭제할 애니메이션을 선택하세요'}
         registered = self._mapping_files_registering(project_id, name)
         if registered:
             return {
@@ -2232,7 +2232,7 @@ class MotionWebBridge(Node):
                 'deletion_blocked': 'registered_motion_file',
                 'registered_mapping_files': registered,
                 'message': (
-                    f'재생 등록된 애니메이션입니다: {name} · '
+                    f'재생 등록된 애니메이션입니다: {name}. '
                     f'재생 등록을 해제한 뒤 삭제하세요 (등록 파일: {", ".join(registered)})'
                 ),
             }
@@ -2352,7 +2352,7 @@ class MotionWebBridge(Node):
         # 코디네이터가 전체 시작을 취소한다) · 정지·취소 명령은 계속 받는다
         off = run_mode_gate.motion_command_block_reason(self)
         if off:
-            return {'success': False, 'message': f'그룹 준비 불가: {off}'}
+            return {'success': False, 'message': f'그룹 실행 준비 불가: {off}'}
         blocker = self.motor_runtime_control_blocker()
         if blocker:
             return {'success': False, 'message': f'그룹 실행 준비 불가: {blocker}'}

@@ -37,7 +37,7 @@ test('json only, and one failure stops the batch so its reason stays visible', (
   assert.match(body, /break;/);
   assert.match(body, /업로드 실패/);
   // 실패는 창으로도 띄운다 · 작은 글씨만으론 놓친다 (2026-10-02)
-  assert.match(controller, /showAlert\(message, \{ title: '애니메이션 불러오기', tone: 'warning' \}\);/);
+  assert.match(controller, /showAlert\(message, \{ title: '애니메이션 업로드', tone: 'warning' \}\);/);
 });
 
 // 사용자 보고 · 프로젝트가 선택돼 있어도 「프로젝트를 먼저 선택하세요」 (2026-10-02)
@@ -51,7 +51,7 @@ test('the upload takes the project id from the animation list response', () => {
 
 // 불러오기 버튼 · 폴더 드롭 · 화면 전체 받는 칸 · 문서 전체 가드 · 2026-10-02
 test('a 불러오기 button opens a multi-file picker through the same path', () => {
-  assert.match(html, /<button id="motionFileImportButton"[^>]*>불러오기<\/button>/);
+  assert.match(html, /<button id="motionFileImportButton"[^>]*>업로드<\/button>/);
   assert.match(html, /<input id="motionFileImportInput" type="file"[^>]*accept="\.json,application\/json" multiple>/);
   assert.match(controller, /el\.motionFileImportButton\?\.addEventListener\('click', \(\) => el\.motionFileImportInput\?\.click\(\)\)/);
   assert.match(controller, /importAnimationFiles\(chosen\);/);

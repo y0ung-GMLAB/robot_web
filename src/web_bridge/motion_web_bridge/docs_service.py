@@ -73,7 +73,7 @@ class DocsService:
         for document in DOCUMENTS:
             if document['id'] == str(doc_id):
                 return document
-        raise DocumentNotFound(f'그런 문서가 없습니다: {doc_id}')
+        raise DocumentNotFound(f'문서를 찾을 수 없습니다: {doc_id}')
 
     # ----------------------------------------------------------------- #
     # 읽기
@@ -112,8 +112,8 @@ class DocsService:
                 'source': document['path'],
                 'markdown': '',
                 'message': (
-                    f'{document["path"]} 파일이 이 PC 에 없습니다 · '
-                    '최신 코드를 받은 뒤 다시 보세요'
+                    f'{document["path"]} 파일이 없습니다. '
+                    '최신 버전으로 업데이트한 뒤 다시 여세요.'
                 ),
             }
         return {
@@ -136,9 +136,9 @@ class DocsService:
         base = (self._root() / ASSET_DIR).resolve()
         target = (base / str(name)).resolve()
         if base not in target.parents and target != base:
-            raise DocumentAssetRefused('문서 그림 폴더 밖입니다')
+            raise DocumentAssetRefused('문서 그림 폴더 밖의 파일은 열 수 없습니다')
         if target.suffix.lower() not in ASSET_SUFFIXES:
             raise DocumentAssetRefused('그림 파일이 아닙니다')
         if not target.is_file():
-            raise DocumentNotFound('그림이 없습니다')
+            raise DocumentNotFound('그림 파일을 찾을 수 없습니다')
         return target

@@ -301,7 +301,7 @@ def test_failed_recompute_does_not_bless_the_old_result(tmp_path):
     # 수정 목록 54 · 실패가 먼저 보인다 · 옛 결과는 보기만 허용하고 기록(meta)은 안 남긴다
     state = animation_preview.preview_state(workspace, motion)
     assert state['state'] == 'failed' and state['has_result'] is True
-    assert '옛 결과 있음' in state['message'] and 'precompute.log' in state['message']
+    assert '이전 결과는 볼 수 있습니다' in state['message'] and 'precompute.log' in state['message']
     result = Path(str(motion)[:-len('.json')] + '.sim.npz')
     assert not animation_preview.meta_path_for(result).exists()
 

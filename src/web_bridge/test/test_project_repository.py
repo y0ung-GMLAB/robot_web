@@ -160,7 +160,7 @@ def test_new_project_is_ready_for_first_run_without_legacy_files(tmp_path):
     assert created['project']['active_files']['motor_axes'] == ''
     assert created['project']['active_files']['motion_axis_matching'] == ''
 
-    with pytest.raises(ValueError, match='모터축 설정 파일'):
+    with pytest.raises(ValueError, match='모터 설정 파일'):
         repository.prepare_runtime_motor_config(project_id)
     repository.save_file(
         project_id,
@@ -883,7 +883,7 @@ def test_motor_config_save_rejects_stale_browser_revision(tmp_path):
     })
 
     assert result['success'] is False
-    assert '현재 파일 보호를 위해 저장을 거부' in result['message']
+    assert '현재 파일을 보호하려고 저장하지 않았습니다' in result['message']
     assert 'period: 2000000' in _motor_config_of(bridge).selected.read_text(encoding='utf-8')
 
 
@@ -910,7 +910,7 @@ def test_motor_config_save_rejects_zero_axis_overwrite(tmp_path):
     })
 
     assert result['success'] is False
-    assert '0축 모터 설정은 저장할 수 없습니다' in result['message']
+    assert '모터가 하나도 없는 설정은 저장할 수 없습니다' in result['message']
     assert _motor_config_of(bridge).load()['registry']['motors']
 
 
@@ -1503,8 +1503,8 @@ def test_a_timed_out_apply_keeps_the_new_project(tmp_path, monkeypatch):
     assert scheduled == [], '재시작을 또 걸면 안 된다'
 
     # **어느 축이 안 왔는지 말해 준다**
-    assert '1번 모터가 올라오지 않았습니다' in result['error']
-    assert '붙은 축 1/2' in result['error']
+    assert '1번 모터가 연결되지 않았습니다' in result['error']
+    assert '연결된 모터 1/2' in result['error']
 
 
 def test_service_entrypoint_never_loads_runtime_from_another_project(tmp_path):
@@ -2580,7 +2580,7 @@ def test_motor_control_restart_rejects_project_without_applied_motor_config(monk
     result = _motor_config_of(bridge).restart_motor_control()
 
     assert result['success'] is False
-    assert '설정 적용·재시작' in result['message']
+    assert '장비에 적용 · 모터 재시작' in result['message']
     assert commands == []
     assert bridge._motion_run_status['state'] == 'stopped'
 

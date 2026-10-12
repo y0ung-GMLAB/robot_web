@@ -86,12 +86,12 @@ const ScheduleManager = {
         // 받은 시각에 그 뒤 흐른 만큼을 더한다 · 5초마다 툭툭 뛰지 않게
         const epoch = this.clockAnchor.at + (Date.now() - this.clockAnchor.received);
         const shown = wallClockText(epoch, this.clockAnchor.offset);
-        const zone = clock.timezone || clock.abbreviation || '시간대 미상';
-        const ntp = clock.ntp_synced === false ? ' · ⚠️ 시계 미동기' : '';
+        const zone = clock.timezone || clock.abbreviation || '시간대 알 수 없음';
+        const ntp = clock.ntp_synced === false ? ' · ⚠️ 시계 동기화 안 됨' : '';
         timeEl.textContent = `🕒 PC 시각: ${shown} · ${zone}${ntp}`;
         timeEl.title = clock.ntp_synced === false
-            ? '이 PC 는 시각을 맞춰주는 서버에 붙지 못했습니다 · 시계가 틀어져 있을 수 있습니다'
-            : `이 PC 기준입니다 · 브라우저 시각이 아닙니다 · UTC${clock.utc_offset || ''}`;
+            ? 'PC가 인터넷 시간 서버에 연결되지 않아 시계가 틀릴 수 있습니다'
+            : `브라우저가 아니라 PC의 시각입니다 · UTC${clock.utc_offset || ''}`;
     },
 
     bindEvents() {
@@ -149,7 +149,7 @@ const ScheduleManager = {
         const current = String(this.status?.run_mode || 'schedule');
         if (mode === current) return;
         const CONFIRMS = {
-            schedule: '스케줄 모드로 바꿉니다.\n\n지금이 운영시간이면 곧바로 '
+            schedule: '스케줄 모드로 바꿉니다.\n\n지금이 운영 시간이면 곧바로 '
                 + '초기 위치 이동과 재생이 시작될 수 있습니다.',
             off: '오프 모드로 바꿉니다.\n\n움직임 명령(조그·페이더·재생·그룹 시작)이 '
                 + '전부 차단됩니다.\n서보는 켠 채 그 자리를 유지합니다.',
@@ -157,7 +157,7 @@ const ScheduleManager = {
         if (CONFIRMS[mode]) {
             const confirmed = await showConfirm(CONFIRMS[mode], {
                 title: mode === 'off' ? '오프 모드' : '스케줄 모드',
-                confirmLabel: '바꾸기',
+                confirmLabel: '전환',
                 tone: 'warning',
             });
             if (!confirmed) return;
@@ -172,7 +172,7 @@ const ScheduleManager = {
             // 프로젝트가 바뀌는 중이면 다음 회에 맞는다 · 사람을 부르지 않는다
             if (!err?.staleProjectResponse) {
                 console.error('[ScheduleManager] Failed to save run mode:', err);
-                alert(`실행 관리 변경 실패: ${err?.message || err}`);
+                alert(`운전 모드 변경 실패: ${err?.message || err}`);
             }
         }
         await this.loadStatus();
@@ -232,7 +232,7 @@ const ScheduleManager = {
                 button.disabled = !state.canEdit;
             });
             segment.title = state.blockedReason
-                || '운전 모드 · 어느 화면에서든 한 번에 바꾼다';
+                || '운전 모드 · 어느 화면에서 바꿔도 똑같이 적용됩니다';
         }
 
         // 한눈에 보는 두 칸 · 구간 여부는 여기가 안다 · §6-286
@@ -296,8 +296,8 @@ const ScheduleManager = {
             const result = await configureMotionAutomation({ schedule_end_action: action });
             if (result?.success === false) throw new Error(result.message || '저장 실패');
             if (note) note.textContent = action === 'hold'
-                ? '저장 · 운영 시간이 끝나면 마지막 자세에서 서보를 켠 채 둡니다'
-                : '저장 · 운영 시간이 끝나면 기준점으로 이동한 뒤 서보를 끕니다';
+                ? '저장했습니다. 운영 시간이 끝나면 마지막 자세에서 서보를 켠 채 둡니다'
+                : '저장했습니다. 운영 시간이 끝나면 기준점으로 이동한 뒤 서보를 끕니다';
         } catch (error) {
             if (note) note.textContent = `저장 실패 · ${error?.message || error}`;
         }
@@ -337,7 +337,7 @@ const ScheduleManager = {
         if (!this.schedules || this.schedules.length === 0) {
             container.innerHTML = `
                 <div class="text-center text-muted py-4">
-                    등록된 재생 스케줄이 없습니다. [+ 신규 스케줄 추가] 버튼을 눌러 생성하세요.
+                    등록된 재생 스케줄이 없습니다. 「+ 신규 스케줄 추가」를 눌러 추가하세요.
                 </div>
             `;
             return;
@@ -346,10 +346,10 @@ const ScheduleManager = {
         let html = '<div class="list-group">';
         this.schedules.forEach(item => {
             const enabledBadge = item.enabled
-                ? '<span class="badge bg-success" style="background-color: #38a169; color: #fff; padding: 2px 6px; border-radius: 4px; font-size: 11px;">활성</span>'
-                : '<span class="badge bg-secondary" style="background-color: #718096; color: #fff; padding: 2px 6px; border-radius: 4px; font-size: 11px;">비활성</span>';
+                ? '<span class="badge bg-success" style="background-color: #38a169; color: #fff; padding: 2px 6px; border-radius: 4px; font-size: 11px;">켜짐</span>'
+                : '<span class="badge bg-secondary" style="background-color: #718096; color: #fff; padding: 2px 6px; border-radius: 4px; font-size: 11px;">꺼짐</span>';
 
-            const stopInfo = `종료시각: ${item.stop_time || '설정안됨'}`;
+            const stopInfo = `종료: ${item.stop_time || '없음'}`;
 
             const daysInfo = item.repeat_type === 'weekly'
                 ? `반복: 매주 [${(item.repeat_days || []).join(', ')}]`
@@ -371,7 +371,7 @@ const ScheduleManager = {
                     <div style="display: flex; gap: 8px;">
                         <button type="button" style="background: ${item.enabled ? '#dd6b20' : '#38a169'}; color: #fff; border: none; padding: 6px 12px; border-radius: 4px; cursor: pointer; font-size: 12px; font-weight: bold;" 
                                 onclick="window.ScheduleManager.toggleEnable('${item.schedule_id}', ${!item.enabled})">
-                            ${item.enabled ? '비활성화' : '활성화'}
+                            ${item.enabled ? '끄기' : '켜기'}
                         </button>
                         <button type="button" style="background: #e53e3e; color: #fff; border: none; padding: 6px 12px; border-radius: 4px; cursor: pointer; font-size: 12px; font-weight: bold;" 
                                 onclick="window.ScheduleManager.deleteSchedule('${item.schedule_id}')">

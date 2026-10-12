@@ -16,7 +16,7 @@
             <section class="motion-file-subsection" aria-label="재생할 애니메이션">
               <div class="section-head compact">
                 <strong>1. 재생할 애니메이션</strong>
-                <span id="motionRunMessage">애니메이션과 매핑 파일을 선택하세요</span>
+                <span id="motionRunMessage">애니메이션을 선택하세요</span>
               </div>
               <!-- 오래 걸리는 일 표시 · 올리기 · 읽기 · 재생 등록 · 0.4초 넘을 때만 · 수정 목록 87 -->
               <div id="motionBusy" class="motion-busy hidden" role="status" aria-live="polite">
@@ -32,16 +32,16 @@
                   </div>
                   <!-- 표와 버튼을 옆으로 나란히 · §6-100 · 버튼이 표 아래
                        두 줄을 차지해 위아래로 길었다 -->
-                  <div class="motion-file-drop-hint">「불러오기」 또는 .json 파일·폴더를 이 화면에 끌어다 놓으면 추가됩니다</div>
+                  <div class="motion-file-drop-hint">「업로드」를 누르거나 .json 파일·폴더를 이 화면에 끌어다 놓으면 업로드됩니다</div>
                   <div class="motion-file-body">
-                  <div class="table-wrap motion-file-table-wrap user-resizable" data-resize-key="anim.files" title="오른쪽 아래 모서리를 끌면 늘어납니다 · 두 번 누르면 원래 크기">
+                  <div class="table-wrap motion-file-table-wrap user-resizable" data-resize-key="anim.files" title="오른쪽 아래 모서리를 끌어 크기를 바꿀 수 있습니다. 두 번 누르면 원래 크기로 돌아갑니다">
                     <table class="motion-file-table motion-file-table-compact">
                       <thead>
                         <tr>
                           <th>파일명</th>
                           <th>검사</th>
                           <th>시간</th>
-                          <th>수정</th>
+                          <th>수정 시각</th>
                         </tr>
                       </thead>
                       <tbody id="motionFileRows">
@@ -52,12 +52,12 @@
                     </table>
                   </div>
                   <div class="motion-file-actions">
-                    <button id="motionFileImportButton" type="button" title="내 PC 의 .json 애니메이션을 고릅니다 · 여러 개 가능">불러오기</button>
+                    <button id="motionFileImportButton" type="button" title=".json 애니메이션 파일을 선택합니다. 여러 개를 한 번에 선택할 수 있습니다">업로드</button>
                     <input id="motionFileImportInput" type="file" class="hidden" accept=".json,application/json" multiple>
                     <button id="registerMotionFileButton" class="primary" type="button" disabled>재생 등록</button>
                     <button id="unregisterMotionFileButton" type="button" class="danger" disabled>재생 등록 해제</button>
-                    <button id="downloadMotionFileButton" type="button" title="이 파일을 지금 보고 있는 PC 에 저장합니다" disabled>내 PC로 저장</button>
-                    <button id="previewMotionFileButton" type="button" title="MuJoCo 물리 계산을 시작합니다 · 끝나면 「3D 보기 (웹)」 에서 실물과 같이 볼 수 있습니다" disabled>MuJoCo 계산</button>
+                    <button id="downloadMotionFileButton" type="button" title="이 파일을 다운로드합니다" disabled>다운로드</button>
+                    <button id="previewMotionFileButton" type="button" title="MuJoCo 물리 계산을 시작합니다. 끝나면 「3D 보기 (웹)」에서 볼 수 있습니다" disabled>MuJoCo 계산</button>
                     <button id="deleteMotionFileButton" type="button" class="danger" disabled>삭제</button>
                   </div>
                   </div>
@@ -67,7 +67,7 @@
               </div>
                 <div class="motion-run-main">
                 <div id="motionRunSummary" class="motion-run-summary">
-                  <div class="empty">선택된 애니메이션과 매핑 파일 기준으로 실행합니다</div>
+                  <div class="empty">재생 등록된 애니메이션과 조인트 매핑으로 실행합니다</div>
                 </div>
                 </div>
               </div>
@@ -84,27 +84,27 @@
                   <div class="coord-group motion-group">
                     <span class="coord-group-label">실행</span>
 <div class="coord-motion-options">
-                      <label class="compact-field"><span>초기 이동 시간</span>
+                      <label class="compact-field"><span>초기 위치 이동 시간</span>
                         <select id="motionRunInitialMoveTime" class="compact-select">
-                          <option value="mapping">매핑 설정 사용</option>
-                          <option value="5" selected>5초 일괄 적용</option>
-                          <option value="7">7초 일괄 적용</option>
-                          <option value="10">10초 일괄 적용</option>
+                          <option value="mapping">조인트 매핑대로</option>
+                          <option value="5" selected>5초</option>
+                          <option value="7">7초</option>
+                          <option value="10">10초</option>
                         </select>
                       </label>
                       <label class="compact-field"><span>회차 사이 동작</span>
                         <select id="motionAutomationRepeatMode" class="compact-select" disabled>
                           <option value="direct">바로 다음 회차</option>
                           <option value="dwell">대기 후 다음 회차</option>
-                          <option value="reinitialize" selected>초기 위치 이동 후 다음</option>
-                          <option value="dwell_reinitialize">대기 후 초기위치 → 다음</option>
+                          <option value="reinitialize" selected>초기 위치로 돌아간 뒤 다음 회차</option>
+                          <option value="dwell_reinitialize">대기 후 초기 위치로 돌아간 뒤 다음 회차</option>
                         </select>
                       </label>
                       <label id="motionAutomationDwellWrap" class="compact-field hidden"><span>대기 시간(초)</span>
                         <input id="motionAutomationDwellSec" type="number" min="0" max="86400" step="0.1" value="5.0" disabled>
                       </label>
-                      <label id="motionRunTargetCycleWrap" class="compact-field"><span>정지 목표(N)회차</span>
-                        <input id="motionRunTargetCycle" type="number" min="0" max="10000" step="1" value="0" title="0은 무한 반복입니다">
+                      <label id="motionRunTargetCycleWrap" class="compact-field"><span>정지할 회차</span>
+                        <input id="motionRunTargetCycle" type="number" min="0" max="10000" step="1" value="0" title="0이면 정지하지 않고 계속 반복합니다">
                       </label>
                     </div>
 <div class="coord-group-buttons">
@@ -119,7 +119,7 @@
                     <span class="coord-group-label">정지 · 기타</span>
 <div class="coord-group-buttons">
                       <button id="motionRunStopButton" class="danger" type="button" disabled>즉시 정지</button>
-                      <button id="motionRunStopAfterButton" class="warning-button" type="button" disabled>현재 회차 후 정지</button>
+                      <button id="motionRunStopAfterButton" class="warning-button" type="button" disabled>이번 회차 후 정지</button>
                       <button id="motionRunRefreshButton" type="button">상태 새로고침</button>
                     </div>
                   </div>
@@ -132,16 +132,16 @@
             <details id="sim3dSection" class="motion-file-subsection sim3d-section" aria-label="3D 보기 (웹)">
               <summary class="section-head compact sim3d-summary">
                 <strong>3D 보기 (웹)</strong>
-                <span id="sim3dStatus">펼치면 로봇 팩의 3D 장면을 불러옵니다 · 기본은 실물 재생과 같이 움직입니다</span>
+                <span id="sim3dStatus">펼치면 로봇 팩의 3D 장면을 불러옵니다. 기본으로 「동시 재생」이 켜져 있어 실물 재생에 맞춰 움직입니다</span>
               </summary>
               <div class="sim3d-toolbar">
                 <!-- 「실물과 같이」 · 기본 켬 = 디지털 트윈 · 재생 등록 애니를 실물 재생과 같은 순간에 ·
                      끄면 목록에서 고른 애니를 직접 재생·슬라이더로 본다 · 2026-10-09 사용자 · 수정 목록 86 -->
                 <label class="compact-field sim3d-view-toggle sim3d-follow-toggle"
-                  title="켜면 실물 재생과 같이 움직입니다(재생 등록 애니) · 끄면 고른 애니를 직접 재생합니다">
-                  <input id="sim3dFollowToggle" type="checkbox" checked><span>실물과 같이</span>
+                  title="켜면 실물 재생에 맞춰 3D 로봇이 같이 움직입니다(재생 등록된 애니메이션). 끄면 목록에서 선택한 애니메이션을 직접 재생합니다">
+                  <input id="sim3dFollowToggle" type="checkbox" checked><span>동시 재생</span>
                 </label>
-                <button id="sim3dPrepareButton" type="button" title="로봇 팩에서 3D 장면을 만듭니다 · 팩마다 한 번">3D 장면 준비</button>
+                <button id="sim3dPrepareButton" type="button" title="로봇 팩에서 3D 장면을 만듭니다. 로봇 팩마다 한 번만 하면 됩니다">3D 장면 준비</button>
                 <button id="sim3dLoadButton" type="button" disabled title="선택한 애니메이션의 MuJoCo 계산 결과를 불러옵니다">프레임 불러오기</button>
                 <button id="sim3dPlayButton" type="button" class="primary" disabled>재생</button>
                 <input id="sim3dSlider" type="range" min="0" max="1000" value="0" step="1" disabled aria-label="재생 위치">
@@ -157,12 +157,12 @@
                 <button id="sim3dResetViewButton" type="button" title="로봇 팩의 카메라 설정으로 되돌립니다">시점 초기화</button>
                 <!-- 수정 목록 7-c · 실제 모터 위치로 같은 로봇을 주황 반투명으로 겹쳐 그린다 · MuJoCo 뷰만 -->
                 <label class="compact-field sim3d-view-toggle"
-                  title="실제 모터 위치(매핑 식으로 되돌린 조인트 각도)로 로봇을 하나 더 그립니다 · 계획과 실물의 차이 · 처짐·늦음 확인">
+                  title="실제 모터 위치(조인트 매핑 식으로 되돌린 조인트 각도)로 로봇을 하나 더 겹쳐 그립니다. 계획과 실물의 차이(처짐·늦음)를 확인할 수 있습니다">
                   <input id="sim3dActualToggle" type="checkbox" disabled><span>실물 위치</span>
                 </label>
                 <!-- 수정 목록 50 · 팩에 scene.glb 가 있을 때만 보인다 · 끄면 MuJoCo 뷰 -->
                 <label id="sim3dBlenderLabel" class="compact-field sim3d-view-toggle hidden"
-                  title="Blender 에서 만든 장면(헤드 4대 · 매장 오브제)을 그립니다 · 실제 재생 시각을 따라갑니다 · 끄면 MuJoCo 계산 뷰">
+                  title="Blender에서 만든 장면(헤드 4대 · 매장 오브제)을 그립니다. 실제 재생 시각을 따라갑니다. 끄면 MuJoCo 보기로 돌아갑니다">
                   <input id="sim3dBlenderToggle" type="checkbox"><span>Blender 뷰</span>
                 </label>
               </div>
@@ -187,7 +187,7 @@
                   <div id="motionRunStageStrip" class="motion-run-stage-strip"></div>
                   <div class="motion-run-progress" aria-label="애니메이션 재생 진행률">
                     <div class="motion-run-progress-head">
-                      <strong id="motionRunCurrentPhase">현재 단계: 재생 전</strong>
+                      <strong id="motionRunCurrentPhase">현재 단계: 대기 상태</strong>
                       <span id="motionRunProgressText">0.0 %</span>
                     </div>
                     <div class="motion-run-progress-track">
@@ -214,12 +214,12 @@
                 <section class="motion-file-subsection" aria-label="애니메이션 재생 축">
                   <div class="section-head compact">
                     <strong>4. 실행 축</strong>
-                    <span>활성 매핑 기준 · 실행 준비 검사 후 채워집니다</span>
+                    <span>현재 조인트 매핑 기준 · 「실행 준비 검사」를 누르면 채워집니다</span>
                   </div>
                   <!-- 「사용」·라이브 리밋은 누르는 즉시 재생에 들어간다 · 저장하지 않는다 · 40 -->
-                  <p class="motion-run-axis-note">「사용」 체크·라이브 리밋은 <strong>누르는 즉시</strong> 재생에 반영됩니다 ·
-                    끄면 그 모터는 그 자리에 섭니다(서보 유지) · 다시 켜도 이 회차는 서 있고 다음 회차부터 같이 움직입니다 ·
-                    매핑 파일에는 저장되지 않고 「재생 등록」 때 모두 풀립니다</p>
+                  <p class="motion-run-axis-note">「사용」 체크와 라이브 리밋은 <strong>누르는 즉시</strong> 재생에 반영됩니다.
+                    끄면 그 모터는 현재 위치에서 정지합니다(서보 유지). 다시 켜도 이번 회차는 정지한 채로 있고, 다음 회차부터 같이 움직입니다.
+                    조인트 매핑에는 저장되지 않으며, 「재생 등록」을 하면 모두 해제됩니다</p>
                   <div class="table-wrap user-resizable" data-resize-key="anim.axes">
                     <table>
                       <thead>
@@ -235,12 +235,12 @@
                           <th>재생 시작/종료</th>
                           <th>연속 판정</th>
                           <th>범위 제한</th>
-                          <th>라이브 리밋 (모션 deg)</th>
+                          <th>라이브 리밋 (조인트 deg)</th>
                         </tr>
                       </thead>
                       <tbody id="motionRunAxisRows">
                         <tr>
-                          <td colspan="12" class="empty">실행 준비 검사를 누르면 표시됩니다</td>
+                          <td colspan="12" class="empty">「실행 준비 검사」를 누르면 표시됩니다</td>
                         </tr>
                       </tbody>
                     </table>

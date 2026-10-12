@@ -28,7 +28,7 @@ test('연동을 쓰지 않으면 마스터라는 말을 쓰지 않는다', () =>
   assert.equal(state.text, '스케줄러: 동작 중 (2개 등록)');
   assert.equal(state.canEdit, true);
   assert.equal(state.warning, '');
-  assert.match(motionScheduleScopeNote(status()), /이 PC 의 등록된 애니메이션/);
+  assert.match(motionScheduleScopeNote(status()), /등록된 애니메이션을 연속 재생/);
 });
 
 test('묶여 있어도 같은 말을 한다 · 스케줄은 그것과 상관없다 · §6-266', () => {
@@ -84,7 +84,7 @@ test('수동 모드면 스케줄이 손대지 않는다고 말한다', () => {
   const state = motionScheduleBadgeState(now);
   assert.equal(state.scope, 'manual');
   assert.match(state.text, /수동 모드/);
-  assert.match(state.blockedReason, /시작·정지시키지 않습니다/);
+  assert.match(state.blockedReason, /재생을 시작하거나 정지하지 않습니다/);
   assert.match(motionScheduleScopeNote(now), /스케줄 모드로 바꾸면/);
 });
 
@@ -329,7 +329,7 @@ test('시각을 못 읽으면 빨간 줄로 알린다', () => {
 
   assert.equal(state.tone, 'bad');
   assert.match(state.text, /시각을 읽을 수 없음/);
-  assert.match(state.warning, /돌지 않습니다/);
+  assert.match(state.warning, /실행되지 않습니다/);
   assert.match(state.warning, /새 스케줄/);
 });
 

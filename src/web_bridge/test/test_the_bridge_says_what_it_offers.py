@@ -135,7 +135,7 @@ def test_the_release_message_is_written_once():
     """같은 문구가 두 곳에 있었다 · 하나만 고치면 화면이 달리 말한다."""
     source = _read('motor_config_service.py')
 
-    assert source.count("'실행 적용 해제로 정지 상태를 정리했습니다'") == 1
+    assert source.count("'실행 적용을 해제해 정지를 마무리했습니다'") == 1
     assert source.count('RELEASE_SETTLED_MESSAGE') == 2  # 정의 + 쓰는 곳 하나(settle_stopping_run_state)
 
 

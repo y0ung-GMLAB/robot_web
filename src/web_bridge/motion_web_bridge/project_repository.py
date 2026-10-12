@@ -294,7 +294,7 @@ class ProjectRepository:
     ) -> Dict[str, Any]:
         project_dir = self._project_dir(project_id)
         if self.selected_project_id() != project_dir.name:
-            raise ValueError('현재 선택 프로젝트의 서보 에러 등급만 저장할 수 있습니다')
+            raise ValueError('현재 선택한 프로젝트의 서보 에러 등급만 저장할 수 있습니다')
         payload = {
             'version': 1,
             'updated_at': time.time(),
@@ -518,7 +518,7 @@ class ProjectRepository:
         if runtime_target.get('target_project_id') == project_dir.name:
             raise ValueError(
                 '현재 모터 실행 설정이 사용하는 프로젝트는 삭제할 수 없습니다. '
-                '「전체 동작 정지」 후 「실행 적용 해제」를 실행하거나, '
+                '「전체 동작 정지」를 누른 뒤 「실행 적용 해제」를 누르거나, '
                 '다른 프로젝트의 모터 설정을 적용한 뒤 다시 시도하세요'
             )
         manifest = self._read_manifest(project_dir)
@@ -557,8 +557,8 @@ class ProjectRepository:
         return {
             **self.list_projects(),
             'message': (
-                f"프로젝트 '{project_name}'를 휴지통으로 옮겼습니다 · "
-                '7일 안에 되살릴 수 있습니다'
+                f"프로젝트 '{project_name}'를 휴지통으로 옮겼습니다. "
+                '7일 안에 복원할 수 있습니다'
             ),
             'deleted_project_id': project_dir.name,
             'permanently_deleted': False,
@@ -584,9 +584,9 @@ class ProjectRepository:
             'imported_project_id': result['project_id'],
             'replaced_to_trash': bool(result['replaced_to']),
             'message': (
-                f"프로젝트 '{result['project_id']}' 를 복원했습니다"
-                + (' · 있던 것은 휴지통으로 옮겼습니다' if result['replaced_to'] else '')
-                + ' · 선택한 뒤 「장비에 적용」 하세요'
+                f"프로젝트 '{result['project_id']}'를 복원했습니다"
+                + ('. 같은 이름으로 있던 프로젝트는 휴지통으로 옮겼습니다' if result['replaced_to'] else '')
+                + '. 프로젝트를 선택한 뒤 모터 설정에서 「장비에 적용 · 모터 재시작」을 누르세요'
             ),
         }
 
@@ -623,7 +623,7 @@ class ProjectRepository:
         return {
             **self.list_projects(),
             'restored_project_id': project_id,
-            'message': f"프로젝트 '{project_id}' 를 되살렸습니다",
+            'message': f"프로젝트 '{project_id}'를 복원했습니다",
         }
 
     def import_text(
@@ -799,12 +799,12 @@ class ProjectRepository:
         manifest = self._read_manifest(project_dir)
         file_name = manifest['active_files'].get('motor_axes') or ''
         if not file_name:
-            raise ValueError('현재 모터축 설정 파일이 없습니다')
+            raise ValueError('현재 모터 설정 파일이 없습니다')
         source = self._asset_path(project_id, 'motor_axes', file_name)
         content = source.read_text(encoding='utf-8')
         payload = yaml.safe_load(content) or {}
         if not isinstance(payload, dict):
-            raise ValueError('모터축 설정 YAML 최상위 값은 객체여야 합니다')
+            raise ValueError('모터 설정 YAML 최상위 값은 객체여야 합니다')
         # Validate with web identity metadata still present.  Only the final
         # disposable runtime file removes those web-only fields.
         payload = dict(payload)
@@ -823,7 +823,7 @@ class ProjectRepository:
             if isinstance(master, dict)
         )
         if motor_count < 1:
-            raise ValueError('등록된 모터축이 없어 설정을 적용할 수 없습니다')
+            raise ValueError('등록된 모터가 없어 설정을 적용할 수 없습니다')
         validate_runtime_motor_profiles(payload)
         runtime_payload = self._runtime_motor_payload(payload)
         runtime_content = yaml.safe_dump(
@@ -1034,7 +1034,7 @@ class ProjectRepository:
         if not isinstance(payload, dict) or payload.get('version') != PROJECT_VERSION:
             raise ValueError('지원하지 않는 프로젝트 파일입니다')
         if payload.get('project_id') != project_dir.name:
-            raise ValueError('프로젝트 ID와 디렉터리 이름이 다릅니다')
+            raise ValueError('프로젝트 ID와 폴더 이름이 다릅니다')
         active = payload.get('active_files')
         if not isinstance(active, dict):
             active = {}

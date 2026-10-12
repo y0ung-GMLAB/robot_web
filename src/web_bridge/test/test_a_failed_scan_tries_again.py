@@ -38,7 +38,7 @@ def _orchestrator(results):
 
 _OK = {'success': True, 'message': '모터 검색 완료'}
 _PARTIAL = {'success': False, 'partial': True, 'message': '부분 완료'}
-_FAIL = {'success': False, 'message': 'AC Servo 검색 미실행: ... 해제되지 않았습니다'}
+_FAIL = {'success': False, 'message': 'AC 서보 검색 미실행: ... 해제되지 않았습니다'}
 
 
 def test_a_good_scan_runs_once():

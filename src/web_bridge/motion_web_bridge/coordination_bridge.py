@@ -103,7 +103,7 @@ class CoordinationWebBridge:
         connected = self._status_received_at and time.time() - self._status_received_at <= 3.0
         # 「그룹 실행 중」 판단의 주인은 `motion_common.run_state` 다 · §6-145
         if connected and run_state.group_is_active(dict(execution or {})):
-            return 'DDS 그룹 실행이 로컬 애니메이션 재생을 사용 중입니다'
+            return '그룹 재생 중이라 단독 재생을 할 수 없습니다'
         return ''
 
     def update_settings(self, payload: Mapping[str, Any]) -> Dict[str, Any]:
@@ -125,7 +125,7 @@ class CoordinationWebBridge:
         running = self.local_execution_blocker()
         if running:
             raise ValueError(
-                '연동 모션이 도는 중에는 연동 설정을 바꿀 수 없습니다 · '
+                '그룹 재생 중에는 연동 설정을 바꿀 수 없습니다. '
                 '먼저 정지한 뒤 바꾸세요'
             )
         # `joined` · 「그룹 참여」 스위치가 설정이 꺼진 PC 를 켤 때 설정과 참가를 한 번에 (83)
@@ -171,7 +171,7 @@ class CoordinationWebBridge:
             'success': True,
             'saved': True,
             'restart_pending': True,
-            'message': 'DDS 그룹 설정 저장 · PC 연동 서비스 재시작 요청 완료',
+            'message': 'DDS 그룹 설정을 저장하고 PC 연동 서비스 재시작을 요청했습니다',
             'config': self._config_summary(config),
         }
 
@@ -368,7 +368,7 @@ def local_motion_readiness(
         return {
             'success': False,
             'message': (
-                '현재 프로젝트 실행 컨텍스트를 적용할 수 없습니다: '
+                '현재 프로젝트의 실행 준비가 끝나지 않았습니다: '
                 + readiness_failure_text(context)
             ),
         }
@@ -517,7 +517,7 @@ def _local_motion_selection(bridge: Any) -> Dict[str, str]:
         active = project.get('active_files') or {}
         mapping_id = str(active.get('motion_axis_matching') or '').strip()
         if not mapping_id:
-            raise ValueError('로컬 조인트 매핑을 선택하세요')
+            raise ValueError('조인트 매핑을 선택하세요')
         mapping_path = bridge.project_repository.export_path(
             project_id, 'motion_axis_matching', mapping_id
         )
@@ -526,8 +526,8 @@ def _local_motion_selection(bridge: Any) -> Dict[str, str]:
             mapping.get('motion_file_id') if isinstance(mapping, dict) else ''
         ).strip()
         if not motion_id:
-            raise ValueError('로컬 모션 파일을 재생 등록하세요')
+            raise ValueError('애니메이션을 재생 등록하세요')
         bridge.project_repository.export_path(project_id, 'motions', motion_id)
     except (OSError, ValueError, yaml.YAMLError) as exc:
-        raise ValueError(f'로컬 실행 파일 확인 실패: {exc}') from exc
+        raise ValueError(f'재생 파일 확인 실패: {exc}') from exc
     return {'motion_file_id': motion_id, 'mapping_file_id': mapping_id}

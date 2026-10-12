@@ -105,7 +105,7 @@ class MotorRuntimeStore:
             raise ValueError('현재 선택 프로젝트의 모터 설정만 적용할 수 있습니다')
         prepared = project_dir / 'runtime' / 'applied_motor_config.yaml'
         if not prepared.is_file():
-            raise ValueError('적용할 런타임 모터축 설정 파일이 없습니다')
+            raise ValueError('적용할 모터 설정 파일이 없습니다')
         runtime_content = prepared.read_bytes()
         config_sha256 = _sha256(runtime_content)
         session_id = f'motor-{config_sha256}'

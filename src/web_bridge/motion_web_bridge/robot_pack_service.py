@@ -117,7 +117,7 @@ def unpack_zip(data: bytes, destination: Path) -> List[str]:
     with archive:
         members = _members(archive)
         if not members:
-            return ['zip 이 비어 있음']
+            return ['zip이 비어 있음']
         problems = [p for p in (_member_problem(info) for info in archive.infolist()) if p]
         if len(members) > MAX_FILES:
             problems.append(f'파일 수 초과: {len(members)} > {MAX_FILES}')
@@ -227,7 +227,7 @@ def install_pack(
             _remove(incoming)
             return {
                 'success': False,
-                'message': '로봇 팩 거부 · 지금 팩 유지',
+                'message': '로봇 팩 거부 · 현재 팩 유지',
                 'errors': errors,
             }
         info = robot_pack.read_pack_info(incoming)
@@ -308,7 +308,7 @@ def mapping_diff(workspace_root: Path, mapping: Optional[Dict[str, Any]]) -> Dic
             'differences': [],
         }
         if row is None:
-            entry['differences'].append('조인트 매핑에 motion_id 없음')
+            entry['differences'].append('조인트 매핑에 없음')
         else:
             ratio = row.get('gear_ratio', 1.0)
             span = _mapping_range_deg(row)
@@ -324,7 +324,7 @@ def mapping_diff(workspace_root: Path, mapping: Optional[Dict[str, Any]]) -> Dic
             'motion_id': motion_id,
             'mapping_ratio': row.get('gear_ratio', 1.0),
             'mapping_range': _mapping_range_deg(row),
-            'differences': ['팩에 motion_id 없음'],
+            'differences': ['팩에 없음'],
         })
     return {'success': True, 'available': True, 'rows': rows}
 

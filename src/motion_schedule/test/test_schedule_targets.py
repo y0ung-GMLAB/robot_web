@@ -87,7 +87,7 @@ def test_schedule_button_is_disabled_on_a_slave():
     # 주석에는 옛 문구를 적어 둘 수 있다 · 주석을 빼고 본다
     shown = re.sub(r'/\*[\s\S]*?\*/', '', scope)
     shown = re.sub(r'^\s*//.*$', '', shown, flags=re.M)
-    assert '이 PC 에서는 설정하지 않습니다' in shown, '어디서 설정하는지 알려주지 않는다'
+    assert '마스터 스케줄을 따름' in shown, '어디서 설정하는지 알려주지 않는다'
     assert '시각이 되어도 실행되지 않습니다' not in shown, (
         '이제 혼자 돈다 · 실행되지 않는다는 말은 사실이 아니다'
     )

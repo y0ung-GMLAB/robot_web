@@ -54,7 +54,7 @@ test('apply and restart never writes the project file', () => {
   assert.doesNotMatch(body, /updateSelectedAxisIdentity/);
   assert.match(body, /await applyMotorConfig\(\)/);
   // 막지 않고 말로 알린다
-  assert.match(body, /저장된 파일\*\*이 적용됩니다/);
+  assert.match(body, /마지막으로 저장한 파일이 적용됩니다/);
 });
 
 // 「모터 상태 확인」은 지웠다 · §6-228
@@ -74,11 +74,11 @@ test('program status refresh is the only status check button', () => {
 
 test('motor type scans and the full scan are directly available without nested controls', () => {
   const scanSection = html.match(
-    /<section class="[^"]*\baxis-setup-step\b[^"]*" aria-label="모터 타입별 검색">([\s\S]*?)<\/section>\s*<section class="[^"]*\baxis-settings-panel\b/,
+    /<section class="[^"]*\baxis-setup-step\b[^"]*" aria-label="모터 검색">([\s\S]*?)<\/section>\s*<section class="[^"]*\baxis-settings-panel\b/,
   );
   assert.ok(scanSection, 'primary motor type scan section missing');
-  assert.match(scanSection[1], /id="scanButton"[^>]*>AC Servo 검색</);
-  assert.match(scanSection[1], /id="dynamixelScanButton"[^>]*>Dynamixel 검색</);
+  assert.match(scanSection[1], /id="scanButton"[^>]*>AC 서보 검색</);
+  assert.match(scanSection[1], /id="dynamixelScanButton"[^>]*>다이나믹셀 검색</);
   assert.match(scanSection[1], /id="scanAllButton"[^>]*>전체 모터 검색</);
   assert.match(
     scanSection[1],
@@ -111,7 +111,7 @@ test('project-compatible physical scan gaps are displayed as partial, not failur
     controller,
     /const scanPartial = payload\.partial === true\s*\|\| payload\.motor_operation\?\.status === 'partial'/,
   );
-  assert.match(controller, /scanPartial\s*\?\s*'직접 검색 부분 완료'/);
+  assert.match(controller, /scanPartial\s*\?\s*'AC 서보 검색 일부 완료'/);
   assert.match(
     controller,
     /scanPartial \? 'partial' : ''/,

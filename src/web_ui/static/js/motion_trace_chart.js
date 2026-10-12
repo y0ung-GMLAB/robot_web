@@ -63,7 +63,7 @@ export function traceTimingText(record) {
   const skipped = Number(timing.skipped_samples) || 0;
   if (!late && !skipped) return '';
   const worst = Number(timing.max_late_ms) || 0;
-  return `늦은 프레임 ${late} · 최대 ${worst.toFixed(1)} ms${skipped ? ` · 건너뜀 ${skipped}` : ''}`;
+  return `늦은 프레임 ${late}개 · 최대 ${worst.toFixed(1)} ms${skipped ? ` · 건너뛴 샘플 ${skipped}개` : ''}`;
 }
 
 /** 회차 요약의 모터별 최대 오차 중 가장 큰 것 · 없으면 null */

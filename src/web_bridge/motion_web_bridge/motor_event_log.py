@@ -210,7 +210,7 @@ class MotorEventLog:
 
         if state == 'running' and previous_state != 'running':
             continuous = details['run_mode'] == 'continuous'
-            motion_label = '연속 모션' if continuous else '1회 모션'
+            motion_label = '연속 재생' if continuous else '1회 재생'
             self.append(
                 category='motion',
                 event_type='continuous_motion_started' if continuous else 'single_motion_started',

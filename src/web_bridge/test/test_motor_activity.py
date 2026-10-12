@@ -16,7 +16,7 @@ def test_automatic_motion_has_priority_over_playback_owner():
     assert result == {
         'active': True,
         'kind': 'automation',
-        'label': '자동 반복 모션 동작 중',
+        'label': '자동 반복 재생 중',
         'source': 'motion_run',
         'warning': False,
     }

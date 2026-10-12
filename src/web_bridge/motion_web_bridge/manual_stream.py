@@ -112,7 +112,7 @@ class ManualStreamService:
             if axis is not None and axis not in clean:
                 clean.append(axis)
         if not clean:
-            return {'success': False, 'message': '잡아 둘 모터가 없습니다'}
+            return {'success': False, 'message': '위치를 유지할 모터가 없습니다'}
         request = self._base_request()
         request['hold_axes'] = clean
         self._publish(request)

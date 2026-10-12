@@ -37,15 +37,15 @@ test('그룹 참여를 꺼 두면 그룹 미참여 · 혼자 재생이라고 말
   const [scope] = motionHeaderConditionCells({ enabled: true, joined: false, inWindow: false });
 
   assert.equal(scope.text, '그룹 미참여');
-  assert.match(scope.title, /그룹 참여」 꺼짐 · 이 PC 혼자 재생합니다/);
+  assert.match(scope.title, /그룹 참여」가 꺼져 있어 단독으로 재생합니다/);
 });
 
 test('아직 모르면 물음표로 둔다', () => {
   // 모르는 것을 「그룹 미참여」로 단정하면 없는 문제를 만든다
-  assert.deepEqual(texts({ enabled: null, joined: null, inWindow: null }), ['그룹?', '운영시간?']);
+  assert.deepEqual(texts({ enabled: null, joined: null, inWindow: null }), ['그룹 확인 중', '운영시간 확인 중']);
 });
 
-test('앱솔루트 미확인이면 빨간 칸이 붙고 누르면 모터 관리로 간다 · 수정 목록 62', () => {
+test('앱솔루트 미확인이면 빨간 칸이 붙고 누르면 모터 설정으로 이동합니다 간다 · 수정 목록 62', () => {
   const cells = motionHeaderConditionCells({
     enabled: true, joined: false, inWindow: true,
     absoluteProblem: '앱솔루트 미확인 · 1번 모터 Pr0.15=1(인크리멘털)',

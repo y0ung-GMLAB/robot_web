@@ -112,7 +112,7 @@ def validate_runtime_motor_profiles(payload: Dict[str, Any]) -> None:
                         raise ValueError(
                             f'{axis}번 모터의 EEPROM Alias가 실행 설정({alias})과 '
                             f'물리 식별 정보({identity_alias})에서 다릅니다. '
-                            '모터축 설정에서 확인 후 변경 내용 저장을 누르세요'
+                            '모터 설정에서 확인한 뒤 「저장」을 누르세요'
                         )
                     # **alias 를 쓰면 이 둘은 원래 다르다** · §6-201
                     #
@@ -130,7 +130,7 @@ def validate_runtime_motor_profiles(payload: Dict[str, Any]) -> None:
                         raise ValueError(
                             f'{axis}번 모터의 Slave Position이 실행 설정({position})과 '
                             f'물리 식별 정보({identity_position})에서 다릅니다. '
-                            '모터축 설정에서 확인 후 변경 내용 저장을 누르세요'
+                            '모터 설정에서 확인한 뒤 「저장」을 누르세요'
                         )
                     missing_identity = missing_ethercat_identity({
                         **identity,
@@ -138,9 +138,9 @@ def validate_runtime_motor_profiles(payload: Dict[str, Any]) -> None:
                     })
                     if missing_identity:
                         raise ValueError(
-                            f'{axis}번 모터의 실제 EtherCAT 식별정보가 완전하지 않습니다: '
+                            f'{axis}번 모터의 실제 EtherCAT 식별 정보가 완전하지 않습니다: '
                             f'{", ".join(missing_identity)}. '
-                            '전체 모터 검색 후 해당 검색 장비의 연결정보를 반영하고 저장하세요'
+                            '모터 검색으로 연결 정보를 반영한 뒤 「저장」을 누르세요'
                         )
                 if alias != 0:
                     alias_key = (ethercat_master_index, alias)

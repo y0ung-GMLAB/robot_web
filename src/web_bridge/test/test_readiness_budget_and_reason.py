@@ -66,14 +66,14 @@ def test_a_tiny_budget_still_leaves_time_to_work():
 
 def test_the_answer_carries_the_real_reason():
     context = _Context(
-        message='현재 프로젝트의 모터 관리 노드 상태 확인 대기 중',
+        message='Motor Manager 상태 확인을 기다리는 중입니다',
         failures={'motor_runtime': 'motor_manager_node 시작 후 첫 모터 상태를 기다리는 중입니다'},
     )
 
     result = local_motion_readiness(_bridge(context), {'budget_sec': 6.0})
 
     assert result['success'] is False
-    assert '모터 관리 노드 상태 확인 대기 중' in result['message']
+    assert 'Motor Manager 상태 확인을 기다리는 중입니다' in result['message']
     assert 'motor_runtime' in result['message'], '어느 노드가 막았는지 없다'
     assert '첫 모터 상태를 기다리는' in result['message'], '진짜 사유가 없다'
 

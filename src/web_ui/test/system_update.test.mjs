@@ -10,7 +10,7 @@ const api = readFileSync(new URL('../static/js/api.js', import.meta.url), 'utf8'
 const dom = readFileSync(new URL('../static/js/dom.js', import.meta.url), 'utf8');
 
 test('the update section sits under the same-network PC table with one button', () => {
-  const network = indexHtml.indexOf('aria-label="같은 망 PC"');
+  const network = indexHtml.indexOf('aria-label="같은 네트워크의 PC"');
   const update = indexHtml.indexOf('aria-label="모든 PC 업데이트"');
   assert.ok(network > 0 && update > network);
   assert.match(indexHtml, /<button id="systemUpdateAllButton" class="primary" type="button">모든 PC 업데이트<\/button>/);
@@ -33,9 +33,9 @@ test('rows show state, version change and the last line', () => {
   assert.match(html, /aaa → bbb/);
   assert.match(html, /응답 없음 \(재시작 중일 수 있음\)/);
   assert.match(html, /터미널에서/);
-  assert.match(html, /floating4<\/strong> <small>\(이 PC\)<\/small>/);
+  assert.match(html, /floating4<\/strong> <small>\(현재 접속\)<\/small>/);
   assert.match(html, /새 시스템 패키지가 필요합니다/);
-  assert.match(systemUpdateRows([]), /같은 망 PC 를 기다리는 중/);
+  assert.match(systemUpdateRows([]), /같은 네트워크의 PC를 찾는 중/);
 });
 
 test('a failed update shows only the current version, not before → after (82)', () => {

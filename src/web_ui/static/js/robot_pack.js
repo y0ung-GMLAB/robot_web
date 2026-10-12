@@ -56,7 +56,7 @@ export function createRobotPackController({ el }) {
     if (el.robotPackUploadedAt) el.robotPackUploadedAt.textContent = current?.uploaded_at || '-';
     if (el.robotPackPrevious) el.robotPackPrevious.textContent = previous ? label(previous) : '없음';
     if (el.robotPackSummary) {
-      el.robotPackSummary.textContent = current ? `${label(current)} 사용 중` : '팩 없음 · zip 을 올리세요';
+      el.robotPackSummary.textContent = current ? `${label(current)} 사용 중` : '로봇 팩이 없습니다. zip 파일을 업로드하세요.';
     }
     if (el.robotPackRollbackButton) el.robotPackRollbackButton.disabled = busy || !previous;
   }
@@ -74,7 +74,7 @@ export function createRobotPackController({ el }) {
     if (!source || busy) return;
     const isFolder = Array.isArray(source);
     if (!isFolder && !/\.zip$/i.test(source.name)) {
-      setMessage(`zip 파일이나 팩 폴더만 올릴 수 있습니다: ${source.name}`, { error: true });
+      setMessage(`zip 파일이나 팩 폴더만 업로드할 수 있습니다: ${source.name}`, { error: true });
       return;
     }
     if (isFolder && !source.length) {
@@ -87,7 +87,7 @@ export function createRobotPackController({ el }) {
     try {
       let body = source;
       if (isFolder) {
-        setMessage(`묶는 중: ${name} · 파일 ${source.length}개`);
+        setMessage(`압축하는 중: ${name} · 파일 ${source.length}개`);
         body = await zipFiles(source);
       }
       setMessage(`검사 중: ${name} · 모델 로드 검사까지 수십 초 걸릴 수 있습니다`);
@@ -105,7 +105,7 @@ export function createRobotPackController({ el }) {
 
   async function rollback() {
     if (busy) return;
-    const ok = await showConfirm('이전 로봇 팩으로 되돌립니다 · 지금 팩은 이전 팩 자리로 갑니다');
+    const ok = await showConfirm('이전 로봇 팩으로 되돌립니다. 현재 팩은 이전 팩으로 보관됩니다.');
     if (!ok) return;
     busy = true;
     try {
@@ -146,7 +146,7 @@ export function createRobotPackController({ el }) {
       }
       el.robotPackDiffWrap?.classList.remove('hidden');
       setMessage(result.mapping_file
-        ? `비교 대상 조인트 매핑: ${result.mapping_file} · 표시만 · 적용하지 않습니다`
+        ? `비교 대상 조인트 매핑: ${result.mapping_file} · 비교만 하고 적용하지는 않습니다`
         : '등록된 조인트 매핑이 없습니다');
     } catch (error) {
       setMessage(`비교 실패: ${error.message}`, { error: true });

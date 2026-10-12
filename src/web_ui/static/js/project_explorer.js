@@ -85,7 +85,7 @@ export function createProjectExplorerController({
       anchor.href = projectExportUrl(state.project.project_id);
       anchor.download = `${state.project.project_id}.zip`;
       anchor.click();
-      setMessage(`zip 내려받기 · ${state.project.name || state.project.project_id}`);
+      setMessage(`zip 다운로드 · ${state.project.name || state.project.project_id}`);
     });
     el.projectImportZipButton?.addEventListener('click', () => el.projectImportZipInput?.click());
     el.projectImportZipInput?.addEventListener('change', async () => {
@@ -125,8 +125,8 @@ export function createProjectExplorerController({
         if (confirmed) await restoreFromZip(file, true);
         return;
       }
-      await afterRepositoryChange(result, result?.message || 'zip 으로 복원했습니다');
-      await showAlert(result?.message || 'zip 으로 복원했습니다', { title: '프로젝트 복원', tone: 'info' });
+      await afterRepositoryChange(result, result?.message || 'zip으로 복원했습니다');
+      await showAlert(result?.message || 'zip으로 복원했습니다', { title: '프로젝트 복원', tone: 'info' });
     } catch (error) {
       const message = `복원 실패 · ${error?.message || error}`;
       setMessage(message, true);
@@ -151,9 +151,9 @@ export function createProjectExplorerController({
         ? entries.map((entry) => (
           `<div class="project-trash-row"><span>${escapeHtml(entry.name || entry.entry)}`
           + ` · ${escapeHtml(new Date(Number(entry.deleted_at) * 1000).toLocaleString())}</span>`
-          + ` <button type="button" data-trash-entry="${escapeHtml(entry.entry)}">되살리기</button></div>`
+          + ` <button type="button" data-trash-entry="${escapeHtml(entry.entry)}">복원</button></div>`
         )).join('')
-        : `휴지통이 비어 있습니다 · 지운 프로젝트는 ${Number(result?.keep_days) || 7}일 동안 여기 있습니다`;
+        : `휴지통이 비어 있습니다. 삭제한 프로젝트는 ${Number(result?.keep_days) || 7}일 동안 여기에 보관됩니다.`;
       box.classList.remove('hidden');
     } catch (error) {
       box.textContent = `휴지통을 읽지 못했습니다 · ${error?.message || error}`;
@@ -174,7 +174,7 @@ export function createProjectExplorerController({
       const days = Array.isArray(result?.days) ? result.days : [];
       const keep = Number(result?.keep_days) || 14;
       box.innerHTML = days.length
-        ? `<div>하루 한 번 저절로 남깁니다 · ${keep}일 보관 · 내려받은 zip 을 「zip 올려 복원」</div>`
+        ? `<div>하루 한 번 자동으로 백업하고 ${keep}일 동안 보관합니다. 다운로드한 zip은 「zip 파일로 복원」으로 복원하세요.</div>`
           + days.map((day) => (
             `<div class="project-trash-row"><span>${escapeHtml(day.day)}</span> `
             + (day.projects || []).map((item) => (
@@ -183,7 +183,7 @@ export function createProjectExplorerController({
             )).join(' · ')
             + '</div>'
           )).join('')
-        : `아직 자동 백업이 없습니다 · 프로그램을 켜 두면 하루 한 번 만들고 ${keep}일 보관합니다`;
+        : `아직 자동 백업이 없습니다. 프로그램이 켜져 있으면 하루 한 번 백업하고 ${keep}일 동안 보관합니다.`;
       box.classList.remove('hidden');
     } catch (error) {
       box.textContent = `자동 백업 목록을 읽지 못했습니다 · ${error?.message || error}`;
@@ -196,10 +196,10 @@ export function createProjectExplorerController({
     renderControls();
     try {
       const result = await restoreProjectTrash(entry);
-      await afterRepositoryChange(result, result?.message || '되살렸습니다');
+      await afterRepositoryChange(result, result?.message || '복원했습니다');
       await renderTrash();
     } catch (error) {
-      setMessage(`되살리기 실패 · ${error?.message || error}`, true);
+      setMessage(`복원 실패 · ${error?.message || error}`, true);
     } finally {
       state.busy = false;
       renderControls();
@@ -220,8 +220,8 @@ export function createProjectExplorerController({
     ) {
       return (
         `'${name}' 프로젝트를 삭제할 수 없습니다.\n\n`
-        + '현재 이 프로젝트의 모터 설정이 실행 시스템에 적용되어 있습니다.\n'
-        + '프로그램 재시작·전체 동작 정지만으로는 적용이 해제되지 않습니다.\n\n'
+        + '이 프로젝트의 모터 설정이 장비에 적용되어 있습니다.\n'
+        + '프로그램을 재시작하거나 「전체 동작 정지」를 눌러도 적용은 해제되지 않습니다.\n\n'
         + '삭제하려면 다음 순서로 진행하세요.\n'
         + '1. 「전체 동작 정지」를 실행합니다.\n'
         + '2. 「실행 적용 해제」를 실행합니다.\n'
@@ -316,7 +316,7 @@ export function createProjectExplorerController({
         const bankTree = '';
         return `<div class="project-tree-file-entry"><div class="project-tree-file-row${selected ? ' selected' : ''}" `
           + `data-project-category="${escapeHtml(file.category)}" data-project-file="${escapeHtml(file.name)}">`
-          + `<button type="button" class="project-tree-file" ${isLogFile ? 'data-project-log-open' : 'data-project-open'} title="${escapeHtml(file.name)} · ${isLogFile ? '로그 탭에서 보기' : '기능에서 열기'}">`
+          + `<button type="button" class="project-tree-file" ${isLogFile ? 'data-project-log-open' : 'data-project-open'} title="${escapeHtml(file.name)} · ${isLogFile ? '로그 탭에서 보기' : '해당 탭에서 열기'}">`
           + `<span class="project-tree-branch">${fileIndex === folder.children.length - 1 ? '└' : '├'}</span>`
           + `<span class="project-tree-name" title="${escapeHtml(file.name)}">${escapeHtml(file.name)}</span>`
           + `${fileBadge}</button>`
@@ -382,8 +382,8 @@ export function createProjectExplorerController({
     }
     const activeLabels = {
       motor_axes: '현재 모터 설정으로 선택',
-      motion_axis_matching: '현재 조인트 매핑로 선택',
-      motions: '현재 애니메이션로 선택',
+      motion_axis_matching: '현재 조인트 매핑으로 선택',
+      motions: '현재 애니메이션으로 선택',
       layers: '현재 레이어로 선택',
     };
     if (el.projectFileActivateButton) {
@@ -438,7 +438,7 @@ export function createProjectExplorerController({
     const status = state.project.setup_status || {};
     const steps = [
       ['config', '', '모터 설정', Boolean(status.motor_configured)],
-      ['config', '', '실행 설정 적용', Boolean(status.motor_applied)],
+      ['config', '', '장비에 적용', Boolean(status.motor_applied)],
       ['manual', '', '조그 확인', Boolean(status.jog_verified)],
       ['motion', 'mapping', '조인트 매핑', Boolean(status.motion_axes_configured)],
     ];
@@ -464,8 +464,8 @@ export function createProjectExplorerController({
       const hasRuntime = Boolean(state.runtimeProjectId);
       el.clearMotorRuntimeButton.disabled = state.busy || !hasRuntime;
       el.clearMotorRuntimeButton.title = hasRuntime
-        ? 'Motor Manager 실행 적용을 해제해 프로젝트 삭제가 가능하게 합니다'
-        : '해제할 모터 실행 적용이 없습니다';
+        ? 'Motor Manager에 적용된 설정을 해제합니다. 해제하면 프로젝트를 삭제할 수 있습니다.'
+        : '장비에 적용된 설정이 없어 해제할 것이 없습니다';
     }
     if (el.projectDeleteButton) el.projectDeleteButton.disabled = state.busy || !hasProject;
     if (el.projectExportButton) el.projectExportButton.disabled = !hasProject;
@@ -583,7 +583,7 @@ export function createProjectExplorerController({
         loadMemoDraft();
       }
       if (!silent || el.projectExplorerMessage?.textContent.includes('불러오는 중')) {
-        setMessage(`프로젝트 ${state.projects.length}개 · 변경은 시스템 정보에서만`);
+        setMessage(`프로젝트 ${state.projects.length}개 · 프로젝트 변경은 「시스템 정보」에서 합니다`);
       }
     } catch (error) {
       setMessage(error.message, true);
@@ -672,7 +672,7 @@ export function createProjectExplorerController({
     renderControls();
     try {
       const result = await openProjectFileEditor(state.project.project_id, category, fileName);
-      setMessage(result.message || `${fileName} 기능에서 열기 완료`);
+      setMessage(result.message || `${fileName} · 해당 탭에서 열었습니다`);
       await onOpenEditor(result, targetWorkspace);
       return true;
     } catch (error) {
@@ -735,7 +735,7 @@ export function createProjectExplorerController({
       }
       const changed = await run(
         () => selectProject(projectId),
-        '프로젝트 선택 완료 · 장비에는 적용되지 않았습니다',
+        '프로젝트를 선택했습니다. 장비에는 아직 적용되지 않았습니다.',
       );
       if (changed) await onProjectChange(state.project, state.projectGeneration);
     });
@@ -758,10 +758,10 @@ export function createProjectExplorerController({
         (item) => item.project_id === state.runtimeProjectId,
       )?.name || state.runtimeProjectId;
       const confirmed = await showConfirm(
-        `모터 실행 적용을 해제합니다.\n\n`
+        `장비에 적용된 모터 설정을 해제합니다.\n\n`
         + `적용 중 프로젝트: ${runtimeName}\n`
-        + 'Motor Manager가 정지되며, 다시 사용하려면 「장비에 적용 · 모터 재시작」이 필요합니다.\n'
-        + '모든 애니메이션이 정지된 상태에서 「전체 동작 정지」를 먼저 실행했는지 확인하세요.',
+        + 'Motor Manager가 정지됩니다. 다시 사용하려면 「장비에 적용 · 모터 재시작」을 누르세요.\n'
+        + '먼저 「전체 동작 정지」를 눌러 모든 애니메이션을 정지했는지 확인하세요.',
         {
           title: '실행 적용 해제',
           confirmLabel: '적용 해제',
@@ -820,7 +820,7 @@ export function createProjectExplorerController({
       }
       const expected = String(state.project.name || '');
       const entered = await showPrompt(
-        `프로젝트를 휴지통으로 옮깁니다 · 7일 안에는 「휴지통」 에서 되살릴 수 있고, 그 뒤 자동으로 지워집니다.\n확인하려면 프로젝트 이름을 입력하세요.\n\n${expected}`,
+        `프로젝트를 휴지통으로 옮깁니다. 7일 안에는 「휴지통」에서 복원할 수 있고, 그 뒤에는 자동으로 삭제됩니다.\n확인하려면 프로젝트 이름을 입력하세요.\n\n${expected}`,
         {
           title: '프로젝트 삭제 (휴지통)',
           defaultValue: '',
@@ -923,7 +923,7 @@ export function createProjectExplorerController({
         const result = await openProjectFileEditor(
           state.project.project_id, file.category, file.file_name,
         );
-        setMessage(result.message || '기능 탭에 연결했습니다');
+        setMessage(result.message || '해당 탭에서 열었습니다');
         await onOpenEditor(result);
       } catch (error) {
         setMessage(error.message, true);
@@ -956,7 +956,7 @@ export function createProjectExplorerController({
       closeFileActionMenu();
       await run(
         () => activateProjectFile(state.project.project_id, file.category, file.file_name),
-        '프로젝트의 현재 파일로 선택했습니다 · 실제 장비에는 적용되지 않았습니다',
+        '프로젝트의 현재 파일로 선택했습니다. 장비에는 아직 적용되지 않았습니다.',
       );
     });
     el.projectFileExportButton?.addEventListener('click', () => {

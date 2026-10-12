@@ -117,7 +117,7 @@ class MotorRuntimeService:
             )
         if time.time() - float(received_at) > 1.0:
             return (
-                '최신 모터 상태가 중단되어 정지 여부를 확인할 수 없습니다'
+                '모터 상태 수신이 끊겨 정지 여부를 확인할 수 없습니다'
                 if require_fresh_motor_state else ''
             )
 
@@ -157,10 +157,10 @@ class MotorRuntimeService:
             if moving:
                 moving_axes.append(str(motor.get('controller_index', '?')))
         if require_fresh_motor_state and not observed_axes:
-            return '최신 모터 상태에서 AC Servo 축을 확인할 수 없습니다'
+            return '모터 상태에서 AC 서보 모터를 찾을 수 없습니다'
         if moving_axes:
             return (
-                f'AC Servo 축 {", ".join(moving_axes)}이 움직이는 중입니다. '
+                f'AC 서보 {", ".join(moving_axes)}번 모터가 움직이는 중입니다. '
                 '완전히 정지한 뒤 다시 검색하세요'
             )
         return ''
@@ -186,11 +186,11 @@ class MotorRuntimeService:
                     continue
         missing = [axis for axis in expected if axis not in online]
         if not missing:
-            return '모터 설정 적용 제한시간을 초과했습니다'
+            return '모터 설정 적용 제한 시간을 초과했습니다'
         return (
-            f'{", ".join(str(axis) for axis in missing)}번 모터가 올라오지 않았습니다 · '
-            f'전원·통신선·드라이버 상태를 확인하세요 '
-            f'(붙은 축 {len(expected) - len(missing)}/{len(expected)})'
+            f'{", ".join(str(axis) for axis in missing)}번 모터가 연결되지 않았습니다. '
+            f'전원·통신선·드라이브 상태를 확인하세요 '
+            f'(연결된 모터 {len(expected) - len(missing)}/{len(expected)})'
         )
 
     def wait_for_runtime_recovery(
@@ -214,7 +214,7 @@ class MotorRuntimeService:
                     or self.managed_service_active(motor_service)
                 ),
                 'duration_sec': 0.0,
-                'error': '복구 대상 EtherCAT 축을 확인할 수 없습니다',
+                'error': '복구할 EtherCAT 모터를 확인할 수 없습니다',
             }
         while time.time() - started_at < timeout_sec:
             service_active = (
@@ -283,7 +283,7 @@ class MotorRuntimeService:
                     operation_id,
                     'failure',
                     phase='interrupted',
-                    error='브리지 종료로 AC Servo 검색 결과를 확인할 수 없습니다',
+                    error='브리지가 종료되어 AC 서보 검색 결과를 확인할 수 없습니다',
                 )
                 return
             self.run_managed_service('start', 'motion-motor.service')
@@ -298,7 +298,7 @@ class MotorRuntimeService:
                     'failure',
                     phase='interrupted_recovered',
                     error=(
-                        '브리지 종료로 AC Servo 검색 결과를 확인할 수 없습니다. '
+                        '브리지가 종료되어 AC 서보 검색 결과를 확인할 수 없습니다. '
                         'Motor Manager는 검색 전 실행 상태로 복구했습니다'
                     ),
                     details={'recovery': recovery},
@@ -308,7 +308,7 @@ class MotorRuntimeService:
                     operation_id,
                     'failure',
                     phase='restore_failed',
-                    error='중단된 AC Servo 검색 후 Motor Manager 복구에 실패했습니다',
+                    error='중단된 AC 서보 검색 뒤 Motor Manager를 복구하지 못했습니다',
                     details={'recovery': recovery},
                 )
         except (OSError, RuntimeError, subprocess.TimeoutExpired, ValueError) as exc:
@@ -317,7 +317,7 @@ class MotorRuntimeService:
                     operation_id,
                     'failure',
                     phase='restore_failed',
-                    error=f'중단된 AC Servo 검색 복구 실패: {exc}',
+                    error=f'중단된 AC 서보 검색 복구 실패: {exc}',
                 )
             except ValueError:
                 pass
@@ -340,7 +340,7 @@ class MotorRuntimeService:
             updated = self.repository.runtime.update_motor_operation(
                 operation_id,
                 'restoring_after_bridge_restart',
-                message='중단된 AC Servo 검색의 Motor Manager 복구 중',
+                message='중단된 AC 서보 검색 뒤 Motor Manager 복구 중',
                 timeout_sec=20.0,
             )
         except ValueError:
@@ -430,7 +430,7 @@ class MotorRuntimeService:
                     operation_id,
                     'timeout',
                     phase='timed_out',
-                    error=str(operation.get('error') or '모터 작업 제한시간을 초과했습니다'),
+                    error=str(operation.get('error') or '모터 작업 제한 시간을 초과했습니다'),
                 )
             except ValueError:
                 return operation

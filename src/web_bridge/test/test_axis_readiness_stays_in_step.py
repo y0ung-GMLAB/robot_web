@@ -96,7 +96,7 @@ def test_the_screen_says_the_same_thing():
     """문구가 갈리면 같은 상황에 두 가지 말이 나온다."""
     source = MOTION_TEST_JS.read_text(encoding='utf-8')
 
-    for sentence in ('감지되지 않았습니다', '에러가 있습니다', '서보가 켜진 상태가 아닙니다'):
+    for sentence in ('감지되지 않았습니다', '에러가 있습니다', '서보가 꺼져 있습니다'):
         assert sentence in source, f'화면에서 사라진 안내: {sentence}'
 
 

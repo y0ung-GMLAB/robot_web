@@ -128,8 +128,8 @@ test('재생 등록 저장은 파일 개정만 동기화하고 편집 초안은 
 test('a save conflict says what is lost and never locks the draft away', () => {
   assert.match(controller, /function isMappingRevisionConflict\(message\)/);
   // 무엇을 잃는지 말한다
-  assert.match(controller, /저장된 내용을 다시 불러오면 지금 고친 것은 사라집니다/);
-  assert.match(controller, /confirmLabel: '고친 것을 버리고 다시 불러오기'/);
+  assert.match(controller, /저장된 내용을 다시 불러오면 수정한 내용은 사라집니다/);
+  assert.match(controller, /confirmLabel: '버리고 다시 불러오기'/);
   assert.match(controller, /cancelLabel: '그대로 두기'/);
   assert.match(controller, /await selectMapping\(selectedMappingId\)/);
   // 「그대로 두기」 뒤에도 다시 저장할 수 있어야 한다 · §6-243
@@ -150,7 +150,7 @@ test('program reconnect refreshes clean mappings and preserves dirty drafts', ()
   assert.match(body, /if \(!mappingDirty\)/);
   assert.match(body, /await selectMapping\(selectedMappingId\)/);
   assert.match(body, /if \(currentRevision && currentRevision !== mappingRevision\)/);
-  assert.match(body, /편집 내용은 유지 중/);
+  assert.match(body, /수정한 내용은 그대로 있습니다/);
   assert.match(controller, /refreshMappingAfterReconnect,/);
   assert.match(main, /motionData\?\.refreshMappingAfterReconnect\?\.\(\)/);
 });

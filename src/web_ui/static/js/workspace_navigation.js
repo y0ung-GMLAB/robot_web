@@ -22,7 +22,7 @@ const LEGACY_ROUTE_ALIASES = Object.freeze({ 'motion-mapping': 'config' });
 export const MOTION_WORKSPACE_DETAILS = Object.freeze({
   'motion-run': Object.freeze([
     '애니메이션 재생',
-    '애니메이션을 고르고 재생 등록한 뒤 초기 위치 이동과 재생을 제어합니다',
+    '애니메이션을 선택해 재생 등록한 뒤 초기 위치 이동과 재생을 제어합니다',
   ]),
 });
 

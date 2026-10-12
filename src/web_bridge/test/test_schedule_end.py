@@ -125,7 +125,7 @@ def test_finish_cycle_then_park_then_power_off_only_flagged_motors(tmp_path):
 
 @pytest.mark.parametrize('kwargs, reason', [
     ({'states': ['running', 'error']}, '오류'),
-    ({'states': ['completed'], 'alarm': 2}, 'Servo 알람'),
+    ({'states': ['completed'], 'alarm': 2}, '서보 알람'),
     ({'states': ['completed'], 'init_ok': False}, '기준점 이동 시작 실패'),
     ({'states': ['completed', 'initializing', 'error']}, '끝나지 않음'),
 ])
@@ -179,7 +179,7 @@ def test_start_is_refused_while_parking(tmp_path):
     service = _service(bridge)
     service._set('parking', '기준점 이동 중')
 
-    assert '스케줄 끝 동작' in service.start_blocker()
+    assert '운영 종료 동작' in service.start_blocker()
 
 
 def test_motor_flag_defaults_to_power_off():

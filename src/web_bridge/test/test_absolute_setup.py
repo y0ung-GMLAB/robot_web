@@ -150,7 +150,7 @@ def test_full_run_goes_through_every_step_with_two_power_cycles():
     assert status['state'] == 'done', status['message']
     assert '기준점을 다시 캡처' in status['message']
     assert switch.cycles == 2
-    assert servo[0] is False                                     # 등록 축 서보 OFF
+    assert servo[0] is False                                     # 등록 축 서보 끄기
     assert service_calls == ['stop', 'start', 'stop', 'start']   # 쓰기 두 번 · 늘 다시 띄움
     for drive in drives.values():
         assert drive.ram == 0 and drive.eeprom == 0 and drive.code == 0 and drive.position < ONE_TURN_COUNTS

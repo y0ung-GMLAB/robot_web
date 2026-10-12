@@ -175,15 +175,15 @@ export function createJogDialController({
     const modeReason = manualControlBlockReason();
     if (modeReason) return modeReason;
     if (!motor) return '모터를 먼저 선택하세요';
-    if (String(motor.state || '') !== 'detected') return '선택 모터가 감지되지 않았습니다';
-    if (motor.fault) return '선택 모터에 에러가 있습니다';
-    if (!isDynamixel(motor) && motor.servo_on !== true) return '서보가 켜진 상태가 아닙니다';
+    if (String(motor.state || '') !== 'detected') return '선택한 모터가 감지되지 않았습니다';
+    if (motor.fault) return '선택한 모터에 오류가 있습니다';
+    if (!isDynamixel(motor) && motor.servo_on !== true) return '서보가 꺼져 있습니다';
     return '';
   }
 
   /** 다이얼만의 사유 · 스위치가 꺼졌으면 잠금 (목표 위치 이동은 무관) */
   function dialBlockReason(motor) {
-    if (!enabled) return '다이얼 OFF · 위 스위치로 켜세요';
+    if (!enabled) return '다이얼이 꺼져 있습니다. 위 스위치로 켜세요';
     return blockReason(motor);
   }
 
@@ -333,7 +333,7 @@ export function createJogDialController({
     }
     const step = stepDeg();
     if (step === null) {
-      lastMessage = `한 칸 크기는 ${STEP_MIN_DEG} ~ ${STEP_MAX_DEG} deg 숫자여야 합니다`;
+      lastMessage = `한 칸 값은 ${STEP_MIN_DEG} ~ ${STEP_MAX_DEG} deg 사이여야 합니다`;
       render();
       return;
     }
@@ -342,7 +342,7 @@ export function createJogDialController({
     if (!session) {
       const position = positionDeg(motor);
       if (position === null) {
-        lastMessage = '모터 위치를 아직 모릅니다';
+        lastMessage = '모터 위치를 아직 받지 못했습니다';
         render();
         return;
       }
@@ -397,14 +397,14 @@ export function createJogDialController({
     } else {
       bounds = below ? `한계 ${shown(lower)}°` : `한계 ${shown(upper)}°`;
     }
-    return `목표 ${shown(target)}° 가 운전 범위(${bounds}) 밖입니다 · 리밋은 조인트 매핑에서 정합니다`;
+    return `목표 ${shown(target)}°가 운전 범위(${bounds}) 밖입니다. 범위는 조인트 매핑에서 정합니다`;
   }
 
   async function moveToTarget() {
     const motor = selectedMotor();
     const reason = blockReason(motor);
     if (reason || inFlight || hasPending()) {
-      lastMessage = reason || '앞 이동이 끝난 뒤에 이동하세요';
+      lastMessage = reason || '이전 이동이 끝난 뒤에 다시 시도하세요';
       render();
       return;
     }
@@ -423,12 +423,12 @@ export function createJogDialController({
     }
     const current = positionDeg(motor);
     if (current !== null && Math.abs(target - current) < TARGET_EPSILON_DEG) {
-      lastMessage = '이미 그 위치입니다';
+      lastMessage = '이미 목표 위치에 있습니다';
       render();
       return;
     }
     inFlight = true;
-    lastMessage = `목표 ${typed}° 로 이동 요청 중`;
+    lastMessage = `목표 ${typed}°로 이동 요청 중`;
     render();
     try {
       const sendAction = isDynamixel(motor) ? requestDynamixelAction : requestAcServoAction;
@@ -439,7 +439,7 @@ export function createJogDialController({
       });
       lastMessage = response?.success === false
         ? String(response?.message || '이동 거부')
-        : `목표 ${typed}° 로 이동 시작`;
+        : `목표 ${typed}°로 이동 시작`;
     } catch (error) {
       lastMessage = `이동 실패: ${error?.message || error}`;
     } finally {
@@ -582,7 +582,7 @@ export function createJogDialController({
       el.jogTargetMoveButton.disabled = Boolean(reason) || inFlight || hasPending()
         || typed === null || Boolean(limitReason);
       el.jogTargetMoveButton.title = reason || limitReason
-        || (typed === null ? '목표 위치를 입력하세요' : `${jointRow(motor) ? '조인트' : '모터'} ${typed}° 로 이동`);
+        || (typed === null ? '목표 위치를 입력하세요' : `${jointRow(motor) ? '조인트' : '모터'} ${typed}°로 이동`);
     }
   }
 
@@ -594,7 +594,7 @@ export function createJogDialController({
     renderSwitch();
     renderTarget(motor, reason);
     el.jogDial.setAttribute('aria-disabled', dialReason ? 'true' : 'false');
-    el.jogDial.title = dialReason || `좌우로 끌면 모터가 그만큼 움직입니다 · 휠·방향키·◀ ▶ 도 됩니다 · Shift = 1/10 칸 · 단위 = ${unitText(motor)}`;
+    el.jogDial.title = dialReason || `좌우로 끌면 끈 만큼 모터가 움직입니다. 휠·방향키·◀ ▶도 됩니다 · Shift = 1/10 칸 · 단위 = ${unitText(motor)}`;
     const joint = Boolean(jointRow(motor));
     // 라벨은 짧게(줄 넘침 방지) · 자세한 뜻은 조그 칸 체크 글과 다이얼 툴팁에
     const shortUnit = joint ? '조인트 deg' : '모터 deg · 감속·기어비 미적용';
@@ -709,14 +709,14 @@ export function createJogDialController({
     bindArrow(el.jogDialPlus, 1);
     el.motionTestJogJointMode?.addEventListener('change', () => {
       // 단위가 바뀌면 돌리던 것은 지금 자리에 세우고 목표 칸을 새 단위로 다시 채운다 · 76
-      lastMessage = session ? '단위를 바꿔 지금 자리에 세웠습니다' : '';
+      lastMessage = session ? '단위를 바꿔 현재 위치에서 정지했습니다' : '';
       endSession(true);
       targetTouched = false;
       render();
     });
     el.jogDialStep?.addEventListener('input', () => {
       // 단위를 바꾸면 돌리던 것은 지금 자리에 세운다 · 새 단위로 다시 돌린다
-      lastMessage = session ? '한 칸 크기를 바꿔 지금 자리에 세웠습니다' : '';
+      lastMessage = session ? '한 칸 값을 바꿔 현재 위치에서 정지했습니다' : '';
       endSession(true);
       render();
     });

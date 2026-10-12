@@ -89,7 +89,7 @@ def test_an_old_speaker_without_the_endpoint_is_skipped_not_failed():
 
     result = system_timezone.apply_all(pcs, 'Europe/Paris', _tz(_Run()), http=http)
     speaker = next(row for row in result['pcs'] if row['pc_id'] == 'speaker')
-    assert speaker['success'] is True and '옛 스피커 앱' in speaker['message']
+    assert speaker['success'] is True and '이전 버전 스피커 앱' in speaker['message']
 
 
 def test_the_speaker_changes_the_zone_without_restarting_robot_services():

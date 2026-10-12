@@ -25,9 +25,9 @@ from typing import Any
 
 from motion_common.schedule_store import OFF_MODE, SCHEDULE_MODE, ScheduleStore
 
-OFF_BLOCK_MESSAGE = '오프 모드 · 명령이 차단되어 있습니다 (상단에서 모드를 바꾸세요)'
+OFF_BLOCK_MESSAGE = '오프 모드라 모든 명령이 차단되어 있습니다. 상단에서 모드를 바꾸세요.'
 SCHEDULE_MANUAL_BLOCK_MESSAGE = (
-    '스케줄 모드 · 수동 조작은 「수동」 모드에서만 됩니다 (상단에서 모드를 바꾸세요)'
+    '스케줄 모드에서는 수동 조작과 직접 재생을 할 수 없습니다. 상단에서 「수동」 모드로 바꾸세요.'
 )
 MODE_UNREADABLE_BLOCK_MESSAGE = '운전 모드를 확인할 수 없어 명령을 차단했습니다'
 

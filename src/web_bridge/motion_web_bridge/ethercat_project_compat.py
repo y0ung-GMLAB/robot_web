@@ -44,7 +44,7 @@ def annotate_ethercat_project_compatibility(
         comparison['ethercat_project'] = {
             'available': False,
             'compatible': False,
-            'message': f'현재 프로젝트 모터축 설정 확인 실패: {exc}',
+            'message': f'현재 프로젝트 모터 설정 확인 실패: {exc}',
         }
         return
     if registry_result.get('success') is not True:
@@ -53,7 +53,7 @@ def annotate_ethercat_project_compatibility(
             'compatible': False,
             'message': str(
                 registry_result.get('message')
-                or '현재 프로젝트 모터축 설정을 확인할 수 없습니다'
+                or '현재 프로젝트 모터 설정을 확인할 수 없습니다'
             ),
         }
         return
@@ -135,7 +135,7 @@ def annotate_ethercat_project_compatibility(
         comparison['ethercat_project'] = {
             'available': True,
             'compatible': True,
-            'message': '현재 프로젝트에 등록된 EtherCAT 축이 없습니다',
+            'message': '현재 프로젝트에 등록된 EtherCAT 모터가 없습니다',
             'required_master_indices': [],
             'masters': [],
         }
@@ -157,7 +157,7 @@ def annotate_ethercat_project_compatibility(
         observed = observed_by_master.get(master_index, [])
         errors = []
         if len(observed) != len(expected):
-            errors.append(f'축 수 {len(observed)}/{len(expected)}')
+            errors.append(f'모터 수 {len(observed)}/{len(expected)}')
         observed_by_position = {
             optional_int(item.get('slave_position'), None): item
             for item in observed
@@ -171,7 +171,7 @@ def annotate_ethercat_project_compatibility(
                 continue
             if actual.get('direct_read_complete') is not True:
                 errors.append(
-                    f'Slave {position} 물리 식별정보 읽기 미완료'
+                    f'Slave {position} 식별 정보를 아직 읽지 못함'
                 )
             for field in ('vendor_id', 'product_code', 'serial_number'):
                 expected_value = target.get(field)

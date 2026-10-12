@@ -76,8 +76,8 @@ def block_reason(
             return PREFIX + reason
     if axis is not None and axis not in mapped_axes(saved_rows, motors):
         return (
-            f'{PREFIX}{axis}번 모터는 조인트 매핑의 「사용」 줄에 없습니다 · '
-            '범위를 모르는 모터는 손으로도 움직이지 않습니다 · 조인트 매핑에서 연결하고 범위를 넣으세요'
+            f'{PREFIX}{axis}번 모터는 조인트 매핑의 「사용」 줄에 없습니다. '
+            '범위를 모르는 모터는 수동으로도 움직일 수 없습니다. 조인트 매핑에서 모터를 연결하고 범위를 입력하세요.'
         )
     return ''
 
@@ -98,7 +98,7 @@ class ManualRangeGate:
         project = repository.get_project(project_id).get('project') or {}
         mapping_id = str((project.get('active_files') or {}).get('motion_axis_matching') or '').strip()
         if not mapping_id:
-            raise ValueError('조인트 매핑이 없습니다 · 모터 관리에서 조인트 매핑을 만들고 범위를 넣으세요')
+            raise ValueError('조인트 매핑이 없습니다. 모터 설정에서 조인트 매핑을 만들고 범위를 입력하세요.')
         path = Path(repository.export_path(project_id, 'motion_axis_matching', mapping_id))
         stat = path.stat()
         key = (str(path), stat.st_mtime_ns, stat.st_size)

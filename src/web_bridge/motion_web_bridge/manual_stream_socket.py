@@ -36,8 +36,8 @@ BLOCK_RECHECK_SEC = 0.5
 
 HELLO_REQUIRED_MESSAGE = "hello 가 필요합니다 · {type:'hello'}"
 STALE_MAPPING_MESSAGE = (
-    '조인트 매핑이 이 화면을 연 뒤에 바뀌었습니다 · '
-    '화면을 새로 고친 뒤 다시 잡으세요'
+    '화면을 연 뒤에 조인트 매핑이 바뀌었습니다. '
+    '화면을 새로 고친 뒤 페이더를 다시 잡으세요.'
 )
 
 

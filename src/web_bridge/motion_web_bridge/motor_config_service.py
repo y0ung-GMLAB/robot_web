@@ -77,11 +77,11 @@ class MotorConfigService:
         try:
             self.selected = motor_config_rules.selected_motor_config_path(self.repository)
         except ValueError as exc:
-            if '모터축 설정 파일이 없습니다' in str(exc):
+            if '모터 설정 파일이 없습니다' in str(exc):
                 return {
                     'success': True,
                     'saved': False,
-                    'message': '아직 저장된 모터축 설정 파일이 없습니다',
+                    'message': '아직 저장된 모터 설정 파일이 없습니다',
                     'config_file': '',
                     'config_revision': '',
                     'content': '',
@@ -237,17 +237,17 @@ class MotorConfigService:
                 actual_revision = hashlib.sha256(target_file.read_bytes()).hexdigest()
                 if not expected_revision:
                     raise ValueError(
-                        '설정 파일 버전 정보가 없습니다. 설정 다시 불러오기 후 저장하세요'
+                        '설정 파일 버전 정보가 없습니다. 화면을 새로고침해 설정을 다시 불러온 뒤 저장하세요'
                     )
                 if expected_revision != actual_revision:
                     raise ValueError(
                         '설정 파일이 화면을 불러온 뒤 변경됐습니다. '
-                        '현재 파일 보호를 위해 저장을 거부했습니다. 설정 다시 불러오기를 실행하세요'
+                        '현재 파일을 보호하려고 저장하지 않았습니다. 화면을 새로고침해 설정을 다시 불러오세요'
                     )
             elif expected_revision:
                 raise ValueError(
-                    '화면에서 불러온 설정 파일이 현재 존재하지 않습니다. '
-                    '설정 다시 불러오기를 실행하세요'
+                    '화면에서 불러온 설정 파일이 없어졌습니다. '
+                    '화면을 새로고침해 설정을 다시 불러오세요'
                 )
             if 'content' in payload:
                 content = str(payload.get('content') or '')
@@ -283,8 +283,8 @@ class MotorConfigService:
             )
             if configured_axes == 0:
                 raise ValueError(
-                    '0축 모터 설정은 저장할 수 없습니다. '
-                    '설정 파일 제거는 현재 설정 파일 휴지통으로 이동을 사용하세요'
+                    '모터가 하나도 없는 설정은 저장할 수 없습니다. '
+                    '설정 파일을 삭제하려면 프로젝트 파일 메뉴의 「휴지통으로 이동」을 누르세요'
                 )
 
             self._write(content, target_file)
@@ -317,8 +317,8 @@ class MotorConfigService:
             return {
                 'success': False,
                 'message': (
-                    '모터축 설정 파일은 저장됐지만 저장 응답에 축 목록이 없습니다. '
-                    '설정 불러오기로 파일을 다시 확인하세요'
+                    '모터 설정 파일은 저장됐지만 저장 응답에 모터 목록이 없습니다. '
+                    '화면을 새로고침해 파일을 다시 확인하세요'
                 ),
                 'config_file': str(target_file),
                 'config_revision': '',
@@ -382,7 +382,7 @@ class MotorConfigService:
         except (OSError, ValueError) as exc:
             return {
                 'success': False,
-                'message': f'모터축 설정 파일 삭제 실패: {exc}',
+                'message': f'모터 설정 파일 삭제 실패: {exc}',
                 'config_file': '',
                 'content': '',
                 'registry': motor_config_rules.empty_motor_registry(),
@@ -396,9 +396,9 @@ class MotorConfigService:
             'replacement_active_file': replacement,
             'trash_path': str(deleted.get('trash_path') or ''),
             'message': (
-                f'모터축 설정 파일을 프로젝트 휴지통으로 이동하고 {replacement} 파일을 선택했습니다'
+                f'모터 설정 파일을 프로젝트 휴지통으로 이동하고 {replacement} 파일을 선택했습니다'
                 if replacement
-                else '모터축 설정 파일을 프로젝트 휴지통으로 이동했습니다'
+                else '모터 설정 파일을 프로젝트 휴지통으로 이동했습니다'
             ),
         })
         return loaded
@@ -458,7 +458,7 @@ class MotorConfigService:
                 runtime_file
             )
             if not expected_axes:
-                raise ValueError('적용할 모터 실행 설정에서 대상 축을 확인할 수 없습니다')
+                raise ValueError('적용할 모터 실행 설정에서 대상 모터를 확인할 수 없습니다')
             self.repository.runtime.update_motor_operation(
                 str(operation['operation_id']),
                 'prepared',
@@ -530,7 +530,7 @@ class MotorConfigService:
 
         return {
             'success': True,
-            'message': '프로젝트 설정 적용을 시작했습니다. 웹이 잠시 후 다시 연결됩니다',
+            'message': '프로젝트 설정 적용을 시작했습니다. 잠시 후 화면이 다시 연결됩니다',
             'restart_script': str(self.restart_script),
             'restart_mode': restart_mode,
             'runtime_config': {
@@ -545,7 +545,7 @@ class MotorConfigService:
         }
 
     #: 실행 적용을 해제했을 때 「정지 중」에 붙는 마무리 문구 · 한 곳에서 쓴다
-    RELEASE_SETTLED_MESSAGE = '실행 적용 해제로 정지 상태를 정리했습니다'
+    RELEASE_SETTLED_MESSAGE = '실행 적용을 해제해 정지를 마무리했습니다'
 
     def clear_stopping_release_state(self) -> None:
         """실행 적용을 해제했다 · 「정지 중」을 매듭짓는다 · §6-186
@@ -627,8 +627,8 @@ class MotorConfigService:
             return {
                 'success': False,
                 'message': (
-                    '현재 프로젝트의 모터축 설정이 적용되지 않았습니다. '
-                    '모터 관리에서 설정 적용·재시작을 먼저 실행하세요'
+                    '현재 프로젝트의 모터 설정이 장비에 적용되지 않았습니다. '
+                    '모터 설정에서 「장비에 적용 · 모터 재시작」을 먼저 누르세요'
                 ),
                 **self.bridge.snapshot(),
             }
@@ -637,7 +637,7 @@ class MotorConfigService:
             self.clear_stopping_release_state()
             return {
                 'success': False,
-                'message': '현재 모터 실행 설정에서 대상 축을 확인할 수 없습니다',
+                'message': '현재 모터 실행 설정에서 대상 모터를 확인할 수 없습니다',
                 **self.bridge.snapshot(),
             }
         self.project.ensure_change_allowed()
@@ -683,7 +683,7 @@ class MotorConfigService:
             'success': True,
             'message': (
                 '모터 제어 시스템 재시작을 시작했습니다. '
-                'AC Servo가 OFF됐다가 자동 ON될 수 있습니다'
+                'AC 서보가 꺼졌다가 자동으로 다시 켜질 수 있습니다'
             ),
             'restart_mode': 'motor_service',
             'motor_operation': self.repository.runtime.motor_operation_status(),
@@ -727,7 +727,7 @@ class MotorConfigService:
         if execution_blocker:
             return {
                 'success': False,
-                'message': f'실행 적용 해제 미실행: {execution_blocker}',
+                'message': f'실행 적용을 해제하지 못했습니다: {execution_blocker}',
                 **self.bridge.snapshot(),
             }
         moving_blocker = self.runtime.ethercat_scan_safety_blocker(
@@ -738,8 +738,8 @@ class MotorConfigService:
             return {
                 'success': False,
                 'message': (
-                    f'실행 적용 해제 미실행: {moving_blocker}. '
-                    '먼저 「전체 동작 정지」를 실행하세요'
+                    f'실행 적용을 해제하지 못했습니다: {moving_blocker}. '
+                    '먼저 「전체 동작 정지」를 누르세요'
                 ),
                 **self.bridge.snapshot(),
             }
@@ -823,7 +823,7 @@ class MotorConfigService:
             'message': (
                 f"{cleared.get('message') or '모터 실행 적용을 해제했습니다'}. "
                 'Motor Manager는 정지 상태입니다. '
-                '다시 사용하려면 프로젝트에서 「장비에 적용 · 모터 재시작」을 실행하세요'
+                '다시 사용하려면 모터 설정에서 「장비에 적용 · 모터 재시작」을 누르세요'
             ),
             'runtime_project_id': '',
             'motor_operation': self.repository.runtime.motor_operation_status(),

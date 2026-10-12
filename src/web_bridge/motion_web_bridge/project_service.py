@@ -119,7 +119,7 @@ class ProjectService:
         if run_state == 'initialized' and not bool((run_status or {}).get('group_execution')):
             blocked_run_states.discard('initialized')
         if run_state in blocked_run_states:
-            return f'모션 동작 상태가 {run_state}이므로 프로젝트를 변경할 수 없습니다'
+            return f'애니메이션이 동작 중({run_state})이라 프로젝트를 변경할 수 없습니다'
         return ''
 
     def payload_matches_selected(
@@ -288,7 +288,7 @@ class ProjectService:
         policy_result = self.bridge.publish_servo_alarm_policy()
         if policy_result.get('success') is not True:
             raise ValueError(
-                '선택 프로젝트의 서보 에러 정책을 적용하지 못했습니다: '
+                '선택한 프로젝트의 알람 정책을 적용하지 못했습니다: '
                 f'{policy_result.get("message") or "응답 없음"}'
             )
         result['execution_context'] = self.bridge.reconcile_execution_context()
@@ -323,8 +323,8 @@ class ProjectService:
         target = project_backup.peek_project_id(data)
         if target and target == self.runtime_project_id():
             raise ValueError(
-                '지금 모터에 적용된 프로젝트는 덮어쓸 수 없습니다 · '
-                '「실행 적용 해제」 또는 다른 프로젝트를 적용한 뒤 다시 하세요'
+                '현재 모터에 적용된 프로젝트는 덮어쓸 수 없습니다. '
+                '「실행 적용 해제」를 실행하거나 다른 프로젝트를 적용한 뒤 다시 시도하세요'
             )
         if overwrite and target and target == self.repository.selected_project_id():
             self.ensure_change_allowed()
@@ -336,7 +336,7 @@ class ProjectService:
                 'success': False,
                 'exists': True,
                 'project_id': str(exc),
-                'message': f"같은 ID 의 프로젝트가 있습니다 ({exc}) · 덮어쓰면 지금 것은 휴지통으로 갑니다",
+                'message': f"같은 ID의 프로젝트가 있습니다({exc}). 덮어쓰면 기존 프로젝트는 휴지통으로 옮겨집니다",
             }
 
     def list_trash(self) -> Dict[str, Any]:
@@ -399,7 +399,7 @@ class ProjectService:
         if str(payload.get('category') or '').strip() != 'motions':
             raise ValueError(
                 '프로젝트로 가져올 수 있는 것은 애니메이션(.json)뿐입니다. '
-                '모터 설정과 조인트 매핑은 이 PC 에서 직접 만드세요'
+                '모터 설정과 조인트 매핑은 각 PC에서 직접 만드세요'
             )
         self._ensure_motion_import_target(project_id)
         result = self.repository.import_text(
@@ -479,7 +479,7 @@ class ProjectService:
                 'workspace': 'config',
                 'category': category_text,
                 'file_name': path.name,
-                'message': '모터축 설정 편집기에 연결했습니다 · 설정 적용은 실행하지 않았습니다',
+                'message': '모터 설정 화면에서 열었습니다. 장비에는 아직 적용하지 않았습니다',
             }
         if category_text in {'motion_axis_matching', 'motions'}:
             return {
@@ -489,7 +489,7 @@ class ProjectService:
                 'motion_tab': 'mapping' if category_text == 'motion_axis_matching' else 'files',
                 'file_name': path.name,
                 'path': str(path),
-                'message': '현재 프로젝트 파일을 기능 탭에서 직접 사용합니다 · 모션 실행은 시작하지 않았습니다',
+                'message': '해당 화면에서 이 파일을 엽니다. 재생은 시작하지 않았습니다',
             }
         return {
             'success': True,

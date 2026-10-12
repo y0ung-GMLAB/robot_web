@@ -24,7 +24,7 @@ export function createMotionFileManager({
   async function loadFiles(targetFileId = selectedFileId, { retried = false } = {}) {
     const loadToken = ++fileLoadToken;
     setLoading(true);
-    setMessage('파일 목록 불러오는 중');
+    setMessage('애니메이션 목록을 불러오는 중');
     let staleRetry = false;
     try {
       const payload = await fetchMotionFiles();
@@ -47,10 +47,10 @@ export function createMotionFileManager({
         // 상태로 굳는다 · 내보내기 직후 새 파일이 안 보이던 원인이다 · §6-54
         // 세대가 정해진 뒤 한 번만 다시 읽는다.
         staleRetry = !retried;
-        if (!staleRetry) setMessage('파일 목록을 다시 읽지 못했습니다. 새로고침하세요');
+        if (!staleRetry) setMessage('애니메이션 목록을 다시 불러오지 못했습니다. 페이지를 새로고침하세요.');
         return;
       }
-      setMessage(`파일 목록 실패: ${error?.message || error}`);
+      setMessage(`애니메이션 목록 불러오기 실패 · ${error?.message || error}`);
     } finally {
       if (loadToken === fileLoadToken) {
         setLoading(false);
@@ -65,17 +65,17 @@ export function createMotionFileManager({
     if (loadToken !== fileLoadToken) return;
     selectedFileId = fileId;
     setLoading(true);
-    setMessage('파일 상세 불러오는 중');
+    setMessage('애니메이션 정보를 불러오는 중');
     try {
       const payload = await fetchMotionFile(fileId);
       if (loadToken !== fileLoadToken) return;
       selectedFile = payload.file || null;
       files = Array.isArray(payload.files) ? payload.files : files;
-      setMessage(payload.message || '파일 상세 갱신 완료');
+      setMessage(payload.message || '애니메이션 정보 갱신 완료');
     } catch (error) {
       if (loadToken !== fileLoadToken || error?.staleProjectResponse) return;
       selectedFile = null;
-      setMessage(`파일 상세 실패: ${error?.message || error}`);
+      setMessage(`애니메이션 정보 불러오기 실패 · ${error?.message || error}`);
     } finally {
       if (loadToken !== fileLoadToken) return;
       setLoading(false);

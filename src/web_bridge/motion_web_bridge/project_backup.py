@@ -63,9 +63,9 @@ def _manifest(project_dir: Path) -> Dict[str, Any]:
     try:
         payload = json.loads((project_dir / 'project.json').read_text(encoding='utf-8'))
     except (OSError, ValueError) as exc:
-        raise ValueError('zip 안에 project.json 이 없거나 읽을 수 없습니다') from exc
+        raise ValueError('zip 안에 project.json이 없거나 읽을 수 없습니다') from exc
     if not isinstance(payload, dict) or not str(payload.get('project_id') or '').strip():
-        raise ValueError('project.json 에 project_id 가 없습니다')
+        raise ValueError('project.json에 project_id가 없습니다')
     return payload
 
 
@@ -160,11 +160,11 @@ def restore_from_trash(root: Path, entry: str) -> str:
     name = _valid_id(entry)
     source = root / TRASH_DIR / name
     if not source.is_dir() or source.is_symlink():
-        raise ValueError(f'휴지통에 없습니다: {entry}')
+        raise ValueError(f'휴지통에서 찾을 수 없습니다: {entry}')
     project_id = _valid_id(_manifest(source)['project_id'])
     destination = root / project_id
     if destination.exists():
-        raise ValueError(f'같은 ID 의 프로젝트가 이미 있습니다: {project_id} · 그것을 지우거나 이름을 바꾼 뒤 되살리세요')
+        raise ValueError(f'같은 ID의 프로젝트가 이미 있습니다: {project_id}. 기존 프로젝트를 삭제하거나 이름을 바꾼 뒤 복원하세요.')
     source.rename(destination)
     return project_id
 

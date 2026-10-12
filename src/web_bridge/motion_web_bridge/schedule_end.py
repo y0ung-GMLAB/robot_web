@@ -153,13 +153,13 @@ class ScheduleEndService:
         """회차 후 정지는 부른 쪽이 이미 보냈다 · 여기는 그 뒤를 맡는다."""
         action = self.end_action()
         if action == HOLD:
-            self._set('skipped', '스케줄 끝 · 설정이 「서보 유지」 · 마지막 자세에서 정지')
+            self._set('skipped', '운영 종료 · 설정에 따라 서보를 켠 채 마지막 자세에서 정지했습니다')
             return self.status()
         with self._lock:
             if self._thread is not None and self._thread.is_alive():
                 return dict(self._status)
             self._thread = threading.Thread(target=self._run, name='schedule-end', daemon=True)
-        self._set('waiting_cycle', '스케줄 끝 · 지금 애니메이션을 마무리하는 중')
+        self._set('waiting_cycle', '운영 종료 · 현재 애니메이션을 마무리하는 중')
         self._thread.start()
         return self.status()
 
@@ -169,7 +169,7 @@ class ScheduleEndService:
         except Exception as exc:  # noqa: BLE001 · 실패는 기록하고 홀드
             error = f'예기치 않은 오류: {exc}'
         if error:
-            self._set('failed', f'스케줄 끝 · 서보를 끄지 않고 그대로 둠 · {error}')
+            self._set('failed', f'운영 종료 · 서보를 끄지 않고 그대로 두었습니다 · {error}')
 
     def _motion_status(self) -> Dict[str, Any]:
         result = self.bridge.motion_run_status()
@@ -201,16 +201,16 @@ class ScheduleEndService:
             lambda: self._motion_state() in FINISHED_STATES | {'error', 'blocked'},
             CYCLE_WAIT_SEC,
         ):
-            return '회차가 끝나기를 기다리다 시간 초과'
+            return '회차 종료 대기 시간 초과'
         if not self._wait(lambda: not self.bridge.coordination_execution_blocker(), GROUP_RELEASE_WAIT_SEC):
-            return '그룹 실행이 풀리지 않음'
+            return '그룹 재생이 해제되지 않음'
         if self._motion_state() == 'error':
             return '재생이 오류로 끝남'
         if self._alarm_grade() > 0:
-            return f'Servo 알람 {self._alarm_grade()}등급'
+            return f'서보 알람 {self._alarm_grade()}등급'
 
         # 2 · 기준점으로 천천히 · 도달 확인은 초기 위치 이동이 한다
-        self._set('parking', f'스케줄 끝 · 기준점(0°)으로 {PARK_MOVE_SEC:g}초 동안 이동')
+        self._set('parking', f'운영 종료 · 기준점(0°)으로 {PARK_MOVE_SEC:g}초 동안 이동 중')
         payload = self._fill_active_files({
             'initial_mode_override': 'reference',
             'initial_move_time_sec': PARK_MOVE_SEC,
@@ -240,10 +240,10 @@ class ScheduleEndService:
         if seen[-1] != 'initialized':
             return f'기준점 이동이 끝나지 않음({seen[-1]})'
         if self._alarm_grade() > 0:
-            return f'Servo 알람 {self._alarm_grade()}등급'
+            return f'서보 알람 {self._alarm_grade()}등급'
 
         # 3 · 서보 OFF · 모터별 설정
-        self._set('powering_off', '스케줄 끝 · 기준점 도달 · 서보 OFF')
+        self._set('powering_off', '운영 종료 · 기준점 도달 · 서보 끄는 중')
         ac_axes, dxl_axes = self._axes_to_power_off()
         done: Dict[str, List[int]] = {'ac_servo': [], 'dynamixel': []}
         failures = []
@@ -260,7 +260,7 @@ class ScheduleEndService:
             self._write_powered_off({**done, 'at': time.time()})
         kept = sorted(set(self._all_axes()) - set(ac_axes) - set(dxl_axes))
         message = (
-            '스케줄 끝 · 기준점 주차 · 서보 OFF '
+            '운영 종료 · 기준점 이동 후 서보 OFF '
             + _axes_text('AC', done['ac_servo']) + _axes_text('다이나믹셀', done['dynamixel'])
             + (f' · 켠 채 둠(모터 설정) {", ".join(map(str, kept))}번' if kept else '')
         )
@@ -314,7 +314,7 @@ class ScheduleEndService:
     def start_blocker(self) -> str:
         """시작 전에 부른다 · 주차 중이면 막고 · 여기서 끈 모터는 켜고 확인한다."""
         if self.active():
-            return '스케줄 끝 동작(기준점 주차 → 서보 OFF) 중입니다 · 끝난 뒤 다시'
+            return '운영 종료 동작(기준점 이동 → 서보 OFF)이 진행 중입니다. 끝난 뒤 다시 시도하세요'
         record = self._read_powered_off()
         ac_axes = record.get('ac_servo') or []
         dxl_axes = record.get('dynamixel') or []
@@ -323,11 +323,11 @@ class ScheduleEndService:
         for axis in ac_axes:
             reply = self._ac_servo_control('servo_on', axis, 'selected')
             if reply.get('success') is False:
-                return f'스케줄 끝에 끈 {axis}번 모터 서보를 켜지 못했습니다 · {reply.get("message") or ""}'
+                return f'운영 종료 때 끈 {axis}번 모터의 서보를 켜지 못했습니다 · {reply.get("message") or ""}'
         if dxl_axes:
             reply = self._dynamixel_torque_control('torque_on', dxl_axes)
             if reply.get('success') is False:
-                return f'스케줄 끝에 끈 다이나믹셀 토크를 켜지 못했습니다 · {reply.get("message") or ""}'
+                return f'운영 종료 때 끈 다이나믹셀 토크를 켜지 못했습니다 · {reply.get("message") or ""}'
 
         def servos_on() -> bool:
             by_axis = {
@@ -337,9 +337,9 @@ class ScheduleEndService:
             return all(bool((by_axis.get(axis) or {}).get('servo_on')) for axis in ac_axes)
 
         if not self._wait(servos_on, SERVO_ON_WAIT_SEC):
-            return '스케줄 끝에 끈 서보가 켜지지 않았습니다 · 모터 상태를 확인하세요'
+            return '운영 종료 때 끈 서보가 켜지지 않았습니다. 모터 상태를 확인하세요'
         self._write_powered_off(None)
-        self._set('idle', '스케줄 끝에 끈 서보를 다시 켬', restored={'ac_servo': ac_axes, 'dynamixel': dxl_axes})
+        self._set('idle', '운영 종료 때 끈 서보를 다시 켰습니다', restored={'ac_servo': ac_axes, 'dynamixel': dxl_axes})
         return ''
 
 

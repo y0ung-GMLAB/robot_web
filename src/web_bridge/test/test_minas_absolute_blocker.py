@@ -30,7 +30,7 @@ def test_runtime_blocker_names_the_absolute_reason_after_axis_checks():
     assert _bridge(BLOCKED).motor_runtime_control_blocker() == BLOCKED['message']
     assert '확인 중' in _bridge({'state': 'checking'}).motor_runtime_control_blocker()
     # 축이 오프라인이면 그 사유가 먼저 · 더 구체적이다
-    assert '온라인이 아닌 축' in _bridge(BLOCKED, online=False).motor_runtime_control_blocker()
+    assert '연결되지 않은 모터' in _bridge(BLOCKED, online=False).motor_runtime_control_blocker()
 
 
 def test_motion_run_check_refuses_before_asking_the_runtime():

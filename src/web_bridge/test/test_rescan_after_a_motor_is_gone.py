@@ -133,7 +133,7 @@ def test_a_faulted_motor_counts_as_missing_not_online():
 @pytest.mark.parametrize('needle', [
     "if not recovery.get('service_active')",
     "result['missing_axes'] = missing",
-    '돌아오지 않았습니다',
+    '다시 연결되지 않았습니다',
 ])
 def test_the_scan_keeps_the_two_apart(needle):
     from pathlib import Path

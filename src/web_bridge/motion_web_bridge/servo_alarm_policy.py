@@ -13,12 +13,12 @@ UNKNOWN_ALARM_GRADE = 2
 GRADE_DEFINITIONS = {
     '1': {
         'label': '1등급',
-        'action': '해당 에러축 정지',
-        'active_block': '해당 에러축만 동작 차단',
+        'action': '해당 모터만 정지',
+        'active_block': '해당 모터만 동작 차단',
     },
     '2': {
         'label': '2등급',
-        'action': '전체 모션 종료',
+        'action': '전체 재생 종료',
         'active_block': '전체 모터 동작 차단',
     },
     '3': {

@@ -99,7 +99,7 @@ def register_motion_run_routes(app: FastAPI, bridge, safety_first_stop) -> None:
     async def preview_blender_scene():
         path = await asyncio.to_thread(bridge.preview_blender_scene_path)
         if path is None:
-            raise HTTPException(status_code=404, detail='로봇 팩에 scene.glb 가 없습니다')
+            raise HTTPException(status_code=404, detail='로봇 팩에 scene.glb가 없습니다')
         return FileResponse(str(path), media_type='model/gltf-binary', headers={'Cache-Control': 'no-cache'})
 
     # Blender 뷰 · 애니메이션 json 값 그대로(glb 에 굽지 않음) · 수정 목록 98

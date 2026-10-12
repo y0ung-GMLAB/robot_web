@@ -59,7 +59,7 @@ async function projectFetch(input, options = {}) {
     return response;
   } catch (error) {
     if (controller?.signal.aborted) {
-      throw new Error(`상태 응답 시간 초과 · ${Math.round(timeout / 1000)}초`);
+      throw new Error(`서버 응답 시간 초과 · ${Math.round(timeout / 1000)}초`);
     }
     throw error;
   } finally {
@@ -126,7 +126,7 @@ async function readJson(response, { projectScoped = true } = {}) {
     // 서버가 앞서 갔다 · 버릴 것이 아니라 따라가야 한다 · §6-140
     setProjectGeneration(responseGeneration);
     if (projectAheadHandler) projectAheadHandler(responseGeneration);
-    const error = new Error('프로젝트 설정이 바뀌어 다시 읽습니다');
+    const error = new Error('프로젝트 설정이 바뀌어 다시 불러옵니다');
     error.staleProjectResponse = true;
     error.projectMovedAhead = responseGeneration;
     throw error;

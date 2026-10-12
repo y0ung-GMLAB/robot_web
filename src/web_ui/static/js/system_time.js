@@ -77,7 +77,7 @@ export function timezoneCommand({ zones = [], chosen = '', current = '' } = {}) 
   // 목록에 없는 이름이면 명령을 만들지 않는다 · `Europe/Pari` 처럼 한 글자만
   // 틀려도 `timedatectl` 이 거부하는데, 거부 이유는 터미널에만 남는다.
   if (zones.length && !zones.includes(zone)) {
-    return { command: '', note: `목록에 없는 이름입니다 · ${zone}` };
+    return { command: '', note: `목록에 없는 시간대입니다 · ${zone}` };
   }
   const command = `sudo timedatectl set-timezone ${zone}`;
   return {
@@ -115,21 +115,21 @@ const SystemTime = {
     const zone = this.chosen();
     const { note } = this.decide();
     if (!zone || (note && note.startsWith('목록에 없는'))) {
-      this.setMessage(note || '시간대를 고르세요');
+      this.setMessage(note || '시간대를 선택하세요');
       return;
     }
     const confirmed = await showConfirm(
-      `${all ? '같은 망의 로봇 PC 전부' : '이 PC'} 의 시간대를 「${zone}」 로 바꿉니다.\n\n`
-      + '· 스케줄이 이 시각 기준으로 바뀝니다\n'
-      + '· 바꾼 PC 는 2초 뒤 프로그램을 다시 띄웁니다(재생 중인 PC 는 거절)\n\n계속할까요?',
-      { title: '시간대 바꾸기', confirmLabel: '바꾸기', tone: 'warning' },
+      `${all ? '같은 네트워크의 로봇 PC 전체의 ' : ''}시간대를 「${zone}」로 바꿉니다.\n\n`
+      + '· 스케줄은 바뀐 시각을 기준으로 동작합니다\n'
+      + '· 시간대를 바꾼 PC는 2초 뒤 프로그램을 다시 시작합니다. 재생 중인 PC는 바꾸지 않습니다.\n\n계속할까요?',
+      { title: '시간대 변경', confirmLabel: '전환', tone: 'warning' },
     );
     if (!confirmed) return;
-    this.setMessage('바꾸는 중');
+    this.setMessage('시간대 변경 처리 중');
     try {
       const payload = all ? await applyTimezoneAll(zone) : await applyTimezone(zone);
       const rows = Array.isArray(payload.pcs)
-        ? payload.pcs.map((pc) => `${pc.display_name || pc.pc_id} · ${pc.message || (pc.success ? '됨' : '안 됨')}`).join('\n')
+        ? payload.pcs.map((pc) => `${pc.display_name || pc.pc_id} · ${pc.message || (pc.success ? '완료' : '실패')}`).join('\n')
         : '';
       this.setMessage([payload.message, rows].filter(Boolean).join('\n'));
       if (payload.clock) {
@@ -138,7 +138,7 @@ const SystemTime = {
       }
     } catch (error) {
       // 이 PC 를 다시 띄우는 중이면 응답이 끊길 수 있다
-      this.setMessage(`응답 없음 · 프로그램을 다시 띄우는 중일 수 있습니다 · 잠시 뒤 새로고침 · ${error?.message || error}`);
+      this.setMessage(`응답이 없습니다. 프로그램을 다시 시작하는 중일 수 있으니 잠시 뒤 새로고침하세요 · ${error?.message || error}`);
     }
   },
 
@@ -158,7 +158,7 @@ const SystemTime = {
     const now = document.getElementById('systemTimezoneNow');
     if (now) {
       const ntp = clock.ntp_synced === false
-        ? ' · ⚠️ 시계가 맞춰지지 않았습니다' : '';
+        ? ' · ⚠️ 시계 동기화 안 됨' : '';
       now.textContent = `${this.current || '알 수 없음'} (UTC${clock.utc_offset || ''})${ntp}`;
     }
 
@@ -179,7 +179,7 @@ const SystemTime = {
     const mismatch = document.getElementById('systemTimezoneMismatch');
     if (mismatch) {
       mismatch.textContent = guess && this.current && guess !== this.current
-        ? `⚠️ 보고 계신 기기는 ${guess} 인데 이 PC 는 ${this.current} 입니다 · 다른 곳에서 보고 있다면 정상입니다`
+        ? `⚠️ 이 브라우저는 ${guess}, PC는 ${this.current}입니다. 다른 지역에서 원격으로 보고 있다면 정상이고, 해외에 설치했다면 PC 시간대를 바꾸세요.`
         : '';
       mismatch.classList.toggle('hidden', !mismatch.textContent);
     }

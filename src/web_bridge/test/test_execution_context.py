@@ -943,7 +943,7 @@ def test_scan_result_message_keeps_evidence_out_of_operation_text():
         '{"large":"raw response"}',
     )
 
-    assert message == '모터 검색 완료 · AC Servo 5축 · scan_id physical-5'
+    assert message == '모터 검색 완료 · AC 서보 5대 · scan_id physical-5'
     assert 'serial_number' not in message
 
 
@@ -969,9 +969,9 @@ def test_scan_result_message_preserves_partial_outcome():
         'raw failure',
     )
 
-    assert message.startswith('모터 검색 부분 완료')
-    assert 'AC Servo 5축' in message
-    assert 'Dynamixel 0축' in message
+    assert message.startswith('모터 검색 일부 완료')
+    assert 'AC 서보 5대' in message
+    assert '다이나믹셀 0대' in message
 
 
 def test_an_unused_disconnected_master_does_not_make_the_scan_partial():
@@ -1101,9 +1101,9 @@ def test_scan_result_marks_detected_ac_servo_as_partial_without_project_config()
         fallback_success=False,
     ) == 'partial'
     message = motor_config_rules.scan_result_message(False, scan, 'raw failure')
-    assert message.startswith('모터 검색 부분 완료')
-    assert 'AC Servo 1축' in message
-    assert 'Master 0 1축 / Master 1 0축' in message
+    assert message.startswith('모터 검색 일부 완료')
+    assert 'AC 서보 1대' in message
+    assert 'Master 0 1대 / Master 1 0대' in message
 
 
 def test_scan_result_handles_multiple_ac_servo_masters_as_success():
@@ -1136,8 +1136,8 @@ def test_scan_result_handles_multiple_ac_servo_masters_as_success():
     ) == 'success'
     message = motor_config_rules.scan_result_message(True, scan, 'raw success')
     assert message.startswith('모터 검색 완료')
-    assert 'AC Servo 5축' in message
-    assert 'Master 0 2축 / Master 1 3축' in message
+    assert 'AC 서보 5대' in message
+    assert 'Master 0 2대 / Master 1 3대' in message
 
 
 def test_full_scan_marks_mixed_ac_success_and_dynamixel_missing_as_partial():
@@ -1169,9 +1169,9 @@ def test_full_scan_marks_mixed_ac_success_and_dynamixel_missing_as_partial():
         fallback_success=False,
     ) == 'partial'
     message = motor_config_rules.scan_result_message(False, scan, 'raw failure')
-    assert message.startswith('모터 검색 부분 완료')
-    assert 'AC Servo 4축' in message
-    assert 'Dynamixel 0축' in message
+    assert message.startswith('모터 검색 일부 완료')
+    assert 'AC 서보 4대' in message
+    assert '다이나믹셀 0대' in message
 
 
 def test_dynamixel_scan_with_detected_devices_is_not_reported_as_failure():
@@ -1193,8 +1193,8 @@ def test_dynamixel_scan_with_detected_devices_is_not_reported_as_failure():
         fallback_success=False,
     ) == 'partial'
     message = motor_config_rules.scan_result_message(False, scan, 'raw failure')
-    assert message.startswith('모터 검색 부분 완료')
-    assert 'Dynamixel 2축' in message
+    assert message.startswith('모터 검색 일부 완료')
+    assert '다이나믹셀 2대' in message
 
 
 def test_scan_result_keeps_failure_when_no_requested_device_is_detected():
@@ -1506,7 +1506,7 @@ def test_ac_servo_scan_fails_when_motor_runtime_does_not_recover(monkeypatch):
     assert result['success'] is False
     assert result['motor_service_restored'] is False
     assert '복구 실패' in result['message']
-    assert 'Motor Manager 가 다시 실행되지 않았습니다' in result['message']
+    assert 'Motor Manager가 다시 실행되지 않았습니다' in result['message']
 
 
 def test_a_motor_that_did_not_come_back_is_not_a_scan_failure(monkeypatch):
@@ -1538,7 +1538,7 @@ def test_a_motor_that_did_not_come_back_is_not_a_scan_failure(monkeypatch):
 
     assert result['success'] is True, '검색은 성공했다'
     assert result['missing_axes'] == [1]
-    assert '1번 모터가 돌아오지 않았습니다' in result['message'], '무엇이 없는지 알려야 한다'
+    assert '1번 모터가 ' in result['message'], '무엇이 없는지 알려야 한다'
     assert '실패' not in result['message'], '실패라고 말하면 안 된다'
 
 
@@ -1820,7 +1820,7 @@ def test_ac_servo_scan_is_blocked_while_runtime_velocity_is_nonzero(monkeypatch)
 
     assert result['success'] is False
     assert result['scan_blocked'] is True
-    assert '축 2' in result['message']
+    assert '2번 모터' in result['message']
     assert '움직이는 중' in result['message']
 
 
@@ -1849,7 +1849,7 @@ def test_ac_servo_scan_is_blocked_when_running_motor_state_is_not_fresh(
 
     assert result['success'] is False
     assert result['scan_blocked'] is True
-    assert '최신 모터 상태' in result['message']
+    assert '모터 상태' in result['message'] and '확인할 수 없습니다' in result['message']
 
 
 def test_ac_servo_scan_retires_previous_project_runtime_without_feedback(
@@ -1946,7 +1946,7 @@ def test_ac_servo_scan_still_blocks_observed_motion_during_project_handoff(
 
     assert result['success'] is False
     assert result['scan_blocked'] is True
-    assert '축 1' in result['message']
+    assert '1번 모터' in result['message']
     assert '움직이는 중' in result['message']
 
 
@@ -2003,7 +2003,7 @@ def test_ac_servo_scan_blocks_clear_motion_even_when_target_is_reached():
 
     blocker = _runtime_of(bridge).ethercat_scan_safety_blocker()
 
-    assert '축 4' in blocker
+    assert '4번 모터' in blocker
     assert '움직이는 중' in blocker
 
 

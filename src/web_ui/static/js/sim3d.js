@@ -246,7 +246,7 @@ export function createSim3dViewer({ el, getLatestState = () => null }) {
     const { qpos, matched, missing } = actualQpos(sceneJson, motors, shownQpos);
     applyPose(qpos, actualGroups);
     const text = missing.length
-      ? `실물 위치 · ${matched}축 · 못 받은 축 ${missing.join(', ')}`
+      ? `실물 위치 · ${matched}축 · 받지 못한 축 ${missing.join(', ')}`
       : `실물 위치 · ${matched}축`;
     if (text !== actualText) {
       actualText = text;
@@ -528,7 +528,7 @@ export function createSim3dViewer({ el, getLatestState = () => null }) {
     blenderLoading = true;
     renderControls();
     const sizeMb = (Number(blenderInfo.size_bytes) || 0) / 1e6;
-    setMessage(`Blender 장면 받는 중 · ${sizeMb.toFixed(1)} MB`);
+    setMessage(`Blender 장면 불러오는 중 · ${sizeMb.toFixed(1)} MB`);
     try {
       await ensureThree();
       const { GLTFLoader } = await import(GLTF_LOADER_URL);
@@ -575,7 +575,7 @@ export function createSim3dViewer({ el, getLatestState = () => null }) {
       showTime();
       startLoop();
       if (jointMode) {
-        setMessage(`Blender 뷰 · 조인트 ${rig.length}개 · 애니메이션 json 값으로${missing.length ? ` · glb 에 없는 노드 ${missing.join(', ')}` : ''} · ${sizeMb.toFixed(1)} MB`);
+        setMessage(`Blender 뷰 · 조인트 ${rig.length}개 · 애니메이션 json 값으로${missing.length ? ` · glb에 없는 노드 ${missing.join(', ')}` : ''} · ${sizeMb.toFixed(1)} MB`);
         await loadJointValues(currentFile);
       } else {
         setMessage(`Blender 뷰 · 애니메이션 ${(gltf.animations || []).length}개 · ${duration.toFixed(1)}초 · ${sizeMb.toFixed(1)} MB`);
@@ -620,11 +620,11 @@ export function createSim3dViewer({ el, getLatestState = () => null }) {
     if (jointValuesFor === file.id && jointValues) return;
     if (jointValuesLoading === file.id) return;
     jointValuesLoading = file.id;
-    setMessage(`Blender 뷰 · ${file.id} 값 받는 중`);
+    setMessage(`Blender 뷰 · ${file.id} 값 불러오는 중`);
     try {
       const payload = await fetchMotionJointValues(file.id);
       if (currentFile?.id !== file.id) return;
-      if (payload?.success === false) throw new Error(payload.message || '값을 못 읽었습니다');
+      if (payload?.success === false) throw new Error(payload.message || '값을 읽지 못했습니다');
       jointValues = payload;
       jointValuesFor = file.id;
       if (blender) blender.duration = Number(payload.duration_sec) || 0;
@@ -633,7 +633,7 @@ export function createSim3dViewer({ el, getLatestState = () => null }) {
       playhead = Math.min(playhead, blender?.duration || 0);
       showTime();
     } catch (error) {
-      setMessage(`Blender 뷰 · 값 받기 실패: ${error?.message || error}`);
+      setMessage(`Blender 뷰 · 값 불러오기 실패: ${error?.message || error}`);
     } finally {
       if (jointValuesLoading === file.id) jointValuesLoading = '';
       renderControls();
@@ -676,7 +676,7 @@ export function createSim3dViewer({ el, getLatestState = () => null }) {
       if (blender?.jointMode) await loadJointValues(currentFile);
     } else {
       showTime();
-      if (frames) setMessage(`${framesFileId} · ${followEndSec(frames).toFixed(1)}초 · MuJoCo 계산`);
+      if (frames) setMessage(`${framesFileId} · ${followEndSec(frames).toFixed(1)}초 · MuJoCo`);
     }
     renderControls();
   }
@@ -701,11 +701,11 @@ export function createSim3dViewer({ el, getLatestState = () => null }) {
       el.sim3dBlenderToggle.disabled = blenderLoading || !allowed;
       const jointMode = blenderUsesJoints(blenderInfo);
       const why = !currentFile
-        ? '애니메이션을 먼저 고르세요'
+        ? '애니메이션을 먼저 선택하세요'
         : jointMode ? 'Blender 뷰를 켤 수 없습니다'
           : !(blenderInfo?.animations || []).length
-            ? '로봇 팩에 조인트 → 노드(pack.yaml scene_glb.joints)도 장면이 담은 애니메이션 이름도 없어 Blender 뷰를 끕니다 · MuJoCo 뷰'
-            : `이 애니메이션의 Blender 장면 없음 · MuJoCo 뷰 (장면: ${(blenderInfo.animations || []).join(', ')})`;
+            ? '로봇 팩에 조인트-노드 연결(pack.yaml scene_glb.joints)도, 장면에 담긴 애니메이션 이름도 없어 Blender 뷰를 쓸 수 없습니다. MuJoCo 뷰로 봅니다.'
+            : `이 애니메이션의 Blender 장면이 없어 MuJoCo 뷰로 봅니다 (장면: ${(blenderInfo.animations || []).join(', ')})`;
       const tip = allowed
         ? (jointMode ? 'Blender 장면을 이 애니메이션 json 값으로 움직입니다' : 'Blender 에서 구운 장면으로 봅니다')
         : why;
@@ -718,15 +718,15 @@ export function createSim3dViewer({ el, getLatestState = () => null }) {
     }
     if (has('sim3dLoadButton')) {
       el.sim3dLoadButton.disabled = view === 'blender' || !ready || !currentFile;
-      el.sim3dLoadButton.title = currentFile ? `${currentFile.id} 의 계산 결과를 불러옵니다` : '애니메이션을 먼저 선택하세요';
+      el.sim3dLoadButton.title = currentFile ? `${currentFile.id}의 계산 결과를 불러옵니다` : '애니메이션을 먼저 선택하세요';
     }
     if (has('sim3dFollowToggle')) el.sim3dFollowToggle.checked = follow;
     // 실물과 같이 볼 때는 실물이 시계다 · 직접 재생·끌기는 끄고 나서 (86)
-    const followTip = '실물과 같이 보는 중 · 직접 재생하려면 「실물과 같이」 를 끄세요';
+    const followTip = '동시 재생 중입니다. 직접 재생하려면 「동시 재생」을 끄세요.';
     if (has('sim3dPlayButton')) {
       el.sim3dPlayButton.disabled = follow || !hasTimeline();
-      el.sim3dPlayButton.textContent = follow ? (playing ? '실물 재생 중' : '실물 대기') : (playing ? '일시정지' : '재생');
-      el.sim3dPlayButton.title = follow ? followTip : '고른 애니메이션을 직접 재생합니다';
+      el.sim3dPlayButton.textContent = follow ? (playing ? '동시 재생 중' : '대기 상태') : (playing ? '일시정지' : '재생');
+      el.sim3dPlayButton.title = follow ? followTip : '선택한 애니메이션을 직접 재생합니다';
     }
     if (has('sim3dSlider')) {
       el.sim3dSlider.disabled = follow || !hasTimeline();
@@ -809,8 +809,8 @@ export function createSim3dViewer({ el, getLatestState = () => null }) {
       if (opened && sceneJson && usable(target)) loadFrames(target.id);
       // 실물과 같이 볼 것이 없으면 왜 안 움직이는지 말한다 (86)
       if (opened && sceneJson && view !== 'blender' && follow) {
-        if (!target) setMessage('실물과 같이 · 재생 등록된 애니메이션이 없습니다 · 「실물과 같이」 를 끄면 고른 애니를 직접 봅니다');
-        else if (!usable(target)) setMessage(`실물과 같이 · ${target.id} 의 MuJoCo 계산 결과가 없습니다 · 「MuJoCo 계산」 을 누르거나 「실물과 같이」 를 끄세요`);
+        if (!target) setMessage('동시 재생 · 재생 등록된 애니메이션이 없습니다. 「동시 재생」을 끄면 선택한 애니메이션을 직접 볼 수 있습니다.');
+        else if (!usable(target)) setMessage(`동시 재생 · ${target.id}의 MuJoCo 계산 결과가 없습니다. 「MuJoCo 계산」을 누르거나 「동시 재생」을 끄세요.`);
       }
     }
     renderControls();

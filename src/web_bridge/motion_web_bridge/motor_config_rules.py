@@ -607,14 +607,14 @@ def scan_result_message(
         (
             '모터 검색 완료'
             if success
-            else '모터 검색 부분 완료'
+            else '모터 검색 일부 완료'
             if partial
             else '모터 검색 실패'
         )
     ]
     if isinstance(ethercat, dict) and ethercat.get('skipped') is not True:
         try:
-            parts.append(f'AC Servo {int(ethercat.get("slaves_count") or 0)}축')
+            parts.append(f'AC 서보 {int(ethercat.get("slaves_count") or 0)}대')
         except (TypeError, ValueError):
             pass
         master_rows = ethercat.get('masters')
@@ -623,7 +623,7 @@ def scan_result_message(
                 ' / '.join(
                     (
                         f'Master {int(row.get("master_index") or 0)} '
-                        f'{int(row.get("slaves_count") or 0)}축'
+                        f'{int(row.get("slaves_count") or 0)}대'
                     )
                     for row in master_rows
                     if isinstance(row, dict)
@@ -631,7 +631,7 @@ def scan_result_message(
             )
     if isinstance(dynamixel, dict) and dynamixel.get('skipped') is not True:
         try:
-            parts.append(f'Dynamixel {int(dynamixel.get("devices_count") or 0)}축')
+            parts.append(f'다이나믹셀 {int(dynamixel.get("devices_count") or 0)}대')
         except (TypeError, ValueError):
             pass
     if project_compatible:
@@ -768,7 +768,7 @@ def selected_motor_config_path(repository) -> Path:
     active = detail.get('project', {}).get('active_files') or {}
     file_name = str(active.get('motor_axes') or '').strip()
     if not file_name:
-        raise ValueError('현재 프로젝트에 모터축 설정 파일이 없습니다')
+        raise ValueError('현재 프로젝트에 모터 설정 파일이 없습니다')
     return repository.export_path(
         project_id, 'motor_axes', file_name
     )
@@ -853,7 +853,7 @@ def motor_operation_runtime_readiness(
         return {
             'ready': False,
             'failed': True,
-            'error': '검증할 설정 대상 모터축이 없습니다',
+            'error': '확인할 대상 모터가 없습니다',
         }
     motors = motion_state.get('motors')
     motors = motors if isinstance(motors, list) else []
@@ -965,7 +965,7 @@ def runtime_service_status(
         runtime_message = 'motor_manager_node의 모터 상태 갱신이 중단되었습니다'
     else:
         runtime_phase = 'ready'
-        runtime_message = f'모터 상태 {motor_count}축 수신 중'
+        runtime_message = f'모터 {motor_count}대 상태 수신 중'
 
     return {
         'phase': runtime_phase,

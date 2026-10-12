@@ -16,8 +16,8 @@ const api = readFileSync(new URL('../static/js/api.js', import.meta.url), 'utf8'
 test('the run-joints table carries the toggle and live-limit columns', () => {
   const head = html.slice(html.indexOf('애니메이션 재생 축'), html.indexOf('motionRunAxisRows'));
   assert.match(head, /<th>사용 \(즉시\)<\/th>/);
-  assert.match(head, /<th>라이브 리밋 \(모션 deg\)<\/th>/);
-  assert.match(html, /colspan="12" class="empty">실행 준비 검사를 누르면 표시됩니다/);
+  assert.match(head, /<th>라이브 리밋 \(조인트 deg\)<\/th>/);
+  assert.match(html, /colspan="12" class="empty">「실행 준비 검사」를 누르면 표시됩니다/);
 });
 
 test('rows render the mute checkbox and clamp inputs from live_overrides', () => {
@@ -35,7 +35,7 @@ test('edits go through the one gateway and update local state', () => {
 
 test('an inverted clamp is refused before it reaches the server', () => {
   assert.match(controller, /low > high/);
-  assert.match(controller, /라이브 리밋은 최소 ≤ 최대 인 숫자여야 합니다/);
+  assert.match(controller, /라이브 리밋은 최소 ≤ 최대인 숫자여야 합니다/);
   // 두 칸을 다 비우면 해제다
   assert.match(controller, /payload\.clamp = null;/);
 });
@@ -50,7 +50,7 @@ test('live status updates do not clobber a cell being edited', () => {
 test('the table says toggles apply at once, are not saved, and marks muted rows', () => {
   const head = html.slice(html.indexOf('애니메이션 재생 축'), html.indexOf('motionRunAxisRows'));
   assert.match(head, /누르는 즉시/);
-  assert.match(head, /저장되지 않고 「재생 등록」 때 모두 풀립니다/);
+  assert.match(head, /저장되지 않으며, 「재생 등록」을 하면 모두 해제됩니다/);
   assert.match(controller, /<tr class="\$\{muted \|\| waiting \? 'live-muted' : ''\}">/);
   assert.match(controller, /live-muted-badge">제외 중</);
   // 도중에 다시 켜도 이 회차는 서 있고 다음 회차부터 · 95

@@ -51,7 +51,7 @@ test('running servo scan failure is concise in the UI', () => {
     + '운전 중 버스 재열거는 안전하지 않아 직접 스캔을 중단했습니다 / dynamixel: 오류 상세';
   assert.equal(
     conciseMotorScanMessage(detailed),
-    '검색 중단: 서보가 운전 중이어서 EtherCAT 버스 재검색을 안전하게 실행하지 않았습니다.',
+    '검색을 중단했습니다. 서보가 동작 중이라 안전을 위해 EtherCAT 버스를 다시 검색하지 않았습니다.',
   );
   assert.ok(conciseMotorScanMessage('x'.repeat(500)).length <= 180);
 });
@@ -63,7 +63,7 @@ test('motion control requires applied project config without depending on scan h
       runtime_matches_selected: true,
       motor_config_applied: false,
     }, 5),
-    '현재 프로젝트에 저장한 모터 설정이 실행 시스템에 아직 적용되지 않았습니다. 설정 적용·재시작을 실행하세요.',
+    '현재 프로젝트에 저장한 모터 설정이 아직 장비에 적용되지 않았습니다. 모터 설정에서 「장비에 적용 · 모터 재시작」을 누르세요.',
   );
   assert.equal(
     motorControlConfigurationError({
@@ -145,7 +145,7 @@ test('an unreadable model is named but does not stop the apply', () => {
   ]);
 
   assert.match(message, /모델을 읽지 못한 모터: 0/);
-  assert.match(message, /적용은 진행됩니다/);
+  assert.match(message, /적용은 그대로 진행되며/);
   assert.doesNotMatch(message, /적용 불가/);
   assert.doesNotMatch(message, /축: 0, 1/);
 });

@@ -6,7 +6,7 @@
       <button id="projectFileOpenEditorButton" type="button" role="menuitem" disabled>기능 탭에서 열기</button>
       <button id="projectFileRenameButton" type="button" role="menuitem" disabled>이름 변경</button>
       <button id="projectFileActivateButton" type="button" role="menuitem" disabled>현재 설정으로 선택</button>
-      <button id="projectFileExportButton" type="button" role="menuitem" disabled>외부로 내보내기</button>
+      <button id="projectFileExportButton" type="button" role="menuitem" disabled>다운로드</button>
       <div class="project-file-action-divider"></div>
       <button id="projectFileDeleteButton" class="off" type="button" role="menuitem" disabled>휴지통으로 이동</button>
     </div>
@@ -81,17 +81,17 @@
              전에는 「사람이 멈췄나」를 요청 내용으로 추측했다 · 그룹 정지나
              안전 정지까지 사람이 멈춘 것으로 읽어 오판했다. -->
         <div class="schedule-mode-switch">
-          <label for="scheduleRunMode">실행 관리</label>
+          <label for="scheduleRunMode">운전 모드</label>
           <select id="scheduleRunMode">
             <option value="schedule">스케줄 모드 · 시각에 맞춰 시작·정지</option>
-            <option value="manual">수동 모드 · 스케줄이 손대지 않음</option>
-            <option value="off">오프 · 움직임 명령 전부 차단 (서보 홀드 유지)</option>
+            <option value="manual">수동 모드 · 스케줄이 시작·정지하지 않음</option>
+            <option value="off">오프 · 모든 움직임 명령 차단 (서보는 켜진 채 유지)</option>
           </select>
         </div>
         <!-- 운영 시간이 끝나면 · 이 PC 의 설정 · 그룹이어도 PC 마다 제 것 · 수정 목록 36 -->
         <div class="schedule-mode-switch">
           <label for="scheduleEndAction">운영 시간이 끝나면</label>
-          <select id="scheduleEndAction" title="지금 애니메이션을 마친 뒤 · 기준점(0°)으로 10초 동안 천천히 이동 → 도달 확인 → 서보 OFF(AC 서보는 브레이크) · 다음 시작 때 끈 모터를 다시 켭니다 · 모터별로 끄지 않게 하려면 모터 관리 상세 설정의 「끝나면 서보 OFF」">
+          <select id="scheduleEndAction" title="재생 중인 애니메이션을 마친 뒤 기준점(0°)으로 10초 동안 천천히 이동하고, 도착을 확인하면 서보를 끕니다(AC 서보는 브레이크가 잡힘). 다음 시작 때 다시 켭니다. 일부 모터만 켜 두려면 모터 설정의 상세 설정에서 「끝나면 서보 OFF」를 해제하세요.">
             <option value="park_servo_off">기준점으로 이동 후 서보 OFF (기본)</option>
             <option value="hold">마지막 자세에서 서보 켠 채 정지</option>
           </select>
@@ -101,7 +101,7 @@
           <div class="text-center text-muted py-4">스케줄 목록을 불러오는 중...</div>
         </div>
         <div style="display: flex; justify-content: flex-end; gap: 8px;">
-          <button id="btnAddSchedule" type="button" style="background: #319795; color: white; border: none; padding: 8px 16px; border-radius: 4px; cursor: pointer; font-weight: bold;">+ 신규 스케줄 추가</button>
+          <button id="btnAddSchedule" type="button" style="background: #319795; color: white; border: none; padding: 8px 16px; border-radius: 4px; cursor: pointer; font-weight: bold;">+ 새 스케줄</button>
         </div>
       </div>
     </div>
@@ -126,18 +126,18 @@
           <div>
             <label style="display: block; margin-bottom: 4px;">종료 시각 (HH:MM:SS)</label>
             <input type="text" id="schedStopTime" value="18:00:00" style="width: 100%; padding: 6px; background: #1a202c; border: 1px solid #4a5568; color: white; border-radius: 4px;">
-            <small style="display: block; margin-top: 4px; color: #a0aec0;">시작보다 이른 시각이면 자정을 넘긴 것으로 봅니다 (예: 23:00 → 01:00)</small>
+            <small style="display: block; margin-top: 4px; color: #a0aec0;">종료 시각이 시작보다 이르면 다음 날 그 시각까지 운영합니다 (예: 23:00 → 01:00)</small>
           </div>
           <div>
-            <label style="display: block; margin-bottom: 4px;">반복 유형</label>
+            <label style="display: block; margin-bottom: 4px;">반복</label>
             <select id="schedRepeatType" style="width: 100%; padding: 6px; background: #1a202c; border: 1px solid #4a5568; color: white; border-radius: 4px;">
-              <option value="daily">매일 (Daily)</option>
-              <option value="weekly">주간 지정 (Weekly)</option>
-              <option value="once">1회만 실행 (Once)</option>
+              <option value="daily">매일</option>
+              <option value="weekly">요일 선택</option>
+              <option value="once">한 번 (날짜 지정)</option>
             </select>
           </div>
           <div id="schedWeeklyDaysGroup" style="display: none;">
-            <label style="display: block; margin-bottom: 4px;">구동 요일 선택</label>
+            <label style="display: block; margin-bottom: 4px;">요일</label>
             <div style="display: flex; gap: 8px; flex-wrap: wrap; font-size: 13px;">
               <label style="display: flex; align-items: center; gap: 3px;"><input type="checkbox" class="sched-day-check" value="MON" checked> 월</label>
               <label style="display: flex; align-items: center; gap: 3px;"><input type="checkbox" class="sched-day-check" value="TUE" checked> 화</label>
@@ -149,7 +149,7 @@
             </div>
           </div>
           <div id="schedOnceDateGroup" style="display: none;">
-            <label style="display: block; margin-bottom: 4px;">실행 날짜 (YYYY-MM-DD)</label>
+            <label style="display: block; margin-bottom: 4px;">날짜</label>
             <input type="date" id="schedRunDate" style="width: 100%; padding: 6px; background: #1a202c; border: 1px solid #4a5568; color: white; border-radius: 4px;">
           </div>
         </div>
