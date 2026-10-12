@@ -10,6 +10,7 @@ import { h, dot } from '../dom.js';
 import { api } from '../net.js';
 import { confirmBox, toast } from '../dialog.js';
 import * as act from '../actions.js';
+import { isRevisionConflict } from '../mapping_model.js';
 import { EDIT_FIELDS, absoluteJobText, absoluteSummary, getField, motorChanges, motorProblems, motorRows, setField } from '../motors_model.js';
 import { signedDeg } from '../play_model.js';
 
@@ -230,7 +231,21 @@ export async function saveMotors(state, changed) {
   ui.busy = '저장 중';
   changed();
   try {
-    const result = await api('PUT', '/api/motor-config', { body: { registry: ui.draft, base_revision: ui.revision }, timeoutMs: 20000 });
+    const put = () => api('PUT', '/api/motor-config', { body: { registry: ui.draft, base_revision: ui.revision }, timeoutMs: 20000 });
+    let result;
+    try {
+      result = await put();
+    } catch (error) {
+      // 「화면을 불러온 뒤 변경됐습니다」 · 그사이 바뀐 것이 모터 목록·설정이 아니라 운전 한계(하한·상한)뿐이면
+      // 그대로 다시 저장한다 · 한계는 서버가 저장할 때마다 조인트 매핑에서 다시 계산해 덮으므로 잃는 것이 없다 ·
+      // 다른 화면이 모터 설정 자체를 바꿨으면 그대로 거절을 올린다(덮어쓰지 않게) (실물 2026-10-12)
+      if (!isRevisionConflict(error.message)) throw error;
+      const latest = await api('GET', '/api/motor-config');
+      const latestMotors = latest?.registry?.motors || [];
+      if (motorChanges(ui.saved, latestMotors).length) throw error;
+      ui.revision = String(latest?.config_revision || '');
+      result = await put();
+    }
     await loadMotors(state, changed, { force: true });
     return String(result?.message || '모터 설정을 저장했습니다');
   } finally {
