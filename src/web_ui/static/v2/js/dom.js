@@ -25,7 +25,14 @@ export function replace(container, ...children) {
   if (container.contains(document.activeElement)
     && document.activeElement.matches('textarea, select, input:not([type=checkbox]):not([type=radio]):not([type=button])')) return;
   const scrolled = scrollPositions(container);
+  // 펼쳐 둔 칸(details)도 다시 그리면 접혔다 · 제목 글로 같은 칸을 찾아 다시 펼친다 (원본 파일 보기 · 2026-10-12)
+  const opened = new Set([...container.querySelectorAll('details[open] > summary')].map((s) => s.textContent));
   container.replaceChildren(...children.flat(Infinity).filter(Boolean));
+  if (opened.size) {
+    for (const summary of container.querySelectorAll('details > summary')) {
+      if (opened.has(summary.textContent)) summary.parentElement.open = true;
+    }
+  }
   restoreScroll(container, scrolled);
 }
 
