@@ -1353,6 +1353,8 @@ CANNED = {
         'file': MAPPING_FILE,
         'files': [MAPPING_FILE],
         'mapping': _mapping_doc(),
+        # 서버처럼 원본 파일 글도 · 새 화면 「원본 파일」 칸
+        'content': __import__('yaml').safe_dump(_mapping_doc(), allow_unicode=True, sort_keys=False),
         'validation': None,
     },
     ('GET', '/api/projects'): lambda: {

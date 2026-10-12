@@ -472,3 +472,4 @@ dialog.confirm::backdrop { background: rgb(0 0 0 / 60%); }
 @media (max-width: 900px) {
   .issues-drawer { left: 50%; top: auto; bottom: 12px; }
 }
+details.raw pre.raw-file { max-height: 480px; }

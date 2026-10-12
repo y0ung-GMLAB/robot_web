@@ -7,7 +7,7 @@
  */
 import { h, dot } from '../dom.js';
 import { api } from '../net.js';
-import { confirmBox, toast } from '../dialog.js';
+import { toast } from '../dialog.js';
 import * as act from '../actions.js';
 import {
   INITIAL_MODES, autoConfirmRange, changeSummary, draftProblems, draftToRow, isRevisionConflict, motorForRow, motorRefFor, motorWhere, newRow, previewRow,
@@ -15,8 +15,10 @@ import {
 } from '../mapping_model.js';
 import { signedDeg } from '../play_model.js';
 import { motorsDraft } from './motors.js';
+import { threeWayMerge } from '../merge_model.js';
+import { confirmConflicts } from '../conflict_dialog.js';
 
-const ui = { fileId: '', revision: '', name: '', saved: [], rows: null, selected: '', validation: null, busy: '', loadError: '' };
+const ui = { fileId: '', revision: '', name: '', saved: [], rows: null, selected: '', validation: null, busy: '', loadError: '', content: '' };
 let keySeq = 0;
 
 function withKeys(rows) {
@@ -38,7 +40,7 @@ export async function loadMapping(state, changed, { force = false } = {}) {
     const files = Array.isArray(list?.files) ? list.files : [];
     const fileId = files.some((f) => f.id === list?.active_file_id) ? list.active_file_id : (files[0]?.id || '');
     if (!fileId) {
-      Object.assign(ui, { fileId: '', revision: '', name: 'motion_axis', saved: [], rows: [], validation: null, loadError: '' });
+      Object.assign(ui, { fileId: '', revision: '', name: 'motion_axis', saved: [], rows: [], validation: null, loadError: '', content: '' });
       changed();
       return;
     }
@@ -47,7 +49,7 @@ export async function loadMapping(state, changed, { force = false } = {}) {
     const rows = withKeys(Array.isArray(data.mapping.mappings) ? data.mapping.mappings : []);
     Object.assign(ui, {
       fileId, revision: String(data.file?.mapping_revision || data.file?.revision || ''), name: String(data.mapping.name || fileId.replace(/\.ya?ml$/, '')),
-      saved: clone(rows), rows, validation: data.validation || null, loadError: '',
+      saved: clone(rows), rows, validation: data.validation || null, loadError: '', content: String(data.content || ''),
     });
     if (!ui.rows.some((row) => row._key === ui.selected)) ui.selected = ui.rows[0]?._key || '';
   } catch (error) {
@@ -85,7 +87,7 @@ function payload() {
 }
 
 /** 조인트 매핑만 저장 · 저장했으면 메시지 · 검사 실패·충돌은 여기서 알리고 null · 장비 적용은 motor_setup.js
- *  충돌(화면을 연 뒤 파일이 바뀜)이면 「계속 저장」 으로 바로 덮어쓰고 이어 간다 · 재생 목록은 서버가 원래 것을 지킨다 */
+ *  충돌(화면을 연 뒤 파일이 바뀜)이면 최신 파일에 이 화면에서 고친 칸만 얹어 다시 저장 · 재생 목록은 서버가 원래 것을 지킨다 */
 export async function saveMapping(state, changed, { retried = false } = {}) {
   ui.busy = '저장 중';
   changed();
@@ -101,13 +103,21 @@ export async function saveMapping(state, changed, { retried = false } = {}) {
     return String(result?.message || '조인트 매핑을 저장했습니다');
   } catch (error) {
     if (isRevisionConflict(error.message) && !retried) {
-      const go = await confirmBox({
-        title: '조인트 매핑 파일이 화면을 연 뒤 바뀌었습니다',
-        body: '이 화면을 연 다음에 같은 파일이 저장됐습니다(다른 화면에서 저장 · 수동 조작에서 기준점·하한점·상한점 지정 등).\n\n「계속 저장」 · 이 화면 내용으로 덮어쓰고 이어서 진행합니다. 재생 목록은 바뀌지 않습니다.\n「저장 안 함」 · 아무것도 저장하지 않습니다. 고친 내용은 화면에 남아 있습니다.',
-        confirmLabel: '계속 저장', cancelLabel: '저장 안 함', tone: 'warning',
+      // 화면을 연 뒤 파일이 바뀌었다(다른 화면 · 수동 조작의 기준점·하한점·상한점 지정 등) · 최신 파일을 받아
+      // 이 화면에서 고친 칸만 얹고 다시 저장한다 · 같은 칸을 다르게 바꿨을 때만 묻는다 (사용자 2026-10-12)
+      const latest = await latestMapping();
+      if (!latest) { toast('최신 조인트 매핑을 받지 못했습니다. 화면을 새로 고친 뒤 다시 저장하세요.', 'bad'); return null; }
+      const keyed = latest.rows.map((row, index) => {
+        const base = ui.saved.find((b) => b.motion_id && b.motion_id === row.motion_id);
+        return { ...row, _key: base ? base._key : `latest-${index}` };
       });
-      if (!go) return null;
-      ui.revision = await latestRevision(error);
+      const merged = threeWayMerge(ui.saved, ui.rows, keyed, (row) => row._key);
+      if (merged.conflicts.length && !(await confirmConflicts(merged.conflicts, (key) => {
+        const row = ui.rows.find((r) => r._key === key) || keyed.find((r) => r._key === key);
+        return row?.motion_id || '조인트';
+      }))) return null;
+      ui.rows = merged.records;
+      ui.revision = latest.revision;
       ui.busy = '';
       return saveMapping(state, changed, { retried: true });
     }
@@ -120,15 +130,15 @@ export async function saveMapping(state, changed, { retried = false } = {}) {
   }
 }
 
-/** 지금 파일의 버전 · 충돌 응답에 있으면 그것 · 없으면 다시 묻는다 */
-async function latestRevision(error) {
-  const fromError = error?.data?.file?.mapping_revision;
-  if (fromError) return String(fromError);
+/** 지금 파일 · 줄(화면 모양)과 버전 */
+async function latestMapping() {
   try {
     const data = await api('GET', `/api/motion-mappings/${encodeURIComponent(ui.fileId)}`);
-    return String(data?.file?.mapping_revision || data?.file?.revision || ui.revision);
+    const rows = Array.isArray(data?.mapping?.mappings) ? data.mapping.mappings.map((row) => rowToDraft(row)) : null;
+    if (!rows) return null;
+    return { rows, revision: String(data?.file?.mapping_revision || data?.file?.revision || '') };
   } catch {
-    return ui.revision;
+    return null;
   }
 }
 
@@ -296,5 +306,8 @@ export function mappingBody(state, changed) {
     h('section', { class: 'card', 'aria-label': '조인트' },
       ui.rows.length ? table(state, changed) : h('p', { class: 'muted', text: '조인트가 없습니다. 「인식 모터 자동 생성」을 누르세요.' })),
     previewCard(),
+    // 원본 파일 그대로(저장된 것) · 이전 UI 처럼 열어 볼 수 있게 (사용자 2026-10-12)
+    ui.content ? h('details', { class: 'raw card' }, h('summary', { text: `원본 파일 · ${ui.fileId || '조인트 매핑'} (저장된 내용)` }),
+      h('pre', { class: 'doc-code small raw-file' }, h('code', { text: ui.content }))) : null,
   ];
 }

@@ -63,7 +63,10 @@ async function saveChanged(state, changed) {
   const messages = [];
   if (motors.changes.length) {
     try {
-      messages.push(await saveMotors(state, changed));
+      const message = await saveMotors(state, changed);
+      // 충돌 확인 창에서 「저장 안 함」 · 매핑 저장 · 장비 적용으로 넘어가지 않는다
+      if (message === null) return null;
+      messages.push(message);
     } catch (error) {
       if (isRevisionConflict(error.message)) {
         // 화면을 연 뒤 파일이 바뀌었다(다른 화면 저장 · 매핑 저장이 운전 한계를 고쳐 씀) · 고친 것을 버리고 다시 받을지 묻는다
