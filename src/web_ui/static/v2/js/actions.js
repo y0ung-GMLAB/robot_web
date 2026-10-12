@@ -99,8 +99,8 @@ export function startGroup(settings) {
     (r) => r?.message || '매장 전체 재생을 시작합니다. PC마다 초기 위치로 이동한 뒤 함께 시작합니다.');
 }
 
-export function initializeGroup() {
-  return attempt(() => control({ command: 'initialize_group' }), (r) => r?.message || '매장 전체를 초기 위치로 이동합니다');
+export function initializeGroup(settings = {}) {
+  return attempt(() => control({ command: 'initialize_group', ...settings }), (r) => r?.message || '매장 전체를 초기 위치로 이동합니다');
 }
 
 /** 지금 멈춤 · 재생만 멈춘다 · 서보는 켠 채 그 자리 */

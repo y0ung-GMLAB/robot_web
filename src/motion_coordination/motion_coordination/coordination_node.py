@@ -124,6 +124,15 @@ def _message_uint32(message: Any, field_name: str, default: int = 0) -> int:
     return int(getattr(message, field_name, default) or 0)
 
 
+def _message_initial_move_time(message: Any) -> float:
+    """그룹 명령의 초기 위치 이동 시간 · 옛 명령엔 칸이 없다 · 0 = PC마다 조인트 매핑 값"""
+    try:
+        value = float(getattr(message, 'initial_move_time_sec', 0.0) or 0.0)
+    except (TypeError, ValueError):
+        return 0.0
+    return value if value > 0.0 else 0.0
+
+
 def _set_optional_message_field(message: Any, field_name: str, value: Any) -> None:
     if hasattr(message, field_name):
         setattr(message, field_name, value)
@@ -967,6 +976,7 @@ class MotionCoordinationNode(Node):
                     self._execution.target_cycle_count = int(
                         getattr(message, 'target_cycle_count', 0) or 0
                     )
+                    self._execution.initial_move_time_sec = _message_initial_move_time(message)
                 result = self._local_readiness()
                 event = 'ready' if result.get('success') else 'rejected'
                 self._publish_event(
@@ -1002,6 +1012,7 @@ class MotionCoordinationNode(Node):
                     'run_mode': self._execution.run_mode,
                     'sync_mode': self._execution.sync_mode,
                     'target_cycle_count': self._execution.target_cycle_count,
+                    'initial_move_time_sec': self._execution.initial_move_time_sec,
                 })
                 event = (
                     'initialize_scheduled'
@@ -1698,6 +1709,13 @@ class MotionCoordinationNode(Node):
         if repeat_mode not in {'dwell', 'dwell_reinitialize'}:
             dwell_sec = 0.0
         sync_mode = normalize_group_sync_mode(request.get('sync_mode'))
+        # 초기 위치 이동 시간 · 없거나 0 이면 PC마다 조인트 매핑 값 · 2026-10-12
+        try:
+            initial_move_time_sec = float(request.get('initial_move_time_sec') or 0.0)
+        except (TypeError, ValueError) as exc:
+            raise ValueError('초기 위치 이동 시간은 숫자여야 합니다') from exc
+        if initial_move_time_sec < 0.0:
+            raise ValueError('초기 위치 이동 시간은 0초 이상이어야 합니다')
         with self._lock:
             if self._duplicate_pc_boot_id:
                 raise ValueError('중복 PC ID를 수정하고 연동 서비스를 재시작하세요')
@@ -1722,6 +1740,7 @@ class MotionCoordinationNode(Node):
                 target_cycle_count=target_cycle_count,
                 initialization_only=initialization_only,
                 sync_mode=sync_mode,
+                initial_move_time_sec=initial_move_time_sec,
             )
             self._execution.excluded = dict(excluded)
             self._sync_estimators.clear()
@@ -1743,6 +1762,7 @@ class MotionCoordinationNode(Node):
                 initialization_only=initialization_only,
                 run_mode=run_mode,
                 sync_mode=sync_mode,
+                initial_move_time_sec=initial_move_time_sec,
             )
             self._execution.pending_command = 'prepare'
             self._execution.pending_command_id = command.command_id
@@ -1769,6 +1789,7 @@ class MotionCoordinationNode(Node):
             'repeat_mode': repeat_mode,
             'dwell_sec': dwell_sec,
             'sync_mode': sync_mode,
+            'initial_move_time_sec': initial_move_time_sec,
             'initialization_only': initialization_only,
             'excluded': excluded,
         }
@@ -2017,6 +2038,7 @@ class MotionCoordinationNode(Node):
                         target_cycle_count=self._execution.target_cycle_count,
                         run_mode=self._execution.run_mode,
                         sync_mode=self._execution.sync_mode,
+                        initial_move_time_sec=self._execution.initial_move_time_sec,
                     ))
         for pc_id, reason in drops.items():
             self._drop_joiner(pc_id, reason)
@@ -2089,6 +2111,7 @@ class MotionCoordinationNode(Node):
             self._execution.run_mode = str(message.run_mode or 'continuous').strip().lower()
             self._execution.sync_mode = normalize_group_sync_mode(getattr(message, 'sync_mode', ''))
             self._execution.target_cycle_count = int(getattr(message, 'target_cycle_count', 0) or 0)
+            self._execution.initial_move_time_sec = _message_initial_move_time(message)
             self._execution.join_cycle = int(message.cycle_number)
             self._execution.join_started = time.monotonic()
         result = self._local_readiness()
@@ -2104,6 +2127,7 @@ class MotionCoordinationNode(Node):
                 'run_mode': self._execution.run_mode,
                 'sync_mode': self._execution.sync_mode,
                 'target_cycle_count': self._execution.target_cycle_count,
+                'initial_move_time_sec': self._execution.initial_move_time_sec,
             })
         if result.get('success'):
             self._publish_event(message, 'join_accepted', True, '복귀 준비 시작')
@@ -2439,6 +2463,7 @@ class MotionCoordinationNode(Node):
         stop_reason: str = '',
         motion_file_id: str = '',
         start_delay_sec: float = 0.0,
+        initial_move_time_sec: float = 0.0,
     ) -> GroupCommand:
         message = GroupCommand()
         message.group_id = self._config.group_id
@@ -2464,6 +2489,7 @@ class MotionCoordinationNode(Node):
         _set_optional_message_field(message, 'stop_reason', str(stop_reason))
         _set_optional_message_field(message, 'motion_file_id', str(motion_file_id))
         _set_optional_message_field(message, 'start_delay_sec', float(start_delay_sec))
+        _set_optional_message_field(message, 'initial_move_time_sec', float(initial_move_time_sec or 0.0))
         return message
 
     def _publish_event(

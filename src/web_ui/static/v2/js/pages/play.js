@@ -70,7 +70,8 @@ async function busy(work, state, changed) {
 function syncFromServer(status) {
   const automation = status.automation || {};
   if (ui.repeatMode === null) {
-    ui.repeatMode = automation.repeat_mode || 'reinitialize';
+    // 이전 UI 에서 「바로 다음 회차」로 저장돼 있어도 새 화면은 고르지 않는다 · 안전상 초기 위치로 (2026-10-12)
+    ui.repeatMode = automation.repeat_mode && automation.repeat_mode !== 'direct' ? automation.repeat_mode : 'reinitialize';
     ui.dwellSec = Number(automation.dwell_sec || 0);
   }
   if (ui.syncMode === null && automation.group_sync_mode) ui.syncMode = automation.group_sync_mode;
@@ -83,6 +84,11 @@ function runSettings(run_mode) {
     dwell_sec: ui.repeatMode?.startsWith('dwell') ? Math.max(0, Number(ui.dwellSec) || 0) : 0,
     target_cycle_count: Math.max(0, Math.floor(Number(ui.targetCycles) || 0)),
   };
+}
+
+/** 매장 전체 · 화면에 골라져 보이는 값을 그대로 보낸다 · 다른 PC 매핑 값과 섞이지 않게 · 「조인트마다 다름」이면 null */
+function groupMoveTime(state) {
+  return initialMoveChoices(state.play?.mapping?.mappings, ui.initialMove).selected ?? null;
 }
 
 function localPayload(state, run_mode) {
@@ -146,14 +152,14 @@ function nowCard(state, changed, navigate) {
   const playlist = registeredPlaylist(play.mapping);
   const blocker = startBlocker(state.snap, state.sched, { scope: ui.scope, playlist, mappingId: play.mappingId });
   const loopBlocked = status.capabilities?.continuous_run?.available === false
-    && (ui.repeatMode === 'direct' || ui.repeatMode === 'dwell');
+    && ui.repeatMode === 'dwell';
   const disabled = Boolean(blocker) || ui.busy;
   const scopeText = group ? '매장 전체' : '단독';
 
   const start = (runMode) => busy(() => (group
-    ? act.startGroup({ ...runSettings(runMode), sync_mode: ui.syncMode || 'lockstep' })
+    ? act.startGroup({ ...runSettings(runMode), sync_mode: ui.syncMode || 'lockstep', initial_move_time_sec: groupMoveTime(state) })
     : act.startLocal(localPayload(state, runMode))), state, changed);
-  const initialize = () => busy(() => (group ? act.initializeGroup() : act.initializeLocal(localPayload(state, 'once'))), state, changed);
+  const initialize = () => busy(() => (group ? act.initializeGroup({ initial_move_time_sec: groupMoveTime(state) }) : act.initializeLocal(localPayload(state, 'once'))), state, changed);
   const stopAfter = () => (group ? act.stopGroupAfterCycle(groupStopCommand(state.snap)) : act.stopAfterCycle(false));
 
   return h('section', { class: `card card-now tone-${head.tone}`, 'aria-label': '지금' },
@@ -232,9 +238,8 @@ function repeatCard(state, changed) {
         '초') : null),
     h('div', { class: 'field' },
       h('span', { class: 'field-label', text: '초기 위치 이동 시간' }),
-      group
-        ? h('span', { class: 'muted small', text: 'PC마다 조인트 매핑에 저장된 시간을 씁니다' })
-        : segmented('초기 위치 이동 시간', moveTime.options, moveTime.selected, (value) => { ui.initialMove = moveTime.pick(value); changed(); })),
+      segmented('초기 위치 이동 시간', moveTime.options, moveTime.selected, (value) => { ui.initialMove = moveTime.pick(value); changed(); }),
+      group ? h('span', { class: 'muted small', text: '매장 전체의 모든 PC가 이 시간으로 초기 위치에 갑니다' }) : null),
     h('div', { class: 'field' },
       h('label', { class: 'inline' }, h('span', { class: 'field-label', text: '정지할 회차' }),
         h('input', { class: 'input num-input', type: 'number', min: '0', step: '1', value: String(ui.targetCycles),

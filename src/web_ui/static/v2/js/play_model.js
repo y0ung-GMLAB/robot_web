@@ -16,7 +16,7 @@ const GROUP_NOT_STARTED = new Set(['preparing', 'initializing', 'armed', 'start_
 
 export const REPEAT_MODES = [
   { id: 'reinitialize', label: '초기 위치로 돌아간 뒤 다음 회차', short: '초기 위치 → 다음' },
-  { id: 'direct', label: '바로 다음 회차', short: '바로 다음' },
+  // 「바로 다음 회차」(direct)는 뺐다 · 끝 자세에서 첫 자세로 곧바로 튄다 · 안전상 쓰지 않는다(사용자 2026-10-12)
   { id: 'dwell', label: '대기 후 다음 회차', short: '대기 후 다음' },
   { id: 'dwell_reinitialize', label: '대기 후 초기 위치로 돌아간 뒤 다음 회차', short: '대기 후 초기 위치' },
 ];

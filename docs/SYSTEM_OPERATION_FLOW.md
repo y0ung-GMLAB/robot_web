@@ -153,7 +153,7 @@ trigger_report_timeout_sec: 1.0
   다음 회차부터 같이 · 늘 회차 첫 프레임부터 · 다른 PC 는 기다리지 않는다 ·
   복귀 PC 의 거절·무응답(30초)·끊김은 그 PC 만 접는다(30초 뒤 다시 권함) · 참가자가 아닌 PC 의
   늦은 사건은 진행 PC 가 무시한다 · 각자 재생은 다음 그룹 시작 때 들어간다
-- PC 사이 약속 번호 4 (`GROUP_PROTOCOL_VERSION`) · 모든 PC 같은 버전으로
+- PC 사이 약속 번호 6 (`GROUP_PROTOCOL_VERSION`) · 모든 PC 같은 버전으로 · 6 은 그룹 명령에 초기 위치 이동 시간을 싣는다(2026-10-12)
 - `그룹 나가기`는 `joined: false` heartbeat로 즉시 공유한다.
 
 ## 그룹 실행 상태

@@ -22,7 +22,7 @@ from motion_common.repeat_policy import (
 #: 사건 `join_ready` (수정 목록 30-3) ·
 #: 5 · 2026-10-07 `GroupCommand.motion_file_id`·`start_delay_sec` · PC 1대 재생도 `start_at` 알림
 #: (스피커 연동 · 수정 목록 38)
-GROUP_PROTOCOL_VERSION = 5
+GROUP_PROTOCOL_VERSION = 6
 
 
 @dataclass
@@ -142,6 +142,8 @@ class GroupExecution:
         self.run_mode = 'continuous'
         self.repeat_mode = 'reinitialize'
         self.dwell_sec = 0.0
+        #: 초기 위치 이동 시간 · 0 = PC마다 조인트 매핑 값 · 2026-10-12
+        self.initial_move_time_sec = 0.0
         self.target_cycle_count = 0
         self.initialization_only = False
         #: 회차 맞춤(lockstep) / 각자 재생(independent) · 수정 목록 35
@@ -223,6 +225,7 @@ class GroupExecution:
         target_cycle_count: int = 0,
         initialization_only: bool = False,
         sync_mode: str = GROUP_LOCKSTEP,
+        initial_move_time_sec: float = 0.0,
     ) -> str:
         selected = tuple(sorted(set(str(value) for value in participants if str(value))))
         if not 1 <= len(selected) <= 8:
@@ -243,6 +246,7 @@ class GroupExecution:
         self.target_cycle_count = int(target_cycle_count)
         self.initialization_only = bool(initialization_only)
         self.sync_mode = normalize_group_sync_mode(sync_mode)
+        self.initial_move_time_sec = max(float(initial_move_time_sec or 0.0), 0.0)
         self.state = 'preparing'
         return self.execution_id
 

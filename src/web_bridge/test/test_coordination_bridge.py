@@ -321,3 +321,17 @@ def test_the_group_switch_turns_settings_and_participation_on_together(tmp_path,
 
     with pytest.raises(ValueError):
         service.update_settings({'joined': 'yes'})
+
+
+def test_group_prepare_carries_the_masters_initial_move_time(tmp_path):
+    """마스터 재생 화면에서 고른 초기 위치 이동 시간 · 0 이나 없으면 조인트 매핑 값(None) · 2026-10-12"""
+    _assets(tmp_path)
+    bridge = _Bridge(_Repository(tmp_path))
+    base = {'command': 'group_prepare', 'execution_id': 'exec-a',
+            'initialize_monotonic': 100.0, 'network_operation_id': 'command-a'}
+    assert local_motion_control(bridge, {**base, 'initial_move_time_sec': 7.0})['success'] is True
+    assert bridge.payload['initial_move_time_sec'] == 7.0
+    local_motion_control(bridge, {**base, 'initial_move_time_sec': 0.0})
+    assert bridge.payload['initial_move_time_sec'] is None
+    local_motion_control(bridge, base)
+    assert bridge.payload['initial_move_time_sec'] is None

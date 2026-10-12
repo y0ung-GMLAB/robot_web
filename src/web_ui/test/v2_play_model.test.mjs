@@ -2,7 +2,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
-  axisRows, defaultScope, fileInfo, groupRows, groupStopCommand, initialMoveChoices, phaseSteps, playHeadline,
+  axisRows, defaultScope, fileInfo, groupRows, groupStopCommand, initialMoveChoices, phaseSteps, playHeadline, REPEAT_MODES,
   playlistAdd, playlistMove, playlistRemove, registeredPlaylist, startBlocker,
 } from '../static/v2/js/play_model.js';
 
@@ -98,4 +98,9 @@ test('첫 자세 이동 시간 · 매핑 시간이 하나면 그 값이 골라�
   assert.deepEqual(mixed.options[0], [null, '조인트마다 다름 (매핑)']);
   assert.equal(mixed.selected, null);
   assert.equal(mixed.pick(5), 5);
+});
+
+test('회차 사이 · 「바로 다음 회차」(끝 자세 → 첫 자세로 곧바로)는 고를 수 없다 · 안전 (2026-10-12)', () => {
+  assert.ok(!REPEAT_MODES.some((mode) => mode.id === 'direct'));
+  assert.equal(REPEAT_MODES[0].id, 'reinitialize');
 });

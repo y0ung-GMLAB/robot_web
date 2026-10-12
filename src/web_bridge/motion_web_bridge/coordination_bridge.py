@@ -240,6 +240,8 @@ class CoordinationWebBridge:
                     ),
                     'dwell_sec': payload.get('dwell_sec', 0.0),
                     'target_cycle_count': payload.get('target_cycle_count', 0),
+                    # 초기 위치 이동 시간 · 없으면 PC마다 조인트 매핑 값 · 2026-10-12
+                    'initial_move_time_sec': payload.get('initial_move_time_sec') or 0.0,
                     # 회차 맞춤 / 각자 재생 · 수정 목록 35
                     'sync_mode': repeat_policy.normalize_group_sync_mode(
                         payload.get('sync_mode'),
@@ -391,6 +393,14 @@ def local_motion_readiness(
     })
 
 
+def _group_initial_move_time(payload: Mapping[str, Any]) -> Optional[float]:
+    try:
+        value = float(payload.get('initial_move_time_sec') or 0.0)
+    except (TypeError, ValueError):
+        return None
+    return value if value > 0.0 else None
+
+
 def local_motion_control(bridge: Any, payload: Mapping[str, Any]) -> Dict[str, Any]:
     """Execute one loopback-only high-level command through motion_run_manager."""
     command = str(payload.get('command') or '')
@@ -479,6 +489,8 @@ def local_motion_control(bridge: Any, payload: Mapping[str, Any]) -> Dict[str, A
                 payload.get('sync_mode'),
             ),
             'target_cycle_count': int(payload.get('target_cycle_count') or 0),
+            # 마스터 재생 화면에서 고른 이동 시간 · 0 이면 None(조인트 매핑 값) · 2026-10-12
+            'initial_move_time_sec': _group_initial_move_time(payload),
             # Direct repetition must use the same continuity validation as a
             # local continuous run. Reinitializing policies deliberately
             # bypass that check because every cycle returns to the start pose.
