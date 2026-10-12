@@ -27,7 +27,8 @@ test('PC 줄 · 재생 상태는 그룹 표에서 · 알람 · 버전 다름 · 
 });
 
 test('주소 · 터미널은 같은 호스트 8081 · 이상한 주소는 링크 안 만듦', () => {
-  assert.deepEqual(pcLinks({ web_url: 'http://10.0.0.2:8000/' }), { web: 'http://10.0.0.2:8000', terminal: 'http://10.0.0.2:8081' });
+  assert.deepEqual(pcLinks({ web_url: 'http://10.0.0.2:8000/' }), { web: 'http://10.0.0.2:8000/v2', terminal: 'http://10.0.0.2:8081' });
+  assert.deepEqual(pcLinks({ role: 'speaker', web_url: 'http://10.0.0.9:8090' }), { web: 'http://10.0.0.9:8090', terminal: 'http://10.0.0.9:8081' });
   assert.deepEqual(pcLinks({ web_url: 'javascript:alert(1)' }), { web: '', terminal: '' });
   assert.deepEqual(pcLinks({}), { web: '', terminal: '' });
 });

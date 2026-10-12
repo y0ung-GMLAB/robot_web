@@ -11,7 +11,8 @@ export function pcLinks(pc) {
   const url = String(pc?.web_url || '').replace(/\/+$/, '');
   if (!SAFE_URL.test(url)) return { web: '', terminal: '' };
   const host = url.replace(/:\d+$/, '');
-  return { web: url, terminal: `${host}:8081` };
+  // 새 화면에서 연 다른 로봇 PC 도 새 화면으로 · 스피커는 자기 앱 화면 그대로 (2026-10-12)
+  return { web: pc?.role === 'speaker' ? url : `${url}/v2`, terminal: `${host}:8081` };
 }
 
 export function shortHash(hash) {
