@@ -293,7 +293,7 @@ async def index():
 @app.get('/v2/')
 async def index_v2():
     # 새 UI · 뼈대 + 홈 · 설계안 2026-10-09
-    return FileResponse(STATIC / 'v2' / 'index.html')
+    return FileResponse(STATIC / 'v2' / 'index.html', headers={'Cache-Control': 'no-cache'})
 
 
 @app.get('/favicon.ico')
@@ -306,7 +306,8 @@ async def static_asset(asset_path: str):
     target = (STATIC / asset_path).resolve()
     if not str(target).startswith(str(STATIC.resolve())) or not target.is_file():
         return JSONResponse({'detail': 'not found'}, status_code=404)
-    return FileResponse(target)
+    # 서버처럼 매번 물어본다 · 옛 모듈이 캐시에 남아 화면이 「불러오는 중」 에서 멈추지 않게
+    return FileResponse(target, headers={'Cache-Control': 'no-cache'})
 
 
 @app.websocket('/ws/status')
