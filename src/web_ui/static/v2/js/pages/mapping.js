@@ -101,8 +101,8 @@ export async function saveMapping(state, changed) {
   } catch (error) {
     if (isRevisionConflict(error.message)) {
       const reload = await confirmBox({
-        title: '다른 화면에서 먼저 변경되었습니다',
-        body: '이 화면을 연 뒤 조인트 매핑이 변경되었습니다.\n수정한 내용을 버리고 다시 불러올까요? 「취소」를 누르면 수정한 내용이 남아 있어 다시 저장할 수 있습니다.',
+        title: '조인트 매핑 파일이 화면을 연 뒤 바뀌었습니다',
+        body: '이 화면을 연 다음에 누군가 같은 파일을 저장했습니다. 이런 때 생깁니다 · 다른 화면(이전 UI · 다른 PC 브라우저)에서 저장 · 재생 목록 변경(재생 목록도 같은 파일에 저장) · 수동 조작에서 기준점·하한점·상한점 지정.\n\n「버리고 다시 불러오기」 · 최신 파일을 받고, 이 화면에서 고친 것은 버립니다.\n「취소」 · 고친 것을 그대로 두고, 다시 「저장」하면 이 화면 내용으로 덮어씁니다.',
         confirmLabel: '버리고 다시 불러오기', tone: 'warning',
       });
       if (reload) await loadMapping(state, changed, { force: true });

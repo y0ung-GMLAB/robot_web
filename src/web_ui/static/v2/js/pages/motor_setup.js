@@ -69,8 +69,7 @@ async function saveChanged(state, changed) {
         // 화면을 연 뒤 파일이 바뀌었다(다른 화면 저장 · 매핑 저장이 운전 한계를 고쳐 씀) · 고친 것을 버리고 다시 받을지 묻는다
         const reload = await confirmBox({
           title: '모터 설정 파일이 화면을 연 뒤 바뀌었습니다',
-          body: '다른 화면에서 저장했거나, 조인트 매핑 저장으로 운전 한계가 바뀌었습니다.
-「다시 불러오기」를 누르면 최신 파일을 받습니다(이 화면에서 고친 모터 설정은 사라집니다). 다시 불러온 뒤 고쳐서 저장하세요.',
+          body: '다른 화면에서 저장했거나, 조인트 매핑 저장으로 운전 한계가 바뀌었습니다.\n「다시 불러오기」를 누르면 최신 파일을 받습니다(이 화면에서 고친 모터 설정은 사라집니다). 다시 불러온 뒤 고쳐서 저장하세요.',
           confirmLabel: '다시 불러오기', tone: 'warning',
         });
         if (reload) await loadMotors(state, changed, { force: true });
