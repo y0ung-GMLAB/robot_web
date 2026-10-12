@@ -16,14 +16,14 @@
   setTimeout(function () {
     var box = document.querySelector('#app .booting');
     if (!box) return;
-    box.textContent = '화면을 못 불러왔습니다 · 업데이트 직후면 강력 새로 고침(Ctrl+Shift+R) · 계속되면 기존 화면(/)으로 ';
+    box.textContent = '화면을 못 불러왔습니다 · 업데이트 직후면 강력 새로 고침(Ctrl+Shift+R) · 계속되면 이전 UI(/)로 ';
     var again = document.createElement('button');
     again.textContent = '다시 불러오기';
     again.className = 'btn';
     again.onclick = function () { location.reload(); };
     var old = document.createElement('a');
     old.href = '/';
-    old.textContent = '기존 화면';
+    old.textContent = '이전 UI';
     old.className = 'btn';
     box.appendChild(again);
     box.appendChild(old);

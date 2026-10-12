@@ -139,5 +139,8 @@ export function absoluteJobText(job) {
   const step = job.step_count ? ` · ${job.step_index ?? 0}/${job.step_count}` : '';
   const label = job.step_label ? ` · ${job.step_label}` : '';
   const head = { running: '앱솔루트 설정 중', done: '앱솔루트 설정 완료', failed: '앱솔루트 설정 실패' }[job.state] || job.state;
-  return `${head}${step}${label}${job.message ? ` · ${job.message}` : ''}${job.error ? ` · ${job.error}` : ''}`;
+  // 단계 이름·메시지가 머리말과 같은 말(「완료」 등)이면 한 번만
+  const parts = [label, job.message, job.error].flatMap((part) => String(part || '').split(' · ')).map((part) => part.trim()).filter(Boolean);
+  const unique = parts.filter((part, i) => !head.includes(part) && parts.indexOf(part) === i);
+  return [`${head}${step}`, ...unique].join(' · ');
 }

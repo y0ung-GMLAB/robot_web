@@ -19,8 +19,7 @@ import { loadNetwork, renderNetwork } from './pages/network.js';
 import { loadBackup, renderBackup } from './pages/backup.js';
 import { loadPack, renderPack } from './pages/pack.js';
 import { loadRecords, renderRecords } from './pages/records.js';
-import { loadMapping, renderMapping } from './pages/mapping.js';
-import { loadMotors, renderMotors } from './pages/motors.js';
+import { loadSetup, renderSetup } from './pages/motor_setup.js';
 import { loadManual, renderManual } from './pages/manual.js';
 
 const state = { snap: null, sched: null, schedules: [], events: [], connected: false };
@@ -37,8 +36,9 @@ const PAGES = {
   backup: { render: renderBackup, load: loadBackup, reloadMs: 5000 },
   pack: { render: renderPack, load: loadPack, reloadMs: 5000 },
   records: { render: renderRecords, load: loadRecords, reloadMs: 15000 },
-  mapping: { render: renderMapping, load: loadMapping, reloadMs: 10000 },
-  'maintain-motors': { render: renderMotors, load: loadMotors, reloadMs: 10000 },
+  // 모터 설정 한 페이지 · #/mapping 은 같은 페이지의 ② 구획
+  mapping: { render: renderSetup, load: loadSetup, reloadMs: 10000 },
+  'maintain-motors': { render: renderSetup, load: loadSetup, reloadMs: 10000 },
   manual: { render: renderManual, load: loadManual, reloadMs: 15000 },
   // static · 들어올 때 한 번만 그린다 · iframe 을 다시 그리면 터미널 세션이 끊긴다
   tools: { render: renderTools, static: true },

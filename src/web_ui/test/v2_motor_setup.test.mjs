@@ -1,0 +1,50 @@
+/** UI v2 · 모터 설정 · ① 모터·드라이브 · ② 조인트 매핑 을 한 페이지 두 구획으로 (사용자 결정 2026-10-12) */
+import assert from 'node:assert/strict';
+import test from 'node:test';
+import { pendingText, setupStatus } from '../static/v2/js/pages/motor_setup.js';
+import { motorWhere } from '../static/v2/js/mapping_model.js';
+import { absoluteJobText } from '../static/v2/js/motors_model.js';
+import { NAV, routeLabel } from '../static/v2/js/shell.js';
+
+test('메뉴엔 「모터 설정」 하나 · 조인트 매핑 주소도 그 메뉴로 열린다', () => {
+  const ids = NAV.flatMap((group) => group.items.map(([id]) => id));
+  assert.ok(ids.includes('maintain-motors'));
+  assert.ok(!ids.includes('mapping'));
+  assert.equal(routeLabel('maintain-motors'), '모터 설정');
+  assert.equal(routeLabel('mapping'), '모터 설정');
+});
+
+test('구획 상태 · 모터 연결 수 · 범위 미확인 · 장비 적용', () => {
+  const snap = {
+    motion_state: { motors: [{ state: 'detected' }, { state: 'missing' }] },
+    mapping_range_blocker: 'Neck_Pitch',
+    project_scope: { runtime_matches_selected: true, motor_config_applied: true },
+  };
+  const status = setupStatus(snap);
+  assert.deepEqual(status.motors, { done: false, note: '1/2대 연결' });
+  assert.deepEqual(status.mapping, { done: false, note: '범위 미확인' });
+  assert.deepEqual(status.apply, ['장비에 적용됨', 'ok']);
+  assert.equal(setupStatus(snap, { dirty: true }).apply[1], 'warn');
+  assert.deepEqual(setupStatus({}).apply, ['장비에 적용 필요', 'warn']);
+});
+
+test('저장 칸 한 줄 · 두 구획 변경을 같이 센다', () => {
+  assert.equal(pendingText([], []), '저장됨');
+  assert.equal(pendingText(['0번 이름 A → B'], []), '저장하지 않은 변경 · 모터 1개 · 0번 이름 A → B');
+  assert.equal(pendingText(['a', 'b'], ['c', 'd']), '저장하지 않은 변경 · 모터 2개 · 조인트 매핑 2개 · a · b · c …');
+});
+
+test('모터 고르기 목록 · 어느 드라이브인지 · 슬레이브 번호 · alias · 다이나믹셀 포트·ID', () => {
+  assert.equal(motorWhere({ motor_type: 'ac_servo', ethercat_master_index: 0, slave_position: 3, alias: 103 }), 'AC · 슬레이브 3 · alias 103');
+  assert.equal(motorWhere({ motor_type: 'ac_servo', slave_position: 0, alias: 0 }), 'AC · 슬레이브 0');
+  assert.equal(motorWhere({ motor_type: 'ac_servo', ethercat_master_index: 1, slave_position: 2 }), 'AC · 마스터 1 · 슬레이브 2');
+  assert.equal(motorWhere({ motor_type: 'dynamixel', serial_port: '/dev/ttyUSB0', bus_id: 5 }), 'DXL · /dev/ttyUSB0 · ID 5');
+});
+
+test('앱솔루트 작업 글 · 머리말과 같은 말은 한 번만(「완료 · 완료」 없음)', () => {
+  assert.equal(absoluteJobText({ state: 'done', message: '완료 · 위치 숫자가 바뀌어 기준점을 다시 캡처해야 합니다' }),
+    '앱솔루트 설정 완료 · 위치 숫자가 바뀌어 기준점을 다시 캡처해야 합니다');
+  assert.equal(absoluteJobText({ state: 'done', message: '앱솔루트 설정 완료 · 위치 숫자가 바뀌어 기준점을 다시 캡처해야 합니다' }),
+    '앱솔루트 설정 완료 · 위치 숫자가 바뀌어 기준점을 다시 캡처해야 합니다');
+  assert.equal(absoluteJobText({ state: 'running', step_count: 4, step_index: 2, step_label: '드라이브 재시작' }), '앱솔루트 설정 중 · 2/4 · 드라이브 재시작');
+});

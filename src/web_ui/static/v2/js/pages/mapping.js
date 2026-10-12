@@ -10,7 +10,7 @@ import { api } from '../net.js';
 import { confirmBox, toast } from '../dialog.js';
 import * as act from '../actions.js';
 import {
-  INITIAL_MODES, autoConfirmRange, changeSummary, draftProblems, draftToRow, isRevisionConflict, motorForRow, motorRefFor, newRow, previewRow,
+  INITIAL_MODES, autoConfirmRange, changeSummary, draftProblems, draftToRow, isRevisionConflict, motorForRow, motorRefFor, motorWhere, newRow, previewRow,
   rangeConfirmed, rowToDraft, rowTarget, unconfirmedRows,
 } from '../mapping_model.js';
 import { signedDeg } from '../play_model.js';
@@ -62,7 +62,7 @@ function motorList(state) {
   return motors.map((motor) => ({
     axis: Number(motor.controller_index),
     label: `${motor.controller_index}번 · ${motor.name || motor.display_name || motor.motion_id || ''}`.replace(/ · $/, ''),
-    type: motor.motor_type === 'dynamixel' ? 'DXL' : 'AC',
+    where: motorWhere(motor),
     ref: motorRefFor(motor),
     positionDeg: motor.position_rad === null || motor.position_rad === undefined ? null : Number(motor.position_rad) * 180 / Math.PI,
   }));
@@ -83,26 +83,20 @@ function payload() {
   };
 }
 
-async function save(state, changed, { apply = false } = {}) {
-  const problems = draftProblems(ui.rows);
-  if (problems.length) { toast(problems[0], 'bad'); return; }
-  if (apply) {
-    const go = await act.confirmApplyMotorConfig('조인트 매핑을 저장한 뒤 바로 장비에 적용합니다. 운전 한계(소프트 리밋)가 새 범위로 바뀝니다.');
-    if (!go) return;
-  }
+/** 조인트 매핑만 저장 · 저장했으면 메시지 · 검사 실패·충돌은 여기서 알리고 null · 장비 적용은 motor_setup.js */
+export async function saveMapping(state, changed) {
   ui.busy = '저장 중';
   changed();
   try {
     const checked = await api('POST', '/api/motion-mappings/validate', { body: payload() }).catch((error) => ({ success: false, message: error.message, validation: error.data?.validation }));
     if (checked?.validation) ui.validation = checked.validation;
     if (checked?.success === false && checked?.validation?.valid === false) {
-      toast(`검사 실패 · ${(checked.validation.errors || [])[0] || checked.message}`, 'bad');
-      return;
+      toast(`조인트 매핑 검사 실패 · ${(checked.validation.errors || [])[0] || checked.message}`, 'bad');
+      return null;
     }
     const result = await api('POST', '/api/motion-mappings', { body: payload(), timeoutMs: 20000 });
-    toast(result?.message || '저장했습니다', 'ok');
     await loadMapping(state, changed, { force: true });
-    if (apply) await act.applyMotorConfig();
+    return String(result?.message || '조인트 매핑을 저장했습니다');
   } catch (error) {
     if (isRevisionConflict(error.message)) {
       const reload = await confirmBox({
@@ -116,10 +110,20 @@ async function save(state, changed, { apply = false } = {}) {
       if (error.data?.validation) ui.validation = error.data.validation;
       toast(error.message || String(error), 'bad');
     }
+    return null;
   } finally {
     ui.busy = '';
     changed();
   }
+}
+
+export function mappingDraft() {
+  if (!ui.rows) return { ready: false, changes: [], problems: [], busy: ui.busy };
+  return { ready: true, changes: changeSummary(ui.saved, ui.rows), problems: draftProblems(ui.rows), busy: ui.busy };
+}
+
+export function revertMapping() {
+  if (ui.rows) ui.rows = clone(ui.saved);
 }
 
 /* ---------- 표 ---------- */
@@ -150,7 +154,7 @@ function table(state, changed) {
     return [
       h('option', { value: '', selected: !found && !unknown }, '없음'),
       unknown ? h('option', { value: 'keep', selected: true }, `${row.motor_axis !== null ? `${row.motor_axis}번` : row.motor_ref} (지금 안 보임)`) : null,
-      motors.map((m) => h('option', { value: String(m.axis), selected: found === m }, `${m.label} · ${m.type}`)),
+      motors.map((m) => h('option', { value: String(m.axis), selected: found === m }, `${m.label} (${m.where})`)),
     ];
   };
   return h('div', { class: 'table-wrap' }, h('table', { class: 'table mapping-table' },
@@ -165,7 +169,7 @@ function table(state, changed) {
       h('td', {}, h('input', { class: 'input mono name-input', value: row.motion_id, placeholder: 'Blender 본 이름', 'aria-label': `${index + 1}번 줄 조인트 이름`,
         onfocus: () => { ui.selected = row._key; },
         oninput: (e) => { row.motion_id = e.target.value; }, onchange: () => changed() })),
-      h('td', {}, h('select', { class: 'select select-sm', 'aria-label': `${index + 1}번 줄 모터`,
+      h('td', {}, h('select', { class: 'select select-sm motor-select', 'aria-label': `${index + 1}번 줄 모터`, title: motor ? `${motor.label} (${motor.where})` : '',
         onchange: (e) => {
           const value = e.target.value;
           if (value === 'keep') return;
@@ -227,13 +231,9 @@ function previewCard() {
         ? h('ul', { class: 'list small' }, validation.warnings.map((w) => h('li', { class: 'tone-text-warn', text: w }))) : null) : null);
 }
 
-export function renderMapping(state, { changed }) {
-  if (!ui.rows) {
-    return [h('div', { class: 'page-head' }, h('h1', { text: '조인트 매핑' })),
-      h('p', { class: ui.loadError ? 'tone-text-bad' : 'muted', text: ui.loadError || '불러오는 중…' })];
-  }
-  const summary = changeSummary(ui.saved, ui.rows);
-  const problems = draftProblems(ui.rows);
+/** ② 구획 머리 오른쪽 · 모터로 자동 생성 · 조인트 더하기 */
+export function mappingActions(state, changed) {
+  if (!ui.rows) return null;
   const motors = motorList(state);
   const autoBuild = () => {
     const used = new Set(ui.rows.map(rowTarget));
@@ -247,32 +247,33 @@ export function renderMapping(state, { changed }) {
     changed();
   };
   return [
-    h('div', { class: 'page-head' },
-      h('h1', { text: '조인트 매핑' }),
-      h('span', { class: 'spacer' }),
-      h('button', { class: 'btn', type: 'button', disabled: !motors.length, onclick: autoBuild }, '모터로 자동 생성'),
-      h('button', { class: 'btn', type: 'button', onclick: () => {
-        const row = { ...newRow(null, ''), _key: `k${keySeq += 1}` };
-        ui.rows.push(row);
-        ui.selected = row._key;
-        changed();
-      } }, '+ 조인트'),
-      h('p', { class: 'muted small' }, '애니메이션의 조인트를 모터에 연결합니다. 모터 = 기준점 + 조인트 × 감속비 × 방향 · 파일 ',
-        h('span', { class: 'mono', text: ui.fileId || '(새 파일)' }), ' · ', h('a', { href: '#/pack', text: '로봇 팩과 비교' }))),
+    h('button', { class: 'btn', type: 'button', disabled: !motors.length, onclick: autoBuild }, '인식 모터 자동 생성'),
+    h('button', { class: 'btn', type: 'button', onclick: () => {
+      const row = { ...newRow(null, ''), _key: `k${keySeq += 1}` };
+      ui.rows.push(row);
+      ui.selected = row._key;
+      changed();
+    } }, '+ 조인트'),
+  ];
+}
+
+/** ② 구획 설명 · 공식과 파일 이름 */
+export function mappingNote() {
+  return h('p', { class: 'muted small' }, '애니메이션 조인트 값을 모터 값으로 바꿉니다. 모터 = 기준점 + 조인트 × 감속비 × 방향 · 파일 ',
+    h('span', { class: 'mono', text: ui.fileId || '(새 파일)' }), ' · ', h('a', { href: '#/pack', text: '로봇 팩과 비교' }));
+}
+
+/** ② 조인트 매핑 구획 본문 · 머리와 저장 칸은 motor_setup.js */
+export function mappingBody(state, changed) {
+  if (!ui.rows) return h('p', { class: ui.loadError ? 'tone-text-bad' : 'muted', text: ui.loadError || '불러오는 중…' });
+  return [
     ui.loadError ? h('div', { class: 'blocker' }, dot('warn'), h('span', { class: 'grow', text: `다시 불러오기 실패 · ${ui.loadError} · 수정 중인 내용은 그대로 남아 있습니다` })) : null,
     unconfirmedRows(ui.rows).length ? h('div', { class: 'blocker bad' }, dot('bad'),
       h('span', { class: 'grow', text: `범위 미확인 · ${unconfirmedRows(ui.rows).map((r) => r.motion_id).join(', ')}. 실제 기계 범위(최소·최대)를 입력하거나 「범위 확인」을 체크한 뒤 저장하세요. 그 전에는 재생, 초기 이동, 수동 조작이 차단됩니다.` })) : null,
     state.snap?.mapping_range_blocker && !unconfirmedRows(ui.rows).length && changeSummary(ui.saved, ui.rows).length
       ? h('p', { class: 'muted small', text: '저장하면 범위 미확인 상태가 해제됩니다' }) : null,
     h('section', { class: 'card', 'aria-label': '조인트' },
-      ui.rows.length ? table(state, changed) : h('p', { class: 'muted', text: '조인트가 없습니다. 「모터로 자동 생성」을 누르세요.' })),
+      ui.rows.length ? table(state, changed) : h('p', { class: 'muted', text: '조인트가 없습니다. 「인식 모터 자동 생성」을 누르세요.' })),
     previewCard(),
-    h('div', { class: 'apply-bar' },
-      h('div', { class: 'grow' },
-        h('span', { text: summary.length ? `저장하지 않은 변경 ${summary.length}개 · ${summary.slice(0, 3).join(' · ')}${summary.length > 3 ? ' …' : ''}` : '저장됨' }),
-        problems.length ? h('p', { class: 'tone-text-warn small', text: problems[0] }) : null),
-      h('button', { class: 'btn', type: 'button', disabled: Boolean(ui.busy) || !summary.length, onclick: () => { ui.rows = clone(ui.saved); changed(); } }, '되돌리기'),
-      h('button', { class: 'btn btn-primary', type: 'button', disabled: Boolean(ui.busy) || Boolean(problems.length), onclick: () => save(state, changed) }, ui.busy || '저장'),
-      h('button', { class: 'btn btn-warn', type: 'button', disabled: Boolean(ui.busy) || Boolean(problems.length), onclick: () => save(state, changed, { apply: true }) }, '저장 후 장비에 적용…')),
   ];
 }

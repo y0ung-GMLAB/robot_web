@@ -366,6 +366,7 @@ body.drop-active .drop-zone { border-color: var(--blue); background: var(--blue-
 .cell-row { display: flex; align-items: center; gap: 4px; }
 .mapping-table th, .mapping-table td { padding: 6px 6px; }
 .mapping-table .select-sm { max-width: 150px; }
+.mapping-table .motor-select { min-width: 260px; max-width: 340px; }
 .mapping-table .btn-mini { padding: 0 8px; }
 .mapping-table input[type=checkbox] { width: 20px; height: 20px; }
 .mapping-table td.range-unconfirmed { outline: 2px solid var(--bad); outline-offset: -4px; border-radius: 6px; }
@@ -451,3 +452,12 @@ dialog.confirm::backdrop { background: rgb(0 0 0 / 60%); }
   .main { padding-bottom: 96px; }
   .toast { bottom: 92px; }
 }
+
+/* 모터 설정 · 한 페이지 두 구획 (2026-10-12) */
+.setup-part { display: grid; gap: 16px; padding-top: 8px; scroll-margin-top: 16px; }
+.setup-part + .setup-part { border-top: 2px solid var(--line); padding-top: 24px; margin-top: 8px; }
+.part-head { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; }
+.part-head h2 { margin: 0; font-size: 22px; }
+.part-note { font-size: 15px; font-weight: 400; color: var(--warn-ink); }
+.part-note.ok { color: var(--muted); }
+.part-jumps { gap: 8px; }

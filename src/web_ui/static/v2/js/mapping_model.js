@@ -105,6 +105,23 @@ export function newRow(motorAxis = null, name = '') {
  * 모터 고유 이름(motor_ref) · 서버 형식 그대로 · 번호가 바뀌어도 같은 드라이브를 가리킨다
  * AC · ac_servo:master:<m>:alias:<n>(alias>0) 또는 :slave:<pos> · DXL · dynamixel:port:<포트>:id:<id>
  */
+/** 모터 고르기 목록에 붙일 「어느 드라이브인지」 · AC 는 슬레이브 번호와 alias · 다이나믹셀은 포트와 ID */
+export function motorWhere(motor) {
+  if (!motor) return '';
+  if (String(motor.motor_type || '').toLowerCase() === 'dynamixel') {
+    const id = Number(motor.bus_id ?? motor.node_id);
+    const port = String(motor.serial_port ?? '').trim();
+    return ['DXL', port, Number.isInteger(id) ? `ID ${id}` : ''].filter(Boolean).join(' · ');
+  }
+  const slave = Number(motor.slave_position);
+  const alias = Number(motor.alias ?? motor.ethercat_alias);
+  const master = Number(motor.ethercat_master_index ?? 0);
+  return ['AC',
+    Number.isInteger(master) && master > 0 ? `마스터 ${master}` : '',
+    Number.isInteger(slave) && slave >= 0 ? `슬레이브 ${slave}` : '',
+    Number.isFinite(alias) && alias > 0 ? `alias ${alias}` : ''].filter(Boolean).join(' · ');
+}
+
 export function motorRefFor(motor) {
   if (!motor) return '';
   const type = String(motor.motor_type || '').toLowerCase();

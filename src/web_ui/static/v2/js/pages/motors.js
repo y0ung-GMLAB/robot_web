@@ -48,7 +48,7 @@ function watchJob(state, changed) {
   if (ui.job?.state === 'running' && !jobTimer) {
     jobTimer = setInterval(async () => {
       try { ui.job = await api('GET', '/api/motor-config/absolute-setup', { timeoutMs: 3000 }); } catch { /* 다음에 */ }
-      if (ui.job?.state !== 'running' || !location.hash.startsWith('#/maintain-motors')) { clearInterval(jobTimer); jobTimer = null; }
+      if (ui.job?.state !== 'running' || !/^#\/(maintain-motors|mapping)/.test(location.hash)) { clearInterval(jobTimer); jobTimer = null; }
       changed();
     }, 1000);
   }
@@ -121,8 +121,8 @@ async function absoluteSetup(scope, row, state, changed) {
 
 const SCAN_KINDS = {
   all: { label: '전체', path: '/api/motors/scan' },
-  ac: { label: 'AC 서보만', path: '/api/motors/scan/ac-servo' },
-  dxl: { label: '다이나믹셀만', path: '/api/motors/scan/dynamixel' },
+  ac: { label: 'AC 서보', path: '/api/motors/scan/ac-servo' },
+  dxl: { label: '다이나믹셀', path: '/api/motors/scan/dynamixel' },
 };
 
 async function scan(kind, state, changed) {
@@ -192,41 +192,30 @@ function scanBox(changed) {
     h('button', { class: 'btn btn-mini', type: 'button', onclick: () => { ui.scan = null; changed(); } }, '닫기'));
 }
 
-async function save(state, changed, { apply = false } = {}) {
-  const problems = motorProblems(ui.draft?.motors);
-  if (problems.length) { toast(problems[0], 'bad'); return; }
-  if (apply && !(await act.confirmApplyMotorConfig(dirty() ? '모터 설정을 저장한 뒤 바로 장비에 적용합니다.' : '저장된 모터 설정을 장비에 적용합니다.'))) return;
+/** 모터 설정 파일만 저장 · 검사·확인창·장비 적용은 motor_setup.js 가 한 번에 · 실패는 throw */
+export async function saveMotors(state, changed) {
   ui.busy = '저장 중';
   changed();
   try {
     const result = await api('PUT', '/api/motor-config', { body: { registry: ui.draft, base_revision: ui.revision }, timeoutMs: 20000 });
-    // 바꾼 것이 없어도 저장은 된다 · 결과는 늘 보이게(§6-203)
-    await confirmBox({ title: '저장했습니다', body: `${result?.message || '모터 설정 파일을 저장했습니다'}\n\n드라이브에 반영하려면 「저장 후 장비에 적용」을 누르세요.`, confirmLabel: '확인' });
     await loadMotors(state, changed, { force: true });
-    if (apply) await act.applyMotorConfig();
-  } catch (error) {
-    toast(error.message || String(error), 'bad');
+    return String(result?.message || '모터 설정을 저장했습니다');
   } finally {
     ui.busy = '';
     changed();
   }
 }
 
-/* ---------- 그리기 ---------- */
-
-function stepsStrip(state, rows) {
-  const scope = state.snap?.project_scope || {};
-  const applied = scope.runtime_matches_selected === true && scope.motor_config_applied === true;
-  const detected = rows.filter((r) => r.detected).length;
-  const steps = [
-    [rows.length > 0 && detected === rows.length, `모터 검색 · ${detected}/${rows.length}대`],
-    [rows.length > 0 && rows.every((r) => r.name), '이름·설정'],
-    [null, '조인트 매핑'],
-    [applied && !dirty(), applied ? (dirty() ? '장비에 적용 · 먼저 저장 필요' : '장비에 적용됨') : '장비에 적용 필요'],
-  ];
-  return h('ol', { class: 'steps', 'aria-label': '순서' }, steps.map(([done, label], i) => h('li', { class: `step ${done === true ? 'step-done' : done === false ? 'step-now' : ''}` },
-    i === 2 ? h('a', { href: '#/mapping', text: `${i + 1} · ${label}` }) : `${done ? '✓ ' : ''}${i + 1} · ${label}`)));
+export function motorsDraft() {
+  if (!ui.draft) return { ready: false, changes: [], problems: [], busy: ui.busy };
+  return { ready: true, changes: motorChanges(ui.saved, ui.draft.motors), problems: motorProblems(ui.draft.motors), busy: ui.busy };
 }
+
+export function revertMotors() {
+  if (ui.draft) ui.draft = { ...ui.draft, motors: clone(ui.saved) };
+}
+
+/* ---------- 그리기 ---------- */
 
 function detailCard(state, changed, row) {
   const motor = ui.draft?.motors?.find((m) => Number(m.axis) === row.axis);
@@ -265,28 +254,24 @@ function detailCard(state, changed, row) {
       h('pre', { class: 'doc-code small' }, h('code', { text: JSON.stringify({ identity: motor.identity, profile: motor.profile, config: motor.config }, null, 2) }))));
 }
 
-export function renderMotors(state, { changed }) {
-  if (!ui.draft) {
-    return [h('div', { class: 'page-head' }, h('h1', { text: '모터·드라이브' })),
-      h('p', { class: ui.error ? 'tone-text-bad' : 'muted', text: ui.error || '불러오는 중…' })];
-  }
+/** ① 구획 머리 오른쪽 · 다시 검색 */
+export function motorsActions(state, changed) {
+  return h('div', { class: 'segmented', role: 'group', 'aria-label': '모터 검색' },
+    Object.entries(SCAN_KINDS).map(([kind, spec]) => h('button', { class: 'seg', type: 'button', disabled: Boolean(ui.busy),
+      title: `${spec.label} 다시 검색 · 결과는 저장하기 전까지 화면에만 표시됩니다`, onclick: () => scan(kind, state, changed) }, `${spec.label} 검색…`)));
+}
+
+/** ① 모터·드라이브 구획 본문 · 머리와 저장 칸은 motor_setup.js */
+export function motorsBody(state, changed) {
+  if (!ui.draft) return h('p', { class: ui.error ? 'tone-text-bad' : 'muted', text: ui.error || '불러오는 중…' });
   const rows = motorRows(ui.draft, state.snap);
   const abs = absoluteSummary(rows);
   const faults = rows.filter((r) => r.fault);
-  const changes = motorChanges(ui.saved, ui.draft.motors);
-  const problems = motorProblems(ui.draft.motors);
   const selected = rows.find((r) => r.axis === ui.selected) || rows[0];
   const jobText = absoluteJobText(ui.job);
   const runtime = state.snap?.service_management?.runtime || {};
   return [
-    h('div', { class: 'page-head' },
-      h('h1', { text: '모터·드라이브' }),
-      h('span', { class: 'spacer' }),
-      h('div', { class: 'segmented', role: 'group', 'aria-label': '모터 검색' },
-        Object.entries(SCAN_KINDS).map(([kind, spec]) => h('button', { class: 'seg', type: 'button', disabled: Boolean(ui.busy),
-          title: `${spec.label} 다시 검색 · 결과는 저장하기 전까지 화면에만 표시됩니다`, onclick: () => scan(kind, state, changed) }, `${spec.label} 검색…`)))),
     scanBox(changed),
-    stepsStrip(state, rows),
     ui.message ? h('p', { class: 'muted', text: ui.message }) : null,
     runtime.motor_manager_start_block_reason || (runtime.phase && runtime.phase !== 'ready')
       ? h('div', { class: 'blocker' }, dot('warn'), h('span', { class: 'grow', text: `모터 프로그램 · ${runtime.motor_manager_start_block_reason || runtime.message || runtime.phase}` })) : null,
@@ -315,12 +300,5 @@ export function renderMotors(state, { changed }) {
           h('td', {}, h('button', { class: 'btn btn-mini', type: 'button', 'aria-label': `${row.axis}번 자세히`, onclick: () => { ui.selected = row.axis; changed(); } }, '⋯')))))))
         : h('p', { class: 'muted', text: '설정된 모터가 없습니다. 위의 「전체 검색…」으로 모터를 찾으세요.' })),
     selected ? detailCard(state, changed, selected) : null,
-    h('div', { class: 'apply-bar' },
-      h('div', { class: 'grow' },
-        h('span', { text: changes.length ? `저장하지 않은 변경 ${changes.length}개 · ${changes.slice(0, 3).join(' · ')}${changes.length > 3 ? ' …' : ''}` : '저장됨' }),
-        problems.length ? h('p', { class: 'tone-text-warn small', text: problems[0] }) : null),
-      h('button', { class: 'btn', type: 'button', disabled: Boolean(ui.busy) || !changes.length, onclick: () => { ui.draft = { ...ui.draft, motors: clone(ui.saved) }; changed(); } }, '되돌리기'),
-      h('button', { class: 'btn btn-primary', type: 'button', disabled: Boolean(ui.busy), onclick: () => save(state, changed) }, ui.busy === '저장 중' ? '저장 중…' : '저장'),
-      h('button', { class: 'btn btn-warn', type: 'button', disabled: Boolean(ui.busy), onclick: () => save(state, changed, { apply: true }) }, '저장 후 장비에 적용…')),
   ];
 }

@@ -9,13 +9,17 @@ import * as act from './actions.js';
 export const NAV = [
   { label: '운영', items: [['home', '홈'], ['play', '재생'], ['schedule', '스케줄'], ['store', '매장 PC']] },
   { label: '작업', items: [['animations', '애니메이션'], ['manual', '수동 조작']] },
-  { label: '설정', items: [['maintain-motors', '모터·드라이브'], ['mapping', '조인트 매핑'], ['pack', '로봇 팩·3D'],
+  { label: '설정', items: [['maintain-motors', '모터 설정'], ['pack', '로봇 팩·3D'],
     ['alarms', '알람 정책'], ['network', '네트워크·시간'], ['backup', '업데이트·백업']] },
   { label: '기록·도구', items: [['records', '기록'], ['tools', '터미널 · PC 성능'], ['docs', '사용법']] },
 ];
 
+/** 메뉴에 따로 없는 화면 → 메뉴에서 켜질 칸 · 조인트 매핑은 「모터 설정」 의 두 번째 탭 */
+export const NAV_ALIASES = { mapping: 'maintain-motors' };
+
 export function routeLabel(route) {
-  for (const group of NAV) for (const [id, label] of group.items) if (id === route) return label;
+  const id = NAV_ALIASES[route] || route;
+  for (const group of NAV) for (const [item, label] of group.items) if (item === id) return label;
   return '';
 }
 
@@ -76,7 +80,7 @@ export function createShell(root, { navigate }) {
       }),
     ]),
     // 기존 화면은 / 에 그대로 · 같은 서버 · 같은 설정 · 익숙한 화면으로 돌아갈 때
-    h('a', { href: '/', class: 'nav-link nav-old', title: '기존 화면 · 같은 서버를 쓰므로 어느 화면에서 바꿔도 똑같이 반영됩니다' }, '기존 화면 ↗'));
+    h('a', { href: '/', class: 'nav-link nav-old', title: '이전 UI · 같은 서버를 쓰므로 어느 쪽에서 바꿔도 똑같이 반영됩니다' }, '이전 UI ↗'));
   const main = h('main', { class: 'main', id: 'main', tabindex: '-1' });
   root.replaceChildren(topbar, drawer, h('div', { class: 'body' }, nav, main));
 
@@ -123,8 +127,9 @@ export function createShell(root, { navigate }) {
   }
 
   function setRoute(route) {
+    const navId = NAV_ALIASES[route] || route;
     for (const [id, link] of navLinks) {
-      if (id === route) link.setAttribute('aria-current', 'page');
+      if (id === navId) link.setAttribute('aria-current', 'page');
       else link.removeAttribute('aria-current');
     }
   }

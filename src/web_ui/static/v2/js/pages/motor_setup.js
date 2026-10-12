@@ -1,0 +1,149 @@
+/** UI v2 · 모터 설정 · ① 모터·드라이브 와 ② 조인트 매핑 을 한 페이지의 두 구획으로 (사용자 결정 2026-10-12)
+ *
+ * 따로 있던 두 화면이 각자 단계 표시와 「저장 후 장비에 적용」 을 갖고 있어 같은 일을 하는 것처럼 보였다 ·
+ * 탭으로 나누는 것보다 한 페이지에 구획을 나눠 두는 쪽이 찾기 쉽다(사용자) · 머리 · 저장 칸은 여기 하나만.
+ * 저장은 바뀐 쪽만 · 장비 적용은 둘 다 저장한 뒤 한 번 · #/mapping 주소는 ② 구획으로 스크롤.
+ */
+import { h } from '../dom.js';
+import { confirmBox, toast } from '../dialog.js';
+import * as act from '../actions.js';
+import { loadMotors, motorsActions, motorsBody, motorsDraft, revertMotors, saveMotors } from './motors.js';
+import { loadMapping, mappingActions, mappingBody, mappingDraft, mappingNote, revertMapping, saveMapping } from './mapping.js';
+
+const SETUP_PARTS = [
+  ['part-motors', '① 모터·드라이브', '실제 모터 · 검색 · 이름 · 속도 · 브레이크 · 서보 · 앱솔루트'],
+  ['part-mapping', '② 조인트 매핑', '애니메이션 조인트 값을 어느 모터에 어떻게 보낼지 · 감속비 · 방향 · 기준점 · 범위'],
+];
+
+const ui = { busy: false, scrolledFor: '' };
+
+export async function loadSetup(state, changed) {
+  await Promise.all([loadMotors(state, changed), loadMapping(state, changed)]);
+}
+
+/** 구획마다 끝났는지 · 장비 적용 상태 · 화면 없이 시험된다 */
+export function setupStatus(snap, { dirty = false } = {}) {
+  const motors = Array.isArray(snap?.motion_state?.motors) ? snap.motion_state.motors : [];
+  const detected = motors.filter((m) => m.state === 'detected').length;
+  const scope = snap?.project_scope || {};
+  const applied = scope.runtime_matches_selected === true && scope.motor_config_applied === true;
+  return {
+    motors: { done: motors.length > 0 && detected === motors.length, note: `${detected}/${motors.length}대 연결` },
+    mapping: { done: !snap?.mapping_range_blocker, note: snap?.mapping_range_blocker ? '범위 미확인' : '' },
+    apply: applied ? (dirty ? ['장비에 적용됨 · 바꾼 것은 저장 필요', 'warn'] : ['장비에 적용됨', 'ok']) : ['장비에 적용 필요', 'warn'],
+  };
+}
+
+/** 저장 칸 글 · 두 구획 변경을 한 줄로 */
+export function pendingText(motorChanges, mappingChanges) {
+  const parts = [];
+  if (motorChanges.length) parts.push(`모터 ${motorChanges.length}개`);
+  if (mappingChanges.length) parts.push(`조인트 매핑 ${mappingChanges.length}개`);
+  if (!parts.length) return '저장됨';
+  const first = [...motorChanges, ...mappingChanges].slice(0, 3);
+  const more = motorChanges.length + mappingChanges.length > 3 ? ' …' : '';
+  return `저장하지 않은 변경 · ${parts.join(' · ')} · ${first.join(' · ')}${more}`;
+}
+
+function jumpTo(id) {
+  const node = document.getElementById(id);
+  if (!node) return;
+  // 위 막대(sticky)에 제목이 가리지 않게 · 좁은 화면은 막대가 두세 줄이라 높이를 그때 잰다
+  const bar = document.querySelector('.topbar');
+  node.style.scrollMarginTop = `${(bar ? bar.getBoundingClientRect().height : 0) + 12}px`;
+  node.scrollIntoView({ behavior: 'smooth', block: 'start' });
+}
+
+/** 바뀐 쪽만 저장 · 저장한 것 메시지 목록 · 하나라도 실패하면 null */
+async function saveChanged(state, changed) {
+  const motors = motorsDraft();
+  const mapping = mappingDraft();
+  const messages = [];
+  if (motors.changes.length) {
+    try {
+      messages.push(await saveMotors(state, changed));
+    } catch (error) {
+      toast(`모터 설정 저장 실패 · ${error.message || error}`, 'bad');
+      return null;
+    }
+  }
+  if (mapping.changes.length) {
+    const message = await saveMapping(state, changed);
+    if (message === null) return null;
+    messages.push(message);
+  }
+  return messages;
+}
+
+async function save(state, changed, { apply = false } = {}) {
+  if (ui.busy) return;
+  const problems = [...motorsDraft().problems, ...mappingDraft().problems];
+  if (problems.length) { toast(problems[0], 'bad'); return; }
+  const dirty = motorsDraft().changes.length + mappingDraft().changes.length > 0;
+  if (!apply && !dirty) { toast('저장할 변경이 없습니다', 'warn'); return; }
+  if (apply && !(await act.confirmApplyMotorConfig(dirty
+    ? '바꾼 모터 설정과 조인트 매핑을 저장한 뒤 바로 장비에 적용합니다. 운전 한계(소프트 리밋)도 조인트 매핑 범위로 바뀝니다.'
+    : '저장된 모터 설정과 조인트 매핑을 장비에 적용합니다.'))) return;
+  ui.busy = true;
+  changed();
+  try {
+    const messages = await saveChanged(state, changed);
+    if (messages === null) return;
+    if (apply) {
+      await act.applyMotorConfig();
+    } else {
+      await confirmBox({ title: '저장했습니다', body: `${messages.join('\n')}\n\n드라이브에 반영하려면 「저장 후 장비에 적용」을 누르세요.`, confirmLabel: '확인' });
+    }
+  } finally {
+    ui.busy = false;
+    changed();
+  }
+}
+
+function partHead([id, label, hint], status, actions, note) {
+  return [
+    h('div', { class: 'part-head' },
+      h('h2', {}, `${status.done ? '✓ ' : ''}${label}`, status.note ? h('small', { class: `part-note${status.done ? ' ok' : ''}`, text: ` · ${status.note}` }) : null),
+      h('span', { class: 'spacer' }),
+      actions),
+    note || h('p', { class: 'muted small', text: hint }),
+  ];
+}
+
+export function renderSetup(state, { changed }) {
+  const motors = motorsDraft();
+  const mapping = mappingDraft();
+  const dirty = motors.changes.length + mapping.changes.length > 0;
+  const status = setupStatus(state.snap, { dirty });
+  const busy = ui.busy || Boolean(motors.busy) || Boolean(mapping.busy);
+  const problems = [...motors.problems, ...mapping.problems];
+  // #/mapping 으로 들어오면 ② 구획으로 한 번만 내려간다
+  const route = location.hash.replace(/^#\/?/, '');
+  if (route === 'mapping' && ui.scrolledFor !== 'mapping' && mapping.ready) {
+    ui.scrolledFor = 'mapping';
+    requestAnimationFrame(() => jumpTo('part-mapping'));
+  } else if (route !== 'mapping') {
+    ui.scrolledFor = '';
+  }
+  return [
+    h('div', { class: 'page-head' },
+      h('h1', { text: '모터 설정' }),
+      h('nav', { class: 'row part-jumps', 'aria-label': '구획으로 이동' },
+        SETUP_PARTS.map(([id, label]) => h('a', { class: 'btn btn-mini', href: `#/${id === 'part-mapping' ? 'mapping' : 'maintain-motors'}`,
+          onclick: (event) => { event.preventDefault(); jumpTo(id); } }, label))),
+      h('span', { class: `chip chip-${status.apply[1]}`, text: status.apply[0] })),
+    h('section', { class: 'setup-part', id: 'part-motors', 'aria-label': '모터·드라이브' },
+      partHead(SETUP_PARTS[0], status.motors, motorsActions(state, changed)),
+      motorsBody(state, changed)),
+    h('section', { class: 'setup-part', id: 'part-mapping', 'aria-label': '조인트 매핑' },
+      partHead(SETUP_PARTS[1], status.mapping, mappingActions(state, changed), mapping.ready ? mappingNote() : null),
+      mappingBody(state, changed)),
+    h('div', { class: 'apply-bar' },
+      h('div', { class: 'grow' },
+        h('span', { text: pendingText(motors.changes, mapping.changes) }),
+        problems.length ? h('p', { class: 'tone-text-warn small', text: problems[0] }) : null),
+      h('button', { class: 'btn', type: 'button', disabled: busy || !dirty, onclick: () => { revertMotors(); revertMapping(); changed(); } }, '되돌리기'),
+      h('button', { class: 'btn btn-primary', type: 'button', disabled: busy || !dirty || Boolean(problems.length), onclick: () => save(state, changed) }, busy ? '저장 중…' : '저장'),
+      h('button', { class: 'btn btn-warn', type: 'button', disabled: busy || Boolean(problems.length), onclick: () => save(state, changed, { apply: true }) }, '저장 후 장비에 적용…')),
+  ];
+}
