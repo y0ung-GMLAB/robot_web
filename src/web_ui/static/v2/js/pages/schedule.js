@@ -183,7 +183,7 @@ export function renderSchedule(state, { changed }) {
       h('h1', { text: '스케줄' }),
       h('span', { class: 'spacer' }),
       canEdit ? h('button', { class: 'btn btn-primary', type: 'button', disabled: ui.busy, onclick: () => { ui.draft = draftFrom(null); changed(); } }, '+ 새 스케줄') : null,
-      h('p', { class: 'muted small', text: `스케줄 모드에서 이 시간에 ${sched.coordination_joined ? '매장 전체를' : '로봇을'} 켜고 끕니다.${mode && mode !== 'schedule' ? ` 지금은 ${RUN_MODE_LABEL[mode] || '-'} 모드라 스케줄이 실행되지 않습니다.` : ''}` })),
+      h('p', { class: 'muted small', text: `스케줄 모드에서 이 시간에 ${sched.coordination_joined ? '그룹 전체를' : '로봇을'} 켜고 끕니다.${mode && mode !== 'schedule' ? ` 지금은 ${RUN_MODE_LABEL[mode] || '-'} 모드라 스케줄이 실행되지 않습니다.` : ''}` })),
     !canEdit ? h('div', { class: 'blocker' }, dot('info'),
       h('span', { class: 'grow', text: `슬레이브 PC라서 마스터${master ? `(${master.name})` : ''} 스케줄을 따릅니다. 여기서는 볼 수만 있습니다.` }),
       master?.url ? h('a', { class: 'btn', href: master.url, target: '_blank', rel: 'noopener' }, '마스터 화면 열기') : null) : null,

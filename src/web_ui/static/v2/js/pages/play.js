@@ -131,12 +131,12 @@ function scopeHeader(state, changed) {
   const groupBusy = group.active;
   return h('div', { class: 'page-head' },
     h('h1', { text: '재생' }),
-    segmented('범위', [['local', '단독'], ['group', `매장 전체${count ? ` · ${count}대` : ''}`, groupBusy ? '' : blocker]], ui.scope, (value) => {
+    segmented('범위', [['local', '단독'], ['group', `그룹 전체${count ? ` · ${count}대` : ''}`, groupBusy ? '' : blocker]], ui.scope, (value) => {
       ui.scope = value;
       changed();
     }),
     h('p', { class: 'muted small', text: ui.scope === 'group'
-      ? (groupBusy ? '매장 전체 재생 중입니다. 정지 버튼을 누르면 매장 전체가 멈춥니다.' : '각 PC는 자기 재생 목록을 재생하고, 시작만 함께 합니다.')
+      ? (groupBusy ? '그룹 전체 재생 중입니다. 정지 버튼을 누르면 이번 재생에 참가한 PC가 모두 정지합니다.' : '각 PC는 자기 재생 목록을 재생하고, 시작만 함께 합니다.')
       : (blocker && group.joined ? blocker : '다른 PC와 상관없이 단독으로 재생합니다. 다른 PC는 영향을 받지 않습니다.') }));
 }
 
@@ -153,7 +153,7 @@ function nowCard(state, changed, navigate) {
   const playlist = registeredPlaylist(play.mapping);
   const blocker = startBlocker(state.snap, state.sched, { scope: ui.scope, playlist, mappingId: play.mappingId });
   const disabled = Boolean(blocker) || ui.busy;
-  const scopeText = group ? '매장 전체' : '단독';
+  const scopeText = group ? '그룹 전체' : '단독';
 
   const start = (runMode) => busy(() => (group
     ? act.startGroup({ ...runSettings(runMode), sync_mode: ui.syncMode || 'lockstep', initial_move_time_sec: groupMoveTime(state) })
@@ -236,7 +236,7 @@ function repeatCard(state, changed) {
     h('div', { class: 'field' },
       h('span', { class: 'field-label', text: '초기 위치 이동 시간' }),
       segmented('초기 위치 이동 시간', moveTime.options, moveTime.selected, (value) => { ui.initialMove = moveTime.pick(value); changed(); }),
-      group ? h('span', { class: 'muted small', text: '매장 전체의 모든 PC가 이 시간으로 초기 위치에 갑니다' }) : null),
+      group ? h('span', { class: 'muted small', text: '그룹 재생에 참가한 모든 PC가 이 시간으로 초기 위치에 갑니다' }) : null),
     h('div', { class: 'field' },
       h('label', { class: 'inline' }, h('span', { class: 'field-label', text: '정지할 회차' }),
         h('input', { class: 'input num-input', type: 'number', min: '0', step: '1', value: String(ui.targetCycles),

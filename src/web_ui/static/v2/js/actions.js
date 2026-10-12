@@ -96,22 +96,22 @@ export function initializeLocal(payload) {
 /** 매장 전체 · 마스터가 그룹에 시작을 건다 · 각 PC 는 자기 재생 목록 */
 export function startGroup(settings) {
   return attempt(() => control({ command: 'start_group', ...settings }),
-    (r) => r?.message || '매장 전체 재생을 시작합니다. PC마다 초기 위치로 이동한 뒤 함께 시작합니다.');
+    (r) => r?.message || '그룹 전체 재생을 시작합니다. PC마다 초기 위치로 이동한 뒤 함께 시작합니다.');
 }
 
 export function initializeGroup(settings = {}) {
-  return attempt(() => control({ command: 'initialize_group', ...settings }), (r) => r?.message || '매장 전체를 초기 위치로 이동합니다');
+  return attempt(() => control({ command: 'initialize_group', ...settings }), (r) => r?.message || '그룹 전체를 초기 위치로 이동합니다');
 }
 
 /** 지금 멈춤 · 재생만 멈춘다 · 서보는 켠 채 그 자리 */
 export function stopNow(group) {
   return attempt(() => (group ? control({ command: 'stop_now' }) : api('POST', '/api/motion-run/stop')),
-    group ? '매장 전체를 정지했습니다. 서보 토크 유지.' : '정지했습니다. 서보 토크 유지.');
+    group ? '그룹 전체를 정지했습니다. 서보 토크 유지.' : '정지했습니다. 서보 토크 유지.');
 }
 
 export function stopGroupAfterCycle(command) {
   return attempt(() => control({ command }),
-    command === 'stop_now' ? '아직 시작 전이어서 바로 정지했습니다' : '이번 회차가 끝나면 매장 전체가 정지합니다');
+    command === 'stop_now' ? '아직 시작 전이어서 바로 정지했습니다' : '이번 회차가 끝나면 그룹 전체가 정지합니다');
 }
 
 /** 반복 설정 · 서버에 남는다(스케줄이 다음에 돌릴 때도 이것으로) · 보낸 칸만 바뀐다 */

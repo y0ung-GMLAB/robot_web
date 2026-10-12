@@ -77,7 +77,7 @@ export function defaultScope(snap) {
 export function groupScopeBlocker(snap) {
   const group = groupRuntime(snap);
   if (!group.joined) return '그룹에 참여하지 않은 상태입니다';
-  if (!group.master) return '매장 전체 재생은 마스터 PC에서만 시작할 수 있습니다. 각 PC는 자기 재생 목록을 재생합니다.';
+  if (!group.master) return '그룹 재생은 마스터 PC에서만 시작할 수 있습니다. 각 PC는 자기 재생 목록을 재생합니다.';
   return '';
 }
 

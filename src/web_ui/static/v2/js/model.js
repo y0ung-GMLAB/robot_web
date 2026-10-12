@@ -150,7 +150,7 @@ export function runSummary(snap) {
   const group = Boolean(run.group_execution);
   const participants = snap?.coordination?.runtime?.execution?.participants;
   const count = Array.isArray(participants) ? participants.length : 0;
-  const scope = group ? (count ? `매장 전체 ${count}대` : '매장 전체') : '단독';
+  const scope = group ? (count ? `그룹 전체 ${count}대` : '그룹 전체') : '단독';
   const cycle = Number(run.current_cycle) || 0;
   const progress = run.progress || {};
   const elapsed = Number(progress.elapsed_sec) || 0;

@@ -57,7 +57,7 @@ test('지금 카드 · 재생 중이면 파일 · 회차 · 진행 · 매장 전
     run_mode: 'continuous', group_execution: true, progress: { elapsed_sec: 256, duration_sec: 556 } },
   coordination: { runtime: { execution: { participants: ['a', 'b', 'c', 'd'] } } } });
   assert.equal(run.title, 'narration 재생 중');
-  assert.equal(run.subtitle, '매장 전체 4대 · 3회차 · 연속');
+  assert.equal(run.subtitle, '그룹 전체 4대 · 3회차 · 연속');
   assert.equal(run.timeText, '04:16 / 09:16');
   assert.ok(run.moving && Math.abs(run.ratio - 256 / 556) < 1e-9);
   assert.equal(runSummary({ motion_run_status: { state: 'idle' } }).title, '대기 상태');
