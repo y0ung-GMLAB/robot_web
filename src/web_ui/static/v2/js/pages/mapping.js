@@ -14,6 +14,7 @@ import {
   rangeConfirmed, rowToDraft, rowTarget, unconfirmedRows,
 } from '../mapping_model.js';
 import { signedDeg } from '../play_model.js';
+import { motorsDraft } from './motors.js';
 
 const ui = { fileId: '', revision: '', name: '', saved: [], rows: null, selected: '', validation: null, busy: '', loadError: '' };
 let keySeq = 0;
@@ -185,7 +186,9 @@ function table(state, changed) {
         numberInput(row, 'reference_position_deg', changed, { label: '기준점 모터 deg' }),
         h('button', { class: 'btn btn-mini', type: 'button', disabled: !canCapture || !motor || motor.positionDeg === null,
           // 막힌 이유를 그대로 · 전에는 늘 「장비에 적용」 이라고만 해서 모터를 못 찾은 경우와 갈리지 않았다 (2026-10-12)
-          title: !canCapture ? '모터 설정이 아직 장비에 적용되지 않았습니다. 「저장 후 장비에 적용」을 먼저 하세요.'
+          title: !canCapture ? (motorsDraft().problems[0]
+            ? `모터 설정을 저장할 수 없어 장비에 적용되지 않았습니다 · ${motorsDraft().problems[0]}`
+            : '모터 설정이 아직 장비에 적용되지 않았습니다. 「저장 후 장비에 적용」을 먼저 하세요.')
             : !motor ? '이 줄에 연결된 모터를 찾지 못했습니다. 「모터」 칸을 확인하세요.'
               : motor.positionDeg === null ? '이 모터의 현재 위치를 아직 받지 못했습니다.'
                 : '현재 모터 위치를 기준점(조인트 0°)으로 설정합니다. 저장해야 반영됩니다.',

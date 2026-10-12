@@ -50,3 +50,11 @@ test('앱솔루트 설정 일 한 줄', () => {
   assert.equal(absoluteJobText({ state: 'idle' }), '');
   assert.equal(absoluteJobText({ state: 'running', step_index: 3, step_count: 7, step_label: '전원 껐다 켜기 1' }), '앱솔루트 설정 중 · 3/7 · 전원 껐다 켜기 1');
 });
+
+test('EtherCAT 주소 겹침 · 서버 저장 검사와 같은 규칙 · 저장 전에 보이게 (2026-10-12)', () => {
+  const ac = (axis, alias, slave) => ({ axis, name: `M${axis}`, motor_type: 'ac_servo', identity: { ethercat_master_index: 0, ethercat_alias: alias, slave_position: slave }, config: {} });
+  assert.deepEqual(motorProblems([ac(0, 0, 0), ac(1, 0, 1), ac(2, 0, 2)]), [], 'Alias 0 이어도 Slave 번호가 다르면 된다');
+  assert.match(motorProblems([ac(0, 101, 0), ac(1, 101, 1)])[0], /^1번 · EtherCAT Alias 101가 0번과 같습니다/);
+  assert.match(motorProblems([ac(0, 0, 0), ac(1, 0, 0)])[0], /Alias 0 · Slave 0이 0번과 같습니다 · |「전체 검색」/);
+  assert.deepEqual(motorProblems([ac(0, 101, 0), ac(1, 0, 0)]), [], 'Alias 를 쓰는 드라이브와 Slave 번호로 찾는 드라이브는 겹치지 않는다');
+});

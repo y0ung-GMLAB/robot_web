@@ -79,8 +79,35 @@ export function absoluteSummary(rows) {
 }
 
 /** 저장 전 검사 · 서버도 같은 것을 거절한다(수정 목록 37 · §6-217) */
-export function motorProblems(motors) {
+/** EtherCAT 주소 겹침 · 서버 저장 검사(motor_profile_validation)와 같은 규칙 · 저장을 누르기 전에 보이게 (2026-10-12)
+ *  Alias 1 이상은 같은 Master 안에서 겹치면 안 된다 · Alias 0 은 Slave 번호로 찾으니 Slave 번호가 겹치면 안 된다 */
+function addressProblems(motors) {
   const problems = [];
+  const seen = new Map();
+  for (const motor of motors || []) {
+    if (motor.deleted || !isAc(motor)) continue;
+    const identity = motor.identity || {};
+    const config = motor.config || {};
+    // 주소 정보가 하나도 없으면 여기서 판정하지 않는다(서버가 「식별 정보 불완전」 으로 따로 말한다)
+    if (![identity.ethercat_alias, identity.slave_position, config.alias, config.position].some((v) => v !== undefined && v !== null && v !== '')) continue;
+    const master = Number(identity.ethercat_master_index ?? config.ethercat_master_index ?? 0) || 0;
+    const alias = Number(identity.ethercat_alias ?? config.alias ?? 0) || 0;
+    const position = Number(identity.slave_position ?? config.position ?? 0) || 0;
+    const key = alias ? `m${master}:a${alias}` : `m${master}:p${position}`;
+    const other = seen.get(key);
+    if (other !== undefined) {
+      problems.push(alias
+        ? `${motor.axis}번 · EtherCAT Alias ${alias}가 ${other}번과 같습니다. 「설정 ▾」 → 「Alias 쓰기」로 다른 값이나 0으로 바꾸세요`
+        : `${motor.axis}번 · Alias 0 · Slave ${position}이 ${other}번과 같습니다. 「전체 검색」으로 실제 Slave 번호를 다시 받으세요`);
+    } else {
+      seen.set(key, motor.axis);
+    }
+  }
+  return problems;
+}
+
+export function motorProblems(motors) {
+  const problems = addressProblems(motors);
   const names = new Map();
   for (const motor of motors || []) {
     if (motor.deleted) continue;
