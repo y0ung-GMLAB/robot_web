@@ -38,13 +38,11 @@ import {
   runtimeMotorConfirmsRegistryMotor,
   scanKey,
   scanRowMatchesRuntimeMotor,
-  scanRowToMotor as acServoScanRowToMotor,
   siiReportedAcServoModel,
   verifiedAcServoModel,
 } from './motor_type_ac_servo.js';
 import {
   dynamixelScanDeviceKey,
-  dynamixelScanDeviceToMotor as buildDynamixelScanDeviceToMotor,
   firstDefined,
   modelTextFromDevice,
   runtimeIsDynamixel,
@@ -538,49 +536,6 @@ export function createMotorConfigController({
       ...patch,
     };
     rowEditDrafts.set(rowId, next);
-  }
-
-  function nextAxisAboveMax(motors = axisMotors()) {
-    const axes = motors
-      .filter((motor) => !motor.deleted)
-      .map(motorAxisValue)
-      .filter((axis) => axis !== null);
-    if (axes.length === 0) return 0;
-    return Math.max(...axes) + 1;
-  }
-
-  function createAxisAllocator(motors = axisMotors()) {
-    let nextAxis = nextAxisAboveMax(motors);
-    return () => {
-      const axis = nextAxis;
-      nextAxis += 1;
-      return axis;
-    };
-  }
-
-  function nextAvailableAxis() {
-    return nextAxisAboveMax();
-  }
-
-  function firstDynamixelDriverId() {
-    const motor = axisMotors().find((item) => {
-      const driverId = item.config?.driver_id;
-      return driverId !== null && driverId !== undefined && driverId !== '';
-    });
-    return motor ? Number(motor.config.driver_id) : 1;
-  }
-
-  // 이름을 겹치지 않게 한다 · §6-217
-  //
-  // 전에는 이 감싸개가 바깥 함수와 **같은 이름**이었고 세 번째 인자만 달랐다
-  // (여기선 함수, 바깥에선 옵션 객체) · 부르는 쪽이 옵션 객체를 넘기자
-  // `options.nextAvailableAxis is not a function` 으로 검색이 통째로 죽었다.
-  function proposedDynamixelMotor(device, { axis, model } = {}) {
-    return buildDynamixelScanDeviceToMotor(device, null, {
-      nextAvailableAxis: typeof axis === 'function' ? axis : nextAvailableAxis,
-      firstDynamixelDriverId,
-      model,
-    });
   }
 
   function registryMotorMatchesMonitoringMotor(item, motor) {
@@ -2484,48 +2439,27 @@ export function createMotorConfigController({
     const rows = axisRowsData();
     const parts = [`${head} · ${formatInt(rows.length)}개`];
     parts.push('이름을 고친 뒤 맨 아래 「저장」을 누르세요');
-    return parts.join(' · ');
+    // 서버가 알린 것(뺀 모터 · 바뀐 번호 · 확인 필요) · 수정 목록 100
+    return [parts.join(' · '), ...scanNotes].join('\n');
   }
 
-  // **검색하면 목록을 갈아 끼운다** · §6-219
+  // **검색 결과로 만든 목록은 서버가 제안한다** · 수정 목록 100 (2026-10-12)
   //
-  // 기존 목록을 지우고 이번 검색이 찾은 것으로 채운다 · 그것이 목록이고
-  // 그대로 저장된다 · 「선택 모터 추가」로 사람이 옮기던 단계를 없앴다.
-  //
-  // 「AC Servo 검색」을 누르면 서보만 남는다 · 둘 다 쓰려면 「전체 모터
-  // 검색」을 누른다 · 통로별로 반쪽만 바꾸게 했더니 서보를 검색했는데
-  // 표에 4모터가 떠서 무엇을 찾은 것인지 알 수 없었다.
-  //
-  // 사람이 붙인 이름만 남긴다 · 고칠 수 있는 것이 이름 하나뿐이므로
-  // 다시 검색했다고 지워지면 안 된다.
+  // 전에는 여기서 검색 응답을 받아 목록을 새로 만들었다(§6-219) · 새 화면도 같은 일을
+  // 해야 해서 규칙을 서버(`scan_proposal.py`) 한 곳으로 옮겼다 · 화면은 받아서 갈아 끼운다.
+  // 서버 규칙 · 검색한 통로만 바꾼다(AC 만 검색하면 다이나믹셀은 그대로) · 짝지은 모터는
+  // 이름 · 사용 · 드라이브 연결을 지킨다 · 이름표는 서버 규칙 하나 · 번호는 빈칸 없이(바뀌면 알림).
+  // 같은 제안을 두 번 넣지 않는다 · 검색이 시간 초과로 빈 응답이면 옛 제안이 남아 있어서
+  // 그사이 고친 것이 지워지던 것을 막는다.
+  let adoptedProposal = null;
+  let scanNotes = [];
   function adoptScanIntoDraft() {
-    const served = serverAxisRows();
-    if (!served) return;
-
-    const namesById = new Map(
-      axisConfig.motors.map((motor) => [motor.id, motor.name]),
-    );
+    const proposal = latestScan?.proposed_registry;
+    if (!proposal || proposal === adoptedProposal || !Array.isArray(proposal.registry?.motors)) return;
+    adoptedProposal = proposal;
+    scanNotes = Array.isArray(proposal.notes) ? proposal.notes.map(String) : [];
     axisConfig.motors = [];
-
-    const found = [
-      ...(served.axes || []).filter((item) => item.state === 'matched'),
-      ...(served.new_devices || []),
-    ];
-    found.forEach((item) => {
-      const acServo = item.transport === 'ethercat';
-      const scanRow = acServo ? rawAcServoScanRow(item.scanned) : null;
-      const scanDevice = acServo ? null : rawDynamixelDevice(item.scanned);
-      if (acServo ? !scanRow : !scanDevice) return;
-      const axisFor = () => Number(item.proposed_axis ?? item.axis ?? 0);
-      const motor = acServo
-        ? acServoScanRowToMotor(scanRow, axisFor)
-        : proposedDynamixelMotor(scanDevice, { axis: axisFor, model: item.model });
-      const name = namesById.get(motor.id);
-      upsertMotorInRegistry(
-        axisConfig,
-        name ? normalizeMotor({ ...motor, name }) : motor,
-      );
-    });
+    proposal.registry.motors.forEach((motor) => upsertMotorInRegistry(axisConfig, normalizeMotor(motor)));
   }
 
 
