@@ -34,6 +34,15 @@ ERROR = "error"
 # 그래서 초기화 전에 기본 경로가 잡힐 때까지 기다린다.
 NET_WAIT_SEC = 30
 
+# 같은 이유로, 뜬 뒤에 Wi-Fi 가 바뀌거나 끊겼다 다른 주소로 붙으면 참가자는 옛 주소를
+# 광고한 채 남아 상대를 영영 못 찾는다 (로봇 PC 는 IP 가 고정이라 끊겼다 붙어도 그대로였다).
+# 스피커는 모터가 없어 다시 시작해도 위험하지 않다 → 주소가 바뀌면 DDS 를 저절로 다시 시작하고,
+# 네트워크가 없어 시작을 못 했으면 생길 때까지 기다렸다 다시 시도한다 (2026-10-12).
+NET_RECHECK_SEC = 3.0
+NET_RETRY_POLL_SEC = 2.0
+RESTART = "restart"
+NO_NETWORK = "no_network"
+
 
 class DdsListener:
     def __init__(self, logbuf):
@@ -144,6 +153,22 @@ class DdsListener:
             stop_event.wait(1.0)
 
     def _run(self, stop_event):
+        """한 번 띄우고 · 주소가 바뀌면 다시 · 네트워크가 없었으면 생길 때까지 기다렸다 다시."""
+        while not stop_event.is_set():
+            result = self._run_once(stop_event)
+            if result == RESTART:
+                continue
+            if result == NO_NETWORK:
+                while not stop_event.is_set() and not sysinfo.network_ready(force=True):
+                    stop_event.wait(NET_RETRY_POLL_SEC)
+                if not stop_event.is_set():
+                    self._log.add("네트워크가 생겼습니다 — DDS 다시 시작")
+                continue
+            break
+        self._set_status(OFF)
+        self._log.add("DDS 리스너 정지")
+
+    def _run_once(self, stop_event):
         self._set_status(CONNECTING)
         with self._lock:
             self._init_ok = None
@@ -167,11 +192,11 @@ class DdsListener:
             rclpy = _rclpy
             ip, iface = self._wait_network(stop_event)
             if stop_event.is_set():
-                return
+                return None
             if iface == "-" or ip.startswith("127."):
                 self._fail("네트워크가 없어 DDS를 시작하지 못했습니다 "
-                           "(%d초 대기 후 포기, 랜/Wi-Fi 확인 후 재시작 필요)" % NET_WAIT_SEC)
-                return
+                           "(랜/Wi-Fi 가 붙으면 저절로 다시 시작합니다)")
+                return NO_NETWORK
             context = Context()
             rclpy.init(context=context, domain_id=self._domain_id)
             # 발자국 최소화: rosout 로그 발행과 파라미터 서비스를 끈다.
@@ -211,10 +236,19 @@ class DdsListener:
 
             last_check = 0.0
             last_presence = 0.0
+            last_net = time.time()
             was_connected = False
             while not stop_event.is_set():
                 executor.spin_once(timeout_sec=0.2)
                 now = time.time()
+                if now - last_net >= NET_RECHECK_SEC:
+                    last_net = now
+                    ip_now, iface_now = sysinfo.network(force=True)
+                    # 끊긴 동안(주소 없음)은 기다린다 · 같은 주소로 돌아오면 그대로 이어진다
+                    if iface_now != "-" and not ip_now.startswith("127.") and ip_now != ip:
+                        self._log.add("네트워크가 바뀌었습니다 (%s %s → %s %s) — DDS 다시 시작"
+                                      % (iface, ip, iface_now, ip_now))
+                        return RESTART
                 if presence_pub is not None and now - last_presence >= PRESENCE_INTERVAL_SEC:
                     last_presence = now
                     self._publish_presence(presence_pub, ip)
@@ -227,10 +261,10 @@ class DdsListener:
                         was_connected = connected
         except ImportError as exc:
             self._fail("ROS 환경이 로드되지 않았습니다 (%s)" % exc)
-            return
+            return None
         except Exception as exc:
             self._fail(str(exc))
-            return
+            return None
         finally:
             try:
                 if executor is not None:
@@ -247,8 +281,7 @@ class DdsListener:
                     rclpy.shutdown(context=context)
             except Exception:
                 pass
-        self._set_status(OFF)
-        self._log.add("DDS 리스너 정지")
+        return None
 
     def _create_presence_publisher(self, node, qos):
         if self._presence is None:
