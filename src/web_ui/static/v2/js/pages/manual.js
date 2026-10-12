@@ -168,7 +168,9 @@ function tick() {
   for (const [axis, fader] of ui.faders) {
     const item = list.find((a) => a.axis === axis);
     if (!item?.row) continue;
-    const motorDeg = jointToMotor(item.row, fader.joint);
+    // 페이더 끝값도 모터 한계 안으로 · 매핑 범위를 모터 deg 로 바꾸면 반올림으로 한계를 살짝 넘었다 · 수정 목록 103(다)
+    const limits = motorLimits(item);
+    const motorDeg = Math.min(limits.upper, Math.max(limits.lower, jointToMotor(item.row, fader.joint)));
     stream.target(axis, motorDeg * RAD, { motion_id: item.row.motion_id, motion_rad: fader.joint * RAD });
   }
   updateLive(list);

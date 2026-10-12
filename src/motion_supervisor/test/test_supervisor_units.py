@@ -85,7 +85,7 @@ def test_limit_check_compares_rad_targets_with_degree_config_limits():
     motor = {'controller_index': 1, 'lower': -10.0, 'upper': 13.0}
     assert supervisor._target_position_limit_error(motor, R(12.9)) == ''
     message = supervisor._target_position_limit_error(motor, R(13.5))
-    assert '13.500 deg' in message and '상한 13.000 deg' in message
+    assert '13.5000 deg' in message and '상한 13.0000 deg' in message
 
 
 def test_profile_limits_from_the_degree_config_become_rad_per_second():

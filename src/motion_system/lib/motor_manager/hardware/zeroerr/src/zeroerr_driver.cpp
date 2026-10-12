@@ -71,12 +71,12 @@ void zeroerr::ZeroerrDriver::loadParameters(const std::string& param_file)
 
         if (e_cfg.id == motor_interface::ID_MIN_POSITION_LIMIT) {
             motor_interface::fill<int32_t>(
-                static_cast<int32_t>(config_.lower / DEGREE_PER_REVOLUTION * config_.pulse_per_revolution),
+                static_cast<int32_t>((config_.lower - config_.soft_limit_margin) / DEGREE_PER_REVOLUTION * config_.pulse_per_revolution),
                 e_cfg.data
             );
         } else if (e_cfg.id == motor_interface::ID_MAX_POSITION_LIMIT) {
             motor_interface::fill<int32_t>(
-                static_cast<int32_t>(config_.upper / DEGREE_PER_REVOLUTION * config_.pulse_per_revolution),
+                static_cast<int32_t>((config_.upper + config_.soft_limit_margin) / DEGREE_PER_REVOLUTION * config_.pulse_per_revolution),
                 e_cfg.data
             );
         } else if (e_cfg.id == motor_interface::ID_PROFILE_VELOCITY) {

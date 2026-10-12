@@ -277,7 +277,8 @@ def test_cancel_before_start_uses_urgent_dispatch_lane():
     assert node._cancelled_execution_ids == {'exec-a'}
 
 
-def test_delayed_start_is_rejected_after_urgent_stop_was_accepted():
+def test_delayed_start_is_dropped_quietly_after_urgent_stop_was_accepted():
+    """버리는 것은 맞다 · 그러나 「거절」 사건을 내면 진행 PC 가 그룹 오류를 띄운다 · 수정 목록 102"""
     node = _node()
     node._cancelled_execution_ids.add('exec-a')
     node._event_pub = _Publisher()
@@ -289,11 +290,10 @@ def test_delayed_start_is_rejected_after_urgent_stop_was_accepted():
 
     node._process_group_command(message)
 
-    assert node._event_pub.messages[-1].event == 'rejected'
-    assert '지연 명령' in node._event_pub.messages[-1].message
+    assert node._event_pub.messages == []
 
 
-def test_start_that_finishes_after_stop_is_stopped_and_rejected():
+def test_start_that_finishes_after_stop_is_stopped_without_a_rejection():
     import threading
 
     node = _node()
@@ -329,8 +329,8 @@ def test_start_that_finishes_after_stop_is_stopped_and_rejected():
     thread.join(timeout=1.0)
 
     assert [row['command'] for row in calls] == ['group_start_at', 'stop_now']
-    assert node._event_pub.messages[-1].event == 'rejected'
-    assert '지연 그룹 명령' in node._event_pub.messages[-1].message
+    # 늦게 끝난 시작은 이 PC 에서 멈추고 · 사건은 내지 않는다(그룹 오류가 되지 않게) · 수정 목록 102
+    assert node._event_pub.messages == []
 
 
 def test_scheduled_command_requires_ack_margin():

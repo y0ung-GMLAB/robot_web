@@ -83,6 +83,8 @@ struct driver_config_t {
     double unit_effort;
     double lower;
     double upper;
+    // 드라이브 소프트 리밋(0x607D)만 lower/upper 바깥으로 이만큼 넓힌다(모터 deg) · robot_web 수정 목록 103
+    double soft_limit_margin;
     double speed;
     double acceleration;
     double deceleration;

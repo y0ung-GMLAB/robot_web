@@ -105,6 +105,9 @@ def motion_run_rejection_reason(
 _deg = units.rad_to_deg
 
 
+#: 한계 비교 반올림 여유 · 설정 파일 한계 자릿수(0.001°) · 수정 목록 103(라)
+LIMIT_ROUNDING_TOLERANCE_RAD = math.radians(0.001)
+
 class MotionSupervisor(Node):
     """Final publisher for upper-level motion commands."""
 
@@ -667,6 +670,8 @@ class MotionSupervisor(Node):
                 results.append(self._stream_target_result(target, False, error))
                 continue
 
+            if motor is not None and target.get('operation') != 'hold':
+                target_position = self._clamp_to_limits(motor, target_position)
             commanded_axes.add(axis)
             command.number_of_target_interfaces[axis] = 2
             command.target_interface_id[axis] = Int8MultiArray(
@@ -2020,17 +2025,28 @@ class MotionSupervisor(Node):
         axis = self._optional_int(motor.get('controller_index'))
         lower = wire_units.motor_limit(motor, 'lower')
         upper = wire_units.motor_limit(motor, 'upper')
-        if lower is not None and target_position < lower:
+        # 설정 파일은 한계를 0.001° 로 반올림해 적는다 · 그 안쪽 넘침은 반올림 차이라 거절하지 않는다
+        # (호출한 쪽이 경계값으로 자른다 · `_clamp_to_limits`) · 수정 목록 103(라)
+        tolerance = LIMIT_ROUNDING_TOLERANCE_RAD
+        if lower is not None and target_position < lower - tolerance:
             return (
-                f'{axis}번 모터 목표 위치 {_deg(target_position):.3f} deg 가 '
-                f'하한 {_deg(lower):.3f} deg 보다 작습니다'
+                f'{axis}번 모터 목표 위치 {_deg(target_position):.4f} deg 가 '
+                f'하한 {_deg(lower):.4f} deg 보다 작습니다'
             )
-        if upper is not None and target_position > upper:
+        if upper is not None and target_position > upper + tolerance:
             return (
-                f'{axis}번 모터 목표 위치 {_deg(target_position):.3f} deg 가 '
-                f'상한 {_deg(upper):.3f} deg 보다 큽니다'
+                f'{axis}번 모터 목표 위치 {_deg(target_position):.4f} deg 가 '
+                f'상한 {_deg(upper):.4f} deg 보다 큽니다'
             )
         return ''
+
+    def _clamp_to_limits(self, motor: Dict[str, Any], target_position: float) -> float:
+        """반올림 여유 안에서 넘은 목표를 경계값으로 · 재생 쪽 클리핑과 같은 방식 · 수정 목록 103(라)"""
+        lower = wire_units.motor_limit(motor, 'lower')
+        upper = wire_units.motor_limit(motor, 'upper')
+        if lower is None or upper is None or lower > upper:
+            return target_position
+        return min(max(target_position, lower), upper)
 
     def _range_recovery_target_error(
         self,

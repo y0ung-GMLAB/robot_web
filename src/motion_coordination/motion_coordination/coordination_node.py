@@ -133,6 +133,10 @@ def _message_initial_move_time(message: Any) -> float:
     return value if value > 0.0 else 0.0
 
 
+class _LateCommandDropped(Exception):
+    """정지된 그룹 실행의 늦게 온 명령 · 버리는 것이 맞다 · 실패가 아니라 사건을 내지 않는다 · 수정 목록 102"""
+
+
 def _set_optional_message_field(message: Any, field_name: str, value: Any) -> None:
     if hasattr(message, field_name):
         setattr(message, field_name, value)
@@ -920,7 +924,7 @@ class MotionCoordinationNode(Node):
             if execution_cancelled and command not in {
                 'stop_after_cycle', 'stop_now', 'cancel_before_start'
             }:
-                raise ValueError('정지된 그룹 실행의 지연 명령을 폐기했습니다')
+                raise _LateCommandDropped('정지된 그룹 실행의 지연 명령을 폐기했습니다')
             participants = tuple(sorted(set(message.participant_ids)))
             if not 1 <= len(participants) <= 8:
                 raise ValueError('그룹 실행 참가 PC는 1~8대여야 합니다')
@@ -1071,15 +1075,17 @@ class MotionCoordinationNode(Node):
                             f'late-command-stop-{message.command_id}'
                         ),
                     }, timeout_sec=0.25)
-                    result = {
-                        'success': False,
-                        'message': '정지 후 완료된 지연 그룹 명령을 폐기했습니다',
-                    }
-                    event = 'rejected'
+                    raise _LateCommandDropped('정지 후 완료된 지연 그룹 명령을 폐기했습니다')
             self._publish_event(
                 message, event if result.get('success') else 'rejected',
                 bool(result.get('success')),
                 str(result.get('message') or event),
+            )
+        except _LateCommandDropped as exc:
+            # 「거절」 사건을 내면 진행 PC 가 「그룹 명령 실패」 로 읽어 그룹 오류(전체 정지)를 띄웠다 ·
+            # 실물 2026-10-12 14:21 · 정지된 실행이라 기다리는 쪽도 없다 · 로그만 남긴다 (수정 목록 102)
+            self.get_logger().info(
+                f'{exc} · {message.command} · {message.execution_id} · {message.command_id}'
             )
         except Exception as exc:
             self._publish_event(message, 'rejected', False, str(exc))
