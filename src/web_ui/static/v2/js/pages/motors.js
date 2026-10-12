@@ -99,6 +99,32 @@ async function maintenance(row, action, state, changed) {
   }
 }
 
+/** EEPROM Alias 쓰기 · 드라이브가 같은 Alias 를 쓰면 어느 드라이브인지 가릴 수 없어 저장이 거절된다 (2026-10-12)
+ *  서버 /api/motors/ethercat-alias 가 검색 때 본 값(Vendor · Product · Serial · 지금 Alias)과 실제가 같을 때만 쓴다 */
+async function writeAlias(row, motor, state, changed) {
+  const identity = motor.identity || {};
+  const current = identity.ethercat_alias;
+  const input = document.getElementById(`alias-${row.axis}`);
+  const next = Number(input?.value);
+  if (!Number.isInteger(next) || next < 0 || next > 65535) { toast('Alias 는 0~65535 사이의 정수여야 합니다', 'bad'); return; }
+  if (identity.serial_number === undefined || identity.vendor_id === undefined) { toast('검색 정보가 없습니다. 「전체 검색」을 먼저 하세요', 'bad'); return; }
+  const ok = await confirmBox({
+    title: `${row.axis}번 드라이브 EEPROM Alias 쓰기`,
+    body: `Master ${row.masterIndex} · Slave ${row.slavePosition} · 지금 Alias ${current ?? '-'} → ${next}\n`
+      + '드라이브 EEPROM 에 저장됩니다. 다른 드라이브와 같은 값은 쓸 수 없습니다(0 은 케이블 순서로 찾습니다).\n'
+      + '쓴 뒤 드라이브 제어 전원을 껐다 켜고 「전체 검색」 → 「저장 후 장비에 적용」 을 하세요.',
+    confirmLabel: '쓰기', tone: 'warning',
+  });
+  if (!ok) return;
+  await run(`${row.axis}번 Alias 쓰기`, () => api('POST', '/api/motors/ethercat-alias', {
+    body: {
+      confirmed: true, master_index: row.masterIndex, slave_position: row.slavePosition, new_alias: next,
+      expected: { ethercat_alias: current, vendor_id: identity.vendor_id, product_code: identity.product_code ?? identity.product_id, serial_number: identity.serial_number },
+    },
+    timeoutMs: 15000,
+  }), state, changed);
+}
+
 async function absoluteSetup(scope, row, state, changed) {
   const body = scope === 'all' ? { scope: 'all' } : { scope: 'one', master_index: row.masterIndex, slave_position: row.slavePosition };
   let preview;
@@ -250,6 +276,13 @@ function detailCard(state, changed, row) {
           onclick: () => absoluteSetup('one', row, state, changed) }, row.absolute === '정상' ? '앱솔루트 정상' : '앱솔루트 설정') : null,
         row.ac ? h('button', { class: 'btn btn-mini danger-text', type: 'button', disabled: busy, onclick: () => maintenance(row, 'absolute_clear', state, changed) }, '다회전 클리어') : null),
       h('p', { class: 'muted small', text: '빨간 글씨 버튼은 위치 기준을 바꿉니다. 누르면 확인 창이 먼저 뜹니다.' })),
+    row.ac ? h('div', { class: 'field' },
+      h('span', { class: 'field-label', text: `EtherCAT Alias · 지금 ${motor.identity?.ethercat_alias ?? '-'} · Slave ${Number.isFinite(row.slavePosition) ? row.slavePosition : '-'}` }),
+      h('div', { class: 'row' },
+        h('input', { id: `alias-${row.axis}`, class: 'input mono num-input', type: 'number', min: '0', max: '65535', step: '1',
+          value: String(motor.identity?.ethercat_alias ?? ''), 'aria-label': `${row.axis}번 새 Alias` }),
+        h('button', { class: 'btn btn-mini', type: 'button', disabled: busy, onclick: () => writeAlias(row, motor, state, changed) }, 'Alias 쓰기')),
+      h('p', { class: 'muted small', text: '드라이브마다 다른 값이어야 합니다. 같은 값이면 어느 드라이브인지 가릴 수 없어 저장이 거절됩니다. 쓴 뒤 드라이브 제어 전원을 껐다 켜고 다시 검색하세요.' })) : null,
     h('details', { class: 'raw' }, h('summary', { text: '원본 (드라이브 정보)' }),
       h('pre', { class: 'doc-code small' }, h('code', { text: JSON.stringify({ identity: motor.identity, profile: motor.profile, config: motor.config }, null, 2) }))));
 }
