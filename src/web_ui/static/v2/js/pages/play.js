@@ -182,8 +182,8 @@ function groupCard(state) {
   const rows = groupRows(state.snap);
   const execution = groupRuntime(state.snap).execution;
   const spread = Number(execution.start_spread_ms);
-  return h('section', { class: 'card', 'aria-label': 'PC별 상태' },
-    h('div', { class: 'card-head' }, h('h2', { text: 'PC별 상태' }),
+  return h('section', { class: 'card', 'aria-label': 'PC별 재생 상태' },
+    h('div', { class: 'card-head' }, h('h2', { text: 'PC별 재생 상태' }),
       Number.isFinite(spread) && execution.execution_id ? h('span', { class: 'muted small mono', text: `시작 편차 ${spread.toFixed(0)} ms` }) : null),
     rows.length
       ? h('ul', { class: 'list' }, rows.map((row) => h('li', { class: 'list-row' },
@@ -267,7 +267,7 @@ function previewCard(state) {
   const status = runStatus(state.snap);
   const fileId = String(status.motion_file_id || registeredPlaylist(state.play?.mapping)[0] || '');
   return h('section', { class: 'card', 'aria-label': '3D' },
-    h('div', { class: 'card-head' }, h('h2', { text: '3D · 실물과 동기화' }), h('a', { href: '#/pack', text: '로봇 팩·3D' })),
+    h('div', { class: 'card-head' }, h('h2', { text: '3D 동시 재생' }), h('a', { href: '#/pack', text: '로봇 팩·3D' })),
     getViewer3d().update(state, { fileId }));
 }
 
@@ -280,10 +280,10 @@ export function renderPlay(state, { navigate, changed }) {
     scopeHeader(state, changed),
     nowCard(state, changed, navigate),
     ui.scope === 'group' ? groupCard(state) : null,
+    previewCard(state),
     h('div', { class: 'grid-2' },
       playlistCard(state, changed, { link: ['#/animations', '애니메이션'], reload: loadPlay }),
       repeatCard(state, changed)),
     axesCard(state),
-    previewCard(state),
   ];
 }
