@@ -148,7 +148,8 @@ def _mapping_doc():
         'file_id': 'motion_axis.yaml',
         'angle_unit': 'rad',
         'motion_file_id': playlist[0] if playlist else '',
-        'mappings': mapping_rows(),
+        # 새 UI(v2) 조인트 매핑에서 저장하면 메모리의 줄로
+        'mappings': state.get('mapping_rows_saved') or mapping_rows(),
     }
     if len(playlist) > 1:
         mapping['motion_playlist'] = playlist
@@ -178,6 +179,8 @@ def snapshot():
             'errorcode': 0,
             'error_text': 'No error',
             'motion_id': name,
+            # 드라이브 고유 이름(motor_ref) 재료 · 새 UI(v2) 조인트 매핑
+            'ethercat_master_index': 0, 'alias': 100 + axis, 'slave_position': axis,
             'lower': -36000.0,
             'upper': 36000.0,
             'profile_velocity': 18000.0,
@@ -1023,6 +1026,50 @@ async def preview_trace(date: str, file: str):
 @app.get('/api/motion-trace/download')
 async def preview_trace_download(date: str, file: str):
     return HTMLResponse('time_sec,Neck_Pitch_target_deg,Neck_Pitch_actual_deg\n0,0,0\n', media_type='text/csv')
+
+
+def _preview_validate(body):
+    rows = (body.get('mapping') or {}).get('mappings') or []
+    out_rows, errors = {}, []
+    for row in rows:
+        mid = str(row.get('motion_id') or '')
+        problems = []
+        if float(row.get('motion_lower_rad') or 0) > float(row.get('motion_upper_rad') or 0):
+            problems.append('motion_lower_rad must be <= motion_upper_rad')
+        if not float(row.get('gear_ratio') or 0) > 0:
+            problems.append('gear_ratio must be > 0')
+        errors += [f'{mid}: {p}' for p in problems]
+        out_rows[mid] = {'status': 'error' if problems else 'ok', 'messages': problems}
+    return {'valid': not errors, 'message': 'ok' if not errors else 'motion mapping validation failed',
+            'errors': errors, 'warnings': [], 'rows': out_rows}
+
+
+@app.post('/api/motion-mappings/validate')
+async def preview_validate_mapping(request: Request):
+    body = await request.json()
+    validation = _preview_validate(body)
+    return {'success': validation['valid'], 'message': validation['message'], 'mapping': body.get('mapping'), 'validation': validation}
+
+
+@app.post('/api/motion-mappings')
+async def preview_save_mapping(request: Request):
+    """저장 흉내 · 버전이 다르면 서버와 같은 문구로 거절"""
+    body = await request.json()
+    if body.get('base_mapping_revision') and body['base_mapping_revision'] != MAPPING_FILE['mapping_revision']:
+        return {'success': False, 'message': 'motion mapping command failed: 조인트 매핑이 화면을 불러온 뒤 변경됐습니다 · 다시 불러오세요'}
+    validation = _preview_validate(body)
+    if not validation['valid']:
+        return {'success': False, 'message': 'motion mapping validation failed', 'validation': validation}
+    state['mapping_rows_saved'] = (body.get('mapping') or {}).get('mappings') or []
+    state['mapping_rev'] = state.get('mapping_rev', 1) + 1
+    MAPPING_FILE['revision'] = MAPPING_FILE['mapping_revision'] = f"preview-rev-{state['mapping_rev']}"
+    return {'success': True, 'message': '프리뷰 · 조인트 매핑 저장 · 모터 운전 한계 갱신 · 드라이브 반영은 「장비에 적용 · 모터 재시작」',
+            'file': MAPPING_FILE, 'mapping': _mapping_doc(), 'validation': validation}
+
+
+@app.post('/api/motor-config/apply')
+async def preview_apply_motor_config():
+    return {'success': True, 'message': '프리뷰 · 장비에 적용 (실제로는 아무것도 안 함)'}
 
 
 _PREVIEW_DOCS = [

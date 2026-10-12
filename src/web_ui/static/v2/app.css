@@ -352,6 +352,20 @@ body.drop-active .drop-zone { border-color: var(--blue); background: var(--blue-
 .wrap-text { overflow-wrap: anywhere; }
 @media (max-width: 560px) { .trace-charts { grid-template-columns: 1fr; } }
 
+/* 조인트 매핑 */
+.mapping-table td { vertical-align: middle; }
+.mapping-table tr.selected td { background: var(--blue-soft); }
+.mapping-table .input { min-height: 36px; padding: 0 8px; }
+.input-num { width: 64px; }
+/* 넓은 편집 표 · 이 화면만 본문 폭 제한을 푼다 */
+.main:has(.mapping-table) { max-width: none; }
+.name-input { width: 130px; }
+.cell-row { display: flex; align-items: center; gap: 4px; }
+.mapping-table th, .mapping-table td { padding: 6px 6px; }
+.mapping-table .select-sm { max-width: 150px; }
+.mapping-table .btn-mini { padding: 0 8px; }
+.mapping-table input[type=checkbox] { width: 20px; height: 20px; }
+
 /* 확인 창 · 알림 */
 dialog.confirm { max-width: 480px; width: calc(100% - 32px); padding: 24px; border: 1px solid var(--line); border-radius: 14px; background: var(--panel); color: var(--ink); }
 dialog.confirm::backdrop { background: rgb(0 0 0 / 60%); }

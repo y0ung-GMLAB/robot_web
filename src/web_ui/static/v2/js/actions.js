@@ -223,3 +223,24 @@ export function saveAlarmPolicy(overrides) {
   return attempt(() => api('PUT', '/api/servo-alarm-policy', { body: { overrides } }),
     (r) => r?.message || '알람 정책을 저장했습니다 · Supervisor 에 적용됨');
 }
+
+/* ---------- 장비에 적용 · 모터 재시작 (모터·드라이브 · 조인트 매핑 같이 씀) ---------- */
+
+/** 확인만 · 기존 화면 문구 그대로(motor_config.js · 위험을 다 적는다) · reason 은 맨 앞 한 줄 */
+export function confirmApplyMotorConfig(reason = '') {
+  return confirmBox({
+    title: '장비에 적용 · 모터 재시작',
+    body: `${reason ? `${reason}\n\n` : ''}주의 · 저장된 설정을 적용하려고 Motor Manager 를 다시 시작합니다.\n`
+      + '다시 시작하는 동안 AC 서보 · 다이나믹셀 통신이 잠시 끊기거나 다시 초기화될 수 있습니다.\n'
+      + '지금 부하를 잡고 있는 모터는 순간적으로 토크가 풀려 부하가 풀릴 수 있습니다 · 중력 · 외력 · 기구 하중 때문에 뜻하지 않은 움직임이 생길 수 있습니다.\n'
+      + '기구를 안전하게 받치고, 사람이 다가가지 못하게 하고, 움직여도 위험하지 않을 때만 하세요.\n'
+      + '웹 연결은 잠깐 끊긴 뒤 저절로 다시 붙습니다.',
+    confirmLabel: '적용 · 재시작', tone: 'danger',
+  });
+}
+
+/** 저장된 파일을 적용(파일은 안 고침 · §6-221) · 확인은 부르는 쪽에서 */
+export function applyMotorConfig() {
+  return attempt(() => api('POST', '/api/motor-config/apply', { timeoutMs: 60000 }),
+    (r) => r?.message || '적용했습니다 · 모터가 잠깐 멈췄다 켜집니다 · 화면이 다시 붙습니다');
+}
