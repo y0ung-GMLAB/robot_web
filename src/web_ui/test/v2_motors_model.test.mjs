@@ -39,6 +39,11 @@ test('바뀐 것 · 이름 · 설정 칸 · 체크', () => {
   const draft = [{ ...motor(0, 'B'), config: { ...motor(0, 'B').config, schedule_end_servo_off: true } }];
   assert.deepEqual(motorChanges(saved, draft), ['0번 이름 A → B', '0번 운영 끝 서보 끄기 - → true']);
   assert.deepEqual(motorChanges(saved, [motor(0, 'A')]), []);
+  // 검색 제안 · 뺌 · 더함 · 번호 (수정 목록 100)
+  const two = [motor(0, 'A'), motor(1, 'B')];
+  const proposal = [motor(0, 'A'), { ...motor(2, 'C'), id: 'm2', axis: 1 }];
+  assert.deepEqual(motorChanges(two, proposal), ['1번 B 뺌', '1번 C 더함']);
+  assert.deepEqual(motorChanges(two, [{ ...motor(1, 'B'), axis: 0 }]), ['0번 A 뺌', 'B 번호 1 → 0']);
 });
 
 test('앱솔루트 설정 일 한 줄', () => {

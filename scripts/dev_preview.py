@@ -1106,10 +1106,10 @@ def _preview_range_blocker():
 def _preview_registry():
     if state['motor_registry'] is None:
         state['motor_registry'] = {'motors': [
-            {'id': f'ac_servo_master_0_alias_{100 + axis}', 'enabled': True, 'axis': axis, 'name': name,
+            {'id': f'ac_servo_ethercat_master_0_alias_{100 + axis}', 'enabled': True, 'axis': axis, 'name': name,
              'motor_type': 'ac_servo', 'driver_family': 'minas', 'transport': 'ethercat',
              'identity': {'ethercat_master_index': 0, 'ethercat_alias': 100 + axis, 'slave_position': axis, 'vendor_id': '0x066f'},
-             'profile': {'driver_model': 'MINAS A6B', 'model_confirmed': True},
+             'profile': {'driver_model': 'MADLN05BE', 'model_confirmed': True, 'model_source': 'physical_sii'},
              'config': {'controller_index': axis, 'position': axis, 'profile_velocity': 18000, 'profile_acceleration': 180000,
                         'acceleration': 180000, 'max_speed_rpm': 3000, 'overload_monitor': 1}}
             for name, axis, *_ in JOINTS]}
@@ -1208,6 +1208,49 @@ async def preview_motion_stop():
         state['targets'][axis] = value
     state['run_started'] = None
     return {'success': True, 'message': '프리뷰 · 정지 · 서보는 켠 채', 'acknowledgement_pending': True}
+
+
+def _preview_scan(ethercat=True, dynamixel=True):
+    """검색 흉내 · 가짜 5축 + 새 AC 하나 + 다이나믹셀 하나 · 짝 맞추기·제안은 서버 모듈 그대로 · 수정 목록 100"""
+    from motion_web_bridge import scan_axis_rows, scan_proposal
+    slaves = [{'master_index': 0, 'slave_position': axis, 'ethercat_alias': 100 + axis, 'rotary_alias': None,
+               'serial_number': 9000 + axis, 'vendor_id': 1647, 'product_code': 1614282756, 'order_number': 'MADLN05BE',
+               'device_name': 'MADLN05BE', 'device_state': 'PREOP', 'identity_source': 'physical_sii'}
+              for _name, axis, *_ in JOINTS if axis != 3]       # 3번은 안 보이는 척
+    slaves.append({'master_index': 0, 'slave_position': 5, 'ethercat_alias': 150, 'serial_number': 9150, 'vendor_id': 1647,
+                   'product_code': 1614282756, 'order_number': 'MADLN15SE', 'device_name': 'MADLN15SE', 'identity_source': 'physical_sii'})
+    scan = {
+        'ethercat_scan': {'available': True, 'slaves': slaves, 'masters': [{'master_index': 0, 'complete': True}]} if ethercat else {'skipped': True},
+        'dynamixel_scan': {'available': True, 'error': '', 'devices': [{'id': 3, 'port': '/dev/ttyUSB0', 'model_number': 1130,
+                                                                         'model_name': 'XM540-W150', 'firmware_version': 50}]} if dynamixel else {'skipped': True},
+    }
+    registry = _preview_registry()
+    scan['axis_rows'] = scan_axis_rows.axis_rows_from_scan(registry, scan)
+    scan['proposed_registry'] = scan_proposal.proposed_registry(registry, scan, scan['axis_rows'])
+    return {'success': True, 'message': f'프리뷰 · 검색 흉내 · AC {len(slaves) if ethercat else 0} · 다이나믹셀 {1 if dynamixel else 0}', 'scan': scan}
+
+
+@app.post('/api/motors/scan')
+async def preview_scan_all():
+    await asyncio.sleep(1.5)
+    return _preview_scan()
+
+
+@app.post('/api/motors/scan/ac-servo')
+async def preview_scan_ac():
+    await asyncio.sleep(1.0)
+    return _preview_scan(dynamixel=False)
+
+
+@app.post('/api/motors/scan/dynamixel')
+async def preview_scan_dxl():
+    await asyncio.sleep(1.0)
+    return _preview_scan(ethercat=False)
+
+
+@app.get('/api/motors/scan/progress')
+async def preview_scan_progress():
+    return {'success': True, 'progress': {'running': True, 'events': [{'phase': 'ethercat', 'message': 'EtherCAT 슬레이브 읽는 중'}]}}
 
 
 _PREVIEW_DOCS = [

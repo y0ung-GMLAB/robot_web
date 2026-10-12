@@ -3,7 +3,8 @@
  * 저장은 파일만 · 드라이브에 들어가는 것은 「장비에 적용 · 모터 재시작」 뒤(§6-221) · 저장 버튼은 늘 눌린다(§6-203).
  * 서보 켜기/끄기 · 알람 리셋은 운전 모드와 무관(서버 run_mode_gate) · 끄기·재부팅·정비는 확인 창.
  * 「…」 이 붙은 버튼은 확인 창이 뜬다 · 빨간 글은 위치 기준이 바뀌는 일.
- * 모터 검색은 지금 기존 화면에서(검색 결과를 설정으로 옮기는 일이 커서 다음 단계).
+ * 모터 검색 · 결과로 만든 목록은 서버가 제안한다(수정 목록 100 · scan_proposal.py) · 화면은 받아서 초안으로 ·
+ * 검색한 통로만 바뀌고 · 짝지은 모터는 이름·드라이브 값을 지킨다 · 뺀 모터·바뀐 번호는 알림으로 · 저장해야 남는다.
  */
 import { h, dot } from '../dom.js';
 import { api } from '../net.js';
@@ -12,7 +13,7 @@ import * as act from '../actions.js';
 import { EDIT_FIELDS, absoluteJobText, absoluteSummary, getField, motorChanges, motorProblems, motorRows, setField } from '../motors_model.js';
 import { signedDeg } from '../play_model.js';
 
-const ui = { revision: '', saved: null, draft: null, selected: null, job: null, busy: '', error: '' };
+const ui = { revision: '', saved: null, draft: null, selected: null, job: null, busy: '', error: '', scan: null };
 let jobTimer = null;
 
 function clone(motors) {
@@ -116,6 +117,81 @@ async function absoluteSetup(scope, row, state, changed) {
   await run('앱솔루트 설정', () => api('POST', '/api/motor-config/absolute-setup', { body: { ...body, confirmed: true }, timeoutMs: 20000 }), state, changed);
 }
 
+/* ---------- 모터 검색 · 서버 제안 · 수정 목록 100 ---------- */
+
+const SCAN_KINDS = {
+  all: { label: '전체', path: '/api/motors/scan' },
+  ac: { label: 'AC 서보만', path: '/api/motors/scan/ac-servo' },
+  dxl: { label: '다이나믹셀만', path: '/api/motors/scan/dynamixel' },
+};
+
+async function scan(kind, state, changed) {
+  const spec = SCAN_KINDS[kind];
+  const ok = await confirmBox({
+    title: `모터 검색 · ${spec.label}`,
+    body: `${kind === 'dxl' ? '다이나믹셀' : kind === 'ac' ? 'AC 서보(EtherCAT)' : 'AC 서보와 다이나믹셀'}를 찾습니다(수십 초 · 실패하면 몇 번 다시).\n`
+      + '찾는 동안 모터 프로그램(Motor Manager)이 잠시 멈췄다 다시 켜집니다 · 서보가 풀릴 수 있으니 기구를 받치고, 움직이는 축이 없을 때 하세요.\n\n'
+      + `결과는 저장하기 전까지 화면에만 있습니다 · ${kind === 'all' ? '' : '검색 안 한 쪽 모터는 그대로 둡니다 · '}이름과 드라이브 값은 지킵니다.`
+      + (dirty() ? '\n\n저장 안 한 변경은 검색 결과로 바뀝니다.' : ''),
+    confirmLabel: '검색', tone: 'warning',
+  });
+  if (!ok) return;
+  ui.busy = 'scan';
+  ui.scan = { kind, running: true, step: '검색 시작', notes: [], message: '' };
+  changed();
+  const poll = setInterval(async () => {
+    try {
+      const progress = (await api('GET', '/api/motors/scan/progress', { timeoutMs: 3000 }))?.progress || {};
+      const last = (progress.events || []).slice(-1)[0];
+      if (last?.message && ui.scan) { ui.scan.step = String(last.message); changed(); }
+    } catch { /* 다음에 */ }
+  }, 1000);
+  try {
+    const result = await fetch(spec.path, { method: 'POST', headers: { Accept: 'application/json' } }).then((r) => r.json());
+    const proposal = result?.scan?.proposed_registry;
+    ui.scan = {
+      kind, running: false, success: result?.success === true, partial: result?.partial === true,
+      message: String(result?.message || ''), notes: Array.isArray(proposal?.notes) ? proposal.notes : [],
+      summary: proposal?.summary || null,
+    };
+    if (proposal && Array.isArray(proposal.registry?.motors)) {
+      // 제안을 초안으로 · 저장해야 파일에 남는다
+      ui.draft = { ...(ui.draft || {}), motors: clone(proposal.registry.motors) };
+      if (!ui.draft.motors.some((m) => Number(m.axis) === ui.selected)) ui.selected = ui.draft.motors[0] ? Number(ui.draft.motors[0].axis) : null;
+    }
+  } catch (error) {
+    ui.scan = { kind, running: false, success: false, message: error.message || String(error), notes: [] };
+  } finally {
+    clearInterval(poll);
+    ui.busy = '';
+    changed();
+  }
+}
+
+async function cancelScan(changed) {
+  try { toast((await api('POST', '/api/motors/scan/cancel'))?.message || '다음 장치 종류 전에 멈춥니다', 'ok'); } catch (error) { toast(error.message || String(error), 'bad'); }
+  changed();
+}
+
+function scanBox(changed) {
+  const s = ui.scan;
+  if (!s) return null;
+  if (s.running) {
+    return h('div', { class: 'busy-line', role: 'status' }, h('span', { class: 'spinner', 'aria-hidden': 'true' }),
+      h('span', { class: 'grow', text: `모터 검색 중 · ${SCAN_KINDS[s.kind].label} · ${s.step}` }),
+      h('button', { class: 'btn btn-mini', type: 'button', onclick: () => cancelScan(changed) }, '멈추기'));
+  }
+  const tone = s.success ? 'ok' : s.partial ? 'warn' : 'bad';
+  const sum = s.summary;
+  return h('div', { class: `blocker ${tone === 'ok' ? 'ok' : tone === 'bad' ? 'bad' : ''}` }, dot(tone),
+    h('div', { class: 'grow' },
+      h('strong', { text: `검색 ${s.success ? '끝' : s.partial ? '일부만' : '실패'} · ${SCAN_KINDS[s.kind].label}${sum ? ` · 짝지음 ${sum.matched} · 새로 ${sum.added} · 뺌 ${sum.removed}${sum.kept ? ` · 그대로 ${sum.kept}` : ''}` : ''}` }),
+      s.message ? h('p', { class: 'small', text: s.message }) : null,
+      s.notes.length ? h('ul', { class: 'list small' }, s.notes.map((note) => h('li', { text: note }))) : null,
+      sum ? h('p', { class: 'small muted', text: '아직 저장 전입니다 · 이름을 확인하고 아래 「저장」 → 「장비에 적용」' }) : null),
+    h('button', { class: 'btn btn-mini', type: 'button', onclick: () => { ui.scan = null; changed(); } }, '닫기'));
+}
+
 async function save(state, changed, { apply = false } = {}) {
   const problems = motorProblems(ui.draft?.motors);
   if (problems.length) { toast(problems[0], 'bad'); return; }
@@ -206,7 +282,10 @@ export function renderMotors(state, { changed }) {
     h('div', { class: 'page-head' },
       h('h1', { text: '모터·드라이브' }),
       h('span', { class: 'spacer' }),
-      h('a', { class: 'btn', href: '/', title: '검색 결과를 설정으로 옮기는 일은 지금 기존 화면에서 · 저장하면 여기에도 보입니다' }, '모터 다시 검색 (기존 화면) ↗')),
+      h('div', { class: 'segmented', role: 'group', 'aria-label': '모터 검색' },
+        Object.entries(SCAN_KINDS).map(([kind, spec]) => h('button', { class: 'seg', type: 'button', disabled: Boolean(ui.busy),
+          title: `${spec.label} 다시 찾기 · 결과는 저장 전까지 화면에만`, onclick: () => scan(kind, state, changed) }, `${spec.label} 검색…`)))),
+    scanBox(changed),
     stepsStrip(state, rows),
     ui.message ? h('p', { class: 'muted', text: ui.message }) : null,
     runtime.motor_manager_start_block_reason || (runtime.phase && runtime.phase !== 'ready')

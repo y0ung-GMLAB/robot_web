@@ -113,10 +113,16 @@ export function motorProblems(motors) {
 /** 저장 안 한 변경 · 사람이 읽는 줄 */
 export function motorChanges(saved, draft) {
   const before = new Map((saved || []).map((m) => [m.id, m]));
+  const after = new Set((draft || []).map((m) => m.id));
   const out = [];
+  // 검색 제안으로 빠진 · 새로 든 모터 · 번호가 바뀐 모터도 변경이다 · 수정 목록 100
+  for (const old of saved || []) {
+    if (!after.has(old.id)) out.push(`${old.axis}번 ${old.name || ''} 뺌`.replace('  ', ' '));
+  }
   for (const motor of draft || []) {
     const old = before.get(motor.id);
-    if (!old) continue;
+    if (!old) { out.push(`${motor.axis}번 ${motor.name || ''} 더함`.replace('  ', ' ')); continue; }
+    if (Number(old.axis) !== Number(motor.axis)) out.push(`${motor.name || motor.id} 번호 ${old.axis} → ${motor.axis}`);
     for (const field of EDIT_FIELDS.concat([{ key: 'overload_monitor', label: '과부하 감시' }, { key: 'schedule_end_servo_off', label: '운영 끝 서보 끄기' }])) {
       const a = field.top ? old[field.key] : old.config?.[field.key];
       const b = field.top ? motor[field.key] : motor.config?.[field.key];
