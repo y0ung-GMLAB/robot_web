@@ -73,25 +73,13 @@ async function run(label, work, state, changed) {
 }
 
 async function servo(row, action, state, changed) {
-  const ac = row.ac;
-  const map = ac ? { on: 'servo_on', off: 'servo_off', reset: 'fault_reset' } : { on: 'torque_on', off: 'torque_off', reset: 'reboot' };
-  if (action === 'off') {
-    const ok = await confirmBox({
-      title: `${row.axis}번 ${ac ? '서보' : '토크'} 끄기`,
-      body: ac ? `${row.axis}번 · ${row.name} 서보를 끕니다.\n서보가 꺼지면 부하가 풀릴 수 있습니다(브레이크 없는 축은 처짐).`
-        : `${row.axis}번 · ${row.name} 토크를 끕니다.\n다이나믹셀은 브레이크가 없어 관절이 처질 수 있습니다.`,
-      confirmLabel: '끄기', tone: 'warning',
-    });
-    if (!ok) return;
+  if (ui.busy) return;
+  ui.busy = `${row.axis}번`;
+  changed();
+  try { await act.servoControl(row, action); } finally {
+    ui.busy = '';
+    await loadMotors(state, changed);
   }
-  if (action === 'reset' && !ac) {
-    const ok = await confirmBox({ title: `${row.axis}번 재부팅`, body: '하드웨어 오류가 풀리고 토크가 꺼집니다 · 브레이크가 없어 관절이 처질 수 있습니다.\n다회전 모드 모터는 바퀴 수가 사라져 위치 표시가 바뀔 수 있습니다 · 재부팅 뒤 위치를 확인하세요.', confirmLabel: '재부팅', tone: 'warning' });
-    if (!ok) return;
-  }
-  const path = ac ? '/api/motion-test/ac-servo/control' : '/api/motion-test/dynamixel/control';
-  const body = ac ? { action: map[action], scope: 'selected', axis: row.axis } : { action: map[action], axis: row.axis };
-  const result = await run(`${row.axis}번`, () => api('POST', path, { body, timeoutMs: 5000 }), state, changed);
-  if (result && action === 'reset' && ac) toast('오류 초기화 · 서보는 꺼진 채 · 원인을 확인한 뒤 「서보 켜기」 (수정 목록 71)', 'warn');
 }
 
 async function maintenance(row, action, state, changed) {

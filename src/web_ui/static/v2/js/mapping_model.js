@@ -176,6 +176,14 @@ export function jointToMotor(row, jointDeg) {
   return ref + (Number(jointDeg) + Number(row.offset_deg || 0)) * Number(row.scale ?? 1) * sign * Number(row.gear_ratio || 1);
 }
 
+/** 모터 deg → 조인트 deg · 식을 거꾸로 · 이득이 0 이면 null */
+export function motorToJoint(row, motorDeg) {
+  const ref = row.reference_enabled === false ? 0 : Number(row.reference_position_deg || 0);
+  const gain = Number(row.scale ?? 1) * (row.invert ? -1 : 1) * Number(row.gear_ratio || 1);
+  if (!gain) return null;
+  return (Number(motorDeg) - ref) / gain - Number(row.offset_deg || 0);
+}
+
 /** 고른 줄 미리보기 · 조인트 +1° → 모터 · 범위 → 모터 한계 */
 export function previewRow(row) {
   const gain = Number(row.scale ?? 1) * (row.invert ? -1 : 1) * Number(row.gear_ratio || 1);

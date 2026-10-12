@@ -1190,6 +1190,25 @@ async def preview_absolute_cancel():
     return {'success': True, 'message': '취소했습니다'}
 
 
+@app.post('/api/motion-test/ac-servo/action')
+async def preview_absolute_move(request: Request):
+    """목표 위치로 · 가짜 모터가 스르르 · 수동 모드에서만(서버처럼)"""
+    body = await request.json()
+    if state['run_mode'] != 'manual':
+        return {'success': False, 'message': '수동 조작은 「수동」 모드에서만 됩니다'}
+    axis = int(body.get('axis'))
+    state['targets'][axis] = math.degrees(float(body.get('target_rad') or 0))
+    return {'success': True, 'message': f'{axis}번 · 목표 {state["targets"][axis]:.2f}° 로 천천히'}
+
+
+@app.post('/api/safety/motion-stop')
+async def preview_motion_stop():
+    for axis, value in state['positions'].items():
+        state['targets'][axis] = value
+    state['run_started'] = None
+    return {'success': True, 'message': '프리뷰 · 정지 · 서보는 켠 채', 'acknowledgement_pending': True}
+
+
 _PREVIEW_DOCS = [
     {'id': 'usage', 'title': '사용법', 'subtitle': '화면 하나하나', 'path': 'docs/사용법.md'},
     {'id': 'install', 'title': '설치법', 'subtitle': 'README', 'path': 'README.md'},

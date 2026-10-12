@@ -244,3 +244,37 @@ export function applyMotorConfig() {
   return attempt(() => api('POST', '/api/motor-config/apply', { timeoutMs: 60000 }),
     (r) => r?.message || '적용했습니다 · 모터가 잠깐 멈췄다 켜집니다 · 화면이 다시 붙습니다');
 }
+
+/* ---------- 서보 · 한 축 (모터·드라이브 · 수동 조작 같이 씀) ---------- */
+
+/**
+ * 서보(AC) · 토크(DXL) 켜기/끄기 · 오류 초기화(AC) / 재부팅(DXL)
+ * 운전 모드와 무관(서버 run_mode_gate) · 끄기·재부팅은 확인(수정 목록 24) · 오류 초기화 뒤 서보는 꺼진 채(수정 목록 71)
+ */
+export async function servoControl(motor, action) {
+  const ac = motor.ac !== false;
+  const label = `${motor.axis}번${motor.name ? ` · ${motor.name}` : ''}`;
+  if (action === 'off') {
+    const ok = await confirmBox({
+      title: `${label} ${ac ? '서보' : '토크'} 끄기`,
+      body: ac ? '서보를 끕니다.\n서보가 꺼지면 부하가 풀릴 수 있습니다(브레이크 없는 축은 처짐).'
+        : '토크를 끕니다.\n다이나믹셀은 브레이크가 없어 관절이 처질 수 있습니다.',
+      confirmLabel: '끄기', tone: 'warning',
+    });
+    if (!ok) return null;
+  }
+  if (action === 'reset' && !ac) {
+    const ok = await confirmBox({ title: `${label} 재부팅`, body: '하드웨어 오류가 풀리고 토크가 꺼집니다 · 브레이크가 없어 관절이 처질 수 있습니다.\n다회전 모드 모터는 바퀴 수가 사라져 위치 표시가 바뀔 수 있습니다 · 재부팅 뒤 위치를 확인하세요.', confirmLabel: '재부팅', tone: 'warning' });
+    if (!ok) return null;
+  }
+  const map = ac ? { on: 'servo_on', off: 'servo_off', reset: 'fault_reset' } : { on: 'torque_on', off: 'torque_off', reset: 'reboot' };
+  const path = ac ? '/api/motion-test/ac-servo/control' : '/api/motion-test/dynamixel/control';
+  const body = ac ? { action: map[action], scope: 'selected', axis: motor.axis } : { action: map[action], axis: motor.axis };
+  return attempt(() => api('POST', path, { body, timeoutMs: 5000 }),
+    action === 'reset' && ac ? '오류 초기화 · 서보는 꺼진 채 · 원인을 확인한 뒤 「서보 켜기」' : (r) => r?.message || '보냈습니다');
+}
+
+/** 움직이던 것 멈춤 · 서보는 켠 채 그 자리 · 늘 된다 */
+export function motionStop() {
+  return attempt(() => api('POST', '/api/safety/motion-stop'), '멈췄습니다 · 서보는 켠 채 그 자리');
+}
