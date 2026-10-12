@@ -215,7 +215,7 @@ def snapshot():
         'system_info': {'hostname': 'floating1'},
         'supervisor_watchdog': {},
         'mapping_range_blocker': _preview_range_blocker(),
-        'minas_absolute_blocker': '' if state['abs_done'] else '앱솔루트 미확인 · 4번 모터 Pr0.15=1(인크리멘털) · 모터 관리에서 앱솔루트 설정',
+        'minas_absolute_blocker': '' if state['abs_done'] else '앱솔루트 미확인 · 4번 모터 Pr0.15=1(인크리멘털) · 모터 설정에서 「앱솔루트 설정」을 누르세요',
         'coordination': {
             'node_connected': True,
             'config': {'pc_id': 'floating1', 'enabled': True, 'group_id': 'stage-a', 'is_master': True,
@@ -1100,7 +1100,7 @@ def _preview_range_blocker():
             ids.append(str(row['motion_id']))
     if not ids:
         return ''
-    return f"조인트 범위 미확인 · {', '.join(ids)} · 모터 관리 → 조인트 매핑에서 실제 기계 범위(최소·최대)를 넣거나 「범위 확인」 을 체크하고 저장하세요"
+    return f"조인트 범위 미확인 · {', '.join(ids)} · 모터 설정 → 조인트 매핑에서 실제 기계 범위(최소·최대)를 입력하거나 「범위 확인」을 체크한 뒤 저장하세요"
 
 
 def _preview_registry():
