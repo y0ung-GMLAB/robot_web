@@ -27,6 +27,7 @@ import { installDialogManager, showConfirm } from './ui_dialogs.js';
 import { StatusSocket } from './socket.js';
 import { motionHeaderConditionsUpdate } from './header_conditions.js';
 import { TERMINAL_FAILURES } from './restart_tracking.js';
+import { installOverflowTitles } from './overflow_title.js';
 import {
   canChangeProjectInWorkspace,
   createWorkspaceRouteState,
@@ -52,6 +53,8 @@ import { inDegView, motionRunStatusInDeg } from './unit_view.js';
 const el = getElements();
 const operationProgress = createOperationProgressManager({ el });
 const appDialogs = installDialogManager({ el });
+// 잘린 글(…)에 마우스를 올리면 전체 글 · 화면 전체에 한 번 · 수정 목록 99
+installOverflowTitles();
 window.alert = (message) => {
   void appDialogs.alert(message, {
     title: '알림',

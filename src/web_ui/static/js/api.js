@@ -407,6 +407,10 @@ export const fetchPreviewSceneData = () => request('GET', '/api/preview/scene/da
 export const fetchPreviewFrames = (fileId) =>
   request('GET', `/api/motion-files/${encodeURIComponent(fileId)}/preview-frames`);
 
+/** Blender 뷰 · 애니메이션 json 의 조인트 값(rad · 고른 시각표) · 수정 목록 98 */
+export const fetchMotionJointValues = (fileId) =>
+  request('GET', `/api/motion-files/${encodeURIComponent(fileId)}/joint-values`, { timeoutMs: 30000 });
+
 /** MuJoCo 계산 시작 · 무거운 물리 시뮬 · 업로드 직후 자동으로도 부른다 · P7 */
 export const precomputeMotionFile = (fileId) =>
   request('POST', `/api/motion-files/${encodeURIComponent(fileId)}/preview-precompute`);

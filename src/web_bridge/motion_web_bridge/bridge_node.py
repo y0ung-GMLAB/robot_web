@@ -31,7 +31,7 @@ from .ethercat_alias_manager import EthercatAliasError, EthercatAliasManager
 from .coordination_bridge import (
     CoordinationWebBridge, local_motion_control, local_motion_readiness,
 )
-from . import motion_file_analysis, motor_config_rules, run_mode_gate
+from . import motion_file_analysis, motion_joint_values, motor_config_rules, run_mode_gate
 from .execution_context_service import ExecutionContextService
 from .manual_motor_commands import ManualMotorCommandService
 from .schedule_end import ScheduleEndService
@@ -2293,6 +2293,14 @@ class MotionWebBridge(Node):
     def preview_blender_scene_path(self) -> Optional[Path]:
         """팩의 Blender 뷰 장면(scene.glb) · 없으면 None · 수정 목록 50"""
         return sim_scene.blender_scene_path(self.workspace_root)
+
+    def motion_joint_values(self, file_id: str) -> Dict[str, Any]:
+        """애니메이션 json 의 조인트 값(rad · 고른 시각표) · 웹 3D 「Blender 뷰」 가 노드를 돌린다 · 수정 목록 98"""
+        project_id = self.project_repository.selected_project_id()
+        if not project_id:
+            return {'success': False, 'message': NO_PROJECT_SELECTED}
+        motion_path = self.project_repository.export_path(project_id, 'motions', file_id)
+        return motion_joint_values.joint_values_payload(motion_path)
 
     def preview_motion_frames(self, file_id: str) -> Dict[str, Any]:
         """선택한 애니메이션의 MuJoCo 계산 결과(t · qpos) · 브라우저 재생용."""

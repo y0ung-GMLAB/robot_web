@@ -102,6 +102,11 @@ def register_motion_run_routes(app: FastAPI, bridge, safety_first_stop) -> None:
             raise HTTPException(status_code=404, detail='로봇 팩에 scene.glb 가 없습니다')
         return FileResponse(str(path), media_type='model/gltf-binary', headers={'Cache-Control': 'no-cache'})
 
+    # Blender 뷰 · 애니메이션 json 값 그대로(glb 에 굽지 않음) · 수정 목록 98
+    @app.get('/api/motion-files/{file_id}/joint-values')
+    async def motion_joint_values(file_id: str):
+        return await asyncio.to_thread(bridge.motion_joint_values, file_id)
+
     @app.get('/api/motion-files/{file_id}/preview-frames')
     async def preview_motion_frames(file_id: str):
         return await asyncio.to_thread(bridge.preview_motion_frames, file_id)

@@ -1527,8 +1527,23 @@ async def preview_scene_data():
 async def preview_scene_state():
     # MuJoCo 장면(가짜 헤드 5축)과 Blender 뷰가 둘 다 있는 팩
     return {'state': 'ready', 'message': '프리뷰 · 가짜 MuJoCo 장면 · Blender 뷰도 있음',
-            'blender': {'available': True, 'size_bytes': len(DEMO_GLB), 'fingerprint': 'devpreview000001'},
+            'blender': {'available': True, 'size_bytes': len(DEMO_GLB), 'fingerprint': 'devpreview000001',
+                        # 수정 목록 98 · 조인트 → 노드 · 내보낸 파일의 조인트(1-2 목 좌우 · 1-1 목 상하)
+                        # f9_none 은 어느 파일에도 없다 → 기본 자세 그대로여야 한다
+                        'joints': {'1-2': {'node': 'Head_1', 'axis': [0.0, 1.0, 0.0]},
+                                   '1-1': {'node': 'Head_2', 'axis': [1.0, 0.0, 0.0]},
+                                   'f9_none': {'node': 'Head_4', 'axis': [0.0, 1.0, 0.0]}}},
             'project_generation': state['generation']}
+
+
+@app.get('/api/motion-files/{file_id}/joint-values')
+async def preview_joint_values(file_id: str):
+    """서버와 같은 함수로 · 내보내기 폴더의 파일 · 수정 목록 98"""
+    from motion_web_bridge import motion_joint_values
+    path = EXPORT_DIR / Path(file_id).name
+    payload = await asyncio.to_thread(motion_joint_values.joint_values_payload, path)
+    # 실제 서버는 머리말(X-Project-Generation)로 붙인다 · 프리뷰는 몸통에
+    return {**payload, 'project_generation': state['generation']}
 
 
 @app.get('/api/preview/blender-scene')
