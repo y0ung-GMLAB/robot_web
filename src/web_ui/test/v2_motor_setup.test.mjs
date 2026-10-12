@@ -48,3 +48,16 @@ test('앱솔루트 작업 글 · 머리말과 같은 말은 한 번만(「완료
     '앱솔루트 설정 완료 · 위치 숫자가 바뀌어 기준점을 다시 캡처해야 합니다');
   assert.equal(absoluteJobText({ state: 'running', step_count: 4, step_index: 2, step_label: '드라이브 재시작' }), '앱솔루트 설정 중 · 2/4 · 드라이브 재시작');
 });
+
+test('모터·드라이브 · 모든 서보 켜기·끄기 (사용자 2026-10-12) · AC 는 서버 scope all 한 번 · 끄기는 확인 창', async () => {
+  const { readFileSync } = await import('node:fs');
+  const page = readFileSync(new URL('../static/v2/js/pages/motors.js', import.meta.url), 'utf8');
+  const actions = readFileSync(new URL('../static/v2/js/actions.js', import.meta.url), 'utf8');
+  assert.match(page, /'모든 서보 켜기'/);
+  assert.match(page, /'모든 서보 끄기'/);
+  assert.match(page, /servoAllBar\(rows, state, changed\)/);
+  const body = actions.slice(actions.indexOf('export async function servoAll'), actions.indexOf('export function motionStop'));
+  assert.match(body, /scope: 'all'/);
+  assert.match(body, /confirmBox\(/);
+  assert.match(body, /dynamixel\/control/);
+});

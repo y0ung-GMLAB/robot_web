@@ -274,6 +274,42 @@ export async function servoControl(motor, action) {
     action === 'reset' && ac ? '오류를 초기화했습니다. 서보는 꺼진 상태입니다. 원인을 확인한 뒤 「서보 켜기」를 누르세요.' : (r) => r?.message || '명령을 보냈습니다');
 }
 
+/**
+ * 서보 · 모두 켜기/끄기 (사용자 2026-10-12 · 모터 설정 화면)
+ * AC 는 서버 scope 'all'(감지된 AC 축 전부) 한 번 · 다이나믹셀은 감지된 축마다 · 끄기는 확인 창
+ */
+export async function servoAll(motors, action) {
+  const detected = (motors || []).filter((m) => m.detected);
+  const ac = detected.filter((m) => m.ac !== false);
+  const dxl = detected.filter((m) => m.ac === false);
+  if (!detected.length) { toast('감지된 모터가 없습니다. 「전체 검색」을 먼저 하세요.', 'warn'); return null; }
+  if (action === 'off') {
+    const ok = await confirmBox({
+      title: `모든 서보 끄기 · ${detected.length}대`,
+      body: '감지된 모든 모터의 서보(토크)를 끕니다.\n브레이크 보드가 연결된 모터는 브레이크가 잡아 주지만, 브레이크가 없는 모터는 부하를 지탱하지 못해 처질 수 있습니다. 기구를 받치고 주변에 사람이 없는지 확인하세요.',
+      confirmLabel: '모두 끄기', tone: 'warning',
+    });
+    if (!ok) return null;
+  }
+  const failed = [];
+  if (ac.length) {
+    try {
+      const r = await api('POST', '/api/motion-test/ac-servo/control', { body: { action: action === 'on' ? 'servo_on' : 'servo_off', scope: 'all' }, timeoutMs: 5000 });
+      if (r && r.success === false) failed.push(`AC 서보 · ${r.message === 'detected AC Servo axis not found' ? '감지된 AC 서보가 없습니다' : r.message || '실패'}`);
+    } catch (error) { failed.push(`AC 서보 · ${error.message || error}`); }
+  }
+  for (const m of dxl) {
+    try {
+      const r = await api('POST', '/api/motion-test/dynamixel/control', { body: { action: action === 'on' ? 'torque_on' : 'torque_off', axis: m.axis }, timeoutMs: 5000 });
+      if (r && r.success === false) failed.push(`${m.axis}번 · ${r.message || '실패'}`);
+    } catch (error) { failed.push(`${m.axis}번 · ${error.message || error}`); }
+  }
+  const verb = action === 'on' ? '켰습니다' : '껐습니다';
+  if (failed.length) toast(`일부 모터가 안 됐습니다 · ${failed.join(' · ')}`, 'bad');
+  else toast(`모든 서보를 ${verb} (${detected.length}대).`, 'ok');
+  return failed.length === 0;
+}
+
 /** 움직이던 것 멈춤 · 서보는 켠 채 그 자리 · 늘 된다 */
 export function motionStop() {
   return attempt(() => api('POST', '/api/safety/motion-stop'), '정지했습니다. 서보 토크 유지.');

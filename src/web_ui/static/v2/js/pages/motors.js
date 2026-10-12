@@ -86,6 +86,30 @@ async function servo(row, action, state, changed) {
   }
 }
 
+async function servoAll(rows, action, state, changed) {
+  if (ui.busy) return;
+  ui.busy = action === 'on' ? '모든 서보 켜기' : '모든 서보 끄기';
+  changed();
+  try { await act.servoAll(rows, action); } finally {
+    ui.busy = '';
+    await loadMotors(state, changed);
+  }
+}
+
+/** 서보 한 줄 · 「켜짐 3/5」 + 모두 켜기·끄기 (사용자 2026-10-12) */
+function servoAllBar(rows, state, changed) {
+  const detected = rows.filter((r) => r.detected);
+  if (!detected.length) return null;
+  const on = detected.filter((r) => r.servoOn).length;
+  const tone = on === detected.length ? 'ok' : on === 0 ? 'warn' : 'info';
+  return h('div', { class: `blocker ${tone === 'ok' ? 'ok' : ''}` }, dot(tone),
+    h('span', { class: 'grow', text: `서보 켜짐 ${on}/${detected.length}${on < detected.length ? ' · 꺼진 모터는 재생·수동 조작이 안 됩니다' : ''}` }),
+    h('button', { class: 'btn btn-mini', type: 'button', disabled: Boolean(ui.busy) || on === detected.length,
+      title: '감지된 모든 모터의 서보를 켭니다 · 알람이 있는 모터는 먼저 오류 초기화', onclick: () => servoAll(rows, 'on', state, changed) }, '모든 서보 켜기'),
+    h('button', { class: 'btn btn-mini', type: 'button', disabled: Boolean(ui.busy) || on === 0,
+      title: '감지된 모든 모터의 서보를 끕니다 · 브레이크 없는 모터는 처질 수 있습니다', onclick: () => servoAll(rows, 'off', state, changed) }, '모든 서보 끄기'));
+}
+
 async function maintenance(row, action, state, changed) {
   const texts = {
     eeprom_save: { title: `${row.axis}번 드라이브에 저장 (EEPROM)`, body: '드라이브의 현재 설정값을 전원을 꺼도 유지되도록 저장합니다. 모터 프로그램을 잠시 정지했다가 다시 시작하며(몇 초), 그동안 서보 토크가 해제됩니다. 브레이크가 없는 모터는 처질 수 있습니다.\n저장하는 동안(최대 10초) 드라이브 전원을 끄지 마세요.', tone: 'warning', label: '저장' },
@@ -347,6 +371,7 @@ export function motorsBody(state, changed) {
       h('div', { class: 'issue-text' }, h('strong', { text: `${row.axis}번 · ${row.name} · ${row.error || '알람'}` }),
         h('span', { text: '기구에 걸린 것이 없는지 확인한 뒤 오류를 초기화하고 서보를 켜세요' })),
       h('button', { class: 'btn btn-danger-soft', type: 'button', disabled: Boolean(ui.busy), onclick: () => servo(row, 'reset', state, changed) }, row.ac ? '오류 초기화' : '재부팅'))),
+    servoAllBar(rows, state, changed),
     h('section', { class: 'card', 'aria-label': '모터' },
       rows.length ? h('div', { class: 'table-wrap' }, h('table', { class: 'table files-table' },
         h('thead', {}, h('tr', {}, ['번호', '이름', '종류 · 모델', '서보', '위치 (모터°)', '과부하율', '앱솔루트', '통신'].map((text) => h('th', { scope: 'col', text })))),
