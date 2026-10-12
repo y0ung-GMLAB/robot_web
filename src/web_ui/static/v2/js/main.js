@@ -7,7 +7,6 @@ import { replace } from './dom.js';
 import { api, poll, StatusStream } from './net.js';
 import { createShell, routeLabel } from './shell.js';
 import { renderHome } from './pages/home.js';
-import { renderPlaceholder } from './pages/placeholder.js';
 import { loadPlay, renderPlay } from './pages/play.js';
 import { loadSchedule, renderSchedule } from './pages/schedule.js';
 import { loadStore, renderStore } from './pages/store.js';
@@ -72,7 +71,7 @@ function renderPage() {
   const page = PAGES[route];
   if (page?.static && drawnRoute === route) return;
   drawnRoute = route;
-  replace(shell.main, page ? page.render(state, { navigate, changed }) : renderPlaceholder(route, routeLabel(route)));
+  replace(shell.main, page.render(state, { navigate, changed }));
 }
 
 let loadTimer = null;

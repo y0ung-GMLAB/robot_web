@@ -103,3 +103,15 @@ test('새 UI 는 기존 화면 코드를 가져다 쓰지 않는다 · 따로 �
     assert.doesNotMatch(text, /innerHTML/, `${file} · 글은 textContent 로`);
   }
 });
+
+test('메뉴의 모든 화면에 페이지가 있다 · 빈 자리 없음', async () => {
+  const { NAV } = await import('../static/v2/js/shell.js');
+  const main = readFileSync(new URL('../static/v2/js/main.js', import.meta.url), 'utf8');
+  const block = main.slice(main.indexOf('const PAGES = {'), main.indexOf('};', main.indexOf('const PAGES = {')));
+  for (const group of NAV) {
+    for (const [id] of group.items) {
+      assert.ok(block.includes(`
+  ${id}: {`) || block.includes(`'${id}': {`), `${id} 페이지 없음`);
+    }
+  }
+});
