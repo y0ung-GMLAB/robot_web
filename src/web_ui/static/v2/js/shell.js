@@ -84,11 +84,21 @@ export function createShell(root, { navigate }) {
   const main = h('main', { class: 'main', id: 'main', tabindex: '-1' });
   root.replaceChildren(topbar, drawer, h('div', { class: 'body' }, nav, main));
 
-  pill.addEventListener('click', () => {
-    const open = drawer.hidden;
+  // 확인할 일 창 · 닫기 버튼 · Esc · 바깥 누르기 · 해결 버튼 누르기 · 화면 이동 때 닫힌다 (실물 2026-10-12 · 전에는 상태 버튼을 다시 눌러야만 닫혀 메뉴를 가렸다)
+  function setDrawer(open) {
     drawer.hidden = !open;
     pill.setAttribute('aria-expanded', String(open));
+  }
+  pill.addEventListener('click', (event) => {
+    event.stopPropagation();
+    setDrawer(drawer.hidden);
   });
+  drawer.addEventListener('click', (event) => {
+    event.stopPropagation();
+    if (event.target.closest('button, a')) setDrawer(false);
+  });
+  document.addEventListener('click', () => { if (!drawer.hidden) setDrawer(false); });
+  document.addEventListener('keydown', (event) => { if (event.key === 'Escape' && !drawer.hidden) setDrawer(false); });
   menuButton.addEventListener('click', () => {
     const open = !nav.classList.contains('open');
     nav.classList.toggle('open', open);
@@ -112,9 +122,10 @@ export function createShell(root, { navigate }) {
     pill.replaceChildren(dot(line.tone), h('span', { class: 'status-text', text: line.text }));
     pill.disabled = !line.issues.length;
     replace(drawer,
-      h('div', { class: 'drawer-head' }, h('h2', { text: line.issues.length ? `확인할 일 ${line.issues.length}` : '확인할 일 없음' })),
+      h('div', { class: 'drawer-head' }, h('h2', { class: 'grow', text: line.issues.length ? `확인할 일 ${line.issues.length}` : '확인할 일 없음' }),
+        h('button', { class: 'btn btn-mini', type: 'button', 'aria-label': '확인할 일 닫기' }, '닫기 ✕')),
       line.issues.map((issue) => issueRow(issue, navigate)));
-    if (!line.issues.length) drawer.hidden = true;
+    if (!line.issues.length) setDrawer(false);
 
     const mode = runMode(sched);
     const slave = sched && sched.coordination_enabled && sched.coordination_joined && sched.is_master === false;
@@ -127,6 +138,7 @@ export function createShell(root, { navigate }) {
   }
 
   function setRoute(route) {
+    setDrawer(false);
     const navId = NAV_ALIASES[route] || route;
     for (const [id, link] of navLinks) {
       if (id === navId) link.setAttribute('aria-current', 'page');

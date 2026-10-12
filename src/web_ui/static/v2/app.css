@@ -464,3 +464,11 @@ dialog.confirm::backdrop { background: rgb(0 0 0 / 60%); }
 
 .pick-row { cursor: pointer; }
 .pick-row:hover td { background: var(--panel-2); }
+
+/* 확인할 일 창 · 화면 전체를 덮지 않게 상단 가운데 떠 있는 칸으로 · 닫기 버튼 (2026-10-12) */
+.issues-drawer { left: 50%; right: auto; width: min(720px, calc(100vw - 32px)); transform: translateX(-50%);
+  border: 1px solid var(--line); border-radius: 12px; box-shadow: 0 12px 32px rgba(0, 0, 0, 0.45); }
+.issues-drawer .drawer-head { display: flex; align-items: center; gap: 8px; }
+@media (max-width: 900px) {
+  .issues-drawer { left: 50%; top: auto; bottom: 12px; }
+}
