@@ -164,7 +164,7 @@ export function joinGroup(config) {
       '그룹에 참여했습니다. 같은 그룹의 PC들과 함께 재생합니다.');
   }
   if (!String(config?.group_id || '').trim()) {
-    toast('그룹 ID가 없습니다. 「네트워크·시간」 화면에서 그룹 ID를 입력한 뒤 켜세요.', 'warn');
+    toast('그룹 ID가 없습니다. 「그룹」 화면에서 그룹 ID를 입력한 뒤 켜세요.', 'warn');
     return Promise.resolve(null);
   }
   return attempt(() => api('PUT', '/api/coordination/settings', { body: { enabled: true, joined: true, group_id: config.group_id }, timeoutMs: 20000 }),

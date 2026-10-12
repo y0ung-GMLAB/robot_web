@@ -1,4 +1,4 @@
-/** UI v2 · 네트워크·시간 · 이 PC (설계안 2026-10-09)
+/** UI v2 · 네트워크 · 시간 · 그룹 · 메뉴 세 개가 같은 파일 · 같은 불러오기 (설계안 2026-10-09 · 2026-10-12 사용자 결정으로 셋으로 나눔)
  *
  * Wi-Fi · 바꾸면 60초 안에 「유지」 · 안 누르면(원격이라 끊겨도) 원래 Wi-Fi 로 돌아온다 (수정 목록 81).
  * 시간대 · 이 PC 또는 매장 PC 전부 · 바꾼 PC 는 2초 뒤 프로그램을 다시 띄운다(재생 중이면 거절).
@@ -319,8 +319,21 @@ function groupCard(state, changed) {
 
 export function renderNetwork(state, { changed }) {
   return [
-    h('div', { class: 'page-head' }, h('h1', { text: '네트워크·시간' })),
-    h('div', { class: 'grid-2' }, wifiCard(state, changed), h('div', { class: 'stack' }, timeCard(state, changed), pcCard(state))),
+    h('div', { class: 'page-head' }, h('h1', { text: '네트워크' })),
+    h('div', { class: 'grid-2' }, wifiCard(state, changed), pcCard(state)),
+  ];
+}
+
+export function renderTime(state, { changed }) {
+  return [
+    h('div', { class: 'page-head' }, h('h1', { text: '시간' })),
+    h('div', { class: 'grid-2' }, timeCard(state, changed)),
+  ];
+}
+
+export function renderGroup(state, { changed }) {
+  return [
+    h('div', { class: 'page-head' }, h('h1', { text: '그룹' })),
     groupCard(state, changed),
   ];
 }

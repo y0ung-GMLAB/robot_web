@@ -130,7 +130,7 @@ export function renderStore(state, { changed }) {
       h('section', { class: 'card', 'aria-label': '매장 전체' },
         h('div', { class: 'card-head' }, h('h2', { text: '매장 전체 일괄 작업' })),
         h('div', { class: 'row' },
-          h('a', { class: 'btn', href: '#/network' }, '시간대 맞추기 (스피커 포함) ›'),
+          h('a', { class: 'btn', href: '#/time' }, '시간대 맞추기 (스피커 포함) ›'),
           h('a', { class: 'btn', href: '#/play' }, '매장 전체 재생 ›')))),
   ];
 }
