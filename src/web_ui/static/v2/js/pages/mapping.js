@@ -158,7 +158,7 @@ function table(state, changed) {
     ];
   };
   return h('div', { class: 'table-wrap' }, h('table', { class: 'table mapping-table' },
-    h('thead', {}, h('tr', {}, ['사용', '조인트', '모터', '감속비', '방향 반전', '기준점 (모터°)', '범위 (조인트°)', '범위 확인', '최대 속도 · 가속', '초기 위치', '상태', ''].map((text) => h('th', { scope: 'col', text })))),
+    h('thead', {}, h('tr', {}, ['사용', '조인트', '모터', '감속 기어비', '방향 반전', '기준점 (모터°)', '범위 (조인트°)', '범위 확인', '최대 속도 · 가속', '초기 위치', '상태', ''].map((text) => h('th', { scope: 'col', text })))),
     h('tbody', {}, ui.rows.map((row, index) => {
       const status = rowStatus(row);
       const motor = motorForRow(row, motors);
@@ -179,7 +179,7 @@ function table(state, changed) {
           row.motor_ref = motor ? motor.ref : '';
           changed();
         } }, motorOptions(row))),
-      h('td', {}, numberInput(row, 'gear_ratio', changed, { label: '감속비' })),
+      h('td', {}, numberInput(row, 'gear_ratio', changed, { label: '감속 기어비' })),
       h('td', {}, h('input', { type: 'checkbox', checked: row.invert, 'aria-label': `${index + 1}번 줄 방향 반전`, onchange: (e) => { row.invert = e.target.checked; changed(); } })),
       h('td', {}, h('div', { class: 'cell-row' },
         numberInput(row, 'reference_position_deg', changed, { label: '기준점 모터 deg' }),
@@ -259,7 +259,7 @@ export function mappingActions(state, changed) {
 
 /** ② 구획 설명 · 공식과 파일 이름 */
 export function mappingNote() {
-  return h('p', { class: 'muted small' }, '애니메이션 조인트 값을 모터 값으로 바꿉니다. 모터 = 기준점 + 조인트 × 감속비 × 방향 · 파일 ',
+  return h('p', { class: 'muted small' }, '애니메이션 조인트 값을 모터 값으로 바꿉니다. 모터 = 기준점 + 조인트 × 감속 기어비 × 방향 · 파일 ',
     h('span', { class: 'mono', text: ui.fileId || '(새 파일)' }), ' · ', h('a', { href: '#/pack', text: '로봇 팩과 비교' }));
 }
 
