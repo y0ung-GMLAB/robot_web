@@ -175,7 +175,7 @@ export function playHeadline(snap) {
   return {
     moving,
     tone: state === 'error' ? 'bad' : moving ? 'ok' : 'idle',
-    title: moving && cycle ? `${cycle}회차 ${STATE_TEXT[state] || state}` : (STATE_TEXT[state] || '재생 안 함'),
+    title: moving && cycle ? `${cycle}회차 ${STATE_TEXT[state] || state}` : (STATE_TEXT[state] || '대기 상태'),
     file: moving || state === 'initialized' ? file : '',
     detail: parts.join(' · '),
     message: state === 'error' ? String(status.message || '') : '',

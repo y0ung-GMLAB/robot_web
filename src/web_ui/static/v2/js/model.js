@@ -151,7 +151,7 @@ export function runSummary(snap) {
   const duration = Number(progress.duration_sec) || 0;
   const ratio = duration > 0 ? Math.min(1, Math.max(0, elapsed / duration)) : 0;
   const continuous = String(run.run_mode || '') === 'continuous';
-  let title = '재생 안 함';
+  let title = '대기 상태';
   if (RUNNING_STATES.has(state)) title = `${file || '애니메이션'} 재생 중`;
   else if (state === 'initializing') title = '첫 자세로 천천히 가는 중';
   else if (state === 'recovering') title = '자동 복구 중';
