@@ -96,7 +96,7 @@ export async function zipFiles(items) {
     if (!keepPath(item.path)) continue;
     entries.push({ path: item.path, bytes: new Uint8Array(await item.file.arrayBuffer()) });
   }
-  if (!entries.length) throw new Error('담을 파일이 없습니다');
+  if (!entries.length) throw new Error('압축할 파일이 없습니다');
   return new Blob([buildZip(entries)], { type: 'application/zip' });
 }
 

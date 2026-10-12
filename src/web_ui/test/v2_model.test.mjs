@@ -16,7 +16,7 @@ test('정상이면 한 문장 · 모드와 운영 시간', () => {
   assert.deepEqual(headline(pcs(), sched).text, '정상 · 자동 운영 중');
   assert.equal(headline(pcs(), { run_mode: 'schedule' }).text, '정상 · 운영 시간 외');
   assert.equal(headline(pcs(), { run_mode: 'manual' }).tone, 'info');
-  assert.equal(modePhrase({ run_mode: 'off' }), '끔 · 명령 막힘');
+  assert.equal(modePhrase({ run_mode: 'off' }), '끔 · 명령 차단');
 });
 
 test('나쁜 문제가 있으면 그 문제가 한 문장 · 주의만 있으면 개수', () => {
@@ -24,7 +24,7 @@ test('나쁜 문제가 있으면 그 문제가 한 문장 · 주의만 있으면
     minas_absolute_blocker: '0번 모터 Pr0.15=1' };
   const line = headline(snap, { run_mode: 'schedule', active_schedule_id: 'a' });
   assert.equal(line.tone, 'bad');
-  assert.match(line.text, /앱솔루트 미확인/);
+  assert.match(line.text, /앱솔루트 방식이 확인되지 않아/);
   assert.equal(line.issues[0].action.kind, 'open');
   const warnOnly = headline(pcs({ pc_id: 'floating2', online: true, version_differs: true }), { run_mode: 'schedule', active_schedule_id: 'a' });
   assert.equal(warnOnly.tone, 'warn');
@@ -35,7 +35,7 @@ test('나쁜 문제가 있으면 그 문제가 한 문장 · 주의만 있으면
 test('조인트 범위 미확인 · 빨간 문제 · 조인트 매핑 열기 (수정 목록 97)', () => {
   const line = headline({ ...pcs(), mapping_range_blocker: '조인트 범위 미확인 · Neck_Pitch · …' }, { run_mode: 'manual' });
   assert.equal(line.tone, 'bad');
-  assert.deepEqual([line.issues[0].title, line.issues[0].action.target], ['조인트 범위 미확인 · 재생·수동 조작이 막혀 있습니다', 'mapping']);
+  assert.deepEqual([line.issues[0].title, line.issues[0].action.target], ['조인트 범위가 확인되지 않아 재생과 수동 조작이 차단되어 있습니다', 'mapping']);
 });
 
 test('문제마다 해결 버튼 · 긴급 정지 · 알람 · 그룹 오류 · 스케줄 거부 · 연결 끊김', () => {
@@ -47,7 +47,7 @@ test('문제마다 해결 버튼 · 긴급 정지 · 알람 · 그룹 오류 · 
   snap.coordination.runtime.coordination_error = { active: true, message: '회차 실패' };
   const kinds = collectIssues(snap, { last_failure: { count: 3, message: '피어 없음' } }).map((i) => i.action?.kind || i.title);
   assert.deepEqual(kinds.slice(0, 3), ['restart-program', 'fault-reset', 'ack-group-error']);
-  assert.ok(kinds.includes('스케줄 시작 거부 3회'));
+  assert.ok(kinds.includes('스케줄 시작 거부됨 (3회)'));
   assert.ok(kinds.some((k) => /floating2 연결 안 됨/.test(k)));
   assert.equal(collectIssues(snap, {}, { connected: false }).length, 1, '연결이 끊기면 그것 하나만');
 });
@@ -79,7 +79,7 @@ test('모터 · 조인트 값이 있으면 조인트 deg · 알람·서보 꺼�
 
 test('매장 PC 줄 · 연결 안 됨 · 버전 다름 · 그룹 참여 꺼짐', () => {
   const rows = pcRows(pcs({ pc_id: 'f1', online: false }, { pc_id: 'f2', version_differs: true }, { pc_id: 'f3', joined: false }, { pc_id: 'sp', role: 'speaker' }));
-  assert.deepEqual(rows.map((r) => r.note), ['마스터', '연결 안 됨', '버전 다름', '그룹 참여 꺼짐', '스피커']);
+  assert.deepEqual(rows.map((r) => r.note), ['마스터', '연결 안 됨', '버전 다름', '그룹 미참여', '스피커']);
   assert.equal(rows[0].local, true);
 });
 

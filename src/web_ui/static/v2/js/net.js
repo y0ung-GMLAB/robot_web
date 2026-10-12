@@ -35,7 +35,7 @@ export async function api(method, path, { body, raw, contentType, timeoutMs = 15
       body: raw !== undefined ? raw : (body === undefined ? undefined : JSON.stringify(body)),
     });
   } catch (error) {
-    throw new ApiError(error?.name === 'AbortError' ? '응답이 너무 늦습니다' : '서버에 닿지 않습니다', 0);
+    throw new ApiError(error?.name === 'AbortError' ? '응답 시간이 초과되었습니다' : '서버에 연결할 수 없습니다', 0);
   } finally {
     clearTimeout(timer);
   }

@@ -19,7 +19,7 @@ export function renderTools() {
     const section = h('section', { class: 'card tool-card', 'aria-label': tool.label, hidden: true },
       tool.key === 'terminal' ? [
         h('p', { class: 'small' }, h('strong', { text: '코드 받기 + 다시 빌드' }),
-          ' · 아래 한 줄을 그대로 치세요(몇 분) · 빌드 동안 웹 화면은 잠깐 끊기지만 터미널은 안 끊깁니다 · 끝나면 「설치 완료」'),
+          ' · 아래 명령을 그대로 입력하세요(몇 분 걸립니다). 빌드하는 동안 웹 화면은 잠시 끊기지만 터미널은 끊기지 않습니다. 끝나면 「설치 완료」가 표시됩니다.'),
         h('pre', { class: 'doc-code' }, h('code', { text: 'bash scripts/install.sh' })),
       ] : null,
       frame);

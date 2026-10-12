@@ -1,8 +1,8 @@
-/** UI v2 · 공연 화면 값 · 시작 막는 이유 · 재생 목록 · 실행 축 · 그룹 PC 줄 (설계안 2026-10-09) */
+/** UI v2 · 재생 화면 값 · 시작 막는 이유 · 재생 목록 · 실행 축 · 그룹 PC 줄 (설계안 2026-10-09) */
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
-  axisRows, defaultScope, fileInfo, groupRows, groupStopCommand, phaseSteps, playHeadline,
+  axisRows, defaultScope, fileInfo, groupRows, groupStopCommand, initialMoveChoices, phaseSteps, playHeadline,
   playlistAdd, playlistMove, playlistRemove, registeredPlaylist, startBlocker,
 } from '../static/v2/js/play_model.js';
 
@@ -20,14 +20,14 @@ test('시작 막는 이유 · 자동·끔 모드는 수동으로 바꾸기 버�
   assert.equal(startBlocker({}, { run_mode: 'schedule' }, ok).fix, 'mode-manual');
   assert.equal(startBlocker({}, { run_mode: 'off' }, ok).fix, 'mode-manual');
   assert.equal(startBlocker({ safety_status: { emergency_latched: true } }, { run_mode: 'off' }, ok).fix, 'restart-program');
-  assert.match(startBlocker({}, { run_mode: 'manual' }, { ...ok, playlist: [] }).text, /재생 목록이 비었/);
+  assert.match(startBlocker({}, { run_mode: 'manual' }, { ...ok, playlist: [] }).text, /재생 목록이 비어 있습니다/);
   assert.equal(startBlocker({}, { run_mode: 'manual' }, { ...ok, mappingId: '' }).fix, 'open-mapping');
   assert.match(startBlocker({ execution_context: { ready: false, message: '모터 설정 미적용' } }, { run_mode: 'manual' }, ok).text, /미적용/);
   assert.match(startBlocker({ motion_run_status: { state: 'running' } }, { run_mode: 'manual' }, ok).text, /재생 중/);
   const range = startBlocker({ mapping_range_blocker: '조인트 범위 미확인 · A' }, { run_mode: 'manual' }, ok);
   assert.deepEqual([range.text, range.fix], ['조인트 범위 미확인 · A', 'open-mapping'], '수정 목록 97');
   const slave = { coordination: { config: { is_master: false }, runtime: { joined: true } } };
-  assert.match(startBlocker(slave, { run_mode: 'manual' }, { ...ok, scope: 'group' }).text, /마스터에서만/);
+  assert.match(startBlocker(slave, { run_mode: 'manual' }, { ...ok, scope: 'group' }).text, /마스터 PC에서만/);
   assert.equal(startBlocker(group({ coordination_error: { active: true, message: 'x' } }), { run_mode: 'manual' }, { ...ok, scope: 'group' }).fix, 'ack-group-error');
 });
 
@@ -68,10 +68,10 @@ test('실행 축 · 끔 = 그 자리 · 다시 켬 = 다음 회차부터 · 지�
     motion_state: { motors: [{ controller_index: 0, motion_actual_rad: Math.PI / 180 * 2.5 }] },
   };
   const rows = axisRows(snap, mapping);
-  assert.deepEqual(rows.map((r) => [r.id, r.state]), [['A', '꺼짐 · 그 자리에 섬'], ['B', '다음 회차부터'], ['C', '도는 중']]);
+  assert.deepEqual(rows.map((r) => [r.id, r.state]), [['A', '꺼짐 · 제자리 정지'], ['B', '다음 회차부터 적용'], ['C', '재생 중']]);
   assert.equal(rows[0].range, '−10.0 ~ +10.0°');
   assert.equal(rows[0].now, '+2.50');
-  assert.equal(rows[2].clamped, '범위로 자름');
+  assert.equal(rows[2].clamped, '범위 제한');
 });
 
 test('그룹 PC 줄 · 빠진 PC 는 이유 · 연결 안 됨 · 출발 전 멈춤은 지금 멈춤', () => {
@@ -80,8 +80,22 @@ test('그룹 PC 줄 · 빠진 PC 는 이유 · 연결 안 됨 · 출발 전 멈�
     peers: [{ pc_id: 'f2', motion_cycle_text: '3회차' }, { pc_id: 'f3' }, { pc_id: 'f4', state: 'offline' }],
     execution: { state: 'running', excluded: { f3: '버전 다름' } },
   });
-  assert.deepEqual(groupRows(snap).map((r) => [r.id, r.note]), [['f1', '그룹 대기'], ['f2', '그룹 대기'], ['f3', '빠짐 · 버전 다름'], ['f4', '연결 안 됨']]);
+  assert.deepEqual(groupRows(snap).map((r) => [r.id, r.note]), [['f1', '그룹 대기'], ['f2', '그룹 대기'], ['f3', '제외됨 · 버전 다름'], ['f4', '연결 안 됨']]);
   assert.equal(groupRows(snap)[0].local, true);
   assert.equal(groupStopCommand(snap), 'stop_after_cycle');
   assert.equal(groupStopCommand(group({ execution: { state: 'armed' } })), 'stop_now');
+});
+
+test('첫 자세 이동 시간 · 매핑 시간이 하나면 그 값이 골라져 있고 중복 칸 없음 · 다를 때만 「조인트마다 다름」', () => {
+  const same = initialMoveChoices([{ initial_move_time_sec: 5 }, { initial_move_time_sec: 5 }, { enabled: false, initial_move_time_sec: 10 }], null);
+  assert.deepEqual(same.options.map(([value]) => value), [5, 7, 10]);
+  assert.equal(same.selected, 5);
+  assert.equal(same.pick(5), null, '매핑과 같으면 null = 매핑대로');
+  assert.equal(same.pick(7), 7);
+  assert.equal(initialMoveChoices([{ initial_move_time_sec: 5 }], 7).selected, 7);
+  assert.deepEqual(initialMoveChoices([{ initial_move_time_sec: 8 }], null).options.map(([value]) => value), [5, 7, 8, 10]);
+  const mixed = initialMoveChoices([{ initial_move_time_sec: 5 }, { initial_move_time_sec: 10 }], null);
+  assert.deepEqual(mixed.options[0], [null, '조인트마다 다름 (매핑)']);
+  assert.equal(mixed.selected, null);
+  assert.equal(mixed.pick(5), 5);
 });

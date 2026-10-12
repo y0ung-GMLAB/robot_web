@@ -62,9 +62,9 @@ export function checkState(file, mapping) {
   }
   if (info.check === 'unknown') return { text: '검사 전', tone: 'idle' };
   const issues = rangeIssues(analysis, mapping);
-  if (issues.length) return { text: `경고 · 범위 넘음 ${issues.length}`, tone: 'warn' };
+  if (issues.length) return { text: `경고 · 범위 초과 ${issues.length}`, tone: 'warn' };
   const { total, mapped } = mappedCount(analysis, mapping);
-  if (mapping && total && !mapped) return { text: '경고 · 이 PC 조인트 없음', tone: 'warn' };
+  if (mapping && total && !mapped) return { text: '경고 · 매핑된 조인트 없음', tone: 'warn' };
   if ((analysis.warnings || []).length) return { text: `경고 · ${analysis.warnings[0]}`, tone: 'warn' };
   return { text: '정상', tone: 'ok' };
 }

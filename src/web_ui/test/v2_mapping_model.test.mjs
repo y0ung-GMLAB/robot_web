@@ -30,13 +30,13 @@ test('rad → deg → rad · 같은 값으로 돌아온다 · 빈 최대 속도�
 test('막는 것 · 빈 이름(줄 번호) · 겹친 이름 · 같은 모터 · 모터 없음 · 범위 거꾸로 · 감속비 0', () => {
   const a = rowToDraft(serverRow);
   assert.deepEqual(draftProblems([a]), []);
-  assert.match(draftProblems([a, { ...newRow(1, ''), enabled: true }])[0], /2번 줄 · 조인트 이름이 비었습니다 \(1번 모터\)/);
-  assert.match(draftProblems([a, { ...a }]).join(), /겹칩니다/);
+  assert.match(draftProblems([a, { ...newRow(1, ''), enabled: true }])[0], /2번 줄 · 조인트 이름이 비어 있습니다 \(1번 모터\)/);
+  assert.match(draftProblems([a, { ...a }]).join(), /중복됩니다/);
   assert.match(draftProblems([a, { ...a, motion_id: 'B' }]).join(), /같은 모터/);
-  assert.match(draftProblems([{ ...a, motor_ref: '', motor_axis: null }]).join(), /모터가 없습니다/);
+  assert.match(draftProblems([{ ...a, motor_ref: '', motor_axis: null }]).join(), /모터가 지정되지 않았습니다/);
   assert.equal(draftProblems([{ ...a, motor_ref: '', motor_axis: null, enabled: false }]).length, 0, '안 쓰는 줄은 모터 없어도 됨');
   assert.match(draftProblems([{ ...a, motion_lower_deg: 20 }]).join(), /최소가 최대보다/);
-  assert.match(draftProblems([{ ...a, gear_ratio: 0 }]).join(), /0 보다 커야/);
+  assert.match(draftProblems([{ ...a, gear_ratio: 0 }]).join(), /0보다 커야/);
   assert.deepEqual(draftProblems([]), ['조인트가 하나도 없습니다']);
 });
 
@@ -53,8 +53,8 @@ test('바뀐 것 · 칸 · 더함 · 뺌', () => {
   const a = { ...rowToDraft(serverRow), _key: 'k1' };
   const b = { ...rowToDraft({ ...serverRow, motion_id: 'Yaw', motor_axis: 1 }), _key: 'k2' };
   assert.deepEqual(changeSummary([a, b], [a, b]), []);
-  assert.deepEqual(changeSummary([a, b], [{ ...a, gear_ratio: 120 }]), ['Neck_Pitch 감속비 150 → 120', 'Yaw 뺌']);
-  assert.deepEqual(changeSummary([a], [a, { ...newRow(2, 'New'), _key: 'k9' }]), ['New 더함']);
+  assert.deepEqual(changeSummary([a, b], [{ ...a, gear_ratio: 120 }]), ['Neck_Pitch 감속비 150 → 120', 'Yaw 삭제']);
+  assert.deepEqual(changeSummary([a], [a, { ...newRow(2, 'New'), _key: 'k9' }]), ['New 추가']);
 });
 
 test('모터 고유 이름 · alias 우선 · 없으면 slave · DXL 포트 · ref 로 먼저 찾고 번호로', () => {

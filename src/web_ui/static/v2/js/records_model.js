@@ -1,8 +1,8 @@
 /** UI v2 · 기록 화면이 보는 값 · 화면 없이 시험되는 함수만 (설계안 2026-10-09 · 기록) */
 
 export const RESULT_TEXT = {
-  completed: ['끝까지', 'ok'],
-  stopped: ['도중 정지', 'warn'],
+  completed: ['완료', 'ok'],
+  stopped: ['중간에 정지', 'warn'],
   error: ['오류', 'bad'],
 };
 

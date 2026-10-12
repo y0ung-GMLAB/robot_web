@@ -43,9 +43,9 @@ export function playlistCard(state, changed, { link = null, adding = true, onPic
 
   return h('section', { class: 'card', 'aria-label': '재생 목록' },
     h('div', { class: 'card-head' },
-      h('h2', { text: `이 PC 재생 목록 · ${list.length}` }),
+      h('h2', { text: `재생 목록 · ${list.length}` }),
       link ? h('a', { href: link[0], text: link[1] }) : null),
-    h('p', { class: 'muted small', text: `한 바퀴 ${formatDuration(total || null)} · 차례로 돌고 끝나면 1번부터 · 사이마다 다음 애니메이션의 첫 자세로 천천히 갑니다` }),
+    h('p', { class: 'muted small', text: `전체 ${formatDuration(total || null)} · 순서대로 재생하고, 끝나면 1번부터 다시 재생합니다. 애니메이션 사이마다 다음 애니메이션의 첫 자세로 천천히 이동합니다.` }),
     play.error ? h('p', { class: 'tone-text-bad', text: play.error }) : null,
     list.length
       ? h('ol', { class: 'playlist' }, list.map((id, index) => {
@@ -62,14 +62,14 @@ export function playlistCard(state, changed, { link = null, adding = true, onPic
           h('span', { class: 'row-actions' },
             h('button', { class: 'btn btn-mini', type: 'button', disabled: locked || index === 0, 'aria-label': `${info.name} 위로`, onclick: () => save(playlistMove(list, index, -1)) }, '↑'),
             h('button', { class: 'btn btn-mini', type: 'button', disabled: locked || index === list.length - 1, 'aria-label': `${info.name} 아래로`, onclick: () => save(playlistMove(list, index, 1)) }, '↓'),
-            h('button', { class: 'btn btn-mini', type: 'button', disabled: locked, onclick: () => save(playlistRemove(list, index)) }, '빼기')));
+            h('button', { class: 'btn btn-mini', type: 'button', disabled: locked, onclick: () => save(playlistRemove(list, index)) }, '삭제')));
       }))
-      : h('p', { class: 'muted', text: adding ? '비었습니다 · 아래에서 애니메이션을 넣으세요' : '비었습니다 · 애니메이션을 고르고 「재생 목록에 넣기」' }),
+      : h('p', { class: 'muted', text: adding ? '재생 목록이 비어 있습니다. 아래에서 애니메이션을 추가하세요.' : '재생 목록이 비어 있습니다. 애니메이션을 선택하고 「재생 목록에 추가」를 누르세요.' }),
     adding ? h('div', { class: 'row add-row' },
-      h('select', { class: 'select grow', 'aria-label': '넣을 애니메이션', disabled: locked || !choices.length,
+      h('select', { class: 'select grow', 'aria-label': '추가할 애니메이션', disabled: locked || !choices.length,
         onchange: (event) => { ui.addPick = event.target.value; } },
       choices.map((file) => h('option', { value: file.id, selected: file.id === ui.addPick }, `${file.name} · ${formatDuration(file.duration)}`))),
       h('button', { class: 'btn', type: 'button', disabled: locked || !ui.addPick || list.length >= PLAYLIST_MAX,
-        onclick: () => save(playlistAdd(list, ui.addPick)) }, '넣기')) : null,
-    running ? h('p', { class: 'muted small', text: '재생 중에는 목록을 못 바꿉니다 · 멈춘 뒤에' }) : null);
+        onclick: () => save(playlistAdd(list, ui.addPick)) }, '추가')) : null,
+    running ? h('p', { class: 'muted small', text: '재생 중에는 목록을 바꿀 수 없습니다. 재생을 멈춘 뒤 바꾸세요.' }) : null);
 }

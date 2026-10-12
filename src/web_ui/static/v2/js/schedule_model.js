@@ -89,11 +89,11 @@ export function draftFrom(item, today = new Date()) {
 
 /** 저장 전 검사 · 글 하나 · 비면 저장해도 된다 */
 export function draftProblem(draft) {
-  if (toMinutes(draft.start) === null) return '시작 시각을 넣으세요';
-  if (toMinutes(draft.stop) === null) return '끝 시각을 넣으세요';
-  if (toMinutes(draft.start) === toMinutes(draft.stop)) return '시작과 끝이 같습니다';
-  if (draft.repeat === 'weekly' && !draft.days.length) return '요일을 하나 이상 고르세요';
-  if (draft.repeat === 'once' && !/^\d{4}-\d{2}-\d{2}$/.test(draft.date)) return '날짜를 고르세요';
+  if (toMinutes(draft.start) === null) return '시작 시각을 입력하세요';
+  if (toMinutes(draft.stop) === null) return '종료 시각을 입력하세요';
+  if (toMinutes(draft.start) === toMinutes(draft.stop)) return '시작 시각과 종료 시각이 같습니다';
+  if (draft.repeat === 'weekly' && !draft.days.length) return '요일을 하나 이상 선택하세요';
+  if (draft.repeat === 'once' && !/^\d{4}-\d{2}-\d{2}$/.test(draft.date)) return '날짜를 선택하세요';
   return '';
 }
 
@@ -124,7 +124,7 @@ export function timezoneDrift(items, timezone) {
     .filter(Boolean));
   stamps.delete(now);
   if (!stamps.size) return '';
-  return `${[...stamps].sort().join(', ')} 에서 만든 스케줄인데 이 PC 는 지금 ${now} 입니다 · 시각을 다시 확인하세요`;
+  return `${[...stamps].sort().join(', ')} 시간대에서 만든 스케줄인데, 지금 PC 시간대는 ${now}입니다. 시각을 다시 확인하세요.`;
 }
 
 /** 슬레이브면 마스터 화면 주소 · 같은 망 표에서 */

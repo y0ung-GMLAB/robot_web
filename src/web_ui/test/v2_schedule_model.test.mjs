@@ -35,8 +35,8 @@ test('반복 · 시각 글', () => {
 test('편집 · 검사 · 저장 모양은 기존 화면과 같은 칸', () => {
   const draft = draftFrom(null, new Date(2026, 9, 12));
   assert.deepEqual([draft.start, draft.stop, draft.repeat, draft.date], ['10:00', '18:00', 'daily', '2026-10-12']);
-  assert.equal(draftProblem({ ...draft, stop: '10:00' }), '시작과 끝이 같습니다');
-  assert.equal(draftProblem({ ...draft, repeat: 'weekly', days: [] }), '요일을 하나 이상 고르세요');
+  assert.equal(draftProblem({ ...draft, stop: '10:00' }), '시작 시각과 종료 시각이 같습니다');
+  assert.equal(draftProblem({ ...draft, repeat: 'weekly', days: [] }), '요일을 하나 이상 선택하세요');
   assert.equal(draftProblem(draft), '');
   const payload = draftPayload({ ...draftFrom(night), name: '  밤 ', days: ['THU', 'WED'] });
   assert.deepEqual(payload, {
@@ -49,7 +49,7 @@ test('편집 · 검사 · 저장 모양은 기존 화면과 같은 칸', () => {
 
 test('시간대 어긋남 · 슬레이브의 마스터 주소', () => {
   assert.equal(timezoneDrift([{ saved_timezone: 'Asia/Seoul' }], 'Asia/Seoul'), '');
-  assert.match(timezoneDrift([{ saved_timezone: 'Asia/Seoul' }], 'Europe/Paris'), /Asia\/Seoul 에서 만든/);
+  assert.match(timezoneDrift([{ saved_timezone: 'Asia/Seoul' }], 'Europe/Paris'), /Asia\/Seoul 시간대에서 만든/);
   const snap = { coordination: { runtime: { network_pcs: [{ pc_id: 'f4', is_master: true, web_url: 'http://192.168.0.14:8000' }] } } };
   assert.deepEqual(masterLink(snap), { name: 'f4', url: 'http://192.168.0.14:8000/v2#/schedule' });
   assert.equal(masterLink({ coordination: { runtime: { network_pcs: [{ is_master: true, web_url: 'javascript:x' }] } } }).url, '');

@@ -21,8 +21,8 @@ test('표 줄 · 설정과 지금 상태를 번호로 · 서보 · 위치 · 과
 
 test('막는 것 · 빈 이름 · 겹친 이름 · 범위 · 프로파일 > 최대(수정 목록 37)', () => {
   assert.deepEqual(motorProblems([motor(0, 'A'), motor(1, 'B')]), []);
-  assert.match(motorProblems([motor(0, '')]).join(), /이름이 비었습니다/);
-  assert.match(motorProblems([motor(0, 'A'), motor(1, 'A')]).join(), /겹칩니다/);
+  assert.match(motorProblems([motor(0, '')]).join(), /이름이 비어 있습니다/);
+  assert.match(motorProblems([motor(0, 'A'), motor(1, 'A')]).join(), /중복됩니다/);
   const fast = motor(0, 'A');
   setField(fast, 'profile_velocity', 20000);
   assert.match(motorProblems([fast]).join(), /최대 속도 3000 rpm \(18000 deg\/s\)/);
@@ -37,13 +37,13 @@ test('막는 것 · 빈 이름 · 겹친 이름 · 범위 · 프로파일 > 최�
 test('바뀐 것 · 이름 · 설정 칸 · 체크', () => {
   const saved = [motor(0, 'A')];
   const draft = [{ ...motor(0, 'B'), config: { ...motor(0, 'B').config, schedule_end_servo_off: true } }];
-  assert.deepEqual(motorChanges(saved, draft), ['0번 이름 A → B', '0번 운영 끝 서보 끄기 - → true']);
+  assert.deepEqual(motorChanges(saved, draft), ['0번 이름 A → B', '0번 운영 종료 시 서보 끄기 - → true']);
   assert.deepEqual(motorChanges(saved, [motor(0, 'A')]), []);
   // 검색 제안 · 뺌 · 더함 · 번호 (수정 목록 100)
   const two = [motor(0, 'A'), motor(1, 'B')];
   const proposal = [motor(0, 'A'), { ...motor(2, 'C'), id: 'm2', axis: 1 }];
-  assert.deepEqual(motorChanges(two, proposal), ['1번 B 뺌', '1번 C 더함']);
-  assert.deepEqual(motorChanges(two, [{ ...motor(1, 'B'), axis: 0 }]), ['0번 A 뺌', 'B 번호 1 → 0']);
+  assert.deepEqual(motorChanges(two, proposal), ['1번 B 삭제', '1번 C 추가']);
+  assert.deepEqual(motorChanges(two, [{ ...motor(1, 'B'), axis: 0 }]), ['0번 A 삭제', 'B 번호 1 → 0']);
 });
 
 test('앱솔루트 설정 일 한 줄', () => {

@@ -35,9 +35,9 @@ function isDirty(data) {
 }
 
 const GRADE_TEXT = {
-  1: '그 모터만 멈춤 · 나머지는 계속',
-  2: '재생 전체 끝 · 오류 초기화 뒤 다시',
-  3: '모든 모터 명령 막힘 · 프로그램 다시 시작 필요',
+  1: '해당 모터만 정지 · 나머지는 계속 동작',
+  2: '재생 전체 중단 · 오류 초기화 후 다시 시작',
+  3: '모든 모터 명령 차단 · 프로그램 재시작 필요',
 };
 
 function gradeChip(grade) {
@@ -77,29 +77,29 @@ export function renderAlarms(state, { changed }) {
   return [
     h('div', { class: 'page-head' },
       h('h1', { text: '알람 정책' }),
-      h('p', { class: 'muted small', text: '드라이브 알람이 나면 얼마나 세게 멈출지 · 이 프로젝트만 · 지금 나 있는 알람은 상단 상태와 「모터·드라이브」 에서' })),
+      h('p', { class: 'muted small', text: '드라이브 알람이 발생했을 때 어느 범위까지 멈출지 정합니다. 이 프로젝트에만 적용됩니다. 현재 발생한 알람은 상단 상태 표시와 「모터·드라이브」 화면에서 확인하세요.' })),
     page.error ? h('p', { class: 'tone-text-bad', text: page.error }) : null,
     notApplied ? h('div', { class: 'blocker' }, dot('warn'),
-      h('span', { class: 'grow', text: '저장된 정책과 지금 돌고 있는 정책이 다릅니다 · 「저장」 을 한 번 더 누르면 다시 적용합니다' })) : null,
+      h('span', { class: 'grow', text: '저장된 정책과 현재 적용 중인 정책이 다릅니다. 「저장」을 한 번 더 누르면 다시 적용합니다.' })) : null,
     h('section', { class: 'card', 'aria-label': '등급' },
       h('ul', { class: 'list grade-list' }, [1, 2, 3].map((grade) => h('li', { class: 'list-row' },
         gradeChip(grade), h('strong', { text: `${grade}등급` }), h('span', { class: 'muted', text: GRADE_TEXT[grade] }))))),
     h('section', { class: 'card', 'aria-label': '알람 표' },
       h('div', { class: 'row' },
-        h('input', { class: 'input grow', type: 'search', placeholder: '코드 · 이름으로 찾기 (Enter)', value: ui.query, 'aria-label': '알람 찾기',
+        h('input', { class: 'input grow', type: 'search', placeholder: '코드 또는 이름으로 검색 (Enter)', value: ui.query, 'aria-label': '알람 검색',
           oninput: (event) => { ui.query = event.target.value; }, onchange: () => changed(),
           onkeydown: (event) => { if (event.key === 'Enter') event.target.blur(); } }),
         h('label', { class: 'inline' },
           h('input', { type: 'checkbox', checked: ui.onlyChanged, onchange: (event) => { ui.onlyChanged = event.target.checked; changed(); } }),
-          `바꾼 것만 (${changedCount})`)),
+          `변경한 항목만 (${changedCount})`)),
       rows.length ? h('div', { class: 'table-wrap' }, h('table', { class: 'table alarm-table' },
-        h('thead', {}, h('tr', {}, ['코드', '내용', '기본', '이 프로젝트', '사람이 할 일'].map((text) => h('th', { scope: 'col', text })))),
+        h('thead', {}, h('tr', {}, ['코드', '내용', '기본', '설정', '조치 방법'].map((text) => h('th', { scope: 'col', text })))),
         h('tbody', {}, rows.map((row) => {
           const value = draft[row.code] ? Number(draft[row.code]) : 0;
           const now = active.includes(String(row.code));
           return h('tr', { class: now ? 'alarm-now' : '' },
             h('td', { class: 'mono' }, row.code_label || row.code, row.ethercat_related ? h('small', { class: 'muted', text: ' · EtherCAT' }) : null),
-            h('td', { class: 'wrap' }, row.name, now ? h('span', { class: 'chip chip-bad', text: '지금 나 있음' }) : null),
+            h('td', { class: 'wrap' }, row.name, now ? h('span', { class: 'chip chip-bad', text: '현재 발생 중' }) : null),
             h('td', {}, gradeChip(row.default_grade)),
             h('td', {}, h('select', { class: 'select select-sm', 'aria-label': `${row.code_label} 등급`, disabled: ui.busy,
               onchange: (event) => {
@@ -112,11 +112,11 @@ export function renderAlarms(state, { changed }) {
             h('option', { value: '0', selected: !value }, `기본 (${row.default_grade}등급)`),
             [1, 2, 3].map((grade) => h('option', { value: String(grade), selected: value === grade }, `${grade}등급`)))),
             h('td', { class: 'wrap muted', text: row.guidance || '' }));
-        })))) : h('p', { class: 'muted', text: data ? '맞는 알람 없음' : '불러오는 중…' })),
+        })))) : h('p', { class: 'muted', text: data ? '검색 결과 없음' : '불러오는 중…' })),
     h('div', { class: 'apply-bar' },
-      h('span', { class: 'grow', text: dirty ? `저장 안 한 변경 · 바꾼 것 ${changedCount}` : `바꾼 것 ${changedCount} · 저장됨` }),
+      h('span', { class: 'grow', text: dirty ? `저장하지 않은 변경 ${changedCount}개` : `변경 ${changedCount}개 · 저장됨` }),
       h('button', { class: 'btn', type: 'button', disabled: ui.busy || !dirty, onclick: () => { ui.draft = { ...(data?.overrides || {}) }; changed(); } }, '되돌리기'),
-      h('button', { class: 'btn', type: 'button', disabled: ui.busy || !data, onclick: () => save({}) }, '전부 기본값으로 저장'),
+      h('button', { class: 'btn', type: 'button', disabled: ui.busy || !data, onclick: () => save({}) }, '모두 기본값으로 저장'),
       h('button', { class: 'btn btn-primary', type: 'button', disabled: ui.busy || !data, onclick: () => save({ ...draft }) }, '저장')),
   ];
 }

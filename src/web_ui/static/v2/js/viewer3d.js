@@ -181,7 +181,7 @@ function createViewer3d() {
       const payload = await api('GET', `/api/motion-files/${encodeURIComponent(fileId)}/preview-frames`, { timeoutMs: 60000 });
       // 모양이 맞아야 쓴다(시각 · 자세 줄이 있고 같은 길이)
       if (!Array.isArray(payload?.t) || !Array.isArray(payload?.qpos) || !payload.t.length || payload.t.length !== payload.qpos.length) {
-        throw new Error(payload?.message || '계산 결과 모양이 맞지 않습니다');
+        throw new Error(payload?.message || '계산 결과 형식이 맞지 않습니다');
       }
       frames = payload;
       framesFor = fileId;
@@ -189,7 +189,7 @@ function createViewer3d() {
       frames = null;
       framesFor = fileId;
       framesFailedAt = Date.now();
-      say(`${fileId} · MuJoCo 계산 결과 없음 · 애니메이션 화면에서 「3D 계산」 (${error.message})`);
+      say(`${fileId} · MuJoCo 계산 결과가 없습니다. 애니메이션 화면에서 「3D 계산 시작」을 누르세요 (${error.message})`);
     } finally {
       framesLoading = '';
     }
@@ -201,7 +201,7 @@ function createViewer3d() {
     const info = sceneInfo?.blender;
     if (!info?.available || blLoading || (bl && bl.fingerprint === info.fingerprint)) return;
     blLoading = true;
-    say(`Blender 장면 받는 중 · ${((Number(info.size_bytes) || 0) / 1e6).toFixed(1)} MB`);
+    say(`Blender 장면 다운로드 중 · ${((Number(info.size_bytes) || 0) / 1e6).toFixed(1)} MB`);
     try {
       const { GLTFLoader } = await import(GLTF_URL);
       const gltf = await new GLTFLoader().loadAsync(`/api/preview/blender-scene?v=${encodeURIComponent(info.fingerprint || '')}`);
@@ -256,7 +256,7 @@ function createViewer3d() {
     } catch (error) {
       values = null;
       valuesFor = fileId;
-      say(`${fileId} · 값을 못 받음 · ${error.message}`);
+      say(`${fileId} · 값을 받지 못함 · ${error.message}`);
     } finally {
       valuesLoading = '';
     }
@@ -292,7 +292,7 @@ function createViewer3d() {
     const allowed = blenderAllowed();
     viewButtons.blender.disabled = !sceneInfo?.blender?.available;
     viewButtons.blender.title = !sceneInfo?.blender?.available ? '로봇 팩에 Blender 장면(scene.glb)이 없습니다'
-      : allowed ? '' : '이 애니메이션은 Blender 장면에 없습니다(옛 팩)';
+      : allowed ? '' : '이 애니메이션은 Blender 장면에 없습니다(이전 버전 팩)';
     const shown = view === 'blender' && allowed ? 'blender' : 'mujoco';
     viewButtons.mujoco.setAttribute('aria-pressed', String(shown === 'mujoco'));
     viewButtons.blender.setAttribute('aria-pressed', String(shown === 'blender'));
@@ -316,9 +316,9 @@ function createViewer3d() {
       } else if (sceneInfo.state === 'missing' && !exportAsked) {
         exportAsked = true;
         await api('POST', '/api/preview/scene/export').catch(() => null);
-        say('3D 장면을 처음 만드는 중 · 몇 초');
+        say('3D 장면을 처음 만드는 중 · 몇 초 걸립니다');
       } else if (sceneInfo.state !== 'ready') {
-        say(sceneInfo.message || (sceneInfo.state === 'unavailable' ? '로봇 팩이 없어 3D 를 못 그립니다' : `3D 장면 · ${sceneInfo.state}`));
+        say(sceneInfo.message || (sceneInfo.state === 'unavailable' ? '로봇 팩이 없어 3D를 표시할 수 없습니다' : `3D 장면 · ${sceneInfo.state}`));
       }
     } catch (error) {
       say(`3D 준비 실패 · ${error.message || error}`);
@@ -338,14 +338,14 @@ function createViewer3d() {
       poseBlender(Math.min(playhead, duration || playhead), latest.fileId);
       bl.controls.update();
       renderer.render(bl.scene, bl.camera);
-      say(`Blender · ${latest.fileId || '애니메이션 없음'}${bl.jointMode ? ' · json 값' : ' · 구운 장면'}${running ? ' · 실물과 같이' : ' · 대기 상태(첫 자세)'}`);
+      say(`Blender · ${latest.fileId || '애니메이션 없음'}${bl.jointMode ? ' · json 값' : ' · 구운 장면'}${running ? ' · 실물과 동기화' : ' · 대기 상태(초기 위치)'}`);
     } else if (mj) {
       const ok = frames && framesFor === latest.fileId;
       duration = ok ? followEndSec(frames) : 0;
       poseMujoco(ok ? frames.qpos[frameIndexAt(frames.t, Math.min(playhead, duration))] : null);
       mj.controls.update();
       renderer.render(mj.scene, mj.camera);
-      if (ok) say(`MuJoCo · ${latest.fileId}${running ? ' · 실물과 같이' : ' · 대기 상태(첫 자세)'}`);
+      if (ok) say(`MuJoCo · ${latest.fileId}${running ? ' · 실물과 동기화' : ' · 대기 상태(초기 위치)'}`);
     }
     timeLabel.textContent = duration ? `${Math.min(playhead, duration).toFixed(1)} / ${duration.toFixed(1)} s` : '';
     raf = requestAnimationFrame(frame);

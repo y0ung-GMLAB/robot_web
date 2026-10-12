@@ -58,7 +58,7 @@ async function upload(blob, label) {
 
 async function uploadFolder(items, label) {
   try {
-    ui.busy = `묶는 중 · ${label}`;
+    ui.busy = `압축하는 중 · ${label}`;
     current.changed();
     const blob = await zipFiles(items);
     ui.busy = '';
@@ -84,7 +84,7 @@ function onDrag(event) {
   } else if (file && /\.zip$/i.test(file.name)) {
     upload(file, file.name);
   } else {
-    toast('팩은 .zip 이나 팩 폴더를 놓으세요', 'warn');
+    toast('로봇 팩은 .zip 파일이나 팩 폴더를 끌어다 놓으세요', 'warn');
   }
 }
 ['dragenter', 'dragover', 'dragleave', 'drop'].forEach((kind) => document.addEventListener(kind, onDrag));
@@ -104,7 +104,7 @@ function packCard(state, changed) {
       uploadFolder(items, `${items[0].path.split('/')[0]}/`);
     } });
   const rollback = async () => {
-    const ok = await confirmBox({ title: '이전 팩으로 되돌리기', body: `이전 로봇 팩(${previous?.name || ''} ${previous?.version || ''})으로 되돌립니다 · 지금 팩은 이전 팩 자리로 갑니다.\n3D 계산 결과는 다시 계산이 필요해집니다.`, confirmLabel: '되돌리기', tone: 'warning' });
+    const ok = await confirmBox({ title: '이전 팩으로 되돌리기', body: `이전 로봇 팩(${previous?.name || ''} ${previous?.version || ''})으로 되돌립니다. 지금 팩은 이전 팩으로 보관됩니다.\n3D 계산 결과는 다시 계산해야 합니다.`, confirmLabel: '되돌리기', tone: 'warning' });
     if (!ok) return;
     ui.busy = '되돌리는 중';
     changed();
@@ -114,22 +114,22 @@ function packCard(state, changed) {
     } catch (error) { toast(error.message || String(error), 'bad'); }
     finally { ui.busy = ''; await loadPack(state, changed); }
   };
-  return h('section', { class: 'card', 'aria-label': '지금 쓰는 팩' },
-    h('div', { class: 'card-head' }, h('h2', { text: '지금 쓰는 팩' })),
+  return h('section', { class: 'card', 'aria-label': '현재 로봇 팩' },
+    h('div', { class: 'card-head' }, h('h2', { text: '현재 로봇 팩' })),
     packData.error ? h('p', { class: 'tone-text-bad small', text: packData.error }) : null,
     pack ? [
       h('p', {}, h('strong', { class: 'pack-name', text: pack.name || '-' }), ' ', h('span', { class: 'mono', text: pack.version || '' }),
-        h('span', { class: 'muted small', text: ` · ${when(pack.uploaded_at)} 올림` })),
+        h('span', { class: 'muted small', text: ` · ${when(pack.uploaded_at)} 업로드` })),
       h('p', { class: 'muted small', text: `Blender 장면 ${blender.available ? `있음${(blender.animations || []).length ? ` (${blender.animations.join(', ')})` : ''}` : '없음'}` }),
       (pack.warnings || []).length ? h('ul', { class: 'list small' }, pack.warnings.map((w) => h('li', { class: 'tone-text-warn', text: `경고 · ${w}` }))) : null,
-    ] : h('p', { class: 'muted', text: '팩이 없습니다 · 3D 와 3D 계산이 꺼져 있습니다' }),
+    ] : h('p', { class: 'muted', text: '로봇 팩이 없습니다. 3D 보기와 3D 계산을 사용할 수 없습니다.' }),
     previous ? h('div', { class: 'row' }, h('button', { class: 'btn', type: 'button', disabled: Boolean(ui.busy), onclick: rollback }, `이전 팩(${previous.version || previous.name})으로 되돌리기…`)) : null,
     h('div', { class: 'drop-zone' },
-      h('strong', { text: '새 팩 올리기' }),
-      h('span', { class: 'muted small', text: 'zip 이나 팩 폴더를 이 화면에 끌어 놓기 · 폴더는 브라우저가 묶어서 올림' }),
+      h('strong', { text: '새 팩 업로드' }),
+      h('span', { class: 'muted small', text: 'zip 파일이나 팩 폴더를 이 화면에 끌어다 놓으세요. 폴더는 브라우저에서 압축해 업로드합니다.' }),
       h('div', { class: 'row' },
-        h('button', { class: 'btn btn-primary', type: 'button', disabled: Boolean(ui.busy), onclick: () => zipPicker.click() }, 'zip 고르기'),
-        h('button', { class: 'btn', type: 'button', disabled: Boolean(ui.busy), onclick: () => dirPicker.click() }, '폴더 고르기'),
+        h('button', { class: 'btn btn-primary', type: 'button', disabled: Boolean(ui.busy), onclick: () => zipPicker.click() }, 'zip 파일 선택'),
+        h('button', { class: 'btn', type: 'button', disabled: Boolean(ui.busy), onclick: () => dirPicker.click() }, '폴더 선택'),
         zipPicker, dirPicker)),
     ui.busy ? h('div', { class: 'busy-line', role: 'status' }, h('span', { class: 'spinner', 'aria-hidden': 'true' }), ui.busy) : null,
     ui.result ? h('div', { class: `blocker${ui.result.ok ? ' ok' : ' bad'}` }, dot(ui.result.ok ? 'ok' : 'bad'),
@@ -141,18 +141,18 @@ function diffCard(state) {
   const diff = state.packPage?.diff;
   const rows = (diff?.rows || []).filter((row) => (row.differences || []).length);
   const fmtRange = (range) => (Array.isArray(range) ? `${Number(range[0]).toFixed(1)} ~ ${Number(range[1]).toFixed(1)}°` : '-');
-  return h('section', { class: 'card', 'aria-label': '매핑과 다른 칸' },
-    h('div', { class: 'card-head' }, h('h2', { text: `이 PC 조인트 매핑과 다른 칸 · ${rows.length}` }), h('a', { href: '#/mapping', text: '조인트 매핑' })),
-    h('p', { class: 'muted small', text: '팩은 기본값 · 실제 값은 이 PC 매핑이 정합니다 · 다르면 일부러 바꾼 것인지 확인하세요' }),
+  return h('section', { class: 'card', 'aria-label': '매핑과 다른 항목' },
+    h('div', { class: 'card-head' }, h('h2', { text: `조인트 매핑과 다른 항목 · ${rows.length}` }), h('a', { href: '#/mapping', text: '조인트 매핑' })),
+    h('p', { class: 'muted small', text: '팩의 값은 기본값이고, 실제 값은 조인트 매핑을 따릅니다. 값이 다르면 의도적으로 바꾼 것인지 확인하세요.' }),
     !diff || diff.available === false ? h('p', { class: 'muted', text: diff?.message || '비교할 팩이나 매핑이 없습니다' })
       : rows.length ? h('div', { class: 'table-wrap' }, h('table', { class: 'table' },
-        h('thead', {}, h('tr', {}, ['조인트', '다른 칸', '팩', '이 PC'].map((text) => h('th', { scope: 'col', text })))),
+        h('thead', {}, h('tr', {}, ['조인트', '다른 항목', '팩', '매핑'].map((text) => h('th', { scope: 'col', text })))),
         h('tbody', {}, rows.map((row) => h('tr', {},
           h('td', { class: 'mono', text: row.motion_id || row.joint }),
           h('td', { text: row.differences.join(' · ') }),
           h('td', { class: 'mono', text: `${row.pack_ratio ?? '-'} · ${fmtRange(row.pack_range)}` }),
           h('td', { class: 'mono', text: `${row.mapping_ratio ?? '-'} · ${fmtRange(row.mapping_range)}` }))))))
-        : h('p', { class: 'muted', text: '다른 칸 없음' }));
+        : h('p', { class: 'muted', text: '다른 항목 없음' }));
 }
 
 const SCENE_TEXT = { ready: ['준비됨', 'ok'], computing: ['만드는 중', 'info'], failed: ['실패', 'bad'], missing: ['아직 없음', 'idle'], unavailable: ['팩 없음', 'idle'] };
@@ -169,7 +169,7 @@ function sceneCard(state, changed) {
   const rebuild = async () => {
     try {
       const result = await api('POST', '/api/preview/scene/export');
-      toast(result?.message || '3D 장면을 다시 만듭니다 · 몇 초', 'ok');
+      toast(result?.message || '3D 장면을 다시 만듭니다. 몇 초 걸립니다.', 'ok');
     } catch (error) { toast(error.message || String(error), 'bad'); }
     await loadPack(state, changed);
   };
@@ -177,11 +177,11 @@ function sceneCard(state, changed) {
     h('div', { class: 'card-head' }, h('h2', { text: '3D' })),
     h('div', { class: 'list-row' }, h('span', { class: 'grow', text: '3D 장면' }), h('span', { class: `chip chip-${tone}`, text: text }),
       h('button', { class: 'btn btn-mini', type: 'button', disabled: scene.state === 'computing' || scene.state === 'unavailable', onclick: rebuild }, '다시 만들기')),
-    scene.message ? h('p', { class: 'muted small', text: scene.message }) : h('p', { class: 'muted small', text: '팩을 바꾸면 처음 볼 때 저절로 다시 만듭니다(몇 초)' }),
+    scene.message ? h('p', { class: 'muted small', text: scene.message }) : h('p', { class: 'muted small', text: '팩을 바꾸면 처음 볼 때 자동으로 다시 만듭니다(몇 초)' }),
     h('div', { class: 'list-row' }, h('span', { class: 'grow', text: `애니메이션 3D 계산 · ${(page.files || []).length}` }),
       h('span', { class: 'muted small', text: Object.entries(counts).map(([k, v]) => `${k} ${v}`).join(' · ') || '-' }),
       h('a', { href: '#/animations', text: '애니메이션에서 보기 ›' })),
-    h('p', { class: 'muted small', text: '계산은 프로그램과 따로 돌아 다시 시작해도 이어집니다' }));
+    h('p', { class: 'muted small', text: '계산은 프로그램과 별도로 실행되므로, 프로그램을 다시 시작해도 계속됩니다.' }));
 }
 
 export function renderPack(state, { changed }) {

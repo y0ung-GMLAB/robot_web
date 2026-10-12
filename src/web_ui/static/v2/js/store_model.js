@@ -28,12 +28,12 @@ export function storeRows(snap) {
     const id = String(pc.pc_id || '');
     const peer = peers.get(id) || {};
     const speaker = pc.role === 'speaker';
-    let status = speaker ? '스피커' : String(peer.motion_step || (pc.joined ? '그룹 대기' : '혼자'));
+    let status = speaker ? '스피커' : String(peer.motion_step || (pc.joined ? '그룹 대기' : '단독'));
     let tone = 'ok';
     let note = '';
-    if (pc.online === false) { status = '연결 안 됨'; tone = 'bad'; note = 'PC 가 꺼졌거나 Wi-Fi 가 끊겼습니다'; }
-    else if (pc.protocol_mismatch) { status = '연동 버전 다름'; tone = 'bad'; note = '같이 못 돕니다 · 모든 PC 업데이트'; }
-    else if (pc.version_differs && !speaker) { status = '버전 다름'; tone = 'warn'; note = '그룹 시작에서 빠집니다 · 업데이트하면 다음 회차부터'; }
+    if (pc.online === false) { status = '연결 안 됨'; tone = 'bad'; note = 'PC가 꺼졌거나 Wi-Fi 연결이 끊겼습니다'; }
+    else if (pc.protocol_mismatch) { status = '연동 버전 다름'; tone = 'bad'; note = '함께 재생할 수 없습니다. 모든 PC를 업데이트하세요.'; }
+    else if (pc.version_differs && !speaker) { status = '버전 다름'; tone = 'warn'; note = '그룹 재생에서 제외됩니다. 업데이트하면 다음 회차부터 참여합니다.'; }
     else if (Number(peer.servo_alarm_grade || 0) > 0) { status = '알람'; tone = 'bad'; }
     const role = speaker ? '스피커' : pc.is_master ? '마스터' : '슬레이브';
     const group = speaker ? (pc.same_group ? '같은 그룹' : '') : pc.joined ? '그룹 참여' : '그룹 미참여';
@@ -61,13 +61,13 @@ export function versionSummary(snap) {
 }
 
 const UPDATE_STATE = {
-  idle: ['지난 업데이트 없음', 'idle'],
+  idle: ['업데이트 기록 없음', 'idle'],
   running: ['업데이트 중', 'info'],
   done: ['완료', 'ok'],
-  failed: ['실패 · 이전 버전으로 되돌림', 'bad'],
+  failed: ['실패 · 이전 버전으로 복구함', 'bad'],
   unreachable: ['응답 없음', 'warn'],
   offline: ['연결 안 됨', 'bad'],
-  manual: ['그 PC 에서 직접', 'warn'],
+  manual: ['해당 PC에서 직접 업데이트 필요', 'warn'],
 };
 
 function when(epochSec) {

@@ -7,9 +7,9 @@ import { headline, runMode } from './model.js';
 import * as act from './actions.js';
 
 export const NAV = [
-  { label: '운영', items: [['home', '홈'], ['play', '공연'], ['schedule', '스케줄'], ['store', '매장 PC']] },
+  { label: '운영', items: [['home', '홈'], ['play', '재생'], ['schedule', '스케줄'], ['store', '매장 PC']] },
   { label: '작업', items: [['animations', '애니메이션'], ['manual', '수동 조작']] },
-  { label: '정비', items: [['maintain-motors', '모터·드라이브'], ['mapping', '조인트 매핑'], ['pack', '로봇 팩·3D'],
+  { label: '설정', items: [['maintain-motors', '모터·드라이브'], ['mapping', '조인트 매핑'], ['pack', '로봇 팩·3D'],
     ['alarms', '알람 정책'], ['network', '네트워크·시간'], ['backup', '업데이트·백업']] },
   { label: '기록·도구', items: [['records', '기록'], ['tools', '터미널 · PC 성능'], ['docs', '사용법']] },
 ];
@@ -51,8 +51,8 @@ export function createShell(root, { navigate }) {
   const modeButtons = Object.entries({ schedule: '자동', manual: '수동', off: '끔' }).map(([mode, label]) =>
     h('button', { class: 'seg', type: 'button', 'data-mode': mode, 'aria-pressed': 'false', onclick: () => act.setRunMode(mode) }, label));
   const modeGroup = h('div', { class: 'segmented', role: 'group', 'aria-label': '운전 모드' }, modeButtons);
-  const stopButton = h('button', { class: 'btn btn-stop', type: 'button', title: '모든 움직임을 멈춥니다 · 서보는 켠 채 그 자리', onclick: act.stopAll }, '정지');
-  const estopButton = h('button', { class: 'btn btn-estop', type: 'button', title: '서보를 끄고 잠급니다 · 프로그램을 다시 시작해야 풀립니다', onclick: act.emergencyStop }, '긴급 정지');
+  const stopButton = h('button', { class: 'btn btn-stop', type: 'button', title: '모든 움직임을 멈춥니다. 서보는 켜진 채 그 자리에 있습니다.', onclick: act.stopAll }, '정지');
+  const estopButton = h('button', { class: 'btn btn-estop', type: 'button', title: '서보를 끄고 잠급니다. 프로그램을 다시 시작해야 해제됩니다.', onclick: act.emergencyStop }, '긴급 정지');
   const drawer = h('section', { id: 'issues-drawer', class: 'issues-drawer', hidden: true, 'aria-label': '확인할 일' });
   const menuButton = h('button', { class: 'btn btn-icon menu-toggle', type: 'button', 'aria-label': '메뉴', 'aria-expanded': 'false' }, '≡');
 
@@ -76,7 +76,7 @@ export function createShell(root, { navigate }) {
       }),
     ]),
     // 기존 화면은 / 에 그대로 · 같은 서버 · 같은 설정 · 익숙한 화면으로 돌아갈 때
-    h('a', { href: '/', class: 'nav-link nav-old', title: '기존 화면 · 같은 서버라 어느 쪽에서 바꿔도 같습니다' }, '기존 화면 ↗'));
+    h('a', { href: '/', class: 'nav-link nav-old', title: '기존 화면 · 같은 서버를 쓰므로 어느 화면에서 바꿔도 똑같이 반영됩니다' }, '기존 화면 ↗'));
   const main = h('main', { class: 'main', id: 'main', tabindex: '-1' });
   root.replaceChildren(topbar, drawer, h('div', { class: 'body' }, nav, main));
 
@@ -101,7 +101,7 @@ export function createShell(root, { navigate }) {
     const config = snap?.coordination?.runtime?.config || snap?.coordination?.config || {};
     pcName.textContent = snap?.system_info?.hostname || config.pc_id || '…';
     const group = config.enabled && config.group_id ? ` · 그룹 ${config.group_id}` : '';
-    pcRole.textContent = `${config.enabled ? (config.is_master ? '마스터' : '참가자') : '혼자'}${group}`;
+    pcRole.textContent = `${config.enabled ? (config.is_master ? '마스터' : '슬레이브') : '단독'}${group}`;
 
     const line = headline(snap, sched, { connected: state.connected });
     pill.className = `status-pill tone-${line.tone}`;
@@ -118,7 +118,7 @@ export function createShell(root, { navigate }) {
       const active = button.dataset.mode === mode;
       button.setAttribute('aria-pressed', String(active));
       button.disabled = !sched || Boolean(slave);
-      button.title = slave ? '참가자 PC 는 마스터를 따릅니다 · 마스터 화면에서 바꾸세요' : '';
+      button.title = slave ? '슬레이브 PC는 마스터 설정을 따릅니다. 마스터 화면에서 바꾸세요.' : '';
     }
   }
 

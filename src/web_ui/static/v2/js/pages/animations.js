@@ -47,7 +47,7 @@ async function upload(fileList) {
   if (!picked.length || ui.busy) return;
   const wrong = picked.find((file) => !/\.json$/i.test(file.name || ''));
   if (wrong) {
-    toast(`애니메이션은 .json 만 받습니다 · ${wrong.name}`, 'warn');
+    toast(`애니메이션은 .json 파일만 업로드할 수 있습니다: ${wrong.name}`, 'warn');
     return;
   }
   ui.busy = 'upload';
@@ -55,28 +55,28 @@ async function upload(fileList) {
   try {
     if (!state.play?.projectId) await loadPlay(state, changed);
     const projectId = state.play?.projectId;
-    if (!projectId) throw new Error('프로젝트가 정해지지 않았습니다');
+    if (!projectId) throw new Error('선택된 프로젝트가 없습니다');
     for (const [index, file] of picked.entries()) {
-      ui.upload = `올리는 중 ${index + 1}/${picked.length} · ${file.name} (${(file.size / 1e6).toFixed(1)} MB) · 서버가 검사하는 중`;
+      ui.upload = `업로드 중 ${index + 1}/${picked.length} · ${file.name} (${(file.size / 1e6).toFixed(1)} MB) · 서버에서 검사하는 중`;
       changed();
       try {
         await act.uploadAnimation(projectId, file.name, await file.text());
         done.push(file.name);
       } catch (error) {
         // 하나 실패하면 멈춘다 · 이유(이름 겹침 · 매핑 없음 · 형식)가 다음 성공에 덮이지 않게
-        toast(`${file.name} 올리기 실패 · ${error.message || error}${done.length ? ` · 앞의 ${done.length}개는 올라감` : ''}`, 'bad');
+        toast(`${file.name} 업로드 실패 · ${error.message || error}${done.length ? ` · 앞의 ${done.length}개는 업로드됨` : ''}`, 'bad');
         break;
       }
     }
     if (done.length) {
-      ui.upload = `${done.length}개 올림 · 목록 다시 읽는 중`;
+      ui.upload = `${done.length}개 업로드 완료 · 목록을 새로 고치는 중`;
       changed();
       await loadPlay(state, changed);
       const toCompute = (state.play?.files || []).filter((file) => done.includes(String(file.id)) && mujocoState(file).state === 'missing');
       for (const file of toCompute) {
         await api('POST', `/api/motion-files/${encodeURIComponent(file.id)}/preview-precompute`).catch(() => null);
       }
-      toast(`${done.length}개 올림${toCompute.length ? ` · 3D 계산 ${toCompute.length}개 시작` : ''}`, 'ok');
+      toast(`${done.length}개 업로드 완료${toCompute.length ? ` · 3D 계산 ${toCompute.length}개 시작` : ''}`, 'ok');
       ui.selected = done[done.length - 1];
       ui.detail = null;
       await loadAnimations(state, changed);
@@ -113,14 +113,14 @@ function listCard(state, changed) {
     onchange: (event) => upload(event.target.files) });
   return h('section', { class: 'card', 'aria-label': '애니메이션 목록' },
     h('div', { class: 'card-head' },
-      h('h2', { text: `이 PC 에 올린 것 · ${rows.length}개` }),
-      h('button', { class: 'btn btn-primary', type: 'button', disabled: Boolean(ui.busy), onclick: () => picker.click() }, '올리기'),
+      h('h2', { text: `업로드된 애니메이션 · ${rows.length}개` }),
+      h('button', { class: 'btn btn-primary', type: 'button', disabled: Boolean(ui.busy), onclick: () => picker.click() }, '업로드'),
       picker),
-    h('p', { class: 'muted small', text: '여기에 .json 파일을 끌어 놓아도 올라갑니다 · 올리면 검사하고 3D 계산을 시작합니다' }),
+    h('p', { class: 'muted small', text: '여기에 .json 파일을 끌어다 놓아도 업로드됩니다. 업로드하면 검사 후 3D 계산을 시작합니다.' }),
     ui.upload ? h('div', { class: 'busy-line', role: 'status' }, h('span', { class: 'spinner', 'aria-hidden': 'true' }), ui.upload) : null,
     play.error ? h('p', { class: 'tone-text-bad', text: play.error }) : null,
     rows.length ? h('div', { class: 'table-wrap' }, h('table', { class: 'table files-table' },
-      h('thead', {}, h('tr', {}, ['이름', '길이', '검사', '3D 계산', '재생 목록', '올린 날'].map((text) => h('th', { scope: 'col', text })))),
+      h('thead', {}, h('tr', {}, ['이름', '길이', '검사', '3D 계산', '재생 목록', '업로드 날짜'].map((text) => h('th', { scope: 'col', text })))),
       h('tbody', {}, rows.map((row) => h('tr', { class: row.id === ui.selected ? 'selected' : '' },
         h('td', { class: 'name-cell' }, h('button', { class: 'link-button', type: 'button', title: row.name, 'aria-pressed': String(row.id === ui.selected),
           onclick: () => { ui.selected = row.id; ui.detail = null; changed(); loadDetail(state, changed); } }, row.name)),
@@ -129,7 +129,7 @@ function listCard(state, changed) {
         h('td', {}, h('span', { class: `chip chip-${row.mujoco.tone}`, title: row.mujoco.message, text: row.mujoco.text })),
         h('td', { class: 'mono muted', text: row.slots }),
         h('td', { class: 'mono muted', text: row.date }))))))
-      : h('p', { class: 'muted', text: ui.busy ? '' : '아직 없습니다 · Blender 에서 내보낸 .json 을 올리세요' }));
+      : h('p', { class: 'muted', text: ui.busy ? '' : '아직 애니메이션이 없습니다. Blender에서 내보낸 .json 파일을 업로드하세요.' }));
 }
 
 /* ---------- 상세 ---------- */
@@ -144,7 +144,7 @@ function chart(series, mappingRow) {
     h('figcaption', {},
       h('span', { class: 'mono', text: series.motion_id }),
       h('span', { class: 'mono muted small', text: `${signedDeg(geo.min)} ~ ${signedDeg(geo.max)}°` }),
-      mappingRow ? null : h('span', { class: 'muted small', text: '이 PC 에 없음' })),
+      mappingRow ? null : h('span', { class: 'muted small', text: '매핑에 없음' })),
     svg('svg', { viewBox: '0 0 300 80', preserveAspectRatio: 'none', role: 'img', 'aria-label': `${series.motion_id} 그래프` },
       geo.upperY !== null ? svg('line', { x1: 0, x2: 300, y1: geo.upperY, y2: geo.upperY, class: 'limit' }) : null,
       geo.lowerY !== null ? svg('line', { x1: 0, x2: 300, y1: geo.lowerY, y2: geo.lowerY, class: 'limit' }) : null,
@@ -178,18 +178,18 @@ function detailCard(state, changed, navigate) {
   const addToPlaylist = async () => {
     if (await act.savePlaylist(play.mappingId, playlistAdd(playlist, ui.selected))) {
       await loadPlay(state, changed);
-      toast('재생 목록 끝에 넣었습니다 · 순서는 공연 화면에서', 'ok');
+      toast('재생 목록 끝에 추가했습니다. 순서는 재생 화면에서 바꿀 수 있습니다.', 'ok');
     }
   };
   return h('section', { class: 'card detail-card', 'aria-label': '애니메이션 상세' },
     h('div', { class: 'card-head' }, h('h2', { class: 'detail-name', text: ui.selected })),
     h('p', { class: 'muted' },
       factLine(analysis),
-      ` · 조인트 ${counts.total}개 · 이 PC 매핑에 있는 것 ${counts.mapped}`,
+      ` · 조인트 ${counts.total}개 · 매핑에 있음 ${counts.mapped}개`,
       analysis.value_unit ? ` · 단위 ${analysis.value_unit}` : ''),
-    check.tone === 'bad' ? h('div', { class: 'blocker bad' }, dot('bad'), h('span', { class: 'grow', text: `${check.text} · 이 파일은 재생할 수 없습니다 · Blender 에서 다시 내보내세요` })) : null,
+    check.tone === 'bad' ? h('div', { class: 'blocker bad' }, dot('bad'), h('span', { class: 'grow', text: `${check.text} · 이 파일은 재생할 수 없습니다. Blender에서 다시 내보내세요.` })) : null,
     issues.length ? h('div', { class: 'blocker' }, dot('warn'),
-      h('span', { class: 'grow', text: `범위 넘음 ${issues.length} 조인트 · ${issues.slice(0, 3).map((i) => `${i.id} ${signedDeg(i.min)} ~ ${signedDeg(i.max)}° (범위 ${signedDeg(i.lower)} ~ ${signedDeg(i.upper)}°)`).join(' · ')} · 재생은 범위로 잘라서 돕니다 · 고치려면 Blender 에서 다시 내보내기` })) : null,
+      h('span', { class: 'grow', text: `범위 초과 조인트 ${issues.length}개 · ${issues.slice(0, 3).map((i) => `${i.id} ${signedDeg(i.min)} ~ ${signedDeg(i.max)}° (범위 ${signedDeg(i.lower)} ~ ${signedDeg(i.upper)}°)`).join(' · ')} · 재생은 범위로 잘라서 돕니다 · 고치려면 Blender 에서 다시 내보내기` })) : null,
     detail?.error ? h('p', { class: 'tone-text-bad small', text: detail.error }) : null,
     series.length
       ? h('div', { class: 'charts' }, series.map((item) => chart(item, rows.get(String(item.motion_id)))))
@@ -197,15 +197,15 @@ function detailCard(state, changed, navigate) {
     h('div', { class: 'row' },
       h('button', { class: 'btn btn-primary', type: 'button',
         disabled: running || check.tone === 'bad' || !play.mappingId || playlist.length >= PLAYLIST_MAX,
-        title: running ? '재생 중에는 목록을 못 바꿉니다' : '', onclick: addToPlaylist }, inPlaylist ? '재생 목록에 한 번 더 넣기' : '재생 목록에 넣기'),
+        title: running ? '재생 중에는 목록을 바꿀 수 없습니다' : '', onclick: addToPlaylist }, inPlaylist ? '재생 목록에 한 번 더 추가' : '재생 목록에 추가'),
       ['missing', 'stale', 'failed'].includes(mujoco.state)
         ? h('button', { class: 'btn', type: 'button', onclick: async () => { await act.precompute(ui.selected); await loadPlay(state, changed); } },
           mujoco.state === 'missing' ? '3D 계산 시작' : '3D 다시 계산')
         : h('span', { class: `chip chip-${mujoco.tone}`, text: `3D · ${mujoco.text}` }),
-      downloadUrl ? h('a', { class: 'btn', href: downloadUrl, download: ui.selected }, '내 PC 로 저장') : null,
+      downloadUrl ? h('a', { class: 'btn', href: downloadUrl, download: ui.selected }, '다운로드') : null,
       h('span', { class: 'spacer' }),
       h('button', { class: 'btn', type: 'button', disabled: inPlaylist || running,
-        title: inPlaylist ? '재생 목록에 들어 있습니다 · 재생 목록에서 먼저 빼세요' : '',
+        title: inPlaylist ? '재생 목록에 들어 있습니다. 먼저 재생 목록에서 빼세요.' : '',
         onclick: async () => {
           if (await act.deleteAnimation(ui.selected)) {
             ui.selected = '';
@@ -213,7 +213,7 @@ function detailCard(state, changed, navigate) {
             await loadAnimations(state, changed);
           }
         } }, '삭제…')),
-    inPlaylist ? h('p', { class: 'muted small', text: '재생 목록에 들어 있어 지울 수 없습니다 · 재생 목록에서 먼저 빼세요' }) : null);
+    inPlaylist ? h('p', { class: 'muted small', text: '재생 목록에 들어 있어 삭제할 수 없습니다. 먼저 재생 목록에서 빼세요.' }) : null);
 }
 
 export function renderAnimations(state, { navigate, changed }) {
@@ -223,7 +223,7 @@ export function renderAnimations(state, { navigate, changed }) {
     h('div', { class: 'anim-grid' },
       listCard(state, changed),
       playlistCard(state, changed, {
-        link: ['#/play', '공연 화면'],
+        link: ['#/play', '재생 화면'],
         adding: false,
         selected: ui.selected,
         onPick: (id) => { ui.selected = id; ui.detail = null; changed(); loadDetail(state, changed); },

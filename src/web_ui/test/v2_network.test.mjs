@@ -5,9 +5,9 @@ import { groupProblem, wifiProblem } from '../static/v2/js/pages/network.js';
 
 test('Wi-Fi · 고르기 · 비밀번호 8~63 · 열린 망은 비밀번호 없이 · 802.1X 거절 · 고정 IP 형식', () => {
   const base = { ssid: 'shop', password: 'password123', security: 'WPA2', useStatic: false };
-  assert.equal(wifiProblem({ ...base, ssid: '' }), '바꿀 Wi-Fi 를 고르세요');
-  assert.equal(wifiProblem({ ...base, password: '' }), '비밀번호를 넣으세요');
-  assert.equal(wifiProblem({ ...base, password: 'short' }), '비밀번호는 8~63자');
+  assert.equal(wifiProblem({ ...base, ssid: '' }), '연결할 Wi-Fi를 선택하세요');
+  assert.equal(wifiProblem({ ...base, password: '' }), '비밀번호를 입력하세요');
+  assert.equal(wifiProblem({ ...base, password: 'short' }), '비밀번호는 8~63자여야 합니다');
   assert.equal(wifiProblem({ ...base, security: '--', password: '' }), '');
   assert.match(wifiProblem({ ...base, security: 'WPA2 802.1X' }), /802\.1X/);
   assert.match(wifiProblem({ ...base, useStatic: true, address: '192.168.0.300x' }), /고정 IP/);

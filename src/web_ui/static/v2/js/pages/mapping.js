@@ -42,7 +42,7 @@ export async function loadMapping(state, changed, { force = false } = {}) {
       return;
     }
     const data = await api('GET', `/api/motion-mappings/${encodeURIComponent(fileId)}`);
-    if (!data?.mapping) throw new Error(data?.message || '매핑을 못 읽었습니다');
+    if (!data?.mapping) throw new Error(data?.message || '매핑을 불러오지 못했습니다');
     const rows = withKeys(Array.isArray(data.mapping.mappings) ? data.mapping.mappings : []);
     Object.assign(ui, {
       fileId, revision: String(data.file?.mapping_revision || data.file?.revision || ''), name: String(data.mapping.name || fileId.replace(/\.ya?ml$/, '')),
@@ -87,7 +87,7 @@ async function save(state, changed, { apply = false } = {}) {
   const problems = draftProblems(ui.rows);
   if (problems.length) { toast(problems[0], 'bad'); return; }
   if (apply) {
-    const go = await act.confirmApplyMotorConfig('조인트 매핑을 저장한 뒤 바로 장비에 적용합니다 · 운전 한계(소프트 리밋)가 새 범위로 바뀝니다.');
+    const go = await act.confirmApplyMotorConfig('조인트 매핑을 저장한 뒤 바로 장비에 적용합니다. 운전 한계(소프트 리밋)가 새 범위로 바뀝니다.');
     if (!go) return;
   }
   ui.busy = '저장 중';
@@ -106,8 +106,8 @@ async function save(state, changed, { apply = false } = {}) {
   } catch (error) {
     if (isRevisionConflict(error.message)) {
       const reload = await confirmBox({
-        title: '다른 화면에서 먼저 바꿨습니다',
-        body: '이 화면을 연 뒤 조인트 매핑이 바뀌었습니다.\n고친 것을 버리고 다시 불러올까요? 「그대로 두기」 를 고르면 고친 것이 남고, 다시 저장할 수 있습니다.',
+        title: '다른 화면에서 먼저 변경되었습니다',
+        body: '이 화면을 연 뒤 조인트 매핑이 변경되었습니다.\n수정한 내용을 버리고 다시 불러올까요? 「취소」를 누르면 수정한 내용이 남아 있어 다시 저장할 수 있습니다.',
         confirmLabel: '버리고 다시 불러오기', tone: 'warning',
       });
       if (reload) await loadMapping(state, changed, { force: true });
@@ -180,14 +180,14 @@ function table(state, changed) {
       h('td', {}, h('div', { class: 'cell-row' },
         numberInput(row, 'reference_position_deg', changed, { label: '기준점 모터 deg' }),
         h('button', { class: 'btn btn-mini', type: 'button', disabled: !canCapture || !motor || motor.positionDeg === null,
-          title: canCapture ? '지금 모터 위치를 기준점(조인트 0°)으로 · 저장해야 남습니다' : '이 프로젝트 모터 설정을 장비에 적용한 뒤 캡처할 수 있습니다',
+          title: canCapture ? '현재 모터 위치를 기준점(조인트 0°)으로 설정합니다. 저장해야 반영됩니다.' : '이 프로젝트의 모터 설정을 장비에 적용해야 캡처할 수 있습니다',
           onclick: () => { row.reference_position_deg = Math.round(motor.positionDeg * 1e4) / 1e4; row.reference_enabled = true; changed(); } }, '캡처'))),
       h('td', {}, h('div', { class: 'cell-row' },
         numberInput(row, 'motion_lower_deg', changed, { label: '최소', after: autoConfirmRange }), h('span', { class: 'muted', text: '~' }),
         numberInput(row, 'motion_upper_deg', changed, { label: '최대', after: autoConfirmRange }))),
       h('td', { class: row.enabled && !rangeConfirmed(row) ? 'range-unconfirmed' : '' },
         h('input', { type: 'checkbox', checked: rangeConfirmed(row), 'aria-label': `${index + 1}번 줄 범위 확인`,
-          title: '최소·최대가 이 로봇의 실제 기계 범위인지 · 확인하고 저장하기 전에는 재생·초기 이동·수동 조작이 안 됩니다 · 최소·최대를 둘 다 고치면 저절로 체크',
+          title: '최소·최대가 이 로봇의 실제 기계 범위인지 확인하는 칸입니다. 확인하고 저장하기 전에는 재생, 초기 이동, 수동 조작을 할 수 없습니다. 최소·최대를 둘 다 수정하면 자동으로 체크됩니다.',
           onchange: (e) => { row.range_confirmed = e.target.checked; changed(); } })),
       h('td', {}, h('div', { class: 'cell-row' },
         numberInput(row, 'max_velocity_deg_s', changed, { label: '최대 속도 deg/s', placeholder: '없음' }),
@@ -200,11 +200,11 @@ function table(state, changed) {
         } }, INITIAL_MODES.map(([value, label]) => h('option', { value, selected: row.initial_mode === value }, label))),
         row.initial_mode === 'manual' ? numberInput(row, 'initial_motion_position_deg', changed, { label: '지정 값 조인트 deg' }) : null)),
       h('td', { class: 'wrap' }, h('span', { class: `chip chip-${status.tone}`, title: status.text, text: status.text })),
-      h('td', {}, h('button', { class: 'btn btn-mini', type: 'button', 'aria-label': `${index + 1}번 줄 빼기`, onclick: () => {
+      h('td', {}, h('button', { class: 'btn btn-mini', type: 'button', 'aria-label': `${index + 1}번 줄 삭제`, onclick: () => {
         ui.rows = ui.rows.filter((r) => r !== row);
         if (ui.selected === row._key) ui.selected = ui.rows[0]?._key || '';
         changed();
-      } }, '빼기')));
+      } }, '삭제')));
     }))));
 }
 
@@ -217,7 +217,7 @@ function previewCard() {
     h('div', { class: 'card-head' }, h('h2', { text: `${row.motion_id || '(이름 없음)'} · 미리보기` })),
     h('p', { class: 'mono' }, `조인트 +1° → 모터 ${signedDeg(view.perDegree, 2)}°${row.invert ? ' (반대)' : ''}`),
     h('p', { class: 'mono' }, `범위 ${signedDeg(Number(row.motion_lower_deg))} ~ ${signedDeg(Number(row.motion_upper_deg))}° → 모터 한계 ${signedDeg(view.motorMin)} ~ ${signedDeg(view.motorMax)}°`),
-    h('p', { class: 'muted small', text: '저장 후 「장비에 적용」 하면 드라이브 소프트 리밋이 됩니다' }),
+    h('p', { class: 'muted small', text: '저장한 뒤 장비에 적용하면 드라이브 소프트 리밋으로 설정됩니다' }),
     validation ? h('div', { class: 'field' },
       h('span', { class: 'field-label', text: '검사' }),
       (validation.errors || []).length
@@ -243,36 +243,36 @@ export function renderMapping(state, { changed }) {
       ui.rows.push({ ...newRow(motor.axis, ''), motor_ref: motor.ref, _key: `k${keySeq += 1}` });
       added += 1;
     }
-    toast(added ? `모터 ${added}개 줄을 더했습니다 · 조인트 이름(Blender 본 이름)을 넣으세요` : '모든 모터에 이미 줄이 있습니다', added ? 'ok' : 'warn');
+    toast(added ? `모터 ${added}개의 줄을 추가했습니다. 조인트 이름(Blender 본 이름)을 입력하세요.` : '모든 모터에 이미 매핑 줄이 있습니다', added ? 'ok' : 'warn');
     changed();
   };
   return [
     h('div', { class: 'page-head' },
       h('h1', { text: '조인트 매핑' }),
       h('span', { class: 'spacer' }),
-      h('button', { class: 'btn', type: 'button', disabled: !motors.length, onclick: autoBuild }, '모터로 자동 만들기'),
+      h('button', { class: 'btn', type: 'button', disabled: !motors.length, onclick: autoBuild }, '모터로 자동 생성'),
       h('button', { class: 'btn', type: 'button', onclick: () => {
         const row = { ...newRow(null, ''), _key: `k${keySeq += 1}` };
         ui.rows.push(row);
         ui.selected = row._key;
         changed();
       } }, '+ 조인트'),
-      h('p', { class: 'muted small' }, '애니메이션의 조인트 → 이 PC 모터 · 모터 = 기준점 + 조인트 × 감속비 × 방향 · 파일 ',
-        h('span', { class: 'mono', text: ui.fileId || '(새로 만듦)' }), ' · ', h('a', { href: '#/pack', text: '로봇 팩과 비교' }))),
-    ui.loadError ? h('div', { class: 'blocker' }, dot('warn'), h('span', { class: 'grow', text: `다시 읽기 실패 · ${ui.loadError} · 고치던 것은 그대로` })) : null,
+      h('p', { class: 'muted small' }, '애니메이션의 조인트를 모터에 연결합니다. 모터 = 기준점 + 조인트 × 감속비 × 방향 · 파일 ',
+        h('span', { class: 'mono', text: ui.fileId || '(새 파일)' }), ' · ', h('a', { href: '#/pack', text: '로봇 팩과 비교' }))),
+    ui.loadError ? h('div', { class: 'blocker' }, dot('warn'), h('span', { class: 'grow', text: `다시 불러오기 실패 · ${ui.loadError} · 수정 중인 내용은 그대로 남아 있습니다` })) : null,
     unconfirmedRows(ui.rows).length ? h('div', { class: 'blocker bad' }, dot('bad'),
-      h('span', { class: 'grow', text: `범위 미확인 · ${unconfirmedRows(ui.rows).map((r) => r.motion_id).join(', ')} · 실제 기계 범위(최소·최대)를 넣거나 「범위 확인」 을 체크하고 저장하세요 · 그 전에는 재생·초기 이동·수동 조작이 막힙니다(수정 목록 97)` })) : null,
+      h('span', { class: 'grow', text: `범위 미확인 · ${unconfirmedRows(ui.rows).map((r) => r.motion_id).join(', ')}. 실제 기계 범위(최소·최대)를 입력하거나 「범위 확인」을 체크한 뒤 저장하세요. 그 전에는 재생, 초기 이동, 수동 조작이 차단됩니다.` })) : null,
     state.snap?.mapping_range_blocker && !unconfirmedRows(ui.rows).length && changeSummary(ui.saved, ui.rows).length
-      ? h('p', { class: 'muted small', text: '저장하면 범위 미확인이 풀립니다' }) : null,
+      ? h('p', { class: 'muted small', text: '저장하면 범위 미확인 상태가 해제됩니다' }) : null,
     h('section', { class: 'card', 'aria-label': '조인트' },
-      ui.rows.length ? table(state, changed) : h('p', { class: 'muted', text: '조인트가 없습니다 · 「모터로 자동 만들기」 를 누르세요' })),
+      ui.rows.length ? table(state, changed) : h('p', { class: 'muted', text: '조인트가 없습니다. 「모터로 자동 생성」을 누르세요.' })),
     previewCard(),
     h('div', { class: 'apply-bar' },
       h('div', { class: 'grow' },
-        h('span', { text: summary.length ? `저장 안 한 변경 ${summary.length} · ${summary.slice(0, 3).join(' · ')}${summary.length > 3 ? ' …' : ''}` : '저장됨' }),
+        h('span', { text: summary.length ? `저장하지 않은 변경 ${summary.length}개 · ${summary.slice(0, 3).join(' · ')}${summary.length > 3 ? ' …' : ''}` : '저장됨' }),
         problems.length ? h('p', { class: 'tone-text-warn small', text: problems[0] }) : null),
       h('button', { class: 'btn', type: 'button', disabled: Boolean(ui.busy) || !summary.length, onclick: () => { ui.rows = clone(ui.saved); changed(); } }, '되돌리기'),
       h('button', { class: 'btn btn-primary', type: 'button', disabled: Boolean(ui.busy) || Boolean(problems.length), onclick: () => save(state, changed) }, ui.busy || '저장'),
-      h('button', { class: 'btn btn-warn', type: 'button', disabled: Boolean(ui.busy) || Boolean(problems.length), onclick: () => save(state, changed, { apply: true }) }, '저장 · 장비에 적용 · 모터 재시작…')),
+      h('button', { class: 'btn btn-warn', type: 'button', disabled: Boolean(ui.busy) || Boolean(problems.length), onclick: () => save(state, changed, { apply: true }) }, '저장 후 장비에 적용…')),
   ];
 }

@@ -12,8 +12,8 @@ export const EDIT_FIELDS = [
   { key: 'profile_velocity', label: '프로파일 속도', unit: 'deg/s', min: 0 },
   { key: 'acceleration', label: '최대 가속', unit: 'deg/s²', min: 0 },
   { key: 'profile_acceleration', label: '프로파일 가속', unit: 'deg/s²', min: 0 },
-  { key: 'brake_delay_stop_ms', label: '브레이크 · 정지', unit: 'ms', ac: true, min: 0, max: 10000 },
-  { key: 'brake_delay_run_ms', label: '브레이크 · 동작', unit: 'ms', ac: true, min: 0, max: 10000 },
+  { key: 'brake_delay_stop_ms', label: '브레이크 지연 (정지)', unit: 'ms', ac: true, min: 0, max: 10000 },
+  { key: 'brake_delay_run_ms', label: '브레이크 지연 (동작)', unit: 'ms', ac: true, min: 0, max: 10000 },
 ];
 
 export function getField(motor, key) {
@@ -64,7 +64,7 @@ export function motorRows(registry, snap) {
       absolute: absText,
       absoluteTone: absTone,
       absoluteProblem: String(drive?.problem || ''),
-      comm: String(live.state || '없음'),
+      comm: live.state === 'detected' ? '연결됨' : live.state ? `연결 안 됨 (${live.state})` : '연결 안 됨',
       masterIndex: Number(motor.identity?.ethercat_master_index ?? motor.config?.ethercat_master_index ?? 0),
       slavePosition: Number(motor.config?.position ?? motor.identity?.slave_position),
     };
@@ -86,26 +86,26 @@ export function motorProblems(motors) {
     if (motor.deleted) continue;
     const at = `${motor.axis}번`;
     const name = String(motor.name || '').trim();
-    if (!name) problems.push(`${at} · 이름이 비었습니다`);
-    else if (names.has(name)) problems.push(`${at} · 이름 「${name}」 이 ${names.get(name)}번과 겹칩니다`);
+    if (!name) problems.push(`${at} · 이름이 비어 있습니다`);
+    else if (names.has(name)) problems.push(`${at} · 「${name}」 이름이 ${names.get(name)}번과 중복됩니다`);
     else names.set(name, motor.axis);
     for (const field of EDIT_FIELDS) {
       if (field.top || (field.ac && !isAc(motor))) continue;
       const raw = getField(motor, field.key);
       if (raw === null || raw === undefined || raw === '') continue;
       const value = Number(raw);
-      if (!Number.isFinite(value)) problems.push(`${at} · ${field.label} 숫자가 아닙니다`);
+      if (!Number.isFinite(value)) problems.push(`${at} · ${field.label} 값이 숫자가 아닙니다`);
       else if ((field.min !== undefined && value < field.min) || (field.max !== undefined && value > field.max)) {
-        problems.push(`${at} · ${field.label} 은 ${field.min}~${field.max ?? '∞'} ${field.unit}`);
+        problems.push(`${at} · ${field.label} 값은 ${field.min}~${field.max ?? '∞'} ${field.unit} 범위여야 합니다`);
       }
     }
     const config = motor.config || {};
     const pv = Number(config.profile_velocity);
     const rpm = Number(config.max_speed_rpm);
-    if (isAc(motor) && pv > 0 && rpm > 0 && pv > rpm * 6 + 1e-6) problems.push(`${at} · 프로파일 속도 ${pv} deg/s 가 최대 속도 ${rpm} rpm (${rpm * 6} deg/s) 보다 큽니다`);
+    if (isAc(motor) && pv > 0 && rpm > 0 && pv > rpm * 6 + 1e-6) problems.push(`${at} · 프로파일 속도 ${pv} deg/s가 최대 속도 ${rpm} rpm (${rpm * 6} deg/s)보다 큽니다`);
     const pa = Number(config.profile_acceleration);
     const acc = Number(config.acceleration);
-    if (pa > 0 && acc > 0 && pa > acc + 1e-6) problems.push(`${at} · 프로파일 가속 ${pa} 가 최대 가속 ${acc} 보다 큽니다`);
+    if (pa > 0 && acc > 0 && pa > acc + 1e-6) problems.push(`${at} · 프로파일 가속 ${pa}가 최대 가속 ${acc}보다 큽니다`);
   }
   return problems;
 }
@@ -117,13 +117,13 @@ export function motorChanges(saved, draft) {
   const out = [];
   // 검색 제안으로 빠진 · 새로 든 모터 · 번호가 바뀐 모터도 변경이다 · 수정 목록 100
   for (const old of saved || []) {
-    if (!after.has(old.id)) out.push(`${old.axis}번 ${old.name || ''} 뺌`.replace('  ', ' '));
+    if (!after.has(old.id)) out.push(`${old.axis}번 ${old.name || ''} 삭제`.replace('  ', ' '));
   }
   for (const motor of draft || []) {
     const old = before.get(motor.id);
-    if (!old) { out.push(`${motor.axis}번 ${motor.name || ''} 더함`.replace('  ', ' ')); continue; }
+    if (!old) { out.push(`${motor.axis}번 ${motor.name || ''} 추가`.replace('  ', ' ')); continue; }
     if (Number(old.axis) !== Number(motor.axis)) out.push(`${motor.name || motor.id} 번호 ${old.axis} → ${motor.axis}`);
-    for (const field of EDIT_FIELDS.concat([{ key: 'overload_monitor', label: '과부하 감시' }, { key: 'schedule_end_servo_off', label: '운영 끝 서보 끄기' }])) {
+    for (const field of EDIT_FIELDS.concat([{ key: 'overload_monitor', label: '과부하 감시' }, { key: 'schedule_end_servo_off', label: '운영 종료 시 서보 끄기' }])) {
       const a = field.top ? old[field.key] : old.config?.[field.key];
       const b = field.top ? motor[field.key] : motor.config?.[field.key];
       const same = (a ?? '') === (b ?? '') || (Number.isFinite(Number(a)) && Number.isFinite(Number(b)) && a !== '' && b !== '' && Number(a) === Number(b));
@@ -138,6 +138,6 @@ export function absoluteJobText(job) {
   if (!job || !job.state || job.state === 'idle') return '';
   const step = job.step_count ? ` · ${job.step_index ?? 0}/${job.step_count}` : '';
   const label = job.step_label ? ` · ${job.step_label}` : '';
-  const head = { running: '앱솔루트 설정 중', done: '앱솔루트 설정 끝', failed: '앱솔루트 설정 실패' }[job.state] || job.state;
+  const head = { running: '앱솔루트 설정 중', done: '앱솔루트 설정 완료', failed: '앱솔루트 설정 실패' }[job.state] || job.state;
   return `${head}${step}${label}${job.message ? ` · ${job.message}` : ''}${job.error ? ` · ${job.error}` : ''}`;
 }

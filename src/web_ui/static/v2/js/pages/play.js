@@ -6,7 +6,7 @@
 import { h, dot } from '../dom.js';
 import { runSummary } from '../model.js';
 import {
-  INITIAL_MOVE_OPTIONS, REPEAT_MODES,
+  initialMoveChoices, REPEAT_MODES,
   axisRows, defaultScope, groupRows, groupRuntime, groupScopeBlocker, groupStopCommand,
   isRunning, phaseSteps, playHeadline, registeredPlaylist, runStatus, startBlocker,
 } from '../play_model.js';
@@ -97,7 +97,7 @@ function fixButton(fix, navigate) {
   const map = {
     'mode-manual': ['수동으로 바꾸기', () => act.setRunMode('manual')],
     'restart-program': ['프로그램 다시 시작', act.restartProgram],
-    'ack-group-error': ['그룹 오류 풀기', act.ackGroupError],
+    'ack-group-error': ['그룹 오류 해제', act.ackGroupError],
     'open-mapping': ['조인트 매핑 열기', () => navigate('mapping')],
   };
   const entry = map[fix];
@@ -112,14 +112,14 @@ function scopeHeader(state, changed) {
   const count = group.peers.length || (group.joined ? 1 : 0);
   const groupBusy = group.active;
   return h('div', { class: 'page-head' },
-    h('h1', { text: '공연' }),
-    segmented('범위', [['local', '이 PC 만'], ['group', `매장 전체${count ? ` · ${count}대` : ''}`, groupBusy ? '' : blocker]], ui.scope, (value) => {
+    h('h1', { text: '재생' }),
+    segmented('범위', [['local', '단독'], ['group', `매장 전체${count ? ` · ${count}대` : ''}`, groupBusy ? '' : blocker]], ui.scope, (value) => {
       ui.scope = value;
       changed();
     }),
     h('p', { class: 'muted small', text: ui.scope === 'group'
-      ? (groupBusy ? '매장 전체 재생이 도는 중 · 멈춤 버튼은 매장 전체에 갑니다' : '각 PC 는 자기 재생 목록을 돌립니다 · 시작만 같이')
-      : (blocker && group.joined ? blocker : '이 PC 만 돌립니다 · 다른 PC 는 그대로') }));
+      ? (groupBusy ? '매장 전체 재생 중입니다. 정지 버튼을 누르면 매장 전체가 멈춥니다.' : '각 PC는 자기 재생 목록을 재생하고, 시작만 함께 합니다.')
+      : (blocker && group.joined ? blocker : '다른 PC와 상관없이 단독으로 재생합니다. 다른 PC는 영향을 받지 않습니다.') }));
 }
 
 /* ---------- 지금 · 버튼 ---------- */
@@ -137,7 +137,7 @@ function nowCard(state, changed, navigate) {
   const loopBlocked = status.capabilities?.continuous_run?.available === false
     && (ui.repeatMode === 'direct' || ui.repeatMode === 'dwell');
   const disabled = Boolean(blocker) || ui.busy;
-  const scopeText = group ? '매장 전체' : '이 PC';
+  const scopeText = group ? '매장 전체' : '단독';
 
   const start = (runMode) => busy(() => (group
     ? act.startGroup({ ...runSettings(runMode), sync_mode: ui.syncMode || 'lockstep' })
@@ -157,23 +157,23 @@ function nowCard(state, changed, navigate) {
     head.moving ? h('div', { class: 'progress', role: 'progressbar', 'aria-valuemin': '0', 'aria-valuemax': '100', 'aria-valuenow': String(Math.round(run.ratio * 100)) },
       h('div', { class: 'progress-fill', style: { width: `${(run.ratio * 100).toFixed(1)}%` } })) : null,
     head.moving ? h('div', { class: 'now-meta' }, h('span', { class: 'mono', text: run.timeText }),
-      h('span', { text: status.summary?.target_cycle_count ? `${status.summary.target_cycle_count}회차 뒤 멈춤` : '' })) : null,
+      h('span', { text: status.summary?.target_cycle_count ? `${status.summary.target_cycle_count}회차 후 정지` : '' })) : null,
     h('div', { class: 'controls' },
       h('div', { class: 'row' },
         h('button', { class: 'btn', type: 'button', disabled: disabled || running, onclick: initialize,
-          title: '재생 목록 첫 애니메이션의 첫 자세로 천천히 갑니다' }, '초기 위치로'),
+          title: '재생 목록 첫 애니메이션의 첫 자세로 천천히 이동합니다' }, '초기 위치로'),
         h('button', { class: 'btn btn-primary', type: 'button', disabled: disabled || running, onclick: () => start('once') }, '1회 시작'),
         h('button', { class: 'btn btn-primary', type: 'button', disabled: disabled || running || loopBlocked, onclick: () => start('continuous'),
-          title: loopBlocked ? '시작·끝 자세가 달라 「바로 다음」 으로는 못 이어 돕니다' : '' }, '연속 시작')),
+          title: loopBlocked ? '시작 자세와 끝 자세가 달라 「바로 다음 회차」로 이어서 재생할 수 없습니다' : '' }, '연속 시작')),
       h('span', { class: 'spacer' }),
       h('div', { class: 'row' },
-        h('button', { class: 'btn', type: 'button', disabled: !running, onclick: stopAfter }, '이 회차 끝나면 멈춤'),
-        h('button', { class: 'btn btn-danger', type: 'button', disabled: !running, onclick: () => act.stopNow(group) }, `지금 멈춤 · ${scopeText}`))),
+        h('button', { class: 'btn', type: 'button', disabled: !running, onclick: stopAfter }, '이번 회차 후 정지'),
+        h('button', { class: 'btn btn-danger', type: 'button', disabled: !running, onclick: () => act.stopNow(group) }, `즉시 정지 · ${scopeText}`))),
     blocker && !running ? h('div', { class: 'blocker' },
       dot('warn'),
-      h('span', { class: 'grow', text: `시작 버튼이 꺼진 이유 · ${blocker.text}` }),
+      h('span', { class: 'grow', text: `시작할 수 없는 이유: ${blocker.text}` }),
       fixButton(blocker.fix, navigate)) : null,
-    loopBlocked && !blocker ? h('p', { class: 'muted small', text: '연속 시작이 꺼진 이유 · 시작·끝 자세가 달라 「바로 다음」 으로 이어 돌 수 없습니다 · 반복을 「초기 위치 → 다음」 으로 바꾸세요' }) : null);
+    loopBlocked && !blocker ? h('p', { class: 'muted small', text: '연속 시작을 할 수 없습니다. 시작 자세와 끝 자세가 달라 「바로 다음 회차」로 이어서 재생할 수 없습니다. 반복을 「초기 위치로 돌아간 뒤 다음 회차」로 바꾸세요.' }) : null);
 }
 
 /* ---------- PC 별 (매장 전체) ---------- */
@@ -182,17 +182,17 @@ function groupCard(state) {
   const rows = groupRows(state.snap);
   const execution = groupRuntime(state.snap).execution;
   const spread = Number(execution.start_spread_ms);
-  return h('section', { class: 'card', 'aria-label': 'PC 별' },
-    h('div', { class: 'card-head' }, h('h2', { text: 'PC 별' }),
+  return h('section', { class: 'card', 'aria-label': 'PC별 상태' },
+    h('div', { class: 'card-head' }, h('h2', { text: 'PC별 상태' }),
       Number.isFinite(spread) && execution.execution_id ? h('span', { class: 'muted small mono', text: `시작 편차 ${spread.toFixed(0)} ms` }) : null),
     rows.length
       ? h('ul', { class: 'list' }, rows.map((row) => h('li', { class: 'list-row' },
         dot(row.tone),
-        h('span', { class: 'pc-cell' }, row.name, row.local ? h('small', { class: 'muted', text: ' · 이 PC' }) : null),
+        h('span', { class: 'pc-cell' }, row.name, row.local ? h('small', { class: 'muted', text: ' · 현재 접속' }) : null),
         h('span', { class: 'mono muted cycle-cell', text: row.cycle }),
         h('span', { class: `grow tone-text-${row.tone}`, text: row.note }),
         row.progress ? h('span', { class: 'mono muted small', text: row.progress }) : null)))
-      : h('p', { class: 'muted', text: '같은 그룹의 다른 PC 가 아직 안 보입니다' }));
+      : h('p', { class: 'muted', text: '같은 그룹의 다른 PC가 아직 보이지 않습니다' }));
 }
 
 /* ---------- 재생 목록 ---------- */
@@ -201,7 +201,7 @@ function groupCard(state) {
 
 function repeatCard(state, changed) {
   const group = ui.scope === 'group';
-  const mappingTime = (state.play?.mapping?.mappings || []).find((row) => row.initial_move_time_sec)?.initial_move_time_sec;
+  const moveTime = initialMoveChoices(state.play?.mapping?.mappings, ui.initialMove);
   const pickRepeat = (value) => {
     ui.repeatMode = value;
     changed();
@@ -215,22 +215,23 @@ function repeatCard(state, changed) {
         REPEAT_MODES.map((mode) => h('button', {
           class: 'choice', type: 'button', role: 'radio', 'aria-checked': String(ui.repeatMode === mode.id), onclick: () => pickRepeat(mode.id),
         }, mode.label))),
-      ui.repeatMode?.startsWith('dwell') ? h('label', { class: 'inline' }, '기다림',
+      ui.repeatMode?.startsWith('dwell') ? h('label', { class: 'inline' }, '대기 시간',
         h('input', { class: 'input num-input', type: 'number', min: '0', step: '1', value: String(ui.dwellSec),
           onchange: (event) => { ui.dwellSec = Math.max(0, Number(event.target.value) || 0); act.saveAutomation({ dwell_sec: ui.dwellSec }); } }),
         '초') : null),
     h('div', { class: 'field' },
-      h('span', { class: 'field-label', text: '첫 자세로 가는 시간' }),
-      segmented('첫 자세로 가는 시간', INITIAL_MOVE_OPTIONS.map((value) => [value, value === null
-        ? `매핑 설정${mappingTime ? ` (${Number(mappingTime)} s)` : ''}` : `${value} s`]), ui.initialMove, (value) => { ui.initialMove = value; changed(); })),
+      h('span', { class: 'field-label', text: '초기 위치 이동 시간' }),
+      group
+        ? h('span', { class: 'muted small', text: 'PC마다 조인트 매핑에 저장된 시간을 씁니다' })
+        : segmented('초기 위치 이동 시간', moveTime.options, moveTime.selected, (value) => { ui.initialMove = moveTime.pick(value); changed(); })),
     h('div', { class: 'field' },
-      h('label', { class: 'inline' }, h('span', { class: 'field-label', text: '몇 회차 뒤 멈춤' }),
+      h('label', { class: 'inline' }, h('span', { class: 'field-label', text: '정지할 회차' }),
         h('input', { class: 'input num-input', type: 'number', min: '0', step: '1', value: String(ui.targetCycles),
           onchange: (event) => { ui.targetCycles = Math.max(0, Math.floor(Number(event.target.value) || 0)); changed(); } }),
-        h('span', { class: 'muted small', text: '0 = 계속' }))),
+        h('span', { class: 'muted small', text: '0 = 계속 반복' }))),
     group ? h('div', { class: 'field' },
-      h('span', { class: 'field-label', text: 'PC 사이' }),
-      segmented('PC 사이', [['lockstep', '회차 맞춤 (짧은 PC 가 기다림)'], ['independent', '각자 재생 (처음만 같이)']], ui.syncMode || 'lockstep', (value) => {
+      h('span', { class: 'field-label', text: 'PC 간 동기화' }),
+      segmented('PC 간 동기화', [['lockstep', '회차 맞춤 (짧은 PC가 기다림)'], ['independent', '각자 재생 (시작만 함께)']], ui.syncMode || 'lockstep', (value) => {
         ui.syncMode = value;
         changed();
         act.saveAutomation({ group_sync_mode: value });
@@ -242,11 +243,11 @@ function repeatCard(state, changed) {
 function axesCard(state) {
   const rows = axisRows(state.snap, state.play?.mapping);
   return h('section', { class: 'card', 'aria-label': '실행 축' },
-    h('div', { class: 'card-head' }, h('h2', { text: '실행 축 · 이 PC' })),
-    h('p', { class: 'muted small', text: '끄면 그 자리에 섭니다 · 다시 켜도 돌던 중이면 다음 회차부터 · 저장되지 않습니다(프로그램을 다시 시작하면 다 켜짐)' }),
+    h('div', { class: 'card-head' }, h('h2', { text: '실행 축' })),
+    h('p', { class: 'muted small', text: '끄면 그 축은 현재 위치에서 멈춥니다. 재생 중에 다시 켜면 다음 회차부터 적용됩니다. 이 설정은 저장되지 않으며, 프로그램을 다시 시작하면 모두 켜집니다.' }),
     rows.length
       ? h('div', { class: 'table-wrap' }, h('table', { class: 'table' },
-        h('thead', {}, h('tr', {}, ['사용', '조인트', '모터', '범위', '지금', '범위로 자름', '상태'].map((text) => h('th', { scope: 'col', text })))),
+        h('thead', {}, h('tr', {}, ['사용', '조인트', '모터', '범위', '지금', '범위 제한', '상태'].map((text) => h('th', { scope: 'col', text })))),
         h('tbody', {}, rows.map((row) => h('tr', { class: row.muted ? 'muted-row' : '' },
           h('td', {}, h('label', { class: 'switch' },
             h('input', { type: 'checkbox', role: 'switch', checked: !row.muted, 'aria-label': `${row.id} 사용`,
@@ -266,7 +267,7 @@ function previewCard(state) {
   const status = runStatus(state.snap);
   const fileId = String(status.motion_file_id || registeredPlaylist(state.play?.mapping)[0] || '');
   return h('section', { class: 'card', 'aria-label': '3D' },
-    h('div', { class: 'card-head' }, h('h2', { text: '3D · 실물과 같이' }), h('a', { href: '#/pack', text: '로봇 팩·3D' })),
+    h('div', { class: 'card-head' }, h('h2', { text: '3D · 실물과 동기화' }), h('a', { href: '#/pack', text: '로봇 팩·3D' })),
     getViewer3d().update(state, { fileId }));
 }
 

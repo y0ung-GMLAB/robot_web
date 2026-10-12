@@ -18,7 +18,7 @@ export function runMode(sched) {
 export function modePhrase(sched) {
   const mode = runMode(sched);
   if (mode === 'manual') return '수동';
-  if (mode === 'off') return '끔 · 명령 막힘';
+  if (mode === 'off') return '끔 · 명령 차단';
   if (mode === 'schedule') return sched?.active_schedule_id ? '자동 운영 중' : '운영 시간 외';
   return '상태 확인 중';
 }
@@ -44,6 +44,12 @@ export function networkPcs(snap) {
   return Array.isArray(list) ? list : [];
 }
 
+/** 접속한 PC 이름 · 「이 PC」 대신 · 단독/전체를 나눠 말해야 할 때만 */
+export function localName(state) {
+  const snap = state?.snap;
+  return String(snap?.system_info?.hostname || snap?.coordination?.config?.pc_id || '현재 PC');
+}
+
 export function pcName(pc) {
   return String(pc?.display_name || pc?.pc_id || '-');
 }
@@ -54,33 +60,33 @@ export function collectIssues(snap, sched, { connected = true } = {}) {
   const bad = (title, detail = '', action = null) => issues.push({ tone: 'bad', title, detail, action });
   const warn = (title, detail = '', action = null) => issues.push({ tone: 'warn', title, detail, action });
   if (!connected) {
-    bad('이 PC 서버와 연결이 끊겼습니다', '프로그램이 다시 뜨는 중일 수 있습니다 · 저절로 다시 붙습니다');
+    bad('서버와 연결이 끊겼습니다', '프로그램이 다시 시작되는 중일 수 있습니다. 잠시 후 자동으로 다시 연결됩니다.');
     return issues;
   }
   if (!snap) return issues;
   const safety = snap.safety_status || {};
   if (safety.emergency_latched) {
-    bad('긴급 정지로 잠겨 있습니다', '모터 명령이 모두 막혔습니다 · 프로그램을 다시 시작해야 풀립니다',
+    bad('긴급 정지 상태입니다', '모든 모터 명령이 차단되었습니다. 프로그램을 다시 시작해야 해제됩니다.',
       { kind: 'restart-program', label: '프로그램 다시 시작' });
   }
   const watchdog = String(snap.supervisor_watchdog?.message || '');
   if (watchdog) bad('모터 제어가 응답하지 않습니다', watchdog);
   const absolute = String(snap.minas_absolute_blocker || '');
   if (absolute) {
-    bad('앱솔루트 미확인 · 모터를 움직일 수 없습니다', absolute,
-      { kind: 'open', target: 'maintain-motors', label: '정비에서 설정' });
+    bad('앱솔루트 방식이 확인되지 않아 모터를 움직일 수 없습니다', absolute,
+      { kind: 'open', target: 'maintain-motors', label: '모터·드라이브에서 설정' });
   }
   // 조인트 범위 미확인 · 재생·초기 이동·수동 조작이 막혀 있다 · 판정은 서버 · 수정 목록 97
   const range = String(snap.mapping_range_blocker || '');
   if (range) {
-    bad('조인트 범위 미확인 · 재생·수동 조작이 막혀 있습니다', range,
+    bad('조인트 범위가 확인되지 않아 재생과 수동 조작이 차단되어 있습니다', range,
       { kind: 'open', target: 'mapping', label: '조인트 매핑 열기' });
   }
   const motors = Array.isArray(snap.motion_state?.motors) ? snap.motion_state.motors : [];
   const faulted = motors.filter((m) => m && m.fault);
   if (faulted.length) {
     const names = faulted.map((m) => `${m.controller_index}번${motorErrorText(m) ? ` (${motorErrorText(m)})` : ''}`).join(' · ');
-    bad(`모터 알람 · ${names}`, '걸린 것이 없는지 보고 오류 초기화',
+    bad(`모터 알람 · ${names}`, '기구에 걸린 것이 없는지 확인한 뒤 오류를 초기화하세요',
       { kind: 'fault-reset', label: '오류 초기화' });
   }
   const run = snap.motion_run_status || {};
@@ -89,27 +95,27 @@ export function collectIssues(snap, sched, { connected = true } = {}) {
   }
   const group = snap.coordination?.runtime?.coordination_error || {};
   if (group.active) {
-    bad('그룹 오류', String(group.message || ''), { kind: 'ack-group-error', label: '확인하고 풀기' });
+    bad('그룹 오류', String(group.message || ''), { kind: 'ack-group-error', label: '확인 후 해제' });
   }
   const failure = sched?.last_failure || {};
   const failCount = Number(failure.count) || 0;
   if (failCount > 0) {
-    const entry = [`스케줄 시작 거부 ${failCount}회`, String(failure.message || '이유를 알려 주지 않았습니다')];
+    const entry = [`스케줄 시작 거부됨 (${failCount}회)`, String(failure.message || '거부 사유가 전달되지 않았습니다')];
     if (failCount >= 3) bad(...entry); else warn(...entry);
   }
   const unreadable = Array.isArray(sched?.unreadable_schedules) ? sched.unreadable_schedules.filter(Boolean) : [];
   if (unreadable.length) {
-    warn(`시각을 읽을 수 없는 스케줄 ${unreadable.length}`, unreadable.join(' · '), { kind: 'open', target: 'schedule', label: '스케줄 고치기' });
+    warn(`시각을 읽을 수 없는 스케줄 ${unreadable.length}개`, unreadable.join(' · '), { kind: 'open', target: 'schedule', label: '스케줄 수정' });
   }
   const pcs = networkPcs(snap);
   const differing = pcs.filter((pc) => !pc.is_local && pc.role !== 'speaker' && (pc.version_differs || pc.protocol_mismatch));
   if (differing.length) {
-    warn(`${differing.map(pcName).join(' · ')} 버전이 다릅니다`, '다음 그룹 시작에서 빠집니다',
+    warn(`${differing.map(pcName).join(' · ')} 버전이 다릅니다`, '다음 그룹 재생에서 제외됩니다',
       { kind: 'update-all', label: '모든 PC 업데이트' });
   }
   const offline = pcs.filter((pc) => !pc.is_local && pc.online === false);
   if (offline.length) {
-    warn(`${offline.map(pcName).join(' · ')} 연결 안 됨`, 'PC 가 꺼졌거나 Wi-Fi 가 끊겼습니다');
+    warn(`${offline.map(pcName).join(' · ')} 연결 안 됨`, 'PC가 꺼졌거나 Wi-Fi 연결이 끊겼습니다');
   }
   return issues.sort((a, b) => (a.tone === b.tone ? 0 : a.tone === 'bad' ? -1 : 1));
 }
@@ -121,7 +127,7 @@ export function headline(snap, sched, options = {}) {
   const first = issues[0];
   if (first && first.tone === 'bad') return { tone: 'bad', text: first.title, issues };
   if (issues.length) return { tone: 'warn', text: `${mode} · 확인할 일 ${issues.length}개`, issues };
-  if (runMode(sched) === 'manual') return { tone: 'info', text: '수동 · 스케줄이 손대지 않음', issues };
+  if (runMode(sched) === 'manual') return { tone: 'info', text: '수동 · 스케줄 동작 안 함', issues };
   return { tone: 'ok', text: `정상 · ${mode}`, issues };
 }
 
@@ -144,7 +150,7 @@ export function runSummary(snap) {
   const group = Boolean(run.group_execution);
   const participants = snap?.coordination?.runtime?.execution?.participants;
   const count = Array.isArray(participants) ? participants.length : 0;
-  const scope = group ? (count ? `매장 전체 ${count}대` : '매장 전체') : '이 PC';
+  const scope = group ? (count ? `매장 전체 ${count}대` : '매장 전체') : '단독';
   const cycle = Number(run.current_cycle) || 0;
   const progress = run.progress || {};
   const elapsed = Number(progress.elapsed_sec) || 0;
@@ -153,11 +159,12 @@ export function runSummary(snap) {
   const continuous = String(run.run_mode || '') === 'continuous';
   let title = '대기 상태';
   if (RUNNING_STATES.has(state)) title = `${file || '애니메이션'} 재생 중`;
-  else if (state === 'initializing') title = '첫 자세로 천천히 가는 중';
+  else if (state === 'initializing') title = '초기 위치로 천천히 이동 중';
   else if (state === 'recovering') title = '자동 복구 중';
-  else if (state === 'initialized') title = '첫 자세에서 기다림';
+  else if (state === 'initialized') title = '초기 위치에서 대기 중';
   else if (state === 'error') title = '오류로 멈춤';
-  const parts = [scope];
+  // 대기·오류일 땐 범위가 의미 없다 · 움직이거나 초기 위치에서 기다릴 때만
+  const parts = MOVING_STATES.has(state) || state === 'initialized' ? [scope] : [];
   if (cycle > 0 && MOVING_STATES.has(state)) parts.push(`${cycle}회차`);
   if (continuous && MOVING_STATES.has(state)) parts.push('연속');
   return {
@@ -202,7 +209,7 @@ export function pcRows(snap) {
     let note = pc.role === 'speaker' ? '스피커' : (pc.is_master ? '마스터' : '슬레이브');
     if (pc.online === false) { tone = 'bad'; note = '연결 안 됨'; }
     else if (pc.version_differs || pc.protocol_mismatch) { tone = 'warn'; note = '버전 다름'; }
-    else if (pc.role !== 'speaker' && pc.joined === false) { tone = 'info'; note = '그룹 참여 꺼짐'; }
+    else if (pc.role !== 'speaker' && pc.joined === false) { tone = 'info'; note = '그룹 미참여'; }
     return { name: pcName(pc), local: Boolean(pc.is_local), tone, note, url: String(pc.web_url || '') };
   });
 }

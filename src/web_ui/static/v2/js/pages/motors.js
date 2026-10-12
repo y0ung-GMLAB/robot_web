@@ -85,17 +85,17 @@ async function servo(row, action, state, changed) {
 
 async function maintenance(row, action, state, changed) {
   const texts = {
-    eeprom_save: { title: `${row.axis}번 드라이브에 저장 (EEPROM)`, body: '드라이브의 지금 값을 전원을 꺼도 남게 저장합니다. Motor Manager 를 잠시 멈췄다가 다시 띄웁니다(몇 초) · 그동안 모터는 서보가 풀릴 수 있습니다.\n저장 중(최대 10초) 드라이브 전원을 끄지 마세요.', tone: 'warning', label: '저장' },
-    absolute_clear: { title: `${row.axis}번 다회전 클리어`, body: '엔코더의 회전 수 기록을 0 으로 지웁니다 · 위치 기준이 바뀝니다.\n서보가 꺼져 있어야 합니다 · 끝나면 드라이브 전원을 껐다 켜세요 · 위치 숫자가 바뀌어 기준점을 다시 캡처해야 합니다. 그 전에는 재생하지 마세요.', tone: 'danger', label: '클리어' },
+    eeprom_save: { title: `${row.axis}번 드라이브에 저장 (EEPROM)`, body: '드라이브의 현재 설정값을 전원을 꺼도 유지되도록 저장합니다. Motor Manager를 잠시 멈췄다가 다시 시작하며(몇 초), 그동안 서보가 풀릴 수 있습니다.\n저장하는 동안(최대 10초) 드라이브 전원을 끄지 마세요.', tone: 'warning', label: '저장' },
+    absolute_clear: { title: `${row.axis}번 다회전 클리어`, body: '엔코더의 회전 수 기록을 0으로 초기화합니다. 위치 기준이 바뀝니다.\n서보가 꺼져 있어야 합니다. 끝나면 드라이브 전원을 껐다 켜세요. 위치 값이 바뀌므로 기준점을 다시 캡처해야 하며, 그 전에는 재생하지 마세요.', tone: 'danger', label: '클리어' },
   }[action];
-  if (action === 'absolute_clear' && row.servoOn) { toast('서보를 먼저 끄세요 · 다회전 클리어는 서보가 꺼져 있어야 합니다', 'warn'); return; }
+  if (action === 'absolute_clear' && row.servoOn) { toast('서보를 먼저 끄세요. 다회전 클리어는 서보가 꺼진 상태에서만 할 수 있습니다.', 'warn'); return; }
   const ok = await confirmBox({ ...texts, confirmLabel: texts.label });
   if (!ok) return;
-  const result = await run(`${row.axis}번 정비`, () => api('POST', '/api/motor-config/drive-maintenance', {
+  const result = await run(`${row.axis}번 드라이브 관리`, () => api('POST', '/api/motor-config/drive-maintenance', {
     body: { action, axis: row.axis, confirmed: true }, timeoutMs: 60000,
   }), state, changed);
   if (result?.power_cycle_required) {
-    await confirmBox({ title: '드라이브 전원 재투입 필요', body: '드라이브 전원을 껐다 켜야 바뀐 값이 들어갑니다. 켠 뒤 기준점을 다시 캡처하세요.', confirmLabel: '알겠습니다' });
+    await confirmBox({ title: '드라이브 전원을 껐다 켜야 합니다', body: '드라이브 전원을 껐다 켜야 바뀐 값이 적용됩니다. 전원을 켠 뒤 기준점을 다시 캡처하세요.', confirmLabel: '확인' });
   }
 }
 
@@ -107,10 +107,10 @@ async function absoluteSetup(scope, row, state, changed) {
   } catch (error) { toast(error.message || String(error), 'bad'); return; }
   const targets = (preview?.targets || []).map((t) => `· ${t.label || t.axis}${t.problem ? ` (${t.problem})` : ''}`);
   const skipped = (preview?.skipped || []).map((t) => `· ${t.label || t.axis} · ${t.reason || '이미 정상'}`);
-  if (!targets.length) { toast(preview?.message || '할 것이 없습니다 · 이미 앱솔루트 정상', 'ok'); return; }
+  if (!targets.length) { toast(preview?.message || '설정할 모터가 없습니다. 모두 이미 앱솔루트 방식입니다.', 'ok'); return; }
   const ok = await confirmBox({
     title: '앱솔루트 설정',
-    body: `대상\n${targets.join('\n')}${skipped.length ? `\n\n건너뜀(이미 정상 · 다시 하면 기준점이 사라짐)\n${skipped.join('\n')}` : ''}\n\n${(preview?.steps || []).map((s, i) => `${i + 1}. ${s.label || s}`).join('\n')}\n\n대상 축 서보를 끄고 Motor Manager 를 두 번 잠시 멈춥니다. 중간에 드라이브 전원을 두 번 껐다 켜야 합니다(화면이 알려 줍니다). 끝나면 위치 숫자가 바뀌어 기준점을 다시 캡처해야 합니다.`,
+    body: `대상\n${targets.join('\n')}${skipped.length ? `\n\n건너뜀(이미 정상 · 다시 하면 기준점이 사라짐)\n${skipped.join('\n')}` : ''}\n\n${(preview?.steps || []).map((s, i) => `${i + 1}. ${s.label || s}`).join('\n')}\n\n대상 축의 서보를 끄고 Motor Manager를 두 번 잠시 멈춥니다. 중간에 드라이브 전원을 두 번 껐다 켜야 합니다(화면에 안내가 나옵니다). 끝나면 위치 값이 바뀌므로 기준점을 다시 캡처해야 합니다.`,
     confirmLabel: '시작', tone: 'danger',
   });
   if (!ok) return;
@@ -129,10 +129,10 @@ async function scan(kind, state, changed) {
   const spec = SCAN_KINDS[kind];
   const ok = await confirmBox({
     title: `모터 검색 · ${spec.label}`,
-    body: `${kind === 'dxl' ? '다이나믹셀' : kind === 'ac' ? 'AC 서보(EtherCAT)' : 'AC 서보와 다이나믹셀'}를 찾습니다(수십 초 · 실패하면 몇 번 다시).\n`
-      + '찾는 동안 모터 프로그램(Motor Manager)이 잠시 멈췄다 다시 켜집니다 · 서보가 풀릴 수 있으니 기구를 받치고, 움직이는 축이 없을 때 하세요.\n\n'
-      + `결과는 저장하기 전까지 화면에만 있습니다 · ${kind === 'all' ? '' : '검색 안 한 쪽 모터는 그대로 둡니다 · '}이름과 드라이브 값은 지킵니다.`
-      + (dirty() ? '\n\n저장 안 한 변경은 검색 결과로 바뀝니다.' : ''),
+    body: `${kind === 'dxl' ? '다이나믹셀' : kind === 'ac' ? 'AC 서보(EtherCAT)' : 'AC 서보와 다이나믹셀'} 모터를 검색합니다(수십 초 걸리며, 실패하면 몇 번 다시 시도합니다).\n`
+      + '검색하는 동안 모터 프로그램(Motor Manager)이 잠시 멈췄다가 다시 켜집니다. 서보가 풀릴 수 있으니 기구를 받치고, 움직이는 축이 없을 때 진행하세요.\n\n'
+      + `검색 결과는 저장하기 전까지 화면에만 표시됩니다. ${kind === 'all' ? '' : '검색하지 않은 종류의 모터는 그대로 둡니다. '}모터 이름과 드라이브 설정값은 유지됩니다.`
+      + (dirty() ? '\n\n저장하지 않은 변경 내용은 검색 결과로 대체됩니다.' : ''),
     confirmLabel: '검색', tone: 'warning',
   });
   if (!ok) return;
@@ -169,7 +169,7 @@ async function scan(kind, state, changed) {
 }
 
 async function cancelScan(changed) {
-  try { toast((await api('POST', '/api/motors/scan/cancel'))?.message || '다음 장치 종류 전에 멈춥니다', 'ok'); } catch (error) { toast(error.message || String(error), 'bad'); }
+  try { toast((await api('POST', '/api/motors/scan/cancel'))?.message || '다음 장치 종류를 검색하기 전에 멈춥니다', 'ok'); } catch (error) { toast(error.message || String(error), 'bad'); }
   changed();
 }
 
@@ -179,16 +179,16 @@ function scanBox(changed) {
   if (s.running) {
     return h('div', { class: 'busy-line', role: 'status' }, h('span', { class: 'spinner', 'aria-hidden': 'true' }),
       h('span', { class: 'grow', text: `모터 검색 중 · ${SCAN_KINDS[s.kind].label} · ${s.step}` }),
-      h('button', { class: 'btn btn-mini', type: 'button', onclick: () => cancelScan(changed) }, '멈추기'));
+      h('button', { class: 'btn btn-mini', type: 'button', onclick: () => cancelScan(changed) }, '중지'));
   }
   const tone = s.success ? 'ok' : s.partial ? 'warn' : 'bad';
   const sum = s.summary;
   return h('div', { class: `blocker ${tone === 'ok' ? 'ok' : tone === 'bad' ? 'bad' : ''}` }, dot(tone),
     h('div', { class: 'grow' },
-      h('strong', { text: `검색 ${s.success ? '끝' : s.partial ? '일부만' : '실패'} · ${SCAN_KINDS[s.kind].label}${sum ? ` · 짝지음 ${sum.matched} · 새로 ${sum.added} · 뺌 ${sum.removed}${sum.kept ? ` · 그대로 ${sum.kept}` : ''}` : ''}` }),
+      h('strong', { text: `검색 ${s.success ? '완료' : s.partial ? '일부 완료' : '실패'} · ${SCAN_KINDS[s.kind].label}${sum ? ` · 일치 ${sum.matched} · 추가 ${sum.added} · 삭제 ${sum.removed}${sum.kept ? ` · 유지 ${sum.kept}` : ''}` : ''}` }),
       s.message ? h('p', { class: 'small', text: s.message }) : null,
       s.notes.length ? h('ul', { class: 'list small' }, s.notes.map((note) => h('li', { text: note }))) : null,
-      sum ? h('p', { class: 'small muted', text: '아직 저장 전입니다 · 이름을 확인하고 아래 「저장」 → 「장비에 적용」' }) : null),
+      sum ? h('p', { class: 'small muted', text: '아직 저장하지 않았습니다. 이름을 확인한 뒤 아래 「저장 후 장비에 적용」을 누르세요.' }) : null),
     h('button', { class: 'btn btn-mini', type: 'button', onclick: () => { ui.scan = null; changed(); } }, '닫기'));
 }
 
@@ -201,7 +201,7 @@ async function save(state, changed, { apply = false } = {}) {
   try {
     const result = await api('PUT', '/api/motor-config', { body: { registry: ui.draft, base_revision: ui.revision }, timeoutMs: 20000 });
     // 바꾼 것이 없어도 저장은 된다 · 결과는 늘 보이게(§6-203)
-    await confirmBox({ title: '저장했습니다', body: `${result?.message || '모터 설정 파일을 저장했습니다'}\n\n드라이브에 넣으려면 「장비에 적용 · 모터 재시작」.`, confirmLabel: '확인' });
+    await confirmBox({ title: '저장했습니다', body: `${result?.message || '모터 설정 파일을 저장했습니다'}\n\n드라이브에 반영하려면 「저장 후 장비에 적용」을 누르세요.`, confirmLabel: '확인' });
     await loadMotors(state, changed, { force: true });
     if (apply) await act.applyMotorConfig();
   } catch (error) {
@@ -219,10 +219,10 @@ function stepsStrip(state, rows) {
   const applied = scope.runtime_matches_selected === true && scope.motor_config_applied === true;
   const detected = rows.filter((r) => r.detected).length;
   const steps = [
-    [rows.length > 0 && detected === rows.length, `모터 찾기 · ${detected}/${rows.length}대`],
+    [rows.length > 0 && detected === rows.length, `모터 검색 · ${detected}/${rows.length}대`],
     [rows.length > 0 && rows.every((r) => r.name), '이름·설정'],
     [null, '조인트 매핑'],
-    [applied && !dirty(), applied ? (dirty() ? '장비에 적용 · 저장부터' : '장비에 적용됨') : '장비에 적용 필요'],
+    [applied && !dirty(), applied ? (dirty() ? '장비에 적용 · 먼저 저장 필요' : '장비에 적용됨') : '장비에 적용 필요'],
   ];
   return h('ol', { class: 'steps', 'aria-label': '순서' }, steps.map(([done, label], i) => h('li', { class: `step ${done === true ? 'step-done' : done === false ? 'step-now' : ''}` },
     i === 2 ? h('a', { href: '#/mapping', text: `${i + 1} · ${label}` }) : `${done ? '✓ ' : ''}${i + 1} · ${label}`)));
@@ -237,30 +237,30 @@ function detailCard(state, changed, row) {
     const value = getField(motor, field.key);
     return h('label', { class: 'field' }, h('span', { class: 'field-label', text: `${field.label}${field.unit ? ` (${field.unit})` : ''}` }),
       h('input', { class: `input${field.top ? '' : ' mono'}`, type: field.top ? 'text' : 'number', step: 'any', value: value ?? '',
-        placeholder: field.top ? '' : '드라이브 값 그대로',
+        placeholder: field.top ? '' : '드라이브 설정값 유지',
         oninput: (e) => setField(motor, field.key, field.top ? e.target.value : (e.target.value === '' ? null : Number(e.target.value))),
         onchange: () => changed() }));
   };
   return h('section', { class: 'card', 'aria-label': `${row.axis}번 자세히` },
-    h('div', { class: 'card-head' }, h('h2', { text: `${row.axis}번 · ${row.name || '-'}` }), h('span', { class: 'muted small mono', text: row.id })),
+    h('div', { class: 'card-head' }, h('h2', { text: `${row.axis}번 · ${row.name || '-'}` }), h('span', { class: 'muted small mono wrap-text', text: row.id })),
     h('div', { class: 'row form-row' }, EDIT_FIELDS.map(input)),
     row.ac ? h('label', { class: 'inline' }, h('input', { type: 'checkbox', checked: Number(motor.config?.overload_monitor) === 1,
       onchange: (e) => { setField(motor, 'overload_monitor', e.target.checked ? 1 : 0); changed(); } }),
-    '과부하율 받기 (드라이브 소프트웨어 Ver1.03 이상만 · 아니면 Motor Manager 가 안 뜸)') : null,
+    '과부하율 읽기 (드라이브 소프트웨어 Ver1.03 이상만 지원 · 그 미만이면 Motor Manager가 시작되지 않음)') : null,
     h('label', { class: 'inline' }, h('input', { type: 'checkbox', checked: motor.config?.schedule_end_servo_off === true,
       onchange: (e) => { setField(motor, 'schedule_end_servo_off', e.target.checked); changed(); } }), '운영 시간이 끝나면 서보 끄기'),
     h('div', { class: 'field' },
-      h('span', { class: 'field-label', text: '드라이브 정비' }),
+      h('span', { class: 'field-label', text: '드라이브 관리' }),
       h('div', { class: 'row' },
         h('button', { class: 'btn btn-mini', type: 'button', disabled: busy, onclick: () => servo(row, 'reset', state, changed) }, row.ac ? `오류 초기화${row.fault ? '' : ' (알람 없음)'}` : '재부팅…'),
         row.servoOn
           ? h('button', { class: 'btn btn-mini', type: 'button', disabled: busy, onclick: () => servo(row, 'off', state, changed) }, row.ac ? '서보 끄기…' : '토크 끄기…')
           : h('button', { class: 'btn btn-mini', type: 'button', disabled: busy || row.fault || !row.detected, onclick: () => servo(row, 'on', state, changed) }, row.ac ? '서보 켜기' : '토크 켜기'),
         row.ac ? h('button', { class: 'btn btn-mini', type: 'button', disabled: busy, onclick: () => maintenance(row, 'eeprom_save', state, changed) }, '드라이브에 저장 (EEPROM)…') : null,
-        row.ac ? h('button', { class: 'btn btn-mini', type: 'button', disabled: busy || row.absolute === '정상', title: row.absolute === '정상' ? '이미 앱솔루트 정상 · 다시 하면 기준점이 사라집니다' : '',
+        row.ac ? h('button', { class: 'btn btn-mini', type: 'button', disabled: busy || row.absolute === '정상', title: row.absolute === '정상' ? '이미 앱솔루트 방식입니다. 다시 설정하면 기준점이 사라집니다.' : '',
           onclick: () => absoluteSetup('one', row, state, changed) }, row.absolute === '정상' ? '앱솔루트 정상' : '앱솔루트 설정…') : null,
         row.ac ? h('button', { class: 'btn btn-mini danger-text', type: 'button', disabled: busy, onclick: () => maintenance(row, 'absolute_clear', state, changed) }, '다회전 클리어…') : null),
-      h('p', { class: 'muted small', text: '「…」 은 확인 창이 뜨는 일 · 빨간 글은 위치 기준이 바뀌는 일' })),
+      h('p', { class: 'muted small', text: '「…」이 붙은 버튼은 확인 창이 뜹니다. 빨간 글씨 버튼은 위치 기준을 바꿉니다.' })),
     h('details', { class: 'raw' }, h('summary', { text: '원본 (드라이브 정보)' }),
       h('pre', { class: 'doc-code small' }, h('code', { text: JSON.stringify({ identity: motor.identity, profile: motor.profile, config: motor.config }, null, 2) }))));
 }
@@ -284,21 +284,21 @@ export function renderMotors(state, { changed }) {
       h('span', { class: 'spacer' }),
       h('div', { class: 'segmented', role: 'group', 'aria-label': '모터 검색' },
         Object.entries(SCAN_KINDS).map(([kind, spec]) => h('button', { class: 'seg', type: 'button', disabled: Boolean(ui.busy),
-          title: `${spec.label} 다시 찾기 · 결과는 저장 전까지 화면에만`, onclick: () => scan(kind, state, changed) }, `${spec.label} 검색…`)))),
+          title: `${spec.label} 다시 검색 · 결과는 저장하기 전까지 화면에만 표시됩니다`, onclick: () => scan(kind, state, changed) }, `${spec.label} 검색…`)))),
     scanBox(changed),
     stepsStrip(state, rows),
     ui.message ? h('p', { class: 'muted', text: ui.message }) : null,
     runtime.motor_manager_start_block_reason || (runtime.phase && runtime.phase !== 'ready')
       ? h('div', { class: 'blocker' }, dot('warn'), h('span', { class: 'grow', text: `모터 프로그램 · ${runtime.motor_manager_start_block_reason || runtime.message || runtime.phase}` })) : null,
     h('div', { class: `blocker ${abs.allOk ? 'ok' : ''}` }, dot(abs.allOk ? 'ok' : 'warn'),
-      h('span', { class: 'grow', text: abs.total ? `앱솔루트 ${abs.ok}/${abs.total} 정상${abs.allOk ? ' · 껐다 켜도 위치가 남습니다' : ' · 정상이 아니면 모든 모터 동작이 막힙니다(수정 목록 62)'}` : 'AC 서보 없음' }),
+      h('span', { class: 'grow', text: abs.total ? `앱솔루트 ${abs.ok}/${abs.total} 정상${abs.allOk ? ' · 전원을 껐다 켜도 위치가 유지됩니다' : ' · 정상이 아니면 모든 모터 동작이 차단됩니다'}` : 'AC 서보 없음' }),
       !abs.allOk && abs.total ? h('button', { class: 'btn btn-warn', type: 'button', disabled: Boolean(ui.busy) || ui.job?.state === 'running', onclick: () => absoluteSetup('all', null, state, changed) }, '앱솔루트 설정 (전체)…') : null),
     jobText ? h('div', { class: `blocker ${ui.job.state === 'failed' ? 'bad' : ''}` }, dot(ui.job.state === 'failed' ? 'bad' : 'info'),
       h('span', { class: 'grow', text: jobText }),
       ui.job.state === 'running' ? h('button', { class: 'btn', type: 'button', onclick: () => run('취소', () => api('POST', '/api/motor-config/absolute-setup/cancel'), state, changed) }, '취소') : null) : null,
     faults.map((row) => h('div', { class: 'issue issue-bad' }, dot('bad'),
       h('div', { class: 'issue-text' }, h('strong', { text: `${row.axis}번 · ${row.name} · ${row.error || '알람'}` }),
-        h('span', { text: '걸린 것이 없는지 보고 오류 초기화 → 서보 켜기' })),
+        h('span', { text: '기구에 걸린 것이 없는지 확인한 뒤 오류를 초기화하고 서보를 켜세요' })),
       h('button', { class: 'btn btn-danger-soft', type: 'button', disabled: Boolean(ui.busy), onclick: () => servo(row, 'reset', state, changed) }, row.ac ? '오류 초기화' : '재부팅…'))),
     h('section', { class: 'card', 'aria-label': '모터' },
       rows.length ? h('div', { class: 'table-wrap' }, h('table', { class: 'table files-table' },
@@ -313,14 +313,14 @@ export function renderMotors(state, { changed }) {
           h('td', {}, h('span', { class: `chip chip-${row.absoluteTone}`, title: row.absoluteProblem, text: row.absolute })),
           h('td', { class: 'muted', text: row.comm }),
           h('td', {}, h('button', { class: 'btn btn-mini', type: 'button', 'aria-label': `${row.axis}번 자세히`, onclick: () => { ui.selected = row.axis; changed(); } }, '⋯')))))))
-        : h('p', { class: 'muted', text: '설정된 모터가 없습니다 · 「모터 다시 검색」 으로 찾으세요' })),
+        : h('p', { class: 'muted', text: '설정된 모터가 없습니다. 위의 「전체 검색…」으로 모터를 찾으세요.' })),
     selected ? detailCard(state, changed, selected) : null,
     h('div', { class: 'apply-bar' },
       h('div', { class: 'grow' },
-        h('span', { text: changes.length ? `저장 안 한 변경 ${changes.length} · ${changes.slice(0, 3).join(' · ')}${changes.length > 3 ? ' …' : ''}` : '저장됨' }),
+        h('span', { text: changes.length ? `저장하지 않은 변경 ${changes.length}개 · ${changes.slice(0, 3).join(' · ')}${changes.length > 3 ? ' …' : ''}` : '저장됨' }),
         problems.length ? h('p', { class: 'tone-text-warn small', text: problems[0] }) : null),
       h('button', { class: 'btn', type: 'button', disabled: Boolean(ui.busy) || !changes.length, onclick: () => { ui.draft = { ...ui.draft, motors: clone(ui.saved) }; changed(); } }, '되돌리기'),
       h('button', { class: 'btn btn-primary', type: 'button', disabled: Boolean(ui.busy), onclick: () => save(state, changed) }, ui.busy === '저장 중' ? '저장 중…' : '저장'),
-      h('button', { class: 'btn btn-warn', type: 'button', disabled: Boolean(ui.busy), onclick: () => save(state, changed, { apply: true }) }, '저장 · 장비에 적용 · 모터 재시작…')),
+      h('button', { class: 'btn btn-warn', type: 'button', disabled: Boolean(ui.busy), onclick: () => save(state, changed, { apply: true }) }, '저장 후 장비에 적용…')),
   ];
 }

@@ -10,7 +10,7 @@ test('회차 줄 · 결과 글 · 최대 오차는 축 중 가장 큰 것 · 최
     { file: 'b', started_text: '2026-10-12T14:27:01+09:00', cycle: 3, motion_file_id: 'y.json', result: 'completed', group_execution: true, axes: [] },
   ]);
   assert.deepEqual(rows.map((r) => [r.file, r.time, r.result, r.worst, r.group]), [
-    ['b', '14:27:01', '끝까지', '-', true], ['a', '10:00:00', '오류', '0.40°', false],
+    ['b', '14:27:01', '완료', '-', true], ['a', '10:00:00', '오류', '0.40°', false],
   ]);
 });
 
