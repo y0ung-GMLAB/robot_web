@@ -8,6 +8,7 @@ import { h } from '../dom.js';
 import { confirmBox, toast } from '../dialog.js';
 import * as act from '../actions.js';
 import { loadMotors, motorsActions, motorsBody, motorsDraft, revertMotors, saveMotors } from './motors.js';
+import { isRevisionConflict } from '../mapping_model.js';
 import { loadMapping, mappingActions, mappingBody, mappingDraft, mappingNote, revertMapping, saveMapping } from './mapping.js';
 
 const SETUP_PARTS = [
@@ -64,6 +65,17 @@ async function saveChanged(state, changed) {
     try {
       messages.push(await saveMotors(state, changed));
     } catch (error) {
+      if (isRevisionConflict(error.message)) {
+        // 화면을 연 뒤 파일이 바뀌었다(다른 화면 저장 · 매핑 저장이 운전 한계를 고쳐 씀) · 고친 것을 버리고 다시 받을지 묻는다
+        const reload = await confirmBox({
+          title: '모터 설정 파일이 화면을 연 뒤 바뀌었습니다',
+          body: '다른 화면에서 저장했거나, 조인트 매핑 저장으로 운전 한계가 바뀌었습니다.
+「다시 불러오기」를 누르면 최신 파일을 받습니다(이 화면에서 고친 모터 설정은 사라집니다). 다시 불러온 뒤 고쳐서 저장하세요.',
+          confirmLabel: '다시 불러오기', tone: 'warning',
+        });
+        if (reload) await loadMotors(state, changed, { force: true });
+        return null;
+      }
       toast(`모터 설정 저장 실패 · ${error.message || error}`, 'bad');
       return null;
     }
@@ -72,6 +84,9 @@ async function saveChanged(state, changed) {
     const message = await saveMapping(state, changed);
     if (message === null) return null;
     messages.push(message);
+    // 매핑을 저장하면 서버가 모터 설정 파일의 운전 한계(하한·상한)도 고쳐 쓴다 · 화면의 모터 설정 버전을
+    // 새로 받지 않으면 다음 모터 저장이 「화면을 불러온 뒤 변경됐습니다」 로 막혔다 (2026-10-12 실물)
+    await loadMotors(state, changed, { force: !motorsDraft().changes.length });
   }
   return messages;
 }
