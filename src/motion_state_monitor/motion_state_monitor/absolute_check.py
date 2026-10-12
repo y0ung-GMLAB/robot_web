@@ -20,6 +20,14 @@ motion_state 의 `minas_absolute` 로 싣는다 · 판정은 `motion_common.mina
 모터 상태 없음)가 막는다 · 다시 보이면 읽기 전까지 「확인 중」 으로 막는다.
 
 `ethercat` 명령은 폴링 타이머를 막지 않게 따로 스레드에서 돈다.
+
+버스가 자리 잡은 뒤에 읽는다 · 수정 목록 110 (2026-10-12 floating4 재부팅)
+    부팅 때 Motor Manager 가 드라이브를 PREOP → OP 로 올리는 동안 마스터가 같은 메일박스로
+    설정 SDO 를 보낸다 · 그 사이 `ethercat upload` 가 끼면 「wrong SDO」 · 「No response」 로
+    실패하고, 구성이 그대로라 다시 안 읽어 「확인 불가」 로 굳어 모든 동작이 막혔다 ·
+    그래서 ① 슬레이브 상태(PREOP · SAFEOP · OP)가 `SETTLE_SEC` 동안 그대로일 때만 읽고 ·
+    ② 「확인 불가」 가 남은 드라이브는 몇 초마다 다시 읽는다 (Pr0.15 ≠ 0 · Err40 은 다시 읽어도
+    값이 같으니 그대로 막는다 · 읽기 실패만 다시).
 """
 
 from __future__ import annotations
@@ -38,7 +46,15 @@ UPLOAD_TIMEOUT_SEC = 2.0
 #: `ethercat slaves -v` 제한 시간
 SLAVES_TIMEOUT_SEC = 3.0
 
+#: 슬레이브 상태가 이만큼 그대로여야 읽는다 · 부팅 때 PREOP → OP 전환 중엔 안 읽는다
+SETTLE_SEC = 2.0
+#: 「확인 불가」 다시 읽기 간격 · 처음 1 분은 짧게, 그 뒤엔 드물게
+RETRY_FAST_SEC = 2.0
+RETRY_FAST_WINDOW_SEC = 60.0
+RETRY_SLOW_SEC = 10.0
+
 Signature = FrozenSet[Tuple[int, int]]
+BusStates = FrozenSet[Tuple[int, int, str]]
 
 
 def visible_slaves(
@@ -70,6 +86,24 @@ def visible_slaves(
     return frozenset(seen)
 
 
+def bus_states(masters: Dict[str, Dict[str, Any]]) -> BusStates:
+    """보이는 슬레이브의 (마스터, 링 위치, 상태) · 이게 바뀌는 동안은 마스터가 설정 중이다"""
+    found = set()
+    for key, status in (masters or {}).items():
+        if not isinstance(status, dict) or not status.get('available'):
+            continue
+        master = parse_int(status.get('master_index'))
+        if master is None:
+            master = parse_int(key)
+        if master is None:
+            continue
+        for position, state in (status.get('states_by_position') or {}).items():
+            value = parse_int(position)
+            if value is not None:
+                found.add((int(master), int(value), str(state or '').upper()))
+    return frozenset(found)
+
+
 class MinasAbsoluteCheck:
     def __init__(
         self,
@@ -92,6 +126,14 @@ class MinasAbsoluteCheck:
         #: 마지막으로 읽기 시작한 구성 · None = 아직 한 번도 안 봄
         self._signature: Optional[Signature] = None
         self._running = False
+        #: 읽어야 하는데 버스가 자리 잡기를 기다리는 중
+        self._pending = False
+        #: 마지막으로 본 슬레이브 상태 · 그 상태가 된 때
+        self._states: Optional[BusStates] = None
+        self._states_since = 0.0
+        #: 「확인 불가」 다시 읽기 · 다음 때 · 처음 실패한 때
+        self._retry_at: Optional[float] = None
+        self._first_failure_at: Optional[float] = None
         self._summary: Dict[str, Any] = minas_absolute.checking_summary()
 
     @staticmethod
@@ -101,19 +143,33 @@ class MinasAbsoluteCheck:
     # -- 폴링에서 부른다 -------------------------------------------------- #
 
     def observe(self, masters: Dict[str, Dict[str, Any]]) -> None:
+        now = self._clock()
         with self._lock:
+            states = bus_states(masters)
+            if states != self._states:
+                self._states = states
+                self._states_since = now
             signature = visible_slaves(masters, self._signature)
-            if signature == self._signature:
-                return
-            previous = list(self._summary.get('drives') or [])
-            self._signature = signature
-            if not signature:
-                self._summary = minas_absolute.summary([], checked_at=self._clock())
-                return
-            self._summary = minas_absolute.checking_summary(previous)
-            if self._running:
+            if signature != self._signature:
+                previous = list(self._summary.get('drives') or [])
+                self._signature = signature
+                self._retry_at = None
+                self._first_failure_at = None
+                if not signature:
+                    self._summary = minas_absolute.summary([], checked_at=now)
+                    self._pending = False
+                    return
+                self._summary = minas_absolute.checking_summary(previous)
+                self._pending = True
+            elif self._retry_at is not None and now >= self._retry_at:
+                self._retry_at = None
+                self._pending = True
+            if not self._pending or self._running:
                 # 도는 읽기가 끝나면 구성이 달라진 것을 보고 다시 읽는다
                 return
+            if now - self._states_since < SETTLE_SEC:
+                return                      # 마스터가 아직 드라이브를 설정 중 · 메일박스가 붐빈다
+            self._pending = False
             self._running = True
         self._spawn(self._run)
 
@@ -140,10 +196,23 @@ class MinasAbsoluteCheck:
             with self._lock:
                 if signature != self._signature:
                     continue                # 읽는 사이 구성이 바뀜 · 다시
+                now = self._clock()
                 if signature:
-                    self._summary = minas_absolute.summary(drives, checked_at=self._clock())
+                    self._summary = minas_absolute.summary(drives, checked_at=now)
+                self._schedule_retry(drives, now)
                 self._running = False
                 return
+
+    def _schedule_retry(self, drives: List[Dict[str, Any]], now: float) -> None:
+        """읽기 실패(「확인 불가」)가 남았으면 다음 읽기를 잡는다 · 잠금 안에서 부른다"""
+        if not any(drive.get('status') == minas_absolute.DRIVE_UNKNOWN for drive in drives):
+            self._retry_at = None
+            self._first_failure_at = None
+            return
+        if self._first_failure_at is None:
+            self._first_failure_at = now
+        fast = now - self._first_failure_at < RETRY_FAST_WINDOW_SEC
+        self._retry_at = now + (RETRY_FAST_SEC if fast else RETRY_SLOW_SEC)
 
     def _read(self, signature: Signature) -> List[Dict[str, Any]]:
         drives: List[Dict[str, Any]] = []

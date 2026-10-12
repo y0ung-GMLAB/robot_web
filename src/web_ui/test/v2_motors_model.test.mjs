@@ -16,7 +16,17 @@ test('표 줄 · 설정과 지금 상태를 번호로 · 서보 · 위치 · 과
   assert.deepEqual(rows.map((r) => [r.axis, r.servo, r.position, r.load, r.absolute, r.error]), [
     [0, '켜짐', 180, 104, '정상', ''], [1, '알람', null, null, '앱솔루트 아님', 'Err16.0'],
   ]);
-  assert.deepEqual(absoluteSummary(rows), { total: 2, ok: 1, allOk: false });
+  assert.deepEqual(absoluteSummary(rows), { total: 2, ok: 1, allOk: false, needsSetup: 1, waiting: 0 });
+});
+
+test('앱솔루트 · 읽기만 실패(unknown)면 「앱솔루트 설정」 을 권하지 않는다 · 다시 읽는 중 (수정 목록 110)', () => {
+  const snap = { motion_state: {
+    motors: [{ controller_index: 0, state: 'detected' }, { controller_index: 1, state: 'detected' }],
+    minas_absolute: { drives: [{ axis: 0, status: 'unknown', problem: '확인 불가 · 드라이브 응답을 기다리며 다시 읽는 중' }, { axis: 1, status: 'ok' }] },
+  } };
+  const rows = motorRows({ motors: [motor(0, 'A'), motor(1, 'B')] }, snap);
+  assert.equal(rows[0].absolute, '다시 읽는 중');
+  assert.deepEqual(absoluteSummary(rows), { total: 2, ok: 1, allOk: false, needsSetup: 0, waiting: 1 });
 });
 
 test('막는 것 · 빈 이름 · 겹친 이름 · 범위 · 프로파일 > 최대(수정 목록 37)', () => {

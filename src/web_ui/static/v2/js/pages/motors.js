@@ -362,8 +362,11 @@ export function motorsBody(state, changed) {
     runtime.motor_manager_start_block_reason || (runtime.phase && runtime.phase !== 'ready')
       ? h('div', { class: 'blocker' }, dot('warn'), h('span', { class: 'grow', text: `모터 프로그램 · ${runtime.motor_manager_start_block_reason || runtime.message || runtime.phase}` })) : null,
     h('div', { class: `blocker ${abs.allOk ? 'ok' : ''}` }, dot(abs.allOk ? 'ok' : 'warn'),
-      h('span', { class: 'grow', text: abs.total ? `앱솔루트 ${abs.ok}/${abs.total} 정상${abs.allOk ? ' · 전원을 껐다 켜도 위치가 유지됩니다' : ' · 정상이 아니면 모든 모터 동작이 차단됩니다'}` : 'AC 서보 없음' }),
-      !abs.allOk && abs.total ? h('button', { class: 'btn btn-warn', type: 'button', disabled: Boolean(ui.busy) || ui.job?.state === 'running', onclick: () => absoluteSetup('all', null, state, changed) }, '앱솔루트 설정 (전체)') : null),
+      h('span', { class: 'grow', text: !abs.total ? 'AC 서보 없음'
+        : abs.allOk ? `앱솔루트 ${abs.ok}/${abs.total} 정상 · 전원을 껐다 켜도 위치가 유지됩니다`
+          : !abs.needsSetup ? `앱솔루트 ${abs.ok}/${abs.total} 정상 · ${abs.waiting ? '드라이브 응답을 기다리며 다시 읽는 중' : '확인 중'} · 끝날 때까지 모터 동작이 차단됩니다 (앱솔루트 설정은 필요 없음)`
+            : `앱솔루트 ${abs.ok}/${abs.total} 정상 · 정상이 아니면 모든 모터 동작이 차단됩니다` }),
+      abs.needsSetup ? h('button', { class: 'btn btn-warn', type: 'button', disabled: Boolean(ui.busy) || ui.job?.state === 'running', onclick: () => absoluteSetup('all', null, state, changed) }, '앱솔루트 설정 (전체)') : null),
     jobText ? h('div', { class: `blocker ${ui.job.state === 'failed' ? 'bad' : ''}` }, dot(ui.job.state === 'failed' ? 'bad' : 'info'),
       h('span', { class: 'grow', text: jobText }),
       ui.job.state === 'running' ? h('button', { class: 'btn', type: 'button', onclick: () => run('취소', () => api('POST', '/api/motor-config/absolute-setup/cancel'), state, changed) }, '취소') : null) : null,

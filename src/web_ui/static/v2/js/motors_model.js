@@ -31,7 +31,7 @@ function isAc(motor) {
   return String(motor?.motor_type || '') !== 'dynamixel';
 }
 
-const ABS_TEXT = { ok: ['정상', 'ok'], not_absolute: ['앱솔루트 아님', 'bad'], unknown: ['확인 안 됨', 'warn'], multiturn_invalid: ['다회전 무효(Err40)', 'bad'] };
+const ABS_TEXT = { ok: ['정상', 'ok'], not_absolute: ['앱솔루트 아님', 'bad'], unknown: ['다시 읽는 중', 'warn'], multiturn_invalid: ['다회전 무효(Err40)', 'bad'] };
 
 /** 표 줄 · 설정 + 지금 상태 */
 export function motorRows(registry, snap) {
@@ -64,6 +64,7 @@ export function motorRows(registry, snap) {
       absolute: absText,
       absoluteTone: absTone,
       absoluteProblem: String(drive?.problem || ''),
+      absoluteStatus: ac && drive ? String(drive.status || '') : '',
       comm: live.state === 'detected' ? '연결됨' : live.state ? `연결 안 됨 (${live.state})` : '연결 안 됨',
       masterIndex: Number(motor.identity?.ethercat_master_index ?? motor.config?.ethercat_master_index ?? 0),
       slavePosition: Number(motor.config?.position ?? motor.identity?.slave_position),
@@ -75,7 +76,11 @@ export function motorRows(registry, snap) {
 export function absoluteSummary(rows) {
   const ac = rows.filter((r) => r.ac);
   const ok = ac.filter((r) => r.absolute === '정상').length;
-  return { total: ac.length, ok, allOk: ac.length > 0 && ok === ac.length };
+  // 「앱솔루트 설정」 은 값이 틀린 드라이브(Pr0.15 ≠ 0 · Err40)에만 권한다 · 그 버튼은 다회전 클리어까지 가서
+  // 기준점을 잃는다 · 읽기만 실패한 것(unknown)은 감시가 몇 초마다 다시 읽는다 (수정 목록 110)
+  const needsSetup = ac.filter((r) => r.absoluteStatus === 'not_absolute' || r.absoluteStatus === 'multiturn_invalid').length;
+  const waiting = ac.filter((r) => r.absoluteStatus === 'unknown').length;
+  return { total: ac.length, ok, allOk: ac.length > 0 && ok === ac.length, needsSetup, waiting };
 }
 
 /** 저장 전 검사 · 서버도 같은 것을 거절한다(수정 목록 37 · §6-217) */
