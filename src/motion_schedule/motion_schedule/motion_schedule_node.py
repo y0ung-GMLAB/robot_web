@@ -79,6 +79,8 @@ class MotionScheduleNode(Node):
         # 로그에 `success` 라고 찍히고 끝이라, 화면 배지는 초록불이었다 ·
         # 한 시간 내내 매분 거부당하는 동안 아무도 몰랐다.
         self._last_failure = {}
+        # 지금 도는 재생을 스케줄이 켰나 · True 켰음 · False 사람이 켬 · None 모름(기동 직후) · 수정 목록 106
+        self._schedule_started = None
         #: 조회가 연달아 몇 번 실패했나 · 상태가 바뀔 때만 적는다 · §6-271
         self._read_failures: Dict[str, int] = {}
 
@@ -378,6 +380,9 @@ class MotionScheduleNode(Node):
         wanted = self.engine.active(now, schedules)
         running = self._motion_is_running()
         self._warn_about_unreadable(schedules)
+        if not running:
+            # 멈춰 있는 것을 봤다 · 다음에 도는 것은 스케줄이 켰거나(`_execute_start`) 사람이 켠 것이다
+            self._schedule_started = False
 
         # **구간이 끝나면 멈춘다 · 모드와 상관없이** · §6-270
         #
@@ -385,9 +390,20 @@ class MotionScheduleNode(Node):
         # 않았다 · 실측으로 16~18시 스케줄이 17:58 에 켠 모션이, 그 뒤 수동
         # 모드가 되자 18시가 지나도 아무도 멈추지 않아 18분을 더 돌았다.
         #
-        # 누가 켰는지는 묻지 않는다 · 구간 밖에서는 아무것도 돌지 않는 것이
-        # 규칙이다 · 사람이 손으로 켠 것도 구간이 끝나면 멈춘다.
+        # (2026-10-12 바뀜 · 수정 목록 106) 수동 모드에서 사람이 켠 재생은 예외 · 아래.
         if wanted is None and running:
+            # **구간이 끝나서 멈추는 것은 스케줄이 켠 재생만** · 수정 목록 106 (사용자 2026-10-12)
+            #
+            # 수동 모드에서 사람이 켠 재생(단독 · 그룹)은 손대지 않는다 · 시험은 운영 구간이
+            # 없는 날에도 돼야 한다 · 스케줄이 켰다가 도중에 수동으로 바꾼 것은 위 17:58 사고라
+            # 그대로 멈춘다 · 누가 켰는지 모르면(스케줄 노드 재시작 뒤 그룹) 멈추는 쪽 ·
+            # 스케줄 모드 · 오프 모드는 누가 켰든 멈춘다.
+            if self._run_mode not in (SCHEDULE_MODE, OFF_MODE) and not self._started_by_schedule():
+                if not getattr(self, '_manual_run_noted', False):
+                    self._manual_run_noted = True
+                    self.get_logger().info("[점검] 구간 밖 · 수동 모드에서 사람이 켠 재생 · 그대로 둠")
+                return
+            self._manual_run_noted = False
             self.get_logger().info("[점검] 구간 밖인데 돌고 있다 · 회차 후 정지")
             # 스케줄 모드에서 운영 시간이 끝났다 · 정지 뒤 PC 마다 제 설정대로
             # 기준점 주차 → 서보 OFF · 수동·오프 모드는 멈추기만 (사람이 만지는 중일 수 있다) ·
@@ -440,6 +456,20 @@ class MotionScheduleNode(Node):
             )
             self._execute_start(wanted)
 
+    def _started_by_schedule(self) -> bool:
+        """지금 도는 재생을 스케줄이 켰나 · 모르면 켠 것으로 본다(멈추는 쪽) · 수정 목록 106
+
+        단독 재생은 런타임 상태의 `schedule_id` 가 답이다(스케줄만 그 칸을 채운다 · §6-270) ·
+        그룹은 그 칸이 없어 이 노드가 시작을 보낸 것을 기억한 값으로 본다.
+        """
+        try:
+            status = self._local_run_status()
+        except Exception:
+            status = {}
+        if is_running(str(status.get('state') or '')) and not status.get('group_execution'):
+            return bool(str(status.get('schedule_id') or '').strip())
+        return getattr(self, '_schedule_started', None) is not False
+
     def _warn_about_unreadable(self, schedules) -> None:
         """시각을 못 읽는 스케줄은 **말이라도 한다** · §6-285
 
@@ -464,6 +494,7 @@ class MotionScheduleNode(Node):
 
     def _execute_start(self, item: ScheduleItem):
         self.get_logger().info(f"[SCHEDULE TRIGGER] START -> {item.schedule_name} ({item.schedule_id})")
+        self._schedule_started = True   # 구간이 끝나면 이 재생은 스케줄이 멈춘다 · 수정 목록 106
         
         # 스케줄러 자체 판단을 제거하고, 연동 설정 파일에 사용자가 저장한 값을 그대로 가져와 웹 UI와 100% 동일하게 쏩니다.
         # 반복 방식의 주인은 `motion_common.repeat_policy` 다 · §6-135
