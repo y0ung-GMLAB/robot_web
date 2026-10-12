@@ -1203,3 +1203,6 @@ button.jog-dial-switch.on:hover:not(:disabled) { border-color: #2563eb; backgrou
 .wifi-pending:not(.hidden) { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; border-color: var(--yellow); }
 .wifi-pending > span { flex: 1 1 260px; }
 #systemTimezoneMessage { white-space: pre-line; }
+
+/* 모터 검색 뒤 · 서버가 알린 것(뺀 모터 · 바뀐 번호)을 줄마다 · 수정 목록 100 */
+#axisActionMessage { white-space: pre-line; }

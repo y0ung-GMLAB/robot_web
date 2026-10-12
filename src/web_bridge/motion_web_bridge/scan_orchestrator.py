@@ -34,6 +34,7 @@ from motion_web_bridge import (
     motion_file_analysis,
     motor_config_rules,
     scan_axis_rows,
+    scan_proposal,
 )
 
 
@@ -568,6 +569,8 @@ class ScanOrchestrator:
             if scan_project_id:
                 registry = (self.load_motor_config() or {}).get('registry') or {}
             scan['axis_rows'] = scan_axis_rows.axis_rows_from_scan(registry, scan)
+            # 검색 결과로 만든 모터 목록 제안 · 두 화면(기존 · 새 UI)이 같은 것을 쓴다 · 수정 목록 100
+            scan['proposed_registry'] = scan_proposal.proposed_registry(registry, scan, scan['axis_rows'])
         message = motor_config_rules.scan_result_message(
             bool(response.success),
             scan,
