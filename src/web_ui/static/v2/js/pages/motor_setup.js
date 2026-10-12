@@ -41,7 +41,8 @@ export function pendingText(motorChanges, mappingChanges) {
   if (mappingChanges.length) parts.push(`조인트 매핑 ${mappingChanges.length}개`);
   if (!parts.length) return '저장됨';
   const first = [...motorChanges, ...mappingChanges].slice(0, 3);
-  const more = motorChanges.length + mappingChanges.length > 3 ? ' …' : '';
+  const rest = motorChanges.length + mappingChanges.length - 3;
+  const more = rest > 0 ? ` 외 ${rest}개` : '';
   return `저장하지 않은 변경 · ${parts.join(' · ')} · ${first.join(' · ')}${more}`;
 }
 
@@ -144,6 +145,6 @@ export function renderSetup(state, { changed }) {
         problems.length ? h('p', { class: 'tone-text-warn small', text: problems[0] }) : null),
       h('button', { class: 'btn', type: 'button', disabled: busy || !dirty, onclick: () => { revertMotors(); revertMapping(); changed(); } }, '되돌리기'),
       h('button', { class: 'btn btn-primary', type: 'button', disabled: busy || !dirty || Boolean(problems.length), onclick: () => save(state, changed) }, busy ? '저장 중…' : '저장'),
-      h('button', { class: 'btn btn-warn', type: 'button', disabled: busy || Boolean(problems.length), onclick: () => save(state, changed, { apply: true }) }, '저장 후 장비에 적용…')),
+      h('button', { class: 'btn btn-warn', type: 'button', disabled: busy || Boolean(problems.length), onclick: () => save(state, changed, { apply: true }) }, '저장 후 장비에 적용')),
   ];
 }

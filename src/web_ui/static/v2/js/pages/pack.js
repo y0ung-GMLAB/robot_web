@@ -123,7 +123,7 @@ function packCard(state, changed) {
       h('p', { class: 'muted small', text: `Blender 장면 ${blender.available ? `있음${(blender.animations || []).length ? ` (${blender.animations.join(', ')})` : ''}` : '없음'}` }),
       (pack.warnings || []).length ? h('ul', { class: 'list small' }, pack.warnings.map((w) => h('li', { class: 'tone-text-warn', text: `경고 · ${w}` }))) : null,
     ] : h('p', { class: 'muted', text: '로봇 팩이 없습니다. 3D 보기와 3D 계산을 사용할 수 없습니다.' }),
-    previous ? h('div', { class: 'row' }, h('button', { class: 'btn', type: 'button', disabled: Boolean(ui.busy), onclick: rollback }, `이전 팩(${previous.version || previous.name})으로 되돌리기…`)) : null,
+    previous ? h('div', { class: 'row' }, h('button', { class: 'btn', type: 'button', disabled: Boolean(ui.busy), onclick: rollback }, `이전 팩(${previous.version || previous.name})으로 되돌리기`)) : null,
     h('div', { class: 'drop-zone' },
       h('strong', { text: '새 팩 업로드' }),
       h('span', { class: 'muted small', text: 'zip 파일이나 팩 폴더를 이 화면에 끌어다 놓으세요. 폴더는 브라우저에서 압축해 업로드합니다.' }),

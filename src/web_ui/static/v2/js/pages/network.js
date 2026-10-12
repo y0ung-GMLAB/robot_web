@@ -167,7 +167,7 @@ function wifiCard(state, changed) {
         h('label', { class: 'field grow' }, h('span', { class: 'field-label', text: 'DNS (비워 두면 게이트웨이 사용)' }),
           h('input', { class: 'input mono', value: ui.dns, oninput: (e) => { ui.dns = e.target.value; }, onchange: () => changed() }))) : null,
       problem ? h('p', { class: 'tone-text-warn small', text: problem }) : null,
-      h('div', { class: 'row' }, h('button', { class: 'btn btn-warn', type: 'button', disabled: Boolean(problem) || ui.wifiBusy || Boolean(pending), onclick: connect }, '이 Wi-Fi에 연결…')),
+      h('div', { class: 'row' }, h('button', { class: 'btn btn-warn', type: 'button', disabled: Boolean(problem) || ui.wifiBusy || Boolean(pending), onclick: connect }, '이 Wi-Fi에 연결')),
     ] : null,
     h('p', { class: 'muted small', text: '원격으로 변경하다 연결이 끊겨도 60초 뒤 원래 Wi-Fi로 돌아갑니다. 비밀번호가 틀리면 바로 되돌립니다. 회사 인증(802.1X) Wi-Fi는 우분투 설정에서 연결하세요. 재생 중에는 변경할 수 없습니다.' }));
 }
@@ -210,8 +210,8 @@ function timeCard(state, changed) {
         ? h('select', { class: 'select grow', 'aria-label': '시간대', onchange: (e) => { ui.zone = e.target.value; changed(); } },
           zones.map((zone) => h('option', { value: zone, selected: zone === ui.zone }, zone)))
         : h('input', { class: 'input grow mono', value: ui.zone, 'aria-label': '시간대', oninput: (e) => { ui.zone = e.target.value; }, onchange: () => changed() }),
-      h('button', { class: 'btn', type: 'button', disabled: ui.zoneBusy || !ui.zone, onclick: () => apply(false) }, `${localName(state)}에만 적용…`),
-      h('button', { class: 'btn', type: 'button', disabled: ui.zoneBusy || !ui.zone, onclick: () => apply(true) }, '매장 PC 전체에 적용 (스피커 포함)…')));
+      h('button', { class: 'btn', type: 'button', disabled: ui.zoneBusy || !ui.zone, onclick: () => apply(false) }, `${localName(state)}에만 적용`),
+      h('button', { class: 'btn', type: 'button', disabled: ui.zoneBusy || !ui.zone, onclick: () => apply(true) }, '매장 PC 전체에 적용 (스피커 포함)')));
 }
 
 /* ---------- 이 PC ---------- */
@@ -234,7 +234,7 @@ function pcCard(state) {
     h('dl', { class: 'facts' }, rows.map(([label, value]) => [h('dt', { text: label }), h('dd', { class: label === '이름' ? '' : 'mono', text: value })])),
     runtime.motor_manager_start_block_reason ? h('p', { class: 'tone-text-bad small', text: runtime.motor_manager_start_block_reason }) : null,
     h('div', { class: 'row' },
-      h('button', { class: 'btn', type: 'button', onclick: act.restartProgram }, '프로그램 다시 시작…'),
+      h('button', { class: 'btn', type: 'button', onclick: act.restartProgram }, '프로그램 다시 시작'),
       h('a', { class: 'btn', href: '#/tools' }, '터미널 ›')));
 }
 
@@ -314,7 +314,7 @@ function groupCard(state, changed) {
     problem ? h('p', { class: 'tone-text-warn small', text: problem }) : null,
     h('div', { class: 'row end' },
       dirty ? h('button', { class: 'btn', type: 'button', onclick: () => { ui.group = null; changed(); } }, '되돌리기') : null,
-      h('button', { class: 'btn btn-primary', type: 'button', disabled: Boolean(problem) || ui.groupBusy, onclick: save }, '저장 후 연동 재시작…')));
+      h('button', { class: 'btn btn-primary', type: 'button', disabled: Boolean(problem) || ui.groupBusy, onclick: save }, '저장 후 연동 재시작')));
 }
 
 export function renderNetwork(state, { changed }) {

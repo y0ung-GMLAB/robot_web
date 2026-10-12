@@ -108,7 +108,7 @@ function listCard(state, changed, canEdit) {
             h('button', { class: 'btn btn-mini', type: 'button', disabled: ui.busy, onclick: () => { ui.draft = draftFrom(item); changed(); } }, '편집'),
             h('button', { class: 'btn btn-mini', type: 'button', disabled: ui.busy, onclick: () => busy(async () => {
               if (await act.deleteSchedule(id, name) && ui.draft?.id === id) ui.draft = null;
-            }, state, changed) }, '삭제…')) : null);
+            }, state, changed) }, '삭제')) : null);
       }))
       : h('p', { class: 'muted', text: '스케줄이 없습니다. 자동 모드여도 재생이 시작되지 않습니다.' }),
     endActionBlock(state, changed, canEdit));

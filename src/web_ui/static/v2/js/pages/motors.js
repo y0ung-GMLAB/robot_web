@@ -241,15 +241,15 @@ function detailCard(state, changed, row) {
     h('div', { class: 'field' },
       h('span', { class: 'field-label', text: '드라이브 관리' }),
       h('div', { class: 'row' },
-        h('button', { class: 'btn btn-mini', type: 'button', disabled: busy, onclick: () => servo(row, 'reset', state, changed) }, row.ac ? `오류 초기화${row.fault ? '' : ' (알람 없음)'}` : '재부팅…'),
+        h('button', { class: 'btn btn-mini', type: 'button', disabled: busy, onclick: () => servo(row, 'reset', state, changed) }, row.ac ? `오류 초기화${row.fault ? '' : ' (알람 없음)'}` : '재부팅'),
         row.servoOn
-          ? h('button', { class: 'btn btn-mini', type: 'button', disabled: busy, onclick: () => servo(row, 'off', state, changed) }, row.ac ? '서보 끄기…' : '토크 끄기…')
+          ? h('button', { class: 'btn btn-mini', type: 'button', disabled: busy, onclick: () => servo(row, 'off', state, changed) }, row.ac ? '서보 끄기' : '토크 끄기')
           : h('button', { class: 'btn btn-mini', type: 'button', disabled: busy || row.fault || !row.detected, onclick: () => servo(row, 'on', state, changed) }, row.ac ? '서보 켜기' : '토크 켜기'),
-        row.ac ? h('button', { class: 'btn btn-mini', type: 'button', disabled: busy, onclick: () => maintenance(row, 'eeprom_save', state, changed) }, '드라이브에 저장 (EEPROM)…') : null,
+        row.ac ? h('button', { class: 'btn btn-mini', type: 'button', disabled: busy, onclick: () => maintenance(row, 'eeprom_save', state, changed) }, '드라이브에 저장 (EEPROM)') : null,
         row.ac ? h('button', { class: 'btn btn-mini', type: 'button', disabled: busy || row.absolute === '정상', title: row.absolute === '정상' ? '이미 앱솔루트 방식입니다. 다시 설정하면 기준점이 사라집니다.' : '',
-          onclick: () => absoluteSetup('one', row, state, changed) }, row.absolute === '정상' ? '앱솔루트 정상' : '앱솔루트 설정…') : null,
-        row.ac ? h('button', { class: 'btn btn-mini danger-text', type: 'button', disabled: busy, onclick: () => maintenance(row, 'absolute_clear', state, changed) }, '다회전 클리어…') : null),
-      h('p', { class: 'muted small', text: '「…」이 붙은 버튼은 확인 창이 뜹니다. 빨간 글씨 버튼은 위치 기준을 바꿉니다.' })),
+          onclick: () => absoluteSetup('one', row, state, changed) }, row.absolute === '정상' ? '앱솔루트 정상' : '앱솔루트 설정') : null,
+        row.ac ? h('button', { class: 'btn btn-mini danger-text', type: 'button', disabled: busy, onclick: () => maintenance(row, 'absolute_clear', state, changed) }, '다회전 클리어') : null),
+      h('p', { class: 'muted small', text: '빨간 글씨 버튼은 위치 기준을 바꿉니다. 누르면 확인 창이 먼저 뜹니다.' })),
     h('details', { class: 'raw' }, h('summary', { text: '원본 (드라이브 정보)' }),
       h('pre', { class: 'doc-code small' }, h('code', { text: JSON.stringify({ identity: motor.identity, profile: motor.profile, config: motor.config }, null, 2) }))));
 }
@@ -258,7 +258,7 @@ function detailCard(state, changed, row) {
 export function motorsActions(state, changed) {
   return h('div', { class: 'segmented', role: 'group', 'aria-label': '모터 검색' },
     Object.entries(SCAN_KINDS).map(([kind, spec]) => h('button', { class: 'seg', type: 'button', disabled: Boolean(ui.busy),
-      title: `${spec.label} 다시 검색 · 결과는 저장하기 전까지 화면에만 표시됩니다`, onclick: () => scan(kind, state, changed) }, `${spec.label} 검색…`)));
+      title: `${spec.label} 다시 검색 · 결과는 저장하기 전까지 화면에만 표시됩니다`, onclick: () => scan(kind, state, changed) }, `${spec.label} 검색`)));
 }
 
 /** ① 모터·드라이브 구획 본문 · 머리와 저장 칸은 motor_setup.js */
@@ -277,14 +277,14 @@ export function motorsBody(state, changed) {
       ? h('div', { class: 'blocker' }, dot('warn'), h('span', { class: 'grow', text: `모터 프로그램 · ${runtime.motor_manager_start_block_reason || runtime.message || runtime.phase}` })) : null,
     h('div', { class: `blocker ${abs.allOk ? 'ok' : ''}` }, dot(abs.allOk ? 'ok' : 'warn'),
       h('span', { class: 'grow', text: abs.total ? `앱솔루트 ${abs.ok}/${abs.total} 정상${abs.allOk ? ' · 전원을 껐다 켜도 위치가 유지됩니다' : ' · 정상이 아니면 모든 모터 동작이 차단됩니다'}` : 'AC 서보 없음' }),
-      !abs.allOk && abs.total ? h('button', { class: 'btn btn-warn', type: 'button', disabled: Boolean(ui.busy) || ui.job?.state === 'running', onclick: () => absoluteSetup('all', null, state, changed) }, '앱솔루트 설정 (전체)…') : null),
+      !abs.allOk && abs.total ? h('button', { class: 'btn btn-warn', type: 'button', disabled: Boolean(ui.busy) || ui.job?.state === 'running', onclick: () => absoluteSetup('all', null, state, changed) }, '앱솔루트 설정 (전체)') : null),
     jobText ? h('div', { class: `blocker ${ui.job.state === 'failed' ? 'bad' : ''}` }, dot(ui.job.state === 'failed' ? 'bad' : 'info'),
       h('span', { class: 'grow', text: jobText }),
       ui.job.state === 'running' ? h('button', { class: 'btn', type: 'button', onclick: () => run('취소', () => api('POST', '/api/motor-config/absolute-setup/cancel'), state, changed) }, '취소') : null) : null,
     faults.map((row) => h('div', { class: 'issue issue-bad' }, dot('bad'),
       h('div', { class: 'issue-text' }, h('strong', { text: `${row.axis}번 · ${row.name} · ${row.error || '알람'}` }),
         h('span', { text: '기구에 걸린 것이 없는지 확인한 뒤 오류를 초기화하고 서보를 켜세요' })),
-      h('button', { class: 'btn btn-danger-soft', type: 'button', disabled: Boolean(ui.busy), onclick: () => servo(row, 'reset', state, changed) }, row.ac ? '오류 초기화' : '재부팅…'))),
+      h('button', { class: 'btn btn-danger-soft', type: 'button', disabled: Boolean(ui.busy), onclick: () => servo(row, 'reset', state, changed) }, row.ac ? '오류 초기화' : '재부팅'))),
     h('section', { class: 'card', 'aria-label': '모터' },
       rows.length ? h('div', { class: 'table-wrap' }, h('table', { class: 'table files-table' },
         h('thead', {}, h('tr', {}, ['번호', '이름', '종류 · 모델', '서보', '위치 (모터°)', '과부하율', '앱솔루트', '통신', ''].map((text) => h('th', { scope: 'col', text })))),
@@ -298,7 +298,7 @@ export function motorsBody(state, changed) {
           h('td', {}, h('span', { class: `chip chip-${row.absoluteTone}`, title: row.absoluteProblem, text: row.absolute })),
           h('td', { class: 'muted', text: row.comm }),
           h('td', {}, h('button', { class: 'btn btn-mini', type: 'button', 'aria-label': `${row.axis}번 자세히`, onclick: () => { ui.selected = row.axis; changed(); } }, '⋯')))))))
-        : h('p', { class: 'muted', text: '설정된 모터가 없습니다. 위의 「전체 검색…」으로 모터를 찾으세요.' })),
+        : h('p', { class: 'muted', text: '설정된 모터가 없습니다. 위의 「전체 검색」으로 모터를 찾으세요.' })),
     selected ? detailCard(state, changed, selected) : null,
   ];
 }

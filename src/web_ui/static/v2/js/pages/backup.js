@@ -72,7 +72,7 @@ function updateCard(state, changed) {
     running && Array.isArray(update.tail) && update.tail.length ? h('pre', { class: 'doc-code small' }, h('code', { text: update.tail.slice(-6).join('\n') })) : null,
     h('div', { class: 'row' },
       h('a', { class: 'btn btn-primary', href: '#/store' }, '모든 PC 업데이트 ›'),
-      h('button', { class: 'btn', type: 'button', disabled: Boolean(ui.busy) || running, onclick: start }, `${localName(state)}만 업데이트…`)),
+      h('button', { class: 'btn', type: 'button', disabled: Boolean(ui.busy) || running, onclick: start }, `${localName(state)}만 업데이트`)),
     h('p', { class: 'muted small', text: '새 시스템 패키지가 필요한 업데이트는 해당 PC의 터미널에서 bash scripts/install.sh 명령을 실행하세요.' }));
 }
 
@@ -106,7 +106,7 @@ function projectCard(state, changed) {
     await busy('create', async () => {
       try {
         await api('POST', '/api/projects', { body: { name } });
-        toast(`「${name}」 프로젝트를 만들었습니다. 사용하려면 목록에서 「선택…」을 누르세요.`, 'ok');
+        toast(`「${name}」 프로젝트를 만들었습니다. 사용하려면 목록에서 「선택」을 누르세요.`, 'ok');
       } catch (error) { toast(error.message || String(error), 'bad'); }
     }, state, changed);
   };
@@ -133,7 +133,7 @@ function projectCard(state, changed) {
   }, state, changed);
   return h('section', { class: 'card', 'aria-label': '프로젝트' },
     h('div', { class: 'card-head' }, h('h2', { text: '프로젝트' }),
-      h('button', { class: 'btn btn-mini', type: 'button', disabled: Boolean(ui.busy), onclick: create }, '새로 만들기…')),
+      h('button', { class: 'btn btn-mini', type: 'button', disabled: Boolean(ui.busy), onclick: create }, '새로 만들기')),
     h('p', { class: 'muted small', text: '로봇 한 대에 프로젝트 하나를 씁니다. 프로젝트를 바꾼 뒤에는 모터·드라이브 화면에서 장비에 적용해야 합니다.' }),
     data.error ? h('p', { class: 'tone-text-bad small', text: data.error }) : null,
     current ? [
@@ -150,8 +150,8 @@ function projectCard(state, changed) {
       h('span', { class: 'field-label', text: `다른 프로젝트 · ${others.length}` }),
       h('ul', { class: 'list' }, others.map((project) => h('li', { class: 'list-row' },
         h('span', { class: 'grow', text: project.name || project.project_id }),
-        h('button', { class: 'btn btn-mini', type: 'button', disabled: Boolean(ui.busy), onclick: () => pick(project) }, '선택…'),
-        h('button', { class: 'btn btn-mini', type: 'button', disabled: Boolean(ui.busy), onclick: () => remove(project) }, '삭제…'))))) : null);
+        h('button', { class: 'btn btn-mini', type: 'button', disabled: Boolean(ui.busy), onclick: () => pick(project) }, '선택'),
+        h('button', { class: 'btn btn-mini', type: 'button', disabled: Boolean(ui.busy), onclick: () => remove(project) }, '삭제'))))) : null);
 }
 
 /* ---------- 백업 ---------- */
@@ -194,7 +194,7 @@ function backupCard(state, changed) {
     h('p', { class: 'muted small', text: '매핑, 모터 설정, 애니메이션, 스케줄을 zip 파일 하나로 백업합니다.' }),
     h('div', { class: 'row' },
       selectedId ? h('a', { class: 'btn btn-primary', href: `/api/projects/${encodeURIComponent(selectedId)}/export`, download: '' }, 'zip 다운로드') : null,
-      h('button', { class: 'btn', type: 'button', disabled: Boolean(ui.busy), onclick: () => picker.click() }, ui.busy === 'import' ? '가져오는 중…' : 'zip 파일로 복원…'),
+      h('button', { class: 'btn', type: 'button', disabled: Boolean(ui.busy), onclick: () => picker.click() }, ui.busy === 'import' ? '가져오는 중…' : 'zip 파일로 복원'),
       picker),
     h('div', { class: 'field' },
       h('span', { class: 'field-label', text: `자동 백업 · 매일 · ${data.backups?.keep_days ?? 14}일 보관 · 누르면 다운로드` }),
@@ -220,6 +220,6 @@ export function renderBackup(state, { changed }) {
     running ? h('div', { class: 'blocker' }, dot('info'), h('span', { class: 'grow', text: '업데이트 중입니다. 끝나면 화면 연결이 잠시 끊겼다가 다시 연결됩니다.' })) : null,
     h('div', { class: 'grid-2' }, updateCard(state, changed), projectCard(state, changed)),
     backupCard(state, changed),
-    h('p', { class: 'muted small' }, '프로그램만 다시 시작하려면 ', h('button', { class: 'link-button inline-link', type: 'button', onclick: act.restartProgram }, '프로그램 다시 시작…'), ' (모터와 서보 상태는 유지됩니다)'),
+    h('p', { class: 'muted small' }, '프로그램만 다시 시작하려면 ', h('button', { class: 'link-button inline-link', type: 'button', onclick: act.restartProgram }, '프로그램 다시 시작'), ' (모터와 서보 상태는 유지됩니다)'),
   ];
 }

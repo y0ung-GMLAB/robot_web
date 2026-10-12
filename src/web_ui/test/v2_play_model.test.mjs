@@ -100,7 +100,7 @@ test('첫 자세 이동 시간 · 매핑 시간이 하나면 그 값이 골라�
   assert.equal(mixed.pick(5), 5);
 });
 
-test('회차 사이 · 「바로 다음 회차」(끝 자세 → 첫 자세로 곧바로)는 고를 수 없다 · 안전 (2026-10-12)', () => {
-  assert.ok(!REPEAT_MODES.some((mode) => mode.id === 'direct'));
+test('회차 사이 · 초기 위치를 거치지 않는 「바로 다음」 · 「대기 후 다음」 은 고를 수 없다 · 안전 (2026-10-12)', () => {
+  assert.deepEqual(REPEAT_MODES.map((mode) => mode.id), ['reinitialize', 'dwell_reinitialize']);
   assert.equal(REPEAT_MODES[0].id, 'reinitialize');
 });

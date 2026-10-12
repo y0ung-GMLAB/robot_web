@@ -70,8 +70,9 @@ async function busy(work, state, changed) {
 function syncFromServer(status) {
   const automation = status.automation || {};
   if (ui.repeatMode === null) {
-    // 이전 UI 에서 「바로 다음 회차」로 저장돼 있어도 새 화면은 고르지 않는다 · 안전상 초기 위치로 (2026-10-12)
-    ui.repeatMode = automation.repeat_mode && automation.repeat_mode !== 'direct' ? automation.repeat_mode : 'reinitialize';
+    // 이전 UI 에서 고른 「바로 다음」 · 「대기 후 다음」 은 초기 위치를 거치는 쪽으로 읽는다
+    const saved = String(automation.repeat_mode || '');
+    ui.repeatMode = saved === 'dwell' ? 'dwell_reinitialize' : (saved && saved !== 'direct' ? saved : 'reinitialize');
     ui.dwellSec = Number(automation.dwell_sec || 0);
   }
   if (ui.syncMode === null && automation.group_sync_mode) ui.syncMode = automation.group_sync_mode;
@@ -151,8 +152,6 @@ function nowCard(state, changed, navigate) {
   const play = state.play || {};
   const playlist = registeredPlaylist(play.mapping);
   const blocker = startBlocker(state.snap, state.sched, { scope: ui.scope, playlist, mappingId: play.mappingId });
-  const loopBlocked = status.capabilities?.continuous_run?.available === false
-    && ui.repeatMode === 'dwell';
   const disabled = Boolean(blocker) || ui.busy;
   const scopeText = group ? '매장 전체' : '단독';
 
@@ -180,8 +179,7 @@ function nowCard(state, changed, navigate) {
         h('button', { class: 'btn', type: 'button', disabled: disabled || running, onclick: initialize,
           title: '재생 목록 첫 애니메이션의 첫 자세로 천천히 이동합니다' }, '초기 위치로'),
         h('button', { class: 'btn btn-primary', type: 'button', disabled: disabled || running, onclick: () => start('once') }, '1회 시작'),
-        h('button', { class: 'btn btn-primary', type: 'button', disabled: disabled || running || loopBlocked, onclick: () => start('continuous'),
-          title: loopBlocked ? '시작 자세와 끝 자세가 달라 「바로 다음 회차」로 이어서 재생할 수 없습니다' : '' }, '연속 시작')),
+        h('button', { class: 'btn btn-primary', type: 'button', disabled: disabled || running, onclick: () => start('continuous') }, '연속 시작')),
       h('span', { class: 'spacer' }),
       h('div', { class: 'row' },
         h('button', { class: 'btn', type: 'button', disabled: !running, onclick: stopAfter }, '이번 회차 후 정지'),
@@ -189,8 +187,7 @@ function nowCard(state, changed, navigate) {
     blocker && !running ? h('div', { class: 'blocker' },
       dot('warn'),
       h('span', { class: 'grow', text: `시작할 수 없는 이유: ${blocker.text}` }),
-      fixButton(blocker.fix, navigate)) : null,
-    loopBlocked && !blocker ? h('p', { class: 'muted small', text: '연속 시작을 할 수 없습니다. 시작 자세와 끝 자세가 달라 「바로 다음 회차」로 이어서 재생할 수 없습니다. 반복을 「초기 위치로 돌아간 뒤 다음 회차」로 바꾸세요.' }) : null);
+      fixButton(blocker.fix, navigate)) : null);
 }
 
 /* ---------- PC 별 (매장 전체) ---------- */

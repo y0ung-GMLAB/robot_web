@@ -83,7 +83,7 @@ function updateCard(state, changed) {
     h('div', { class: 'card-head' },
       h('h2', { text: '업데이트' }),
       h('button', { class: `btn ${summary.differ ? 'btn-warn' : ''}`, type: 'button', disabled: ui.busy || running,
-        onclick: () => busy(async () => { if (await act.updateAll()) await loadStore(state, changed); }, state, changed) }, '모든 PC 업데이트…')),
+        onclick: () => busy(async () => { if (await act.updateAll()) await loadStore(state, changed); }, state, changed) }, '모든 PC 업데이트')),
     h('p', { class: summary.differ ? 'tone-text-warn' : 'muted', text: summary.differ
       ? `${summary.total}대 중 ${summary.differ}대 버전이 다릅니다`
       : `${summary.total}대 모두 같은 버전입니다` }),
@@ -110,7 +110,7 @@ function rosterCard(state, changed) {
     config.is_master ? h('div', { class: 'row' },
       h('button', { class: 'btn', type: 'button', disabled: ui.busy || !candidates.length || same,
         title: same ? '지금 보이는 PC와 같습니다' : '',
-        onclick: () => busy(() => act.saveRoster(candidates), state, changed) }, `지금 보이는 ${candidates.length}대로 다시 지정…`)) : h('p', { class: 'muted small', text: '필수 명단은 마스터 PC에서 지정합니다' }));
+        onclick: () => busy(() => act.saveRoster(candidates), state, changed) }, `지금 보이는 ${candidates.length}대로 다시 지정`)) : h('p', { class: 'muted small', text: '필수 명단은 마스터 PC에서 지정합니다' }));
 }
 
 export function renderStore(state, { changed }) {

@@ -381,10 +381,10 @@ function axisPanel(state, changed, item) {
     h('div', { class: 'row' },
       ['lower', 'reference', 'upper'].map((kind) => h('button', { class: 'btn btn-mini', type: 'button', disabled: !canCapture,
         title: canCapture ? '' : '조인트 매핑 줄이 있고, 모터 설정이 장비에 적용되어 있고, 다이얼이 멈춰 있어야 사용할 수 있습니다.',
-        onclick: () => capture(item, kind, changed) }, { lower: '현재 위치를 하한으로…', reference: '현재 위치를 기준점(0)으로…', upper: '현재 위치를 상한으로…' }[kind]))),
+        onclick: () => capture(item, kind, changed) }, { lower: '현재 위치를 하한으로', reference: '현재 위치를 기준점(0)으로', upper: '현재 위치를 상한으로' }[kind]))),
     h('p', { class: 'muted small', text: '변경하면 조인트 매핑에 저장되고, 이어서 장비에 적용(모터 재시작)할지 확인합니다.' }),
     outside ? h('div', { class: 'blocker bad' }, dot('bad'), h('span', { class: 'grow', text: '운전 한계를 벗어나 있습니다. 다이얼과 목표 위치 이동을 사용할 수 없습니다.' }),
-      h('button', { class: 'btn btn-warn', type: 'button', onclick: () => recoverRange(item, changed) }, '범위 안으로 복귀…')) : null,
+      h('button', { class: 'btn btn-warn', type: 'button', onclick: () => recoverRange(item, changed) }, '범위 안으로 복귀')) : null,
     h('div', { class: 'field' },
       h('div', { class: 'row' }, h('strong', { text: '움직이기' }),
         h('label', { class: `switch${ui.dialOn ? ' on' : ''}` },
@@ -414,9 +414,9 @@ function axisPanel(state, changed, item) {
         dot(item.fault ? 'bad' : item.servoOn ? 'ok' : 'warn'),
         h('span', { class: 'grow', text: `${item.servoOn ? '켜짐' : '꺼짐'} · ${item.fault ? '알람' : '알람 없음'}` }),
         item.servoOn
-          ? h('button', { class: 'btn btn-mini', type: 'button', onclick: async () => { endSession(true); await act.servoControl(item, 'off'); changed(); } }, item.ac ? '서보 끄기…' : '토크 끄기…')
+          ? h('button', { class: 'btn btn-mini', type: 'button', onclick: async () => { endSession(true); await act.servoControl(item, 'off'); changed(); } }, item.ac ? '서보 끄기' : '토크 끄기')
           : h('button', { class: 'btn btn-mini', type: 'button', disabled: item.fault || !item.detected, onclick: async () => { await act.servoControl(item, 'on'); changed(); } }, item.ac ? '서보 켜기' : '토크 켜기'),
-        h('button', { class: 'btn btn-mini', type: 'button', onclick: async () => { await act.servoControl(item, 'reset'); changed(); } }, item.ac ? `오류 초기화${item.fault ? '' : ' (알람 없음)'}` : '재부팅…'))),
+        h('button', { class: 'btn btn-mini', type: 'button', onclick: async () => { await act.servoControl(item, 'reset'); changed(); } }, item.ac ? `오류 초기화${item.fault ? '' : ' (알람 없음)'}` : '재부팅'))),
     ui.message ? h('p', { class: 'tone-text-warn small', text: ui.message }) : null);
 }
 
@@ -478,7 +478,7 @@ export function renderManual(state, { changed }) {
         }, label))),
       h('span', { class: 'spacer' }),
       h('button', { class: 'btn', type: 'button', disabled: initDisabled, title: initDisabled && pcBlocker ? pcBlocker.text : '',
-        onclick: initialize }, '초기 위치로…')),
+        onclick: initialize }, '초기 위치로')),
     !list.length ? h('section', { class: 'card' }, h('p', { class: 'muted', text: '인식된 모터가 없습니다' }))
       : ui.mode === 'faders' ? faderView(state, changed, list)
         : h('div', { class: 'manual-grid' },

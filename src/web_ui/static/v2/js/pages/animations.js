@@ -212,7 +212,7 @@ function detailCard(state, changed, navigate) {
             ui.detail = null;
             await loadAnimations(state, changed);
           }
-        } }, '삭제…')),
+        } }, '삭제')),
     inPlaylist ? h('p', { class: 'muted small', text: '재생 목록에 들어 있어 삭제할 수 없습니다. 먼저 재생 목록에서 빼세요.' }) : null);
 }
 

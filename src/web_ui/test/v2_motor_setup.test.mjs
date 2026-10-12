@@ -31,7 +31,7 @@ test('구획 상태 · 모터 연결 수 · 범위 미확인 · 장비 적용', 
 test('저장 칸 한 줄 · 두 구획 변경을 같이 센다', () => {
   assert.equal(pendingText([], []), '저장됨');
   assert.equal(pendingText(['0번 이름 A → B'], []), '저장하지 않은 변경 · 모터 1개 · 0번 이름 A → B');
-  assert.equal(pendingText(['a', 'b'], ['c', 'd']), '저장하지 않은 변경 · 모터 2개 · 조인트 매핑 2개 · a · b · c …');
+  assert.equal(pendingText(['a', 'b'], ['c', 'd']), '저장하지 않은 변경 · 모터 2개 · 조인트 매핑 2개 · a · b · c 외 1개');
 });
 
 test('모터 고르기 목록 · 어느 드라이브인지 · 슬레이브 번호 · alias · 다이나믹셀 포트·ID', () => {
