@@ -125,6 +125,13 @@ async function writeAlias(row, motor, state, changed) {
   }), state, changed);
 }
 
+/** 그 모터 설정 칸을 열고 그 자리로 내려간다 */
+function openDetail(axis, changed) {
+  ui.selected = axis;
+  changed();
+  setTimeout(() => document.getElementById('motor-detail')?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 600);
+}
+
 async function absoluteSetup(scope, row, state, changed) {
   const body = scope === 'all' ? { scope: 'all' } : { scope: 'one', master_index: row.masterIndex, slave_position: row.slavePosition };
   let preview;
@@ -256,7 +263,7 @@ function detailCard(state, changed, row) {
         oninput: (e) => setField(motor, field.key, field.top ? e.target.value : (e.target.value === '' ? null : Number(e.target.value))),
         onchange: () => changed() }));
   };
-  return h('section', { class: 'card', 'aria-label': `${row.axis}번 자세히` },
+  return h('section', { class: 'card', id: 'motor-detail', 'aria-label': `${row.axis}번 설정` },
     h('div', { class: 'card-head' }, h('h2', { text: `${row.axis}번 · ${row.name || '-'}` }), h('span', { class: 'muted small mono wrap-text', text: row.id })),
     h('div', { class: 'row form-row' }, EDIT_FIELDS.map(input)),
     row.ac ? h('label', { class: 'inline' }, h('input', { type: 'checkbox', checked: Number(motor.config?.overload_monitor) === 1,
@@ -321,7 +328,8 @@ export function motorsBody(state, changed) {
     h('section', { class: 'card', 'aria-label': '모터' },
       rows.length ? h('div', { class: 'table-wrap' }, h('table', { class: 'table files-table' },
         h('thead', {}, h('tr', {}, ['번호', '이름', '종류 · 모델', '서보', '위치 (모터°)', '과부하율', '앱솔루트', '통신', ''].map((text) => h('th', { scope: 'col', text })))),
-        h('tbody', {}, rows.map((row) => h('tr', { class: row.axis === selected?.axis ? 'selected' : '' },
+        // 줄 어디를 눌러도 그 모터 설정이 아래에 열린다 · 「⋯」 만으로는 무엇을 하는지 안 보였다 (2026-10-12)
+        h('tbody', {}, rows.map((row) => h('tr', { class: `pick-row${row.axis === selected?.axis ? ' selected' : ''}`, onclick: () => openDetail(row.axis, changed) },
           h('td', { class: 'mono', text: String(row.axis) }),
           h('td', { text: row.name || '-' }),
           h('td', { class: 'muted', text: row.kind }),
@@ -330,7 +338,7 @@ export function motorsBody(state, changed) {
           h('td', { class: `mono ${row.load !== null && row.load >= 100 ? 'tone-text-bad' : ''}`, text: row.load === null ? '-' : `${Math.round(row.load)}%` }),
           h('td', {}, h('span', { class: `chip chip-${row.absoluteTone}`, title: row.absoluteProblem, text: row.absolute })),
           h('td', { class: 'muted', text: row.comm }),
-          h('td', {}, h('button', { class: 'btn btn-mini', type: 'button', 'aria-label': `${row.axis}번 자세히`, onclick: () => { ui.selected = row.axis; changed(); } }, '⋯')))))))
+          h('td', {}, h('button', { class: 'btn btn-mini', type: 'button', 'aria-label': `${row.axis}번 설정 열기`, onclick: (event) => { event.stopPropagation(); openDetail(row.axis, changed); } }, '설정 ▾')))))))
         : h('p', { class: 'muted', text: '설정된 모터가 없습니다. 위의 「전체 검색」으로 모터를 찾으세요.' })),
     selected ? detailCard(state, changed, selected) : null,
   ];

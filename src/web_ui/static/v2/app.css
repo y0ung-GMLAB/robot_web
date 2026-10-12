@@ -461,3 +461,6 @@ dialog.confirm::backdrop { background: rgb(0 0 0 / 60%); }
 .part-note { font-size: 15px; font-weight: 400; color: var(--warn-ink); }
 .part-note.ok { color: var(--muted); }
 .part-jumps { gap: 8px; }
+
+.pick-row { cursor: pointer; }
+.pick-row:hover td { background: var(--panel-2); }
