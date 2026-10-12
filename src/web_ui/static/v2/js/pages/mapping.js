@@ -10,7 +10,8 @@ import { api } from '../net.js';
 import { confirmBox, toast } from '../dialog.js';
 import * as act from '../actions.js';
 import {
-  INITIAL_MODES, changeSummary, draftProblems, draftToRow, isRevisionConflict, motorForRow, motorRefFor, newRow, previewRow, rowToDraft, rowTarget,
+  INITIAL_MODES, autoConfirmRange, changeSummary, draftProblems, draftToRow, isRevisionConflict, motorForRow, motorRefFor, newRow, previewRow,
+  rangeConfirmed, rowToDraft, rowTarget, unconfirmedRows,
 } from '../mapping_model.js';
 import { signedDeg } from '../play_model.js';
 
@@ -129,7 +130,7 @@ function numberInput(row, key, changed, attrs = {}) {
     class: 'input input-num mono', type: 'number', step: 'any', value: value === null || value === undefined ? '' : String(value),
     'aria-label': attrs.label || key, placeholder: attrs.placeholder || '',
     oninput: (e) => { row[key] = e.target.value === '' ? null : Number(e.target.value); },
-    onchange: () => changed(),
+    onchange: () => { attrs.after?.(row); changed(); },
   });
 }
 
@@ -153,7 +154,7 @@ function table(state, changed) {
     ];
   };
   return h('div', { class: 'table-wrap' }, h('table', { class: 'table mapping-table' },
-    h('thead', {}, h('tr', {}, ['사용', '조인트', '모터', '감속·기어비', '방향 반전', '기준점 (모터°)', '범위 (조인트°)', '최대 속도 · 가속', '시작 자세', '상태', ''].map((text) => h('th', { scope: 'col', text })))),
+    h('thead', {}, h('tr', {}, ['사용', '조인트', '모터', '감속·기어비', '방향 반전', '기준점 (모터°)', '범위 (조인트°)', '범위 확인', '최대 속도 · 가속', '시작 자세', '상태', ''].map((text) => h('th', { scope: 'col', text })))),
     h('tbody', {}, ui.rows.map((row, index) => {
       const status = rowStatus(row);
       const motor = motorForRow(row, motors);
@@ -182,7 +183,12 @@ function table(state, changed) {
           title: canCapture ? '지금 모터 위치를 기준점(조인트 0°)으로 · 저장해야 남습니다' : '이 프로젝트 모터 설정을 장비에 적용한 뒤 캡처할 수 있습니다',
           onclick: () => { row.reference_position_deg = Math.round(motor.positionDeg * 1e4) / 1e4; row.reference_enabled = true; changed(); } }, '캡처'))),
       h('td', {}, h('div', { class: 'cell-row' },
-        numberInput(row, 'motion_lower_deg', changed, { label: '최소' }), h('span', { class: 'muted', text: '~' }), numberInput(row, 'motion_upper_deg', changed, { label: '최대' }))),
+        numberInput(row, 'motion_lower_deg', changed, { label: '최소', after: autoConfirmRange }), h('span', { class: 'muted', text: '~' }),
+        numberInput(row, 'motion_upper_deg', changed, { label: '최대', after: autoConfirmRange }))),
+      h('td', { class: row.enabled && !rangeConfirmed(row) ? 'range-unconfirmed' : '' },
+        h('input', { type: 'checkbox', checked: rangeConfirmed(row), 'aria-label': `${index + 1}번 줄 범위 확인`,
+          title: '최소·최대가 이 로봇의 실제 기계 범위인지 · 확인하고 저장하기 전에는 재생·초기 이동·수동 조작이 안 됩니다 · 최소·최대를 둘 다 고치면 저절로 체크',
+          onchange: (e) => { row.range_confirmed = e.target.checked; changed(); } })),
       h('td', {}, h('div', { class: 'cell-row' },
         numberInput(row, 'max_velocity_deg_s', changed, { label: '최대 속도 deg/s', placeholder: '없음' }),
         numberInput(row, 'max_acceleration_deg_s2', changed, { label: '최대 가속 deg/s²', placeholder: '없음' }))),
@@ -254,6 +260,10 @@ export function renderMapping(state, { changed }) {
       h('p', { class: 'muted small' }, '애니메이션의 조인트 → 이 PC 모터 · 모터 = 기준점 + 조인트 × 감속비 × 방향 · 파일 ',
         h('span', { class: 'mono', text: ui.fileId || '(새로 만듦)' }), ' · ', h('a', { href: '#/pack', text: '로봇 팩과 비교' }))),
     ui.loadError ? h('div', { class: 'blocker' }, dot('warn'), h('span', { class: 'grow', text: `다시 읽기 실패 · ${ui.loadError} · 고치던 것은 그대로` })) : null,
+    unconfirmedRows(ui.rows).length ? h('div', { class: 'blocker bad' }, dot('bad'),
+      h('span', { class: 'grow', text: `범위 미확인 · ${unconfirmedRows(ui.rows).map((r) => r.motion_id).join(', ')} · 실제 기계 범위(최소·최대)를 넣거나 「범위 확인」 을 체크하고 저장하세요 · 그 전에는 재생·초기 이동·수동 조작이 막힙니다(수정 목록 97)` })) : null,
+    state.snap?.mapping_range_blocker && !unconfirmedRows(ui.rows).length && changeSummary(ui.saved, ui.rows).length
+      ? h('p', { class: 'muted small', text: '저장하면 범위 미확인이 풀립니다' }) : null,
     h('section', { class: 'card', 'aria-label': '조인트' },
       ui.rows.length ? table(state, changed) : h('p', { class: 'muted', text: '조인트가 없습니다 · 「모터로 자동 만들기」 를 누르세요' })),
     previewCard(),

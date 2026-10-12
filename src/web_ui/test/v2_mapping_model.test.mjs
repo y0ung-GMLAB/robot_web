@@ -71,3 +71,22 @@ test('충돌 문구', () => {
   assert.equal(isRevisionConflict('motion mapping command failed: 조인트 매핑이 화면을 불러온 뒤 변경됐습니다 · 다시'), true);
   assert.equal(isRevisionConflict('재생 중에는 바꿀 수 없습니다'), false);
 });
+
+test('범위 확인 · 칸이 있으면 그 값 · 옛 파일은 ±180 이면 미확인 · 둘 다 고치면 저절로 확인 (수정 목록 97)', async () => {
+  const { autoConfirmRange, rangeConfirmed, unconfirmedRows } = await import('../static/v2/js/mapping_model.js');
+  const old = rowToDraft({ ...serverRow, range_confirmed: undefined, motion_lower_rad: -Math.PI, motion_upper_rad: Math.PI });
+  assert.equal(rangeConfirmed(old), false);
+  assert.equal(rangeConfirmed(rowToDraft(serverRow)), true, '옛 파일이라도 범위를 넣었으면 확인으로');
+  assert.equal(rangeConfirmed({ ...old, range_confirmed: true }), true);
+  assert.equal(rangeConfirmed(rowToDraft({ ...serverRow, range_confirmed: false })), false);
+  const fresh = newRow(0, 'X');
+  assert.equal(fresh.range_confirmed, false, '자동 생성 새 줄은 미확인');
+  fresh.motion_lower_deg = -10;
+  autoConfirmRange(fresh);
+  assert.equal(fresh.range_confirmed, false, '한쪽만 고치면 그대로');
+  fresh.motion_upper_deg = 10;
+  autoConfirmRange(fresh);
+  assert.equal(fresh.range_confirmed, true);
+  assert.deepEqual(unconfirmedRows([old, { ...old, enabled: false }, { ...old, motion_id: '' }]).length, 1, '안 쓰는 줄 · 이름 없는 줄은 빼고');
+  assert.equal(draftToRow({ ...fresh }).range_confirmed, true, '저장에 실린다');
+});

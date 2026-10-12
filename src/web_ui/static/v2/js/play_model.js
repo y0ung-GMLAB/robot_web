@@ -144,6 +144,7 @@ export function startBlocker(snap, sched, { scope, playlist, mappingId }) {
   } else if (isRunning(status)) {
     return { text: '재생 중입니다' };
   }
+  if (snap?.mapping_range_blocker) return { text: String(snap.mapping_range_blocker), fix: 'open-mapping' };
   if (snap?.execution_context && snap.execution_context.ready === false) {
     return { text: String(snap.execution_context.message || '실행 준비가 안 됐습니다') };
   }

@@ -32,6 +32,12 @@ test('나쁜 문제가 있으면 그 문제가 한 문장 · 주의만 있으면
   assert.equal(warnOnly.issues[0].action.kind, 'update-all');
 });
 
+test('조인트 범위 미확인 · 빨간 문제 · 조인트 매핑 열기 (수정 목록 97)', () => {
+  const line = headline({ ...pcs(), mapping_range_blocker: '조인트 범위 미확인 · Neck_Pitch · …' }, { run_mode: 'manual' });
+  assert.equal(line.tone, 'bad');
+  assert.deepEqual([line.issues[0].title, line.issues[0].action.target], ['조인트 범위 미확인 · 재생·수동 조작이 막혀 있습니다', 'mapping']);
+});
+
 test('문제마다 해결 버튼 · 긴급 정지 · 알람 · 그룹 오류 · 스케줄 거부 · 연결 끊김', () => {
   const snap = {
     ...pcs({ pc_id: 'floating2', online: false }),

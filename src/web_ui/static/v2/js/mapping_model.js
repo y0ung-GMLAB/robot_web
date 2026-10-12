@@ -67,8 +67,33 @@ export function draftToRow(draft) {
   return out;
 }
 
+/**
+ * 범위를 사람이 확인했나 · 서버 joint_mapping.range_confirmed 와 같은 규칙 · 수정 목록 97
+ * 칸이 있으면 그 값 · 없으면(옛 파일) 범위로 짐작 · −180 ~ 180 그대로면 미확인
+ */
+export function rangeConfirmed(row) {
+  if (row?.range_confirmed !== undefined && row?.range_confirmed !== null) return Boolean(row.range_confirmed);
+  const lower = Number(row?.motion_lower_deg);
+  const upper = Number(row?.motion_upper_deg);
+  return !(Math.abs(lower - -180) < 1e-6 && Math.abs(upper - 180) < 1e-6);
+}
+
+/** 최소·최대 둘 다 기본값(±180)이 아니게 되면 저절로 확인 · 끄지는 않는다(기존 화면과 같음) */
+export function autoConfirmRange(row) {
+  const lower = Number(row.motion_lower_deg);
+  const upper = Number(row.motion_upper_deg);
+  if (Number.isFinite(lower) && Number.isFinite(upper) && lower !== -180 && upper !== 180) row.range_confirmed = true;
+}
+
+/** 재생을 막는 줄 · 「사용」 이고 이름 있고 미확인 */
+export function unconfirmedRows(rows) {
+  return (rows || []).filter((row) => row.enabled !== false && String(row.motion_id || '').trim() && !rangeConfirmed(row));
+}
+
 export function newRow(motorAxis = null, name = '') {
   return rowToDraft({
+    // ±180 은 기계 범위가 아니다 · 사람이 범위를 넣거나 확인해야 재생된다 · 수정 목록 97
+    range_confirmed: false,
     motion_id: name, enabled: motorAxis !== null, motor_ref: '', motor_axis: motorAxis,
     reference_enabled: true, reference_position_rad: 0, motion_lower_rad: -Math.PI, motion_upper_rad: Math.PI,
     initial_mode: 'reference', initial_motion_position_rad: 0, initial_move_time_sec: 5, invert: false,
@@ -163,7 +188,7 @@ const LABELS = {
   motion_id: '이름', enabled: '사용', motor_axis: '모터', gear_ratio: '감속비', invert: '방향',
   reference_position_deg: '기준점', motion_lower_deg: '최소', motion_upper_deg: '최대',
   max_velocity_deg_s: '최대 속도', max_acceleration_deg_s2: '최대 가속', initial_mode: '시작 자세',
-  initial_motion_position_deg: '지정 값',
+  initial_motion_position_deg: '지정 값', range_confirmed: '범위 확인',
 };
 
 function same(a, b) {

@@ -214,6 +214,7 @@ def snapshot():
         # 새 UI(v2) 상단 바 · 홈이 읽는다 · 실제 브리지 스냅샷과 같은 자리
         'system_info': {'hostname': 'floating1'},
         'supervisor_watchdog': {},
+        'mapping_range_blocker': _preview_range_blocker(),
         'minas_absolute_blocker': '' if state['abs_done'] else '앱솔루트 미확인 · 4번 모터 Pr0.15=1(인크리멘털) · 모터 관리에서 앱솔루트 설정',
         'coordination': {
             'node_connected': True,
@@ -1081,6 +1082,24 @@ async def preview_save_mapping(request: Request):
 @app.post('/api/motor-config/apply')
 async def preview_apply_motor_config():
     return {'success': True, 'message': '프리뷰 · 장비에 적용 (실제로는 아무것도 안 함)'}
+
+
+def _preview_range_blocker():
+    """서버 joint_mapping.range_block_reason 흉내 · 수정 목록 97"""
+    rows = state.get('mapping_rows_saved') or mapping_rows()
+    ids = []
+    for row in rows:
+        if row.get('enabled') is False or not row.get('motion_id'):
+            continue
+        confirmed = row.get('range_confirmed')
+        if confirmed is None:
+            confirmed = not (abs(math.degrees(float(row.get('motion_lower_rad') or 0)) + 180) < 1e-6
+                             and abs(math.degrees(float(row.get('motion_upper_rad') or 0)) - 180) < 1e-6)
+        if not confirmed:
+            ids.append(str(row['motion_id']))
+    if not ids:
+        return ''
+    return f"조인트 범위 미확인 · {', '.join(ids)} · 모터 관리 → 조인트 매핑에서 실제 기계 범위(최소·최대)를 넣거나 「범위 확인」 을 체크하고 저장하세요"
 
 
 def _preview_registry():

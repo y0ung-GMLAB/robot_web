@@ -24,6 +24,8 @@ test('시작 막는 이유 · 자동·끔 모드는 수동으로 바꾸기 버�
   assert.equal(startBlocker({}, { run_mode: 'manual' }, { ...ok, mappingId: '' }).fix, 'open-mapping');
   assert.match(startBlocker({ execution_context: { ready: false, message: '모터 설정 미적용' } }, { run_mode: 'manual' }, ok).text, /미적용/);
   assert.match(startBlocker({ motion_run_status: { state: 'running' } }, { run_mode: 'manual' }, ok).text, /재생 중/);
+  const range = startBlocker({ mapping_range_blocker: '조인트 범위 미확인 · A' }, { run_mode: 'manual' }, ok);
+  assert.deepEqual([range.text, range.fix], ['조인트 범위 미확인 · A', 'open-mapping'], '수정 목록 97');
   const slave = { coordination: { config: { is_master: false }, runtime: { joined: true } } };
   assert.match(startBlocker(slave, { run_mode: 'manual' }, { ...ok, scope: 'group' }).text, /마스터에서만/);
   assert.equal(startBlocker(group({ coordination_error: { active: true, message: 'x' } }), { run_mode: 'manual' }, { ...ok, scope: 'group' }).fix, 'ack-group-error');

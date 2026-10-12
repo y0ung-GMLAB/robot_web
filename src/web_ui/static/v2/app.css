@@ -365,6 +365,7 @@ body.drop-active .drop-zone { border-color: var(--blue); background: var(--blue-
 .mapping-table .select-sm { max-width: 150px; }
 .mapping-table .btn-mini { padding: 0 8px; }
 .mapping-table input[type=checkbox] { width: 20px; height: 20px; }
+.mapping-table td.range-unconfirmed { outline: 2px solid var(--bad); outline-offset: -4px; border-radius: 6px; }
 
 /* 모터·드라이브 */
 .btn.danger-text { color: var(--bad-ink); border-color: var(--bad-line); }

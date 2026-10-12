@@ -70,6 +70,12 @@ export function collectIssues(snap, sched, { connected = true } = {}) {
     bad('앱솔루트 미확인 · 모터를 움직일 수 없습니다', absolute,
       { kind: 'open', target: 'maintain-motors', label: '정비에서 설정' });
   }
+  // 조인트 범위 미확인 · 재생·초기 이동·수동 조작이 막혀 있다 · 판정은 서버 · 수정 목록 97
+  const range = String(snap.mapping_range_blocker || '');
+  if (range) {
+    bad('조인트 범위 미확인 · 재생·수동 조작이 막혀 있습니다', range,
+      { kind: 'open', target: 'mapping', label: '조인트 매핑 열기' });
+  }
   const motors = Array.isArray(snap.motion_state?.motors) ? snap.motion_state.motors : [];
   const faulted = motors.filter((m) => m && m.fault);
   if (faulted.length) {
