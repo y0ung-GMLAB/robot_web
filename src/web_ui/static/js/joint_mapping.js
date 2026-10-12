@@ -58,3 +58,18 @@ export function motorToJoint(row, motor, unit = 'deg') {
   if (!factor) return null;
   return (Number(motor) - mappingReference(row, unit)) / factor - mappingAngle(row, 'offset', unit);
 }
+
+/** 사람이 이 줄의 범위를 확인했나 · 서버 `range_confirmed` 와 같은 규칙 · 수정 목록 97
+ *
+ * 칸이 있으면 그 값 · 없으면 범위로 짐작 · 기본 −180 ~ 180 그대로면 미확인.
+ * 미확인 줄이 「사용」 이면 재생·초기 이동이 막힌다(판정은 서버). */
+export function mappingRangeConfirmed(row) {
+  const value = row?.range_confirmed;
+  if (value !== undefined && value !== null) return Boolean(value);
+  const lower = mappingAngle(row, 'motion_lower', 'deg');
+  const upper = mappingAngle(row, 'motion_upper', 'deg');
+  return !(
+    Math.abs(lower - ANGLE_DEFAULTS_DEG.motion_lower) < 1e-6
+    && Math.abs(upper - ANGLE_DEFAULTS_DEG.motion_upper) < 1e-6
+  );
+}

@@ -676,6 +676,8 @@ class MotionMappingManager(Node):
                 'reference_position_rad': reference_position,
                 'motion_lower_rad': joint_mapping.angle(row, 'motion_lower', units.RAD),
                 'motion_upper_rad': joint_mapping.angle(row, 'motion_upper', units.RAD),
+                # 범위 확인 · 옛 파일은 범위로 짐작해 칸을 채운다 · 수정 목록 97
+                joint_mapping.RANGE_CONFIRMED_FIELD: joint_mapping.range_confirmed(row),
                 'initial_mode': initial_mode,
                 'initial_motion_position_rad': initial_position,
                 'initial_move_time_sec': initial_move_time,
@@ -802,6 +804,9 @@ class MotionMappingManager(Node):
                 row_errors.append('motion range must be numeric')
             elif lower > upper:
                 row_errors.append('motion_lower_rad must be <= motion_upper_rad')
+            if enabled and not joint_mapping.range_confirmed(row):
+                # 저장은 된다 · 재생만 막힌다 (재생 계획이 같은 판정을 쓴다) · 수정 목록 97
+                row_warnings.append('범위 미확인 · 실제 범위를 넣거나 「범위 확인」 체크 · 그 전에는 재생·수동 조작 안 됨')
             if initial_mode not in INITIAL_MODES:
                 row_errors.append(f'initial_mode must be one of: {", ".join(INITIAL_MODES)}')
             if initial_position is None:

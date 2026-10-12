@@ -258,6 +258,12 @@ class PlanBuilder:
             rows = []
         axes = []
         errors = []
+        # 범위를 사람이 확인 안 한 줄이 있으면 재생·초기 이동 모두 안 한다 ·
+        # 자동 생성 기본 −180 ~ 180° 는 기계 범위가 아니라 막는 것이 없다 · 수정 목록 97
+        # 맨 앞에 둔다 · 오류는 8개까지만 보인다
+        range_reason = joint_mapping.range_block_reason(rows)
+        if range_reason:
+            errors.append(range_reason)
         warnings = [unusable_motion_file_note] if unusable_motion_file_note else []
         # 모터가 이 PC 에 없는 축 · 막지 않고 건너뛴다 · §6-139
         missing_motor_motion_ids = []

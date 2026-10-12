@@ -14,7 +14,7 @@ import rclpy
 import uvicorn
 import yaml
 from fastapi import FastAPI, HTTPException, Request
-from motion_common import generation, minas_absolute, rpc, topics, upper_restart
+from motion_common import generation, joint_mapping, minas_absolute, rpc, topics, upper_restart
 from motion_common import paths as common_paths
 from motion_common import motor_ref as motor_ref_rules
 from fastapi.responses import JSONResponse
@@ -40,6 +40,7 @@ from .auto_backup import AutoBackupService
 from .absolute_setup import AbsoluteSetup
 from .drive_maintenance import DriveMaintenance
 from .manual_stream import ManualStreamService
+from .manual_range_gate import ManualRangeGate
 from . import animation_preview, sim_scene
 from .motor_runtime_service import MotorRuntimeService
 from .project_service import ProjectService
@@ -832,11 +833,14 @@ class MotionWebBridge(Node):
             ),
             'motor_config_applied': motor_config_applied,
         }
+        # 적용된 조인트 매핑의 범위 미확인 줄 · 상단 빨간 칸 · 재생 계획과 같은 판정 · 수정 목록 97
+        mapping_range_blocker = ''
         if isinstance(motion_state, dict):
             mapping_rows = self._monitoring_mapping_rows_for_context(
                 execution_context,
                 selected_project_id,
             )
+            mapping_range_blocker = joint_mapping.range_block_reason(mapping_rows)
             current_generation = self.current_project_generation()
             if (
                 motion_value_state.get('project_id') != selected_project_id
@@ -890,6 +894,8 @@ class MotionWebBridge(Node):
             ),
             # 연결된 MINAS 드라이브 앱솔루트 미확인 사유 · 상단 빨간 칸 · 수정 목록 62
             'minas_absolute_blocker': self.minas_absolute_blocker(),
+            # 조인트 범위 미확인 사유 · 재생·초기 이동이 막혀 있다 · 수정 목록 97
+            'mapping_range_blocker': mapping_range_blocker,
             'motion_run_status': motion_run_status,
             'motor_activity': motor_activity_snapshot(
                 motion_run_status,
@@ -2052,6 +2058,21 @@ class MotionWebBridge(Node):
         if not isinstance(motion_state, dict):
             return ''
         return minas_absolute.block_reason(motion_state.get('minas_absolute'))
+
+    def manual_range_blocker(self, axis: Any = None) -> str:
+        """수동 조작(조그·다이얼·절대 이동·범위 복구·페이더)을 막을 이유 · 조인트 범위 확인 전 · 수정 목록 97"""
+        return self._manual_range_gate_instance().block_reason(axis)
+
+    def manual_range_axis_blocker(self, axis: Any) -> str:
+        """페이더 목표 하나 · 마지막 전체 판정 + 축 연결만 (초당 수십 번 불린다) · 수정 목록 97"""
+        return self._manual_range_gate_instance().cached_axis_reason(axis)
+
+    def _manual_range_gate_instance(self) -> ManualRangeGate:
+        gate = getattr(self, '_manual_range_gate', None)
+        if gate is None:
+            gate = ManualRangeGate(self)
+            self._manual_range_gate = gate
+        return gate
 
     def coordination_execution_blocker(self) -> str:
         service = getattr(self, '_coordination_web_bridge', None)

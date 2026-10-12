@@ -1,6 +1,6 @@
 import { createMotionFileManager } from './motion_file_manager.js';
 import { motionScheduleResumeNote } from './schedule_scope.js';
-import { mappingGain, motorToJoint } from './joint_mapping.js';
+import { mappingGain, mappingRangeConfirmed, motorToJoint } from './joint_mapping.js';
 import {
   playlistPanelHtml,
   playlistProgressText,
@@ -384,6 +384,8 @@ function defaultMotionAxisRow(motionId, motorAxis = null) {
     motor_ref: '', motor_axis: motorAxis,
     reference_enabled: true, reference_position_deg: 0.0,
     motion_lower_deg: -180.0, motion_upper_deg: 180.0,
+    // ±180 은 기계 범위가 아니다 · 사람이 범위를 넣거나 체크해야 재생된다 · 수정 목록 97
+    range_confirmed: false,
     initial_mode: 'reference', initial_motion_position_deg: 0.0,   // 기본 기준점 · 2026-10-03 (13-3)
     initial_move_time_sec: 5.0, invert: false, offset_deg: 0.0,
     scale: 1.0, gear_ratio: 1.0,
@@ -2110,6 +2112,7 @@ export function createMotionDataController({
       const initialPositionDisabled = initialMode !== 'manual';
       const referencePositionValue = displayReferencePosition(row);
       const initialPositionValue = displayInitialPosition(row);
+      const rangeConfirmed = mappingRangeConfirmed(row);
       // 감속·기어비 · 다이나믹셀도 입력 · 외부 기어 사례 (2026-10-04 · 「1 고정」 폐지)
       const gearRatioValue = numericOr(row?.gear_ratio, 1.0);
       // 초기 위치 · 첫 프레임(애니메이션 첫 줄 값) · 직접 지정(이 칸) · 기준점(모션 0°) · 2026-10-02
@@ -2130,6 +2133,7 @@ export function createMotionDataController({
           </td>
           <td class="mapping-number-cell"><input class="numeric-input mapping-number-input" type="number" step="0.001" data-motion-mapping-field="motion_lower_deg" value="${displayText(row.motion_lower_deg)}"></td>
           <td class="mapping-number-cell"><input class="numeric-input mapping-number-input" type="number" step="0.001" data-motion-mapping-field="motion_upper_deg" value="${displayText(row.motion_upper_deg)}"></td>
+          <td class="${rangeConfirmed || row.enabled === false ? '' : 'mapping-range-unconfirmed'}"><input type="checkbox" data-motion-mapping-field="range_confirmed" title="범위 확인 · 최소·최대가 이 로봇의 실제 기계 범위인지 · 체크하고 저장하기 전에는 재생·초기 이동·수동 조작(조그·다이얼·페이더)이 안 됩니다 · 최소·최대를 둘 다 고치면 저절로 체크됩니다" ${rangeConfirmed ? 'checked' : ''}></td>
           <td class="mapping-number-cell"><input class="numeric-input mapping-number-input" type="number" min="0" step="1" placeholder="없음" data-motion-mapping-field="max_velocity_deg_s" value="${row.max_velocity_deg_s == null ? '' : displayText(row.max_velocity_deg_s)}"></td>
           <td class="mapping-number-cell"><input class="numeric-input mapping-number-input" type="number" min="0" step="10" placeholder="없음" data-motion-mapping-field="max_acceleration_deg_s2" value="${row.max_acceleration_deg_s2 == null ? '' : displayText(row.max_acceleration_deg_s2)}"></td>
           <td>
@@ -2967,7 +2971,7 @@ export function createMotionDataController({
     if (!row) return;
     if (field === 'motion_id') {
       row.motion_id = String(value || '').trim();
-    } else if (field === 'enabled' || field === 'invert') {
+    } else if (field === 'enabled' || field === 'invert' || field === 'range_confirmed') {
       row[field] = Boolean(checked);
     } else if (field === 'motor_ref') {
       const selectionValue = String(value || '');
@@ -3000,10 +3004,23 @@ export function createMotionDataController({
       const number = Number(value);
       const fallback = field === 'scale' || field === 'gear_ratio' ? 1.0 : field === 'initial_move_time_sec' ? 5.0 : 0.0;
       row[field] = Number.isFinite(number) ? number : fallback;
+      if (field === 'motion_lower_deg' || field === 'motion_upper_deg') confirmRangeWhenBothEndsSet(row);
     }
     mappingValidation = null;
     markMappingDirty();
     renderMappingPanel();
+  }
+
+  /** 최소·최대 둘 다 기본값(−180·180)이 아니게 되면 범위 확인으로 · 수정 목록 97
+   *
+   * 한쪽만 넣었을 때는 다른 쪽이 아직 ±180 이라 그대로 둔다 · 실제로 한쪽이
+   * 180 인 축은 「범위 확인」 을 직접 체크한다. 체크를 저절로 끄지는 않는다. */
+  function confirmRangeWhenBothEndsSet(row) {
+    const lower = Number(row.motion_lower_deg);
+    const upper = Number(row.motion_upper_deg);
+    if (Number.isFinite(lower) && Number.isFinite(upper) && lower !== -180 && upper !== 180) {
+      row.range_confirmed = true;
+    }
   }
 
   function captureReferencePosition(rowIndex) {
@@ -3078,6 +3095,7 @@ export function createMotionDataController({
       } else {
         row.motion_lower_deg = Math.ceil(motion * 10000) / 10000;
       }
+      confirmRangeWhenBothEndsSet(row);
       const lower = Number(row.motion_lower_deg);
       const upper = Number(row.motion_upper_deg);
       if (Number.isFinite(lower) && Number.isFinite(upper) && lower > upper) {

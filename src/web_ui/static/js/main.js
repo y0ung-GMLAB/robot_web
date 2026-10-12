@@ -1447,6 +1447,8 @@ function connectSocket() {
         supervisorProblem: String(payload?.supervisor_watchdog?.message || ''),
         // 앱솔루트 미확인 · 상단 빨간 칸 · 판단은 서버 · 수정 목록 62
         absoluteProblem: String(payload?.minas_absolute_blocker || ''),
+        // 조인트 범위 미확인 · 상단 빨간 칸 · 판단은 서버 · 수정 목록 97
+        rangeProblem: String(payload?.mapping_range_blocker || ''),
       });
       renderServiceManagement(payload);
       renderAccess(payload, el);

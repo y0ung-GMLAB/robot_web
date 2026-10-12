@@ -41,6 +41,15 @@ STALE_MAPPING_MESSAGE = (
 )
 
 
+def _stream_block_reason(bridge: Any) -> str:
+    """페이더 연결·0.5초마다 · 운전 모드 + 조인트 범위 확인(수정 목록 97)"""
+    reason = manual_control_block_reason(bridge)
+    if reason:
+        return reason
+    range_blocker = getattr(bridge, 'manual_range_blocker', None)
+    return range_blocker() if callable(range_blocker) else ''
+
+
 async def run_manual_stream_socket(bridge: Any, websocket: Any) -> None:
     await websocket.accept()
 
@@ -51,7 +60,7 @@ async def run_manual_stream_socket(bridge: Any, websocket: Any) -> None:
     async def send(payload: dict) -> None:
         await websocket.send_text(json.dumps(payload, ensure_ascii=False))
 
-    block = await asyncio.to_thread(manual_control_block_reason, bridge)
+    block = await asyncio.to_thread(_stream_block_reason, bridge)
     if block:
         await refuse(block)
         return
@@ -79,15 +88,19 @@ async def run_manual_stream_socket(bridge: Any, websocket: Any) -> None:
             now = time.monotonic()
             if now - last_block_check > BLOCK_RECHECK_SEC:
                 last_block_check = now
-                block = await asyncio.to_thread(
-                    manual_control_block_reason, bridge
-                )
+                block = await asyncio.to_thread(_stream_block_reason, bridge)
                 if block:
                     await refuse(block)
                     return
 
             kind = message.get('type')
             if kind == 'target':
+                # 축 하나 · 「사용」 매핑 줄에 없는 모터는 안 보낸다 · 수정 목록 97
+                axis_blocker = getattr(bridge, 'manual_range_axis_blocker', None)
+                axis_block = axis_blocker(message.get('axis')) if callable(axis_blocker) else ''
+                if axis_block:
+                    await send({'type': 'result', 'success': False, 'message': axis_block})
+                    continue
                 result = service.send_target(
                     message.get('axis'),
                     message.get('target_rad'),
