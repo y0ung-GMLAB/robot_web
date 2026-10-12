@@ -7,7 +7,7 @@ import { headline, runMode } from './model.js';
 import * as act from './actions.js';
 
 export const NAV = [
-  { label: '운영', items: [['home', '홈'], ['play', '재생'], ['schedule', '스케줄'], ['store', '매장 PC']] },
+  { label: '운영', items: [['home', '홈'], ['play', '재생'], ['schedule', '스케줄'], ['store', 'PC 현황']] },
   { label: '작업', items: [['animations', '애니메이션'], ['manual', '수동 조작']] },
   { label: '설정', items: [['maintain-motors', '모터 설정'], ['pack', '로봇 팩·3D'],
     ['alarms', '드라이브 알람'], ['network', '네트워크·시간·그룹'], ['backup', '업데이트·백업']] },

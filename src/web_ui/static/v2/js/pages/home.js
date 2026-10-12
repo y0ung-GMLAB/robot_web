@@ -59,7 +59,7 @@ function issuesSection(state, navigate) {
 
 function storeCard(state) {
   const rows = pcRows(state.snap);
-  return card('매장 PC', [h('h2', { text: `매장 PC ${rows.length || ''}`.trim() }), h('a', { href: '#/store', text: '자세히' })],
+  return card('PC 현황', [h('h2', { text: `PC 현황 ${rows.length || ''}`.trim() }), h('a', { href: '#/store', text: '자세히' })],
     rows.length
       ? h('ul', { class: 'list' }, rows.map((row) => h('li', { class: 'list-row' },
         dot(row.tone),

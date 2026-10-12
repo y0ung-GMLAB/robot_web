@@ -51,7 +51,7 @@ function updateCard(state, changed) {
   const start = async () => {
     const ok = await confirmBox({
       title: `${localName(state)}만 업데이트`,
-      body: `${localName(state)} PC를 최신 버전으로 업데이트합니다(몇 분 걸립니다). 그동안 재생이 멈추고 화면 연결이 잠시 끊깁니다. 재생 중이면 업데이트하지 않습니다. 실패하면 이전 버전으로 되돌아가 계속 동작합니다.\n같은 그룹의 PC는 버전이 같아야 함께 재생할 수 있습니다. 보통은 매장 PC 화면의 「모든 PC 업데이트」를 사용하세요.`,
+      body: `${localName(state)} PC를 최신 버전으로 업데이트합니다(몇 분 걸립니다). 그동안 재생이 멈추고 화면 연결이 잠시 끊깁니다. 재생 중이면 업데이트하지 않습니다. 실패하면 이전 버전으로 되돌아가 계속 동작합니다.\n같은 그룹의 PC는 버전이 같아야 함께 재생할 수 있습니다. 보통은 PC 현황 화면의 「모든 PC 업데이트」를 사용하세요.`,
       confirmLabel: '업데이트', tone: 'warning',
     });
     if (!ok) return;

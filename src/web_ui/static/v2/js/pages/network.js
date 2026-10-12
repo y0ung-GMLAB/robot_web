@@ -181,8 +181,8 @@ function timeCard(state, changed) {
   const browserZone = (() => { try { return Intl.DateTimeFormat().resolvedOptions().timeZone; } catch { return ''; } })();
   const apply = async (all) => {
     const ok = await confirmBox({
-      title: all ? '매장 PC 전체 시간대 변경' : `${localName(state)} 시간대 변경`,
-      body: `${all ? '매장 PC 전체(스피커 포함)' : localName(state)}의 시간대를 「${ui.zone}」에 맞춥니다.\n스케줄은 바뀐 시각을 기준으로 동작합니다. 시간대를 바꾼 PC는 2초 뒤 프로그램을 다시 시작합니다(재생 중인 PC는 변경하지 않습니다).`,
+      title: all ? '모든 PC 시간대 변경' : `${localName(state)} 시간대 변경`,
+      body: `${all ? '모든 PC(스피커 포함)' : localName(state)}의 시간대를 「${ui.zone}」에 맞춥니다.\n스케줄은 바뀐 시각을 기준으로 동작합니다. 시간대를 바꾼 PC는 2초 뒤 프로그램을 다시 시작합니다(재생 중인 PC는 변경하지 않습니다).`,
       confirmLabel: '전환', tone: 'warning',
     });
     if (!ok) return;
@@ -211,7 +211,7 @@ function timeCard(state, changed) {
           zones.map((zone) => h('option', { value: zone, selected: zone === ui.zone }, zone)))
         : h('input', { class: 'input grow mono', value: ui.zone, 'aria-label': '시간대', oninput: (e) => { ui.zone = e.target.value; }, onchange: () => changed() }),
       h('button', { class: 'btn', type: 'button', disabled: ui.zoneBusy || !ui.zone, onclick: () => apply(false) }, `${localName(state)}에만 적용`),
-      h('button', { class: 'btn', type: 'button', disabled: ui.zoneBusy || !ui.zone, onclick: () => apply(true) }, '매장 PC 전체에 적용 (스피커 포함)')));
+      h('button', { class: 'btn', type: 'button', disabled: ui.zoneBusy || !ui.zone, onclick: () => apply(true) }, '모든 PC에 적용 (스피커 포함)')));
 }
 
 /* ---------- 이 PC ---------- */
@@ -299,7 +299,7 @@ function groupCard(state, changed) {
     h('input', { class: 'input mono', value: String(form[key] ?? ''), ...attrs, oninput: (e) => { form[key] = e.target.value; }, onchange: () => changed() }));
   return h('section', { class: 'card', 'aria-label': '그룹 설정' },
     h('div', { class: 'card-head' }, h('h2', { text: '그룹 설정 (처음 한 번만)' })),
-    h('p', { class: 'muted small', text: '그룹 ID와 Domain이 같은 PC끼리 묶입니다. 그룹 참여를 켜고 끄는 것은 「매장 PC」 화면에서 합니다.' }),
+    h('p', { class: 'muted small', text: '그룹 ID와 Domain이 같은 PC끼리 묶입니다. 그룹 참여를 켜고 끄는 것은 「PC 현황」 화면에서 합니다.' }),
     h('div', { class: 'field' }, h('span', { class: 'field-label', text: '역할' }),
       h('div', { class: 'segmented', role: 'group', 'aria-label': '역할' },
         [[true, '마스터'], [false, '슬레이브']].map(([value, label]) => h('button', {
