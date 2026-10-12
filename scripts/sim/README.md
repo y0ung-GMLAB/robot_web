@@ -26,7 +26,9 @@ uv run --no-project --with mujoco --with numpy --with pyyaml python scripts/sim/
 ## 로봇 팩 형식 (터미널 세션과 공유하는 계약)
 
 ```
-pack.yaml       name, version, created · scene.glb 가 있으면 scene_glb: {animations: [애니메이션 파일 이름(확장자 뺌)]}
+pack.yaml       name, version, created · scene.glb 가 있으면
+                scene_glb: {joints: {<조인트 이름>: {node: <glb 노드 이름>, axis: [x, y, z]}}}   # 98 · 권장
+                scene_glb: {animations: [애니메이션 파일 이름(확장자 뺌)]}                       # 60 · 옛 방식
 robot.yaml      axes: [{joint, motion_id, motor, reducer, ratio, range_deg: [min, max], servo_bw_hz}]
                 drive: {profile_velocity_deg_s, profile_accel_deg_s2}     # 모터축 기준
                 env:   {settle_body, settle_s, torsion_k, torsion_c,
@@ -55,6 +57,22 @@ scene.glb       웹 3D 「Blender 뷰」 장면 (선택 · glTF 2.0 바이너리
   검사 · 머리말(glTF 2) · 길이 · 크기만 · 좌표는 glTF 기본(Y-up · Blender 내보내기 기본값 +Y Up)
 - scene.glb 를 넣으면 `pack.yaml` 에 그 장면이 담은 애니메이션 이름을 적는다 · 예) `scene_glb: {animations: [floating_narration_all]}` ·
   웹은 지금 보는 애니메이션이 이 목록에 있을 때만 「Blender 뷰」 를 켠다 · 안 적으면 Blender 뷰가 꺼지고 팩 검사가 경고한다 · 수정 목록 60
+- **권장 · `scene_glb.joints` (수정 목록 98)** · glb 에 애니메이션을 굽지 않고 **모델만** 내보낸다 · 웹이 지금 보는(실물과 같이면 재생 중인)
+  애니메이션 json 의 조인트 값을 재생 시각으로 보간해 노드를 돌린다 · 새 애니메이션마다 glb 를 다시 만들 필요 없음
+  · `joints` 의 키 = 애니메이션 json 의 조인트 이름(motion_id · 예 `f1_neck_yaw`) · `node` = glb 노드 이름 · `axis` = 그 노드의
+    **로컬 축**(길이는 상관없음 · 웹이 단위 벡터로 맞춤) · + 방향 = 애니메이션 값 + 방향
+  · 노드 회전 = 내보낸 기본 자세 × 축 회전(값 · rad) · 계층은 glb 그대로(목 좌우 → 목 상하 → 눈 상하 / 눈 좌우 L·R)
+  · json 에 없는 조인트는 0(기본 자세) · 예) `floating1_dir_test` 는 f1 만 움직이고 나머지 3대는 기본 자세
+  · 값은 Blender 본 값 그대로(매핑 scale·invert·감속비 안 씀) · 단위는 json 헤더 `rotation_unit` 대로(재생과 같은 파서)
+  · `joints` 가 있으면 `animations` 는 안 본다(어떤 애니메이션이든 켜짐) · glb 안에 클립이 있으면 쓰지 않고 경고만
+  · 팩 검사 · 노드가 glb 에 있는지 · axis 가 길이 0 이 아닌 숫자 3개인지 · 틀리면 팩 거부
+  · 예)
+    ```yaml
+    scene_glb:
+      joints:
+        f1_neck_yaw:   {node: f1_neck_yaw,   axis: [0, 1, 0]}
+        f1_neck_pitch: {node: f1_neck_pitch, axis: [1, 0, 0]}
+    ```
 
 ## 웹 업로드
 

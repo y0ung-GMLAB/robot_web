@@ -5,7 +5,8 @@
 웹 업로드 검사(브리지)와 sim 실행기(`scripts/sim`)가 **같은 검사**를 쓴다.
 
     pack.yaml       name, version, created
-                    scene_glb: {animations: [floating_narration_all]}   # scene.glb 가 담은 애니메이션 (수정 목록 60)
+                    scene_glb: {joints: {<조인트 이름>: {node: <glb 노드>, axis: [x, y, z]}}}   # 애니메이션 json 값으로 (수정 목록 98)
+                    scene_glb: {animations: [floating_narration_all]}   # 옛 방식 · glb 에 구운 클립 (수정 목록 60)
     robot.yaml      axes: [{joint, motion_id, motor, reducer, ratio, range_deg, servo_bw_hz}]
                     drive: {profile_velocity_deg_s, profile_accel_deg_s2}   # 모터축 기준
                     env:   {settle_body, settle_s, torsion_k, torsion_c,
@@ -40,6 +41,8 @@ __all__ = [
     'SCENE_GLB_MAX_BYTES',
     'SCENE_GLB_NAME',
     'check_scene_glb',
+    'glb_info',
+    'scene_glb_joints',
     'scene_glb_path',
     'INSTALLED_NAME',
     'PACK_DIRNAME',
@@ -354,11 +357,18 @@ def inspect_pack(pack_dir: Path) -> PackReport:
             errors.append('preview.yaml · 표 필요')
     scene_glb = scene_glb_path(pack_dir)
     if scene_glb is not None:
-        errors += check_scene_glb(scene_glb)
-        if not scene_glb_animations(pack_dir):
+        glb_errors = check_scene_glb(scene_glb)
+        errors += glb_errors
+        raw_joints = _scene_glb_section(pack_dir).get('joints')
+        if raw_joints is not None:
+            # 수정 목록 98 · 애니메이션 json 값으로 노드를 돌린다 · glb 는 모델만
+            joint_errors, joint_warnings = _check_scene_glb_joints(raw_joints, None if glb_errors else scene_glb)
+            errors += joint_errors
+            report.warnings.extend(joint_warnings)
+        elif not scene_glb_animations(pack_dir):
             report.warnings.append(
-                'pack.yaml · scene_glb.animations 없음 · Blender 뷰 꺼짐 '
-                '(scene.glb 가 담은 애니메이션 이름을 적으면 그 애니메이션에서만 켜짐)'
+                'pack.yaml · scene_glb.joints 도 animations 도 없음 · Blender 뷰 꺼짐 '
+                '(joints 를 적으면 어떤 애니메이션이든 json 값으로 · 수정 목록 98)'
             )
     return report
 
@@ -376,6 +386,102 @@ def scene_glb_path(pack_dir: Path) -> Optional[Path]:
     """팩에 Blender 뷰 장면이 있으면 그 경로 · 없으면 None (검사는 `inspect_pack`)"""
     path = Path(pack_dir) / SCENE_GLB_NAME
     return path if path.is_file() else None
+
+
+def _scene_glb_section(pack_dir: Path) -> Dict[str, Any]:
+    try:
+        payload = yaml.safe_load((Path(pack_dir) / 'pack.yaml').read_text(encoding='utf-8'))
+    except (OSError, yaml.YAMLError):
+        return {}
+    scene = payload.get('scene_glb') if isinstance(payload, dict) else None
+    return scene if isinstance(scene, dict) else {}
+
+
+def _unit_axis(value: Any) -> Optional[List[float]]:
+    if not isinstance(value, (list, tuple)) or len(value) != 3:
+        return None
+    try:
+        axis = [float(item) for item in value]
+    except (TypeError, ValueError):
+        return None
+    if not all(math.isfinite(item) for item in axis):
+        return None
+    length = math.sqrt(sum(item * item for item in axis))
+    if length < 1e-9:
+        return None
+    return [round(item / length, 9) for item in axis]
+
+
+def scene_glb_joints(pack_dir: Path) -> Dict[str, Dict[str, Any]]:
+    """Blender 뷰 조인트 · `pack.yaml` `scene_glb: {joints: {<조인트>: {node, axis}}}` · 수정 목록 98
+
+    조인트 이름 = 애니메이션 json 의 조인트(motion_id) · node = glb 노드 이름 · axis = 노드 로컬 축
+    (단위 벡터로 맞춤 · + = 애니메이션 값 + 방향) · 화면은 노드 회전 = 기본 자세 × 축 회전(값) ·
+    잘못 적힌 줄은 뺀다(검사는 `inspect_pack` 이 오류로) · 없으면 빈 표 → 옛 방식(animations).
+    """
+    raw = _scene_glb_section(pack_dir).get('joints')
+    if not isinstance(raw, dict):
+        return {}
+    out: Dict[str, Dict[str, Any]] = {}
+    for name, entry in raw.items():
+        if not isinstance(entry, dict):
+            continue
+        node = str(entry.get('node') or '').strip()
+        axis = _unit_axis(entry.get('axis'))
+        if str(name).strip() and node and axis:
+            out[str(name).strip()] = {'node': node, 'axis': axis}
+    return out
+
+
+def glb_info(path: Path) -> Dict[str, Any]:
+    """glb 의 JSON 덩어리만 읽어 노드 이름·애니메이션 수 · 못 읽으면 ValueError"""
+    with open(path, 'rb') as handle:
+        header = handle.read(20)
+        if len(header) < 20 or header[:4] != _GLB_MAGIC:
+            raise ValueError('glTF 바이너리가 아닙니다')
+        chunk_length = int.from_bytes(header[12:16], 'little')
+        if header[16:20] != b'JSON':
+            raise ValueError('첫 덩어리가 JSON 이 아닙니다')
+        document = json.loads(handle.read(chunk_length).decode('utf-8'))
+    nodes = [str(node.get('name') or '') for node in document.get('nodes') or [] if isinstance(node, dict)]
+    return {'nodes': nodes, 'animations': len(document.get('animations') or [])}
+
+
+def _check_scene_glb_joints(raw: Any, glb_path: Optional[Path]) -> Tuple[List[str], List[str]]:
+    where = 'pack.yaml · scene_glb.joints'
+    errors: List[str] = []
+    warnings: List[str] = []
+    if not isinstance(raw, dict) or not raw:
+        return [f'{where} · {{조인트: {{node, axis}}}} 표 필요'], warnings
+    names: List[str] = []
+    for name, entry in raw.items():
+        label = f'{where} · {name}'
+        if not isinstance(entry, dict):
+            errors.append(f'{label} · {{node, axis}} 표 필요')
+            continue
+        node = str(entry.get('node') or '').strip()
+        if not node:
+            errors.append(f'{label} · node(glb 노드 이름) 필요')
+        else:
+            names.append(node)
+        if _unit_axis(entry.get('axis')) is None:
+            errors.append(f'{label} · axis 는 길이 0 이 아닌 숫자 3개 [x, y, z]')
+    if glb_path is not None:
+        try:
+            info = glb_info(glb_path)
+        except (OSError, ValueError) as exc:
+            errors.append(f'{SCENE_GLB_NAME} · 노드 이름을 못 읽음: {exc}')
+            return errors, warnings
+        present = set(info['nodes'])
+        for node in names:
+            if node not in present:
+                errors.append(f'{where} · 노드 {node!r} 가 {SCENE_GLB_NAME} 에 없습니다')
+        if info['animations']:
+            warnings.append(
+                f'{SCENE_GLB_NAME} · 안에 애니메이션 {info["animations"]}개 · joints 방식에서는 쓰지 않습니다 '
+                '(모델만 내보내면 파일이 작아집니다 · 수정 목록 98)'
+            )
+    return errors, warnings
 
 
 def scene_glb_animations(pack_dir: Path) -> List[str]:

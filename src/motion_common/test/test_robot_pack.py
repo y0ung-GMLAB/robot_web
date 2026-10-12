@@ -207,3 +207,55 @@ def test_scene_glb_size_limit_keeps_the_pack_under_the_zip_limit(tmp_path, monke
     monkeypatch.setattr(robot_pack, 'SCENE_GLB_MAX_BYTES', 10)
     assert '크기 초과' in '\n'.join(robot_pack.validate_pack_dir(pack))
     assert robot_pack.SCENE_GLB_NAME == 'scene.glb'
+
+
+# scene_glb.joints · 애니메이션 json 값으로 노드 돌리기 · 수정 목록 98
+# --------------------------------------------------------------------------- #
+
+def _joint_pack(tmp_path, joints, *, nodes=('f1_neck_yaw', 'f1_neck_pitch'), animations=0):
+    import json as _json
+    document = {'asset': {'version': '2.0'}, 'nodes': [{'name': name} for name in nodes]}
+    if animations:
+        document['animations'] = [{'channels': [], 'samplers': []}] * animations
+    pack = make_pack(tmp_path / 'p', pack={'name': 'demo', 'version': '1.0', 'created': '2026-10-12',
+                                           'scene_glb': {'joints': joints}})
+    (pack / 'scene.glb').write_bytes(_glb(_json.dumps(document).encode()))
+    return pack
+
+
+def test_scene_glb_joints_are_read_and_axis_is_normalized(tmp_path):
+    pack = _joint_pack(tmp_path, {'f1_neck_yaw': {'node': 'f1_neck_yaw', 'axis': [0, 0, 2]},
+                                  'f1_neck_pitch': {'node': 'f1_neck_pitch', 'axis': [1, 0, 0]}})
+    report = robot_pack.inspect_pack(pack)
+    assert report.errors == []
+    assert not any('scene_glb' in w for w in report.warnings), report.warnings
+    joints = robot_pack.scene_glb_joints(pack)
+    assert joints['f1_neck_yaw'] == {'node': 'f1_neck_yaw', 'axis': [0.0, 0.0, 1.0]}
+    assert robot_pack.glb_info(pack / 'scene.glb')['nodes'] == ['f1_neck_yaw', 'f1_neck_pitch']
+
+
+def test_scene_glb_joints_missing_node_and_bad_axis_are_errors(tmp_path):
+    pack = _joint_pack(tmp_path, {'f1_neck_yaw': {'node': 'no_such_node', 'axis': [0, 1, 0]},
+                                  'f1_neck_pitch': {'node': 'f1_neck_pitch', 'axis': [0, 0, 0]},
+                                  'f1_eye': {'axis': [1, 0, 0]}})
+    errors = '\n'.join(robot_pack.validate_pack_dir(pack))
+    assert "노드 'no_such_node' 가 scene.glb 에 없습니다" in errors
+    assert 'f1_neck_pitch · axis 는 길이 0 이 아닌 숫자 3개' in errors
+    assert 'f1_eye · node(glb 노드 이름) 필요' in errors
+    # 모양이 틀린 줄만 뺀다 · 노드 없음은 팩 검사가 오류로 거절해 깔리지 않는다
+    assert set(robot_pack.scene_glb_joints(pack)) == {'f1_neck_yaw'}
+
+
+def test_scene_glb_baked_clips_are_only_a_warning_in_joint_mode(tmp_path):
+    pack = _joint_pack(tmp_path, {'f1_neck_yaw': {'node': 'f1_neck_yaw', 'axis': [0, 0, 1]}}, animations=2)
+    report = robot_pack.inspect_pack(pack)
+    assert report.errors == []
+    assert any('애니메이션 2개 · joints 방식에서는 쓰지 않습니다' in w for w in report.warnings)
+
+
+def test_scene_glb_without_joints_or_animations_warns(tmp_path):
+    pack = make_pack(tmp_path / 'p')
+    (pack / 'scene.glb').write_bytes(_glb())
+    report = robot_pack.inspect_pack(pack)
+    assert any('scene_glb.joints 도 animations 도 없음' in w for w in report.warnings)
+    assert robot_pack.scene_glb_joints(pack) == {}
