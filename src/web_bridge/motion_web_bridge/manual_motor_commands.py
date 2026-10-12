@@ -135,18 +135,24 @@ class ManualMotorCommandService:
             is_ac_servo=is_ac_servo,
         )
 
-    def _off_mode_block(self) -> Dict[str, Any] | None:
+    def _off_mode_block(self, axis: Any = None) -> Dict[str, Any] | None:
         """수동 모드에서만 움직임 명령을 받는다 · 스케줄·오프는 거절 · 2026-10-02
+
+        조인트 범위를 사람이 확인하기 전에도 거절 · 그 모터가 「사용」 매핑 줄에
+        없어도 거절 · 수정 목록 97 (`manual_range_gate`)
 
         정지·서보 제어는 여기 안 온다 (모든 모드에서 된다).
         """
         reason = run_mode_gate.manual_control_block_reason(self.bridge)
         if not reason:
+            range_blocker = getattr(self.bridge, 'manual_range_blocker', None)
+            reason = range_blocker(axis) if callable(range_blocker) else ''
+        if not reason:
             return None
         return {'success': False, 'message': reason, **self.bridge.snapshot()}
 
     def ac_servo_jog(self, axis: Any, relative_rad: Any) -> Dict[str, Any]:
-        off = self._off_mode_block()
+        off = self._off_mode_block(axis)
         if off is not None:
             return off
         axis_value = optional_int(axis, None)
@@ -221,7 +227,7 @@ class ManualMotorCommandService:
         }
 
     def dynamixel_jog(self, axis: Any, relative_rad: Any) -> Dict[str, Any]:
-        off = self._off_mode_block()
+        off = self._off_mode_block(axis)
         if off is not None:
             return off
         axis_value = optional_int(axis, None)
@@ -302,7 +308,7 @@ class ManualMotorCommandService:
         duration_sec: Any = None,
         range_recovery: Any = False,
     ) -> Dict[str, Any]:
-        off = self._off_mode_block()
+        off = self._off_mode_block(axis)
         if off is not None:
             return off
         axis_value = optional_int(axis, None)
@@ -390,7 +396,7 @@ class ManualMotorCommandService:
         duration_sec: Any = None,
         range_recovery: Any = False,
     ) -> Dict[str, Any]:
-        off = self._off_mode_block()
+        off = self._off_mode_block(axis)
         if off is not None:
             return off
         axis_value = optional_int(axis, None)

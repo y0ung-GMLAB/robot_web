@@ -47,6 +47,7 @@ def _row(motion_id, motor_ref, **overrides):
         'reference_position_deg': 0.0,
         'motion_lower_deg': -180.0,
         'motion_upper_deg': 180.0,
+        'range_confirmed': True,   # 범위 확인한 매핑 · 수정 목록 97
         'initial_mode': 'first_frame',
         'initial_move_time_sec': 5.0,
         'invert': False,

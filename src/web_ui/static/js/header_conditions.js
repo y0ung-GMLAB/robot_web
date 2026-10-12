@@ -21,7 +21,23 @@ const state = {
   supervisorProblem: '',
   // 앱솔루트 미확인 사유 · 판단은 서버(`minas_absolute_blocker`) · 수정 목록 62
   absoluteProblem: '',
+  // 조인트 범위 미확인 사유 · 판단은 서버(`mapping_range_blocker`) · 수정 목록 97
+  rangeProblem: '',
 };
+
+/** 조인트 범위 미확인 · 재생·초기 이동·수동 조작이 막혀 있다 · 누르면 모터 관리(조인트 매핑) · 수정 목록 97 */
+function rangeCell(problem) {
+  return problem
+    ? [{
+      key: 'range',
+      text: '범위 미확인',
+      on: false,
+      bad: true,
+      action: 'config',
+      title: `${problem} · 재생·초기 이동·수동 조작(조그·다이얼·절대 이동·페이더)이 막혀 있습니다 · 누르면 모터 관리로 갑니다`,
+    }]
+    : [];
+}
 
 /** 앱솔루트 미확인 · 모든 화면 · 누르면 모터 관리 · 수정 목록 62 */
 function absoluteCell(problem) {
@@ -52,7 +68,7 @@ function supervisorCell(problem) {
 
 /** 순수 계산 · 화면을 모른다 · 시험은 이것만 본다 */
 export function motionHeaderConditionCells({
-  enabled, joined, inWindow, supervisorProblem = '', absoluteProblem = '',
+  enabled, joined, inWindow, supervisorProblem = '', absoluteProblem = '', rangeProblem = '',
 }) {
   if (enabled === null || joined === null) {
     return [
@@ -60,6 +76,7 @@ export function motionHeaderConditionCells({
       { key: 'window', text: '운영시간?', on: false, title: '스케줄 상태 확인 중' },
       ...supervisorCell(supervisorProblem),
       ...absoluteCell(absoluteProblem),
+      ...rangeCell(rangeProblem),
     ];
   }
   const grouped = Boolean(enabled) && Boolean(joined);
@@ -83,6 +100,7 @@ export function motionHeaderConditionCells({
     },
     ...supervisorCell(supervisorProblem),
     ...absoluteCell(absoluteProblem),
+    ...rangeCell(rangeProblem),
   ];
 }
 

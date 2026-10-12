@@ -17,7 +17,8 @@
 
 from __future__ import annotations
 
-from typing import Any, Dict, Mapping, Optional
+import math
+from typing import Any, Dict, Iterable, List, Mapping, Optional
 
 from . import units
 
@@ -100,6 +101,54 @@ def joint_from_motor(row: Mapping[str, Any], motor: float, unit: str = units.RAD
         return None
     offset = float(angle(row, 'offset', unit))
     return (float(motor) - reference(row, unit)) / factor - offset
+
+
+#: 범위 확인 표시 · 줄마다 · 수정 목록 97 (2026-10-12)
+RANGE_CONFIRMED_FIELD = 'range_confirmed'
+
+
+def range_confirmed(row: Mapping[str, Any]) -> bool:
+    """사람이 이 줄의 범위를 확인했나 · 수정 목록 97
+
+    「자동 생성」 줄은 범위가 −180 ~ 180°(기계 범위 아님)라 재생을 막는다 ·
+    사람이 범위를 넣거나 「범위 확인」 을 체크해야 풀린다.
+
+    칸이 있으면 그 값 · 없으면(이 칸이 생기기 전 파일) 범위로 짐작한다 ·
+    기본값 −180 ~ 180 그대로면 미확인, 다른 값이면 누가 넣은 것으로 본다 ·
+    이미 범위를 넣어 둔 PC 가 업데이트하자마자 멈추지 않게.
+    """
+    value = row.get(RANGE_CONFIRMED_FIELD)
+    if value is not None:
+        return bool(value)
+    lower = angle(row, 'motion_lower', units.DEG)
+    upper = angle(row, 'motion_upper', units.DEG)
+    return not (
+        math.isclose(lower, ANGLE_FIELDS['motion_lower'], abs_tol=1e-6)
+        and math.isclose(upper, ANGLE_FIELDS['motion_upper'], abs_tol=1e-6)
+    )
+
+
+def unconfirmed_range_ids(rows: Iterable[Any]) -> List[str]:
+    """범위 미확인 조인트 이름 · 「사용」 꺼진 줄은 안 본다(재생도 안 쓴다)"""
+    result = []
+    for row in rows or ():
+        if not isinstance(row, Mapping) or row.get('enabled') is False:
+            continue
+        motion_id = str(row.get('motion_id') or '').strip()
+        if motion_id and not range_confirmed(row):
+            result.append(motion_id)
+    return result
+
+
+def range_block_reason(rows: Iterable[Any]) -> str:
+    """재생을 막을 이유 · 막지 않으면 빈 문자열 · 재생 계획·상단 배지가 같은 이 글을 쓴다"""
+    ids = unconfirmed_range_ids(rows)
+    if not ids:
+        return ''
+    return (
+        f'조인트 범위 미확인 · {", ".join(ids)} · '
+        '모터 관리 → 조인트 매핑에서 실제 기계 범위(최소·최대)를 넣거나 「범위 확인」 을 체크하고 저장하세요'
+    )
 
 
 def row_in_unit(row: Mapping[str, Any], unit: str) -> Dict[str, Any]:

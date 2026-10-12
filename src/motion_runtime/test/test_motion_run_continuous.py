@@ -298,6 +298,7 @@ def test_first_frame_initialization_without_motion_file_uses_motion_zero():
         'motion_file_id': '',
         'mappings': [{
             'motion_id': '1-1',
+            'range_confirmed': True,   # 범위 확인한 매핑 · 수정 목록 97
             'motor_axis': 0,
             'reference_position_deg': 100.0,
             'motion_lower_deg': -30.0,
@@ -326,6 +327,7 @@ def _zero_row_mapping(motion_file_id):
         'motion_file_id': motion_file_id,
         'mappings': [{
             'motion_id': '1-1', 'motor_axis': 0, 'reference_position_deg': 100.0,
+            'range_confirmed': True,   # 범위 확인한 매핑 · 수정 목록 97
             'motion_lower_deg': -30.0, 'motion_upper_deg': 30.0,
             'initial_mode': 'first_frame', 'initial_move_time_sec': 5.0, 'gear_ratio': 50.0,
         }],
@@ -454,12 +456,14 @@ def test_motion_run_initialization_uses_every_enabled_mapping_axis():
         'mappings': [
             {
                 'motion_id': '1-1',
+                'range_confirmed': True,   # 범위 확인한 매핑 · 수정 목록 97
                 'motor_axis': 0,
                 'initial_mode': 'manual',
                 'initial_motion_position_deg': -2.0,
             },
             {
                 'motion_id': '1-2',
+                'range_confirmed': True,   # 범위 확인한 매핑 · 수정 목록 97
                 'motor_axis': 1,
                 'initial_mode': 'manual',
                 'initial_motion_position_deg': 4.0,
@@ -511,6 +515,7 @@ def test_plan_uses_motion_state_captured_before_slow_motion_file_processing():
         'motion_file_id': 'motion.json',
         'mappings': [{
             'motion_id': '1-1',
+            'range_confirmed': True,   # 범위 확인한 매핑 · 수정 목록 97
             'motor_axis': 0,
             'initial_mode': 'manual',
             'initial_motion_position_deg': 0.0,
@@ -637,8 +642,8 @@ def test_motion_run_playback_uses_only_motion_ids_present_in_file():
     manager._load_mapping = lambda _path: {
         'motion_file_id': 'motion.json',
         'mappings': [
-            {'motion_id': '1-1', 'motor_axis': 0, 'reference_position_deg': 0.0},
-            {'motion_id': '1-2', 'motor_axis': 1, 'reference_position_deg': 10.0},
+            {'motion_id': '1-1', 'motor_axis': 0, 'reference_position_deg': 0.0, 'range_confirmed': True},
+            {'motion_id': '1-2', 'motor_axis': 1, 'reference_position_deg': 10.0, 'range_confirmed': True},
         ],
     }
     motors = [{'axis': 0}, {'axis': 1}]
@@ -915,6 +920,7 @@ def test_zero_fallback_outside_motion_range_blocks_initialization():
         'motion_file_id': '',
         'mappings': [{
             'motion_id': '1-1',
+            'range_confirmed': True,   # 범위 확인한 매핑 · 수정 목록 97
             'motor_axis': 0,
             'reference_position_deg': 100.0,
             'motion_lower_deg': 10.0,
@@ -947,6 +953,7 @@ def test_plan_keeps_single_run_available_when_continuous_seam_fails():
         'motion_file_id': 'motion.json',
         'mappings': [{
             'motion_id': 'joint',
+            'range_confirmed': True,   # 범위 확인한 매핑 · 수정 목록 97
             'motor_axis': 0,
             'reference_position_deg': 10.0,
             # A legacy false value must not bypass mandatory initialization.
@@ -991,6 +998,7 @@ def test_plan_resolves_current_axis_from_stable_alias_instead_of_saved_axis():
         'motion_file_id': 'motion.json',
         'mappings': [{
             'motion_id': 'joint',
+            'range_confirmed': True,   # 범위 확인한 매핑 · 수정 목록 97
             'motor_ref': 'ac_servo:alias:101',
             'motor_axis': 0,
             'reference_position_deg': 0.0,
@@ -1076,6 +1084,7 @@ def test_plan_runs_with_out_of_range_data_and_clamps_every_command():
         'motion_file_id': 'motion.json',
         'mappings': [{
             'motion_id': 'joint',
+            'range_confirmed': True,   # 범위 확인한 매핑 · 수정 목록 97
             'motor_axis': 0,
             'reference_position_deg': 0.0,
             'motion_lower_deg': -30.0,
@@ -1123,8 +1132,8 @@ def test_motion_studio_can_use_read_only_mapping_with_generated_preview_file():
     manager._load_mapping = lambda _path: {
         'motion_file_id': 'original.json',
         'mappings': [
-            {'motion_id': '1-1', 'motor_axis': 0, 'reference_position_deg': 0.0},
-            {'motion_id': '1-2', 'motor_axis': 1, 'reference_position_deg': 10.0},
+            {'motion_id': '1-1', 'motor_axis': 0, 'reference_position_deg': 0.0, 'range_confirmed': True},
+            {'motion_id': '1-2', 'motor_axis': 1, 'reference_position_deg': 10.0, 'range_confirmed': True},
         ],
     }
     motors = [{'axis': 0}, {'axis': 1}]
@@ -1262,6 +1271,7 @@ def _shared_file_manager(mapping_motion_ids, records):
         'mappings': [
             {
                 'motion_id': motion_id,
+                'range_confirmed': True,   # 범위 확인한 매핑 · 수정 목록 97
                 'motor_axis': index,
                 'reference_position_deg': 100.0,
                 'initial_mode': 'first_frame',
