@@ -6,7 +6,8 @@ Blender 에서 Text Editor 로 열고 Run Script. 폴더 고르기 창 → 고�
   report/<이름>_limits.json   조인트별 MotorLimit · 클립 최소/최대 · 첫 프레임 (deg)
   report/<이름>_check.json    속도·가속 초과 구간 · MotorLimit 에 걸린 샘플 (deg)
 
-모터 본 = 커스텀 속성 joint_name 이 있는 포즈 본 (README.md 「본 설정」):
+모터 본 = 커스텀 속성 joint_name 이 있는 포즈 본 (README.md 「본 설정」) · 아마추어 여러 개(로봇 여러 대) 가능
+  → 한 파일에 모두 · joint_name 은 전체에서 겹치면 안 됨 · 리포트·검사 곡선 이름은 「리그:본」:
   joint_name      조인트 이름 = 각 로봇 PC 웹 「조인트 매핑」의 조인트 이름과 완전히 같게
   motor_axis      본 로컬 회전축 X / Y / Z
   max_vel_deg_s   관절 최대 속도 (deg/s) · 0 = 검사 안 함
@@ -18,7 +19,7 @@ Blender 에서 Text Editor 로 열고 Run Script. 폴더 고르기 창 → 고�
 Blender 안: 초과 구간마다 타임라인 마커 "ANIM! ..." · Empty "AnimSpeedCheck" 의
 <본>_vel_pct / <본>_acc_pct 곡선 (Graph Editor · 100 = 한계).
 
-exec 전에 둘 수 있는 전역: ARMATURE (오브젝트 이름) · EXPORT_NAME · OUT_DIR (창 없이 출력).
+exec 전에 둘 수 있는 전역: ARMATURE (오브젝트 이름 또는 이름 목록 · 없으면 joint_name 본이 있는 아마추어 전부) · EXPORT_NAME · OUT_DIR (창 없이 출력).
 blender -b 실행도 창 없이 출력 (OUT_DIR 없으면 기본 폴더).
 """
 
@@ -31,6 +32,7 @@ import bpy
 
 PERIOD = 0.02                 # motion_common/timing.py · 50 fps 고정
 WARN_RATIO = 0.8              # 한계의 80% 부터 경고 · 100% 초과 오류
+ZERO_SNAP_RAD = 1e-6          # 파일 값 · 이보다 작으면 정확히 0 (Blender 행렬 float32 → 키 0 이어도 ~1e-7 rad 잡음)
 AXIS_INDEX = {'X': 0, 'Y': 1, 'Z': 2}
 MARKER_PREFIX = 'ANIM!'
 CHECK_OBJECT = 'AnimSpeedCheck'
@@ -47,19 +49,25 @@ BONE_PROPS = {
 }
 
 
-def find_armature():
-    name = globals().get('ARMATURE')
-    if name:
-        return bpy.data.objects[name]
-    obj = bpy.context.object
-    if obj and obj.type == 'ARMATURE' and any('joint_name' in pb for pb in obj.pose.bones):
-        return obj
+def find_armatures():
+    """every armature that has joint_name bones (one .blend may hold several robots) · ARMATURE = name or list"""
+    given = globals().get('ARMATURE')
+    if given:
+        names = [given] if isinstance(given, str) else list(given)
+        return [bpy.data.objects[n] for n in names]
     found = [o for o in bpy.data.objects
              if o.type == 'ARMATURE' and any('joint_name' in pb for pb in o.pose.bones)]
-    if len(found) != 1:
-        raise RuntimeError('joint_name 속성 본이 있는 아마추어 %d개 · 대상을 선택하거나 ARMATURE 지정'
-                           % len(found))
-    return found[0]
+    if not found:
+        raise RuntimeError('joint_name 속성 본이 있는 아마추어 없음')
+    return sorted(found, key=lambda o: o.name)
+
+
+LABEL_WITH_RIG = False
+
+
+def label(pb):
+    """report / curve name of a bone · 'rig:bone' when the file holds several rigs"""
+    return '%s:%s' % (pb.id_data.name, pb.name) if LABEL_WITH_RIG else pb.name
 
 
 def ensure_bone_props(pb):
@@ -74,16 +82,16 @@ def ensure_bone_props(pb):
             ui.update(description=desc)
 
 
-def motor_bones(arm):
-    bones = [pb for pb in arm.pose.bones if 'joint_name' in pb]
+def motor_bones(arms):
+    bones = [pb for arm in arms for pb in arm.pose.bones if 'joint_name' in pb]
     for pb in bones:
         ensure_bone_props(pb)
     errors = []
     for pb in bones:
         if not str(pb['joint_name']).strip():
-            errors.append('%s · joint_name 비어 있음' % pb.name)
+            errors.append('%s · joint_name 비어 있음' % label(pb))
         if str(pb['motor_axis']).upper() not in AXIS_INDEX:
-            errors.append('%s · motor_axis 는 X / Y / Z 중 하나' % pb.name)
+            errors.append('%s · motor_axis 는 X / Y / Z 중 하나' % label(pb))
     names = [str(pb['joint_name']).strip() for pb in bones]
     errors += ['joint_name 중복 · %s' % n for n in sorted({n for n in names if n and names.count(n) > 1})]
     if not bones:
@@ -139,15 +147,15 @@ def sample(scene, bones):
     start, end = scene.frame_start, scene.frame_end
     n = int(round((end - start) / fps / PERIOD)) + 1
     keep = scene.frame_current
-    frames, values, raw = [], {pb.name: [] for pb in bones}, {pb.name: [] for pb in bones}
+    frames, values, raw = [], {label(pb): [] for pb in bones}, {label(pb): [] for pb in bones}
     for k in range(n):
         f = start + k * PERIOD * fps
         fi = math.floor(f + 1e-9)
         scene.frame_set(fi, subframe=f - fi)
         frames.append(f)
         for pb in bones:
-            values[pb.name].append(local_angle(pb))
-            raw[pb.name].append(math.degrees(pb.rotation_euler[AXIS_INDEX[axis(pb)]]))
+            values[label(pb)].append(local_angle(pb))
+            raw[label(pb)].append(math.degrees(pb.rotation_euler[AXIS_INDEX[axis(pb)]]))
     scene.frame_set(keep)
     return fps, frames, values, raw
 
@@ -181,7 +189,8 @@ def write_animation(path, title, ids, n):
         for k in range(n):
             row = [k + 1, round((k + 1) * PERIOD, 9)]
             for jid, series in ids:
-                row.extend((jid, round(math.radians(series[k]), 9) + 0.0))
+                v = round(math.radians(series[k]), 9)
+                row.extend((jid, 0.0 if abs(v) < ZERO_SNAP_RAD else v + 0.0))
             f.write(json.dumps(row, ensure_ascii=False, separators=(',', ':')) + '\n')
 
 
@@ -207,7 +216,7 @@ def bake_check_curves(scene, arm, bones, frames, vel_pct, acc_pct):
         if old.users == 0:
             bpy.data.actions.remove(old)
     for pb in bones:
-        for key, series in ((pb.name + '_vel_pct', vel_pct[pb.name]), (pb.name + '_acc_pct', acc_pct[pb.name])):
+        for key, series in ((label(pb) + '_vel_pct', vel_pct[label(pb)]), (label(pb) + '_acc_pct', acc_pct[label(pb)])):
             obj[key] = 0.0
             for f, v in zip(frames, series):
                 obj[key] = float(v)
@@ -224,10 +233,13 @@ def default_out_dir():
 
 def main(out_dir=None):
     scene = bpy.context.scene
-    arm = find_armature()
+    global LABEL_WITH_RIG
+    arms = find_armatures()
+    arm = arms[0]
+    LABEL_WITH_RIG = len(arms) > 1
     if bpy.context.object and bpy.context.object.mode == 'EDIT':
         bpy.ops.object.mode_set(mode='POSE')
-    bones = motor_bones(arm)
+    bones = motor_bones(arms)
     name = export_name(arm)
     fps, frames, values, raw = sample(scene, bones)
     n = len(frames)
@@ -236,32 +248,32 @@ def main(out_dir=None):
     for pb in bones:   # matrix→euler 잡음 (~1e-6 deg) 이 MotorLimit 을 넘지 않게
         lim = motor_limit(pb)
         if lim:
-            values[pb.name] = [min(max(s, lim[0]), lim[1]) if lim[0] - 1e-4 <= s <= lim[1] + 1e-4 else s
-                               for s in values[pb.name]]
+            values[label(pb)] = [min(max(s, lim[0]), lim[1]) if lim[0] - 1e-4 <= s <= lim[1] + 1e-4 else s
+                                 for s in values[label(pb)]]
 
     out_dir = out_dir or default_out_dir()
     if not out_dir:
         raise RuntimeError('.blend 를 저장하거나 OUT_DIR 지정')
     os.makedirs(out_dir, exist_ok=True)
-    ids = [(joint_name(pb), values[pb.name]) for pb in bones]
+    ids = [(joint_name(pb), values[label(pb)]) for pb in bones]
     path = os.path.join(out_dir, name + '.json')
     write_animation(path, name, ids, n)
 
     flags, axes_report, limits_report = [], [], []
     vel_pct, acc_pct = {}, {}
     for pb in bones:
-        x = values[pb.name]
+        x = values[label(pb)]
         jid = joint_name(pb)
         vmax, amax = float(pb['max_vel_deg_s']), float(pb['max_acc_deg_s2'])
         v = [0.0] + [(x[i] - x[i - 1]) / PERIOD for i in range(1, n)]          # 20 ms 차분
         a = [0.0] + [(v[i] - v[i - 1]) / PERIOD for i in range(1, n)]
-        vel_pct[pb.name] = [abs(s) / vmax * 100 if vmax > 0 else 0.0 for s in v]
-        acc_pct[pb.name] = [abs(s) / amax * 100 if amax > 0 else 0.0 for s in a]
+        vel_pct[label(pb)] = [abs(s) / vmax * 100 if vmax > 0 else 0.0 for s in v]
+        acc_pct[label(pb)] = [abs(s) / amax * 100 if amax > 0 else 0.0 for s in a]
         for kind, series, lim in (('velocity', v, vmax), ('acceleration', a, amax)):
             if lim <= 0:
                 continue
             for i0, i1, ratio, peak in segments(series, lim, WARN_RATIO):
-                flags.append({'bone': pb.name, 'joint_name': jid, 'kind': kind,
+                flags.append({'bone': label(pb), 'joint_name': jid, 'kind': kind,
                               'level': 'error' if ratio > 1.0 else 'warn',
                               'file_frame_from': i0 + 1, 'file_frame_to': i1 + 1,
                               'blender_frame_from': round(frames[max(i0 - 1, 0)], 3),
@@ -272,13 +284,13 @@ def main(out_dir=None):
         lim = motor_limit(pb)
         clamped = 0
         if lim and not follows_other_bone(pb):
-            clamped = sum(1 for r in raw[pb.name] if r < lim[0] - 1e-6 or r > lim[1] + 1e-6)
-        limits_report.append({'bone': pb.name, 'joint_name': jid,
+            clamped = sum(1 for r in raw[label(pb)] if r < lim[0] - 1e-6 or r > lim[1] + 1e-6)
+        limits_report.append({'bone': label(pb), 'joint_name': jid,
                               'blender_limit_deg': [round(d, 3) for d in lim] if lim else None,
                               'clip_min_deg': round(min(x), 3), 'clip_max_deg': round(max(x), 3),
                               'first_frame_deg': round(x[0], 3)})
         axes_report.append({
-            'bone': pb.name, 'joint_name': jid,
+            'bone': label(pb), 'joint_name': jid,
             'vel_limit_deg_s': round(vmax, 3) if vmax > 0 else None,
             'acc_limit_deg_s2': round(amax, 3) if amax > 0 else None,
             'clip_peak_vel_deg_s': round(max(abs(s) for s in v), 3),

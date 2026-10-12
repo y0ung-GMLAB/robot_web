@@ -50,6 +50,7 @@
 ## 단위
 
 - 파일 값 rad · 헤더 `rotation_unit: "rad"` (2026-10-06 결정)
+- 0 근처 · 1e-6 rad (0.00006°) 보다 작은 값은 정확히 0 으로 씀 · 값을 본 행렬에서 다시 계산해서 (Blender 행렬 float32) 키가 0 이어도 ~1e-7 rad 가 남기 때문 (2026-10-12)
 - 본 속성 · 리포트 · Blender 안 검사 deg
 - 스택은 헤더 `rotation_unit` 을 읽어 내부 단위로 바꿈 (`docs/수정_목록.md` 6-2) · rad·deg 파일 모두 재생 · 그 전 버전이 깔린 PC 에서는 rad 파일이 약 1/57 로 움직임
 
@@ -59,4 +60,5 @@
 blender -b X.blend --python-expr "OUT_DIR=r'D:\out'; exec(open(r'scripts/blender/animation_export.py', encoding='utf-8').read())"
 ```
 
-- 전역 · `OUT_DIR` 출력 폴더 · `EXPORT_NAME` 파일 이름 · `ARMATURE` 아마추어 오브젝트 이름 (`joint_name` 본 있는 아마추어가 여러 개일 때)
+- 전역 · `OUT_DIR` 출력 폴더 · `EXPORT_NAME` 파일 이름 · `ARMATURE` 아마추어 오브젝트 이름 또는 이름 목록 (없으면 `joint_name` 본 있는 아마추어 전부)
+- 아마추어 여러 개(로봇 여러 대 · 예 플로팅 4대) · 한 파일에 모두 · `joint_name` 은 전체에서 겹치면 안 됨 · 리포트·검사 곡선 이름은 「리그:본」
