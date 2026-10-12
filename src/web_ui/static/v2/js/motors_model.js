@@ -97,7 +97,7 @@ function addressProblems(motors) {
     const other = seen.get(key);
     if (other !== undefined) {
       problems.push(alias
-        ? `${motor.axis}번 · EtherCAT Alias ${alias}가 ${other}번과 같습니다. 「설정 ▾」 → 「Alias 쓰기」로 다른 값이나 0으로 바꾸세요`
+        ? `${motor.axis}번 · EtherCAT Alias ${alias}가 ${other}번과 같습니다. 그 모터 줄을 눌러 「Alias 쓰기」로 다른 값이나 0으로 바꾸세요`
         : `${motor.axis}번 · Alias 0 · Slave ${position}이 ${other}번과 같습니다. 「전체 검색」으로 실제 Slave 번호를 다시 받으세요`);
     } else {
       seen.set(key, motor.axis);

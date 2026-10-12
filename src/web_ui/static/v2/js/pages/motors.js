@@ -115,7 +115,7 @@ async function writeAlias(row, motor, state, changed) {
     title: `${row.axis}번 드라이브 EEPROM Alias 쓰기`,
     body: `Master ${row.masterIndex} · Slave ${row.slavePosition} · 지금 Alias ${current ?? '-'} → ${next}\n`
       + '드라이브 EEPROM 에 저장됩니다. 다른 드라이브와 같은 값은 쓸 수 없습니다(0 은 케이블 순서로 찾습니다).\n'
-      + '쓴 뒤 드라이브 제어 전원을 껐다 켜고 「전체 검색」 → 「저장 후 장비에 적용」 을 하세요.',
+      + '쓴 뒤 「전체 검색」으로 새 값이 보이는지 확인하고 「저장 후 장비에 적용」을 하세요. 예전 값 그대로면 드라이브 제어 전원을 껐다 켠 뒤 다시 검색하세요.',
     confirmLabel: '쓰기', tone: 'warning',
   });
   if (!ok) return;
@@ -311,7 +311,7 @@ function detailCard(state, changed, row) {
         h('input', { id: `alias-${row.axis}`, class: 'input mono num-input', type: 'number', min: '0', max: '65535', step: '1',
           value: String(motor.identity?.ethercat_alias ?? ''), 'aria-label': `${row.axis}번 새 Alias` }),
         h('button', { class: 'btn btn-mini', type: 'button', disabled: busy, onclick: () => writeAlias(row, motor, state, changed) }, 'Alias 쓰기')),
-      h('p', { class: 'muted small', text: '드라이브마다 다른 값이어야 합니다. 같은 값이면 어느 드라이브인지 가릴 수 없어 저장이 거절됩니다. 쓴 뒤 드라이브 제어 전원을 껐다 켜고 다시 검색하세요.' })) : null,
+      h('p', { class: 'muted small', text: '드라이브마다 다른 값이어야 합니다(0은 겹쳐도 되고 케이블 순서로 찾습니다). 쓴 뒤 「전체 검색」으로 새 값이 보이는지 확인하세요. 예전 값 그대로면 드라이브 제어 전원을 껐다 켠 뒤 다시 검색하세요.' })) : null,
     h('details', { class: 'raw' }, h('summary', { text: '원본 (드라이브 정보)' }),
       h('pre', { class: 'doc-code small' }, h('code', { text: JSON.stringify({ identity: motor.identity, profile: motor.profile, config: motor.config }, null, 2) }))));
 }
