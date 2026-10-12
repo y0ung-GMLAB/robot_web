@@ -453,6 +453,9 @@ def test_range_recovery_flag_is_forwarded_to_motion_supervisor(monkeypatch):
     # 운전 모드 문은 못 읽으면 막는다(18) · 이 시험의 관심사가 아니라 수동으로 둔다
     monkeypatch.setattr(run_mode_gate, 'current_run_mode', lambda _bridge: 'manual')
     bridge = make_bridge()
+    # 조인트 범위 확인 문(97)도 이 시험의 관심사가 아니다 · 확인된 것으로 둔다 ·
+    # 스텁에는 프로젝트·매핑이 없어 그대로 두면 「확인할 수 없음」 으로 거절된다(맞는 동작)
+    bridge.manual_range_blocker = lambda _axis=None: ''
     published = []
     _manual_of(bridge)._motion_state_motor = lambda _axis: {
         'controller_index': 0,
@@ -487,6 +490,33 @@ def test_range_recovery_flag_is_forwarded_to_motion_supervisor(monkeypatch):
         'target_rad': -1000.0,
         'range_recovery': True,
     }]
+
+
+def test_range_recovery_is_refused_while_joint_range_unconfirmed(monkeypatch):
+    """범위 복귀도 수동 조작이다 · 조인트 범위 미확인이면 supervisor 로 안 보낸다 · 수정 목록 97"""
+    monkeypatch.setattr(run_mode_gate, 'current_run_mode', lambda _bridge: 'manual')
+    bridge = make_bridge()
+    bridge.manual_range_blocker = lambda _axis=None: '수동 조작 불가 · 조인트 범위 미확인 · Neck_Pitch'
+    published = []
+    _manual_of(bridge)._motion_state_motor = lambda _axis: {
+        'controller_index': 0,
+        'motor_type': 'ac_servo',
+        'state': 'detected',
+        'servo_on': True,
+        'fault': False,
+    }
+    bridge.new_project_request_id = lambda _prefix: 'recovery-1'
+    bridge.current_project_generation = lambda: 1
+    bridge._action_request_publisher = type('Publisher', (), {
+        'publish': lambda _self, message: published.append(json.loads(message.data)),
+    })()
+    bridge.snapshot = lambda: {}
+
+    result = _manual_of(bridge).ac_servo_action(0, -1000.0, range_recovery=True)
+
+    assert result['success'] is False
+    assert '조인트 범위 미확인' in result['message']
+    assert published == []
 
 
 def test_frequent_status_read_does_not_rehash_project_files():
