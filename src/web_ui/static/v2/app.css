@@ -320,6 +320,16 @@ body.drop-active .main { outline: 2px dashed var(--blue); outline-offset: -8px; 
 .alarm-table .chip-bad { margin-left: 8px; }
 @media (max-width: 560px) { .apply-bar { bottom: 92px; } }
 
+/* 네트워크·시간 */
+.stack { display: flex; flex-direction: column; gap: 16px; min-width: 0; }
+.facts { display: grid; grid-template-columns: max-content 1fr; gap: 6px 16px; margin: 0; font-size: 14px; }
+.facts dt { color: var(--muted); }
+.facts dd { margin: 0; overflow-wrap: anywhere; }
+.form-row { align-items: flex-end; }
+.field > .segmented { align-self: flex-start; }
+.form-row .field { flex: 1 1 180px; }
+.input:disabled { opacity: 0.6; }
+
 /* 확인 창 · 알림 */
 dialog.confirm { max-width: 480px; width: calc(100% - 32px); padding: 24px; border: 1px solid var(--line); border-radius: 14px; background: var(--panel); color: var(--ink); }
 dialog.confirm::backdrop { background: rgb(0 0 0 / 60%); }

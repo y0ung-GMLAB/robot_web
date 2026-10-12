@@ -239,7 +239,9 @@ def snapshot():
         },
         'motor_activity': {},
         'execution_context': {},
-        'service_management': {},
+        'service_management': {'managed': True, 'mode': 'automatic',
+                               'runtime': {'phase': 'ready', 'message': '모터 피드백 정상'}},
+        'web_access': {'url': 'http://192.168.0.11:8000', 'lan_ip': '192.168.0.11', 'port': 8000},
         'motion_test_limits': {},
         'project_scope': {'runtime_matches_selected': True, 'motor_config_applied': True},
         'safety_status': {
@@ -864,6 +866,17 @@ async def preview_save_alarm_policy(request: Request):
     state['alarm_overrides'] = body.get('overrides') or {}
     payload = await preview_alarm_policy()
     return {**payload, 'saved': True, 'message': f"프리뷰 · 알람 정책 저장 · 바꾼 것 {len(payload['overrides'])}"}
+
+
+@app.post('/api/system/timezone')
+async def preview_timezone(request: Request):
+    body = await request.json()
+    return {'success': True, 'changed': False, 'message': f"프리뷰 · 이 PC 시간대 {body.get('zone')} (실제로는 안 바꿈)"}
+
+
+@app.get('/api/system/version')
+async def preview_version():
+    return {'branch': 'ui-v2', 'hash': 'cadddb6', 'message': '프리뷰', 'is_main': False}
 
 
 _PREVIEW_DOCS = [
