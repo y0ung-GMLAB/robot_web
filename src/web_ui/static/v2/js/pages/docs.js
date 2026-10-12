@@ -48,7 +48,7 @@ function scrollTo(id) {
 function article(doc) {
   const key = `${doc.id}:${doc.markdown.length}:${doc.markdown.slice(0, 64)}`;
   if (ui.builtKey !== key) {
-    ui.built = h('article', { class: 'doc', onclick: (event) => {
+    ui.built = h('article', { class: 'doc', 'data-persistent': '', onclick: (event) => {
       const link = event.target.closest('a[data-anchor]');
       if (!link) return;
       event.preventDefault();

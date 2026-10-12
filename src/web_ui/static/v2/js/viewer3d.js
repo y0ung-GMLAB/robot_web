@@ -36,7 +36,7 @@ function createViewer3d() {
     blender: h('button', { class: 'seg', type: 'button', 'aria-pressed': 'false', onclick: () => setView('blender') }, 'Blender'),
   };
   const canvasWrap = h('div', { class: 'view3d-canvas' });
-  const node = h('div', { class: 'view3d' },
+  const node = h('div', { class: 'view3d', 'data-persistent': '' },
     h('div', { class: 'row view3d-bar' },
       h('div', { class: 'segmented', role: 'group', 'aria-label': '3D 보기' }, viewButtons.mujoco, viewButtons.blender),
       status, timeLabel),
