@@ -36,7 +36,7 @@ test('문제마다 해결 버튼 · 긴급 정지 · 알람 · 그룹 오류 · 
   const snap = {
     ...pcs({ pc_id: 'floating2', online: false }),
     safety_status: { emergency_latched: true },
-    motion_state: { motors: [{ controller_index: 2, fault: true, error_code: 'Err16.0' }] },
+    motion_state: { motors: [{ controller_index: 2, fault: true, error_text: 'Err16.0' }] },
   };
   snap.coordination.runtime.coordination_error = { active: true, message: '회차 실패' };
   const kinds = collectIssues(snap, { last_failure: { count: 3, message: '피어 없음' } }).map((i) => i.action?.kind || i.title);
@@ -60,12 +60,14 @@ test('지금 카드 · 재생 중이면 파일 · 회차 · 진행 · 매장 전
 
 test('모터 · 조인트 값이 있으면 조인트 deg · 알람·서보 꺼짐', () => {
   const chips = motorChips({ motion_state: { motors: [
-    { controller_index: 0, name: '눈 상하', motion_actual_rad: Math.PI / 180 * 2.31, servo_on: true, torque_percent: 18 },
+    { controller_index: 0, name: '눈 상하', motion_actual_rad: Math.PI / 180 * 2.31, servo_on: true, overload_ratio_pct: 18 },
     { controller_index: 1, name: '눈 좌우', position_rad: -Math.PI / 180 * 80.4, servo_on: false },
-    { controller_index: 2, fault: true, error_code: 'Err16.0' },
+    { controller_index: 2, fault: true, errorcode: 0, error_text: 'Err16.0' },
+    { controller_index: 3, name: '빈 조인트', motion_actual_rad: null, position_rad: 0, servo_on: true, error_text: 'No error' },
   ] } });
   assert.deepEqual(chips.map((c) => [c.value, c.unit, c.tone, c.note]), [
     ['+2.31°', '조인트', 'ok', '부하 18%'], ['−80.40°', '모터', 'warn', '서보 꺼짐'], ['-', '모터', 'bad', '알람 Err16.0'],
+    ['+0.00°', '모터', 'ok', ''],
   ]);
 });
 
@@ -89,7 +91,7 @@ test('오늘 스케줄 · 매일 · 요일 · 한 번 · 자정 넘김 · 꺼진
 });
 
 test('새 UI 는 기존 화면 코드를 가져다 쓰지 않는다 · 따로 선다', () => {
-  for (const file of ['main.js', 'shell.js', 'net.js', 'actions.js', 'play_model.js', 'schedule_model.js', 'store_model.js', 'anim_model.js', 'pages/home.js', 'pages/play.js', 'pages/schedule.js', 'pages/store.js', 'pages/animations.js', 'pages/playlist_card.js']) {
+  for (const file of ['main.js', 'shell.js', 'net.js', 'actions.js', 'play_model.js', 'schedule_model.js', 'store_model.js', 'anim_model.js', 'pages/home.js', 'pages/play.js', 'pages/schedule.js', 'pages/store.js', 'pages/animations.js', 'pages/playlist_card.js', 'markdown.js', 'pages/docs.js', 'pages/tools.js']) {
     const text = readFileSync(new URL(`../static/v2/js/${file}`, import.meta.url), 'utf8');
     assert.doesNotMatch(text, /from '\.\.\/(\.\.\/)?js\//, file);
     assert.doesNotMatch(text, /innerHTML/, `${file} · 글은 textContent 로`);

@@ -279,6 +279,36 @@ body.drop-active .main { outline: 2px dashed var(--blue); outline-offset: -8px; 
 .chart.over .trace { stroke: var(--warn); }
 .chart .limit { stroke: var(--line-strong); stroke-width: 1; stroke-dasharray: 4 3; vector-effect: non-scaling-stroke; }
 
+/* 사용법 */
+.docs-layout { display: grid; grid-template-columns: 260px minmax(0, 1fr); gap: 16px; align-items: start; }
+.docs-outline { position: sticky; top: 84px; max-height: calc(100vh - 100px); overflow-y: auto; gap: 8px; }
+.outline-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 2px; font-size: 14px; }
+.outline-list a { display: block; padding: 4px 6px; border-radius: 6px; color: var(--ink-2); text-decoration: none; }
+.outline-list a:hover { background: var(--panel-2); color: var(--ink); }
+.outline-list .outline-3 a { padding-left: 18px; font-size: 13px; color: var(--muted); }
+.docs-body { min-width: 0; }
+.doc { line-height: 1.7; overflow-wrap: anywhere; }
+.doc > * + * { margin-top: 12px; }
+.doc .doc-h { scroll-margin-top: 84px; margin-top: 28px; }
+.doc .doc-h1 { font-size: 26px; margin-top: 0; }
+.doc .doc-h2 { font-size: 21px; padding-bottom: 6px; border-bottom: 1px solid var(--line); }
+.doc .doc-h3 { font-size: 17px; }
+.doc .doc-h4 { font-size: 15px; color: var(--ink-2); }
+.doc ul, .doc ol { margin: 0; padding-left: 22px; }
+.doc li + li { margin-top: 4px; }
+.doc code { font-family: var(--mono); font-size: 0.92em; padding: 1px 5px; border-radius: 5px; background: #232A33; }
+.doc-code { margin: 0; padding: 12px 14px; border-radius: 10px; background: #0B0E12; border: 1px solid var(--line); overflow-x: auto; }
+.doc-code code { padding: 0; background: none; white-space: pre; }
+.doc blockquote { margin: 0; padding: 8px 14px; border-left: 3px solid var(--line-strong); color: var(--ink-2); }
+.doc img { max-width: 100%; border-radius: 8px; border: 1px solid var(--line); }
+.doc hr { border: 0; border-top: 1px solid var(--line); }
+.doc-table td, .doc-table th { white-space: normal; vertical-align: top; min-width: 80px; }
+@media (max-width: 900px) { .docs-layout { grid-template-columns: 1fr; } .docs-outline { position: static; max-height: 40vh; } }
+
+/* 터미널 · PC 성능 */
+.tool-card { padding: 12px; }
+.tool-frame { width: 100%; height: calc(100vh - 230px); min-height: 480px; border: 0; border-radius: 8px; background: #000; }
+
 /* 확인 창 · 알림 */
 dialog.confirm { max-width: 480px; width: calc(100% - 32px); padding: 24px; border: 1px solid var(--line); border-radius: 14px; background: var(--panel); color: var(--ink); }
 dialog.confirm::backdrop { background: rgb(0 0 0 / 60%); }

@@ -173,7 +173,10 @@ def snapshot():
             'velocity_rad_s': 0.0,
             # 서버가 매핑 식으로 되돌린 실제 조인트 각도 흉내(기준점 0 · 감속비만) · 7-c
             'motion_actual_rad': math.radians(position / gear),
-            'torque_percent': 3.0,
+            # 서버 칸 이름 그대로 · 과부하율 · 오류 (state_publisher.py)
+            'overload_ratio_pct': 3.0,
+            'errorcode': 0,
+            'error_text': 'No error',
             'motion_id': name,
             'lower': -36000.0,
             'upper': 36000.0,
@@ -840,6 +843,44 @@ async def preview_motion_run_status():
     status['automation']['schedule_end_action'] = state['schedule_end_action']
     return {'success': True, 'message': '', 'status': status,
             'schedule_end': {'state': 'done', 'message': '어제 18:00 · 기준점 도착 → 서보 끔 · 정상'}}
+
+
+_PREVIEW_DOCS = [
+    {'id': 'usage', 'title': '사용법', 'subtitle': '화면 하나하나', 'path': 'docs/사용법.md'},
+    {'id': 'install', 'title': '설치법', 'subtitle': 'README', 'path': 'README.md'},
+]
+_REPO = Path(__file__).resolve().parents[1]
+
+
+@app.get('/api/docs')
+async def preview_docs():
+    """문서 목록 · 저장소 파일 그대로 · 새 UI(v2) 사용법"""
+    out = []
+    for doc in _PREVIEW_DOCS:
+        path = _REPO / doc['path']
+        out.append({**{k: doc[k] for k in ('id', 'title', 'subtitle')}, 'source': doc['path'],
+                    'available': path.is_file(), 'modified': path.stat().st_mtime if path.is_file() else 0.0})
+    return {'success': True, 'documents': out}
+
+
+@app.get('/api/docs/images/{name:path}')
+async def preview_doc_image(name: str):
+    base = (_REPO / 'docs' / 'images').resolve()
+    target = (base / name).resolve()
+    if base not in target.parents or not target.is_file():
+        return JSONResponse({'detail': 'Not Found'}, status_code=404)
+    return FileResponse(str(target))
+
+
+@app.get('/api/docs/{doc_id}')
+async def preview_doc(doc_id: str):
+    doc = next((d for d in _PREVIEW_DOCS if d['id'] == doc_id), None)
+    if doc is None:
+        return JSONResponse({'detail': '없는 문서'}, status_code=404)
+    path = _REPO / doc['path']
+    if not path.is_file():
+        return {'success': False, 'id': doc_id, 'title': doc['title'], 'markdown': '', 'message': f"{doc['path']} 파일이 없습니다"}
+    return {'success': True, 'id': doc_id, 'title': doc['title'], 'source': doc['path'], 'markdown': path.read_text(encoding='utf-8')}
 
 
 _PREVIEW_SCHEDULES = [

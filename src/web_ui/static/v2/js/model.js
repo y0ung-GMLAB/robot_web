@@ -23,6 +23,22 @@ export function modePhrase(sched) {
   return '상태 확인 중';
 }
 
+/** 모터 오류 글 · 서버 칸은 error_text(영문)·errorcode(숫자) · 없으면 빈 글 */
+export function motorErrorText(motor) {
+  const text = String(motor?.error_text || '').trim();
+  if (text && text !== 'No error') {
+    return text === 'Communication unavailable' ? '통신 불가' : text.replace(/^Error\s+/i, '오류 ');
+  }
+  const code = Number(motor?.errorcode);
+  return Number.isFinite(code) && code !== 0 ? `오류 ${code}` : '';
+}
+
+/** 과부하율 % · 서버 칸 overload_ratio_pct · 없으면 null */
+export function motorLoad(motor) {
+  const value = motor?.overload_ratio_pct;
+  return value === null || value === undefined || !Number.isFinite(Number(value)) ? null : Number(value);
+}
+
 export function networkPcs(snap) {
   const list = snap?.coordination?.runtime?.network_pcs;
   return Array.isArray(list) ? list : [];
@@ -57,7 +73,7 @@ export function collectIssues(snap, sched, { connected = true } = {}) {
   const motors = Array.isArray(snap.motion_state?.motors) ? snap.motion_state.motors : [];
   const faulted = motors.filter((m) => m && m.fault);
   if (faulted.length) {
-    const names = faulted.map((m) => `${m.controller_index}번${m.error_code ? ` (${m.error_code})` : ''}`).join(' · ');
+    const names = faulted.map((m) => `${m.controller_index}번${motorErrorText(m) ? ` (${motorErrorText(m)})` : ''}`).join(' · ');
     bad(`모터 알람 · ${names}`, '걸린 것이 없는지 보고 오류 초기화',
       { kind: 'fault-reset', label: '오류 초기화' });
   }
@@ -153,16 +169,17 @@ export function runSummary(snap) {
 export function motorChips(snap) {
   const motors = Array.isArray(snap?.motion_state?.motors) ? snap.motion_state.motors : [];
   return motors.map((m) => {
-    const joint = Number(m.motion_actual_rad);
-    const motor = Number(m.position_rad);
+    // null 은 0 이 아니다 · 매핑 없는 모터는 조인트 값이 비어 온다
+    const joint = m.motion_actual_rad === null || m.motion_actual_rad === undefined ? NaN : Number(m.motion_actual_rad);
+    const motor = m.position_rad === null || m.position_rad === undefined ? NaN : Number(m.position_rad);
     const deg = Number.isFinite(joint) ? (joint * 180) / Math.PI : (Number.isFinite(motor) ? (motor * 180) / Math.PI : null);
-    const load = Number(m.overload_percent ?? m.torque_percent);
+    const load = motorLoad(m);
     let tone = 'ok';
     let note = '';
-    if (m.fault) { tone = 'bad'; note = `알람${m.error_code ? ` ${m.error_code}` : ''}`; }
+    if (m.fault) { tone = 'bad'; note = `알람${motorErrorText(m) ? ` ${motorErrorText(m)}` : ''}`; }
     else if (!m.servo_on) { tone = 'warn'; note = '서보 꺼짐'; }
     return {
-      name: String(m.name || m.display_name || `${m.controller_index}번 모터`),
+      name: String(m.motion_id || m.name || m.display_name || `${m.controller_index}번 모터`),
       index: m.controller_index,
       tone,
       value: deg === null ? '-' : `${deg >= 0 ? '+' : '−'}${Math.abs(deg).toFixed(2)}°`,

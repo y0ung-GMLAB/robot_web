@@ -12,6 +12,8 @@ import { loadPlay, renderPlay } from './pages/play.js';
 import { loadSchedule, renderSchedule } from './pages/schedule.js';
 import { loadStore, renderStore } from './pages/store.js';
 import { loadAnimations, renderAnimations } from './pages/animations.js';
+import { loadDocs, renderDocs } from './pages/docs.js';
+import { renderTools } from './pages/tools.js';
 
 const state = { snap: null, sched: null, schedules: [], events: [], connected: false };
 /** 화면 · render 는 상태로 그리기만 · load 는 그 화면만 쓰는 값을 받아 온다(들어올 때 + reloadMs 마다) */
@@ -21,6 +23,9 @@ const PAGES = {
   schedule: { render: renderSchedule, load: loadSchedule, reloadMs: 30000 },
   store: { render: renderStore, load: loadStore, reloadMs: 10000 },
   animations: { render: renderAnimations, load: loadAnimations, reloadMs: 10000 },
+  docs: { render: renderDocs, load: loadDocs },
+  // static · 들어올 때 한 번만 그린다 · iframe 을 다시 그리면 터미널 세션이 끊긴다
+  tools: { render: renderTools, static: true },
 };
 const PAGE_INTERVAL_MS = 500;
 
@@ -42,12 +47,15 @@ document.addEventListener('pointerdown', () => { pointerDown = true; }, true);
 document.addEventListener('pointerup', () => { pointerDown = false; schedulePage(); }, true);
 document.addEventListener('pointercancel', () => { pointerDown = false; }, true);
 
+let drawnRoute = '';
 function renderPage() {
   pagePending = false;
   if (pointerDown) return;
   lastPageAt = Date.now();
   const route = currentRoute();
   const page = PAGES[route];
+  if (page?.static && drawnRoute === route) return;
+  drawnRoute = route;
   replace(shell.main, page ? page.render(state, { navigate, changed }) : renderPlaceholder(route, routeLabel(route)));
 }
 
@@ -80,6 +88,7 @@ window.addEventListener('hashchange', () => {
   shell.setRoute(route);
   document.title = `${routeLabel(route)} · Robot Web`;
   startLoading(route);
+  drawnRoute = '';
   lastPageAt = 0;
   renderPage();
   shell.main.focus({ preventScroll: true });
