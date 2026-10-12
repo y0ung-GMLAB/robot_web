@@ -13,6 +13,7 @@ import {
 import { api } from '../net.js';
 import * as act from '../actions.js';
 import { playlistCard } from './playlist_card.js';
+import { getViewer3d } from '../viewer3d.js';
 
 /** 이 화면에서 고른 것 · 페이지를 떠나도 남는다(새로고침하면 서버 값으로) */
 const ui = {
@@ -260,10 +261,13 @@ function axesCard(state) {
       : h('p', { class: 'muted', text: '조인트 매핑이 없습니다' }));
 }
 
-function previewCard() {
+/** 3D · 실물 재생과 같이 · 도는 애니메이션(없으면 재생 목록 1번 첫 자세) · 칸은 한 번 만들어 계속 쓴다 */
+function previewCard(state) {
+  const status = runStatus(state.snap);
+  const fileId = String(status.motion_file_id || registeredPlaylist(state.play?.mapping)[0] || '');
   return h('section', { class: 'card', 'aria-label': '3D' },
-    h('div', { class: 'card-head' }, h('h2', { text: '3D' }), h('a', { href: '/', text: '기존 화면에서 보기' })),
-    h('p', { class: 'muted', text: '3D 보기는 다음 단계에서 이 화면에 붙입니다 · 지금은 기존 화면 › 애니메이션 › 3D' }));
+    h('div', { class: 'card-head' }, h('h2', { text: '3D · 실물과 같이' }), h('a', { href: '#/pack', text: '로봇 팩·3D' })),
+    getViewer3d().update(state, { fileId }));
 }
 
 export function renderPlay(state, { navigate, changed }) {
@@ -279,6 +283,6 @@ export function renderPlay(state, { navigate, changed }) {
       playlistCard(state, changed, { link: ['#/animations', '애니메이션'], reload: loadPlay }),
       repeatCard(state, changed)),
     axesCard(state),
-    previewCard(),
+    previewCard(state),
   ];
 }

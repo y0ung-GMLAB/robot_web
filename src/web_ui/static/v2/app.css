@@ -410,6 +410,13 @@ details.raw pre { margin-top: 8px; max-height: 260px; overflow: auto; }
   .fader-row .fader { grid-column: 1 / -1; }
 }
 
+/* 3D */
+.view3d { display: flex; flex-direction: column; gap: 8px; }
+.view3d-bar { flex-wrap: wrap; }
+.view3d-canvas { position: relative; height: 420px; border-radius: 10px; overflow: hidden; background: #0B0E12; border: 1px solid var(--line); }
+.view3d-canvas canvas { display: block; width: 100%; height: 100%; }
+@media (max-width: 560px) { .view3d-canvas { height: 300px; } }
+
 /* 확인 창 · 알림 */
 dialog.confirm { max-width: 480px; width: calc(100% - 32px); padding: 24px; border: 1px solid var(--line); border-radius: 14px; background: var(--panel); color: var(--ink); }
 dialog.confirm::backdrop { background: rgb(0 0 0 / 60%); }

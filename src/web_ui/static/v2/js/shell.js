@@ -75,8 +75,8 @@ export function createShell(root, { navigate }) {
         return link;
       }),
     ]),
-    // 기존 화면은 / 에 그대로 · 새 화면에 아직 없는 일(공연 3D)은 거기서
-    h('a', { href: '/', class: 'nav-link nav-old', title: '기존 화면 · 공연 3D 는 아직 거기서' }, '기존 화면 ↗'));
+    // 기존 화면은 / 에 그대로 · 같은 서버 · 같은 설정 · 익숙한 화면으로 돌아갈 때
+    h('a', { href: '/', class: 'nav-link nav-old', title: '기존 화면 · 같은 서버라 어느 쪽에서 바꿔도 같습니다' }, '기존 화면 ↗'));
   const main = h('main', { class: 'main', id: 'main', tabindex: '-1' });
   root.replaceChildren(topbar, drawer, h('div', { class: 'body' }, nav, main));
 

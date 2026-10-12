@@ -1560,6 +1560,15 @@ def _demo_scene() -> dict:
     }
 
 
+@app.get('/api/motion-files/{file_id}/preview-frames')
+async def preview_frames(file_id: str):
+    """MuJoCo 계산 결과 흉내 · 데모 장면 5축(qpos 5) · 4초 · 새 UI(v2) 공연 3D 확인용"""
+    t = [round(i * 0.04, 3) for i in range(101)]
+    qpos = [[round(0.5 * math.sin(x + k), 4) for k in range(5)] for x in t]
+    return {'success': True, 'n_frames': 100, 'nq': 5, 'duration_sec': 4.0, 'motion_sec': 4.0, 'hz': 25.0,
+            't': t, 'qpos': qpos, 'project_generation': state['generation']}
+
+
 @app.get('/api/preview/scene/data')
 async def preview_scene_data():
     # 진짜 서버는 모든 응답 머리에 프로젝트 세대를 싣는다 · 화면이 그것으로 늦은 응답을 가린다
