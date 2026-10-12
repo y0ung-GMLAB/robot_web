@@ -104,3 +104,10 @@ test('회차 사이 · 초기 위치를 거치지 않는 「바로 다음」 · 
   assert.deepEqual(REPEAT_MODES.map((mode) => mode.id), ['reinitialize', 'dwell_reinitialize']);
   assert.equal(REPEAT_MODES[0].id, 'reinitialize');
 });
+
+test('그룹 PC 줄 · 모터 설정이 없어 빠진 PC 는 짧게 「모터 설정 없음」 (2026-10-12)', () => {
+  const snap = { coordination: { runtime: { joined: true, local: { pc_id: 'f4' }, peers: [{ pc_id: 'f1', state: 'online' }],
+    execution: { execution_id: 'e', excluded: { f1: '준비 거절 · 현재 프로젝트의 실행 준비가 끝나지 않았습니다: 모터 설정과 조인트 매핑을 저장해 확정하세요' } } } } };
+  const row = groupRows(snap).find((r) => r.id === 'f1');
+  assert.equal(row.note, '제외됨 · 모터 설정 없음(재생할 모터가 없는 PC)');
+});
