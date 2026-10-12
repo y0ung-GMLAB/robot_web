@@ -1,5 +1,6 @@
 """Own motion-axis mapping files and validation outside the web layer."""
 
+import copy
 import json
 import hashlib
 import math
@@ -268,12 +269,16 @@ class MotionMappingManager(Node):
         path = self._mapping_file_path(file_id)
         content = path.read_text(encoding='utf-8')
         mapping = self._normalize_mapping(yaml.safe_load(content) or {}, fallback_name=path.stem)
+        # 버전은 **파일 그대로**로 센다 · 검사(`_validate_mapping`)가 「첫 프레임」 줄에 재생 목록 첫 애니메이션의
+        # 첫 프레임 값을 써 넣는데, 그 뒤에 세면 저장 때(파일 그대로) 센 값과 늘 달라 저장이 거절됐다 ·
+        # 수정 목록 105 (실물 2026-10-12) · 화면에 주는 매핑(첫 프레임 값)은 지금처럼
+        file_summary = self._mapping_file_summary(path, mapping=copy.deepcopy(mapping))
         validation = self._validate_mapping(mapping)
         return {
             **self._list_mappings(),
             'success': True,
             'message': 'motion mapping loaded',
-            'file': self._mapping_file_summary(path, mapping=mapping),
+            'file': file_summary,
             'mapping': mapping,
             'content': content,
             'validation': validation,
@@ -553,6 +558,8 @@ class MotionMappingManager(Node):
                 mapping = {}
                 valid = False
                 message = str(exc)
+        # 버전은 검사가 손대기 전 값으로 (105)
+        revision_source = copy.deepcopy(mapping) if isinstance(mapping, dict) else {}
         if valid and isinstance(mapping, dict):
             validation = self._validate_mapping(mapping, include_motion_file=False)
             valid = bool(validation.get('valid'))
@@ -578,7 +585,7 @@ class MotionMappingManager(Node):
             'valid': valid,
             'message': message,
             'revision': hashlib.sha256(path.read_bytes()).hexdigest(),
-            'mapping_revision': self._mapping_revision(mapping),
+            'mapping_revision': self._mapping_revision(revision_source),
             'name': mapping.get('name') if isinstance(mapping, dict) else path.stem,
             'motion_file_id': mapping.get('motion_file_id') if isinstance(mapping, dict) else '',
             'motion_playlist': playlist_from_mapping(mapping),
