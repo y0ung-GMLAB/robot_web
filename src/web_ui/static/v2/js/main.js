@@ -4,6 +4,7 @@
  * 미룬다 · 버튼을 누르는 사이 그 버튼이 새로 그려져 눌림이 사라지는 일을 막는다.
  */
 import { replace } from './dom.js';
+import { installOverflowTitles } from './overflow_title.js';
 import { api, poll, StatusStream } from './net.js';
 import { createShell, routeLabel } from './shell.js';
 import { renderHome } from './pages/home.js';
@@ -54,6 +55,8 @@ function navigate(route) {
 }
 
 const shell = createShell(document.getElementById('app'), { navigate });
+// 잘린 글(…)에 마우스를 올리면 전체 글 · 화면 전체에 한 번 · 수정 목록 99
+installOverflowTitles();
 
 let pointerDown = false;
 let pagePending = false;

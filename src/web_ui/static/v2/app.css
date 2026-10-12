@@ -146,7 +146,7 @@ p { margin: 0; }
 
 .list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }
 .list-row { display: flex; align-items: center; gap: 10px; }
-.list-row .note { font-size: 14px; white-space: nowrap; }
+.list-row .note { font-size: 14px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; flex: 0 1 auto; }
 .list-row .time { flex: 0 0 auto; font-size: 13px; }
 
 /* 확인할 일 */
@@ -184,7 +184,9 @@ p { margin: 0; }
 }
 .choice:hover { background: var(--panel-2); }
 .choice[aria-checked="true"] { border-color: var(--blue); background: var(--blue-soft); color: var(--blue-ink); font-weight: 700; }
-.chip { display: inline-block; padding: 3px 10px; border-radius: 999px; font-size: 13px; white-space: nowrap; background: #232A33; color: var(--ink-2); }
+.chip { display: inline-block; max-width: 100%; padding: 3px 10px; border-radius: 999px; font-size: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; vertical-align: middle; background: #232A33; color: var(--ink-2); }
+/* 표 안 상태 칩 · 길면 … · 마우스를 올리면 전체(수정 목록 99) */
+.table .chip { max-width: 260px; }
 .chip-ok { background: var(--ok-soft); color: var(--ok-ink); }
 .chip-warn { background: #2E2614; color: var(--warn-ink); }
 .chip-bad { background: var(--bad-soft); color: var(--bad-ink); }
