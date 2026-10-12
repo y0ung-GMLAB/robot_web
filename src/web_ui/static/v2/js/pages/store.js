@@ -49,7 +49,7 @@ function joinCard(state, changed) {
           } }),
         h('span', { class: 'switch-track', 'aria-hidden': 'true' })),
       h('div', { class: 'grow' },
-        h('strong', { text: `그룹 참여 · ${joined ? '켬' : '끔'}` }),
+        h('strong', { text: `그룹 참여 · ${joined ? 'ON' : 'OFF'}` }),
         h('p', { class: 'muted small', text: joined
           ? '같은 그룹의 PC와 함께 재생합니다. 끄면 스케줄을 포함해 단독으로 재생합니다.'
           : '단독으로 재생합니다. 켜면 같은 그룹의 PC와 함께 재생합니다.' }),

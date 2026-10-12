@@ -45,7 +45,7 @@ export function playlistCard(state, changed, { link = null, adding = true, onPic
     h('div', { class: 'card-head' },
       h('h2', { text: `재생 목록 · ${list.length}` }),
       link ? h('a', { href: link[0], text: link[1] }) : null),
-    h('p', { class: 'muted small', text: `전체 ${formatDuration(total || null)} · 순서대로 재생하고, 끝나면 1번부터 다시 재생합니다. 애니메이션 사이에는 다음 애니메이션의 초기 위치로 천천히 이동합니다.` }),
+    h('p', { class: 'muted small', text: `전체 ${formatDuration(total || null)} · 순서대로 재생합니다. 연속 재생이면 마지막 애니메이션 뒤에 1번부터 다시 재생합니다. 애니메이션 사이에는 다음 애니메이션의 초기 위치로 천천히 이동합니다.` }),
     play.error ? h('p', { class: 'tone-text-bad', text: play.error }) : null,
     list.length
       ? h('ol', { class: 'playlist' }, list.map((id, index) => {

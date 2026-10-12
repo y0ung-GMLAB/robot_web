@@ -287,7 +287,7 @@ function previewCard(state, changed) {
         h('input', { type: 'checkbox', role: 'switch', checked: ui.show3d, 'aria-label': '3D 동시 재생',
           onchange: (event) => { ui.show3d = event.target.checked; writeShow3d(ui.show3d); changed(); } }),
         h('span', { class: 'switch-track', 'aria-hidden': 'true' })),
-      h('h2', { class: 'grow', text: `3D 동시 재생 · ${ui.show3d ? '켬' : '끔'}` }),
+      h('h2', { class: 'grow', text: `3D 동시 재생 · ${ui.show3d ? 'ON' : 'OFF'}` }),
       h('a', { href: '#/pack', text: '로봇 팩·3D' })),
     ui.show3d
       ? getViewer3d().update(state, { fileId })
