@@ -82,6 +82,10 @@ from .servo_alarm_policy import (
 )
 
 
+#: 스케줄 노드 상태(1초마다)가 이보다 늙었으면 「구간 안」 을 믿지 않는다 · 수정 목록 131
+SCHEDULE_STATUS_FRESH_SEC = 10.0
+
+
 def _managed_motor_service() -> str:
     """Motor Manager 가 따로 도는 설치인가 · 아니면 빈 글자 (멈출 것이 없다)"""
     service = str(os.environ.get('MOTION_MOTOR_SERVICE_UNIT') or '').strip()
@@ -495,7 +499,15 @@ class MotionWebBridge(Node):
             alarm_grade=lambda: int((self._safety_status or {}).get('servo_alarm_grade') or 0),
             # 스케줄 모드 PC 만 주차 · 수동·끔은 멈추기만 · 사용자 2026-10-13
             run_mode=lambda: run_mode_gate.current_run_mode(self),
+            # 주차 다시 시도를 그만둘 때 · 구간이 다시 열렸나(마스터만 앎) · 수정 목록 131
+            in_window=self._schedule_window_open,
+            # 주차 실패 · 그 자리에서 서보 끔 · 모터 기록(운영 로그)에 · 수정 목록 131
+            record_event=lambda event_type, content, details: self._motor_event_log.append(
+                category='system', event_type=event_type, target='스케줄 끝',
+                content=content, details=details,
+            ),
         )
+        self._resume_schedule_end()
         self._manual_stream_request_publisher = self.create_publisher(
             String, self.manual_stream_request_topic, 10
         )
@@ -782,6 +794,21 @@ class MotionWebBridge(Node):
             'reconcile_interval_sec': payload.get('reconcile_interval_sec'),
         }
 
+    def _resume_schedule_end(self) -> None:
+        """브리지가 다시 켜졌다 · 같은 구간 끝의 주차 다시 시도 · 포기 알림을 잇는다(횟수는 파일) · 수정 목록 131"""
+        try:
+            self.schedule_end.resume()
+        except Exception as exc:  # noqa: BLE001 · 이어 하지 못해도 브리지는 뜬다
+            self.get_logger().warn(f'[스케줄 끝] 지난 주차 다시 시도 기록을 읽지 못했습니다 · {exc}')
+
+    def _schedule_window_open(self) -> bool:
+        """스케줄 노드가 지금 운영 구간 안이라고 말하나 · 늙은 값 · 슬레이브(말 안 함)는 False · 수정 목록 131"""
+        status = self.schedule_node_status()
+        age = status.get('age_sec')
+        if not status.get('received') or age is None or age > SCHEDULE_STATUS_FRESH_SEC:
+            return False
+        return bool(status.get('active_schedule_id'))
+
     def _motion_run_status_callback(self, msg: String) -> None:
         try:
             payload = json.loads(msg.data)
@@ -933,6 +960,11 @@ class MotionWebBridge(Node):
             'boot_params': (
                 self.boot_params.public_status()
                 if getattr(self, 'boot_params', None) is not None else {}
+            ),
+            # 운영 종료 동작 · `notice` 가 있으면 「확인할 일」 (주차 실패 · 그 자리에서 서보 끔) · 수정 목록 131
+            'schedule_end': (
+                self.schedule_end.status()
+                if getattr(self, 'schedule_end', None) is not None else {}
             ),
             'motion_run_status': motion_run_status,
             'motor_activity': motor_activity_snapshot(

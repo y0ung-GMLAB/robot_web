@@ -127,7 +127,7 @@ def test_finish_cycle_then_park_then_power_off_only_flagged_motors(tmp_path):
 @pytest.mark.parametrize('kwargs, reason', [
     ({'states': ['running', 'error']}, '오류'),
     ({'states': ['completed'], 'alarm': 2}, '서보 알람'),
-    ({'states': ['completed'], 'init_ok': False}, '기준점 이동 시작 실패'),
+    ({'states': ['completed'], 'init_ok': False}, '기준점 이동 거절'),
     ({'states': ['completed', 'initializing', 'error']}, '끝나지 않음'),
 ])
 def test_no_servo_off_when_parking_did_not_succeed(tmp_path, kwargs, reason):
@@ -227,14 +227,17 @@ def test_a_stopped_robot_is_parked_and_powered_off(tmp_path):
 
 @pytest.mark.parametrize('kwargs, run_mode, state', [
     ({'motors': [_on(0), _on(1)]}, 'manual', 'skipped'),
-    ({'motors': [_on(0, servo_on=False), _on(1)]}, 'schedule', 'failed'),
-    ({'motors': [_on(0)], 'alarm': 1}, 'schedule', 'failed'),
+    # 지금 주차할 수 없는 것은 첫 실패로 센다 · 1분 뒤 다시 · 수정 목록 131 (흐름은 test_schedule_end_retry)
+    ({'motors': [_on(0, servo_on=False), _on(1)]}, 'schedule', 'retry_wait'),
+    ({'motors': [_on(0)], 'alarm': 1}, 'schedule', 'retry_wait'),
     ({'motors': [_on(0)], 'flags': {0: False}}, 'schedule', 'skipped'),
 ])
 def test_a_stopped_robot_that_cannot_park_is_left_alone(tmp_path, kwargs, run_mode, state):
     bridge, calls, _runtime = _bridge(tmp_path, states=['idle'], **kwargs)
+    service = _service(bridge, run_mode=lambda: run_mode)
+    service._spawn = lambda *_args, **_kwargs: None   # 다시 시도 스레드는 띄우지 않는다
 
-    status = _service(bridge, run_mode=lambda: run_mode).begin()
+    status = service.begin()
 
     assert status['state'] == state
     assert calls == [], '움직이지도 끄지도 않는다'

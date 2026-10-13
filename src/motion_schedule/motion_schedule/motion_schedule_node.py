@@ -644,6 +644,9 @@ class MotionScheduleNode(Node):
         묶여 있으면 그룹 길 · 도는 그룹이 없어도 연동 노드가 스케줄 모드 PC 마다 전한다 ·
         그룹 길이 거절하면(옛 연동 노드 · 묶임 풀림) 이 PC 만.
         브리지가 PC 마다 다시 본다 · 스케줄 모드 · 알람 없음 · 서보 켜짐 · 끌 모터 있음.
+        여기서는 한 번만 보낸다 · 거절·실패 뒤 1분 간격 다시 시도(모두 3번) · 그래도 안 되면 그 자리에서
+        서보 OFF 는 PC 마다 브리지(`schedule_end.ScheduleEndService`)가 맡는다 · 결과는 PC 마다 다르고
+        마스터는 슬레이브 결과를 모른다 · 수정 목록 131
         """
         payload = {"schedule_id": "window_end", "reason": "schedule_end"}
         if self._coordination_enabled() and self._coordination_joined():

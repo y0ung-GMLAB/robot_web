@@ -130,7 +130,17 @@ class ScheduleService:
             'clock': local_clock.snapshot(),
             # 지금 시작하면 안 되는 이유 · 스케줄 노드가 비어 있을 때만 시작한다 · 수정 목록 124
             'start_blocker': self._start_blocker(),
+            # 구간 끝 주차 실패 · 그 자리에서 서보 끔 · 이 PC 것 · 풀릴 때까지 · 수정 목록 131
+            'schedule_end_notice': self._schedule_end_notice(),
         }
+
+    def _schedule_end_notice(self) -> Dict[str, Any]:
+        end = getattr(self.bridge, 'schedule_end', None)
+        try:
+            notice = end.status().get('notice') if end is not None else None
+        except Exception:  # 상태 조회 실패가 화면을 막지 않는다
+            return {}
+        return dict(notice) if isinstance(notice, dict) else {}
 
     def _start_blocker(self) -> str:
         """스케줄이 지금 시작하면 안 되는 이유 · 비면 시작해도 된다 · 읽기만 한다 · 수정 목록 124
