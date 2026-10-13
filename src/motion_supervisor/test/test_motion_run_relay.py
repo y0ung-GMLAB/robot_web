@@ -944,6 +944,8 @@ def test_manual_activity_snapshot_distinguishes_jog_and_action_axes():
     assert supervisor._manual_activity_snapshot() == {
         'manual_activity_modes': ['jog', 'action'],
         'manual_activity_axes': [0, 2],
+        # 끝낸 조작의 알림(목표 근처 출렁임 등) · 아직 없음 · 실물 R-11
+        'manual_notices': [],
     }
 
 

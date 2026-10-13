@@ -21,6 +21,7 @@ import {
   autoConfirmRange, draftToRow, jointToMotor, motorForRow, motorRefFor, motorToJoint, previewRow, rowToDraft,
 } from '../mapping_model.js';
 import { registeredPlaylist, signedDeg } from '../play_model.js';
+import { manualNotices } from '../model.js';
 
 const DEG = 180 / Math.PI;
 const RAD = Math.PI / 180;
@@ -504,6 +505,8 @@ function axisPanel(state, changed, item) {
   };
   return h('section', { class: 'card axis-panel', 'aria-label': `${item.label} 조작` },
     blocker ? h('div', { class: 'blocker' }, dot('warn'), h('span', { class: 'grow', text: blocker.text }), fixButton(blocker, item, changed)) : null,
+    // 앞 조작을 끝내며 남긴 알림(목표 근처 출렁임 등) · 막지는 않는다 · 실물 R-11
+    manualNotices(state.snap, item.axis).map((notice) => h('div', { class: 'blocker' }, dot('warn'), h('span', { class: 'grow', text: notice.message }))),
     h('div', { class: 'card-head' }, h('h2', { text: `${item.label} · 현재 위치` }),
       h('div', { class: 'segmented', role: 'group', 'aria-label': '단위' },
         [['joint', '조인트 °'], ['motor', '모터 °']].map(([value, label]) => h('button', {

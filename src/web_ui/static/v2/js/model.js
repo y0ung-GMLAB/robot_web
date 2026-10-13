@@ -54,6 +54,14 @@ export function pcName(pc) {
   return String(pc?.display_name || pc?.pc_id || '-');
 }
 
+/** supervisor 알림 · 조그 · 목표 이동을 끝내며 남김(목표 근처 출렁임 · 못 미치고 섬 · 시간 초과) · axis 를 주면 그 모터만 */
+export function manualNotices(snap, axis = null) {
+  const list = snap?.safety_status?.manual_notices;
+  return (Array.isArray(list) ? list : [])
+    .filter((n) => n && n.message && (axis === null || Number(n.axis) === Number(axis)))
+    .map((n) => ({ axis: Number(n.axis), kind: String(n.kind || ''), message: String(n.message) }));
+}
+
 /** 확인할 일 · 나쁜 것(bad)이 먼저 · action.kind 는 화면이 버튼으로 바꾼다 */
 export function collectIssues(snap, sched, { connected = true } = {}) {
   const issues = [];
@@ -89,6 +97,10 @@ export function collectIssues(snap, sched, { connected = true } = {}) {
   if (range) {
     bad('조인트 범위가 확인되지 않아 재생과 수동 조작이 차단되어 있습니다', range,
       { kind: 'open', target: 'mapping', label: '조인트 매핑 열기' });
+  }
+  // 조그 · 목표 이동을 끝내며 supervisor 가 남긴 알림 · 목표 근처 출렁임 등 · 5 분 · 실물 R-11
+  for (const notice of manualNotices(snap)) {
+    warn(notice.message, '조작은 끝냈습니다. 다음 조작은 됩니다.', { kind: 'open', target: 'maintain-motors', label: '모터 설정 열기' });
   }
   const motors = Array.isArray(snap.motion_state?.motors) ? snap.motion_state.motors : [];
   const faulted = motors.filter((m) => m && m.fault);
