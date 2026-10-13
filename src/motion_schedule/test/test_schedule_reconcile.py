@@ -155,7 +155,8 @@ def test_a_midnight_window_runs_through_the_night(tmp_path):
 
     node.sent.clear()
     node._reconcile(DAY.replace(day=18, hour=1, minute=30))
-    assert node.sent == [], '구간이 끝났는데 시작했다'
+    # 구간 끝 · 멈춰 있으니 주차만(사용자 2026-10-13) · 시작은 없다
+    assert [endpoint for endpoint, _payload in node.sent] == ['/api/motion-run/stop-after-cycle'], '구간이 끝났는데 시작했다'
 
 
 def test_a_disabled_schedule_is_ignored(tmp_path):
@@ -419,3 +420,48 @@ def test_a_start_that_runs_is_not_counted(tmp_path):
 
     assert node._start_pending is False
     assert node._last_failure == {}
+
+
+def _window_end(node, *, before='running', after='stopped'):
+    """13:00 구간 안 → 20:00 · 20:01 구간 밖"""
+    node._local_run_state = lambda: before
+    node._local_run_status = lambda: {'state': before}
+    node._reconcile(DAY.replace(hour=13))
+    node._local_run_state = lambda: after
+    node._local_run_status = lambda: {'state': after}
+    node._reconcile(DAY.replace(hour=20))
+    node._reconcile(DAY.replace(hour=20, minute=1))
+    return node.sent
+
+
+def test_window_end_parks_a_robot_that_was_already_stopped(tmp_path):
+    """사용자 2026-10-13 · 멈춰 있어도 주차 → 서보 OFF · 한 번만"""
+    node = _node(tmp_path, run_state='running', schedules=[_day_schedule()])
+    sent = _window_end(node)
+    assert sent == [('/api/motion-run/stop-after-cycle', {'schedule_id': 'window_end', 'reason': 'schedule_end'})]
+
+
+def test_window_end_idle_park_goes_the_group_way_when_joined(tmp_path):
+    node = _node(tmp_path, run_state='running', schedules=[_day_schedule()])
+    node._coordination_enabled = lambda: True
+    node._coordination_joined = lambda: True
+    endpoint, payload = _window_end(node)[0]
+    assert endpoint == '/api/coordination/control'
+    assert payload['command'] == 'stop_after_cycle' and payload['reason'] == 'schedule_end'
+
+
+def test_window_end_idle_park_is_not_sent_in_manual_mode(tmp_path):
+    node = _node(tmp_path, run_state='running', run_mode='manual', schedules=[_day_schedule()],
+                 local={'schedule_id': ''})
+    assert _window_end(node, before='stopped') == []
+
+
+def test_window_end_while_running_parks_through_the_stop_only(tmp_path):
+    """도는 중이면 회차 후 정지(schedule_end) 하나 · 멈춘 뒤 또 보내지 않는다"""
+    node = _node(tmp_path, run_state='running', schedules=[_day_schedule()])
+    node._reconcile(DAY.replace(hour=13))
+    node._reconcile(DAY.replace(hour=20))
+    node._local_run_state = lambda: 'stopped'
+    node._local_run_status = lambda: {'state': 'stopped'}
+    node._reconcile(DAY.replace(hour=20, minute=1))
+    assert [payload.get('reason') for _endpoint, payload in node.sent] == ['schedule_end']

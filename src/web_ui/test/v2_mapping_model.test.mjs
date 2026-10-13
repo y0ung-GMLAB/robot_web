@@ -72,21 +72,40 @@ test('충돌 문구', () => {
   assert.equal(isRevisionConflict('재생 중에는 바꿀 수 없습니다'), false);
 });
 
-test('범위 확인 · 칸이 있으면 그 값 · 옛 파일은 ±180 이면 미확인 · 둘 다 고치면 저절로 확인 (수정 목록 97)', async () => {
-  const { autoConfirmRange, rangeConfirmed, unconfirmedRows } = await import('../static/v2/js/mapping_model.js');
+test('범위 확인 · 칸이 있으면 그 값 · 옛 파일은 ±180 이면 미확인 · 숫자만 고쳐서는 안 바뀐다 (수정 목록 97 · 사용자 2026-10-13)', async () => {
+  const { rangeConfirmed, unconfirmedRows } = await import('../static/v2/js/mapping_model.js');
+  const mappingModel = await import('../static/v2/js/mapping_model.js');
+  assert.equal(mappingModel.autoConfirmRange, undefined, '저절로 체크하는 함수는 없다');
   const old = rowToDraft({ ...serverRow, range_confirmed: undefined, motion_lower_rad: -Math.PI, motion_upper_rad: Math.PI });
   assert.equal(rangeConfirmed(old), false);
+  assert.equal(old.range_confirmed, false, '불러올 때 칸으로 굳힌다');
   assert.equal(rangeConfirmed(rowToDraft(serverRow)), true, '옛 파일이라도 범위를 넣었으면 확인으로');
   assert.equal(rangeConfirmed({ ...old, range_confirmed: true }), true);
   assert.equal(rangeConfirmed(rowToDraft({ ...serverRow, range_confirmed: false })), false);
+  // 옛 파일 ±180 줄에 숫자만 넣어도 미확인 그대로 · 짐작은 불러올 때 한 번만
+  old.motion_lower_deg = -10;
+  old.motion_upper_deg = 13;
+  assert.equal(rangeConfirmed(old), false);
+  assert.equal(draftToRow({ ...old }).range_confirmed, false, '저장에도 미확인으로 실린다');
   const fresh = newRow(0, 'X');
   assert.equal(fresh.range_confirmed, false, '자동 생성 새 줄은 미확인');
   fresh.motion_lower_deg = -10;
-  autoConfirmRange(fresh);
-  assert.equal(fresh.range_confirmed, false, '한쪽만 고치면 그대로');
   fresh.motion_upper_deg = 10;
-  autoConfirmRange(fresh);
-  assert.equal(fresh.range_confirmed, true);
+  assert.equal(rangeConfirmed(fresh), false, '최소·최대를 둘 다 고쳐도 그대로');
+  fresh.range_confirmed = true;   // 사람이 체크
   assert.deepEqual(unconfirmedRows([old, { ...old, enabled: false }, { ...old, motion_id: '' }]).length, 1, '안 쓰는 줄 · 이름 없는 줄은 빼고');
   assert.equal(draftToRow({ ...fresh }).range_confirmed, true, '저장에 실린다');
+  const noField = { ...rowToDraft(serverRow) };
+  delete noField.range_confirmed;
+  assert.equal(draftToRow(noField).range_confirmed, true, '칸이 없어도 늘 적어 보낸다');
+});
+
+test('「범위 확인」 칸 옆 주의 · 최소·최대 입력에 저절로 체크 없음 · 수동 하한·상한 지정도 (사용자 2026-10-13)', async () => {
+  const { readFile } = await import('node:fs/promises');
+  const page = await readFile(new URL('../static/v2/js/pages/mapping.js', import.meta.url), 'utf8');
+  const manual = await readFile(new URL('../static/v2/js/pages/manual.js', import.meta.url), 'utf8');
+  assert.match(page, /RANGE_NOTE = '범위 확인 유의 · /);
+  assert.doesNotMatch(page, /autoConfirmRange|range_confirmed = true/);
+  assert.doesNotMatch(manual, /autoConfirmRange|range_confirmed/);
+  assert.doesNotMatch(page, /입력하거나 「범위 확인」/, '숫자 입력만으로 풀린다는 안내 없음');
 });

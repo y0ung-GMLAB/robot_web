@@ -8,6 +8,7 @@ from __future__ import annotations
 from typing import Any, Mapping, Optional
 
 from motion_common.run_state import group_is_active
+from motion_common.schedule_store import SCHEDULE_MODE
 
 GROUP_ROUTE = 'group'
 LOCAL_ROUTE = 'local'
@@ -26,6 +27,38 @@ def stop_route(group_execution: Optional[Mapping[str, Any]], *, joined: bool) ->
     if joined and group_is_active(dict(group_execution or {})):
         return GROUP_ROUTE
     return LOCAL_ROUTE
+
+
+#: 구간 끝에 멈춰 있던 로봇 · 기준점 주차 → 서보 OFF 를 보낸다 · 사용자 2026-10-13
+IDLE_PARK = 'idle_park'
+#: 구간 끝을 이미 다른 길(회차 후 정지)로 처리했거나 할 일이 없다
+WINDOW_END_DONE = 'done'
+#: 아직 구간 안 · 끝을 기다린다
+WINDOW_END_WAIT = 'wait'
+
+
+def window_end_step(
+    *, pending: bool, in_window: bool, running: bool, run_mode: str,
+) -> str:
+    """운영 구간이 끝날 때 멈춰 있던 로봇도 주차하나 · 구간 끝마다 한 번 · 사용자 2026-10-13
+
+    전에는 돌고 있던 재생만 「회차 후 정지 → 기준점 주차 → 서보 OFF」 했다 · 구간이 끝날 때
+    이미 멈춰 있으면 서보가 켠 채 밤을 샜다(수정 목록 36 「안 한 것」).
+
+    `pending` = 구간 안을 본 뒤 아직 끝을 처리하지 않았다 · 노드가 구간 안에서 켜고
+    여기 답이 `wait` 가 아니면 끈다 · 그래서 구간 끝마다 한 번 · 노드가 구간 밖에서
+    켜졌으면(재부팅) 보내지 않는다.
+
+        구간 안                         wait
+        구간 밖 · 돌고 있다             done (회차 후 정지 길이 맡는다 · 수동 모드 사람 재생은 그대로)
+        구간 밖 · 멈춤 · 스케줄 모드    idle_park
+        구간 밖 · 멈춤 · 수동 · 끔      done (사람이 만지는 중일 수 있다)
+    """
+    if in_window:
+        return WINDOW_END_WAIT
+    if not pending or running:
+        return WINDOW_END_DONE
+    return IDLE_PARK if str(run_mode or '') == SCHEDULE_MODE else WINDOW_END_DONE
 
 
 def start_blocker(schedule_status: Optional[Mapping[str, Any]]) -> Optional[str]:

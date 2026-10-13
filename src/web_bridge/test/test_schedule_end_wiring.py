@@ -67,6 +67,30 @@ def test_start_gate_restores_servos_except_for_the_park_move_itself():
     assert end.checked == 1
 
 
+def test_idle_schedule_end_is_not_reported_as_a_refused_stop():
+    """멈춰 있던 로봇 · 런타임은 「반복 실행 중일 때만」 으로 정지를 거절한다 · 주차가 시작됐으면 성공 · 사용자 2026-10-13"""
+    end = _End()
+    bridge, _sent = _bridge(end)
+    bridge._request_motion_run = lambda command, payload, timeout_sec=2.0: {
+        'success': False, 'message': '반복 모션 실행 중일 때만 현재 회차 후 정지를 사용할 수 있습니다',
+    }
+
+    result = bridge.motion_run_stop_after_cycle({'reason': 'schedule_end'})
+
+    assert result['success'] is True and end.begun == 1
+    assert '반복 모션' in result['stop_message']
+    assert bridge.motion_run_stop_after_cycle({})['success'] is False, '사람이 누른 정지는 그대로'
+
+
+def test_a_failed_schedule_end_keeps_the_refusal():
+    end = _End()
+    end.begin = lambda: {'state': 'failed', 'message': '알람'}
+    bridge, _sent = _bridge(end)
+    bridge._request_motion_run = lambda command, payload, timeout_sec=2.0: {'success': False, 'message': '거절'}
+
+    assert bridge.motion_run_stop_after_cycle({'reason': 'schedule_end'})['success'] is False
+
+
 def test_scheduler_sends_the_reason_only_in_schedule_mode():
     from motion_schedule import motion_schedule_node as node_module
 

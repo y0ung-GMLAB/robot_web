@@ -19,12 +19,20 @@ export function shortHash(hash) {
   return String(hash || '').slice(0, 7);
 }
 
+/** 연동 약속 번호가 다른 PC · 그룹 재생에서 빠진다 · 숫자까지 보여 어느 쪽이 옛것인지 알게 (2026-10-13) */
+export function protocolNote(theirs, mine) {
+  const them = Number(theirs) > 0 ? String(theirs) : '없음(옛 프로그램)';
+  const me = Number(mine) > 0 ? ` · 이 PC ${mine}` : '';
+  return `그룹 재생에서 빠집니다(연동 약속 번호 ${them}${me}). 「모든 PC 업데이트」로 같은 버전으로 맞추세요.`;
+}
+
 /** PC 한 줄 · 상태 글과 색 · 그룹 사람 표의 「재생 중」 같은 말을 쓴다 */
 export function storeRows(snap) {
   const runtime = snap?.coordination?.runtime || {};
   const pcs = Array.isArray(runtime.network_pcs) ? runtime.network_pcs : [];
   const peers = new Map([...(Array.isArray(runtime.peers) ? runtime.peers : []), runtime.local].filter(Boolean)
     .map((peer) => [String(peer.pc_id), peer]));
+  const mine = pcs.find((pc) => pc.is_local)?.protocol_version;
   return pcs.map((pc) => {
     const id = String(pc.pc_id || '');
     const peer = peers.get(id) || {};
@@ -33,8 +41,9 @@ export function storeRows(snap) {
     let tone = 'ok';
     let note = '';
     if (pc.online === false) { status = '연결 안 됨'; tone = 'bad'; note = 'PC가 꺼져 있거나 Wi-Fi 연결이 끊겼을 수 있습니다'; }
-    else if (pc.protocol_mismatch) { status = '연동 버전 다름'; tone = 'bad'; note = '함께 재생할 수 없습니다. 모든 PC를 업데이트하세요.'; }
-    else if (pc.version_differs && !speaker) { status = '버전 다름'; tone = 'warn'; note = '그룹 재생에서 제외됩니다. 업데이트하면 다음 회차부터 참여합니다.'; }
+    else if (pc.protocol_mismatch) { status = '연동 버전 다름'; tone = 'bad'; note = protocolNote(pc.protocol_version, mine); }
+    // 커밋만 다르다 · 연동 약속 번호가 같으면 그룹에서 빠지지 않는다(participant_rules) · 2026-10-13
+    else if (pc.version_differs && !speaker) { status = '버전 다름'; tone = 'warn'; note = '코드 버전(커밋)이 다릅니다. 그룹 재생은 되지만 「모든 PC 업데이트」로 같은 버전으로 맞추세요.'; }
     else if (Number(peer.servo_alarm_grade || 0) > 0) { status = '알람'; tone = 'bad'; }
     const role = speaker ? '스피커' : pc.is_master ? '마스터' : '슬레이브';
     const group = speaker ? (pc.same_group ? '같은 그룹' : '') : pc.joined ? '그룹 참여' : '그룹 미참여';

@@ -10,13 +10,16 @@ import { api } from '../net.js';
 import { toast } from '../dialog.js';
 import * as act from '../actions.js';
 import {
-  INITIAL_MODES, autoConfirmRange, changeSummary, draftProblems, draftToRow, isRevisionConflict, motorForRow, motorRefFor, motorWhere, newRow, previewRow,
+  INITIAL_MODES, changeSummary, draftProblems, draftToRow, isRevisionConflict, motorForRow, motorRefFor, motorWhere, newRow, previewRow,
   rangeConfirmed, rowToDraft, rowTarget, unconfirmedRows,
 } from '../mapping_model.js';
 import { signedDeg } from '../play_model.js';
 import { motorsDraft } from './motors.js';
 import { threeWayMerge } from '../merge_model.js';
 import { confirmConflicts } from '../conflict_dialog.js';
+
+/** 「범위 확인」 칸 옆 주의 · 숫자만 넣고 체크하지 않게 (사용자 2026-10-13) */
+export const RANGE_NOTE = '범위 확인 유의 · 실제 기계 범위인지 확인한 뒤 체크';
 
 const ui = { fileId: '', revision: '', name: '', saved: [], rows: null, selected: '', validation: null, busy: '', loadError: '', content: '' };
 let keySeq = 0;
@@ -221,12 +224,14 @@ function table(state, changed) {
                 : '현재 모터 위치를 기준점(조인트 0°)으로 설정합니다. 저장해야 반영됩니다.',
           onclick: () => { row.reference_position_deg = Math.round(motor.positionDeg * 1e4) / 1e4; row.reference_enabled = true; changed(); } }, '캡처'))),
       h('td', {}, h('div', { class: 'cell-row' },
-        numberInput(row, 'motion_lower_deg', changed, { label: '최소', after: autoConfirmRange }), h('span', { class: 'muted', text: '~' }),
-        numberInput(row, 'motion_upper_deg', changed, { label: '최대', after: autoConfirmRange }))),
-      h('td', { class: row.enabled && !rangeConfirmed(row) ? 'range-unconfirmed' : '' },
+        numberInput(row, 'motion_lower_deg', changed, { label: '최소' }), h('span', { class: 'muted', text: '~' }),
+        numberInput(row, 'motion_upper_deg', changed, { label: '최대' }))),
+      // 숫자를 넣어도 저절로 체크되지 않는다 · 사람이 직접 (사용자 2026-10-13)
+      h('td', { class: row.enabled && !rangeConfirmed(row) ? 'range-unconfirmed' : '' }, h('div', { class: 'cell-row' },
         h('input', { type: 'checkbox', checked: rangeConfirmed(row), 'aria-label': `${index + 1}번 줄 범위 확인`,
-          title: '최소·최대가 이 로봇의 실제 기계 범위인지 확인하는 칸입니다. 확인하고 저장하기 전에는 재생, 초기 위치 이동, 수동 조작을 할 수 없습니다. 최소·최대를 둘 다 수정하면 자동으로 체크됩니다.',
-          onchange: (e) => { row.range_confirmed = e.target.checked; changed(); } })),
+          title: '최소·최대가 이 로봇의 실제 기계 범위인지 확인하는 칸입니다. 확인하고 저장하기 전에는 재생, 초기 위치 이동, 수동 조작을 할 수 없습니다. 최소·최대를 입력해도 저절로 체크되지 않습니다. 직접 체크하세요.',
+          onchange: (e) => { row.range_confirmed = e.target.checked; changed(); } }),
+        h('span', { class: 'small tone-text-warn range-note', text: RANGE_NOTE }))),
       h('td', {}, h('div', { class: 'cell-row' },
         numberInput(row, 'max_velocity_deg_s', changed, { label: '최대 속도 deg/s', placeholder: '없음' }),
         numberInput(row, 'max_acceleration_deg_s2', changed, { label: '최대 가속 deg/s²', placeholder: '없음' }))),
@@ -317,9 +322,9 @@ export function mappingBody(state, changed) {
   return [
     ui.loadError ? h('div', { class: 'blocker' }, dot('warn'), h('span', { class: 'grow', text: `다시 불러오기 실패 · ${ui.loadError} · 수정 중인 내용은 그대로 남아 있습니다` })) : null,
     unconfirmedRows(ui.rows).length ? h('div', { class: 'blocker bad' }, dot('bad'),
-      h('span', { class: 'grow', text: `범위 미확인 · ${unconfirmedRows(ui.rows).map((r) => r.motion_id).join(', ')}. 실제 기계 범위(최소·최대)를 입력하거나 「범위 확인」을 체크한 뒤 저장하세요. 그 전에는 재생, 초기 위치 이동, 수동 조작이 차단됩니다.` })) : null,
+      h('span', { class: 'grow', text: `범위 미확인 · ${unconfirmedRows(ui.rows).map((r) => r.motion_id).join(', ')}. 최소·최대가 실제 기계 범위인지 확인한 뒤 「범위 확인」을 직접 체크하고 저장하세요(숫자만 입력해서는 풀리지 않습니다). 그 전에는 재생, 초기 위치 이동, 수동 조작이 차단됩니다.` })) : null,
     state.snap?.mapping_range_blocker && !unconfirmedRows(ui.rows).length && changeSummary(ui.saved, ui.rows).length
-      ? h('p', { class: 'muted small', text: '저장하면 범위 미확인 상태가 해제됩니다' }) : null,
+      ? h('p', { class: 'muted small', text: '「범위 확인」을 체크했습니다 · 저장해야 범위 미확인 상태가 해제됩니다' }) : null,
     h('section', { class: 'card', 'aria-label': '조인트' },
       ui.rows.length ? table(state, changed) : h('p', { class: 'muted', text: motorList(state).length
         ? '조인트가 없습니다. 「인식 모터 자동 생성」을 누르세요.'

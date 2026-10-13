@@ -180,9 +180,16 @@ export function collectIssues(snap, sched, { connected = true } = {}) {
     warn(`시각을 읽을 수 없는 스케줄 ${unreadable.length}개`, unreadable.join(' · '), { kind: 'open', target: 'schedule', label: '스케줄 수정' });
   }
   const pcs = networkPcs(snap);
-  const differing = pcs.filter((pc) => !pc.is_local && pc.role !== 'speaker' && (pc.version_differs || pc.protocol_mismatch));
+  // 연동 약속 번호가 다르면 그룹에서 빠진다 · 커밋만 다르면 빠지지 않는다 · 2026-10-13
+  const others = pcs.filter((pc) => !pc.is_local && pc.role !== 'speaker');
+  const mismatched = others.filter((pc) => pc.protocol_mismatch);
+  const differing = others.filter((pc) => !pc.protocol_mismatch && pc.version_differs);
+  if (mismatched.length) {
+    warn(`${mismatched.map(pcName).join(' · ')} 연동 버전이 다릅니다`, '그룹 재생에서 빠집니다. 모든 PC를 같은 버전으로 업데이트하세요.',
+      { kind: 'update-all', label: '모든 PC 업데이트' });
+  }
   if (differing.length) {
-    warn(`${differing.map(pcName).join(' · ')} 버전이 다릅니다`, '다음 그룹 재생에서 제외됩니다',
+    warn(`${differing.map(pcName).join(' · ')} 버전이 다릅니다`, '그룹 재생은 되지만 같은 버전으로 맞추세요',
       { kind: 'update-all', label: '모든 PC 업데이트' });
   }
   const offline = pcs.filter((pc) => !pc.is_local && pc.online === false);
@@ -280,7 +287,8 @@ export function pcRows(snap) {
     let tone = 'ok';
     let note = pc.role === 'speaker' ? '스피커' : (pc.is_master ? '마스터' : '슬레이브');
     if (pc.online === false) { tone = 'bad'; note = '연결 안 됨'; }
-    else if (pc.version_differs || pc.protocol_mismatch) { tone = 'warn'; note = '버전 다름'; }
+    else if (pc.protocol_mismatch) { tone = 'bad'; note = '연동 버전 다름'; }
+    else if (pc.version_differs) { tone = 'warn'; note = '버전 다름'; }
     else if (pc.role !== 'speaker' && pc.joined === false) { tone = 'info'; note = '그룹 미참여'; }
     return { name: pcName(pc), local: Boolean(pc.is_local), tone, note, url: String(pc.web_url || '') };
   });

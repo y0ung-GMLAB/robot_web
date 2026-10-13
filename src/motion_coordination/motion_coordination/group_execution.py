@@ -23,8 +23,12 @@ from .participant_rules import STARTED_BY_SCHEDULE, normalize_started_by
 #: 4 · 2026-10-06 도는 그룹 복귀 · 명령 `join` · `update_participants` 가 참가자를 늘릴 수 있음 ·
 #: 사건 `join_ready` (수정 목록 30-3) ·
 #: 5 · 2026-10-07 `GroupCommand.motion_file_id`·`start_delay_sec` · PC 1대 재생도 `start_at` 알림
-#: (스피커 연동 · 수정 목록 38)
-GROUP_PROTOCOL_VERSION = 6
+#: (스피커 연동 · 수정 목록 38) ·
+#: 6 · 2026-10-12 `GroupCommand.initial_move_time_sec` (재생 화면 초기 이동 5/7/10 s) ·
+#: 7 · 2026-10-13 칸은 같고 그룹 동작이 바뀜 · 누가 시작했나(`started_by` · 수동 PC 넣기 · 수정 목록 122) ·
+#: 시작 전 미리 보기 · 뺀 PC 에만 보내는 풀기 명령 번호(123) · 도는 그룹 없이 구간 끝 주차(실행 ID 없는
+#: `stop_after_cycle` · 수정 목록 36 후속) · 옛 PC 와 섞이면 그룹 동작이 갈린다 → 같은 버전끼리만
+GROUP_PROTOCOL_VERSION = 7
 
 #: 진행 PC 가 **뺀 PC 하나에만** 보내는 풀기 명령의 번호 앞머리 · 수정 목록 123
 #:

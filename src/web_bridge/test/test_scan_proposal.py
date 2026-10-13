@@ -70,8 +70,9 @@ def test_new_devices_come_after_and_get_server_ids():
         'ac_servo_ethercat_master_0_alias_404',
         motor_id_for(motor_type='dynamixel', transport='serial', axis=2, serial_port='/dev/ttyUSB0', bus_id=5),
     ]
-    assert motors[1]['name'] == 'alias 404'
-    assert motors[2]['name'] == 'ID 5'
+    assert motors[1]['name'] == '모터 1', '새 모터 기본 이름 = 모터 번호 · 사용자 2026-10-13'
+    assert motors[2]['name'] == '모터 2'
+    assert motors[0]['name'] == servo['name'], '저장된 이름은 그대로'
     assert motors[2]['profile']['driver_model'] == 'XM540-W150'
     assert motors[2]['config']['serial_baudrate'] == 1_000_000
     assert result['summary']['added'] == 2

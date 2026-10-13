@@ -7,10 +7,16 @@
 실물 S-12 (15:34) · 부팅 직후 앱솔루트 확인 전에 그룹 시작 · 거절이 2등급으로 잠김.
 """
 
+import pytest
+
 from motion_schedule.schedule_rules import (
     GROUP_ROUTE,
+    IDLE_PARK,
     LOCAL_ROUTE,
     START_WENT_NOWHERE,
+    WINDOW_END_DONE,
+    WINDOW_END_WAIT,
+    window_end_step,
     start_blocker,
     start_failure_message,
     stop_route,
@@ -45,3 +51,39 @@ def test_why_the_last_start_went_nowhere():
     assert start_failure_message(group, {}) == 'floating4 실행 준비 안 됨: 앱솔루트 미확인'
     assert start_failure_message({}, {'state': 'error', 'message': '도달 확인 실패'}) == '도달 확인 실패'
     assert start_failure_message(None, {'state': 'stopped', 'message': '정지'}) == START_WENT_NOWHERE
+
+
+def _walk(states, *, run_mode='schedule'):
+    """점검 순서대로 (구간 안?, 도는 중?) · 노드처럼 pending 을 이어 가며 답만 모은다"""
+    pending, steps = False, []
+    for in_window, running in states:
+        step = window_end_step(pending=pending, in_window=in_window, running=running, run_mode=run_mode)
+        pending = step == WINDOW_END_WAIT
+        steps.append(step)
+    return steps
+
+
+def test_window_end_parks_a_robot_that_was_already_stopped_once():
+    """사용자 2026-10-13 · 구간 끝에 멈춰 있어도 주차 → 서보 OFF · 구간 끝마다 한 번"""
+    assert _walk([(True, False), (False, False), (False, False)]) == [WINDOW_END_WAIT, IDLE_PARK, WINDOW_END_DONE]
+
+
+def test_window_end_while_running_is_left_to_the_stop_after_cycle_path():
+    """도는 중이면 옛 길(회차 후 정지 + schedule_end) · 멈춘 뒤 또 주차하지 않는다"""
+    assert _walk([(True, True), (False, True), (False, False)]) == [WINDOW_END_WAIT, WINDOW_END_DONE, WINDOW_END_DONE]
+
+
+@pytest.mark.parametrize('mode', ['manual', 'off', ''])
+def test_window_end_parks_only_in_schedule_mode(mode):
+    """수동 · 끔 · 모름 · 사람이 만지는 중일 수 있다"""
+    assert _walk([(True, False), (False, False)], run_mode=mode) == [WINDOW_END_WAIT, WINDOW_END_DONE]
+
+
+def test_starting_outside_the_window_does_not_park():
+    """재부팅 · 구간 밖에서 켜졌다 · 구간 끝을 본 적이 없다"""
+    assert _walk([(False, False), (False, False)]) == [WINDOW_END_DONE, WINDOW_END_DONE]
+
+
+def test_each_window_end_parks_again():
+    steps = _walk([(True, False), (False, False), (True, True), (False, True), (True, False), (False, False)])
+    assert steps.count(IDLE_PARK) == 2

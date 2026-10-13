@@ -321,7 +321,8 @@ function detailCard(state, changed, row) {
         onchange: () => changed() }));
   };
   return h('section', { class: 'card', id: 'motor-detail', 'aria-label': `${row.axis}번 설정` },
-    h('div', { class: 'card-head' }, h('h2', { text: `${row.axis}번 · ${row.name || '-'}` }), h('span', { class: 'muted small mono wrap-text', text: row.id })),
+    // 내부 ID 는 「원본」 안으로 · 사용자 2026-10-13
+    h('div', { class: 'card-head' }, h('h2', { text: `${row.axis}번 · ${row.name || '-'}` })),
     // 묶음마다 가로선(사용자 2026-10-13 「같은 줄끼리 구획」) · 운전값 → 게인 → 드라이브 관리 → Alias → 원본
     h('div', { class: 'detail-group' },
     h('div', { class: 'group-title', text: '운전값' }),
@@ -329,7 +330,7 @@ function detailCard(state, changed, row) {
     row.ac ? h('label', { class: 'inline' }, h('input', { type: 'checkbox', checked: Number(motor.config?.overload_monitor) === 1,
       onchange: (e) => { setField(motor, 'overload_monitor', e.target.checked ? 1 : 0); changed(); } }),
     '과부하율 읽기 (드라이브 소프트웨어 Ver1.03 이상 필요 · 낮은 버전에서 켜면 모터 프로그램이 시작되지 않음)') : null,
-    h('label', { class: 'inline' }, h('input', { type: 'checkbox', checked: motor.config?.schedule_end_servo_off === true,
+    h('label', { class: 'inline' }, h('input', { type: 'checkbox', checked: motor.config?.schedule_end_servo_off !== false,   // 안 적었으면 켬 · 서버(schedule_end.motor_turns_off_at_end)와 같게 · 2026-10-13
       onchange: (e) => { setField(motor, 'schedule_end_servo_off', e.target.checked); changed(); } }), '스케줄 모드에서 운영 시간이 끝나면 서보 끄기')),
     // 드라이브 게인 · 잠금 · 재시작 없이 쓰기 · 수정 목록 108 (다)
     row.ac ? h('div', { class: 'detail-group' }, gainField(row, changed, () => loadMotors(state, changed, { force: true }))) : null,
@@ -347,7 +348,8 @@ function detailCard(state, changed, row) {
       h('p', { class: 'muted small', text: '빨간 글씨 버튼은 위치 기준을 바꿉니다. 누르면 확인 창이 먼저 뜹니다.' }))),
     row.ac ? h('div', { class: 'detail-group' }, h('div', { class: 'field' },
       h('div', { class: 'group-title', text: 'EtherCAT Alias' }),
-      h('span', { class: 'muted small', text: `지금 ${motor.identity?.ethercat_alias ?? '-'} · Slave ${Number.isFinite(row.slavePosition) ? row.slavePosition : '-'}` }),
+      // 「지금」 이 아니라 마지막 검색 때 읽은 값 · 사용자 2026-10-13
+      h('span', { class: 'muted small', text: `마지막 검색 때 읽은 값 ${motor.identity?.ethercat_alias ?? '-'} · Slave ${Number.isFinite(row.slavePosition) ? row.slavePosition : '-'}` }),
       h('div', { class: 'row' },
         h('input', { id: `alias-${row.axis}`, class: 'input mono num-input', type: 'number', min: '0', max: '65535', step: '1',
           value: ui.aliasDraft[row.axis] ?? String(motor.identity?.ethercat_alias ?? ''), 'aria-label': `${row.axis}번 새 Alias`,
@@ -357,6 +359,7 @@ function detailCard(state, changed, row) {
     // 파라미터 (고급) · 드라이브 현재값 · 부팅 시 적용값 · 팩토리값 · 직접 읽기·쓰기 · 수정 목록 109 · 114
     paramsField(row, changed),
     h('details', { class: 'raw detail-group' }, h('summary', { text: '원본 (드라이브 정보)' }),
+      h('p', { class: 'muted small' }, '내부 ID · ', h('span', { class: 'mono wrap-text', text: row.id })),
       h('pre', { class: 'doc-code small' }, h('code', { text: JSON.stringify({ identity: motor.identity, profile: motor.profile, config: motor.config }, null, 2) }))));
 }
 

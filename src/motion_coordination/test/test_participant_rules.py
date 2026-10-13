@@ -19,6 +19,7 @@ from motion_coordination.participant_rules import (
     STARTED_BY_HUMAN,
     STARTED_BY_SCHEDULE,
     exclusion_reason,
+    idle_park_wanted,
     normalize_started_by,
     solo_busy,
     start_summary,
@@ -101,3 +102,11 @@ def test_the_start_notice_names_the_count_and_who_was_left_out():
     assert start_summary(('a',), {'c': '끔 모드', 'b': '단독 재생 중'}) == (
         '참가 1대 · 빠짐 b(단독 재생 중), c(끔 모드)'
     )
+
+
+def test_idle_park_goes_out_only_for_a_schedule_end_without_a_group_run():
+    """사용자 2026-10-13 · 도는 그룹 없이 구간이 끝나도 PC 마다 주차 → 서보 OFF"""
+    assert idle_park_wanted(after_cycle=True, reason='schedule_end', execution_id='') is True
+    assert idle_park_wanted(after_cycle=True, reason='schedule_end', execution_id='exec-a') is False, '도는 그룹은 옛 길'
+    assert idle_park_wanted(after_cycle=True, reason='', execution_id='') is False, '사람이 누른 정지는 그대로 거절'
+    assert idle_park_wanted(after_cycle=False, reason='schedule_end', execution_id='') is False
