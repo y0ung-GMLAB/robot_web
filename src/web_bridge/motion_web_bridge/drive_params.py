@@ -2,8 +2,8 @@
 
 드라이브에 지금 들어 있는 값(RAM) · 부팅 때 우리가 쓸 값 · 초기값을 한 표에 · 다르면 표시.
 
-    드라이브 지금   `ethercat upload` · Motor Manager 를 멈추지 않는다
-    부팅 때 쓸 값   `minas_params.boot_values` (플랫폼 기반 → 현장 공통 설정 → 모터별 칸) · 이 값은 모터
+    드라이브 현재값   `ethercat upload` · Motor Manager 를 멈추지 않는다
+    부팅 시 적용값   `minas_params.boot_values` (플랫폼 기반 → 현장 공통 설정 → 모터별 칸) · 이 값은 모터
                     프로그램이 켜질 때마다 다시 쓰이므로, 여기서 다른 값을 써도 재시작하면 돌아간다
     초기값          A6B 레퍼런스 SX-DSV03190 R11.0 부록(파라미터 · 객체 기본값) · A~C 프레임
 
@@ -145,7 +145,7 @@ class DriveParams:
         return value, '' if value is not None else f'응답을 읽지 못함: {(done.stdout or "").strip()!r}'
 
     def table(self, axis: int) -> Dict[str, Any]:
-        """자주 보는 객체 표 · 드라이브 지금 · 부팅 때 · 초기값"""
+        """자주 보는 객체 표 · 드라이브 현재값 · 부팅 시 적용값 · 초기값"""
         try:
             target = self._target(int(axis))
         except (TypeError, ValueError) as exc:

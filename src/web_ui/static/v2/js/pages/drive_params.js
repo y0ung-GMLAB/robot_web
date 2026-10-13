@@ -32,17 +32,17 @@ async function load(axis, changed) {
 export function rowHint(row) {
   const parts = [`${row.number} · 0x${row.index.toString(16).toUpperCase().padStart(4, '0')}:${row.subindex} · ${row.type}`];
   if (row.memo === 'C') parts.push('전원 재투입 때 반영(지금 값을 바꿔도 바로 안 바뀜)');
-  else if (row.memo === 'auto') parts.push('모터 설정 값에서 계산해 부팅 때 씀');
+  else if (row.memo === 'auto') parts.push('모터 설정 값에서 계산해 부팅 시 적용');
   else if (row.memo) parts.push(row.memo);
   if (row.error) parts.push(`못 읽음 · ${row.error}`);
   if (row.type.endsWith('32') && Number.isInteger(row.drive)) parts.push(`16진 0x${(row.drive >>> 0).toString(16).toUpperCase()}`);
   return parts.join('\n');
 }
 
-/** 표시 · 초기값과 다름 · 부팅 값과 다름(재시작하면 부팅 값으로 돌아감) */
+/** 표시 · 초기값과 다름 · 부팅 시 적용값과 다름(재시작하면 부팅 값으로 돌아감) */
 export function rowFlags(row) {
   const flags = [];
-  if (row.differs_boot) flags.push({ tone: 'warn', text: '부팅 값과 다름', hint: `재시작하면 ${row.boot} 로 돌아갑니다` });
+  if (row.differs_boot) flags.push({ tone: 'warn', text: '부팅 시 적용값과 다름', hint: `재시작하면 ${row.boot} 로 돌아갑니다` });
   if (row.differs_factory) flags.push({ tone: 'info', text: '초기값과 다름', hint: `초기값 ${row.factory}` });
   return flags;
 }
@@ -90,14 +90,14 @@ export function paramsField(row, changed) {
   }
   const pick = (item) => { ui.form = { object: item.number, type: item.type, value: '' }; changed(); };
   return h('details', { class: 'detail-group' },
-    h('summary', { class: 'group-title', text: '파라미터 (고급) · 드라이브 지금 값 · 부팅 때 쓸 값 · 초기값' }),
+    h('summary', { class: 'group-title', text: '파라미터 (고급) · 드라이브 현재값 · 부팅 시 적용값 · 초기값' }),
     h('div', { class: 'row' },
       h('button', { class: 'btn btn-mini', type: 'button', disabled: ui.loading, onclick: () => load(row.axis, changed) },
         ui.loading ? '읽는 중' : ui.rows ? '다시 읽기' : '드라이브에서 읽기'),
       h('span', { class: 'muted small', text: '모터 프로그램을 멈추지 않고 읽습니다. 줄을 누르면 아래 칸에 채워집니다.' })),
     ui.error ? h('p', { class: 'tone-text-bad', text: ui.error }) : null,
     ui.rows ? h('div', { class: 'table-wrap' }, h('table', { class: 'table params-table' },
-      h('thead', {}, h('tr', {}, ['항목', '드라이브 지금', '부팅 때 씀', '초기값', ''].map((text) => h('th', { scope: 'col', text })))),
+      h('thead', {}, h('tr', {}, ['항목', '드라이브 현재값', '부팅 시 적용값', '초기값', ''].map((text) => h('th', { scope: 'col', text })))),
       h('tbody', {}, groups.map((group) => [
         h('tr', { class: 'params-group' }, h('td', { colspan: '5', text: group.name })),
         group.rows.map((item) => h('tr', { class: 'pick-row', title: rowHint(item), onclick: () => pick(item) },
