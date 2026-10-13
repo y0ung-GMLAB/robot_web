@@ -490,3 +490,5 @@ details.raw pre.raw-file { max-height: 480px; }
 .detail-group { border-top: 1px solid var(--line); padding-top: 14px; margin-top: 14px; }
 .detail-group .group-title { font-weight: 600; margin-bottom: 8px; }
 .detail-group > label.inline { display: flex; margin-top: 6px; }
+.params-table tr.params-group td { font-weight: 600; padding-top: 12px; color: var(--muted, inherit); }
+details.detail-group > summary { cursor: pointer; }

@@ -1179,6 +1179,48 @@ async def preview_drive_gains(request: Request):
     return {'success': True, 'message': f"프리뷰 · {' · '.join(f'{a}번' for a in axes)} 게인을 썼습니다(실제로는 아무것도 안 함)"}
 
 
+# 파라미터 (고급) · 진짜 규칙(drive_params) · 가짜 드라이브 값 · 109 · 114
+PREVIEW_DRIVE_VALUES = {}
+
+
+def _preview_drive_params():
+    from types import SimpleNamespace
+    from motion_web_bridge import minas_params
+    from motion_web_bridge.drive_params import CATALOG, DriveParams
+
+    def runner(command, **_kwargs):
+        axis = int(command[command.index('-p') + 1])
+        values = PREVIEW_DRIVE_VALUES.setdefault(axis, {
+            (index, sub): factory for _g, _l, _n, index, sub, _t, factory, _u, _m in CATALOG if factory is not None})
+        values[(0x3512, 0)] = 50          # 예전에 EEPROM 에 저장된 플랫폼 값이 남은 모양
+        if command[1] == 'download':
+            values[(int(command[-3], 16), int(command[-2]))] = int(command[-1])
+            return SimpleNamespace(returncode=0, stdout='', stderr='')
+        key = (int(command[-2], 16), int(command[-1]))
+        if key not in values:
+            return SimpleNamespace(returncode=1, stdout='', stderr='SDO upload aborted (프리뷰)')
+        return SimpleNamespace(returncode=0, stdout=f'0x{values[key] & 0xFFFF:04x} {values[key]}', stderr='')
+
+    return DriveParams(runner=runner, target=lambda axis: {'master': 0, 'position': axis},
+                       boot_values=lambda axis: minas_params.boot_values(PREVIEW_SITE, {}),
+                       safety_blocker=lambda: '', record=lambda _r: None)
+
+
+@app.get('/api/motor-config/drive-params')
+async def preview_drive_params(axis: int):
+    return _preview_drive_params().table(axis)
+
+
+@app.post('/api/motor-config/drive-params/read')
+async def preview_drive_params_read(request: Request):
+    return _preview_drive_params().read(await request.json())
+
+
+@app.post('/api/motor-config/drive-params/write')
+async def preview_drive_params_write(request: Request):
+    return _preview_drive_params().write(await request.json())
+
+
 @app.post('/api/motor-config/eeprom-save-all')
 async def preview_eeprom_save_all(request: Request):
     body = await request.json()

@@ -39,6 +39,8 @@ from .supervisor_watchdog import SupervisorWatchdog
 from .auto_backup import AutoBackupService
 from .absolute_setup import AbsoluteSetup
 from .drive_maintenance import DriveMaintenance
+from .drive_params import DriveParams
+from . import minas_params
 from .manual_stream import ManualStreamService
 from .manual_range_gate import ManualRangeGate
 from . import animation_preview, sim_scene
@@ -431,6 +433,18 @@ class MotionWebBridge(Node):
             # 온라인 뒤 서보가 다 켜질 때까지(최대 8 초) · 수정 목록 109 메모
             wait_recovery=self._wait_maintenance_recovery,
             expected_axes=self._detected_axes,
+            record=self._record_drive_maintenance,
+        )
+        # MINAS 파라미터 고급 보기·쓰기 · 드라이브 지금 · 부팅 때 · 출하값 · 수정 목록 109 · 114
+        self.drive_params = DriveParams(
+            target=self.drive_maintenance._target,
+            boot_values=lambda axis: minas_params.boot_values(
+                self.workspace_root, minas_params.param_overrides(self._registry_motor_for_axis(axis) or {}),
+            ),
+            safety_blocker=lambda: (
+                self.absolute_setup.blocker()
+                or self._motor_runtime.ethercat_scan_safety_blocker(require_fresh_motor_state=True)
+            ),
             record=self._record_drive_maintenance,
         )
         # MINAS 「앱솔루트 설정」 · 앱솔루트 + 다회전 클리어 · 전원 재투입 감지 · 수정 목록 62 ③④

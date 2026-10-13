@@ -96,3 +96,13 @@ test('게인 쓰기 · 바뀐 칸만 · 범위 · 뜻은 마우스로 (수정 �
   assert.ok(!GAIN_FIELDS.some((f) => f.key === 'inertia_ratio'));                  // 관성비는 자동조정이 정함
   assert.match(gainHint(GAIN_FIELDS[0], 3), /3 = 수직축/);
 });
+
+test('파라미터 (고급) · 다름 표시 · 마우스 글 (수정 목록 109 · 114)', async () => {
+  const { rowFlags, rowHint } = await import('../static/v2/js/pages/drive_params.js');
+  const row = { number: 'Pr5.12', index: 0x3512, subindex: 0, type: 'int16', memo: '', factory: 0, drive: 50, boot: 0,
+    differs_factory: true, differs_boot: true, error: '' };
+  assert.deepEqual(rowFlags(row).map((f) => f.text), ['부팅 값과 다름', '출하값과 다름']);
+  assert.match(rowHint(row), /0x3512:0 · int16/);
+  assert.match(rowHint({ ...row, memo: 'C' }), /전원 재투입/);
+  assert.deepEqual(rowFlags({ ...row, differs_factory: false, differs_boot: false }), []);
+});

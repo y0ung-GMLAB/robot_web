@@ -372,6 +372,35 @@ def write_param_file(
     상대경로는 어긋난다 · 다이나믹셀 param 과 같은 방식으로 절대경로를 적는다.
     같은 객체가 기반 목록에 이미 있으면 값을 바꾸고, 없으면 뒤에 더한다.
     """
+    document = build_document(workspace_root, overrides)
+    out_dir = Path(workspace_root) / 'config' / OUTPUT_DIR
+    out_dir.mkdir(parents=True, exist_ok=True)
+    out_path = out_dir / f'driver_{driver_id}.yaml'
+    header = (
+        '# 이 파일은 저장할 때마다 다시 만들어진다 · 손으로 고치지 말 것\n'
+        '# (모터 관리 화면의 드라이브 설정 → config/minas_params/) · P8\n'
+        + ''.join(
+            f'# {key}={overrides[key]} · {_describe(key)}\n'
+            for key in sorted(overrides)
+        )
+    )
+    out_path.write_text(
+        header + yaml.safe_dump(document, allow_unicode=True, sort_keys=False),
+        encoding='utf-8',
+    )
+    return str(out_path)
+
+
+def boot_values(workspace_root: Path, overrides: Dict[str, int]) -> Dict[Tuple[int, int], int]:
+    """부팅 때 이 드라이브에 쓰일 값 · (index, subindex) → 값 · 파일을 쓰지 않는다 · 수정 목록 109 · 114"""
+    return {
+        _item_key(item): int(item.get('value') or 0)
+        for item in build_document(workspace_root, overrides).get('items', [])
+    }
+
+
+def build_document(workspace_root: Path, overrides: Dict[str, int]) -> Dict[str, Any]:
+    """플랫폼 기반 → 현장 공통 값 → 모터별 칸 · 부팅 목록 문서 · 파일은 `write_param_file` 이 쓴다"""
     document = _base_document(Path(workspace_root))
     items = [dict(item) for item in document.get('items', [])]
     next_id = max((int(item.get('id') or 0) for item in items), default=0) + 1
@@ -404,20 +433,4 @@ def write_param_file(
     document = dict(document)
     document['items'] = items
     document['interfaces'] = _with_monitors(document.get('interfaces', []), overrides)
-
-    out_dir = Path(workspace_root) / 'config' / OUTPUT_DIR
-    out_dir.mkdir(parents=True, exist_ok=True)
-    out_path = out_dir / f'driver_{driver_id}.yaml'
-    header = (
-        '# 이 파일은 저장할 때마다 다시 만들어진다 · 손으로 고치지 말 것\n'
-        '# (모터 관리 화면의 드라이브 설정 → config/minas_params/) · P8\n'
-        + ''.join(
-            f'# {key}={overrides[key]} · {_describe(key)}\n'
-            for key in sorted(overrides)
-        )
-    )
-    out_path.write_text(
-        header + yaml.safe_dump(document, allow_unicode=True, sort_keys=False),
-        encoding='utf-8',
-    )
-    return str(out_path)
+    return document
