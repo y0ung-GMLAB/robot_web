@@ -108,6 +108,30 @@ def test_stale_actual_position_is_left_blank(tmp_path):
     assert summary[0]['max_abs_error_deg'] is None
 
 
+def test_polled_status_is_taken_only_when_a_row_is_added(tmp_path):
+    """실행기 밖 구독 · 재생 틱마다 마지막 한 장을 꺼낸다 · 서 있을 때는 아무도 안 꺼낸다 · 수정 목록 130"""
+    recorder = _recorder(stale_sec=0.05)
+    pending = [{0: _motor(1.0)}, None]
+    taken = []
+
+    def poll():
+        taken.append(True)
+        return pending.pop(0) if pending else None
+
+    recorder.set_poll(poll)
+    assert taken == []
+    trace = recorder.begin(_plan(), 1, tmp_path)
+    trace.add({'time_sec': 0.0, 'positions': {0: _motor(1.0)}, 'motion_values': {'1-1': R(1.0)}})
+    # 새 것이 없으면 직전 한 장 · 오래되면 비운다(옛 콜백 구독과 같은 판정)
+    trace.add({'time_sec': 0.02, 'positions': {0: _motor(1.0)}, 'motion_values': {'1-1': R(1.0)}})
+    _header, rows, _summary, missing = recorder.build(trace)
+    recorder.close()
+    assert len(taken) == 2
+    assert rows[0][1:] == ['1.0000', '1.0000', '0.0000']
+    assert rows[1][1:] == ['1.0000', '1.0000', '0.0000']
+    assert missing == 0
+
+
 def test_studio_playback_and_disabled_recorder_record_nothing(tmp_path):
     recorder = _recorder()
     assert recorder.begin(_plan(request_source='motion_studio'), 1, tmp_path) is None

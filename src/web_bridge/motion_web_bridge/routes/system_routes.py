@@ -12,6 +12,7 @@ from motion_common import local_clock
 
 from motion_web_bridge import desktop_shortcut, system_timezone, system_update
 from motion_web_bridge.index_composer import IndexComposer
+from motion_web_bridge.shared_snapshot import SharedSnapshot
 
 
 def _is_not_modified(response_headers, request_headers) -> bool:
@@ -318,8 +319,15 @@ def register_system_routes(app: FastAPI, bridge, project_call) -> None:
 
         `@app.get` 들은 스레드로 옮겼는데(§6-146) 여기만 남아 있었다 ·
         `@app.websocket` 은 그때 훑은 대상이 아니었다.
+
+        탭이 여럿이면 반 박자 안에 만든 한 장을 같이 쓴다 · 수정 목록 130
         """
-        return json.dumps(bridge.snapshot())
+        return shared_snapshot.text()
+
+    shared_snapshot = SharedSnapshot(
+        lambda: json.dumps(bridge.snapshot()),
+        max_age_sec=lambda: 0.5 / max(float(bridge.web_publish_hz), 0.1),
+    )
 
     @app.websocket('/ws/status')
     async def websocket_status(websocket: WebSocket):
