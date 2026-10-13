@@ -4,7 +4,8 @@
  * 탭으로 나누는 것보다 한 페이지에 구획을 나눠 두는 쪽이 찾기 쉽다(사용자) · 머리 · 저장 칸은 여기 하나만.
  * 저장은 바뀐 쪽만 · 장비 적용은 둘 다 저장한 뒤 한 번 · #/mapping 주소는 ② 구획으로 스크롤.
  */
-import { h } from '../dom.js';
+import { h, dot } from '../dom.js';
+import { bootParamsNotice } from '../model.js';
 import { confirmBox, toast } from '../dialog.js';
 import * as act from '../actions.js';
 import { loadMotors, motorsActions, motorsBody, motorsDraft, revertMotors, saveMotors } from './motors.js';
@@ -28,10 +29,15 @@ export function setupStatus(snap, { dirty = false } = {}) {
   const detected = motors.filter((m) => m.state === 'detected').length;
   const scope = snap?.project_scope || {};
   const applied = scope.runtime_matches_selected === true && scope.motor_config_applied === true;
+  // 파일은 적용됐어도 지금 도는 모터 프로그램의 부팅 값이 옛 값이면 적용 필요 · 수정 목록 116
+  const boot = bootParamsNotice(snap);
+  let apply = applied ? (dirty ? ['장비에 적용됨 · 저장하지 않은 변경 있음', 'warn'] : ['장비에 적용됨', 'ok']) : ['장비에 적용 필요', 'warn'];
+  if (applied && boot) apply = [boot.title, 'warn'];
   return {
     motors: { done: motors.length > 0 && detected === motors.length, note: `${detected}/${motors.length}대 연결` },
     mapping: { done: !snap?.mapping_range_blocker, note: snap?.mapping_range_blocker ? '범위 미확인' : '' },
-    apply: applied ? (dirty ? ['장비에 적용됨 · 저장하지 않은 변경 있음', 'warn'] : ['장비에 적용됨', 'ok']) : ['장비에 적용 필요', 'warn'],
+    apply,
+    boot,
   };
 }
 
@@ -158,6 +164,10 @@ export function renderSetup(state, { changed }) {
         SETUP_PARTS.map(([id, label]) => h('a', { class: 'btn btn-mini', href: `#/${id === 'part-mapping' ? 'mapping' : 'maintain-motors'}`,
           onclick: (event) => { event.preventDefault(); jumpTo(id); } }, label))),
       h('span', { class: `chip chip-${status.apply[1]}`, text: status.apply[0] })),
+    // 지금 도는 모터 프로그램이 옛 부팅 값 · 업데이트만 하고 적용 안 함 · 수정 목록 116
+    status.boot ? h('div', { class: 'blocker' }, dot('warn'),
+      h('span', { class: 'grow' }, h('strong', { text: status.boot.title }), h('span', { class: 'muted small', text: ` · ${status.boot.detail}` })),
+      h('button', { class: 'btn btn-warn', type: 'button', disabled: busy || Boolean(problems.length), onclick: () => save(state, changed, { apply: true }) }, '저장 후 장비에 적용')) : null,
     h('section', { class: 'setup-part', id: 'part-motors', 'aria-label': '모터·드라이브' },
       partHead(SETUP_PARTS[0], status.motors, motorsActions(state, changed)),
       motorsBody(state, changed)),

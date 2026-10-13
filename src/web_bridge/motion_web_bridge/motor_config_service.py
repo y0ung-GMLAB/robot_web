@@ -33,6 +33,7 @@ from motion_common import store
 
 from motion_web_bridge.motor_runtime_store import MOTOR_BUSY_MESSAGE
 from motion_web_bridge import (
+    boot_params,
     mapping_motor_limits,
     minas_params,
     motion_file_analysis,
@@ -486,6 +487,8 @@ class MotorConfigService:
                     'previous_runtime': previous_runtime,
                 },
             )
+            # 부팅 목록(param 파일)이 지금 공통 설정 · 모터 칸과 다르면 먼저 다시 만든다 · 수정 목록 116
+            boot_refresh = self._refresh_boot_param_files()
             prepared = self.repository.prepare_runtime_motor_config(project_id)
             runtime_file = self.repository.runtime.mark_runtime_motor_config_applied(
                 project_id
@@ -566,7 +569,10 @@ class MotorConfigService:
 
         return {
             'success': True,
-            'message': '프로젝트 설정 적용을 시작했습니다. 잠시 후 화면이 다시 연결됩니다',
+            'message': (
+                '프로젝트 설정 적용을 시작했습니다. 잠시 후 화면이 다시 연결됩니다'
+                + (f' · 부팅 값을 새 설정으로 다시 만들었습니다({boot_refresh})' if boot_refresh else '')
+            ),
             'restart_script': str(self.restart_script),
             'restart_mode': restart_mode,
             'runtime_config': {
@@ -579,6 +585,32 @@ class MotorConfigService:
             'motor_operation': self.repository.runtime.motor_operation_status(),
             **self.bridge.snapshot(),
         }
+
+    def _refresh_boot_param_files(self) -> str:
+        """저장된 모터 설정이 가리키는 부팅 목록이 지금 설정과 다르면 같은 registry 로 다시 저장 · 수정 목록 116
+
+        업데이트로 공통 설정(`config/minas_base.yaml`)이 바뀌었거나, 옛 모터 설정이 아직 플랫폼
+        `param/minas.yaml` 을 가리키면(floating4 2026-10-13) 「적용」 만으로는 새 값이 안 들어갔다 ·
+        param 경로와 파일은 저장 때 만들어지므로 여기서 한 번 저장한다(`save_minas_base` 와 같은 길) ·
+        같으면 아무것도 안 쓴다(설정 sha 가 괜히 바뀌지 않게) · 바꾼 것 한 줄을 돌려준다 · 실패는 ValueError
+        """
+        loaded = self.load()
+        motors = ((loaded.get('registry') or {}).get('motors') or []) if loaded.get('success') else []
+        config_file = Path(str(loaded.get('config_file') or ''))
+        if not motors or not config_file.is_file():
+            return ''
+        rows = boot_params.config_differences(
+            config_file, boot_params.expected_for(self.workspace_root, motors),
+        )
+        if not rows:
+            return ''
+        result = self.save({
+            'registry': loaded['registry'],
+            'base_revision': str(loaded.get('config_revision') or ''),
+        })
+        if not result.get('success'):
+            raise ValueError(f'부팅 값을 새 설정으로 다시 만들지 못했습니다 · {result.get("message") or ""}')
+        return boot_params.describe(rows)
 
     #: 실행 적용을 해제했을 때 「정지 중」에 붙는 마무리 문구 · 한 곳에서 쓴다
     RELEASE_SETTLED_MESSAGE = '실행 적용을 해제해 정지를 마무리했습니다'

@@ -40,7 +40,7 @@ from .auto_backup import AutoBackupService
 from .absolute_setup import AbsoluteSetup
 from .drive_maintenance import DriveMaintenance
 from .drive_params import DriveParams
-from . import minas_params
+from . import boot_params, minas_params
 from .manual_stream import ManualStreamService
 from .manual_range_gate import ManualRangeGate
 from . import animation_preview, sim_scene
@@ -435,12 +435,30 @@ class MotionWebBridge(Node):
             expected_axes=self._detected_axes,
             record=self._record_drive_maintenance,
         )
+        # 부팅 시 적용값 · **지금 도는** 세션이 쓴 값 · 지금 설정과 다르면 「설정 적용 필요」 · 수정 목록 116
+        self.boot_params = boot_params.BootParamsWatch(
+            config_file=self.project_repository.runtime.selected_runtime_motor_config,
+            expected=lambda axes: boot_params.expected_for(
+                self.workspace_root, (self._motor_config.load().get('registry') or {}).get('motors') or [],
+            )(axes),
+            labels=boot_params.LABELS,
+        )
         # MINAS 파라미터 고급 보기·쓰기 · 드라이브 지금 · 부팅 때 · 팩토리값 · 수정 목록 109 · 114
         self.drive_params = DriveParams(
             target=self.drive_maintenance._target,
-            boot_values=lambda axis: minas_params.boot_values(
+            # 지금 도는 세션 기준 · 적용된 세션이 없으면 지금 설정으로 계산(예전 그대로) · 116
+            boot_values=lambda axis: (
+                self.boot_params.running_for_axis(axis)
+                or minas_params.boot_values(
+                    self.workspace_root, minas_params.param_overrides(self._registry_motor_for_axis(axis) or {}),
+                )
+            ),
+            boot_next=lambda axis: minas_params.boot_values(
                 self.workspace_root, minas_params.param_overrides(self._registry_motor_for_axis(axis) or {}),
             ),
+            boot_stale=lambda: ' · '.join(filter(None, (
+                self.boot_params.status().get('message'), self.boot_params.status().get('detail'),
+            ))),
             safety_blocker=lambda: (
                 self.absolute_setup.blocker()
                 or self._motor_runtime.ethercat_scan_safety_blocker(require_fresh_motor_state=True)
@@ -909,6 +927,11 @@ class MotionWebBridge(Node):
             'minas_absolute_blocker': self.minas_absolute_blocker(),
             # 조인트 범위 미확인 사유 · 재생·초기 이동이 막혀 있다 · 수정 목록 97
             'mapping_range_blocker': mapping_range_blocker,
+            # 지금 도는 모터 프로그램의 부팅 값이 지금 설정과 다른가 · 「설정 적용 필요」 · 수정 목록 116
+            'boot_params': (
+                self.boot_params.public_status()
+                if getattr(self, 'boot_params', None) is not None else {}
+            ),
             'motion_run_status': motion_run_status,
             'motor_activity': motor_activity_snapshot(
                 motion_run_status,

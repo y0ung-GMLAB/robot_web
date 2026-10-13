@@ -121,6 +121,19 @@ def main() -> None:
     )
 
 
+def record_boot_params(runtime_config: Path) -> None:
+    """이번에 드라이브에 쓸 부팅 값을 세션 옆에 남긴다 · 화면 「부팅 시 적용값」 의 근거 · 수정 목록 116
+
+    기록을 못 남겨도 모터는 떠야 한다 · 화면은 그때 param 파일을 직접 읽는다.
+    """
+    try:
+        from motion_web_bridge import boot_params
+
+        boot_params.write_snapshot(runtime_config)
+    except Exception as exc:  # noqa: BLE001 - 어떤 실패도 모터 기동을 막지 않는다
+        print(f'부팅 값 기록 실패(모터는 그대로 시작): {exc}', flush=True)
+
+
 def motor_main() -> None:
     """Start only the persistent low-level Motor Manager service."""
     workspace = Path(
@@ -140,6 +153,7 @@ def motor_main() -> None:
     runner = workspace / 'src' / 'web_bridge' / 'deploy' / 'run_motor_service.sh'
     if not runner.is_file():
         raise SystemExit(f'motor service runner not found: {runner}')
+    record_boot_params(runtime_config)
 
     environment = dict(os.environ)
     environment['MOTION_WORKSPACE'] = str(workspace)

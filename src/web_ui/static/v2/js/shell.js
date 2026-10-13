@@ -32,6 +32,7 @@ export function issueAction(issue, navigate) {
     'fault-reset': act.faultReset,
     'update-all': act.updateAll,
     'ack-group-error': act.ackGroupError,
+    'apply-motor-config': act.applyBootParams,
     open: () => navigate(action.target),
   }[action.kind];
   if (!run) return null;

@@ -18,7 +18,7 @@ from rclpy.node import Node
 from rclpy.qos import DurabilityPolicy, QoSProfile, ReliabilityPolicy
 from std_msgs.msg import Int8MultiArray, String
 
-from motion_supervisor import manual_ramp
+from motion_supervisor import manual_ramp, manual_settle
 from motion_supervisor.command_arbiter import CommandArbiter, CommandOwner
 from motion_supervisor.servo_alarm_guard import ServoAlarmGuard
 from motion_common import manual_speed, minas_absolute, motor_readiness, units, values, topics, wire_units
@@ -175,6 +175,8 @@ class MotionSupervisor(Node):
         self._latest_state_at: Optional[float] = None
         self._active_jogs: Dict[int, Dict[str, Any]] = {}
         self._active_actions: Dict[int, Dict[str, Any]] = {}
+        #: 조그 · 목표 이동을 끝내며 남긴 알림(목표 근처 출렁임 등) · 축 → 알림 · 실물 R-11
+        self._manual_notices: Dict[int, Dict[str, Any]] = {}
         self._jog_threads: Dict[int, threading.Thread] = {}
         self._action_threads: Dict[int, threading.Thread] = {}
         self._motor_config_cache: Optional[Dict[str, Any]] = None
@@ -1328,20 +1330,10 @@ class MotionSupervisor(Node):
             return False, f'{axis}번 모터의 현재 위치를 읽을 수 없습니다'
 
         self._clear_completed_jogs()
-        if axis in self._active_jogs:
-            active = self._active_jogs[axis]
-            return (
-                False,
-                f'{axis}번 모터의 이전 조그가 아직 돌고 있습니다 · '
-                f'목표 {_deg(active["target_position"]):.3f} deg',
-            )
-        if axis in self._active_actions:
-            active = self._active_actions[axis]
-            return (
-                False,
-                f'{axis}번 모터의 이전 동작이 아직 돌고 있습니다 · '
-                f'목표 {_deg(active["target_position"]):.3f} deg',
-            )
+        # 앞 조작이 다 보냈고 목표 근처면 끝내고 넘겨받는다 · 아니면 거절 · 실물 R-11 · R-14
+        busy_message = self._previous_manual_busy_message(axis)
+        if busy_message:
+            return False, busy_message
 
         target_position = current_position + relative_rad
         limit_error = self._target_position_limit_error(motor, target_position)
@@ -1411,20 +1403,10 @@ class MotionSupervisor(Node):
 
         self._clear_completed_jogs()
         self._clear_completed_actions()
-        if axis in self._active_jogs:
-            active = self._active_jogs[axis]
-            return (
-                False,
-                f'{axis}번 모터의 이전 조그가 아직 돌고 있습니다 · '
-                f'목표 {_deg(active["target_position"]):.3f} deg',
-            )
-        if axis in self._active_actions:
-            active = self._active_actions[axis]
-            return (
-                False,
-                f'{axis}번 모터의 이전 동작이 아직 돌고 있습니다 · '
-                f'목표 {_deg(active["target_position"]):.3f} deg',
-            )
+        # 앞 조작이 다 보냈고 목표 근처면 끝내고 넘겨받는다 · 아니면 거절 · 실물 R-11 · R-14
+        busy_message = self._previous_manual_busy_message(axis)
+        if busy_message:
+            return False, busy_message
 
         target_position = current_position + relative_rad
         success, message = self._publish_position_target(
@@ -1483,20 +1465,10 @@ class MotionSupervisor(Node):
 
         self._clear_completed_jogs()
         self._clear_completed_actions()
-        if axis in self._active_jogs:
-            active = self._active_jogs[axis]
-            return (
-                False,
-                f'{axis}번 모터의 이전 조그가 아직 돌고 있습니다 · '
-                f'목표 {_deg(active["target_position"]):.3f} deg',
-            )
-        if axis in self._active_actions:
-            active = self._active_actions[axis]
-            return (
-                False,
-                f'{axis}번 모터의 이전 동작이 아직 돌고 있습니다 · '
-                f'목표 {_deg(active["target_position"]):.3f} deg',
-            )
+        # 앞 조작이 다 보냈고 목표 근처면 끝내고 넘겨받는다 · 아니면 거절 · 실물 R-11 · R-14
+        busy_message = self._previous_manual_busy_message(axis)
+        if busy_message:
+            return False, busy_message
 
         if range_recovery:
             return self._start_range_recovery(
@@ -1591,20 +1563,10 @@ class MotionSupervisor(Node):
 
         self._clear_completed_jogs()
         self._clear_completed_actions()
-        if axis in self._active_jogs:
-            active = self._active_jogs[axis]
-            return (
-                False,
-                f'{axis}번 모터의 이전 조그가 아직 돌고 있습니다 · '
-                f'목표 {_deg(active["target_position"]):.3f} deg',
-            )
-        if axis in self._active_actions:
-            active = self._active_actions[axis]
-            return (
-                False,
-                f'{axis}번 모터의 이전 동작이 아직 돌고 있습니다 · '
-                f'목표 {_deg(active["target_position"]):.3f} deg',
-            )
+        # 앞 조작이 다 보냈고 목표 근처면 끝내고 넘겨받는다 · 아니면 거절 · 실물 R-11 · R-14
+        busy_message = self._previous_manual_busy_message(axis)
+        if busy_message:
+            return False, busy_message
 
         if range_recovery:
             return self._start_range_recovery(
@@ -1900,6 +1862,106 @@ class MotionSupervisor(Node):
             )
         self._action_threads.pop(axis, None)
 
+    def _manual_settle_verdict(
+        self,
+        active: Dict[str, Any],
+        motor: Dict[str, Any],
+        position: Optional[float],
+        velocity: Optional[float],
+        now: float,
+        *,
+        settle_sec: float,
+        timed_out: bool,
+    ) -> str:
+        """조그 · 목표 이동이 끝났나 · 판정은 `manual_settle` · 실물 R-11 · R-14"""
+        done_velocity = self._done_velocity(motor)
+        manual_settle.observe(active, position, velocity, done_velocity, now)
+        return manual_settle.verdict(
+            position=position,
+            velocity=velocity,
+            target=float(active['target_position']),
+            tolerance=self._target_tolerance(motor),
+            done_velocity=done_velocity,
+            commands_sent_at=self._optional_float(active.get('commands_sent_at')),
+            peak_error=self._optional_float(active.get('settle_peak_error')),
+            moving_at=self._optional_float(active.get('settle_moving_at')),
+            near=manual_settle.near_for(not self._is_dynamixel(motor)),
+            settle_sec=settle_sec,
+            now=now,
+            timed_out=timed_out,
+        )
+
+    def _note_manual_settle(
+        self,
+        axis: int,
+        active: Dict[str, Any],
+        result: str,
+        position: Optional[float],
+        motor: Optional[Dict[str, Any]] = None,
+    ) -> str:
+        """끝낸 조작에 알릴 일이 있으면 남긴다 · 화면은 안전 상태의 `manual_notices` 로 본다 · 알림 글
+
+        AC 서보만 · 다이나믹셀은 도착 오차(2 카운트)가 빡빡해 시간 초과가 흔하고 게인 안내가 맞지 않는다
+        """
+        if result not in manual_settle.NOTICE_VERDICTS:
+            return ''
+        if motor is not None and self._is_dynamixel(motor):
+            return ''
+        text = manual_settle.notice_text(
+            axis,
+            result,
+            position=position,
+            target=float(active['target_position']),
+            peak_error=self._optional_float(active.get('settle_peak_error')),
+        )
+        notices = getattr(self, '_manual_notices', None)
+        if notices is None:
+            notices = {}
+            self._manual_notices = notices
+        notices[int(axis)] = {
+            'axis': int(axis),
+            'kind': result,
+            'message': text,
+            'stamp': time.time(),
+        }
+        self.get_logger().warning(text)
+        return text
+
+    def _previous_manual_busy_message(self, axis: int) -> str:
+        """같은 축의 앞 조그 · 동작 · 다 보냈고 목표 근처면 끝내고 넘겨받는다 · 아니면 거절 문구 · 실물 R-11 · R-14
+
+        앞 조작이 드라이브 출렁임(R-11) · 자리 잡기(R-14) 때문에 안 끝났을 뿐이면 새 조작을 막을
+        까닭이 없다 · 새 궤적은 지금 위치에서 시작한다 · 아직 보내는 중이거나 목표에서 멀면 거절.
+        """
+        self._clear_completed_jogs()
+        self._clear_completed_actions()
+        motor = self._motor_for_axis(axis, self._current_motors())
+        position = self._motor_position(motor) if motor is not None else None
+        for active_targets, noun in ((self._active_jogs, '조그가'), (self._active_actions, '동작이')):
+            active = active_targets.get(axis)
+            if active is None:
+                continue
+            if motor is not None and manual_settle.can_take_over(
+                active,
+                position,
+                manual_settle.near_for(not self._is_dynamixel(motor)),
+                self._target_tolerance(motor),
+            ):
+                active_targets.pop(axis, None)
+                if active_targets is self._active_actions:
+                    self._publish_action_result(
+                        str(active.get('request_id') or ''),
+                        True,
+                        f'{axis}번 모터 · 다음 조작이 이어받음 · 목표 {_deg(active["target_position"]):.3f} deg 근처',
+                    )
+                continue
+            where = '' if position is None else f' · 지금 {_deg(position):.3f} deg'
+            return (
+                f'{axis}번 모터의 이전 {noun} 아직 돌고 있습니다 · '
+                f'목표 {_deg(active["target_position"]):.3f} deg{where}'
+            )
+        return ''
+
     def _clear_completed_position_targets(self, active_targets: Dict[int, Dict[str, Any]]) -> None:
         if not active_targets:
             return
@@ -1915,25 +1977,19 @@ class MotionSupervisor(Node):
 
             position = self._motor_position(motor)
             velocity = self._motor_velocity(motor)
-            target_position = active['target_position']
-            target_tolerance = self._target_tolerance(motor)
-            done_velocity = self._done_velocity(motor)
-            target_close = (
-                position is not None
-                and abs(position - target_position) <= target_tolerance
-            )
-            velocity_quiet = (
-                velocity is None
-                or abs(velocity) <= done_velocity
-            )
             timeout_limit = max(
                 float(active.get('active_timeout_sec') or JOG_ACTIVE_TIMEOUT_SEC),
                 float(active.get('applied_duration_sec') or 0.0) + 5.0,
             )
-            timed_out = now - active['started_at'] > timeout_limit
-
-            if (target_close and velocity_quiet) or timed_out:
+            # 도착 · 또는 다 보낸 뒤 3 초 지나 목표 근처 출렁임 · 못 미치고 섬 → 끝내고 알림 · 실물 R-11
+            result = self._manual_settle_verdict(
+                active, motor, position, velocity, now,
+                settle_sec=manual_settle.JOG_SETTLE_SEC,
+                timed_out=now - active['started_at'] > timeout_limit,
+            )
+            if result != manual_settle.WAIT:
                 active_targets.pop(axis, None)
+                self._note_manual_settle(axis, active, result, position, motor)
 
     def _clear_completed_action_targets(self) -> None:
         if not self._active_actions:
@@ -1948,13 +2004,6 @@ class MotionSupervisor(Node):
             label = str(active.get('label') or 'Motion')
             timeout_limit = max(float(active.get('applied_duration_sec') or 0.0) + 10.0, 10.0)
             timed_out = now - active['started_at'] > timeout_limit
-            commands_sent = last_step >= steps
-            commands_sent_at = self._optional_float(active.get('commands_sent_at'))
-            settle_timeout = (
-                commands_sent
-                and commands_sent_at is not None
-                and now - commands_sent_at > max(ACTION_RESULT_SETTLE_SEC, self.action_period_sec * 3.0)
-            )
 
             if last_step < steps and not timed_out:
                 continue
@@ -1968,40 +2017,36 @@ class MotionSupervisor(Node):
             position = self._motor_position(motor)
             velocity = self._motor_velocity(motor)
             target_position = active['target_position']
-            target_tolerance = self._target_tolerance(motor)
-            done_velocity = self._done_velocity(motor)
-            target_close = (
-                position is not None
-                and abs(position - target_position) <= target_tolerance
+            # 자리 잡기 2 초(예전 그대로) 뒤 · 목표 근처 출렁임은 끝내고 알림 · 멈췄는데 못 미침은 실패 · 실물 R-11 · R-14
+            result = self._manual_settle_verdict(
+                active, motor, position, velocity, now,
+                settle_sec=max(ACTION_RESULT_SETTLE_SEC, self.action_period_sec * 3.0),
+                timed_out=timed_out,
             )
-            velocity_quiet = (
-                velocity is None
-                or abs(velocity) <= done_velocity
-            )
+            if result == manual_settle.WAIT:
+                continue
+            self._active_actions.pop(axis, None)
+            notice = self._note_manual_settle(axis, active, result, position, motor)
 
-            if target_close and velocity_quiet:
-                self._active_actions.pop(axis, None)
+            if result in (manual_settle.ARRIVED, manual_settle.HUNTING):
+                message = (
+                    f'{label} trajectory completed: Axis {axis}, '
+                    f'sent {last_step}/{steps} steps, '
+                    f'target {_deg(target_position):.3f} deg'
+                )
                 self._publish_action_result(
-                    request_id,
-                    True,
-                    (
-                        f'{label} trajectory completed: Axis {axis}, '
-                        f'sent {last_step}/{steps} steps, '
-                        f'target {_deg(target_position):.3f} deg'
-                    ),
+                    request_id, True, f'{message} · {notice}' if notice else message,
                 )
                 continue
 
-            if (settle_timeout and velocity_quiet) or timed_out:
-                self._active_actions.pop(axis, None)
-                position_text = 'unavailable' if position is None else f'{_deg(position):.3f} deg'
-                message = (
-                    f'{label} trajectory did not reach target: Axis {axis}, '
-                    f'current {position_text}, target {_deg(target_position):.3f} deg, '
-                    f'sent {last_step}/{steps} steps'
-                )
-                self._publish_action_result(request_id, False, message)
-                self.get_logger().warn(message)
+            position_text = 'unavailable' if position is None else f'{_deg(position):.3f} deg'
+            message = (
+                f'{label} trajectory did not reach target: Axis {axis}, '
+                f'current {position_text}, target {_deg(target_position):.3f} deg, '
+                f'sent {last_step}/{steps} steps'
+            )
+            self._publish_action_result(request_id, False, f'{message} · {notice}' if notice else message)
+            self.get_logger().warn(message)
 
     @staticmethod
     def _motor_position(motor: Optional[Dict[str, Any]]) -> Optional[float]:
@@ -2820,6 +2865,10 @@ class MotionSupervisor(Node):
         return {
             'manual_activity_modes': modes,
             'manual_activity_axes': axes,
+            # 끝낸 조작의 알림 · 목표 근처 출렁임 등 · 5 분 · 실물 R-11
+            'manual_notices': manual_settle.recent_notices(
+                getattr(self, '_manual_notices', None) or {}, time.time(),
+            ),
         }
 
     def _current_motors(self) -> list[Dict[str, Any]]:

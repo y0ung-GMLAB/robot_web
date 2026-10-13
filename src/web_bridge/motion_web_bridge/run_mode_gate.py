@@ -95,6 +95,25 @@ def manual_control_block_reason(bridge: Any) -> str:
 INITIALIZED_MANUAL_BLOCK_MESSAGE = '초기 위치에서 대기 중입니다. 「정지」를 누른 뒤 수동 조작을 하세요.'
 #: 재생 · 초기 위치 이동 · 회차 사이 대기 중
 PLAYING_MANUAL_BLOCK_MESSAGE = '재생 중입니다. 「정지」를 누른 뒤 수동 조작을 하세요.'
+#: 소프트 긴급 정지 잠김 · 다른 사유(초기 위치 대기 · 서보 꺼짐)보다 먼저 · 실물 R-23 (2026-10-13)
+#: 잠김은 「프로그램 다시 시작」 으로만 풀린다 · 풀린 뒤 서보는 꺼진 채라 직접 켠다
+EMERGENCY_MANUAL_BLOCK_MESSAGE = (
+    '긴급정지 잠김 · 수동 조작 불가 · 「프로그램 다시 시작」 으로 잠김을 푼 뒤 서보를 켜세요.'
+)
+
+
+def _emergency_latched(bridge: Any) -> bool:
+    """브리지가 받아 둔 마지막 안전 상태 · 못 읽으면 False(supervisor 가 최종 판정 · 거기서도 막는다)"""
+    lock = getattr(bridge, '_safety_status_lock', None)
+    try:
+        if lock is not None:
+            with lock:
+                status = dict(getattr(bridge, '_safety_status', None) or {})
+        else:
+            status = dict(getattr(bridge, '_safety_status', None) or {})
+    except (TypeError, ValueError):
+        return False
+    return bool(status.get('emergency_latched'))
 
 
 def _current_run_state(bridge: Any) -> str:
@@ -114,10 +133,13 @@ def _current_run_state(bridge: Any) -> str:
 def manual_motion_block_reason(bridge: Any) -> str:
     """손으로 모터를 움직이는 명령(조그·다이얼·목표 이동·범위 복귀·페이더)의 문 · 2026-10-12
 
-    운전 모드 문(`manual_control_block_reason`) 다음에 **재생 상태**를 본다 ·
+    긴급 정지 잠김이 맨 먼저 · 운전 모드 문(`manual_control_block_reason`) 다음에 **재생 상태**를 본다 ·
     초기 위치에서 대기 중이거나 재생 중이면 정지한 뒤에만 · 재생 시작 문에는 쓰지 않는다
     (초기 위치에서 대기 중일 때 「1회 시작」 은 되어야 한다).
     """
+    # 잠김이 진짜 이유다 · 이게 없으면 「초기 위치에서 대기 중」 · 「서보 꺼짐」 이 대신 나왔다(R-23)
+    if _emergency_latched(bridge):
+        return EMERGENCY_MANUAL_BLOCK_MESSAGE
     reason = manual_control_block_reason(bridge)
     if reason:
         return reason
