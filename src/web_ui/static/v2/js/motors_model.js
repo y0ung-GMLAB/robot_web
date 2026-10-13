@@ -13,8 +13,8 @@ export const EDIT_FIELDS = [
   { key: 'acceleration', label: '최대 가속', unit: 'deg/s²', min: 0 },
   { key: 'profile_acceleration', label: '프로파일 가속', unit: 'deg/s²', min: 0 },
   // 비우면 「모든 MINAS 드라이브 공통 설정」(아래 칸 · config/minas_base.yaml) · 이름은 공통 설정과 같은 말 · 사용자 2026-10-13
-  { key: 'brake_delay_stop_ms', label: '브레이크 지연 · 멈춰 있을 때', unit: 'ms', ac: true, min: 0, max: 10000, blank: '비우면 공통 설정(기본 150)' },
-  { key: 'brake_delay_run_ms', label: '브레이크 지연 · 움직이는 중', unit: 'ms', ac: true, min: 0, max: 10000, blank: '비우면 공통 설정(기본 0)' },
+  { key: 'brake_delay_stop_ms', label: '브레이크 지연 · 멈춰 있을 때', unit: 'ms', ac: true, min: 0, max: 10000, blank: '비우면 공통 설정(기본값 150)' },
+  { key: 'brake_delay_run_ms', label: '브레이크 지연 · 움직이는 중', unit: 'ms', ac: true, min: 0, max: 10000, blank: '비우면 공통 설정(기본값 0)' },
 ];
 
 export function getField(motor, key) {

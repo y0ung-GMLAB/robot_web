@@ -125,10 +125,10 @@ function editor(row, changed) {
       onchange: (e) => { ui.draft[row.key] = e.target.value === String(row.default) ? '' : e.target.value; changed(); } },
     row.choices.map((choice) => h('option', { value: String(choice.value), title: `${choice.value} = ${choice.label}`,
       selected: String(choice.value) === current ? '' : null },
-    `${choice.value}${choice.value === row.default ? ' (기본)' : ''}`)));
+    `${choice.value}${choice.value === row.default ? ' (기본값)' : ''}`)));
   }
   return h('input', { class: 'input mono', type: 'number', step: '1', min: row.min, max: row.max, value: shown,
-    placeholder: `기본 ${row.default}`, 'aria-label': row.label, title: row.note || '',
+    placeholder: `기본값 ${row.default}`, 'aria-label': row.label, title: row.note || '',
     oninput: (e) => { ui.draft[row.key] = e.target.value; },
     onchange: () => changed() });
 }
@@ -156,13 +156,13 @@ export function minasBaseCard(changed, { hasAc = true } = {}) {
       h('td', { class: 'common-value' }, ui.unlocked ? editor(row, changed)
         : h('span', { class: 'mono hint', text: valueText(row, row.value), title: valueHint(row, row.value) })),
       h('td', { class: 'muted small mono common-default', text: valueText(row, row.default), title: valueHint(row, row.default) }),
-      h('td', { class: 'common-state' }, h('span', { class: `chip chip-${changedHere ? 'info' : 'idle'}`, text: changedHere ? '이 PC에서 바꿈' : '기본 그대로' })));
+      h('td', { class: 'common-state' }, h('span', { class: `chip chip-${changedHere ? 'info' : 'idle'}`, text: changedHere ? '변경됨' : '기본값' })));
   });
   return h('section', { class: 'card', 'aria-label': label },
     head,
     h('p', { class: 'muted small', text: '모든 MINAS 드라이브에 똑같이 들어가는 설정입니다. 모터 프로그램이 시작할 때마다 드라이브에 써 넣습니다. 브레이크 지연은 브레이크 보드에 연결된 모터에만 해당하고, 위 모터별 칸에 따로 적은 모터는 그 값을 씁니다. 저장하면 장비에 적용할지 묻습니다.' }),
     h('div', { class: 'table-wrap' }, h('table', { class: 'table common-table' },
-      h('thead', {}, h('tr', {}, ['항목', '지금 값', '기본', ''].map((text) => h('th', { scope: 'col', text })))),
+      h('thead', {}, h('tr', {}, ['항목', '지금 값', '기본값', ''].map((text) => h('th', { scope: 'col', text })))),
       h('tbody', {}, rows))),
     problems.map((text) => h('div', { class: 'blocker' }, dot('warn'), h('span', { class: 'grow', text }))),
     ui.unlocked ? h('div', { class: 'pick-row-actions' },
