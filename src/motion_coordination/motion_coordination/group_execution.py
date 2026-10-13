@@ -13,6 +13,8 @@ from motion_common.repeat_policy import (
     normalize_group_sync_mode,
 )
 
+from .participant_rules import STARTED_BY_SCHEDULE, normalize_started_by
+
 #: PC 사이 메시지 약속 번호 · 메시지 칸을 바꿀 때마다 +1 · 수정 목록 30-7
 #:
 #: 1 · 칸 없음(옛 PC · 0 으로 읽힌다) · 2 · 2026-10-06 `GroupCommand.sync_mode` ·
@@ -23,6 +25,92 @@ from motion_common.repeat_policy import (
 #: 5 · 2026-10-07 `GroupCommand.motion_file_id`·`start_delay_sec` · PC 1대 재생도 `start_at` 알림
 #: (스피커 연동 · 수정 목록 38)
 GROUP_PROTOCOL_VERSION = 6
+
+#: 진행 PC 가 **뺀 PC 하나에만** 보내는 풀기 명령의 번호 앞머리 · 수정 목록 123
+#:
+#: 약속상 참가 목록에 진행 PC 도 적혀야 해서(`_require_stop_command`) 진행 PC 자신도
+#: 이 명령을 받는다 · 전에는 그것을 제 실행 취소로 처리해 제 쪽 `group_cancel` →
+#: 「정지」 사건 → 제 실행을 `stopped` 로 두고 `execution_id` 는 남겼다 · 그래서 준비 중에
+#: 다른 PC 가 거절하면 남은 마스터도 안 돌고 「이전 그룹 실행 정리 확인 중입니다」 에
+#: 갇혔다(실물 S-11 · 2026-10-13 15:09 · 17 분) · 진행 PC 는 이 번호의 제 명령을 건너뛴다.
+DROP_RELEASE_PREFIX = 'drop-release-'
+
+
+def drop_release_command_id() -> str:
+    return f'{DROP_RELEASE_PREFIX}{uuid.uuid4().hex}'
+
+
+def is_own_drop_release(command: str, command_id: str, coordinator_id: str, pc_id: str) -> bool:
+    """뺀 PC 에 보낸 풀기 명령이 진행 PC 자신에게 돌아왔나 · 그러면 처리하지 않는다"""
+    return (
+        str(command) == 'cancel_before_start'
+        and str(command_id or '').startswith(DROP_RELEASE_PREFIX)
+        and str(coordinator_id) == str(pc_id)
+    )
+
+
+#: 끝난 실행(`stopped` · `error`)을 들고 있을 수 있는 최대 시간 · 수정 목록 123
+#:
+#: 정상 길은 끝나면 바로 `execution_id` 를 지운다 · 이 시간을 넘겨 남아 있으면 어느
+#: 길에서 정리를 빠뜨린 것이다 · 그대로 두면 새 시작이 영영 「이전 그룹 실행 정리 확인
+#: 중입니다」 로 거부된다(실물 S-11 · 17 분 · 「프로그램 다시 시작」 으로만 풀림) ·
+#: 회차 후 정지 요청이 출발 직전(`start_scheduled`)에 와서 잠깐 `stopped` 였다가 시작 보고로
+#: 다시 `running` 이 되는 길이 있어 몇 초는 기다린다.
+STALE_LEASE_LIMIT_SEC = 20.0
+
+
+class StaleLeaseWatch:
+    """끝난 실행이 얼마나 오래 남아 있나 · 진행 PC 만 · 한도를 넘기면 참"""
+
+    TERMINAL_STATES = frozenset({'stopped', 'error'})
+
+    def __init__(self, limit_sec: float = STALE_LEASE_LIMIT_SEC) -> None:
+        self.limit_sec = float(limit_sec)
+        self._key: tuple = ()
+        self._since = 0.0
+
+    def observe(
+        self, *, execution_id: str, state: str, coordinator: bool,
+        releasing: bool, now: float,
+    ) -> bool:
+        if not execution_id or not coordinator or releasing or state not in self.TERMINAL_STATES:
+            self._key = ()
+            self._since = 0.0
+            return False
+        key = (execution_id, state)
+        if key != self._key:
+            self._key = key
+            self._since = float(now)
+            return False
+        return float(now) - self._since >= self.limit_sec
+
+
+#: 기동 뒤 이 시간 안에 로컬 Web Bridge 상태가 끊기는 것은 고장으로 잠그지 않는다 · 수정 목록 123·124
+#:
+#: 「프로그램 다시 시작」 은 웹 서비스와 연동 서비스를 같이 다시 띄운다 · 연동이 먼저 뜨고
+#: 스케줄이 첫 점검에서 그룹 시작을 보내면, 아직 덜 뜬 브리지 상태가 끊겨
+#: GROUP_PARTICIPANT_FAILURE 2등급으로 잠겼다(실물 S-11 다시 · 15:26) · 사람이 한 재시작이다.
+BOOT_GRACE_SEC = 90.0
+#: 「프로그램 다시 시작」 을 누른 뒤 브리지가 사라져도 잠그지 않는 시간
+PLANNED_RESTART_GRACE_SEC = 120.0
+#: 아직 아무것도 움직이지 않은 단계 · 여기서 브리지가 끊기면 취소만 한다(잠그지 않는다)
+PRE_MOTION_STATES = frozenset({'idle', 'ready', 'preparing', 'stopped', 'error'})
+
+
+def bridge_loss_latches(
+    *, state: str, now: float, boot_monotonic: float, planned_restart_until: float,
+) -> bool:
+    """로컬 Web Bridge 상태가 끊겼을 때 그룹 오류(2등급)로 잠글 것인가
+
+    모터가 그룹 명령으로 움직이는 중이면 잠근다(사람이 원인을 봐야 한다) ·
+    사람이 누른 다시 시작 · 기동 직후 · 움직이기 전 단계는 정리만 하고 잠그지 않는다 ·
+    스케줄이 다음 점검에 다시 시작한다.
+    """
+    if planned_restart_until and now < planned_restart_until:
+        return False
+    if boot_monotonic and now - boot_monotonic < BOOT_GRACE_SEC:
+        return False
+    return str(state or '') not in PRE_MOTION_STATES
 
 
 @dataclass
@@ -150,8 +238,10 @@ class GroupExecution:
         self.sync_mode = GROUP_LOCKSTEP
         #: 각자 재생에서 제 회차를 끝내고 멈췄다고 알린 PC
         self.independent_stopped: set[str] = set()
-        #: 이번 실행에서 뺀 PC 와 이유 · 미접속·알람·오프 모드·명단 외 · 수정 목록 30
+        #: 이번 실행에서 뺀 PC 와 이유 · 미접속·알람·끔 모드·명단 외 · 수정 목록 30
         self.excluded: Dict[str, str] = {}
+        #: 누가 시작했나 · 사람(human) · 스케줄(schedule) · 참가 · 복귀 규칙이 다르다 · 수정 목록 122
+        self.started_by = STARTED_BY_SCHEDULE
         #: 진행 PC · 도는 중에 복귀하는 PC · {pc_id: {'state': preparing|ready, 'since': monotonic}} · 30-3
         self.joining: Dict[str, Dict[str, object]] = {}
         #: 진행 PC · 이번 회차 경계에서 넣은 PC · 확정이 거절되면 빼고 나머지로 간다
@@ -226,6 +316,7 @@ class GroupExecution:
         initialization_only: bool = False,
         sync_mode: str = GROUP_LOCKSTEP,
         initial_move_time_sec: float = 0.0,
+        started_by: str = STARTED_BY_SCHEDULE,
     ) -> str:
         selected = tuple(sorted(set(str(value) for value in participants if str(value))))
         if not 1 <= len(selected) <= 8:
@@ -247,6 +338,7 @@ class GroupExecution:
         self.initialization_only = bool(initialization_only)
         self.sync_mode = normalize_group_sync_mode(sync_mode)
         self.initial_move_time_sec = max(float(initial_move_time_sec or 0.0), 0.0)
+        self.started_by = normalize_started_by(started_by)
         self.state = 'preparing'
         return self.execution_id
 

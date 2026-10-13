@@ -366,3 +366,56 @@ def test_schedule_and_off_modes_stop_a_human_started_run(tmp_path, mode):
     node = _node(tmp_path, run_state='running', run_mode=mode, schedules=[_day_schedule()],
                  local={'schedule_id': ''})
     assert len(_evening(node)) == 1
+
+
+# --------------------------------------------------------------------------- #
+# 부팅 직후 준비 전에는 시작을 미룬다 · 받아들여졌는데 안 돌면 센다 · 수정 목록 124
+#
+# 실물 S-12 (2026-10-13 15:34) · 부팅 중 앱솔루트 확인 전에 그룹 시작 → 거절이 2등급으로
+# 잠겨 모터가 다 돌아온 뒤에도 안 시작 · 사람이 「그룹 오류 해제」 를 눌렀다.
+# --------------------------------------------------------------------------- #
+
+def test_inside_the_window_but_not_ready_waits_for_the_next_check(tmp_path):
+    node = _node(tmp_path, run_state='stopped', schedules=[_day_schedule()])
+    node._last_failure = {}
+    node._start_blocker = '앱솔루트 미확인 · 2번 모터 확인 불가'
+
+    node._reconcile(DAY.replace(hour=13))
+
+    assert node.sent == [], '준비 전에는 시작을 보내지 않는다'
+    assert node._last_failure['deferred'] is True
+    assert node._last_failure['message'] == '앱솔루트 미확인 · 2번 모터 확인 불가'
+
+    node._start_blocker = ''
+    node._reconcile(DAY.replace(hour=13, minute=1))
+
+    assert node.sent[0][0] == '/api/motion-run/start', '준비되면 다음 점검에 스스로 시작'
+
+
+def test_an_accepted_start_that_never_ran_is_counted(tmp_path):
+    """그룹 시작은 받아들여진 뒤 준비에서 실패한다 · 다음 점검에 안 돌면 거부로 센다 (S-11)"""
+    node = _node(tmp_path, run_state='stopped', schedules=[_day_schedule()])
+    node._last_failure = {}
+    node._read_json = lambda endpoint, **_kwargs: {
+        'runtime': {'last_start_failure': {'message': 'floating4 실행 준비 안 됨: 앱솔루트 미확인'}},
+    }
+
+    node._reconcile(DAY.replace(hour=13))
+    assert node._start_pending is True
+    node._reconcile(DAY.replace(hour=13, minute=1))
+
+    assert node._last_failure['count'] == 1
+    assert node._last_failure['message'] == 'floating4 실행 준비 안 됨: 앱솔루트 미확인'
+    assert len(node.sent) == 2, '그래도 다시 시작한다'
+
+
+def test_a_start_that_runs_is_not_counted(tmp_path):
+    node = _node(tmp_path, run_state='stopped', schedules=[_day_schedule()])
+    node._last_failure = {}
+    node._reconcile(DAY.replace(hour=13))
+    node._local_run_state = lambda: 'running'
+
+    node._reconcile(DAY.replace(hour=13, minute=1))
+
+    assert node._start_pending is False
+    assert node._last_failure == {}

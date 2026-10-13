@@ -37,8 +37,10 @@ from motion_common.schedule_store import (
 
 try:
     from motion_schedule.schedule_engine import ScheduleEngine, unreadable_schedules
+    from motion_schedule import schedule_rules
 except ImportError:
     from .schedule_engine import ScheduleEngine, unreadable_schedules
+    from . import schedule_rules
 
 PACKAGE_HINT = 'motion_schedule'
 
@@ -83,6 +85,10 @@ class MotionScheduleNode(Node):
         self._schedule_started = None
         #: 조회가 연달아 몇 번 실패했나 · 상태가 바뀔 때만 적는다 · §6-271
         self._read_failures: Dict[str, int] = {}
+        #: 브리지가 말하는 「지금 시작하면 안 되는 이유」 · 부팅 직후 앱솔루트 확인 등 · 수정 목록 124
+        self._start_blocker = ''
+        #: 시작을 보냈고 받아들여졌다 · 다음 점검에 안 돌고 있으면 실패로 센다 · 수정 목록 123·124
+        self._start_pending = False
 
         # Status publisher
         self.status_pub = self.create_publisher(String, topics.SCHEDULE_STATUS, 10)
@@ -213,8 +219,11 @@ class MotionScheduleNode(Node):
         self.get_logger().info(f"HTTP Request [{endpoint}] success: {result}")
         return True
 
-    def _remember_failure(self, endpoint: str, message: str) -> None:
-        """연달아 몇 번째인지까지 센다 · 한 번은 경합, 계속이면 고장이다."""
+    def _remember_failure(self, endpoint: str, message: str, *, deferred: bool = False) -> None:
+        """연달아 몇 번째인지까지 센다 · 한 번은 경합, 계속이면 고장이다.
+
+        `deferred` · 거부가 아니라 준비를 기다려 미룬 것 · 화면이 「대기」 로 쓴다 · 수정 목록 124
+        """
         previous = self._last_failure.get('count') or 0
         self._last_failure = {
             'endpoint': endpoint,
@@ -222,6 +231,8 @@ class MotionScheduleNode(Node):
             'count': int(previous) + 1,
             'at': datetime.now().astimezone().isoformat(),
         }
+        if deferred:
+            self._last_failure['deferred'] = True
 
     def _forget_failure(self) -> None:
         if getattr(self, '_last_failure', None):
@@ -352,6 +363,10 @@ class MotionScheduleNode(Node):
         # 안이면 모터가 돌기 시작했다 · 모르면 아무것도 바꾸지 않는 쪽이 맞다.
         if isinstance(data, dict) and data.get('run_mode') is not None:
             self._run_mode = normalize_run_mode(data.get('run_mode'))
+        # 지금 시작하면 안 되는 이유 · 못 읽었으면 직전 값 · 수정 목록 124
+        blocker = schedule_rules.start_blocker(data)
+        if blocker is not None:
+            self._start_blocker = blocker
 
         if not self.store.current_project_id:
             self._load_active_project_from_file()
@@ -383,6 +398,10 @@ class MotionScheduleNode(Node):
         if not running:
             # 멈춰 있는 것을 봤다 · 다음에 도는 것은 스케줄이 켰거나(`_execute_start`) 사람이 켠 것이다
             self._schedule_started = False
+        if running or wanted is None:
+            # 지난 시작이 돌기 시작했거나 구간이 끝났다 · 셀 것이 없다 · 수정 목록 124
+            self._start_pending = False
+            self._deferred_reason = ''
 
         # **구간이 끝나면 멈춘다 · 모드와 상관없이** · §6-270
         #
@@ -448,13 +467,47 @@ class MotionScheduleNode(Node):
             return
 
         if wanted is not None and not running:
+            # 지난 점검에 보낸 시작이 받아들여졌는데 아직 안 돈다 · 거부로 센다 · 수정 목록 123·124
+            #
+            # 그룹 시작은 받아들여진 뒤 준비 단계에서 실패한다 · 전에는 그 실패가 아무 데도 안
+            # 세어져 1분마다 「받아들여졌다」 만 찍히고 화면은 초록이었다(실물 S-11).
+            self._note_start_went_nowhere()
             if self._auto_recovery_hold():
                 return
             self._auto_recovery_hold_logged = False
+            # 부팅 직후 · 앱솔루트 확인 · 모터 상태가 준비될 때까지 미룬다 · 수정 목록 124
+            #
+            # 전에는 준비 전에 그룹 시작을 보내 「실행 준비 검사 실패: 앱솔루트 미확인」 으로
+            # 거절당했고, 그 거절이 그룹 오류 2등급으로 잠겨 준비가 끝난 뒤에도 사람이 풀 때까지
+            # 안 돌았다(실물 S-12 · 15:34) · 잠그지 않고 다음 점검(1분)에 다시 본다.
+            blocker = getattr(self, '_start_blocker', '')
+            if blocker:
+                self._defer_start(wanted, blocker)
+                return
             self.get_logger().info(
                 f"[점검] 구간 안인데 멈춰 있다 · 시작 · {wanted.schedule_name}"
             )
             self._execute_start(wanted)
+
+    def _defer_start(self, item: ScheduleItem, reason: str) -> None:
+        """준비가 덜 됐다 · 시작을 미루고 화면에 「대기」 로 남긴다 · 이유가 바뀔 때만 로그"""
+        if getattr(self, '_deferred_reason', '') != reason:
+            self._deferred_reason = reason
+            self.get_logger().warning(
+                f"[점검] 구간 안 · 준비 전이라 시작 미룸 · {item.schedule_name} · {reason} · "
+                f"{RECONCILE_INTERVAL_SEC:.0f}초 뒤 다시"
+            )
+        self._remember_failure('준비 대기', reason, deferred=True)
+
+    def _note_start_went_nowhere(self) -> None:
+        if not getattr(self, '_start_pending', False):
+            return
+        self._start_pending = False
+        payload = self._read_json('/api/coordination')
+        runtime = payload.get('runtime') if isinstance(payload, dict) else None
+        message = schedule_rules.start_failure_message(runtime, self._local_run_status())
+        self.get_logger().warning(f"[점검] 지난 시작이 재생으로 이어지지 않음 · {message}")
+        self._remember_failure('시작 뒤 재생 없음', message)
 
     def _started_by_schedule(self) -> bool:
         """지금 도는 재생을 스케줄이 켰나 · 모르면 켠 것으로 본다(멈추는 쪽) · 수정 목록 106
@@ -517,6 +570,7 @@ class MotionScheduleNode(Node):
             self.get_logger().warning(f"Failed to read motion_automation.json: {exc}")
             
         if self._coordination_enabled() and self._coordination_joined():
+            endpoint = "/api/coordination/control"
             payload = {
                 "command": "start_group",
                 "run_mode": "continuous",
@@ -526,30 +580,48 @@ class MotionScheduleNode(Node):
                 "target_cycle_count": 0,
                 "schedule_id": item.schedule_id,
             }
-            self._send_http_request("/api/coordination/control", payload)
-            return
-
-        # 단독 · 모션·매핑 파일은 브리지가 프로젝트의 활성 파일로 채운다
-        payload = {
-            "run_mode": "continuous",
-            "repeat_mode": req_repeat_mode,
-            "dwell_sec": req_dwell_sec,
-            "target_cycle_count": 0,
-            "schedule_id": item.schedule_id,
-        }
-        self._send_http_request("/api/motion-run/start", payload)
+        else:
+            # 단독 · 모션·매핑 파일은 브리지가 프로젝트의 활성 파일로 채운다
+            endpoint = "/api/motion-run/start"
+            payload = {
+                "run_mode": "continuous",
+                "repeat_mode": req_repeat_mode,
+                "dwell_sec": req_dwell_sec,
+                "target_cycle_count": 0,
+                "schedule_id": item.schedule_id,
+            }
+        # **받아들여진 것은 아직 성공이 아니다** · 실제로 돌아야 지운다(`_reconcile`) · 수정 목록 124
+        #
+        # 그룹 시작은 받아들여진 뒤 준비 단계에서 실패할 수 있다 · 받아들여졌다고 지난 실패를
+        # 지우면, 1분마다 실패해도 횟수가 1을 넘지 못해 화면이 빨강이 되지 않는다.
+        previous = dict(getattr(self, '_last_failure', {}) or {})
+        accepted = self._send_http_request(endpoint, payload)
+        self._start_pending = bool(accepted)
+        if accepted and previous:
+            self._last_failure = previous
 
     def _execute_stop_after_cycle(self, item=None, reason: str = ''):
         name = getattr(item, 'schedule_name', '구간 밖')
         schedule_id = getattr(item, 'schedule_id', '')
         self.get_logger().info(f"[SCHEDULE TRIGGER] STOP-AFTER-CYCLE -> '{name}'")
-        if self._coordination_enabled() and self._coordination_joined():
-            self._send_http_request("/api/coordination/control", {
+        # **도는 것이 그룹 실행일 때만** 그룹 길 · 단독 재생은 단독 길 · 수정 목록 115
+        #
+        # 전에는 연동이 켜져 있고 묶여 있으면 무조건 그룹 길로 보냈다 · 사람이 켠 단독 연속
+        # 재생은 「활성 그룹 실행이 없습니다」 로 거절당해 4회차 넘게 안 멈췄다(실물 R-43) ·
+        # 단독 길도 `reason` 을 실어 스케줄 끝 동작(기준점 주차 → 서보 OFF)이 같이 돈다.
+        joined = self._coordination_enabled() and self._coordination_joined()
+        route = schedule_rules.stop_route(
+            self._group_execution() if joined else {}, joined=joined,
+        )
+        if route == schedule_rules.GROUP_ROUTE:
+            if self._send_http_request("/api/coordination/control", {
                 "command": "stop_after_cycle",
                 "schedule_id": schedule_id or 'reconcile',
                 "reason": reason,
-            })
-            return
+            }):
+                return
+            # 그룹 길이 거절했다(그 사이 그룹이 끝났거나 실행이 없다) · 단독 길로 다시
+            self.get_logger().info("[점검] 그룹 회차 후 정지 거절 · 단독 길로 다시")
         self._send_http_request("/api/motion-run/stop-after-cycle", {
             "schedule_id": schedule_id or 'reconcile',
             "reason": reason,

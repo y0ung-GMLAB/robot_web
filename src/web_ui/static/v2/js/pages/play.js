@@ -7,7 +7,7 @@ import { h, dot } from '../dom.js';
 import { runSummary } from '../model.js';
 import {
   initialMoveChoices, REPEAT_MODES,
-  axisRows, defaultScope, groupRows, groupRuntime, groupScopeBlocker, groupStopCommand,
+  axisRows, defaultScope, excludedText, groupRows, groupRuntime, groupScopeBlocker, groupStartPreview, groupStopCommand,
   isRunning, phaseSteps, playHeadline, registeredPlaylist, repeatChoice, runStatus, startBlocker,
 } from '../play_model.js';
 import { api } from '../net.js';
@@ -126,8 +126,12 @@ function fixButton(fix, navigate) {
 function scopeHeader(state, changed) {
   const group = groupRuntime(state.snap);
   const blocker = groupScopeBlocker(state.snap);
-  const count = group.peers.length || (group.joined ? 1 : 0);
   const groupBusy = group.active;
+  // N = 실제로 들어갈 PC 수 · 도는 중이면 이번 참가 PC 수 · 서버 미리 보기가 없으면 옛 방식 · 수정 목록 122 (다)
+  const preview = groupStartPreview(state.snap);
+  const running = Array.isArray(group.execution.participants) ? group.execution.participants.length : 0;
+  const count = groupBusy ? running : (preview.count ?? (group.peers.length + (group.joined ? 1 : 0)));
+  const leftOut = groupBusy ? '' : excludedText(preview.excluded);
   return h('div', { class: 'page-head' },
     h('h1', { text: '재생' }),
     segmented('재생 대상', [['local', '단독'], ['group', `그룹 전체${count ? ` · ${count}대` : ''}`, groupBusy ? '' : blocker]], ui.scope, (value) => {
@@ -135,8 +139,9 @@ function scopeHeader(state, changed) {
       changed();
     }),
     h('p', { class: 'muted small', text: ui.scope === 'group'
-      ? (groupBusy ? '그룹 전체 재생 중입니다. 정지 버튼을 누르면 이번 재생에 참가한 PC가 모두 정지합니다.' : '각 PC는 자기 재생 목록을 재생하고 함께 시작합니다. 회차를 맞출지는 아래 「PC 간 동기화」에서 정합니다.')
-      : (blocker && group.joined ? blocker : '다른 PC와 상관없이 단독으로 재생합니다. 다른 PC는 영향을 받지 않습니다.') }));
+      ? (groupBusy ? '그룹 전체 재생 중입니다. 정지 버튼을 누르면 이번 재생에 참가한 PC가 모두 정지합니다.' : '각 PC는 자기 재생 목록을 재생하고 함께 시작합니다. 수동 모드 PC도 함께 시작하고, 끔 모드 PC는 빠집니다. 회차를 맞출지는 아래 「PC 간 동기화」에서 정합니다.')
+      : (blocker && group.joined ? blocker : '다른 PC와 상관없이 단독으로 재생합니다. 다른 PC는 영향을 받지 않습니다.') }),
+    ui.scope === 'group' && leftOut ? h('p', { class: 'small tone-text-warn', text: `${leftOut} · 시작하면 이 PC들은 빼고 재생합니다` }) : null);
 }
 
 /* ---------- 지금 · 버튼 ---------- */

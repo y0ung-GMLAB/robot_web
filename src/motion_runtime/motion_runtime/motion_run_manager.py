@@ -937,7 +937,7 @@ class MotionRunManager(Node):
                 'state': 'stopped',
                 'phase': 'stopped',
                 'phase_finished_at': time.time(),
-                'message': 'stop requested during plan preparation',
+                'message': '계획 준비 중 정지 요청',
             })
         elif current.get('state') in (
             'initializing',
@@ -948,18 +948,18 @@ class MotionRunManager(Node):
             self._update_status({
                 'state': 'stopping',
                 'phase': 'stopping',
-                'message': 'stop requested',
+                'message': '정지 요청',
             })
         else:
             self._update_status({
                 'state': 'stopped',
                 'phase': 'stopped',
                 'phase_finished_at': time.time(),
-                'message': 'stop requested',
+                'message': '정지 요청',
             })
         return {
             'success': True,
-            'message': 'motion run stop requested',
+            'message': '정지합니다. 서보 토크 유지.',
             'status': self.status(),
         }
 
@@ -996,9 +996,13 @@ class MotionRunManager(Node):
                 'status': current,
             }
         self._graceful_stop_event.set()
+        # 단독 연속 재생에 「동기」 라고 답했다(실물 R-41 · 2026-10-13) · 동기 반복일 때만 그 말 · 화면 글자와 같게
         return {
             'success': True,
-            'message': '현재 동기 반복 회차 완료 후 정지 요청',
+            'message': (
+                '이번 동기 반복 회차가 끝나면 정지합니다'
+                if is_sync_repeat else '이번 회차가 끝나면 정지합니다'
+            ),
             'status': self.status(),
         }
 

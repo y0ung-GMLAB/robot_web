@@ -171,6 +171,9 @@ def test_state_tick_consumes_background_runtime_sample_before_event_check():
 def test_stale_local_runtime_status_stops_only_active_group_execution():
     node = _node()
     node._execution.execution_id = 'exec-a'
+    # 움직이는 중이어야 잠근다 · 준비 중 · 기동 직후 · 사람이 한 재시작은 정리만 · 수정 목록 123
+    node._execution.coordinator_id = 'pc-a'
+    node._execution.state = 'running'
     node._local_runtime_monitor = SimpleNamespace(
         snapshot=lambda: {
             'status': {'bridge_state': 'ok'},
@@ -928,7 +931,7 @@ def test_start_leaves_out_broken_pcs_and_names_the_reason():
     assert result['excluded'] == {
         'pc-c': '통신 단절',
         'pc-d': 'Servo 알람 2등급',
-        'pc-e': '오프 모드',
+        'pc-e': '끔 모드',
         'pc-f': '버전 불일치 · 그 PC 에서 bash scripts/install.sh',
     }
     assert node._execution.excluded == result['excluded']
@@ -1927,3 +1930,230 @@ def test_it_still_stops_when_the_network_stays_bad_up_to_the_limit():
         _answer(node, number, 250)
     assert node._trigger_sync_status['trigger_sync_state'] == 'failed'
     assert f'({limit}번 잼)' in node._trigger_sync_status['message']
+
+
+# --------------------------------------------------------------------------- #
+# 수정 목록 122 · 사람이 누른 그룹 재생은 수동 PC 도 넣는다 · 끔만 뺀다
+# --------------------------------------------------------------------------- #
+
+def _start_node():
+    node = _node()
+    node._joined = True
+    node._command_pub = _Publisher()
+    node._note_excluded = lambda *args, **kwargs: None
+    node._registry.update(_member('pc-b', operation_mode='manual'))
+    node._registry.update(_member('pc-c', operation_mode='off'))
+    node._registry.update(_member('pc-d', operation_mode='manual', motion_phase='running'))
+    return node
+
+
+def test_a_human_group_start_takes_manual_pcs_and_leaves_off_pcs():
+    """실물 S-10 · 4대 모두 수동인데 마스터 혼자 돌았다"""
+    node = _start_node()
+
+    result = node._start_group_execution(request={'started_by': 'human'})
+
+    assert result['participants'] == ['pc-a', 'pc-b']
+    assert result['excluded'] == {'pc-c': '끔 모드', 'pc-d': '단독 재생 중'}
+    assert '참가 2대' in result['message'] and 'pc-c(끔 모드)' in result['message']
+    assert node._execution.started_by == 'human'
+
+
+def test_a_schedule_group_start_still_takes_only_schedule_pcs():
+    node = _start_node()
+
+    result = node._start_group_execution(request={'started_by': 'schedule'})
+
+    assert result['participants'] == ['pc-a']
+    assert result['excluded']['pc-b'] == '수동 모드'
+
+
+def test_the_play_screen_sees_who_would_join_before_start():
+    """(다) 「그룹 전체 · N대」 의 N · 빠질 PC 와 이유 · 사람이 누를 때 규칙"""
+    node = _start_node()
+
+    preview = node.snapshot()['start_preview']
+
+    assert preview == {
+        'participants': ['pc-a', 'pc-b'],
+        'excluded': {'pc-c': '끔 모드', 'pc-d': '단독 재생 중'},
+    }
+
+
+def test_a_human_started_run_lets_a_manual_pc_rejoin():
+    """(라) 복귀도 시작한 쪽 규칙"""
+    node = _start_node()
+    node._call_local_control = lambda payload, **_kwargs: {'success': True}
+    node._start_group_execution(request={'started_by': 'human'})
+    assert node._member_exclusion_reason('pc-b') == ''
+    node._execution.started_by = 'schedule'
+    assert node._member_exclusion_reason('pc-b') == '수동 모드'
+
+
+# --------------------------------------------------------------------------- #
+# 수정 목록 123 · 준비 중 거절 PC 를 빼도 마스터는 계속 · 갇히지 않는다 (실물 S-11)
+# --------------------------------------------------------------------------- #
+
+def test_the_master_does_not_cancel_itself_with_a_release_meant_for_a_dropped_pc():
+    node = _node()
+    node._joined = True
+    node._execution = GroupExecution()
+    execution_id = node._execution.begin('pc-a', ('pc-a', 'pc-b', 'pc-c'))
+    node._execution.pending_command = 'prepare'
+    node._execution.pending_command_id = 'prepare-command'
+    node._execution.ready = {'pc-a'}
+    node._execution.pending_acks = {'pc-a'}
+    node._command_pub = _Publisher()
+    node._note_excluded = lambda *args, **kwargs: None
+    synced = []
+    node._begin_trigger_sync = synced.append
+    submitted = []
+    node._command_dispatcher = SimpleNamespace(
+        submit=lambda message, urgent_stop=False: submitted.append(message.command) or True,
+    )
+
+    for pc_id in ('pc-b', 'pc-c'):
+        node._event_callback(GroupEvent(
+            group_id='stage-a', execution_id=execution_id, pc_id=pc_id,
+            event='rejected', success=False,
+            message='현재 프로젝트의 실행 준비가 끝나지 않았습니다: 모터 설정과 조인트 매핑을 저장해 확정하세요',
+        ))
+    releases = [m for m in node._command_pub.messages if m.command == 'cancel_before_start']
+    assert len(releases) == 2
+    # DDS 는 제가 보낸 것도 제게 돌려준다 · 진행 PC 는 처리하지 않는다
+    for release in releases:
+        node._command_callback(release)
+
+    assert submitted == []
+    assert node._execution.execution_id == execution_id
+    assert node._execution.state == 'preparing'
+    assert node._execution.participants == ('pc-a',)
+    assert execution_id not in node._cancelled_execution_ids
+    assert synced == ['initialize'], '남은 마스터 혼자 다음 단계로'
+
+
+def test_an_unexpected_stop_releases_the_whole_group_instead_of_holding_it():
+    node = _node()
+    node._execution = GroupExecution()
+    execution_id = node._execution.begin('pc-a', ('pc-a', 'pc-b'))
+    node._execution.state = 'running'
+    events = []
+    node._call_local_control = lambda payload, **_kwargs: (
+        events.append(('local', payload['command'])) or {'success': True}
+    )
+    node._command_pub = _Publisher(events)
+
+    node._event_callback(GroupEvent(
+        group_id='stage-a', execution_id=execution_id, pc_id='pc-b',
+        event='stopped', success=True, message='정지',
+    ))
+
+    assert events == [('local', 'group_cancel'), ('dds', 'cancel_before_start')]
+    _peer_release_ack(node)
+    assert node._execution.execution_id == ''
+    assert node._coordination_error == {}
+
+
+def test_a_finished_execution_left_behind_is_reaped():
+    node = _node()
+    node._execution = GroupExecution()
+    node._execution.begin('pc-a', ('pc-a', 'pc-b'))
+    node._execution.stop_now()                         # S-11 · stopped 인데 execution_id 남음
+    events = []
+    node._call_local_control = lambda payload, **_kwargs: (
+        events.append(('local', payload['command'])) or {'success': True}
+    )
+    node._command_pub = _Publisher(events)
+    node._stale_lease = coordination_node.StaleLeaseWatch(limit_sec=0.0)
+
+    node._reap_stale_execution()                       # 처음 본 때
+    node._reap_stale_execution()                       # 한도 넘김
+
+    assert node._execution.execution_id == ''
+    assert ('dds', 'cancel_before_start') in events
+    # 새 시작이 「이전 그룹 실행 정리 확인 중입니다」 로 막히지 않는다
+    assert node._execution.begin('pc-a', ('pc-a', 'pc-b'))
+
+
+# --------------------------------------------------------------------------- #
+# 수정 목록 124 · 진행 PC 준비 안 됨 · 사람이 한 재시작 · 잠그지 않는다
+# --------------------------------------------------------------------------- #
+
+def test_the_master_not_ready_cancels_without_latching():
+    """실물 S-12 · 앱솔루트 확인 전 · 전에는 GROUP_START_REJECTED 2등급"""
+    node = _node()
+    node._execution = GroupExecution()
+    execution_id = node._execution.begin('pc-a', ('pc-a', 'pc-b'))
+    events = []
+    node._call_local_control = lambda payload, **_kwargs: (
+        events.append(('local', payload['command'])) or {'success': True}
+    )
+    node._command_pub = _Publisher(events)
+
+    node._event_callback(GroupEvent(
+        group_id='stage-a', execution_id=execution_id, pc_id='pc-a',
+        event='rejected', success=False,
+        message='실행 준비 검사 실패: 앱솔루트 미확인 · 2번 모터 확인 불가',
+    ))
+    _peer_release_ack(node)
+
+    assert node._execution.execution_id == ''
+    assert node._coordination_error == {}, '잠그지 않는다 · 스케줄이 다음 점검에 다시'
+    failure = node.snapshot()['last_start_failure']
+    assert failure['code'] == 'GROUP_START_NOT_READY'
+    assert '앱솔루트 미확인' in failure['message']
+
+
+def test_a_planned_restart_releases_without_latching():
+    """실물 S-11 다시 · 「프로그램 다시 시작」 이 GROUP_PARTICIPANT_FAILURE 를 만들었다"""
+    node = _node()
+    node._execution = GroupExecution()
+    node._execution.begin('pc-a', ('pc-a', 'pc-b'))
+    node._call_local_control = lambda payload, **_kwargs: {'success': True}
+    node._command_pub = _Publisher()
+
+    result = node._handle_local_request({'command': 'planned_restart'})
+
+    assert result['success'] is True
+    assert node._execution.execution_id == ''
+    assert node._coordination_error == {}
+    assert node._planned_restart_until > time.monotonic()
+
+
+def test_losing_the_bridge_after_a_planned_restart_does_not_latch():
+    node = _node()
+    node._execution = GroupExecution()
+    node._execution.begin('pc-a', ('pc-a', 'pc-b'))
+    node._execution.state = 'running'
+    node._planned_restart_until = time.monotonic() + 60.0
+    node._boot_monotonic = 0.0
+    node._call_local_control = lambda payload, **_kwargs: {'success': True}
+    node._command_pub = _Publisher()
+    node._local_runtime_monitor = SimpleNamespace(
+        snapshot=lambda: {'status': {}, 'received_monotonic': 1.0, 'active_since_monotonic': 0.0},
+        diagnosis=lambda: '검사용',
+    )
+
+    node._consume_local_runtime_status()
+
+    assert node._execution.execution_id == ''
+    assert node._coordination_error == {}
+
+
+def test_a_slave_losing_its_bridge_while_running_still_latches():
+    """슬레이브 실행 상태는 preparing 에 머문다 · 움직이는지는 로컬 상태로 본다"""
+    node = _node()
+    node._execution = GroupExecution()
+    node._execution.activate_claim('exec-a', 'pc-b', ('pc-a', 'pc-b'))
+    node._local_status = {'motion_run_status': {'group_execution': True, 'state': 'running'}}
+    node._boot_monotonic = 0.0
+    failures = []
+    node._stop_for_peer_failure = failures.append
+    node._local_runtime_monitor = SimpleNamespace(
+        snapshot=lambda: {'status': {}, 'received_monotonic': 1.0, 'active_since_monotonic': 0.0},
+        diagnosis=lambda: '검사용',
+    )
+
+    node._consume_local_runtime_status()
+
+    assert len(failures) == 1

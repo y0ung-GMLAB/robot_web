@@ -3,7 +3,7 @@
  * 원칙 1 · 4 · 7 (설계안 2026-10-09) · 상태 문장을 누르면 확인할 일과 해결 버튼
  */
 import { h, dot, replace } from './dom.js';
-import { headline, pcRole as pcRoleOf, runMode } from './model.js';
+import { headline, pcRole as pcRoleOf, runMode, RUN_MODE_HINT } from './model.js';
 import * as act from './actions.js';
 
 export const NAV = [
@@ -133,7 +133,7 @@ export function createShell(root, { navigate }) {
       const active = button.dataset.mode === mode;
       button.setAttribute('aria-pressed', String(active));
       button.disabled = !sched || Boolean(slave);
-      button.title = slave ? '슬레이브 PC는 마스터 설정을 따릅니다. 마스터 화면에서 바꾸세요.' : '';
+      button.title = slave ? '슬레이브 PC는 마스터 설정을 따릅니다. 마스터 화면에서 바꾸세요.' : (RUN_MODE_HINT[button.dataset.mode] || '');
     }
   }
 
