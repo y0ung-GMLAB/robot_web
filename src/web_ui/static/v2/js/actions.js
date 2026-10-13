@@ -246,6 +246,12 @@ export function applyMotorConfig() {
     (r) => r?.message || '적용했습니다. 모터 프로그램이 다시 시작되고 화면이 다시 연결됩니다.');
 }
 
+/** 부팅 값이 옛 값일 때 · 확인 → 적용(서버가 부팅 목록을 새 설정으로 다시 만든다) · 홈 · 모터 설정 같이 씀 · 수정 목록 116 */
+export async function applyBootParams() {
+  if (!(await confirmApplyMotorConfig('지금 드라이브는 옛 부팅 값입니다. 드라이브 공통 설정 · 모터 칸 값으로 부팅 목록을 다시 만들어 적용합니다.'))) return null;
+  return applyMotorConfig();
+}
+
 /* ---------- 서보 · 한 축 (모터·드라이브 · 수동 조작 같이 씀) ---------- */
 
 /**

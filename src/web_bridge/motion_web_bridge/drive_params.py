@@ -3,8 +3,10 @@
 드라이브에 지금 들어 있는 값(RAM) · 부팅 때 우리가 쓸 값 · 팩토리값을 한 표에 · 다르면 표시.
 
     드라이브 현재값   `ethercat upload` · Motor Manager 를 멈추지 않는다
-    부팅 시 적용값   `minas_params.boot_values` (플랫폼 기반 → 현장 공통 설정 → 모터별 칸) · 이 값은 모터
-                    프로그램이 켜질 때마다 다시 쓰이므로, 여기서 다른 값을 써도 재시작하면 돌아간다
+    부팅 시 적용값   **지금 도는** 모터 프로그램이 켜질 때 쓴 값(`boot_params` · 세션 기록) · 여기서 다른
+                    값을 써도 재시작하면 돌아간다 · 지금 설정(플랫폼 기반 → 현장 공통 설정 → 모터별 칸)과
+                    다르면 `boot_next` 에 「적용하면」 값 · 수정 목록 116 (전엔 지금 설정으로 계산해 보여 줘
+                    적용 안 한 새 공통 값이 드라이브에 있는 줄 알았다)
     팩토리값          A6B 레퍼런스 SX-DSV03190 R11.0 부록(파라미터 · 객체 기본값) · A~C 프레임
 
 쓰기는 RAM 에만 · Motor Manager 를 멈추지 않는다 · 되읽어 같은지 본다 · 모터가 움직이는 동안 거절 ·
@@ -124,10 +126,17 @@ class DriveParams:
         safety_blocker: Callable[[], str],
         record: Callable[[Dict[str, Any]], None],
         timeout_sec: float = 5.0,
+        boot_next: Optional[Callable[[int], Optional[Dict[Tuple[int, int], int]]]] = None,
+        boot_stale: Optional[Callable[[], str]] = None,
     ) -> None:
         self._runner = runner
         self._target = target
+        #: 지금 도는 모터 프로그램이 부팅 때 쓴 값 · 수정 목록 116
         self._boot_values = boot_values
+        #: 「장비에 적용」 하면 쓸 값(지금 설정) · 다를 때만 표에 · 없으면 안 봄
+        self._boot_next = boot_next
+        #: 둘이 다르면 그 한 줄(「설정 적용 필요 · …」) · 표 위에
+        self._boot_stale = boot_stale
         self._safety_blocker = safety_blocker
         self._record = record
         self._timeout = timeout_sec
@@ -150,20 +159,25 @@ class DriveParams:
             target = self._target(int(axis))
         except (TypeError, ValueError) as exc:
             return {'success': False, 'message': str(exc)}
-        boot = self._boot_values(int(axis))
+        boot = self._boot_values(int(axis)) or {}
+        upcoming = (self._boot_next(int(axis)) if self._boot_next else None) or {}
         rows = []
         for group, label, number, index, sub, data_type, factory, unit, memo in CATALOG:
             value, error = self._upload(target, index, sub, data_type)
             boot_value = 'auto' if memo == 'auto' else boot.get((index, sub))
+            next_value = upcoming.get((index, sub)) if memo != 'auto' and upcoming else None
             rows.append({
                 'group': group, 'label': label, 'number': number, 'index': index, 'subindex': sub,
                 'type': data_type, 'unit': unit, 'memo': memo, 'factory': factory,
                 'drive': value, 'error': error, 'boot': boot_value,
+                # 적용하면 바뀔 값 · 지금 도는 세션의 부팅 값과 다를 때만 · 수정 목록 116
+                'boot_next': next_value if next_value is not None and next_value != boot_value else None,
                 'differs_factory': value is not None and factory is not None and value != factory,
                 'differs_boot': value is not None and isinstance(boot_value, int) and value != boot_value,
                 'writable': not write_block_reason(index),
             })
-        return {'success': True, 'axis': int(axis), 'rows': rows}
+        return {'success': True, 'axis': int(axis), 'rows': rows,
+                'boot_stale': (self._boot_stale() if self._boot_stale else '') or ''}
 
     def read(self, payload: Dict[str, Any]) -> Dict[str, Any]:
         try:
@@ -176,7 +190,7 @@ class DriveParams:
         except (TypeError, ValueError) as exc:
             return {'success': False, 'message': str(exc)}
         value, error = self._upload(target, index, sub, data_type)
-        boot = self._boot_values(axis).get((index, sub))
+        boot = (self._boot_values(axis) or {}).get((index, sub))
         return {'success': not error, 'message': error or '읽었습니다', 'index': index, 'subindex': sub,
                 'type': data_type, 'value': value, 'boot': boot}
 
@@ -213,7 +227,7 @@ class DriveParams:
         after, read_error = self._upload(target, index, sub, data_type) if not error else (None, '')
         if not error and after != value:
             error = f'되읽기 {after} ≠ {value}{f" · {read_error}" if read_error else ""}'
-        boot = self._boot_values(axis).get((index, sub))
+        boot = (self._boot_values(axis) or {}).get((index, sub))
         notes = []
         if isinstance(boot, int) and boot != value:
             notes.append(f'부팅 때 {boot} 로 다시 씁니다(재시작하면 돌아감 · 남기려면 공통 설정이나 모터 칸에서)')

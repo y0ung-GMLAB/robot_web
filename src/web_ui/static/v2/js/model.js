@@ -54,6 +54,16 @@ export function pcName(pc) {
   return String(pc?.display_name || pc?.pc_id || '-');
 }
 
+/** 부팅 값 알림 · 서버 `boot_params` (지금 도는 세션 vs 지금 설정) · 다를 때만 · 수정 목록 116 */
+export function bootParamsNotice(snap) {
+  const boot = snap?.boot_params;
+  if (!boot || boot.state !== 'stale') return null;
+  return {
+    title: String(boot.message || '설정 적용 필요 · 지금 드라이브는 옛 부팅 값'),
+    detail: `${boot.detail ? `${boot.detail} · ` : ''}「장비에 적용」 을 누르면 새 값으로 모터 프로그램을 다시 켭니다.`,
+  };
+}
+
 /** supervisor 알림 · 조그 · 목표 이동을 끝내며 남김(목표 근처 출렁임 · 못 미치고 섬 · 시간 초과) · axis 를 주면 그 모터만 */
 export function manualNotices(snap, axis = null) {
   const list = snap?.safety_status?.manual_notices;
@@ -98,6 +108,9 @@ export function collectIssues(snap, sched, { connected = true } = {}) {
     bad('조인트 범위가 확인되지 않아 재생과 수동 조작이 차단되어 있습니다', range,
       { kind: 'open', target: 'mapping', label: '조인트 매핑 열기' });
   }
+  // 지금 도는 모터 프로그램의 부팅 값이 지금 설정과 다르다 · 업데이트만 하고 적용 안 한 PC · 수정 목록 116
+  const boot = bootParamsNotice(snap);
+  if (boot) warn(boot.title, boot.detail, { kind: 'apply-motor-config', label: '장비에 적용' });
   // 조그 · 목표 이동을 끝내며 supervisor 가 남긴 알림 · 목표 근처 출렁임 등 · 5 분 · 실물 R-11
   for (const notice of manualNotices(snap)) {
     warn(notice.message, '조작은 끝냈습니다. 다음 조작은 됩니다.', { kind: 'open', target: 'maintain-motors', label: '모터 설정 열기' });

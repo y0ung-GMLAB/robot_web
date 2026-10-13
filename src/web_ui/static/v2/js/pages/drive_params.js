@@ -1,6 +1,6 @@
 /**
  * UI v2 · 모터 설정 ① · 모터 상세 · 파라미터 (고급) · 수정 목록 109 · 114 (2026-10-13)
- * 드라이브에 지금 들어 있는 값 · 부팅 때 우리가 쓸 값 · 팩토리값을 한 표에 · 다르면 표시.
+ * 드라이브에 지금 들어 있는 값 · 부팅 때 우리가 쓴 값(지금 도는 모터 프로그램 · 116) · 팩토리값을 한 표에 · 다르면 표시.
  * 직접 읽기·쓰기 · 평소엔 잠김 · 쓰기는 드라이브 RAM 에만(전원을 끄면 사라짐 · 남기려면 「드라이브 저장(EEPROM)」) ·
  * 제어 워드 · 운전 모드 · PDO · EEPROM 저장 · 앱솔루트 · 0x60B2 등은 서버가 거절(전용 버튼이 있다).
  * 값은 숫자 그대로 · 뜻은 마우스를 올리면 (사용자 2026-10-13).
@@ -10,7 +10,7 @@ import { api } from '../net.js';
 import { confirmBox, toast } from '../dialog.js';
 
 const TYPES = ['int16', 'uint16', 'int32', 'uint32', 'int8', 'uint8'];
-const ui = { axis: null, rows: null, loading: false, error: '', unlocked: false, form: { object: '', type: 'int16', value: '' }, last: '' };
+const ui = { axis: null, rows: null, stale: '', loading: false, error: '', unlocked: false, form: { object: '', type: 'int16', value: '' }, last: '' };
 
 async function load(axis, changed) {
   ui.loading = true;
@@ -19,7 +19,7 @@ async function load(axis, changed) {
   try {
     const data = await api('GET', `/api/motor-config/drive-params?axis=${axis}`, { timeoutMs: 60000 });
     if (data?.success === false) { ui.error = data.message || '읽지 못했습니다'; ui.rows = null; }
-    else { ui.rows = data?.rows || []; ui.axis = axis; }
+    else { ui.rows = data?.rows || []; ui.stale = String(data?.boot_stale || ''); ui.axis = axis; }
   } catch (error) {
     ui.error = error.message || String(error);
   } finally {
@@ -39,10 +39,12 @@ export function rowHint(row) {
   return parts.join('\n');
 }
 
-/** 표시 · 팩토리값과 다름 · 부팅 시 적용값과 다름(재시작하면 부팅 값으로 돌아감) */
+/** 표시 · 팩토리값과 다름 · 부팅 시 적용값과 다름(재시작하면 부팅 값으로 돌아감) · 적용하면 바뀜(116) */
 export function rowFlags(row) {
   const flags = [];
   if (row.differs_boot) flags.push({ tone: 'warn', text: '부팅 시 적용값과 다름', hint: `재시작하면 ${row.boot} 로 돌아갑니다` });
+  // 지금 도는 모터 프로그램은 옛 부팅 값 · 적용하면 바뀜 · 수정 목록 116
+  if (row.boot_next !== null && row.boot_next !== undefined) flags.push({ tone: 'warn', text: `적용하면 ${row.boot_next}`, hint: '드라이브 공통 설정 · 모터 칸 값 · 「장비에 적용」 전에는 안 들어갑니다' });
   if (row.differs_factory) flags.push({ tone: 'info', text: '팩토리값과 다름', hint: `팩토리값 ${row.factory}` });
   return flags;
 }
@@ -81,7 +83,7 @@ async function writeOne(axis, changed) {
 
 export function paramsField(row, changed) {
   if (!row.ac) return null;
-  if (ui.axis !== null && ui.axis !== row.axis) { ui.axis = null; ui.rows = null; ui.unlocked = false; ui.last = ''; }
+  if (ui.axis !== null && ui.axis !== row.axis) { ui.axis = null; ui.rows = null; ui.stale = ''; ui.unlocked = false; ui.last = ''; }
   const groups = [];
   for (const item of ui.rows || []) {
     let group = groups.find((g) => g.name === item.group);
@@ -96,6 +98,8 @@ export function paramsField(row, changed) {
         ui.loading ? '읽는 중' : ui.rows ? '다시 읽기' : '드라이브에서 읽기'),
       h('span', { class: 'muted small', text: '모터 프로그램을 멈추지 않고 읽습니다. 줄을 누르면 아래 칸에 채워집니다.' })),
     ui.error ? h('p', { class: 'tone-text-bad', text: ui.error }) : null,
+    // 「부팅 시 적용값」 은 지금 도는 모터 프로그램 기준 · 지금 설정과 다르면 한 줄 · 수정 목록 116
+    ui.rows && ui.stale ? h('p', { class: 'tone-text-warn small', text: `${ui.stale} · 「저장 후 장비에 적용」 을 누르세요` }) : null,
     ui.rows ? h('div', { class: 'table-wrap' }, h('table', { class: 'table params-table' },
       h('thead', {}, h('tr', {}, ['항목', '드라이브 현재값', '부팅 시 적용값', '팩토리값', ''].map((text) => h('th', { scope: 'col', text })))),
       h('tbody', {}, groups.map((group) => [
