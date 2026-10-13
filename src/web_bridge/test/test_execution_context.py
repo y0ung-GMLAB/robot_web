@@ -482,14 +482,16 @@ def test_range_recovery_flag_is_forwarded_to_motion_supervisor(monkeypatch):
     )
 
     assert result['success'] is True
-    assert published == [{
+    # 수동 조작 속도 상한(126)이 같이 실릴 수 있다 · 여기서는 복귀 표시가 넘어가는지만 본다
+    assert len(published) == 1
+    assert {
         'request_id': 'recovery-1',
         'project_generation': 1,
         'command': 'ac_servo_absolute_move',
         'axis': 0,
         'target_rad': -1000.0,
         'range_recovery': True,
-    }]
+    }.items() <= published[0].items()
 
 
 def test_range_recovery_is_refused_while_joint_range_unconfirmed(monkeypatch):
