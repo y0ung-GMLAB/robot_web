@@ -136,11 +136,9 @@ def _new_motor(row: Dict[str, Any], raw: Dict[str, Any], dxl_driver_id: int) -> 
     scanned = row['scanned']
     axis = row['proposed_axis']
     if row['transport'] == 'ethercat':
-        alias = scanned.get('alias')
-        name = f'alias {alias}' if optional_int(alias, 0) else f'slave {scanned.get("slave_position")}'
         profile = _scanned_profile(scanned, 'ethercat') or {'driver_model': '', 'model_confirmed': False, 'model_source': ''}
         return {
-            'id': row['id'], 'enabled': True, 'hidden': False, 'deleted': False, 'axis': axis, 'name': name,
+            'id': row['id'], 'enabled': True, 'hidden': False, 'deleted': False, 'axis': axis, 'name': _new_name(axis),
             'motor_type': 'ac_servo', 'driver_family': 'minas', 'transport': 'ethercat',
             'identity': _ac_identity(raw, scanned),
             'profile': profile,
@@ -150,7 +148,7 @@ def _new_motor(row: Dict[str, Any], raw: Dict[str, Any], dxl_driver_id: int) -> 
     profile = _scanned_profile(scanned, 'serial') or {'driver_model': '', 'model_confirmed': False, 'model_source': ''}
     return {
         'id': row['id'], 'enabled': True, 'hidden': False, 'deleted': False, 'axis': axis,
-        'name': f'ID {bus}' if bus is not None else 'ID -',
+        'name': _new_name(axis),
         'motor_type': 'dynamixel', 'driver_family': 'dynamixel', 'transport': 'serial',
         'identity': _dxl_identity(scanned, DYNAMIXEL_DEFAULT_BAUDRATE),
         'profile': profile,
@@ -158,6 +156,20 @@ def _new_motor(row: Dict[str, Any], raw: Dict[str, Any], dxl_driver_id: int) -> 
                    'serial_port': str(scanned.get('serial_port') or ''), 'serial_baudrate': DYNAMIXEL_DEFAULT_BAUDRATE,
                    'profile_mode': 0},
     }
+
+
+def _new_name(axis: Any) -> str:
+    """새 모터 기본 이름 · 화면의 모터 번호 그대로 · 사용자 2026-10-13 (전에는 slave N · alias N · ID N)"""
+    return f'모터 {axis}'
+
+
+def _device_text(row: Dict[str, Any]) -> str:
+    """알림에 쓸 새 장치 주소 · alias · Slave · DXL ID"""
+    scanned = row.get('scanned') or {}
+    if row.get('transport') == 'ethercat':
+        alias = optional_int(scanned.get('alias'), 0)
+        return f'alias {alias}' if alias else f'Slave {scanned.get("slave_position")}'
+    return f'ID {scanned.get("bus_id")}' if scanned.get('bus_id') is not None else 'ID -'
 
 
 def _label(motor: Dict[str, Any]) -> str:
@@ -211,7 +223,7 @@ def proposed_registry(registry: Dict[str, Any], scan: Dict[str, Any], axis_rows:
         picked.append((row['proposed_axis'], order, motor, None, True))
         counts['added'] += 1
         if row.get('association_candidates'):
-            notes.append(f'새 장치 {motor["name"]} · 같은 위치의 모터가 여럿({", ".join(str(a) for a in row["association_candidates"])}번)이라 새로 추가했습니다. 어느 모터인지 확인하세요.')
+            notes.append(f'새 장치 {_device_text(row)} · 같은 위치의 모터가 여럿({", ".join(str(a) for a in row["association_candidates"])}번)이라 새로 추가했습니다. 어느 모터인지 확인하세요.')
         order += 1
 
     # 번호 · 0 부터 빈칸 없이 · 순서는 지금 번호대로
@@ -219,6 +231,8 @@ def proposed_registry(registry: Dict[str, Any], scan: Dict[str, Any], axis_rows:
     motors = []
     renumbered = []
     for index, (_sort, _order, motor, old_axis, refresh_id) in enumerate(picked):
+        if old_axis is None and motor.get('name') == _new_name(motor.get('axis')):
+            motor['name'] = _new_name(index)   # 새 모터 · 정해진 번호로 · 저장된 이름은 안 건드림
         motor['axis'] = index
         motor.setdefault('config', {})['controller_index'] = index
         if refresh_id:
