@@ -1824,7 +1824,7 @@ def _presence(pc_id, role='robot', address='192.168.0.12', **fields):
     message.web_url = f'http://{address}:8000'
     message.boot_id = fields.pop('boot_id', f'boot-{pc_id}')
     fields = {'group_id': '', 'joined': False, 'is_master': False, 'git_hash': '',
-              'protocol_version': 6, **fields}
+              'protocol_version': coordination_node.GROUP_PROTOCOL_VERSION, **fields}
     for key, value in fields.items():
         setattr(message, key, value)
     return message
