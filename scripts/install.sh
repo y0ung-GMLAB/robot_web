@@ -623,6 +623,10 @@ if [[ "$(script_fingerprint)" != "${SCRIPT_FINGERPRINT_BEFORE}" && "${MOTION_INS
   exec bash "${SCRIPT_PATH}" ${ORIG_ARGS[@]+"${ORIG_ARGS[@]}"}
 fi
 
+# Wi-Fi 절전 끄기 · 관리자 권한 없이 됨(웹 Wi-Fi 권한) · 웹 업데이트에서도 · 실패해도 설치는 계속 · 수정 목록 112 차
+print_step "2-1. Wi-Fi 절전 끄기"
+site_wifi_powersave_off || echo "!! Wi-Fi 절전을 끄지 못했습니다 · 설치는 계속합니다" >&2
+
 if [[ "${CODE_ONLY}" == true ]]; then
   print_step "3~6. 건너뜀 · 코드만 갱신 (시스템 패키지 · 권한 · rosdep 은 첫 설치 때 끝남)"
 else

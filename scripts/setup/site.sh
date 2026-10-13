@@ -17,6 +17,7 @@
 
 SITE_DRY_RUN="${SITE_DRY_RUN:-0}"
 SITE_GDM_CONF="${SITE_GDM_CONF:-/etc/gdm3/custom.conf}"
+SITE_WIFI_POWERSAVE_CONF="${SITE_WIFI_POWERSAVE_CONF:-/etc/NetworkManager/conf.d/99-robot-web-wifi-powersave-off.conf}"
 SITE_ETHERLAB_VERSION="${SITE_ETHERLAB_VERSION:-1.6.9}"
 SITE_ETHERLAB_SRC="${SITE_ETHERLAB_SRC:-/usr/local/src/ethercat}"
 SITE_ETHERLAB_REPO="${SITE_ETHERLAB_REPO:-https://gitlab.com/etherlab.org/ethercat.git}"
@@ -120,18 +121,38 @@ CONF
     printf '[Desktop Entry]\nType=Application\nName=Update Notifier\nHidden=true\nX-GNOME-Autostart-enabled=false\n' \
       > "${HOME}/.config/autostart/update-notifier.desktop"
   fi
-  echo "WiFi 절전 끄기 (무선 연결이 있을 때만)"
-  if command -v nmcli >/dev/null 2>&1; then
-    local line name type
-    while IFS= read -r line; do
-      [[ -z "${line}" ]] && continue
-      name="${line%%:*}"; type="${line##*:}"
-      if [[ "${type}" == "802-11-wireless" ]]; then
-        site_run nmcli connection modify "${name}" 802-11-wireless.powersave 2 || true
-        site_note "WiFi 「${name}」 절전 OFF"
-      fi
-    done < <(nmcli -t -f NAME,TYPE connection show 2>/dev/null || true)
+  echo "WiFi 절전 끄기 (기본값 · 지금 있는 무선 연결)"
+  # 우분투 기본 /etc/NetworkManager/conf.d/default-wifi-powersave-on.conf = 3(켬) · 그보다 뒤에 읽히는
+  # 이름으로 2(끔) · 나중에 손으로 만든 연결도 끈 채로 · 수정 목록 112 차 (2026-10-12 floating4 켜져 있었음)
+  if [[ -d /etc/NetworkManager/conf.d ]]; then
+    site_write_root_file "${SITE_WIFI_POWERSAVE_CONF}" <<'CONF'
+# robot_web · Wi-Fi 절전 끄기 (그룹 동기화 지연 · 수정 목록 112 차)
+[connection]
+wifi.powersave = 2
+CONF
   fi
+  site_wifi_powersave_off
+}
+
+# 지금 있는 무선 연결마다 절전 끔 · 관리자 권한 없이 됨(웹 Wi-Fi 권한 polkit) · 업데이트(--code-only)도 부른다 ·
+# 바뀐 값은 그 연결이 다시 붙을 때(재부팅 · Wi-Fi 재연결) 적용된다 · 이미 2 면 건드리지 않는다
+site_wifi_powersave_off() {
+  command -v nmcli >/dev/null 2>&1 || return 0
+  local line name type current
+  while IFS= read -r line; do
+    [[ -z "${line}" ]] && continue
+    name="${line%:*}"; type="${line##*:}"
+    [[ "${type}" == "802-11-wireless" ]] || continue
+    current="$(nmcli -g 802-11-wireless.powersave connection show "${name}" 2>/dev/null || true)"
+    if [[ "${current}" == "2" || "${current}" == "disable" ]]; then
+      continue
+    fi
+    if site_run nmcli connection modify "${name}" 802-11-wireless.powersave 2; then
+      site_note "WiFi 「${name}」 절전 OFF (다음 연결부터)"
+    else
+      site_warn "WiFi 「${name}」 절전을 끄지 못했습니다 · 웹 관리 권한(allow_web_admin.sh) 확인"
+    fi
+  done < <(nmcli -t -f NAME,TYPE connection show 2>/dev/null || true)
 }
 
 # ------------------------------------------------------------------ #
@@ -397,6 +418,16 @@ site_cancel_resume() {
 # 자가 점검 · 설치 끝에 한눈에
 # ------------------------------------------------------------------ #
 
+# Wi-Fi 로 붙어 있으면 절전이 꺼져 있나 · 1 꺼짐(또는 Wi-Fi 아님) · 0 켜짐 · 112 차
+site_wifi_powersave_ok() {
+  command -v nmcli >/dev/null 2>&1 || { echo 1; return; }
+  local name value
+  name="$(nmcli -t -f NAME,TYPE connection show --active 2>/dev/null | awk -F: '$2 == "802-11-wireless" { print $1; exit }')"
+  [[ -z "${name}" ]] && { echo 1; return; }
+  value="$(nmcli -g 802-11-wireless.powersave connection show "${name}" 2>/dev/null || true)"
+  if [[ "${value}" == "2" || "${value}" == "disable" ]]; then echo 1; else echo 0; fi
+}
+
 site_check_row() {
   local ok="$1" what="$2" detail="$3"
   if [[ "${ok}" == "1" ]]; then printf '  [OK]   %-28s %s\n' "${what}" "${detail}"; else printf '  [확인] %-28s %s\n' "${what}" "${detail}"; SITE_CHECK_FAILED=1; fi
@@ -418,6 +449,7 @@ site_selfcheck() {
     site_check_row "$(printf '%s' "${sb}" | grep -qi enabled && echo 0 || echo 1)" "Secure Boot 꺼짐 (EtherCAT 모듈)" "${sb:-미상}"
   fi
   site_check_row "$(systemctl is-enabled unattended-upgrades 2>/dev/null | grep -q masked && echo 1 || echo 0)" "자동 업데이트" "$(systemctl is-enabled unattended-upgrades 2>/dev/null || echo 없음)"
+  site_check_row "$(site_wifi_powersave_ok)" "Wi-Fi 절전 꺼짐" "$(iwconfig 2>/dev/null | grep -o 'Power Management:[a-z]*' | head -1 || echo 무선 없음) · 재연결 뒤 적용"
   for unit in motion-control motion-motor motion-coordination; do
     site_check_row "$(systemctl --user is-active --quiet "${unit}.service" && echo 1 || echo 0)" "${unit}.service" "$(systemctl --user is-active "${unit}.service" 2>/dev/null || echo unknown)"
   done
