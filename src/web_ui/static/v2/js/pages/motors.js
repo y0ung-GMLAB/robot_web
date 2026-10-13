@@ -157,10 +157,10 @@ async function writeAlias(row, motor, state, changed) {
 }
 
 /** 그 모터 설정 칸을 열고 그 자리로 내려간다 */
+/** 줄을 누르면 그 모터 설정이 표 아래에 열린다 · 화면은 그 자리 그대로(자동으로 내려가지 않음 · 사용자 2026-10-13) */
 function openDetail(axis, changed) {
   ui.selected = axis;
   changed();
-  setTimeout(() => document.getElementById('motor-detail')?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 600);
 }
 
 async function absoluteSetup(scope, row, state, changed) {
