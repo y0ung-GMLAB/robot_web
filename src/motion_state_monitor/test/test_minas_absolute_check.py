@@ -283,3 +283,41 @@ def test_retries_slow_down_after_a_minute():
     clock.now += 8.0
     check.observe(_masters(0))
     assert sum('0x3015' in c for c in runner.calls) == reads + 1
+
+
+# -- 수정 목록 108 (가) · 게인도 같이 읽어 화면에 · 막지 않는다 · 5 분마다 게인만 다시 ------------------- #
+
+def test_gains_are_read_with_the_absolute_values():
+    runner = FakeEthercat(modes={}, codes={})
+    clock = Clock()
+    check, _ = _check(runner, clock=clock)
+    _see(check, _masters(0))
+    gains = check.snapshot()['drives'][0]['gains']
+    assert set(gains) >= {'auto_tuning', 'stiffness', 'inertia_ratio', 'estimation_speed', 'error'}
+    assert gains['error'] == ''
+    assert any('0x3004' in call for call in runner.calls)
+
+
+def test_a_gain_read_failure_does_not_block():
+    runner = FakeEthercat(fail={(0, '0x3003')})
+    check, _ = _check(runner, clock=Clock())
+    _see(check, _masters(0))
+    drive = check.snapshot()['drives'][0]
+    assert drive['status'] == ma.DRIVE_OK
+    assert '0x3003' in drive['gains']['error']
+    assert check.snapshot()['state'] == ma.STATE_OK
+
+
+def test_gains_alone_are_read_again_later_without_rereading_pr015():
+    from motion_state_monitor.absolute_check import GAIN_REFRESH_SEC
+    runner = FakeEthercat(modes={}, codes={})
+    clock = Clock()
+    check, _ = _check(runner, clock=clock)
+    _see(check, _masters(0))
+    mode_reads = sum('0x3015' in c for c in runner.calls)
+    inertia_reads = sum('0x3004' in c for c in runner.calls)
+    clock.now += GAIN_REFRESH_SEC + 1
+    check.observe(_masters(0))
+    assert sum('0x3015' in c for c in runner.calls) == mode_reads          # 속성 C · 다시 안 읽음
+    assert sum('0x3004' in c for c in runner.calls) == inertia_reads + 1
+    assert check.snapshot()['state'] == ma.STATE_OK

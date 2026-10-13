@@ -13,7 +13,7 @@ import * as act from '../actions.js';
 import { isRevisionConflict } from '../mapping_model.js';
 import { threeWayMerge } from '../merge_model.js';
 import { confirmConflicts } from '../conflict_dialog.js';
-import { EDIT_FIELDS, absoluteJobText, absoluteSummary, getField, motorChanges, motorProblems, motorRows, setField } from '../motors_model.js';
+import { EDIT_FIELDS, absoluteJobText, absoluteSummary, gainText, gainWarnings, getField, motorChanges, motorProblems, motorRows, setField } from '../motors_model.js';
 import { signedDeg } from '../play_model.js';
 import { minasBaseCard } from './minas_base.js';
 
@@ -379,9 +379,11 @@ export function motorsBody(state, changed) {
         h('span', { text: '기구에 걸린 것이 없는지 확인한 뒤 오류를 초기화하고 서보를 켜세요' })),
       h('button', { class: 'btn btn-danger-soft', type: 'button', disabled: Boolean(ui.busy), onclick: () => servo(row, 'reset', state, changed) }, row.ac ? '오류 초기화' : '재부팅'))),
     servoAllBar(rows, state, changed),
+    // 게인 알림 · 막지 않음 · 108 (나)
+    gainWarnings(rows).map((text) => h('div', { class: 'blocker' }, dot('warn'), h('span', { class: 'grow', text }))),
     h('section', { class: 'card', 'aria-label': '모터' },
       rows.length ? h('div', { class: 'table-wrap' }, h('table', { class: 'table files-table' },
-        h('thead', {}, h('tr', {}, ['번호', '이름', '종류 · 모델', '서보', '위치 (모터°)', '과부하율', '앱솔루트', '통신'].map((text) => h('th', { scope: 'col', text })))),
+        h('thead', {}, h('tr', {}, ['번호', '이름', '종류 · 모델', '서보', '위치 (모터°)', '과부하율', '앱솔루트', '게인', '통신'].map((text) => h('th', { scope: 'col', text })))),
         // 줄 어디를 눌러도 그 모터 설정이 아래에 열린다 · 「⋯」 만으로는 무엇을 하는지 안 보였다 (2026-10-12)
         h('tbody', {}, rows.map((row) => h('tr', { class: `pick-row${row.axis === selected?.axis ? ' selected' : ''}`, title: '누르면 이 모터 설정이 아래에 열립니다', onclick: () => openDetail(row.axis, changed) },
           h('td', { class: 'mono', text: String(row.axis) }),
@@ -391,6 +393,9 @@ export function motorsBody(state, changed) {
           h('td', { class: 'mono', text: row.position === null ? '-' : signedDeg(row.position, 2) }),
           h('td', { class: `mono ${row.load !== null && row.load >= 100 ? 'tone-text-bad' : ''}`, text: row.load === null ? '-' : `${Math.round(row.load)}%` }),
           h('td', {}, h('span', { class: `chip chip-${row.absoluteTone}`, title: row.absoluteProblem, text: row.absolute })),
+          // 드라이브에 저장된 게인 · 마우스를 올리면 매뉴얼 번호와 값 · 108
+          (() => { const g = row.ac ? gainText(row.gains) : null; return h('td', { class: 'small', title: g?.hint || '' },
+            g ? h('span', { class: `chip chip-${g.tone}`, text: g.text }) : '-'); })(),
           h('td', { class: 'muted', text: row.comm }))))))
         : h('p', { class: 'muted', text: '설정된 모터가 없습니다. 위의 「전체 검색」으로 모터를 찾으세요.' })),
     selected ? detailCard(state, changed, selected) : null,

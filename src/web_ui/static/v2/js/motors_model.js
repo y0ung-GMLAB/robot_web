@@ -66,11 +66,44 @@ export function motorRows(registry, snap) {
       absoluteTone: absTone,
       absoluteProblem: String(drive?.problem || ''),
       absoluteStatus: ac && drive ? String(drive.status || '') : '',
+      // 게인 · 드라이브 EEPROM 값 그대로(우리 부팅 목록에 없음) · 수정 목록 108 (가)
+      gains: ac && drive?.gains ? drive.gains : null,
       comm: live.state === 'detected' ? '연결됨' : live.state ? `연결 안 됨 (${live.state})` : '연결 안 됨',
       masterIndex: Number(motor.identity?.ethercat_master_index ?? motor.config?.ethercat_master_index ?? 0),
       slavePosition: Number(motor.config?.position ?? motor.identity?.slave_position),
     };
   }).sort((a, b) => a.axis - b.axis);
+}
+
+/** 게인 칸 글 · 「자동 · 강성 13 · 관성비 137 %」 · 못 읽었으면 「-」 · 108 */
+export function gainText(gains) {
+  if (!gains) return { text: '-', tone: 'idle', hint: '아직 못 읽음(드라이브가 자리 잡으면 읽음)' };
+  const auto = gains.auto_tuning;
+  const parts = [
+    `자동조정 ${auto ?? '?'}`,   // 숫자 그대로 · 뜻(0 = 꺼짐 · 1 = 켬)은 마우스를 올리면 · 사용자 2026-10-13
+    gains.stiffness === null || gains.stiffness === undefined ? null : `강성 ${gains.stiffness}`,
+    gains.inertia_ratio === null || gains.inertia_ratio === undefined ? null : `관성비 ${gains.inertia_ratio} %`,
+  ].filter(Boolean);
+  const hint = [
+    `자동조정(Pr0.02) ${auto ?? '?'}${auto === 0 ? ' = 꺼짐' : auto ? ' = 켬' : ''}`,
+    `강성(Pr0.03) ${gains.stiffness ?? '?'}`,
+    `관성비(Pr0.04) ${gains.inertia_ratio ?? '?'} %`,
+    `추정 속도(Pr6.31) ${gains.estimation_speed ?? '?'}`,
+    '드라이브에 저장된 값(우리 프로그램은 쓰지 않음)',
+    gains.error ? `일부 못 읽음 · ${gains.error}` : '',
+  ].filter(Boolean).join('\n');
+  return { text: parts.join(' · '), tone: auto === 0 ? 'warn' : 'ok', hint };
+}
+
+/** 게인 알림 · 자동조정 꺼진 모터 · 드라이브끼리 강성이 다름 · 막지는 않는다(일부러 끈 것일 수 있음) · 108 (나) */
+export function gainWarnings(rows) {
+  const ac = rows.filter((r) => r.ac && r.gains);
+  const warnings = [];
+  const off = ac.filter((r) => r.gains.auto_tuning === 0).map((r) => `${r.axis}번`);
+  if (off.length) warnings.push(`자동조정 꺼짐 · ${off.join(' · ')} · 부하에 맞춰 게인이 바뀌지 않습니다(벤치에서 끈 값이 남았을 수 있음)`);
+  const stiff = [...new Set(ac.map((r) => r.gains.stiffness).filter((v) => v !== null && v !== undefined))];
+  if (stiff.length > 1) warnings.push(`드라이브마다 강성이 다릅니다 · ${ac.map((r) => `${r.axis}번 ${r.gains.stiffness ?? '?'}`).join(' · ')}`);
+  return warnings;
 }
 
 /** 앱솔루트 한 줄 · 「3/3 정상」 */

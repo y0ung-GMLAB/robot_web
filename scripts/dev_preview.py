@@ -201,7 +201,10 @@ def snapshot():
                 {'axis': axis, 'master_index': 0, 'slave_position': axis,
                  'absolute_mode': 0 if axis != 4 or state['abs_done'] else 1,
                  'status': 'ok' if axis != 4 or state['abs_done'] else 'not_absolute',
-                 'problem': '' if axis != 4 or state['abs_done'] else 'Pr0.15=1(인크리멘털)'}
+                 'problem': '' if axis != 4 or state['abs_done'] else 'Pr0.15=1(인크리멘털)',
+                 # 게인 · 108 · 2번은 벤치에서 꺼 둔 자동조정이 남은 모양
+                 'gains': {'auto_tuning': 0 if axis == 2 else 1, 'stiffness': 12 if axis == 2 else 13,
+                           'inertia_ratio': [137, 143, 137, 250, 250][axis % 5], 'estimation_speed': 1, 'error': ''}}
                 for _, axis, *_ in JOINTS]},
             'project_id': 'preview',
             'selected_project_id': 'preview',

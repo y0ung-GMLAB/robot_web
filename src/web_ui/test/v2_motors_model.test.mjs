@@ -68,3 +68,19 @@ test('EtherCAT 주소 겹침 · 서버 저장 검사와 같은 규칙 · 저장 
   assert.match(motorProblems([ac(0, 0, 0), ac(1, 0, 0)])[0], /Alias 0 · Slave 0이 0번과 같습니다 · |「전체 검색」/);
   assert.deepEqual(motorProblems([ac(0, 101, 0), ac(1, 0, 0)]), [], 'Alias 를 쓰는 드라이브와 Slave 번호로 찾는 드라이브는 겹치지 않는다');
 });
+
+test('게인 칸 · 드라이브에 저장된 값 그대로 · 자동조정 꺼짐 · 강성 다름 알림 (수정 목록 108)', async () => {
+  const { gainText, gainWarnings } = await import('../static/v2/js/motors_model.js');
+  const on = { auto_tuning: 1, stiffness: 13, inertia_ratio: 137, estimation_speed: 1, error: '' };
+  const off = { auto_tuning: 0, stiffness: 12, inertia_ratio: 137, estimation_speed: 1, error: '' };
+  assert.equal(gainText(on).text, '자동조정 1 · 강성 13 · 관성비 137 %');
+  assert.equal(gainText(off).tone, 'warn');
+  assert.match(gainText(on).hint, /Pr0\.04/);
+  assert.equal(gainText(null).text, '-');
+  const rows = [{ axis: 0, ac: true, gains: on }, { axis: 2, ac: true, gains: off }, { axis: 5, ac: false, gains: null }];
+  const warnings = gainWarnings(rows);
+  assert.equal(warnings.length, 2);
+  assert.match(warnings[0], /자동조정 꺼짐 · 2번/);
+  assert.match(warnings[1], /0번 13 · 2번 12/);
+  assert.deepEqual(gainWarnings([{ axis: 0, ac: true, gains: on }]), []);
+});

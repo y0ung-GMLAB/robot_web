@@ -21,6 +21,12 @@ motion_state 의 `minas_absolute` 로 싣는다 · 판정은 `motion_common.mina
 
 `ethercat` 명령은 폴링 타이머를 막지 않게 따로 스레드에서 돈다.
 
+게인 값도 같이 읽는다 · 수정 목록 108 (가) (2026-10-13)
+    자동조정(Pr0.02) · 강성(Pr0.03) · 관성비(Pr0.04) · 추정 속도(Pr6.31) · 우리 부팅 목록에 없어 드라이브
+    EEPROM 값이 그대로 쓰인다 · 벤치에서 꺼 둔 자동조정이 남아 축2 가 떨었다(108 경과) · 화면에 보이게 ·
+    읽기 실패는 앱솔루트 판정과 상관없다(막지 않는다) · 관성비는 자동조정이 계속 바꾸므로 `GAIN_REFRESH_SEC`
+    마다 게인만 다시 읽는다(Pr0.15 는 다시 안 읽는다 · 속성 C) · 다시 읽기도 버스가 자리 잡은 때만.
+
 버스가 자리 잡은 뒤에 읽는다 · 수정 목록 110 (2026-10-12 floating4 재부팅)
     부팅 때 Motor Manager 가 드라이브를 PREOP → OP 로 올리는 동안 마스터가 같은 메일박스로
     설정 SDO 를 보낸다 · 그 사이 `ethercat upload` 가 끼면 「wrong SDO」 · 「No response」 로
@@ -52,6 +58,17 @@ SETTLE_SEC = 2.0
 RETRY_FAST_SEC = 2.0
 RETRY_FAST_WINDOW_SEC = 60.0
 RETRY_SLOW_SEC = 10.0
+
+#: 게인 · 이름 → (객체, 형식) · MINAS Pr X.YY = 0x3XYY · 10-07 · 10-12 실물에서 int16 으로 읽고 씀
+GAIN_OBJECTS: Tuple[Tuple[str, int, str], ...] = (
+    ('auto_tuning', 0x3002, 'int16'),
+    ('stiffness', 0x3003, 'int16'),
+    ('inertia_ratio', 0x3004, 'int16'),
+    ('estimation_speed', 0x3631, 'int16'),
+)
+#: 게인만 다시 읽는 간격 · 읽기 실패가 있으면 짧게
+GAIN_REFRESH_SEC = 300.0
+GAIN_RETRY_SEC = 15.0
 
 Signature = FrozenSet[Tuple[int, int]]
 BusStates = FrozenSet[Tuple[int, int, str]]
@@ -134,6 +151,8 @@ class MinasAbsoluteCheck:
         #: 「확인 불가」 다시 읽기 · 다음 때 · 처음 실패한 때
         self._retry_at: Optional[float] = None
         self._first_failure_at: Optional[float] = None
+        #: 게인만 다시 읽을 때 · None = 잡히지 않음(앱솔루트 읽기가 끝나면 잡는다)
+        self._gains_due: Optional[float] = None
         self._summary: Dict[str, Any] = minas_absolute.checking_summary()
 
     @staticmethod
@@ -164,14 +183,21 @@ class MinasAbsoluteCheck:
             elif self._retry_at is not None and now >= self._retry_at:
                 self._retry_at = None
                 self._pending = True
-            if not self._pending or self._running:
-                # 도는 읽기가 끝나면 구성이 달라진 것을 보고 다시 읽는다
+            if self._running or now - self._states_since < SETTLE_SEC:
+                # 도는 읽기가 끝나면 구성이 달라진 것을 보고 다시 읽는다 ·
+                # 버스가 자리 잡기 전엔 안 읽는다(마스터가 드라이브를 설정 중 · 메일박스가 붐빈다 · 110)
                 return
-            if now - self._states_since < SETTLE_SEC:
-                return                      # 마스터가 아직 드라이브를 설정 중 · 메일박스가 붐빈다
-            self._pending = False
-            self._running = True
-        self._spawn(self._run)
+            if self._pending:
+                self._pending = False
+                self._running = True
+                target = self._run
+            elif self._gains_due is not None and now >= self._gains_due:
+                self._gains_due = None
+                self._running = True
+                target = self._refresh_gains
+            else:
+                return
+        self._spawn(target)
 
     def snapshot(self) -> Dict[str, Any]:
         with self._lock:
@@ -200,8 +226,51 @@ class MinasAbsoluteCheck:
                 if signature:
                     self._summary = minas_absolute.summary(drives, checked_at=now)
                 self._schedule_retry(drives, now)
+                self._schedule_gains(drives, now)
                 self._running = False
                 return
+
+    def _schedule_gains(self, drives: List[Dict[str, Any]], now: float) -> None:
+        """다음 게인 다시 읽기 · 잠금 안에서 부른다 · 읽기 실패가 있으면 짧게"""
+        if not drives:
+            self._gains_due = None
+            return
+        failed = any((drive.get('gains') or {}).get('error') for drive in drives)
+        self._gains_due = now + (GAIN_RETRY_SEC if failed else GAIN_REFRESH_SEC)
+
+    def _refresh_gains(self) -> None:
+        """게인만 다시 읽어 지금 목록에 얹는다 · 앱솔루트 판정은 그대로"""
+        with self._lock:
+            signature = self._signature
+            drives = [dict(drive) for drive in self._summary.get('drives') or []]
+        for drive in drives:   # 목록은 MINAS 드라이브만 담는다
+            drive['gains'] = self._read_gains(int(drive['master_index']), int(drive['slave_position']))
+        with self._lock:
+            now = self._clock()
+            if signature == self._signature and self._summary.get('drives'):
+                by_slot = {(d['master_index'], d['slave_position']): d.get('gains') for d in drives}
+                self._summary = {
+                    **self._summary,
+                    'drives': [
+                        {**drive, 'gains': by_slot.get((drive['master_index'], drive['slave_position']), drive.get('gains'))}
+                        for drive in self._summary['drives']
+                    ],
+                }
+                self._schedule_gains(self._summary['drives'], now)
+            self._running = False
+
+    def _read_gains(self, master: int, position: int) -> Dict[str, Any]:
+        """자동조정 · 강성 · 관성비 · 추정 속도 · 하나라도 못 읽으면 error 에 이유(값은 읽은 것만)"""
+        gains: Dict[str, Any] = {}
+        errors = []
+        for name, index, data_type in GAIN_OBJECTS:
+            value, error = self._upload(master, position, index, data_type)
+            gains[name] = value
+            if error:
+                errors.append(error)
+        gains['error'] = ' / '.join(errors)
+        gains['read_at'] = self._clock()
+        return gains
 
     def _schedule_retry(self, drives: List[Dict[str, Any]], now: float) -> None:
         """읽기 실패(「확인 불가」)가 남았으면 다음 읽기를 잡는다 · 잠금 안에서 부른다"""
@@ -232,14 +301,16 @@ class MinasAbsoluteCheck:
                     continue
                 mode, mode_error = self._upload(master, position, 0x3015, 'int16')
                 code, code_error = self._upload(master, position, 0x603F, 'uint16')
-                drives.append(self._drive(
+                drive = self._drive(
                     master, position,
                     alias=alias,
                     absolute_mode=mode,
                     error_code=code,
                     read_error=mode_error,
                     error_code_error=code_error,
-                ))
+                )
+                drive['gains'] = self._read_gains(master, position)   # 108 · 막지 않는다
+                drives.append(drive)
         return drives
 
     def _vendors(self, master: int) -> Tuple[Dict[int, Tuple[Optional[int], Optional[int]]], str]:
