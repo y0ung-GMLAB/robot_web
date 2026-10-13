@@ -46,6 +46,8 @@ export function rowToDraft(row) {
   out.initial_mode = ['reference', 'first_frame', 'manual'].includes(row?.initial_mode) ? row.initial_mode : 'reference';
   out.motor_axis = row?.motor_axis === null || row?.motor_axis === undefined || row?.motor_axis === '' ? null : Number(row.motor_axis);
   out.motor_ref = String(row?.motor_ref || '');
+  // 범위 확인은 불러올 때 칸으로 굳힌다 · 옛 파일(칸 없음)도 · 그 뒤 숫자만 고쳐서는 안 바뀐다 · 사람이 체크 (사용자 2026-10-13)
+  out.range_confirmed = rangeConfirmed(out);
   return out;
 }
 
@@ -64,6 +66,8 @@ export function draftToRow(draft) {
   }
   if (!out.reference_enabled) out.reference_position_rad = 0;
   out.motion_id = String(out.motion_id || '').trim();
+  // 늘 칸을 적어 보낸다 · 옛 파일 짐작(±180)은 서버가 한 번만 · 수정 목록 97
+  out.range_confirmed = rangeConfirmed(draft);
   return out;
 }
 
@@ -76,13 +80,6 @@ export function rangeConfirmed(row) {
   const lower = Number(row?.motion_lower_deg);
   const upper = Number(row?.motion_upper_deg);
   return !(Math.abs(lower - -180) < 1e-6 && Math.abs(upper - 180) < 1e-6);
-}
-
-/** 최소·최대 둘 다 기본값(±180)이 아니게 되면 저절로 확인 · 끄지는 않는다(기존 화면과 같음) */
-export function autoConfirmRange(row) {
-  const lower = Number(row.motion_lower_deg);
-  const upper = Number(row.motion_upper_deg);
-  if (Number.isFinite(lower) && Number.isFinite(upper) && lower !== -180 && upper !== 180) row.range_confirmed = true;
 }
 
 /** 재생을 막는 줄 · 「사용」 이고 이름 있고 미확인 */

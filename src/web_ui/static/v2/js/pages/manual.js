@@ -18,7 +18,7 @@ import {
 } from '../dial_session.js';
 import { ManualStream } from '../manual_stream.js';
 import {
-  autoConfirmRange, draftToRow, jointToMotor, motorForRow, motorRefFor, motorToJoint, patchRow, previewRow, rowToDraft, savedMismatch,
+  draftToRow, jointToMotor, motorForRow, motorRefFor, motorToJoint, patchRow, previewRow, rowToDraft, savedMismatch,
 } from '../mapping_model.js';
 import { registeredPlaylist, signedDeg } from '../play_model.js';
 import { manualNotices } from '../model.js';
@@ -435,8 +435,8 @@ async function capture(item, kind, changed) {
   const next = patchRow(ui.mapping || [], item.row, plan.patch);
   if (!next) { toast(`「${item.row.motion_id}」 줄을 지금 매핑에서 찾지 못했습니다. 화면을 새로 고친 뒤 다시 하세요.`, 'bad'); return; }
   if (plan.kind !== 'reference') {
+    // 범위 확인은 바꾸지 않는다 · 사람이 조인트 매핑에서 직접 체크 (사용자 2026-10-13)
     if (Number(next.row.motion_lower_deg) > Number(next.row.motion_upper_deg)) { toast('하한이 상한보다 커집니다. 위치를 확인하세요.', 'bad'); return; }
-    autoConfirmRange(next.row);
   }
   try {
     const fileId = ui.fileId;
