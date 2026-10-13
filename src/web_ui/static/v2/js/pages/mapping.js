@@ -18,8 +18,9 @@ import { motorsDraft } from './motors.js';
 import { threeWayMerge } from '../merge_model.js';
 import { confirmConflicts } from '../conflict_dialog.js';
 
-/** 「범위 확인」 칸 옆 주의 · 숫자만 넣고 체크하지 않게 (사용자 2026-10-13) */
-export const RANGE_NOTE = '범위 확인 유의 · 실제 기계 범위인지 확인한 뒤 체크';
+/** 「범위 확인」 칸 옆 주의 · 짧게 · 자세한 건 마우스를 올리면 (사용자 2026-10-13 · 「노란 글씨가 너무 길어」) */
+export const RANGE_NOTE = '범위 확인 유의';
+export const RANGE_HINT = '최소·최대가 실제 기계 범위인지 확인한 뒤 직접 체크 · 숫자 입력만으로는 안 켜짐 · 저장 전에는 재생·수동 조작 막힘';
 
 const ui = { fileId: '', revision: '', name: '', saved: [], rows: null, selected: '', validation: null, busy: '', loadError: '', content: '' };
 let keySeq = 0;
@@ -229,9 +230,9 @@ function table(state, changed) {
       // 숫자를 넣어도 저절로 체크되지 않는다 · 사람이 직접 (사용자 2026-10-13)
       h('td', { class: row.enabled && !rangeConfirmed(row) ? 'range-unconfirmed' : '' }, h('div', { class: 'cell-row' },
         h('input', { type: 'checkbox', checked: rangeConfirmed(row), 'aria-label': `${index + 1}번 줄 범위 확인`,
-          title: '최소·최대가 이 로봇의 실제 기계 범위인지 확인하는 칸입니다. 확인하고 저장하기 전에는 재생, 초기 위치 이동, 수동 조작을 할 수 없습니다. 최소·최대를 입력해도 저절로 체크되지 않습니다. 직접 체크하세요.',
+          title: RANGE_HINT,
           onchange: (e) => { row.range_confirmed = e.target.checked; changed(); } }),
-        h('span', { class: 'small tone-text-warn range-note', text: RANGE_NOTE }))),
+        h('span', { class: 'small tone-text-warn range-note', text: RANGE_NOTE, title: RANGE_HINT }))),
       h('td', {}, h('div', { class: 'cell-row' },
         numberInput(row, 'max_velocity_deg_s', changed, { label: '최대 속도 deg/s', placeholder: '없음' }),
         numberInput(row, 'max_acceleration_deg_s2', changed, { label: '최대 가속 deg/s²', placeholder: '없음' }))),
@@ -322,9 +323,9 @@ export function mappingBody(state, changed) {
   return [
     ui.loadError ? h('div', { class: 'blocker' }, dot('warn'), h('span', { class: 'grow', text: `다시 불러오기 실패 · ${ui.loadError} · 수정 중인 내용은 그대로 남아 있습니다` })) : null,
     unconfirmedRows(ui.rows).length ? h('div', { class: 'blocker bad' }, dot('bad'),
-      h('span', { class: 'grow', text: `범위 미확인 · ${unconfirmedRows(ui.rows).map((r) => r.motion_id).join(', ')}. 최소·최대가 실제 기계 범위인지 확인한 뒤 「범위 확인」을 직접 체크하고 저장하세요(숫자만 입력해서는 풀리지 않습니다). 그 전에는 재생, 초기 위치 이동, 수동 조작이 차단됩니다.` })) : null,
+      h('span', { class: 'grow', text: `범위 미확인 · ${unconfirmedRows(ui.rows).map((r) => r.motion_id).join(', ')} · 「범위 확인」 체크 후 저장 · 그 전엔 재생·수동 조작 막힘`, title: RANGE_HINT })) : null,
     state.snap?.mapping_range_blocker && !unconfirmedRows(ui.rows).length && changeSummary(ui.saved, ui.rows).length
-      ? h('p', { class: 'muted small', text: '「범위 확인」을 체크했습니다 · 저장해야 범위 미확인 상태가 해제됩니다' }) : null,
+      ? h('p', { class: 'muted small', text: '체크함 · 저장하면 풀림' }) : null,
     h('section', { class: 'card', 'aria-label': '조인트' },
       ui.rows.length ? table(state, changed) : h('p', { class: 'muted', text: motorList(state).length
         ? '조인트가 없습니다. 「인식 모터 자동 생성」을 누르세요.'
