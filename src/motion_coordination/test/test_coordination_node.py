@@ -2157,3 +2157,178 @@ def test_a_slave_losing_its_bridge_while_running_still_latches():
     node._consume_local_runtime_status()
 
     assert len(failures) == 1
+
+
+# ---------------------------------------------------------------------- #
+# 수정 목록 130 · 마스터 자신의 예약 확인이 늦어도 잠그지 않는다 · 여유는 잰 값으로
+#
+# 실물 2026-10-13 19:20~19:26 floating4 · 준비 거절 3대를 뺀 뒤 바로 초기 위치 예약(여유 0.5 s ·
+# 마감 0.4 s) → 마스터 자신의 확인(HTTP → 브리지 → ROS → motion_run_manager)이 늦어 「그룹 예약
+# 확인 제한시간 초과 · floating4」 → GROUP_SCHEDULE_ACK_TIMEOUT 2등급 잠금 · 다섯 번
+# ---------------------------------------------------------------------- #
+
+def _pending_schedule(node, participants, *, acked=(), command='initialize_at'):
+    node._execution = GroupExecution()
+    node._execution.begin('pc-a', participants)
+    node._execution.state = 'initializing'
+    node._execution.pending_command = command
+    node._execution.pending_command_id = 'cmd-schedule'
+    node._execution.pending_acks = set(acked)
+    node._execution.pending_published_at = time.monotonic() - 0.5
+    node._execution.pending_ack_deadline = time.monotonic() - 0.1
+    node._execution.pending_scheduled_at = time.monotonic() + 0.05
+    sent = []
+    node._call_local_control = lambda payload, **_kwargs: (
+        sent.append(('local', payload['command'])) or {'success': True}
+    )
+    node._command_pub = _Publisher(sent)
+    return sent
+
+
+def test_only_the_masters_own_late_initialize_ack_cancels_without_latch():
+    node = _node()
+    sent = _pending_schedule(node, ('pc-a',))
+    execution_id = node._execution.execution_id
+
+    node._enforce_schedule_ack_deadline()
+
+    assert sent[0] == ('local', 'group_cancel')
+    assert node._execution.execution_id == ''
+    assert node._execution.state == 'stopped'
+    assert node._coordination_error == {}, '그룹 오류(2등급)로 잠그지 않는다'
+    assert node._last_start_failure['code'] == 'GROUP_SCHEDULE_SELF_LATE'
+    # 아직 끝나지 않은 제 로컬 호출이 뒤늦게 성공해도 그 세션은 세운다
+    assert execution_id in node._cancelled_execution_ids
+
+
+def test_masters_own_late_ack_with_peers_releases_the_group_without_latch():
+    node = _node()
+    sent = _pending_schedule(node, ('pc-a', 'pc-b'), acked=('pc-b',))
+
+    node._enforce_schedule_ack_deadline()
+
+    assert sent == [('local', 'group_cancel'), ('dds', 'cancel_before_start')]
+    assert node._execution.state == 'releasing'
+    assert node._execution.release_error is False
+    _peer_release_ack(node)
+    assert node._execution.execution_id == ''
+    assert node._execution.state == 'stopped'
+    assert node._coordination_error == {}
+
+
+def test_a_late_peer_still_latches_as_before():
+    node = _node()
+    _pending_schedule(node, ('pc-a', 'pc-b'), acked=('pc-a',))
+
+    node._enforce_schedule_ack_deadline()
+
+    assert node._coordination_error['code'] == 'GROUP_SCHEDULE_ACK_TIMEOUT'
+
+
+def _schedule_initialize(node):
+    node._execution = GroupExecution()
+    node._execution.begin('pc-a', ('pc-a',))
+    node._execution.mark_ready('pc-a')
+    node._sync_ready = {'pc-a'}
+    node._sync_next_action = 'initialize'
+    node._command_pub = _Publisher()
+    before = time.monotonic()
+    node._complete_trigger_sync_if_ready()
+    command = node._command_pub.messages[-1]
+    return command, command.scheduled_monotonic_ns / 1e9 - before
+
+
+def test_own_ack_is_counted_as_soon_as_the_local_call_returns():
+    """사건이 DDS 를 돌아오기 전에 마감 검사가 먼저 돌아도 취소되지 않게"""
+    node = _node()
+    command, _lead = _schedule_initialize(node)
+
+    assert command.command == 'initialize_at'
+    assert node._execution.pending_command_id == command.command_id
+    node._note_own_schedule_latency(command, {'success': True})
+    assert node._execution.pending_command_id == ''
+    node._enforce_schedule_ack_deadline()
+    assert node._execution.execution_id != ''
+
+
+def test_initialize_lead_starts_at_the_floor_and_grows_with_the_masters_latency():
+    from motion_coordination.schedule_lead import INITIALIZE_LEAD_MIN_SEC
+
+    node = _node()
+    command, lead = _schedule_initialize(node)
+    assert lead == pytest.approx(INITIALIZE_LEAD_MIN_SEC, abs=0.05)
+    # 이번엔 마스터 자신이 1.2 s 걸렸다(늦음) · 다음 여유는 두 배 + 마감 여백
+    node._schedule_sent[command.command_id] = (time.monotonic() - 1.2, time.monotonic() + 0.3)
+    node._note_own_schedule_latency(command, {'success': True})
+    _command, lead = _schedule_initialize(node)
+    assert lead == pytest.approx(2.5, abs=0.05)
+
+
+def test_masters_own_timing_rejection_does_not_latch():
+    node = _node()
+    _pending_schedule(node, ('pc-a',))
+    node._event_callback(GroupEvent(
+        group_id='stage-a',
+        execution_id=node._execution.execution_id,
+        pc_id='pc-a',
+        event='rejected',
+        command_id='cmd-schedule',
+        success=False,
+        message='그룹 예약 트리거의 준비 여유가 부족합니다',
+    ))
+
+    assert node._execution.execution_id == ''
+    assert node._coordination_error == {}
+    assert node._last_start_failure['code'] == 'GROUP_SCHEDULE_SELF_LATE'
+
+
+def test_restart_after_a_completed_run_with_refusing_pcs_dropped():
+    """V-22 의 노드 쪽 · 1회 끝 → 바로 다시 1회 × 3 · 준비 거절 PC 를 빼고 매번 예약까지 간다"""
+    from motion_coordination.group_execution import GROUP_PROTOCOL_VERSION
+
+    node = _node()
+    node._joined = True
+    node._registry = MemberRegistry()
+    for pc_id in ('pc-b', 'pc-c'):
+        node._registry.update(Member(
+            pc_id=pc_id, boot_id=f'boot-{pc_id}', joined=True, is_master=False,
+            state='idle', trigger_sync_state='idle', trigger_sync_uncertainty_ms=0.0,
+            alarm_grade=0, received_monotonic=time.monotonic(),
+            protocol_version=GROUP_PROTOCOL_VERSION, operation_mode='manual',
+        ))
+    node._local_alarm_grade = lambda: 0
+    node._command_pub = _Publisher()
+    node._call_local_control = lambda payload, **_kwargs: {'success': True}
+    node._last_start_failure = {}
+    node._execution = GroupExecution()
+
+    for _ in range(3):
+        result = node._start_group_execution(request={'run_mode': 'once', 'started_by': 'human'})
+        execution_id = result['execution_id']
+        assert result['participants'] == ['pc-a', 'pc-b', 'pc-c']
+        prepare = node._command_pub.messages[-1]
+        node._event_callback(GroupEvent(
+            group_id='stage-a', execution_id=execution_id, pc_id='pc-a',
+            event='ready', command_id=prepare.command_id, success=True,
+        ))
+        for pc_id in ('pc-b', 'pc-c'):
+            node._event_callback(GroupEvent(
+                group_id='stage-a', execution_id=execution_id, pc_id=pc_id,
+                event='rejected', command_id=prepare.command_id, success=False,
+                message='현재 프로젝트의 실행 준비가 끝나지 않았습니다',
+            ))
+        initialize = [
+            message for message in node._command_pub.messages
+            if message.command == 'initialize_at' and message.execution_id == execution_id
+        ]
+        assert len(initialize) == 1
+        assert list(initialize[0].participant_ids) == ['pc-a']
+        lead = initialize[0].scheduled_monotonic_ns / 1e9 - time.monotonic()
+        assert lead > 1.0, '마스터 자신의 확인이 0.4 s 안이라는 가정을 하지 않는다'
+        node._note_own_schedule_latency(initialize[0], {'success': True})
+        node._enforce_schedule_ack_deadline()
+        assert node._execution.execution_id == execution_id
+        assert node._coordination_error == {}
+        # 1회 끝 · 정리 · 바로 다음 시작
+        node._execution.stop_now()
+        node._clear_active_execution()

@@ -12,7 +12,7 @@ import yaml
 from motion_common import paths as common_paths
 from motion_common.execution_context import confirm_context_id
 from motion_common.paths import project_dir_for
-from motion_common import command_router, generation as generation_mod, motion_table, topics, wire_units
+from motion_common import command_router, generation as generation_mod, latest_tap, motion_table, topics, wire_units
 from motion_common.values import finite_float, optional_int
 from motion_control_msgs.msg import MotorStatus
 from rclpy.node import Node
@@ -258,14 +258,27 @@ class MotionRunManager(Node):
                 'motion_trace_max_mb', DEFAULT_MAX_BYTES // (1024 * 1024)).value) * 1024 * 1024,
         )
         self._motor_status_raw_sub = None
+        self._motor_status_tap = None
         if self._motion_trace.enabled:
-            self._motor_status_raw_sub = self.create_subscription(
-                MotorStatus,
-                str(self.declare_parameter('motor_status_topic', topics.MOTOR_STATUS).value),
-                self._motion_trace.on_motor_status,
-                qos,
-                raw=True,
+            motor_status_topic = str(
+                self.declare_parameter('motor_status_topic', topics.MOTOR_STATUS).value
             )
+            # 실행기 밖 구독 · 재생 틱에 마지막 한 장만 꺼낸다 · 서 있을 때 1 kHz 로 깨지 않게 · 수정 목록 130
+            self._motor_status_tap = latest_tap.open_tap(
+                self, MotorStatus, motor_status_topic,
+                node_class=Node, qos=qos, raw=True,
+                suffix='motor_status_tap', logger=self.get_logger(),
+            )
+            if self._motor_status_tap is not None:
+                self._motion_trace.set_poll(self._motor_status_tap.take_latest)
+            else:
+                self._motor_status_raw_sub = self.create_subscription(
+                    MotorStatus,
+                    motor_status_topic,
+                    self._motion_trace.on_motor_status,
+                    qos,
+                    raw=True,
+                )
 
         self.get_logger().info(
             f'motion_run_manager started: state={self.motion_state_topic}, '
@@ -288,6 +301,10 @@ class MotionRunManager(Node):
     def destroy_node(self):
         # 쓰다 만 회차 기록을 마저 쓴다
         self._motion_trace.close()
+        tap = getattr(self, '_motor_status_tap', None)
+        if tap is not None:
+            self._motion_trace.set_poll(None)
+            tap.close()
         return super().destroy_node()
 
     def _motion_state_callback(self, msg: String) -> None:

@@ -109,6 +109,8 @@ class MotionTraceRecorder:
         self.stale_sec = float(stale_sec)
         # 튜플 한 번 바꿔 끼우기는 원자적이다 · 1kHz 콜백에 락을 두지 않는다
         self._latest: Tuple[Any, float] = (None, 0.0)
+        #: 실행기 밖 구독에서 마지막 한 장을 꺼내는 함수 · 없으면 `on_motor_status` 로 받는다 · 130
+        self._poll: Optional[Callable[[], Any]] = None
         self._queue: 'queue.Queue[Optional[Tuple[CycleTrace, str, str]]]' = queue.Queue()
         self._last_prune: Dict[Path, float] = {}
         self._thread = threading.Thread(target=self._writer_loop, name='motion_trace_writer', daemon=True)
@@ -120,7 +122,23 @@ class MotionTraceRecorder:
     def on_motor_status(self, raw: Any) -> None:
         self._latest = (raw, time.monotonic())
 
+    def set_poll(self, poll: Optional[Callable[[], Any]]) -> None:
+        """콜백 구독 대신 재생 틱마다 마지막 한 장을 꺼내 쓴다 · 수정 목록 130
+
+        전에는 1 kHz 구독이 서 있을 때도 실행기를 초당 1,000 번 깨웠다(실물 motion_run_manager
+        CPU 51 %) · 기록은 재생 중 20 ms 마다 한 번만 본다.
+        """
+        self._poll = poll
+
     def latest(self) -> Tuple[Any, float]:
+        poll = getattr(self, '_poll', None)
+        if poll is not None:
+            try:
+                raw = poll()
+            except Exception:  # noqa: BLE001 · 못 꺼내면 직전 값 · 오래되면 비워 둔다(stale_sec)
+                raw = None
+            if raw is not None:
+                self._latest = (raw, time.monotonic())
         return self._latest
 
     def begin(self, plan: Mapping[str, Any], cycle_number: int, project_dir: Path) -> Optional[CycleTrace]:

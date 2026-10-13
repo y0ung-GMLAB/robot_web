@@ -66,20 +66,57 @@ class StatePublisher:
         self.last_disabled_publish_at = 0.0
         self.started_at = time.time()
         self.subscription = None
+        #: 실행기 밖 구독 · 처리 박자 타이머 · 수정 목록 130
+        self.tap = None
+        self.poll_timer = None
 
     def _create_input_subscription(self) -> None:
-        if self.subscription is None:
-            self.subscription = self.monitor.create_subscription(
-                MotorStatus,
-                self.monitor.input_topic,
-                self._motor_status_callback,
-                self.monitor._input_qos,
+        if self.subscription is not None or getattr(self, 'tap', None) is not None:
+            return
+        process_hz = max(float(getattr(self.monitor, 'feedback_process_hz', 0.0)), 0.0)
+        open_tap = getattr(self.monitor, '_open_motor_status_tap', None)
+        tap = open_tap() if process_hz > 0.0 and callable(open_tap) else None
+        if tap is not None:
+            # 실행기 밖 구독 · 처리 박자(100 Hz) 타이머가 마지막 한 장만 꺼낸다 · 전에는 1 kHz 마다
+            # 실행기가 깨어 메시지를 꺼내고 100 Hz 로 거르기만 했다(실물 서 있을 때 CPU 85 %) ·
+            # 처리 박자 · 연결 판정 시간은 같다 · 수정 목록 130
+            self.tap = tap
+            self.poll_timer = self.monitor.create_timer(
+                1.0 / process_hz, self._poll_motor_status,
             )
+            return
+        self.subscription = self.monitor.create_subscription(
+            MotorStatus,
+            self.monitor.input_topic,
+            self._motor_status_callback,
+            self.monitor._input_qos,
+        )
 
     def _destroy_motor_status_subscription(self) -> None:
         if self.subscription is not None:
             self.monitor.destroy_subscription(self.subscription)
             self.subscription = None
+        timer = getattr(self, 'poll_timer', None)
+        if timer is not None:
+            self.monitor.destroy_timer(timer)
+            self.poll_timer = None
+        tap = getattr(self, 'tap', None)
+        if tap is not None:
+            tap.close()
+            self.tap = None
+
+    def _poll_motor_status(self) -> None:
+        """처리 박자마다 마지막 상태 한 장 · 새 것이 없으면 그대로(나이가 늘어 끊김 판정) · 130"""
+        if not self.monitor.monitoring_enabled:
+            return
+        tap = getattr(self, 'tap', None)
+        msg = tap.take_latest() if tap is not None else None
+        if msg is None:
+            return
+        now = time.time()
+        self.last_status_at = now
+        self.last_processed_at = now
+        self._process_motor_status(msg, now)
 
     def _motor_status_callback(self, msg: MotorStatus) -> None:
         if not self.monitor.monitoring_enabled:
@@ -96,7 +133,9 @@ class StatePublisher:
         ):
             return
         self.last_processed_at = now
+        self._process_motor_status(msg, now)
 
+    def _process_motor_status(self, msg: MotorStatus, now: float) -> None:
         controller_indices = list(getattr(msg, 'controller_index', []))
         count = min(len(controller_indices), self.monitor.max_motors)
         if len(controller_indices) > self.monitor.max_motors:

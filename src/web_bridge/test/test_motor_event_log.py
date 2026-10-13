@@ -138,6 +138,67 @@ def test_event_log_record_limit_keeps_latest_records(tmp_path):
     ]
 
 
+def test_append_under_the_limits_does_not_reread_or_rewrite(tmp_path, monkeypatch):
+    """수정 목록 130 · 전에는 한 줄마다 모든 파일을 읽고 오늘 파일을 통째로 다시 썼다(fsync) ·
+    그동안 락을 쥐어 브리지 ROS 콜백(10 Hz 모터 상태)까지 섰고 그룹 기록이 2 s 를 넘겼다"""
+    from motion_web_bridge import motor_event_log
+
+    bridge = event_log_bridge(tmp_path)
+    rewrites = []
+    monkeypatch.setattr(
+        motor_event_log.store, 'atomic_write_text',
+        lambda path, text, **_kwargs: rewrites.append(path),
+    )
+    reads = []
+    real_lines = motor_event_log._event_log_lines
+    monkeypatch.setattr(
+        motor_event_log, '_event_log_lines',
+        lambda path: reads.append(path) or real_lines(path),
+    )
+    for index in range(50):
+        bridge.append('motion', 'motion_started', str(index), f'기록 {index}')
+
+    assert rewrites == []
+    assert len(reads) <= 1, '처음 한 번만 센다'
+    monkeypatch.setattr(motor_event_log, '_event_log_lines', real_lines)
+    assert len(bridge.events(limit=100)['events']) == 50
+
+
+def test_over_the_limit_trims_to_ninety_percent_then_appends_without_rewrite(tmp_path, monkeypatch):
+    from motion_web_bridge import motor_event_log
+
+    bridge = event_log_bridge(tmp_path)
+    bridge.max_records = 20
+    for index in range(21):
+        bridge.append('motion', 'motion_started', str(index), f'기록 {index}')
+    contents = [event['content'] for event in reversed(bridge.events(limit=100)['events'])]
+    assert contents == [f'기록 {index}' for index in range(3, 21)]
+
+    rewrites = []
+    real_write = motor_event_log.store.atomic_write_text
+    monkeypatch.setattr(
+        motor_event_log.store, 'atomic_write_text',
+        lambda path, text, **kwargs: rewrites.append(path) or real_write(path, text, **kwargs),
+    )
+    for index in range(21, 23):
+        bridge.append('motion', 'motion_started', str(index), f'기록 {index}')
+    assert rewrites == []
+    assert len(bridge.events(limit=100)['events']) == 20
+    bridge.append('motion', 'motion_started', '23', '기록 23')
+    assert len(rewrites) == 1
+    assert len(bridge.events(limit=100)['events']) == 18
+
+
+def test_old_days_are_still_dropped_on_the_first_write(tmp_path):
+    bridge = event_log_bridge(tmp_path)
+    bridge.retention_days = 2
+    (tmp_path / '2000-01-01.jsonl').write_text('{"content":"옛"}\n', encoding='utf-8')
+
+    bridge.append('motion', 'motion_started', 'a', '오늘')
+
+    assert not (tmp_path / '2000-01-01.jsonl').exists()
+
+
 def test_delete_single_event_log_file(tmp_path):
     bridge = event_log_bridge(tmp_path)
     bridge.append('motion', 'motion_started', 'sample.json', '모션 시작')
