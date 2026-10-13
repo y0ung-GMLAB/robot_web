@@ -78,13 +78,19 @@ export function minasBaseProblems(rows, draft) {
   return problems;
 }
 
-/** 보이는 값 글 · 보기 항목은 보기 글 */
+/** 보이는 값 글 · 드라이브에 들어가는 숫자 그대로(사용자 2026-10-13 「4 뭐 이렇게 원래값대로」) */
 export function valueText(row, value) {
+  return `${value}${row.unit ? ` ${row.unit}` : ''}`;
+}
+
+/** 마우스를 올리면 뜨는 뜻 · 보기 항목은 그 값의 뜻 · 나머지는 항목 설명 */
+export function valueHint(row, value) {
   if (Array.isArray(row.choices)) {
     const choice = row.choices.find((c) => c.value === Number(value));
-    return choice ? choice.label : String(value);
+    const others = row.choices.map((c) => `${c.value} = ${c.label}`).join(' · ');
+    return choice ? `${value} = ${choice.label} (고를 수 있는 값 · ${others})` : others;
   }
-  return `${value}${row.unit ? ` ${row.unit}` : ''}`;
+  return row.note || '';
 }
 
 async function save(changed) {
@@ -115,13 +121,14 @@ function editor(row, changed) {
   const shown = draftValue !== undefined ? draftValue : (row.local ?? '');
   if (Array.isArray(row.choices)) {
     const current = String(shown === '' ? row.default : shown);
-    return h('select', { class: 'input', 'aria-label': row.label,
+    return h('select', { class: 'input mono', 'aria-label': row.label, title: valueHint(row, current),
       onchange: (e) => { ui.draft[row.key] = e.target.value === String(row.default) ? '' : e.target.value; changed(); } },
-    row.choices.map((choice) => h('option', { value: String(choice.value), selected: String(choice.value) === current ? '' : null },
-      `${choice.label}${choice.value === row.default ? ' · 기본' : ''}`)));
+    row.choices.map((choice) => h('option', { value: String(choice.value), title: `${choice.value} = ${choice.label}`,
+      selected: String(choice.value) === current ? '' : null },
+    `${choice.value}${choice.value === row.default ? ' (기본)' : ''}`)));
   }
   return h('input', { class: 'input mono', type: 'number', step: '1', min: row.min, max: row.max, value: shown,
-    placeholder: `기본 ${row.default}`, 'aria-label': row.label,
+    placeholder: `기본 ${row.default}`, 'aria-label': row.label, title: row.note || '',
     oninput: (e) => { ui.draft[row.key] = e.target.value; },
     onchange: () => changed() });
 }
@@ -146,8 +153,9 @@ export function minasBaseCard(changed, { hasAc = true } = {}) {
       h('td', {},
         h('strong', { text: row.label }), h('span', { class: 'muted small mono', text: `  ${row.number || ''}` }),
         h('div', { class: 'muted small', text: row.note })),
-      h('td', { class: 'common-value' }, ui.unlocked ? editor(row, changed) : h('span', { text: valueText(row, row.value) })),
-      h('td', { class: 'muted small common-default', text: valueText(row, row.default) }),
+      h('td', { class: 'common-value' }, ui.unlocked ? editor(row, changed)
+        : h('span', { class: 'mono hint', text: valueText(row, row.value), title: valueHint(row, row.value) })),
+      h('td', { class: 'muted small mono common-default', text: valueText(row, row.default), title: valueHint(row, row.default) }),
       h('td', { class: 'common-state' }, h('span', { class: `chip chip-${changedHere ? 'info' : 'idle'}`, text: changedHere ? '이 PC에서 바꿈' : '기본 그대로' })));
   });
   return h('section', { class: 'card', 'aria-label': label },

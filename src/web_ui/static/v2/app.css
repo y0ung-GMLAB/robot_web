@@ -484,3 +484,5 @@ details.raw pre.raw-file { max-height: 480px; }
 .common-table td.common-default { width: 190px; white-space: nowrap; }
 .common-table td.common-state { width: 120px; white-space: nowrap; }
 @media (max-width: 720px) { .common-table td.common-value { width: auto; min-width: 180px; } }
+/* 마우스를 올리면 뜻이 뜨는 값 · 점선 밑줄로 알림 */
+.common-table .hint { text-decoration: underline dotted; text-underline-offset: 3px; cursor: help; }
