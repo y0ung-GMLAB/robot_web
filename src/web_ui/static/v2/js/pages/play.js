@@ -8,7 +8,7 @@ import { runSummary } from '../model.js';
 import {
   initialMoveChoices, REPEAT_MODES,
   axisRows, defaultScope, groupRows, groupRuntime, groupScopeBlocker, groupStopCommand,
-  isRunning, phaseSteps, playHeadline, registeredPlaylist, runStatus, startBlocker,
+  isRunning, phaseSteps, playHeadline, registeredPlaylist, repeatChoice, runStatus, startBlocker,
 } from '../play_model.js';
 import { api } from '../net.js';
 import * as act from '../actions.js';
@@ -69,10 +69,9 @@ async function busy(work, state, changed) {
 
 function syncFromServer(status) {
   const automation = status.automation || {};
-  if (ui.repeatMode === null) {
-    // 이전 UI 에서 고른 「바로 다음」 · 「대기 후 다음」 은 초기 위치를 거치는 쪽으로 읽는다
-    const saved = String(automation.repeat_mode || '');
-    ui.repeatMode = saved === 'dwell' ? 'dwell_reinitialize' : (saved && saved !== 'direct' ? saved : 'reinitialize');
+  // 늘 둘 중 하나가 골라져 있게 · 모르는 값이면 「초기 위치로 돌아간 뒤」 · 수정 목록 120 (다)
+  if (ui.repeatMode === null || !REPEAT_MODES.some((m) => m.id === ui.repeatMode)) {
+    ui.repeatMode = repeatChoice(automation.repeat_mode);
     ui.dwellSec = Number(automation.dwell_sec || 0);
   }
   if (ui.syncMode === null && automation.group_sync_mode) ui.syncMode = automation.group_sync_mode;

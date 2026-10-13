@@ -3,15 +3,26 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
   axisRows, defaultScope, fileInfo, groupRows, groupStopCommand, initialMoveChoices, phaseSteps, playHeadline, REPEAT_MODES,
-  playlistAdd, playlistMove, playlistRemove, registeredPlaylist, startBlocker,
+  playlistAdd, playlistMove, playlistRemove, registeredPlaylist, repeatChoice, startBlocker,
 } from '../static/v2/js/play_model.js';
 
 const group = (extra = {}) => ({ coordination: { config: { is_master: true, enabled: true }, runtime: { joined: true, execution: {}, ...extra } } });
 
-test('범위 · 그룹에 든 마스터만 매장 전체가 기본', () => {
-  assert.equal(defaultScope(group()), 'group');
-  assert.equal(defaultScope({ coordination: { config: { is_master: false }, runtime: { joined: true } } }), 'local');
+test('범위 · 기본은 단독 · 마스터에서 그룹 실행이 돌고 있을 때만 그룹 전체 (수정 목록 120 (나))', () => {
+  assert.equal(defaultScope(group()), 'local', '그룹에 든 마스터라도 처음엔 단독');
+  assert.equal(defaultScope(group({ execution: { execution_id: 'exec-1' } })), 'group', '돌고 있는 그룹 실행');
+  assert.equal(defaultScope({ coordination: { config: { is_master: false }, runtime: { joined: true, execution: { execution_id: 'e' } } } }), 'local');
   assert.equal(defaultScope({}), 'local');
+});
+
+test('회차 사이 · 늘 하나 골라짐 · 모르는 값·빈 값은 「초기 위치로 돌아간 뒤」 (수정 목록 120 (다))', () => {
+  assert.equal(repeatChoice(''), 'reinitialize');
+  assert.equal(repeatChoice(undefined), 'reinitialize');
+  assert.equal(repeatChoice('direct'), 'reinitialize');
+  assert.equal(repeatChoice('dwell'), 'dwell_reinitialize');
+  assert.equal(repeatChoice('DWELL_REINITIALIZE'), 'dwell_reinitialize');
+  assert.equal(repeatChoice('weird'), 'reinitialize');
+  for (const mode of REPEAT_MODES) assert.equal(repeatChoice(mode.id), mode.id);
 });
 
 test('시작 막는 이유 · 자동·끔 모드는 수동으로 바꾸기 버튼 · 긴급 정지가 먼저', () => {

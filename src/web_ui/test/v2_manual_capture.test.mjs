@@ -53,6 +53,10 @@ test('저장 뒤 확인 · 파일 값이 다르면 무엇이 다른지 · 같으
   assert.match(savedMismatch([server[0]], target, patch)[0], /찾지 못했습니다/);
 });
 
+test('다이얼 한 칸 기본값 = 조인트 1° (수정 목록 126 · 120 (라))', () => {
+  assert.match(MANUAL_SRC, /mode: 'axis', axis: null, unit: 'joint', dialOn: false, step: 1,/);
+});
+
 test('capture 는 객체 비교 대신 patchRow · 저장 뒤 다시 읽어 savedMismatch', () => {
   const body = MANUAL_SRC.slice(MANUAL_SRC.indexOf('async function capture('), MANUAL_SRC.indexOf('/* ---------- 그리기'));
   assert.doesNotMatch(body, /r === item\.row/);

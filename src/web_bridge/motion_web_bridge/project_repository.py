@@ -16,7 +16,7 @@ from typing import Any, Dict, List
 
 import yaml
 
-from motion_common import motion_table, store
+from motion_common import motion_table, schedule_store, store
 from motion_common.paths import NO_PROJECT_SELECTED
 
 from . import project_backup
@@ -345,6 +345,11 @@ class ProjectRepository:
             },
         }
         self._write_manifest(project_dir, manifest)
+        # 운전 모드 「수동」 으로 시작 · 설정하기 전에 스케줄이 모터를 돌리지 않게 · 수정 목록 120 (가)
+        self._atomic_write(
+            project_dir / schedule_store.STORE_FILE_NAME,
+            json.dumps(schedule_store.new_project_store_payload(), ensure_ascii=False, indent=2) + '\n',
+        )
         self.select_project(project_id)
         return self.get_project(project_id)
 
