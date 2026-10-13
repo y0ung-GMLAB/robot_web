@@ -60,8 +60,9 @@ export async function updateAll() {
 }
 
 export async function faultReset() {
+  // 알람이 없는 축은 서버가 건드리지 않는다(서보 그대로) · 수정 목록 112 가
   return attempt(() => api('POST', '/api/motion-test/ac-servo/control', { body: { action: 'fault_reset', scope: 'all' } }),
-    '오류를 초기화했습니다. 원인을 확인한 뒤 서보를 켜세요.');
+    (r) => (r?.skipped_axes ? r.message : '오류를 초기화했습니다. 알람이 있던 모터는 서보가 꺼져 있습니다. 원인을 확인한 뒤 서보를 켜세요.'));
 }
 
 export async function restartProgram() {
@@ -271,7 +272,9 @@ export async function servoControl(motor, action) {
   const path = ac ? '/api/motion-test/ac-servo/control' : '/api/motion-test/dynamixel/control';
   const body = ac ? { action: map[action], scope: 'selected', axis: motor.axis } : { action: map[action], axis: motor.axis };
   return attempt(() => api('POST', path, { body, timeoutMs: 5000 }),
-    action === 'reset' && ac ? '오류를 초기화했습니다. 서보는 꺼진 상태입니다. 원인을 확인한 뒤 「서보 켜기」를 누르세요.' : (r) => r?.message || '명령을 보냈습니다');
+    action === 'reset' && ac
+      ? (r) => (r?.skipped_axes ? r.message : '오류를 초기화했습니다. 서보는 꺼진 상태입니다. 원인을 확인한 뒤 「서보 켜기」를 누르세요.')
+      : (r) => r?.message || '명령을 보냈습니다');
 }
 
 /**

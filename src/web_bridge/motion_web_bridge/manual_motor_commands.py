@@ -572,6 +572,26 @@ class ManualMotorCommandService:
                 }
             axes = [axis_value]
 
+        if action_value == 'fault_reset':
+            # 알람이 있는 축에만 보낸다 · 리셋은 드라이브를 서보 OFF 로 떨어뜨린다 · 알람 없는 축까지
+            # 보내면 켜져 있던 서보가 꺼졌다(2026-10-12 floating4) · 수정 목록 112 가 (사용자 결정)
+            faulted = [
+                axis for axis in axes
+                if bool((self._motion_state_motor(axis) or {}).get('fault'))
+            ]
+            if not faulted:
+                return {
+                    'success': True,
+                    'message': '알람이 없어 오류 초기화를 하지 않았습니다 · 서보는 그대로입니다',
+                    'skipped_axes': list(axes),
+                    **self.bridge.snapshot(),
+                }
+            axes = faulted
+            if axis_value is not None and axis_value not in faulted:
+                axis_value = None
+            # 감독은 scope 'all' 이면 축 목록을 안 보고 감지된 AC 축 전부에 보낸다 · 고른 축만
+            scope_value = 'selected'
+
         request_id = self.bridge.new_project_request_id('ac-servo-control')
         payload = {
             'request_id': request_id,
