@@ -240,10 +240,40 @@ export function confirmApplyMotorConfig(reason = '') {
   });
 }
 
+/** 응답이 끊기거나 500 이어도 적용은 됐을 수 있다(서버가 재시작으로 내려감) · 작업 기록으로 판정 · 수정 목록 132 */
+export async function applyOutcomeFromRecord(read, { previousId = '', tries = 15, waitMs = 2000, sleep = (ms) => new Promise((r) => setTimeout(r, ms)) } = {}) {
+  for (let i = 0; i < tries; i += 1) {
+    await sleep(waitMs);
+    let snap = null;
+    try { snap = await read(); } catch { continue; }   // 다시 켜지는 중
+    const op = snap?.motor_operation || {};
+    if (op.type !== 'motor_apply') continue;
+    if (previousId && op.operation_id === previousId) continue;   // 누르기 전 기록 · 이번 적용이 아님
+    if (op.status === 'success') return { success: true, message: op.message || '모터 설정 적용·재시작 완료' };
+    if (op.status && op.status !== 'running') return { success: false, message: op.error || op.message || '적용 실패' };
+  }
+  return null;
+}
+
 /** 저장된 파일을 적용(파일은 안 고침 · §6-221) · 확인은 부르는 쪽에서 */
-export function applyMotorConfig() {
-  return attempt(() => api('POST', '/api/motor-config/apply', { timeoutMs: 60000 }),
-    (r) => r?.message || '적용했습니다. 모터 프로그램이 다시 시작되고 화면이 다시 연결됩니다.');
+export async function applyMotorConfig() {
+  let previousId = '';
+  try { previousId = String((await api('GET', '/api/status', { timeoutMs: 3000 }))?.motor_operation?.operation_id || ''); } catch { /* 몰라도 됨 */ }
+  try {
+    const result = await api('POST', '/api/motor-config/apply', { timeoutMs: 60000 });
+    toast(result?.message || '적용했습니다. 모터 프로그램이 다시 시작되고 화면이 다시 연결됩니다.', 'ok');
+    return result;
+  } catch (error) {
+    // 재시작이 응답보다 먼저 브리지를 내리면 연결 끊김·500 · 실제 결과는 작업 기록에 · 132
+    toast('응답이 끊겼습니다 · 적용 결과를 확인하는 중…', 'warn');
+    const outcome = await applyOutcomeFromRecord(() => api('GET', '/api/status', { timeoutMs: 3000 }), { previousId });
+    if (outcome) {
+      toast(outcome.message, outcome.success ? 'ok' : 'bad');
+      return outcome.success ? outcome : null;
+    }
+    toast(error.message || String(error), 'bad');
+    return null;
+  }
 }
 
 /** 부팅 값이 옛 값일 때 · 확인 → 적용(서버가 부팅 목록을 새 설정으로 다시 만든다) · 홈 · 모터 설정 같이 씀 · 수정 목록 116 */

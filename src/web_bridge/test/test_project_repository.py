@@ -2348,7 +2348,7 @@ def test_web_apply_requests_managed_service_restart_without_second_launch(
     assert result['success'] is True
     assert result['restart_mode'] == 'split_managed_services'
     assert commands[0][0][:4] == [
-        '/bin/bash', '-c', 'sleep 0.5; exec "$@"',
+        '/bin/bash', '-c', 'sleep 2; exec "$@"',
         'motion-control-delayed-restart',
     ]
     assert commands[0][0][4:] == [

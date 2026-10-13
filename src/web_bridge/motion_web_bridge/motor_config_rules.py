@@ -758,6 +758,10 @@ def wait_for_ethercat_release(timeout_sec: float) -> None:
     )
 
 
+#: 서비스 재시작을 거는 지연 · 응답이 먼저 나가게 · 수정 목록 132
+MANAGED_RESTART_DELAY_SEC = 2.0
+
+
 def schedule_managed_service_restart(*managed_services: str) -> None:
     """Return the HTTP response before stopping the process serving it.
 
@@ -777,11 +781,13 @@ def schedule_managed_service_restart(*managed_services: str) -> None:
         or any(service not in allowed_services for service in managed_services)
     ):
         raise ValueError('허용되지 않은 자동실행 서비스 이름입니다')
+    # 0.5 s 는 짧았다 · 재시작 요청 뒤에도 작업 기록 갱신 등이 0.5 s 넘게 걸려 응답 전에 브리지가 내려가
+    # 적용은 성공했는데 화면은 HTTP 500 · 수정 목록 132 (실물 2026-10-13) · 시간대 바꾸기(2 s)와 같게
     subprocess.Popen(
         [
             '/bin/bash',
             '-c',
-            'sleep 0.5; exec "$@"',
+            f'sleep {MANAGED_RESTART_DELAY_SEC:g}; exec "$@"',
             'motion-control-delayed-restart',
             '/usr/bin/systemctl',
             '--user',
