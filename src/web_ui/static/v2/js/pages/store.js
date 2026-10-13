@@ -5,20 +5,83 @@
 import { h, dot } from '../dom.js';
 import { rosterCandidates, storeRows, updateRows, versionSummary } from '../store_model.js';
 import { api } from '../net.js';
+import { confirmBox, toast } from '../dialog.js';
 import * as act from '../actions.js';
 
 const ui = { busy: false };
 
 /** 업데이트 표는 PC 마다 물어보는 것이라 이 화면에서만 받는다 */
 export async function loadStore(state, changed) {
-  const page = state.storePage || (state.storePage = { update: null, error: '' });
+  const page = state.storePage || (state.storePage = { update: null, error: '', modes: null, modesError: '' });
   try {
     page.update = await api('GET', '/api/system/update-all', { timeoutMs: 20000 });
     page.error = '';
   } catch (error) {
     page.error = error.message || String(error);
   }
+  await loadModes(state, changed);
   changed();
+}
+
+/** PC 마다 운전 모드 · 이 서버가 그 PC 웹에 대신 묻는다 · 2026-10-13 (밤샘 시험 F-1) */
+async function loadModes(state, changed) {
+  const page = state.storePage;
+  try {
+    page.modes = (await api('GET', '/api/remote/run-modes', { timeoutMs: 20000 }))?.pcs || [];
+    page.modesError = '';
+  } catch (error) {
+    page.modesError = error.message || String(error);
+  }
+  changed();
+}
+
+const MODE_NAMES = { schedule: '스케줄', manual: '수동', off: '끔' };
+const MODE_WARN = {
+  schedule: '운영 시간에 맞춰 재생을 시작하고 멈춥니다. 지금이 운영 시간이면 곧 재생을 시작합니다(마스터 PC 가 그룹을 시작).',
+  manual: '스케줄이 손대지 않습니다. 사람이 켠 재생은 운영 시간 밖이어도 계속 돕니다.',
+  off: '모든 움직임 명령을 막습니다. 진행 중인 재생은 이번 회차가 끝나면 멈춥니다.',
+};
+
+async function setModes(pcIds, mode, state, changed) {
+  const ok = await confirmBox({
+    title: `${pcIds.join(' · ')} → ${MODE_NAMES[mode]} 모드`,
+    body: `${MODE_WARN[mode]}\n그 PC 에 사람이 붙어 일하고 있지 않은지 확인하세요.`,
+    confirmLabel: '바꾸기', tone: 'warning',
+  });
+  if (!ok) return;
+  await busy(async () => {
+    try {
+      const result = await api('PUT', '/api/remote/run-mode', { body: { pc_ids: pcIds, run_mode: mode }, timeoutMs: 30000 });
+      toast(result?.message || '바꿨습니다', result?.success === false ? 'bad' : 'ok');
+    } catch (error) {
+      toast(error.message || String(error), 'bad');
+    }
+    await loadModes(state, changed);
+  }, state, changed);
+}
+
+function modeCard(state, changed) {
+  const page = state.storePage || {};
+  const pcs = page.modes || [];
+  const reachable = pcs.filter((pc) => !pc.error).map((pc) => pc.pc_id);
+  return h('section', { class: 'card', 'aria-label': 'PC 별 운전 모드' },
+    h('div', { class: 'card-head' }, h('h2', { text: '운전 모드 · PC 별' }),
+      h('span', { class: 'grow' }),
+      h('button', { class: 'btn btn-mini', type: 'button', disabled: ui.busy, onclick: () => loadModes(state, changed) }, '다시 읽기')),
+    page.modesError ? h('p', { class: 'tone-text-bad', text: page.modesError }) : null,
+    !page.modes ? h('p', { class: 'muted', text: '불러오는 중…' }) : h('div', { class: 'table-wrap' }, h('table', { class: 'table' },
+      h('thead', {}, h('tr', {}, ['PC', '지금', '바꾸기'].map((text) => h('th', { scope: 'col', text })))),
+      h('tbody', {}, pcs.map((pc) => h('tr', {},
+        h('td', {}, h('strong', { text: pc.display_name || pc.pc_id }), pc.is_local ? h('span', { class: 'muted small', text: ' · 이 PC' }) : null),
+        h('td', {}, pc.error ? h('span', { class: 'muted small', text: pc.error })
+          : h('span', { class: `chip chip-${pc.run_mode === 'schedule' ? 'ok' : pc.run_mode === 'off' ? 'warn' : 'info'}`, text: MODE_NAMES[pc.run_mode] || pc.run_mode || '-' })),
+        h('td', {}, h('div', { class: 'segmented', role: 'group', 'aria-label': `${pc.pc_id} 운전 모드` },
+          ['schedule', 'manual', 'off'].map((mode) => h('button', { class: 'seg', 'aria-pressed': String(pc.run_mode === mode), type: 'button',
+            disabled: ui.busy || Boolean(pc.error) || pc.run_mode === mode, onclick: () => setModes([pc.pc_id], mode, state, changed) }, MODE_NAMES[mode]))))))))),
+    reachable.length > 1 ? h('div', { class: 'row' },
+      h('span', { class: 'muted small', text: `연결된 ${reachable.length}대 한 번에` }),
+      ['schedule', 'manual'].map((mode) => h('button', { class: 'btn btn-mini', type: 'button', disabled: ui.busy,
+        onclick: () => setModes(reachable, mode, state, changed) }, `모두 ${MODE_NAMES[mode]}`))) : null);
 }
 
 async function busy(work, state, changed) {
@@ -124,6 +187,8 @@ export function renderStore(state, { changed }) {
     rows.length
       ? h('ul', { class: 'pc-grid', 'aria-label': 'PC 목록' }, rows.map(pcCard))
       : h('section', { class: 'card' }, h('p', { class: 'muted', text: '같은 네트워크의 다른 PC를 기다리는 중입니다. Wi-Fi와 그룹 ID를 확인하세요.' })),
+    // PC 별 운전 모드 · 그 PC 화면에 들어가지 않고 · 2026-10-13
+    modeCard(state, changed),
     updateCard(state, changed),
     h('div', { class: 'grid-2' },
       rosterCard(state, changed),

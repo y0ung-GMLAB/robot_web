@@ -1179,6 +1179,26 @@ async def preview_drive_gains(request: Request):
     return {'success': True, 'message': f"프리뷰 · {' · '.join(f'{a}번' for a in axes)} 게인을 썼습니다(실제로는 아무것도 안 함)"}
 
 
+# 다른 PC 운전 모드 · 가짜 · 2026-10-13
+PREVIEW_MODES = {'floating1': 'manual', 'floating2': 'manual', 'floating3': 'manual', 'floating4': 'manual'}
+
+
+@app.get('/api/remote/run-modes')
+async def preview_remote_modes():
+    rows = [{'pc_id': pc, 'display_name': pc, 'is_local': pc == 'floating1', 'online': pc != 'floating3',
+             'run_mode': mode if pc != 'floating3' else '', 'error': '' if pc != 'floating3' else '연결 안 됨'}
+            for pc, mode in PREVIEW_MODES.items()]
+    return {'success': True, 'pcs': rows}
+
+
+@app.put('/api/remote/run-mode')
+async def preview_set_remote_mode(request: Request):
+    body = await request.json()
+    for pc in body.get('pc_ids') or []:
+        PREVIEW_MODES[pc] = body.get('run_mode')
+    return {'success': True, 'message': f"프리뷰 · {' · '.join(body.get('pc_ids') or [])} → {body.get('run_mode')}"}
+
+
 # 파라미터 (고급) · 진짜 규칙(drive_params) · 가짜 드라이브 값 · 109 · 114
 PREVIEW_DRIVE_VALUES = {}
 

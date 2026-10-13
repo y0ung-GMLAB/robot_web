@@ -169,7 +169,7 @@ export function minasBaseCard(changed, { hasAc = true, acAxes = [], onSaveAll = 
     !ui.unlocked && onSaveAll && acAxes.length ? h('div', { class: 'pick-row-actions' },
       h('span', { class: 'muted small', text: '적용 뒤 한 번 눌러 두면 프로그램 없이 드라이브만 켜질 때도 같은 값이 쓰입니다' }),
       h('button', { class: 'btn btn-mini', type: 'button', disabled: ui.busy, onclick: onSaveAll,
-        title: '모든 MINAS 드라이브 · 드라이브 안(EEPROM)에 저장 · 전원을 꺼도 지금 값이 남음 · 모터 프로그램이 몇 초 멈췄다 다시 켜짐' }, '모든 드라이브에 저장')) : null,
+        title: '모든 MINAS 드라이브 · 드라이브 안(EEPROM)에 저장 · 전원을 꺼도 지금 값이 남음 · 모터 프로그램이 몇 초 멈췄다 다시 켜짐' }, '모든 드라이브 저장(EEPROM)')) : null,
     ui.unlocked ? h('div', { class: 'pick-row-actions' },
       h('span', { class: 'muted small', text: Object.keys(pending).length ? `바꾼 칸 ${Object.keys(pending).length}개` : '바꾼 칸 없음' }),
       h('button', { class: 'btn btn-primary', type: 'button', disabled: ui.busy || problems.length > 0 || !Object.keys(pending).length,

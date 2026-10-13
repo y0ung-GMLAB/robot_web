@@ -87,7 +87,7 @@ async function write(row, changed, reload) {
     ui.unlockedAxis = null;
     ui.draft = {};
     const keep = await confirmBox({
-      title: '드라이브에 저장',
+      title: '드라이브 저장(EEPROM)',
       body: '지금 값은 전원을 끄면 사라집니다. 드라이브 안(EEPROM)에도 저장할까요?\n모터 프로그램이 몇 초 멈췄다 다시 켜지고, 그동안 서보 토크가 풀립니다. 브레이크가 없는 모터는 처질 수 있습니다.\n(값을 더 맞춰 볼 거면 나중에 저장해도 됩니다. 표의 게인 칸은 1분 안에 새 값으로 바뀝니다.)',
       confirmLabel: '저장', cancelLabel: '나중에', tone: 'warning',
     });
@@ -134,7 +134,7 @@ export async function autoTuneAll(rows, changed, reload) {
       body: { axes: off.map((r) => r.axis), values: { auto_tuning: 1 }, confirmed: true }, timeoutMs: 60000 });
     toast(result?.message || '켰습니다', result?.success === false ? 'bad' : 'ok');
     if (result?.success !== false && await confirmBox({
-      title: '드라이브에 저장', body: '전원을 꺼도 남게 드라이브 안(EEPROM)에도 저장할까요? 모터 프로그램이 몇 초 멈췄다 다시 켜집니다.',
+      title: '드라이브 저장(EEPROM)', body: '전원을 꺼도 남게 드라이브 안(EEPROM)에도 저장할까요? 모터 프로그램이 몇 초 멈췄다 다시 켜집니다.',
       confirmLabel: '저장', cancelLabel: '나중에', tone: 'warning',
     })) await saveAll(off.map((r) => r.axis), changed, reload);
   } catch (error) {
@@ -174,5 +174,5 @@ export function gainField(row, changed, reload) {
           h('button', { class: 'btn btn-mini', type: 'button', disabled: ui.busy, onclick: () => { ui.unlockedAxis = null; ui.draft = {}; changed(); } }, '취소')]
         : h('button', { class: 'btn btn-mini', type: 'button', disabled: ui.busy || !gains, title: gains ? '' : '아직 드라이브에서 읽지 못했습니다',
           onclick: () => unlock(row, changed) }, '잠금 해제')),
-    h('p', { class: 'muted small', text: '자동조정이 켜져 있으면 관성비와 위치·속도 게인은 드라이브가 정합니다. 사람이 맞추는 것은 강성입니다. 쓰면 바로 적용되고 전원을 끄면 사라집니다(남기려면 「드라이브에 저장」).' }));
+    h('p', { class: 'muted small', text: '자동조정이 켜져 있으면 관성비와 위치·속도 게인은 드라이브가 정합니다. 사람이 맞추는 것은 강성입니다. 쓰면 바로 적용되고 전원을 끄면 사라집니다(남기려면 「드라이브 저장(EEPROM)」).' }));
 }

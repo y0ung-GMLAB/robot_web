@@ -69,7 +69,7 @@ CATALOG: List[Tuple[str, str, str, int, int, str, Optional[int], str, str]] = [
 
 #: 여기서 못 쓰는 객체 · 이유
 WRITE_BLOCKED: Dict[int, str] = {
-    0x1010: 'EEPROM 저장은 「드라이브에 저장」 버튼으로',
+    0x1010: 'EEPROM 저장은 「드라이브 저장(EEPROM)」 버튼으로',
     0x3015: '앱솔루트 방식은 「앱솔루트 설정」 버튼으로(전원 재투입 · 다회전 클리어 순서가 있다)',
     0x4D00: '다회전 클리어는 전용 버튼으로', 0x4D01: '다회전 클리어는 전용 버튼으로',
     0x6040: '제어 워드는 모터 프로그램이 쓴다', 0x6060: '운전 모드는 모터 프로그램이 정한다',
@@ -223,7 +223,7 @@ class DriveParams:
         self._record(record)
         return {
             'success': not error,
-            'message': (f'0x{index:04X}:{sub} {before} → {after} · 지금부터 적용(전원을 끄면 사라짐 · 남기려면 「드라이브에 저장」)'
+            'message': (f'0x{index:04X}:{sub} {before} → {after} · 지금부터 적용(전원을 끄면 사라짐 · 남기려면 「드라이브 저장(EEPROM)」)'
                         if not error else f'쓰기 실패 · {error}'),
             'notes': notes, 'before': before, 'after': after,
         }

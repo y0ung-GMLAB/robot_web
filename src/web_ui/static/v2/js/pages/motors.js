@@ -118,7 +118,7 @@ function servoAllBar(rows, state, changed) {
 
 async function maintenance(row, action, state, changed) {
   const texts = {
-    eeprom_save: { title: `${row.axis}번 드라이브에 저장`, body: '드라이브의 현재 설정값을 전원을 꺼도 유지되도록 저장합니다. 모터 프로그램을 잠시 정지했다가 다시 시작하며(몇 초), 그동안 서보 토크가 해제됩니다. 브레이크가 없는 모터는 처질 수 있습니다.\n저장하는 동안(최대 10초) 드라이브 전원을 끄지 마세요.', tone: 'warning', label: '저장' },
+    eeprom_save: { title: `${row.axis}번 드라이브 저장(EEPROM)`, body: '드라이브의 현재 설정값을 전원을 꺼도 유지되도록 저장합니다. 모터 프로그램을 잠시 정지했다가 다시 시작하며(몇 초), 그동안 서보 토크가 해제됩니다. 브레이크가 없는 모터는 처질 수 있습니다.\n저장하는 동안(최대 10초) 드라이브 전원을 끄지 마세요.', tone: 'warning', label: '저장' },
     absolute_clear: { title: `${row.axis}번 다회전 클리어`, body: '엔코더의 회전 수 기록을 0으로 초기화합니다. 위치 기준이 바뀝니다.\n서보가 꺼져 있어야 합니다. 끝나면 드라이브 전원을 껐다 켜세요. 위치 값이 바뀌므로 기준점을 다시 캡처해야 하며, 그 전에는 재생하지 마세요.', tone: 'danger', label: '클리어' },
   }[action];
   if (action === 'absolute_clear' && row.servoOn) { toast('서보를 먼저 끄세요. 다회전 클리어는 서보가 꺼진 상태에서만 할 수 있습니다.', 'warn'); return; }
@@ -335,7 +335,7 @@ function detailCard(state, changed, row) {
         row.servoOn
           ? h('button', { class: 'btn btn-mini', type: 'button', disabled: busy, onclick: () => servo(row, 'off', state, changed) }, row.ac ? '서보 끄기' : '토크 끄기')
           : h('button', { class: 'btn btn-mini', type: 'button', disabled: busy || row.fault || !row.detected, onclick: () => servo(row, 'on', state, changed) }, row.ac ? '서보 켜기' : '토크 켜기'),
-        row.ac ? h('button', { class: 'btn btn-mini', type: 'button', disabled: busy, title: '드라이브 안(EEPROM)에 저장 · 전원을 꺼도 지금 값이 남음 · 모터 프로그램이 몇 초 멈췄다 다시 켜짐', onclick: () => maintenance(row, 'eeprom_save', state, changed) }, '드라이브에 저장') : null,
+        row.ac ? h('button', { class: 'btn btn-mini', type: 'button', disabled: busy, title: '드라이브 안(EEPROM)에 저장 · 전원을 꺼도 지금 값이 남음 · 모터 프로그램이 몇 초 멈췄다 다시 켜짐', onclick: () => maintenance(row, 'eeprom_save', state, changed) }, '드라이브 저장(EEPROM)') : null,
         row.ac ? h('button', { class: 'btn btn-mini', type: 'button', disabled: busy || row.absolute === '정상', title: row.absolute === '정상' ? '이미 앱솔루트 방식입니다. 다시 설정하면 기준점이 사라집니다.' : '',
           onclick: () => absoluteSetup('one', row, state, changed) }, row.absolute === '정상' ? '앱솔루트 정상' : '앱솔루트 설정') : null,
         row.ac ? h('button', { class: 'btn btn-mini danger-text', type: 'button', disabled: busy, onclick: () => maintenance(row, 'absolute_clear', state, changed) }, '다회전 클리어') : null),
@@ -418,7 +418,7 @@ export function motorsBody(state, changed) {
       onSaveAll: async () => {
         const axes = rows.filter((r) => r.ac && r.detected).map((r) => r.axis);
         const ok = await confirmBox({
-          title: `모든 드라이브에 저장 · ${axes.map((a) => `${a}번`).join(' · ')}`,
+          title: `모든 드라이브 저장(EEPROM) · ${axes.map((a) => `${a}번`).join(' · ')}`,
           body: '지금 드라이브에 들어 있는 값(공통 설정 · 게인 등)을 전원을 꺼도 남게 저장합니다.\n'
             + '모터 프로그램이 한 번 멈췄다 다시 켜지고, 그동안 서보 토크가 풀립니다. 브레이크가 없는 모터는 처질 수 있습니다.\n'
             + '저장하는 동안(최대 10초씩) 드라이브 전원을 끄지 마세요.',
