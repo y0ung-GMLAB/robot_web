@@ -118,6 +118,14 @@ async function save(state, changed, { apply = false } = {}) {
   }
 }
 
+/** 아래 저장 칸 버튼 툴팁 · 막혔으면 먼저 걸리는 이유 · 아니면 하는 일 · 수정 목록 118 */
+export function blockReason({ busy, dirty, problems }, ok) {
+  if (busy) return '저장·적용하는 중입니다';
+  if (problems.length) return `막힘 · ${problems[0]}`;
+  if (!dirty) return '바꾼 내용이 없습니다';
+  return ok;
+}
+
 function partHead([id, label, hint], status, actions, note) {
   return [
     h('div', { class: 'part-head' },
@@ -160,8 +168,12 @@ export function renderSetup(state, { changed }) {
       h('div', { class: 'grow' },
         h('span', { text: pendingText(motors.changes, mapping.changes) }),
         problems.length ? h('p', { class: 'tone-text-warn small', text: problems[0] }) : null),
-      h('button', { class: 'btn', type: 'button', disabled: busy || !dirty, onclick: () => { revertMotors(); revertMapping(); changed(); } }, '되돌리기'),
-      h('button', { class: 'btn btn-primary', type: 'button', disabled: busy || !dirty || Boolean(problems.length), onclick: () => save(state, changed) }, busy ? '저장 중…' : '저장'),
-      h('button', { class: 'btn btn-warn', type: 'button', disabled: busy || Boolean(problems.length), onclick: () => save(state, changed, { apply: true }) }, '저장 후 장비에 적용')),
+      // 막힌 버튼마다 이유를 툴팁으로 · 수정 목록 118
+      h('button', { class: 'btn', type: 'button', disabled: busy || !dirty, title: blockReason({ busy, dirty, problems: [] }, '저장하지 않은 변경을 버립니다'),
+        onclick: () => { revertMotors(); revertMapping(); changed(); } }, '되돌리기'),
+      h('button', { class: 'btn btn-primary', type: 'button', disabled: busy || !dirty || Boolean(problems.length), title: blockReason({ busy, dirty, problems }, '파일에만 저장합니다(드라이브에는 「저장 후 장비에 적용」 뒤 반영)'),
+        onclick: () => save(state, changed) }, busy ? '저장 중…' : '저장'),
+      h('button', { class: 'btn btn-warn', type: 'button', disabled: busy || Boolean(problems.length), title: blockReason({ busy, dirty: true, problems }, '저장한 뒤 장비에 적용하고 모터 프로그램을 다시 시작합니다'),
+        onclick: () => save(state, changed, { apply: true }) }, '저장 후 장비에 적용')),
   ];
 }

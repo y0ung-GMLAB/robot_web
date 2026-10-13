@@ -144,7 +144,10 @@ async function latestMapping() {
 
 export function mappingDraft() {
   if (!ui.rows) return { ready: false, changes: [], problems: [], busy: ui.busy };
-  return { ready: true, changes: changeSummary(ui.saved, ui.rows), problems: draftProblems(ui.rows), busy: ui.busy };
+  const changes = changeSummary(ui.saved, ui.rows);
+  // 매핑을 고쳤을 때만 매핑 검사로 저장을 막는다 · 처음 연결(조인트 0개 · 안 고침)에도 모터 설정만 저장·적용되게 ·
+  // 그래야 모터 프로그램이 켜지고 「인식 모터 자동 생성」 이 된다 · 수정 목록 118 · 고친 매핑(줄을 다 지움 등)은 그대로 막는다
+  return { ready: true, changes, problems: changes.length ? draftProblems(ui.rows) : [], busy: ui.busy };
 }
 
 export function revertMapping() {
@@ -262,6 +265,19 @@ function previewCard() {
         ? h('ul', { class: 'list small' }, validation.warnings.map((w) => h('li', { class: 'tone-text-warn', text: w }))) : null) : null);
 }
 
+/**
+ * 「인식 모터 자동 생성」 툴팁 · 막혔으면 이유 · 수정 목록 118
+ * 줄은 지금 돌고 있는 모터 프로그램이 알려 준 모터로 만든다(고유 이름이 실제 드라이브와 맞게) · 그래서 모터 프로그램이 돌아야 한다
+ */
+export function autoBuildReason(state, motorCount) {
+  if (motorCount > 0) return `지금 인식된 모터 ${motorCount}대마다 한 줄씩 만듭니다(이미 줄이 있는 모터는 건너뜀)`;
+  const scope = state.snap?.project_scope || {};
+  if (!scope.runtime_matches_selected) {
+    return '인식된 모터가 없습니다 · 모터 프로그램이 이 프로젝트 설정으로 돌고 있지 않습니다. ① 모터·드라이브에서 「저장 후 장비에 적용」을 먼저 누르세요(조인트 없이도 됩니다).';
+  }
+  return '인식된 모터가 없습니다 · 모터 프로그램이 모터 상태를 아직 보내지 않았습니다. 잠시 기다리거나 ① 모터·드라이브에서 통신 상태를 확인하세요.';
+}
+
 /** ② 구획 머리 오른쪽 · 모터로 자동 생성 · 조인트 더하기 */
 export function mappingActions(state, changed) {
   if (!ui.rows) return null;
@@ -278,7 +294,8 @@ export function mappingActions(state, changed) {
     changed();
   };
   return [
-    h('button', { class: 'btn', type: 'button', disabled: !motors.length, onclick: autoBuild }, '인식 모터 자동 생성'),
+    h('button', { class: 'btn', type: 'button', disabled: !motors.length, onclick: autoBuild,
+      title: autoBuildReason(state, motors.length) }, '인식 모터 자동 생성'),
     h('button', { class: 'btn', type: 'button', onclick: () => {
       const row = { ...newRow(null, ''), _key: `k${keySeq += 1}` };
       ui.rows.push(row);
@@ -304,7 +321,9 @@ export function mappingBody(state, changed) {
     state.snap?.mapping_range_blocker && !unconfirmedRows(ui.rows).length && changeSummary(ui.saved, ui.rows).length
       ? h('p', { class: 'muted small', text: '저장하면 범위 미확인 상태가 해제됩니다' }) : null,
     h('section', { class: 'card', 'aria-label': '조인트' },
-      ui.rows.length ? table(state, changed) : h('p', { class: 'muted', text: '조인트가 없습니다. 「인식 모터 자동 생성」을 누르세요.' })),
+      ui.rows.length ? table(state, changed) : h('p', { class: 'muted', text: motorList(state).length
+        ? '조인트가 없습니다. 「인식 모터 자동 생성」을 누르세요.'
+        : `조인트가 없습니다. ${autoBuildReason(state, 0)}` })),
     previewCard(),
     // 원본 파일 그대로(저장된 것) · 이전 UI 처럼 열어 볼 수 있게 (사용자 2026-10-12)
     ui.content ? h('details', { class: 'raw card' }, h('summary', { text: `원본 파일 · ${ui.fileId || '조인트 매핑'} (저장된 내용)` }),

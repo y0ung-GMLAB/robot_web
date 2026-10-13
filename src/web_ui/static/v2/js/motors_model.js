@@ -114,7 +114,43 @@ export function absoluteSummary(rows) {
   // 기준점을 잃는다 · 읽기만 실패한 것(unknown)은 감시가 몇 초마다 다시 읽는다 (수정 목록 110)
   const needsSetup = ac.filter((r) => r.absoluteStatus === 'not_absolute' || r.absoluteStatus === 'multiturn_invalid').length;
   const waiting = ac.filter((r) => r.absoluteStatus === 'unknown').length;
-  return { total: ac.length, ok, allOk: ac.length > 0 && ok === ac.length, needsSetup, waiting };
+  // 판정 자체가 없음(모터 프로그램이 이 프로젝트로 안 돎 · 감시가 아직 못 봄) · 인크리멘털일 수도 있다 · 수정 목록 120 (아)
+  const unread = ac.filter((r) => !r.absoluteStatus).length;
+  return { total: ac.length, ok, allOk: ac.length > 0 && ok === ac.length, needsSetup, waiting, unread };
+}
+
+/**
+ * 모터 검색 확인 창 · 모터 프로그램이 검색 뒤 다시 켜지는가는 서버 규칙 그대로 · 수정 목록 118
+ * 서버(scan_orchestrator) · 지금 도는 모터 프로그램이 선택한 프로젝트 것이면 검색 뒤 다시 켬 ·
+ * 다른 프로젝트 것이면 정지만 하고 안 켬(옛 프로젝트 설정으로 되살리지 않게) · 이 프로젝트 설정을 「저장 후 장비에 적용」 해야 켜짐
+ */
+export function scanConfirmText(kind, scope = {}, { dirty = false } = {}) {
+  const what = kind === 'dxl' ? '다이나믹셀' : kind === 'ac' ? 'AC 서보(EtherCAT)' : 'AC 서보와 다이나믹셀';
+  const runtime = String(scope.runtime_project_id || '');
+  const restart = scope.runtime_matches_selected === true
+    ? '검색하는 동안 모터 프로그램이 잠시 정지했다가 다시 시작됩니다.'
+    : runtime
+      ? `지금 모터 프로그램은 다른 프로젝트(${runtime}) 설정으로 돌고 있습니다. 검색하는 동안 정지하고, 검색 뒤에는 다시 켜지 않습니다. 이 프로젝트의 모터 설정을 「저장 후 장비에 적용」 하면 이 프로젝트 설정으로 켜집니다.`
+      : '모터 프로그램이 돌고 있으면 검색하는 동안 정지합니다. 검색 뒤 모터 설정을 「저장 후 장비에 적용」 하면 켜집니다.';
+  return `${what} 모터를 검색합니다(수십 초 걸리며, 실패하면 몇 번 다시 시도합니다).\n`
+    + `${restart} 그동안 서보 토크가 해제됩니다. 브레이크 보드가 연결된 모터는 브레이크가 잡아 주지만, 브레이크가 없는 모터는 처질 수 있으니 기구를 받치고, 움직이는 모터가 없을 때 진행하세요.\n\n`
+    + `검색 결과는 저장하기 전까지 화면에만 표시됩니다. ${kind === 'all' ? '' : '검색하지 않은 종류의 모터는 그대로 둡니다. '}모터 이름과 드라이브 설정값은 유지됩니다.`
+    + (dirty ? '\n\n저장하지 않은 변경 내용은 검색 결과로 대체됩니다.' : '');
+}
+
+/**
+ * 앱솔루트 한 줄 글 · 모르는 것은 모른다고 · 수정 목록 120 (아)
+ * 전에는 값을 못 읽은 채(검색 직후 · 모터 프로그램 꺼짐)에도 「앱솔루트 설정은 필요 없음」 이라 해서 인크리멘털 드라이브를 놓쳤다
+ */
+export function absoluteLine(abs) {
+  if (!abs.total) return 'AC 서보 없음';
+  const head = `앱솔루트 ${abs.ok}/${abs.total} 정상`;
+  if (abs.allOk) return `${head} · 전원을 껐다 켜도 위치가 유지됩니다`;
+  if (abs.needsSetup) return `${head} · ${abs.needsSetup}대 앱솔루트 설정 필요 · 정상이 아니면 모든 모터 동작이 차단됩니다`;
+  const why = abs.unread && !abs.waiting
+    ? `${abs.unread}대 아직 못 읽음(모터 프로그램이 이 프로젝트 설정으로 돌아야 읽습니다 · 「저장 후 장비에 적용」)`
+    : `${abs.waiting + abs.unread}대 드라이브 응답을 기다리며 다시 읽는 중`;
+  return `${head} · ${why} · 읽은 뒤 인크리멘털이면 「앱솔루트 설정」 이 나타납니다 · 확인될 때까지 모터 동작이 차단됩니다`;
 }
 
 /** 저장 전 검사 · 서버도 같은 것을 거절한다(수정 목록 37 · §6-217) */

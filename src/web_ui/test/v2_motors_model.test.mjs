@@ -1,7 +1,7 @@
 /** UI v2 · 모터·드라이브 · 표 줄 · 앱솔루트 · 막는 것 · 바뀐 것 (설계안 2026-10-09) */
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { absoluteJobText, absoluteSummary, motorChanges, motorProblems, motorRows, setField } from '../static/v2/js/motors_model.js';
+import { absoluteJobText, absoluteLine, absoluteSummary, motorChanges, motorProblems, motorRows, setField } from '../static/v2/js/motors_model.js';
 
 const motor = (axis, name, extra = {}) => ({ id: `m${axis}`, axis, name, motor_type: 'ac_servo', profile: { driver_model: 'MINAS A6B' },
   config: { controller_index: axis, profile_velocity: 18000, max_speed_rpm: 3000, acceleration: 180000, profile_acceleration: 180000 }, ...extra });
@@ -16,7 +16,7 @@ test('표 줄 · 설정과 지금 상태를 번호로 · 서보 · 위치 · 과
   assert.deepEqual(rows.map((r) => [r.axis, r.servo, r.position, r.load, r.absolute, r.error]), [
     [0, '켜짐', 180, 104, '정상', ''], [1, '알람', null, null, '앱솔루트 아님', 'Err16.0'],
   ]);
-  assert.deepEqual(absoluteSummary(rows), { total: 2, ok: 1, allOk: false, needsSetup: 1, waiting: 0 });
+  assert.deepEqual(absoluteSummary(rows), { total: 2, ok: 1, allOk: false, needsSetup: 1, waiting: 0, unread: 0 });
 });
 
 test('앱솔루트 · 읽기만 실패(unknown)면 「앱솔루트 설정」 을 권하지 않는다 · 다시 읽는 중 (수정 목록 110)', () => {
@@ -26,7 +26,23 @@ test('앱솔루트 · 읽기만 실패(unknown)면 「앱솔루트 설정」 을
   } };
   const rows = motorRows({ motors: [motor(0, 'A'), motor(1, 'B')] }, snap);
   assert.equal(rows[0].absolute, '다시 읽는 중');
-  assert.deepEqual(absoluteSummary(rows), { total: 2, ok: 1, allOk: false, needsSetup: 0, waiting: 1 });
+  assert.deepEqual(absoluteSummary(rows), { total: 2, ok: 1, allOk: false, needsSetup: 0, waiting: 1, unread: 0 });
+  assert.match(absoluteLine(absoluteSummary(rows)), /1대 드라이브 응답을 기다리며 다시 읽는 중/);
+});
+
+test('앱솔루트 · 아직 못 읽은 드라이브(검색 직후 · 모터 프로그램 꺼짐)는 「필요 없음」 이라 하지 않는다 (수정 목록 120 (아))', () => {
+  const rows = motorRows({ motors: [motor(0, 'A'), motor(1, 'B'), motor(2, 'C')] }, { motion_state: { motors: [] } });
+  const abs = absoluteSummary(rows);
+  assert.deepEqual(abs, { total: 3, ok: 0, allOk: false, needsSetup: 0, waiting: 0, unread: 3 });
+  const line = absoluteLine(abs);
+  assert.doesNotMatch(line, /필요 없음/);
+  assert.match(line, /3대 아직 못 읽음/);
+  assert.match(line, /인크리멘털이면 「앱솔루트 설정」/);
+  // 인크리멘털(Pr0.15 = 1)로 읽히면 설정 필요
+  const incremental = motorRows({ motors: [motor(0, 'A')] }, { motion_state: { motors: [{ controller_index: 0, state: 'detected' }],
+    minas_absolute: { drives: [{ axis: 0, status: 'not_absolute', absolute_mode: 1 }] } } });
+  assert.match(absoluteLine(absoluteSummary(incremental)), /1대 앱솔루트 설정 필요/);
+  assert.equal(absoluteLine(absoluteSummary([])), 'AC 서보 없음');
 });
 
 test('막는 것 · 빈 이름 · 겹친 이름 · 범위 · 프로파일 > 최대(수정 목록 37)', () => {
