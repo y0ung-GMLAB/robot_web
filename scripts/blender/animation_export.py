@@ -5,6 +5,8 @@ Blender 에서 Text Editor 로 열고 Run Script. 폴더 고르기 창 → 고�
                               0.02 s 고정 주기 · rotation_unit "rad" · 이름 = .blend 파일 이름
   report/<이름>_limits.json   조인트별 MotorLimit · 클립 최소/최대 · 첫 프레임 (deg)
   report/<이름>_check.json    속도·가속 초과 구간 · MotorLimit 에 걸린 샘플 (deg)
+속도·가속이 한계의 100% 를 넘는 곳이 하나라도 있으면 <이름>.json 을 쓰지 않는다 (리포트·마커만) ·
+끝나면 조인트별 최대 % 와 넘은 구간(Blender 프레임)을 창으로 보여 준다.
 
 모터 본 = 커스텀 속성 joint_name 이 있는 포즈 본 (README.md 「본 설정」) · 아마추어 여러 개(로봇 여러 대) 가능
   → 한 파일에 모두 · joint_name 은 전체에서 겹치면 안 됨 · 리포트·검사 곡선 이름은 「리그:본」:
@@ -200,7 +202,8 @@ def update_markers(scene, flags):
     for fl in flags:
         tag = 'ERR' if fl['level'] == 'error' else 'warn'
         name = '%s %s %s %s %d%%' % (MARKER_PREFIX, tag, fl['bone'], fl['kind'], round(fl['peak_ratio'] * 100))
-        scene.timeline_markers.new(name, frame=int(math.floor(fl['blender_frame_from'])))
+        at = fl['over_blender_frames'][0] if fl.get('over_blender_frames') else fl['blender_frame_from']
+        scene.timeline_markers.new(name, frame=int(math.floor(at)))
 
 
 def bake_check_curves(scene, arm, bones, frames, vel_pct, acc_pct):
@@ -257,7 +260,6 @@ def main(out_dir=None):
     os.makedirs(out_dir, exist_ok=True)
     ids = [(joint_name(pb), values[label(pb)]) for pb in bones]
     path = os.path.join(out_dir, name + '.json')
-    write_animation(path, name, ids, n)
 
     flags, axes_report, limits_report = [], [], []
     vel_pct, acc_pct = {}, {}
@@ -273,13 +275,16 @@ def main(out_dir=None):
             if lim <= 0:
                 continue
             for i0, i1, ratio, peak in segments(series, lim, WARN_RATIO):
+                over = [i for i in range(i0, i1 + 1) if abs(series[i]) > lim]   # 100% 넘는 샘플만
                 flags.append({'bone': label(pb), 'joint_name': jid, 'kind': kind,
                               'level': 'error' if ratio > 1.0 else 'warn',
                               'file_frame_from': i0 + 1, 'file_frame_to': i1 + 1,
                               'blender_frame_from': round(frames[max(i0 - 1, 0)], 3),
                               'blender_frame_to': round(frames[i1], 3),
                               'peak': round(peak, 3), 'limit': round(lim, 3),
-                              'peak_ratio': round(ratio, 3)})
+                              'peak_ratio': round(ratio, 3),
+                              'over_blender_frames': [round(frames[max(over[0] - 1, 0)], 3),
+                                                      round(frames[over[-1]], 3)] if over else None})
 
         lim = motor_limit(pb)
         clamped = 0
@@ -295,6 +300,8 @@ def main(out_dir=None):
             'acc_limit_deg_s2': round(amax, 3) if amax > 0 else None,
             'clip_peak_vel_deg_s': round(max(abs(s) for s in v), 3),
             'clip_peak_acc_deg_s2': round(max(abs(s) for s in a), 3),
+            'peak_vel_pct': round(max(vel_pct[label(pb)]), 1) if vmax > 0 else None,
+            'peak_acc_pct': round(max(acc_pct[label(pb)]), 1) if amax > 0 else None,
             'clamped_by_MotorLimit_samples': clamped,
             'start_end_diff_deg': round(abs(x[-1] - x[0]), 3)})
 
@@ -306,6 +313,9 @@ def main(out_dir=None):
              'warnings': sum(1 for f in flags if f['level'] == 'warn'),
              'not_checked': unchecked,
              'axes': axes_report, 'segments': flags}
+    check['exported'] = check['errors'] == 0      # 100% 넘는 곳이 있으면 애니메이션 파일을 쓰지 않는다
+    if check['exported']:
+        write_animation(path, name, ids, n)
     report_dir = os.path.join(out_dir, 'report')
     os.makedirs(report_dir, exist_ok=True)
     base = os.path.join(report_dir, name)
@@ -317,7 +327,9 @@ def main(out_dir=None):
     update_markers(scene, flags)
     bake_check_curves(scene, arm, bones, frames, vel_pct, acc_pct)
 
-    print('exported', path, '| samples', n, '| ids', [i for i, _ in ids])
+    print('exported' if check['exported'] else 'NOT exported (100% 초과)', path, '| samples', n, '| ids', [i for i, _ in ids])
+    for line in summary_lines(check):
+        print('  ' + line)
     for ax in axes_report:
         print('  %-12s %-12s peak %8.2f deg/s of %8s | acc %10.1f of %10s | clamp %d' % (
             ax['bone'], ax['joint_name'], ax['clip_peak_vel_deg_s'], ax['vel_limit_deg_s'] or '-',
@@ -330,6 +342,21 @@ def main(out_dir=None):
             fl['level'], fl['bone'], fl['kind'], fl['file_frame_from'], fl['file_frame_to'],
             fl['blender_frame_from'], fl['blender_frame_to'], fl['peak'], fl['limit'], round(fl['peak_ratio'] * 100)))
     return check
+
+
+def summary_lines(check):
+    """조인트별 최대 % · 100% 넘는 구간 (Blender 프레임) · 끝나면 창으로 보여 준다."""
+    pct = lambda p: '-' if p is None else '%.0f%%' % p
+    lines = ['%s  속도 %s · 가속 %s' % (ax['bone'], pct(ax['peak_vel_pct']), pct(ax['peak_acc_pct']))
+             for ax in check['axes']]
+    for fl in check['segments']:
+        if fl['level'] == 'error':
+            f0, f1 = fl['over_blender_frames']
+            lines.append('너무 빠름  %s %s %d%% · 프레임 %.0f–%.0f' % (
+                fl['bone'], '속도' if fl['kind'] == 'velocity' else '가속', round(fl['peak_ratio'] * 100), f0, f1))
+    if check['not_checked']:
+        lines.append('검사 안 함 (한계 0): ' + ', '.join(check['not_checked']))
+    return lines
 
 
 class ROBOT_OT_animation_export(bpy.types.Operator):
@@ -353,10 +380,20 @@ class ROBOT_OT_animation_export(bpy.types.Operator):
             self.report({'ERROR'}, '내보내기 실패: %s' % exc)
             raise
         context.scene[DIR_PROP] = out_dir
-        msg = '내보내기 → %s | errors %d, warnings %d' % (out_dir, check['errors'], check['warnings'])
-        if check['not_checked']:
-            msg += ' | 검사 안 함: ' + ', '.join(check['not_checked'])
-        self.report({'WARNING'} if check['errors'] or check['warnings'] or check['not_checked'] else {'INFO'}, msg)
+        lines = summary_lines(check)
+        if check['exported']:
+            title = '내보내기 완료 · 경고 %d' % check['warnings']
+            self.report({'WARNING'} if check['warnings'] or check['not_checked'] else {'INFO'},
+                        '내보내기 → %s | warnings %d' % (out_dir, check['warnings']))
+        else:
+            title = '추출 안 함 · 100%% 넘는 구간 %d곳 (타임라인 ANIM! ERR)' % check['errors']
+            self.report({'ERROR'}, title)
+
+        def draw(menu, _context):
+            for line in lines:
+                menu.layout.label(text=line)
+
+        context.window_manager.popup_menu(draw, title=title, icon='INFO' if check['exported'] else 'ERROR')
         return {'FINISHED'}
 
 
