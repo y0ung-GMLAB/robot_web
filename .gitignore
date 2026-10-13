@@ -31,6 +31,8 @@ backups/
 /config/motion_coordination.yaml
 /config/.motion_coordination.yaml.lock
 /config/.motion_coordination.yaml.transaction.json
+# PC 마다 저장할 때 만들어지는 MINAS param 파일(모터마다 · 수정 목록 113)
+/config/minas_params/
 
 # Local machine files
 .vscode/
