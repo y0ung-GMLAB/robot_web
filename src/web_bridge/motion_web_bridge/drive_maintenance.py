@@ -402,6 +402,9 @@ class DriveMaintenance:
         )
         if restore_error:
             message += f' / Motor Manager 복구 실패: {restore_error}'
+        elif recovery.get('servo_waiting_axes'):
+            waiting = ' · '.join(f'{axis}번' for axis in recovery['servo_waiting_axes'])
+            message += f' / {waiting} 서보가 아직 켜지는 중입니다 · 잠시 뒤 모터 표에서 확인하세요'
         self._record({
             'event_type': f'minas_{action}',
             'axis': axis,

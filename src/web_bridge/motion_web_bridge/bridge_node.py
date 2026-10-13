@@ -428,9 +428,8 @@ class MotionWebBridge(Node):
             service_active=self._motor_runtime.managed_service_active,
             run_service=lambda action, service: self._motor_runtime.run_managed_service(action, service),
             wait_release=lambda: motor_config_rules.wait_for_ethercat_release(timeout_sec=5.0),
-            wait_recovery=lambda service, axes: self._motor_runtime.wait_for_runtime_recovery(
-                axes, timeout_sec=12.0, motor_service=service,
-            ),
+            # 온라인 뒤 서보가 다 켜질 때까지(최대 8 초) · 수정 목록 109 메모
+            wait_recovery=self._wait_maintenance_recovery,
             expected_axes=self._detected_axes,
             record=self._record_drive_maintenance,
         )
@@ -2000,6 +1999,13 @@ class MotionWebBridge(Node):
                 if int(motor['controller_index']) == int(axis):
                     return motor
         return None
+
+    def _wait_maintenance_recovery(self, service: str, axes: List[int]) -> Dict[str, Any]:
+        """드라이브 정비 뒤 · 모터가 온라인으로 돌아오고 서보가 다 켜질 때까지 · 수정 목록 109 메모"""
+        recovery = self._motor_runtime.wait_for_runtime_recovery(axes, timeout_sec=12.0, motor_service=service)
+        if recovery.get('recovered'):
+            recovery.update(self._motor_runtime.wait_for_servo_on(axes, timeout_sec=8.0))
+        return recovery
 
     def _detected_axes(self) -> List[int]:
         state = self.motion_state()

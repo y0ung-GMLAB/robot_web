@@ -269,6 +269,38 @@ class MotorRuntimeService:
             'duration_sec': round(time.time() - started_at, 3),
         }
 
+    def wait_for_servo_on(self, axes: List[int], timeout_sec: float) -> Dict[str, Any]:
+        """재시작 뒤 서보가 다 켜질 때까지 · 수정 목록 109 메모 (2026-10-12 floating4)
+
+        「온라인」 만 보면 서보가 켜지기 전(Not ready to switch on · 2 초쯤)에 「복구됨」 이라고 답했다 ·
+        그 사이 재생을 누르면 거절됐다 · 다이나믹셀 · 알람 축은 기다리지 않는다.
+        """
+        wanted = sorted(set(int(axis) for axis in axes))
+        started_at = time.time()
+        on: List[int] = []
+        while True:
+            motion_state = self.bridge.motion_state()
+            motors = motion_state.get('motors') if isinstance(motion_state, dict) else None
+            on, skip = [], []
+            for motor in motors or []:
+                if not isinstance(motor, dict):
+                    continue
+                try:
+                    axis = int(motor.get('controller_index'))
+                except (TypeError, ValueError):
+                    continue
+                if axis not in wanted:
+                    continue
+                if motor.get('fault') is True or str(motor.get('motor_type') or '') == 'dynamixel':
+                    skip.append(axis)
+                elif motor.get('servo_on') is True:
+                    on.append(axis)
+            waiting = [axis for axis in wanted if axis not in on and axis not in skip]
+            if not waiting or time.time() - started_at >= timeout_sec:
+                return {'servo_on_axes': sorted(on), 'servo_waiting_axes': waiting,
+                        'servo_wait_sec': round(time.time() - started_at, 3)}
+            time.sleep(0.1)
+
     def recover_interrupted_scan(self, operation: Dict[str, Any]) -> None:
         lock = getattr(self, '_recovery_lock', None)
         operation_id = str(operation.get('operation_id') or '')

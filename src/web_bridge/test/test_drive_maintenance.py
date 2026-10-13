@@ -197,3 +197,24 @@ def test_eeprom_save_all_restarts_motor_manager_once():
     assert result['success'] is True, result
     assert calls.count(('service', 'stop')) == 1 and calls.count(('service', 'start')) == 1
     assert ('cli', 'download -m 0 -p 2 -t uint32 0x1010 1 0x65766173') in calls
+
+
+def test_message_says_when_servos_are_still_turning_on():
+    """수정 목록 109 메모 · 온라인만 보고 「복구됨」 · 서보가 켜지기 전 재생을 누르면 거절됐다"""
+    service, _calls, _records = _service()
+    service._wait_recovery = lambda _service, axes: {'service_active': True, 'recovered': True, 'servo_waiting_axes': [0]}
+    result = service.run({'action': EEPROM_SAVE, 'axis': 1, 'confirmed': True})
+    assert '0번 서보가 아직 켜지는 중' in result['message']
+
+
+def test_wait_for_servo_on_returns_when_all_ac_axes_are_on():
+    from types import SimpleNamespace as NS
+    from motion_web_bridge.motor_runtime_service import MotorRuntimeService
+    states = iter([
+        {'motors': [{'controller_index': 0, 'servo_on': False}, {'controller_index': 1, 'servo_on': True}]},
+        {'motors': [{'controller_index': 0, 'servo_on': True}, {'controller_index': 1, 'servo_on': True}]},
+    ])
+    runtime = MotorRuntimeService.__new__(MotorRuntimeService)
+    runtime.bridge = NS(motion_state=lambda: next(states))
+    result = runtime.wait_for_servo_on([0, 1], timeout_sec=2.0)
+    assert result['servo_on_axes'] == [0, 1] and result['servo_waiting_axes'] == []
