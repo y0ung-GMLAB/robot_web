@@ -2,9 +2,11 @@
  *
  * 규약(서버 manual_stream_socket.py) ·
  *   ← {type:'hello', mapping_file_id?, base_mapping_revision?} → {type:'hello_ok'} | {type:'error'} 후 닫힘
- *   ← {type:'target', axis, target_rad, motion_id?, motion_rad?}   (모터 rad)
- *   ← {type:'release', axes:[..]}  → 그 자리에 선다
+ *   ← {type:'target', axis, target_rad, motion_id?, motion_rad?, source?}   (모터 rad · source fader|dial)
+ *   ← {type:'release', axes:[..]}  → 마지막 목표까지 천천히 간 뒤 선다 (수정 목록 126)
+ *   ← {type:'stop', axes:[..]}     → 그 자리에 선다 (페이지를 떠날 때)
  *   → {type:'result', success, message}
+ * 목표는 「가고 싶은 곳」 · 서버가 조인트 2 °/s · 4 °/s² 로 천천히 다가간다 (수정 목록 126).
  * 수동 모드가 아니면 서버가 거절하고 닫는다 · 끊기면 서버가 만졌던 축을 그 자리에 세운다.
  */
 
@@ -64,6 +66,13 @@ export class ManualStream {
   release(axes) {
     if (!this.isOpen()) return false;
     this.socket.send(JSON.stringify({ type: 'release', axes }));
+    return true;
+  }
+
+  /** 그 자리에 세운다 · 놓기와 달리 남은 이동을 버린다 */
+  stop(axes) {
+    if (!this.isOpen()) return false;
+    this.socket.send(JSON.stringify({ type: 'stop', axes }));
     return true;
   }
 

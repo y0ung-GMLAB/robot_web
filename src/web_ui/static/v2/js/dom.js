@@ -6,7 +6,13 @@ export function h(tag, props = {}, ...children) {
     if (value === undefined || value === null || value === false) continue;
     if (key === 'class') node.className = value;
     else if (key === 'text') node.textContent = String(value);
-    else if (key === 'style' && typeof value === 'object') Object.assign(node.style, value);
+    else if (key === 'style' && typeof value === 'object') {
+      // CSS 변수(--이름)는 setProperty 로만 들어간다 · Object.assign 은 조용히 버린다
+      for (const [name, styleValue] of Object.entries(value)) {
+        if (name.startsWith('--')) node.style.setProperty(name, String(styleValue));
+        else node.style[name] = styleValue;
+      }
+    }
     else if (key.startsWith('on') && typeof value === 'function') listen(node, key.slice(2).toLowerCase(), value);
     else if (value === true) node.setAttribute(key, '');
     else node.setAttribute(key, String(value));
@@ -99,8 +105,9 @@ function morphChildren(parent, freshChildren) {
 export function replace(container, ...children) {
   if (!container) return;
   // 스위치·체크칸은 누른 뒤에도 초점이 남는다 · 그것까지 막으면 화면이 통째로 멈춘다 → 글 넣는 칸만
+  // 페이더(range)도 놓은 뒤 초점이 남아 화면이 멈췄다(안내 문구가 안 바뀜 · 수정 목록 126) · 끄는 중은 pointerDown 이 막고 값은 morph 가 안 건드린다
   if (container.contains(document.activeElement)
-    && document.activeElement.matches('textarea, select, input:not([type=checkbox]):not([type=radio]):not([type=button])')) return;
+    && document.activeElement.matches('textarea, select, input:not([type=checkbox]):not([type=radio]):not([type=button]):not([type=range])')) return;
   const fresh = children.flat(Infinity).filter(Boolean).map((child) => (child instanceof Node ? child : document.createTextNode(String(child))));
   morphChildren(container, fresh);
 }

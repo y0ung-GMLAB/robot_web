@@ -2097,6 +2097,10 @@ class MotionWebBridge(Node):
         """페이더 목표 하나 · 마지막 전체 판정 + 축 연결만 (초당 수십 번 불린다) · 수정 목록 97"""
         return self._manual_range_gate_instance().cached_axis_reason(axis)
 
+    def manual_speed_limits(self, axis: Any) -> Dict[str, float]:
+        """수동 조작 상한 · 모터 rad/s · rad/s² · 매핑 이득으로 · 수정 목록 126"""
+        return self._manual_range_gate_instance().speed_limits(axis)
+
     def _manual_range_gate_instance(self) -> ManualRangeGate:
         gate = getattr(self, '_manual_range_gate', None)
         if gate is None:

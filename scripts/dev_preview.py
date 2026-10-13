@@ -269,12 +269,17 @@ def snapshot():
     }
 
 
+#: 수동 조작 상한 흉내 · 조인트 2 °/s (서버 motion_common.manual_speed · 수정 목록 126) · 가속은 생략
+PREVIEW_JOINT_SPEED_DEG_S = 2.0
+GEAR_BY_AXIS = {axis: gear for _, axis, gear, *_ in JOINTS}
+
+
 def tick(dt: float) -> None:
-    """목표를 향해 스르르 · 페이더 감각 확인용."""
+    """목표를 향해 천천히 · 조인트 2 °/s · 페이더 · 다이얼 · 목표 위치 감각 확인용."""
     for axis, target in state['targets'].items():
         current = state['positions'][axis]
-        step = (target - current) * min(1.0, dt * 8.0)
-        state['positions'][axis] = current + step
+        limit = PREVIEW_JOINT_SPEED_DEG_S * GEAR_BY_AXIS.get(axis, 1.0) * dt
+        state['positions'][axis] = current + max(-limit, min(limit, target - current))
 
 
 # --------------------------------------------------------------------------- #
@@ -355,6 +360,12 @@ async def ws_manual_stream(websocket: WebSocket):
                 axis = int(message.get('axis'))
                 state['targets'][axis] = math.degrees(float(message.get('target_rad')))
             elif kind == 'release':
+                # 놓아도 목표까지 천천히 · 수정 목록 126
+                await websocket.send_text(json.dumps({
+                    'type': 'result', 'success': True,
+                    'axes': message.get('axes'), 'message': '프리뷰 · 목표까지 간 뒤 정지',
+                }, ensure_ascii=False))
+            elif kind == 'stop':
                 for axis in message.get('axes') or []:
                     state['targets'][int(axis)] = state['positions'][int(axis)]
                 await websocket.send_text(json.dumps({

@@ -23,7 +23,7 @@ from typing import Any, Dict, List, Optional, Tuple
 
 import yaml
 
-from motion_common import joint_mapping
+from motion_common import joint_mapping, manual_speed
 from motion_common import motor_ref as motor_ref_rules
 from motion_common.values import optional_int
 
@@ -61,6 +61,19 @@ def mapped_axes(rows: List[Dict[str, Any]], motors: List[Dict[str, Any]]) -> set
             continue
         axes.update(_row_axes(row, motors))
     return axes
+
+
+def axis_gain(rows: List[Dict[str, Any]], motors: List[Dict[str, Any]], axis: int) -> Optional[float]:
+    """이 모터를 모는 「사용」 줄의 |이득| · 여러 줄이면 작은 쪽(조인트가 더 빨라지지 않게) · 없으면 None"""
+    gains = []
+    for row in rows:
+        if row.get('enabled') is False or not str(row.get('motion_id') or '').strip():
+            continue
+        if axis in _row_axes(row, motors):
+            value = abs(joint_mapping.gain(row))
+            if value > 0.0:
+                gains.append(value)
+    return min(gains) if gains else None
 
 
 def block_reason(
@@ -142,6 +155,17 @@ class ManualRangeGate:
         if reason or axis_value is None:
             return reason
         return block_reason(saved, [], motors, axis_value)
+
+    def speed_limits(self, axis: Any) -> Dict[str, float]:
+        """수동 조작 상한 · 모터 rad/s · rad/s² · 마지막 판정 때 읽은 저장 매핑으로 · 수정 목록 126
+
+        이득을 모르면 1 (모터 2 °/s · 가장 느림) · 그런 축은 어차피 위 판정이 막는다
+        """
+        with self._lock:
+            _, saved = self._last
+        axis_value = optional_int(axis, None)
+        gain = axis_gain(saved, self._motors(), axis_value) if axis_value is not None else None
+        return manual_speed.motor_limits(gain)
 
     def cached_axis_reason(self, axis: Any) -> str:
         """페이더 목표 하나 · 마지막 전체 판정(0.5초마다 새로 봄)과 축 연결만"""

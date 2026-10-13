@@ -4,8 +4,9 @@
 
     ← {type:'hello', mapping_file_id?, base_mapping_revision?}
     → {type:'hello_ok'}  |  {type:'error', message}  (보내고 닫는다)
-    ← {type:'target', axis, target_rad, motion_id?, motion_rad?}   # 모터 rad (수정 목록 6)
-    ← {type:'release', axes:[..]}        # 놓음 → 현재 위치에 hold
+    ← {type:'target', axis, target_rad, motion_id?, motion_rad?, source?}   # 모터 rad (수정 목록 6) · source fader|dial
+    ← {type:'release', axes:[..]}        # 놓음 → 마지막 목표까지 천천히 간 뒤 끝 (수정 목록 126)
+    ← {type:'stop', axes:[..]}           # 세움 → 현재 위치에 hold (페이지를 떠남 등)
     → {type:'result', ...}               # supervisor 의 축별 마지막 승인·거부
 
 조인트 → 모터 변환은 화면이 자기 매핑 행으로 한다 · 그래서 인사에
@@ -15,9 +16,8 @@
 수동 모드에서만 받는다(스케줄·오프는 거절) · `run_mode_gate.manual_control_block_reason` ·
 흐르는 중에도 0.5초마다 다시 확인해서, 상단에서 모드를 바꾸면 소켓이 끊긴다.
 
-끊기면(놓지 않고 창을 닫아도) 만졌던 축을 현재 위치에 세운다 · 임대는
-어차피 0.15초에 끝나지만, 마지막으로 날아가던 목표가 아니라 **지금 서 있는
-곳**이 목표가 되게 한다.
+끊기면(놓지 않고 창을 닫아도) 만졌던 축을 현재 위치에 세운다 · 놓은 뒤 천천히
+가던 축도 · 끊긴 화면이 모르는 움직임을 남기지 않는다(수정 목록 126).
 """
 
 from __future__ import annotations
@@ -106,6 +106,7 @@ async def run_manual_stream_socket(bridge: Any, websocket: Any) -> None:
                     message.get('target_rad'),
                     motion_id=message.get('motion_id'),
                     motion_rad=message.get('motion_rad'),
+                    source=message.get('source'),
                 )
                 if not result.get('success'):
                     await send({'type': 'result', **result})
@@ -117,6 +118,13 @@ async def run_manual_stream_socket(bridge: Any, websocket: Any) -> None:
                 if pending:
                     await send({'type': 'result', **pending})
             elif kind == 'release':
+                # 놓음 · 멈추지 않고 마지막 목표까지 · 끊기면 그 자리에 세우도록 만진 축은 그대로 둔다
+                axes = message.get('axes')
+                if not isinstance(axes, list):
+                    axes = [message.get('axis')]
+                result = service.release(axes)
+                await send({'type': 'result', **result})
+            elif kind == 'stop':
                 axes = message.get('axes')
                 if not isinstance(axes, list):
                     axes = [message.get('axis')]

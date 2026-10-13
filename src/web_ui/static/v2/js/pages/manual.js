@@ -3,6 +3,10 @@
  * 수동 모드에서만 움직인다 · 최종 판정은 서버(run_mode_gate · 범위 미확인 manual_range_gate · supervisor) · 화면은 먼저 알린다.
  * 정지 · 서보 끄기 · 알람 해제는 늘 된다. 다이얼은 늘 꺼진 채 시작(수정 목록 84) · 켜도 다이얼만 · 자리는 그대로(41).
  * 실시간 값(위치 · 다이얼 남은 양)은 0.05초마다 그 칸 글자만 바꾼다 · 끄는 중에 화면 전체를 다시 그리지 않는다.
+ *
+ * 천천히 · 수정 목록 126 (사용자 결정 2026-10-13) · 페이더 · 다이얼 · 목표 위치 · 범위 복구 전부 서버가 조인트 2 °/s · 4 °/s² 로 ·
+ * 화면이 보내는 값은 「가고 싶은 곳」(파랑 = 목표) · 모터는 천천히 따라온다(회색 = 현재) · 잘못 찍어도 그 자리까지 천천히 ·
+ * 놓아도 목표까지 간다 · 멈추려면 「동작 취소」 · 같은 조작은 새 목표로 · 움직이는 축에 다른 조작은 거절.
  */
 import { h, dot } from '../dom.js';
 import { api } from '../net.js';
@@ -20,11 +24,18 @@ import { registeredPlaylist, signedDeg } from '../play_model.js';
 
 const DEG = 180 / Math.PI;
 const RAD = Math.PI / 180;
+/** 서버 `motion_common.manual_speed` 와 같다 · 화면은 글과 남은 시간 짐작에만 쓴다 */
+export const MANUAL_JOINT_SPEED_DEG_S = 2;
+/** 목표에 닿았다고 볼 거리 · 모터 deg (다이얼 도착 판정과 같다) */
+const GOAL_ARRIVE_MOTOR_DEG = 0.05;
+const SOURCE_LABEL = { fader: '페이더', dial: '다이얼' };
 
 const ui = {
   mode: 'axis', axis: null, unit: 'joint', dialOn: false, step: 1, goal: '',
   mapping: null, mappingDoc: null, fileId: '', revision: '', busy: '', message: '',
   session: null, faders: new Map(), wheelAcc: 0, dragX: null,
+  // 축 → { source, motor(deg), joint(deg|null), deadline } · 보낸 목표 · 도착하면 지운다 · 수정 목록 126
+  goals: new Map(), spinX: null, dialOffset: 0,
 };
 let ctx = { state: null, changed: () => {} };
 let loop = null;
@@ -32,7 +43,9 @@ const stream = new ManualStream({
   onResult: (result) => {
     if (result.success === false && result.message) {
       ui.message = result.message;
-      if (ui.session) endSession(false);
+      const axis = Number(result.axis);
+      if (Number.isFinite(axis)) { ui.goals.delete(axis); ui.faders.delete(axis); }
+      if (ui.session && (!Number.isFinite(axis) || ui.session.axis === axis)) endSession(false);
       ctx.changed();
     }
   },
@@ -40,9 +53,36 @@ const stream = new ManualStream({
     if (reason) ui.message = reason;
     ui.session = null;
     ui.faders.clear();
+    ui.goals.clear();
     ctx.changed();
   },
 });
+
+/** 목표 하나 적기 · 남은 시간을 짐작해 그만큼(+ 여유) 지나면 지운다(서버 결과를 못 받아도 남지 않게) */
+function setGoal(item, source, motorDeg, jointDeg = null) {
+  const joint = jointDeg ?? (item.row ? motorToJoint(item.row, motorDeg) : null);
+  const now = performance.now();
+  const remainJoint = joint !== null && item.joint !== null ? Math.abs(joint - item.joint) : Math.abs(motorDeg - (item.position ?? motorDeg)) / Math.abs(gain(item) || 1);
+  ui.goals.set(item.axis, { source, motor: motorDeg, joint, deadline: now + (remainJoint / MANUAL_JOINT_SPEED_DEG_S + 5) * 1000 });
+}
+
+/** 움직이는 축에 다른 조작 · 서버와 같은 규칙(먼저 알린다) · 빈 글자면 통과 */
+function conflictText(axis, source) {
+  const goal = ui.goals.get(axis);
+  if (!goal || goal.source === source) return '';
+  return `${axis}번 모터 이동 중(${SOURCE_LABEL[goal.source] || goal.source}) · 도착하거나 「동작 취소」 뒤에 조작하세요`;
+}
+
+/** 놓았고 도착했거나 시간이 지난 목표는 지운다 */
+function settleGoals(list, now) {
+  for (const [axis, goal] of ui.goals) {
+    const held = ui.faders.has(axis) || ui.session?.axis === axis;
+    if (held) continue;
+    const item = list.find((a) => a.axis === axis);
+    const arrived = item && item.position !== null && Math.abs(item.position - goal.motor) <= GOAL_ARRIVE_MOTOR_DEG;
+    if (arrived || now > goal.deadline || !item) ui.goals.delete(axis);
+  }
+}
 
 /* ---------- 읽기 ---------- */
 
@@ -152,17 +192,27 @@ function ensureLoop() {
 }
 
 function stopLoopIfIdle() {
-  if (!ui.session && !ui.faders.size && loop) { clearInterval(loop); loop = null; }
+  if (!ui.session && !ui.faders.size && !ui.goals.size && loop) { clearInterval(loop); loop = null; }
+}
+
+/** 페이지를 떠남 · 남은 이동을 버리고 그 자리에 세운다(지켜보는 사람이 없다) */
+function stopEverything() {
+  const axesMoving = new Set([...ui.goals.keys(), ...ui.faders.keys()]);
+  if (ui.session) axesMoving.add(ui.session.axis);
+  if (axesMoving.size) stream.stop([...axesMoving]);
+  ui.session = null;
+  ui.faders.clear();
+  ui.goals.clear();
 }
 
 function tick() {
-  if (!location.hash.startsWith('#/manual')) { endSession(true); releaseAllFaders(); stopLoopIfIdle(); return; }
+  if (!location.hash.startsWith('#/manual')) { stopEverything(); stopLoopIfIdle(); return; }
   const list = axes(ctx.state);
   const now = performance.now();
   if (ui.session) {
     const item = list.find((a) => a.axis === ui.session.axis);
     const value = nextTarget(ui.session);
-    if (stream.target(ui.session.axis, value * RAD)) markSent(ui.session, value);
+    if (stream.target(ui.session.axis, value * RAD, { source: 'dial' })) markSent(ui.session, value);
     if (releaseDue(ui.session, now, item?.position)) endSession(true);
   }
   for (const [axis, fader] of ui.faders) {
@@ -171,27 +221,79 @@ function tick() {
     // 페이더 끝값도 모터 한계 안으로 · 매핑 범위를 모터 deg 로 바꾸면 반올림으로 한계를 살짝 넘었다 · 수정 목록 103(다)
     const limits = motorLimits(item);
     const motorDeg = Math.min(limits.upper, Math.max(limits.lower, jointToMotor(item.row, fader.joint)));
-    stream.target(axis, motorDeg * RAD, { motion_id: item.row.motion_id, motion_rad: fader.joint * RAD });
+    if (!stream.target(axis, motorDeg * RAD, { motion_id: item.row.motion_id, motion_rad: fader.joint * RAD, source: 'fader' })) continue;
+    setGoal(item, 'fader', motorDeg, fader.joint);
+    if (fader.letGo) { stream.release([axis]); ui.faders.delete(axis); }
   }
+  settleGoals(list, now);
   updateLive(list);
   stopLoopIfIdle();
 }
 
-/** 실시간 칸만 바꾼다 · data-live="pos|motor|pending" data-axis */
+/** 범위 안 비율 0~1 · 조인트 deg */
+function rangePct(item, joint) {
+  if (!item.row || joint === null || joint === undefined) return null;
+  const lower = Number(item.row.motion_lower_deg);
+  const upper = Number(item.row.motion_upper_deg);
+  return Math.max(0, Math.min(1, (joint - lower) / ((upper - lower) || 1)));
+}
+
+/** 이 축의 목표 · 조인트 deg(없으면 null) */
+function goalJoint(item) {
+  const goal = ui.goals.get(item.axis);
+  if (!goal) return null;
+  return goal.joint ?? (item.row ? motorToJoint(item.row, goal.motor) : null);
+}
+
+/** 고른 단위로 · 목표까지 남은 양 */
+function pendingText(item) {
+  const goal = ui.goals.get(item.axis);
+  if (!goal || item.position === null) return '대기';
+  const joint = ui.unit === 'joint' && Boolean(item.row);
+  const target = joint ? goalJoint(item) : goal.motor;
+  const left = joint ? (target ?? 0) - (item.joint ?? 0) : goal.motor - item.position;
+  const hit = ui.session?.axis === item.axis && ui.session.hitLimit ? ` · ${ui.session.hitLimit} 도달` : '';
+  return `목표 ${signedDeg(target, 2)}° · 남은 이동 ${signedDeg(left, 2)}° · 천천히(조인트 ${MANUAL_JOINT_SPEED_DEG_S} °/s)${hit}`;
+}
+
+/** 실시간 칸만 바꾼다 · data-live="joint|motor|pending|slider|fader-*|range-*" data-axis */
 function updateLive(list) {
   for (const node of document.querySelectorAll('[data-live]')) {
     const item = list.find((a) => a.axis === Number(node.dataset.axis));
     if (!item) continue;
     const kind = node.dataset.live;
+    const target = goalJoint(item);
     if (kind === 'joint') node.textContent = item.joint === null ? '-' : `${signedDeg(item.joint, 2)}°`;
     else if (kind === 'motor') node.textContent = item.position === null ? '-' : `모터 ${signedDeg(item.position, 1)}°`;
-    else if (kind === 'pending') {
-      const left = ui.session && ui.session.axis === item.axis && item.position !== null ? ui.session.target - item.position : 0;
-      node.textContent = ui.session?.axis === item.axis ? `남은 이동 ${signedDeg(left / (ui.unit === 'joint' && item.row ? gain(item) : 1), 3)}°${ui.session.hitLimit ? ` · ${ui.session.hitLimit} 도달` : ''}` : '대기';
-    } else if (kind === 'slider' && !ui.faders.has(item.axis) && item.joint !== null && document.activeElement !== node) {
-      node.value = String(item.joint);
+    else if (kind === 'pending') node.textContent = pendingText(item);
+    else if (kind === 'slider') {
+      // 손잡이(파랑) = 목표 · 잡고 있으면 손이 정한다 · 목표가 없으면 지금 위치
+      const value = target ?? item.joint;
+      if (!ui.faders.has(item.axis) && value !== null && document.activeElement !== node) node.value = String(value);
+    } else if (kind === 'fader-value') {
+      node.textContent = item.joint === null ? '-' : target === null ? `${signedDeg(item.joint, 2)}°` : `목표 ${signedDeg(target, 1)}° · 현재 ${signedDeg(item.joint, 1)}°`;
+    } else if (kind === 'fader-now' || kind === 'range-pos') {
+      const pct = rangePct(item, item.joint);
+      node.hidden = pct === null || (kind === 'fader-now' && target === null);
+      if (pct !== null) node.style.setProperty('--pct', String(pct));
+    } else if (kind === 'fader-gap' || kind === 'range-gap') {
+      const a = rangePct(item, item.joint);
+      const b = rangePct(item, target);
+      node.hidden = a === null || b === null;
+      if (a !== null && b !== null) { node.style.setProperty('--from', String(Math.min(a, b))); node.style.setProperty('--to', String(Math.max(a, b))); }
+    } else if (kind === 'range-goal') {
+      const pct = rangePct(item, target);
+      node.hidden = pct === null;
+      if (pct !== null) node.style.setProperty('--pct', String(pct));
     }
   }
+}
+
+/** 다이얼 눈금을 손 따라 민다 · 실제 조그 휠처럼 · 화면 효과만(모터 값과 무관) */
+function spinDial(px) {
+  ui.dialOffset = (ui.dialOffset + px) % (PX_PER_STEP * 1000);
+  const ticks = document.querySelector('.dial-ticks');
+  if (ticks) ticks.style.backgroundPositionX = `${ui.dialOffset}px`;
 }
 
 /* ---------- 다이얼 ---------- */
@@ -199,6 +301,8 @@ function updateLive(list) {
 async function dialInput(item, steps, fine = false) {
   const blocker = manualBlocker(ctx.state, item);
   if (!ui.dialOn || blocker || !item || item.position === null) return;
+  const busy = conflictText(item.axis, 'dial');
+  if (busy) { ui.message = busy; ctx.changed(); return; }
   const stepDeg = Number(ui.step);
   if (!(stepDeg > 0 && stepDeg <= 360)) { ui.message = '한 칸 값은 0.001 ~ 360° 사이여야 합니다'; ctx.changed(); return; }
   const motorDelta = steps * stepDeg * (fine ? FINE_FACTOR : 1) * (ui.unit === 'joint' && item.row ? gain(item) : 1);
@@ -214,16 +318,22 @@ async function dialInput(item, steps, fine = false) {
       return;
     }
     const limits = motorLimits(item);
-    ui.session = startSession({ axis: item.axis, position: item.position, lower: limits.lower, upper: limits.upper, now });
+    // 아직 가는 중인 다이얼 목표가 있으면 거기서부터 쌓는다 · 지금 위치부터 쌓으면 남은 칸이 사라진다
+    const previous = ui.goals.get(item.axis);
+    const from = previous?.source === 'dial' ? previous.motor : item.position;
+    ui.session = startSession({ axis: item.axis, position: from, lower: limits.lower, upper: limits.upper, now });
   }
   addDelta(ui.session, motorDelta, now);
+  setGoal(item, 'dial', ui.session.target);
   ui.message = '';
   ensureLoop();
 }
 
+/** 다이얼 세션 끝 · release = 서버가 목표까지 천천히 간다(목표 표시는 도착까지 남김) · 아니면 거절이라 목표도 지운다 */
 function endSession(release) {
   if (!ui.session) return;
   if (release) stream.release([ui.session.axis]);
+  else ui.goals.delete(ui.session.axis);
   ui.session = null;
 }
 
@@ -233,10 +343,15 @@ function releaseAllFaders() {
   ui.faders.clear();
 }
 
+/** 「동작 취소」 · 남은 이동을 버리고 그 자리에 · 서버 전체 정지가 램프도 끝낸다 */
 async function cancelMotion() {
-  endSession(true);
-  releaseAllFaders();
+  if (ui.session) stream.stop([ui.session.axis]);
+  if (ui.faders.size) stream.stop([...ui.faders.keys()]);
+  ui.session = null;
+  ui.faders.clear();
+  ui.goals.clear();
   await act.motionStop();
+  ctx.changed();
 }
 
 /* ---------- 목표 위치 · 범위 복귀 ---------- */
@@ -244,7 +359,7 @@ async function cancelMotion() {
 async function moveTo(item, changed) {
   const blocker = manualBlocker(ctx.state, item);
   if (blocker) { toast(blocker.text, 'warn'); return; }
-  if (ui.session) { toast('다이얼로 이동 중입니다. 이동이 끝난 뒤 다시 시도하세요.', 'warn'); return; }
+  if (ui.session || ui.goals.has(item.axis)) { toast(`${item.axis}번 모터 이동 중입니다. 도착하거나 「동작 취소」 뒤에 다시 시도하세요.`, 'warn'); return; }
   const value = Number(ui.goal);
   if (ui.goal === '' || !Number.isFinite(value)) { toast('목표 위치를 숫자로 입력하세요', 'warn'); return; }
   const motorDeg = ui.unit === 'joint' && item.row ? jointToMotor(item.row, value) : value;
@@ -270,7 +385,7 @@ async function moveTo(item, changed) {
 
 async function recoverRange(item, changed) {
   const bound = item.position < item.lower ? item.lower : item.upper;
-  const ok = await confirmBox({ title: '범위 안으로 복귀', body: `${item.axis}번 모터가 운전 한계를 벗어나 있습니다(현재 모터 ${signedDeg(item.position, 2)}°).\n가장 가까운 한계(${signedDeg(bound, 2)}°)까지 한 번에 이동합니다. 주변에 사람이나 물건이 없는지 확인하세요.`, confirmLabel: '복귀', tone: 'warning' });
+  const ok = await confirmBox({ title: '범위 안으로 복귀', body: `${item.axis}번 모터가 운전 한계를 벗어나 있습니다(현재 모터 ${signedDeg(item.position, 2)}°).\n가장 가까운 한계(${signedDeg(bound, 2)}°)까지 천천히(조인트 ${MANUAL_JOINT_SPEED_DEG_S} °/s) 이동합니다. 주변에 사람이나 물건이 없는지 확인하세요.`, confirmLabel: '복귀', tone: 'warning' });
   if (!ok) return;
   try {
     const result = await api('POST', item.ac ? '/api/motion-test/ac-servo/action' : '/api/motion-test/dynamixel/action',
@@ -325,16 +440,20 @@ async function capture(item, kind, changed) {
 
 /* ---------- 그리기 ---------- */
 
+/** 범위 막대 · 회색 = 지금 위치 · 파랑 = 목표 · 둘 사이 옅은 막대 = 따라가는 중 · 0.05초마다 data-live 로 */
 function rangeBar(item) {
   if (!item.row) return null;
   const lower = Number(item.row.motion_lower_deg);
   const upper = Number(item.row.motion_upper_deg);
-  const span = upper - lower || 1;
-  const pos = item.joint === null ? null : Math.max(0, Math.min(1, (item.joint - lower) / span));
-  const zero = Math.max(0, Math.min(1, (0 - lower) / span));
+  const zero = rangePct(item, 0);
+  const pos = rangePct(item, item.joint);
+  const goal = rangePct(item, goalJoint(item));
+  const live = (kind) => ({ 'data-live': kind, 'data-axis': String(item.axis) });
   return h('div', { class: 'range-bar', 'aria-hidden': 'true' },
     h('div', { class: 'range-zero', style: { left: `${zero * 100}%` } }),
-    pos === null ? null : h('div', { class: 'range-pos', style: { left: `${pos * 100}%` } }),
+    h('div', { class: 'range-gap', ...live('range-gap'), hidden: pos === null || goal === null, style: { '--from': String(Math.min(pos ?? 0, goal ?? 0)), '--to': String(Math.max(pos ?? 0, goal ?? 0)) } }),
+    h('div', { class: 'range-pos', ...live('range-pos'), hidden: pos === null, style: { '--pct': String(pos ?? 0) } }),
+    h('div', { class: 'range-goal', ...live('range-goal'), hidden: goal === null, style: { '--pct': String(goal ?? 0) } }),
     h('div', { class: 'range-labels mono' }, h('span', { text: `${signedDeg(lower, 1)}° 하한` }), h('span', { text: '0 기준점' }), h('span', { text: `${signedDeg(upper, 1)}° 상한` })));
 }
 
@@ -348,32 +467,38 @@ function axisPanel(state, changed, item) {
   const dial = h('div', {
     class: `dial${ui.dialOn && !disabled ? '' : ' locked'}`, tabindex: '0', role: 'slider',
     'aria-label': '다이얼 (드래그, 휠, ← → 키)', 'aria-disabled': String(!ui.dialOn || disabled),
-    onpointerdown: (e) => { if (!ui.dialOn || disabled) return; ui.dragX = e.clientX; e.currentTarget.setPointerCapture(e.pointerId); },
+    onpointerdown: (e) => { if (!ui.dialOn || disabled) return; ui.dragX = e.clientX; ui.spinX = e.clientX; e.currentTarget.setPointerCapture(e.pointerId); },
     onpointermove: (e) => {
       if (ui.dragX === null) return;
+      // 눈금은 손을 그대로 따라간다 · 칸은 24 px 마다
+      spinDial(e.clientX - ui.spinX);
+      ui.spinX = e.clientX;
       const moved = e.clientX - ui.dragX;
       const steps = Math.trunc(moved / PX_PER_STEP);
       if (steps) { ui.dragX += steps * PX_PER_STEP; dialInput(item, steps, e.shiftKey); }
     },
-    onpointerup: () => { ui.dragX = null; },
-    onpointercancel: () => { ui.dragX = null; },
+    onpointerup: () => { ui.dragX = null; ui.spinX = null; },
+    onpointercancel: () => { ui.dragX = null; ui.spinX = null; },
     onwheel: (e) => {
       if (!ui.dialOn || disabled) return;
       e.preventDefault();
-      ui.wheelAcc += wheelPixels(e);
+      const pixels = wheelPixels(e);
+      spinDial(-pixels * PX_PER_STEP / WHEEL_PX_PER_STEP);
+      ui.wheelAcc += pixels;
       const steps = Math.trunc(ui.wheelAcc / WHEEL_PX_PER_STEP);
       if (steps) { ui.wheelAcc -= steps * WHEEL_PX_PER_STEP; dialInput(item, -steps, e.shiftKey); }
     },
     onkeydown: (e) => {
       const dir = { ArrowRight: 1, ArrowUp: 1, ArrowLeft: -1, ArrowDown: -1 }[e.key];
-      if (dir) { e.preventDefault(); dialInput(item, dir, e.shiftKey); }
+      if (dir) { e.preventDefault(); if (ui.dialOn && !disabled) spinDial(dir * PX_PER_STEP); dialInput(item, dir, e.shiftKey); }
     },
-  }, h('span', { class: 'dial-ticks', 'aria-hidden': 'true' }), h('span', { class: 'dial-hint', text: ui.dialOn ? (disabled ? '조작 불가' : '드래그 · 휠 · ← → 키 (Shift: 1/10 단위)') : '다이얼이 꺼져 있습니다. 위 스위치로 켜세요.' }));
+  }, h('span', { class: 'dial-ticks', 'aria-hidden': 'true', style: { backgroundPositionX: `${ui.dialOffset}px` } }), h('span', { class: 'dial-hint', text: ui.dialOn ? (disabled ? '조작 불가' : '드래그 · 휠 · ← → 키 (Shift: 1/10 단위)') : '다이얼이 꺼져 있습니다. 위 스위치로 켜세요.' }));
   const hold = (dir) => {
     let timer = null;
     const stop = () => { clearTimeout(timer); clearInterval(timer); timer = null; };
+    const press = () => { if (ui.dialOn && !disabled) spinDial(dir * PX_PER_STEP); dialInput(item, dir); };
     return {
-      onpointerdown: () => { dialInput(item, dir); timer = setTimeout(() => { timer = setInterval(() => dialInput(item, dir), 120); }, 400); },
+      onpointerdown: () => { press(); timer = setTimeout(() => { timer = setInterval(press, 120); }, 400); },
       onpointerup: stop, onpointerleave: stop, onpointercancel: stop,
     };
   };
@@ -410,13 +535,14 @@ function axisPanel(state, changed, item) {
       h('div', { class: 'row' },
         h('label', { class: 'inline' }, '한 칸', h('input', { class: 'input num-input mono', type: 'number', min: '0.001', max: '360', step: 'any', value: String(ui.step),
           oninput: (e) => { ui.step = Number(e.target.value); }, onchange: () => { endSession(true); changed(); } }), jointUnit ? '조인트 °' : '모터 °'),
-        h('span', { class: 'mono muted small grow', 'data-live': 'pending', 'data-axis': String(item.axis), text: '대기' }))),
+        h('span', { class: 'mono muted small grow', 'data-live': 'pending', 'data-axis': String(item.axis), text: pendingText(item) })),
+      h('p', { class: 'muted small', text: `한 칸 값을 크게 해도 한 번에 가지 않고 조인트 ${MANUAL_JOINT_SPEED_DEG_S} °/s 로 천천히 갑니다. 파랑 = 목표 · 회색 = 지금 위치.` })),
     h('div', { class: 'field' },
       h('span', { class: 'field-label', text: `목표 위치로 이동 (${jointUnit ? '조인트' : '모터'} °)` }),
       h('div', { class: 'row' },
         h('input', { class: 'input mono num-input wide', type: 'number', step: 'any', value: ui.goal, 'aria-label': '목표 위치',
           oninput: (e) => { ui.goal = e.target.value; }, onchange: () => changed() }),
-        h('button', { class: 'btn btn-primary', type: 'button', disabled: disabled || ui.busy === 'move' || Boolean(ui.session), onclick: () => moveTo(item, changed) }, '천천히 이동'),
+        h('button', { class: 'btn btn-primary', type: 'button', disabled: disabled || ui.busy === 'move' || Boolean(ui.session) || ui.goals.has(item.axis), onclick: () => moveTo(item, changed) }, '천천히 이동'),
         h('button', { class: 'btn btn-danger', type: 'button', title: '다이얼 · 목표 위치 이동을 모두 멈춥니다', onclick: cancelMotion }, '동작 취소'))),
     h('div', { class: 'field servo-box' },
       h('span', { class: 'field-label', text: `서보 · ${item.label}` }),
@@ -435,31 +561,50 @@ function faderView(state, changed, list) {
   const blocker = manualBlocker(state, usable[0] || null);
   const grab = async (item, joint) => {
     if (manualBlocker(state, item)) return;
+    const busy = conflictText(item.axis, 'fader');
+    if (busy) { ui.message = busy; changed(); return; }
     if (ui.session) endSession(true);
-    if (!ui.faders.has(item.axis)) {
-      try { await stream.open({ mapping_file_id: ui.fileId, base_mapping_revision: ui.revision }); } catch (error) { ui.message = error.message; changed(); return; }
-    }
-    ui.faders.set(item.axis, { joint });
+    // 잡기를 먼저 적는다 · 한 번 찍으면 change(놓기)가 소켓 열기보다 먼저 와서, 전에는 페이더가 잡힌 채 남았다
+    const fresh = !ui.faders.has(item.axis);
+    ui.faders.set(item.axis, { joint, letGo: false });
+    ui.message = '';
     ensureLoop();
+    if (fresh) {
+      try { await stream.open({ mapping_file_id: ui.fileId, base_mapping_revision: ui.revision }); } catch (error) {
+        ui.faders.delete(item.axis);
+        ui.goals.delete(item.axis);
+        ui.message = error.message;
+        changed();
+      }
+    }
   };
+  // 놓기 · 목표를 한 번은 보낸 뒤(tick) 놓는다 · 잘못 찍은 곳까지도 천천히 간다
   const letGo = (item) => {
-    if (!ui.faders.has(item.axis)) return;
-    stream.release([item.axis]);
-    ui.faders.delete(item.axis);
+    const fader = ui.faders.get(item.axis);
+    if (fader) fader.letGo = true;
   };
   return h('section', { class: 'card', 'aria-label': '전체 페이더' },
     blocker && blocker.fix !== 'servo-on' && blocker.fix !== 'reset' ? h('div', { class: 'blocker' }, dot('warn'), h('span', { class: 'grow', text: blocker.text }), fixButton(blocker, null, changed)) : null,
-    h('p', { class: 'muted small', text: '페이더를 드래그하는 동안에만 모터가 따라 움직이고, 손을 떼면 그 위치에서 정지합니다. 범위는 조인트 매핑의 최소·최대입니다.' }),
+    h('div', { class: 'row' },
+      h('p', { class: 'muted small grow', text: `페이더를 움직이면 모터가 조인트 ${MANUAL_JOINT_SPEED_DEG_S} °/s 로 천천히 따라옵니다. 파란 손잡이 = 목표 · 회색 표시 = 지금 위치. 손을 떼거나 잘못 찍어도 목표까지 천천히 갑니다. 멈추려면 「동작 취소」. 범위는 조인트 매핑의 최소·최대입니다.` }),
+      h('button', { class: 'btn btn-danger', type: 'button', title: '페이더 · 다이얼 · 목표 위치 이동을 모두 그 자리에서 멈춥니다', onclick: cancelMotion }, '동작 취소')),
     usable.length ? h('ul', { class: 'list fader-list' }, usable.map((item) => {
       const own = manualBlocker(state, item);
+      const target = goalJoint(item);
+      const now = rangePct(item, item.joint);
+      const goal = rangePct(item, target);
+      const live = (kind) => ({ 'data-live': kind, 'data-axis': String(item.axis) });
       return h('li', { class: 'fader-row' },
         h('span', { class: 'fader-name' }, h('strong', { text: item.label }), h('small', { class: 'muted', text: ` ${item.axis}번` })),
         h('span', { class: 'mono muted small', text: `${signedDeg(Number(item.row.motion_lower_deg), 1)}°` }),
-        h('input', { class: 'fader', type: 'range', min: String(item.row.motion_lower_deg), max: String(item.row.motion_upper_deg), step: '0.05',
-          value: String(item.joint ?? 0), disabled: Boolean(own), 'aria-label': `${item.label} 페이더`, 'data-live': 'slider', 'data-axis': String(item.axis),
-          oninput: (e) => grab(item, Number(e.target.value)), onchange: () => letGo(item) }),
+        h('span', { class: 'fader-track' },
+          h('span', { class: 'fader-gap', ...live('fader-gap'), hidden: now === null || goal === null, style: { '--from': String(Math.min(now ?? 0, goal ?? 0)), '--to': String(Math.max(now ?? 0, goal ?? 0)) } }),
+          h('span', { class: 'fader-now', ...live('fader-now'), hidden: now === null || target === null, style: { '--pct': String(now ?? 0) } }),
+          h('input', { class: 'fader', type: 'range', min: String(item.row.motion_lower_deg), max: String(item.row.motion_upper_deg), step: '0.05',
+            value: String(target ?? item.joint ?? 0), disabled: Boolean(own), 'aria-label': `${item.label} 페이더 (목표)`, ...live('slider'),
+            oninput: (e) => grab(item, Number(e.target.value)), onchange: () => letGo(item) })),
         h('span', { class: 'mono muted small', text: `${signedDeg(Number(item.row.motion_upper_deg), 1)}°` }),
-        h('span', { class: 'mono fader-value', 'data-live': 'joint', 'data-axis': String(item.axis), text: item.joint === null ? '-' : `${signedDeg(item.joint, 2)}°` }),
+        h('span', { class: 'mono fader-value', ...live('fader-value'), text: item.joint === null ? '-' : target === null ? `${signedDeg(item.joint, 2)}°` : `목표 ${signedDeg(target, 1)}° · 현재 ${signedDeg(item.joint, 1)}°` }),
         own ? h('span', { class: 'chip chip-warn', title: own.text, text: '조작 불가' }) : null);
     })) : h('p', { class: 'muted', text: '「사용」이 켜진 조인트 매핑 줄에 연결된 모터가 없습니다' }),
     ui.message ? h('p', { class: 'tone-text-warn small', text: ui.message }) : null);

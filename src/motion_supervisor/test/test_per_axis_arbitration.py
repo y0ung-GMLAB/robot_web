@@ -40,7 +40,8 @@ def test_commanded_axes_skips_untouched_slots():
 
 def test_midi_claims_only_its_own_axes():
     assert 'axes=commanded_axes' in NODE, 'MIDI 배치가 전체를 잡는다'
-    assert 'axes=[axis]' in NODE, 'MIDI 단건이 전체를 잡는다'
+    # 단건도 램프를 거쳐 같은 배치 발행으로 나간다 · 수정 목록 126
+    assert 'self._accept_stream_goals([request])' in NODE, 'MIDI 단건이 배치 길을 안 탄다'
 
 
 def test_the_global_playback_gate_is_gone():

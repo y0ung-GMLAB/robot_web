@@ -10,6 +10,8 @@
 """
 
 from pathlib import Path
+
+import pytest
 from types import SimpleNamespace
 
 import yaml
@@ -168,3 +170,38 @@ def test_the_fader_stream_passes_the_gate():
 
     assert source.count('asyncio.to_thread(_stream_block_reason, bridge)') == 2
     assert "getattr(bridge, 'manual_range_axis_blocker', None)" in source
+
+
+# ------------------------------------------------- 수동 조작 상한 · 수정 목록 126 --
+
+
+def test_speed_limits_use_the_mapping_gain_so_every_joint_moves_alike(tmp_path):
+    """조인트 2 °/s · 4 °/s² · 모터로는 |scale × 감속·기어비| 배 · 방향(invert)은 상관없음"""
+    import math
+    from motion_common import manual_speed
+    bridge = _bridge(tmp_path, [
+        _row('Neck_Pitch', 0, gear_ratio=150, invert=True),
+        _row('Eye_Yaw', 1, gear_ratio=35, scale=1.047),
+    ])
+    gate = ManualRangeGate(bridge)
+    assert gate.block_reason(0) == ''      # 판정 때 읽은 저장 매핑을 쓴다
+
+    pitch = gate.speed_limits(0)
+    eye = gate.speed_limits(1)
+    assert math.degrees(pitch[manual_speed.VELOCITY_FIELD]) == pytest.approx(300.0)
+    assert math.degrees(pitch[manual_speed.ACCELERATION_FIELD]) == pytest.approx(600.0)
+    assert math.degrees(eye[manual_speed.VELOCITY_FIELD]) == pytest.approx(2.0 * 35 * 1.047)
+
+
+def test_speed_limits_fall_back_to_gain_one_for_an_unmapped_motor(tmp_path):
+    import math
+    from motion_common import manual_speed
+    gate = ManualRangeGate(_bridge(tmp_path, [_row('Neck_Pitch', 0, gear_ratio=150)]))
+    gate.block_reason(0)
+    assert math.degrees(gate.speed_limits(7)[manual_speed.VELOCITY_FIELD]) == pytest.approx(2.0)
+    assert math.degrees(gate.speed_limits(None)[manual_speed.VELOCITY_FIELD]) == pytest.approx(2.0)
+
+
+def test_jog_and_action_requests_carry_the_speed_limits():
+    source = (BRIDGE_DIR / 'manual_motor_commands.py').read_text(encoding='utf-8')
+    assert source.count('**self._speed_limits(axis_value),') == 4   # 조그 2 · 절대 이동(범위 복구 포함) 2

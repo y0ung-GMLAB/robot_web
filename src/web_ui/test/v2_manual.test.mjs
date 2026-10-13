@@ -62,3 +62,41 @@ test('초기 위치에서 대기 중 · 재생 중이면 「정지」 뒤에만 
   assert.match(manualBlocker({ snap: { motion_run_status: { state: 'running' } }, sched: manual }, item).text, /재생 중입니다/);
   assert.equal(manualBlocker({ snap: { motion_run_status: { state: 'stopped' } }, sched: manual }, item), null);
 });
+
+/* ---------- 수정 목록 126 · 수동 조작 천천히 (2026-10-13) ---------- */
+import { readFileSync } from 'node:fs';
+import { MANUAL_JOINT_SPEED_DEG_S } from '../static/v2/js/pages/manual.js';
+
+const MANUAL_SRC = readFileSync(new URL('../static/v2/js/pages/manual.js', import.meta.url), 'utf8');
+const STREAM_SRC = readFileSync(new URL('../static/v2/js/manual_stream.js', import.meta.url), 'utf8');
+const SPEED_PY = readFileSync(new URL('../../motion_common/motion_common/manual_speed.py', import.meta.url), 'utf8');
+
+test('화면 속도 글 = 서버 상한(motion_common.manual_speed)', () => {
+  const match = SPEED_PY.match(/^JOINT_MAX_VELOCITY_DEG_S = ([\d.]+)/m);
+  assert.ok(match, 'manual_speed.py 상수');
+  assert.equal(MANUAL_JOINT_SPEED_DEG_S, Number(match[1]));
+});
+
+test('페이더 · 다이얼 목표에 출처를 싣는다 · 서버가 같은 조작/다른 조작을 가른다', () => {
+  assert.match(MANUAL_SRC, /source: 'fader'/);
+  assert.match(MANUAL_SRC, /source: 'dial'/);
+});
+
+test('놓기는 계속 가기 · 동작 취소와 페이지 떠남은 그 자리에 세우기(stop)', () => {
+  assert.match(STREAM_SRC, /type: 'stop'/);
+  assert.match(MANUAL_SRC, /function stopEverything\(\)/);
+  assert.match(MANUAL_SRC, /if \(!location\.hash\.startsWith\('#\/manual'\)\) \{ stopEverything\(\);/);
+  assert.doesNotMatch(MANUAL_SRC, /손을 떼면 그 위치에서 정지/, '옛 안내 문구');
+});
+
+test('잘못 찍기 · 놓기는 목표를 한 번 보낸 뒤에 · 잡기를 소켓 열기보다 먼저 적는다', () => {
+  const grab = MANUAL_SRC.slice(MANUAL_SRC.indexOf('const grab = async'), MANUAL_SRC.indexOf('const letGo'));
+  assert.ok(grab.indexOf('ui.faders.set(') < grab.indexOf('await stream.open('), '잡기 먼저');
+  assert.match(MANUAL_SRC, /if \(fader\.letGo\) \{ stream\.release\(\[axis\]\); ui\.faders\.delete\(axis\); \}/);
+});
+
+test('파랑 = 목표 · 회색 = 지금 위치 · 실시간 칸', () => {
+  for (const kind of ['fader-now', 'fader-gap', 'fader-value', 'range-goal', 'range-pos', 'range-gap']) {
+    assert.ok(MANUAL_SRC.includes(`'${kind}'`), kind);
+  }
+});

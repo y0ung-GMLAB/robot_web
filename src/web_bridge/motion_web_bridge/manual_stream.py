@@ -6,10 +6,12 @@
 관리하므로 여기서는 응답을 기다리지 않는다(발사 후 망각) · 거부 사유는
 결과 구독으로 받아 **축별 마지막 것**만 들고 있다가 화면에 돌려준다.
 
-놓으면 잡은 곳에 선다 · release 는 `hold_axes` 요청으로 바뀌어 supervisor
-가 현재 위치를 다시 목표로 박는다 · PP 모드 드라이브는 임대가 끝나도
-마지막 목표에 머무르므로, hold 는 "날아가던 목표" 가 아니라 "지금 서 있는
-곳" 에 세우기 위한 것이다.
+목표는 「가고 싶은 곳」 · supervisor 가 조인트 2 °/s · 4 °/s² 로 천천히 다가간다 ·
+상한(모터 단위)은 여기서 매핑 이득으로 계산해 싣는다 · 수정 목록 126
+
+    놓기(release)  `release_axes` · 멈추지 않고 마지막 목표까지 간 뒤 끝
+    세우기(hold)   `hold_axes` · supervisor 가 현재 위치를 다시 목표로 박는다 ·
+                   화면 「정지」 · 페이지를 떠남 · 소켓이 끊김
 """
 
 from __future__ import annotations
@@ -86,6 +88,7 @@ class ManualStreamService:
         *,
         motion_id: Any = None,
         motion_rad: Any = None,
+        source: Any = None,
     ) -> Dict[str, Any]:
         axis_int = _optional_axis(axis)
         if axis_int is None:
@@ -101,16 +104,36 @@ class ManualStreamService:
         joint_rad = _finite_float(motion_rad)
         if joint_rad is not None:
             request['motion_rad'] = joint_rad
+        # 같은 조작이면 새 목표로 · 다른 조작은 움직이는 동안 거절 (supervisor 판정)
+        source_text = str(source or '').strip().lower()
+        if source_text in ('fader', 'dial'):
+            request['source'] = source_text
+        request.update(self._speed_limits(axis_int))
         self._publish(request)
         return {'success': True, 'axis': axis_int, 'request_id': request['request_id']}
 
+    def release(self, axes: Any) -> Dict[str, Any]:
+        """놓음 · 마지막 목표까지 천천히 간 뒤 끝 · 수정 목록 126"""
+        clean = _clean_axes(axes)
+        if not clean:
+            return {'success': False, 'message': '놓을 모터가 없습니다'}
+        request = self._base_request()
+        request['release_axes'] = clean
+        self._publish(request)
+        return {'success': True, 'axes': clean, 'request_id': request['request_id']}
+
+    def _speed_limits(self, axis: int) -> Dict[str, Any]:
+        lookup = getattr(self.bridge, 'manual_speed_limits', None)
+        if not callable(lookup):
+            return {}
+        try:
+            return dict(lookup(axis) or {})
+        except Exception:  # noqa: BLE001 · 못 구하면 싣지 않는다 → supervisor 가 가장 느린 값
+            return {}
+
     def hold(self, axes: Any) -> Dict[str, Any]:
-        """놓은 축들을 현재 위치에 세운다 · supervisor 가 위치를 읽어 박는다."""
-        clean: List[int] = []
-        for value in axes if isinstance(axes, (list, tuple)) else []:
-            axis = _optional_axis(value)
-            if axis is not None and axis not in clean:
-                clean.append(axis)
+        """그 자리에 세운다 · 정지 · 끊김 · supervisor 가 위치를 읽어 박는다."""
+        clean = _clean_axes(axes)
         if not clean:
             return {'success': False, 'message': '위치를 유지할 모터가 없습니다'}
         request = self._base_request()
@@ -132,6 +155,15 @@ class ManualStreamService:
         self._publisher.publish(
             String(data=json.dumps(request, ensure_ascii=False))
         )
+
+
+def _clean_axes(axes: Any) -> List[int]:
+    clean: List[int] = []
+    for value in axes if isinstance(axes, (list, tuple)) else []:
+        axis = _optional_axis(value)
+        if axis is not None and axis not in clean:
+            clean.append(axis)
+    return clean
 
 
 def _optional_axis(value: Any) -> Optional[int]:
