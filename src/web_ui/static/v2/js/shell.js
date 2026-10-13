@@ -3,7 +3,7 @@
  * 원칙 1 · 4 · 7 (설계안 2026-10-09) · 상태 문장을 누르면 확인할 일과 해결 버튼
  */
 import { h, dot, replace } from './dom.js';
-import { headline, runMode } from './model.js';
+import { headline, pcRole as pcRoleOf, runMode } from './model.js';
 import * as act from './actions.js';
 
 export const NAV = [
@@ -112,10 +112,9 @@ export function createShell(root, { navigate }) {
   function update(state) {
     const snap = state.snap;
     const sched = state.sched;
-    const config = snap?.coordination?.runtime?.config || snap?.coordination?.config || {};
-    pcName.textContent = snap?.system_info?.hostname || config.pc_id || '…';
-    const group = config.enabled && config.group_id ? ` · 그룹 ${config.group_id}` : '';
-    pcRole.textContent = `${config.enabled ? (config.is_master ? '마스터' : '슬레이브') : '단독'}${group}`;
+    const role = pcRoleOf(snap);
+    pcName.textContent = snap?.system_info?.hostname || role.pcId || '…';
+    pcRole.textContent = role.text;
 
     const line = headline(snap, sched, { connected: state.connected });
     pill.className = `status-pill tone-${line.tone}`;

@@ -3,8 +3,21 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import test from 'node:test';
 import {
-  collectIssues, headline, modePhrase, motorChips, pcRows, runSummary, todayWindows,
+  collectIssues, headline, modePhrase, motorChips, pcRole, pcRows, runSummary, todayWindows,
 } from '../static/v2/js/model.js';
+
+test('위 막대 역할 · is_master 는 설정 파일 요약에서 · 돌고 있는 노드 칸이 먼저 와도 마스터 (수정 목록 119)', () => {
+  const runtime = { config: { pc_id: 'floating4', enabled: true, group_id: 'stage-a', dds_domain_id: 21 } };
+  const master = { coordination: { config: { pc_id: 'floating4', enabled: true, is_master: true, group_id: 'stage-a' }, runtime } };
+  assert.deepEqual(pcRole(master), { pcId: 'floating4', text: '마스터 · 그룹 stage-a' });
+  const slave = { coordination: { config: { ...master.coordination.config, is_master: false }, runtime } };
+  assert.equal(pcRole(slave).text, '슬레이브 · 그룹 stage-a');
+  assert.equal(pcRole({ coordination: { config: { enabled: false }, runtime: { config: { enabled: false } } } }).text, '단독');
+  assert.equal(pcRole({}).text, '단독');
+  // 돌고 있는 노드 값이 우선(그룹 ID 를 바꾸고 아직 재시작 전)
+  const pending = { coordination: { config: { enabled: true, is_master: true, group_id: 'new' }, runtime: { config: { enabled: true, group_id: 'old' } } } };
+  assert.equal(pcRole(pending).text, '마스터 · 그룹 old');
+});
 
 const pcs = (...extra) => ({ coordination: { runtime: { network_pcs: [
   { pc_id: 'floating4', is_local: true, is_master: true, online: true, joined: true },
