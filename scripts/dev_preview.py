@@ -1121,7 +1121,15 @@ async def preview_motor_config():
     import hashlib
     registry = _preview_registry()
     revision = hashlib.sha256(json.dumps(registry, sort_keys=True, ensure_ascii=False).encode()).hexdigest()
-    return {'success': True, 'saved': True, 'config_file': 'motor_axes/motor_axes.yaml', 'config_revision': revision, 'registry': registry}
+    # 원본 파일 보기(새 화면) · 진짜 파일 모양과 비슷하게 · 소프트 리밋 lower/upper 포함
+    import yaml
+    drivers = [{'id': i, 'type': 'minas', 'lower': -230.0 + i, 'upper': 254.0 - i,
+                'profile_velocity': m['config'].get('profile_velocity'), 'profile_acceleration': m['config'].get('profile_acceleration')}
+               for i, m in enumerate(registry.get('motors') or [])]
+    content = yaml.safe_dump({'masters': [{'type': 'ethercat', 'number_of_slaves': len(drivers)}], 'drivers': drivers},
+                             sort_keys=False, allow_unicode=True)
+    return {'success': True, 'saved': True, 'config_file': 'motor_axes/motor_axes.yaml', 'config_revision': revision,
+            'registry': registry, 'content': content}
 
 
 @app.put('/api/motor-config')

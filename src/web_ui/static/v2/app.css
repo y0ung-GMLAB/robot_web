@@ -476,3 +476,11 @@ details.raw pre.raw-file { max-height: 480px; }
 
 /* 3D 보기 · 이 애니메이션은 Blender 장면에 없음 · 흐리게(누르면 이유가 상태 줄에) · 104 */
 .seg[aria-disabled="true"] { opacity: 0.45; }
+
+/* 모든 MINAS 드라이브 공통 설정 · 저장 줄 · 오른쪽 정렬 · 114 */
+.pick-row-actions { display: flex; align-items: center; justify-content: flex-end; gap: 12px; margin-top: 12px; }
+.common-table td.common-value { width: 300px; }
+.common-table td.common-value .input { width: 100%; }
+.common-table td.common-default { width: 190px; white-space: nowrap; }
+.common-table td.common-state { width: 120px; white-space: nowrap; }
+@media (max-width: 720px) { .common-table td.common-value { width: auto; min-width: 180px; } }

@@ -1,8 +1,9 @@
 /**
- * UI v2 · 모터 설정 ① · 드라이브 공통 값 (MINAS · 모든 축) · 수정 목록 114 (사용자 2026-10-13)
- * 계속 맞춰 보는 값(과부하 레벨 · 브레이크 지연)을 화면에서 · 평소엔 잠김 · 「잠금 해제」 확인 뒤에만 고친다.
- * 값은 부팅 때마다 드라이브 RAM 에 쓰인다(EEPROM 아님) · 저장 = 이 PC 값 파일 · 드라이브에는 「장비에 적용」 때.
- * 서버 · GET/PUT /api/motor-config/minas-base · 범위 · 바꿀 수 있는 항목은 서버가 정한다(minas_params).
+ * UI v2 · 모터 설정 ① · 모든 MINAS 드라이브 공통 설정 · 수정 목록 114 (사용자 2026-10-13)
+ * 계속 맞춰 보는 값(브레이크 지연 · 알람 때 멈추는 방법 · 과부하 알람 기준)을 화면에서 · 평소엔 잠김 ·
+ * 「잠금 해제」 확인 뒤에만 고친다 · 값은 모터 프로그램이 시작할 때마다 드라이브에 써 넣는다(드라이브 안 영구 저장 아님).
+ * 서버 · GET/PUT /api/motor-config/minas-base · 범위 · 보기 · 바꿀 수 있는 항목은 서버가 정한다(minas_params).
+ * 이름은 쉬운 말 · 매뉴얼 번호(Pr)는 작게 (사용자 「용어 이상하고 헷갈리는 것 고려」 2026-10-13)
  */
 import { h, dot } from '../dom.js';
 import { api } from '../net.js';
@@ -28,10 +29,10 @@ async function load(changed) {
 
 async function unlock(changed) {
   const ok = await confirmBox({
-    title: '드라이브 공통 값 잠금 해제',
-    body: '모든 MINAS 축에 부팅 때마다 쓰이는 값입니다.\n'
-      + '잘못 넣으면 서보를 끌 때 축이 처지거나(브레이크 지연), 과부하 알람이 너무 일찍 납니다(과부하 레벨).\n'
-      + '바꾼 값은 「장비에 적용」 을 해야 드라이브에 들어갑니다.',
+    title: '공통 설정 잠금 해제',
+    body: '모든 MINAS 드라이브에 똑같이 들어가는 설정입니다.\n'
+      + '잘못 넣으면 서보를 끌 때 축이 처지거나(브레이크 지연), 알람 때 세우는 방법이 바뀌거나, 과부하 알람이 너무 일찍 납니다.\n'
+      + '바꾼 값은 「저장 후 장비에 적용」 으로 모터 프로그램을 다시 시작해야 드라이브에 들어갑니다.',
     confirmLabel: '잠금 해제', tone: 'warning',
   });
   if (!ok) return;
@@ -46,7 +47,7 @@ function lock(changed) {
   changed();
 }
 
-/** 바뀐 칸 · { key: 값 | '' (기본값으로) } */
+/** 바뀐 칸 · { key: 값 | '' (기본으로) } */
 export function minasBaseChanges(rows, draft) {
   const out = {};
   for (const row of rows || []) {
@@ -59,18 +60,31 @@ export function minasBaseChanges(rows, draft) {
   return out;
 }
 
-/** 칸 값 검사 · 문제 글 목록 */
+/** 칸 값 검사 · 문제 글 목록 · 보기 항목은 보기만 */
 export function minasBaseProblems(rows, draft) {
   const problems = [];
   for (const row of rows || []) {
     const text = String((draft || {})[row.key] ?? '').trim();
     if (!text) continue;
     const value = Number(text);
+    if (Array.isArray(row.choices)) {
+      if (!row.choices.some((choice) => choice.value === value)) problems.push(`${row.label} · 보기 중에서 고르세요`);
+      continue;
+    }
     if (!Number.isInteger(value) || value < row.min || value > row.max) {
-      problems.push(`${row.label} 는 ${row.min}~${row.max} ${row.unit} 사이 정수여야 합니다`);
+      problems.push(`${row.label} · ${row.min}~${row.max} ${row.unit} 사이 정수로 넣으세요`);
     }
   }
   return problems;
+}
+
+/** 보이는 값 글 · 보기 항목은 보기 글 */
+export function valueText(row, value) {
+  if (Array.isArray(row.choices)) {
+    const choice = row.choices.find((c) => c.value === Number(value));
+    return choice ? choice.label : String(value);
+  }
+  return `${value}${row.unit ? ` ${row.unit}` : ''}`;
 }
 
 async function save(changed) {
@@ -85,7 +99,7 @@ async function save(changed) {
     ui.unlocked = false;
     ui.draft = {};
     toast(result?.message || '저장했습니다', 'ok');
-    if (result?.needs_apply && await act.confirmApplyMotorConfig('드라이브 공통 값을 드라이브에 넣으려면 장비에 적용하고 모터를 재시작해야 합니다.')) {
+    if (result?.needs_apply && await act.confirmApplyMotorConfig('공통 설정을 드라이브에 넣으려면 장비에 적용하고 모터 프로그램을 다시 시작해야 합니다.')) {
       await act.applyMotorConfig();
     }
   } catch (error) {
@@ -96,44 +110,55 @@ async function save(changed) {
   }
 }
 
+function editor(row, changed) {
+  const draftValue = ui.draft[row.key];
+  const shown = draftValue !== undefined ? draftValue : (row.local ?? '');
+  if (Array.isArray(row.choices)) {
+    const current = String(shown === '' ? row.default : shown);
+    return h('select', { class: 'input', 'aria-label': row.label,
+      onchange: (e) => { ui.draft[row.key] = e.target.value === String(row.default) ? '' : e.target.value; changed(); } },
+    row.choices.map((choice) => h('option', { value: String(choice.value), selected: String(choice.value) === current ? '' : null },
+      `${choice.label}${choice.value === row.default ? ' · 기본' : ''}`)));
+  }
+  return h('input', { class: 'input mono', type: 'number', step: '1', min: row.min, max: row.max, value: shown,
+    placeholder: `기본 ${row.default}`, 'aria-label': row.label,
+    oninput: (e) => { ui.draft[row.key] = e.target.value; },
+    onchange: () => changed() });
+}
+
 export function minasBaseCard(changed, { hasAc = true } = {}) {
   if (!hasAc) return null;
-  if (!ui.rows && !ui.error) { load(changed); return h('section', { class: 'card', 'aria-label': '드라이브 공통 값' }, h('p', { class: 'muted', text: '드라이브 공통 값 불러오는 중…' })); }
+  const label = '모든 MINAS 드라이브 공통 설정';
+  if (!ui.rows && !ui.error) { load(changed); return h('section', { class: 'card', 'aria-label': label }, h('p', { class: 'muted', text: '공통 설정 불러오는 중…' })); }
   const problems = minasBaseProblems(ui.rows, ui.draft);
   const pending = minasBaseChanges(ui.rows, ui.draft);
   const head = h('div', { class: 'part-head' },
-    h('h3', { text: '드라이브 공통 값 · MINAS 모든 축' }),
+    h('h3', { text: label }),
     h('span', { class: `chip chip-${ui.unlocked ? 'warn' : 'idle'}`, text: ui.unlocked ? '고치는 중' : '잠김' }),
     h('span', { class: 'grow' }),
     ui.unlocked
-      ? h('button', { class: 'btn btn-mini', type: 'button', disabled: ui.busy, onclick: () => lock(changed) }, '취소 · 잠금')
+      ? h('button', { class: 'btn btn-mini', type: 'button', disabled: ui.busy, onclick: () => lock(changed) }, '취소')
       : h('button', { class: 'btn btn-mini', type: 'button', disabled: ui.busy || !ui.rows?.length, onclick: () => unlock(changed) }, '잠금 해제'));
-  if (ui.error) return h('section', { class: 'card', 'aria-label': '드라이브 공통 값' }, head, h('p', { class: 'tone-text-bad', text: ui.error }));
+  if (ui.error) return h('section', { class: 'card', 'aria-label': label }, head, h('p', { class: 'tone-text-bad', text: ui.error }));
   const rows = (ui.rows || []).map((row) => {
-    const draftValue = ui.draft[row.key];
-    const shown = draftValue !== undefined ? draftValue : (row.local ?? '');
+    const changedHere = row.local !== null && row.local !== undefined;
     return h('tr', {},
-      h('td', {}, h('strong', { text: row.label }), h('div', { class: 'muted small', text: row.note })),
-      h('td', {}, ui.unlocked
-        ? h('input', { class: 'input mono', type: 'number', step: '1', min: row.min, max: row.max, value: shown,
-          placeholder: `기본 ${row.default}`, 'aria-label': row.label,
-          oninput: (e) => { ui.draft[row.key] = e.target.value; },
-          onchange: () => changed() })
-        : h('span', { class: 'mono', text: `${row.value}` })),
-      h('td', { class: 'muted', text: row.unit }),
-      h('td', { class: 'muted mono', text: `${row.default}` }),
-      h('td', {}, h('span', { class: `chip chip-${row.local === null || row.local === undefined ? 'idle' : 'info'}`,
-        text: row.local === null || row.local === undefined ? '기본값' : '이 PC 값' })));
+      h('td', {},
+        h('strong', { text: row.label }), h('span', { class: 'muted small mono', text: `  ${row.number || ''}` }),
+        h('div', { class: 'muted small', text: row.note })),
+      h('td', { class: 'common-value' }, ui.unlocked ? editor(row, changed) : h('span', { text: valueText(row, row.value) })),
+      h('td', { class: 'muted small common-default', text: valueText(row, row.default) }),
+      h('td', { class: 'common-state' }, h('span', { class: `chip chip-${changedHere ? 'info' : 'idle'}`, text: changedHere ? '이 PC에서 바꿈' : '기본 그대로' })));
   });
-  return h('section', { class: 'card', 'aria-label': '드라이브 공통 값' },
+  return h('section', { class: 'card', 'aria-label': label },
     head,
-    h('p', { class: 'muted small', text: '부팅 때마다 모든 MINAS 드라이브에 쓰는 값입니다(드라이브 EEPROM 은 그대로). 모터 설정 칸에 그 모터만 적은 값이 있으면 그게 이깁니다. 비워 두면 기본값.' }),
-    h('div', { class: 'table-wrap' }, h('table', { class: 'table' },
-      h('thead', {}, h('tr', {}, ['항목', '값', '단위', '기본값', ''].map((text) => h('th', { scope: 'col', text })))),
+    h('p', { class: 'muted small', text: '모든 MINAS 드라이브에 똑같이 들어가는 설정입니다. 모터 프로그램이 시작할 때마다 드라이브에 써 넣습니다. 브레이크 지연은 브레이크 보드에 연결된 모터에만 해당하고, 위 모터별 칸에 따로 적은 모터는 그 값을 씁니다. 저장하면 장비에 적용할지 묻습니다.' }),
+    h('div', { class: 'table-wrap' }, h('table', { class: 'table common-table' },
+      h('thead', {}, h('tr', {}, ['항목', '지금 값', '기본', ''].map((text) => h('th', { scope: 'col', text })))),
       h('tbody', {}, rows))),
     problems.map((text) => h('div', { class: 'blocker' }, dot('warn'), h('span', { class: 'grow', text }))),
-    ui.unlocked ? h('div', { class: 'row-actions' },
+    ui.unlocked ? h('div', { class: 'pick-row-actions' },
+      h('span', { class: 'muted small', text: Object.keys(pending).length ? `바꾼 칸 ${Object.keys(pending).length}개` : '바꾼 칸 없음' }),
       h('button', { class: 'btn btn-primary', type: 'button', disabled: ui.busy || problems.length > 0 || !Object.keys(pending).length,
-        onclick: () => save(changed) }, ui.busy ? '저장 중' : '저장 후 장비에 적용'),
-      h('span', { class: 'muted small', text: Object.keys(pending).length ? `바뀐 칸 ${Object.keys(pending).length}개` : '바뀐 칸 없음' })) : null);
+        onclick: () => save(changed) }, ui.busy ? '저장 중' : '공통 설정 저장')) : null);
 }

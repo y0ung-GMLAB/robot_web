@@ -192,7 +192,7 @@ def test_repo_site_base_has_the_decided_values():
     """사용자 결정 2026-10-13 · 과부하 레벨 출하값 · 정지 중 브레이크 150 ms · 회전 중 0 ms"""
     root = Path(__file__).resolve().parents[3]
     values = {int(item['index']): item['value'] for item in minas_params.site_default_items(root)}
-    assert values == {0x3512: 0, 0x3437: 150, 0x3438: 0}
+    assert values == {0x3512: 0, 0x3437: 150, 0x3438: 0, 0x3510: 4, 0x3614: 200}
 
 
 def test_brake_delay_defaults_come_from_the_site_base_and_the_motor_field_wins(tmp_path):
@@ -220,3 +220,17 @@ def test_screen_refuses_out_of_range_and_unknown_objects(tmp_path):
         minas_params.save_site_local(tmp_path, {'0x3512:0': 116})     # 115 % 넘게는 못 씀(매뉴얼)
     with pytest.raises(ValueError):
         minas_params.save_site_local(tmp_path, {'0x60B2:0': 10})      # 화면에서 못 바꾸는 객체(0x60B2 안 씀)
+
+
+def test_alarm_stop_method_is_a_choice_of_two_and_time_cannot_be_zero(tmp_path):
+    """사용자 결정 2026-10-13 · Pr5.10 = 4(모터 힘으로 먼저 세움) · 0 과 4 만 · Pr6.14 = 0 은 즉시 정지를 끄므로 막음"""
+    import pytest
+    view = minas_params.site_base_view(tmp_path)
+    rows = {row['key']: row for row in view['items']}
+    assert [c['value'] for c in rows['0x3510:0']['choices']] == [4, 0]
+    assert rows['0x3510:0']['value'] == 4 and rows['0x3614:0']['value'] == 200
+    minas_params.save_site_local(tmp_path, {'0x3510:0': 0})
+    with pytest.raises(ValueError):
+        minas_params.save_site_local(tmp_path, {'0x3510:0': 1})       # 프리런 섞인 값은 안 받음
+    with pytest.raises(ValueError):
+        minas_params.save_site_local(tmp_path, {'0x3614:0': 0})

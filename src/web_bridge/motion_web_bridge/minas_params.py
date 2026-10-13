@@ -135,18 +135,44 @@ EMBEDDED_SITE_ITEMS: List[Dict[str, Any]] = [
     {'index': 0x3512, 'subindex': 0x00, 'value': 0, 'type': 's16'},
     {'index': 0x3437, 'subindex': 0x00, 'value': 150, 'type': 's16'},
     {'index': 0x3438, 'subindex': 0x00, 'value': 0, 'type': 's16'},
+    {'index': 0x3510, 'subindex': 0x00, 'value': 4, 'type': 's16'},
+    {'index': 0x3614, 'subindex': 0x00, 'value': 200, 'type': 's16'},
 ]
 
-#: 화면에서 바꿀 수 있는 공통 값 · (index, subindex) → (이름, 단위, 최소, 최대, 설명)
-#: 여기 없는 객체는 화면에서 못 바꾼다 · 계속 맞춰 보는 값만 연다(사용자 2026-10-13)
-EDITABLE_SITE_ITEMS: Dict[Tuple[int, int], Tuple[str, str, int, int, str]] = {
-    (0x3512, 0x00): ('Pr5.12 과부하 레벨', '%', 0, 115,
-                     '0 = 정격 115 %(출하값 · 매뉴얼 「통상은 0」) · 낮추면 그 % 에서 과부하 알람(Err16)'),
-    (0x3437, 0x00): ('Pr4.37 브레이크 지연 (정지)', 'ms', 0, 10000,
-                     '멈춘 채 서보 OFF · 브레이크 신호 뒤 전류를 끊기까지 · 브레이크가 실제로 물리는 시간 이상'),
-    (0x3438, 0x00): ('Pr4.38 브레이크 지연 (동작)', 'ms', 0, 10000,
-                     '도는 중 서보 OFF · 브레이크를 잡기까지 · 길면 전원이 끊긴 채 자유낙하'),
+#: 화면에서 바꿀 수 있는 공통 값 · (index, subindex) → (이름, 매뉴얼 번호, 단위, 최소, 최대, 설명)
+#: 여기 없는 객체는 화면에서 못 바꾼다 · 계속 맞춰 보는 값만 연다(사용자 2026-10-13) · 화면 순서도 이 순서
+#: 이름은 쉬운 말 · 매뉴얼 번호는 작게(사용자 「용어 이상하고 헷갈리는 것 고려」 2026-10-13)
+EDITABLE_SITE_ITEMS: Dict[Tuple[int, int], Tuple[str, str, str, int, int, str]] = {
+    (0x3437, 0x00): ('브레이크 지연 · 멈춰 있을 때', 'Pr4.37', 'ms', 0, 10000,
+                     '멈춘 상태에서 서보를 끌 때 브레이크를 잡은 뒤 이만큼 모터 힘을 더 유지 · 브레이크가 물리는 시간보다 길게'),
+    (0x3438, 0x00): ('브레이크 지연 · 움직이는 중', 'Pr4.38', 'ms', 0, 10000,
+                     '움직이다 서보가 꺼질 때(알람 · 긴급 정지) 브레이크를 잡기까지 · 0 = 바로'),
+    (0x3510, 0x00): ('알람 때 멈추는 방법', 'Pr5.10', '', 0, 4,
+                     '모터 힘으로 먼저 세우면 무거운 축이 덜 출렁임 · 안 되는 알람(과전류 · 엔코더 이상)은 다이나믹 브레이크'),
+    (0x3614, 0x00): ('알람 때 모터 힘으로 세우는 최대 시간', 'Pr6.14', 'ms', 1, 1000,
+                     '이 안에 못 세우면 다이나믹 브레이크로 · 이 동안에도 모터 힘은 유지 · 보통 수십 ms 에 섬'),
+    (0x3512, 0x00): ('과부하 알람 기준', 'Pr5.12', '%', 0, 115,
+                     '0 = 정격의 115 %(출하값 · 보통은 0) · 낮추면 그 % 에서 과부하 알람'),
 }
+
+#: 숫자 대신 고르는 항목 · 값 → 화면 글 · 여기 없는 값은 받지 않는다
+SITE_ITEM_CHOICES: Dict[Tuple[int, int], Dict[int, str]] = {
+    # 1~3 · 5~7 은 프리런(힘 없이 굴러감)이 섞여 무거운 축에 안 맞는다 · 0 과 4 만 연다
+    (0x3510, 0x00): {
+        4: '모터 힘으로 먼저 세움',
+        0: '바로 다이나믹 브레이크(출하값)',
+    },
+}
+
+
+def _accepts(key: Tuple[int, int], value: int) -> bool:
+    spec = EDITABLE_SITE_ITEMS.get(key)
+    if spec is None:
+        return False
+    choices = SITE_ITEM_CHOICES.get(key)
+    if choices is not None:
+        return value in choices
+    return spec[3] <= value <= spec[4]
 
 
 def _item_key(item: Dict[str, Any]) -> Tuple[int, int]:
@@ -174,8 +200,7 @@ def site_local_values(workspace_root: Path) -> Dict[Tuple[int, int], int]:
     for item in _read_items(Path(workspace_root) / SITE_LOCAL_FILE) or []:
         key = _item_key(item)
         value = optional_int(item.get('value'))
-        spec = EDITABLE_SITE_ITEMS.get(key)
-        if spec is None or value is None or not spec[2] <= value <= spec[3]:
+        if value is None or not _accepts(key, value):
             continue
         values[key] = value
     return values
@@ -198,11 +223,13 @@ def site_base_view(workspace_root: Path) -> Dict[str, Any]:
     defaults = {_item_key(item): optional_int(item.get('value')) for item in site_default_items(workspace_root)}
     local = site_local_values(workspace_root)
     rows = []
-    for key, (label, unit, low, high, note) in EDITABLE_SITE_ITEMS.items():
+    for key, (label, number, unit, low, high, note) in EDITABLE_SITE_ITEMS.items():
         default = defaults.get(key)
+        choices = SITE_ITEM_CHOICES.get(key)
         rows.append({
             'key': f'0x{key[0]:04X}:{key[1]}',
-            'label': label, 'unit': unit, 'min': low, 'max': high, 'note': note,
+            'label': label, 'number': number, 'unit': unit, 'min': low, 'max': high, 'note': note,
+            'choices': [{'value': v, 'label': text} for v, text in choices.items()] if choices else None,
             'default': default,
             'local': local.get(key),
             'value': local.get(key, default),
@@ -233,8 +260,11 @@ def save_site_local(workspace_root: Path, values: Dict[str, Any]) -> Dict[str, A
             local.pop(key, None)
             continue
         value = optional_int(raw_value)
-        if value is None or not spec[2] <= value <= spec[3]:
-            raise ValueError(f'{spec[0]} 는 {spec[2]}~{spec[3]} {spec[1]} 사이 정수여야 합니다')
+        if value is None or not _accepts(key, value):
+            choices = SITE_ITEM_CHOICES.get(key)
+            if choices:
+                raise ValueError(f'{spec[0]} 는 정해진 보기 중에서만 고를 수 있습니다')
+            raise ValueError(f'{spec[0]} 는 {spec[3]}~{spec[4]} {spec[2]} 사이 정수여야 합니다')
         if value == defaults.get(key):
             local.pop(key, None)
         else:

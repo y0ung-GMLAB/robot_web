@@ -34,6 +34,9 @@ export async function loadMotors(state, changed, { force = false } = {}) {
       const data = await api('GET', '/api/motor-config');
       const registry = data?.registry || { motors: [] };
       ui.revision = String(data?.config_revision || '');
+      // 원본 파일 그대로 · 소프트 리밋(lower/upper) 등 화면 칸에 없는 값도 보이게 · 사용자 2026-10-13
+      ui.content = String(data?.content || '');
+      ui.configFile = String(data?.config_file || '');
       ui.saved = clone(registry.motors);
       ui.draft = { ...registry, motors: clone(registry.motors) };
       ui.message = data?.saved === false ? String(data?.message || '') : '';
@@ -393,5 +396,10 @@ export function motorsBody(state, changed) {
     selected ? detailCard(state, changed, selected) : null,
     // 모든 MINAS 축 공통 · 잠금 · 수정 목록 114
     minasBaseCard(changed, { hasAc: rows.some((r) => r.ac) }),
+    // 모터 설정 원본 파일(저장된 것) · 이전 UI 「원본 보기」 · 소프트 리밋 lower/upper(모터 deg · 조인트 매핑에서 옴) 등 · 2026-10-13
+    ui.content ? h('details', { class: 'raw card' },
+      h('summary', { text: `원본 파일 · ${ui.configFile ? ui.configFile.split(/[\\/]/).pop() : '모터 설정'} (저장된 내용 · 소프트 리밋 lower/upper 포함)` }),
+      h('p', { class: 'muted small', text: 'lower · upper = 드라이브 소프트 리밋(모터 deg) · 조인트 매핑의 범위를 환산해 저장 때 들어갑니다(여유 2° 는 장비에 넣을 때 더함). 읽기 전용입니다.' }),
+      h('pre', { class: 'doc-code small raw-file' }, h('code', { text: ui.content }))) : null,
   ];
 }

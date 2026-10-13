@@ -82,6 +82,16 @@ test('드라이브 공통 값 · 잠금 해제 확인 뒤에만 고침 · 모터
   const page = readFileSync(new URL('../static/v2/js/pages/motors.js', import.meta.url), 'utf8');
   assert.match(card, /'잠금 해제'/);
   assert.match(card, /confirmBox\(/);
-  assert.match(card, /ui\.unlocked\s*\n?\s*\? h\('input'/);
+  assert.match(card, /ui\.unlocked \? editor\(row, changed\)/);   // 잠겼을 때는 글만
   assert.match(page, /minasBaseCard\(changed/);
+});
+
+test('공통 설정 · 알람 때 멈추는 방법은 보기에서만 · 보이는 글', async () => {
+  const { minasBaseProblems, valueText } = await import('../static/v2/js/pages/minas_base.js');
+  const row = { key: '0x3510:0', label: '알람 때 멈추는 방법', unit: '', min: 0, max: 4, default: 4, local: null, value: 4,
+    choices: [{ value: 4, label: '모터 힘으로 먼저 세움' }, { value: 0, label: '바로 다이나믹 브레이크 (출하값)' }] };
+  assert.deepEqual(minasBaseProblems([row], { '0x3510:0': '2' }).length, 1);
+  assert.deepEqual(minasBaseProblems([row], { '0x3510:0': '0' }), []);
+  assert.equal(valueText(row, 4), '모터 힘으로 먼저 세움');
+  assert.equal(valueText({ unit: 'ms' }, 150), '150 ms');
 });
