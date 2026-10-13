@@ -1976,6 +1976,16 @@ class MotionWebBridge(Node):
         result = self.drive_maintenance.run(payload if isinstance(payload, dict) else {})
         return {**result, **self.snapshot()}
 
+    def minas_drive_gains(self, payload: Dict[str, Any]) -> Dict[str, Any]:
+        """MINAS 게인 쓰기 · `POST /api/motor-config/drive-gains` · 수정 목록 108 (다)"""
+        result = self.drive_maintenance.write_gains(payload if isinstance(payload, dict) else {})
+        return {**result, **self.snapshot()}
+
+    def minas_eeprom_save_all(self, payload: Dict[str, Any]) -> Dict[str, Any]:
+        """모든 MINAS 축 EEPROM 저장 · 재시작 한 번 · `POST /api/motor-config/eeprom-save-all` · 108 (다)"""
+        result = self.drive_maintenance.save_eeprom_all(payload if isinstance(payload, dict) else {})
+        return {**result, **self.snapshot()}
+
     def _registry_motor_for_axis(self, axis: int) -> Optional[Dict[str, Any]]:
         registry = self._motor_config.load().get('registry') or {}
         for entry in registry.get('motors') or []:

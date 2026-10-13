@@ -1,5 +1,5 @@
 /**
- * UI v2 · 모터 설정 ① · 모든 MINAS 드라이브 공통 설정 · 수정 목록 114 (사용자 2026-10-13)
+ * UI v2 · 모터 설정 ① · 드라이브 공통 설정 · 수정 목록 114 (사용자 2026-10-13)
  * 계속 맞춰 보는 값(브레이크 지연 · 알람 때 멈추는 방법 · 과부하 알람 기준)을 화면에서 · 평소엔 잠김 ·
  * 「잠금 해제」 확인 뒤에만 고친다 · 값은 모터 프로그램이 시작할 때마다 드라이브에 써 넣는다(드라이브 안 영구 저장 아님).
  * 서버 · GET/PUT /api/motor-config/minas-base · 범위 · 보기 · 바꿀 수 있는 항목은 서버가 정한다(minas_params).
@@ -30,7 +30,7 @@ async function load(changed) {
 async function unlock(changed) {
   const ok = await confirmBox({
     title: '공통 설정 잠금 해제',
-    body: '모든 MINAS 드라이브에 똑같이 들어가는 설정입니다.\n'
+    body: '모든 MINAS 드라이브(AC 서보)에 똑같이 들어가는 설정입니다.\n'
       + '잘못 넣으면 서보를 끌 때 축이 처지거나(브레이크 지연), 알람 때 세우는 방법이 바뀌거나, 과부하 알람이 너무 일찍 납니다.\n'
       + '바꾼 값은 「저장 후 장비에 적용」 으로 모터 프로그램을 다시 시작해야 드라이브에 들어갑니다.',
     confirmLabel: '잠금 해제', tone: 'warning',
@@ -133,9 +133,9 @@ function editor(row, changed) {
     onchange: () => changed() });
 }
 
-export function minasBaseCard(changed, { hasAc = true } = {}) {
+export function minasBaseCard(changed, { hasAc = true, acAxes = [], onSaveAll = null } = {}) {
   if (!hasAc) return null;
-  const label = '모든 MINAS 드라이브 공통 설정';
+  const label = '드라이브 공통 설정';
   if (!ui.rows && !ui.error) { load(changed); return h('section', { class: 'card', 'aria-label': label }, h('p', { class: 'muted', text: '공통 설정 불러오는 중…' })); }
   const problems = minasBaseProblems(ui.rows, ui.draft);
   const pending = minasBaseChanges(ui.rows, ui.draft);
@@ -160,11 +160,15 @@ export function minasBaseCard(changed, { hasAc = true } = {}) {
   });
   return h('section', { class: 'card', 'aria-label': label },
     head,
-    h('p', { class: 'muted small', text: '모든 MINAS 드라이브에 똑같이 들어가는 설정입니다. 모터 프로그램이 시작할 때마다 드라이브에 써 넣습니다. 브레이크 지연은 브레이크 보드에 연결된 모터에만 해당하고, 위 모터별 칸에 따로 적은 모터는 그 값을 씁니다. 저장하면 장비에 적용할지 묻습니다.' }),
+    h('p', { class: 'muted small', text: '모든 MINAS 드라이브(AC 서보)에 똑같이 들어가는 설정입니다. 모터 프로그램이 시작할 때마다 드라이브에 써 넣습니다. 브레이크 지연은 브레이크 보드에 연결된 모터에만 해당하고, 위 모터별 칸에 따로 적은 모터는 그 값을 씁니다. 저장하면 장비에 적용할지 묻습니다.' }),
     h('div', { class: 'table-wrap' }, h('table', { class: 'table common-table' },
       h('thead', {}, h('tr', {}, ['항목', '지금 값', '기본값', ''].map((text) => h('th', { scope: 'col', text })))),
       h('tbody', {}, rows))),
     problems.map((text) => h('div', { class: 'blocker' }, dot('warn'), h('span', { class: 'grow', text }))),
+    // 모든 축 EEPROM 저장 · 공통 설정 · 게인 등 지금 드라이브 값이 전원을 꺼도 남게 · 재시작 한 번 · 108 (다)
+    !ui.unlocked && onSaveAll && acAxes.length ? h('div', { class: 'pick-row-actions' },
+      h('span', { class: 'muted small', text: '적용 뒤 한 번 눌러 두면 프로그램 없이 드라이브만 켜질 때도 같은 값이 쓰입니다' }),
+      h('button', { class: 'btn btn-mini', type: 'button', disabled: ui.busy, onclick: onSaveAll }, `모든 축 드라이브에 저장 (EEPROM) · ${acAxes.length}대`)) : null,
     ui.unlocked ? h('div', { class: 'pick-row-actions' },
       h('span', { class: 'muted small', text: Object.keys(pending).length ? `바꾼 칸 ${Object.keys(pending).length}개` : '바꾼 칸 없음' }),
       h('button', { class: 'btn btn-primary', type: 'button', disabled: ui.busy || problems.length > 0 || !Object.keys(pending).length,

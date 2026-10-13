@@ -67,7 +67,7 @@ GAIN_OBJECTS: Tuple[Tuple[str, int, str], ...] = (
     ('estimation_speed', 0x3631, 'int16'),
 )
 #: 게인만 다시 읽는 간격 · 읽기 실패가 있으면 짧게
-GAIN_REFRESH_SEC = 300.0
+GAIN_REFRESH_SEC = 60.0   # 화면에서 쓴 게인이 1 분 안에 표에 보이게 · 108 (다)
 GAIN_RETRY_SEC = 15.0
 
 Signature = FrozenSet[Tuple[int, int]]

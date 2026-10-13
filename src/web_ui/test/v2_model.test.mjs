@@ -97,7 +97,7 @@ test('오늘 스케줄 · 매일 · 요일 · 한 번 · 자정 넘김 · 꺼진
 });
 
 test('새 UI 는 기존 화면 코드를 가져다 쓰지 않는다 · 따로 선다', () => {
-  for (const file of ['main.js', 'shell.js', 'net.js', 'actions.js', 'play_model.js', 'schedule_model.js', 'store_model.js', 'anim_model.js', 'pages/home.js', 'pages/play.js', 'pages/schedule.js', 'pages/store.js', 'pages/animations.js', 'pages/playlist_card.js', 'markdown.js', 'pages/docs.js', 'pages/tools.js', 'pages/alarms.js', 'pages/network.js', 'pages/backup.js', 'dialog.js', 'net.js', 'pages/pack.js', 'zip_store.js', 'records_model.js', 'pages/records.js', 'mapping_model.js', 'pages/mapping.js', 'motors_model.js', 'pages/motors.js', 'pages/minas_base.js', 'pages/manual.js', 'dial_session.js', 'manual_stream.js', 'viewer3d.js']) {
+  for (const file of ['main.js', 'shell.js', 'net.js', 'actions.js', 'play_model.js', 'schedule_model.js', 'store_model.js', 'anim_model.js', 'pages/home.js', 'pages/play.js', 'pages/schedule.js', 'pages/store.js', 'pages/animations.js', 'pages/playlist_card.js', 'markdown.js', 'pages/docs.js', 'pages/tools.js', 'pages/alarms.js', 'pages/network.js', 'pages/backup.js', 'dialog.js', 'net.js', 'pages/pack.js', 'zip_store.js', 'records_model.js', 'pages/records.js', 'mapping_model.js', 'pages/mapping.js', 'motors_model.js', 'pages/motors.js', 'pages/minas_base.js', 'pages/drive_gains.js', 'pages/manual.js', 'dial_session.js', 'manual_stream.js', 'viewer3d.js']) {
     const text = readFileSync(new URL(`../static/v2/js/${file}`, import.meta.url), 'utf8');
     // 기존 화면 코드는 안 쓴다 · 예외 하나 · 3D 순수 계산(sim3d_math.js)은 두 화면이 같은 시계·자세를 쓰게 함께 쓴다
     const imports = [...text.matchAll(/from '((?:\.\.\/)+js\/[^']+)'/g)].map((m) => m[1]);

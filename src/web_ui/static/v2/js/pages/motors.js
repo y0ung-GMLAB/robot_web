@@ -16,6 +16,7 @@ import { confirmConflicts } from '../conflict_dialog.js';
 import { EDIT_FIELDS, absoluteJobText, absoluteSummary, gainText, gainWarnings, getField, motorChanges, motorProblems, motorRows, setField } from '../motors_model.js';
 import { signedDeg } from '../play_model.js';
 import { minasBaseCard } from './minas_base.js';
+import { autoTuneAll, gainField, saveAll } from './drive_gains.js';
 
 const ui = { revision: '', saved: null, draft: null, selected: null, job: null, busy: '', error: '', scan: null };
 let jobTimer = null;
@@ -321,6 +322,8 @@ function detailCard(state, changed, row) {
     '과부하율 읽기 (드라이브 소프트웨어 Ver1.03 이상 필요 · 낮은 버전에서 켜면 모터 프로그램이 시작되지 않음)') : null,
     h('label', { class: 'inline' }, h('input', { type: 'checkbox', checked: motor.config?.schedule_end_servo_off === true,
       onchange: (e) => { setField(motor, 'schedule_end_servo_off', e.target.checked); changed(); } }), '운영 시간이 끝나면 서보 끄기'),
+    // 드라이브 게인 · 잠금 · 재시작 없이 쓰기 · 수정 목록 108 (다)
+    gainField(row, changed, () => loadMotors(state, changed, { force: true })),
     h('div', { class: 'field' },
       h('span', { class: 'field-label', text: '드라이브 관리' }),
       h('div', { class: 'row' },
@@ -379,8 +382,10 @@ export function motorsBody(state, changed) {
         h('span', { text: '기구에 걸린 것이 없는지 확인한 뒤 오류를 초기화하고 서보를 켜세요' })),
       h('button', { class: 'btn btn-danger-soft', type: 'button', disabled: Boolean(ui.busy), onclick: () => servo(row, 'reset', state, changed) }, row.ac ? '오류 초기화' : '재부팅'))),
     servoAllBar(rows, state, changed),
-    // 게인 알림 · 막지 않음 · 108 (나)
-    gainWarnings(rows).map((text) => h('div', { class: 'blocker' }, dot('warn'), h('span', { class: 'grow', text }))),
+    // 게인 알림 · 막지 않음 · 108 (나) · 자동조정 꺼짐이면 「모두 켜기」 · 108 (다)
+    gainWarnings(rows).map((text) => h('div', { class: 'blocker' }, dot('warn'), h('span', { class: 'grow', text }),
+      text.startsWith('자동조정 꺼짐') ? h('button', { class: 'btn btn-mini', type: 'button', disabled: Boolean(ui.busy),
+        onclick: () => autoTuneAll(rows, changed, () => loadMotors(state, changed, { force: true })) }, '자동조정 켜기') : null)),
     h('section', { class: 'card', 'aria-label': '모터' },
       rows.length ? h('div', { class: 'table-wrap' }, h('table', { class: 'table files-table' },
         h('thead', {}, h('tr', {}, ['번호', '이름', '종류 · 모델', '서보', '위치 (모터°)', '과부하율', '앱솔루트', '게인', '통신'].map((text) => h('th', { scope: 'col', text })))),
@@ -400,7 +405,21 @@ export function motorsBody(state, changed) {
         : h('p', { class: 'muted', text: '설정된 모터가 없습니다. 위의 「전체 검색」으로 모터를 찾으세요.' })),
     selected ? detailCard(state, changed, selected) : null,
     // 모든 MINAS 축 공통 · 잠금 · 수정 목록 114
-    minasBaseCard(changed, { hasAc: rows.some((r) => r.ac) }),
+    minasBaseCard(changed, {
+      hasAc: rows.some((r) => r.ac),
+      acAxes: rows.filter((r) => r.ac && r.detected).map((r) => r.axis),
+      onSaveAll: async () => {
+        const axes = rows.filter((r) => r.ac && r.detected).map((r) => r.axis);
+        const ok = await confirmBox({
+          title: `모든 축 드라이브에 저장 (EEPROM) · ${axes.length}대`,
+          body: '지금 드라이브에 들어 있는 값(공통 설정 · 게인 등)을 전원을 꺼도 남게 저장합니다.\n'
+            + '모터 프로그램이 한 번 멈췄다 다시 켜지고, 그동안 서보 토크가 풀립니다. 브레이크가 없는 모터는 처질 수 있습니다.\n'
+            + '저장하는 동안(최대 10초씩) 드라이브 전원을 끄지 마세요.',
+          confirmLabel: '저장', tone: 'warning',
+        });
+        if (ok) await saveAll(axes, changed, () => loadMotors(state, changed, { force: true }));
+      },
+    }),
     // 모터 설정 원본 파일(저장된 것) · 이전 UI 「원본 보기」 · 소프트 리밋 lower/upper(모터 deg · 조인트 매핑에서 옴) 등 · 2026-10-13
     ui.content ? h('details', { class: 'raw card' },
       h('summary', { text: `원본 파일 · ${ui.configFile ? ui.configFile.split(/[\\/]/).pop() : '모터 설정'} (저장된 내용 · 소프트 리밋 lower/upper 포함)` }),

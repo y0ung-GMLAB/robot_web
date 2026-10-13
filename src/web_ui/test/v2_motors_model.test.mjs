@@ -84,3 +84,15 @@ test('게인 칸 · 드라이브에 저장된 값 그대로 · 자동조정 꺼�
   assert.match(warnings[1], /0번 13 · 2번 12/);
   assert.deepEqual(gainWarnings([{ axis: 0, ac: true, gains: on }]), []);
 });
+
+test('게인 쓰기 · 바뀐 칸만 · 범위 · 뜻은 마우스로 (수정 목록 108 다)', async () => {
+  const { gainChanges, gainHint, GAIN_FIELDS } = await import('../static/v2/js/pages/drive_gains.js');
+  const gains = { auto_tuning: 1, stiffness: 13, estimation_speed: 1 };
+  assert.deepEqual(gainChanges(gains, {}), { values: {}, problems: [] });
+  assert.deepEqual(gainChanges(gains, { stiffness: '13' }).values, {});            // 같은 값은 안 보냄
+  assert.deepEqual(gainChanges(gains, { stiffness: '12', auto_tuning: '3' }).values, { stiffness: 12, auto_tuning: 3 });
+  assert.equal(gainChanges(gains, { stiffness: '32' }).problems.length, 1);
+  assert.equal(gainChanges(gains, { auto_tuning: '5' }).problems.length, 1);
+  assert.ok(!GAIN_FIELDS.some((f) => f.key === 'inertia_ratio'));                  // 관성비는 자동조정이 정함
+  assert.match(gainHint(GAIN_FIELDS[0], 3), /3 = 수직축/);
+});

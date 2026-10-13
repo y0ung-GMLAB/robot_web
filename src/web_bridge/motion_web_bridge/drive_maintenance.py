@@ -13,6 +13,13 @@
 
 출처 · Panasonic SX-DSV03241 R10.0 (Pr0.15 p.176) · SX-DSV03242 R10.1 (1010h · 4D00h/4D01h p.259)
 
+게인 쓰기 · 수정 목록 108 (다) (2026-10-13)
+    자동조정(Pr0.02) · 강성(Pr0.03) · 추정 속도(Pr6.31) · Motor Manager 를 **멈추지 않고** `ethercat download` ·
+    강성은 여러 번 바꿔 보며 맞추는 값이라 매번 재시작(토크 풀림)하면 안 된다 · 2026-10-12 floating4 에서
+    Motor Manager 가 돌 때 0x3002 · 0x3003 쓰기 · 되읽기 같음(108 경과) · 쓰기는 드라이브 RAM 에만 ·
+    전원을 꺼도 남기려면 EEPROM 저장(이건 기존처럼 Motor Manager 를 멈추는 길 · 모든 축이면 한 번만).
+    모터가 움직이는 동안(재생 · 초기 이동 · 수동 조작)은 거절 · 쓰고 나면 되읽어 같은지 본다.
+
 길 · Motor Manager 를 멈춰 EtherCAT 마스터를 풀고 → `ethercat download` → 다시 띄운다 ·
 모터 검색과 같은 길이다(`scan_orchestrator`) · motion_system 은 고치지 않는다 ·
 이 예외 길은 사용자 승인(2026-10-02) · 정비는 사람이 확인(`confirmed`)해야 한다.
@@ -66,6 +73,48 @@ def command_plan(action: str, master: int, position: int, value: Optional[int] =
 
 #: 다회전 클리어 시작 비트 · 0x4D00:01 bit9
 ABSOLUTE_CLEAR_BIT = 0x0200
+
+#: 화면에서 쓰는 게인 · 이름 → (객체, 최소, 최대) · int16 · A6 기술 자료 SX-DSV03031 p.107-108
+#: Pr0.02 5(부하 특성 측정) · 6(사용자 정의) 은 뺀다 · 위치·속도 게인(Pr1.xx)은 자동조정이 정하므로 안 연다
+GAIN_FIELDS: Dict[str, tuple] = {
+    'auto_tuning': (0x3002, 0, 4),
+    'stiffness': (0x3003, 0, 31),
+    'estimation_speed': (0x3631, 0, 3),
+}
+GAIN_LABELS = {'auto_tuning': '자동조정(Pr0.02)', 'stiffness': '강성(Pr0.03)', 'estimation_speed': '추정 속도(Pr6.31)'}
+
+
+def gain_commands(master: int, position: int, values: Dict[str, Any]) -> List[tuple]:
+    """(이름, 값, 쓰기 명령, 되읽기 명령) 목록 · 범위 밖 · 모르는 이름은 ValueError"""
+    if not values:
+        raise ValueError('바꿀 게인이 없습니다')
+    base = ['-m', str(int(master)), '-p', str(int(position)), '-t', 'int16']
+    plan = []
+    for name, raw in values.items():
+        if name not in GAIN_FIELDS:
+            raise ValueError(f'화면에서 바꿀 수 없는 게인입니다: {name}')
+        index, low, high = GAIN_FIELDS[name]
+        try:
+            value = int(raw)
+        except (TypeError, ValueError) as exc:
+            raise ValueError(f'{GAIN_LABELS[name]} 값이 숫자가 아닙니다') from exc
+        if not low <= value <= high:
+            raise ValueError(f'{GAIN_LABELS[name]} 는 {low}~{high} 사이여야 합니다')
+        obj = f'0x{index:04X}'
+        plan.append((name, value, ['ethercat', 'download', *base, obj, '0', str(value)],
+                     ['ethercat', 'upload', *base, obj, '0']))
+    return plan
+
+
+def parse_upload_last(text: str) -> Optional[int]:
+    """`ethercat upload -t int16` 출력(`0x000d 13`) 마지막 칸 = 10진 값 · 못 읽으면 None"""
+    tokens = str(text or '').split()
+    if not tokens:
+        return None
+    try:
+        return int(tokens[-1], 0)
+    except ValueError:
+        return None
 
 
 def verify_command(action: str, master: int, position: int) -> Optional[List[str]]:
@@ -166,6 +215,99 @@ class DriveMaintenance:
         return {'master': master, 'position': position}
 
     # -- 실행 ------------------------------------------------------------ #
+
+    def write_gains(self, payload: Dict[str, Any]) -> Dict[str, Any]:
+        """게인 쓰기 · Motor Manager 를 멈추지 않는다 · 축 하나 또는 여러 축(axes) · 108 (다)"""
+        if payload.get('confirmed') is not True:
+            return {'success': False, 'message': '게인 쓰기 · 확인이 필요합니다'}
+        values = payload.get('values') if isinstance(payload.get('values'), dict) else {}
+        raw_axes = payload.get('axes') if isinstance(payload.get('axes'), list) else [payload.get('axis')]
+        try:
+            axes = [int(axis) for axis in raw_axes]
+        except (TypeError, ValueError):
+            return {'success': False, 'message': '모터 번호가 필요합니다'}
+        if not axes:
+            return {'success': False, 'message': '모터 번호가 필요합니다'}
+        try:
+            plans = {axis: (self._target(axis), None) for axis in axes}
+            plans = {axis: (target, gain_commands(target['master'], target['position'], values))
+                     for axis, (target, _) in plans.items()}
+        except ValueError as exc:
+            return {'success': False, 'message': f'게인 쓰기 불가 · {exc}'}
+        blocker = self._safety_blocker()
+        if blocker:
+            return {'success': False, 'message': f'게인 쓰기 불가 · {blocker}'}
+        if not self._lock.acquire(blocking=False):
+            return {'success': False, 'message': '게인 쓰기 불가 · 다른 모터 작업이 진행 중입니다'}
+        results = []
+        try:
+            for axis, (target, plan) in plans.items():
+                read_back: Dict[str, Optional[int]] = {}
+                errors = []
+                for name, value, write, read in plan:
+                    try:
+                        done = self._runner(write, check=False, capture_output=True, text=True, timeout=COMMAND_TIMEOUT_SEC)
+                        if done.returncode != 0:
+                            errors.append(f'{GAIN_LABELS[name]} 쓰기 실패 · '
+                                          + ((done.stderr or done.stdout or '').strip() or f'종료 코드 {done.returncode}'))
+                            continue
+                        got = self._runner(read, check=False, capture_output=True, text=True, timeout=COMMAND_TIMEOUT_SEC)
+                        read_back[name] = parse_upload_last(got.stdout) if got.returncode == 0 else None
+                        if read_back[name] != value:
+                            errors.append(f'{GAIN_LABELS[name]} 되읽기 {read_back[name]} ≠ {value}')
+                    except (OSError, subprocess.TimeoutExpired) as exc:
+                        errors.append(f'{GAIN_LABELS[name]} · {exc}')
+                ok = not errors
+                record = {
+                    'event_type': 'minas_gain_write', 'axis': axis,
+                    'slave_position': target['position'], 'master_index': target['master'],
+                    'values': dict(values), 'read_back': read_back, 'success': ok,
+                    'message': '게인을 썼습니다(드라이브 RAM)' if ok else ' / '.join(errors),
+                }
+                self._record(record)
+                results.append(record)
+        finally:
+            self._lock.release()
+        failed = [r for r in results if not r['success']]
+        axes_text = ' · '.join(f"{r['axis']}번" for r in results)
+        return {
+            'success': not failed,
+            'message': (
+                f'{axes_text} 게인을 썼습니다. 지금부터 적용됩니다(전원을 끄면 사라짐 · 남기려면 EEPROM 저장).'
+                if not failed else
+                ' / '.join(f"{r['axis']}번 {r['message']}" for r in failed)
+            ),
+            'results': results,
+        }
+
+    def save_eeprom_all(self, payload: Dict[str, Any]) -> Dict[str, Any]:
+        """모든 MINAS 축 EEPROM 저장 · Motor Manager 를 **한 번만** 멈췄다 띄운다 · 108 (다)"""
+        if payload.get('confirmed') is not True:
+            return {'success': False, 'message': 'EEPROM 저장 · 확인이 필요합니다'}
+        axes = [int(axis) for axis in (payload.get('axes') or [])]
+        if not axes:
+            return {'success': False, 'message': '저장할 모터가 없습니다'}
+        try:
+            targets = {axis: self._target(axis) for axis in axes}
+        except ValueError as exc:
+            return {'success': False, 'message': f'EEPROM 저장 불가 · {exc}'}
+        blocker = self._safety_blocker()
+        if blocker:
+            return {'success': False, 'message': f'EEPROM 저장 불가 · {blocker}'}
+        if not self._lock.acquire(blocking=False):
+            return {'success': False, 'message': 'EEPROM 저장 불가 · 다른 모터 작업이 진행 중입니다'}
+        try:
+            commands = []
+            for axis, target in targets.items():
+                commands.extend(command_plan(EEPROM_SAVE, target['master'], target['position']))
+            first = axes[0]
+            result = self._run_locked(EEPROM_SAVE, first, None, targets[first], commands)
+        finally:
+            self._lock.release()
+        result['axes'] = axes
+        if result.get('success'):
+            result['message'] = f"{' · '.join(f'{a}번' for a in axes)} EEPROM에 저장했습니다. 드라이브 전원을 꺼도 지금 값이 유지됩니다"
+        return result
 
     def run(self, payload: Dict[str, Any]) -> Dict[str, Any]:
         action = str(payload.get('action') or '').strip()

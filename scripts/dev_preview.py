@@ -203,8 +203,7 @@ def snapshot():
                  'status': 'ok' if axis != 4 or state['abs_done'] else 'not_absolute',
                  'problem': '' if axis != 4 or state['abs_done'] else 'Pr0.15=1(인크리멘털)',
                  # 게인 · 108 · 2번은 벤치에서 꺼 둔 자동조정이 남은 모양
-                 'gains': {'auto_tuning': 0 if axis == 2 else 1, 'stiffness': 12 if axis == 2 else 13,
-                           'inertia_ratio': [137, 143, 137, 250, 250][axis % 5], 'estimation_speed': 1, 'error': ''}}
+                 'gains': _preview_gains(axis)}
                 for _, axis, *_ in JOINTS]},
             'project_id': 'preview',
             'selected_project_id': 'preview',
@@ -1157,6 +1156,33 @@ async def preview_servo_control(request: Request):
     if action in ('servo_on', 'servo_off'):
         state['servo_on'] = action == 'servo_on'
     return {'success': True, 'message': {'servo_on': '서보 켬', 'servo_off': '서보 끔', 'fault_reset': '오류 초기화 · 서보는 꺼진 채'}.get(action, action)}
+
+
+# 게인 · 108 · 2번은 벤치에서 꺼 둔 자동조정이 남은 모양 · 쓰기 API 가 바꾼다
+PREVIEW_GAINS = {}
+
+
+def _preview_gains(axis):
+    if axis not in PREVIEW_GAINS:
+        PREVIEW_GAINS[axis] = {'auto_tuning': 0 if axis == 2 else 1, 'stiffness': 12 if axis == 2 else 13,
+                               'inertia_ratio': [137, 143, 137, 250, 250][axis % 5], 'estimation_speed': 1, 'error': ''}
+    return dict(PREVIEW_GAINS[axis])
+
+
+@app.post('/api/motor-config/drive-gains')
+async def preview_drive_gains(request: Request):
+    body = await request.json()
+    axes = body.get('axes') or [body.get('axis')]
+    for axis in axes:
+        _preview_gains(int(axis))
+        PREVIEW_GAINS[int(axis)].update({k: int(v) for k, v in (body.get('values') or {}).items()})
+    return {'success': True, 'message': f"프리뷰 · {' · '.join(f'{a}번' for a in axes)} 게인을 썼습니다(실제로는 아무것도 안 함)"}
+
+
+@app.post('/api/motor-config/eeprom-save-all')
+async def preview_eeprom_save_all(request: Request):
+    body = await request.json()
+    return {'success': True, 'message': f"프리뷰 · {' · '.join(f'{a}번' for a in body.get('axes') or [])} EEPROM 저장(실제로는 아무것도 안 함)"}
 
 
 # MINAS 공통 값 · 진짜 규칙(minas_params) · 이 PC 값은 임시 폴더에 · 수정 목록 114

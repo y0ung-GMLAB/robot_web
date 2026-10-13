@@ -151,3 +151,49 @@ def test_refusals_touch_nothing(kwargs, payload, text):
 
     assert result['success'] is False and text in result['message']
     assert calls == [] and records == []
+
+
+# -- 수정 목록 108 (다) · 게인 쓰기(재시작 없이) · 모든 축 EEPROM 저장(재시작 한 번) ---------------- #
+
+def test_gain_write_does_not_stop_motor_manager_and_reads_back():
+    service, calls, records = _service(upload_stdout='0x000c 12\n')
+    result = service.write_gains({'axis': 1, 'values': {'stiffness': 12}, 'confirmed': True})
+    assert result['success'] is True, result
+    assert ('service', 'stop') not in calls                      # 토크가 풀리지 않게 재시작 없음
+    assert ('cli', 'download -m 0 -p 2 -t int16 0x3003 0 12') in calls
+    assert ('cli', 'upload -m 0 -p 2 -t int16 0x3003 0') in calls
+    assert records[0]['event_type'] == 'minas_gain_write' and records[0]['read_back'] == {'stiffness': 12}
+
+
+def test_gain_write_reports_a_readback_mismatch():
+    service, _calls, _records = _service(upload_stdout='0x000d 13\n')
+    result = service.write_gains({'axis': 1, 'values': {'stiffness': 12}, 'confirmed': True})
+    assert result['success'] is False
+    assert '되읽기 13 ≠ 12' in result['message']
+
+
+@pytest.mark.parametrize('values, text', [
+    ({'stiffness': 32}, '0~31'),
+    ({'auto_tuning': 5}, '0~4'),            # 5 부하 특성 측정 · 6 사용자 정의는 안 엶
+    ({'inertia_ratio': 200}, '바꿀 수 없는'),   # 관성비는 자동조정이 정함
+])
+def test_gain_write_refuses_out_of_range_or_closed_fields(values, text):
+    service, calls, _records = _service()
+    result = service.write_gains({'axis': 1, 'values': values, 'confirmed': True})
+    assert result['success'] is False and text in result['message']
+    assert not [c for c in calls if c[0] == 'cli' and c[1].startswith('download')]
+
+
+def test_gain_write_needs_confirmation_and_no_motion():
+    service, _calls, _records = _service()
+    assert service.write_gains({'axis': 1, 'values': {'stiffness': 12}})['success'] is False
+    moving, _c, _r = _service(blocker='재생 중입니다')
+    assert '재생 중' in moving.write_gains({'axis': 1, 'values': {'stiffness': 12}, 'confirmed': True})['message']
+
+
+def test_eeprom_save_all_restarts_motor_manager_once():
+    service, calls, _records = _service()
+    result = service.save_eeprom_all({'axes': [1], 'confirmed': True})
+    assert result['success'] is True, result
+    assert calls.count(('service', 'stop')) == 1 and calls.count(('service', 'start')) == 1
+    assert ('cli', 'download -m 0 -p 2 -t uint32 0x1010 1 0x65766173') in calls
