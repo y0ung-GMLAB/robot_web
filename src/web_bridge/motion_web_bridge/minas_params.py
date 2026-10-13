@@ -46,7 +46,7 @@ MINAS 의 드라이브 객체 값(SDO)은 드라이버의 `param_file` 이 가�
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any, Dict, List, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 import yaml
 
@@ -124,14 +124,132 @@ EMBEDDED_BASE_ITEMS: List[Dict[str, Any]] = [
     {'id': 58, 'index': 0x60C6, 'subindex': 0x00, 'value': 0, 'type': 'u32'},
 ]
 
-#: 플랫폼 기반 값 중 robot_web 이 고쳐 쓰는 것 · (index, subindex) → 값 · 수정 목록 113
-#: `src/motion_system` 의 `param/minas.yaml` 은 고치지 않고(보호) 여기서 덮어쓴다.
-#: 0x3512 Pr5.12 과부하 레벨 · 플랫폼은 50(이유 기록 없음) = 정격의 50 % 에서 과부하 알람(Err16) ·
-#: 매뉴얼(MINAS A6 · Pr5.12) 「0 이면 115 % · 통상은 0 으로 · 낮춰 쓰고 싶을 때만 설정」 · Err16 원인 ⑦
-#: 「Pr5.12 가 너무 낮다」 · 무거운 머리를 버티는 축이 알람으로 서보 OFF 되지 않게 출하값 0 으로
-BASE_VALUE_FIXES: Dict[Tuple[int, int], int] = {
-    (0x3512, 0x00): 0,
+#: 현장 공통 값 · 플랫폼 기반 위에 모든 MINAS 축에 덮어쓴다 · 수정 목록 113 · 114 (사용자 결정 2026-10-13)
+#: 저장소 기본값 `config/minas_base.yaml` + 이 PC 가 화면에서 바꾼 값 `config/minas_base.local.yaml`(git 무시 ·
+#: 업데이트가 덮지 않는다) · `src/motion_system` 의 `param/minas.yaml` 은 고치지 않는다(보호)
+SITE_BASE_FILE = Path('config') / 'minas_base.yaml'
+SITE_LOCAL_FILE = Path('config') / 'minas_base.local.yaml'
+
+#: 저장소 파일이 없을 때(시험 · 옛 작업 공간)의 같은 내용
+EMBEDDED_SITE_ITEMS: List[Dict[str, Any]] = [
+    {'index': 0x3512, 'subindex': 0x00, 'value': 0, 'type': 's16'},
+    {'index': 0x3437, 'subindex': 0x00, 'value': 150, 'type': 's16'},
+    {'index': 0x3438, 'subindex': 0x00, 'value': 0, 'type': 's16'},
+]
+
+#: 화면에서 바꿀 수 있는 공통 값 · (index, subindex) → (이름, 단위, 최소, 최대, 설명)
+#: 여기 없는 객체는 화면에서 못 바꾼다 · 계속 맞춰 보는 값만 연다(사용자 2026-10-13)
+EDITABLE_SITE_ITEMS: Dict[Tuple[int, int], Tuple[str, str, int, int, str]] = {
+    (0x3512, 0x00): ('Pr5.12 과부하 레벨', '%', 0, 115,
+                     '0 = 정격 115 %(출하값 · 매뉴얼 「통상은 0」) · 낮추면 그 % 에서 과부하 알람(Err16)'),
+    (0x3437, 0x00): ('Pr4.37 브레이크 지연 (정지)', 'ms', 0, 10000,
+                     '멈춘 채 서보 OFF · 브레이크 신호 뒤 전류를 끊기까지 · 브레이크가 실제로 물리는 시간 이상'),
+    (0x3438, 0x00): ('Pr4.38 브레이크 지연 (동작)', 'ms', 0, 10000,
+                     '도는 중 서보 OFF · 브레이크를 잡기까지 · 길면 전원이 끊긴 채 자유낙하'),
 }
+
+
+def _item_key(item: Dict[str, Any]) -> Tuple[int, int]:
+    return int(item.get('index') or 0), int(item.get('subindex') or 0)
+
+
+def _read_items(path: Path) -> Optional[List[Dict[str, Any]]]:
+    try:
+        payload = yaml.safe_load(path.read_text(encoding='utf-8'))
+    except (OSError, yaml.YAMLError):
+        return None
+    if not isinstance(payload, dict) or not isinstance(payload.get('items'), list):
+        return None
+    return [dict(item) for item in payload['items'] if isinstance(item, dict) and 'index' in item]
+
+
+def site_default_items(workspace_root: Path) -> List[Dict[str, Any]]:
+    items = _read_items(Path(workspace_root) / SITE_BASE_FILE)
+    return items if items is not None else [dict(item) for item in EMBEDDED_SITE_ITEMS]
+
+
+def site_local_values(workspace_root: Path) -> Dict[Tuple[int, int], int]:
+    """이 PC 가 화면에서 바꾼 값 · 바꿀 수 있는 객체만 · 범위 밖은 버린다(손으로 고친 파일)"""
+    values: Dict[Tuple[int, int], int] = {}
+    for item in _read_items(Path(workspace_root) / SITE_LOCAL_FILE) or []:
+        key = _item_key(item)
+        value = optional_int(item.get('value'))
+        spec = EDITABLE_SITE_ITEMS.get(key)
+        if spec is None or value is None or not spec[2] <= value <= spec[3]:
+            continue
+        values[key] = value
+    return values
+
+
+def site_items(workspace_root: Path) -> List[Dict[str, Any]]:
+    """실제로 쓰일 공통 값 · 저장소 기본값 위에 이 PC 값"""
+    local = site_local_values(workspace_root)
+    items = []
+    for item in site_default_items(workspace_root):
+        merged = dict(item)
+        if _item_key(item) in local:
+            merged['value'] = local[_item_key(item)]
+        items.append(merged)
+    return items
+
+
+def site_base_view(workspace_root: Path) -> Dict[str, Any]:
+    """화면용 · 바꿀 수 있는 공통 값 줄마다 기본값 · 이 PC 값 · 쓰일 값"""
+    defaults = {_item_key(item): optional_int(item.get('value')) for item in site_default_items(workspace_root)}
+    local = site_local_values(workspace_root)
+    rows = []
+    for key, (label, unit, low, high, note) in EDITABLE_SITE_ITEMS.items():
+        default = defaults.get(key)
+        rows.append({
+            'key': f'0x{key[0]:04X}:{key[1]}',
+            'label': label, 'unit': unit, 'min': low, 'max': high, 'note': note,
+            'default': default,
+            'local': local.get(key),
+            'value': local.get(key, default),
+        })
+    return {'success': True, 'items': rows,
+            'default_file': str(SITE_BASE_FILE), 'local_file': str(SITE_LOCAL_FILE)}
+
+
+def _parse_key(text: Any) -> Tuple[int, int]:
+    index_text, _, sub_text = str(text or '').partition(':')
+    return int(index_text, 0), int(sub_text or '0', 0)
+
+
+def save_site_local(workspace_root: Path, values: Dict[str, Any]) -> Dict[str, Any]:
+    """화면에서 바꾼 공통 값 저장 · 빈 값(None · '') = 기본값으로 · 기본값과 같으면 적지 않는다"""
+    defaults = {_item_key(item): optional_int(item.get('value')) for item in site_default_items(workspace_root)}
+    types = {_item_key(item): str(item.get('type') or 's16') for item in site_default_items(workspace_root)}
+    local = site_local_values(workspace_root)
+    for raw_key, raw_value in (values or {}).items():
+        try:
+            key = _parse_key(raw_key)
+        except ValueError as exc:
+            raise ValueError(f'알 수 없는 항목입니다: {raw_key}') from exc
+        spec = EDITABLE_SITE_ITEMS.get(key)
+        if spec is None:
+            raise ValueError(f'화면에서 바꿀 수 없는 항목입니다: {raw_key}')
+        if raw_value is None or str(raw_value).strip() == '':
+            local.pop(key, None)
+            continue
+        value = optional_int(raw_value)
+        if value is None or not spec[2] <= value <= spec[3]:
+            raise ValueError(f'{spec[0]} 는 {spec[2]}~{spec[3]} {spec[1]} 사이 정수여야 합니다')
+        if value == defaults.get(key):
+            local.pop(key, None)
+        else:
+            local[key] = value
+    path = Path(workspace_root) / SITE_LOCAL_FILE
+    path.parent.mkdir(parents=True, exist_ok=True)
+    items = [
+        {'index': key[0], 'subindex': key[1], 'value': value, 'type': types.get(key, 's16')}
+        for key, value in sorted(local.items())
+    ]
+    header = ('# 이 PC 가 화면(모터 설정 · 드라이브 공통 값)에서 바꾼 값 · 저장소 기본값 '
+              f'{SITE_BASE_FILE} 위에 덮어쓴다\n')
+    path.write_text(header + yaml.safe_dump({'items': items}, sort_keys=False), encoding='utf-8')
+    return site_base_view(workspace_root)
+
 
 #: 인터페이스(PDO) 구획은 값이 아니라 배선이다 · 플랫폼 그대로 복사한다
 EMBEDDED_INTERFACES: List[Dict[str, Any]] = [
@@ -226,11 +344,19 @@ def write_param_file(
     """
     document = _base_document(Path(workspace_root))
     items = [dict(item) for item in document.get('items', [])]
-    for item in items:
-        fix = BASE_VALUE_FIXES.get((int(item.get('index') or 0), int(item.get('subindex') or 0)))
-        if fix is not None:
-            item['value'] = fix
     next_id = max((int(item.get('id') or 0) for item in items), default=0) + 1
+    # 현장 공통 값(yaml) · 플랫폼 기반 위에 · 그 다음 모터별 칸이 이긴다 · 수정 목록 113 · 114
+    for site in site_items(Path(workspace_root)):
+        for item in items:
+            if _item_key(item) == _item_key(site):
+                item['value'] = int(site['value'])
+                break
+        else:
+            items.append({
+                'id': next_id, 'index': int(site['index']), 'subindex': int(site.get('subindex') or 0),
+                'value': int(site['value']), 'type': str(site.get('type') or 's16'),
+            })
+            next_id += 1
     for key, value in sorted(overrides.items()):
         if key not in PARAM_FIELDS:
             continue   # 감시 값 · SDO 가 아니라 PDO (아래 _with_monitors)

@@ -10,6 +10,22 @@ set -uo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 WORKSPACE_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
+
+# 자동 업데이트가 꺼져 있나 · 1 꺼짐 · 0 켜짐 · 수정 목록 112 사
+# masked 면 꺼짐 · disabled 라도 apt 주기 설정(20auto-upgrades)이 "0" 이면 돌지 않으니 꺼짐으로 본다 ·
+# floating4 는 disabled 였다(설치 때 mask 대신 끔) · 서비스가 없는 PC 도 꺼짐
+auto_upgrades_off() {
+  local state
+  state="$(systemctl is-enabled unattended-upgrades 2>/dev/null || true)"
+  case "${state}" in
+    masked|"") echo 1; return ;;
+  esac
+  if [[ "${state}" != enabled* ]] && grep -qs 'Unattended-Upgrade "0"' /etc/apt/apt.conf.d/20auto-upgrades; then
+    echo 1
+  else
+    echo 0
+  fi
+}
 FAILED=0
 
 row() {
@@ -68,7 +84,14 @@ else
   info "코드" "${head_line:-git 아님} · 인터넷이 안 돼 최신인지 못 봄"
 fi
 row "$(loginctl show-user "$(id -un)" 2>/dev/null | grep -q '^Linger=yes' && echo 1 || echo 0)" "로그아웃해도 유지 (linger)" "$(loginctl show-user "$(id -un)" 2>/dev/null | grep '^Linger=' || echo 미상)"
-row "$(systemctl is-enabled unattended-upgrades 2>/dev/null | grep -q masked && echo 1 || echo 0)" "자동 업데이트 꺼짐" "$(systemctl is-enabled unattended-upgrades 2>/dev/null; true)"
+# masked 또는 disabled + apt 주기 0 이면 꺼짐 · 수정 목록 112 사
+row "$(auto_upgrades_off)" "자동 업데이트 꺼짐" "$(systemctl is-enabled unattended-upgrades 2>/dev/null; true)"
+# Wi-Fi 로 붙어 있으면 절전 꺼짐(2)인지 · 업데이트가 끄고 다음 연결부터 적용 · 수정 목록 112 차
+wifi_conn="$(nmcli -t -f NAME,TYPE connection show --active 2>/dev/null | awk -F: '$2 == "802-11-wireless" { print $1; exit }')"
+if [[ -n "${wifi_conn}" ]]; then
+  wifi_ps="$(nmcli -g 802-11-wireless.powersave connection show "${wifi_conn}" 2>/dev/null || true)"
+  row "$([[ "${wifi_ps}" == "2" || "${wifi_ps}" == "disable" ]] && echo 1 || echo 0)" "Wi-Fi 절전 꺼짐" "${wifi_conn} · powersave=${wifi_ps:-미상} (2 = 끔 · 바꾼 뒤 재연결)"
+fi
 info "시간대" "$(timedatectl show -p Timezone --value 2>/dev/null || echo 미상) · $(date '+%H:%M')"
 
 if [[ "${ROLE}" == "robot" ]]; then

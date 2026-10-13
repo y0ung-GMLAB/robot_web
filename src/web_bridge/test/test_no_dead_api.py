@@ -24,6 +24,7 @@ from pathlib import Path
 WORKSPACE = Path(__file__).resolve().parents[3]
 BRIDGE = WORKSPACE / 'src/web_bridge/motion_web_bridge'
 JS_DIR = WORKSPACE / 'src/web_ui/static/js'
+V2_JS_DIR = WORKSPACE / 'src/web_ui/static/v2/js'
 
 ROUTE = re.compile(r"@app\.(get|post|put|patch|delete|websocket)\('([^']+)'")
 
@@ -55,9 +56,9 @@ def _declared():
 
 
 def _frontend():
-    return '\n'.join(
-        path.read_text(encoding='utf-8') for path in JS_DIR.glob('*.js')
-    )
+    # 새 화면(/v2)도 부르는 쪽이다 · 새 화면에만 있는 기능(드라이브 공통 값 등)이 생겼다 · 2026-10-13
+    paths = [*JS_DIR.glob('*.js'), *V2_JS_DIR.rglob('*.js')]
+    return '\n'.join(path.read_text(encoding='utf-8') for path in paths)
 
 
 def _loose(text: str) -> str:

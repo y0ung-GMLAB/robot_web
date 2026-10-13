@@ -1148,6 +1148,30 @@ async def preview_servo_control(request: Request):
     return {'success': True, 'message': {'servo_on': '서보 켬', 'servo_off': '서보 끔', 'fault_reset': '오류 초기화 · 서보는 꺼진 채'}.get(action, action)}
 
 
+# MINAS 공통 값 · 진짜 규칙(minas_params) · 이 PC 값은 임시 폴더에 · 수정 목록 114
+PREVIEW_SITE = Path(tempfile.mkdtemp(prefix='preview_site_'))
+(PREVIEW_SITE / 'config').mkdir(parents=True, exist_ok=True)
+(PREVIEW_SITE / 'config' / 'minas_base.yaml').write_text(
+    (ROOT / 'config' / 'minas_base.yaml').read_text(encoding='utf-8'), encoding='utf-8')
+
+
+@app.get('/api/motor-config/minas-base')
+async def preview_minas_base():
+    from motion_web_bridge import minas_params
+    return minas_params.site_base_view(PREVIEW_SITE)
+
+
+@app.put('/api/motor-config/minas-base')
+async def preview_save_minas_base(request: Request):
+    from motion_web_bridge import minas_params
+    body = await request.json()
+    try:
+        view = minas_params.save_site_local(PREVIEW_SITE, body.get('values') or {})
+    except ValueError as exc:
+        return {**minas_params.site_base_view(PREVIEW_SITE), 'success': False, 'message': str(exc)}
+    return {**view, 'success': True, 'needs_apply': True, 'message': '저장했습니다. 「장비에 적용」 을 해야 드라이브에 들어갑니다.'}
+
+
 @app.post('/api/motor-config/drive-maintenance')
 async def preview_drive_maintenance(request: Request):
     body = await request.json()

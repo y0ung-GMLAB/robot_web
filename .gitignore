@@ -33,6 +33,8 @@ backups/
 /config/.motion_coordination.yaml.transaction.json
 # PC 마다 저장할 때 만들어지는 MINAS param 파일(모터마다 · 수정 목록 113)
 /config/minas_params/
+# 이 PC 가 화면에서 바꾼 MINAS 공통 값(기본값은 config/minas_base.yaml · 수정 목록 114)
+/config/minas_base.local.yaml
 
 # Local machine files
 .vscode/

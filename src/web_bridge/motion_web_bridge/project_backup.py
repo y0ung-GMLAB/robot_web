@@ -39,6 +39,9 @@ def _included(relative: Path) -> bool:
     parts = relative.parts
     if not parts or parts[0] in SKIP_TOP_DIRS:
         return False
+    # 파일 잠금 표시(`*.lock`) · 내용이 없고 옮기면 뜻이 없다 · 없는 애니메이션 잠금까지 들어갔다 · 수정 목록 112 자
+    if relative.name.endswith('.lock'):
+        return False
     if parts[0] == 'runtime':
         return len(parts) > 1 and parts[1] in RUNTIME_KEEP
     return True

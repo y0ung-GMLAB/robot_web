@@ -34,6 +34,7 @@ from motion_common import store
 from motion_web_bridge.motor_runtime_store import MOTOR_BUSY_MESSAGE
 from motion_web_bridge import (
     mapping_motor_limits,
+    minas_params,
     motion_file_analysis,
     motor_config_build,
     motor_config_rules,
@@ -330,6 +331,41 @@ class MotorConfigService:
         if 'project_sync_warning' in synced:
             result['project_sync_warning'] = synced['project_sync_warning']
         return result
+
+    # -- MINAS 공통 값 · 수정 목록 114 (사용자 2026-10-13 · 계속 맞춰 보는 값은 화면에서 · 잠금) -- #
+
+    def minas_base(self) -> Dict[str, Any]:
+        """모든 MINAS 축에 부팅 때 쓰는 공통 값 · 기본값(저장소) · 이 PC 값 · 쓰일 값"""
+        return minas_params.site_base_view(self.workspace_root)
+
+    def save_minas_base(self, payload: Dict[str, Any]) -> Dict[str, Any]:
+        """이 PC 값 저장 → 모터 설정의 param 파일을 다시 만든다 · 드라이브에는 「장비에 적용」 때 들어간다"""
+        try:
+            self.bridge.ensure_project_mutation_allowed(self.repository.selected_project_id())
+            values = payload.get('values') if isinstance(payload, dict) else None
+            if not isinstance(values, dict):
+                raise ValueError('values 가 필요합니다')
+            view = minas_params.save_site_local(self.workspace_root, values)
+        except ValueError as exc:
+            return {**minas_params.site_base_view(self.workspace_root), 'success': False, 'message': str(exc)}
+        # param 파일은 모터 설정을 저장할 때 만들어진다 · 지금 설정을 같은 내용으로 다시 저장해 새 공통 값을 싣는다
+        loaded = self.load()
+        motors = ((loaded.get('registry') or {}).get('motors') or []) if loaded.get('success') else []
+        if motors:
+            result = self.save({
+                'registry': loaded['registry'],
+                'base_revision': str(loaded.get('config_revision') or ''),
+            })
+            if not result.get('success'):
+                return {
+                    **view, 'success': False,
+                    'message': f'공통 값은 저장했지만 모터 설정에 싣지 못했습니다 · {result.get("message") or ""}',
+                }
+        return {
+            **view, 'success': True, 'needs_apply': bool(motors),
+            'message': '저장했습니다. 「장비에 적용」 을 해야 드라이브에 들어갑니다.' if motors
+            else '저장했습니다. 모터 설정을 저장하면 같이 들어갑니다.',
+        }
 
     def sync_limits_from_mapping(self) -> Dict[str, Any]:
         """조인트 매핑 저장 뒤 · 지금 모터 설정 파일의 lower/upper 를 매핑 환산값으로.

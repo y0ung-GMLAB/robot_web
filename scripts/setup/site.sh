@@ -428,6 +428,22 @@ site_wifi_powersave_ok() {
   if [[ "${value}" == "2" || "${value}" == "disable" ]]; then echo 1; else echo 0; fi
 }
 
+# 자동 업데이트가 꺼져 있나 · 1 꺼짐 · 0 켜짐 · 수정 목록 112 사
+# masked 면 꺼짐 · disabled 라도 apt 주기 설정(20auto-upgrades)이 "0" 이면 돌지 않으니 꺼짐으로 본다 ·
+# floating4 는 disabled 였다(설치 때 mask 대신 끔) · 서비스가 없는 PC 도 꺼짐
+auto_upgrades_off() {
+  local state
+  state="$(systemctl is-enabled unattended-upgrades 2>/dev/null || true)"
+  case "${state}" in
+    masked|"") echo 1; return ;;
+  esac
+  if [[ "${state}" != enabled* ]] && grep -qs 'Unattended-Upgrade "0"' /etc/apt/apt.conf.d/20auto-upgrades; then
+    echo 1
+  else
+    echo 0
+  fi
+}
+
 site_check_row() {
   local ok="$1" what="$2" detail="$3"
   if [[ "${ok}" == "1" ]]; then printf '  [OK]   %-28s %s\n' "${what}" "${detail}"; else printf '  [확인] %-28s %s\n' "${what}" "${detail}"; SITE_CHECK_FAILED=1; fi
@@ -448,7 +464,7 @@ site_selfcheck() {
     sb="$(mokutil --sb-state 2>/dev/null | head -1 || true)"
     site_check_row "$(printf '%s' "${sb}" | grep -qi enabled && echo 0 || echo 1)" "Secure Boot 꺼짐 (EtherCAT 모듈)" "${sb:-미상}"
   fi
-  site_check_row "$(systemctl is-enabled unattended-upgrades 2>/dev/null | grep -q masked && echo 1 || echo 0)" "자동 업데이트" "$(systemctl is-enabled unattended-upgrades 2>/dev/null || echo 없음)"
+  site_check_row "$(auto_upgrades_off)" "자동 업데이트" "$(systemctl is-enabled unattended-upgrades 2>/dev/null || echo 없음)"
   site_check_row "$(site_wifi_powersave_ok)" "Wi-Fi 절전 꺼짐" "$(iwconfig 2>/dev/null | grep -o 'Power Management:[a-z]*' | head -1 || echo 무선 없음) · 재연결 뒤 적용"
   for unit in motion-control motion-motor motion-coordination; do
     site_check_row "$(systemctl --user is-active --quiet "${unit}.service" && echo 1 || echo 0)" "${unit}.service" "$(systemctl --user is-active "${unit}.service" 2>/dev/null || echo unknown)"

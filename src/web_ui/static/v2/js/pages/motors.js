@@ -15,6 +15,7 @@ import { threeWayMerge } from '../merge_model.js';
 import { confirmConflicts } from '../conflict_dialog.js';
 import { EDIT_FIELDS, absoluteJobText, absoluteSummary, getField, motorChanges, motorProblems, motorRows, setField } from '../motors_model.js';
 import { signedDeg } from '../play_model.js';
+import { minasBaseCard } from './minas_base.js';
 
 const ui = { revision: '', saved: null, draft: null, selected: null, job: null, busy: '', error: '', scan: null };
 let jobTimer = null;
@@ -305,7 +306,7 @@ function detailCard(state, changed, row) {
     const value = getField(motor, field.key);
     return h('label', { class: 'field' }, h('span', { class: 'field-label', text: `${field.label}${field.unit ? ` (${field.unit})` : ''}` }),
       h('input', { class: `input${field.top ? '' : ' mono'}`, type: field.top ? 'text' : 'number', step: 'any', value: value ?? '',
-        placeholder: field.top ? '' : '비워 두면 드라이브 값 유지',
+        placeholder: field.top ? '' : (field.blank || '비워 두면 드라이브 값 유지'),
         oninput: (e) => setField(motor, field.key, field.top ? e.target.value : (e.target.value === '' ? null : Number(e.target.value))),
         onchange: () => changed() }));
   };
@@ -390,5 +391,7 @@ export function motorsBody(state, changed) {
           h('td', { class: 'muted', text: row.comm }))))))
         : h('p', { class: 'muted', text: '설정된 모터가 없습니다. 위의 「전체 검색」으로 모터를 찾으세요.' })),
     selected ? detailCard(state, changed, selected) : null,
+    // 모든 MINAS 축 공통 · 잠금 · 수정 목록 114
+    minasBaseCard(changed, { hasAc: rows.some((r) => r.ac) }),
   ];
 }

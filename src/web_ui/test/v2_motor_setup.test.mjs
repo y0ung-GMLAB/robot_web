@@ -61,3 +61,27 @@ test('모터·드라이브 · 모든 서보 켜기·끄기 (사용자 2026-10-12
   assert.match(body, /confirmBox\(/);
   assert.match(body, /dynamixel\/control/);
 });
+
+test('드라이브 공통 값 · 바뀐 칸 · 범위 검사 (수정 목록 114)', async () => {
+  const { minasBaseChanges, minasBaseProblems } = await import('../static/v2/js/pages/minas_base.js');
+  const rows = [
+    { key: '0x3437:0', label: 'Pr4.37', unit: 'ms', min: 0, max: 10000, default: 150, local: null, value: 150 },
+    { key: '0x3512:0', label: 'Pr5.12', unit: '%', min: 0, max: 115, default: 0, local: 50, value: 50 },
+  ];
+  assert.deepEqual(minasBaseChanges(rows, {}), {});
+  assert.deepEqual(minasBaseChanges(rows, { '0x3437:0': '200', '0x3512:0': '50' }), { '0x3437:0': '200' });
+  assert.deepEqual(minasBaseChanges(rows, { '0x3512:0': '' }), { '0x3512:0': '' });   // 비우면 기본값으로
+  assert.deepEqual(minasBaseProblems(rows, { '0x3512:0': '116' }).length, 1);
+  assert.deepEqual(minasBaseProblems(rows, { '0x3437:0': '1.5' }).length, 1);
+  assert.deepEqual(minasBaseProblems(rows, { '0x3437:0': '' }), []);
+});
+
+test('드라이브 공통 값 · 잠금 해제 확인 뒤에만 고침 · 모터 설정 ① 에 붙음', async () => {
+  const { readFileSync } = await import('node:fs');
+  const card = readFileSync(new URL('../static/v2/js/pages/minas_base.js', import.meta.url), 'utf8');
+  const page = readFileSync(new URL('../static/v2/js/pages/motors.js', import.meta.url), 'utf8');
+  assert.match(card, /'잠금 해제'/);
+  assert.match(card, /confirmBox\(/);
+  assert.match(card, /ui\.unlocked\s*\n?\s*\? h\('input'/);
+  assert.match(page, /minasBaseCard\(changed/);
+});

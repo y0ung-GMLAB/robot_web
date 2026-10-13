@@ -49,7 +49,7 @@ def test_out_of_range_drive_values_never_reach_the_drive():
         'brake_delay_stop_ms': -50,      # 음수
         'brake_delay_run_ms': 999999,    # 과대
     }}
-    assert minas_params.param_overrides(motor) == {}
+    assert minas_params.param_overrides(motor) == {}   # 공통 값(yaml)이 쓰인다
 
 
 def test_overrides_are_appended_to_the_item_list(tmp_path):
@@ -120,7 +120,8 @@ def test_every_minas_motor_gets_its_own_param_file(tmp_path):
     assert 'minas_params' in plain
     plain_values = {int(item['index']): item['value']
                     for item in yaml.safe_load(Path(plain).read_text(encoding='utf-8'))['items']}
-    assert 0x3437 not in plain_values
+    # 칸을 비운 모터도 브레이크 지연 기본값 · 정지 150 ms · 동작 0 ms (사용자 결정 2026-10-13)
+    assert plain_values[0x3437] == 150 and plain_values[0x3438] == 0
 
 
 def test_overload_level_is_the_factory_default_not_50(tmp_path):
@@ -180,3 +181,42 @@ def test_overload_entry_id_matches_motor_manager():
               'motor_interface/motor_driver.hpp').read_text(encoding='utf-8')
     assert 'ID_OVERLOAD_RATIO = 12;' in header
     assert minas_params.MONITOR_FIELDS['overload_monitor'][0]['id'] == 12
+
+
+def _values(path):
+    return {int(item['index']): item['value']
+            for item in yaml.safe_load(Path(path).read_text(encoding='utf-8'))['items']}
+
+
+def test_repo_site_base_has_the_decided_values():
+    """사용자 결정 2026-10-13 · 과부하 레벨 출하값 · 정지 중 브레이크 150 ms · 회전 중 0 ms"""
+    root = Path(__file__).resolve().parents[3]
+    values = {int(item['index']): item['value'] for item in minas_params.site_default_items(root)}
+    assert values == {0x3512: 0, 0x3437: 150, 0x3438: 0}
+
+
+def test_brake_delay_defaults_come_from_the_site_base_and_the_motor_field_wins(tmp_path):
+    values = _values(minas_params.write_param_file(tmp_path, 1, {}))
+    assert values[0x3437] == 150 and values[0x3438] == 0
+    values = _values(minas_params.write_param_file(tmp_path, 1, {'brake_delay_stop_ms': 300}))
+    assert values[0x3437] == 300
+
+
+def test_screen_values_go_to_the_local_file_and_win_over_the_repo_default(tmp_path):
+    view = minas_params.save_site_local(tmp_path, {'0x3437:0': 200, '0x3512:0': 0})
+    rows = {row['key']: row for row in view['items']}
+    assert rows['0x3437:0']['value'] == 200 and rows['0x3437:0']['default'] == 150
+    assert rows['0x3512:0']['local'] is None              # 기본값과 같으면 적지 않는다
+    assert (tmp_path / 'config' / 'minas_base.local.yaml').is_file()
+    assert _values(minas_params.write_param_file(tmp_path, 2, {}))[0x3437] == 200
+    # 빈 값 = 기본값으로
+    minas_params.save_site_local(tmp_path, {'0x3437:0': ''})
+    assert _values(minas_params.write_param_file(tmp_path, 2, {}))[0x3437] == 150
+
+
+def test_screen_refuses_out_of_range_and_unknown_objects(tmp_path):
+    import pytest
+    with pytest.raises(ValueError):
+        minas_params.save_site_local(tmp_path, {'0x3512:0': 116})     # 115 % 넘게는 못 씀(매뉴얼)
+    with pytest.raises(ValueError):
+        minas_params.save_site_local(tmp_path, {'0x60B2:0': 10})      # 화면에서 못 바꾸는 객체(0x60B2 안 씀)

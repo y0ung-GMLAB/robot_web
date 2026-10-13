@@ -299,7 +299,7 @@ def driver_id_for_registry_motor(
         # MINAS 드라이브 파라미터(브레이크 타이밍 · 앱솔루트 모드)는 드라이버
         # yaml 키가 아니라 param_file(SDO 목록)로 들어간다 · P8 ·
         # 오버라이드가 없어도 모든 MINAS 가 제 param 파일을 받는다 · 플랫폼 기반 값을
-        # robot_web 이 고쳐 쓰는 것(`BASE_VALUE_FIXES` · Pr5.12)이 있어서 · 수정 목록 113
+        # 현장 공통 값(`config/minas_base.yaml` · Pr5.12 · 브레이크 지연)이 있어서 · 수정 목록 113 · 114
         if str(driver.get('type') or '') == 'minas':
             drive_params = minas_params.param_overrides(motor)
             driver['param_file'] = minas_params.write_param_file(
