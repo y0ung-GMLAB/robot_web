@@ -19,7 +19,9 @@ import { minasBaseCard } from './minas_base.js';
 import { autoTuneAll, gainField, saveAll } from './drive_gains.js';
 import { paramsField } from './drive_params.js';
 
-const ui = { revision: '', saved: null, draft: null, selected: null, job: null, busy: '', error: '', scan: null };
+const ui = { revision: '', saved: null, draft: null, selected: null, job: null, busy: '', error: '', scan: null,
+  // Alias 칸에 친 값 · 축 → 글 · 화면이 0.5 초마다 다시 그려도 지워지지 않게(칸 밖을 누르면 드라이브 값으로 돌아갔다 · 2026-10-13)
+  aliasDraft: {} };
 let jobTimer = null;
 
 function clone(motors) {
@@ -137,8 +139,8 @@ async function maintenance(row, action, state, changed) {
 async function writeAlias(row, motor, state, changed) {
   const identity = motor.identity || {};
   const current = identity.ethercat_alias;
-  const input = document.getElementById(`alias-${row.axis}`);
-  const next = Number(input?.value);
+  const typed = ui.aliasDraft[row.axis];
+  const next = Number(typed === undefined ? document.getElementById(`alias-${row.axis}`)?.value : typed);
   if (!Number.isInteger(next) || next < 0 || next > 65535) { toast('Alias 는 0~65535 사이의 정수여야 합니다', 'bad'); return; }
   if (identity.serial_number === undefined || identity.vendor_id === undefined) { toast('검색 정보가 없습니다. 「전체 검색」을 먼저 하세요', 'bad'); return; }
   const ok = await confirmBox({
@@ -149,13 +151,15 @@ async function writeAlias(row, motor, state, changed) {
     confirmLabel: '쓰기', tone: 'warning',
   });
   if (!ok) return;
-  await run(`${row.axis}번 Alias 쓰기`, () => api('POST', '/api/motors/ethercat-alias', {
+  const result = await run(`${row.axis}번 Alias 쓰기`, () => api('POST', '/api/motors/ethercat-alias', {
     body: {
       confirmed: true, master_index: row.masterIndex, slave_position: row.slavePosition, new_alias: next,
       expected: { ethercat_alias: current, vendor_id: identity.vendor_id, product_code: identity.product_code ?? identity.product_id, serial_number: identity.serial_number },
     },
     timeoutMs: 15000,
   }), state, changed);
+  // 썼으면 친 값은 버린다 · 다시 검색하면 드라이브 값이 칸에 들어온다 · 실패면 친 값을 남겨 다시 누를 수 있게
+  if (result && result.success !== false) { delete ui.aliasDraft[row.axis]; changed(); }
 }
 
 /** 그 모터 설정 칸을 열고 그 자리로 내려간다 */
@@ -345,7 +349,8 @@ function detailCard(state, changed, row) {
       h('span', { class: 'muted small', text: `지금 ${motor.identity?.ethercat_alias ?? '-'} · Slave ${Number.isFinite(row.slavePosition) ? row.slavePosition : '-'}` }),
       h('div', { class: 'row' },
         h('input', { id: `alias-${row.axis}`, class: 'input mono num-input', type: 'number', min: '0', max: '65535', step: '1',
-          value: String(motor.identity?.ethercat_alias ?? ''), 'aria-label': `${row.axis}번 새 Alias` }),
+          value: ui.aliasDraft[row.axis] ?? String(motor.identity?.ethercat_alias ?? ''), 'aria-label': `${row.axis}번 새 Alias`,
+          oninput: (e) => { ui.aliasDraft[row.axis] = e.target.value; } }),
         h('button', { class: 'btn btn-mini', type: 'button', disabled: busy, onclick: () => writeAlias(row, motor, state, changed) }, 'Alias 쓰기')),
       h('p', { class: 'muted small', text: '드라이브마다 다른 값이어야 합니다(0은 겹쳐도 되고 케이블 순서로 찾습니다). 쓴 뒤 「전체 검색」으로 새 값이 보이는지 확인하세요. 예전 값 그대로면 드라이브 제어 전원을 껐다 켠 뒤 다시 검색하세요.' }))) : null,
     // 파라미터 (고급) · 드라이브 현재값 · 부팅 시 적용값 · 팩토리값 · 직접 읽기·쓰기 · 수정 목록 109 · 114
