@@ -255,3 +255,23 @@ def test_join_prepare_needs_no_initialize_time_but_a_normal_prepare_does():
         assert '트리거' in str(exc)
     else:
         raise AssertionError('normal prepare needs initialize_monotonic')
+
+
+def test_release_after_a_finished_once_run_stays_completed():
+    """수정 목록 112 마 · 끝까지 돈 그룹 1회를 마스터가 세션 정리(group_cancel)할 때 「취소」 로 덮지 않는다"""
+    manager = _group_manager()
+    manager._run_thread = None
+    manager._status = {'state': 'completed', 'message': '모션 실행 완료'}
+    result = manager._group.cancel({'execution_id': 'exec-a'})
+    assert result['success'] is True
+    assert manager._status['state'] == 'completed'
+    assert '완료' in manager._status['message']
+
+
+def test_cancel_before_the_motion_finished_is_still_a_cancel():
+    manager = _group_manager()
+    manager._run_thread = None
+    manager._status = {'state': 'initializing'}
+    manager._group.cancel({'execution_id': 'exec-a'})
+    assert manager._status['state'] == 'stopped'
+    assert manager._status['message'] == '그룹 실행 취소'

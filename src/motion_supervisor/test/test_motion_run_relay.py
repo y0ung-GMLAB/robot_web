@@ -127,7 +127,7 @@ def test_range_recovery_sends_one_in_range_target_without_intermediate_targets()
     supervisor._active_actions = {}
     published = []
     supervisor._publish_ac_servo_action_setpoint = (
-        lambda _motors, _motor, axis, target: (
+        lambda _motors, _motor, axis, target, still_active=None: (
             published.append((axis, target)) is None,
             '',
         )
@@ -173,7 +173,7 @@ def test_ac_servo_jog_trajectory_sends_cubic_intermediate_targets():
     }
     positions = []
     supervisor._publish_ac_servo_action_setpoint = (
-        lambda _motors, _motor, _axis, target: (
+        lambda _motors, _motor, _axis, target, still_active=None: (
             positions.append(target) is None,
             '',
         )

@@ -283,6 +283,9 @@ class GroupSession:
 
     def cancel(self, payload: Dict[str, Any]) -> Dict[str, Any]:
         execution_id = str(payload.get('execution_id') or '').strip()
+        # 끝까지 돈 1회 · 회차 후 정지도 마스터가 이 길로 세션을 정리한다 · 그때 「완료」 를 「취소」 로 덮어
+        # 끝까지 돈 재생이 실패처럼 보였다(2026-10-12 H-52) · 끝난 뒤 정리면 완료로 둔다 · 수정 목록 112 마
+        finished = str(self.manager.status().get('state') or '') in ('completed', 'motion_completed')
         with self.condition:
             if execution_id and self.session.get('execution_id') != execution_id:
                 raise ValueError('취소하려는 그룹 실행 세션이 일치하지 않습니다')
@@ -304,6 +307,13 @@ class GroupSession:
                 'message': '이전 그룹 실행 정리 중입니다. 잠시 후 다시 시도하세요',
                 'status': self.manager.status(),
             }
+        if finished:
+            self.manager._update_status({
+                'state': 'completed',
+                'phase': 'completed',
+                'message': '그룹 실행 완료',
+            })
+            return {'success': True, 'message': '그룹 실행 완료 · 세션 정리', 'status': self.manager.status()}
         self.manager._update_status({
             'state': 'stopped',
             'phase': 'stopped',

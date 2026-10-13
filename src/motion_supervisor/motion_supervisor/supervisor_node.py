@@ -1525,6 +1525,7 @@ class MotionSupervisor(Node):
                 motor,
                 axis,
                 command_position,
+                still_active=lambda axis=axis, active=active: self._active_jogs.get(axis) is active,
             )
             if not success:
                 self._active_jogs.pop(axis, None)
@@ -1597,6 +1598,7 @@ class MotionSupervisor(Node):
                 motor,
                 axis,
                 command_position,
+                still_active=lambda axis=axis, active=active: self._active_actions.get(axis) is active,
             )
             if not success:
                 request_id = str(active.get('request_id') or '')
@@ -2208,6 +2210,7 @@ class MotionSupervisor(Node):
         motor: Dict[str, Any],
         axis: int,
         target_position: float,
+        still_active=None,
     ) -> tuple[bool, str]:
         limit_error = self._target_position_limit_error(motor, target_position)
         if limit_error:
@@ -2215,13 +2218,19 @@ class MotionSupervisor(Node):
 
         self._publish_controlword(motors, [axis], CW_ENABLE_OPERATION_MINAS)
         time.sleep(self._action_setpoint_clear_sec())
-        return self._publish_position_target(
-            motors,
-            motor,
-            axis,
-            target_position,
-            CW_NEW_SET_POINT_MINAS,
-        )
+        # 기다리는 사이 정지가 왔으면 보내지 않는다 · 정지가 「지금 위치에 서라」 를 보낸 **뒤에** 다음 점을
+        # 또 보내 그만큼 더 갔다(2026-10-12 floating4 「동작 취소」 뒤 모터 7.4°) · 정지와 같은 잠금 안에서 확인 ·
+        # 수정 목록 112 나
+        with self._command_lock:
+            if still_active is not None and not still_active():
+                return True, 'cancelled by stop'
+            return self._publish_position_target(
+                motors,
+                motor,
+                axis,
+                target_position,
+                CW_NEW_SET_POINT_MINAS,
+            )
 
     def _handle_ac_servo_control(self, request: Dict[str, Any]) -> tuple[bool, str]:
         action = str(request.get('action') or '').strip().lower().replace('-', '_')
