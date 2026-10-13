@@ -1,11 +1,11 @@
 """MINAS 드라이브 파라미터 · 고급 보기·쓰기 · 수정 목록 109 · 114 (2026-10-13)
 
-드라이브에 지금 들어 있는 값(RAM) · 부팅 때 우리가 쓸 값 · 초기값을 한 표에 · 다르면 표시.
+드라이브에 지금 들어 있는 값(RAM) · 부팅 때 우리가 쓸 값 · 팩토리값을 한 표에 · 다르면 표시.
 
     드라이브 현재값   `ethercat upload` · Motor Manager 를 멈추지 않는다
     부팅 시 적용값   `minas_params.boot_values` (플랫폼 기반 → 현장 공통 설정 → 모터별 칸) · 이 값은 모터
                     프로그램이 켜질 때마다 다시 쓰이므로, 여기서 다른 값을 써도 재시작하면 돌아간다
-    초기값          A6B 레퍼런스 SX-DSV03190 R11.0 부록(파라미터 · 객체 기본값) · A~C 프레임
+    팩토리값          A6B 레퍼런스 SX-DSV03190 R11.0 부록(파라미터 · 객체 기본값) · A~C 프레임
 
 쓰기는 RAM 에만 · Motor Manager 를 멈추지 않는다 · 되읽어 같은지 본다 · 모터가 움직이는 동안 거절 ·
 드라이브 동작을 직접 바꾸는 객체(제어 워드 · 목표 · 운전 모드 · PDO 배선 · EEPROM 저장 · 다회전 클리어 ·
@@ -24,7 +24,7 @@ TYPE_RANGES = {
     'int32': (-2147483648, 2147483647), 'uint32': (0, 4294967295),
 }
 
-#: (묶음, 이름, 번호, index, subindex, 형식, 초기값, 단위, 메모)
+#: (묶음, 이름, 번호, index, subindex, 형식, 팩토리값, 단위, 메모)
 #: 메모 · C = 전원 재투입 때 반영(속성 C) · auto = 모터 설정에서 계산해 부팅 때 씀
 CATALOG: List[Tuple[str, str, str, int, int, str, Optional[int], str, str]] = [
     ('게인', '자동조정', 'Pr0.02', 0x3002, 0, 'int16', 1, '', ''),
@@ -145,7 +145,7 @@ class DriveParams:
         return value, '' if value is not None else f'응답을 읽지 못함: {(done.stdout or "").strip()!r}'
 
     def table(self, axis: int) -> Dict[str, Any]:
-        """자주 보는 객체 표 · 드라이브 현재값 · 부팅 시 적용값 · 초기값"""
+        """자주 보는 객체 표 · 드라이브 현재값 · 부팅 시 적용값 · 팩토리값"""
         try:
             target = self._target(int(axis))
         except (TypeError, ValueError) as exc:

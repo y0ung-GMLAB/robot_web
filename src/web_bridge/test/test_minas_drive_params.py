@@ -189,7 +189,7 @@ def _values(path):
 
 
 def test_repo_site_base_has_the_decided_values():
-    """사용자 결정 2026-10-13 · 과부하 레벨 초기값 · 정지 중 브레이크 150 ms · 회전 중 0 ms"""
+    """사용자 결정 2026-10-13 · 과부하 레벨 팩토리값 · 정지 중 브레이크 150 ms · 회전 중 0 ms"""
     root = Path(__file__).resolve().parents[3]
     values = {int(item['index']): item['value'] for item in minas_params.site_default_items(root)}
     assert values == {0x3512: 0, 0x3437: 150, 0x3438: 0, 0x3510: 4, 0x3614: 200}

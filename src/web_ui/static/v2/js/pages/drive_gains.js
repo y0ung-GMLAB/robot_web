@@ -13,9 +13,9 @@ export const GAIN_FIELDS = [
   { key: 'auto_tuning', label: '자동조정', number: 'Pr0.02', min: 0, max: 4,
     meanings: { 0: '끔 · 게인이 그대로 고정', 1: '표준 · 보통은 이것', 2: '위치결정 · 짧게 자주 서는 축', 3: '수직축 · 중력이 늘 걸리는 축', 4: '마찰 보상' } },
   { key: 'stiffness', label: '강성', number: 'Pr0.03', min: 0, max: 31,
-    meanings: null, note: '높을수록 단단하게 따라감 · 너무 높으면 떨림·소리 · 낮은 값부터 한 칸씩 · 초기값 13' },
+    meanings: null, note: '높을수록 단단하게 따라감 · 너무 높으면 떨림·소리 · 낮은 값부터 한 칸씩 · 팩토리값 13' },
   { key: 'estimation_speed', label: '관성비 추정 속도', number: 'Pr6.31', min: 0, max: 3,
-    meanings: { 0: '멈춤 · 관성비 고정', 1: '분 단위 · 천천히(초기값)', 2: '초 단위', 3: '급변 · 부하가 갑자기 바뀌는 축' } },
+    meanings: { 0: '멈춤 · 관성비 고정', 1: '분 단위 · 천천히(팩토리값)', 2: '초 단위', 3: '급변 · 부하가 갑자기 바뀌는 축' } },
 ];
 
 const ui = { unlockedAxis: null, draft: {}, busy: false };

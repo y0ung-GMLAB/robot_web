@@ -101,7 +101,7 @@ test('파라미터 (고급) · 다름 표시 · 마우스 글 (수정 목록 109
   const { rowFlags, rowHint } = await import('../static/v2/js/pages/drive_params.js');
   const row = { number: 'Pr5.12', index: 0x3512, subindex: 0, type: 'int16', memo: '', factory: 0, drive: 50, boot: 0,
     differs_factory: true, differs_boot: true, error: '' };
-  assert.deepEqual(rowFlags(row).map((f) => f.text), ['부팅 시 적용값과 다름', '초기값과 다름']);
+  assert.deepEqual(rowFlags(row).map((f) => f.text), ['부팅 시 적용값과 다름', '팩토리값과 다름']);
   assert.match(rowHint(row), /0x3512:0 · int16/);
   assert.match(rowHint({ ...row, memo: 'C' }), /전원 재투입/);
   assert.deepEqual(rowFlags({ ...row, differs_factory: false, differs_boot: false }), []);

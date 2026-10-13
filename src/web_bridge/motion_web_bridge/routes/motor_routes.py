@@ -75,7 +75,7 @@ def register_motor_routes(app: FastAPI, bridge, project_call) -> None:
             raise HTTPException(status_code=400, detail='request body must be an object')
         return await asyncio.to_thread(bridge.minas_drive_gains, body)
 
-    # 드라이브 파라미터 고급 · 표(지금 · 부팅 때 · 초기값) · 직접 읽기 · 쓰기 · 수정 목록 109 · 114
+    # 드라이브 파라미터 고급 · 표(지금 · 부팅 때 · 팩토리값) · 직접 읽기 · 쓰기 · 수정 목록 109 · 114
     @app.get('/api/motor-config/drive-params')
     async def drive_params_table(axis: int):
         return await asyncio.to_thread(bridge.drive_params.table, axis)

@@ -1,16 +1,16 @@
 #!/usr/bin/env python3
 """MINAS 드라이브를 「처음 연결」 상태에 가깝게 · 시험용 · 2026-10-13 (사용자 요청 · 미니 PC 에서 실행)
 
-전체 공장 초기화가 아니다 · 파라미터 (고급) 표의 객체(`drive_params.CATALOG`)만 초기값으로 · 나머지 수백 개
+전체 공장 초기화가 아니다 · 파라미터 (고급) 표의 객체(`drive_params.CATALOG`)만 팩토리값으로 · 나머지 수백 개
 (필터 · 진동 억제 · 출력 핀 등)는 그대로 · 완전 초기화는 PANATERM 으로만 된다.
 
     python3 scripts/minas_factory_reset.py                 # 읽고 기록만 (기본 · 안전)
-    python3 scripts/minas_factory_reset.py --apply         # 초기값 쓰기 + 앱솔루트 1 + Alias 0 + EEPROM 저장
+    python3 scripts/minas_factory_reset.py --apply         # 팩토리값 쓰기 + 앱솔루트 1 + Alias 0 + EEPROM 저장
 
 --apply 조건 · 모터 프로그램이 멈춰 있어야 한다(`systemctl --user stop motion-motor`) · 끝나면 드라이브 제어
 전원을 껐다 켠다(앱솔루트 방식 · Alias 는 그때 반영) · 그 뒤 웹 「앱솔루트 설정」 부터 다시.
 
-입력 핀(SI1~8 · Pr4.00~4.07)은 **되돌리지 않는다** · 초기값은 리밋 스위치(POT/NOT)가 켜진 배선이라
+입력 핀(SI1~8 · Pr4.00~4.07)은 **되돌리지 않는다** · 팩토리값은 리밋 스위치(POT/NOT)가 켜진 배선이라
 스위치가 없는 축은 한 방향으로 못 움직이거나 Err38 · 다르면 기록만 한다(--include-pins 로 강제).
 CiA402 의 「모터 설정에서 계산」(auto) 값은 부팅 때 다시 쓰이므로 쓰지 않는다.
 """
@@ -30,7 +30,7 @@ sys.path.insert(0, str(ROOT / 'src' / 'web_bridge'))
 from motion_web_bridge.drive_params import CATALOG  # noqa: E402
 
 MINAS_VENDOR = 0x066F
-ABSOLUTE_FACTORY = 1          # Pr0.15 초기값 · 인크리멘털 · A6B 레퍼런스 부록
+ABSOLUTE_FACTORY = 1          # Pr0.15 팩토리값 · 인크리멘털 · A6B 레퍼런스 부록
 
 
 def run(command, check=False):
@@ -68,10 +68,10 @@ def download(master, position, index, sub, data_type, value):
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description='MINAS 드라이브 · 파라미터 (고급) 표 객체를 초기값으로(시험용)')
+    parser = argparse.ArgumentParser(description='MINAS 드라이브 · 파라미터 (고급) 표 객체를 팩토리값으로(시험용)')
     parser.add_argument('--master', type=int, default=0)
-    parser.add_argument('--apply', action='store_true', help='초기값 쓰기 + 앱솔루트 1 + Alias 0 + EEPROM 저장')
-    parser.add_argument('--include-pins', action='store_true', help='입력 핀(SI1~8)도 초기값으로 · 리밋 스위치가 배선된 경우만')
+    parser.add_argument('--apply', action='store_true', help='팩토리값 쓰기 + 앱솔루트 1 + Alias 0 + EEPROM 저장')
+    parser.add_argument('--include-pins', action='store_true', help='입력 핀(SI1~8)도 팩토리값으로 · 리밋 스위치가 배선된 경우만')
     parser.add_argument('--keep-alias', action='store_true', help='Alias 는 그대로')
     args = parser.parse_args()
 
@@ -92,7 +92,7 @@ def main() -> int:
         print(f'\n== 슬레이브 {position} · Alias {slave["alias"]}')
         for row in rows:
             if row['differs'] or row['error']:
-                mark = '못 읽음 ' + row['error'] if row['error'] else f"{row['value']} (초기값 {row['factory']})"
+                mark = '못 읽음 ' + row['error'] if row['error'] else f"{row['value']} (팩토리값 {row['factory']})"
                 print(f"  {row['number']:<9} {row['label']:<24} {mark}")
         if args.apply:
             for row, (group, _l, _n, index, sub, data_type, factory, _u, memo) in zip(rows, CATALOG):
@@ -114,7 +114,7 @@ def main() -> int:
                 drive['written'].append('Alias → 0')
             print(f"  썼음 · {', '.join(drive['written'])}")
             if drive['skipped']:
-                print(f"  입력 핀은 초기값과 다르지만 그대로 둠 · {', '.join(drive['skipped'])} (리밋 스위치 배선 확인 뒤 --include-pins)")
+                print(f"  입력 핀은 팩토리값과 다르지만 그대로 둠 · {', '.join(drive['skipped'])} (리밋 스위치 배선 확인 뒤 --include-pins)")
         report['drives'].append(drive)
 
     out = ROOT / 'log' / 'field_check' / f"minas_factory_{'apply' if args.apply else 'report'}_{time.strftime('%Y%m%d_%H%M%S')}.json"
