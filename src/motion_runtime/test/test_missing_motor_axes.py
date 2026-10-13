@@ -203,7 +203,8 @@ def test_a_loop_value_gap_does_not_block_continuous_play():
     plan = _build(manager, run_mode='continuous', repeat_mode='direct')
 
     assert len(plan['axes']) == 3, '값이 튄다고 실행을 막으면 안 된다'
-    assert any('튑니다' in text for text in plan['warnings'])
+    # 옛 direct 는 초기 위치를 거치는 방식으로 바뀐다 · 이음매가 없으니 튐 경고도 없다 · 수정 목록 112 라
+    assert plan['repeat_mode'] == 'reinitialize'
 
 
 # 재생 선택을 끈 축 · 세 번째 문 · §6-158

@@ -137,7 +137,8 @@ def test_group_prepare_preserves_local_between_cycle_setting_without_auto_repeat
     assert result['success'] is True
     assert bridge.payload['run_mode'] == 'once'
     assert bridge.payload['group_execution'] is True
-    assert bridge.payload['repeat_mode'] == 'dwell'
+    # 저장된 옛 dwell 은 「대기 후 초기 위치로」 로 · 수정 목록 112 라
+    assert bridge.payload['repeat_mode'] == 'dwell_reinitialize'
     assert bridge.payload['dwell_sec'] == 0.25
     assert 'automation_run' not in bridge.payload
 

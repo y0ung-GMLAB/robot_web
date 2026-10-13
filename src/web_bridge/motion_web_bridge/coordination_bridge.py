@@ -226,6 +226,9 @@ class CoordinationWebBridge:
             human = run_mode_gate.human_start_block_reason(self._node, dict(payload))
             if human:
                 return {'success': False, 'message': human}
+            repeat_error = repeat_policy.request_repeat_mode_error(payload.get('repeat_mode'))
+            if repeat_error:
+                return {'success': False, 'message': repeat_error}
         start_generation = int(self._project_generation())
         try:
             request = {'command': command}

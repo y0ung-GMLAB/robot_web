@@ -54,7 +54,8 @@ def test_boot_playback_fields_are_dropped_from_old_files():
 
     assert 'enabled' not in state
     assert 'armed' not in state
-    assert state['repeat_mode'] == 'dwell'
+    # 저장돼 있던 dwell 은 「대기 후 초기 위치로」 로 읽힌다 · 수정 목록 112 라
+    assert state['repeat_mode'] == 'dwell_reinitialize'
     assert state['dwell_sec'] == 10.0
 
 

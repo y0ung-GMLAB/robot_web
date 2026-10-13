@@ -1710,6 +1710,8 @@ class MotionCoordinationNode(Node):
             raise ValueError('그룹 실행 방식은 1회 또는 연속이어야 합니다')
         if repeat_mode not in {'direct', 'dwell', 'reinitialize', 'dwell_reinitialize'}:
             raise ValueError('지원하지 않는 그룹 회차 사이 동작입니다')
+        # 옛 direct·dwell 은 초기 위치를 거치게 · 수정 목록 112 라 (사용자 결정 2026-10-13)
+        repeat_mode = {'direct': 'reinitialize', 'dwell': 'dwell_reinitialize'}.get(repeat_mode, repeat_mode)
         if dwell_sec < 0.0:
             raise ValueError('그룹 대기 시간은 0초 이상이어야 합니다')
         if repeat_mode not in {'dwell', 'dwell_reinitialize'}:

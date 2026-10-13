@@ -5,6 +5,7 @@ from fastapi.responses import FileResponse
 
 from pathlib import Path
 
+from motion_common import repeat_policy
 from motion_web_bridge import animation_preview, motion_file_analysis
 
 
@@ -143,6 +144,10 @@ def register_motion_run_routes(app: FastAPI, bridge, safety_first_stop) -> None:
         body = await request.json()
         if not isinstance(body, dict):
             raise HTTPException(status_code=400, detail='request body must be an object')
+        # 받은 뒤 준비에서 죽지 않게 받기 전에 거절 · direct·dwell 도 거절 · 수정 목록 112 라
+        repeat_error = repeat_policy.request_repeat_mode_error(body.get('repeat_mode'))
+        if repeat_error:
+            return {'success': False, 'message': repeat_error}
         handler = bridge.motion_run_start
         return await asyncio.to_thread(handler, body)
 
@@ -154,6 +159,9 @@ def register_motion_run_routes(app: FastAPI, bridge, safety_first_stop) -> None:
             body = {}
         if not isinstance(body, dict):
             raise HTTPException(status_code=400, detail='request body must be an object')
+        repeat_error = repeat_policy.request_repeat_mode_error(body.get('repeat_mode'))
+        if repeat_error:
+            return {'success': False, 'message': repeat_error}
         try:
             handler = bridge.motion_automation_configure
             return await asyncio.to_thread(handler, body)

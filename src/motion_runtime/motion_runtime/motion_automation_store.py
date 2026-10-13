@@ -12,6 +12,7 @@ from motion_common.repeat_policy import (
     DEFAULT_REPEAT_MODE,
     GROUP_SYNC_MODES,
     REPEAT_MODES,
+    normalize_repeat_mode,
 )
 from pathlib import Path
 from typing import Any, Dict
@@ -48,7 +49,8 @@ def normalize_automation_state(value: Any) -> Dict[str, Any]:
     repeat_mode = str(source.get('repeat_mode') or DEFAULT_REPEAT_MODE).strip().lower()
     if repeat_mode not in REPEAT_MODES:
         raise ValueError(f'지원하지 않는 자동 반복 방식입니다: {repeat_mode}')
-    state['repeat_mode'] = repeat_mode
+    # 저장돼 있던 direct·dwell 은 초기 위치 방식으로 읽는다 · 수정 목록 112 라
+    state['repeat_mode'] = normalize_repeat_mode(repeat_mode)
     try:
         dwell_sec = float(source.get('dwell_sec') or 0.0)
     except (TypeError, ValueError) as exc:

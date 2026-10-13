@@ -27,10 +27,38 @@ DEFAULT_REPEAT_MODE = REINITIALIZE
 LOOPS_WITHOUT_REINITIALIZE = frozenset({DIRECT, DWELL})
 
 
+#: 쓰는 방식 · 늘 초기 위치를 거친다 (사용자 결정 2026-10-12 · 서버도 2026-10-13)
+#: 「바로 다음 회차」(direct) · 「대기 후 다음 회차」(dwell) 는 끝값에서 시작값으로 바로 이어
+#: 안전상 쓰지 않는다 · 저장돼 있던 값은 초기 위치 방식으로 바꿔 읽고, 새로 보내면 거절한다.
+ALLOWED_REPEAT_MODES = frozenset({REINITIALIZE, DWELL_REINITIALIZE})
+SAFE_REPLACEMENT = {DIRECT: REINITIALIZE, DWELL: DWELL_REINITIALIZE}
+
+UNSAFE_MODE_MESSAGE = (
+    '초기 위치를 거치지 않는 반복(바로 다음 회차 · 대기 후 다음 회차)은 안전을 위해 쓰지 않습니다 · '
+    '「초기 위치로 돌아간 뒤 다음 회차」 를 고르세요'
+)
+
+
 def normalize_repeat_mode(value, default: str = DEFAULT_REPEAT_MODE) -> str:
-    """빈 값·모르는 값은 기본값으로 · 판정은 여기서만 한다."""
+    """빈 값·모르는 값은 기본값으로 · 옛 direct·dwell 은 초기 위치 방식으로 · 판정은 여기서만 한다."""
     mode = str(value or '').strip().lower()
-    return mode if mode in REPEAT_MODES else default
+    if mode not in REPEAT_MODES:
+        return default
+    return SAFE_REPLACEMENT.get(mode, mode)
+
+
+def request_repeat_mode_error(value) -> str:
+    """새로 들어온 요청의 반복 방식 · 받으면 안 되는 이유 · 괜찮으면 빈 글 · 수정 목록 112 라
+
+    받은 뒤 준비 단계에서 「지원하지 않는 자동 반복 방식」 으로 죽지 않게 받기 전에 거절한다.
+    빈 값은 저장된 설정 · 기본값을 쓰라는 뜻이라 괜찮다.
+    """
+    mode = str(value or '').strip().lower()
+    if not mode or mode in ALLOWED_REPEAT_MODES:
+        return ''
+    if mode in SAFE_REPLACEMENT:
+        return UNSAFE_MODE_MESSAGE
+    return f'지원하지 않는 반복 방식입니다: {mode}'
 
 
 def needs_loop_value_match(repeat_mode, *, unknown_needs_match: bool = True) -> bool:

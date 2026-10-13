@@ -111,7 +111,7 @@ def test_address_change_restarts_dds(monkeypatch):
         assert _wait(lambda: listener.init["ip"] == "192.168.1.33")
         assert len(inits) == 2
         assert any("네트워크가 바뀌었습니다" in line for line in log.lines)
-        assert listener.status == dds_listener.CONNECTED
+        assert _wait(lambda: listener.status == dds_listener.CONNECTED)   # 첫 점검(1 초 주기) 전엔 연결 중
     finally:
         listener.stop()
     assert listener.status == dds_listener.OFF

@@ -167,7 +167,7 @@ def _plan(name, *, playlist=('a.json', 'b.json', 'c.json'), target=0, init=False
         'motion_playlist': list(playlist),
         'run_mode': 'continuous',
         'automation_run': False,
-        'repeat_mode': 'direct',
+        'repeat_mode': 'reinitialize',
         'dwell_sec': 0.0,
         'synchronized_repeat_count': 0,
         'axes': [],
@@ -275,8 +275,10 @@ def test_independent_group_counts_its_own_cycles():
         'group_cycle_number': 1,
         'independent_group': True,
     }
+    init = {**_plan('a.json', playlist=('a.json',), target=3, init=True), 'group_execution': True}
 
-    manager._player._run_motion(plan)
+    # 회차 사이는 늘 초기 위치를 거친다 · 옛 direct 는 reinitialize 로 읽힌다(수정 목록 112 라) · 초기 위치 계획을 준다
+    manager._player._run_motion(plan, init)
 
     assert cycles == [1, 2, 3]
 

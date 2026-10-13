@@ -89,6 +89,8 @@ class PlanBuilder:
         ).strip().lower()
         if repeat_mode not in REPEAT_MODES:
             raise ValueError(f'지원하지 않는 자동 반복 방식입니다: {repeat_mode}')
+        # 옛 「바로 다음 · 대기 후 다음」 은 초기 위치를 거치게 바꾼다 · 수정 목록 112 라 (사용자 결정)
+        repeat_mode = repeat_policy.normalize_repeat_mode(repeat_mode)
         dwell_sec = finite_float(payload.get('dwell_sec'))
         dwell_sec = 0.0 if dwell_sec is None else dwell_sec
         if dwell_sec < 0.0:

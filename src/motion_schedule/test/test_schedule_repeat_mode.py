@@ -65,13 +65,25 @@ def test_missing_automation_file_means_reinitialize(tmp_path):
 
 
 def test_saved_repeat_mode_is_used_as_is(tmp_path):
+    _write_automation(tmp_path, 'proj-a', repeat_mode='dwell_reinitialize', dwell_sec=4.0)
+    node = _node(tmp_path)
+
+    node._execute_start(ScheduleItem(schedule_id='s1'))
+
+    _endpoint, payload = node.sent[0]
+    assert payload['repeat_mode'] == 'dwell_reinitialize'
+    assert payload['dwell_sec'] == 4.0
+
+
+def test_saved_old_dwell_is_sent_as_dwell_then_initial_position(tmp_path):
+    """옛 「대기 후 다음 회차」 가 저장돼 있어도 스케줄은 초기 위치를 거친다 · 수정 목록 112 라"""
     _write_automation(tmp_path, 'proj-a', repeat_mode='dwell', dwell_sec=4.0)
     node = _node(tmp_path)
 
     node._execute_start(ScheduleItem(schedule_id='s1'))
 
     _endpoint, payload = node.sent[0]
-    assert payload['repeat_mode'] == 'dwell'
+    assert payload['repeat_mode'] == 'dwell_reinitialize'
     assert payload['dwell_sec'] == 4.0
 
 
