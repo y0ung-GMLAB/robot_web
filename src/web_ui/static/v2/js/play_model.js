@@ -67,6 +67,28 @@ export function groupRuntime(snap) {
   };
 }
 
+/**
+ * 지금 「그룹 전체」 를 누르면 들어갈 PC 수와 빠질 PC · 서버(마스터 연동 노드)가 시작과 같은 규칙으로 센다 ·
+ * 수동 PC 도 들어가고 끔 · 연결 안 됨 · 알람 · 단독 재생 중 PC 는 빠진다 · 수정 목록 122 (다)
+ * 미리 보기가 없으면(슬레이브 · 옛 서버) count = null
+ */
+export function groupStartPreview(snap) {
+  const group = groupRuntime(snap);
+  const preview = snap?.coordination?.runtime?.start_preview || {};
+  const participants = Array.isArray(preview.participants) ? preview.participants.map(String) : null;
+  const names = new Map([...(group.peers || []), ...(group.local ? [group.local] : [])].map((peer) => [String(peer.pc_id || ''), pcName(peer)]));
+  const excluded = Object.entries(preview.excluded || {})
+    .map(([id, reason]) => ({ id, name: names.get(id) || id, reason: String(reason || '') }))
+    .sort((a, b) => a.name.localeCompare(b.name));
+  return { count: participants ? participants.length : null, excluded };
+}
+
+/** 빠질 PC 한 줄 · 「빠짐 · floating1(끔 모드) · floating2(단독 재생 중)」 · 없으면 빈 글 */
+export function excludedText(excluded) {
+  const rows = Array.isArray(excluded) ? excluded : [];
+  return rows.length ? `빠짐 · ${rows.map((row) => `${row.name}(${row.reason})`).join(' · ')}` : '';
+}
+
 /** 범위 고르기 · 그룹에 들어가 있는 마스터면 매장 전체가 기본 */
 export function defaultScope(snap) {
   const group = groupRuntime(snap);

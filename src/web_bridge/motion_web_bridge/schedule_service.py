@@ -128,7 +128,26 @@ class ScheduleService:
             'reconcile_interval_sec': node.get('reconcile_interval_sec'),
             # 이 PC 가 몇 시라고 믿는가 · 해외 설치에서 시간대만 안 바뀐다
             'clock': local_clock.snapshot(),
+            # 지금 시작하면 안 되는 이유 · 스케줄 노드가 비어 있을 때만 시작한다 · 수정 목록 124
+            'start_blocker': self._start_blocker(),
         }
+
+    def _start_blocker(self) -> str:
+        """스케줄이 지금 시작하면 안 되는 이유 · 비면 시작해도 된다 · 읽기만 한다 · 수정 목록 124
+
+        재부팅 직후에는 앱솔루트 확인 · 모터 상태 수신 · 실행 설정 적용이 아직 끝나지 않았다 ·
+        그때 시작을 보내면 준비 검사에서 거절당한다 · 판단은 화면 버튼과 같은 곳
+        (`motor_action_blocker` · 긴급 정지 · 실행 설정 · 모터 연결·오류 · 앱솔루트) · 못 읽으면
+        빈 값(막지 않는다 · 시작이 같은 검사를 다시 한다).
+        """
+        reader = getattr(self.bridge, 'motor_action_blocker', None)
+        if not callable(reader):
+            return ''
+        try:
+            return str(reader() or '').strip()
+        except Exception:  # 상태 조회 실패가 스케줄을 막지 않는다
+            logger.debug('시작 가능 여부 조회 실패', exc_info=True)
+            return ''
 
     def _coordination_session(self) -> Dict[str, Any]:
         """연동을 쓰는가 · 지금 그룹에 들어가 있는가 · §6-133

@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import test from 'node:test';
 import {
-  collectIssues, headline, modePhrase, motorChips, pcRows, runSummary, todayWindows,
+  collectIssues, headline, modePhrase, motorChips, pcRows, RUN_MODE_HINT, runSummary, todayWindows,
 } from '../static/v2/js/model.js';
 
 const pcs = (...extra) => ({ coordination: { runtime: { network_pcs: [
@@ -50,6 +50,29 @@ test('문제마다 해결 버튼 · 긴급 정지 · 알람 · 그룹 오류 · 
   assert.ok(kinds.includes('스케줄 시작 거부됨 (3회)'));
   assert.ok(kinds.some((k) => /floating2 연결 안 됨/.test(k)));
   assert.equal(collectIssues(snap, {}, { connected: false }).length, 1, '연결이 끊기면 그것 하나만');
+});
+
+test('스케줄 시작 대기 · 잠그지 않은 그룹 시작 실패 · 수정 목록 123·124', () => {
+  // 부팅 직후 앱솔루트 확인 전 · 거부가 아니라 대기 · 3번 넘게 이어지면 빨강
+  const waiting = collectIssues({}, { last_failure: { count: 1, deferred: true, message: '앱솔루트 미확인' } });
+  assert.equal(waiting[0].title, '스케줄 시작 대기 중 (1회)');
+  assert.equal(waiting[0].tone, 'warn');
+  assert.match(waiting[0].detail, /스스로 시작/);
+  assert.equal(collectIssues({}, { last_failure: { count: 3, deferred: true, message: 'x' } })[0].tone, 'bad');
+  // 진행 PC 준비 안 됨 · 그룹 오류로 잠그지 않지만 이유는 보인다 · 그룹이 돌면 안 보인다
+  const failed = { coordination: { runtime: { last_start_failure: { message: 'floating4 실행 준비 안 됨: 앱솔루트 미확인' }, execution: {} } } };
+  assert.deepEqual(collectIssues(failed, {}).map((i) => [i.tone, i.title]), [['warn', '그룹 시작이 취소되었습니다']]);
+  failed.coordination.runtime.execution = { execution_id: 'exec-1' };
+  assert.equal(collectIssues(failed, {}).length, 0);
+});
+
+test('운전 모드 버튼 설명 · 누가 시작하나 · 수정 목록 122', () => {
+  const shell = readFileSync(new URL('../static/v2/js/shell.js', import.meta.url), 'utf8');
+  assert.match(shell, /RUN_MODE_HINT\[button\.dataset\.mode\]/);
+  assert.match(RUN_MODE_HINT.manual, /사람이 시작/);
+  assert.match(RUN_MODE_HINT.manual, /그룹 재생/);
+  assert.match(RUN_MODE_HINT.schedule, /저절로/);
+  assert.match(RUN_MODE_HINT.off, /움직이지 않/);
 });
 
 test('지금 카드 · 재생 중이면 파일 · 회차 · 진행 · 매장 전체', () => {

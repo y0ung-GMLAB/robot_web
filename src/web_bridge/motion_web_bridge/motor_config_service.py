@@ -622,6 +622,12 @@ class MotorConfigService:
         ).strip()
         if coordination_service == 'motion-coordination.service':
             restart_services.append(coordination_service)
+        # 사람이 누른 재시작이다 · 연동 노드가 브리지가 사라진 것을 그룹 오류로 잠그지 않게 먼저 알린다 ·
+        # 실패해도 재시작은 간다 · 수정 목록 123 (실물 S-11 다시)
+        coordination = getattr(self.bridge, '_coordination_web_bridge', None)
+        notify = getattr(coordination, 'notify_planned_restart', None)
+        if callable(notify):
+            notify()
         try:
             motor_config_rules.schedule_managed_service_restart(*restart_services)
         except OSError as exc:

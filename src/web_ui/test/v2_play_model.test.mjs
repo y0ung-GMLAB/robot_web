@@ -2,7 +2,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
-  axisRows, defaultScope, fileInfo, groupRows, groupStopCommand, initialMoveChoices, phaseSteps, playHeadline, REPEAT_MODES,
+  axisRows, defaultScope, excludedText, fileInfo, groupRows, groupStartPreview, groupStopCommand, initialMoveChoices, phaseSteps, playHeadline, REPEAT_MODES,
   playlistAdd, playlistMove, playlistRemove, registeredPlaylist, startBlocker,
 } from '../static/v2/js/play_model.js';
 
@@ -110,4 +110,23 @@ test('그룹 PC 줄 · 모터 설정이 없어 빠진 PC 는 짧게 「모터 �
     execution: { execution_id: 'e', excluded: { f1: '준비 거절 · 현재 프로젝트의 실행 준비가 끝나지 않았습니다: 모터 설정과 조인트 매핑을 저장해 확정하세요' } } } } };
   const row = groupRows(snap).find((r) => r.id === 'f1');
   assert.equal(row.note, '제외됨 · 모터 설정 없음(재생할 모터가 없는 PC)');
+});
+
+test('그룹 전체 N대 · 실제로 들어갈 PC 수 · 빠질 PC 와 이유 · 수정 목록 122 (다)', () => {
+  // 실물 S-10 · 4대 모두 수동인데 「그룹 전체 · 3대」 로 보이고 마스터 혼자 돌았다
+  const snap = group({
+    local: { pc_id: 'floating4', display_name: 'floating4' },
+    peers: [{ pc_id: 'floating1' }, { pc_id: 'floating2', display_name: '두번째' }, { pc_id: 'floating3' }],
+    start_preview: {
+      participants: ['floating1', 'floating3', 'floating4'],
+      excluded: { floating2: '끔 모드' },
+    },
+  });
+  const preview = groupStartPreview(snap);
+  assert.equal(preview.count, 3);
+  assert.deepEqual(preview.excluded, [{ id: 'floating2', name: '두번째', reason: '끔 모드' }]);
+  assert.equal(excludedText(preview.excluded), '빠짐 · 두번째(끔 모드)');
+  assert.equal(excludedText([]), '');
+  // 미리 보기가 없으면(슬레이브 · 옛 서버) 모른다 · 화면이 옛 방식으로 센다
+  assert.equal(groupStartPreview(group()).count, null);
 });

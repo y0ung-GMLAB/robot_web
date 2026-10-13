@@ -6,6 +6,13 @@
 
 export const RUN_MODE_LABEL = { schedule: '스케줄', manual: '수동', off: '끔' };
 
+/** 운전 모드 뜻 = 누가 시작하나 · 위 막대 버튼 설명 · 수정 목록 122 (사용자 결정 2026-10-13) */
+export const RUN_MODE_HINT = {
+  schedule: '스케줄 · 정한 시간에 맞춰 저절로 시작하고 정지합니다. 스케줄이 켜는 그룹 재생에는 스케줄 모드 PC만 들어갑니다.',
+  manual: '수동 · 사람이 시작합니다. 단독 재생과 그룹 재생 모두 됩니다. 사람이 누른 그룹 재생에는 수동 모드 PC도 들어갑니다.',
+  off: '끔 · 움직이지 않습니다. 그룹 재생에서도 빠집니다. 서보는 켠 채 제자리를 유지합니다.',
+};
+
 const RUNNING_STATES = new Set(['running', 'verifying', 'waiting']);
 const MOVING_STATES = new Set(['running', 'verifying', 'waiting', 'initializing', 'recovering']);
 
@@ -105,10 +112,19 @@ export function collectIssues(snap, sched, { connected = true } = {}) {
   if (group.active) {
     bad('그룹 오류', String(group.message || ''), { kind: 'ack-group-error', label: '그룹 오류 해제' });
   }
+  // 잠그지 않은 그룹 시작 실패 · 준비 안 됨 · 다시 시작으로 정리 · 다음 시작에 지워진다 · 수정 목록 123·124
+  const startFailure = snap.coordination?.runtime?.last_start_failure || {};
+  const groupActive = Boolean(snap.coordination?.runtime?.execution?.execution_id);
+  if (!group.active && !groupActive && String(startFailure.message || '')) {
+    warn('그룹 시작이 취소되었습니다', String(startFailure.message));
+  }
   const failure = sched?.last_failure || {};
   const failCount = Number(failure.count) || 0;
   if (failCount > 0) {
-    const entry = [`스케줄 시작 거부됨 (${failCount}회)`, String(failure.message || '거부 사유가 전달되지 않았습니다')];
+    // 준비 대기(부팅 직후 앱솔루트 확인 등)는 거부가 아니다 · 같은 횟수 기준으로 색만 · 수정 목록 124
+    const entry = failure.deferred
+      ? [`스케줄 시작 대기 중 (${failCount}회)`, `준비가 끝나면 스스로 시작합니다 · ${String(failure.message || '')}`]
+      : [`스케줄 시작 거부됨 (${failCount}회)`, String(failure.message || '거부 사유가 전달되지 않았습니다')];
     if (failCount >= 3) bad(...entry); else warn(...entry);
   }
   const unreadable = Array.isArray(sched?.unreadable_schedules) ? sched.unreadable_schedules.filter(Boolean) : [];

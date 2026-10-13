@@ -249,6 +249,9 @@ class CoordinationWebBridge:
                     'sync_mode': repeat_policy.normalize_group_sync_mode(
                         payload.get('sync_mode'),
                     ),
+                    # 누가 시작했나 · 스케줄이 보낸 것만 `schedule_id` 가 있다 · 사람이 누른 그룹 재생은
+                    # 수동 PC 도 넣는다 · 수정 목록 122
+                    'started_by': group_start_origin(payload),
                 })
             result = self._local_api('/control', request)
         except (OSError, ValueError) as exc:
@@ -259,6 +262,17 @@ class CoordinationWebBridge:
                 'message': '프로젝트 전환 전 시작한 그룹 실행 결과를 폐기했습니다',
             }
         return result
+
+    def notify_planned_restart(self) -> Dict[str, Any]:
+        """「프로그램 다시 시작」 직전 · 연동 노드에 사람이 한 재시작임을 알린다 · 수정 목록 123
+
+        브리지가 사라지는 동안 연동 노드가 그것을 고장(GROUP_PARTICIPANT_FAILURE 2등급)으로
+        잠그지 않게 · 연동 노드가 없거나 답이 없어도 재시작은 그대로 간다.
+        """
+        try:
+            return self._local_api('/control', {'command': 'planned_restart'})
+        except (OSError, ValueError) as exc:
+            return {'success': False, 'message': str(exc)}
 
     def _local_api(
         self, path: str, payload: Mapping[str, Any] | None = None
@@ -329,6 +343,50 @@ def readiness_failure_text(context: Mapping[str, Any]) -> str:
     return f'{summary} · {detail}' if detail else summary
 
 
+def group_start_origin(payload: Mapping[str, Any]) -> str:
+    """그룹 시작을 누가 보냈나 · `schedule_id` 가 있으면 스케줄 · 아니면 사람 · 수정 목록 122"""
+    return 'schedule' if str(payload.get('schedule_id') or '').strip() else 'human'
+
+
+#: 사람 조작 · 안전 상태 `manual_activity_modes` · `command_owner` 를 화면 글자로
+_MANUAL_ACTIVITY_TEXT = {'jog': '조그 이동', 'action': '목표 위치 이동'}
+
+
+def human_operation_reason(
+    motion_run_status: Optional[Mapping[str, Any]],
+    safety_status: Optional[Mapping[str, Any]],
+) -> str:
+    """이 PC 에서 사람이 지금 무언가 움직이는 중인가 · 그러면 그룹에 들어가지 않는다 · 수정 목록 122 (나)
+
+    수동 모드 PC 도 사람이 누른 그룹 재생에 들어간다 · 그런데 그 PC 앞에서 누가 조그 ·
+    페이더 · 단독 재생을 하고 있으면 그룹이 축을 빼앗는다 · 그 PC 만 준비를 거절하고 이유를
+    남긴다(진행 PC 가 「준비 거절 · 사람 조작 중 …」 으로 빼고 나머지로 간다).
+    """
+    run = motion_run_status if isinstance(motion_run_status, Mapping) else {}
+    safety = safety_status if isinstance(safety_status, Mapping) else {}
+    state = str(run.get('state') or '').strip().lower()
+    if state and not run.get('group_execution') and run_state.is_running(state):
+        return '사람 조작 중 · 단독 재생'
+    modes = safety.get('manual_activity_modes')
+    modes = {str(item) for item in modes} if isinstance(modes, (list, tuple, set)) else set()
+    for mode in ('jog', 'action'):
+        if mode in modes:
+            return f'사람 조작 중 · {_MANUAL_ACTIVITY_TEXT[mode]}'
+    if str(safety.get('command_owner') or '') == 'stream':
+        return '사람 조작 중 · 페이더'
+    return ''
+
+
+def _locked_copy(bridge: Any, value_name: str, lock_name: str) -> Dict[str, Any]:
+    lock = getattr(bridge, lock_name, None)
+    if lock is None:
+        value = getattr(bridge, value_name, None)
+    else:
+        with lock:
+            value = getattr(bridge, value_name, None)
+    return dict(value) if isinstance(value, Mapping) else {}
+
+
 #: 부르는 쪽이 기다려 주는 시간에서 **떼어 둘 몫** · §6-297
 #:
 #: 답이 돌아가는 데도 시간이 든다 · 안쪽이 바깥 예산을 꽉 채우면, 일은 끝났는데
@@ -360,6 +418,13 @@ def local_motion_readiness(
     except (TypeError, ValueError):
         budget = DEFAULT_READINESS_BUDGET_SEC
     timeout_sec = max(0.5, budget - READINESS_MARGIN_SEC)
+    # 사람이 이 PC 를 만지는 중이면 그룹에 안 들어간다 · 수정 목록 122 (나)
+    busy = human_operation_reason(
+        _locked_copy(bridge, '_motion_run_status', '_motion_run_lock'),
+        _locked_copy(bridge, '_safety_status', '_safety_status_lock'),
+    )
+    if busy:
+        return {'success': False, 'message': busy}
     # A group prepare must not race the periodic project-context reconciler.
     # Apply and verify the context synchronously before reporting this PC ready.
     reconcile = getattr(

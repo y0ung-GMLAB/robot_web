@@ -105,6 +105,8 @@ def test_start_is_continuous_play(tmp_path):
 def test_stop_is_stop_after_cycle_on_both_scopes(tmp_path):
     """종료 시각에는 「현재 회차 후 정지」다 · 중간에 끊지 않는다."""
     group = _node(tmp_path, coordination_enabled=True)
+    # 그룹 길은 **그룹 실행이 돌 때만** · 수정 목록 115
+    group._group_execution = lambda: {'state': 'running', 'execution_id': 'exec-a'}
     group._execute_stop_after_cycle(_item())
     assert group.sent[0][0] == '/api/coordination/control'
     assert group.sent[0][1]['command'] == 'stop_after_cycle'
@@ -112,6 +114,50 @@ def test_stop_is_stop_after_cycle_on_both_scopes(tmp_path):
     local = _node(tmp_path, coordination_enabled=False)
     local._execute_stop_after_cycle(_item())
     assert local.sent[0][0] == '/api/motion-run/stop-after-cycle'
+
+
+def test_a_solo_run_on_a_joined_pc_is_stopped_on_the_local_path(tmp_path):
+    """실물 R-43 · 연동 묶임 · 사람이 켠 단독 연속 · 그룹 길로만 보내 「활성 그룹 실행이 없습니다」 · 수정 목록 115"""
+    node = _node(tmp_path, coordination_enabled=True)
+    node._group_execution = lambda: {}
+
+    node._execute_stop_after_cycle(None, reason='schedule_end')
+
+    assert [endpoint for endpoint, _ in node.sent] == ['/api/motion-run/stop-after-cycle']
+    # 스케줄 끝 동작(기준점 주차 → 서보 OFF)도 단독 길에서 같이 · 브리지가 `reason` 을 본다
+    assert node.sent[0][1]['reason'] == 'schedule_end'
+
+
+def test_a_refused_group_stop_falls_back_to_the_local_path(tmp_path):
+    """그룹 길이 거절하면(그 사이 그룹이 끝남) 단독 길로 다시 · 수정 목록 115"""
+    node = _node(tmp_path, coordination_enabled=True)
+    node._group_execution = lambda: {'state': 'running', 'execution_id': 'exec-a'}
+    node._send_http_request = lambda endpoint, payload: (
+        node.sent.append((endpoint, payload)) or endpoint != '/api/coordination/control'
+    )
+
+    node._execute_stop_after_cycle(None, reason='schedule_end')
+
+    assert [endpoint for endpoint, _ in node.sent] == [
+        '/api/coordination/control', '/api/motion-run/stop-after-cycle',
+    ]
+
+
+def test_an_accepted_start_does_not_wipe_the_failure_count(tmp_path):
+    """받아들여진 시작은 아직 성공이 아니다 · 실제로 돌아야 지운다 · 수정 목록 124"""
+    node = _node(tmp_path, coordination_enabled=True)
+    node._last_failure = {'endpoint': '시작 뒤 재생 없음', 'message': '준비 안 됨', 'count': 2}
+
+    def accept(endpoint, payload):
+        node.sent.append((endpoint, payload))
+        node._last_failure = {}     # 진짜 `_send_http_request` 는 받아들여지면 지운다
+        return True
+
+    node._send_http_request = accept
+    node._execute_start(_item())
+
+    assert node._last_failure['count'] == 2
+    assert node._start_pending is True
 
 
 def test_a_slave_pc_never_fires_its_own_schedule(tmp_path, monkeypatch):
