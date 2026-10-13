@@ -52,8 +52,9 @@ UPLOAD_TIMEOUT_SEC = 2.0
 #: `ethercat slaves -v` 제한 시간
 SLAVES_TIMEOUT_SEC = 3.0
 
-#: 슬레이브 상태가 이만큼 그대로여야 읽는다 · 부팅 때 PREOP → OP 전환 중엔 안 읽는다
-SETTLE_SEC = 2.0
+#: 슬레이브 상태가 이만큼 그대로여야 읽는다 · 부팅 때 PREOP → OP 전환 중엔 안 읽는다 ·
+#: 2 → 5 s · 실물 U-1b(10-13) 드라이브 재투입 직후 OP 여도 메일박스 응답이 늦어 「wrong SDO」 13 건
+SETTLE_SEC = 5.0
 #: 「확인 불가」 다시 읽기 간격 · 처음 1 분은 짧게, 그 뒤엔 드물게
 RETRY_FAST_SEC = 2.0
 RETRY_FAST_WINDOW_SEC = 60.0
@@ -261,13 +262,15 @@ class MinasAbsoluteCheck:
 
     def _read_gains(self, master: int, position: int) -> Dict[str, Any]:
         """자동조정 · 강성 · 관성비 · 추정 속도 · 하나라도 못 읽으면 error 에 이유(값은 읽은 것만)"""
-        gains: Dict[str, Any] = {}
+        gains: Dict[str, Any] = {name: None for name, _index, _type in GAIN_OBJECTS}
         errors = []
         for name, index, data_type in GAIN_OBJECTS:
             value, error = self._upload(master, position, index, data_type)
             gains[name] = value
             if error:
+                # 하나가 안 되면 그 드라이브엔 더 묻지 않는다 · 늦은 응답이 다음 요청의 답으로 섞인다(U-1b)
                 errors.append(error)
+                break
         gains['error'] = ' / '.join(errors)
         gains['read_at'] = self._clock()
         return gains
@@ -300,7 +303,9 @@ class MinasAbsoluteCheck:
                 if vendor != minas_absolute.MINAS_VENDOR_ID:
                     continue
                 mode, mode_error = self._upload(master, position, 0x3015, 'int16')
-                code, code_error = self._upload(master, position, 0x603F, 'uint16')
+                # 앞 읽기가 안 되면 같은 드라이브에 바로 더 묻지 않는다 · 막 켜진 드라이브는 응답이 늦고
+                # 늦은 0x3015 응답이 다음 0x603F 요청의 답으로 섞인다(커널 「wrong SDO」 · 실물 U-1b 10-13) · 다음 다시 읽기에서
+                code, code_error = (None, '') if mode_error else self._upload(master, position, 0x603F, 'uint16')
                 drive = self._drive(
                     master, position,
                     alias=alias,
@@ -309,7 +314,11 @@ class MinasAbsoluteCheck:
                     read_error=mode_error,
                     error_code_error=code_error,
                 )
-                drive['gains'] = self._read_gains(master, position)   # 108 · 막지 않는다
+                if mode_error or code_error:
+                    drive['gains'] = {name: None for name, _index, _type in GAIN_OBJECTS}
+                    drive['gains'].update(error='앞 읽기 실패로 건너뜀', read_at=self._clock())
+                else:
+                    drive['gains'] = self._read_gains(master, position)   # 108 · 막지 않는다
                 drives.append(drive)
         return drives
 

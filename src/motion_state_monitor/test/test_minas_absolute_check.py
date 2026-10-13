@@ -321,3 +321,26 @@ def test_gains_alone_are_read_again_later_without_rereading_pr015():
     assert sum('0x3015' in c for c in runner.calls) == mode_reads          # 속성 C · 다시 안 읽음
     assert sum('0x3004' in c for c in runner.calls) == inertia_reads + 1
     assert check.snapshot()['state'] == ma.STATE_OK
+
+
+def test_a_failed_read_sends_nothing_more_to_that_drive_in_the_same_pass():
+    """실물 U-1b(10-13) · 막 켜진 드라이브에 SDO 를 줄줄이 보내면 늦은 응답이 다음 요청 답으로 섞인다(「wrong SDO」)
+    · 0x3015 가 안 되면 그 드라이브엔 0x603F · 게인을 이번엔 안 묻고 다음 다시 읽기로"""
+    runner = FakeEthercat(fail={(1, '0x3015')})
+    check, _ = _check(runner)
+    _see(check, _masters(0, 1))
+    to_slave_1 = [c for c in runner.calls if ' -p 1 ' in c]
+    assert len(to_slave_1) == 1 and '0x3015' in to_slave_1[0]
+    drive = check.snapshot()['drives'][1]
+    assert drive['status'] == ma.DRIVE_UNKNOWN
+    assert drive['gains']['error'] and drive['gains']['inertia_ratio'] is None
+    # 다른 드라이브는 그대로 다 읽음
+    assert any(' -p 0 ' in c and '0x3004' in c for c in runner.calls)
+
+
+def test_a_failed_gain_read_stops_the_other_gain_reads_on_that_drive():
+    runner = FakeEthercat(fail={(0, '0x3002')})
+    check, _ = _check(runner)
+    _see(check, _masters(0))
+    assert not any('0x3003' in c or '0x3004' in c for c in runner.calls)
+    assert '0x3002' in check.snapshot()['drives'][0]['gains']['error']
