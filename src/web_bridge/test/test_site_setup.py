@@ -147,6 +147,44 @@ def test_bootstrap_refuses_root_and_other_repos_but_updates_our_workspace():
     assert 'pull --ff-only' in source and 'git clone -b' in source
 
 
+def _os_release_blocks_bootstrap():
+    path = Path('/etc/os-release')
+    if not path.exists():
+        return False
+    text = path.read_text(encoding='utf-8', errors='replace')
+    return not ('ID=ubuntu' in text and 'VERSION_ID="22.04"' in text)
+
+
+@pytest.mark.skipif(_os_release_blocks_bootstrap(), reason='bootstrap 은 우분투 22.04 에서만 앞으로 간다')
+def test_bootstrap_stops_on_an_old_stack_and_moves_it_only_with_replace_old(tmp_path):
+    """옛 스택(kimjoonho motion_web)도 ~/ros2_ws · 2026-10-13
+    옵션 없으면 아무것도 안 바꾸고 멈춤(sudo·PC 이름 전) · --replace-old 면 옛 서비스 멈추고 폴더를 옮김(지우지 않음)."""
+    old = tmp_path / 'ros2_ws'
+    (old / 'src' / 'motion_web').mkdir(parents=True)
+    fake = tmp_path / 'bin'
+    fake.mkdir()
+    calls = tmp_path / 'calls.txt'
+    for name, code in (('sudo', 1), ('systemctl', 0)):
+        (fake / name).write_text(f'#!/bin/sh\necho "{name} $*" >> "{calls}"\nexit {code}\n', encoding='utf-8')
+        (fake / name).chmod(0o755)
+    env = {'MOTION_WORKSPACE': str(old), 'PATH': f'{fake}{os.pathsep}{os.environ["PATH"]}'}
+
+    refused = _bash(f'bash "{SCRIPTS / "bootstrap.sh"}" --name floating9 </dev/null', env)
+    assert refused.returncode == 1
+    assert '--replace-old' in refused.stderr
+    assert (old / 'src' / 'motion_web').is_dir()
+    assert not calls.exists()  # sudo 도 systemctl 도 안 불림
+
+    # 가짜 sudo 가 1 을 돌려 옮긴 직후 멈춘다 · 그 뒤 clone 은 이 시험 밖
+    _bash(f'bash "{SCRIPTS / "bootstrap.sh"}" --replace-old </dev/null', env)
+    moved = list(tmp_path.glob('ros2_ws_old_*'))
+    assert len(moved) == 1 and (moved[0] / 'src' / 'motion_web').is_dir()
+    assert not old.exists()
+    log = calls.read_text(encoding='utf-8')
+    assert 'systemctl --user stop motion-control.service motion-coordination.service' in log
+    assert log.index('systemctl') < log.index('sudo')
+
+
 def test_the_stale_motor_config_sample_with_absolute_paths_is_gone():
     assert not (WORKSPACE / 'config' / 'active_motor_config.yaml').exists()
     for path in (WORKSPACE / 'config').glob('*.yaml'):
