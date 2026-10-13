@@ -46,6 +46,12 @@ def _event_log_lines(path: Path) -> List[str]:
         return []
 
 
+def _low_water(limit: int) -> int:
+    """한도를 넘어 줄일 때 남길 양 · 한도의 90 % · 작은 한도는 그대로 · 수정 목록 130"""
+    limit = int(limit)
+    return max(limit - limit // 10, 1)
+
+
 class MotorEventLog:
     def __init__(
         self,
@@ -75,6 +81,8 @@ class MotorEventLog:
         self._last_motion_run_state: Optional[str] = None
         #: 마지막으로 적은 앱솔루트 차단 문구 · '' = 막히지 않음 · None = 아직 모름 · 수정 목록 62
         self._last_minas_absolute_message: Optional[str] = None
+        #: 로그 폴더마다 정리 뒤 셈 · 건수 · 크기 · 파일 수 · 정리한 날 · 수정 목록 130
+        self._tally: Dict[Path, Dict[str, Any]] = {}
 
     def clear_project_memory(self) -> None:
         """프로젝트가 바뀌면 전이 판정 기준을 지운다."""
@@ -243,16 +251,39 @@ class MotorEventLog:
             record['project_id'] = project_id
             record['project_name'] = project_name
         path = log_dir / f'{now:%Y-%m-%d}.jsonl'
+        line = json.dumps(record, ensure_ascii=False, separators=(',', ':')) + '\n'
         try:
             with self._lock:
                 log_dir.mkdir(parents=True, exist_ok=True)
+                new_file = not path.exists()
                 with path.open('a', encoding='utf-8') as stream:
-                    stream.write(json.dumps(record, ensure_ascii=False, separators=(',', ':')))
-                    stream.write('\n')
-                self.prune(log_dir)
+                    stream.write(line)
+                # 한도를 넘었을 때만 정리 · 전에는 한 줄 쓸 때마다 모든 파일을 읽고 오늘 파일을
+                # 통째로 다시 썼다(fsync) · 그동안 이 락을 쥐어 브리지 ROS 콜백까지 섰다 · 수정 목록 130
+                if self._tally_after_append(log_dir, now.date(), len(line.encode('utf-8')), new_file):
+                    self.prune(log_dir)
         except OSError as error:
             self.logger().error(f'Failed to write motor event log {path}: {error}')
         return record
+
+    def _tally_after_append(self, log_dir: Path, day: Any, size: int, new_file: bool) -> bool:
+        """방금 쓴 한 줄을 셈에 더한다 · 정리가 필요하면 참 · 락 안에서 부른다 · 수정 목록 130
+
+        셈이 없으면(처음 · 지운 뒤) · 날이 바뀌면(보존 일수) · 건수 · 크기 · 파일 수가 한도를
+        넘으면 정리한다 · 정리가 셈을 새로 맞춘다.
+        """
+        tally = self._tally.get(log_dir)
+        if tally is None or tally.get('day') != day:
+            return True
+        tally['records'] += 1
+        tally['bytes'] += int(size)
+        if new_file:
+            tally['files'] += 1
+        return (
+            tally['records'] > self.max_records
+            or tally['bytes'] > self.max_bytes
+            or tally['files'] > self.max_files
+        )
 
     def context(self, for_write: bool = False) -> tuple[Path, str, str]:
         configured_fallback = self.log_dir
@@ -332,29 +363,47 @@ class MotorEventLog:
                 except OSError:
                     continue
                 total_records -= line_counts.get(oldest, 0)
+                total_bytes -= sizes.get(oldest, 0)
 
             if paths:
                 newest = paths[-1]
-                lines = _event_log_lines(newest)
-                if len(lines) > self.max_records:
-                    lines = lines[-self.max_records:]
-                encoded_lines = [(line + '\n').encode('utf-8') for line in lines]
-                encoded_size = sum(len(line) for line in encoded_lines)
-                while encoded_lines and encoded_size > self.max_bytes:
-                    encoded_size -= len(encoded_lines.pop(0))
-                try:
-                    # 원자적 교체 · 정리 도중 죽어도 로그가 잘리지 않는다 · §6-24
-                    store.atomic_write_text(
-                        newest, b''.join(encoded_lines).decode('utf-8')
-                    )
-                except (OSError, UnicodeDecodeError):
-                    pass
+                # 오늘 파일 하나가 한도를 넘었을 때만 다시 쓴다 · 넘었으면 한도의 90 % 까지 줄여
+                # 다음 몇백 줄은 다시 쓰지 않게 · 전에는 정리 때마다(= 한 줄마다) 통째로 다시 썼다 · 수정 목록 130
+                if (
+                    line_counts.get(newest, 0) > self.max_records
+                    or sizes.get(newest, 0) > self.max_bytes
+                ):
+                    lines = _event_log_lines(newest)
+                    if len(lines) > self.max_records:
+                        lines = lines[-_low_water(self.max_records):]
+                    encoded_lines = [(line + '\n').encode('utf-8') for line in lines]
+                    encoded_size = sum(len(line) for line in encoded_lines)
+                    if encoded_size > self.max_bytes:
+                        keep_bytes = _low_water(self.max_bytes)
+                        while encoded_lines and encoded_size > keep_bytes:
+                            encoded_size -= len(encoded_lines.pop(0))
+                    try:
+                        # 원자적 교체 · 정리 도중 죽어도 로그가 잘리지 않는다 · §6-24
+                        store.atomic_write_text(
+                            newest, b''.join(encoded_lines).decode('utf-8')
+                        )
+                        total_records += len(encoded_lines) - line_counts.get(newest, 0)
+                        total_bytes += encoded_size - sizes.get(newest, 0)
+                    except (OSError, UnicodeDecodeError):
+                        pass
+            self._tally[target_dir] = {
+                'day': datetime.now().astimezone().date(),
+                'records': max(int(total_records), 0),
+                'bytes': max(int(total_bytes), 0),
+                'files': len(paths),
+            }
 
     def clear(self) -> Dict[str, Any]:
         log_dir, project_id, project_name = self.context()
         deleted_files = 0
         deleted_bytes = 0
         with self._lock:
+            self._tally.pop(Path(log_dir), None)
             for path in _event_log_paths(log_dir):
                 try:
                     deleted_bytes += path.stat().st_size
@@ -380,6 +429,7 @@ class MotorEventLog:
         if not path.is_file() or path.is_symlink():
             raise ValueError(f'로그 파일을 찾을 수 없습니다: {name}')
         with self._lock:
+            self._tally.pop(Path(log_dir), None)
             size = path.stat().st_size
             path.unlink()
         return {

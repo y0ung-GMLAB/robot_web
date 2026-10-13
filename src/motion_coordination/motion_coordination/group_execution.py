@@ -260,6 +260,8 @@ class GroupExecution:
         self.pending_acks: set[str] = set()
         self.pending_ack_deadline = 0.0
         self.pending_scheduled_at = 0.0
+        #: 예약 명령을 보낸 때 · 확인 시간 재기 · 수정 목록 130
+        self.pending_published_at = 0.0
         self.motion_start_report_deadline = 0.0
         self.release_error = False
 
@@ -284,6 +286,7 @@ class GroupExecution:
         self.pending_acks.clear()
         self.pending_ack_deadline = 0.0
         self.pending_scheduled_at = 0.0
+        self.pending_published_at = 0.0
         self.motion_start_report_deadline = 0.0
         self.release_error = False
         self.joining.clear()
@@ -381,14 +384,14 @@ class GroupExecution:
             raise ValueError('준비 응답을 받을 수 있는 상태가 아닙니다')
         self.ready.add(pc_id)
 
-    def initialize_action(self, *, now: float) -> ScheduledAction:
+    def initialize_action(self, *, now: float, lead_sec: Optional[float] = None) -> ScheduledAction:
         if self.ready != set(self.participants):
             raise ValueError('전체 PC 실행 준비가 완료되지 않았습니다')
         self.state = 'initializing'
         self.scheduled.clear()
         return ScheduledAction(
             'initialize_at', self.execution_id, 0,
-            float(now) + self.start_lead_sec,
+            float(now) + self._lead(lead_sec),
         )
 
     def mark_armed(self, pc_id: str, triggered_at: float = 0.0) -> None:
@@ -404,7 +407,7 @@ class GroupExecution:
                 self.last_initialize_spread_ms = (max(values) - min(values)) * 1000.0
             self.state = 'armed'
 
-    def start_action(self, *, now: float) -> ScheduledAction:
+    def start_action(self, *, now: float, lead_sec: Optional[float] = None) -> ScheduledAction:
         if self.state == 'armed':
             next_cycle = 1
         elif (
@@ -421,7 +424,7 @@ class GroupExecution:
         self.triggered.clear()
         return ScheduledAction(
             'start_at', self.execution_id, next_cycle,
-            float(now) + self.start_lead_sec,
+            float(now) + self._lead(lead_sec),
         )
 
     def mark_scheduled(self, pc_id: str, cycle_number: int) -> None:
@@ -479,7 +482,7 @@ class GroupExecution:
             if self.target_cycle_count > 0 and self.cycle_number >= self.target_cycle_count:
                 self.request_stop_after_cycle()
 
-    def cycle_initialize_action(self, *, now: float) -> ScheduledAction:
+    def cycle_initialize_action(self, *, now: float, lead_sec: Optional[float] = None) -> ScheduledAction:
         """Schedule the next cycle's initialization only after all motions finish."""
         if (
             self.state != 'motion_completed'
@@ -491,7 +494,7 @@ class GroupExecution:
         self.scheduled.clear()
         return ScheduledAction(
             'cycle_initialize_at', self.execution_id, self.cycle_number,
-            float(now) + self.start_lead_sec,
+            float(now) + self._lead(lead_sec),
         )
 
     def mark_cycle_initialized(self, pc_id: str, cycle_number: int) -> None:
@@ -519,6 +522,12 @@ class GroupExecution:
         if self.last_initialize_spread_ms is None:
             return None
         return self.last_initialize_spread_ms <= self.max_start_spread_ms
+
+    def _lead(self, lead_sec: Optional[float]) -> float:
+        """예약 여유 · 진행 PC 가 잰 확인 시간으로 정해 넘긴다 · 없으면 설정값 · 수정 목록 130"""
+        if lead_sec is None:
+            return self.start_lead_sec
+        return max(float(lead_sec), self.start_lead_sec)
 
     def _participant(self, pc_id: str) -> None:
         if pc_id not in self.participants:
