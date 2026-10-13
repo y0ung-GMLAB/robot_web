@@ -26,6 +26,14 @@ from motion_common.timing import CONTROL_PERIOD_SEC
 
 # MuJoCo 계산 기록 · `animation_preview.meta_path_for` 가 만든다
 SIM_META_SUFFIX = '.sim.meta.json'
+# 계산 시작 때 남기는 임시 기록 · `animation_preview.pending_path_for` · 수정 목록 120 (마)
+SIM_PENDING_SUFFIX = '.sim.pending.json'
+SIM_RECORD_SUFFIXES = (SIM_META_SUFFIX, SIM_PENDING_SUFFIX)
+
+
+def is_sim_record(name: str) -> bool:
+    """3D 계산 기록 파일(애니메이션 아님) · 목록에 「오류 · motion data rows not found」 로 보이던 것"""
+    return str(name or '').lower().endswith(SIM_RECORD_SUFFIXES)
 
 
 def motion_mapping_file_id(result: Dict[str, Any]) -> str:
@@ -110,6 +118,20 @@ def motion_graph_series(
     return series
 
 
+def _starts_with_motion_header(content: str) -> bool:
+    """첫 줄(빈 줄·# 줄 빼고)이 `{"type": "motion_header", …}` 인가 · 표준 모션 파일(JSON Lines)"""
+    for line in str(content or '').splitlines():
+        text = line.strip()
+        if not text or text.startswith('#'):
+            continue
+        try:
+            first = json.loads(text)
+        except json.JSONDecodeError:
+            return False
+        return isinstance(first, dict) and str(first.get('type') or '') == 'motion_header'
+    return False
+
+
 def analyze_motion_json(content: str, *, include_records: bool) -> Dict[str, Any]:
     result: Dict[str, Any] = {
         'json_valid': False,
@@ -129,6 +151,8 @@ def analyze_motion_json(content: str, *, include_records: bool) -> Dict[str, Any
         },
         'errors': [],
         'warnings': [],
+        # 알림(정보) · 경고가 아닌 것 · 화면 검사 칸을 「경고」 로 바꾸지 않는다
+        'notes': [],
     }
     try:
         payload = json.loads(content)
@@ -141,7 +165,11 @@ def analyze_motion_json(content: str, *, include_records: bool) -> Dict[str, Any
                 result['errors'].append(text_error)
             return result
         result['message'] = 'motion data parsed from header/list rows'
-        result['warnings'].append('strict JSON 형식은 아니지만 헤더+대괄호 행 형식으로 해석했습니다')
+        if _starts_with_motion_header(content):
+            # Blender 내보내기 · 웹 녹화 형식(JSON Lines · 첫 줄 motion_header) · 정상 형식이라 경고가 아니다 · 수정 목록 120 (S-8)
+            result['notes'].append('헤더 + 프레임마다 한 줄(JSON Lines) 형식 · Blender 내보내기 형식')
+        else:
+            result['warnings'].append('strict JSON 형식은 아니지만 헤더+대괄호 행 형식으로 해석했습니다')
     else:
         result['json_valid'] = True
         rows, headers, source = motion_table.extract_rows(payload)
@@ -397,8 +425,8 @@ def list_motion_files(
                 item.is_file()
                 and item.suffix.lower() == '.json'
                 and not item.name.startswith('__studio_')
-                # MuJoCo 계산 기록(`x.sim.meta.json`) · 애니메이션 아님
-                and not item.name.lower().endswith(SIM_META_SUFFIX)
+                # MuJoCo 계산 기록(`x.sim.meta.json` · 임시 `x.sim.pending.json`) · 애니메이션 아님
+                and not is_sim_record(item.name)
             )
         ),
         key=lambda item: item.stat().st_mtime if item.exists() else 0.0,

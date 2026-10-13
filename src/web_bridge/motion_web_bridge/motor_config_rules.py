@@ -469,12 +469,41 @@ def scan_item_has_detected_devices(scan_item: Any) -> bool:
     return False
 
 
+def dynamixel_port_missing(scan_item: Any) -> bool:
+    """다이나믹셀 직렬 포트 자체가 없음 · 찾은 장치 없음 · 수정 목록 120 (바)"""
+    return (
+        isinstance(scan_item, dict)
+        and scan_item.get('skipped') is not True
+        and scan_item.get('available') is False
+        and not scan_item_has_detected_devices(scan_item)
+    )
+
+
+def registry_uses_dynamixel(registry: Any) -> bool:
+    """모터 설정에 다이나믹셀 모터가 하나라도 있나 · 지운 줄은 뺀다"""
+    motors = registry.get('motors') if isinstance(registry, dict) else None
+    return any(
+        isinstance(motor, dict)
+        and not motor.get('deleted')
+        and str(motor.get('motor_type') or '').strip().lower() == 'dynamixel'
+        for motor in (motors or [])
+    )
+
+
 def scan_operation_outcome(
     scan: Any,
     *,
     operation_type: str,
     fallback_success: bool,
+    dynamixel_expected: bool = True,
 ) -> str:
+    """검색 판정 · success | partial | failure
+
+    `dynamixel_expected=False` (프로젝트 모터 설정에 다이나믹셀이 없음) 이면
+    전체 검색에서 **다이나믹셀 포트가 아예 없는 것**은 덜 된 것이 아니다 ·
+    전에는 그것만으로 「검색 일부 완료」(실패처럼 읽힘)가 떴다 · 수정 목록 120 (바) ·
+    문구에는 정보로 남긴다(`scan_result_message`).
+    """
     if not isinstance(scan, dict):
         return 'success' if fallback_success else 'failure'
 
@@ -500,6 +529,14 @@ def scan_operation_outcome(
             if isinstance(item, dict) and item.get('skipped') is not True
         ]
     requested = [item for item in requested if isinstance(item, dict)]
+    if (
+        operation_type == 'full_scan'
+        and not dynamixel_expected
+        and isinstance(ethercat, dict)
+        and dynamixel_port_missing(dynamixel)
+    ):
+        # 쓰지 않는 다이나믹셀의 포트 없음은 판정에서 뺀다 · AC 서보만으로 판정
+        requested = [item for item in requested if item is not dynamixel]
     if not requested:
         return 'success' if fallback_success else 'failure'
     project_comparison = scan.get('project_comparison')
@@ -634,6 +671,9 @@ def scan_result_message(
             parts.append(f'다이나믹셀 {int(dynamixel.get("devices_count") or 0)}대')
         except (TypeError, ValueError):
             pass
+        if success and dynamixel_port_missing(dynamixel):
+            # 판정에서 뺀 경우(프로젝트에 다이나믹셀 없음) · 정보로만 · 수정 목록 120 (바)
+            parts.append('다이나믹셀 직렬 포트 없음(정보 · 다이나믹셀 모터를 쓰지 않으면 괜찮습니다)')
     if project_compatible:
         parts.append('프로젝트 EtherCAT 구성 확인 완료')
         unused = ethercat_project.get('unused_registered_master_indices') or []

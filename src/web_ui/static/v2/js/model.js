@@ -50,6 +50,19 @@ export function localName(state) {
   return String(snap?.system_info?.hostname || snap?.coordination?.config?.pc_id || '현재 PC');
 }
 
+/**
+ * 위 막대 「이 PC」 역할 · 마스터 / 슬레이브 / 단독 · 수정 목록 119
+ * is_master 는 설정 파일 요약(coordination.config)에만 있다 · 돌고 있는 노드 칸(runtime.config)은 그 위에 얹는다
+ * (전에는 runtime.config 를 통째로 먼저 써서 마스터도 늘 「슬레이브」)
+ */
+export function pcRole(snap) {
+  const coord = snap?.coordination || {};
+  const config = { ...(coord.config || {}), ...(coord.runtime?.config || {}) };
+  const isMaster = coord.config?.is_master ?? coord.runtime?.config?.is_master;
+  const group = config.enabled && config.group_id ? ` · 그룹 ${config.group_id}` : '';
+  return { pcId: config.pc_id || '', text: `${config.enabled ? (isMaster === true ? '마스터' : '슬레이브') : '단독'}${group}` };
+}
+
 export function pcName(pc) {
   return String(pc?.display_name || pc?.pc_id || '-');
 }

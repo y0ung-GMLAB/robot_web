@@ -13,7 +13,10 @@ import * as act from '../actions.js';
 import { isRevisionConflict } from '../mapping_model.js';
 import { threeWayMerge } from '../merge_model.js';
 import { confirmConflicts } from '../conflict_dialog.js';
-import { EDIT_FIELDS, absoluteJobText, absoluteSummary, gainText, gainWarnings, getField, motorChanges, motorProblems, motorRows, setField } from '../motors_model.js';
+import {
+  EDIT_FIELDS, absoluteJobText, absoluteLine, absoluteSummary, gainText, gainWarnings, getField, motorChanges, motorProblems, motorRows, scanConfirmText,
+  setField,
+} from '../motors_model.js';
 import { signedDeg } from '../play_model.js';
 import { minasBaseCard } from './minas_base.js';
 import { autoTuneAll, gainField, saveAll } from './drive_gains.js';
@@ -199,10 +202,7 @@ async function scan(kind, state, changed) {
   const spec = SCAN_KINDS[kind];
   const ok = await confirmBox({
     title: `모터 검색 · ${spec.label}`,
-    body: `${kind === 'dxl' ? '다이나믹셀' : kind === 'ac' ? 'AC 서보(EtherCAT)' : 'AC 서보와 다이나믹셀'} 모터를 검색합니다(수십 초 걸리며, 실패하면 몇 번 다시 시도합니다).\n`
-      + '검색하는 동안 모터 프로그램이 잠시 정지했다가 다시 시작됩니다. 그동안 서보 토크가 해제됩니다. 브레이크 보드가 연결된 모터는 브레이크가 잡아 주지만, 브레이크가 없는 모터는 처질 수 있으니 기구를 받치고, 움직이는 모터가 없을 때 진행하세요.\n\n'
-      + `검색 결과는 저장하기 전까지 화면에만 표시됩니다. ${kind === 'all' ? '' : '검색하지 않은 종류의 모터는 그대로 둡니다. '}모터 이름과 드라이브 설정값은 유지됩니다.`
-      + (dirty() ? '\n\n저장하지 않은 변경 내용은 검색 결과로 대체됩니다.' : ''),
+    body: scanConfirmText(kind, state.snap?.project_scope || {}, { dirty: dirty() }),
     confirmLabel: '검색', tone: 'warning',
   });
   if (!ok) return;
@@ -258,7 +258,8 @@ function scanBox(changed) {
       h('strong', { text: `검색 ${s.success ? '완료' : s.partial ? '일부 완료' : '실패'} · ${SCAN_KINDS[s.kind].label}${sum ? ` · 일치 ${sum.matched} · 추가 ${sum.added} · 삭제 ${sum.removed}${sum.kept ? ` · 유지 ${sum.kept}` : ''}` : ''}` }),
       s.message ? h('p', { class: 'small', text: s.message }) : null,
       s.notes.length ? h('ul', { class: 'list small' }, s.notes.map((note) => h('li', { text: note }))) : null,
-      sum ? h('p', { class: 'small muted', text: '아직 저장하지 않았습니다. 이름을 확인한 뒤 아래 「저장 후 장비에 적용」을 누르세요.' }) : null),
+      // 저장하면 초안 = 파일 · 그때는 「아직 저장하지 않았습니다」 를 지운다 · 수정 목록 120 (사)
+      sum && dirty() ? h('p', { class: 'small muted', text: '아직 저장하지 않았습니다. 이름을 확인한 뒤 아래 「저장 후 장비에 적용」을 누르세요.' }) : null),
     h('button', { class: 'btn btn-mini', type: 'button', onclick: () => { ui.scan = null; changed(); } }, '닫기'));
 }
 
@@ -381,11 +382,9 @@ export function motorsBody(state, changed) {
     runtime.motor_manager_start_block_reason || (runtime.phase && runtime.phase !== 'ready')
       ? h('div', { class: 'blocker' }, dot('warn'), h('span', { class: 'grow', text: `모터 프로그램 · ${runtime.motor_manager_start_block_reason || runtime.message || runtime.phase}` })) : null,
     h('div', { class: `blocker ${abs.allOk ? 'ok' : ''}` }, dot(abs.allOk ? 'ok' : 'warn'),
-      h('span', { class: 'grow', text: !abs.total ? 'AC 서보 없음'
-        : abs.allOk ? `앱솔루트 ${abs.ok}/${abs.total} 정상 · 전원을 껐다 켜도 위치가 유지됩니다`
-          : !abs.needsSetup ? `앱솔루트 ${abs.ok}/${abs.total} 정상 · ${abs.waiting ? '드라이브 응답을 기다리며 다시 읽는 중' : '확인 중'} · 끝날 때까지 모터 동작이 차단됩니다 (앱솔루트 설정은 필요 없음)`
-            : `앱솔루트 ${abs.ok}/${abs.total} 정상 · 정상이 아니면 모든 모터 동작이 차단됩니다` }),
-      abs.needsSetup ? h('button', { class: 'btn btn-warn', type: 'button', disabled: Boolean(ui.busy) || ui.job?.state === 'running', onclick: () => absoluteSetup('all', null, state, changed) }, '앱솔루트 설정 (전체)') : null),
+      h('span', { class: 'grow', text: absoluteLine(abs) }),
+      abs.needsSetup ? h('button', { class: 'btn btn-warn', type: 'button', disabled: Boolean(ui.busy) || ui.job?.state === 'running',
+        title: ui.job?.state === 'running' ? '앱솔루트 설정이 진행 중입니다' : ui.busy ? '다른 작업(검색·저장)이 진행 중입니다' : undefined, onclick: () => absoluteSetup('all', null, state, changed) }, '앱솔루트 설정 (전체)') : null),
     jobText ? h('div', { class: `blocker ${ui.job.state === 'failed' ? 'bad' : ''}` }, dot(ui.job.state === 'failed' ? 'bad' : 'info'),
       h('span', { class: 'grow', text: jobText }),
       ui.job.state === 'running' ? h('button', { class: 'btn', type: 'button', onclick: () => run('취소', () => api('POST', '/api/motor-config/absolute-setup/cancel'), state, changed) }, '취소') : null) : null,

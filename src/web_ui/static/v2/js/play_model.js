@@ -67,10 +67,19 @@ export function groupRuntime(snap) {
   };
 }
 
-/** 범위 고르기 · 그룹에 들어가 있는 마스터면 매장 전체가 기본 */
+/** 범위 고르기 · 기본은 단독(이 PC 만) · 수정 목록 120 (나) (실물 2026-10-13 S-9)
+ *  그룹 전체는 사람이 고를 때만 · 마스터에서 그룹 실행이 이미 돌고 있으면 그것을 보여 준다(정지 버튼이 그룹에 걸리게) */
 export function defaultScope(snap) {
   const group = groupRuntime(snap);
-  return group.joined && group.master ? 'group' : 'local';
+  return group.joined && group.master && group.active ? 'group' : 'local';
+}
+
+/** 「회차 사이」 고른 값 · 서버 저장값을 화면 칸으로 · 모르는 값·빈 값이면 안전한 「초기 위치로 돌아간 뒤」 · 120 (다)
+ *  옛 「바로 다음」(direct) · 「대기 후 다음」(dwell) 은 초기 위치를 거치는 쪽으로 읽는다 */
+export function repeatChoice(saved) {
+  const mode = String(saved || '').trim().toLowerCase();
+  if (mode === 'dwell') return 'dwell_reinitialize';
+  return REPEAT_MODES.some((m) => m.id === mode) ? mode : 'reinitialize';
 }
 
 /** 매장 전체를 못 고르는 이유 · 빈 글이면 고를 수 있다 */
