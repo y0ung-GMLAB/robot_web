@@ -967,6 +967,11 @@ class MotionRunManager(Node):
         current = self.status()
         if current.get('group_execution'):
             if not self._group.request_stop_after_cycle(current):
+                # 그룹 세션도 실행 번호도 없으면 단독이다 · 아래 단독 길로 · 전에는 표시용
+                # `group_execution` 만 보고 거절해 단독 연속을 회차 후 정지로 못 멈췄다 · 수정 목록 111
+                if not str(current.get('execution_id') or '').strip():
+                    current = {**current, 'group_execution': False}
+                    return self._handle_stop_after_cycle_local(current)
                 return {
                     'success': False,
                     'message': '활성 그룹 실행이 없습니다',
@@ -977,6 +982,9 @@ class MotionRunManager(Node):
                 'message': '현재 그룹 모션 회차 완료 후 정지 요청',
                 'status': self.status(),
             }
+        return self._handle_stop_after_cycle_local(current)
+
+    def _handle_stop_after_cycle_local(self, current: Dict[str, Any]) -> Dict[str, Any]:
         is_sync_repeat = bool(int(current.get('synchronized_repeat_count') or 0))
         is_continuous = current.get('run_mode') == 'continuous'
         is_automation = bool(current.get('automation_run'))

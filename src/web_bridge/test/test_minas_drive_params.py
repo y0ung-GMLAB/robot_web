@@ -96,7 +96,7 @@ def _motor(axis, **config_overrides):
     }
 
 
-def test_only_motors_with_drive_params_get_their_own_param_file(tmp_path):
+def test_every_minas_motor_gets_its_own_param_file(tmp_path):
     registry = {'motors': [
         _motor(0, brake_delay_stop_ms=200, encoder_absolute_mode=1),   # 옛 키는 무시
         _motor(1),
@@ -115,8 +115,21 @@ def test_only_motors_with_drive_params_get_their_own_param_file(tmp_path):
     payload = yaml.safe_load(Path(with_params).read_text(encoding='utf-8'))
     values = {int(item['index']): item['value'] for item in payload['items']}
     assert values[0x3437] == 200 and 0x3015 not in values
-    # 오버라이드 없는 모터는 플랫폼 param 경로 그대로
-    assert 'minas_params' not in str(drivers[driver_of[1]]['param_file'])
+    # 오버라이드 없는 모터도 제 param 파일 · 플랫폼 기반 값 고침(Pr5.12)이 있어서 · 수정 목록 113
+    plain = drivers[driver_of[1]]['param_file']
+    assert 'minas_params' in plain
+    plain_values = {int(item['index']): item['value']
+                    for item in yaml.safe_load(Path(plain).read_text(encoding='utf-8'))['items']}
+    assert 0x3437 not in plain_values
+
+
+def test_overload_level_is_the_factory_default_not_50(tmp_path):
+    """수정 목록 113 · 플랫폼 minas.yaml 은 Pr5.12 = 50(정격 50 % 에서 Err16) · 매뉴얼 「통상은 0 (=115 %)」"""
+    for overrides in ({}, {'brake_delay_stop_ms': 100}):
+        path = minas_params.write_param_file(tmp_path, 7, overrides)
+        items = yaml.safe_load(Path(path).read_text(encoding='utf-8'))['items']
+        level = [item['value'] for item in items if int(item['index']) == 0x3512]
+        assert level == [0]
 
 
 def test_the_generated_file_warns_against_hand_edits(tmp_path):

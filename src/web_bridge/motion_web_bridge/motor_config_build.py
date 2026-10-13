@@ -297,14 +297,14 @@ def driver_id_for_registry_motor(
         if overrides:
             driver.update(overrides)
         # MINAS 드라이브 파라미터(브레이크 타이밍 · 앱솔루트 모드)는 드라이버
-        # yaml 키가 아니라 param_file(SDO 목록)로 들어간다 · 오버라이드가
-        # 있는 모터만 제 param 파일을 받는다 · P8
+        # yaml 키가 아니라 param_file(SDO 목록)로 들어간다 · P8 ·
+        # 오버라이드가 없어도 모든 MINAS 가 제 param 파일을 받는다 · 플랫폼 기반 값을
+        # robot_web 이 고쳐 쓰는 것(`BASE_VALUE_FIXES` · Pr5.12)이 있어서 · 수정 목록 113
         if str(driver.get('type') or '') == 'minas':
             drive_params = minas_params.param_overrides(motor)
-            if drive_params:
-                driver['param_file'] = minas_params.write_param_file(
-                    workspace_root, driver_id, drive_params,
-                )
+            driver['param_file'] = minas_params.write_param_file(
+                workspace_root, driver_id, drive_params,
+            )
         return driver_id
 
     def unclaimed(driver_id) -> bool:

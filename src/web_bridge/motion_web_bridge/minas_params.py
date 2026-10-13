@@ -124,6 +124,15 @@ EMBEDDED_BASE_ITEMS: List[Dict[str, Any]] = [
     {'id': 58, 'index': 0x60C6, 'subindex': 0x00, 'value': 0, 'type': 'u32'},
 ]
 
+#: 플랫폼 기반 값 중 robot_web 이 고쳐 쓰는 것 · (index, subindex) → 값 · 수정 목록 113
+#: `src/motion_system` 의 `param/minas.yaml` 은 고치지 않고(보호) 여기서 덮어쓴다.
+#: 0x3512 Pr5.12 과부하 레벨 · 플랫폼은 50(이유 기록 없음) = 정격의 50 % 에서 과부하 알람(Err16) ·
+#: 매뉴얼(MINAS A6 · Pr5.12) 「0 이면 115 % · 통상은 0 으로 · 낮춰 쓰고 싶을 때만 설정」 · Err16 원인 ⑦
+#: 「Pr5.12 가 너무 낮다」 · 무거운 머리를 버티는 축이 알람으로 서보 OFF 되지 않게 출하값 0 으로
+BASE_VALUE_FIXES: Dict[Tuple[int, int], int] = {
+    (0x3512, 0x00): 0,
+}
+
 #: 인터페이스(PDO) 구획은 값이 아니라 배선이다 · 플랫폼 그대로 복사한다
 EMBEDDED_INTERFACES: List[Dict[str, Any]] = [
     {'id': 98, 'index': 0x1600},
@@ -217,6 +226,10 @@ def write_param_file(
     """
     document = _base_document(Path(workspace_root))
     items = [dict(item) for item in document.get('items', [])]
+    for item in items:
+        fix = BASE_VALUE_FIXES.get((int(item.get('index') or 0), int(item.get('subindex') or 0)))
+        if fix is not None:
+            item['value'] = fix
     next_id = max((int(item.get('id') or 0) for item in items), default=0) + 1
     for key, value in sorted(overrides.items()):
         if key not in PARAM_FIELDS:
