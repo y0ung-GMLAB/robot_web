@@ -228,11 +228,16 @@ class MotorConfigService:
         self.selected = target
         motor_config_rules.write_motor_config_selection(self.repository, target)
 
-    def save(self, payload: Dict[str, Any]) -> Dict[str, Any]:
+    def save(self, payload: Dict[str, Any], *, within_operation: bool = False) -> Dict[str, Any]:
+        """모터 설정 저장 · `within_operation` = 이미 연 모터 작업(「적용」) 안에서 부름 ·
+        그때는 「작업 진행 중이면 저장 안 함」 검사를 건너뛴다 · 그 작업이 바로 자기 것이라
+        자기 자물쇠에 막혀 「적용」 이 늘 실패했다(수정 목록 129 · 116 회귀 · 실물 2026-10-13) ·
+        검사는 「적용」 이 작업을 열기 전에 이미 했다"""
         try:
-            self.bridge.ensure_project_mutation_allowed(
-                self.repository.selected_project_id()
-            )
+            if not within_operation:
+                self.bridge.ensure_project_mutation_allowed(
+                    self.repository.selected_project_id()
+                )
             target_file = self._file_from_payload(payload)
             expected_revision = str(payload.get('base_revision') or '').strip()
             if target_file.is_file():
@@ -607,7 +612,7 @@ class MotorConfigService:
         result = self.save({
             'registry': loaded['registry'],
             'base_revision': str(loaded.get('config_revision') or ''),
-        })
+        }, within_operation=True)   # 「적용」 이 연 작업 안 · 129
         if not result.get('success'):
             raise ValueError(f'부팅 값을 새 설정으로 다시 만들지 못했습니다 · {result.get("message") or ""}')
         return boot_params.describe(rows)

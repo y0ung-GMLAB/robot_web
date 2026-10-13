@@ -181,8 +181,8 @@ def _service(ws, config_file, saves):
     registry = {'motors': [{'axis': 0, 'config': {}}]}
     service.load = lambda: {'success': True, 'registry': registry, 'config_file': str(config_file), 'config_revision': 'rev-1'}
 
-    def save(payload):
-        saves.append(payload)
+    def save(payload, *, within_operation=False):
+        saves.append({**payload, 'within_operation': within_operation})
         return {'success': True}
 
     service.save = save
@@ -195,6 +195,7 @@ def test_apply_resaves_when_the_saved_config_still_points_at_old_boot_values(tmp
     saves = []
     summary = _service(ws, project_file, saves)._refresh_boot_param_files()
     assert len(saves) == 1 and saves[0]['base_revision'] == 'rev-1'
+    assert saves[0]['within_operation'] is True     # 129 · 적용 작업 안에서 제 자물쇠에 안 막히게
     assert '0번' in summary
 
 
@@ -239,3 +240,31 @@ def test_the_table_shows_the_running_boot_value_and_what_apply_would_write():
     assert rows['Pr4.37']['boot_next'] == 150
     assert rows['Pr5.12']['boot_next'] is None                                        # 같으면 안 보임
     assert table['boot_stale'].startswith('설정 적용 필요')
+
+
+def test_a_save_inside_the_apply_operation_is_not_blocked_by_that_operation():
+    """수정 목록 129 (실물 2026-10-13) · 「적용」 이 모터 작업을 연 채로 부른 저장이
+    「모터 설정·검색·재시작 작업이 진행 중」 검사에 걸려 적용이 매번 실패했다 ·
+    작업 안 저장은 그 검사를 건너뛴다 · 밖에서 부른 저장은 그대로 막힌다"""
+    from types import SimpleNamespace
+
+    busy = '모터 설정·검색·재시작 작업이 진행 중이므로 프로젝트를 변경할 수 없습니다'
+
+    def blocked(_project_id):
+        raise ValueError(busy)
+
+    def stop_here(_payload):
+        raise ValueError('검사 다음 단계까지 옴')
+
+    service = MotorConfigService.__new__(MotorConfigService)
+    service.bridge = SimpleNamespace(ensure_project_mutation_allowed=blocked)
+    service.repository = SimpleNamespace(selected_project_id=lambda: 'p1')
+    service.selected = Path('motor.yaml')
+    service._file_from_payload = stop_here
+
+    outside = service.save({'registry': {}})
+    assert outside['success'] is False and busy in outside['message']
+
+    inside = service.save({'registry': {}}, within_operation=True)
+    assert inside['success'] is False
+    assert busy not in inside['message'] and '검사 다음 단계까지 옴' in inside['message']
