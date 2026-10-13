@@ -99,6 +99,13 @@ export function stuckSlaves(snap) {
   return Array.isArray(list) ? list.filter((s) => s && s.message) : [];
 }
 
+/** 운영 종료 동작 알림 · 서버 `schedule_end.notice` · 없으면 null · 수정 목록 131 */
+export function scheduleEndNotice(snap) {
+  const notice = snap?.schedule_end?.notice;
+  if (!notice || !String(notice.title || '')) return null;
+  return { tone: notice.tone === 'bad' ? 'bad' : 'warn', title: String(notice.title), detail: String(notice.detail || '') };
+}
+
 export function collectIssues(snap, sched, { connected = true } = {}) {
   const issues = [];
   const bad = (title, detail = '', action = null) => issues.push({ tone: 'bad', title, detail, action });
@@ -166,6 +173,9 @@ export function collectIssues(snap, sched, { connected = true } = {}) {
   if (!group.active && !groupActive && String(startFailure.message || '')) {
     warn('그룹 시작이 취소되었습니다', String(startFailure.message));
   }
+  // 구간 끝 주차 실패(다시 시도 중) · 그 자리에서 서보 끔 · 글과 색은 서버 · 다음 시작까지 남음 · 수정 목록 131
+  const endNotice = scheduleEndNotice(snap);
+  if (endNotice) (endNotice.tone === 'bad' ? bad : warn)(endNotice.title, endNotice.detail, { kind: 'open', target: 'schedule', label: '스케줄 열기' });
   const failure = sched?.last_failure || {};
   const failCount = Number(failure.count) || 0;
   if (failCount > 0) {

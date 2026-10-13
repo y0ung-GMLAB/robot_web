@@ -105,3 +105,32 @@ def test_group_stop_carries_the_reason_to_every_pc():
     source = open(coordination_node.__file__, encoding='utf-8').read()
     assert "'reason': str(getattr(message, 'stop_reason', '') or '')" in source
     assert 'stop_reason=reason' in source
+
+
+def test_window_reader_trusts_only_a_fresh_schedule_status():
+    """주차 다시 시도를 그만두는 「구간이 다시 열림」 · 마스터 스케줄 노드 상태만 · 늙으면 안 믿음 · 수정 목록 131"""
+    bridge = MotionWebBridge.__new__(MotionWebBridge)
+
+    def status(**values):
+        bridge.schedule_node_status = lambda: {'received': True, 'age_sec': 1.0, 'active_schedule_id': 's1', **values}
+
+    status()
+    assert bridge._schedule_window_open() is True
+    status(active_schedule_id='')
+    assert bridge._schedule_window_open() is False
+    status(age_sec=60.0)
+    assert bridge._schedule_window_open() is False, '스케줄 노드가 죽었다'
+    status(received=False, age_sec=None)
+    assert bridge._schedule_window_open() is False, '슬레이브 · 스케줄 노드가 말하지 않는다'
+
+
+def test_schedule_end_wiring_reports_failures_and_resumes():
+    """주차 실패 기록 · 구간 판단 · 다시 켜졌을 때 이어 하기 · 상태 프레임에 실음 · 수정 목록 131"""
+    import inspect
+
+    source = open(inspect.getsourcefile(MotionWebBridge), encoding='utf-8').read()
+    assert 'in_window=self._schedule_window_open' in source
+    assert "category='system', event_type=event_type, target='스케줄 끝'" in source
+    assert 'self._resume_schedule_end()' in source and 'self.schedule_end.resume()' in source
+    snapshot = inspect.getsource(MotionWebBridge.snapshot)
+    assert "'schedule_end': (" in snapshot and 'self.schedule_end.status()' in snapshot

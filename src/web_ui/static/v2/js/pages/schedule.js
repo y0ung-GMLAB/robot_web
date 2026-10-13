@@ -190,6 +190,9 @@ export function renderSchedule(state, { changed }) {
     drift ? h('div', { class: 'blocker' }, dot('warn'), h('span', { class: 'grow', text: drift })) : null,
     sched.last_failure?.message ? h('div', { class: 'blocker' }, dot('warn'),
       h('span', { class: 'grow', text: `스케줄 시작 거부${sched.last_failure.count ? ` ${sched.last_failure.count}회` : ''} · ${sched.last_failure.message}` })) : null,
+    // 구간 끝 주차 실패 · 그 자리에서 서보 끔 · 이 PC 것 · 수정 목록 131
+    sched.schedule_end_notice?.title ? h('div', { class: 'blocker' }, dot(sched.schedule_end_notice.tone === 'bad' ? 'bad' : 'warn'),
+      h('span', { class: 'grow', text: `${sched.schedule_end_notice.title} · ${sched.schedule_end_notice.detail || ''}` })) : null,
     weekCard(state),
     h('div', { class: ui.draft ? 'grid-2' : '' }, listCard(state, changed, canEdit), ui.draft && canEdit ? editCard(state, changed) : null),
   ];
