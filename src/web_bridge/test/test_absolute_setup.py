@@ -278,3 +278,25 @@ def test_while_running_the_bridge_blocks_motion_and_other_drive_work():
     runtime.bridge = bridge
     runtime.project = SimpleNamespace(change_blocker=lambda **_kwargs: '')
     assert '앱솔루트 설정 진행 중' in runtime.ethercat_scan_safety_blocker()
+
+
+def test_returned_drives_are_read_only_after_the_master_brings_them_to_op():
+    """수정 목록 125 · 재투입으로 돌아온 드라이브를 모터 프로그램이 다시 설정하는 동안(PREOP · SAFEOP)은 SDO 를 안 보낸다"""
+    states = iter(['PREOP', 'SAFEOP', 'OP'])
+    seen = []
+
+    def slaves():
+        state = next(states, 'OP')
+        seen.append(state)
+        return [{'master_index': 0, 'slave_position': 1, 'device_state': state}]
+
+    setup, _calls, _records = _setup(FakeEthercat({1: FakeDrive()}), _minas(_drive(1, 'not_absolute', 1)))
+    setup._visible_slaves = slaves
+    setup._wait_reconfigured({(0, 1)}, slaves())
+    assert seen == ['PREOP', 'SAFEOP', 'OP']
+
+    # 모터 프로그램이 없으면 기다리지 않는다(PREOP 그대로가 정상)
+    setup._service_active = lambda _service: False
+    seen.clear()
+    setup._wait_reconfigured({(0, 1)}, [{'master_index': 0, 'slave_position': 1, 'device_state': 'PREOP'}])
+    assert seen == []

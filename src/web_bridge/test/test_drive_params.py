@@ -83,3 +83,15 @@ def test_write_needs_confirmation_range_and_no_motion():
 
 def test_0x60b2_reason_is_the_user_decision():
     assert '사용자 결정' in write_block_reason(0x60B2)
+
+
+def test_table_and_write_are_refused_while_the_motor_program_configures_the_bus(monkeypatch):
+    """수정 목록 125 · 모터 프로그램이 드라이브를 설정하는 동안엔 SDO 를 안 보낸다 · 표·쓰기에 이유"""
+    from motion_common import ethercat_mailbox
+    monkeypatch.setattr(ethercat_mailbox, 'configuring', lambda **_kw: True)
+    service, calls, _records, _values = _params({(0x3003, 0): 12})
+    rows = service.table(1)['rows']
+    assert calls == []
+    assert all('버스 설정 중' in row['error'] for row in rows)
+    result = service.write({'confirmed': True, 'axis': 1, 'object': 'Pr0.03', 'type': 'int16', 'value': 13})
+    assert calls == [] and result['success'] is False and '버스 설정 중' in result['message']

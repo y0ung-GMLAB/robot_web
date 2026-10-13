@@ -60,7 +60,7 @@ class Clock:
         return self.now
 
 
-def _check(runner, *, axes=None, run_now=True, clock=None):
+def _check(runner, *, axes=None, run_now=True, clock=None, configuring=lambda: False):
     pending = []
     scanner = EthercatScanner(SimpleNamespace(_motor_metadata={}))
     check = MinasAbsoluteCheck(
@@ -69,6 +69,7 @@ def _check(runner, *, axes=None, run_now=True, clock=None):
         runner=runner,
         clock=clock or Clock(),
         spawn=(lambda target: target()) if run_now else pending.append,
+        bus_configuring=configuring,
     )
     return check, pending
 
@@ -204,8 +205,8 @@ def test_scanner_check_is_off_until_the_node_enables_it():
 
 # -- 수정 목록 110 · 부팅 직후 OP 전환 중엔 안 읽고 · 읽기 실패는 다시 읽는다 -------------- #
 
-def _states(states, master=0):
-    return {str(master): {'available': True, 'master_index': master,
+def _states(states, master=0, phase='', active=False):
+    return {str(master): {'available': True, 'master_index': master, 'phase': phase, 'master_active': active,
                           'states_by_position': {str(p): s for p, s in states.items()}}}
 
 
@@ -228,12 +229,12 @@ def test_does_not_read_while_the_master_is_bringing_drives_up():
 
 
 def test_steady_preop_is_read_too():
-    """모터 프로그램이 멈춘 PC(검색 중 등) · PREOP 그대로여도 자리 잡았으면 읽는다"""
+    """모터 프로그램이 멈춘 PC(검색 중 등 · 마스터 Idle) · PREOP 그대로여도 자리 잡았으면 읽는다"""
     clock = Clock()
     check, _ = _check(FakeEthercat(), clock=clock)
-    check.observe(_states({0: 'PREOP'}))
+    check.observe(_states({0: 'PREOP'}, phase='Idle'))
     clock.now += SETTLE_SEC + 0.1
-    check.observe(_states({0: 'PREOP'}))
+    check.observe(_states({0: 'PREOP'}, phase='Idle'))
     assert check.snapshot()['state'] == ma.STATE_OK
 
 
@@ -344,3 +345,162 @@ def test_a_failed_gain_read_stops_the_other_gain_reads_on_that_drive():
     _see(check, _masters(0))
     assert not any('0x3003' in c or '0x3004' in c for c in runner.calls)
     assert '0x3002' in check.snapshot()['drives'][0]['gains']['error']
+
+
+# -- 수정 목록 125 · 모터 프로그램이 버스를 설정하는 동안엔 안 읽는다 (실물 U-1 · PC 만 재부팅 2/2 PREOP + E) ------ #
+
+def test_no_reads_while_the_motor_program_configures_the_bus():
+    """**이것이 그 버그다** · 부팅 때 PREOP 가 한참 그대로여도 모터 프로그램이 설정 중이면 안 읽는다"""
+    runner = FakeEthercat()
+    clock = Clock()
+    busy = {'on': True}
+    check, _ = _check(runner, clock=clock, configuring=lambda: busy['on'])
+    for _ in range(10):                                    # 설정 중 · 상태는 그대로(PREOP)
+        check.observe(_states({0: 'PREOP', 1: 'PREOP'}))
+        clock.now += SETTLE_SEC
+    assert not [c for c in runner.calls if 'upload' in c]
+    assert check.snapshot()['state'] == ma.STATE_CHECKING
+
+    busy['on'] = False                                     # 설정 끝 · 모두 OP
+    check.observe(_states({0: 'OP', 1: 'OP'}, phase='Operation', active=True))
+    clock.now += SETTLE_SEC + 0.1
+    check.observe(_states({0: 'OP', 1: 'OP'}, phase='Operation', active=True))
+    assert check.snapshot()['state'] == ma.STATE_OK
+
+
+def test_steady_preop_waits_longer_while_the_motor_program_holds_the_master():
+    """모터 프로그램이 마스터를 잡고 있는데 PREOP · 설정 중일 수 있다 · `STUCK_SEC` 그대로일 때만(설정 실패 · 미등록)"""
+    from motion_state_monitor.absolute_check import STUCK_SEC
+    runner = FakeEthercat()
+    clock = Clock()
+    check, _ = _check(runner, clock=clock)
+    claimed = _states({0: 'OP', 1: 'PREOP'}, phase='Operation', active=True)
+    check.observe(claimed)
+    clock.now += SETTLE_SEC + 0.1
+    check.observe(claimed)
+    assert not [c for c in runner.calls if 'upload' in c]
+    clock.now += STUCK_SEC
+    check.observe(claimed)
+    assert check.snapshot()['state'] == ma.STATE_OK
+
+
+def test_marker_raised_mid_read_drops_that_pass_and_reads_again_later():
+    """읽는 중에 표시가 서면 남은 SDO 는 안 나간다 · 「확인 불가」 로 굳히지 않고 「확인 중」 그대로 · 다시 읽는다"""
+    from motion_common import ethercat_mailbox
+    clock = Clock()
+    refuse = {'on': True}
+    base = FakeEthercat()
+
+    def runner(command, **kwargs):
+        if refuse['on'] and command[1] == 'upload':
+            return ethercat_mailbox.refused(command, ethercat_mailbox.CONFIGURING_MESSAGE, kwargs)
+        return base(command, **kwargs)
+
+    check, _ = _check(runner, clock=clock)
+    _see(check, _masters(0, 1))
+    assert check.snapshot()['state'] == ma.STATE_CHECKING
+    assert not any(drive.get('status') == ma.DRIVE_UNKNOWN for drive in check.snapshot()['drives'])
+
+    refuse['on'] = False
+    clock.now += 1.0
+    check.observe(_masters(0, 1))
+    assert check.snapshot()['state'] == ma.STATE_OK
+
+
+def test_gain_refresh_respects_the_marker():
+    from motion_state_monitor.absolute_check import GAIN_REFRESH_SEC
+    runner = FakeEthercat()
+    clock = Clock()
+    busy = {'on': False}
+    check, _ = _check(runner, clock=clock, configuring=lambda: busy['on'])
+    _see(check, _masters(0))
+    reads = sum('0x3004' in c for c in runner.calls)
+
+    busy['on'] = True                                      # 「적용」 · 모터 재시작 · 설정 중
+    clock.now += GAIN_REFRESH_SEC + 1
+    check.observe(_masters(0))
+    assert sum('0x3004' in c for c in runner.calls) == reads
+
+    busy['on'] = False
+    clock.now += 1
+    check.observe(_masters(0))
+    assert sum('0x3004' in c for c in runner.calls) == reads + 1
+
+
+def test_gain_refresh_refused_mid_way_keeps_the_old_gains():
+    from motion_common import ethercat_mailbox
+    from motion_state_monitor.absolute_check import GAIN_REFRESH_SEC, GAIN_RETRY_SEC
+    clock = Clock()
+    refuse = {'on': False}
+    base = FakeEthercat()
+
+    def runner(command, **kwargs):
+        if refuse['on'] and command[1] == 'upload':
+            return ethercat_mailbox.refused(command, ethercat_mailbox.BUSY_MESSAGE, kwargs)
+        return base(command, **kwargs)
+
+    check, _ = _check(runner, clock=clock)
+    _see(check, _masters(0))
+    before = check.snapshot()['drives'][0]['gains']
+    refuse['on'] = True
+    clock.now += GAIN_REFRESH_SEC + 1
+    check.observe(_masters(0))
+    assert check.snapshot()['drives'][0]['gains'] == before
+    refuse['on'] = False
+    clock.now += GAIN_RETRY_SEC + 1
+    check.observe(_masters(0))
+    assert check.snapshot()['drives'][0]['gains']['read_at'] > before['read_at']
+
+
+def test_sdo_goes_through_the_shared_mailbox_guard(tmp_path, monkeypatch):
+    """감시 노드의 SDO 도 웹 브리지와 같은 문지기 · 주입한 runner 도 감싼다 · 판단을 지나쳐도 마지막에 막는다"""
+    from motion_common import ethercat_mailbox
+    monkeypatch.setenv('ROBOT_WEB_RUN_DIR', str(tmp_path))
+    monkeypatch.setattr(ethercat_mailbox, 'configuring', lambda **_kw: True)
+    runner = FakeEthercat()
+    check, _ = _check(runner, configuring=lambda: False)
+    _see(check, _masters(0))
+    assert not [c for c in runner.calls if 'upload' in c]
+    assert check.snapshot()['state'] == ma.STATE_CHECKING
+
+
+# -- 수정 목록 125 · PREOP 등에 멈춘 드라이브를 화면에 ------------------------------------------ #
+
+def _bus(states, errors=(), phase='Operation', active=True):
+    masters = _states(states, phase=phase, active=active)
+    masters['0']['error_positions'] = [str(p) for p in errors]
+    return masters
+
+
+def test_a_slave_stuck_in_preop_is_reported_after_a_while(monkeypatch):
+    from motion_common import ethercat_mailbox
+    from motion_state_monitor.ethercat_scanner import STUCK_NOTICE_SEC
+    monkeypatch.setattr(ethercat_mailbox, 'configuring', lambda **_kw: False)
+    scanner = EthercatScanner(SimpleNamespace(_motor_metadata={
+        1: {'transport': 'ethercat', 'ethercat_master_index': 0, 'slave_position': 1},
+    }))
+    bus = _bus({0: 'OP', 1: 'PREOP'}, errors=[1])
+    assert scanner._stuck_slaves(bus, 100.0) == []
+    stuck = scanner._stuck_slaves(bus, 100.0 + STUCK_NOTICE_SEC)
+    assert [(s['slave_position'], s['axis'], s['state'], s['error_flag']) for s in stuck] == [(1, 1, 'PREOP', True)]
+    assert stuck[0]['message'] == '1번 드라이브가 PREOP 에 멈춤 · 그 드라이브 제어 전원을 껐다 켜세요'
+    # OP 로 올라가면 사라지고 시간도 다시 잰다
+    assert scanner._stuck_slaves(_bus({0: 'OP', 1: 'OP'}), 200.0) == []
+    assert scanner._stuck_slaves(bus, 201.0) == []
+
+
+def test_preop_is_not_stuck_while_configuring_or_without_motor_program(monkeypatch):
+    from motion_common import ethercat_mailbox
+    monkeypatch.setattr(ethercat_mailbox, 'configuring', lambda **_kw: True)
+    scanner = EthercatScanner(SimpleNamespace(_motor_metadata={}))
+    bus = _bus({0: 'PREOP'})
+    scanner._stuck_slaves(bus, 0.0)
+    assert scanner._stuck_slaves(bus, 100.0) == []         # 모터 프로그램이 설정 중
+    monkeypatch.setattr(ethercat_mailbox, 'configuring', lambda **_kw: False)
+    idle = _bus({0: 'PREOP'}, phase='Idle', active=False)
+    scanner._stuck_slaves(idle, 0.0)
+    assert scanner._stuck_slaves(idle, 100.0) == []        # 모터 프로그램 없음(검색 뒤) · PREOP 가 정상
+    # 모터 프로그램이 없어도 오류(E)가 붙어 그대로면 알린다(시작 스크립트가 못 풀어 모터가 못 뜸)
+    errored = _bus({0: 'PREOP'}, errors=[0], phase='Idle', active=False)
+    scanner._stuck_slaves(errored, 200.0)
+    assert scanner._stuck_slaves(errored, 300.0)[0]['message'].startswith('슬레이브 0 드라이브가 PREOP')

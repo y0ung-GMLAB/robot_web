@@ -93,6 +93,12 @@ export function manualNotices(snap, axis = null) {
 }
 
 /** 확인할 일 · 나쁜 것(bad)이 먼저 · action.kind 는 화면이 버튼으로 바꾼다 */
+/** PREOP 등에 멈춘 EtherCAT 드라이브 · 감시 노드가 판정한 목록 그대로 · 수정 목록 125 */
+export function stuckSlaves(snap) {
+  const list = snap?.motion_state?.ethercat?.stuck_slaves;
+  return Array.isArray(list) ? list.filter((s) => s && s.message) : [];
+}
+
 export function collectIssues(snap, sched, { connected = true } = {}) {
   const issues = [];
   const bad = (title, detail = '', action = null) => issues.push({ tone: 'bad', title, detail, action });
@@ -113,6 +119,10 @@ export function collectIssues(snap, sched, { connected = true } = {}) {
   if (absolute) {
     bad('앱솔루트 방식이 확인되지 않아 모터를 움직일 수 없습니다', absolute,
       { kind: 'open', target: 'maintain-motors', label: '모터 설정 열기' });
+  }
+  // OP 로 못 올라가고 멈춘 드라이브 · 시작 스크립트의 오류 플래그 해제로도 안 풀림 · 글은 서버 · 수정 목록 125
+  for (const slave of stuckSlaves(snap)) {
+    bad(slave.message, '모터 프로그램이 이 드라이브 설정을 마치지 못했습니다. 제어 전원을 껐다 켜면 다시 설정합니다. 그래도 그대로면 모터 프로그램을 다시 시작하세요.');
   }
   // 자동조정 꺼진 MINAS 드라이브 · 막지 않음 · 알리기만 · 수정 목록 108 (나)
   const gainOff = (snap.motion_state?.minas_absolute?.drives || [])

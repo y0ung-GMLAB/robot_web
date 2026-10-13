@@ -30,6 +30,8 @@ from __future__ import annotations
 import subprocess
 from typing import Any, Callable, Dict, List, Optional
 
+from motion_common import ethercat_mailbox
+
 MINAS_VENDOR_ID = 0x066F
 
 EEPROM_SAVE = 'eeprom_save'
@@ -170,7 +172,8 @@ class DriveMaintenance:
         expected_axes: Callable[[], List[int]],
         record: Callable[[Dict[str, Any]], None],
     ) -> None:
-        self._runner = runner
+        # SDO 는 다른 프로세스와 한 번에 하나 · 버스 설정 중이면 안 보냄 · 수정 목록 125
+        self._runner = ethercat_mailbox.guarded(runner)
         self._read_slaves = read_slaves
         self._registry_motor = registry_motor
         self._current_motor = current_motor
