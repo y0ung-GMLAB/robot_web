@@ -173,6 +173,12 @@ export WORKSPACE
 PROJECT_GENERATION="${MOTION_PROJECT_GENERATION:-0}"
 export PROJECT_GENERATION
 log "ROS DDS isolation: ROS_LOCALHOST_ONLY=${ROS_LOCALHOST_ONLY}"
+# 모터 노드를 같이 띄우면 버스 설정 중 표시 · `run_motor_service.sh` 와 같음 · 수정 목록 125
+BUS_MARKER_HELPER="${WORKSPACE}/src/motion_common/motion_common/ethercat_mailbox.py"
+if [[ "${START_MOTOR_MANAGER}" == "true" ]] && [[ -f "${BUS_MARKER_HELPER}" ]] && command -v python3 >/dev/null 2>&1; then
+  python3 "${BUS_MARKER_HELPER}" begin --owner "$$" || true
+  ( python3 "${BUS_MARKER_HELPER}" watch --owner "$$" </dev/null & )
+fi
 log "starting motion_monitor.launch.py with config_file=${CONFIG_FILE}, project_generation=${PROJECT_GENERATION}, start_motor_manager=${START_MOTOR_MANAGER}"
 sg dialout -c 'bash -lc '"'"'source "$WORKSPACE/install/setup.bash" && ros2 launch motion_state_monitor motion_monitor.launch.py config_file:="$CONFIG_FILE" start_motor_manager:="$START_MOTOR_MANAGER"'"'" &
 launch_pid="$!"

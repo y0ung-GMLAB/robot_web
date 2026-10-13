@@ -20,6 +20,8 @@ import re
 import subprocess
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
+from motion_common import ethercat_mailbox
+
 TYPE_RANGES = {
     'int8': (-128, 127), 'uint8': (0, 255),
     'int16': (-32768, 32767), 'uint16': (0, 65535),
@@ -129,7 +131,8 @@ class DriveParams:
         boot_next: Optional[Callable[[int], Optional[Dict[Tuple[int, int], int]]]] = None,
         boot_stale: Optional[Callable[[], str]] = None,
     ) -> None:
-        self._runner = runner
+        # SDO 는 다른 프로세스와 한 번에 하나 · 버스 설정 중이면 안 보냄 · 수정 목록 125
+        self._runner = ethercat_mailbox.guarded(runner)
         self._target = target
         #: 지금 도는 모터 프로그램이 부팅 때 쓴 값 · 수정 목록 116
         self._boot_values = boot_values

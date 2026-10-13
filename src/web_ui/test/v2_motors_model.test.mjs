@@ -122,3 +122,11 @@ test('파라미터 (고급) · 다름 표시 · 마우스 글 (수정 목록 109
   assert.match(rowHint({ ...row, memo: 'C' }), /전원 재투입/);
   assert.deepEqual(rowFlags({ ...row, differs_factory: false, differs_boot: false }), []);
 });
+
+test('PREOP 에 멈춘 드라이브는 그 줄 통신 칸에 (수정 목록 125)', () => {
+  const snap = { motion_state: { motors: [{ controller_index: 0, state: 'detected' }],
+    ethercat: { stuck_slaves: [{ slave_position: 1, axis: 1, state: 'PREOP', message: '1번 드라이브가 PREOP 에 멈춤 · …' }] } } };
+  const rows = motorRows({ motors: [motor(0, 'A'), motor(1, 'B')] }, snap);
+  assert.equal(rows[0].comm, '연결됨');
+  assert.equal(rows[1].comm, 'PREOP 에 멈춤 · 드라이브 제어 전원을 껐다 켜세요');
+});

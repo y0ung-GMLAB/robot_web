@@ -28,7 +28,7 @@ import threading
 import time
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
-from motion_common import minas_absolute
+from motion_common import ethercat_mailbox, minas_absolute
 
 from .drive_maintenance import (
     ABSOLUTE_CLEAR,
@@ -48,6 +48,8 @@ POWER_CYCLE_TIMEOUT_SEC = 30 * 60
 POLL_SEC = 1.0
 #: 돌아온 뒤 마스터가 다시 설정할 때까지 · 그 전 SDO 는 실패하기 쉽다
 SETTLE_AFTER_RETURN_SEC = 5.0
+#: 모터 프로그램이 돌면 돌아온 드라이브가 OP 가 될 때까지 더 기다린다 · 설정 중 SDO 는 그 설정을 망친다 · 125
+RECONFIGURE_WAIT_SEC = 60.0
 #: 마지막 검증에서 오류 코드가 사라지길 기다리는 시간(재투입 직후 통신 알람 Err88 이 잠깐 뜬다)
 VERIFY_RETRY_SEC = 20.0
 #: 서보 OFF 가 상태에 보일 때까지
@@ -114,7 +116,8 @@ class AbsoluteSetup:
         sleep: Callable[[float], None] = time.sleep,
         spawn: Optional[Callable[[Callable[[], None]], None]] = None,
     ) -> None:
-        self._runner = runner
+        # SDO 는 다른 프로세스와 한 번에 하나 · 버스 설정 중이면 안 보냄 · 수정 목록 125
+        self._runner = ethercat_mailbox.guarded(runner)
         self._minas = minas_absolute_state
         self._visible_slaves = visible_slaves
         self._current_motor = current_motor
@@ -398,6 +401,7 @@ class AbsoluteSetup:
                 waiting_on = sorted(gone - back)
                 if not waiting_off and not waiting_on:
                     self._note('대상 드라이브가 모두 다시 연결됐습니다. EtherCAT 마스터가 다시 설정할 때까지 잠시 기다립니다')
+                    self._wait_reconfigured(keys, slaves)
                     self._sleep(SETTLE_AFTER_RETURN_SEC)
                     return
                 parts = []
@@ -407,6 +411,30 @@ class AbsoluteSetup:
                     parts.append('다시 켜짐 대기 ' + ', '.join(f'슬레이브 {p}' for _m, p in waiting_on))
                 self._note('드라이브 전원을 껐다 켜세요 · ' + ' · '.join(parts))
             self._sleep(POLL_SEC)
+
+    def _wait_reconfigured(self, keys: set, slaves: List[Dict[str, Any]]) -> None:
+        """모터 프로그램이 돌면 돌아온 드라이브가 OP 가 될 때까지 · 그동안 마스터가 설정 SDO 를 쓴다 · 125
+
+        모터 프로그램이 없으면(PREOP 그대로) · 상태를 모르면 · `RECONFIGURE_WAIT_SEC` 이 지나면 그냥 넘어간다 ·
+        다음 읽기가 실패하면 그 단계에서 멈추고 이유를 남긴다(예전과 같음).
+        """
+        deadline = self._clock() + RECONFIGURE_WAIT_SEC
+        while True:
+            if not ethercat_mailbox.configuring():
+                service = self._motor_service()
+                if not (service and self._service_active(service)):
+                    return
+                states = {
+                    (int(slave.get('master_index') or 0), int(slave.get('slave_position'))): slave.get('device_state')
+                    for slave in slaves or [] if slave.get('slave_position') is not None
+                }
+                found = [states.get(key) for key in keys]
+                if any(state is None for state in found) or all(str(state).upper() == 'OP' for state in found):
+                    return
+            if self._clock() >= deadline:
+                return
+            self._sleep(POLL_SEC)
+            slaves = self._visible_slaves() or []
 
     # -- ethercat ----------------------------------------------------------- #
 

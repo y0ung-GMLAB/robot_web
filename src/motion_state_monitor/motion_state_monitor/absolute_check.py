@@ -34,6 +34,18 @@ motion_state 의 `minas_absolute` 로 싣는다 · 판정은 `motion_common.mina
     그래서 ① 슬레이브 상태(PREOP · SAFEOP · OP)가 `SETTLE_SEC` 동안 그대로일 때만 읽고 ·
     ② 「확인 불가」 가 남은 드라이브는 몇 초마다 다시 읽는다 (Pr0.15 ≠ 0 · Err40 은 다시 읽어도
     값이 같으니 그대로 막는다 · 읽기 실패만 다시).
+
+마스터가 버스를 설정하는 동안엔 아예 안 읽는다 · 수정 목록 125 (실물 U-1 · 2026-10-13)
+    상태가 그대로인지만 봐서는 부족했다 · PC 부팅 때 슬레이브는 마스터가 혼자 PREOP 로 올려 둔 채
+    한참 그대로이고, 그 사이 모터 프로그램이 떠서 부팅 설정 SDO 를 쓰기 시작하면 우리 읽기와 엉켜
+    「SDO configuration failed」 → PREOP + E 로 굳었다(PC 만 재부팅 2/2) · 그래서
+    ① 모터 실행 스크립트가 세우는 「버스 설정 중」 표시(`motion_common.ethercat_mailbox`)가 있으면 안 읽고 ·
+    ② 모터 프로그램이 마스터를 잡고 있는데(`ethercat master` Phase Operation · Active) OP 가 아닌 슬레이브가
+       있으면 그 상태로 `STUCK_SEC` 그대로일 때만 읽는다(설정 실패 · 설정 안 된 슬레이브 · 그땐 마스터가 안 건드림) ·
+       모터 프로그램이 없으면(검색 뒤 등) PREOP 그대로 `SETTLE_SEC` 이면 읽는다 · 모두 OP 여도 `SETTLE_SEC` ·
+    ③ 읽는 중에 표시가 서면 남은 SDO 는 `ethercat_mailbox` 가 보내지 않는다 → 이번 읽기는 없던 것으로
+       하고(「확인 중」 그대로) 자리 잡은 뒤 다시 · 게인 다시 읽기도 같은 규칙.
+    SDO 는 모두 `ethercat_mailbox.run` 으로 · 웹 브리지와 한 번에 하나.
 """
 
 from __future__ import annotations
@@ -43,7 +55,7 @@ import threading
 import time
 from typing import Any, Callable, Dict, FrozenSet, List, Optional, Tuple
 
-from motion_common import minas_absolute
+from motion_common import ethercat_mailbox, minas_absolute
 
 from .motor_values import parse_int
 
@@ -55,6 +67,9 @@ SLAVES_TIMEOUT_SEC = 3.0
 #: 슬레이브 상태가 이만큼 그대로여야 읽는다 · 부팅 때 PREOP → OP 전환 중엔 안 읽는다 ·
 #: 2 → 5 s · 실물 U-1b(10-13) 드라이브 재투입 직후 OP 여도 메일박스 응답이 늦어 「wrong SDO」 13 건
 SETTLE_SEC = 5.0
+#: 모터 프로그램이 마스터를 잡고 있는데 OP 가 아닌 슬레이브가 있을 때 · 이만큼 그대로여야 읽는다 · 125 ·
+#: 설정 중이면 PREOP → SAFEOP → OP 로 몇 초 안에 바뀐다 · 이만큼 그대로면 설정 실패(E)나 설정 안 된 슬레이브
+STUCK_SEC = 30.0
 #: 「확인 불가」 다시 읽기 간격 · 처음 1 분은 짧게, 그 뒤엔 드물게
 RETRY_FAST_SEC = 2.0
 RETRY_FAST_WINDOW_SEC = 60.0
@@ -104,6 +119,28 @@ def visible_slaves(
     return frozenset(seen)
 
 
+def master_claimed(masters: Dict[str, Dict[str, Any]]) -> bool:
+    """모터 프로그램이 마스터를 잡고 있나 · `ethercat master` 의 Phase: Operation 또는 Active: yes"""
+    return any(
+        isinstance(status, dict) and status.get('available') and (
+            bool(status.get('master_active'))
+            or str(status.get('phase') or '').strip().lower().startswith('operation')
+        )
+        for status in (masters or {}).values()
+    )
+
+
+def settle_needed(masters: Dict[str, Dict[str, Any]], states: BusStates) -> float:
+    """읽기 전에 슬레이브 상태가 그대로여야 하는 시간 · 125"""
+    if master_claimed(masters) and any(state != 'OP' for _m, _p, state in states):
+        return STUCK_SEC
+    return SETTLE_SEC
+
+
+class _BusBusy(Exception):
+    """`ethercat_mailbox` 가 보내지 않음(버스 설정 중 · 잠금 못 잡음) · 이번 읽기는 없던 것으로"""
+
+
 def bus_states(masters: Dict[str, Dict[str, Any]]) -> BusStates:
     """보이는 슬레이브의 (마스터, 링 위치, 상태) · 이게 바뀌는 동안은 마스터가 설정 중이다"""
     found = set()
@@ -132,11 +169,15 @@ class MinasAbsoluteCheck:
         clock: Callable[[], float] = time.time,
         spawn: Optional[Callable[[Callable[[], None]], None]] = None,
         log_warning: Callable[[str], None] = lambda _message: None,
+        bus_configuring: Callable[[], bool] = ethercat_mailbox.configuring,
     ) -> None:
         self._parse_slaves = parse_slaves
         self._axis_for_slave = axis_for_slave
         # 부를 때 `subprocess.run` 을 찾는다 · 시험의 `mock.patch('subprocess.run')` 이 먹게
         self._runner = runner or (lambda *args, **kwargs: subprocess.run(*args, **kwargs))
+        #: SDO 는 잠금 안에서 · 버스 설정 중이면 안 보냄 · 125
+        self._sdo = ethercat_mailbox.guarded(self._runner)
+        self._bus_configuring = bus_configuring
         self._clock = clock
         self._spawn = spawn or self._spawn_thread
         self._log_warning = log_warning
@@ -146,9 +187,10 @@ class MinasAbsoluteCheck:
         self._running = False
         #: 읽어야 하는데 버스가 자리 잡기를 기다리는 중
         self._pending = False
-        #: 마지막으로 본 슬레이브 상태 · 그 상태가 된 때
+        #: 마지막으로 본 슬레이브 상태 · 그 상태가 된 때 · 읽기 전 그대로여야 하는 시간
         self._states: Optional[BusStates] = None
         self._states_since = 0.0
+        self._settle_needed = SETTLE_SEC
         #: 「확인 불가」 다시 읽기 · 다음 때 · 처음 실패한 때
         self._retry_at: Optional[float] = None
         self._first_failure_at: Optional[float] = None
@@ -169,6 +211,7 @@ class MinasAbsoluteCheck:
             if states != self._states:
                 self._states = states
                 self._states_since = now
+            self._settle_needed = settle_needed(masters, states)
             signature = visible_slaves(masters, self._signature)
             if signature != self._signature:
                 previous = list(self._summary.get('drives') or [])
@@ -184,10 +227,13 @@ class MinasAbsoluteCheck:
             elif self._retry_at is not None and now >= self._retry_at:
                 self._retry_at = None
                 self._pending = True
-            if self._running or now - self._states_since < SETTLE_SEC:
+            if self._running or now - self._states_since < self._settle_needed:
                 # 도는 읽기가 끝나면 구성이 달라진 것을 보고 다시 읽는다 ·
                 # 버스가 자리 잡기 전엔 안 읽는다(마스터가 드라이브를 설정 중 · 메일박스가 붐빈다 · 110)
                 return
+            gains_due = self._gains_due is not None and now >= self._gains_due
+            if (self._pending or gains_due) and self._configuring():
+                return          # 모터 프로그램이 버스를 설정 중 · 표시가 사라지면 다시 · 125
             if self._pending:
                 self._pending = False
                 self._running = True
@@ -214,6 +260,12 @@ class MinasAbsoluteCheck:
                 signature = self._signature
             try:
                 drives = self._read(signature or frozenset())
+            except _BusBusy:
+                with self._lock:
+                    # 이번 읽기는 없던 것으로 · 「확인 중」 그대로 · 버스가 자리 잡으면 다시 · 125
+                    self._pending = True
+                    self._running = False
+                return
             except Exception as exc:  # noqa: BLE001 · 어떤 실패도 「확인 불가」 로
                 self._log_warning(f'MINAS 앱솔루트 확인 실패: {exc}')
                 drives = [
@@ -244,8 +296,15 @@ class MinasAbsoluteCheck:
         with self._lock:
             signature = self._signature
             drives = [dict(drive) for drive in self._summary.get('drives') or []]
-        for drive in drives:   # 목록은 MINAS 드라이브만 담는다
-            drive['gains'] = self._read_gains(int(drive['master_index']), int(drive['slave_position']))
+        try:
+            for drive in drives:   # 목록은 MINAS 드라이브만 담는다
+                drive['gains'] = self._read_gains(int(drive['master_index']), int(drive['slave_position']))
+        except _BusBusy:
+            with self._lock:
+                # 지금 게인은 그대로 · 조금 뒤 다시 · 125
+                self._gains_due = self._clock() + GAIN_RETRY_SEC
+                self._running = False
+            return
         with self._lock:
             now = self._clock()
             if signature == self._signature and self._summary.get('drives'):
@@ -322,6 +381,12 @@ class MinasAbsoluteCheck:
                 drives.append(drive)
         return drives
 
+    def _configuring(self) -> bool:
+        try:
+            return bool(self._bus_configuring())
+        except Exception:  # noqa: BLE001 · 표시를 못 읽으면 없는 것으로(예전처럼 상태로만 판단)
+            return False
+
     def _vendors(self, master: int) -> Tuple[Dict[int, Tuple[Optional[int], Optional[int]]], str]:
         try:
             completed = self._runner(
@@ -343,7 +408,7 @@ class MinasAbsoluteCheck:
 
     def _upload(self, master: int, position: int, index: int, data_type: str) -> Tuple[Optional[int], str]:
         try:
-            completed = self._runner(
+            completed = self._sdo(
                 [
                     'ethercat', 'upload', '-m', str(master), '-p', str(position),
                     '-t', data_type, f'0x{index:04X}', '0',
@@ -352,6 +417,8 @@ class MinasAbsoluteCheck:
             )
         except (OSError, subprocess.TimeoutExpired) as exc:
             return None, f'0x{index:04X} {exc}'
+        if ethercat_mailbox.is_refused(completed):
+            raise _BusBusy((completed.stderr or '').strip())
         if completed.returncode != 0:
             detail = (completed.stderr or completed.stdout or '').strip() or 'unknown error'
             return None, f'0x{index:04X} {detail}'

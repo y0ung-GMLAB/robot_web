@@ -153,3 +153,15 @@ test('메뉴의 모든 화면에 페이지가 있다 · 빈 자리 없음', asyn
     }
   }
 });
+
+test('PREOP 에 멈춘 드라이브 · 감시 노드 글 그대로 빨강 · 제어 전원 안내 (수정 목록 125)', () => {
+  const snap = { motion_state: { ethercat: { stuck_slaves: [
+    { master_index: 0, slave_position: 1, axis: 1, state: 'PREOP', error_flag: true, message: '1번 드라이브가 PREOP 에 멈춤 · 그 드라이브 제어 전원을 껐다 켜세요' },
+  ] } } };
+  const issues = collectIssues(snap, { run_mode: 'manual' });
+  const stuck = issues.find((i) => i.title.includes('PREOP 에 멈춤'));
+  assert.equal(stuck.tone, 'bad');
+  assert.equal(stuck.title, '1번 드라이브가 PREOP 에 멈춤 · 그 드라이브 제어 전원을 껐다 켜세요');
+  assert.match(stuck.detail, /제어 전원/);
+  assert.equal(collectIssues({ motion_state: { ethercat: {} } }, { run_mode: 'manual' }).length, 0);
+});
