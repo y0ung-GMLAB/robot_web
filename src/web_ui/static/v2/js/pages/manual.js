@@ -18,7 +18,7 @@ import {
 } from '../dial_session.js';
 import { ManualStream } from '../manual_stream.js';
 import {
-  autoConfirmRange, draftToRow, jointToMotor, motorForRow, motorRefFor, motorToJoint, previewRow, rowToDraft,
+  autoConfirmRange, draftToRow, jointToMotor, motorForRow, motorRefFor, motorToJoint, patchRow, previewRow, rowToDraft, savedMismatch,
 } from '../mapping_model.js';
 import { registeredPlaylist, signedDeg } from '../play_model.js';
 
@@ -397,6 +397,27 @@ async function recoverRange(item, changed) {
 
 /* ---------- 여기를 하한 · 기준점 · 상한으로 ---------- */
 
+/**
+ * 캡처로 바꿀 칸만 · 줄 전체 사본이 아니라 칸 몇 개(patch) · 저장 때 지금 목록의 같은 줄 위에 얹는다 (수정 목록 117)
+ * 기준점 = 모터 deg 그대로 · 하한·상한 = 그 위치의 조인트 deg 를 안쪽으로 반올림(하한 올림 · 상한 내림)
+ */
+export function capturePatch(row, kind, positionDeg) {
+  const motorDeg = Math.round(Number(positionDeg) * 1e4) / 1e4;
+  if (kind === 'reference') {
+    return {
+      kind, label: '기준점', patch: { reference_position_deg: motorDeg, reference_enabled: true },
+      text: `${row.motion_id} 기준점(조인트 0°)을 현재 모터 위치 ${signedDeg(motorDeg, 2)}°로`,
+    };
+  }
+  const joint = motorToJoint(row, motorDeg);
+  if (joint === null) return { kind };
+  const patch = kind === 'lower' ? { motion_lower_deg: Math.ceil(joint * 1e4) / 1e4 } : { motion_upper_deg: Math.floor(joint * 1e4) / 1e4 };
+  const after = { ...row, ...patch };
+  if (Number(after.motion_lower_deg) > Number(after.motion_upper_deg)) return { kind, error: '하한이 상한보다 커집니다. 위치를 확인하세요.' };
+  const label = kind === 'lower' ? '하한' : '상한';
+  return { kind, label, patch, text: `${row.motion_id} ${label}을 현재 위치 ${signedDeg(joint, 3)}°로` };
+}
+
 async function capture(item, kind, changed) {
   if (!item.row || item.position === null) return;
   const scope = ctx.state.snap?.project_scope || {};
@@ -404,33 +425,33 @@ async function capture(item, kind, changed) {
     toast('이 프로젝트의 모터 설정을 장비에 적용해야 캡처할 수 있습니다', 'warn');
     return;
   }
-  const row = { ...item.row };
-  const motorDeg = Math.round(item.position * 1e4) / 1e4;
-  let text;
-  if (kind === 'reference') {
-    row.reference_position_deg = motorDeg;
-    row.reference_enabled = true;
-    text = `${row.motion_id} 기준점(조인트 0°)을 현재 모터 위치 ${signedDeg(motorDeg, 2)}°로`;
-  } else {
-    const joint = motorToJoint(row, motorDeg);
-    if (joint === null) return;
-    // 안쪽으로 반올림 · 하한은 올림 · 상한은 내림
-    if (kind === 'lower') row.motion_lower_deg = Math.ceil(joint * 1e4) / 1e4;
-    else row.motion_upper_deg = Math.floor(joint * 1e4) / 1e4;
-    if (Number(row.motion_lower_deg) > Number(row.motion_upper_deg)) { toast('하한이 상한보다 커집니다. 위치를 확인하세요.', 'bad'); return; }
-    autoConfirmRange(row);
-    text = `${row.motion_id} ${kind === 'lower' ? '하한' : '상한'}을 현재 위치 ${signedDeg(joint, 3)}°로`;
-  }
-  const ok = await confirmBox({ title: '조인트 매핑에 저장', body: `${text} 저장합니다.\n\n저장한 뒤 운전 한계(소프트 리밋)도 새 값으로 바꿀지 이어서 확인합니다(장비에 적용 및 모터 재시작).`, confirmLabel: '저장' });
+  const plan = capturePatch(item.row, kind, item.position);
+  if (plan.error) { toast(plan.error, 'bad'); return; }
+  if (!plan.patch) return;
+  const ok = await confirmBox({ title: '조인트 매핑에 저장', body: `${plan.text} 저장합니다.\n\n저장한 뒤 운전 한계(소프트 리밋)도 새 값으로 바꿀지 이어서 확인합니다(장비에 적용 및 모터 재시작).`, confirmLabel: '저장' });
   if (!ok) return;
-  const rows = ui.mapping.map((r) => (r === item.row ? row : r));
+  // 줄은 이름 + 모터로 다시 찾는다 · 창이 떠 있는 사이(또는 그 전에) 매핑을 다시 불러오면 item.row 는 옛 객체 · 수정 목록 117
+  const next = patchRow(ui.mapping || [], item.row, plan.patch);
+  if (!next) { toast(`「${item.row.motion_id}」 줄을 지금 매핑에서 찾지 못했습니다. 화면을 새로 고친 뒤 다시 하세요.`, 'bad'); return; }
+  if (plan.kind !== 'reference') {
+    if (Number(next.row.motion_lower_deg) > Number(next.row.motion_upper_deg)) { toast('하한이 상한보다 커집니다. 위치를 확인하세요.', 'bad'); return; }
+    autoConfirmRange(next.row);
+  }
   try {
-    const result = await api('POST', '/api/motion-mappings', {
-      body: { file_id: ui.fileId, base_mapping_revision: ui.revision, mapping: { name: ui.mappingDoc?.name || ui.fileId.replace(/\.ya?ml$/, ''), mappings: rows.map((r) => draftToRow(r)) } },
+    const fileId = ui.fileId;
+    await api('POST', '/api/motion-mappings', {
+      body: { file_id: fileId, base_mapping_revision: ui.revision, mapping: { name: ui.mappingDoc?.name || fileId.replace(/\.ya?ml$/, ''), mappings: next.rows.map((r) => draftToRow(r)) } },
       timeoutMs: 20000,
     });
-    toast(result?.message || '저장했습니다', 'ok');
+    // 「저장했습니다」 만 믿지 않는다 · 파일을 다시 읽어 값이 들어갔나 본다
+    const saved = await api('GET', `/api/motion-mappings/${encodeURIComponent(fileId)}`);
+    const wrong = savedMismatch(saved?.mapping?.mappings, next.row, plan.patch);
     await loadManual(ctx.state, changed);
+    if (wrong.length) {
+      toast(`저장 실패 · 서버는 받았지만 매핑 파일 값이 다릅니다 · ${wrong.join(' · ')}`, 'bad');
+      return;
+    }
+    toast(`${plan.label} 저장 확인 · ${item.row.motion_id}`, 'ok');
     if (await act.confirmApplyMotorConfig('운전 한계(소프트 리밋)도 새 기준으로 바꾸려면 장비에 적용하고 모터를 재시작해야 합니다.')) await act.applyMotorConfig();
     else toast('운전 한계가 아직 적용되지 않았습니다. 「모터 설정」에서 「저장 후 장비에 적용」을 누르세요.', 'warn');
   } catch (error) {

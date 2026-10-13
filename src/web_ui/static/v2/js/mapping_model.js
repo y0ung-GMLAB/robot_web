@@ -256,3 +256,45 @@ function fmt(value) {
 export function isRevisionConflict(message) {
   return /화면을 불러온 뒤 변경됐습니다|버전 정보가 없습니다/.test(String(message || ''));
 }
+
+/**
+ * 같은 줄 찾기 · 객체가 아니라 조인트 이름 + 모터로 · 수정 목록 117
+ * 화면은 매핑을 15초마다 다시 불러 새 객체를 만든다 · 그 사이 그린 칸의 줄은 옛 객체라 === 로는 못 찾는다
+ * 이름·모터 둘 다 맞는 줄 · 없으면 이름만 맞는 줄이 하나일 때 그것 · 없으면 −1
+ */
+export function findRowIndex(rows, target) {
+  const name = String(target?.motion_id || '').trim();
+  if (!name) return -1;
+  const sameName = (row) => String(row?.motion_id || '').trim() === name;
+  const where = rowTarget(target);
+  const exact = (rows || []).findIndex((row) => sameName(row) && rowTarget(row) === where);
+  if (exact >= 0) return exact;
+  const byName = (rows || []).map((row, index) => (sameName(row) ? index : -1)).filter((index) => index >= 0);
+  return byName.length === 1 ? byName[0] : -1;
+}
+
+/** 줄 하나에 칸 몇 개만 바꾼 새 목록 · 못 찾으면 null · 지금 목록의 줄 위에 바꾼다(옛 사본으로 덮지 않게) */
+export function patchRow(rows, target, patch) {
+  const index = findRowIndex(rows, target);
+  if (index < 0) return null;
+  const row = { ...rows[index], ...patch };
+  return { index, row, rows: rows.map((r, i) => (i === index ? row : r)) };
+}
+
+/**
+ * 저장 뒤 확인 · 서버가 돌려준 줄(rad)에 바꾼 칸이 들어갔나 · 다른 칸을 사람이 읽는 글로 · 빈 목록이면 맞음 (수정 목록 117)
+ * 「저장했습니다」 만 믿지 않는다 · 파일에 안 들어갔으면 실패로 알린다
+ */
+export function savedMismatch(serverRows, target, patch) {
+  const rows = (serverRows || []).map(rowToDraft);
+  const index = findRowIndex(rows, target);
+  if (index < 0) return [`「${String(target?.motion_id || '')}」 줄을 저장된 매핑에서 찾지 못했습니다`];
+  const saved = rows[index];
+  const out = [];
+  for (const [field, want] of Object.entries(patch)) {
+    if (!(field in LABELS)) continue;
+    const ok = typeof want === 'number' ? Math.abs(Number(saved[field]) - want) < 1e-4 : same(saved[field], want);
+    if (!ok) out.push(`${LABELS[field]} · 보낸 값 ${fmt(want)} · 파일 값 ${fmt(saved[field])}`);
+  }
+  return out;
+}
