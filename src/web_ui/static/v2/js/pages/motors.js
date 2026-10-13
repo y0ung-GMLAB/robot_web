@@ -348,7 +348,7 @@ function detailCard(state, changed, row) {
           value: String(motor.identity?.ethercat_alias ?? ''), 'aria-label': `${row.axis}번 새 Alias` }),
         h('button', { class: 'btn btn-mini', type: 'button', disabled: busy, onclick: () => writeAlias(row, motor, state, changed) }, 'Alias 쓰기')),
       h('p', { class: 'muted small', text: '드라이브마다 다른 값이어야 합니다(0은 겹쳐도 되고 케이블 순서로 찾습니다). 쓴 뒤 「전체 검색」으로 새 값이 보이는지 확인하세요. 예전 값 그대로면 드라이브 제어 전원을 껐다 켠 뒤 다시 검색하세요.' }))) : null,
-    // 파라미터 (고급) · 드라이브 지금 · 부팅 때 · 출하값 · 직접 읽기·쓰기 · 수정 목록 109 · 114
+    // 파라미터 (고급) · 드라이브 지금 · 부팅 때 · 초기값 · 직접 읽기·쓰기 · 수정 목록 109 · 114
     paramsField(row, changed),
     h('details', { class: 'raw detail-group' }, h('summary', { text: '원본 (드라이브 정보)' }),
       h('pre', { class: 'doc-code small' }, h('code', { text: JSON.stringify({ identity: motor.identity, profile: motor.profile, config: motor.config }, null, 2) }))));

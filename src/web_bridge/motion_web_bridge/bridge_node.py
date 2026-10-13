@@ -435,7 +435,7 @@ class MotionWebBridge(Node):
             expected_axes=self._detected_axes,
             record=self._record_drive_maintenance,
         )
-        # MINAS 파라미터 고급 보기·쓰기 · 드라이브 지금 · 부팅 때 · 출하값 · 수정 목록 109 · 114
+        # MINAS 파라미터 고급 보기·쓰기 · 드라이브 지금 · 부팅 때 · 초기값 · 수정 목록 109 · 114
         self.drive_params = DriveParams(
             target=self.drive_maintenance._target,
             boot_values=lambda axis: minas_params.boot_values(

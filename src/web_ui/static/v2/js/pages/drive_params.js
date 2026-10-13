@@ -1,6 +1,6 @@
 /**
  * UI v2 · 모터 설정 ① · 모터 상세 · 파라미터 (고급) · 수정 목록 109 · 114 (2026-10-13)
- * 드라이브에 지금 들어 있는 값 · 부팅 때 우리가 쓸 값 · 출하값을 한 표에 · 다르면 표시.
+ * 드라이브에 지금 들어 있는 값 · 부팅 때 우리가 쓸 값 · 초기값을 한 표에 · 다르면 표시.
  * 직접 읽기·쓰기 · 평소엔 잠김 · 쓰기는 드라이브 RAM 에만(전원을 끄면 사라짐 · 남기려면 「드라이브 저장(EEPROM)」) ·
  * 제어 워드 · 운전 모드 · PDO · EEPROM 저장 · 앱솔루트 · 0x60B2 등은 서버가 거절(전용 버튼이 있다).
  * 값은 숫자 그대로 · 뜻은 마우스를 올리면 (사용자 2026-10-13).
@@ -39,11 +39,11 @@ export function rowHint(row) {
   return parts.join('\n');
 }
 
-/** 표시 · 출하값과 다름 · 부팅 값과 다름(재시작하면 부팅 값으로 돌아감) */
+/** 표시 · 초기값과 다름 · 부팅 값과 다름(재시작하면 부팅 값으로 돌아감) */
 export function rowFlags(row) {
   const flags = [];
   if (row.differs_boot) flags.push({ tone: 'warn', text: '부팅 값과 다름', hint: `재시작하면 ${row.boot} 로 돌아갑니다` });
-  if (row.differs_factory) flags.push({ tone: 'info', text: '출하값과 다름', hint: `출하값 ${row.factory}` });
+  if (row.differs_factory) flags.push({ tone: 'info', text: '초기값과 다름', hint: `초기값 ${row.factory}` });
   return flags;
 }
 
@@ -90,14 +90,14 @@ export function paramsField(row, changed) {
   }
   const pick = (item) => { ui.form = { object: item.number, type: item.type, value: '' }; changed(); };
   return h('details', { class: 'detail-group' },
-    h('summary', { class: 'group-title', text: '파라미터 (고급) · 드라이브 지금 값 · 부팅 때 쓸 값 · 출하값' }),
+    h('summary', { class: 'group-title', text: '파라미터 (고급) · 드라이브 지금 값 · 부팅 때 쓸 값 · 초기값' }),
     h('div', { class: 'row' },
       h('button', { class: 'btn btn-mini', type: 'button', disabled: ui.loading, onclick: () => load(row.axis, changed) },
         ui.loading ? '읽는 중' : ui.rows ? '다시 읽기' : '드라이브에서 읽기'),
       h('span', { class: 'muted small', text: '모터 프로그램을 멈추지 않고 읽습니다. 줄을 누르면 아래 칸에 채워집니다.' })),
     ui.error ? h('p', { class: 'tone-text-bad', text: ui.error }) : null,
     ui.rows ? h('div', { class: 'table-wrap' }, h('table', { class: 'table params-table' },
-      h('thead', {}, h('tr', {}, ['항목', '드라이브 지금', '부팅 때 씀', '출하값', ''].map((text) => h('th', { scope: 'col', text })))),
+      h('thead', {}, h('tr', {}, ['항목', '드라이브 지금', '부팅 때 씀', '초기값', ''].map((text) => h('th', { scope: 'col', text })))),
       h('tbody', {}, groups.map((group) => [
         h('tr', { class: 'params-group' }, h('td', { colspan: '5', text: group.name })),
         group.rows.map((item) => h('tr', { class: 'pick-row', title: rowHint(item), onclick: () => pick(item) },
