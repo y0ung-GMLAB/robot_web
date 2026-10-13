@@ -117,7 +117,7 @@ function servoAllBar(rows, state, changed) {
 
 async function maintenance(row, action, state, changed) {
   const texts = {
-    eeprom_save: { title: `${row.axis}번 드라이브에 저장 (EEPROM)`, body: '드라이브의 현재 설정값을 전원을 꺼도 유지되도록 저장합니다. 모터 프로그램을 잠시 정지했다가 다시 시작하며(몇 초), 그동안 서보 토크가 해제됩니다. 브레이크가 없는 모터는 처질 수 있습니다.\n저장하는 동안(최대 10초) 드라이브 전원을 끄지 마세요.', tone: 'warning', label: '저장' },
+    eeprom_save: { title: `${row.axis}번 드라이브에 저장`, body: '드라이브의 현재 설정값을 전원을 꺼도 유지되도록 저장합니다. 모터 프로그램을 잠시 정지했다가 다시 시작하며(몇 초), 그동안 서보 토크가 해제됩니다. 브레이크가 없는 모터는 처질 수 있습니다.\n저장하는 동안(최대 10초) 드라이브 전원을 끄지 마세요.', tone: 'warning', label: '저장' },
     absolute_clear: { title: `${row.axis}번 다회전 클리어`, body: '엔코더의 회전 수 기록을 0으로 초기화합니다. 위치 기준이 바뀝니다.\n서보가 꺼져 있어야 합니다. 끝나면 드라이브 전원을 껐다 켜세요. 위치 값이 바뀌므로 기준점을 다시 캡처해야 하며, 그 전에는 재생하지 마세요.', tone: 'danger', label: '클리어' },
   }[action];
   if (action === 'absolute_clear' && row.servoOn) { toast('서보를 먼저 끄세요. 다회전 클리어는 서보가 꺼진 상태에서만 할 수 있습니다.', 'warn'); return; }
@@ -316,34 +316,38 @@ function detailCard(state, changed, row) {
   };
   return h('section', { class: 'card', id: 'motor-detail', 'aria-label': `${row.axis}번 설정` },
     h('div', { class: 'card-head' }, h('h2', { text: `${row.axis}번 · ${row.name || '-'}` }), h('span', { class: 'muted small mono wrap-text', text: row.id })),
+    // 묶음마다 가로선(사용자 2026-10-13 「같은 줄끼리 구획」) · 운전값 → 게인 → 드라이브 관리 → Alias → 원본
+    h('div', { class: 'detail-group' },
+    h('div', { class: 'group-title', text: '운전값' }),
     h('div', { class: 'row form-row' }, EDIT_FIELDS.map(input)),
     row.ac ? h('label', { class: 'inline' }, h('input', { type: 'checkbox', checked: Number(motor.config?.overload_monitor) === 1,
       onchange: (e) => { setField(motor, 'overload_monitor', e.target.checked ? 1 : 0); changed(); } }),
     '과부하율 읽기 (드라이브 소프트웨어 Ver1.03 이상 필요 · 낮은 버전에서 켜면 모터 프로그램이 시작되지 않음)') : null,
     h('label', { class: 'inline' }, h('input', { type: 'checkbox', checked: motor.config?.schedule_end_servo_off === true,
-      onchange: (e) => { setField(motor, 'schedule_end_servo_off', e.target.checked); changed(); } }), '운영 시간이 끝나면 서보 끄기'),
+      onchange: (e) => { setField(motor, 'schedule_end_servo_off', e.target.checked); changed(); } }), '운영 시간이 끝나면 서보 끄기')),
     // 드라이브 게인 · 잠금 · 재시작 없이 쓰기 · 수정 목록 108 (다)
-    gainField(row, changed, () => loadMotors(state, changed, { force: true })),
-    h('div', { class: 'field' },
-      h('span', { class: 'field-label', text: '드라이브 관리' }),
+    row.ac ? h('div', { class: 'detail-group' }, gainField(row, changed, () => loadMotors(state, changed, { force: true }))) : null,
+    h('div', { class: 'detail-group' }, h('div', { class: 'field' },
+      h('div', { class: 'group-title', text: '드라이브 관리' }),
       h('div', { class: 'row' },
         h('button', { class: 'btn btn-mini', type: 'button', disabled: busy, onclick: () => servo(row, 'reset', state, changed) }, row.ac ? `오류 초기화${row.fault ? '' : ' (알람 없음)'}` : '재부팅'),
         row.servoOn
           ? h('button', { class: 'btn btn-mini', type: 'button', disabled: busy, onclick: () => servo(row, 'off', state, changed) }, row.ac ? '서보 끄기' : '토크 끄기')
           : h('button', { class: 'btn btn-mini', type: 'button', disabled: busy || row.fault || !row.detected, onclick: () => servo(row, 'on', state, changed) }, row.ac ? '서보 켜기' : '토크 켜기'),
-        row.ac ? h('button', { class: 'btn btn-mini', type: 'button', disabled: busy, onclick: () => maintenance(row, 'eeprom_save', state, changed) }, '드라이브에 저장 (EEPROM)') : null,
+        row.ac ? h('button', { class: 'btn btn-mini', type: 'button', disabled: busy, title: '드라이브 안(EEPROM)에 저장 · 전원을 꺼도 지금 값이 남음 · 모터 프로그램이 몇 초 멈췄다 다시 켜짐', onclick: () => maintenance(row, 'eeprom_save', state, changed) }, '드라이브에 저장') : null,
         row.ac ? h('button', { class: 'btn btn-mini', type: 'button', disabled: busy || row.absolute === '정상', title: row.absolute === '정상' ? '이미 앱솔루트 방식입니다. 다시 설정하면 기준점이 사라집니다.' : '',
           onclick: () => absoluteSetup('one', row, state, changed) }, row.absolute === '정상' ? '앱솔루트 정상' : '앱솔루트 설정') : null,
         row.ac ? h('button', { class: 'btn btn-mini danger-text', type: 'button', disabled: busy, onclick: () => maintenance(row, 'absolute_clear', state, changed) }, '다회전 클리어') : null),
-      h('p', { class: 'muted small', text: '빨간 글씨 버튼은 위치 기준을 바꿉니다. 누르면 확인 창이 먼저 뜹니다.' })),
-    row.ac ? h('div', { class: 'field' },
-      h('span', { class: 'field-label', text: `EtherCAT Alias · 지금 ${motor.identity?.ethercat_alias ?? '-'} · Slave ${Number.isFinite(row.slavePosition) ? row.slavePosition : '-'}` }),
+      h('p', { class: 'muted small', text: '빨간 글씨 버튼은 위치 기준을 바꿉니다. 누르면 확인 창이 먼저 뜹니다.' }))),
+    row.ac ? h('div', { class: 'detail-group' }, h('div', { class: 'field' },
+      h('div', { class: 'group-title', text: 'EtherCAT Alias' }),
+      h('span', { class: 'muted small', text: `지금 ${motor.identity?.ethercat_alias ?? '-'} · Slave ${Number.isFinite(row.slavePosition) ? row.slavePosition : '-'}` }),
       h('div', { class: 'row' },
         h('input', { id: `alias-${row.axis}`, class: 'input mono num-input', type: 'number', min: '0', max: '65535', step: '1',
           value: String(motor.identity?.ethercat_alias ?? ''), 'aria-label': `${row.axis}번 새 Alias` }),
         h('button', { class: 'btn btn-mini', type: 'button', disabled: busy, onclick: () => writeAlias(row, motor, state, changed) }, 'Alias 쓰기')),
-      h('p', { class: 'muted small', text: '드라이브마다 다른 값이어야 합니다(0은 겹쳐도 되고 케이블 순서로 찾습니다). 쓴 뒤 「전체 검색」으로 새 값이 보이는지 확인하세요. 예전 값 그대로면 드라이브 제어 전원을 껐다 켠 뒤 다시 검색하세요.' })) : null,
-    h('details', { class: 'raw' }, h('summary', { text: '원본 (드라이브 정보)' }),
+      h('p', { class: 'muted small', text: '드라이브마다 다른 값이어야 합니다(0은 겹쳐도 되고 케이블 순서로 찾습니다). 쓴 뒤 「전체 검색」으로 새 값이 보이는지 확인하세요. 예전 값 그대로면 드라이브 제어 전원을 껐다 켠 뒤 다시 검색하세요.' }))) : null,
+    h('details', { class: 'raw detail-group' }, h('summary', { text: '원본 (드라이브 정보)' }),
       h('pre', { class: 'doc-code small' }, h('code', { text: JSON.stringify({ identity: motor.identity, profile: motor.profile, config: motor.config }, null, 2) }))));
 }
 
@@ -411,7 +415,7 @@ export function motorsBody(state, changed) {
       onSaveAll: async () => {
         const axes = rows.filter((r) => r.ac && r.detected).map((r) => r.axis);
         const ok = await confirmBox({
-          title: `모든 축 드라이브에 저장 (EEPROM) · ${axes.length}대`,
+          title: `모든 드라이브에 저장 · ${axes.map((a) => `${a}번`).join(' · ')}`,
           body: '지금 드라이브에 들어 있는 값(공통 설정 · 게인 등)을 전원을 꺼도 남게 저장합니다.\n'
             + '모터 프로그램이 한 번 멈췄다 다시 켜지고, 그동안 서보 토크가 풀립니다. 브레이크가 없는 모터는 처질 수 있습니다.\n'
             + '저장하는 동안(최대 10초씩) 드라이브 전원을 끄지 마세요.',
