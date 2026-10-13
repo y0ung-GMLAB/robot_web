@@ -403,6 +403,17 @@ class MotionScheduleNode(Node):
             self._start_pending = False
             self._deferred_reason = ''
 
+        # 구간 끝에 멈춰 있던 로봇도 기준점 주차 → 서보 OFF · 스케줄 모드 · 구간 끝마다 한 번 · 사용자 2026-10-13
+        step = schedule_rules.window_end_step(
+            pending=getattr(self, '_window_end_pending', False),
+            in_window=wanted is not None, running=running, run_mode=self._run_mode,
+        )
+        self._window_end_pending = step == schedule_rules.WINDOW_END_WAIT
+        if step == schedule_rules.IDLE_PARK:
+            self.get_logger().info("[점검] 구간 끝 · 멈춰 있다 · 기준점 주차 → 서보 OFF")
+            self._execute_idle_park()
+            return
+
         # **구간이 끝나면 멈춘다 · 모드와 상관없이** · §6-270
         #
         # 전에는 수동 모드면 맨 앞에서 돌아갔다 · 그래서 정지도 검사하지
@@ -626,6 +637,20 @@ class MotionScheduleNode(Node):
             "schedule_id": schedule_id or 'reconcile',
             "reason": reason,
         })
+
+    def _execute_idle_park(self):
+        """구간 끝 · 멈춰 있던 로봇 · 회차 후 정지와 같은 `reason=schedule_end` 길 · 사용자 2026-10-13
+
+        묶여 있으면 그룹 길 · 도는 그룹이 없어도 연동 노드가 스케줄 모드 PC 마다 전한다 ·
+        그룹 길이 거절하면(옛 연동 노드 · 묶임 풀림) 이 PC 만.
+        브리지가 PC 마다 다시 본다 · 스케줄 모드 · 알람 없음 · 서보 켜짐 · 끌 모터 있음.
+        """
+        payload = {"schedule_id": "window_end", "reason": "schedule_end"}
+        if self._coordination_enabled() and self._coordination_joined():
+            if self._send_http_request("/api/coordination/control", {"command": "stop_after_cycle", **payload}):
+                return
+            self.get_logger().info("[점검] 그룹 길 거절 · 이 PC 만 주차")
+        self._send_http_request("/api/motion-run/stop-after-cycle", payload)
 
     def _publish_status(self, now: datetime):
         schedules = self.store.list_schedules()

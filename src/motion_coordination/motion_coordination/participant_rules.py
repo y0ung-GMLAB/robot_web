@@ -81,6 +81,19 @@ def exclusion_reason(
     return ''
 
 
+#: 스케줄 구간 끝 · PC 마다 기준점 주차 → 서보 OFF · 수정 목록 36
+SCHEDULE_END_REASON = 'schedule_end'
+
+
+def idle_park_wanted(*, after_cycle: bool, reason: str, execution_id: str) -> bool:
+    """도는 그룹 없이 구간이 끝났다 · 그래도 PC 마다 주차를 전하나 · 사용자 2026-10-13
+
+    전에는 그룹 실행이 없으면 「활성 그룹 실행이 없습니다」 로 거절했다 · 그래서 구간 끝에
+    멈춰 있던 PC 들은 서보를 켠 채 밤을 샜다 · 받을 PC 는 시작과 같은 규칙(스케줄이 켠 그룹)으로 고른다.
+    """
+    return bool(after_cycle) and str(reason or '') == SCHEDULE_END_REASON and not str(execution_id or '')
+
+
 def start_summary(participants, excluded) -> str:
     """시작 응답 · 알림 글 · 참가 N대 · 빠진 PC 와 이유"""
     count = len(tuple(participants or ()))

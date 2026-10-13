@@ -330,7 +330,7 @@ function detailCard(state, changed, row) {
     row.ac ? h('label', { class: 'inline' }, h('input', { type: 'checkbox', checked: Number(motor.config?.overload_monitor) === 1,
       onchange: (e) => { setField(motor, 'overload_monitor', e.target.checked ? 1 : 0); changed(); } }),
     '과부하율 읽기 (드라이브 소프트웨어 Ver1.03 이상 필요 · 낮은 버전에서 켜면 모터 프로그램이 시작되지 않음)') : null,
-    h('label', { class: 'inline' }, h('input', { type: 'checkbox', checked: motor.config?.schedule_end_servo_off === true,
+    h('label', { class: 'inline' }, h('input', { type: 'checkbox', checked: motor.config?.schedule_end_servo_off !== false,   // 안 적었으면 켬 · 서버(schedule_end.motor_turns_off_at_end)와 같게 · 2026-10-13
       onchange: (e) => { setField(motor, 'schedule_end_servo_off', e.target.checked); changed(); } }), '스케줄 모드에서 운영 시간이 끝나면 서보 끄기')),
     // 드라이브 게인 · 잠금 · 재시작 없이 쓰기 · 수정 목록 108 (다)
     row.ac ? h('div', { class: 'detail-group' }, gainField(row, changed, () => loadMotors(state, changed, { force: true }))) : null,

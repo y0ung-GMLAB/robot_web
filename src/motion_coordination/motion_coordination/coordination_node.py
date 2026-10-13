@@ -57,6 +57,7 @@ from .group_execution import (
 from .participant_rules import (
     STARTED_BY_SCHEDULE,
     exclusion_reason,
+    idle_park_wanted,
     normalize_started_by,
     start_summary,
 )
@@ -2253,6 +2254,10 @@ class MotionCoordinationNode(Node):
 
     def _request_group_stop(self, *, after_cycle: bool, reason: str = '') -> Dict[str, Any]:
         with self._lock:
+            execution_id = self._execution.execution_id
+        if idle_park_wanted(after_cycle=after_cycle, reason=reason, execution_id=execution_id):
+            return self._broadcast_idle_park(reason)
+        with self._lock:
             if not self._execution.execution_id:
                 raise ValueError('활성 그룹 실행이 없습니다')
             command = 'stop_after_cycle' if after_cycle else 'stop_now'
@@ -2309,6 +2314,36 @@ class MotionCoordinationNode(Node):
                 f'{local.get("message") or "응답 없음"}'
             ),
             'dds_stop_published': dds_stop_published,
+        }
+
+    def _broadcast_idle_park(self, reason: str) -> Dict[str, Any]:
+        """도는 그룹 없이 구간이 끝났다 · PC 마다 기준점 주차 → 서보 OFF · 사용자 2026-10-13
+
+        실행 ID 없는 「회차 후 정지」 · 받는 PC 는 `_require_stop_command` 가 통과시키고 제 브리지로
+        넘긴다(브리지가 스케줄 모드 · 알람 · 서보 켜짐을 다시 본다) · 받을 PC 는 스케줄이 켠 그룹과
+        같은 규칙 · 수동 · 끔 · 알람 · 통신 끊김 · 다른 버전 · 단독 재생 중 PC 는 뺀다.
+        """
+        participants, excluded = self._select_participants(started_by=STARTED_BY_SCHEDULE, log=False)
+        message = self._new_command(
+            command='stop_after_cycle', execution_id='', cycle_number=0,
+            participants=participants, stop_reason=reason,
+        )
+        local = self._call_local_control({
+            'command': 'stop_after_cycle',
+            'execution_id': '',
+            'network_operation_id': message.command_id,
+            'reason': reason,
+        })
+        published = len(participants) > 1
+        if published:
+            self._command_pub.publish(message)
+        summary = start_summary(participants, excluded)
+        self.get_logger().info(f'운영 종료 · 멈춰 있는 PC 주차 전달 · {summary}')
+        # 이 PC 의 주차 실패는 그 PC 기록에 남는다 · 길은 성공 · 스케줄이 단독 길로 또 보내지 않게
+        return {
+            'success': True,
+            'message': f'운영 종료 · 기준점 주차 → 서보 OFF 전달 · {summary} · 이 PC {local.get("message") or "응답 없음"}',
+            'dds_stop_published': published,
         }
 
     def _publish_action(self, action: ScheduledAction) -> None:

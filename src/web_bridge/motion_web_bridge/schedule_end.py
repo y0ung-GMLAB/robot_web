@@ -12,6 +12,8 @@
 모터별로 「끝나면 서보 OFF」 를 끌 수 있다 (모터 설정 `config.schedule_end_servo_off`).
 
 **주차가 안 되면 끄지 않는다** · 알람·오류·도달 실패·시간 초과면 홀드 + 기록.
+**이미 멈춰 있던 로봇도** 구간 끝에 주차 → 서보 OFF (사용자 2026-10-13 · 전에는 돌던 것만) ·
+이 PC 가 스케줄 모드일 때만 · 끌 모터가 없거나 서보가 꺼져 있거나 알람이면 건드리지 않는다.
 **다음 시작** · 여기서 끈 모터만 기억해 두었다가 시작(스케줄·수동·그룹 준비) 전에
 켜고 켜진 것을 확인한다 · 사람이 손으로 끈 모터는 건드리지 않는다.
 """
@@ -22,7 +24,9 @@ import json
 import threading
 import time
 from pathlib import Path
-from typing import Any, Callable, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional, Tuple
+
+from motion_common import run_state
 
 PARK_SERVO_OFF = 'park_servo_off'
 HOLD = 'hold'
@@ -56,6 +60,51 @@ def motor_turns_off_at_end(entry: Dict[str, Any]) -> bool:
     return config.get('schedule_end_servo_off') is not False
 
 
+#: 운전 모드 화면 글자 · 스케줄이 아니면 주차하지 않는다
+_MODE_TEXT = {'manual': '수동', 'off': '끔'}
+
+
+def mode_skip(run_mode: Optional[str]) -> Optional[Tuple[str, str]]:
+    """이 PC 가 스케줄 모드가 아니면 주차하지 않는다 · 사람이 만지는 중일 수 있다 · 사용자 2026-10-13
+
+    `None` = 모드를 읽지 않는 호출(옛 배선) · 판단하지 않는다 · 빈 값 = 못 읽음 · 안 움직인다.
+    """
+    if run_mode is None or run_mode == 'schedule':
+        return None
+    text = _MODE_TEXT.get(run_mode)
+    if not text:
+        return 'failed', '운영 종료 · 운전 모드를 확인할 수 없어 주차하지 않고 그대로 둡니다'
+    return 'skipped', f'운영 종료 · 이 PC 는 {text} 모드라 주차하지 않고 그대로 둡니다'
+
+
+def idle_park_skip(
+    motors: List[Dict[str, Any]], flags: Dict[int, bool], alarm_grade: int,
+) -> Optional[Tuple[str, str]]:
+    """구간 끝에 **멈춰 있던** 로봇을 주차할 수 있나 · 못 하면 (상태, 글) · 사용자 2026-10-13
+
+    주차는 서보가 켜져 있고 알람이 없어야 한다 · 억지로 켜지 않는다 ·
+    끌 모터가 없으면(모터 설정 「끝나면 서보 끄기」 전부 끔) 움직일 까닭이 없다 ·
+    기준점 · 앱솔루트 미확인은 기준점 이동이 거절하고 그 이유가 남는다.
+    """
+    if alarm_grade > 0:
+        return 'failed', f'운영 종료 · 멈춰 있던 로봇 · 서보 알람 {alarm_grade}등급이라 주차하지 않았습니다'
+    targets = [
+        motor for motor in motors
+        if motor.get('controller_index') is not None and flags.get(int(motor['controller_index']), True)
+    ]
+    if not targets:
+        return 'skipped', '운영 종료 · 끝나면 서보를 끌 모터가 없어(모터 설정) 주차하지 않습니다'
+    off = sorted(int(motor['controller_index']) for motor in targets if motor.get('servo_on') is False)
+    if len(off) == len(targets):
+        return 'skipped', '운영 종료 · 서보가 이미 꺼져 있어 그대로 둡니다'
+    if off:
+        return 'failed', (
+            '운영 종료 · 멈춰 있던 로봇 · 서보가 꺼진 모터가 있어 주차하지 않았습니다 · '
+            f'{", ".join(map(str, off))}번'
+        )
+    return None
+
+
 class ScheduleEndService:
     def __init__(
         self,
@@ -66,6 +115,7 @@ class ScheduleEndService:
         dynamixel_torque_control: Callable[..., Dict[str, Any]],
         load_motor_registry: Callable[[], Dict[str, Any]],
         alarm_grade: Callable[[], int],
+        run_mode: Optional[Callable[[], str]] = None,
         sleep: Callable[[float], None] = time.sleep,
         monotonic: Callable[[], float] = time.monotonic,
     ) -> None:
@@ -76,6 +126,7 @@ class ScheduleEndService:
         self._dynamixel_torque_control = dynamixel_torque_control
         self._load_motor_registry = load_motor_registry
         self._alarm_grade_reader = alarm_grade
+        self._run_mode_reader = run_mode
         self._sleep = sleep
         self._monotonic = monotonic
         self._lock = threading.Lock()
@@ -155,6 +206,10 @@ class ScheduleEndService:
         if action == HOLD:
             self._set('skipped', '운영 종료 · 설정에 따라 서보를 켠 채 마지막 자세에서 정지했습니다')
             return self.status()
+        skip = self._skip()
+        if skip:
+            self._set(*skip)
+            return self.status()
         with self._lock:
             if self._thread is not None and self._thread.is_alive():
                 return dict(self._status)
@@ -162,6 +217,23 @@ class ScheduleEndService:
         self._set('waiting_cycle', '운영 종료 · 현재 애니메이션을 마무리하는 중')
         self._thread.start()
         return self.status()
+
+    def _run_mode(self) -> Optional[str]:
+        if self._run_mode_reader is None:
+            return None
+        try:
+            return str(self._run_mode_reader() or '')
+        except Exception:  # noqa: BLE001 · 못 읽으면 움직이지 않는다
+            return ''
+
+    def _skip(self) -> Optional[Tuple[str, str]]:
+        """주차하지 않을 이유 · 도는 중이면 옛 동작(회차 끝을 기다림) · 멈춰 있으면 지금 볼 수 있는 것을 본다"""
+        skip = mode_skip(self._run_mode())
+        if skip or run_state.is_running(self._motion_state()):
+            return skip
+        if self.bridge.coordination_execution_blocker():
+            return None   # 그룹 실행이 아직 안 풀렸다 · 회차 끝 기다림과 같은 길
+        return idle_park_skip(self._detected_motors(), self._registry_flags(), self._alarm_grade())
 
     def _run(self) -> None:
         try:

@@ -493,6 +493,8 @@ class MotionWebBridge(Node):
             dynamixel_torque_control=self._manual.dynamixel_torque_control,
             load_motor_registry=lambda: self._motor_config.load().get('registry') or {},
             alarm_grade=lambda: int((self._safety_status or {}).get('servo_alarm_grade') or 0),
+            # 스케줄 모드 PC 만 주차 · 수동·끔은 멈추기만 · 사용자 2026-10-13
+            run_mode=lambda: run_mode_gate.current_run_mode(self),
         )
         self._manual_stream_request_publisher = self.create_publisher(
             String, self.manual_stream_request_topic, 10
@@ -2401,7 +2403,12 @@ class MotionWebBridge(Node):
         result = self._request_motion_run('stop_after_cycle', {}, timeout_sec=2.0)
         if str(payload.get('reason') or '') == 'schedule_end' and end is not None:
             # 이미 멈춰 있어서 정지가 거절돼도 주차는 한다
-            result = {**result, 'schedule_end': end.begin()}
+            status = end.begin()
+            result = {**result, 'schedule_end': status}
+            if result.get('success') is False and status.get('state') != 'failed':
+                # 멈춰 있던 로봇 · 「반복 실행 중일 때만」 거절은 실패가 아니다 · 스케줄 화면에 빨강으로 남지 않게 · 사용자 2026-10-13
+                result = {**result, 'success': True, 'message': status.get('message') or '운영 종료 동작',
+                          'stop_message': result.get('message') or ''}
         return result
 
     def motion_group_prepare(self, payload: Dict[str, Any]) -> Dict[str, Any]:
