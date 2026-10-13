@@ -30,6 +30,7 @@ from motion_common.paths import NO_PROJECT_SELECTED
 import yaml
 
 from motion_common import store
+from motion_common.values import optional_int
 
 from motion_web_bridge.motor_runtime_store import MOTOR_BUSY_MESSAGE
 from motion_web_bridge import (
@@ -228,16 +229,11 @@ class MotorConfigService:
         self.selected = target
         motor_config_rules.write_motor_config_selection(self.repository, target)
 
-    def save(self, payload: Dict[str, Any], *, within_operation: bool = False) -> Dict[str, Any]:
-        """모터 설정 저장 · `within_operation` = 이미 연 모터 작업(「적용」) 안에서 부름 ·
-        그때는 「작업 진행 중이면 저장 안 함」 검사를 건너뛴다 · 그 작업이 바로 자기 것이라
-        자기 자물쇠에 막혀 「적용」 이 늘 실패했다(수정 목록 129 · 116 회귀 · 실물 2026-10-13) ·
-        검사는 「적용」 이 작업을 열기 전에 이미 했다"""
+    def save(self, payload: Dict[str, Any]) -> Dict[str, Any]:
         try:
-            if not within_operation:
-                self.bridge.ensure_project_mutation_allowed(
-                    self.repository.selected_project_id()
-                )
+            self.bridge.ensure_project_mutation_allowed(
+                self.repository.selected_project_id()
+            )
             target_file = self._file_from_payload(payload)
             expected_revision = str(payload.get('base_revision') or '').strip()
             if target_file.is_file():
@@ -592,11 +588,14 @@ class MotorConfigService:
         }
 
     def _refresh_boot_param_files(self) -> str:
-        """저장된 모터 설정이 가리키는 부팅 목록이 지금 설정과 다르면 같은 registry 로 다시 저장 · 수정 목록 116
+        """저장된 모터 설정이 가리키는 부팅 목록(param 파일)이 지금 설정과 다르면 **param 파일과 그 경로만** 다시 쓴다 · 수정 목록 116 · 129
 
         업데이트로 공통 설정(`config/minas_base.yaml`)이 바뀌었거나, 옛 모터 설정이 아직 플랫폼
         `param/minas.yaml` 을 가리키면(floating4 2026-10-13) 「적용」 만으로는 새 값이 안 들어갔다 ·
-        param 경로와 파일은 저장 때 만들어지므로 여기서 한 번 저장한다(`save_minas_base` 와 같은 길) ·
+        처음엔 registry 로 설정 전체를 다시 저장했는데 · ① 「적용」 이 연 모터 작업 안이라 저장 검사에 막히고
+        ② 전체 저장은 파일을 더 엄격한 꼴로 다시 만들어(식별 정보 등) 적용 준비가 거절됐다(129 · 시험) ·
+        그래서 다른 칸은 손대지 않고 MINAS 드라이버의 `param_file` 만 저장 때와 같은 규칙
+        (`minas_params.write_param_file` · 모터 칸 오버라이드)으로 바꾼다 ·
         같으면 아무것도 안 쓴다(설정 sha 가 괜히 바뀌지 않게) · 바꾼 것 한 줄을 돌려준다 · 실패는 ValueError
         """
         loaded = self.load()
@@ -604,17 +603,36 @@ class MotorConfigService:
         config_file = Path(str(loaded.get('config_file') or ''))
         if not motors or not config_file.is_file():
             return ''
-        rows = boot_params.config_differences(
-            config_file, boot_params.expected_for(self.workspace_root, motors),
-        )
+        expected = boot_params.expected_for(self.workspace_root, motors)
+        rows = boot_params.config_differences(config_file, expected)
         if not rows:
             return ''
-        result = self.save({
-            'registry': loaded['registry'],
-            'base_revision': str(loaded.get('config_revision') or ''),
-        }, within_operation=True)   # 「적용」 이 연 작업 안 · 129
-        if not result.get('success'):
-            raise ValueError(f'부팅 값을 새 설정으로 다시 만들지 못했습니다 · {result.get("message") or ""}')
+        try:
+            config = yaml.safe_load(config_file.read_text(encoding='utf-8')) or {}
+        except (OSError, yaml.YAMLError) as exc:
+            raise ValueError(f'부팅 값을 새 설정으로 다시 만들지 못했습니다 · 모터 설정을 못 읽음 · {exc}') from exc
+        by_axis = {
+            optional_int(motor.get('axis')): motor
+            for motor in motors
+            if isinstance(motor, dict) and optional_int(motor.get('axis')) is not None
+        }
+        axis_of_driver: Dict[Any, Any] = {}
+        for master in config.get('masters') or []:
+            for slave in (master.get('slaves') or []) if isinstance(master, dict) else []:
+                if isinstance(slave, dict):
+                    axis_of_driver.setdefault(optional_int(slave.get('driver_id')), optional_int(slave.get('controller_index')))
+        for driver in config.get('drivers') or []:
+            if not isinstance(driver, dict) or str(driver.get('type') or '') != 'minas':
+                continue
+            driver_id = optional_int(driver.get('id'))
+            motor = by_axis.get(axis_of_driver.get(driver_id)) or {}
+            driver['param_file'] = minas_params.write_param_file(
+                self.workspace_root, driver_id, minas_params.param_overrides(motor),
+            )
+        self._write(yaml.safe_dump(config, sort_keys=False, allow_unicode=True), config_file)
+        left = boot_params.config_differences(config_file, expected)
+        if left:
+            raise ValueError(f'부팅 값을 새 설정으로 다시 만들지 못했습니다 · {boot_params.describe(left)}')
         return boot_params.describe(rows)
 
     #: 실행 적용을 해제했을 때 「정지 중」에 붙는 마무리 문구 · 한 곳에서 쓴다

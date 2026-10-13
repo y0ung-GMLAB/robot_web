@@ -29,6 +29,9 @@ from motion_web_bridge import motor_config_rules
 from motion_web_bridge.motor_restart_coordinator import MotorRestartCoordinator
 from motion_web_bridge.motor_restart_diagnostics import diagnose_motor_restart_failure
 
+#: 「적용」 이 재시작을 요청하기 전 단계 · 이때는 실행 검증을 하지 않는다 · 수정 목록 129
+APPLY_PREPARING_PHASES = frozenset({'preparing', 'prepared'})
+
 
 #: 이 속도를 넘으면 「움직이는 중」으로 본다 (deg/s) · §6-225
 MOVING_DEG_PER_SEC = 10.0
@@ -485,6 +488,13 @@ class MotorRuntimeService:
                 runtime_status,
                 state_payload,
             )
+        if operation_type == 'motor_apply' and str(operation.get('phase') or '') in APPLY_PREPARING_PHASES:
+            # 아직 재시작을 요청하기 전 · 지금 도는 건 **옛** Motor Manager 라 「준비됨 · 새 상태 들어옴」 이
+            # 참이어도 이 적용의 결과가 아니다 · 여기서 판정하면 실행 설정 경로(`runtime_file`)가 아직 없어
+            # 「검증할 … 경로가 없습니다」 로 실패로 닫았고 · 적용은 모른 채 계속하다 「진행 중인 모터 작업이
+            # 일치하지 않습니다」 로 끝났다(수정 목록 129 · 실물 2026-10-13 20:15 · 116 이 준비를 0.4 s 로 늘려 매번) ·
+            # 제한 시간(위 timeout)은 그대로 본다
+            return operation
         last_motor_status_at = optional_float(
             state_payload.get('last_motor_status_at'), None
         )
