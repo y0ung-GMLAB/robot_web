@@ -14,14 +14,21 @@
 #
 # PC 이름 · `--name floating1` · 컴퓨터 이름(hostname)을 바꾼다 · 로봇 PC 는 이것이 `이 PC ID`(웹에서 못 바꿈) ·
 #   스피커 PC 는 「같은 망 PC」 표의 이름 · 예) ... | bash -s -- --name floating1 · ... | bash -s -- --speaker --name speaker
+#
+# 옛 스택(kimjoonho motion_web 등)이 ~/ros2_ws 에 깔린 PC · `--replace-old` · 2026-10-13
+#   옛 서비스를 멈추고 옛 폴더를 ~/ros2_ws_old_<날짜> 로 옮긴 뒤(지우지 않음) 같은 자리에 새로 설치한다 ·
+#   서비스 이름(motion-control · motion-coordination)이 같아 새 설치가 덮어쓴다 · 옛 설정·매핑은 옮기지 않는다
+#   예) ... | bash -s -- --replace-old --name floating1
 set -Eeuo pipefail
 
 SPEAKER=false
 PC_NAME=""
+REPLACE_OLD=false
 ARGS=()
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --speaker) SPEAKER=true ;;
+    --replace-old) REPLACE_OLD=true ;;
     --name) PC_NAME="${2:-}"; shift ;;
     --name=*) PC_NAME="${1#--name=}" ;;
     *) ARGS+=("$1") ;;
@@ -63,6 +70,28 @@ if [[ "$(id -u)" == "0" ]]; then
   exit 1
 fi
 
+# 옛 스택이 같은 자리에 있으면 · --replace-old 면 옮기고 새로 · 아니면 방법을 알려 주고 멈춘다
+# PC 이름을 바꾸거나 sudo 를 묻기 전에 · 멈출 거면 아무것도 바꾸지 않고 멈추게
+old_stack=false
+if [[ -d "${WORKSPACE}/.git" ]]; then
+  origin="$(git -C "${WORKSPACE}" remote get-url origin 2>/dev/null || echo '')"
+  [[ "${origin}" != *robot_web* ]] && old_stack=true
+elif [[ -e "${WORKSPACE}" ]]; then
+  origin='(git 저장소 아님)'
+  old_stack=true
+fi
+if [[ "${old_stack}" == true ]]; then
+  if [[ "${REPLACE_OLD}" != true ]]; then
+    echo "${WORKSPACE} 에 다른 프로그램이 있습니다 (${origin}) · 옛 스택(motion_web 등)이면 끝에 --replace-old 를 붙여 다시 실행하세요" >&2
+    echo "  예) curl -fsSL .../bootstrap.sh | bash -s -- --replace-old   (옛 폴더는 ${WORKSPACE}_old_<날짜> 로 옮겨 둠 · 지우지 않음)" >&2
+    exit 1
+  fi
+  moved="${WORKSPACE}_old_$(date +%Y%m%d_%H%M%S)"
+  echo "옛 스택 멈춤 · 옮김 · ${WORKSPACE} → ${moved}"
+  systemctl --user stop motion-control.service motion-coordination.service motion-motor.service motion-terminal.service motion-btop.service 2>/dev/null || true
+  mv "${WORKSPACE}" "${moved}"
+fi
+
 echo "관리자 권한이 필요합니다 · 비밀번호를 한 번만 입력하세요"
 sudo -v
 
@@ -84,11 +113,6 @@ if ! command -v git >/dev/null 2>&1 || ! command -v curl >/dev/null 2>&1; then
 fi
 
 if [[ -d "${WORKSPACE}/.git" ]]; then
-  origin="$(git -C "${WORKSPACE}" remote get-url origin 2>/dev/null || echo '')"
-  if [[ "${origin}" != *robot_web* ]]; then
-    echo "${WORKSPACE} 는 다른 저장소입니다 (${origin}) · MOTION_WORKSPACE 로 다른 폴더를 지정하세요" >&2
-    exit 1
-  fi
   if [[ -n "$(git -C "${WORKSPACE}" status --porcelain --untracked-files=no)" ]]; then
     echo "${WORKSPACE} 에 커밋되지 않은 변경이 있습니다 · 정리한 뒤 다시 실행하세요 (git -C ${WORKSPACE} status)" >&2
     exit 1
@@ -97,9 +121,6 @@ if [[ -d "${WORKSPACE}/.git" ]]; then
   git -C "${WORKSPACE}" fetch origin "${BRANCH}"
   git -C "${WORKSPACE}" checkout -q "${BRANCH}"
   git -C "${WORKSPACE}" pull --ff-only origin "${BRANCH}"
-elif [[ -e "${WORKSPACE}" ]]; then
-  echo "${WORKSPACE} 가 이미 있는데 git 저장소가 아닙니다 · 옮기거나 MOTION_WORKSPACE 로 다른 폴더를 지정하세요" >&2
-  exit 1
 else
   echo "코드 받기 · git clone"
   git clone -b "${BRANCH}" "${REPO}" "${WORKSPACE}"

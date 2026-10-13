@@ -154,6 +154,7 @@ curl -fsSL https://raw.githubusercontent.com/y0ung-GMLAB/robot_web/main/scripts/
 |---|---|
 | 다른 용도로 쓰던 PC | 그대로 됩니다 · 있는 프로그램은 지우지 않고 더하기만 합니다 · 단 자동 로그인·자동 업데이트 끄기·절전 끄기는 전시 PC 전제라 적용됩니다 · 깨끗이 하려면 우분투 재설치 뒤 한 줄 |
 | 이미 이 프로그램이 깔린 PC | 같은 한 줄 = 코드 갱신 + 현장 준비 점검 · 또는 전처럼 `bash scripts/install.sh` (현장 준비는 손대지 않음) |
+| 옛 스택(kimjoonho motion_web)이 깔린 PC | 끝에 `-s -- --replace-old` · 옛 `~/ros2_ws` 를 옮겨 두고 새로 · 아래 「옛 스택이 깔린 PC」 |
 | 인터넷이 안 되는 매장 | 한 줄 설치는 인터넷이 필요합니다 · 사무실에서 설치한 뒤 들고 가세요 |
 | 미리 보기만 | `bash scripts/install.sh --site --dry-run` · 바꾸지 않고 할 일만 찍습니다 |
 | 랜카드 지정 · 시간대 지정 | `SITE_ETHERCAT_NIC=enp2s0 SITE_TIMEZONE=Europe/Paris bash scripts/install.sh --site` |
@@ -489,6 +490,25 @@ bash scripts/install.sh
 - 새 시스템 패키지가 필요한 갱신이면 그 PC 가 「실패 · 새 시스템 패키지가 필요합니다」 → 그 PC 터미널(웹 터미널 탭도 됨)에서 위 한 줄
 - 스피커 PC 도 같이 합니다(2026-10-08 · 수정 목록 80) · 옛 스피커 앱이라 「터미널에서」 로 나오면 그 PC 터미널에서 `bash ~/robot_web/scripts/install_speaker.sh` 한 번
 - **이 기능이 들어간 버전을 한 번은 PC 마다 받아야** 그 뒤부터 웹으로 됩니다(처음 한 번은 위 한 줄)
+
+### 옛 스택(kimjoonho motion_web)이 깔린 PC · 2026-10-13
+
+옛 스택도 `~/ros2_ws` 에 깔려 있고 서비스 이름(`motion-control` · `motion-coordination` · `motion-motor` 등)도 같습니다.
+그래서 한 줄 설치를 그냥 치면 「`~/ros2_ws` 에 다른 프로그램이 있습니다」 로 멈춥니다(옛 것을 덮어쓰지 않게).
+옛 폴더를 옮겨 두고 새로 까는 옵션을 붙여 다시 칩니다.
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/y0ung-GMLAB/robot_web/main/scripts/bootstrap.sh | bash -s -- --replace-old
+# PC 이름도 바꾸려면 · ... | bash -s -- --replace-old --name floating1
+```
+
+- 하는 일 · 옛 서비스 멈춤 → `~/ros2_ws` 를 `~/ros2_ws_old_<날짜_시각>` 로 **옮김(지우지 않음)** → 새로 받기 · 빌드 · 서비스 등록(같은 이름이라 옛 서비스 자리를 덮음) · 나머지는 새 PC 한 줄 설치와 같음
+- 손으로 할 때 · `systemctl --user stop motion-control motion-coordination motion-motor` → `mv ~/ros2_ws ~/ros2_ws_old` → 위 한 줄(옵션 없이)
+- **옮겨 오지 않는 것** · 옛 프로젝트·조인트 매핑·기준점·모터 설정 · 새 화면에서 처음부터 합니다 · `설정` → 모터 관리 `전체 모터 검색` → 앱솔루트 방식 확인 → 새 프로젝트 → 조인트 매핑 → 기준점 캡처 → 그룹
+- 옛 애니메이션 `.json` 은 그대로 올릴 수 있습니다 · 옛 폴더 `~/ros2_ws_old_*/motion_projects/<프로젝트>/motions/` 에서 꺼내 웹에 드래그
+- **그룹으로 묶는 PC 는 전부 새 스택 같은 버전**이어야 합니다(그룹 프로토콜 6) · 옛 스택 PC 와 섞이면 서로 못 붙습니다
+- 새 것이 잘 돌면 옛 폴더를 지웁니다 · `rm -rf ~/ros2_ws_old_*` · 그 전에는 남겨 두면 옛 설정을 찾아볼 수 있습니다
+- 아직 실제 옛 스택 PC 에서 이 옵션을 돌려 본 적은 없습니다 · 처음 한 대는 옆에서 지켜보세요
 
 작업공간 경로를 모르면:
 
