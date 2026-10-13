@@ -319,6 +319,7 @@ class ScanOrchestrator:
                 result.get('scan'),
                 operation_type=operation_type,
                 fallback_success=result.get('success') is True,
+                dynamixel_expected=self._project_uses_dynamixel(),
             )
             result['partial'] = outcome == 'partial'
             result['success'] = outcome == 'success'
@@ -800,6 +801,16 @@ class ScanOrchestrator:
                 f'Motor Manager 복구 실패: {restore_error}'
             )
         return result
+
+    def _project_uses_dynamixel(self) -> bool:
+        """선택한 프로젝트 모터 설정에 다이나믹셀이 있나 · 못 읽으면 있다고 본다(옛 판정 그대로) · 수정 목록 120 (바)"""
+        try:
+            if not self.repository.selected_project_id():
+                return True
+            registry = (self.load_motor_config() or {}).get('registry') or {}
+        except (OSError, ValueError, TypeError, AttributeError):
+            return True
+        return motor_config_rules.registry_uses_dynamixel(registry)
 
     def _expected_runtime_axes(self) -> List[int]:
         repository = getattr(self, 'repository', None)
