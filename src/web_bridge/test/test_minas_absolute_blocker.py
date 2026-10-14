@@ -74,6 +74,35 @@ def test_motor_event_log_records_block_and_release_once(tmp_path):
     assert [event['event_type'] for event in events] == ['minas_absolute_blocked', 'minas_absolute_confirmed']
 
 
+def test_all_drives_off_is_not_logged_as_confirmed():
+    """수정 목록 142 · 드라이브 0대(state none) 동안 「앱솔루트 확인됨 · 차단 해제」 를 적지 않는다"""
+    from motion_common import minas_absolute
+    from motion_web_bridge.motor_event_log import MotorEventLog
+
+    events = []
+    log = MotorEventLog.__new__(MotorEventLog)
+    log._lock = threading.RLock()
+    log._last_minas_absolute_message = None
+    log.append = lambda **event: events.append(event)
+
+    log.record_minas_absolute_transition({'minas_absolute': BLOCKED})
+    # 드라이브 전원 꺼짐 · 슬레이브 0대 · 실제 summary([]) 가 내는 값
+    none = minas_absolute.summary([], checked_at=1.0)
+    assert none['state'] == minas_absolute.STATE_NONE
+    log.record_minas_absolute_transition({'minas_absolute': none})
+    log.record_minas_absolute_transition({'minas_absolute': none})
+    assert [event['event_type'] for event in events] == ['minas_absolute_blocked']
+
+    # 다시 켜졌는데 여전히 같은 차단 · 또 적지 않는다
+    log.record_minas_absolute_transition({'minas_absolute': BLOCKED})
+    assert [event['event_type'] for event in events] == ['minas_absolute_blocked']
+
+    # 다시 꺼졌다가 켜지고 정말 앱솔루트 · 그때 해제를 적는다
+    log.record_minas_absolute_transition({'minas_absolute': none})
+    log.record_minas_absolute_transition({'minas_absolute': {'state': 'ok'}})
+    assert [event['event_type'] for event in events] == ['minas_absolute_blocked', 'minas_absolute_confirmed']
+
+
 def test_bridge_moves_the_crash_marker_into_one_motor_event(tmp_path):
     """수정 목록 72"""
     from types import SimpleNamespace

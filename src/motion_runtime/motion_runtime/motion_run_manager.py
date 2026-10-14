@@ -415,7 +415,7 @@ class MotionRunManager(Node):
         router.register('group_join_commit', self._group.commit_join)
         router.register('set_live_override', self._set_live_override)
         router.register('stop', lambda payload: self._handle_stop())
-        router.register('stop_after_cycle', lambda payload: self._handle_stop_after_cycle())
+        router.register('stop_after_cycle', self._handle_stop_after_cycle)
         return router
 
     def _invalidate_execution_context(self, payload: Dict[str, Any]) -> Dict[str, Any]:
@@ -980,10 +980,12 @@ class MotionRunManager(Node):
             'status': self.status(),
         }
 
-    def _handle_stop_after_cycle(self) -> Dict[str, Any]:
+    def _handle_stop_after_cycle(self, payload: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
         current = self.status()
+        # 스케줄 구간 끝이면 `schedule_end` · 그룹 끝 문구를 가른다 · 수정 목록 141
+        reason = str(payload.get('reason') or '') if isinstance(payload, dict) else ''
         if current.get('group_execution'):
-            if not self._group.request_stop_after_cycle(current):
+            if not self._group.request_stop_after_cycle(current, reason):
                 # 그룹 세션도 실행 번호도 없으면 단독이다 · 아래 단독 길로 · 전에는 표시용
                 # `group_execution` 만 보고 거절해 단독 연속을 회차 후 정지로 못 멈췄다 · 수정 목록 111
                 if not str(current.get('execution_id') or '').strip():

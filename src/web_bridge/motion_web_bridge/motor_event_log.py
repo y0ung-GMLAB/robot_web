@@ -151,7 +151,10 @@ class MotorEventLog:
         if not isinstance(summary, dict):
             return
         state = str(summary.get('state') or '')
-        if state == 'checking':
+        # 드라이브 0대(전원 꺼짐 · state none)도 전환이 아니다 · 직전 문구를 그대로 둔다 · 전에는 '' 로 읽혀
+        # 직전 「Pr0.15=1 차단」 뒤에 「앱솔루트 확인됨 · 차단 해제」 로 적혔다(실물 S-4 · 2026-10-14) ·
+        # 드라이브가 돌아와 정말 앱솔루트(ok)일 때 그때 해제를 적는다 · 수정 목록 142
+        if state in ('checking', 'none'):
             return
         message = str(summary.get('message') or '') if state == 'blocked' else ''
         with self._lock:

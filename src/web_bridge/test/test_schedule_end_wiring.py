@@ -47,6 +47,25 @@ def test_schedule_end_stop_begins_parking_and_plain_stop_does_not():
     assert end.begun == 1
 
 
+def test_schedule_end_reason_reaches_the_runtime():
+    """구간 끝 이유를 런타임까지 넘긴다 · 끝 문구 「구간 끝 · 회차 후 정지」 · 수정 목록 141"""
+    end = _End()
+    bridge = MotionWebBridge.__new__(MotionWebBridge)
+    bridge.schedule_end = end
+    payloads = []
+    bridge._request_motion_run = lambda command, payload, timeout_sec=2.0: (
+        payloads.append((command, dict(payload))) or {'success': True, 'message': command}
+    )
+
+    bridge.motion_run_stop_after_cycle({'reason': 'schedule_end'})
+    bridge.motion_run_stop_after_cycle({})
+
+    assert payloads == [
+        ('stop_after_cycle', {'reason': 'schedule_end'}),
+        ('stop_after_cycle', {}),
+    ]
+
+
 def test_repeated_schedule_stops_do_not_cut_the_park_move():
     end = _End(active=True)
     bridge, sent = _bridge(end)

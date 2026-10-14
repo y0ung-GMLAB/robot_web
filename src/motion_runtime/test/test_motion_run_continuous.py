@@ -1357,7 +1357,7 @@ def test_standalone_continuous_marked_group_still_stops_after_cycle():
     from types import SimpleNamespace
     manager = MotionRunManager.__new__(MotionRunManager)
     manager._graceful_stop_event = threading.Event()
-    manager._group = SimpleNamespace(request_stop_after_cycle=lambda _current: False)
+    manager._group = SimpleNamespace(request_stop_after_cycle=lambda _current, _reason='': False)
     manager.status = lambda: {
         'state': 'running', 'run_mode': 'continuous',
         'group_execution': True, 'execution_id': '', 'group_cycle_number': 4,
@@ -1371,7 +1371,7 @@ def test_real_group_without_session_is_still_refused():
     from types import SimpleNamespace
     manager = MotionRunManager.__new__(MotionRunManager)
     manager._graceful_stop_event = threading.Event()
-    manager._group = SimpleNamespace(request_stop_after_cycle=lambda _current: False)
+    manager._group = SimpleNamespace(request_stop_after_cycle=lambda _current, _reason='': False)
     manager.status = lambda: {'state': 'running', 'group_execution': True, 'execution_id': 'exec-a'}
     result = manager._handle_stop_after_cycle()
     assert result['success'] is False
