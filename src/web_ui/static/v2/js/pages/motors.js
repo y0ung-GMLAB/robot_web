@@ -14,7 +14,7 @@ import { isRevisionConflict } from '../mapping_model.js';
 import { threeWayMerge } from '../merge_model.js';
 import { confirmConflicts } from '../conflict_dialog.js';
 import {
-  EDIT_FIELDS, absoluteJobText, absoluteLine, absoluteSummary, gainText, gainWarnings, getField, motorChanges, motorProblems, motorRows, scanConfirmText,
+  EDIT_FIELDS, absoluteJobText, absoluteLine, absoluteResumeConfirm, absoluteResumeView, absoluteSummary, gainText, gainWarnings, getField, motorChanges, motorProblems, motorRows, scanConfirmText,
   setField,
 } from '../motors_model.js';
 import { signedDeg } from '../play_model.js';
@@ -188,6 +188,22 @@ async function absoluteSetup(scope, row, state, changed) {
   });
   if (!ok) return;
   await run('앱솔루트 설정', () => api('POST', '/api/motor-config/absolute-setup', { body: { ...body, confirmed: true }, timeoutMs: 20000 }), state, changed);
+}
+
+/** 실패한 작업 이어서 하기 · 그 작업의 드라이브만 · 서버가 시리얼·기한을 다시 본다 · 수정 목록 134 */
+async function absoluteResume(state, changed) {
+  let preview;
+  try {
+    preview = await api('POST', '/api/motor-config/absolute-setup/preview', { body: { resume: true } });
+  } catch (error) { toast(error.message || String(error), 'bad'); return; }
+  if (!preview?.success) { toast(preview?.message || '이어서 할 수 없습니다', 'bad'); await loadMotors(state, changed); return; }
+  if (!await confirmBox(absoluteResumeConfirm(preview))) return;
+  await run('앱솔루트 설정 이어서 하기', () => api('POST', '/api/motor-config/absolute-setup', { body: { resume: true, confirmed: true }, timeoutMs: 20000 }), state, changed);
+}
+
+function resumeButton(resume, state, changed) {
+  return h('button', { class: 'btn btn-warn', type: 'button', disabled: Boolean(ui.busy),
+    title: ui.busy ? '다른 작업(검색·저장)이 진행 중입니다' : resume.note, onclick: () => absoluteResume(state, changed) }, resume.label);
 }
 
 /* ---------- 모터 검색 · 서버 제안 · 수정 목록 100 ---------- */
@@ -378,6 +394,7 @@ export function motorsBody(state, changed) {
   const faults = rows.filter((r) => r.fault);
   const selected = rows.find((r) => r.axis === ui.selected) || rows[0];
   const jobText = absoluteJobText(ui.job);
+  const resume = absoluteResumeView(ui.job);
   const runtime = state.snap?.service_management?.runtime || {};
   return [
     scanBox(changed),
@@ -389,8 +406,11 @@ export function motorsBody(state, changed) {
       abs.needsSetup ? h('button', { class: 'btn btn-warn', type: 'button', disabled: Boolean(ui.busy) || ui.job?.state === 'running',
         title: ui.job?.state === 'running' ? '앱솔루트 설정이 진행 중입니다' : ui.busy ? '다른 작업(검색·저장)이 진행 중입니다' : undefined, onclick: () => absoluteSetup('all', null, state, changed) }, '앱솔루트 설정 (전체)') : null),
     jobText ? h('div', { class: `blocker ${ui.job.state === 'failed' ? 'bad' : ''}` }, dot(ui.job.state === 'failed' ? 'bad' : 'info'),
-      h('span', { class: 'grow', text: jobText }),
-      ui.job.state === 'running' ? h('button', { class: 'btn', type: 'button', onclick: () => run('취소', () => api('POST', '/api/motor-config/absolute-setup/cancel'), state, changed) }, '취소') : null) : null,
+      h('span', { class: 'grow', text: resume?.inline ? `${jobText} · ${resume.note}` : jobText }),
+      ui.job.state === 'running' ? h('button', { class: 'btn', type: 'button', onclick: () => run('취소', () => api('POST', '/api/motor-config/absolute-setup/cancel'), state, changed) }, '취소') : null,
+      resume?.inline ? resumeButton(resume, state, changed) : null) : null,
+    // 웹을 다시 켠 뒤 · 다른 작업 뒤에도 실패한 작업이 남아 있으면 따로 한 줄 · 134
+    resume && !resume.inline ? h('div', { class: 'blocker bad' }, dot('bad'), h('span', { class: 'grow', text: resume.text }), resumeButton(resume, state, changed)) : null,
     faults.map((row) => h('div', { class: 'issue issue-bad' }, dot('bad'),
       h('div', { class: 'issue-text' }, h('strong', { text: `${row.axis}번 · ${row.name} · ${row.error || '알람'}` }),
         h('span', { text: '기구에 걸린 것이 없는지 확인한 뒤 오류를 초기화하고 서보를 켜세요' })),

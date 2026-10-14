@@ -62,6 +62,17 @@ test('모터·드라이브 · 모든 서보 켜기·끄기 (사용자 2026-10-12
   assert.match(body, /dynamixel\/control/);
 });
 
+test('앱솔루트 설정 이어서 하기 · 미리보기 → 확인 창 → resume 으로 시작 (수정 목록 134)', async () => {
+  const { readFileSync } = await import('node:fs');
+  const page = readFileSync(new URL('../static/v2/js/pages/motors.js', import.meta.url), 'utf8');
+  const body = page.slice(page.indexOf('async function absoluteResume'), page.indexOf('function resumeButton'));
+  assert.match(body, /absolute-setup\/preview', \{ body: \{ resume: true \} \}/);
+  assert.match(body, /confirmBox\(absoluteResumeConfirm\(preview\)\)/);
+  assert.match(body, /body: \{ resume: true, confirmed: true \}/);
+  assert.match(page, /const resume = absoluteResumeView\(ui\.job\)/);
+  assert.match(page, /resumeButton\(resume, state, changed\)/);
+});
+
 test('드라이브 공통 값 · 바뀐 칸 · 범위 검사 (수정 목록 114)', async () => {
   const { minasBaseChanges, minasBaseProblems } = await import('../static/v2/js/pages/minas_base.js');
   const rows = [

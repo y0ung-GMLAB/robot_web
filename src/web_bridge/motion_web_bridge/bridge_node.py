@@ -488,6 +488,8 @@ class MotionWebBridge(Node):
             ),
             expected_axes=self._detected_axes,
             record=self._record_absolute_setup,
+            # 실패한 작업 이어서 하기 · 웹 브리지·PC 를 다시 켜도 남게 작업 폴더 runtime/(git 밖) · 24 h · 시리얼 확인 · 134
+            resume_file=self.workspace_root / 'runtime' / 'absolute_setup_resume.json',
         )
         # 스케줄 끝 · 기준점 주차 → 서보 OFF · 다음 시작 전 다시 켜기 · 수정 목록 36
         self.schedule_end = ScheduleEndService(
