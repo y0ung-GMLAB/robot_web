@@ -75,6 +75,43 @@ test('바뀐 것 · 이름 · 설정 칸 · 체크', () => {
 test('앱솔루트 설정 일 한 줄', () => {
   assert.equal(absoluteJobText({ state: 'idle' }), '');
   assert.equal(absoluteJobText({ state: 'running', step_index: 3, step_count: 7, step_label: '전원 껐다 켜기 1' }), '앱솔루트 설정 중 · 3/7 · 전원 껐다 켜기 1');
+  assert.match(absoluteJobText({ state: 'running', resumed: true, step_index: 4, step_count: 7, step_label: '앱솔루트 방식 확인' }), /^앱솔루트 설정 이어서 하는 중 · 4\/7/);
+});
+
+test('앱솔루트 설정 이어서 하기 · 4/7 에서 실패하면 버튼 · 확인 창은 기준점 다시 캡처를 말한다 (수정 목록 134)', async () => {
+  const { absoluteResumeConfirm, absoluteResumeView } = await import('../static/v2/js/motors_model.js');
+  const resume = {
+    from_step: 'check_mode', from_index: 4, step_count: 7, failed_step: 'check_mode', failed_index: 4, failed_label: '앱솔루트 방식 확인',
+    error: '0번 모터 0x3015 읽기 실패 · Failed to upload SDO: Input/output error (11번 시도)',
+    targets: [{ label: '0번 모터' }, { label: '1번 모터' }],
+  };
+  // 방금 실패한 그 작업 · 실패 줄에 버튼만
+  const failed = absoluteResumeView({ state: 'failed', step: 'check_mode', resume });
+  assert.equal(failed.label, '이어서 하기 (4/7 부터)');
+  assert.equal(failed.inline, true);
+  assert.match(failed.note, /0번 모터, 1번 모터 · 다회전 클리어를 아직 하지 않았습니다/);
+  // 웹을 다시 켠 뒤(idle) · 따로 한 줄에 실패 이유
+  const later = absoluteResumeView({ state: 'idle', resume });
+  assert.equal(later.inline, false);
+  assert.match(later.text, /^앱솔루트 설정 실패 · 4\/7 · 앱솔루트 방식 확인 · 0번 모터 0x3015 읽기 실패/);
+  // 진행 중 · 기록 없음 → 없음
+  assert.equal(absoluteResumeView({ state: 'running', resume }), null);
+  assert.equal(absoluteResumeView({ state: 'failed', step: 'write_mode', resume: null }), null);
+  assert.equal(absoluteResumeView({ state: 'idle', resume: { ...resume, from_step: 'power_cycle_2', from_index: 6 } }).label, '이어서 하기 (6/7 부터)');
+
+  const box = absoluteResumeConfirm({
+    from_index: 4, step_count: 7, failed_index: 4, failed_label: '앱솔루트 방식 확인', error: 'Input/output error', clear_done: false,
+    steps: ['앱솔루트 방식 확인', '다회전 클리어', '드라이브 전원 껐다 켜기 2', '최종 확인'], targets: [{ label: '0번 모터' }],
+  });
+  assert.equal(box.title, '앱솔루트 설정 이어서 하기 (4/7 부터)');
+  assert.equal(box.confirmLabel, '이어서 하기');
+  assert.match(box.body, /4\. 앱솔루트 방식 확인\n5\. 다회전 클리어\n6\. 드라이브 전원 껐다 켜기 2\n7\. 최종 확인/);
+  assert.match(box.body, /다회전 클리어는 엔코더 회전 수를 0으로 초기화해 위치 값이 바뀝니다/);
+  assert.match(box.body, /기준점을 다시 캡처/);
+  assert.match(box.body, /전원을 한 번 더/);
+  const after = absoluteResumeConfirm({ from_index: 7, step_count: 7, failed_index: 7, failed_label: '최종 확인', clear_done: true, steps: ['최종 확인'], targets: [] });
+  assert.match(after.body, /다회전 클리어는 이미 했습니다.*기준점을 다시 캡처/s);
+  assert.doesNotMatch(after.body, /전원을/);
 });
 
 test('EtherCAT 주소 겹침 · 서버 저장 검사와 같은 규칙 · 저장 전에 보이게 (2026-10-12)', () => {

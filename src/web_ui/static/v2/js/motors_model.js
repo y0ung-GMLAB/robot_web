@@ -243,9 +243,49 @@ export function absoluteJobText(job) {
   if (!job || !job.state || job.state === 'idle') return '';
   const step = job.step_count ? ` · ${job.step_index ?? 0}/${job.step_count}` : '';
   const label = job.step_label ? ` · ${job.step_label}` : '';
-  const head = { running: '앱솔루트 설정 중', done: '앱솔루트 설정 완료', failed: '앱솔루트 설정 실패' }[job.state] || job.state;
+  const head = { running: job.resumed ? '앱솔루트 설정 이어서 하는 중' : '앱솔루트 설정 중', done: '앱솔루트 설정 완료', failed: '앱솔루트 설정 실패' }[job.state] || job.state;
   // 단계 이름·메시지가 머리말과 같은 말(「완료」 등)이면 한 번만
   const parts = [label, job.message, job.error].flatMap((part) => String(part || '').split(' · ')).map((part) => part.trim()).filter(Boolean);
   const unique = parts.filter((part, i) => !head.includes(part) && parts.indexOf(part) === i);
   return [`${head}${step}`, ...unique].join(' · ');
+}
+
+/** 앞서 실패한 앱솔루트 설정 「이어서 하기」 · 서버가 남긴 기록(job.resume · 웹을 다시 켜도 남음) · 진행 중엔 없음 · 수정 목록 134
+ *  inline · 방금 실패한 그 작업 · 위 줄이 이미 실패 이유를 보여 주므로 버튼만 붙인다 · 아니면 따로 한 줄 */
+export function absoluteResumeView(job) {
+  const r = job?.resume;
+  if (!r || !r.from_index || job?.state === 'running') return null;
+  const count = r.step_count || 7;
+  const drives = (r.targets || []).map((t) => t.label).filter(Boolean).join(', ');
+  const note = `${drives || '대상 드라이브'} · ${r.from_index <= 5 ? '다회전 클리어를 아직 하지 않았습니다' : '다회전 클리어는 했고 전원 재투입·확인이 남았습니다'}`;
+  const inline = job?.state === 'failed' && job?.step === r.failed_step;
+  return {
+    inline,
+    note,
+    text: [`앱솔루트 설정 실패 · ${r.failed_index}/${count} · ${r.failed_label}`, r.error, note].filter(Boolean).join(' · '),
+    label: `이어서 하기 (${r.from_index}/${count} 부터)`,
+  };
+}
+
+/** 이어서 하기 확인 창 · 미리보기(서버) 그대로 · 다회전 클리어로 위치가 바뀌어 기준점을 다시 캡처해야 함을 늘 적는다 · 134 */
+export function absoluteResumeConfirm(preview) {
+  const p = preview || {};
+  const count = p.step_count || 7;
+  const from = p.from_index || 1;
+  const steps = (p.steps || []).map((s, i) => `${from + i}. ${s}`);
+  const cycles = (p.steps || []).filter((s) => String(s).includes('전원')).length;
+  const clear = p.clear_done
+    ? '다회전 클리어는 이미 했습니다. 엔코더 회전 수가 0으로 초기화되어 위치 값이 바뀌었으므로, 끝나면 기준점을 다시 캡처해야 하며 그 전에는 재생하지 마세요.'
+    : '대상 모터의 서보를 끄고 모터 프로그램을 잠시 정지합니다. 다회전 클리어는 엔코더 회전 수를 0으로 초기화해 위치 값이 바뀝니다. 끝나면 기준점을 다시 캡처해야 하며, 그 전에는 재생하지 마세요.';
+  return {
+    title: `앱솔루트 설정 이어서 하기 (${from}/${count} 부터)`,
+    body: [
+      `앞서 ${p.failed_index ?? '?'}/${count} ${p.failed_label || ''}에서 멈춘 작업을 같은 드라이브로 이어서 합니다.${p.error ? `\n실패 이유 · ${p.error}` : ''}`,
+      `대상\n${(p.targets || []).map((t) => `· ${t.label || t.axis}`).join('\n')}`,
+      steps.join('\n'),
+      `${cycles ? `중간에 드라이브 전원을 ${cycles === 1 ? '한 번' : '두 번'} 더 껐다 켜야 합니다(화면에 안내가 나옵니다). ` : ''}${clear}`,
+    ].join('\n\n'),
+    confirmLabel: '이어서 하기',
+    tone: 'danger',
+  };
 }

@@ -46,6 +46,11 @@ motion_state 의 `minas_absolute` 로 싣는다 · 판정은 `motion_common.mina
     ③ 읽는 중에 표시가 서면 남은 SDO 는 `ethercat_mailbox` 가 보내지 않는다 → 이번 읽기는 없던 것으로
        하고(「확인 중」 그대로) 자리 잡은 뒤 다시 · 게인 다시 읽기도 같은 규칙.
     SDO 는 모두 `ethercat_mailbox.run` 으로 · 웹 브리지와 한 번에 하나.
+
+마스터가 스스로 SDO 사전을 읽는 동안도 피한다 · 수정 목록 134 (실물 S-4 · 2026-10-14)
+    재투입으로 돌아온 드라이브는 OP 뒤 몇 초 동안 마스터가 SDO 사전 목록을 읽는다(우리 잠금 밖 · 표시도 없음) ·
+    그 사이 게인 0x3002 읽기가 「SDO upload aborted」 · 「MBXERR_UNSUPPORTEDPROTOCOL」 과 겹쳤다 ·
+    상태가 그대로여야 하는 시간 `SETTLE_SEC` 을 10 s 로 늘려 그 시간을 넘긴다(실패해도 2 s 뒤 다시 읽는 것은 그대로).
 """
 
 from __future__ import annotations
@@ -65,8 +70,10 @@ UPLOAD_TIMEOUT_SEC = 2.0
 SLAVES_TIMEOUT_SEC = 3.0
 
 #: 슬레이브 상태가 이만큼 그대로여야 읽는다 · 부팅 때 PREOP → OP 전환 중엔 안 읽는다 ·
-#: 2 → 5 s · 실물 U-1b(10-13) 드라이브 재투입 직후 OP 여도 메일박스 응답이 늦어 「wrong SDO」 13 건
-SETTLE_SEC = 5.0
+#: 2 → 5 s · 실물 U-1b(10-13) 드라이브 재투입 직후 OP 여도 메일박스 응답이 늦어 「wrong SDO」 13 건 ·
+#: 5 → 10 s · 수정 목록 134 · 재투입·검색으로 다시 잡힌 슬레이브는 IgH 마스터가 스스로 SDO 사전을 읽는다(우리 잠금 밖) ·
+#: 실물 V-18 OP 뒤 6~8 s(설정 끝 표시 뒤 4~6 s)까지 0x3015 ↔ 0x603F 충돌 · 대가는 부팅·재투입 뒤 「확인 중」(동작 막음)이 5 s 길어지는 것뿐
+SETTLE_SEC = 10.0
 #: 모터 프로그램이 마스터를 잡고 있는데 OP 가 아닌 슬레이브가 있을 때 · 이만큼 그대로여야 읽는다 · 125 ·
 #: 설정 중이면 PREOP → SAFEOP → OP 로 몇 초 안에 바뀐다 · 이만큼 그대로면 설정 실패(E)나 설정 안 된 슬레이브
 STUCK_SEC = 30.0
