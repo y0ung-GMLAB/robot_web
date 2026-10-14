@@ -11,7 +11,10 @@
 #   SITE_ETHERLAB_VERSION   EtherLab 태그 (기본 1.6.9 · README 검증 버전)
 #   SITE_SCAN=1             자가 점검에서 모터 스캔 1회 (최대 50초)
 #
-# 시험용 덮어쓰기 · SITE_GDM_CONF · SITE_ETHERCAT_CONF · SITE_STATE_DIR
+# EtherLab 은 SDO 사전 읽기 끄기 패치(patches/igh-1.6.9-sdo-dict-off.patch)를 넣어 빌드한다 · 수정 목록 139 ·
+# 이미 깔린 PC 는 커널 모듈만 다시 빌드(make install 안 함 · PC 마다 깔린 자리가 다름)
+#
+# 시험용 덮어쓰기 · SITE_GDM_CONF · SITE_ETHERCAT_CONF · SITE_STATE_DIR · SITE_ETHERLAB_PATCH · SITE_SYS_MODULE_DIR
 #
 # 수작업으로 남는 것 · BIOS 「전원 복구 시 켜기」 1회 · 로봇 팩·모터 설정(웹)
 
@@ -353,35 +356,217 @@ site_firewall() {
 # 5단계 · EtherCAT (EtherLab/IgH) · 빌드에 **항상** 필요 · 모터에 쓰는 건 랜카드가 있을 때
 # ------------------------------------------------------------------ #
 
-site_etherlab_ready() {
-  command -v ethercat >/dev/null 2>&1 && modinfo ec_master >/dev/null 2>&1 \
-    && { [[ -f /usr/local/include/ecrt.h ]] || [[ -f /usr/include/ecrt.h ]] || [[ -s /opt/etherlab/include/ecrt.h ]]; }
+# IgH 1.6.9 패치 · SDO 사전 자동 읽기 끄기(모듈 파라미터 sdo_dict · 기본 0) · 수정 목록 139 (2026-10-14)
+#   마스터가 재스캔마다 SDO 사전을 저절로 읽어 우리 `ethercat upload/download` 와 메일박스를 다투다
+#   드라이브 메일박스가 멈췄다 · 우리는 사전을 안 쓴다(모든 호출이 `-t`) · 자세히 docs/수정_139_IgH_패치.md
+#   재빌드 서비스(/usr/local/sbin 에서 돈다 · 작업공간 경로 모름)는 고정 자리에 둔 사본을 읽는다
+SITE_ETHERLAB_PATCH="${SITE_ETHERLAB_PATCH:-${SITE_SETUP_DIR}/patches/igh-1.6.9-sdo-dict-off.patch}"
+SITE_ETHERLAB_PATCH_INSTALLED="${SITE_ETHERLAB_PATCH_INSTALLED:-/usr/local/share/robot_web/igh-sdo-dict-off.patch}"
+SITE_ETHERLAB_CONFIGURE="--disable-8139too --enable-generic=yes"
+
+# 깔린 IgH CLI 자리 · stdout · 없으면 빈 줄 · 자리는 PC 마다 다르다(install.sh ethercat_search_roots 주석 ·
+# 피시1·2 /opt/etherlab · 피시3 /usr/local/etherlab · floating4 /usr/local 손 빌드)
+#   있으면 「이미 깔림」 → 모듈만 다시 빌드 · 옛 판정(site_etherlab_ready)은 CLI 가 PATH 에 없거나 헤더가
+#   /usr/local/etherlab 같은 자리에 있으면 「없음」 으로 보고 /usr/local 에 한 벌 더 깔 수 있었다 · 139
+site_etherlab_cli() {
+  local root
+  if command -v ethercat >/dev/null 2>&1; then
+    command -v ethercat
+    return 0
+  fi
+  for root in /opt/etherlab /usr/local/etherlab /usr/local /usr /opt/ethercat; do
+    if [[ -x "${root}/bin/ethercat" ]]; then
+      echo "${root}/bin/ethercat"
+      return 0
+    fi
+  done
+}
+
+# 깔린(지금 올라간 것이 아니라 modprobe 가 고를) ec_master 에 sdo_dict 파라미터가 있나 · 139
+# pipefail 아래 `modinfo | grep -q` 는 grep 이 먼저 끝나면 실패로 보일 수 있어 받아 두고 본다
+site_etherlab_patched() {
+  local params
+  params="$(modinfo -p ec_master 2>/dev/null || true)"
+  grep -q '^sdo_dict:' <<<"${params}"
+}
+
+# 패치 넣기 · 멱등 · 이미 들어갔으면 그대로 · 안 맞으면(IgH 버전이 바뀜) 멈춘다 · $1 소스 폴더
+site_etherlab_apply_patch() {
+  local src="$1"
+  if [[ "${SITE_DRY_RUN}" == "1" ]]; then
+    echo "  [dry-run] sudo git -C ${src} apply ${SITE_ETHERLAB_PATCH} (이미 들어갔으면 건너뜀 · SDO 사전 읽기 끄기 · 수정 목록 139)"
+    return 0
+  fi
+  if sudo git -C "${src}" apply --reverse --check "${SITE_ETHERLAB_PATCH}" 2>/dev/null; then
+    site_note "IgH 패치 이미 들어감 · $(basename "${SITE_ETHERLAB_PATCH}")"
+    return 0
+  fi
+  if ! sudo git -C "${src}" apply --check "${SITE_ETHERLAB_PATCH}"; then
+    site_warn "IgH 패치가 소스(${src})에 안 맞음 · IgH 버전(${SITE_ETHERLAB_VERSION}) 확인 · 패치는 1.6.9 용 · 수정 목록 139 · 설치를 멈춥니다"
+    return 1
+  fi
+  sudo git -C "${src}" apply "${SITE_ETHERLAB_PATCH}" || return 1
+  site_note "IgH 패치 적용 · $(basename "${SITE_ETHERLAB_PATCH}") (SDO 사전 자동 읽기 끔 · sdo_dict=0)"
+}
+
+# 돌고 있는(또는 부팅 때 돌) ethercat.service 가 읽는 ethercat.conf · stdout · 못 찾으면 빈 줄
+#   ExecStart 의 `ethercatctl -c 설정` → ethercatctl 안의 ETHERCAT_CONFIG= (configure 의 sysconfdir) →
+#   ethercatctl 옆 ../etc → 아는 자리들
+site_ethercat_active_conf() {
+  local exec_line ctl conf
+  exec_line="$({ systemctl cat ethercat 2>/dev/null || true; } | sed -n 's/^ExecStart=[-@!+:]*//p' | tail -1)"
+  if [[ -n "${exec_line}" ]]; then
+    conf="$(printf '%s\n' "${exec_line}" | awk '{ for (i = 1; i < NF; i++) if ($i == "-c") { print $(i + 1); exit } }')"
+    if [[ -n "${conf}" && -f "${conf}" ]]; then
+      echo "${conf}"
+      return 0
+    fi
+    ctl="${exec_line%% *}"
+    if [[ -f "${ctl}" ]]; then
+      conf="$(sed -n 's/^[[:space:]]*ETHERCAT_CONFIG="\{0,1\}\([^"$[:space:]]*\)"\{0,1\}[[:space:]]*$/\1/p' "${ctl}" | tail -1)"
+      if [[ -n "${conf}" && -f "${conf}" ]]; then
+        echo "${conf}"
+        return 0
+      fi
+      conf="$(dirname "$(dirname "${ctl}")")/etc/ethercat.conf"
+      if [[ -f "${conf}" ]]; then
+        echo "${conf}"
+        return 0
+      fi
+    fi
+  fi
+  for conf in "${SITE_ETHERCAT_CONF}" /opt/etherlab/etc/ethercat.conf /usr/local/etherlab/etc/ethercat.conf /etc/ethercat.conf; do
+    if [[ -f "${conf}" ]]; then
+      echo "${conf}"
+      return 0
+    fi
+  done
+}
+
+# ethercat.conf 의 DEVICE_MODULES 값 · stdout · 따옴표·뒤 주석 뺌 · 실행(source)하지 않고 읽기만
+site_ethercat_device_modules_from() {
+  sed -n 's/^[[:space:]]*DEVICE_MODULES=//p' "$1" 2>/dev/null | tail -1 \
+    | sed -e 's/[[:space:]]#.*$//' -e 's/^"\(.*\)"[[:space:]]*$/\1/' -e "s/^'\(.*\)'[[:space:]]*\$/\1/" \
+    | awk '{ $1 = $1; print }'
+}
+
+# generic 말고 다른 랜카드 전용 모듈(r8169 · igb …)이 있으면 1 · 비어 있으면 0
+#   모듈만 다시 빌드할 때 우리는 generic 만 만든다 · 옛 전용 모듈은 새 ec_master 와 짝이 안 맞는다
+site_ethercat_generic_only() {
+  local module
+  for module in $1; do
+    [[ "${module}" == "generic" ]] || return 1
+  done
+  return 0
+}
+
+# 이미 깔린 PC · 커널 모듈만 다시 빌드 (CLI·라이브러리·ethercatctl·서비스는 그대로) · 139
+#   `make install` 을 하면 PC 마다 다른 자리(/opt/etherlab · /usr/local/etherlab)에 깔린 것과 별개로
+#   /usr/local 에 CLI·라이브러리·ethercatctl·서비스가 한 벌 더 생긴다 · 그래서 모듈만 바꾼다
+#   같은 1.6.9 라 ioctl 버전이 같다 · 버전이 다르면 모듈만 바꿨을 때 CLI·라이브러리와 어긋나므로 멈춘다
+site_etherlab_build_modules() {
+  local cli version conf modules before after
+  cli="$(site_etherlab_cli)"
+  version="$("${cli:-ethercat}" version 2>/dev/null | head -1 || true)"
+  if ! grep -Eq "master ${SITE_ETHERLAB_VERSION//./\\.}([^0-9.]|$)" <<<"${version}"; then
+    site_warn "깔린 EtherLab(${cli:-?} · ${version:-버전 미상})이 ${SITE_ETHERLAB_VERSION} 이 아님 · 모듈만 바꾸면 CLI·라이브러리와 어긋남 · 손으로 · 수정 목록 139 · 설치를 멈춥니다"
+    return 1
+  fi
+  conf="$(site_ethercat_active_conf)"
+  if [[ -n "${conf}" ]]; then
+    modules="$(site_ethercat_device_modules_from "${conf}")"
+    if ! site_ethercat_generic_only "${modules}"; then
+      site_warn "EtherCAT 설정(${conf}) DEVICE_MODULES=\"${modules}\" · generic 이 아님 · 모듈만 다시 빌드하면 그 랜카드 전용 모듈이 새 ec_master 와 안 맞음 · 손으로 · 수정 목록 139 · 설치를 멈춥니다"
+      return 1
+    fi
+    site_note "EtherCAT 설정 · ${conf} · DEVICE_MODULES=\"${modules}\""
+  else
+    site_note "EtherCAT 설정 파일 없음 · 랜카드 설정은 다음 단계에서 (generic)"
+  fi
+  before="$(modinfo -n ec_master 2>/dev/null || true)"
+  site_run sudo apt install -y autoconf automake libtool pkg-config build-essential git gcc-12 g++-12 ethtool "linux-headers-$(uname -r)" || return 1
+  if [[ ! -d "${SITE_ETHERLAB_SRC}/.git" ]]; then
+    site_run sudo git clone --depth 1 --branch "${SITE_ETHERLAB_VERSION}" "${SITE_ETHERLAB_REPO}" "${SITE_ETHERLAB_SRC}" || return 1
+  fi
+  site_etherlab_apply_patch "${SITE_ETHERLAB_SRC}" || return 1
+  if [[ "${SITE_DRY_RUN}" == "1" ]]; then
+    echo "  [dry-run] (cd ${SITE_ETHERLAB_SRC} && ./bootstrap && ./configure ${SITE_ETHERLAB_CONFIGURE} && make modules && sudo make modules_install && sudo depmod) · 모듈만 · make install 안 함"
+    return 0
+  fi
+  # `( set -e … ) || …` 안에서는 set -e 가 꺼진다 · && 로 잇는다
+  # shellcheck disable=SC2086
+  (
+    cd "${SITE_ETHERLAB_SRC}" \
+      && sudo ./bootstrap \
+      && sudo ./configure ${SITE_ETHERLAB_CONFIGURE} \
+      && sudo make -j"$(nproc)" modules \
+      && sudo make modules_install \
+      && sudo depmod
+  ) || { site_warn "EtherLab 모듈 빌드 실패 · ${SITE_ETHERLAB_SRC} · 수정 목록 139"; return 1; }
+  site_etherlab_verify_built
+  after="$(modinfo -n ec_master 2>/dev/null || true)"
+  if [[ -n "${before}" && "${before}" != "${after}" ]]; then
+    site_warn "ec_master 자리가 바뀜 · 전 ${before} → 지금 ${after} · 옛 파일은 지우지 않음"
+  fi
+}
+
+# 새로 깐 모듈(modprobe 가 고를 파일)에 sdo_dict 가 있나 · 없으면 경고만
+site_etherlab_verify_built() {
+  if [[ "${SITE_DRY_RUN}" == "1" ]]; then
+    echo "  [dry-run] modinfo -p ec_master | grep sdo_dict (새 모듈 확인)"
+    return 0
+  fi
+  if site_etherlab_patched; then
+    site_note "새 ec_master · $(modinfo -n ec_master 2>/dev/null) · sdo_dict 있음"
+  else
+    site_warn "새로 깐 ec_master 에 sdo_dict 가 없음 · $(modinfo -n ec_master 2>/dev/null || echo 모듈 없음) · 다른 자리(updates/ 등)의 옛 모듈이 먼저 잡히는지 확인 · 수정 목록 139"
+  fi
+}
+
+# 깔기만 하면 지금 올라가 있는 모듈은 그대로 · 옛 모듈이 올라가 있으면 사람이 할 일을 찍는다(설치 중에 모터를 멈추지 않는다)
+#   처음 설치(아직 안 올라감)면 다음 단계 `systemctl enable --now ethercat` 이 새 모듈을 올린다
+site_etherlab_reload_hint() {
+  [[ "$(site_sdo_dict_value)" == "없음" ]] || return 0
+  site_warn "지금 올라가 있는 EtherCAT 모듈은 아직 옛 것(SDO 사전 읽기 켜짐) · 모터 정지 확인(재생·조그 없음 · 서보 오프) 뒤 순서대로 · 수정 목록 139"
+  echo "       systemctl --user stop motion-motor.service"
+  echo "       sudo systemctl restart ethercat"
+  echo "       systemctl --user start motion-motor.service"
+  echo "     확인 · cat /sys/module/ec_master/parameters/sdo_dict → 0"
 }
 
 site_ethercat_install() {
-  if site_etherlab_ready; then
-    site_note "EtherLab 이미 설치됨 · $(ethercat version 2>/dev/null | head -1)"
+  local cli
+  cli="$(site_etherlab_cli)"
+  if [[ -n "${cli}" ]] && site_etherlab_patched; then
+    site_note "EtherLab 이미 설치됨 · $("${cli}" version 2>/dev/null | head -1) · SDO 사전 읽기 끄기 패치 들어감"
+  elif [[ -n "${cli}" ]]; then
+    echo "EtherLab 이미 설치됨(${cli}) · 커널 모듈만 다시 빌드 (SDO 사전 읽기 끄기 패치 · 수정 목록 139 · 몇 분)"
+    site_etherlab_build_modules || return 1
   else
-    echo "EtherLab ${SITE_ETHERLAB_VERSION} 설치 (범용 드라이버 · 소스 빌드 · 몇 분)"
-    site_run sudo apt install -y autoconf automake libtool pkg-config build-essential git gcc-12 g++-12 ethtool "linux-headers-$(uname -r)"
+    echo "EtherLab ${SITE_ETHERLAB_VERSION} 설치 (범용 드라이버 · 소스 빌드 · SDO 사전 읽기 끄기 패치 · 몇 분)"
+    site_run sudo apt install -y autoconf automake libtool pkg-config build-essential git gcc-12 g++-12 ethtool "linux-headers-$(uname -r)" || return 1
     if [[ ! -d "${SITE_ETHERLAB_SRC}/.git" ]]; then
-      site_run sudo git clone --depth 1 --branch "${SITE_ETHERLAB_VERSION}" "${SITE_ETHERLAB_REPO}" "${SITE_ETHERLAB_SRC}"
+      site_run sudo git clone --depth 1 --branch "${SITE_ETHERLAB_VERSION}" "${SITE_ETHERLAB_REPO}" "${SITE_ETHERLAB_SRC}" || return 1
     fi
+    site_etherlab_apply_patch "${SITE_ETHERLAB_SRC}" || return 1
     if [[ "${SITE_DRY_RUN}" == "1" ]]; then
-      echo "  [dry-run] (cd ${SITE_ETHERLAB_SRC} && ./bootstrap && ./configure --disable-8139too --enable-generic=yes && make all modules && sudo make modules_install install && sudo depmod && sudo ldconfig)"
+      echo "  [dry-run] (cd ${SITE_ETHERLAB_SRC} && ./bootstrap && ./configure ${SITE_ETHERLAB_CONFIGURE} && make all modules && sudo make modules_install install && sudo depmod && sudo ldconfig)"
     else
+      # shellcheck disable=SC2086
       (
-        cd "${SITE_ETHERLAB_SRC}"
-        sudo ./bootstrap
-        sudo ./configure --disable-8139too --enable-generic=yes
-        sudo make -j"$(nproc)" all modules
-        sudo make modules_install install
-        sudo depmod
-        sudo ldconfig
-      )
+        cd "${SITE_ETHERLAB_SRC}" \
+          && sudo ./bootstrap \
+          && sudo ./configure ${SITE_ETHERLAB_CONFIGURE} \
+          && sudo make -j"$(nproc)" all modules \
+          && sudo make modules_install install \
+          && sudo depmod \
+          && sudo ldconfig
+      ) || { site_warn "EtherLab 빌드·설치 실패 · ${SITE_ETHERLAB_SRC}"; return 1; }
     fi
+    site_etherlab_verify_built
   fi
-  echo "커널 업데이트 뒤 자동 재빌드 (부팅 때 모듈 없으면 다시 만든다)"
+  echo "커널 업데이트 뒤 자동 재빌드 (부팅 때 모듈이 없거나 패치가 빠졌으면 다시 만든다)"
+  site_run sudo install -D -m 0644 "${SITE_ETHERLAB_PATCH}" "${SITE_ETHERLAB_PATCH_INSTALLED}"
   site_run sudo install -m 0755 "${SITE_SETUP_DIR}/ethercat-rebuild.sh" /usr/local/sbin/ethercat-rebuild
   site_run sudo install -m 0644 "${SITE_SETUP_DIR}/ethercat-rebuild.service" /etc/systemd/system/ethercat-rebuild.service
   site_run sudo systemctl daemon-reload
@@ -508,6 +693,28 @@ auto_upgrades_off() {
   fi
 }
 
+# 올라가 있는 ec_master 의 sdo_dict · stdout · 0 이면 SDO 사전 자동 읽기 꺼짐 · 수정 목록 139
+#   「없음」 = 패치 안 된 옛 모듈 · 「안 올라감」 = 모듈이 아직 안 올라감
+site_sdo_dict_value() {
+  local sys="${SITE_SYS_MODULE_DIR:-/sys/module}/ec_master"
+  if [[ ! -d "${sys}" ]]; then
+    echo 안 올라감
+  elif [[ -r "${sys}/parameters/sdo_dict" ]]; then
+    tr -d '[:space:]' < "${sys}/parameters/sdo_dict"
+  else
+    echo 없음
+  fi
+}
+
+site_sdo_dict_detail() {
+  case "$1" in
+    0) echo "sdo_dict=0" ;;
+    없음) echo "패치 안 된 옛 모듈이 올라가 있음 · 모터 서비스 멈춤 → sudo systemctl restart ethercat → 모터 서비스 시작 · 수정 목록 139" ;;
+    "안 올라감") echo "ec_master 안 올라감 · sudo systemctl status ethercat" ;;
+    *) echo "sdo_dict=$1 · 켜져 있음 · echo 0 | sudo tee /sys/module/ec_master/parameters/sdo_dict · 수정 목록 139" ;;
+  esac
+}
+
 site_check_row() {
   local ok="$1" what="$2" detail="$3"
   if [[ "${ok}" == "1" ]]; then printf '  [OK]   %-28s %s\n' "${what}" "${detail}"; else printf '  [확인] %-28s %s\n' "${what}" "${detail}"; SITE_CHECK_FAILED=1; fi
@@ -538,6 +745,9 @@ site_selfcheck() {
     phase="$({ ethercat master 2>/dev/null || true; } | awk -F: '/Phase/ { gsub(/^ +/, "", $2); print $2; exit }')"
     site_check_row "$([[ -n "${phase}" ]] && echo 1 || echo 0)" "EtherCAT master" "${phase:-응답 없음 · 모터 전원·랜선·sudo systemctl status ethercat}"
     site_check_row 1 "EtherCAT slaves" "$({ ethercat slaves 2>/dev/null || true; } | wc -l)대"
+    local sdo_dict
+    sdo_dict="$(site_sdo_dict_value)"
+    site_check_row "$([[ "${sdo_dict}" == "0" ]] && echo 1 || echo 0)" "EtherCAT SDO 사전 읽기 꺼짐" "$(site_sdo_dict_detail "${sdo_dict}")"
   else
     site_check_row 1 "EtherCAT" "설정 없음 (다이나믹셀 전용)"
   fi

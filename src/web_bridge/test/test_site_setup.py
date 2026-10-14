@@ -91,8 +91,13 @@ def test_local_networks_come_from_the_ip_addresses():
 
 
 def test_dry_run_site_install_changes_nothing_and_lists_every_step(tmp_path):
+    # dry-run 은 sudo 가 필요 없다 · 진짜 sudo 는 `sudo ufw status` 에서 비밀번호를 기다려 멈춘다(WSL)
+    fake = tmp_path / 'bin'
+    fake.mkdir()
+    _fake(fake, 'sudo', 'exit 1')
     env = {
-        'SITE_TIMEZONE': 'Asia/Seoul',
+        'PATH': f'{fake}{os.pathsep}{os.environ["PATH"]}',
+        'SITE_TIMEZONE': 'Pacific/Kiritimati',   # 이 PC 시간대와 달라야 set-timezone 줄이 찍힌다
         'SITE_GDM_CONF': str(tmp_path / 'gdm.conf'),
         'SITE_ETHERCAT_CONF': str(tmp_path / 'ethercat.conf'),
         'SITE_STATE_DIR': str(tmp_path / 'state'),
@@ -107,9 +112,12 @@ def test_dry_run_site_install_changes_nothing_and_lists_every_step(tmp_path):
     linger = out.split('(linger)', 1)[-1].split('자동 로그인', 1)[0]
     assert 'loginctl enable-linger' in linger or '이미 켜져 있음' in linger, linger
     for command in ['20auto-upgrades', 'AutomaticLoginEnable=true',
-                    'timedatectl set-timezone Asia/Seoul', '--enable-generic=yes', '99-ethercat.rules',
-                    'ethercat-rebuild.service', 'UPDOWN_INTERFACES="eth9"', 'systemctl enable --now ethercat']:
+                    'timedatectl set-timezone Pacific/Kiritimati', '--enable-generic=yes', '99-ethercat.rules',
+                    'ethercat-rebuild.service', 'UPDOWN_INTERFACES="eth9"', 'systemctl enable --now ethercat',
+                    # SDO 사전 읽기 끄기 패치 · 빌드 전에 · 재빌드 훅이 읽을 고정 자리 · 수정 목록 139
+                    'igh-1.6.9-sdo-dict-off.patch', '/usr/local/share/robot_web/igh-sdo-dict-off.patch']:
         assert command in out, command
+    assert out.index(' apply ') < out.index('./bootstrap')
     # 바꾼 것이 없다
     assert not (tmp_path / 'gdm.conf').exists()
     assert not (tmp_path / 'ethercat.conf').exists()
@@ -195,10 +203,274 @@ def test_the_stale_motor_config_sample_with_absolute_paths_is_gone():
 def test_ethercat_rebuild_hook_exits_quietly_when_the_module_exists(tmp_path):
     fake = tmp_path / 'bin'
     fake.mkdir()
-    (fake / 'modinfo').write_text('#!/bin/sh\nexit 0\n', encoding='utf-8')
-    (fake / 'modinfo').chmod(0o755)
+    # 모듈이 있고 SDO 사전 읽기 끄기 패치(sdo_dict)도 있어야 바로 끝난다 · 수정 목록 139
+    _fake(fake, 'modinfo', 'if [ "$1" = "-p" ]; then echo "sdo_dict:Fetch SDO dictionaries automatically (0 = off) (uint)"; fi\nexit 0')
     result = _bash(f'PATH="{fake}:$PATH" bash "{SCRIPTS / "setup" / "ethercat-rebuild.sh"}"')
     assert result.returncode == 0 and result.stdout == ''
+
+
+# ------------------------------------------------------------------ #
+# 수정 목록 139 · IgH SDO 사전 자동 읽기 끄기 패치 · 설치(site.sh) · 커널 재빌드(ethercat-rebuild.sh)
+# ------------------------------------------------------------------ #
+
+LINUX_SHELL = Path('/usr/bin/awk').exists()
+IGH_PATCH = SCRIPTS / 'setup' / 'patches' / 'igh-1.6.9-sdo-dict-off.patch'
+REBUILD = SCRIPTS / 'setup' / 'ethercat-rebuild.sh'
+
+
+def _fake(directory, name, body):
+    path = directory / name
+    path.write_text(f'#!/bin/sh\n{body}\n', encoding='utf-8')
+    path.chmod(0o755)
+    return path
+
+
+# 패치 시험용 작은 소스 · IgH 소스는 저장소에 없다 · 진짜 패치가 1.6.9 에 맞는지는 문서 A(floating4 빌드)와 수동 확인
+TOY_SOURCE = 'one\ntwo\nthree\n'
+TOY_PATCH = (
+    'diff --git a/a.txt b/a.txt\n'
+    '--- a/a.txt\n'
+    '+++ b/a.txt\n'
+    '@@ -1,3 +1,3 @@\n'
+    ' one\n'
+    '-two\n'
+    '+TWO\n'
+    ' three\n'
+)
+
+
+def _toy_source(tmp_path):
+    src = tmp_path / 'src'
+    src.mkdir()
+    (src / 'a.txt').write_text(TOY_SOURCE, encoding='utf-8', newline='\n')
+    patch = tmp_path / 'toy.patch'
+    patch.write_bytes(TOY_PATCH.encode())
+    return src, patch
+
+
+def test_igh_patch_is_a_clean_lf_git_patch_with_the_fetch_off_by_default(tmp_path):
+    raw = IGH_PATCH.read_bytes()
+    assert b'\r' not in raw and raw.endswith(b'\n'), 'LF · 끝 줄바꿈 (git apply 가 줄 끝까지 비교)'
+    text = raw.decode('utf-8')
+    assert '+unsigned int ec_sdo_dict = 0;' in text, '기본 0 = 사전 자동 읽기 안 함'
+    assert '+module_param_named(sdo_dict, ec_sdo_dict, uint, S_IRUGO | S_IWUSR);' in text
+    assert '+        if (!ec_sdo_dict' in text
+    # IgH 소스는 4 칸 들여쓰기 · 탭이 섞이면 1.6.9 에 안 맞는다
+    assert '\t' not in text
+    numstat = _bash(f'git apply --numstat "{IGH_PATCH}"', cwd=tmp_path)    # 저장소 밖에서 · 패치 형식만 본다
+    assert numstat.returncode == 0, numstat.stderr
+    assert [line.split('\t')[2] for line in numstat.stdout.splitlines()] == [
+        'master/fsm_master.c', 'master/globals.h', 'master/module.c']
+    attributes = (WORKSPACE / '.gitattributes').read_text(encoding='utf-8')
+    assert '* text=auto eol=lf' in attributes, '체크아웃 때 CRLF 로 바뀌면 패치가 안 맞는다'
+
+
+@pytest.mark.skipif(not LINUX_SHELL, reason='리눅스 셸에서')
+def test_patch_apply_is_idempotent_and_stops_the_install_when_it_does_not_fit(tmp_path):
+    src, patch = _toy_source(tmp_path)
+    fake = tmp_path / 'bin'
+    fake.mkdir()
+    _fake(fake, 'sudo', 'exec "$@"')
+    env = {'PATH': f'{fake}{os.pathsep}{os.environ["PATH"]}', 'SITE_ETHERLAB_PATCH': str(patch)}
+    call = f'source "{SITE}"; site_etherlab_apply_patch "{src}"'
+
+    first = _bash(call, env)
+    assert first.returncode == 0, first.stderr
+    assert '적용' in first.stdout and (src / 'a.txt').read_text(encoding='utf-8') == 'one\nTWO\nthree\n'
+    again = _bash(call, env)
+    assert again.returncode == 0 and '이미 들어감' in again.stdout
+    assert (src / 'a.txt').read_text(encoding='utf-8') == 'one\nTWO\nthree\n', '두 번 넣지 않는다'
+
+    (src / 'a.txt').write_text('one\nzwei\nthree\n', encoding='utf-8', newline='\n')     # 다른 버전 소스
+    refused = _bash(call, env)
+    assert refused.returncode == 1
+    assert '안 맞음' in refused.stderr and '수정 목록 139' in refused.stderr
+    assert (src / 'a.txt').read_text(encoding='utf-8') == 'one\nzwei\nthree\n'
+
+
+def test_dry_run_shows_the_patch_step_and_where_the_rebuild_hook_finds_it():
+    out = _site('site_etherlab_apply_patch /usr/local/src/ethercat', {'SITE_DRY_RUN': '1'})
+    assert '[dry-run] sudo git -C /usr/local/src/ethercat apply' in out
+    assert 'igh-1.6.9-sdo-dict-off.patch' in out
+    source = SITE.read_text(encoding='utf-8')
+    assert '/usr/local/share/robot_web/igh-sdo-dict-off.patch' in source
+    assert '/usr/local/share/robot_web/igh-sdo-dict-off.patch' in REBUILD.read_text(encoding='utf-8')
+
+
+def _installed_pc(tmp_path, *, version='1.6.9 b709e581', device_modules='"generic"', exec_args='start',
+                  patched=False):
+    """이미 깔린 PC 흉내 · CLI · 모듈(패치 없음) · ethercat.service → ethercatctl → ethercat.conf"""
+    fake = tmp_path / 'bin'
+    fake.mkdir()
+    (tmp_path / 'etc').mkdir()
+    conf = tmp_path / 'etc' / 'ethercat.conf'
+    conf.write_text(f'MASTER0_DEVICE="aa:bb:cc:dd:ee:02"\nDEVICE_MODULES={device_modules}  # 랜카드 드라이버\n',
+                    encoding='utf-8', newline='\n')
+    ctl = tmp_path / 'ethercatctl'
+    ctl.write_text('#!/bin/sh\nif [ "$1" = "-c" ]; then\n    ETHERCAT_CONFIG="$2"\nelse\n'
+                   f'    ETHERCAT_CONFIG="{conf}"\nfi\n', encoding='utf-8', newline='\n')
+    sdo = '; echo "sdo_dict:Fetch SDO dictionaries automatically (0 = off) (uint)"' if patched else ''
+    _fake(fake, 'ethercat', f'[ "$1" = "version" ] && echo "IgH EtherCAT master {version}"\nexit 0')
+    _fake(fake, 'modinfo', f'case "$1" in -p) echo "debug_level:Debug level (uint)"{sdo} ;; '
+                           '-n) echo /lib/modules/x/ethercat/master/ec_master.ko;; esac\nexit 0')
+    _fake(fake, 'systemctl', f'[ "$1" = "cat" ] && printf "[Service]\\nExecStart={ctl} {exec_args}\\n"\nexit 0')
+    _fake(fake, 'sudo', 'exec "$@"')
+    env = {
+        'PATH': f'{fake}{os.pathsep}{os.environ["PATH"]}',
+        'SITE_DRY_RUN': '1',
+        'SITE_ETHERLAB_SRC': str(tmp_path / 'src'),
+        'SITE_ETHERCAT_CONF': str(tmp_path / 'none.conf'),
+        'SITE_SYS_MODULE_DIR': str(tmp_path / 'sys'),
+    }
+    return env, conf
+
+
+@pytest.mark.skipif(not LINUX_SHELL, reason='리눅스 셸에서')
+def test_installed_but_unpatched_pc_rebuilds_only_the_kernel_modules(tmp_path):
+    """PC 마다 IgH 가 다른 자리에 깔려 있다(/opt/etherlab · /usr/local/etherlab · /usr/local) ·
+    `make install` 을 하면 /usr/local 에 CLI·라이브러리·ethercatctl 이 한 벌 더 생긴다 → 모듈만"""
+    env, conf = _installed_pc(tmp_path)
+    result = _bash(f'set -Eeuo pipefail; source "{SITE}"; site_ethercat_install', env)
+    assert result.returncode == 0, result.stdout + result.stderr
+    out = result.stdout
+    assert '커널 모듈만 다시 빌드' in out
+    assert f'EtherCAT 설정 · {conf} · DEVICE_MODULES="generic"' in out
+    assert 'git clone --depth 1 --branch 1.6.9' in out
+    assert f'sudo git -C {tmp_path / "src"} apply' in out
+    assert 'make modules && sudo make modules_install && sudo depmod' in out
+    assert 'modules_install install' not in out and 'ldconfig' not in out, 'make install 안 함'
+    assert out.index(' apply ') < out.index('./bootstrap'), '패치가 빌드 전에'
+    assert 'install -D -m 0644' in out and 'igh-sdo-dict-off.patch' in out
+    assert 'ethercat-rebuild.service' in out
+
+
+@pytest.mark.skipif(not LINUX_SHELL, reason='리눅스 셸에서')
+def test_patched_pc_builds_nothing(tmp_path):
+    env, _ = _installed_pc(tmp_path, patched=True)
+    result = _bash(f'set -Eeuo pipefail; source "{SITE}"; site_ethercat_install', env)
+    assert result.returncode == 0, result.stderr
+    assert '패치 들어감' in result.stdout
+    assert 'bootstrap' not in result.stdout and ' apply ' not in result.stdout
+
+
+@pytest.mark.skipif(not LINUX_SHELL, reason='리눅스 셸에서')
+def test_modules_only_rebuild_refuses_a_native_nic_driver(tmp_path):
+    env, conf = _installed_pc(tmp_path, device_modules='"generic r8169"')
+    result = _bash(f'set -Eeuo pipefail; source "{SITE}"; site_ethercat_install', env)
+    assert result.returncode != 0
+    assert 'DEVICE_MODULES="generic r8169"' in result.stderr and '수정 목록 139' in result.stderr
+    assert str(conf) in result.stderr
+    assert 'bootstrap' not in result.stdout and ' apply ' not in result.stdout, '아무것도 안 바꾸고 멈춤'
+
+
+@pytest.mark.skipif(not LINUX_SHELL, reason='리눅스 셸에서')
+def test_modules_only_rebuild_refuses_another_igh_version(tmp_path):
+    env, _ = _installed_pc(tmp_path, version='1.5.2 abc')
+    result = _bash(f'source "{SITE}"; site_ethercat_install', env)
+    assert result.returncode == 1
+    assert '1.6.9 이 아님' in result.stderr and 'bootstrap' not in result.stdout
+
+
+@pytest.mark.skipif(not LINUX_SHELL, reason='리눅스 셸에서')
+def test_active_ethercat_conf_follows_the_service(tmp_path):
+    # ethercatctl 안의 ETHERCAT_CONFIG (configure sysconfdir) · `-c` 분기의 "$2" 는 무시
+    env, conf = _installed_pc(tmp_path)
+    assert _site('site_ethercat_active_conf', env).strip() == str(conf)
+    # ExecStart 에 -c 설정 이 있으면 그것
+    other = tmp_path / 'other.conf'
+    other.write_text('DEVICE_MODULES=generic\n', encoding='utf-8')
+    second = tmp_path / 'b'
+    second.mkdir()
+    env, _ = _installed_pc(second, exec_args=f'-c {other} start')
+    assert _site('site_ethercat_active_conf', env).strip() == str(other)
+
+
+def test_device_modules_are_read_without_running_the_conf(tmp_path):
+    conf = tmp_path / 'ethercat.conf'
+    cases = {
+        'DEVICE_MODULES="generic"\n': 'generic',
+        'DEVICE_MODULES=generic\n': 'generic',
+        "DEVICE_MODULES='generic igb'  # 주석\n": 'generic igb',
+        'DEVICE_MODULES="r8169"\n#DEVICE_MODULES="generic"\n': 'r8169',
+        'DEVICE_MODULES=""\n': '',
+        'DEVICE_MODULES="e1000e"\nDEVICE_MODULES="generic"\n': 'generic',
+    }
+    for text, expected in cases.items():
+        conf.write_text(text, encoding='utf-8', newline='\n')
+        assert _site(f'site_ethercat_device_modules_from "{conf}"').strip() == expected, text
+    assert _bash(f'source "{SITE}"; site_ethercat_generic_only "generic"').returncode == 0
+    assert _bash(f'source "{SITE}"; site_ethercat_generic_only ""').returncode == 0
+    assert _bash(f'source "{SITE}"; site_ethercat_generic_only "generic r8169"').returncode == 1
+
+
+def test_sdo_dict_check_row_reads_the_loaded_module(tmp_path):
+    sys_dir = tmp_path / 'sys'
+    env = {'SITE_SYS_MODULE_DIR': str(sys_dir)}
+    assert _site('site_sdo_dict_value', env).strip() == '안 올라감'
+    (sys_dir / 'ec_master' / 'parameters').mkdir(parents=True)
+    assert _site('site_sdo_dict_value', env).strip() == '없음'
+    assert 'systemctl restart ethercat' in _site('site_sdo_dict_detail 없음')
+    (sys_dir / 'ec_master' / 'parameters' / 'sdo_dict').write_text('0\n', encoding='utf-8')
+    assert _site('site_sdo_dict_value', env).strip() == '0'
+    assert 'EtherCAT SDO 사전 읽기 꺼짐' in SITE.read_text(encoding='utf-8')
+    check = (SCRIPTS / 'check.sh').read_text(encoding='utf-8')
+    assert 'EtherCAT SDO 사전 읽기 꺼짐' in check and '/sys/module/ec_master/parameters/sdo_dict' in check
+    assert _bash(f'bash -n "{SCRIPTS / "check.sh"}"').returncode == 0
+
+
+@pytest.mark.skipif(not LINUX_SHELL, reason='리눅스 셸에서')
+def test_ethercat_rebuild_patches_then_builds_modules_only(tmp_path):
+    src, patch = _toy_source(tmp_path)
+    configure = src / 'configure'
+    configure.write_text('#!/bin/sh\nexit 0\n', encoding='utf-8')
+    configure.chmod(0o755)
+    state = tmp_path / 'state'
+    state.mkdir()
+    fake = tmp_path / 'bin'
+    fake.mkdir()
+    log = tmp_path / 'make.log'
+    _fake(fake, 'make', f'echo "make $*" >> "{log}"\n[ "$1" = "modules_install" ] && touch "{state}/built"\nexit 0')
+    _fake(fake, 'depmod', 'exit 0')
+    _fake(fake, 'dpkg', 'exit 0')
+    _fake(fake, 'modinfo', f'case "$1" in -p) [ -f "{state}/built" ] && echo "sdo_dict:x (uint)";; '
+                           '-n) echo /lib/modules/x/ethercat/master/ec_master.ko;; esac\nexit 0')
+    env = {'PATH': f'{fake}{os.pathsep}{os.environ["PATH"]}', 'ETHERLAB_SRC': str(src), 'ETHERLAB_PATCH': str(patch)}
+
+    first = _bash(f'bash "{REBUILD}"', env)
+    assert first.returncode == 0, first.stdout + first.stderr
+    assert 'sdo_dict)가 없다' in first.stdout and 'IgH 패치 적용' in first.stdout and '재빌드 완료' in first.stdout
+    assert (src / 'a.txt').read_text(encoding='utf-8') == 'one\nTWO\nthree\n'
+    made = log.read_text(encoding='utf-8').split()
+    assert 'install' not in made, '모듈만 · CLI·라이브러리는 그대로'
+    assert log.read_text(encoding='utf-8').splitlines()[1:] == ['make modules_install']
+
+    # 패치된 모듈이면 그냥 끝 · --force 면 다시(패치는 두 번 안 넣음)
+    assert _bash(f'bash "{REBUILD}"', env).stdout == ''
+    forced = _bash(f'bash "{REBUILD}" --force', env)
+    assert forced.returncode == 0 and '이미 들어감' in forced.stdout
+    assert (src / 'a.txt').read_text(encoding='utf-8') == 'one\nTWO\nthree\n'
+
+    # 소스가 다른 버전이면 패치 없는 모듈을 만들지 않고 멈춤
+    (src / 'a.txt').write_text('one\nzwei\nthree\n', encoding='utf-8', newline='\n')
+    log.unlink()
+    refused = _bash(f'bash "{REBUILD}" --force', env)
+    assert refused.returncode == 1 and '수정 목록 139' in refused.stderr
+    assert not log.exists()
+
+    assert _bash(f'bash "{REBUILD}" --what', env).returncode == 2
+
+
+@pytest.mark.skipif(not LINUX_SHELL, reason='리눅스 셸에서')
+def test_ethercat_rebuild_needs_the_installed_patch_file(tmp_path):
+    src, _ = _toy_source(tmp_path)
+    (src / 'configure').write_text('#!/bin/sh\nexit 0\n', encoding='utf-8')
+    fake = tmp_path / 'bin'
+    fake.mkdir()
+    _fake(fake, 'modinfo', 'exit 0')       # 모듈은 있는데 sdo_dict 없음
+    env = {'PATH': f'{fake}{os.pathsep}{os.environ["PATH"]}', 'ETHERLAB_SRC': str(src),
+           'ETHERLAB_PATCH': str(tmp_path / 'missing.patch')}
+    result = _bash(f'bash "{REBUILD}"', env)
+    assert result.returncode == 1 and '패치 파일이 없다' in result.stderr
 
 
 def test_wayland_off_line_is_added_once_and_keeps_autologin(tmp_path):
