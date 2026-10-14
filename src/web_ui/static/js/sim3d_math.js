@@ -244,3 +244,62 @@ export function blenderHoldsAnimation(info, file) {
   const stem = (value) => String(value || '').trim().replace(/\.json$/i, '').toLowerCase();
   return [file.id, file.filename].some((value) => value && names.includes(stem(value)));
 }
+
+
+/* ---------- Blender 뷰 · json 값으로 노드 돌리기 · 수정 목록 98 ---------- */
+
+/** 팩에 조인트 → 노드가 적혀 있나 · 있으면 어떤 애니메이션이든 json 값으로 */
+export function blenderUsesJoints(info) {
+  return Boolean(info?.available) && Boolean(info?.joints) && Object.keys(info.joints).length > 0;
+}
+
+/** Blender 뷰를 켤 수 있나 · 조인트 방식이면 애니메이션 하나만 고르면 · 아니면 옛 방식(60) */
+export function blenderViewAllowed(info, file) {
+  if (!info?.available || !file) return false;
+  return blenderUsesJoints(info) || blenderHoldsAnimation(info, file);
+}
+
+/** 그 시각의 조인트 값(rad) · 서버가 고른 시각표 · 두 점 사이 선형 · 끝 밖은 끝 값 */
+export function sampleJointValues(payload, seconds) {
+  const out = {};
+  const joints = payload?.joints || {};
+  const fps = Number(payload?.fps) || 25;
+  const count = Number(payload?.sample_count) || 0;
+  if (!count) return out;
+  const position = Math.min(Math.max(Number(seconds) || 0, 0) * fps, count - 1);
+  const index = Math.floor(position);
+  const frac = position - index;
+  for (const [name, values] of Object.entries(joints)) {
+    const a = Number(values[index]);
+    const b = Number(values[Math.min(index + 1, values.length - 1)]);
+    if (Number.isFinite(a) && Number.isFinite(b)) out[name] = a + (b - a) * frac;
+  }
+  return out;
+}
+
+/** 축(단위 벡터) · 각도(rad) → 쿼터니언 [x, y, z, w] */
+function axisAngleQuaternion(axis, angle) {
+  const [x, y, z] = axis;
+  const length = Math.hypot(x, y, z) || 1;
+  const half = angle / 2;
+  const s = Math.sin(half) / length;
+  return [x * s, y * s, z * s, Math.cos(half)];
+}
+
+/** a × b · 노드 회전 = 기본 자세 × 축 회전 (노드 로컬 축) */
+function multiplyQuaternion(a, b) {
+  const [ax, ay, az, aw] = a;
+  const [bx, by, bz, bw] = b;
+  return [
+    aw * bx + ax * bw + ay * bz - az * by,
+    aw * by - ax * bz + ay * bw + az * bx,
+    aw * bz + ax * by - ay * bx + az * bw,
+    aw * bw - ax * bx - ay * by - az * bz,
+  ];
+}
+
+/** 조인트 하나의 노드 회전 · json 에 없는 조인트는 0(기본 자세) */
+export function jointNodeRotation(base, axis, values, name) {
+  const angle = Number(values?.[name]);
+  return multiplyQuaternion(base, axisAngleQuaternion(axis, Number.isFinite(angle) ? angle : 0));
+}

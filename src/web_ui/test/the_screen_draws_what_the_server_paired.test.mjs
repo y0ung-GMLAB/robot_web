@@ -151,25 +151,24 @@ test('every scan kind puts what it found into the list', () => {
 });
 
 // --------------------------------------------------------------------------- //
-// 검색한 것으로 갈아 끼운다 · §6-219
+// 검색한 것으로 갈아 끼운다 · §6-219 → 목록은 서버가 제안한다 · 수정 목록 100
 //
-// 검색한 통로의 축을 전부 지우고 이번 검색이 찾은 것으로 채운다 ·
-// 검색하지 않은 통로는 건드리지 않는다.
+// 화면은 서버 제안(`proposed_registry`)을 받아 갈아 끼우기만 한다 · 모터 줄을 스스로
+// 만들지 않는다(두 화면이 같은 규칙을 쓰게) · 검색한 통로만 바꾸는 판단 · 이름 지키기 ·
+// 번호 매기기는 서버(test_scan_proposal.py) 몫이다.
 // --------------------------------------------------------------------------- //
 
-test('any scan replaces the whole list', () => {
+test('a scan puts the server proposal into the list', () => {
   const code = readFileSync(new URL('../static/js/motor_config.js', import.meta.url), 'utf8');
   const adopt = code.slice(code.indexOf('function adoptScanIntoDraft()'));
   const body = adopt.slice(0, adopt.indexOf('\n  }\n'));
 
-  // 기존 목록을 지우고 찾은 것으로 채운다
+  assert.match(body, /proposed_registry/);
   assert.match(body, /axisConfig\.motors = \[\];/);
-  // 사람이 붙인 이름은 남긴다
-  assert.match(body, /namesById/);
-  // 통로별로 반쪽만 바꾸지 않는다
-  assert.doesNotMatch(body, /scanned_transports/);
-  assert.doesNotMatch(body, /unreachable/);
-  assert.doesNotMatch(body, /ethercat_scan/);
+  // 같은 제안을 두 번 넣지 않는다(시간 초과로 빈 응답이면 옛 제안이 남는다)
+  assert.match(body, /proposal === adoptedProposal/);
+  // 화면이 줄을 만들지 않는다
+  assert.doesNotMatch(body, /scanRowToMotor|rawAcServoScanRow|rawDynamixelDevice|namesById/);
 });
 
 test('only pressing 설정 저장 writes the file', () => {

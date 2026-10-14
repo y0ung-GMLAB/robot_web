@@ -64,6 +64,6 @@ test('playback timing problems are summarised on one line', () => {
   assert.equal(traceTimingText({ timing: { late_count: 0, skipped_samples: 0, max_late_ms: 3 } }), '');
   assert.equal(
     traceTimingText({ timing: { late_count: 2, skipped_samples: 4, max_late_ms: 100 } }),
-    '늦은 프레임 2 · 최대 100.0 ms · 건너뜀 4',
+    '늦은 프레임 2개 · 최대 100.0 ms · 건너뛴 샘플 4개',
   );
 });

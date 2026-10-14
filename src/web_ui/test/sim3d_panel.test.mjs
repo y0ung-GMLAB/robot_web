@@ -35,7 +35,7 @@ test('the viewer follows the registered animation by default · 「실물과 같
   // 재생 목록이면 지금 도는 애니를 따라간다 · 수정 목록 35
   assert.match(data, /sim3d\.update\(\{ file: selectedFile, registeredFile: followTarget \}\);/);
   // 「실물과 같이」 = 3D 구역 안 체크 · 기본 켬 · 모션 패널의 「MuJoCo 같이 보기」 는 없앴다 (86)
-  assert.match(indexHtml, /<input id="sim3dFollowToggle" type="checkbox" checked><span>실물과 같이<\/span>/);
+  assert.match(indexHtml, /<input id="sim3dFollowToggle" type="checkbox" checked><span>동시 재생<\/span>/);
   assert.doesNotMatch(indexHtml, /motionRunMujocoToggle|MuJoCo 같이 보기/);
   assert.doesNotMatch(data, /motionRunMujocoToggle|toggleMujocoCompanion/);
   const viewer = read('../static/js/sim3d.js');

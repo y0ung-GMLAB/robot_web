@@ -9,13 +9,13 @@
         <div id="manualModeBanner" class="manual-mode-banner hidden" role="status">
           <div>
             <strong id="manualModeBannerTitle">스케줄 모드입니다</strong>
-            <span id="manualModeBannerDetail">수동 조작(조그·다이얼·동작·페이더)은 「수동」 모드에서만 됩니다 · 스케줄이 빈틈에 재생을 켜면 만지던 모터가 움직일 수 있습니다</span>
+            <span id="manualModeBannerDetail">수동 조작(조그·다이얼·페이더)은 「수동」 모드에서만 할 수 있습니다. 스케줄 모드에서는 스케줄이 재생을 다시 시작해 조작하던 모터가 움직일 수 있습니다</span>
           </div>
           <button id="manualModeSwitchButton" class="primary" type="button">수동 모드로 전환</button>
         </div>
         <div class="workspace-guide" aria-label="수동 조작 사용 순서">
           <strong>사용 순서</strong>
-          <ol><li>모터 선택</li><li>서보 준비</li><li>조그·동작</li><li>결과 확인</li></ol>
+          <ol><li>모터 선택</li><li>서보 준비</li><li>조그·다이얼</li><li>결과 확인</li></ol>
         </div>
 
         <section class="motion-test-card motion-test-top" aria-label="시험할 모터 선택">
@@ -46,13 +46,13 @@
               </div>
             </div>
           </div>
-          <div id="acServoControlMessage" class="registry-message">선택 모터를 제어합니다. 전체 AC 서보 명령과 모터별 상태 관리는 모터 관리 화면에 있습니다.</div>
+          <div id="acServoControlMessage" class="registry-message">선택한 모터를 제어합니다. 전체 AC 서보 명령과 모터별 상태 관리는 「모터 설정」 화면에 있습니다.</div>
         </section>
 
         <section class="motion-test-card manual-fader-card" aria-label="페이더 · 실시간 드래그">
           <div class="section-head">
             <strong>페이더 · 실시간 드래그</strong>
-            <span>조인트 매핑 기준 · 잡는 동안만 전송 · 놓으면 그 자리에 섭니다</span>
+            <span>조인트 매핑 기준 · 잡고 있는 동안에만 움직이고, 놓으면 그 자리에서 정지합니다</span>
           </div>
           <div id="manualFaderMessage" class="registry-message">조인트 매핑 확인 중</div>
           <div id="manualFaderList" class="manual-fader-list" aria-label="조인트 페이더 목록"></div>
@@ -122,7 +122,7 @@
                 <!-- 다이얼 ON/OFF · 끄면 다이얼만 잠근다 · 칸은 그대로(옆 칸 밀림 없음) · 수정 목록 52
                      화면을 열면 늘 OFF (84) -->
                 <button id="jogDialEnabledSwitch" type="button" class="jog-dial-switch" role="switch" aria-checked="false"
-                  title="다이얼 켜기·끄기 · 끄면 끌기·휠·방향키·◀ ▶ 를 무시합니다 · 목표 위치 이동은 그대로 · 화면을 열면 늘 OFF">다이얼 OFF</button>
+                  title="다이얼 켜기·끄기 · 끄면 끌기·휠·방향키·◀ ▶를 무시합니다. 목표 위치 이동은 그대로 쓸 수 있습니다. 화면을 열면 항상 꺼져 있습니다.">다이얼 OFF</button>
                 <div class="jog-wheel-arrows" role="group" aria-label="한 칸씩 이동">
                   <button id="jogDialMinus" type="button" class="jog-wheel-arrow" disabled aria-label="한 칸 −" title="한 칸 − · 길게 누르면 반복">◀</button>
                   <button id="jogDialPlus" type="button" class="jog-wheel-arrow" disabled aria-label="한 칸 +" title="한 칸 + · 길게 누르면 반복">▶</button>
@@ -148,20 +148,20 @@
                 <div class="jog-dial-pending-row">
                   <div id="jogDialPending" class="jog-dial-pending mono">대기</div>
                   <button id="jogDialCancelPending" class="off" type="button"
-                    title="다이얼이 몰던 것을 놓고 움직이는 이동을 멈춥니다 · 서보 ON 유지">동작 취소</button>
+                    title="다이얼 조작을 끝내고 진행 중인 이동을 정지합니다. 서보는 켠 채 유지합니다.">동작 취소</button>
                 </div>
                 <div class="jog-target-row">
                   <label class="manual-field">
                     <span id="jogTargetLabel">목표 위치 (모터 deg · 감속·기어비 미적용)</span>
                     <input id="jogTargetInput" class="mono" type="number" inputmode="decimal" step="any"
-                      title="이동할 모터 위치 · 모터 운전 한계 안 · 「이동」 또는 Enter · 속도·가속은 모터 설정 한계를 따릅니다">
+                      title="이동할 모터 위치(운전 한계 안) · 「이동」 또는 Enter로 이동합니다. 속도·가속은 모터 설정의 한계를 따릅니다.">
                   </label>
                   <button id="jogTargetMoveButton" class="primary" type="button" disabled>이동</button>
                 </div>
-                <div class="jog-dial-capture" role="group" aria-label="지금 위치 찍기">
-                  <button id="jogDialSetLower" type="button" disabled title="지금 모터 위치를 − limit 으로 · 조인트 매핑 범위에 저장 · 모터 운전 한계는 자동 계산">− limit</button>
-                  <button id="jogDialSetReference" type="button" disabled title="지금 모터 위치를 기준점(모션 0°)으로 · 조인트 매핑에 저장">기준점 지정</button>
-                  <button id="jogDialSetUpper" type="button" disabled title="지금 모터 위치를 + limit 으로 · 조인트 매핑 범위에 저장 · 모터 운전 한계는 자동 계산">+ limit</button>
+                <div class="jog-dial-capture" role="group" aria-label="현재 위치 지정">
+                  <button id="jogDialSetLower" type="button" disabled title="현재 모터 위치를 − limit으로 지정해 조인트 매핑 범위에 저장합니다. 모터 운전 한계는 자동으로 계산합니다.">− limit</button>
+                  <button id="jogDialSetReference" type="button" disabled title="현재 모터 위치를 기준점(조인트 0°)으로 지정해 조인트 매핑에 저장합니다.">기준점 지정</button>
+                  <button id="jogDialSetUpper" type="button" disabled title="현재 모터 위치를 + limit으로 지정해 조인트 매핑 범위에 저장합니다. 모터 운전 한계는 자동으로 계산합니다.">+ limit</button>
                 </div>
                 <div id="jogDialMessage" class="jog-dial-message" role="status"></div>
               </div>
@@ -176,7 +176,7 @@
             <div class="motion-test-stop-bar">
               <div>
                 <strong>모터 동작 정지</strong>
-                <span>수동 조작의 조그·동작을 멈추고 서보 ON 상태를 유지합니다</span>
+                <span>조그·다이얼 이동을 정지하고 서보는 켠 채 유지합니다</span>
               </div>
               <button id="motionTestStopButton" class="off motion-test-stop-button" type="button">모터 동작 정지</button>
             </div>
@@ -184,7 +184,7 @@
             <div class="motion-test-stop-bar manual-initialize-bar">
               <div>
                 <strong>초기 위치 이동</strong>
-                <span>조인트 매핑의 「초기 위치」대로 천천히 이동합니다 · 조그·다이얼이 움직이는 중에는 꺼집니다</span>
+                <span>조인트 매핑의 「초기 위치」 설정대로 천천히 이동합니다. 조그·다이얼로 움직이는 중에는 누를 수 없습니다.</span>
               </div>
               <button id="manualInitializeButton" class="primary" type="button" disabled>초기 위치 이동</button>
             </div>
@@ -225,7 +225,7 @@
                 <strong>실제 요청 결과</strong>
                 <span id="motionTestActualState">대기</span>
               </div>
-              <pre id="motionTestActualText">실제 동작 전송 전입니다</pre>
+              <pre id="motionTestActualText">아직 보낸 명령이 없습니다</pre>
             </section>
           </div>
         </section>

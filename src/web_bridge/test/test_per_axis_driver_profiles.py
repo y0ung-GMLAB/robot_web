@@ -17,7 +17,19 @@ from motion_web_bridge.motor_config_build import (
     motor_config_from_registry,
 )
 
+import pytest
+
+from motion_web_bridge import minas_params
+
 WORKSPACE = Path(__file__).resolve().parents[3]
+
+
+@pytest.fixture(autouse=True)
+def _param_files_in_tmp(tmp_path, monkeypatch):
+    """MINAS 마다 param 파일을 만든다(수정 목록 113) · 저장소 `config/` 에 쓰지 않게 임시 폴더로"""
+    original = minas_params.write_param_file
+    monkeypatch.setattr(minas_params, 'write_param_file',
+                        lambda _root, driver_id, overrides: original(tmp_path, driver_id, overrides))
 
 
 def _motor(axis, *, name=None, model='MADLN05BE', **config_overrides):
@@ -51,7 +63,7 @@ def _slave(config, axis):
         for slave in master.get('slaves', []):
             if slave.get('controller_index') == axis:
                 return slave
-    raise AssertionError(f'축 {axis} 슬레이브가 없다')
+    raise AssertionError(f'{axis}번 모터 슬레이브가 없다')
 
 
 def _driver(config, driver_id):

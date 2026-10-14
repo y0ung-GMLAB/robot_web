@@ -77,7 +77,7 @@ def test_an_unapplied_context_blocks():
 
 def test_the_runtime_answer_is_passed_through_last():
     """앞의 셋이 통과하면 기존 판단(모터 상태·연결)이 답한다."""
-    assert _reason(runtime='실행할 모터축이 없습니다') == '실행할 모터축이 없습니다'
+    assert _reason(runtime='실행할 모터가 없습니다') == '실행할 모터가 없습니다'
 
 
 def test_nothing_wrong_means_no_reason():

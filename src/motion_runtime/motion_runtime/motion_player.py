@@ -484,6 +484,14 @@ class MotionPlayer:
             status['lifecycle'] = self.manager._current_lifecycle()
             self.manager._set_status(status)
         except Exception as exc:
+            if self.manager._stop_event.is_set():
+                # 정지를 눌렀다 · 그 사이 다른 검사가 먼저 걸렸어도 사람이 멈춘 것 · 112 다 · 106 나
+                status = motion_run_rules._status_from_plan('stopped', '초기 위치 이동 정지', plan)
+                status['phase'] = 'stopped'
+                status['phase_finished_at'] = time.time()
+                status['lifecycle'] = self.manager._current_lifecycle()
+                self.manager._set_status(status)
+                return
             self.manager.get_logger().error(f'initial position move failed\n{traceback.format_exc()}')
             status = motion_run_rules._status_from_plan('error', f'초기 위치 이동 실패: {exc}', plan)
             status['phase'] = 'error'
@@ -758,6 +766,15 @@ class MotionPlayer:
             status['cycle_count'] = cycle_count
             self.manager._set_status(status)
         except Exception as exc:
+            if self.manager._stop_event.is_set():
+                # 정지를 눌렀다 · 「정지 처리 중」 등 다른 검사가 먼저 걸렸어도 오류가 아니다 · 수정 목록 112 다
+                self._trace_finish(trace, 'stopped', '정지')
+                status = motion_run_rules._status_from_plan('stopped', '모션 실행 정지', plan)
+                status['phase'] = 'stopped'
+                status['phase_finished_at'] = time.time()
+                status['lifecycle'] = self.manager._current_lifecycle()
+                self.manager._set_status(status)
+                return
             self._trace_finish(trace, 'error', str(exc))
             self.manager.get_logger().error(f'motion run failed\n{traceback.format_exc()}')
             if self._hand_to_auto_recovery(plan, exc):
@@ -1148,6 +1165,11 @@ class MotionPlayer:
         )
         if cycle <= 0:
             return {}
+        # 단독 연속 재생도 회차 번호는 있다 · 전에는 그것만 보고 `group_execution` 을 붙여
+        # 회차 사이 초기 이동을 한 번 지나면 단독이 그룹으로 보였고 「이번 회차 후 정지」 가
+        # 「활성 그룹 실행이 없습니다」 로 거절됐다 · 수정 목록 111 (2026-10-12 floating4)
+        if not (plan.get('group_execution') or plan.get('execution_id')):
+            return {'current_cycle': cycle}
         return {
             'group_execution': True,
             'execution_id': str(
@@ -1172,6 +1194,33 @@ class MotionPlayer:
             if remaining <= 0.0:
                 return []
             time.sleep(min(max(self.manager.period_sec, 0.01), 0.05, remaining))
+
+    #: 감독이 정지 처리 중일 때 재생 정지 요청을 기다리는 최대 시간 · 수정 목록 112 다
+    STOP_REQUEST_GRACE_SEC = 1.0
+
+    def _waits_for_stop_request(self) -> bool:
+        """막힌 이유가 「정지 처리 중」 뿐이면 재생 정지 요청을 잠깐 기다린다 · 오면 참
+
+        알람 · 긴급 정지 · 앱솔루트 같은 진짜 차단이면 기다리지 않는다(오류로 남아야 한다).
+        """
+        stop_event = getattr(self.manager, '_stop_event', None)
+        if stop_event is None:
+            return False
+        deadline = time.monotonic() + self.STOP_REQUEST_GRACE_SEC
+        while True:
+            if stop_event.is_set():
+                return True
+            safety = self._latest_safety_status()
+            settling_only = (
+                bool(safety.get('motion_stop_settling'))
+                and not safety.get('emergency_latched')
+                and not safety.get('minas_absolute_blocked')
+                and int(safety.get('servo_alarm_grade') or 0) < 2
+                and not safety.get('servo_alarm_grade3_latched')
+            )
+            if not settling_only or time.monotonic() >= deadline:
+                return stop_event.is_set()
+            time.sleep(0.02)
 
     def _latest_safety_status(self) -> Dict[str, Any]:
         lock = getattr(self.manager, '_safety_status_lock', None)
@@ -1583,6 +1632,10 @@ class MotionPlayer:
         ]
         error = self.manager._playback_ownership_error(axes=axis_numbers)
         if error:
+            if self._waits_for_stop_request():
+                # 사람이 누른 정지 · 화면은 감독에게 먼저 정지를 보내고 그 다음 재생에 정지를 보낸다 ·
+                # 그 사이에 이 검사가 「전체 동작 정지 처리 중」 을 먼저 봐서 오류로 끝났다 · 수정 목록 112 다
+                raise InterruptedError()
             raise RuntimeError(error)
         # 내 축 가운데 통신이 끊긴 축이 있으면 멈춘다 · 재생 기록에는 오류로 남는다 ·
         # 수정 목록 3-1

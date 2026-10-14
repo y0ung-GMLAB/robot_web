@@ -11,5 +11,23 @@
 <!-- UI v2 · 뼈대 + 홈 · 설계안 2026-10-09 · 기존 화면은 / 그대로 -->
 <div id="app" class="app"><p class="booting">불러오는 중…</p></div>
 <script type="module" src="/static/v2/js/main.js"></script>
+<script>
+  // 화면 모듈을 못 읽으면(옛 파일이 캐시에 남음 · 업데이트 중 · 연결 끊김) 「불러오는 중」 에서 멈추지 않게 알린다
+  setTimeout(function () {
+    var box = document.querySelector('#app .booting');
+    if (!box) return;
+    box.textContent = '화면을 못 불러왔습니다 · 업데이트 직후면 강력 새로 고침(Ctrl+Shift+R) · 계속되면 이전 UI(/)로 ';
+    var again = document.createElement('button');
+    again.textContent = '다시 불러오기';
+    again.className = 'btn';
+    again.onclick = function () { location.reload(); };
+    var old = document.createElement('a');
+    old.href = '/';
+    old.textContent = '이전 UI';
+    old.className = 'btn';
+    box.appendChild(again);
+    box.appendChild(old);
+  }, 8000);
+</script>
 </body>
 </html>

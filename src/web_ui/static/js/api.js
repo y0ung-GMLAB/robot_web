@@ -59,7 +59,7 @@ async function projectFetch(input, options = {}) {
     return response;
   } catch (error) {
     if (controller?.signal.aborted) {
-      throw new Error(`상태 응답 시간 초과 · ${Math.round(timeout / 1000)}초`);
+      throw new Error(`서버 응답 시간 초과 · ${Math.round(timeout / 1000)}초`);
     }
     throw error;
   } finally {
@@ -126,7 +126,7 @@ async function readJson(response, { projectScoped = true } = {}) {
     // 서버가 앞서 갔다 · 버릴 것이 아니라 따라가야 한다 · §6-140
     setProjectGeneration(responseGeneration);
     if (projectAheadHandler) projectAheadHandler(responseGeneration);
-    const error = new Error('프로젝트 설정이 바뀌어 다시 읽습니다');
+    const error = new Error('프로젝트 설정이 바뀌어 다시 불러옵니다');
     error.staleProjectResponse = true;
     error.projectMovedAhead = responseGeneration;
     throw error;
@@ -221,7 +221,8 @@ export const fetchServoAlarmPolicy = () => request('GET', '/api/servo-alarm-poli
 
 export const saveServoAlarmPolicy = (overrides) => request('PUT', '/api/servo-alarm-policy', { body: { overrides } });
 
-export const restartManagedProgram = () => request('POST', '/api/system/program/restart');
+/** 재생 중이면 서버가 `needs_stop` 으로 거절 · `{ stop_first: true }` 면 정지 뒤 다시 시작 · 수정 목록 144 */
+export const restartManagedProgram = (body = {}) => request('POST', '/api/system/program/restart', { body, timeoutMs: 20000 });
 
 export const createDesktopShortcut = () => request('POST', '/api/system/desktop-shortcut');
 
@@ -406,6 +407,10 @@ export const exportPreviewScene = () => request('POST', '/api/preview/scene/expo
 export const fetchPreviewSceneData = () => request('GET', '/api/preview/scene/data');
 export const fetchPreviewFrames = (fileId) =>
   request('GET', `/api/motion-files/${encodeURIComponent(fileId)}/preview-frames`);
+
+/** Blender 뷰 · 애니메이션 json 의 조인트 값(rad · 고른 시각표) · 수정 목록 98 */
+export const fetchMotionJointValues = (fileId) =>
+  request('GET', `/api/motion-files/${encodeURIComponent(fileId)}/joint-values`, { timeoutMs: 30000 });
 
 /** MuJoCo 계산 시작 · 무거운 물리 시뮬 · 업로드 직후 자동으로도 부른다 · P7 */
 export const precomputeMotionFile = (fileId) =>

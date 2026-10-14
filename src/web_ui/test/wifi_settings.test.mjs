@@ -31,7 +31,7 @@ test('status text and network options', () => {
     { ssid: 'shop', signal: 72, security: 'WPA2', in_use: true },
     { ssid: 'guest', signal: 40, security: '--' },
   ]);
-  assert.match(html, /value="shop" data-security="WPA2">shop · 72% 🔒 · 지금 연결/);
+  assert.match(html, /value="shop" data-security="WPA2">shop · 72% 🔒 · 연결됨/);
   assert.match(html, /value="guest" data-security="--">guest · 40%<\/option>/);
   assert.match(wifiNetworkOptions([]), /주변 Wi-Fi 찾기/);
 });

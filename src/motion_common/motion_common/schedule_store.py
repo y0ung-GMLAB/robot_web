@@ -24,6 +24,19 @@ DEFAULT_RUN_MODE = SCHEDULE_MODE
 #: 읽으면 자동재생으로 둔갑하므로, 세 모드는 **한 배포로 같이** 나가야 한다.
 
 
+#: 프로젝트 폴더 안 스케줄·운전 모드 파일 이름
+STORE_FILE_NAME = 'schedule_store.json'
+#: **새 프로젝트**는 「수동」으로 시작 · 수정 목록 120 (가) (실물 2026-10-13 S-1)
+#: 모터·매핑을 설정하기 전에 스케줄이 재생을 시작하지 않게 · 파일이 없는 옛 프로젝트는
+#: 그대로 DEFAULT(스케줄) · 설치된 PC 가 업데이트로 멈추지 않게 DEFAULT 는 안 바꾼다
+NEW_PROJECT_RUN_MODE = MANUAL_MODE
+
+
+def new_project_store_payload() -> dict:
+    """새 프로젝트에 처음 쓰는 스케줄 파일 내용 · 스케줄 없음 · 수동"""
+    return {'version': 2, 'mode': NEW_PROJECT_RUN_MODE, 'schedules': []}
+
+
 def normalize_run_mode(value, default: str = DEFAULT_RUN_MODE) -> str:
     mode = str(value or '').strip().lower()
     return mode if mode in RUN_MODES else default
@@ -42,7 +55,7 @@ class ScheduleStore:
     def _get_store_path(self, project_id: str) -> str:
         proj_dir = os.path.join(self.projects_dir, project_id)
         os.makedirs(proj_dir, exist_ok=True)
-        return os.path.join(proj_dir, "schedule_store.json")
+        return os.path.join(proj_dir, STORE_FILE_NAME)
 
     def load_project(self, project_id: str) -> None:
         self.current_project_id = project_id

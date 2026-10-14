@@ -46,7 +46,7 @@ MINAS 의 드라이브 객체 값(SDO)은 드라이버의 `param_file` 이 가�
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any, Dict, List, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 import yaml
 
@@ -123,6 +123,163 @@ EMBEDDED_BASE_ITEMS: List[Dict[str, Any]] = [
     {'id': 57, 'index': 0x60C5, 'subindex': 0x00, 'value': 0, 'type': 'u32'},
     {'id': 58, 'index': 0x60C6, 'subindex': 0x00, 'value': 0, 'type': 'u32'},
 ]
+
+#: 현장 공통 값 · 플랫폼 기반 위에 모든 MINAS 축에 덮어쓴다 · 수정 목록 113 · 114 (사용자 결정 2026-10-13)
+#: 저장소 기본값 `config/minas_base.yaml` + 이 PC 가 화면에서 바꾼 값 `config/minas_base.local.yaml`(git 무시 ·
+#: 업데이트가 덮지 않는다) · `src/motion_system` 의 `param/minas.yaml` 은 고치지 않는다(보호)
+SITE_BASE_FILE = Path('config') / 'minas_base.yaml'
+SITE_LOCAL_FILE = Path('config') / 'minas_base.local.yaml'
+
+#: 저장소 파일이 없을 때(시험 · 옛 작업 공간)의 같은 내용
+EMBEDDED_SITE_ITEMS: List[Dict[str, Any]] = [
+    {'index': 0x3512, 'subindex': 0x00, 'value': 0, 'type': 's16'},
+    {'index': 0x3437, 'subindex': 0x00, 'value': 150, 'type': 's16'},
+    {'index': 0x3438, 'subindex': 0x00, 'value': 0, 'type': 's16'},
+    {'index': 0x3510, 'subindex': 0x00, 'value': 4, 'type': 's16'},
+    {'index': 0x3614, 'subindex': 0x00, 'value': 200, 'type': 's16'},
+]
+
+#: 화면에서 바꿀 수 있는 공통 값 · (index, subindex) → (이름, 매뉴얼 번호, 단위, 최소, 최대, 설명)
+#: 여기 없는 객체는 화면에서 못 바꾼다 · 계속 맞춰 보는 값만 연다(사용자 2026-10-13) · 화면 순서도 이 순서
+#: 이름은 쉬운 말 · 매뉴얼 번호는 작게(사용자 「용어 이상하고 헷갈리는 것 고려」 2026-10-13)
+EDITABLE_SITE_ITEMS: Dict[Tuple[int, int], Tuple[str, str, str, int, int, str]] = {
+    (0x3437, 0x00): ('브레이크 지연 · 멈춰 있을 때', 'Pr4.37', 'ms', 0, 10000,
+                     '멈춘 상태에서 서보를 끌 때 브레이크를 잡은 뒤 이만큼 모터 힘을 더 유지 · 브레이크가 물리는 시간보다 길게'),
+    (0x3438, 0x00): ('브레이크 지연 · 움직이는 중', 'Pr4.38', 'ms', 0, 10000,
+                     '움직이다 서보가 꺼질 때(알람 · 긴급 정지) 브레이크를 잡기까지 · 0 = 바로'),
+    (0x3510, 0x00): ('알람 때 멈추는 방법', 'Pr5.10', '', 0, 4,
+                     '모터 힘으로 먼저 세우면 무거운 축이 덜 출렁임 · 안 되는 알람(과전류 · 엔코더 이상)은 다이나믹 브레이크'),
+    (0x3614, 0x00): ('알람 때 모터 힘으로 세우는 최대 시간', 'Pr6.14', 'ms', 1, 1000,
+                     '이 안에 못 세우면 다이나믹 브레이크로 · 이 동안에도 모터 힘은 유지 · 보통 수십 ms 에 섬'),
+    (0x3512, 0x00): ('과부하 알람 기준', 'Pr5.12', '%', 0, 115,
+                     '0 = 정격의 115 %(팩토리값 · 보통은 0) · 낮추면 그 % 에서 과부하 알람'),
+}
+
+#: 숫자 대신 고르는 항목 · 값 → 화면 글 · 여기 없는 값은 받지 않는다
+SITE_ITEM_CHOICES: Dict[Tuple[int, int], Dict[int, str]] = {
+    # 1~3 · 5~7 은 프리런(힘 없이 굴러감)이 섞여 무거운 축에 안 맞는다 · 0 과 4 만 연다
+    (0x3510, 0x00): {
+        4: '모터 힘으로 먼저 세움',
+        0: '바로 다이나믹 브레이크(팩토리값)',
+    },
+}
+
+
+def _accepts(key: Tuple[int, int], value: int) -> bool:
+    spec = EDITABLE_SITE_ITEMS.get(key)
+    if spec is None:
+        return False
+    choices = SITE_ITEM_CHOICES.get(key)
+    if choices is not None:
+        return value in choices
+    return spec[3] <= value <= spec[4]
+
+
+def _item_key(item: Dict[str, Any]) -> Tuple[int, int]:
+    return int(item.get('index') or 0), int(item.get('subindex') or 0)
+
+
+def _read_items(path: Path) -> Optional[List[Dict[str, Any]]]:
+    try:
+        payload = yaml.safe_load(path.read_text(encoding='utf-8'))
+    except (OSError, yaml.YAMLError):
+        return None
+    if not isinstance(payload, dict) or not isinstance(payload.get('items'), list):
+        return None
+    return [dict(item) for item in payload['items'] if isinstance(item, dict) and 'index' in item]
+
+
+def site_default_items(workspace_root: Path) -> List[Dict[str, Any]]:
+    items = _read_items(Path(workspace_root) / SITE_BASE_FILE)
+    return items if items is not None else [dict(item) for item in EMBEDDED_SITE_ITEMS]
+
+
+def site_local_values(workspace_root: Path) -> Dict[Tuple[int, int], int]:
+    """이 PC 가 화면에서 바꾼 값 · 바꿀 수 있는 객체만 · 범위 밖은 버린다(손으로 고친 파일)"""
+    values: Dict[Tuple[int, int], int] = {}
+    for item in _read_items(Path(workspace_root) / SITE_LOCAL_FILE) or []:
+        key = _item_key(item)
+        value = optional_int(item.get('value'))
+        if value is None or not _accepts(key, value):
+            continue
+        values[key] = value
+    return values
+
+
+def site_items(workspace_root: Path) -> List[Dict[str, Any]]:
+    """실제로 쓰일 공통 값 · 저장소 기본값 위에 이 PC 값"""
+    local = site_local_values(workspace_root)
+    items = []
+    for item in site_default_items(workspace_root):
+        merged = dict(item)
+        if _item_key(item) in local:
+            merged['value'] = local[_item_key(item)]
+        items.append(merged)
+    return items
+
+
+def site_base_view(workspace_root: Path) -> Dict[str, Any]:
+    """화면용 · 바꿀 수 있는 공통 값 줄마다 기본값 · 이 PC 값 · 쓰일 값"""
+    defaults = {_item_key(item): optional_int(item.get('value')) for item in site_default_items(workspace_root)}
+    local = site_local_values(workspace_root)
+    rows = []
+    for key, (label, number, unit, low, high, note) in EDITABLE_SITE_ITEMS.items():
+        default = defaults.get(key)
+        choices = SITE_ITEM_CHOICES.get(key)
+        rows.append({
+            'key': f'0x{key[0]:04X}:{key[1]}',
+            'label': label, 'number': number, 'unit': unit, 'min': low, 'max': high, 'note': note,
+            'choices': [{'value': v, 'label': text} for v, text in choices.items()] if choices else None,
+            'default': default,
+            'local': local.get(key),
+            'value': local.get(key, default),
+        })
+    return {'success': True, 'items': rows,
+            'default_file': str(SITE_BASE_FILE), 'local_file': str(SITE_LOCAL_FILE)}
+
+
+def _parse_key(text: Any) -> Tuple[int, int]:
+    index_text, _, sub_text = str(text or '').partition(':')
+    return int(index_text, 0), int(sub_text or '0', 0)
+
+
+def save_site_local(workspace_root: Path, values: Dict[str, Any]) -> Dict[str, Any]:
+    """화면에서 바꾼 공통 값 저장 · 빈 값(None · '') = 기본값으로 · 기본값과 같으면 적지 않는다"""
+    defaults = {_item_key(item): optional_int(item.get('value')) for item in site_default_items(workspace_root)}
+    types = {_item_key(item): str(item.get('type') or 's16') for item in site_default_items(workspace_root)}
+    local = site_local_values(workspace_root)
+    for raw_key, raw_value in (values or {}).items():
+        try:
+            key = _parse_key(raw_key)
+        except ValueError as exc:
+            raise ValueError(f'알 수 없는 항목입니다: {raw_key}') from exc
+        spec = EDITABLE_SITE_ITEMS.get(key)
+        if spec is None:
+            raise ValueError(f'화면에서 바꿀 수 없는 항목입니다: {raw_key}')
+        if raw_value is None or str(raw_value).strip() == '':
+            local.pop(key, None)
+            continue
+        value = optional_int(raw_value)
+        if value is None or not _accepts(key, value):
+            choices = SITE_ITEM_CHOICES.get(key)
+            if choices:
+                raise ValueError(f'{spec[0]} 는 정해진 보기 중에서만 고를 수 있습니다')
+            raise ValueError(f'{spec[0]} 는 {spec[3]}~{spec[4]} {spec[2]} 사이 정수여야 합니다')
+        if value == defaults.get(key):
+            local.pop(key, None)
+        else:
+            local[key] = value
+    path = Path(workspace_root) / SITE_LOCAL_FILE
+    path.parent.mkdir(parents=True, exist_ok=True)
+    items = [
+        {'index': key[0], 'subindex': key[1], 'value': value, 'type': types.get(key, 's16')}
+        for key, value in sorted(local.items())
+    ]
+    header = ('# 이 PC 가 화면(모터 설정 · 드라이브 공통 값)에서 바꾼 값 · 저장소 기본값 '
+              f'{SITE_BASE_FILE} 위에 덮어쓴다\n')
+    path.write_text(header + yaml.safe_dump({'items': items}, sort_keys=False), encoding='utf-8')
+    return site_base_view(workspace_root)
+
 
 #: 인터페이스(PDO) 구획은 값이 아니라 배선이다 · 플랫폼 그대로 복사한다
 EMBEDDED_INTERFACES: List[Dict[str, Any]] = [
@@ -215,9 +372,50 @@ def write_param_file(
     상대경로는 어긋난다 · 다이나믹셀 param 과 같은 방식으로 절대경로를 적는다.
     같은 객체가 기반 목록에 이미 있으면 값을 바꾸고, 없으면 뒤에 더한다.
     """
+    document = build_document(workspace_root, overrides)
+    out_dir = Path(workspace_root) / 'config' / OUTPUT_DIR
+    out_dir.mkdir(parents=True, exist_ok=True)
+    out_path = out_dir / f'driver_{driver_id}.yaml'
+    header = (
+        '# 이 파일은 저장할 때마다 다시 만들어진다 · 손으로 고치지 말 것\n'
+        '# (모터 관리 화면의 드라이브 설정 → config/minas_params/) · P8\n'
+        + ''.join(
+            f'# {key}={overrides[key]} · {_describe(key)}\n'
+            for key in sorted(overrides)
+        )
+    )
+    out_path.write_text(
+        header + yaml.safe_dump(document, allow_unicode=True, sort_keys=False),
+        encoding='utf-8',
+    )
+    return str(out_path)
+
+
+def boot_values(workspace_root: Path, overrides: Dict[str, int]) -> Dict[Tuple[int, int], int]:
+    """부팅 때 이 드라이브에 쓰일 값 · (index, subindex) → 값 · 파일을 쓰지 않는다 · 수정 목록 109 · 114"""
+    return {
+        _item_key(item): int(item.get('value') or 0)
+        for item in build_document(workspace_root, overrides).get('items', [])
+    }
+
+
+def build_document(workspace_root: Path, overrides: Dict[str, int]) -> Dict[str, Any]:
+    """플랫폼 기반 → 현장 공통 값 → 모터별 칸 · 부팅 목록 문서 · 파일은 `write_param_file` 이 쓴다"""
     document = _base_document(Path(workspace_root))
     items = [dict(item) for item in document.get('items', [])]
     next_id = max((int(item.get('id') or 0) for item in items), default=0) + 1
+    # 현장 공통 값(yaml) · 플랫폼 기반 위에 · 그 다음 모터별 칸이 이긴다 · 수정 목록 113 · 114
+    for site in site_items(Path(workspace_root)):
+        for item in items:
+            if _item_key(item) == _item_key(site):
+                item['value'] = int(site['value'])
+                break
+        else:
+            items.append({
+                'id': next_id, 'index': int(site['index']), 'subindex': int(site.get('subindex') or 0),
+                'value': int(site['value']), 'type': str(site.get('type') or 's16'),
+            })
+            next_id += 1
     for key, value in sorted(overrides.items()):
         if key not in PARAM_FIELDS:
             continue   # 감시 값 · SDO 가 아니라 PDO (아래 _with_monitors)
@@ -235,20 +433,4 @@ def write_param_file(
     document = dict(document)
     document['items'] = items
     document['interfaces'] = _with_monitors(document.get('interfaces', []), overrides)
-
-    out_dir = Path(workspace_root) / 'config' / OUTPUT_DIR
-    out_dir.mkdir(parents=True, exist_ok=True)
-    out_path = out_dir / f'driver_{driver_id}.yaml'
-    header = (
-        '# 이 파일은 저장할 때마다 다시 만들어진다 · 손으로 고치지 말 것\n'
-        '# (모터 관리 화면의 드라이브 설정 → config/minas_params/) · P8\n'
-        + ''.join(
-            f'# {key}={overrides[key]} · {_describe(key)}\n'
-            for key in sorted(overrides)
-        )
-    )
-    out_path.write_text(
-        header + yaml.safe_dump(document, allow_unicode=True, sort_keys=False),
-        encoding='utf-8',
-    )
-    return str(out_path)
+    return document

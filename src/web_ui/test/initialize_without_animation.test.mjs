@@ -13,17 +13,17 @@ const data = readFileSync(new URL('../static/js/motion_data.js', import.meta.url
 
 test('an error status is never replaced by the no-animation hint', () => {
   const at = data.indexOf("status.state === 'error' && status.message");
-  const hint = data.indexOf("'애니메이션 없음 · 첫 프레임 모터는 모션값 0°로 초기 위치 이동할 수 있습니다'");
+  const hint = data.indexOf("'애니메이션이 없습니다. 「초기 위치 이동」은 할 수 있습니다(「첫 프레임」 줄은 조인트 0°로 이동)'");
   assert.ok(at > 0 && hint > at, '오류를 먼저 본다');
 });
 
 test('the block reason says the animation is missing, not that control is possible', () => {
-  assert.match(data, /'재생 등록된 애니메이션이 없습니다 · 「재생 등록」 후 재생 · 초기 위치 이동은 지금도 됩니다'/);
+  assert.match(data, /'재생 등록된 애니메이션이 없습니다. 「재생 등록」을 하면 재생할 수 있습니다. 「초기 위치 이동」은 지금도 할 수 있습니다'/);
   assert.match(data, /localReason,\n\s*\}\);/);
 });
 
 test('the initialize button explains what it will do without an animation', () => {
-  assert.match(data, /'애니메이션이 없어 「첫 프레임」 줄은 모션 0°\(기준점\)로 · 「직접 지정」 줄은 그 값으로 이동합니다'/);
+  assert.match(data, /'애니메이션이 없어서 「첫 프레임」 줄은 조인트 0°\(기준점\)로, 「직접 지정」 줄은 지정 값으로 이동합니다'/);
 });
 
 // 「초기 방식: 첫 프레임 / 수동」 → 「초기 위치: 첫 프레임 / 직접 지정 / 기준점」 (2026-10-02 사용자 결정)

@@ -55,7 +55,7 @@ test('켜기는 설정이 꺼져 있으면 설정과 참가를 한 번에 · 켜
   assert.ok(body);
   assert.match(body, /config\.enabled === true[\s\S]*control\('join'\)/);
   assert.match(body, /enabled: true, joined: true/);
-  assert.match(body, /그룹 ID 가 없습니다/);
+  assert.match(body, /그룹 ID가 없습니다/);
 });
 
 test('헤더에 번호를 붙이지 않는다', () => {
@@ -85,7 +85,7 @@ test('끄기는 도는 중에 아예 눌리지 않는다', () => {
   // 전에는 도는 중에도 눌렸고, 누르면 **세 대를 다 세우고** 나갔다 ·
   // 한 대만 빼려던 사람이 공연을 멈췄다 · 이제 먼저 정지해야 한다 · §6-164
   assert.match(coordination, /coordinationJoinSwitch\.disabled =[^;]*\|\| active/);
-  assert.match(coordination, /그룹 재생이 도는 중입니다 · 먼저 정지한 뒤 끄세요/);
+  assert.match(coordination, /그룹 재생 중에는 끌 수 없습니다. 재생을 정지한 뒤 끄세요./);
 });
 
 test('끄기 확인창은 무엇이 남는지 말한다', () => {
@@ -93,8 +93,8 @@ test('끄기 확인창은 무엇이 남는지 말한다', () => {
     /async function leaveGroup\(\)[\s\S]*?\n  \}/,
   )?.[0] || '';
   assert.ok(body, '확인창 코드를 읽지 못했다');
-  assert.match(body, /이 PC 혼자 재생합니다/);
-  assert.match(body, /프로그램을 다시 켜도 꺼진 채로 있습니다/);
+  assert.match(body, /단독으로 재생합니다/);
+  assert.match(body, /프로그램을 다시 시작해도 꺼진 상태가 유지됩니다/);
   // 확인창은 글자 그대로 나온다 · 꾸밈 기호는 그대로 보인다
   assert.doesNotMatch(body, /\*\*/);
 });

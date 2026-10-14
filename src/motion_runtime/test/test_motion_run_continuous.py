@@ -298,6 +298,7 @@ def test_first_frame_initialization_without_motion_file_uses_motion_zero():
         'motion_file_id': '',
         'mappings': [{
             'motion_id': '1-1',
+            'range_confirmed': True,   # 범위 확인한 매핑 · 수정 목록 97
             'motor_axis': 0,
             'reference_position_deg': 100.0,
             'motion_lower_deg': -30.0,
@@ -326,6 +327,7 @@ def _zero_row_mapping(motion_file_id):
         'motion_file_id': motion_file_id,
         'mappings': [{
             'motion_id': '1-1', 'motor_axis': 0, 'reference_position_deg': 100.0,
+            'range_confirmed': True,   # 범위 확인한 매핑 · 수정 목록 97
             'motion_lower_deg': -30.0, 'motion_upper_deg': 30.0,
             'initial_mode': 'first_frame', 'initial_move_time_sec': 5.0, 'gear_ratio': 50.0,
         }],
@@ -454,12 +456,14 @@ def test_motion_run_initialization_uses_every_enabled_mapping_axis():
         'mappings': [
             {
                 'motion_id': '1-1',
+                'range_confirmed': True,   # 범위 확인한 매핑 · 수정 목록 97
                 'motor_axis': 0,
                 'initial_mode': 'manual',
                 'initial_motion_position_deg': -2.0,
             },
             {
                 'motion_id': '1-2',
+                'range_confirmed': True,   # 범위 확인한 매핑 · 수정 목록 97
                 'motor_axis': 1,
                 'initial_mode': 'manual',
                 'initial_motion_position_deg': 4.0,
@@ -511,6 +515,7 @@ def test_plan_uses_motion_state_captured_before_slow_motion_file_processing():
         'motion_file_id': 'motion.json',
         'mappings': [{
             'motion_id': '1-1',
+            'range_confirmed': True,   # 범위 확인한 매핑 · 수정 목록 97
             'motor_axis': 0,
             'initial_mode': 'manual',
             'initial_motion_position_deg': 0.0,
@@ -637,8 +642,8 @@ def test_motion_run_playback_uses_only_motion_ids_present_in_file():
     manager._load_mapping = lambda _path: {
         'motion_file_id': 'motion.json',
         'mappings': [
-            {'motion_id': '1-1', 'motor_axis': 0, 'reference_position_deg': 0.0},
-            {'motion_id': '1-2', 'motor_axis': 1, 'reference_position_deg': 10.0},
+            {'motion_id': '1-1', 'motor_axis': 0, 'reference_position_deg': 0.0, 'range_confirmed': True},
+            {'motion_id': '1-2', 'motor_axis': 1, 'reference_position_deg': 10.0, 'range_confirmed': True},
         ],
     }
     motors = [{'axis': 0}, {'axis': 1}]
@@ -915,6 +920,7 @@ def test_zero_fallback_outside_motion_range_blocks_initialization():
         'motion_file_id': '',
         'mappings': [{
             'motion_id': '1-1',
+            'range_confirmed': True,   # 범위 확인한 매핑 · 수정 목록 97
             'motor_axis': 0,
             'reference_position_deg': 100.0,
             'motion_lower_deg': 10.0,
@@ -947,6 +953,7 @@ def test_plan_keeps_single_run_available_when_continuous_seam_fails():
         'motion_file_id': 'motion.json',
         'mappings': [{
             'motion_id': 'joint',
+            'range_confirmed': True,   # 범위 확인한 매핑 · 수정 목록 97
             'motor_axis': 0,
             'reference_position_deg': 10.0,
             # A legacy false value must not bypass mandatory initialization.
@@ -991,6 +998,7 @@ def test_plan_resolves_current_axis_from_stable_alias_instead_of_saved_axis():
         'motion_file_id': 'motion.json',
         'mappings': [{
             'motion_id': 'joint',
+            'range_confirmed': True,   # 범위 확인한 매핑 · 수정 목록 97
             'motor_ref': 'ac_servo:alias:101',
             'motor_axis': 0,
             'reference_position_deg': 0.0,
@@ -1076,6 +1084,7 @@ def test_plan_runs_with_out_of_range_data_and_clamps_every_command():
         'motion_file_id': 'motion.json',
         'mappings': [{
             'motion_id': 'joint',
+            'range_confirmed': True,   # 범위 확인한 매핑 · 수정 목록 97
             'motor_axis': 0,
             'reference_position_deg': 0.0,
             'motion_lower_deg': -30.0,
@@ -1123,8 +1132,8 @@ def test_motion_studio_can_use_read_only_mapping_with_generated_preview_file():
     manager._load_mapping = lambda _path: {
         'motion_file_id': 'original.json',
         'mappings': [
-            {'motion_id': '1-1', 'motor_axis': 0, 'reference_position_deg': 0.0},
-            {'motion_id': '1-2', 'motor_axis': 1, 'reference_position_deg': 10.0},
+            {'motion_id': '1-1', 'motor_axis': 0, 'reference_position_deg': 0.0, 'range_confirmed': True},
+            {'motion_id': '1-2', 'motor_axis': 1, 'reference_position_deg': 10.0, 'range_confirmed': True},
         ],
     }
     motors = [{'axis': 0}, {'axis': 1}]
@@ -1262,6 +1271,7 @@ def _shared_file_manager(mapping_motion_ids, records):
         'mappings': [
             {
                 'motion_id': motion_id,
+                'range_confirmed': True,   # 범위 확인한 매핑 · 수정 목록 97
                 'motor_axis': index,
                 'reference_position_deg': 100.0,
                 'initial_mode': 'first_frame',
@@ -1339,3 +1349,84 @@ def test_mapping_axis_without_motion_data_stays_out_of_the_way():
     plan = _shared_file_plan(['1-1', '1-3'])
 
     assert [axis['motion_id'] for axis in plan['axes']] == ['1-1']
+
+
+def test_standalone_continuous_marked_group_still_stops_after_cycle():
+    """수정 목록 111 · 회차 사이 초기 이동 뒤 단독이 `group_execution` 으로 보였다 · 그룹 세션도
+    실행 번호도 없으면 단독 길로 회차 후 정지 (2026-10-12 floating4 4회차 거절)"""
+    from types import SimpleNamespace
+    manager = MotionRunManager.__new__(MotionRunManager)
+    manager._graceful_stop_event = threading.Event()
+    manager._group = SimpleNamespace(request_stop_after_cycle=lambda _current, _reason='': False)
+    manager.status = lambda: {
+        'state': 'running', 'run_mode': 'continuous',
+        'group_execution': True, 'execution_id': '', 'group_cycle_number': 4,
+    }
+    result = manager._handle_stop_after_cycle()
+    assert result['success'] is True
+    assert manager._graceful_stop_event.is_set()
+
+
+def test_real_group_without_session_is_still_refused():
+    from types import SimpleNamespace
+    manager = MotionRunManager.__new__(MotionRunManager)
+    manager._graceful_stop_event = threading.Event()
+    manager._group = SimpleNamespace(request_stop_after_cycle=lambda _current, _reason='': False)
+    manager.status = lambda: {'state': 'running', 'group_execution': True, 'execution_id': 'exec-a'}
+    result = manager._handle_stop_after_cycle()
+    assert result['success'] is False
+    assert not manager._graceful_stop_event.is_set()
+
+
+def test_standalone_cycle_context_does_not_claim_group():
+    """회차 번호만으로 `group_execution` 을 붙이지 않는다 · 수정 목록 111"""
+    manager = SimpleNamespaceManager({'current_cycle': 3})
+    player = MotionPlayer(manager)
+    assert player._group_cycle_context({'run_mode': 'continuous'}) == {'current_cycle': 3}
+    grouped = player._group_cycle_context({'group_execution': True, 'execution_id': 'e', 'group_cycle_number': 2})
+    assert grouped['group_execution'] is True and grouped['group_cycle_number'] == 2
+
+
+class SimpleNamespaceManager:
+    def __init__(self, status):
+        self._status = status
+
+    def status(self):
+        return dict(self._status)
+
+
+class _StopManager:
+    def __init__(self, safety, stop_after=None):
+        self._stop_event = threading.Event()
+        self._safety_status_lock = threading.Lock()
+        self._latest_safety_status = dict(safety)
+        self._error = '전체 동작 정지 처리 중'
+        if stop_after is not None:
+            threading.Timer(stop_after, self._stop_event.set).start()
+
+    def _playback_ownership_error(self, axes=None):
+        return self._error
+
+
+def test_stop_settling_then_stop_request_is_a_stop_not_an_error():
+    """수정 목록 112 다 · 화면 「정지」 = 감독 정지 → 재생 정지 · 그 사이 재생 검사가 「정지 처리 중」 을 봄"""
+    manager = _StopManager({'motion_stop_settling': True, 'commands_blocked': True}, stop_after=0.1)
+    player = MotionPlayer(manager)
+    with pytest.raises(InterruptedError):
+        player._require_playback_command_allowed()
+
+
+def test_real_block_is_still_an_error():
+    manager = _StopManager({'motion_stop_settling': True, 'emergency_latched': True})
+    manager._error = '긴급정지 잠김 상태입니다'
+    player = MotionPlayer(manager)
+    with pytest.raises(RuntimeError):
+        player._require_playback_command_allowed()
+
+
+def test_settling_without_a_stop_request_is_an_error_after_the_grace(monkeypatch):
+    manager = _StopManager({'motion_stop_settling': True})
+    player = MotionPlayer(manager)
+    monkeypatch.setattr(MotionPlayer, 'STOP_REQUEST_GRACE_SEC', 0.05)
+    with pytest.raises(RuntimeError):
+        player._require_playback_command_allowed()

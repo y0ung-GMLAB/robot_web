@@ -20,7 +20,7 @@ test('a selected Dynamixel goes to its own route · reboot and torque off ask fi
   assert.match(api, /request\('POST', '\/api\/motion-test\/dynamixel\/control'/);
   assert.match(motionTest, /if \(scope === 'selected' && motor && isDynamixelMotor\(motor\)\) \{/);
   assert.match(motionTest, /await sendDynamixelControl\(DYNAMIXEL_CONTROL_ACTIONS\[action\] \|\| action, axis\);/);
-  assert.match(motionTest, /reboot: '선택 모터 다이나믹셀을 재부팅합니다/);
+  assert.match(motionTest, /reboot: '선택한 다이나믹셀 모터를 재부팅합니다/);
   assert.match(motionTest, /&& \(isAcServoMotor\(motor\) \|\| isDynamixelMotor\(motor\)\)/);
 });
 

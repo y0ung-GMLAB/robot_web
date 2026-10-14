@@ -96,7 +96,7 @@ test('긴급정지를 알리는 띠가 화면에 있다', () => {
   const html = allPanels();
 
   assert.match(html, /id="emergencyStopBanner"/);
-  assert.match(html, /긴급정지 잠김/);
+  assert.match(html, /긴급 정지로 잠겼습니다/);
 });
 
 test('프로그램 재시작은 제 사정으로만 꺼진다', () => {

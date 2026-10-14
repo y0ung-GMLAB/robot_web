@@ -18,7 +18,9 @@ import time
 from copy import deepcopy
 from typing import Any, Dict, List, Optional
 
-from .absolute_check import MinasAbsoluteCheck
+from motion_common import ethercat_mailbox
+
+from .absolute_check import MinasAbsoluteCheck, master_claimed
 from .motor_values import parse_int
 
 
@@ -39,6 +41,10 @@ MINAS_DRIVE_PARAM_OBJECTS = {
     'max_profile_velocity_count': (0x607F, 0),   # 최대 프로파일 속도 · count/s · 수정 목록 37
 }
 
+#: OP 가 아닌 채 이만큼 그대로면 「멈춤」 으로 알린다 · 수정 목록 125 (실물 U-1 · PREOP + E 가 3 분+ 그대로) ·
+#: 모터 프로그램이 마스터를 잡고 있을 때 · 또는 오류(E) 가 붙었을 때만 · 버스 설정 중 표시가 있으면 안 알린다
+STUCK_NOTICE_SEC = 10.0
+
 #: s16 이 아닌 것 · 읽는 형식 · 수정 목록 37
 MINAS_DRIVE_PARAM_TYPES = {
     'max_profile_velocity_count': 'uint32',
@@ -54,6 +60,8 @@ class EthercatScanner:
         #: 연결된 MINAS 드라이브 전부의 앱솔루트 확인 · 수정 목록 62 · 노드가 켠다
         #: (`enable_absolute_check`) · 안 켜면 motion_state 에 None → 받는 쪽은 막는다
         self.absolute: Optional[MinasAbsoluteCheck] = None
+        #: OP 가 아닌 슬레이브 · (마스터, 링 위치) → 그렇게 된 때 · 125
+        self._not_op_since: Dict[tuple, float] = {}
 
     def enable_absolute_check(self) -> None:
         self.absolute = MinasAbsoluteCheck(
@@ -136,15 +144,19 @@ class EthercatScanner:
             )
             states_by_position: Dict[str, str] = {}
             states_by_alias: Dict[str, str] = {}
+            #: 오류 플래그(E)가 붙은 링 위치 · 125
+            error_positions: List[str] = []
             for match in re.finditer(
-                r'^\s*(\d+)\s+(\d+):\d+\s+([A-Z]+)\b',
+                r'^\s*(\d+)\s+(\d+):\d+\s+([A-Z]+)\b(?:\s+([+E])(?=\s|$))?',
                 slaves.stdout,
                 re.MULTILINE | re.IGNORECASE,
             ):
-                position, alias, state = match.groups()
+                position, alias, state, flag = match.groups()
                 states_by_position[position] = state.upper()
                 if int(alias) > 0:
                     states_by_alias[alias] = state.upper()
+                if flag == 'E':
+                    error_positions.append(position)
 
             masters[str(master_index)] = {
                 'available': True,
@@ -170,6 +182,7 @@ class EthercatScanner:
                 ),
                 'states_by_position': states_by_position,
                 'states_by_alias': states_by_alias,
+                'error_positions': error_positions,
                 'error': '',
             }
 
@@ -198,11 +211,59 @@ class EthercatScanner:
                 if masters[str(master_index)].get('available')
             ),
             'masters': masters,
+            # PREOP 등에 멈춘 드라이브 · 화면이 그대로 알린다 · 125
+            'stuck_slaves': self._stuck_slaves(masters, now),
             'error': ' / '.join(errors),
         }
         self.last_status_at = now
         if self.absolute is not None:
             self.absolute.observe(masters)
+
+    def _stuck_slaves(self, masters: Dict[str, Dict[str, Any]], now: float) -> List[Dict[str, Any]]:
+        """OP 로 못 올라가고 멈춘 드라이브 · 수정 목록 125
+
+        모터 프로그램이 마스터를 잡고 있는데 OP 가 아니거나 · 오류(E)가 붙은 채 `STUCK_NOTICE_SEC` 그대로 ·
+        시작 스크립트의 「오류 플래그 해제」 로도 안 풀린 경우(실물 U-1) · 드라이브 제어 전원을 껐다 켜야 풀린다 ·
+        모터 프로그램이 버스를 설정하는 중(표시)엔 알리지 않는다 · 조회가 안 된 마스터는 직전 그대로 둔다.
+        """
+        try:
+            configuring = ethercat_mailbox.configuring()
+        except Exception:  # noqa: BLE001 · 표시를 못 읽으면 없는 것으로
+            configuring = False
+        claimed = master_claimed(masters)
+        stuck: List[Dict[str, Any]] = []
+        seen = set()
+        for key, status in masters.items():
+            master_index = parse_int(status.get('master_index'))
+            master_index = parse_int(key) if master_index is None else master_index
+            if master_index is None:
+                continue
+            if not status.get('available'):
+                seen.update(item for item in self._not_op_since if item[0] == int(master_index))
+                continue
+            errors = {str(position) for position in status.get('error_positions') or ()}
+            for position, state in (status.get('states_by_position') or {}).items():
+                slot = (int(master_index), int(position))
+                error = str(position) in errors
+                if configuring or state == 'OP' or not (claimed or error):
+                    continue
+                seen.add(slot)
+                since = self._not_op_since.setdefault(slot, now)
+                if now - since < STUCK_NOTICE_SEC:
+                    continue
+                axis = self._axis_for_slave(*slot)
+                label = f'{axis}번' if axis is not None else f'슬레이브 {slot[1]}'
+                stuck.append({
+                    'master_index': slot[0],
+                    'slave_position': slot[1],
+                    'axis': axis,
+                    'state': state,
+                    'error_flag': error,
+                    'since': since,
+                    'message': f'{label} 드라이브가 {state} 에 멈춤 · 그 드라이브 제어 전원을 껐다 켜세요',
+                })
+        self._not_op_since = {slot: since for slot, since in self._not_op_since.items() if slot in seen}
+        return stuck
 
     def _current_ethercat_status(self, now: float) -> Dict[str, Any]:
         if not self.status:
@@ -823,7 +884,8 @@ class EthercatScanner:
         errors: List[str] = []
         for field, (index, subindex) in MINAS_DRIVE_PARAM_OBJECTS.items():
             try:
-                completed = subprocess.run(
+                # 다른 SDO 와 한 번에 하나 · 버스 설정 중이면 안 보냄 · 125
+                completed = ethercat_mailbox.run(
                     [
                         'ethercat',
                         'upload',

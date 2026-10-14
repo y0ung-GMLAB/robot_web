@@ -33,8 +33,8 @@ DEFAULT_SCENE_COMMAND = [
 SCENE_DIR_NAME = 'preview'
 #: 프레임 응답 상한 · 100 Hz 기록을 이 아래로 솎는다 (브라우저 60 fps 면 충분)
 MAX_FRAME_HZ = 60.0
-NO_PACK_MESSAGE = '로봇 팩이 없습니다 · 시스템 정보 → 로봇 팩에서 올리세요'
-NO_UV_MESSAGE = '장면 내보내기 실패 · uv 또는 MuJoCo 를 실행할 수 없습니다 (log/animation_preview/scene.log)'
+NO_PACK_MESSAGE = '로봇 팩이 없습니다. 시스템 정보 → 로봇 팩에서 업로드하세요.'
+NO_UV_MESSAGE = '장면 내보내기 실패 · uv 또는 MuJoCo를 실행할 수 없습니다 (log/animation_preview/scene.log)'
 
 _LOCK = threading.Lock()
 #: 도는 장면 내보내기 · {결과 경로: Popen}
@@ -89,6 +89,8 @@ def blender_scene_info(workspace_root: Path) -> Dict[str, Any]:
         'fingerprint': robot_pack.current_fingerprint(pack_dir)[:16],
         # 이 장면이 담은 애니메이션 · 화면은 고른 애니메이션이 여기 있을 때만 Blender 뷰를 켠다 · 수정 목록 60
         'animations': robot_pack.scene_glb_animations(pack_dir),
+        # 조인트 → glb 노드 · 있으면 어떤 애니메이션이든 json 값으로 돌린다(animations 무시) · 수정 목록 98
+        'joints': robot_pack.scene_glb_joints(pack_dir),
     }
 
 
@@ -111,7 +113,7 @@ def _mujoco_scene_state(workspace_root: Path) -> Dict[str, Any]:
         return {'state': 'ready', 'path': key}
     if last_rc not in (None, 0):
         return {'state': 'failed', 'message': f'{NO_UV_MESSAGE} · 코드 {last_rc}'}
-    return {'state': 'missing', 'message': '3D 장면이 아직 없습니다 · 「3D 장면 준비」를 누르세요'}
+    return {'state': 'missing', 'message': '3D 장면이 아직 없습니다. 「3D 장면 준비」를 누르세요.'}
 
 
 def launch_scene_export(workspace_root: Path, *, spawn=subprocess.Popen) -> Dict[str, Any]:
@@ -135,7 +137,7 @@ def launch_scene_export(workspace_root: Path, *, spawn=subprocess.Popen) -> Dict
     with _LOCK:
         _RUNNING[str(path)] = handle
         _LAST_RC.pop(str(path), None)
-    return {'success': True, 'message': '3D 장면을 만들기 시작했습니다 · 몇 초 뒤 다시 읽습니다'}
+    return {'success': True, 'message': '3D 장면을 만들기 시작했습니다. 몇 초 뒤 다시 불러옵니다.'}
 
 
 def read_scene(workspace_root: Path) -> Optional[Dict[str, Any]]:
@@ -158,11 +160,11 @@ def frames_payload(workspace_root: Path, motion_path: Path, *, max_hz: float = M
     if result is None:
         return {'success': False, 'message': '계산 결과가 없는 구성입니다 (precompute 없음)'}
     if not result.is_file():
-        return {'success': False, 'message': '계산 결과가 없습니다 · 「MuJoCo 계산」을 먼저 누르세요'}
+        return {'success': False, 'message': '계산 결과가 없습니다. 먼저 「MuJoCo 계산」을 누르세요.'}
     try:
         import numpy as np
     except ImportError:
-        return {'success': False, 'message': 'numpy 가 없어 계산 결과를 읽을 수 없습니다'}
+        return {'success': False, 'message': 'numpy가 없어 계산 결과를 읽을 수 없습니다'}
     try:
         with np.load(str(result), allow_pickle=False) as data:
             t = np.asarray(data['t'], dtype=float).reshape(-1)

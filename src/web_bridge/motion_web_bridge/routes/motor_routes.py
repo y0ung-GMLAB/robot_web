@@ -47,6 +47,18 @@ def register_motor_routes(app: FastAPI, bridge, project_call) -> None:
             raise HTTPException(status_code=400, detail='request body must be an object')
         return await asyncio.to_thread(bridge.motor_config.save, body)
 
+    # MINAS 공통 값(부팅 때 모든 축에 쓰는 값) · 수정 목록 114
+    @app.get('/api/motor-config/minas-base')
+    async def minas_base():
+        return await asyncio.to_thread(bridge.motor_config.minas_base)
+
+    @app.put('/api/motor-config/minas-base')
+    async def save_minas_base(request: Request):
+        body = await request.json()
+        if not isinstance(body, dict):
+            raise HTTPException(status_code=400, detail='request body must be an object')
+        return await asyncio.to_thread(bridge.motor_config.save_minas_base, body)
+
     @app.post('/api/motor-config/drive-maintenance')
     async def minas_drive_maintenance(request: Request):
         # EEPROM 저장 · 앱솔루트 방식 · 다회전 클리어 · 수정 목록 15 + 34-3
@@ -54,6 +66,40 @@ def register_motor_routes(app: FastAPI, bridge, project_call) -> None:
         if not isinstance(body, dict):
             raise HTTPException(status_code=400, detail='request body must be an object')
         return await asyncio.to_thread(bridge.minas_drive_maintenance, body)
+
+    # MINAS 게인 쓰기(재시작 없음) · 모든 축 EEPROM 저장(재시작 한 번) · 수정 목록 108 (다)
+    @app.post('/api/motor-config/drive-gains')
+    async def minas_drive_gains(request: Request):
+        body = await request.json()
+        if not isinstance(body, dict):
+            raise HTTPException(status_code=400, detail='request body must be an object')
+        return await asyncio.to_thread(bridge.minas_drive_gains, body)
+
+    # 드라이브 파라미터 고급 · 표(지금 · 부팅 때 · 팩토리값) · 직접 읽기 · 쓰기 · 수정 목록 109 · 114
+    @app.get('/api/motor-config/drive-params')
+    async def drive_params_table(axis: int):
+        return await asyncio.to_thread(bridge.drive_params.table, axis)
+
+    @app.post('/api/motor-config/drive-params/read')
+    async def drive_params_read(request: Request):
+        body = await request.json()
+        if not isinstance(body, dict):
+            raise HTTPException(status_code=400, detail='request body must be an object')
+        return await asyncio.to_thread(bridge.drive_params.read, body)
+
+    @app.post('/api/motor-config/drive-params/write')
+    async def drive_params_write(request: Request):
+        body = await request.json()
+        if not isinstance(body, dict):
+            raise HTTPException(status_code=400, detail='request body must be an object')
+        return await asyncio.to_thread(bridge.drive_params.write, body)
+
+    @app.post('/api/motor-config/eeprom-save-all')
+    async def minas_eeprom_save_all(request: Request):
+        body = await request.json()
+        if not isinstance(body, dict):
+            raise HTTPException(status_code=400, detail='request body must be an object')
+        return await asyncio.to_thread(bridge.minas_eeprom_save_all, body)
 
     # MINAS 「앱솔루트 설정」 · 수정 목록 62 ③④
     @app.get('/api/motor-config/absolute-setup')

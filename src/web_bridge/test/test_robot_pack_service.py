@@ -199,7 +199,7 @@ def test_mapping_diff_only_reports(tmp_path):
     rows = {row['motion_id']: row for row in robot_pack_service.mapping_diff(tmp_path, mapping)['rows']}
     assert rows['2-1']['differences'] == []
     assert rows['2-2']['differences'] == ['감속·기어비']
-    assert rows['9-9']['differences'] == ['팩에 motion_id 없음']
+    assert rows['9-9']['differences'] == ['팩에 없음']
     assert json.dumps(mapping, sort_keys=True) == before
 
 
@@ -230,4 +230,4 @@ def test_active_mapping_diff_reads_the_registered_file(tmp_path):
     rows = {row['motion_id']: row for row in result['rows']}
     assert result['mapping_file'] == 'm.yaml'
     assert rows['2-1']['differences'] == ['범위']
-    assert rows['2-2']['differences'] == ['조인트 매핑에 motion_id 없음']
+    assert rows['2-2']['differences'] == ['조인트 매핑에 없음']

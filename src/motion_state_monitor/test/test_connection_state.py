@@ -848,6 +848,76 @@ Identity:
             )
 
 
+class MotorStatusPollingTest(unittest.TestCase):
+    """1 kHz 모터 상태를 처리 박자로 꺼낸다 · 수정 목록 130
+
+    실물(floating4 · 2026-10-13)에서 서 있을 때 이 노드가 CPU 85 % · 1 kHz 마다 실행기가 깨어
+    메시지를 꺼내고 100 Hz 로 거르기만 했다.
+    """
+
+    def _monitor(self, tap):
+        monitor = object.__new__(MotionStateMonitor)
+        monitor._state = StatePublisher(monitor)
+        monitor.monitoring_enabled = True
+        monitor.feedback_process_hz = 100.0
+        monitor.input_topic = '/motion_control/motor_status'
+        monitor._input_qos = 'qos'
+        monitor._open_motor_status_tap = lambda: tap
+        self.timers = []
+        self.destroyed = []
+        self.subscriptions = []
+        monitor.create_timer = lambda period, callback: (
+            self.timers.append((period, callback)) or 'timer'
+        )
+        monitor.destroy_timer = self.destroyed.append
+        monitor.create_subscription = lambda *args: self.subscriptions.append(args) or 'sub'
+        monitor.destroy_subscription = self.destroyed.append
+        return monitor
+
+    def test_status_is_taken_at_the_process_rate_not_on_every_message(self):
+        closed = []
+        pending = [SimpleNamespace(controller_index=[0])]
+        tap = SimpleNamespace(
+            take_latest=lambda: pending.pop(0) if pending else None,
+            close=lambda: closed.append(True),
+        )
+        monitor = self._monitor(tap)
+        processed = []
+        monitor._state._process_motor_status = lambda msg, now: processed.append((msg, now))
+
+        monitor._state._create_input_subscription()
+
+        self.assertEqual(self.subscriptions, [], '실행기에 1 kHz 구독을 걸지 않는다')
+        period, poll = self.timers[0]
+        self.assertAlmostEqual(period, 0.01)
+        poll()
+        poll()   # 새 것이 없으면 그대로 · 나이가 늘어 끊김 판정은 전과 같다
+        self.assertEqual(len(processed), 1)
+        self.assertEqual(monitor._state.last_status_at, processed[0][1])
+
+        monitor._state._destroy_motor_status_subscription()
+        self.assertEqual(self.destroyed, ['timer'])
+        self.assertEqual(closed, [True])
+        self.assertIsNone(monitor._state.tap)
+
+    def test_without_a_tap_the_old_callback_subscription_is_used(self):
+        monitor = self._monitor(None)
+
+        monitor._state._create_input_subscription()
+
+        self.assertEqual(self.timers, [])
+        self.assertEqual(len(self.subscriptions), 1)
+        self.assertEqual(self.subscriptions[0][1], '/motion_control/motor_status')
+
+    def test_monitoring_off_does_not_take(self):
+        tap = SimpleNamespace(take_latest=lambda: self.fail('꺼져 있으면 꺼내지 않는다'), close=lambda: None)
+        monitor = self._monitor(tap)
+        monitor._state._create_input_subscription()
+        monitor.monitoring_enabled = False
+
+        self.timers[0][1]()
+
+
 if __name__ == '__main__':
     unittest.main()
 

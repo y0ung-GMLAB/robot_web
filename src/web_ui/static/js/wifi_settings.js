@@ -21,10 +21,10 @@ export function wifiStatusText(status) {
 
 export function wifiNetworkOptions(networks) {
   const list = Array.isArray(networks) ? networks : [];
-  if (!list.length) return '<option value="">「주변 Wi-Fi 찾기」 를 누르세요</option>';
+  if (!list.length) return '<option value="">「주변 Wi-Fi 찾기」를 누르세요</option>';
   return list.map((net) => {
     const lock = net.security && net.security !== '--' ? ' 🔒' : '';
-    const used = net.in_use ? ' · 지금 연결' : '';
+    const used = net.in_use ? ' · 연결됨' : '';
     return `<option value="${escapeHtml(net.ssid)}" data-security="${escapeHtml(net.security || '')}">${escapeHtml(net.ssid)} · ${Number(net.signal) || 0}%${lock}${used}</option>`;
   }).join('');
 }
@@ -41,12 +41,12 @@ export function createWifiController({ el }) {
     if (!status) return;
     if (el.wifiCurrent) el.wifiCurrent.textContent = wifiStatusText(status);
     if (el.wifiAddress) el.wifiAddress.textContent = status.address || '-';
-    if (el.wifiMethod) el.wifiMethod.textContent = status.method === 'manual' ? '고정' : (status.method === 'auto' ? '자동 (DHCP)' : '-');
+    if (el.wifiMethod) el.wifiMethod.textContent = status.method === 'manual' ? '고정 IP' : (status.method === 'auto' ? '자동(DHCP)' : '-');
     if (el.wifiPowersave) el.wifiPowersave.textContent = status.powersave || '-';
     const pending = status.pending;
     el.wifiPendingBox?.classList.toggle('hidden', !pending);
     if (pending && el.wifiPendingText) {
-      el.wifiPendingText.textContent = `${pending.ssid} 로 바꿨습니다 · ${pending.seconds_left}초 안에 「유지」 를 누르지 않으면 이전 연결로 되돌립니다`;
+      el.wifiPendingText.textContent = `「${pending.ssid}」에 연결했습니다. ${pending.seconds_left}초 안에 「유지」를 누르지 않으면 이전 연결로 되돌립니다.`;
     }
     if (pending) startPendingWatch(); else stopPendingWatch();
   }
@@ -55,7 +55,7 @@ export function createWifiController({ el }) {
     try {
       render(await fetchWifiStatus());
     } catch (error) {
-      setMessage(`Wi-Fi 상태를 못 읽었습니다 · ${error?.message || error}`);
+      setMessage(`Wi-Fi 상태를 읽지 못했습니다 · ${error?.message || error}`);
     }
   }
 
@@ -71,13 +71,13 @@ export function createWifiController({ el }) {
   }
 
   async function scan() {
-    setMessage('주변 Wi-Fi 찾는 중 (몇 초)');
+    setMessage('주변 Wi-Fi 검색 중 (몇 초 걸림)');
     try {
       const payload = await scanWifi();
       if (el.wifiNetworkSelect) el.wifiNetworkSelect.innerHTML = wifiNetworkOptions(payload.networks);
       setMessage(payload.message || '');
     } catch (error) {
-      setMessage(`찾기 실패 · ${error?.message || error}`);
+      setMessage(`검색 실패 · ${error?.message || error}`);
     }
   }
 
@@ -95,22 +95,22 @@ export function createWifiController({ el }) {
     const option = el.wifiNetworkSelect?.selectedOptions?.[0];
     const ssid = String(el.wifiSsidInput?.value || option?.value || '').trim();
     if (!ssid) {
-      setMessage('Wi-Fi 를 고르거나 이름(SSID)을 넣으세요');
+      setMessage('Wi-Fi를 선택하거나 이름(SSID)을 입력하세요');
       return;
     }
     const security = el.wifiSsidInput?.value ? '' : String(option?.dataset?.security || '');
     const confirmed = await showConfirm(
-      `이 PC 의 Wi-Fi 를 「${ssid}」 로 바꿉니다.\n\n`
-      + '· 바꾸는 동안 이 PC 의 연동·원격 접속이 잠깐 끊길 수 있습니다\n'
-      + '· 60초 안에 「유지」 를 누르지 않으면 이전 연결로 저절로 되돌립니다\n'
-      + '  (원격에서 바꾸다 연결이 끊겨도 60초 뒤 원래대로 돌아옵니다)\n'
-      + '· 이 PC 를 고정 IP 로 쓰려면 공유기 「DHCP 예약」 이 더 간단합니다\n\n계속할까요?',
-      { title: 'Wi-Fi 바꾸기', confirmLabel: '바꾸기', tone: 'warning' },
+      `「${ssid}」 Wi-Fi에 연결합니다.\n\n`
+      + '· 바꾸는 동안 PC 연동과 원격 접속이 잠시 끊길 수 있습니다\n'
+      + '· 60초 안에 「유지」를 누르지 않으면 이전 연결로 자동으로 되돌립니다\n'
+      + '  (원격으로 바꾸다 연결이 끊겨도 60초 뒤 원래 연결로 돌아옵니다)\n'
+      + '· 고정 IP가 필요하면 공유기의 「DHCP 예약」을 쓰는 편이 더 간단합니다\n\n계속할까요?',
+      { title: 'Wi-Fi 변경', confirmLabel: '전환', tone: 'warning' },
     );
     if (!confirmed) return;
     busy = true;
     if (el.wifiConnectButton) el.wifiConnectButton.disabled = true;
-    setMessage(`${ssid} 에 연결하는 중 (최대 45초)`);
+    setMessage(`「${ssid}」 연결 중 (최대 45초)`);
     try {
       const payload = await connectWifi({
         ssid, password: String(el.wifiPasswordInput?.value || ''), static: staticSettings(), security,
@@ -119,7 +119,7 @@ export function createWifiController({ el }) {
       if (el.wifiPasswordInput) el.wifiPasswordInput.value = '';
       render(payload.success ? payload : await fetchWifiStatus());
     } catch (error) {
-      setMessage('응답 없음 · 연결이 바뀌어 이 화면이 끊겼을 수 있습니다 · 60초 안에 새 주소로 들어가 「유지」 를 누르거나, 그대로 두면 원래 연결로 돌아옵니다');
+      setMessage('응답이 없습니다. 연결이 바뀌어 이 화면이 끊겼을 수 있습니다. 60초 안에 새 주소로 접속해 「유지」를 누르세요. 누르지 않으면 원래 연결로 돌아옵니다.');
     } finally {
       busy = false;
       if (el.wifiConnectButton) el.wifiConnectButton.disabled = false;

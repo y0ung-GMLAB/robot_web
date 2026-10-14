@@ -96,3 +96,47 @@ def test_coordination_stop_still_stops_motion_when_safety_publish_fails():
     assert events == ['motion_run_stop']
     assert result['success'] is False
     assert result['safety_stop']['success'] is False
+
+
+def _status_bridge(*, terminal='', runtime=''):
+    from types import SimpleNamespace
+
+    bridge = MotionWebBridge.__new__(MotionWebBridge)
+    bridge._motion_run_lock = threading.Lock()
+    bridge._safety_status_lock = threading.Lock()
+    bridge._coordination_poll_lock = threading.Lock()
+    bridge._coordination_poll_received_monotonic = 0.0
+    bridge._motion_run_status = {}
+    bridge._safety_status = {}
+    bridge._operation_mode_cache = (time.monotonic(), 'manual')
+    calls = []
+    bridge._execution_context = SimpleNamespace(
+        terminal_block_reason=lambda: calls.append('context') or terminal,
+    )
+    bridge.motor_runtime_control_blocker = lambda: calls.append('motor') or runtime
+    return bridge, calls
+
+
+def test_local_status_says_why_this_pc_cannot_start_a_group():
+    """수정 목록 136 ⑤ · floating1~3 (모터 설정 없음) · 하트비트로 마스터에게 · 선택 때 미리 뺀다"""
+    bridge, _calls = _status_bridge(terminal='모터 설정과 조인트 매핑을 저장해 확정하세요')
+
+    result = bridge.coordination_local_status()
+
+    assert result['start_blocker'] == '실행 준비 안 됨 · 모터 설정과 조인트 매핑을 저장해 확정하세요'
+
+
+def test_local_status_names_a_motor_problem_when_the_settings_are_fine():
+    bridge, _calls = _status_bridge(runtime='연결되지 않은 모터가 있습니다: 2')
+
+    assert bridge.coordination_local_status()['start_blocker'] == '실행 준비 안 됨 · 연결되지 않은 모터가 있습니다: 2'
+
+
+def test_local_status_start_blocker_is_empty_when_ready_and_read_once_a_second():
+    """50 ms 마다 불린다 · 1초에 한 번만 본다"""
+    bridge, calls = _status_bridge()
+
+    for _ in range(5):
+        assert bridge.coordination_local_status()['start_blocker'] == ''
+
+    assert calls == ['context', 'motor']

@@ -29,11 +29,14 @@ from motion_common.paths import NO_PROJECT_SELECTED
 
 import yaml
 
-from motion_common import store
+from motion_common import run_state, store
+from motion_common.values import optional_int
 
 from motion_web_bridge.motor_runtime_store import MOTOR_BUSY_MESSAGE
 from motion_web_bridge import (
+    boot_params,
     mapping_motor_limits,
+    minas_params,
     motion_file_analysis,
     motor_config_build,
     motor_config_rules,
@@ -77,11 +80,11 @@ class MotorConfigService:
         try:
             self.selected = motor_config_rules.selected_motor_config_path(self.repository)
         except ValueError as exc:
-            if '모터축 설정 파일이 없습니다' in str(exc):
+            if '모터 설정 파일이 없습니다' in str(exc):
                 return {
                     'success': True,
                     'saved': False,
-                    'message': '아직 저장된 모터축 설정 파일이 없습니다',
+                    'message': '아직 저장된 모터 설정 파일이 없습니다',
                     'config_file': '',
                     'config_revision': '',
                     'content': '',
@@ -237,17 +240,17 @@ class MotorConfigService:
                 actual_revision = hashlib.sha256(target_file.read_bytes()).hexdigest()
                 if not expected_revision:
                     raise ValueError(
-                        '설정 파일 버전 정보가 없습니다. 설정 다시 불러오기 후 저장하세요'
+                        '설정 파일 버전 정보가 없습니다. 화면을 새로고침해 설정을 다시 불러온 뒤 저장하세요'
                     )
                 if expected_revision != actual_revision:
                     raise ValueError(
                         '설정 파일이 화면을 불러온 뒤 변경됐습니다. '
-                        '현재 파일 보호를 위해 저장을 거부했습니다. 설정 다시 불러오기를 실행하세요'
+                        '현재 파일을 보호하려고 저장하지 않았습니다. 화면을 새로고침해 설정을 다시 불러오세요'
                     )
             elif expected_revision:
                 raise ValueError(
-                    '화면에서 불러온 설정 파일이 현재 존재하지 않습니다. '
-                    '설정 다시 불러오기를 실행하세요'
+                    '화면에서 불러온 설정 파일이 없어졌습니다. '
+                    '화면을 새로고침해 설정을 다시 불러오세요'
                 )
             if 'content' in payload:
                 content = str(payload.get('content') or '')
@@ -283,8 +286,8 @@ class MotorConfigService:
             )
             if configured_axes == 0:
                 raise ValueError(
-                    '0축 모터 설정은 저장할 수 없습니다. '
-                    '설정 파일 제거는 현재 설정 파일 휴지통으로 이동을 사용하세요'
+                    '모터가 하나도 없는 설정은 저장할 수 없습니다. '
+                    '설정 파일을 삭제하려면 프로젝트 파일 메뉴의 「휴지통으로 이동」을 누르세요'
                 )
 
             self._write(content, target_file)
@@ -317,8 +320,8 @@ class MotorConfigService:
             return {
                 'success': False,
                 'message': (
-                    '모터축 설정 파일은 저장됐지만 저장 응답에 축 목록이 없습니다. '
-                    '설정 불러오기로 파일을 다시 확인하세요'
+                    '모터 설정 파일은 저장됐지만 저장 응답에 모터 목록이 없습니다. '
+                    '화면을 새로고침해 파일을 다시 확인하세요'
                 ),
                 'config_file': str(target_file),
                 'config_revision': '',
@@ -330,6 +333,41 @@ class MotorConfigService:
         if 'project_sync_warning' in synced:
             result['project_sync_warning'] = synced['project_sync_warning']
         return result
+
+    # -- MINAS 공통 값 · 수정 목록 114 (사용자 2026-10-13 · 계속 맞춰 보는 값은 화면에서 · 잠금) -- #
+
+    def minas_base(self) -> Dict[str, Any]:
+        """모든 MINAS 축에 부팅 때 쓰는 공통 값 · 기본값(저장소) · 이 PC 값 · 쓰일 값"""
+        return minas_params.site_base_view(self.workspace_root)
+
+    def save_minas_base(self, payload: Dict[str, Any]) -> Dict[str, Any]:
+        """이 PC 값 저장 → 모터 설정의 param 파일을 다시 만든다 · 드라이브에는 「장비에 적용」 때 들어간다"""
+        try:
+            self.bridge.ensure_project_mutation_allowed(self.repository.selected_project_id())
+            values = payload.get('values') if isinstance(payload, dict) else None
+            if not isinstance(values, dict):
+                raise ValueError('values 가 필요합니다')
+            view = minas_params.save_site_local(self.workspace_root, values)
+        except ValueError as exc:
+            return {**minas_params.site_base_view(self.workspace_root), 'success': False, 'message': str(exc)}
+        # param 파일은 모터 설정을 저장할 때 만들어진다 · 지금 설정을 같은 내용으로 다시 저장해 새 공통 값을 싣는다
+        loaded = self.load()
+        motors = ((loaded.get('registry') or {}).get('motors') or []) if loaded.get('success') else []
+        if motors:
+            result = self.save({
+                'registry': loaded['registry'],
+                'base_revision': str(loaded.get('config_revision') or ''),
+            })
+            if not result.get('success'):
+                return {
+                    **view, 'success': False,
+                    'message': f'공통 값은 저장했지만 모터 설정에 싣지 못했습니다 · {result.get("message") or ""}',
+                }
+        return {
+            **view, 'success': True, 'needs_apply': bool(motors),
+            'message': '저장했습니다. 「장비에 적용」 을 해야 드라이브에 들어갑니다.' if motors
+            else '저장했습니다. 모터 설정을 저장하면 같이 들어갑니다.',
+        }
 
     def sync_limits_from_mapping(self) -> Dict[str, Any]:
         """조인트 매핑 저장 뒤 · 지금 모터 설정 파일의 lower/upper 를 매핑 환산값으로.
@@ -382,7 +420,7 @@ class MotorConfigService:
         except (OSError, ValueError) as exc:
             return {
                 'success': False,
-                'message': f'모터축 설정 파일 삭제 실패: {exc}',
+                'message': f'모터 설정 파일 삭제 실패: {exc}',
                 'config_file': '',
                 'content': '',
                 'registry': motor_config_rules.empty_motor_registry(),
@@ -396,9 +434,9 @@ class MotorConfigService:
             'replacement_active_file': replacement,
             'trash_path': str(deleted.get('trash_path') or ''),
             'message': (
-                f'모터축 설정 파일을 프로젝트 휴지통으로 이동하고 {replacement} 파일을 선택했습니다'
+                f'모터 설정 파일을 프로젝트 휴지통으로 이동하고 {replacement} 파일을 선택했습니다'
                 if replacement
-                else '모터축 설정 파일을 프로젝트 휴지통으로 이동했습니다'
+                else '모터 설정 파일을 프로젝트 휴지통으로 이동했습니다'
             ),
         })
         return loaded
@@ -450,6 +488,8 @@ class MotorConfigService:
                     'previous_runtime': previous_runtime,
                 },
             )
+            # 부팅 목록(param 파일)이 지금 공통 설정 · 모터 칸과 다르면 먼저 다시 만든다 · 수정 목록 116
+            boot_refresh = self._refresh_boot_param_files()
             prepared = self.repository.prepare_runtime_motor_config(project_id)
             runtime_file = self.repository.runtime.mark_runtime_motor_config_applied(
                 project_id
@@ -458,7 +498,7 @@ class MotorConfigService:
                 runtime_file
             )
             if not expected_axes:
-                raise ValueError('적용할 모터 실행 설정에서 대상 축을 확인할 수 없습니다')
+                raise ValueError('적용할 모터 실행 설정에서 대상 모터를 확인할 수 없습니다')
             self.repository.runtime.update_motor_operation(
                 str(operation['operation_id']),
                 'prepared',
@@ -530,7 +570,10 @@ class MotorConfigService:
 
         return {
             'success': True,
-            'message': '프로젝트 설정 적용을 시작했습니다. 웹이 잠시 후 다시 연결됩니다',
+            'message': (
+                '프로젝트 설정 적용을 시작했습니다. 잠시 후 화면이 다시 연결됩니다'
+                + (f' · 부팅 값을 새 설정으로 다시 만들었습니다({boot_refresh})' if boot_refresh else '')
+            ),
             'restart_script': str(self.restart_script),
             'restart_mode': restart_mode,
             'runtime_config': {
@@ -544,8 +587,56 @@ class MotorConfigService:
             **self.bridge.snapshot(),
         }
 
+    def _refresh_boot_param_files(self) -> str:
+        """저장된 모터 설정이 가리키는 부팅 목록(param 파일)이 지금 설정과 다르면 **param 파일과 그 경로만** 다시 쓴다 · 수정 목록 116 · 129
+
+        업데이트로 공통 설정(`config/minas_base.yaml`)이 바뀌었거나, 옛 모터 설정이 아직 플랫폼
+        `param/minas.yaml` 을 가리키면(floating4 2026-10-13) 「적용」 만으로는 새 값이 안 들어갔다 ·
+        처음엔 registry 로 설정 전체를 다시 저장했는데 · ① 「적용」 이 연 모터 작업 안이라 저장 검사에 막히고
+        ② 전체 저장은 파일을 더 엄격한 꼴로 다시 만들어(식별 정보 등) 적용 준비가 거절됐다(129 · 시험) ·
+        그래서 다른 칸은 손대지 않고 MINAS 드라이버의 `param_file` 만 저장 때와 같은 규칙
+        (`minas_params.write_param_file` · 모터 칸 오버라이드)으로 바꾼다 ·
+        같으면 아무것도 안 쓴다(설정 sha 가 괜히 바뀌지 않게) · 바꾼 것 한 줄을 돌려준다 · 실패는 ValueError
+        """
+        loaded = self.load()
+        motors = ((loaded.get('registry') or {}).get('motors') or []) if loaded.get('success') else []
+        config_file = Path(str(loaded.get('config_file') or ''))
+        if not motors or not config_file.is_file():
+            return ''
+        expected = boot_params.expected_for(self.workspace_root, motors)
+        rows = boot_params.config_differences(config_file, expected)
+        if not rows:
+            return ''
+        try:
+            config = yaml.safe_load(config_file.read_text(encoding='utf-8')) or {}
+        except (OSError, yaml.YAMLError) as exc:
+            raise ValueError(f'부팅 값을 새 설정으로 다시 만들지 못했습니다 · 모터 설정을 못 읽음 · {exc}') from exc
+        by_axis = {
+            optional_int(motor.get('axis')): motor
+            for motor in motors
+            if isinstance(motor, dict) and optional_int(motor.get('axis')) is not None
+        }
+        axis_of_driver: Dict[Any, Any] = {}
+        for master in config.get('masters') or []:
+            for slave in (master.get('slaves') or []) if isinstance(master, dict) else []:
+                if isinstance(slave, dict):
+                    axis_of_driver.setdefault(optional_int(slave.get('driver_id')), optional_int(slave.get('controller_index')))
+        for driver in config.get('drivers') or []:
+            if not isinstance(driver, dict) or str(driver.get('type') or '') != 'minas':
+                continue
+            driver_id = optional_int(driver.get('id'))
+            motor = by_axis.get(axis_of_driver.get(driver_id)) or {}
+            driver['param_file'] = minas_params.write_param_file(
+                self.workspace_root, driver_id, minas_params.param_overrides(motor),
+            )
+        self._write(yaml.safe_dump(config, sort_keys=False, allow_unicode=True), config_file)
+        left = boot_params.config_differences(config_file, expected)
+        if left:
+            raise ValueError(f'부팅 값을 새 설정으로 다시 만들지 못했습니다 · {boot_params.describe(left)}')
+        return boot_params.describe(rows)
+
     #: 실행 적용을 해제했을 때 「정지 중」에 붙는 마무리 문구 · 한 곳에서 쓴다
-    RELEASE_SETTLED_MESSAGE = '실행 적용 해제로 정지 상태를 정리했습니다'
+    RELEASE_SETTLED_MESSAGE = '실행 적용을 해제해 정지를 마무리했습니다'
 
     def clear_stopping_release_state(self) -> None:
         """실행 적용을 해제했다 · 「정지 중」을 매듭짓는다 · §6-186
@@ -556,8 +647,34 @@ class MotorConfigService:
         """
         self.bridge.settle_stopping_run_state(self.RELEASE_SETTLED_MESSAGE)
 
-    def restart_managed_program(self) -> Dict[str, Any]:
-        """Restart only upper-level nodes while Motor Manager keeps running."""
+    #: 재생 중 「프로그램 다시 시작」 · 정지가 듣기를 기다리는 최대 시간 · 수정 목록 144
+    RESTART_STOP_WAIT_SEC = 5.0
+    RESTART_NEEDS_STOP_MESSAGE = '재생 중입니다 · 정지하고 다시 시작하려면 확인하세요'
+    RESTART_MOTOR_JOB_MESSAGE = (
+        '모터 설정·검색·재시작 작업이 진행 중입니다 · 끝난 뒤 다시 시작하세요'
+    )
+
+    def restart_managed_program(
+        self, payload: Optional[Dict[str, Any]] = None,
+    ) -> Dict[str, Any]:
+        """Restart only upper-level nodes while Motor Manager keeps running.
+
+        **재생 중이면 먼저 묻는다** · 수정 목록 144 (실물 V-28 ③ · 2026-10-14 11:35)
+
+        전에는 프로젝트 변경 잠금(`ensure_change_allowed`)을 지나 재생 중이면 「애니메이션이 동작
+        중(waiting)이라 프로젝트를 변경할 수 없습니다」 로 거절했다 · 프로젝트를 바꾸는 일이 아니고,
+        사람은 무엇을 해야 하는지 몰랐다.
+
+        - 재생(단독 · 그룹 · 초기 이동 · 대기) 중 · `stop_first` 없음 → 거절 · `needs_stop: true` ·
+          화면이 두 번째 확인을 받고 `stop_first: true` 로 다시 보낸다
+        - `stop_first` · 연동 노드에 「이 PC 빠짐」 을 먼저 알리고(그룹이면 이 PC 만 빠지고 나머지는
+          계속 · 수정 목록 145 ①) → 「정지」 버튼과 같은 정지(그 자리 · 서보 유지) → 멈출 때까지
+          최대 `RESTART_STOP_WAIT_SEC` 기다림 → 다시 시작
+        - 모터 설정·검색·재시작 작업 중이면 거절(그 작업을 끊지 않게)
+        - 이 PC 가 다른 PC 들의 그룹을 진행 중이면 연동 서비스는 다시 시작하지 않는다(진행이 끊기지 않게)
+        """
+        request = payload if isinstance(payload, dict) else {}
+        stop_first = request.get('stop_first') is True
         self.clear_stopping_release_state()
         managed_service = str(
             os.environ.get('MOTION_CONTROL_SERVICE_UNIT') or ''
@@ -579,13 +696,43 @@ class MotorConfigService:
                 ),
                 **self.bridge.snapshot(),
             }
-        self.project.ensure_change_allowed()
+        if self.project.motor_job_running():
+            return {
+                **self.bridge.snapshot(),
+                'success': False,
+                'message': self.RESTART_MOTOR_JOB_MESSAGE,
+            }
+        playing = self.playback_in_progress()
+        if playing and not stop_first:
+            return {
+                **self.bridge.snapshot(),
+                'success': False,
+                'needs_stop': True,
+                'run_state': playing,
+                'message': self.RESTART_NEEDS_STOP_MESSAGE,
+            }
         restart_services = [managed_service]
         coordination_service = str(
             os.environ.get('MOTION_COORDINATION_SERVICE_UNIT') or ''
         ).strip()
-        if coordination_service == 'motion-coordination.service':
+        # 사람이 누른 재시작이다 · 연동 노드에 「이 PC 빠짐」 을 **정지보다 먼저** 알린다 · 그래야 이 PC 의
+        # 정지가 「참가 PC 먼저 정지 · 전체 풀기」 로 읽히지 않고 이 PC 만 빠진다 · 실패해도 재시작은 간다 ·
+        # 수정 목록 123 (실물 S-11 다시) · 145 ①
+        coordination = getattr(self.bridge, 'coordination', None)
+        notify = getattr(coordination, 'notify_planned_restart', None)
+        notice = notify() if callable(notify) else {}
+        still_coordinating = bool(
+            isinstance(notice, dict) and notice.get('still_coordinating')
+        )
+        if coordination_service == 'motion-coordination.service' and not still_coordinating:
             restart_services.append(coordination_service)
+        notes = []
+        # 이 PC 로컬 재생이 돌 때만 세운다 · 진행만 하던 마스터(로컬은 쉼)는 세울 것이 없다
+        stopped_playback = bool(playing and self._local_run_state())
+        if stopped_playback:
+            notes.append(self._stop_playback_before_restart())
+        if still_coordinating:
+            notes.append('연동 서비스는 다른 PC 그룹을 진행 중이라 다시 시작하지 않음')
         try:
             motor_config_rules.schedule_managed_service_restart(*restart_services)
         except OSError as exc:
@@ -597,13 +744,74 @@ class MotorConfigService:
             }
         return {
             'success': True,
-            'message': (
+            'message': ' · '.join([
                 '상위 프로그램 재시작을 시작했습니다. '
-                'Motor Manager와 현재 서보 상태는 유지됩니다'
-            ),
+                'Motor Manager와 현재 서보 상태는 유지됩니다',
+                *[note for note in notes if note],
+            ]),
             'restart_mode': 'upper_service',
+            'stopped_playback': stopped_playback,
+            'restart_services': list(restart_services),
             **self.bridge.snapshot(),
         }
+
+    def _run_status(self) -> Dict[str, Any]:
+        status = self.bridge.cached_run_status()
+        return dict(status) if isinstance(status, dict) else {}
+
+    def _local_run_state(self) -> str:
+        """이 PC 의 재생(단독 · 그룹 몫)이 돌면 그 상태 이름 · 아니면 빈 값"""
+        state = str(self._run_status().get('state') or '').strip().lower()
+        return state if state and run_state.is_running(state) else ''
+
+    def playback_in_progress(self) -> str:
+        """재생이 도는가 · 돌면 상태 이름 · 수정 목록 144
+
+        단독 재생 · 초기 이동 · 회차 대기 · 그룹 초기 위치 뒤 시작 대기 · 그룹 준비 단계(이 PC 로컬
+        재생은 아직 서 있다 · `run_state.group_is_active`)까지 「재생 중」 으로 본다.
+        """
+        local = self._local_run_state()
+        if local:
+            return local
+        status = self._run_status()
+        if str(status.get('state') or '') == 'initialized' and status.get('group_execution'):
+            return 'initialized'
+        coordination = getattr(self.bridge, 'coordination', None)
+        group_blocker = getattr(coordination, 'local_execution_blocker', None)
+        if callable(group_blocker):
+            try:
+                if group_blocker():
+                    return 'group'
+            except Exception:  # noqa: BLE001 · 연동 노드를 못 읽으면 로컬 상태만으로 판단
+                return ''
+        return ''
+
+    def _stop_playback_before_restart(self) -> str:
+        """「정지」 버튼과 같은 정지 · 최종 출력 정지 → 재생 정지 · 그 자리 · 서보 유지 · 수정 목록 144
+
+        멈출 때까지 최대 `RESTART_STOP_WAIT_SEC` 기다린다 · 넘기면 그대로 다시 시작한다(재생 노드가
+        재시작으로 내려가고 Motor Manager 는 마지막 목표에 선다) · 돌려주는 값은 응답에 붙일 한 줄.
+        """
+        failures = []
+        for label, call in (
+            ('최종 출력 정지', lambda: self.bridge.request_safety_stop(False)),
+            ('재생 정지', self.bridge.motion_run_stop),
+        ):
+            try:
+                result = call()
+            except Exception as exc:  # noqa: BLE001 · 정지 실패도 다시 시작은 간다
+                result = {'success': False, 'message': str(exc)}
+            if isinstance(result, dict) and result.get('success') is False:
+                failures.append(f'{label} 확인 실패: {result.get("message") or "응답 없음"}')
+        deadline = time.monotonic() + float(self.RESTART_STOP_WAIT_SEC)
+        while self._local_run_state() and time.monotonic() < deadline:
+            time.sleep(0.1)
+        remaining = self._local_run_state()
+        if remaining:
+            failures.append(
+                f'{self.RESTART_STOP_WAIT_SEC:g} s 안에 정지 확인 못 함({remaining}) · 그대로 다시 시작'
+            )
+        return ' · '.join(['재생을 정지했습니다', *failures])
 
     def restart_motor_control(self) -> Dict[str, Any]:
         """Restart the persistent Motor Manager only after explicit confirmation."""
@@ -627,8 +835,8 @@ class MotorConfigService:
             return {
                 'success': False,
                 'message': (
-                    '현재 프로젝트의 모터축 설정이 적용되지 않았습니다. '
-                    '모터 관리에서 설정 적용·재시작을 먼저 실행하세요'
+                    '현재 프로젝트의 모터 설정이 장비에 적용되지 않았습니다. '
+                    '모터 설정에서 「장비에 적용 · 모터 재시작」을 먼저 누르세요'
                 ),
                 **self.bridge.snapshot(),
             }
@@ -637,7 +845,7 @@ class MotorConfigService:
             self.clear_stopping_release_state()
             return {
                 'success': False,
-                'message': '현재 모터 실행 설정에서 대상 축을 확인할 수 없습니다',
+                'message': '현재 모터 실행 설정에서 대상 모터를 확인할 수 없습니다',
                 **self.bridge.snapshot(),
             }
         self.project.ensure_change_allowed()
@@ -683,7 +891,7 @@ class MotorConfigService:
             'success': True,
             'message': (
                 '모터 제어 시스템 재시작을 시작했습니다. '
-                'AC Servo가 OFF됐다가 자동 ON될 수 있습니다'
+                'AC 서보가 꺼졌다가 자동으로 다시 켜질 수 있습니다'
             ),
             'restart_mode': 'motor_service',
             'motor_operation': self.repository.runtime.motor_operation_status(),
@@ -727,7 +935,7 @@ class MotorConfigService:
         if execution_blocker:
             return {
                 'success': False,
-                'message': f'실행 적용 해제 미실행: {execution_blocker}',
+                'message': f'실행 적용을 해제하지 못했습니다: {execution_blocker}',
                 **self.bridge.snapshot(),
             }
         moving_blocker = self.runtime.ethercat_scan_safety_blocker(
@@ -738,8 +946,8 @@ class MotorConfigService:
             return {
                 'success': False,
                 'message': (
-                    f'실행 적용 해제 미실행: {moving_blocker}. '
-                    '먼저 「전체 동작 정지」를 실행하세요'
+                    f'실행 적용을 해제하지 못했습니다: {moving_blocker}. '
+                    '먼저 「전체 동작 정지」를 누르세요'
                 ),
                 **self.bridge.snapshot(),
             }
@@ -823,7 +1031,7 @@ class MotorConfigService:
             'message': (
                 f"{cleared.get('message') or '모터 실행 적용을 해제했습니다'}. "
                 'Motor Manager는 정지 상태입니다. '
-                '다시 사용하려면 프로젝트에서 「장비에 적용 · 모터 재시작」을 실행하세요'
+                '다시 사용하려면 모터 설정에서 「장비에 적용 · 모터 재시작」을 누르세요'
             ),
             'runtime_project_id': '',
             'motor_operation': self.repository.runtime.motor_operation_status(),

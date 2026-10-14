@@ -16,11 +16,11 @@ function text(value) {
 }
 
 const stateLabels = {
-  idle: '대기', preparing: '준비 확인', initializing: '초기위치 이동',
+  idle: '대기 상태', preparing: '준비 확인 중', initializing: '초기 위치로 이동 중',
   armed: '시작 대기', start_scheduled: '예약됨', waiting: '예약 대기', running: '애니메이션 재생 중',
   running_independent: '각자 재생 중',
   waiting_cycle_ready: '회차 준비 중', cycle_ready: '다음 시작 준비',
-  stop_after_cycle: '현재 회차 후 정지 대기', releasing: '이전 그룹 실행 정리 확인 중',
+  stop_after_cycle: '이번 회차 후 정지 예정', releasing: '이전 그룹 실행 정리 중',
   stopped: '정지', error: '오류',
   online: '정상', warning: '지연', offline: '통신 단절', ready: '정상',
   unavailable: '확인 불가', out_of_tolerance: '동기화 불량', unknown: '확인 불가',
@@ -103,7 +103,7 @@ export function createCoordinationController({ el }) {
     const isRequired = requiredPeers.has(peer.pc_id);
     // 슬레이브 웹 열기 · 모드 변경은 그 PC 화면에서 · 수정 목록 30-6
     const webLink = !isLocal && /^http:\/\/[0-9.]+:\d+$/.test(String(peer.web_url || ''))
-      ? ` <a href="${text(peer.web_url)}" target="_blank" rel="noopener" title="이 PC 의 화면을 새 탭으로 엽니다">웹 열기</a>`
+      ? ` <a href="${text(peer.web_url)}" target="_blank" rel="noopener" title="해당 PC의 화면을 새 탭으로 엽니다">화면 열기</a>`
       : '';
     const pcNameHtml = `<strong>${text(peer.display_name || peer.pc_id || '-')}</strong><small>${peer.display_name ? text(peer.pc_id || '') : ''}</small>${webLink}`;
     // 색 이름은 `01-base.css` 의 것을 쓴다 · §6-147
@@ -123,7 +123,7 @@ export function createCoordinationController({ el }) {
       : excludedReason
       ? `제외 · ${excludedReason}`
       : (fixedParticipants.has(peer.pc_id)
-        ? '고정 참가'
+        ? '참가 중'
         : (outsideRoster ? '명단 외' : (isRequired ? '명단 포함' : '대기')));
     const executionStateClass = joiningState
       ? 'coordination-state-warn'
@@ -221,7 +221,7 @@ export function createCoordinationController({ el }) {
     if (el.coordinationNetworkStaleBanner) {
       const networkStale = runtime.network_stale || {};
       el.coordinationNetworkStaleBanner.textContent = networkStale.active === true
-        ? `⚠️ ${networkStale.message || '랜 주소가 기동 뒤에 바뀌었습니다'}`
+        ? `⚠️ ${networkStale.message || '프로그램이 시작된 뒤 네트워크 주소가 바뀌었습니다'}`
         : '';
     }
 
@@ -232,15 +232,15 @@ export function createCoordinationController({ el }) {
     // 그대로다.
 
     if (el.coordinationNodeState) {
-      el.coordinationNodeState.textContent = snapshot?.node_connected ? 'DDS 연동 노드 연결됨' : 'DDS 연동 노드 응답 없음';
+      el.coordinationNodeState.textContent = snapshot?.node_connected ? '연동 서비스 연결됨' : '연동 서비스 응답 없음';
       el.coordinationNodeState.className = snapshot?.node_connected ? 'coordination-state-ok' : 'coordination-state-warn';
     }
     if (el.coordinationConfigMessage) {
       el.coordinationConfigMessage.textContent = snapshot?.config_error
         || (
-          'PC 전역 설정 · 같은 그룹 ID와 DDS Domain ID를 입력한 PC끼리 통신합니다. '
-          + `시각 추정 불확실성 허용 ${Number(runtimeConfig.max_trigger_sync_uncertainty_ms ?? 20).toFixed(0)} ms`
-          + ' (시작 전 검사) · 실제 시작 편차 허용은 아래 그룹 실행 줄에 나옵니다'
+          '그룹 ID와 DDS Domain ID가 같은 PC끼리 통신합니다. '
+          + `시작 전에 시각 추정 오차가 ${Number(runtimeConfig.max_trigger_sync_uncertainty_ms ?? 20).toFixed(0)} ms 이하인지 확인합니다`
+          + '. 실제 시작 편차의 허용값은 아래 「그룹 실행」 줄에 나옵니다.'
         );
     }
     if (el.coordinationUpdatedAt) {
@@ -251,7 +251,7 @@ export function createCoordinationController({ el }) {
       el.coordinationGroupDomain.textContent = `${config.group_id || '-'} · ${config.dds_domain_id ?? '-'}`;
     }
     if (el.coordinationJoinState) {
-      el.coordinationJoinState.textContent = joined ? '켬 · 같이 재생' : '끔 · 이 PC 혼자';
+      el.coordinationJoinState.textContent = joined ? '켬 · 그룹 재생' : '끔 · 단독 재생';
       el.coordinationJoinState.className = joined ? 'coordination-state-ok' : '';
       if (el.coordJoinBadge) {
         el.coordJoinBadge.classList.toggle('active', joined);
@@ -269,14 +269,14 @@ export function createCoordinationController({ el }) {
 
     if (el.coordinationPeerCount) el.coordinationPeerCount.textContent = `${peers.length + (joined ? 1 : 0)}대`;
     if (el.coordinationExecutionState) {
-      const coordinator = execution.coordinator_id ? ` · 진행 ${execution.coordinator_id}` : '';
+      const coordinator = execution.coordinator_id ? ` · 진행 PC ${execution.coordinator_id}` : '';
       const tc = Number(execution.target_cycle_count || 0);
       const stopAfter = execution.stop_after_cycle === true;
       let cycle = '';
       if (tc > 0) {
-        cycle = ` · [${Number(execution.cycle_number || 0)} / ${tc}회차]${stopAfter ? '(정지 중)' : ''}`;
+        cycle = ` · [${Number(execution.cycle_number || 0)} / ${tc}회차]${stopAfter ? '(이번 회차 후 정지)' : ''}`;
       } else if (Number(execution.cycle_number || 0) > 0) {
-        cycle = ` · ${execution.cycle_number}회차${stopAfter ? '(정지 중)' : ''}`;
+        cycle = ` · ${execution.cycle_number}회차${stopAfter ? '(이번 회차 후 정지)' : ''}`;
       }
       // 편차 옆에 **허용값을 같이 적는다** · §6-148
       //
@@ -308,7 +308,7 @@ export function createCoordinationController({ el }) {
         initializationStarted = false;
         if (typeof document !== 'undefined') {
           queueMicrotask(() => showAlert(
-            '참가한 모든 PC의 그룹 초기 위치 이동이 완료되었습니다.',
+            '참가한 모든 PC가 초기 위치로 이동했습니다.',
             { title: '그룹 초기 위치 이동 완료', confirmLabel: '확인', tone: 'info' },
           ));
         }
@@ -324,14 +324,14 @@ export function createCoordinationController({ el }) {
       el.coordinationJoinSwitch.checked = joined;
       el.coordinationJoinSwitch.disabled = loading || snapshot?.node_connected !== true || active;
       el.coordinationJoinSwitch.title = active
-        ? '그룹 재생이 도는 중입니다 · 먼저 정지한 뒤 끄세요'
-        : (joined ? '끄면 이 PC 혼자 재생합니다' : '켜면 같은 그룹 PC 들과 같이 재생합니다');
+        ? '그룹 재생 중에는 끌 수 없습니다. 재생을 정지한 뒤 끄세요.'
+        : (joined ? '끄면 단독으로 재생합니다' : '켜면 같은 그룹의 PC들과 함께 재생합니다');
     }
     // 실행 제어는 애니메이션 재생 화면으로 옮겼다 · 여기서는 왜 못 하는지만 알린다 · §6-65
     if (el.coordinationRunAvailability) {
       const availability = groupRunAvailability();
       el.coordinationRunAvailability.textContent = availability.ok
-        ? '그룹 실행 준비됨 · 애니메이션 재생 화면에서 시작하세요'
+        ? '그룹 실행 준비됨 · 아래 버튼으로 시작하세요'
         : `그룹 실행 불가 · ${availability.reason}`;
       el.coordinationRunAvailability.classList.toggle('warning-text', !availability.ok);
     }
@@ -363,7 +363,7 @@ export function createCoordinationController({ el }) {
           const pc = coordinationError.pc_id ? `\n발생 PC: ${coordinationError.pc_id}` : '';
           const cycle = Number(execution.cycle_number || 0);
           const cycleText = cycle > 0 ? `\n회차: ${cycle}회차` : '';
-          const messageBody = `${failure}${pc}${cycleText}\n\n그룹 오류를 확인하고 원인을 해소한 뒤 다시 실행하세요.`;
+          const messageBody = `${failure}${pc}${cycleText}\n\n원인을 해결한 뒤 「그룹 오류 확인」을 누르고 다시 시작하세요.`;
             
           queueMicrotask(() => showAlert(
             messageBody,
@@ -381,7 +381,7 @@ export function createCoordinationController({ el }) {
     }
     // 같은 망 PC · 연동을 안 써도 보인다 · 노드가 꺼져 있으면 비어 있다
     if (snapshot) setHtml(el.coordinationNetworkRows, snapshot.node_connected !== true
-      ? '<tr><td colspan="7" class="empty">PC 연동 서비스가 응답하지 않습니다 · 같은 망 PC 를 볼 수 없습니다</td></tr>'
+      ? '<tr><td colspan="7" class="empty">PC 연동 서비스가 응답하지 않아 같은 네트워크의 PC를 볼 수 없습니다</td></tr>'
       : networkPcRows(runtime.network_pcs));
     if (el.coordinationPeerRows || el.motionRunPeerRows) {
       const rows = [];
@@ -392,7 +392,7 @@ export function createCoordinationController({ el }) {
         rows.push(peerRow({
           ...(runtime.local || {}),
           pc_id: localId,
-          display_name: `${runtime.local?.display_name || runtimeConfig.display_name || config.pc_id} (이 PC)`,
+          display_name: `${runtime.local?.display_name || runtimeConfig.display_name || config.pc_id} (현재 접속)`,
           state: 'online',
         }, requiredPeers, fixedParticipants, excludedMap, true, joiningMap));
         if (localId) seenPcs.add(localId);
@@ -419,7 +419,7 @@ export function createCoordinationController({ el }) {
         : '<tr><td colspan="5" class="empty">그룹에 참가하면 PC 상태가 표시됩니다</td></tr>');
       setHtml(el.motionRunPeerRows, rows.length
         ? rows.map((row) => row.progress).join('')
-        : '<tr><td colspan="8" class="empty">그룹에 참가하면 각 PC 진행이 표시됩니다</td></tr>');
+        : '<tr><td colspan="8" class="empty">그룹에 참가하면 각 PC의 진행 상황이 표시됩니다</td></tr>');
       // 명단은 그룹에 참가했으면 늘 보인다
       el.coordinationRosterSection?.classList.toggle('hidden', !joined);
       // 그룹 실행은 **마스터에서만** 보인다 · 조정 노드가 슬레이브를 거부한다
@@ -448,9 +448,9 @@ export function createCoordinationController({ el }) {
     if (turningMaster && otherMaster) {
       const name = otherMaster.display_name || otherMaster.pc_id;
       const confirmed = await showConfirm(
-        `그룹에 이미 마스터가 있습니다 · ${name}\n`
+        `그룹에 이미 마스터가 있습니다: ${name}\n`
         + '마스터가 둘이면 그룹 오류로 실행이 멈춥니다.\n'
-        + `계속하려면 먼저 ${name} 의 마스터를 해제하세요.`,
+        + `계속하려면 먼저 ${name}의 마스터 설정을 해제하세요.`,
         { title: '마스터가 이미 있습니다', confirmLabel: '그래도 저장', tone: 'danger' },
       );
       if (!confirmed) return;
@@ -479,7 +479,7 @@ export function createCoordinationController({ el }) {
       formDirty = false;
       if (el.coordinationConfigMessage) el.coordinationConfigMessage.textContent = result.message || '';
       if (!result.success) {
-        await showAlert(result.message || 'DDS 그룹 설정 적용 실패', {
+        await showAlert(result.message || '그룹 설정을 적용하지 못했습니다', {
           title: '연동 재시작 실패',
           confirmLabel: '확인',
           tone: 'danger',
@@ -487,7 +487,7 @@ export function createCoordinationController({ el }) {
         return;
       }
       if (el.coordinationConfigMessage) {
-        el.coordinationConfigMessage.textContent = 'DDS 연동 서비스 재시작 확인 중';
+        el.coordinationConfigMessage.textContent = '연동 서비스 재시작을 확인하는 중…';
       }
       // 다 되면 바로 끝낸다 · 기다리는 상한(2초)은 그대로 · §6-162
       //
@@ -508,8 +508,8 @@ export function createCoordinationController({ el }) {
       }
       await showAlert(
         restarted
-          ? (customSuccessMessage || 'DDS 연동 설정 저장 및 재시작 완료')
-          : '설정은 저장됐지만 DDS 연동 노드 재시작을 확인하지 못했습니다.',
+          ? (customSuccessMessage || '연동 설정을 저장하고 연동 서비스를 다시 시작했습니다.')
+          : '설정은 저장했지만 연동 서비스가 다시 시작됐는지 확인하지 못했습니다.',
         {
           title: restarted ? (customSuccessTitle || '연동 재시작 완료') : '연동 재시작 확인 실패',
           confirmLabel: '확인',
@@ -574,9 +574,9 @@ export function createCoordinationController({ el }) {
   async function leaveGroup() {
     if (loading) return;
     const confirmed = await showConfirm(
-      '이 PC 를 그룹에서 뺍니다.\n\n'
-      + '이 PC 혼자 재생합니다 (스케줄도 이 PC 혼자 돕니다).\n'
-      + '프로그램을 다시 켜도 꺼진 채로 있습니다 · 다시 같이 돌리려면 「그룹 참여」를 켜세요.',
+      '그룹 참여를 끕니다.\n\n'
+      + '이제 단독으로 재생합니다(스케줄도 단독으로 동작합니다).\n'
+      + '프로그램을 다시 시작해도 꺼진 상태가 유지됩니다. 다시 함께 재생하려면 「그룹 참여」를 켜세요.',
       {
         title: '그룹 참여 끄기',
         confirmLabel: '끄기',
@@ -593,7 +593,7 @@ export function createCoordinationController({ el }) {
     const config = snapshot?.config || {};
     const groupId = String(config.group_id || el.coordinationGroupId?.value || '').trim();
     if (!groupId) {
-      await showAlert('그룹 ID 가 없습니다 · 아래 「이 PC 그룹 설정」 에서 그룹 ID 를 넣은 뒤 켜세요.', {
+      await showAlert('그룹 ID가 없습니다. 아래 「그룹 설정」에서 그룹 ID를 입력한 뒤 켜세요.', {
         title: '그룹 ID 필요', confirmLabel: '확인', tone: 'warning',
       });
       return;
@@ -602,7 +602,7 @@ export function createCoordinationController({ el }) {
       await control('join');
       return;
     }
-    await save('그룹 참여를 켰습니다 · 같은 그룹 PC 들과 같이 재생합니다', '그룹 참여', {
+    await save('그룹 참여를 켰습니다. 같은 그룹의 PC들과 함께 재생합니다.', '그룹 참여', {
       enabled: true, joined: true, group_id: groupId,
     });
   }
@@ -661,18 +661,18 @@ export function createCoordinationController({ el }) {
       state: String(execution.state || 'idle'),
     };
     if (loading) return { ...state, ok: false, reason: '명령 전달 중' };
-    if (runtime.joined !== true) return { ...state, ok: false, reason: '그룹에 참가하지 않았습니다' };
+    if (runtime.joined !== true) return { ...state, ok: false, reason: '그룹 참여가 꺼져 있습니다' };
     // 시작은 마스터만 · 정지는 누구나 · §6-70
     if ((snapshot?.config || {}).is_master !== true) {
-      return { ...state, ok: false, reason: '이 PC 는 슬레이브입니다 · 마스터 PC 에서 시작하세요' };
+      return { ...state, ok: false, reason: '슬레이브 PC입니다. 마스터 PC에서 시작하세요' };
     }
     if (active) return { ...state, ok: false, reason: '그룹 실행이 진행 중입니다' };
     if (peers.length < 1) return { ...state, ok: false, reason: '연결된 다른 PC가 없습니다' };
     if (peers.some((peer) => peer.state !== 'online' || Number(peer.servo_alarm_grade || 0) > 0)) {
-      return { ...state, ok: false, reason: '참가 PC 중 통신 이상이나 알람이 있습니다' };
+      return { ...state, ok: false, reason: '참가한 PC 중 통신 이상이나 알람이 있는 PC가 있습니다' };
     }
     if ((runtime.coordination_error || {}).active === true) {
-      return { ...state, ok: false, reason: '그룹 오류를 확인해야 합니다' };
+      return { ...state, ok: false, reason: '「그룹 오류 확인」을 먼저 누르세요' };
     }
     return { ...state, ok: true, reason: '' };
   }
@@ -710,12 +710,12 @@ export function createCoordinationController({ el }) {
       const rosterList = Array.from(ids);
       if (rosterList.length > 0) {
         const confirmed = await showConfirm(
-          `현재 접속된 아래 PC 인원으로 필수 참가 명단을 확정하고 시스템에 저장하시겠습니까?\n\n`
+          `지금 보이는 아래 PC들로 필수 명단을 확정해 저장할까요?\n\n`
           + `[ 확정 명단 (${rosterList.length}대) ]\n`
           + `${rosterList.join(', ')}\n\n`
-          + '(그룹 시작 때 명단에서 빠진 PC 는 「미접속」 으로 표시되고, 나머지 PC 로 시작합니다)',
+          + '(그룹을 시작할 때 명단 중 빠진 PC는 「미접속」으로 표시하고 나머지 PC로 시작합니다)',
           {
-            title: 'DDS 그룹 필수 참가 명단 확정',
+            title: '필수 명단 확정',
             confirmLabel: '명단 확정 및 저장',
             tone: 'info',
           },
@@ -728,13 +728,13 @@ export function createCoordinationController({ el }) {
         // 명단은 **값으로 실어 보낸다** · 화면에 칸이 없어도 저장된다 · §6-283
         await save(
           `[ 확정 명단: ${rosterList.join(', ')} ]\n\n`
-          + `필수 참가 명단 확정이 완료되었습니다.\n`
-          + `PC 재부팅 시 해당 명단의 모든 PC가 준비되면 애니메이션이 자동 시작됩니다.`,
-          '명단 확정 저장 완료',
+          + `필수 명단을 확정했습니다.\n`
+          + `그룹을 시작할 때 명단 중 빠진 PC는 「미접속」으로 표시하고 나머지 PC로 시작합니다.`,
+          '필수 명단 저장 완료',
           { required_peers: rosterList },
         );
       } else {
-        await showAlert('현재 방에 접속한 참가 PC가 없거나 네트워크 통신 연결을 확인해야 합니다.', { title: '명단 확정 불가', tone: 'danger' });
+        await showAlert('보이는 PC가 없습니다. 네트워크 연결을 확인하세요.', { title: '명단 확정 불가', tone: 'danger' });
       }
     });
 
@@ -750,10 +750,10 @@ export function createCoordinationController({ el }) {
 
       const confirmed = await showConfirm(
         isRemoving
-          ? `PC [ ${targetPcId} ]를 그룹 필수 참가 명단에서 제외하시겠습니까?\n\n제외 후 저장하면 이 PC 는 「명단 외」 가 되어 그룹 실행에 들어가지 않습니다.`
-          : `PC [ ${targetPcId} ]를 그룹 필수 참가 명단에 추가하시겠습니까?\n\n추가 후 저장하면 그룹 실행에 들어갑니다 · 꺼져 있으면 「미접속」 으로 표시되고 나머지 PC 로 시작합니다.`,
+          ? `PC [ ${targetPcId} ]를 필수 명단에서 제외할까요?\n\n제외하면 해당 PC는 「명단 외」가 되어 그룹 실행에 참가하지 않습니다.`
+          : `PC [ ${targetPcId} ]를 필수 명단에 추가할까요?\n\n추가하면 그룹 실행에 참가합니다. 꺼져 있으면 「미접속」으로 표시하고 나머지 PC로 시작합니다.`,
         {
-          title: isRemoving ? '참가 PC 명단 제외 확인' : '참가 PC 명단 추가 확인',
+          title: isRemoving ? '필수 명단에서 제외' : '필수 명단에 추가',
           confirmLabel: isRemoving ? '명단에서 제외' : '명단에 추가',
           tone: isRemoving ? 'danger' : 'info',
         },
@@ -789,8 +789,8 @@ export function createCoordinationController({ el }) {
       formDirty = true;
       await save(
         isRemoving
-          ? `PC [ ${targetPcId} ]를 필수 참가 명단에서 제외했습니다.\n\n[ 변경된 확정 명단: ${updatedList.join(', ') || '없음'} ]`
-          : `PC [ ${targetPcId} ]를 필수 참가 명단에 추가했습니다.\n\n[ 변경된 확정 명단: ${updatedList.join(', ')} ]`,
+          ? `PC [ ${targetPcId} ]를 필수 명단에서 제외했습니다.\n\n[ 필수 명단: ${updatedList.join(', ') || '없음'} ]`
+          : `PC [ ${targetPcId} ]를 필수 명단에 추가했습니다.\n\n[ 필수 명단: ${updatedList.join(', ')} ]`,
         isRemoving ? '명단 제외 저장 완료' : '명단 추가 저장 완료',
         { required_peers: updatedList },
       );
@@ -816,8 +816,8 @@ export function createCoordinationController({ el }) {
       if (result?.success === false) throw new Error(result.message || '저장 실패');
     } catch (error) {
       await showAlert(
-        `PC 사이 맞춤을 저장하지 못했습니다 · 이번 수동 시작에는 고른 값이 쓰이지만 스케줄은 이전 값을 씁니다\n${error?.message || error}`,
-        { title: 'PC 사이 맞춤', confirmLabel: '확인', tone: 'warning' },
+        `PC 간 동기화 설정을 저장하지 못했습니다. 이번에 직접 시작할 때는 고른 값을 쓰지만, 스케줄은 이전 값을 씁니다.\n${error?.message || error}`,
+        { title: 'PC 간 동기화', confirmLabel: '확인', tone: 'warning' },
       );
     }
   }
@@ -854,7 +854,7 @@ export function createCoordinationController({ el }) {
         is_master: peer.is_master === true,
       })),
       master: config.is_master === true
-        ? (config.display_name || config.pc_id || '이 PC')
+        ? (config.display_name || config.pc_id || '현재 접속 PC')
         : (masterPeer?.display_name || masterPeer?.pc_id || ''),
     };
   }

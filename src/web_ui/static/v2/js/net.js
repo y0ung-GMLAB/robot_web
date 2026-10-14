@@ -12,16 +12,19 @@ export function rememberGeneration(value) {
 }
 
 export class ApiError extends Error {
-  constructor(message, status) {
+  constructor(message, status, data = null) {
     super(message);
     this.status = status;
+    // 서버가 실어 보낸 나머지 칸 · 예 · 프로젝트 복원 「이미 있음(exists)」
+    this.data = data;
   }
 }
 
-/** JSON 요청 · 실패면 서버가 준 이유로 ApiError */
-export async function api(method, path, { body, timeoutMs = 15000 } = {}) {
+/** JSON 요청 · 실패면 서버가 준 이유로 ApiError · raw = 파일 그대로(zip 올리기) */
+export async function api(method, path, { body, raw, contentType, timeoutMs = 15000 } = {}) {
   const headers = { Accept: 'application/json' };
-  if (body !== undefined) headers['Content-Type'] = 'application/json';
+  if (raw !== undefined) headers['Content-Type'] = contentType || 'application/octet-stream';
+  else if (body !== undefined) headers['Content-Type'] = 'application/json';
   if (generation !== null) headers['X-Project-Generation'] = String(generation);
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
@@ -29,10 +32,10 @@ export async function api(method, path, { body, timeoutMs = 15000 } = {}) {
   try {
     response = await fetch(path, {
       method, headers, signal: controller.signal,
-      body: body === undefined ? undefined : JSON.stringify(body),
+      body: raw !== undefined ? raw : (body === undefined ? undefined : JSON.stringify(body)),
     });
   } catch (error) {
-    throw new ApiError(error?.name === 'AbortError' ? '응답이 너무 늦습니다' : '서버에 닿지 않습니다', 0);
+    throw new ApiError(error?.name === 'AbortError' ? '응답 시간이 초과되었습니다' : '서버에 연결할 수 없습니다', 0);
   } finally {
     clearTimeout(timer);
   }
@@ -41,7 +44,7 @@ export async function api(method, path, { body, timeoutMs = 15000 } = {}) {
   try { data = text ? JSON.parse(text) : null; } catch { data = { message: text }; }
   if (!response.ok || data?.success === false) {
     const reason = data?.message || data?.detail || `요청 실패 (${response.status})`;
-    throw new ApiError(typeof reason === 'string' ? reason : JSON.stringify(reason), response.status);
+    throw new ApiError(typeof reason === 'string' ? reason : JSON.stringify(reason), response.status, data);
   }
   return data;
 }

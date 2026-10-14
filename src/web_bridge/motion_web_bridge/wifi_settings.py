@@ -28,7 +28,7 @@ STATE_FILE = Path('log') / 'wifi' / 'pending.json'
 POWERSAVE_DISABLE = '2'
 POWERSAVE_TEXT = {'0': '기본값', '1': '그대로', '2': '꺼짐', '3': '켜짐'}
 NOT_ALLOWED_HINT = (
-    '이 계정에 Wi-Fi 설정 권한이 없습니다 · 이 PC 터미널에서 한 번 · '
+    '이 계정에 Wi-Fi 설정 권한이 없습니다. PC 터미널에서 다음 명령을 한 번 실행하세요: '
     'bash ~/ros2_ws/scripts/allow_web_admin.sh'
 )
 
@@ -132,7 +132,7 @@ class WifiSettings:
     def status(self) -> Dict[str, Any]:
         device = self._device()
         if not device:
-            return {'success': True, 'available': False, 'message': '이 PC 에 Wi-Fi 장치가 없거나 NetworkManager 가 응답하지 않습니다'}
+            return {'success': True, 'available': False, 'message': 'Wi-Fi 장치가 없거나 NetworkManager가 응답하지 않습니다'}
         out: Dict[str, Any] = {
             'success': True, 'available': True,
             'device': device['device'], 'state': device['state'], 'connection': device['connection'],
@@ -204,10 +204,10 @@ class WifiSettings:
         dns = str(static.get('dns') or '').strip() or gateway
         interface = ipaddress.ip_interface(address if '/' in address else f'{address}/24')
         if interface.version != 4:
-            raise ValueError('IPv4 주소만 됩니다')
+            raise ValueError('IPv4 주소만 사용할 수 있습니다')
         gw = ipaddress.ip_address(gateway)
         if gw not in interface.network:
-            raise ValueError(f'게이트웨이 {gw} 가 {interface.network} 안에 없습니다')
+            raise ValueError(f'게이트웨이 {gw}가 {interface.network} 범위 안에 없습니다')
         servers = [str(ipaddress.ip_address(item.strip())) for item in dns.replace(',', ' ').split() if item.strip()]
         return [
             'ipv4.method', 'manual', 'ipv4.addresses', str(interface),
@@ -230,30 +230,30 @@ class WifiSettings:
         password = str(password or '')
         security = str(security or '')
         if '802.1X' in security.upper():
-            return {'success': False, 'message': '회사 인증(802.1X · 아이디·비밀번호) Wi-Fi 는 여기서 못 합니다 · 우분투 설정에서 연결하세요'}
+            return {'success': False, 'message': '회사 인증(802.1X · 아이디·비밀번호) Wi-Fi는 여기서 연결할 수 없습니다. 우분투 설정에서 연결하세요.'}
         if security.strip() not in ('', '--') and not password:
-            return {'success': False, 'message': '비밀번호가 있는 Wi-Fi 입니다 · 비밀번호를 넣으세요'}
+            return {'success': False, 'message': '비밀번호가 필요한 Wi-Fi입니다. 비밀번호를 입력하세요.'}
         if not ssid or len(ssid.encode('utf-8')) > 32:
-            return {'success': False, 'message': 'SSID 는 1~32 바이트여야 합니다'}
+            return {'success': False, 'message': 'SSID는 1~32 바이트여야 합니다'}
         if password and not 8 <= len(password) <= 63:
-            return {'success': False, 'message': '비밀번호는 8~63 글자여야 합니다 (열린 Wi-Fi 면 비워 두기)'}
+            return {'success': False, 'message': '비밀번호는 8~63자여야 합니다. 비밀번호가 없는 Wi-Fi면 비워 두세요.'}
         reason = self._blocker()
         if reason:
             return {'success': False, 'message': reason}
         if self._pending():
-            return {'success': False, 'message': '앞서 바꾼 연결이 확인을 기다립니다 · 「유지」 또는 「되돌리기」 먼저'}
+            return {'success': False, 'message': '이전에 바꾼 연결이 확인을 기다리고 있습니다. 먼저 「유지」 또는 「되돌리기」를 누르세요.'}
         device = self._device()
         if not device:
             return {'success': False, 'message': 'Wi-Fi 장치가 없습니다'}
         try:
             ip_args = self._static_args(static)
         except ValueError as exc:
-            return {'success': False, 'message': f'고정 IP 값 확인 · {exc}'}
+            return {'success': False, 'message': f'고정 IP 값을 확인하세요 · {exc}'}
 
         previous = device['connection'] if device['connection'] not in ('', '--') else ''
         name = f'{CONNECTION_PREFIX}{ssid}'
         if previous == name:
-            return {'success': False, 'message': '이미 그 Wi-Fi 에 이 설정으로 연결돼 있습니다 · 다른 값이면 먼저 다른 Wi-Fi 로 바꾸세요'}
+            return {'success': False, 'message': '이미 같은 설정으로 이 Wi-Fi에 연결되어 있습니다. 설정을 바꾸려면 먼저 다른 Wi-Fi로 연결하세요.'}
         self._nmcli('connection', 'delete', name)   # 같은 이름 옛 설정 · 없으면 실패해도 그만
         add = [
             'connection', 'add', 'type', 'wifi', 'ifname', device['device'], 'con-name', name, 'ssid', ssid,
@@ -278,7 +278,7 @@ class WifiSettings:
         ])
         if code != 0:
             self._nmcli('connection', 'delete', name)
-            return {'success': False, 'message': f'되돌리기 예약을 못 걸어 바꾸지 않았습니다 · {err.strip()}'}
+            return {'success': False, 'message': f'되돌리기 예약을 걸지 못해 변경하지 않았습니다 · {err.strip()}'}
         self._write_pending({
             'ssid': ssid, 'name': name, 'previous': previous,
             'deadline': self._now() + seconds, 'confirm_sec': seconds,
@@ -290,10 +290,10 @@ class WifiSettings:
             text = err.strip()
             if 'secrets were required' in text.lower() or 'password' in text.lower():
                 text = '비밀번호가 맞지 않는 것 같습니다'
-            return {'success': False, 'message': f'연결 실패 · 이전 연결로 되돌렸습니다 · {text}'}
+            return {'success': False, 'message': f'연결에 실패해 이전 연결로 되돌렸습니다 · {text}'}
         return {
             **self.status(), 'success': True,
-            'message': f'{ssid} 연결됨 · {seconds}초 안에 「유지」 를 누르세요 · 안 누르면 이전 연결로 되돌립니다',
+            'message': f'{ssid}에 연결했습니다. {seconds}초 안에 「유지」를 누르세요. 누르지 않으면 이전 연결로 되돌립니다.',
         }
 
     def confirm(self) -> Dict[str, Any]:
@@ -304,7 +304,7 @@ class WifiSettings:
         self._cmd(['systemctl', '--user', 'stop', f'{ROLLBACK_UNIT}.timer'])
         self._nmcli('connection', 'modify', pending['name'], 'connection.autoconnect-priority', '10')
         self._write_pending(None)
-        return {**self.status(), 'success': True, 'message': f"{pending['ssid']} 유지 · 다음 부팅에도 이 Wi-Fi 를 먼저 씁니다"}
+        return {**self.status(), 'success': True, 'message': f"{pending['ssid']} 연결을 유지합니다. 다음 부팅에도 이 Wi-Fi를 먼저 사용합니다."}
 
     def rollback(self) -> Dict[str, Any]:
         """지금 바로 되돌린다 (예약을 앞당겨 실행)."""

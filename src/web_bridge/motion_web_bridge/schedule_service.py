@@ -86,8 +86,8 @@ class ScheduleService:
         role = resolve_master_role(package_hint=PACKAGE_HINT)
         if not role.is_master:
             raise ScheduleOwnershipError(
-                '이 PC 는 연동 슬레이브라 스케줄을 설정할 수 없습니다 · '
-                '마스터 PC 에서 설정하세요 · ' + role.reason
+                '슬레이브 PC라서 스케줄을 설정할 수 없습니다. '
+                '마스터 PC에서 설정하세요 · ' + role.reason
             )
 
     # ----------------------------------------------------------------- #
@@ -128,7 +128,38 @@ class ScheduleService:
             'reconcile_interval_sec': node.get('reconcile_interval_sec'),
             # 이 PC 가 몇 시라고 믿는가 · 해외 설치에서 시간대만 안 바뀐다
             'clock': local_clock.snapshot(),
+            # 지금 시작하면 안 되는 이유 · 스케줄 노드가 비어 있을 때만 시작한다 · 수정 목록 124
+            'start_blocker': self._start_blocker(),
+            # 구간 끝 주차 실패 · 그 자리에서 서보 끔 · 이 PC 것 · 풀릴 때까지 · 수정 목록 131
+            'schedule_end_notice': self._schedule_end_notice(),
         }
+
+    def _schedule_end_notice(self) -> Dict[str, Any]:
+        end = getattr(self.bridge, 'schedule_end', None)
+        try:
+            notice = end.status().get('notice') if end is not None else None
+        except Exception:  # 상태 조회 실패가 화면을 막지 않는다
+            return {}
+        return dict(notice) if isinstance(notice, dict) else {}
+
+    def _start_blocker(self) -> str:
+        """스케줄이 지금 시작하면 안 되는 이유 · 비면 시작해도 된다 · 읽기만 한다 · 수정 목록 124
+
+        재부팅 직후에는 앱솔루트 확인 · 모터 상태 수신 · 실행 설정 적용이 아직 끝나지 않았다 ·
+        그때 시작을 보내면 준비 검사에서 거절당한다 · 판단은 화면 버튼과 같은 곳
+        (`motor_action_blocker` · 긴급 정지 · 실행 설정 · 모터 연결·오류 · 앱솔루트) · 못 읽으면
+        빈 값(막지 않는다 · 시작이 같은 검사를 다시 한다).
+        """
+        reader = getattr(self.bridge, 'motor_action_blocker', None)
+        if not callable(reader):
+            return ''
+        # 다회전 클리어 뒤 기준점 다시 지정 전 · 수동 조그는 되므로 `motor_action_blocker` 밖 · 수정 목록 140 ③
+        cleared = getattr(self.bridge, 'multiturn_clear_blocker', None)
+        try:
+            return str(reader() or (cleared() if callable(cleared) else '') or '').strip()
+        except Exception:  # 상태 조회 실패가 스케줄을 막지 않는다
+            logger.debug('시작 가능 여부 조회 실패', exc_info=True)
+            return ''
 
     def _coordination_session(self) -> Dict[str, Any]:
         """연동을 쓰는가 · 지금 그룹에 들어가 있는가 · §6-133
@@ -189,7 +220,7 @@ class ScheduleService:
         item.saved_timezone = local_clock.timezone_name() or None
         if not self.store.upsert_schedule(item):
             raise RuntimeError(
-                f'프로젝트 {self.store.current_project_id!r} 에 스케줄을 저장하지 못했습니다'
+                f'프로젝트 {self.store.current_project_id!r}에 스케줄을 저장하지 못했습니다'
             )
         return {'status': 'ok', 'schedule': item.to_dict()}
 
@@ -197,12 +228,12 @@ class ScheduleService:
         self._follow_selected_project()
         self._require_owner()
         if not self.store.delete_schedule(schedule_id):
-            raise ScheduleNotFound('그 스케줄이 없거나 지우지 못했습니다')
+            raise ScheduleNotFound('해당 스케줄이 없거나 삭제하지 못했습니다')
         return {'status': 'ok', 'deleted_id': schedule_id}
 
     def set_enabled(self, schedule_id: str, enabled: bool) -> Dict[str, Any]:
         self._follow_selected_project()
         self._require_owner()
         if not self.store.set_enabled(schedule_id, enabled):
-            raise ScheduleNotFound('그 스케줄이 없습니다')
+            raise ScheduleNotFound('해당 스케줄이 없습니다')
         return {'status': 'ok', 'schedule_id': schedule_id, 'enabled': enabled}

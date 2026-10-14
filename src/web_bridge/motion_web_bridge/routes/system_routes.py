@@ -1,7 +1,9 @@
 import asyncio
+import functools
 import json
 import os
 import subprocess
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import List
 
@@ -12,6 +14,7 @@ from motion_common import local_clock
 
 from motion_web_bridge import desktop_shortcut, system_timezone, system_update
 from motion_web_bridge.index_composer import IndexComposer
+from motion_web_bridge.shared_snapshot import SharedSnapshot
 
 
 def _is_not_modified(response_headers, request_headers) -> bool:
@@ -24,6 +27,20 @@ def _is_not_modified(response_headers, request_headers) -> bool:
     if not request_etag:
         return False
     return request_etag == response_headers.get('etag')
+
+
+#: 연동 노드가 부르는 느린 로컬 길(준비 검사 · 그룹 명령) 전용 스레드 · 수정 목록 136 ④
+#:
+#: 이 길은 한 번에 2~5 s 를 기다린다(재생 관리자 답 · 실행 설정 맞추기) · 공용 스레드 풀
+#: (`asyncio.to_thread` · CPU 수 + 4 개)을 같이 쓰면 그룹 시작 · 취소 · 정지가 한꺼번에 올 때
+#: 풀이 차서 `/api/status` · 화면 스냅샷이 줄을 선다(실물 10-14 09:29 · 5 s 넘게 무응답 · 추정).
+_COORDINATION_POOL = ThreadPoolExecutor(max_workers=8, thread_name_prefix='coordination-local')
+
+
+async def _coordination_to_thread(function, *args):
+    """`asyncio.to_thread` 와 같다 · 연동 전용 스레드에서"""
+    loop = asyncio.get_running_loop()
+    return await loop.run_in_executor(_COORDINATION_POOL, functools.partial(function, *args))
 
 
 def register_system_routes(app: FastAPI, bridge, project_call) -> None:
@@ -251,7 +268,7 @@ def register_system_routes(app: FastAPI, bridge, project_call) -> None:
             body = await request.json()
         except Exception:
             body = {}
-        return await asyncio.to_thread(
+        return await _coordination_to_thread(
             bridge.coordination_local_readiness,
             body if isinstance(body, dict) else {},
         )
@@ -283,11 +300,18 @@ def register_system_routes(app: FastAPI, bridge, project_call) -> None:
         body = await request.json()
         if not isinstance(body, dict):
             raise HTTPException(status_code=400, detail='request body must be an object')
-        return await asyncio.to_thread(bridge.coordination_local_control, body)
+        return await _coordination_to_thread(bridge.coordination_local_control, body)
 
     @app.post('/api/system/program/restart')
-    async def restart_managed_program():
-        return await project_call(bridge.motor_config.restart_managed_program)
+    async def restart_managed_program(request: Request):
+        # 프로젝트 변경 잠금 밖 · 재생 중이면 `needs_stop` 거절 · `stop_first` 면 정지 뒤 다시 시작 · 수정 목록 144
+        try:
+            body = await request.json()
+        except Exception:  # noqa: BLE001 · 빈 몸통 = 쉬는 중이면 바로 다시 시작
+            body = {}
+        return await asyncio.to_thread(
+            bridge.motor_config.restart_managed_program, body if isinstance(body, dict) else {},
+        )
 
     @app.post('/api/system/desktop-shortcut')
     async def create_desktop_shortcut():
@@ -318,8 +342,15 @@ def register_system_routes(app: FastAPI, bridge, project_call) -> None:
 
         `@app.get` 들은 스레드로 옮겼는데(§6-146) 여기만 남아 있었다 ·
         `@app.websocket` 은 그때 훑은 대상이 아니었다.
+
+        탭이 여럿이면 반 박자 안에 만든 한 장을 같이 쓴다 · 수정 목록 130
         """
-        return json.dumps(bridge.snapshot())
+        return shared_snapshot.text()
+
+    shared_snapshot = SharedSnapshot(
+        lambda: json.dumps(bridge.snapshot()),
+        max_age_sec=lambda: 0.5 / max(float(bridge.web_publish_hz), 0.1),
+    )
 
     @app.websocket('/ws/status')
     async def websocket_status(websocket: WebSocket):

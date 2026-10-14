@@ -1,9 +1,9 @@
 <!-- 모터 등록·설정
      `index.html`에서 떼어낸 조각 · 원본 397~623줄 · §6-44
      들여쓰기를 그대로 둔다 · 서버가 자리표시자 줄을 이 내용으로 바꾼다 -->
-      <section class="registration-panel workspace-panel settings-editor-page hidden" data-workspace-panel="config" aria-label="모터 관리">
+      <section class="registration-panel workspace-panel settings-editor-page hidden" data-workspace-panel="config" aria-label="모터 설정">
         <div class="section-head workspace-page-head">
-          <div><strong>모터 관리</strong><small>연결 확인부터 애니메이션 재생 준비까지 한 화면에서 관리합니다</small></div>
+          <div><strong>모터 설정</strong><small>연결 확인부터 애니메이션 재생 준비까지 한 화면에서 관리합니다</small></div>
         </div>
 
         <section class="settings-panel" aria-label="장비 제어">
@@ -11,7 +11,7 @@
             <button id="allAcServoOnButton" class="primary" type="button" disabled>전체 AC 서보 켜기</button>
             <button id="allAcServoOffButton" class="off" type="button" disabled>전체 AC 서보 끄기</button>
             <!-- 연결된 MINAS 드라이브 중 앱솔루트 미확인 전부 · 정상은 건너뜀 · 수정 목록 62 ③ -->
-            <button id="absoluteSetupAllButton" class="danger" type="button" title="연결된 MINAS 드라이브 중 앱솔루트로 확인되지 않은 것을 모두 앱솔루트 + 다회전 클리어 · 드라이브 전원 재투입 2회 필요">앱솔루트 설정 (전체)</button>
+            <button id="absoluteSetupAllButton" class="danger" type="button" title="연결된 MINAS 드라이브 중 앱솔루트 방식이 아닌 것을 모두 앱솔루트 방식으로 바꾸고 다회전 클리어를 합니다. 중간에 드라이브 전원을 두 번 껐다 켜야 합니다.">앱솔루트 설정 (전체)</button>
           </div>
           <div id="absoluteSetupStatus" class="absolute-setup-status hidden" role="status" aria-live="polite">
             <strong id="absoluteSetupStep"></strong>
@@ -21,29 +21,29 @@
           </div>
         </section>
 
-        <section class="axis-setup-step settings-step-card" aria-label="모터 타입별 검색">
+        <section class="axis-setup-step settings-step-card" aria-label="모터 검색">
           <div class="section-head axis-settings-head">
-            <strong>1. 장비 검색</strong>
+            <strong>1. 모터 검색</strong>
           </div>
           <div class="axis-scan-grid">
             <section class="axis-type-scan" aria-label="전체 모터 검색">
               <button id="scanAllButton" class="primary" type="button">전체 모터 검색</button>
-              <span id="scanAllResult">대기</span>
+              <span id="scanAllResult">검색 전</span>
             </section>
-            <section class="axis-type-scan" aria-label="AC Servo 검색">
-              <button id="scanButton" class="primary" type="button">AC Servo 검색</button>
-              <span id="scanResult">대기</span>
+            <section class="axis-type-scan" aria-label="AC 서보 검색">
+              <button id="scanButton" class="primary" type="button">AC 서보 검색</button>
+              <span id="scanResult">검색 전</span>
             </section>
-            <section class="axis-type-scan" aria-label="Dynamixel 검색">
-              <button id="dynamixelScanButton" class="primary" type="button">Dynamixel 검색</button>
-              <span id="dynamixelScanResult">대기</span>
+            <section class="axis-type-scan" aria-label="다이나믹셀 검색">
+              <button id="dynamixelScanButton" class="primary" type="button">다이나믹셀 검색</button>
+              <span id="dynamixelScanResult">검색 전</span>
             </section>
           </div>
         </section>
 
-        <section class="axis-settings-panel settings-step-card" aria-label="모터 설정 표">
+        <section class="axis-settings-panel settings-step-card" aria-label="모터 목록">
           <div class="section-head axis-settings-head">
-            <strong>2. 검색 결과 확인 및 모터 편집</strong>
+            <strong>2. 검색 결과 확인과 모터 편집</strong>
             <span id="axisSummary">설정 파일을 불러오는 중</span>
           </div>
 
@@ -60,7 +60,7 @@
               <p id="axisWorkflowDetail">현재 프로젝트와 실제 모터 상태를 확인하고 있습니다.</p>
               <small id="axisWorkflowNext">다음 작업을 확인하고 있습니다.</small>
             </div>
-            <div id="axisActionMessage" class="registry-message">모터 검색을 실행하면 찾은 모터가 그대로 목록이 됩니다 · 이름만 고칠 수 있습니다</div>
+            <div id="axisActionMessage" class="registry-message">모터를 검색하면 찾은 모터가 그대로 목록이 됩니다. 이름만 수정할 수 있습니다.</div>
             <div class="matching-table-wrap">
               <table class="matching-table">
                 <thead>
@@ -76,7 +76,7 @@
                 </thead>
                 <tbody id="axisRows">
                   <tr>
-                    <td colspan="6" class="empty">설정 파일을 불러오거나 모터 스캔을 실행하세요</td>
+                    <td colspan="6" class="empty">설정된 모터가 없습니다. 「전체 모터 검색」으로 모터를 찾으세요.</td>
                   </tr>
                 </tbody>
               </table>
@@ -98,7 +98,7 @@
         <section class="axis-setup-step settings-step-card" aria-label="조인트 매핑">
           <div class="section-head compact">
             <strong>3. 조인트 매핑</strong>
-            <span>조인트 이름(= Blender 본 이름)를 모터에 연결하고 변환값을 설정합니다 · 애니메이션 재생 전에 필요합니다</span>
+            <span>조인트 이름(= Blender 본 이름)을 모터에 연결하고 변환 값을 설정합니다. 애니메이션을 재생하려면 먼저 설정해야 합니다.</span>
           </div>
           <div class="motion-mapping-layout">
             <!-- 「연결 파일」 칸 삭제 · 프로젝트마다 파일 하나라 이름을 볼 일이 없었다 · 저장 결과 글만
@@ -106,7 +106,7 @@
             <section class="motion-file-subsection settings-step-card" aria-label="조인트 매핑 표">
               <div class="section-head compact">
                 <strong id="motionMappingFileName">조인트 매핑 편집</strong>
-                <span>조인트 이름(= Blender 본 이름)를 AC 서보·다이나믹셀 모터에 연결</span>
+                <span>조인트 이름(= Blender 본 이름)을 AC 서보·다이나믹셀 모터에 연결합니다</span>
               </div>
               <div id="motionMappingMessage" class="registry-message hidden" role="status"></div>
               <div class="registry-actions settings-step-actions">
@@ -119,23 +119,24 @@
                     <tr>
                       <th class="motion-id-head"><span class="mapping-head-label">조인트 이름</span><span class="mapping-head-unit"></span></th>
                       <th><span class="mapping-head-label">사용</span><span class="mapping-head-unit"></span></th>
-                      <th class="mapping-motor-head"><span class="mapping-head-label">모터 ID</span><span class="mapping-head-unit"></span></th>
-                      <th class="mapping-number-head" title="모션 1° = 모터 몇 ° · 감속기·외부 기어·벨트 포함 · 다이나믹셀도 입력"><span class="mapping-head-label">감속·기어비</span><span class="mapping-head-unit">x</span></th>
+                      <th class="mapping-motor-head"><span class="mapping-head-label">모터</span><span class="mapping-head-unit"></span></th>
+                      <th class="mapping-number-head" title="조인트 1°에 모터가 몇 ° 도는지 입력합니다. 감속기·외부 기어·벨트를 모두 포함하며, 다이나믹셀도 입력합니다."><span class="mapping-head-label">감속·기어비</span><span class="mapping-head-unit">x</span></th>
                       <th class="mapping-number-head"><span class="mapping-head-label">기준점</span><span class="mapping-head-unit">deg</span></th>
                       <th><span class="mapping-head-label">기준점 캡처</span><span class="mapping-head-unit"></span></th>
                       <th class="mapping-number-head"><span class="mapping-head-label">최소값</span><span class="mapping-head-unit">deg</span></th>
                       <th class="mapping-number-head"><span class="mapping-head-label">최대값</span><span class="mapping-head-unit">deg</span></th>
-                      <th class="mapping-number-head" title="조인트 최대 속도 · 애니메이션이 넘으면 재생을 거부합니다 · 비우면 검사 안 함 (수정 목록 5-2)"><span class="mapping-head-label">최대 속도</span><span class="mapping-head-unit">deg/s</span></th>
-                      <th class="mapping-number-head" title="조인트 최대 가속도 · 애니메이션이 넘으면 재생을 거부합니다 · 비우면 검사 안 함"><span class="mapping-head-label">최대 가속도</span><span class="mapping-head-unit">deg/s²</span></th>
-                      <th title="재생 전에 먼저 옮겨 둘 자세 · 첫 프레임 = 애니메이션 첫 줄 · 직접 지정 = 옆 칸 값 · 기준점 = 모션 0°"><span class="mapping-head-label">초기 위치</span><span class="mapping-head-unit"></span></th>
-                      <th class="mapping-number-head" title="「직접 지정」일 때 이동할 값 · 다른 방식이면 보여 주기만"><span class="mapping-head-label">지정 값</span><span class="mapping-head-unit">deg</span></th>
+                      <th title="최소·최대가 이 로봇의 실제 기계 범위인지 확인하는 칸입니다. 「사용」 줄이 하나라도 미확인이면 재생, 초기 이동, 수동 조작을 할 수 없습니다."><span class="mapping-head-label">범위 확인</span><span class="mapping-head-unit"></span></th>
+                      <th class="mapping-number-head" title="조인트 최대 속도입니다. 애니메이션이 이 값을 넘으면 재생하지 않습니다. 비워 두면 검사하지 않습니다."><span class="mapping-head-label">최대 속도</span><span class="mapping-head-unit">deg/s</span></th>
+                      <th class="mapping-number-head" title="조인트 최대 가속도입니다. 애니메이션이 이 값을 넘으면 재생하지 않습니다. 비워 두면 검사하지 않습니다."><span class="mapping-head-label">최대 가속도</span><span class="mapping-head-unit">deg/s²</span></th>
+                      <th title="재생 전에 먼저 이동할 위치입니다. 첫 프레임 = 애니메이션 첫 줄 · 직접 지정 = 옆 칸 값 · 기준점 = 조인트 0°"><span class="mapping-head-label">초기 위치</span><span class="mapping-head-unit"></span></th>
+                      <th class="mapping-number-head" title="「직접 지정」일 때 이동할 값입니다. 다른 방식에서는 표시만 합니다."><span class="mapping-head-label">지정 값</span><span class="mapping-head-unit">deg</span></th>
                       <th><span class="mapping-head-label">방향 반전</span><span class="mapping-head-unit"></span></th>
                       <th><span class="mapping-head-label">상태</span><span class="mapping-head-unit"></span></th>
                     </tr>
                   </thead>
                   <tbody id="motionMappingRows">
                     <tr>
-                      <td colspan="12" class="empty">조인트 이름을 추가하거나 자동 생성을 누르세요</td>
+                      <td colspan="12" class="empty">조인트가 없습니다. 「조인트 이름 추가」나 「자동 생성」을 누르세요.</td>
                     </tr>
                   </tbody>
                 </table>
@@ -166,7 +167,7 @@
         <section class="axis-setup-step settings-final-card settings-commit-bar" aria-label="저장 및 장비 적용">
           <div class="settings-commit-status">
             <strong id="settingsCommitState">변경 없음</strong>
-            <span id="settingsCommitDetail">모터 목록 · 조인트 매핑을 고치면 「저장」 · 장비 반영은 「장비에 적용 · 모터 재시작」</span>
+            <span id="settingsCommitDetail">모터 목록이나 조인트 매핑을 수정하면 「저장」을, 장비에 반영하려면 「장비에 적용 · 모터 재시작」을 누르세요.</span>
           </div>
           <div class="settings-final-actions">
             <button id="saveAxisConfigButton" class="primary" type="button" disabled>저장</button>

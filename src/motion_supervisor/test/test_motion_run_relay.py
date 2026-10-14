@@ -122,13 +122,22 @@ def test_range_recovery_accepts_only_the_violated_boundary():
     )
 
 
-def test_range_recovery_sends_one_in_range_target_without_intermediate_targets():
+def test_range_recovery_moves_slowly_to_the_boundary_through_out_of_range_points():
+    """수정 목록 126 · 전에는 한계값 하나를 바로 보내 드라이브 프로파일 속도로 갔다 ·
+    이제 수동 조작 상한 궤적 · 중간 점은 한계 밖이라 한계 검사를 건너뛴다"""
     supervisor = MotionSupervisor.__new__(MotionSupervisor)
     supervisor._active_actions = {}
+    supervisor._action_threads = {}
+    supervisor.action_period_sec = 0.001
+    supervisor._velocity_limit = lambda _motor: None
+    supervisor._acceleration_limit = lambda _motor: None
+    supervisor._action_command_period_sec = lambda: 0.001
+    supervisor._publish_action_result = lambda *_a: None
+    supervisor.get_logger = lambda: QuietLogger()
     published = []
     supervisor._publish_ac_servo_action_setpoint = (
-        lambda _motors, _motor, axis, target: (
-            published.append((axis, target)) is None,
+        lambda _motors, _motor, axis, target, still_active=None, check_limits=True: (
+            published.append((axis, target, check_limits)) is None,
             '',
         )
     )
@@ -137,22 +146,59 @@ def test_range_recovery_sends_one_in_range_target_without_intermediate_targets()
         'lower': -1000.0,
         'upper': 1000.0,
     }
+    # 모터 기준 10 °/s · 20 °/s² (조인트 2 °/s × 이득 5)
+    limits = {
+        'manual_max_velocity_rad_s': R(10.0),
+        'manual_max_acceleration_rad_s2': R(20.0),
+    }
 
     success, message = supervisor._start_range_recovery(
         [motor],
         motor,
         0,
-        R(-1200.0),
+        R(-1010.0),
         R(-1000.0),
         'recovery-1',
         is_ac_servo=True,
+        manual_limits=limits,
     )
+    supervisor._action_threads[0].join(timeout=10.0)
 
     assert success is True
     assert 'range recovery started' in message
-    assert published == [(0, R(-1000.0))]
-    assert supervisor._active_actions[0]['steps'] == 1.0
-    assert supervisor._active_actions[0]['last_step'] == 1.0
+    active = supervisor._active_actions[0]
+    # 10° 를 smoothstep 으로 · 최고 속도 1.5 × 10 / T ≤ 10 °/s → T ≥ 1.5 s
+    assert active['applied_duration_sec'] >= 1.5 - 1e-9
+    assert active['range_recovery'] is True
+    assert len(published) == int(active['steps'])
+    assert all(check is False for _axis, _target, check in published)
+    targets = [D(target) for _axis, target, _check in published]
+    assert targets == sorted(targets)
+    assert all(-1010.0 <= value <= -1000.0 for value in targets)
+    assert targets[-1] == pytest.approx(-1000.0)
+
+
+def test_jog_and_absolute_move_obey_the_manual_speed_limit():
+    """수정 목록 126 · 조그 · 절대 이동도 수동 조작 상한(모터 설정보다 느리면 그쪽)"""
+    supervisor = MotionSupervisor.__new__(MotionSupervisor)
+    supervisor.action_period_sec = 0.02
+    supervisor._velocity_limit = lambda _motor: R(18000.0)
+    supervisor._acceleration_limit = lambda _motor: R(180000.0)
+    limits = {
+        'manual_max_velocity_rad_s': R(300.0),       # 조인트 2 °/s × 1:150
+        'manual_max_acceleration_rad_s2': R(600.0),
+    }
+
+    jog = supervisor._correct_jog_duration_sec({}, 0.0, R(150.0), limits)   # 조인트 1°
+    action = supervisor._correct_action_duration_sec({}, 0.0, R(1500.0), None, limits)  # 조인트 10°
+
+    # smoothstep 최고 속도 1.5 × 거리 / 시간 · 최고 가속 6 × 거리 / 시간²
+    assert 1.5 * 150.0 / jog['applied_sec'] <= 300.0 + 1e-6
+    assert 6.0 * 150.0 / jog['applied_sec'] ** 2 <= 600.0 + 1e-6
+    assert 1.5 * 1500.0 / action['applied_sec'] <= 300.0 + 1e-6
+    assert action['limited'] is True
+    # 상한을 안 주면 전과 같다
+    assert supervisor._correct_jog_duration_sec({}, 0.0, R(360.0))['applied_sec'] == pytest.approx(0.48)
 
 
 def test_ac_servo_jog_trajectory_sends_cubic_intermediate_targets():
@@ -173,7 +219,7 @@ def test_ac_servo_jog_trajectory_sends_cubic_intermediate_targets():
     }
     positions = []
     supervisor._publish_ac_servo_action_setpoint = (
-        lambda _motors, _motor, _axis, target: (
+        lambda _motors, _motor, _axis, target, still_active=None: (
             positions.append(target) is None,
             '',
         )
@@ -898,6 +944,8 @@ def test_manual_activity_snapshot_distinguishes_jog_and_action_axes():
     assert supervisor._manual_activity_snapshot() == {
         'manual_activity_modes': ['jog', 'action'],
         'manual_activity_axes': [0, 2],
+        # 끝낸 조작의 알림(목표 근처 출렁임 등) · 아직 없음 · 실물 R-11
+        'manual_notices': [],
     }
 
 

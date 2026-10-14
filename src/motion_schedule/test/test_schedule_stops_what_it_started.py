@@ -51,11 +51,12 @@ def test_starting_still_needs_schedule_mode():
     assert mode_at < start_at, '수동 모드에서도 시작해 버린다'
 
 
-def test_it_does_not_ask_who_started_it():
-    """누가 켰는지 묻지 않는다 · 구간 밖이면 무조건 멈춘다."""
+def test_who_started_it_is_asked_only_in_manual_mode():
+    """수정 목록 106 (2026-10-12) · 수동 모드에서 사람이 켠 것만 예외 · 판정은 `_started_by_schedule`"""
     body = _body('_reconcile')
 
-    assert 'schedule_id' not in body
+    assert '_started_by_schedule()' in body
+    assert 'self._run_mode not in (SCHEDULE_MODE, OFF_MODE)' in body
 
 
 def test_it_asks_for_a_graceful_stop():

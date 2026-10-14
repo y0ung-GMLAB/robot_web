@@ -62,7 +62,7 @@ export function playlistPanelHtml(list, { fileOf = () => null, busy = false } = 
   if (!list.length) {
     return (
       '<div class="motion-playlist-head"><strong>재생 목록 · 비어 있음</strong>'
-      + '<span>애니메이션 파일을 고르고 「재생 등록」 을 누르세요</span></div>'
+      + '<span>애니메이션을 선택하고 「재생 등록」을 누르세요</span></div>'
     );
   }
   const rows = list.map((id, index) => {
@@ -77,13 +77,13 @@ export function playlistPanelHtml(list, { fileOf = () => null, busy = false } = 
       + `<span class="motion-playlist-time">${Number.isFinite(duration) ? `${formatNumber(duration, 1)} s` : '-'}</span>`
       + `<button type="button" data-playlist-action="up" data-playlist-index="${index}" ${busy || index === 0 ? 'disabled' : ''} title="한 칸 위로">↑</button>`
       + `<button type="button" data-playlist-action="down" data-playlist-index="${index}" ${busy || index === list.length - 1 ? 'disabled' : ''} title="한 칸 아래로">↓</button>`
-      + `<button type="button" class="danger" data-playlist-action="remove" data-playlist-index="${index}" ${busy ? 'disabled' : ''} title="${only ? '재생 등록을 해제합니다 · 파일은 지우지 않습니다' : '목록에서 뺍니다 · 파일은 지우지 않습니다'}">${only ? '등록 해제' : '빼기'}</button>`
+      + `<button type="button" class="danger" data-playlist-action="remove" data-playlist-index="${index}" ${busy ? 'disabled' : ''} title="${only ? '재생 등록을 해제합니다. 파일은 삭제되지 않습니다.' : '재생 목록에서 뺍니다. 파일은 삭제되지 않습니다.'}">${only ? '등록 해제' : '빼기'}</button>`
       + '</li>'
     );
   }).join('');
   const note = list.length === 1
-    ? '이 애니메이션만 반복 · 다른 파일을 「재생 등록」 하면 뒤에 붙어 차례로 돕니다'
-    : '차례로 돌고 끝나면 1번부터 · 사이마다 다음 애니의 초기 위치로 이동';
+    ? '이 애니메이션만 반복합니다. 다른 애니메이션을 「재생 등록」하면 목록 끝에 추가되어 차례로 재생합니다.'
+    : '순서대로 재생하고, 끝나면 1번부터 다시 재생합니다. 애니메이션 사이마다 다음 애니메이션의 초기 위치로 이동합니다.';
   return (
     `<div class="motion-playlist-head"><strong>재생 목록 · ${list.length}개</strong>`
     + `<span>${note}</span></div>`

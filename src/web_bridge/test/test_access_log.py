@@ -49,4 +49,4 @@ def test_the_bridge_installs_it_after_uvicorn_configures_logging():
     from pathlib import Path
     source = (Path(__file__).resolve().parents[1] / 'motion_web_bridge/bridge_node.py').read_text(encoding='utf-8')
     config_at = source.index('config = uvicorn.Config(')
-    assert config_at < source.index('install_access_log_filter()') < source.index('uvicorn.Server(config).run()')
+    assert config_at < source.index('install_access_log_filter()') < source.index('_LeaveNoticeServer(config, leave_notice.send).run()')

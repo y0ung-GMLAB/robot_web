@@ -112,6 +112,18 @@ recover_ethercat_errors_before_launch() {
   fi
 }
 
+# 버스 설정 중 표시 · 수정 목록 125 (실물 U-1 · 2026-10-13)
+#
+# 부팅 때 Motor Manager 가 PREOP 인 드라이브에 부팅 설정 SDO 를 쓰는 사이 감시 노드 · 웹이 같은 드라이브에
+# SDO 를 보내 메일박스가 엉켰다 → 「SDO configuration failed」 → PREOP + E 로 굳음(PC 만 재부팅 2/2) ·
+# 그래서 띄우기 **전에** 표시를 세운다 · 우리 SDO 는 모두 `motion_common/ethercat_mailbox.py` 를 거치며
+# 표시가 있으면 보내지 않는다 · `begin` 은 도는 SDO 가 끝나길 기다린 뒤 세운다(같은 잠금) ·
+# 표시는 이 프로세스 pid(`$$` · exec 해도 같다)에 묶여 이게 끝나면 무효 · 실패해도 모터는 띄운다.
+BUS_MARKER_HELPER="${WORKSPACE}/src/motion_common/motion_common/ethercat_mailbox.py"
+if [[ -f "${BUS_MARKER_HELPER}" ]] && command -v python3 >/dev/null 2>&1; then
+  python3 "${BUS_MARKER_HELPER}" begin --owner "$$" || true
+fi
+
 if ! recover_ethercat_errors_before_launch; then
   exit 1
 fi
@@ -129,5 +141,10 @@ set -u
 MOTOR_ROS_ARGS=(--ros-args -p "config_file:=${MOTOR_CONFIG_FILE}")
 if [[ -n "${MOTION_PC_NAMESPACE}" ]]; then
   MOTOR_ROS_ARGS+=(-r "__ns:=/${MOTION_PC_NAMESPACE}")
+fi
+# 슬레이브가 모두 OP 로 자리 잡거나(설정 끝) · 오류로 굳거나 · 시간이 지나거나 · 모터가 끝나면 표시를 지운다 ·
+# 서브셸로 띄워 부모가 systemd 가 되게(좀비 안 남김) · 같은 cgroup 이라 서비스를 멈추면 같이 끝난다 · 125
+if [[ -f "${BUS_MARKER_HELPER}" ]] && command -v python3 >/dev/null 2>&1; then
+  ( python3 "${BUS_MARKER_HELPER}" watch --owner "$$" </dev/null & )
 fi
 exec "${MOTOR_EXECUTABLE}" "${MOTOR_ROS_ARGS[@]}"

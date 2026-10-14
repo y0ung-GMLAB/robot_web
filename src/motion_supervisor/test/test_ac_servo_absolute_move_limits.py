@@ -53,3 +53,27 @@ def test_range_recovery_skips_the_limit_check():
         {'axis': 0, 'target_rad': R(10.0), 'range_recovery': True}
     )
     assert (success, message) == (False, 'stop here')
+
+
+def test_stop_during_the_setpoint_wait_drops_the_next_point():
+    """수정 목록 112 나 · 「동작 취소」 가 「지금 위치에 서라」 를 보낸 뒤 궤적 스레드가 다음 점을 또 보내
+    모터가 7.4° 더 갔다(2026-10-12 floating4) · 기다리는 사이 정지가 오면 보내지 않는다"""
+    import threading
+    supervisor = MotionSupervisor.__new__(MotionSupervisor)
+    supervisor._command_lock = threading.RLock()
+    sent = []
+    supervisor._target_position_limit_error = lambda _motor, _target: ''
+    supervisor._publish_controlword = lambda *_a: None
+    supervisor._action_setpoint_clear_sec = lambda: 0.0
+    supervisor._publish_position_target = lambda *a: sent.append(a[3]) or (True, 'sent')
+    alive = {'yes': False}       # 기다리는 사이 정지가 액션을 지웠다
+
+    ok, message = supervisor._publish_ac_servo_action_setpoint(
+        [], {}, 0, 1.0, still_active=lambda: alive['yes'],
+    )
+    assert ok is True and 'cancelled' in message
+    assert sent == []
+
+    alive['yes'] = True
+    supervisor._publish_ac_servo_action_setpoint([], {}, 0, 2.0, still_active=lambda: alive['yes'])
+    assert sent == [2.0]

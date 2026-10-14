@@ -4,19 +4,47 @@
  * 미룬다 · 버튼을 누르는 사이 그 버튼이 새로 그려져 눌림이 사라지는 일을 막는다.
  */
 import { replace } from './dom.js';
+import { installOverflowTitles } from './overflow_title.js';
 import { api, poll, StatusStream } from './net.js';
 import { createShell, routeLabel } from './shell.js';
 import { renderHome } from './pages/home.js';
-import { renderPlaceholder } from './pages/placeholder.js';
 import { loadPlay, renderPlay } from './pages/play.js';
+import { loadSchedule, renderSchedule } from './pages/schedule.js';
+import { loadStore, renderStore } from './pages/store.js';
+import { loadAnimations, renderAnimations } from './pages/animations.js';
+import { loadDocs, renderDocs } from './pages/docs.js';
+import { renderTools } from './pages/tools.js';
+import { loadAlarms, renderAlarms } from './pages/alarms.js';
+import { loadNetwork, renderNetwork } from './pages/network.js';
+import { loadBackup, renderBackup } from './pages/backup.js';
+import { loadPack, renderPack } from './pages/pack.js';
+import { loadRecords, renderRecords } from './pages/records.js';
+import { loadSetup, renderSetup } from './pages/motor_setup.js';
+import { loadManual, renderManual } from './pages/manual.js';
 
 const state = { snap: null, sched: null, schedules: [], events: [], connected: false };
 /** 화면 · render 는 상태로 그리기만 · load 는 그 화면만 쓰는 값을 받아 온다(들어올 때 + reloadMs 마다) */
 const PAGES = {
   home: { render: renderHome },
   play: { render: renderPlay, load: loadPlay, reloadMs: 15000 },
+  schedule: { render: renderSchedule, load: loadSchedule, reloadMs: 30000 },
+  store: { render: renderStore, load: loadStore, reloadMs: 10000 },
+  animations: { render: renderAnimations, load: loadAnimations, reloadMs: 10000 },
+  docs: { render: renderDocs, load: loadDocs },
+  alarms: { render: renderAlarms, load: loadAlarms, reloadMs: 30000 },
+  network: { render: renderNetwork, load: loadNetwork, reloadMs: 15000 },
+  backup: { render: renderBackup, load: loadBackup, reloadMs: 5000 },
+  pack: { render: renderPack, load: loadPack, reloadMs: 5000 },
+  records: { render: renderRecords, load: loadRecords, reloadMs: 15000 },
+  // 모터 설정 한 페이지 · #/mapping 은 같은 페이지의 ② 구획
+  mapping: { render: renderSetup, load: loadSetup, reloadMs: 10000 },
+  'maintain-motors': { render: renderSetup, load: loadSetup, reloadMs: 10000 },
+  manual: { render: renderManual, load: loadManual, reloadMs: 15000 },
+  // static · 들어올 때 한 번만 그린다 · iframe 을 다시 그리면 터미널 세션이 끊긴다
+  tools: { render: renderTools, static: true },
 };
 const PAGE_INTERVAL_MS = 500;
+const SCROLL_QUIET_MS = 400;
 
 function currentRoute() {
   const route = location.hash.replace(/^#\/?/, '').split('?')[0];
@@ -28,6 +56,8 @@ function navigate(route) {
 }
 
 const shell = createShell(document.getElementById('app'), { navigate });
+// 잘린 글(…)에 마우스를 올리면 전체 글 · 화면 전체에 한 번 · 수정 목록 99
+installOverflowTitles();
 
 let pointerDown = false;
 let pagePending = false;
@@ -35,14 +65,27 @@ let lastPageAt = 0;
 document.addEventListener('pointerdown', () => { pointerDown = true; }, true);
 document.addEventListener('pointerup', () => { pointerDown = false; schedulePage(); }, true);
 document.addEventListener('pointercancel', () => { pointerDown = false; }, true);
+// 스크롤바를 끄는 중에 칸이 바뀌면 끌기가 끊긴다 · 화면 안 칸이 스크롤되는 동안은 다시 그리기를 미룬다(창 전체 스크롤은 상관없음)
+let lastInnerScrollAt = 0;
+document.addEventListener('scroll', (event) => {
+  if (event.target instanceof Element && shell.main?.contains(event.target)) lastInnerScrollAt = Date.now();
+}, true);
 
+let drawnRoute = '';
 function renderPage() {
   pagePending = false;
   if (pointerDown) return;
+  if (Date.now() - lastInnerScrollAt < SCROLL_QUIET_MS) {
+    pagePending = true;
+    setTimeout(() => requestAnimationFrame(renderPage), SCROLL_QUIET_MS);
+    return;
+  }
   lastPageAt = Date.now();
   const route = currentRoute();
   const page = PAGES[route];
-  replace(shell.main, page ? page.render(state, { navigate, changed }) : renderPlaceholder(route, routeLabel(route)));
+  if (page?.static && drawnRoute === route) return;
+  drawnRoute = route;
+  replace(shell.main, page.render(state, { navigate, changed }));
 }
 
 let loadTimer = null;
@@ -74,6 +117,7 @@ window.addEventListener('hashchange', () => {
   shell.setRoute(route);
   document.title = `${routeLabel(route)} · Robot Web`;
   startLoading(route);
+  drawnRoute = '';
   lastPageAt = 0;
   renderPage();
   shell.main.focus({ preventScroll: true });

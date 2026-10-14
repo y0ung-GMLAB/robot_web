@@ -29,6 +29,9 @@ from motion_web_bridge import motor_config_rules
 from motion_web_bridge.motor_restart_coordinator import MotorRestartCoordinator
 from motion_web_bridge.motor_restart_diagnostics import diagnose_motor_restart_failure
 
+#: 「적용」 이 재시작을 요청하기 전 단계 · 이때는 실행 검증을 하지 않는다 · 수정 목록 129
+APPLY_PREPARING_PHASES = frozenset({'preparing', 'prepared'})
+
 
 #: 이 속도를 넘으면 「움직이는 중」으로 본다 (deg/s) · §6-225
 MOVING_DEG_PER_SEC = 10.0
@@ -117,7 +120,7 @@ class MotorRuntimeService:
             )
         if time.time() - float(received_at) > 1.0:
             return (
-                '최신 모터 상태가 중단되어 정지 여부를 확인할 수 없습니다'
+                '모터 상태 수신이 끊겨 정지 여부를 확인할 수 없습니다'
                 if require_fresh_motor_state else ''
             )
 
@@ -157,10 +160,10 @@ class MotorRuntimeService:
             if moving:
                 moving_axes.append(str(motor.get('controller_index', '?')))
         if require_fresh_motor_state and not observed_axes:
-            return '최신 모터 상태에서 AC Servo 축을 확인할 수 없습니다'
+            return '모터 상태에서 AC 서보 모터를 찾을 수 없습니다'
         if moving_axes:
             return (
-                f'AC Servo 축 {", ".join(moving_axes)}이 움직이는 중입니다. '
+                f'AC 서보 {", ".join(moving_axes)}번 모터가 움직이는 중입니다. '
                 '완전히 정지한 뒤 다시 검색하세요'
             )
         return ''
@@ -186,11 +189,11 @@ class MotorRuntimeService:
                     continue
         missing = [axis for axis in expected if axis not in online]
         if not missing:
-            return '모터 설정 적용 제한시간을 초과했습니다'
+            return '모터 설정 적용 제한 시간을 초과했습니다'
         return (
-            f'{", ".join(str(axis) for axis in missing)}번 모터가 올라오지 않았습니다 · '
-            f'전원·통신선·드라이버 상태를 확인하세요 '
-            f'(붙은 축 {len(expected) - len(missing)}/{len(expected)})'
+            f'{", ".join(str(axis) for axis in missing)}번 모터가 연결되지 않았습니다. '
+            f'전원·통신선·드라이브 상태를 확인하세요 '
+            f'(연결된 모터 {len(expected) - len(missing)}/{len(expected)})'
         )
 
     def wait_for_runtime_recovery(
@@ -214,7 +217,7 @@ class MotorRuntimeService:
                     or self.managed_service_active(motor_service)
                 ),
                 'duration_sec': 0.0,
-                'error': '복구 대상 EtherCAT 축을 확인할 수 없습니다',
+                'error': '복구할 EtherCAT 모터를 확인할 수 없습니다',
             }
         while time.time() - started_at < timeout_sec:
             service_active = (
@@ -269,6 +272,38 @@ class MotorRuntimeService:
             'duration_sec': round(time.time() - started_at, 3),
         }
 
+    def wait_for_servo_on(self, axes: List[int], timeout_sec: float) -> Dict[str, Any]:
+        """재시작 뒤 서보가 다 켜질 때까지 · 수정 목록 109 메모 (2026-10-12 floating4)
+
+        「온라인」 만 보면 서보가 켜지기 전(Not ready to switch on · 2 초쯤)에 「복구됨」 이라고 답했다 ·
+        그 사이 재생을 누르면 거절됐다 · 다이나믹셀 · 알람 축은 기다리지 않는다.
+        """
+        wanted = sorted(set(int(axis) for axis in axes))
+        started_at = time.time()
+        on: List[int] = []
+        while True:
+            motion_state = self.bridge.motion_state()
+            motors = motion_state.get('motors') if isinstance(motion_state, dict) else None
+            on, skip = [], []
+            for motor in motors or []:
+                if not isinstance(motor, dict):
+                    continue
+                try:
+                    axis = int(motor.get('controller_index'))
+                except (TypeError, ValueError):
+                    continue
+                if axis not in wanted:
+                    continue
+                if motor.get('fault') is True or str(motor.get('motor_type') or '') == 'dynamixel':
+                    skip.append(axis)
+                elif motor.get('servo_on') is True:
+                    on.append(axis)
+            waiting = [axis for axis in wanted if axis not in on and axis not in skip]
+            if not waiting or time.time() - started_at >= timeout_sec:
+                return {'servo_on_axes': sorted(on), 'servo_waiting_axes': waiting,
+                        'servo_wait_sec': round(time.time() - started_at, 3)}
+            time.sleep(0.1)
+
     def recover_interrupted_scan(self, operation: Dict[str, Any]) -> None:
         lock = getattr(self, '_recovery_lock', None)
         operation_id = str(operation.get('operation_id') or '')
@@ -283,7 +318,7 @@ class MotorRuntimeService:
                     operation_id,
                     'failure',
                     phase='interrupted',
-                    error='브리지 종료로 AC Servo 검색 결과를 확인할 수 없습니다',
+                    error='브리지가 종료되어 AC 서보 검색 결과를 확인할 수 없습니다',
                 )
                 return
             self.run_managed_service('start', 'motion-motor.service')
@@ -298,7 +333,7 @@ class MotorRuntimeService:
                     'failure',
                     phase='interrupted_recovered',
                     error=(
-                        '브리지 종료로 AC Servo 검색 결과를 확인할 수 없습니다. '
+                        '브리지가 종료되어 AC 서보 검색 결과를 확인할 수 없습니다. '
                         'Motor Manager는 검색 전 실행 상태로 복구했습니다'
                     ),
                     details={'recovery': recovery},
@@ -308,7 +343,7 @@ class MotorRuntimeService:
                     operation_id,
                     'failure',
                     phase='restore_failed',
-                    error='중단된 AC Servo 검색 후 Motor Manager 복구에 실패했습니다',
+                    error='중단된 AC 서보 검색 뒤 Motor Manager를 복구하지 못했습니다',
                     details={'recovery': recovery},
                 )
         except (OSError, RuntimeError, subprocess.TimeoutExpired, ValueError) as exc:
@@ -317,7 +352,7 @@ class MotorRuntimeService:
                     operation_id,
                     'failure',
                     phase='restore_failed',
-                    error=f'중단된 AC Servo 검색 복구 실패: {exc}',
+                    error=f'중단된 AC 서보 검색 복구 실패: {exc}',
                 )
             except ValueError:
                 pass
@@ -340,7 +375,7 @@ class MotorRuntimeService:
             updated = self.repository.runtime.update_motor_operation(
                 operation_id,
                 'restoring_after_bridge_restart',
-                message='중단된 AC Servo 검색의 Motor Manager 복구 중',
+                message='중단된 AC 서보 검색 뒤 Motor Manager 복구 중',
                 timeout_sec=20.0,
             )
         except ValueError:
@@ -430,7 +465,7 @@ class MotorRuntimeService:
                     operation_id,
                     'timeout',
                     phase='timed_out',
-                    error=str(operation.get('error') or '모터 작업 제한시간을 초과했습니다'),
+                    error=str(operation.get('error') or '모터 작업 제한 시간을 초과했습니다'),
                 )
             except ValueError:
                 return operation
@@ -453,6 +488,13 @@ class MotorRuntimeService:
                 runtime_status,
                 state_payload,
             )
+        if operation_type == 'motor_apply' and str(operation.get('phase') or '') in APPLY_PREPARING_PHASES:
+            # 아직 재시작을 요청하기 전 · 지금 도는 건 **옛** Motor Manager 라 「준비됨 · 새 상태 들어옴」 이
+            # 참이어도 이 적용의 결과가 아니다 · 여기서 판정하면 실행 설정 경로(`runtime_file`)가 아직 없어
+            # 「검증할 … 경로가 없습니다」 로 실패로 닫았고 · 적용은 모른 채 계속하다 「진행 중인 모터 작업이
+            # 일치하지 않습니다」 로 끝났다(수정 목록 129 · 실물 2026-10-13 20:15 · 116 이 준비를 0.4 s 로 늘려 매번) ·
+            # 제한 시간(위 timeout)은 그대로 본다
+            return operation
         last_motor_status_at = optional_float(
             state_payload.get('last_motor_status_at'), None
         )

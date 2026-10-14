@@ -81,6 +81,42 @@ def test_release_becomes_a_hold_request_with_deduped_axes():
     assert len(publisher.sent) == 1
 
 
+def test_release_keeps_going_and_hold_stops_now():
+    """수정 목록 126 · 놓기 = 마지막 목표까지 천천히 · 세우기(정지 · 끊김) = 그 자리"""
+    service, publisher = _service()
+    assert service.release([2, '2', None])['success'] is True
+    assert service.release([])['success'] is False
+    [request] = publisher.sent
+    assert request['release_axes'] == [2]
+    assert 'hold_axes' not in request
+
+
+def test_target_carries_the_manual_speed_limits_and_source():
+    """수정 목록 126 · 매핑 이득으로 계산한 모터 상한을 싣는다 · 출처는 fader · dial 만"""
+    publisher = _Publisher()
+    bridge = SimpleNamespace(
+        current_project_generation=lambda: 7,
+        manual_speed_limits=lambda axis: {
+            'manual_max_velocity_rad_s': 5.0 + axis, 'manual_max_acceleration_rad_s2': 10.0,
+        },
+    )
+    service = ManualStreamService(bridge, publisher=publisher)
+    service.send_target(1, 0.5, source='Fader')
+    service.send_target(1, 0.5, source='midi?')
+    first, second = publisher.sent
+    assert first['source'] == 'fader'
+    assert first['manual_max_velocity_rad_s'] == 6.0
+    assert first['manual_max_acceleration_rad_s2'] == 10.0
+    assert 'source' not in second
+
+
+def test_target_without_a_limit_lookup_still_goes_out():
+    """상한을 못 구하면 싣지 않는다 · supervisor 가 이득 1(가장 느림)로 받는다"""
+    service, publisher = _service()
+    service.send_target(0, 0.1)
+    assert 'manual_max_velocity_rad_s' not in publisher.sent[0]
+
+
 def test_results_keep_only_the_last_entry_per_axis():
     service, _ = _service(generation=7)
     service.result_callback(_result_msg({
@@ -153,3 +189,6 @@ def test_websocket_route_gates_off_mode_and_holds_on_disconnect():
     # 끊기면 만졌던 축을 현재 위치에 세운다 (finally · 어떤 길로 나가도)
     assert 'finally:' in source
     assert 'await asyncio.to_thread(service.hold, list(touched_axes))' in source
+    # 놓기는 계속 가기 · 세우기는 stop (수정 목록 126)
+    assert 'result = service.release(axes)' in source
+    assert "elif kind == 'stop':" in source

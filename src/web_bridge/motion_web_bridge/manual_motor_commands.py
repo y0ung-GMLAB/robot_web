@@ -135,18 +135,34 @@ class ManualMotorCommandService:
             is_ac_servo=is_ac_servo,
         )
 
-    def _off_mode_block(self) -> Dict[str, Any] | None:
+    def _speed_limits(self, axis: int) -> Dict[str, Any]:
+        """수동 조작 상한(모터 rad/s · rad/s²) · 매핑 이득으로 · 못 구하면 안 실음 → supervisor 가 가장 느린 값 · 수정 목록 126"""
+        lookup = getattr(self.bridge, 'manual_speed_limits', None)
+        if not callable(lookup):
+            return {}
+        try:
+            return dict(lookup(axis) or {})
+        except Exception:  # noqa: BLE001
+            return {}
+
+    def _off_mode_block(self, axis: Any = None) -> Dict[str, Any] | None:
         """수동 모드에서만 움직임 명령을 받는다 · 스케줄·오프는 거절 · 2026-10-02
+
+        조인트 범위를 사람이 확인하기 전에도 거절 · 그 모터가 「사용」 매핑 줄에
+        없어도 거절 · 수정 목록 97 (`manual_range_gate`)
 
         정지·서보 제어는 여기 안 온다 (모든 모드에서 된다).
         """
-        reason = run_mode_gate.manual_control_block_reason(self.bridge)
+        reason = run_mode_gate.manual_motion_block_reason(self.bridge)
+        if not reason:
+            range_blocker = getattr(self.bridge, 'manual_range_blocker', None)
+            reason = range_blocker(axis) if callable(range_blocker) else ''
         if not reason:
             return None
         return {'success': False, 'message': reason, **self.bridge.snapshot()}
 
     def ac_servo_jog(self, axis: Any, relative_rad: Any) -> Dict[str, Any]:
-        off = self._off_mode_block()
+        off = self._off_mode_block(axis)
         if off is not None:
             return off
         axis_value = optional_int(axis, None)
@@ -192,6 +208,7 @@ class ManualMotorCommandService:
             'command': 'ac_servo_jog',
             'axis': axis_value,
             'relative_rad': relative_value,
+            **self._speed_limits(axis_value),
         }
         self._jog_request_publisher.publish(
             String(data=json.dumps(payload, ensure_ascii=False, separators=(',', ':')))
@@ -221,7 +238,7 @@ class ManualMotorCommandService:
         }
 
     def dynamixel_jog(self, axis: Any, relative_rad: Any) -> Dict[str, Any]:
-        off = self._off_mode_block()
+        off = self._off_mode_block(axis)
         if off is not None:
             return off
         axis_value = optional_int(axis, None)
@@ -267,6 +284,7 @@ class ManualMotorCommandService:
             'command': 'dynamixel_jog',
             'axis': axis_value,
             'relative_rad': relative_value,
+            **self._speed_limits(axis_value),
         }
         self._jog_request_publisher.publish(
             String(data=json.dumps(payload, ensure_ascii=False, separators=(',', ':')))
@@ -302,7 +320,7 @@ class ManualMotorCommandService:
         duration_sec: Any = None,
         range_recovery: Any = False,
     ) -> Dict[str, Any]:
-        off = self._off_mode_block()
+        off = self._off_mode_block(axis)
         if off is not None:
             return off
         axis_value = optional_int(axis, None)
@@ -356,6 +374,7 @@ class ManualMotorCommandService:
             'axis': axis_value,
             'target_rad': target_value,
             'range_recovery': range_recovery is True,
+            **self._speed_limits(axis_value),
         }
         if duration_value is not None:
             payload['duration_sec'] = duration_value
@@ -390,7 +409,7 @@ class ManualMotorCommandService:
         duration_sec: Any = None,
         range_recovery: Any = False,
     ) -> Dict[str, Any]:
-        off = self._off_mode_block()
+        off = self._off_mode_block(axis)
         if off is not None:
             return off
         axis_value = optional_int(axis, None)
@@ -444,6 +463,7 @@ class ManualMotorCommandService:
             'axis': axis_value,
             'target_rad': target_value,
             'range_recovery': range_recovery is True,
+            **self._speed_limits(axis_value),
         }
         if duration_value is not None:
             payload['duration_sec'] = duration_value
@@ -565,6 +585,26 @@ class ManualMotorCommandService:
                     **self.bridge.snapshot(),
                 }
             axes = [axis_value]
+
+        if action_value == 'fault_reset':
+            # 알람이 있는 축에만 보낸다 · 리셋은 드라이브를 서보 OFF 로 떨어뜨린다 · 알람 없는 축까지
+            # 보내면 켜져 있던 서보가 꺼졌다(2026-10-12 floating4) · 수정 목록 112 가 (사용자 결정)
+            faulted = [
+                axis for axis in axes
+                if bool((self._motion_state_motor(axis) or {}).get('fault'))
+            ]
+            if not faulted:
+                return {
+                    'success': True,
+                    'message': '알람이 없어 오류 초기화를 하지 않았습니다 · 서보는 그대로입니다',
+                    'skipped_axes': list(axes),
+                    **self.bridge.snapshot(),
+                }
+            axes = faulted
+            if axis_value is not None and axis_value not in faulted:
+                axis_value = None
+            # 감독은 scope 'all' 이면 축 목록을 안 보고 감지된 AC 축 전부에 보낸다 · 고른 축만
+            scope_value = 'selected'
 
         request_id = self.bridge.new_project_request_id('ac-servo-control')
         payload = {

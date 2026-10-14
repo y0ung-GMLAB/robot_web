@@ -137,7 +137,8 @@ def test_group_prepare_preserves_local_between_cycle_setting_without_auto_repeat
     assert result['success'] is True
     assert bridge.payload['run_mode'] == 'once'
     assert bridge.payload['group_execution'] is True
-    assert bridge.payload['repeat_mode'] == 'dwell'
+    # 저장된 옛 dwell 은 「대기 후 초기 위치로」 로 · 수정 목록 112 라
+    assert bridge.payload['repeat_mode'] == 'dwell_reinitialize'
     assert bridge.payload['dwell_sec'] == 0.25
     assert 'automation_run' not in bridge.payload
 
@@ -211,7 +212,7 @@ def test_active_dds_execution_blocks_local_start(tmp_path):
     service._local_api = lambda *_args, **_kwargs: {
         'execution': {'state': 'running', 'execution_id': 'exec-a'},
     }
-    assert 'DDS 그룹 실행' in service.local_execution_blocker()
+    assert '그룹 재생 중이라 단독 재생을' in service.local_execution_blocker()
 
 
 def test_stale_dds_display_state_without_lease_does_not_block_local_start(tmp_path):
@@ -321,3 +322,17 @@ def test_the_group_switch_turns_settings_and_participation_on_together(tmp_path,
 
     with pytest.raises(ValueError):
         service.update_settings({'joined': 'yes'})
+
+
+def test_group_prepare_carries_the_masters_initial_move_time(tmp_path):
+    """마스터 재생 화면에서 고른 초기 위치 이동 시간 · 0 이나 없으면 조인트 매핑 값(None) · 2026-10-12"""
+    _assets(tmp_path)
+    bridge = _Bridge(_Repository(tmp_path))
+    base = {'command': 'group_prepare', 'execution_id': 'exec-a',
+            'initialize_monotonic': 100.0, 'network_operation_id': 'command-a'}
+    assert local_motion_control(bridge, {**base, 'initial_move_time_sec': 7.0})['success'] is True
+    assert bridge.payload['initial_move_time_sec'] == 7.0
+    local_motion_control(bridge, {**base, 'initial_move_time_sec': 0.0})
+    assert bridge.payload['initial_move_time_sec'] is None
+    local_motion_control(bridge, base)
+    assert bridge.payload['initial_move_time_sec'] is None

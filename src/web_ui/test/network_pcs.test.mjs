@@ -19,9 +19,9 @@ test('같은 망 PC · IP 를 글자로 · 다른 PC 는 열기 링크 · 스피
   ]);
   assert.match(html, /192\.168\.0\.11/);
   assert.match(html, /로봇 · 마스터/);
-  assert.match(html, /지금 이 화면/);
+  assert.match(html, /현재 접속/);
   assert.match(html, /href="http:\/\/192\.168\.0\.12:8000"[^>]*target="_blank"/);
-  assert.match(html, /stage-a · 나감/);
+  assert.match(html, /stage-a · 미참여/);
   assert.match(html, /스피커 화면 열기/);
   assert.match(html, /끊김 · 9초 전/);
 });
@@ -41,6 +41,6 @@ test('버전이 다르면 빨갛게 · 이 PC 혼자면 기다리는 이유를 �
     { ...local, pc_id: 'old', display_name: 'old', is_local: false, git_hash: 'ffff000',
       version_differs: true, protocol_mismatch: true, protocol_version: 4 },
   ]);
-  assert.match(html, /이 PC 와 다름 · 약속 번호 4 \(이 PC 5\)/);
+  assert.match(html, /현재 접속 PC와 다름 · 연동 프로토콜 4 \(현재 접속 PC 5\)/);
   assert.match(networkPcRows([local]), /같은 DDS Domain ID/);
 });

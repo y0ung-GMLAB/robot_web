@@ -14,10 +14,10 @@ const listeners = new Set();
 
 //: 서버 run_mode_gate.SCHEDULE_MANUAL_BLOCK_MESSAGE 와 같은 문장
 const SCHEDULE_MANUAL_BLOCK_MESSAGE =
-  '스케줄 모드 · 수동 조작은 「수동」 모드에서만 됩니다 (상단에서 모드를 바꾸세요)';
+  '스케줄 모드에서는 수동 조작과 직접 재생을 할 수 없습니다. 상단에서 「수동」 모드로 바꾸세요.';
 //: 서버 run_mode_gate.OFF_BLOCK_MESSAGE 와 같은 문장
 const OFF_MANUAL_BLOCK_MESSAGE =
-  '오프 모드 · 명령이 차단되어 있습니다 (상단에서 모드를 바꾸세요)';
+  '오프 모드라 모든 명령이 차단되어 있습니다. 상단에서 모드를 바꾸세요.';
 
 export function setRunMode(mode) {
   const next = String(mode || '');

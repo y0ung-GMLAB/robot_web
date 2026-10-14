@@ -36,6 +36,7 @@ def test_export_then_import_round_trips_the_settings_but_not_logs(tmp_path):
     before = {
         key: value for key, value in _hashes(folder).items()
         if not key.startswith(('logs/', 'trash/')) and key != 'runtime/schedule_end_state.json'
+        and not key.endswith('.lock')   # 잠금 표시는 안 옮긴다 · 수정 목록 112 자
     }
 
     exported = repository.export_project_zip(project_id)
@@ -51,7 +52,7 @@ def test_export_then_import_round_trips_the_settings_but_not_logs(tmp_path):
     assert result['imported_project_id'] == project_id
     after = {
         key: value for key, value in _hashes(restored).items()
-        if not key.startswith(('logs/', 'trash/'))
+        if not key.startswith(('logs/', 'trash/')) and not key.endswith('.lock')
     }
     assert after == before
 
@@ -239,3 +240,18 @@ def test_auto_backup_failure_is_logged_not_raised():
     assert service.tick() is True
     assert errors and 'disk full' in errors[0]
     assert service.tick() is False
+
+
+def test_lock_files_are_not_in_the_zip(tmp_path):
+    """수정 목록 112 자 · 2026-10-12 floating4 zip 에 `.lock` 17 개(없는 애니메이션 잠금 포함)"""
+    project = tmp_path / 'proj'
+    (project / 'motions').mkdir(parents=True)
+    (project / 'project.json').write_text('{"project_id": "proj"}', encoding='utf-8')
+    (project / 'motions' / 'a.json').write_text('{}', encoding='utf-8')
+    (project / 'motions' / '.a.json.lock').write_text('', encoding='utf-8')
+    (project / 'motions' / 'gone.json.lock').write_text('', encoding='utf-8')
+
+    names = zipfile.ZipFile(io.BytesIO(project_backup.export_project_zip(project))).namelist()
+
+    assert 'proj/motions/a.json' in names
+    assert not [name for name in names if name.endswith('.lock')]

@@ -31,7 +31,7 @@ SUCCESS_FILE = 'last_success.json'
 TAIL_LINES = 15
 REMOTE_START_TIMEOUT_SEC = 5.0
 REMOTE_STATUS_TIMEOUT_SEC = 2.5
-SPEAKER_HINT = '스피커 PC 는 그 PC 터미널에서 · bash ~/robot_web/scripts/install_speaker.sh'
+SPEAKER_HINT = '스피커 PC는 해당 PC 터미널에서 업데이트하세요: bash ~/robot_web/scripts/install_speaker.sh'
 ROBOT_COMMAND = 'bash scripts/install.sh --code-only'
 #: 스피커 PC · speaker_app 이 이 모듈을 그대로 쓴다(같은 저장소) · 2026-10-08
 SPEAKER_COMMAND = 'bash scripts/install_speaker.sh --code-only'
@@ -158,18 +158,18 @@ class SystemUpdate:
                     # 그 뒤 터미널에서 설치가 끝까지 됐다 · 실패만 남겨 두면 지금 상태를 잘못 읽는다
                     out.update({
                         'state': 'done', 'after_hash': str(success.get('hash') or out.get('git_hash', '')),
-                        'message': '웹 업데이트는 실패했지만 그 뒤 설치로 복구됨',
+                        'message': '웹 업데이트는 실패했지만 이후 설치로 복구되었습니다',
                     })
             return out
         if self._unit_active(str(state.get('unit') or '')):
             out['state'] = 'running'
             return out
-        out.update({'state': 'failed', 'message': '업데이트 작업이 결과 없이 끝났습니다 · 로그를 보세요'})
+        out.update({'state': 'failed', 'message': '업데이트 작업이 결과 없이 끝났습니다. 로그를 확인하세요.'})
         success = self._last_success()
         if float(success.get('time') or 0) > float(state.get('started_at') or 0):
             out.update({
                 'state': 'done', 'after_hash': str(success.get('hash') or out.get('git_hash', '')),
-                'message': '웹 업데이트는 결과 없이 끝났지만 그 뒤 설치로 복구됨',
+                'message': '웹 업데이트는 결과 없이 끝났지만 이후 설치로 복구되었습니다',
             })
         return out
 
@@ -202,7 +202,7 @@ class SystemUpdate:
             'unit': unit, 'log': str(log), 'rc': str(rc),
             'started_at': self._now(), 'before_hash': current.get('git_hash', ''),
         })
-        return {**self.status(), 'success': True, 'message': '업데이트 시작 · 몇 분 걸립니다 · 이 PC 웹이 잠깐 끊깁니다'}
+        return {**self.status(), 'success': True, 'message': '업데이트를 시작했습니다. 몇 분 걸리며, 그동안 웹 화면이 잠깐 끊깁니다.'}
 
 
 # ---------------------------------------------------------------------- #
@@ -277,7 +277,7 @@ def start_all(
     started = [row for row in rows if row.get('state') == 'running']
     return {
         'success': bool(started),
-        'message': f'{len(started)}대 업데이트 시작 · 이 PC 웹은 잠깐 끊겼다 돌아옵니다' if started else '시작한 PC 가 없습니다',
+        'message': f'{len(started)}대 업데이트를 시작했습니다. 현재 접속한 PC의 웹 화면은 잠깐 끊겼다가 다시 연결됩니다.' if started else '업데이트를 시작한 PC가 없습니다',
         'pcs': rows,
     }
 
@@ -312,7 +312,7 @@ def status_all(
             rows.append({**row, **http(f"{row['web_url']}/api/system/update", timeout=REMOTE_STATUS_TIMEOUT_SEC)})
         except (OSError, ValueError, urllib.error.URLError):
             # 업데이트 중에는 그 PC 웹이 잠깐 내려간다 · 실패가 아니라 기다림
-            rows.append({**row, 'state': 'unreachable', 'message': '응답 없음 · 업데이트 중이면 잠시 뒤 돌아옵니다',
+            rows.append({**row, 'state': 'unreachable', 'message': '응답 없음 · 업데이트 중이면 잠시 뒤 다시 연결됩니다',
                          'git_hash': str(pc.get('git_hash') or '')})
     hashes = {str(row.get('git_hash') or '') for row in rows if row.get('role') != 'speaker' and row.get('git_hash')}
     return {'success': True, 'pcs': rows, 'same_version': len(hashes) <= 1}
@@ -324,5 +324,5 @@ def blocker_from_run_status(motion_run_status: Mapping[str, Any]) -> str:
 
     state = str((motion_run_status or {}).get('state') or '')
     if state and run_state.is_running(state):
-        return f'이 PC 가 재생 중입니다({state}) · 정지한 뒤 업데이트하세요'
+        return f'재생 중입니다({state}). 정지한 뒤 업데이트하세요.'
     return ''

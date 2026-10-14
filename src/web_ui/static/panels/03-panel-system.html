@@ -4,7 +4,7 @@
       <!-- 웹 터미널 · 코드를 받아 다시 빌드하는 일을 여기서 한다 · §6-99 -->
       <section class="btop-panel workspace-panel hidden" data-workspace-panel="terminal" aria-label="터미널">
         <div class="section-head workspace-page-head">
-          <div><strong>터미널</strong><small>이 PC 의 작업공간에서 바로 시작합니다</small></div>
+          <div><strong>터미널</strong><small>작업공간 폴더에서 시작합니다</small></div>
         </div>
         <div class="registry-message terminal-howto">
           <!-- `git pull &&` 를 앞에 붙이지 않는다 · §6-102
@@ -12,9 +12,9 @@
                install.sh 가 **아예 돌지 않았다** · 그래서 그 PC 만 다른 명령을
                손으로 치게 됐고 그것이 다음 사고가 됐다. 코드 수신은 install.sh
                2단계가 스스로 한다. -->
-          <strong>코드 받기 + 다시 빌드</strong> · 아래 한 줄을 그대로 치세요 (몇 분 걸립니다)
+          <strong>코드 받기 + 다시 빌드</strong> · 아래 명령을 그대로 입력하세요(몇 분 걸립니다).
           <pre class="terminal-howto-command">bash scripts/install.sh</pre>
-          <span>빌드 동안 이 웹 화면은 잠깐 끊깁니다 · <strong>터미널은 안 끊깁니다</strong> · 끝나면 <code>설치 완료</code> 가 찍힙니다</span>
+          <span>빌드하는 동안 웹 화면은 잠시 끊기지만 <strong>터미널은 끊기지 않습니다</strong>. 끝나면 <code>설치 완료</code>가 표시됩니다.</span>
         </div>
         <!-- 시간대 바꾸기는 화면에서 뺐다 · §6-291
              해외 설치는 **우분투에서 직접** 바꾼다 · `sudo timedatectl set-timezone …`
@@ -56,7 +56,7 @@
               <div><span>런타임 오류</span><strong id="systemFaultCount">0개</strong></div>
             </div>
             <div class="status-strip system-status-secondary" aria-label="세부 상태">
-              <div><span>컴퓨터 명</span><strong id="systemHostname">-</strong></div>
+              <div><span>PC 이름</span><strong id="systemHostname">-</strong></div>
               <div><span>작업공간</span><strong id="systemWorkspacePath">-</strong></div>
               <div><span>프로젝트 폴더</span><strong id="systemProjectsPath">-</strong></div>
               <div><span>Git 주소</span><strong><a id="systemGitRemote" href="#" target="_blank" rel="noopener">-</a></strong></div>
@@ -74,11 +74,11 @@
             </div>
             <div class="registry-actions system-program-actions">
               <button id="programStatusRefreshButton" type="button">프로그램 상태 확인</button>
-              <button id="programPageReloadButton" type="button">화면 갱신</button>
+              <button id="programPageReloadButton" type="button">화면 새로고침</button>
               <button id="desktopShortcutButton" type="button">바탕화면 바로가기 만들기</button>
               <button id="programRestartButton" type="button" disabled>프로그램 재시작</button>
             </div>
-            <div class="registry-message axis-apply-warning system-restart-warning">프로그램 재시작 · 서보 상태 유지 │ 모터 제어 재시작 · AC Servo OFF → 자동 ON 가능</div>
+            <div class="registry-message axis-apply-warning system-restart-warning">「프로그램 재시작」은 서보 상태를 그대로 둡니다. 「장비에 적용 · 모터 재시작」을 하면 AC 서보가 꺼졌다가 자동으로 다시 켜질 수 있습니다.</div>
           </section>
 
           <!-- 로봇 팩 · PC 전역 (PC 1대 = 로봇 1대) · 축·모터·환경·MuJoCo 모델 zip
@@ -89,17 +89,17 @@
               <span id="robotPackSummary">확인 중</span>
             </div>
             <div class="status-strip robot-pack-status">
-              <div><span>지금 팩</span><strong id="robotPackCurrent">-</strong></div>
-              <div><span>올린 시각</span><strong id="robotPackUploadedAt">-</strong></div>
+              <div><span>현재 팩</span><strong id="robotPackCurrent">-</strong></div>
+              <div><span>업로드 시각</span><strong id="robotPackUploadedAt">-</strong></div>
               <div><span>이전 팩</span><strong id="robotPackPrevious">-</strong></div>
             </div>
             <div class="registry-actions robot-pack-actions">
               <label class="robot-pack-drop" id="robotPackDropZone">
                 <input id="robotPackFileInput" type="file" accept=".zip,application/zip" hidden>
-                <span>팩 폴더 또는 zip 놓기 · 눌러서 zip 고르기</span>
+                <span>팩 폴더나 zip 파일을 끌어다 놓거나, 눌러서 zip 파일을 선택하세요</span>
               </label>
               <input id="robotPackFolderInput" type="file" webkitdirectory hidden>
-              <button id="robotPackFolderButton" type="button">폴더 고르기</button>
+              <button id="robotPackFolderButton" type="button">폴더 선택</button>
               <button id="robotPackRollbackButton" type="button" disabled>이전 팩으로 되돌리기</button>
               <button id="robotPackDiffButton" type="button">조인트 매핑과 비교</button>
             </div>
@@ -120,18 +120,18 @@
           <section class="project-system-manager timezone-card" aria-label="시간대">
             <div class="section-head compact">
               <strong>시간대</strong>
-              <span>스케줄은 이 PC 시각 기준 · 로봇 PC 는 모두 같아야 · 도시 이름으로</span>
+              <span>스케줄은 PC 시각을 기준으로 동작합니다. 로봇 PC는 모두 같은 시간대여야 합니다.</span>
             </div>
             <div class="status-strip">
-              <div><span>지금</span><strong id="systemTimezoneNow">-</strong></div>
+              <div><span>현재</span><strong id="systemTimezoneNow">-</strong></div>
             </div>
             <div class="wifi-form">
-              <label class="manual-field"><span>시간대 (예 Asia/Seoul · Europe/Paris)</span>
+              <label class="manual-field"><span>시간대 (예: Asia/Seoul, Europe/Paris)</span>
                 <input id="systemTimezonePick" type="text" list="systemTimezoneList" autocomplete="off" spellcheck="false">
                 <datalist id="systemTimezoneList"></datalist>
               </label>
-              <button id="systemTimezoneApplyButton" type="button">이 PC 에 적용</button>
-              <button id="systemTimezoneApplyAllButton" class="primary" type="button">모든 로봇 PC 에 적용</button>
+              <button id="systemTimezoneApplyButton" type="button">접속한 PC에만 적용</button>
+              <button id="systemTimezoneApplyAllButton" class="primary" type="button">모든 로봇 PC에 적용</button>
             </div>
             <div id="systemTimezoneMismatch" class="registry-message hidden" role="status"></div>
             <div id="systemTimezoneMessage" class="registry-message hidden" role="status"></div>
@@ -141,10 +141,10 @@
           <section class="project-system-manager wifi-card" aria-label="Wi-Fi">
             <div class="section-head compact">
               <strong>Wi-Fi</strong>
-              <span>이 PC 의 무선 연결 · 바꾸면 60초 안에 「유지」 · 안 누르면 이전 연결로 되돌림</span>
+              <span>무선 연결을 바꾸면 60초 안에 「유지」를 누르세요. 누르지 않으면 이전 연결로 돌아갑니다.</span>
             </div>
             <div class="status-strip">
-              <div><span>지금 연결</span><strong id="wifiCurrent">-</strong></div>
+              <div><span>현재 연결</span><strong id="wifiCurrent">-</strong></div>
               <div><span>IP</span><strong id="wifiAddress" class="mono">-</strong></div>
               <div><span>주소 방식</span><strong id="wifiMethod">-</strong></div>
               <div><span>Wi-Fi 절전</span><strong id="wifiPowersave">-</strong></div>
@@ -156,19 +156,19 @@
             </div>
             <div class="registry-actions">
               <button id="wifiScanButton" type="button">주변 Wi-Fi 찾기</button>
-              <button id="wifiRefreshButton" type="button">새로 보기</button>
+              <button id="wifiRefreshButton" type="button">새로고침</button>
             </div>
             <div class="wifi-form">
-              <label class="manual-field"><span>Wi-Fi</span><select id="wifiNetworkSelect"><option value="">「주변 Wi-Fi 찾기」 를 누르세요</option></select></label>
-              <label class="manual-field"><span>또는 이름(SSID) 직접 · 숨긴 Wi-Fi</span><input id="wifiSsidInput" type="text" autocomplete="off" spellcheck="false"></label>
-              <label class="manual-field"><span>비밀번호 (열린 Wi-Fi 면 비움)</span><input id="wifiPasswordInput" type="password" autocomplete="new-password"></label>
-              <label class="compact-field"><input id="wifiStaticToggle" type="checkbox"><span>고정 IP (공유기 「DHCP 예약」 이 더 간단)</span></label>
+              <label class="manual-field"><span>Wi-Fi</span><select id="wifiNetworkSelect"><option value="">「주변 Wi-Fi 찾기」를 누르세요</option></select></label>
+              <label class="manual-field"><span>또는 이름(SSID) 직접 입력 (숨긴 Wi-Fi)</span><input id="wifiSsidInput" type="text" autocomplete="off" spellcheck="false"></label>
+              <label class="manual-field"><span>비밀번호 (암호 없는 Wi-Fi는 비워 두세요)</span><input id="wifiPasswordInput" type="password" autocomplete="new-password"></label>
+              <label class="compact-field"><input id="wifiStaticToggle" type="checkbox"><span>고정 IP (공유기의 「DHCP 예약」이 더 간단합니다)</span></label>
               <div id="wifiStaticFields" class="wifi-static hidden">
-                <label class="manual-field"><span>주소 (예 192.168.0.13/24)</span><input id="wifiStaticAddress" type="text" class="mono"></label>
-                <label class="manual-field"><span>게이트웨이 (공유기 · 예 192.168.0.1)</span><input id="wifiStaticGateway" type="text" class="mono"></label>
-                <label class="manual-field"><span>DNS (비우면 게이트웨이)</span><input id="wifiStaticDns" type="text" class="mono"></label>
+                <label class="manual-field"><span>주소 (예: 192.168.0.13/24)</span><input id="wifiStaticAddress" type="text" class="mono"></label>
+                <label class="manual-field"><span>게이트웨이 (공유기 주소, 예: 192.168.0.1)</span><input id="wifiStaticGateway" type="text" class="mono"></label>
+                <label class="manual-field"><span>DNS (비워 두면 게이트웨이 사용)</span><input id="wifiStaticDns" type="text" class="mono"></label>
               </div>
-              <button id="wifiConnectButton" class="primary" type="button">이 Wi-Fi 로 바꾸기</button>
+              <button id="wifiConnectButton" class="primary" type="button">이 Wi-Fi에 연결</button>
             </div>
             <div id="wifiMessage" class="registry-message" role="status"></div>
           </section>

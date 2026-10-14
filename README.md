@@ -15,9 +15,25 @@ MIDI 녹화·모션 스튜디오는 삭제됐습니다.)
 미니 PC 가 로봇에 붙어 있으면 화면·키보드를 꽂기 어렵습니다 · **같은 망(같은 Wi-Fi)에 있는 아무
 PC·노트북의 브라우저**로 들어가면 됩니다 · 미니 PC 를 열 일이 없게 화면·터미널을 모두 웹으로 냅니다.
 
+**북마크는 PC 이름(`.local`) 주소로** (2026-10-14) · 망이 바뀌어 IP 가 `192.168.…` 에서 `172.…` 처럼 달라져도
+이름은 그대로라 같은 주소로 들어갑니다 · IP 주소 북마크는 망·공유기가 바뀌면 깨집니다.
+
+```text
+http://floating1.local:8000/v2    ← 로봇 PC 1
+http://floating2.local:8000/v2    ← 로봇 PC 2
+http://floating3.local:8000/v2    ← 로봇 PC 3
+http://floating4.local:8000/v2    ← 로봇 PC 4 (마스터 · 애니데스크도 여기)
+http://speaker.local:8100         ← 스피커 PC
+```
+
+- 일반형 · `http://floating<n>.local:8000/v2` · `<n>` 은 PC 번호 · 이름은 그 PC 의 컴퓨터 이름(`hostname`)과 같다(설치 때 `--name`)
+- 기존 화면은 `/v2` 를 빼고 `http://floating<n>.local:8000` · 터미널 `:8081` · PC 성능 `:8080` 도 같은 이름으로
+- 안 열리면(아래 「`.local` 이 안 될 때」) IP 로 들어가서 그 PC 의 「같은 망 PC」 표를 본다
+
 | 무엇 | 주소 | 어느 PC |
 |---|---|---|
 | 로봇 웹 (모터 · 재생 · 매핑 · 스케줄) | `http://<IP>:8000` | 로봇 PC 전부 |
+| 새 화면 (v2 · 시험 중) | `http://<IP>:8000/v2` | 로봇 PC 전부 · 기존 화면(`:8000`)과 같은 서버 · 같은 설정 |
 | 스피커 웹 | `http://<IP>:8100` | 스피커 PC |
 | 터미널 (명령 치기) | 로봇 웹 「터미널」 탭 · 또는 `http://<IP>:8081` | 로봇 PC · 스피커 PC(2026-10-09 뒤 `install_speaker.sh` 한 번) |
 | PC 성능 (btop) | 로봇 웹 「PC 성능」 탭 · 또는 `http://<IP>:8080` | 로봇 PC · 스피커 PC(같음) |
@@ -25,18 +41,27 @@ PC·노트북의 브라우저**로 들어가면 됩니다 · 미니 PC 를 열 �
 - 뒤 숫자(**포트**)는 PC 번호가 아니라 프로그램마다 **늘 같은 값**입니다 · floating1 이든 floating4 든 로봇 웹은 `:8000`
 - PC 마다 다른 것은 앞부분(IP 또는 이름)뿐입니다
 - `https` 가 아니라 **`http`** · 이름과 숫자 사이는 점이 아니라 **콜론 `:`**
+- **새 화면(v2)** · 주소 끝에 `/v2` · 기존 화면과 같은 서버라 어느 쪽에서 바꿔도 같습니다 · 기존 화면은 왼쪽 메뉴 맨 아래 「기존 화면 ↗」
 
 ```text
-http://192.168.0.14:8000      ← IP 로 (가장 확실)
-http://floating4.local:8000   ← PC 이름 + .local 로 (안 열리면 IP 로)
-http://localhost:8000         ← 그 PC 자신의 화면에서
+http://floating4.local:8000/v2   ← PC 이름 + .local 로 (북마크는 이것 · 망이 바뀌어도 그대로)
+http://192.168.0.14:8000/v2      ← IP 로 (지금 망에서 가장 확실 · 망이 바뀌면 달라짐)
+http://localhost:8000/v2         ← 그 PC 자신의 화면에서
 ```
 
 - **IP 를 모를 때** · 아는 PC 하나(보통 마스터)의 로봇 웹 → `PC 연동 설정` 탭 → 「같은 망 PC」 표에 PC 마다 주소가 나오고
   「화면 열기」 를 누르면 그 PC 웹이 새 탭으로 열립니다 · 그 PC 터미널에서는 `hostname -I` · 또는 `bash scripts/check.sh` 의 「웹 :8000」 줄
-- `.local` 이름은 우분투 기본 이름 찾기(mDNS)라 망에 따라 막힐 수 있습니다 · 그때는 IP 로
+- **`.local` 이 안 될 때** · 우분투 기본 이름 찾기(mDNS · avahi)를 쓰므로 ① 공유기의 「클라이언트 격리」·「AP 격리」 가 켜져 있거나
+  ② 회사망처럼 멀티캐스트를 막는 망이면 안 열립니다 · 접속하는 쪽이 윈도 10 · 11 · 맥 · 아이폰이면 보통 되고, 안드로이드는 기기마다 다릅니다 ·
+  그때는 IP 로 · 로봇 PC 끼리의 그룹 연동은 `.local` 과 상관없습니다(DDS)
 - IP 가 바뀌면 북마크가 깨집니다 · 공유기에서 PC 마다 **고정 IP(DHCP 예약)** 를 걸어 두는 것을 권합니다(아래 7. 네트워크)
 - 같은 망이 아니면(회사망 ↔ 현장 Wi-Fi 따로) 열리지 않습니다 · 접속하는 노트북을 로봇 PC 와 같은 Wi-Fi 에 붙입니다
+
+### 밖에서 · 애니데스크 (2026-10-14)
+
+현장 밖(해외 등)에서는 **마스터 PC(floating4)에 깐 애니데스크**(회사 계정)로 들어가 그 PC 브라우저로 웹을 엽니다 ·
+다른 PC 는 「같은 망 PC」 새 탭 · 설치는 마스터에서 `bash ~/ros2_ws/scripts/setup/anydesk.sh` → 재부팅(Wayland 끄기) ·
+자세히 [설치 101](docs/설치_101.md) 4-1 · 웹 포트(8000 등)를 인터넷에 직접 열지 않습니다(웹에는 로그인이 없음)
 
 ## 구성
 
@@ -152,6 +177,7 @@ curl -fsSL https://raw.githubusercontent.com/y0ung-GMLAB/robot_web/main/scripts/
 |---|---|
 | 다른 용도로 쓰던 PC | 그대로 됩니다 · 있는 프로그램은 지우지 않고 더하기만 합니다 · 단 자동 로그인·자동 업데이트 끄기·절전 끄기는 전시 PC 전제라 적용됩니다 · 깨끗이 하려면 우분투 재설치 뒤 한 줄 |
 | 이미 이 프로그램이 깔린 PC | 같은 한 줄 = 코드 갱신 + 현장 준비 점검 · 또는 전처럼 `bash scripts/install.sh` (현장 준비는 손대지 않음) |
+| 옛 스택(kimjoonho motion_web)이 깔린 PC | 끝에 `-s -- --replace-old` · 옛 `~/ros2_ws` 를 옮겨 두고 새로 · 아래 「옛 스택이 깔린 PC」 |
 | 인터넷이 안 되는 매장 | 한 줄 설치는 인터넷이 필요합니다 · 사무실에서 설치한 뒤 들고 가세요 |
 | 미리 보기만 | `bash scripts/install.sh --site --dry-run` · 바꾸지 않고 할 일만 찍습니다 |
 | 랜카드 지정 · 시간대 지정 | `SITE_ETHERCAT_NIC=enp2s0 SITE_TIMEZONE=Europe/Paris bash scripts/install.sh --site` |
@@ -479,6 +505,10 @@ bash scripts/install.sh
 **갱신 명령은 이 한 줄입니다.** 모든 PC 에서 같습니다. 연동해서 쓰는 PC 는
 **전부** 갱신해야 서로 붙습니다.
 
+**현장 PC 에 올리기 전 (2026-10-13 · 사용자 결정)** · 메이저 업데이트(모터·드라이브 · 재생·그룹·스케줄 · 매핑·리밋 · 설치 스크립트가 바뀐 것)는
+먼저 벤치 PC(floating4)에서 `docs/실물_테스트_로봇_구동.md` 의 **S 시나리오를 처음부터 끝까지** 돌려 **오류 0** 이어야 현장에 올립니다 ·
+무엇이 메이저인지 · 통과 기준은 그 문서 맨 앞 「배포 규칙」.
+
 **웹에서 한 번에 (2026-10-08~)** · 아무 로봇 PC 웹 → `실행` → `PC 연동 설정` → 「같은 망 PC」 아래
 **`모든 PC 업데이트`** · 같은 망의 연결된 로봇 PC 마다 `install.sh --code-only`(코드 받기 → 빌드 →
 서비스 재시작 · 관리자 비밀번호 없이)를 돌리고 표에 진행·버전(옛 → 새)·마지막 줄을 보여 줍니다.
@@ -487,6 +517,25 @@ bash scripts/install.sh
 - 새 시스템 패키지가 필요한 갱신이면 그 PC 가 「실패 · 새 시스템 패키지가 필요합니다」 → 그 PC 터미널(웹 터미널 탭도 됨)에서 위 한 줄
 - 스피커 PC 도 같이 합니다(2026-10-08 · 수정 목록 80) · 옛 스피커 앱이라 「터미널에서」 로 나오면 그 PC 터미널에서 `bash ~/robot_web/scripts/install_speaker.sh` 한 번
 - **이 기능이 들어간 버전을 한 번은 PC 마다 받아야** 그 뒤부터 웹으로 됩니다(처음 한 번은 위 한 줄)
+
+### 옛 스택(kimjoonho motion_web)이 깔린 PC · 2026-10-13
+
+옛 스택도 `~/ros2_ws` 에 깔려 있고 서비스 이름(`motion-control` · `motion-coordination` · `motion-motor` 등)도 같습니다.
+그래서 한 줄 설치를 그냥 치면 「`~/ros2_ws` 에 다른 프로그램이 있습니다」 로 멈춥니다(옛 것을 덮어쓰지 않게).
+옛 폴더를 옮겨 두고 새로 까는 옵션을 붙여 다시 칩니다.
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/y0ung-GMLAB/robot_web/main/scripts/bootstrap.sh | bash -s -- --replace-old
+# PC 이름도 바꾸려면 · ... | bash -s -- --replace-old --name floating1
+```
+
+- 하는 일 · 옛 서비스 멈춤 → `~/ros2_ws` 를 `~/ros2_ws_old_<날짜_시각>` 로 **옮김(지우지 않음)** → 새로 받기 · 빌드 · 서비스 등록(같은 이름이라 옛 서비스 자리를 덮음) · 나머지는 새 PC 한 줄 설치와 같음
+- 손으로 할 때 · `systemctl --user stop motion-control motion-coordination motion-motor` → `mv ~/ros2_ws ~/ros2_ws_old` → 위 한 줄(옵션 없이)
+- **옮겨 오지 않는 것** · 옛 프로젝트·조인트 매핑·기준점·모터 설정 · 새 화면에서 처음부터 합니다 · `설정` → 모터 관리 `전체 모터 검색` → 앱솔루트 방식 확인 → 새 프로젝트 → 조인트 매핑 → 기준점 캡처 → 그룹
+- 옛 애니메이션 `.json` 은 그대로 올릴 수 있습니다 · 옛 폴더 `~/ros2_ws_old_*/motion_projects/<프로젝트>/motions/` 에서 꺼내 웹에 드래그
+- **그룹으로 묶는 PC 는 전부 새 스택 같은 버전**이어야 합니다(그룹 프로토콜 8) · 옛 스택 PC 와 섞이면 서로 못 붙습니다
+- 새 것이 잘 돌면 옛 폴더를 지웁니다 · `rm -rf ~/ros2_ws_old_*` · 그 전에는 남겨 두면 옛 설정을 찾아볼 수 있습니다
+- 아직 실제 옛 스택 PC 에서 이 옵션을 돌려 본 적은 없습니다 · 처음 한 대는 옆에서 지켜보세요
 
 작업공간 경로를 모르면:
 
@@ -633,6 +682,15 @@ make all modules
 sudo make modules_install install
 sudo depmod
 ```
+
+> **IgH 패치 필수 (수정 목록 139)** · 손으로 빌드할 때도 `./bootstrap` 전에
+> `git apply <작업공간>/scripts/setup/patches/igh-1.6.9-sdo-dict-off.patch` 를 넣는다
+> (재스캔 뒤 마스터가 SDO 사전을 저절로 읽다 우리 SDO 읽기·쓰기와 부딪쳐 드라이브 메일박스가 멈췄다 · 패치는 그 읽기를 끈다 · 모듈 파라미터 `sdo_dict` 기본 0).
+> `bash scripts/install.sh --site` 는 패치를 저절로 넣는다 · **이미 깔린 PC 는 커널 모듈만** 다시 빌드한다
+> (`make modules` · `modules_install` · `depmod` · PC 마다 IgH 가 깔린 자리가 달라서 `make install` 은 안 함 ·
+> `DEVICE_MODULES` 가 `generic` 이 아니거나 깔린 IgH 가 1.6.9 가 아니면 멈춤).
+> 새 모듈은 모터 서비스를 멈추고 `sudo systemctl restart ethercat` 해야 올라간다 · 순서는 `docs/설치_101.md` 5-1 ·
+> 커널이 바뀌면 `ethercat-rebuild.service` 가 부팅 때 패치를 넣어 다시 만든다(손으로 `sudo /usr/local/sbin/ethercat-rebuild --force`).
 
 설정 파일은 빌드 방식에 따라 `/etc/ethercat.conf` 또는 `/usr/local/etc/ethercat.conf` 경로에 생성됩니다. 설정 파일 경로를 확인한 후 편집합니다.
 

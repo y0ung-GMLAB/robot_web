@@ -38,13 +38,11 @@ import {
   runtimeMotorConfirmsRegistryMotor,
   scanKey,
   scanRowMatchesRuntimeMotor,
-  scanRowToMotor as acServoScanRowToMotor,
   siiReportedAcServoModel,
   verifiedAcServoModel,
 } from './motor_type_ac_servo.js';
 import {
   dynamixelScanDeviceKey,
-  dynamixelScanDeviceToMotor as buildDynamixelScanDeviceToMotor,
   firstDefined,
   modelTextFromDevice,
   runtimeIsDynamixel,
@@ -79,10 +77,10 @@ export function conciseMotorScanMessage(value, maxLength = 180) {
   const text = String(value || '').replace(/\s+/g, ' ').trim();
   if (!text) return '모터 검색 실패';
   if (text.includes('모터 런타임 피드백이 수신 중')) {
-    return '검색 중단: 서보가 운전 중이어서 EtherCAT 버스 재검색을 안전하게 실행하지 않았습니다.';
+    return '검색을 중단했습니다. 서보가 동작 중이라 안전을 위해 EtherCAT 버스를 다시 검색하지 않았습니다.';
   }
   if (text.includes('Dynamixel 직렬 포트를 찾지 못')) {
-    return 'Dynamixel 검색 실패: 연결된 직렬 포트를 찾지 못했습니다.';
+    return '다이나믹셀 검색 실패: 연결된 시리얼 포트를 찾지 못했습니다.';
   }
   if (text.length <= maxLength) return text;
   return `${text.slice(0, Math.max(1, maxLength - 1)).trimEnd()}…`;
@@ -91,10 +89,10 @@ export function conciseMotorScanMessage(value, maxLength = 180) {
 export function motorControlConfigurationError(scope, configuredAxisCount) {
   if (Number(configuredAxisCount) <= 0) return '';
   if (scope?.runtime_matches_selected !== true) {
-    return '현재 선택 프로젝트와 실행 중인 모터 설정의 프로젝트가 다릅니다.';
+    return '선택한 프로젝트와 현재 실행 중인 모터 설정의 프로젝트가 다릅니다.';
   }
   if (scope?.motor_config_applied !== true) {
-    return '현재 프로젝트에 저장한 모터 설정이 실행 시스템에 아직 적용되지 않았습니다. 설정 적용·재시작을 실행하세요.';
+    return '현재 프로젝트에 저장한 모터 설정이 아직 장비에 적용되지 않았습니다. 모터 설정에서 「장비에 적용 · 모터 재시작」을 누르세요.';
   }
   return '';
 }
@@ -212,7 +210,7 @@ export function motorModelProfileWarning(motors) {
     });
   if (axes.length === 0) return '';
   return `모델을 읽지 못한 모터: ${axes.join(', ')}. `
-    + '적용은 진행됩니다 · 운전 프로필은 등록된 드라이버 값을 그대로 씁니다.';
+    + '적용은 그대로 진행되며, 운전 프로필은 등록된 드라이버 값을 사용합니다.';
 }
 
 export function motorRuntimeReadyForAppliedConfig(state) {
@@ -316,7 +314,7 @@ export function createMotorConfigController({
       if (!scanProgressActiveId) {
         scanProgressActiveId = scanId;
         scanProgressRenderedCount = 0;
-        operationProgress.update({ detail: `스캔 ID ${scanId}` });
+        operationProgress.update({ detail: `검색 ID ${scanId}` });
       }
       const events = Array.isArray(progress.events) ? progress.events : [];
       events.slice(scanProgressRenderedCount).forEach((event) => {
@@ -328,16 +326,16 @@ export function createMotorConfigController({
             : phase === 'complete' || phase === 'completed' || phase.endsWith('_done')
             ? 'done'
             : 'running';
-        appendScanProgressLine(String(event.message || phase || '스캔 진행 중'), lineState);
+        appendScanProgressLine(String(event.message || phase || '검색 중'), lineState);
       });
       scanProgressRenderedCount = events.length;
       operationProgress.update({
-        phase: progress.running ? '실시간 스캔 진행 중' : '스캔 종료 확인',
+        phase: progress.running ? '검색 중' : '검색 종료',
       });
       if (!progress.running && scanProgressActiveId) stopScanProgressPolling();
     } catch (error) {
       if (!error?.staleProjectResponse) {
-        appendScanProgressLine(`진행 상태 수신 실패: ${error?.message || error}`, 'failed');
+        appendScanProgressLine(`진행 상태를 받지 못했습니다: ${error?.message || error}`, 'failed');
       }
     }
   }
@@ -350,13 +348,13 @@ export function createMotorConfigController({
     const started = operationProgress?.begin({
       id,
       title,
-      message: '물리 모터 검색을 실행하고 있습니다.',
-      detail: '새 스캔 요청 준비',
-      phase: '스캔 요청 준비 중',
+      message: '연결된 모터를 검색하고 있습니다.',
+      detail: '검색 요청 준비',
+      phase: '검색 요청 준비 중',
       mode: 'log',
     });
     if (!started) return false;
-    appendScanProgressLine('새 직접 스캔 요청을 전송합니다', 'running');
+    appendScanProgressLine('검색 요청을 보냅니다', 'running');
     try {
       const payload = await fetchMotorScanProgress();
       scanProgressBaselineId = String(payload?.progress?.scan_id || '');
@@ -375,9 +373,9 @@ export function createMotorConfigController({
     const partial = outcome === 'partial';
     operationProgress?.finish({
       outcome: success ? 'success' : (partial ? 'partial' : 'failure'),
-      title: success ? '모터 검색 완료' : (partial ? '모터 검색 부분 완료' : '모터 검색 실패'),
+      title: success ? '모터 검색 완료' : (partial ? '모터 검색 일부 완료' : '모터 검색 실패'),
       message: fallbackMessage,
-      detail: scanProgressActiveId ? `스캔 ID ${scanProgressActiveId}` : '스캔 결과 확인',
+      detail: scanProgressActiveId ? `검색 ID ${scanProgressActiveId}` : '검색 결과 확인',
     });
     stopScanProgressPolling();
   }
@@ -514,7 +512,7 @@ export function createMotorConfigController({
     const scope = getLatestState?.()?.project_scope || {};
     const configuredAxisCount = activeAxisMotors().filter((motor) => motor.enabled).length;
     return motorControlConfigurationError(scope, configuredAxisCount)
-      || (identityUpdatePending ? '확인한 모터 연결값을 프로젝트에 저장해야 합니다.' : '');
+      || (identityUpdatePending ? '확인한 모터 연결 정보를 프로젝트에 저장해야 합니다.' : '');
   }
 
   function motorAxisValue(motor) {
@@ -538,49 +536,6 @@ export function createMotorConfigController({
       ...patch,
     };
     rowEditDrafts.set(rowId, next);
-  }
-
-  function nextAxisAboveMax(motors = axisMotors()) {
-    const axes = motors
-      .filter((motor) => !motor.deleted)
-      .map(motorAxisValue)
-      .filter((axis) => axis !== null);
-    if (axes.length === 0) return 0;
-    return Math.max(...axes) + 1;
-  }
-
-  function createAxisAllocator(motors = axisMotors()) {
-    let nextAxis = nextAxisAboveMax(motors);
-    return () => {
-      const axis = nextAxis;
-      nextAxis += 1;
-      return axis;
-    };
-  }
-
-  function nextAvailableAxis() {
-    return nextAxisAboveMax();
-  }
-
-  function firstDynamixelDriverId() {
-    const motor = axisMotors().find((item) => {
-      const driverId = item.config?.driver_id;
-      return driverId !== null && driverId !== undefined && driverId !== '';
-    });
-    return motor ? Number(motor.config.driver_id) : 1;
-  }
-
-  // 이름을 겹치지 않게 한다 · §6-217
-  //
-  // 전에는 이 감싸개가 바깥 함수와 **같은 이름**이었고 세 번째 인자만 달랐다
-  // (여기선 함수, 바깥에선 옵션 객체) · 부르는 쪽이 옵션 객체를 넘기자
-  // `options.nextAvailableAxis is not a function` 으로 검색이 통째로 죽었다.
-  function proposedDynamixelMotor(device, { axis, model } = {}) {
-    return buildDynamixelScanDeviceToMotor(device, null, {
-      nextAvailableAxis: typeof axis === 'function' ? axis : nextAvailableAxis,
-      firstDynamixelDriverId,
-      model,
-    });
   }
 
   function registryMotorMatchesMonitoringMotor(item, motor) {
@@ -836,7 +791,7 @@ export function createMotorConfigController({
     }
     if (row.scanRow) {
       const siiName = row.scanRow.sii_order_number || row.scanRow.sii_device_name;
-      return siiName ? `SII ${siiName}` : '실제 모델 미확인';
+      return siiName ? `SII ${siiName}` : '모델 미확인';
     }
     if (row.scanDevice) return modelTextFromDevice(row.scanDevice) || '-';
     return '-';
@@ -858,8 +813,8 @@ export function createMotorConfigController({
     // 표를 다시 그리지 않는다 · 타이핑 중에 다시 그리면 입력칸이 초점을 잃는다
     if (el.saveAxisConfigButton) {
       el.saveAxisConfigButton.title = hasAnyConfigChanges()
-        ? '변경한 내용을 설정 파일에 씁니다.'
-        : '바뀐 내용은 없지만 지금 값 그대로 다시 저장합니다.';
+        ? '변경한 내용을 설정 파일에 저장합니다.'
+        : '변경된 내용은 없지만 현재 값을 그대로 다시 저장합니다.';
     }
   }
 
@@ -1318,8 +1273,8 @@ export function createMotorConfigController({
           <table class="matching-table config-value-table">
             <thead>
               <tr>
-                <th>한글명</th>
-                <th>실제 파라미터</th>
+                <th>항목</th>
+                <th>파라미터 이름</th>
                 <th>값</th>
                 <th>단위</th>
                 <th>자료형</th>
@@ -1437,7 +1392,7 @@ export function createMotorConfigController({
         <div class="config-section-stack">
           ${renderConfigRowsTable('전역 설정', globalRows, '전역 설정 항목이 없습니다')}
           ${renderMasterConfigOverview('마스터 설정', rows, '마스터 설정 항목이 없습니다')}
-          <div class="empty config-table-empty">표시할 설정 모터가 없습니다</div>
+          <div class="empty config-table-empty">표시할 모터가 없습니다</div>
         </div>
       `;
       updateSaveButtonState();
@@ -1470,7 +1425,7 @@ export function createMotorConfigController({
         ${renderConfigRowsTable('전역 설정', globalRows, '전역 설정 항목이 없습니다')}
         ${renderMasterConfigOverview('마스터 설정', rows, '마스터 설정 항목이 없습니다')}
         <div class="config-master-detail">
-          <section class="config-axis-list" aria-label="설정 모터 목록">
+          <section class="config-axis-list" aria-label="모터 목록">
             <div class="config-table-group-head">
               <strong>모터 목록</strong>
               <span>${formatInt(motors.length)}개</span>
@@ -1502,14 +1457,14 @@ export function createMotorConfigController({
               </table>
             </div>
           </section>
-          <section class="config-axis-detail" aria-label="선택 모터 설정 상세">
+          <section class="config-axis-detail" aria-label="선택한 모터의 상세 설정">
             <div class="config-selected-summary">
               <strong>${displayText(selectedMotor ? registryMotorLabel(selectedMotor) : '모터를 선택하세요')}</strong>
               <span>${displayText(selectedMotor ? `${motorKind(selectedMotor)} / ${axisIdLabel({ motor: selectedMotor })}` : '')}</span>
             </div>
-            ${renderConfigRowsTable('선택 마스터 설정', masterRows, '선택 모터에 해당하는 마스터 설정 항목을 찾지 못했습니다')}
-            ${renderConfigRowsTable('모터 설정', slaveRows, '선택 모터에 해당하는 모터 설정 항목을 찾지 못했습니다')}
-            ${renderConfigRowsTable('드라이버 설정', driverRows, '선택 모터에 해당하는 드라이버 설정 항목을 찾지 못했습니다')}
+            ${renderConfigRowsTable('선택 마스터 설정', masterRows, '선택한 모터의 마스터 설정 항목을 찾지 못했습니다')}
+            ${renderConfigRowsTable('모터 설정', slaveRows, '선택한 모터의 모터 설정 항목을 찾지 못했습니다')}
+            ${renderConfigRowsTable('드라이버 설정', driverRows, '선택한 모터의 드라이버 설정 항목을 찾지 못했습니다')}
           </section>
         </div>
       </div>
@@ -1625,7 +1580,7 @@ export function createMotorConfigController({
         return [`EtherCAT ${deviceState}`, 'delete'];
       }
       if (row.servedRow?.confirmation_required) {
-        return ['기존 모터 연결 필요', 'review'];
+        return ['기존 모터와 연결 확인 필요', 'review'];
       }
       const motor = row.motor;
       const identity = motor?.identity || {};
@@ -1635,7 +1590,7 @@ export function createMotorConfigController({
       if (expectedRotary === null || expectedRotary === undefined ||
           expectedSlave === null || expectedSlave === undefined ||
           scannedRotary === null || scannedRotary === undefined) {
-        return ['연결정보 확인 필요', 'review'];
+        return ['연결 정보 확인 필요', 'review'];
       }
       if (expectedRotary !== null && expectedRotary !== undefined &&
           scannedRotary !== null && scannedRotary !== undefined &&
@@ -1676,7 +1631,7 @@ export function createMotorConfigController({
     if (savedAxis !== null && runtime.controller_index !== null &&
         runtime.controller_index !== undefined &&
         Number(savedAxis) !== Number(runtime.controller_index)) {
-      return [`Control Index 불일치 ${formatInt(savedAxis)}→${axis}`, 'delete'];
+      return [`모터 번호 불일치 ${formatInt(savedAxis)}→${axis}`, 'delete'];
     }
     return [`${stateLabel(state)} / 모터 ${axis}`, state === 'detected' ? 'matched' : 'review'];
   }
@@ -1835,7 +1790,7 @@ export function createMotorConfigController({
     );
     return {
       title: axisIdLabel(row),
-      detail: port ? String(port) : '직렬 포트 미수신',
+      detail: port ? String(port) : '시리얼 포트 미수신',
     };
   }
 
@@ -2014,9 +1969,9 @@ export function createMotorConfigController({
    */
   const MINAS_RATE_FIELDS = ['max_speed_rpm', 'profile_acceleration', 'acceleration'];
   const MINAS_RATE_LABELS = {
-    max_speed_rpm: ['최대 속도 (rpm)', '모터축 최대 회전 속도 · 0x607F(count/s 로 환산)와 0x6080(rpm) 둘 다 이 값 · PP 외 모드에서도 보호'],
+    max_speed_rpm: ['최대 속도 (rpm)', '모터축 최대 회전 속도입니다. 0x607F(count/s로 환산)와 0x6080(rpm)에 같은 값이 들어가며, PP 외 모드에서도 보호합니다.'],
     profile_acceleration: ['프로파일 가속도 (deg/s²)', '평소 가속·감속 · 0x6083·0x6084'],
-    acceleration: ['최대 가속도 (deg/s²)', '가속·감속 상한 · 0x60C5·0x60C6 · 프로파일 가속도 이상'],
+    acceleration: ['최대 가속도 (deg/s²)', '가속·감속 상한입니다(0x60C5·0x60C6). 프로파일 가속도 이상이어야 합니다.'],
   };
 
   /** MINAS 드라이브 파라미터 · param_file(SDO 목록)로 부팅 때 써진다 · P8
@@ -2056,12 +2011,12 @@ export function createMotorConfigController({
     const profileVelocity = value('profile_velocity');
     const maxRpm = value('max_speed_rpm');
     if (profileVelocity && maxRpm && profileVelocity > maxRpm * 6) {
-      return `프로파일 속도 ${profileVelocity} deg/s 가 최대 속도 ${maxRpm} rpm (${maxRpm * 6} deg/s) 보다 큽니다`;
+      return `프로파일 속도(${profileVelocity} deg/s)가 최대 속도(${maxRpm} rpm = ${maxRpm * 6} deg/s)보다 큽니다`;
     }
     const profileAcceleration = value('profile_acceleration');
     const maxAcceleration = value('acceleration');
     if (profileAcceleration && maxAcceleration && profileAcceleration > maxAcceleration) {
-      return `프로파일 가속도 ${profileAcceleration} 가 최대 가속도 ${maxAcceleration} 보다 큽니다`;
+      return `프로파일 가속도(${profileAcceleration})가 최대 가속도(${maxAcceleration})보다 큽니다`;
     }
     return '';
   }
@@ -2069,15 +2024,15 @@ export function createMotorConfigController({
   /** MINAS 드라이브 정비 · 확인 → 서버(Motor Manager 잠시 정지 → ethercat download) · 수정 목록 15 + 34-3 */
   const MAINTENANCE_TEXT = {
     eeprom_save: {
-      title: 'EEPROM 저장',
-      body: '드라이브의 지금 값을 전원을 꺼도 남게 저장합니다.\n'
-        + 'Motor Manager 를 잠시 멈췄다가 다시 띄웁니다 (몇 초) · 그동안 모터는 서보가 풀릴 수 있습니다.\n'
-        + '저장 중(최대 10초) 드라이브 전원을 끄지 마세요.',
+      title: '드라이브에 저장 (EEPROM)',
+      body: '드라이브의 현재 설정값을 전원을 꺼도 유지되도록 저장합니다.\n'
+        + 'Motor Manager를 잠시 멈췄다가 다시 시작하며(몇 초), 그동안 서보가 풀릴 수 있습니다.\n'
+        + '저장하는 동안(최대 10초) 드라이브 전원을 끄지 마세요.',
     },
     absolute_clear: {
       title: '앱솔루트 다회전 클리어',
-      body: '엔코더의 회전 수 기록을 0 으로 지웁니다 · 위치 기준이 바뀝니다.\n'
-        + '서보가 꺼져 있어야 합니다 · 끝나면 드라이브 전원을 껐다 켜세요 · 위치 숫자가 바뀌어 기준점을 다시 캡처해야 합니다.\n'
+      body: '엔코더의 회전 수 기록을 0으로 초기화합니다. 위치 기준이 바뀝니다.\n'
+        + '서보가 꺼져 있어야 합니다. 끝나면 드라이브 전원을 껐다 켜세요. 위치 값이 바뀌므로 기준점을 다시 캡처해야 합니다.\n'
         + '그 전에는 재생하지 마세요.',
     },
   };
@@ -2086,16 +2041,16 @@ export function createMotorConfigController({
     const action = button.dataset.axisMaintenance || '';
     const axis = Number(button.dataset.axisMaintenanceIndex);
     if (!Number.isInteger(axis) || axis < 0) {
-      setAxisMessage('정비할 모터 번호를 확인할 수 없습니다.', true);
+      setAxisMessage('대상 모터 번호를 확인할 수 없습니다.', true);
       return;
     }
     const payload = { action, axis, confirmed: true };
     if (action === 'absolute_mode') {
       const text = await showPrompt(
-        `${axis}번 모터 · 앱솔루트 방식(Pr0.15)을 바꾸고 EEPROM 에 저장합니다.\n`
+        `${axis}번 모터의 앱솔루트 방식(Pr0.15)을 바꾸고 드라이브(EEPROM)에 저장합니다.\n`
         + Object.entries(ABSOLUTE_MODE_TEXT).map(([value, label]) => `${value} = ${label}`).join(' · ')
-        + '\n드라이브 전원을 껐다 켜야 적용됩니다 · 0~4 중 하나를 입력하세요',
-        { title: '앱솔루트 방식 바꾸기', confirmLabel: '저장', defaultValue: '0' },
+        + '\n드라이브 전원을 껐다 켜야 적용됩니다. 0~4 중 하나를 입력하세요.',
+        { title: '앱솔루트 방식 변경', confirmLabel: '저장', defaultValue: '0' },
       );
       if (text === null || text === undefined) return;
       const value = Number(String(text).trim());
@@ -2115,15 +2070,15 @@ export function createMotorConfigController({
       if (!confirmed) return;
     }
     button.disabled = true;
-    setAxisMessage(`${axis}번 모터 드라이브 정비 중 · Motor Manager 를 잠시 멈춥니다`);
+    setAxisMessage(`${axis}번 모터 드라이브 관리 작업 중입니다. Motor Manager를 잠시 멈춥니다.`);
     try {
       const result = await requestDriveMaintenance(payload);
-      setAxisMessage(result?.message || '드라이브 정비 결과를 받지 못했습니다', result?.success === false);
+      setAxisMessage(result?.message || '드라이브 관리 결과를 받지 못했습니다', result?.success === false);
       if (result?.power_cycle_required) {
-        await showAlert(result.message, { title: '드라이브 전원 재투입 필요', tone: 'warning' });
+        await showAlert(result.message, { title: '드라이브 전원을 껐다 켜야 합니다', tone: 'warning' });
       }
     } catch (error) {
-      setAxisMessage(`드라이브 정비 실패: ${error?.message || error}`, true);
+      setAxisMessage(`드라이브 관리 실패: ${error?.message || error}`, true);
     } finally {
       button.disabled = false;
     }
@@ -2140,7 +2095,7 @@ export function createMotorConfigController({
   const DRIVE_PARAM_LABELS = {
     brake_delay_stop_ms: ['브레이크·정지 (ms)', '브레이크 정지 지연 (ms)'],
     brake_delay_run_ms: ['브레이크·동작 (ms)', '브레이크 동작 설정 (ms)'],
-    encoder_absolute_mode: ['앱솔루트 (읽기)', '앱솔루트 방식 · 드라이브에서 읽은 값 · 바꾸기는 EEPROM 저장 기능과 함께 (수정 목록 15)'],
+    encoder_absolute_mode: ['앱솔루트 (읽기)', '앱솔루트 방식입니다. 드라이브에서 읽은 값이며, 「앱솔루트 방식」 버튼으로 바꿀 수 있습니다.'],
     // 값이 아니라 PDO 배선 · 4D29h 를 주기 데이터에 더한다 · 드라이브 Ver1.03 이상만
     overload_monitor: ['과부하율 읽기', '과부하율 읽기 (4D29h · 0 끔 · 1 켬 · 드라이브 소프트웨어 Ver1.03 이상만)'],
   };
@@ -2176,8 +2131,8 @@ export function createMotorConfigController({
     const normal = drive.status === 'ok';
     const disabled = normal || absoluteSetupRunning ? ' disabled' : '';
     const title = normal
-      ? '정상 · 이미 앱솔루트 · 다시 클리어하면 기준점이 사라져 막아 둡니다'
-      : '앱솔루트(Pr0.15 = 0) + 다회전 클리어 · 드라이브 전원 재투입 2회 필요 (수정 목록 62)';
+      ? '이미 앱솔루트 방식입니다. 다시 설정하면 기준점이 사라지므로 막아 두었습니다.'
+      : '앱솔루트 방식(Pr0.15 = 0)으로 바꾸고 다회전 클리어를 합니다. 중간에 드라이브 전원을 두 번 껐다 켜야 합니다.';
     return `<button type="button" class="danger" data-axis-absolute-setup
       data-master-index="${escapeHtml(drive.master_index ?? 0)}" data-slave-position="${escapeHtml(drive.slave_position)}"
       title="${escapeHtml(title)}"${disabled}>${normal ? '앱솔루트 정상' : '앱솔루트 설정'}</button>`;
@@ -2251,16 +2206,16 @@ export function createMotorConfigController({
     }
     const line = (item) => `· ${item.label}${item.problem ? ` (${item.problem})` : ''}`;
     const body = [
-      '처리 대상',
+      '대상',
       ...(preview.targets || []).map(line),
-      ...((preview.skipped || []).length ? ['', '정상 · 건너뜀', ...preview.skipped.map(line)] : []),
+      ...((preview.skipped || []).length ? ['', '건너뜀 (이미 정상 · 다시 하면 기준점이 사라짐)', ...preview.skipped.map(line)] : []),
       '',
       '순서',
       ...(preview.steps || []).map((step, index) => `${index + 1}. ${step}`),
       '',
-      '대상 축 서보를 끄고 Motor Manager 를 두 번 잠시 멈춥니다.',
-      '중간에 드라이브 전원을 두 번 껐다 켜야 합니다(화면이 알려 줍니다).',
-      '끝나면 위치 숫자가 바뀌어 기준점을 다시 캡처해야 합니다.',
+      '대상 축의 서보를 끄고 Motor Manager를 두 번 잠시 멈춥니다.',
+      '중간에 드라이브 전원을 두 번 껐다 켜야 합니다(화면에 안내가 나옵니다).',
+      '끝나면 위치 값이 바뀌므로 기준점을 다시 캡처해야 합니다.',
     ].join('\n');
     const confirmed = await showConfirm(body, {
       title: '앱솔루트 설정', confirmLabel: '시작', tone: 'danger',
@@ -2337,12 +2292,12 @@ export function createMotorConfigController({
   function driveParamError(field, text) {
     if (text === '') return '';
     const value = Number(text);
-    if (!Number.isInteger(value)) return `${DRIVE_PARAM_LABELS[field][1]} · 정수만 넣을 수 있습니다`;
+    if (!Number.isInteger(value)) return `${DRIVE_PARAM_LABELS[field][1]} · 정수만 입력할 수 있습니다`;
     if (field === 'overload_monitor' && ![0, 1].includes(value)) {
-      return `${DRIVE_PARAM_LABELS[field][1]} · 0, 1 중 하나만 됩니다`;
+      return `${DRIVE_PARAM_LABELS[field][1]} · 0 또는 1만 입력할 수 있습니다`;
     }
     if (['brake_delay_stop_ms', 'brake_delay_run_ms'].includes(field) && (value < 0 || value > 10000)) {
-      return `${DRIVE_PARAM_LABELS[field][1]} · 0 ~ 10000 ms 만 됩니다`;
+      return `${DRIVE_PARAM_LABELS[field][1]} · 0~10000 ms만 입력할 수 있습니다`;
     }
     return '';
   }
@@ -2386,7 +2341,7 @@ export function createMotorConfigController({
         const rateError = axisRateError({ ...(row.motor?.config || {}), [field]: text });
         if (rateError) {
           resetAxisEditInput(input, row, field);
-          setAxisMessage(`${rateError} · 최대는 프로파일 이상이어야 합니다`, true);
+          setAxisMessage(`${rateError}. 최대값은 프로파일 값 이상이어야 합니다.`, true);
           return;
         }
       }
@@ -2396,8 +2351,8 @@ export function createMotorConfigController({
         lastAxisRenderSignature = '';
         renderAxisSettings();
         setAxisMessage(
-          '과부하율 읽기를 켰습니다 · 드라이브 소프트웨어 Ver1.03 미만이면 모터 제어가 뜨지 않습니다'
-          + ' · 그때는 0 으로 되돌려 저장 · 반영은 「설정 적용 · 모터 재시작」',
+          '과부하율 읽기를 켰습니다. 드라이브 소프트웨어가 Ver1.03 미만이면 Motor Manager가 시작되지 않습니다.'
+          + ' 그때는 0으로 되돌려 저장하세요. 장비에 반영하려면 「장비에 적용 · 모터 재시작」을 누르세요.',
           true,
         );
         return;
@@ -2408,7 +2363,7 @@ export function createMotorConfigController({
     }
 
     lastAxisRenderSignature = '';
-    setAxisMessage('모터 목록 변경됨. 저장하려면 변경 내용 저장을 누르세요.');
+    setAxisMessage('모터 목록이 변경되었습니다. 맨 아래 「저장」을 누르세요.');
     renderAxisSettings();
   }
 
@@ -2483,49 +2438,28 @@ export function createMotorConfigController({
   function scanAdoptedMessage(head) {
     const rows = axisRowsData();
     const parts = [`${head} · ${formatInt(rows.length)}개`];
-    parts.push('이름을 고친 뒤 맨 아래 「저장」을 누르세요');
-    return parts.join(' · ');
+    parts.push('이름을 확인한 뒤 맨 아래 「저장」을 누르세요');
+    // 서버가 알린 것(뺀 모터 · 바뀐 번호 · 확인 필요) · 수정 목록 100
+    return [parts.join(' · '), ...scanNotes].join('\n');
   }
 
-  // **검색하면 목록을 갈아 끼운다** · §6-219
+  // **검색 결과로 만든 목록은 서버가 제안한다** · 수정 목록 100 (2026-10-12)
   //
-  // 기존 목록을 지우고 이번 검색이 찾은 것으로 채운다 · 그것이 목록이고
-  // 그대로 저장된다 · 「선택 모터 추가」로 사람이 옮기던 단계를 없앴다.
-  //
-  // 「AC Servo 검색」을 누르면 서보만 남는다 · 둘 다 쓰려면 「전체 모터
-  // 검색」을 누른다 · 통로별로 반쪽만 바꾸게 했더니 서보를 검색했는데
-  // 표에 4모터가 떠서 무엇을 찾은 것인지 알 수 없었다.
-  //
-  // 사람이 붙인 이름만 남긴다 · 고칠 수 있는 것이 이름 하나뿐이므로
-  // 다시 검색했다고 지워지면 안 된다.
+  // 전에는 여기서 검색 응답을 받아 목록을 새로 만들었다(§6-219) · 새 화면도 같은 일을
+  // 해야 해서 규칙을 서버(`scan_proposal.py`) 한 곳으로 옮겼다 · 화면은 받아서 갈아 끼운다.
+  // 서버 규칙 · 검색한 통로만 바꾼다(AC 만 검색하면 다이나믹셀은 그대로) · 짝지은 모터는
+  // 이름 · 사용 · 드라이브 연결을 지킨다 · 이름표는 서버 규칙 하나 · 번호는 빈칸 없이(바뀌면 알림).
+  // 같은 제안을 두 번 넣지 않는다 · 검색이 시간 초과로 빈 응답이면 옛 제안이 남아 있어서
+  // 그사이 고친 것이 지워지던 것을 막는다.
+  let adoptedProposal = null;
+  let scanNotes = [];
   function adoptScanIntoDraft() {
-    const served = serverAxisRows();
-    if (!served) return;
-
-    const namesById = new Map(
-      axisConfig.motors.map((motor) => [motor.id, motor.name]),
-    );
+    const proposal = latestScan?.proposed_registry;
+    if (!proposal || proposal === adoptedProposal || !Array.isArray(proposal.registry?.motors)) return;
+    adoptedProposal = proposal;
+    scanNotes = Array.isArray(proposal.notes) ? proposal.notes.map(String) : [];
     axisConfig.motors = [];
-
-    const found = [
-      ...(served.axes || []).filter((item) => item.state === 'matched'),
-      ...(served.new_devices || []),
-    ];
-    found.forEach((item) => {
-      const acServo = item.transport === 'ethercat';
-      const scanRow = acServo ? rawAcServoScanRow(item.scanned) : null;
-      const scanDevice = acServo ? null : rawDynamixelDevice(item.scanned);
-      if (acServo ? !scanRow : !scanDevice) return;
-      const axisFor = () => Number(item.proposed_axis ?? item.axis ?? 0);
-      const motor = acServo
-        ? acServoScanRowToMotor(scanRow, axisFor)
-        : proposedDynamixelMotor(scanDevice, { axis: axisFor, model: item.model });
-      const name = namesById.get(motor.id);
-      upsertMotorInRegistry(
-        axisConfig,
-        name ? normalizeMotor({ ...motor, name }) : motor,
-      );
-    });
+    proposal.registry.motors.forEach((motor) => upsertMotorInRegistry(axisConfig, normalizeMotor(motor)));
   }
 
 
@@ -2545,8 +2479,8 @@ export function createMotorConfigController({
     if (el.saveAxisConfigButton) {
       el.saveAxisConfigButton.disabled = false;
       el.saveAxisConfigButton.title = changed
-        ? '검색해서 나온 모터와 고친 이름을 설정 파일에 씁니다.'
-        : '바뀐 내용은 없지만 지금 값 그대로 다시 저장합니다.';
+        ? '검색한 모터와 수정한 이름을 설정 파일에 저장합니다.'
+        : '변경된 내용은 없지만 현재 값을 그대로 다시 저장합니다.';
     }
     // 모터가 없어도 누를 수 있다 · 왜 안 되는지는 서버가 말한다 · §6-203
     if (el.applyAxisConfigButton) {
@@ -2557,13 +2491,13 @@ export function createMotorConfigController({
       // 글자가 바뀌었다 · 같은 버튼을 부를 이름이 둘이 되어 말이 안 통했다.
       el.applyAxisConfigButton.textContent = '장비에 적용 · 모터 재시작';
       el.applyAxisConfigButton.title = !hasConfiguredAxes
-        ? (applyBlockMessage || '적용할 프로젝트 모터 설정이 없습니다.')
+        ? (applyBlockMessage || '적용할 모터 설정이 없습니다.')
         : changed
-          ? '저장하지 않은 변경이 있습니다 · **저장된 파일**이 적용됩니다.'
+          ? '저장하지 않은 변경이 있습니다. 마지막으로 저장한 파일이 적용됩니다.'
           : alreadyApplied
-            ? '이미 적용된 설정입니다 · 다시 누르면 모터를 재시작합니다.'
+            ? '이미 적용된 설정입니다. 다시 누르면 모터를 재시작합니다.'
             : applyBlockMessage || recoveryMessage
-              || '저장된 현재 프로젝트 설정을 실행 시스템에 적용합니다.';
+              || '저장된 프로젝트 설정을 장비에 적용합니다.';
     }
     if (el.configState) {
       el.configState.textContent = changed
@@ -2604,33 +2538,33 @@ export function createMotorConfigController({
     ).length;
     const scanOnlyCount = 0;
     let state = '정상';
-    let detail = '프로젝트 저장값과 검색된 실제 연결값이 일치합니다.';
+    let detail = '프로젝트에 저장된 값과 검색된 실제 연결 정보가 일치합니다.';
     let next = '다음 작업: 모터 동작 상태를 확인하세요.';
     let stateCode = 'normal';
 
     if (pendingAliasWrite) {
-      state = '전원 재투입 및 재검색 필요';
+      state = '전원을 껐다 켠 뒤 다시 검색 필요';
       detail = acHardwareIdentityErrorMessage();
-      next = '다음 작업: 서보 드라이버 제어 전원을 재투입한 뒤 전체 모터 검색';
+      next = '다음 작업: 서보 드라이버 제어 전원을 껐다 켠 뒤 「전체 모터 검색」을 누르세요.';
       stateCode = 'warning';
     } else if (changed) {
-      state = '변경 내용 저장 필요';
+      state = '저장 필요';
       detail = '화면의 편집 내용은 아직 프로젝트 파일에 반영되지 않았습니다.';
-      next = '다음 작업: 변경 내용 저장';
+      next = '다음 작업: 맨 아래 「저장」을 누르세요.';
       stateCode = 'warning';
     } else if (recoveryMessage) {
-      state = '설정 적용 필요';
+      state = '장비 적용 필요';
       detail = recoveryMessage;
-      next = '다음 작업: 설정 적용 · 모터 재시작';
+      next = '다음 작업: 맨 아래 「장비에 적용 · 모터 재시작」을 누르세요.';
       stateCode = 'error';
     } else if (!hasConfiguredAxes && !hasAcScan && !latestScan?.dynamixel_scan) {
       state = '검색 필요';
       detail = '현재 프로젝트에 등록된 모터가 없거나 실제 모터 검색을 하지 않았습니다.';
-      next = '다음 작업: 전체 모터 검색';
+      next = '다음 작업: 「전체 모터 검색」을 누르세요.';
       stateCode = 'notice';
     } else if (errorSlaves.length > 0) {
       state = 'EtherCAT 통신 오류';
-      detail = `오류 상태 Slave ${errorSlaves.map(
+      detail = `오류 상태 슬레이브 ${errorSlaves.map(
         (item) => formatInt(item.slave_position),
       ).join(', ')} · ${errorSlaves.map((item) => item.device_state).join(', ')}`;
       next = identityError
@@ -2640,15 +2574,15 @@ export function createMotorConfigController({
     } else if (connectionCandidateCount > 0) {
       state = '기존 모터 연결 확인 필요';
       detail = `Serial이 없는 기존 모터와 같은 위치에서 ${formatInt(connectionCandidateCount)}개가 검색됐습니다.`;
-      next = '다음 작업: 자동 선택된 모터를 확인하고 선택 모터 검색값 반영';
+      next = '다음 작업: 검색된 모터가 맞는지 확인한 뒤 맨 아래 「저장」을 누르세요.';
       stateCode = 'warning';
     } else if (identityError) {
       const needsScan = identityError.includes('검색이 필요');
-      state = needsScan ? '검색 필요' : '연결정보 확인 필요';
+      state = needsScan ? '검색 필요' : '연결 정보 확인 필요';
       detail = identityError;
       next = needsScan
-        ? '다음 작업: 전체 모터 검색'
-        : '다음 작업: 차이가 있는 모터를 선택하고 연결정보 반영';
+        ? '다음 작업: 「전체 모터 검색」을 누르세요.'
+        : '다음 작업: 「전체 모터 검색」으로 다시 검색한 뒤 맨 아래 「저장」을 누르세요.';
       stateCode = 'warning';
     } else if (scanOnlyCount > 0) {
       state = '신규 모터 확인 필요';
@@ -2656,9 +2590,9 @@ export function createMotorConfigController({
       next = '다음 작업: 신규 모터를 선택하고 선택 모터 추가';
       stateCode = 'warning';
     } else if (configApplyPending) {
-      state = '설정 적용 필요';
+      state = '장비 적용 필요';
       detail = '프로젝트 파일은 저장됐지만 실행 시스템에는 아직 반영되지 않았습니다.';
-      next = '다음 작업: 설정 적용 · 모터 재시작';
+      next = '다음 작업: 맨 아래 「장비에 적용 · 모터 재시작」을 누르세요.';
       stateCode = 'warning';
     }
 
@@ -2807,7 +2741,7 @@ export function createMotorConfigController({
                 <span class="axis-number-label mono">${displayText(view.axisValue)}</span>
                 <input class="axis-edit-input axis-name-input" aria-label="모터 이름" data-axis-edit="name" data-axis-row-id="${escapeHtml(row.id)}" value="${escapeHtml(view.name === '-' ? '' : view.name)}"${disabled}>
               </td>
-              <td class="axis-limits-cell" title="위 줄: 운전 속도(모터 deg/s · 빈 칸이면 드라이버 기본값 · 회색 = 실행 설정 값) · 하한·상한은 조인트 매핑에서 계산 · 아래 줄: MINAS 드라이브 설정(빈 칸 = 드라이브 값 유지 · 회색 = 마지막 모터 검색 때 드라이브에서 읽은 값 · 앱솔루트는 읽기만 · 리밋 스위치·입력 핀은 명령어로(사용법 12장))">
+              <td class="axis-limits-cell" title="위 줄은 운전 속도(모터 deg/s)입니다. 빈 칸이면 드라이버 기본값을 쓰고, 회색 글씨는 현재 실행 설정 값입니다. 하한·상한은 조인트 매핑에서 계산합니다. 아래 줄은 MINAS 드라이브 설정입니다. 빈 칸이면 드라이브 값을 유지하고, 회색 글씨는 마지막 모터 검색 때 드라이브에서 읽은 값입니다. 앱솔루트는 읽기만 합니다. 리밋 스위치·입력 핀은 명령어로 설정합니다(사용법 12장).">
                 ${AXIS_LIMIT_FIELDS.map((field) => `
                   <label class="axis-limit-field"><span>속도 (deg/s)</span>
                     <input class="axis-edit-input axis-limit-input mono" type="text" inputmode="decimal"
@@ -2832,7 +2766,7 @@ export function createMotorConfigController({
                   <span class="mono axis-drive-readonly">${escapeHtml(absoluteModeText(view.driveRead.encoder_absolute_mode))}</span>
                   ${liveAbsoluteProblem(view.axisValue) ? `<small class="axis-absolute-warning" role="alert">${escapeHtml(liveAbsoluteProblem(view.axisValue))}</small>` : ''}
                 </label>
-                <label class="axis-limit-field" title="운영 시간이 끝나 기준점에 세운 뒤 이 모터 서보(다이나믹셀은 토크)를 끕니다 · 다이나믹셀은 브레이크가 없어 처질 수 있으면 끄세요 · 다음 시작 때 다시 켭니다"><span>끝나면 서보 OFF</span>
+                <label class="axis-limit-field" title="운영 시간이 끝나 기준점으로 이동한 뒤 이 모터의 서보(다이나믹셀은 토크)를 끕니다. 다이나믹셀은 브레이크가 없어 처질 수 있으니 그럴 때는 체크를 해제하세요. 다음 시작 때 다시 켭니다."><span>운영 시간이 끝나면 서보 끄기</span>
                   <input type="checkbox" data-axis-edit="${SCHEDULE_END_FIELD}" data-axis-row-id="${escapeHtml(row.id)}"${view.endOff ? ' checked' : ''}${disabled}>
                 </label>
               </td>
@@ -2854,21 +2788,21 @@ export function createMotorConfigController({
                 <small>${displayText(view.drive.detail)}</small>
                 ${view.showAcServoControls ? `
                   <div class="axis-inline-actions">
-                    <button type="button" data-axis-servo-action="servo_on" data-axis-servo-index="${escapeHtml(view.axisValue ?? '')}">ON</button>
-                    <button type="button" data-axis-servo-action="servo_off" data-axis-servo-index="${escapeHtml(view.axisValue ?? '')}">OFF</button>
+                    <button type="button" data-axis-servo-action="servo_on" data-axis-servo-index="${escapeHtml(view.axisValue ?? '')}">서보 켜기</button>
+                    <button type="button" data-axis-servo-action="servo_off" data-axis-servo-index="${escapeHtml(view.axisValue ?? '')}">서보 끄기</button>
                     <button type="button" data-axis-servo-action="fault_reset" data-axis-servo-index="${escapeHtml(view.axisValue ?? '')}">오류 초기화</button>
                   </div>
-                  <div class="axis-inline-actions" title="드라이브 정비 · Motor Manager 를 잠시 멈추고 드라이브에 직접 씁니다 (수정 목록 15)">
-                    <button type="button" data-axis-maintenance="eeprom_save" data-axis-maintenance-index="${escapeHtml(view.axisValue ?? '')}">EEPROM 저장</button>
+                  <div class="axis-inline-actions" title="드라이브 관리 · Motor Manager를 잠시 멈추고 드라이브에 직접 씁니다.">
+                    <button type="button" data-axis-maintenance="eeprom_save" data-axis-maintenance-index="${escapeHtml(view.axisValue ?? '')}">드라이브에 저장 (EEPROM)</button>
                     <button type="button" data-axis-maintenance="absolute_mode" data-axis-maintenance-index="${escapeHtml(view.axisValue ?? '')}">앱솔루트 방식</button>
                     <button type="button" class="danger" data-axis-maintenance="absolute_clear" data-axis-maintenance-index="${escapeHtml(view.axisValue ?? '')}">다회전 클리어</button>
                     ${absoluteSetupButton(view.axisValue)}
                   </div>
                 ` : ''}
                 ${view.showDynamixelControls ? `
-                  <div class="axis-inline-actions" title="다이나믹셀 · 재부팅은 하드웨어 오류(과부하·과열·전압)를 풀고 토크를 끕니다 (수정 목록 24)">
-                    <button type="button" data-axis-servo-action="servo_on" data-axis-servo-index="${escapeHtml(view.axisValue ?? '')}">토크 ON</button>
-                    <button type="button" data-axis-servo-action="servo_off" data-axis-servo-index="${escapeHtml(view.axisValue ?? '')}">토크 OFF</button>
+                  <div class="axis-inline-actions" title="다이나믹셀의 「재부팅」은 하드웨어 오류(과부하·과열·전압)를 해제하고 토크를 끕니다.">
+                    <button type="button" data-axis-servo-action="servo_on" data-axis-servo-index="${escapeHtml(view.axisValue ?? '')}">토크 켜기</button>
+                    <button type="button" data-axis-servo-action="servo_off" data-axis-servo-index="${escapeHtml(view.axisValue ?? '')}">토크 끄기</button>
                     <button type="button" class="danger" data-axis-servo-action="fault_reset" data-axis-servo-index="${escapeHtml(view.axisValue ?? '')}">재부팅</button>
                   </div>
                 ` : ''}
@@ -2876,7 +2810,7 @@ export function createMotorConfigController({
             </tr>
           `;
         }).join('')
-          : '<tr><td colspan="6" class="empty">설정 파일을 불러오거나 모터 스캔을 실행하세요</td></tr>';
+          : '<tr><td colspan="6" class="empty">설정된 모터가 없습니다. 「전체 모터 검색」으로 모터를 찾으세요.</td></tr>';
       }
     }
 
@@ -2961,12 +2895,12 @@ export function createMotorConfigController({
     lastConfigTableRenderSignature = '';
     lastConfigRawTextRenderSignature = '';
     renderAxisSettings();
-    if (el.scanResult) el.scanResult.textContent = '새 프로젝트에서 아직 검색하지 않았습니다';
+    if (el.scanResult) el.scanResult.textContent = '아직 검색하지 않았습니다';
     if (el.scanAllResult) {
-      el.scanAllResult.textContent = '검색 전 · 새로 발견된 모터는 자동으로 선택됩니다';
+      el.scanAllResult.textContent = '검색 전 · 찾은 모터는 바로 목록에 들어갑니다';
     }
     if (el.dynamixelScanResult) {
-      el.dynamixelScanResult.textContent = '새 프로젝트에서 아직 검색하지 않았습니다';
+      el.dynamixelScanResult.textContent = '아직 검색하지 않았습니다';
     }
     await fetchRegistry(expectedToken);
   }
@@ -2984,14 +2918,14 @@ export function createMotorConfigController({
     ));
     if (invalidIndex >= 0) {
       const motor = motors[invalidIndex];
-      return `모터 번호가 없는 모터가 있습니다: ${registryMotorLabel(motor)}. 모터 번호 정렬을 먼저 실행하세요.`;
+      return `모터 번호가 없는 모터가 있습니다: ${registryMotorLabel(motor)}. 「전체 모터 검색」으로 다시 검색하세요.`;
     }
 
     const counts = new Map();
     axes.forEach((axis) => counts.set(axis, (counts.get(axis) || 0) + 1));
     const duplicate = [...counts.entries()].find(([, count]) => count > 1);
     if (duplicate) {
-      return `모터 번호 ${formatInt(duplicate[0])} 값이 중복되어 있습니다. 모터 번호 정렬을 먼저 실행하세요.`;
+      return `모터 번호 ${formatInt(duplicate[0])} 값이 중복되어 있습니다. 「전체 모터 검색」으로 다시 검색하세요.`;
     }
 
     const missing = [];
@@ -3000,7 +2934,7 @@ export function createMotorConfigController({
     }
     if (missing.length > 0) {
       const current = axes.slice().sort((a, b) => a - b).map(formatInt).join(', ');
-      return `모터 번호가 0부터 연속으로 정렬되어 있지 않습니다. 현재 모터 번호: ${current}. 모터 번호 정렬을 먼저 실행하세요.`;
+      return `모터 번호가 0부터 연속으로 정렬되어 있지 않습니다. 현재 모터 번호: ${current}. 「전체 모터 검색」으로 다시 검색하세요.`;
     }
 
     const duplicateAddress = duplicateEthercatAddress(motors);
@@ -3019,7 +2953,7 @@ export function createMotorConfigController({
     if (pendingAliasWrite) {
       return `Slave Position ${formatInt(pendingAliasWrite.slavePosition)}의 EEPROM Alias를 `
         + `${formatInt(pendingAliasWrite.newAlias)}(으)로 기록했습니다. `
-        + '서보 드라이버 제어 전원을 재투입한 뒤 전체 모터 검색이 필요합니다.';
+        + '서보 드라이버 제어 전원을 껐다 켠 뒤 전체 모터 검색이 필요합니다.';
     }
 
     const recoveryMessage = acHardwareRecoveryMessage();
@@ -3034,7 +2968,7 @@ export function createMotorConfigController({
           runtime.controller_index === undefined) continue;
       const savedAxis = motorAxisValue(motor);
       if (savedAxis !== null && Number(savedAxis) !== Number(runtime.controller_index)) {
-        return `프로젝트 Control Index ${formatInt(savedAxis)}와 실행 중인 Control Index ${formatInt(runtime.controller_index)}가 다릅니다.`;
+        return `프로젝트의 모터 번호(${formatInt(savedAxis)})와 실행 중인 모터 번호(${formatInt(runtime.controller_index)})가 다릅니다.`;
       }
     }
 
@@ -3046,7 +2980,7 @@ export function createMotorConfigController({
     const scan = latestScan?.ethercat_scan;
     if (enabledAcMotors.length > 0 &&
         (!scan || scan.skipped || !Array.isArray(scan.slaves))) {
-      return 'AC 서보 저장값과 실제값 확인을 위해 전체 모터 검색이 필요합니다.';
+      return 'AC 서보의 저장값과 실제값을 비교하려면 전체 모터 검색이 필요합니다.';
     }
     if (!scan || scan.skipped || !Array.isArray(scan.slaves)) return '';
     const scannedAliases = new Map();
@@ -3071,20 +3005,20 @@ export function createMotorConfigController({
     )) {
       const scanRow = scanRowForMotor(motor);
       if (!scanRow) {
-        return `Control Index ${formatInt(motorAxisValue(motor))}의 Slave Position을 검색 결과에서 찾지 못했습니다.`;
+        return `${formatInt(motorAxisValue(motor))}번 모터의 Slave Position을 검색 결과에서 찾지 못했습니다.`;
       }
       const expectedRotary = motor.identity?.rotary_alias;
       const expectedSlave = motor.identity?.slave_position;
       if (expectedSlave === null || expectedSlave === undefined ||
           scanRow.slave_position === null || scanRow.slave_position === undefined) {
-        return `Control Index ${formatInt(motorAxisValue(motor))}의 연결정보 확인 및 업데이트가 필요합니다.`;
+        return `${formatInt(motorAxisValue(motor))}번 모터의 연결 정보를 확인하고 갱신해야 합니다.`;
       }
       if (assignedAlias(expectedRotary) && assignedAlias(scanRow.rotary_alias) &&
           Number(expectedRotary) !== Number(scanRow.rotary_alias)) {
-        return `Control Index ${formatInt(motorAxisValue(motor))}의 Station Alias가 프로젝트와 다릅니다.`;
+        return `${formatInt(motorAxisValue(motor))}번 모터의 Station Alias가 프로젝트와 다릅니다.`;
       }
       if (Number(expectedSlave) !== Number(scanRow.slave_position)) {
-        return `Control Index ${formatInt(motorAxisValue(motor))}의 Slave Position이 프로젝트와 다릅니다.`;
+        return `${formatInt(motorAxisValue(motor))}번 모터의 Slave Position이 프로젝트와 다릅니다.`;
       }
       if ((motor.config?.vendor_id !== null && motor.config?.vendor_id !== undefined &&
            scanRow.vendor_id !== null && scanRow.vendor_id !== undefined &&
@@ -3092,7 +3026,7 @@ export function createMotorConfigController({
           (motor.config?.product_id !== null && motor.config?.product_id !== undefined &&
            scanRow.product_code !== null && scanRow.product_code !== undefined &&
            Number(motor.config.product_id) !== Number(scanRow.product_code))) {
-        return `Control Index ${formatInt(motorAxisValue(motor))}의 드라이버 모델 정보가 프로젝트와 다릅니다.`;
+        return `${formatInt(motorAxisValue(motor))}번 모터의 드라이버 모델 정보가 프로젝트와 다릅니다.`;
       }
     }
     return '';
@@ -3133,8 +3067,8 @@ export function createMotorConfigController({
       unavailableCount += 1;
     }
     if (unavailableCount === 0) return '';
-    return `EEPROM Alias 변경 후 ${formatInt(unavailableCount)}모터가 EtherCAT 오류 상태라 `
-      + 'Station Alias를 읽지 못했습니다. 저장된 새 설정을 적용·재시작한 뒤 다시 검색해야 합니다.';
+    return `EEPROM Alias 변경 후 모터 ${formatInt(unavailableCount)}개가 EtherCAT 오류 상태라 `
+      + 'Station Alias를 읽지 못했습니다. 저장된 새 설정을 「장비에 적용 · 모터 재시작」으로 적용한 뒤 다시 검색해야 합니다.';
   }
 
   /** 맨 아래 저장·적용 바 · 지금 무엇을 눌러야 하는지 한 줄로 · 2026-10-02
@@ -3151,7 +3085,7 @@ export function createMotorConfigController({
     const unsaved = [changed && '모터 목록', mappingDirty() && '조인트 매핑'].filter(Boolean);
     let state = 'clean';
     let title = '변경 없음';
-    let detail = '저장한 설정이 장비에 들어가 있습니다';
+    let detail = '저장한 설정이 장비에 적용되어 있습니다';
     if (unsaved.length) {
       state = 'unsaved';
       title = '저장 안 한 변경';
@@ -3159,12 +3093,12 @@ export function createMotorConfigController({
     } else if (applyReasons.length || configApplyPending || !alreadyApplied) {
       state = 'apply';
       title = '장비 적용 필요';
-      detail = `${applyReasons.join(' · ') || '저장된 설정이 아직 장비에 안 들어갔습니다'} · 「장비에 적용 · 모터 재시작」 (모터가 잠깐 멈췄다 켜집니다)`;
+      detail = `${applyReasons.join(' · ') || '저장된 설정이 아직 장비에 적용되지 않았습니다'}. 「장비에 적용 · 모터 재시작」을 누르세요(모터가 잠깐 멈췄다가 다시 켜집니다).`;
     }
     if (context && !context.hasConfiguredAxes && state !== 'unsaved') {
       state = 'clean';
       title = '모터 없음';
-      detail = '모터를 검색해 추가한 뒤 「저장」';
+      detail = '모터를 검색해 추가한 뒤 「저장」을 누르세요.';
     }
     bar.dataset.state = state;
     if (el.settingsCommitState) el.settingsCommitState.textContent = title;
@@ -3196,8 +3130,8 @@ export function createMotorConfigController({
     if (withMapping) {
       const saved = await mappingCommit.save();
       if (saved === false) {
-        const message = '조인트 매핑 저장 실패 · 사유는 조인트 매핑 아래 검증 결과를 보세요'
-          + (done.length ? ' · 모터 목록은 저장됐습니다' : '');
+        const message = '조인트 매핑을 저장하지 못했습니다. 이유는 조인트 매핑 아래 「검증 결과」에서 확인하세요.'
+          + (done.length ? ' 모터 목록은 저장되었습니다.' : '');
         setAxisMessage(message, true);
         renderAxisSettings();
         await showAlert(message, { title: '설정 저장 실패', tone: 'danger' });
@@ -3208,8 +3142,8 @@ export function createMotorConfigController({
       await showAlert(
         `${done.join(' · ')} 저장했습니다.\n\n`
         + (applyReasons.length
-          ? `장비 반영이 필요합니다 · ${applyReasons.join(' · ')}\n「장비에 적용 · 모터 재시작」을 누르세요.`
-          : '바로 반영됐습니다 · 모터 재시작은 필요 없습니다.'),
+          ? `장비에 적용해야 합니다(${applyReasons.join(' · ')}).\n「장비에 적용 · 모터 재시작」을 누르세요.`
+          : '바로 반영되었습니다. 모터를 재시작할 필요는 없습니다.'),
         { title: '설정 저장 완료', tone: 'info' },
       );
     }
@@ -3253,8 +3187,8 @@ export function createMotorConfigController({
       const rawDirty = hasMotorConfigDataChanges();
       const registryDirty = hasAxisChanges();
       if (rawDirty && registryDirty) {
-        const message = '원본(상세 표) 수정과 모터 목록 수정이 함께 있습니다 · '
-          + '한 번에 한쪽만 저장할 수 있습니다 · 먼저 한쪽을 저장한 뒤 다른 쪽을 고치세요';
+        const message = '상세 설정 표(원본)와 모터 목록을 함께 수정했습니다. '
+          + '한 번에 한쪽만 저장할 수 있으니 한쪽을 먼저 저장한 뒤 다른 쪽을 수정하세요.';
         setStatusMessage(message);
         setAxisMessage(message);
         await showAlert(message, { title: '설정 저장 중단', tone: 'danger' });
@@ -3288,7 +3222,7 @@ export function createMotorConfigController({
       setAxisMessage(
         modelWarning
           ? `프로젝트 모터 목록 저장됨 · ${modelWarning}`
-          : '저장했습니다 · 실제 모터에 반영하려면 맨 아래 「장비에 적용 · 모터 재시작」을 누르세요.',
+          : '저장했습니다. 실제 모터에 반영하려면 맨 아래 「장비에 적용 · 모터 재시작」을 누르세요.',
         Boolean(modelWarning),
       );
       await onProjectFilesChange?.();
@@ -3337,10 +3271,10 @@ export function createMotorConfigController({
     // **파일은 「설정 저장」을 눌렀을 때만 바뀐다** · 여기서는 저장된
     // 파일을 그대로 적용하고, 다른 점이 있으면 확인창에서 말로 알린다.
     const unsavedWarning = hasAnyConfigChanges()
-      ? '저장하지 않은 변경이 있습니다 · **저장된 파일**이 적용됩니다.\n\n'
+      ? '저장하지 않은 변경이 있습니다. 마지막으로 저장한 파일이 적용됩니다.\n\n'
       : '';
     if (!axisMotors().some((motor) => !motor.deleted)) {
-      setAxisMessage('설정 적용할 모터가 없습니다.');
+      setAxisMessage('적용할 모터가 없습니다.');
       renderAxisSettings();
       return false;
     }
@@ -3367,17 +3301,17 @@ export function createMotorConfigController({
       + unsavedWarning
       + modelWarning
       + recoveryWarning
-      + '주의: 설정 적용 중 motor_manager_node를 재시작합니다.\n\n'
-      + '재시작 중에는 AC 서보 / 다이나믹셀 통신이 잠시 끊기거나 재초기화될 수 있습니다.\n'
+      + '주의: 설정을 적용하면서 Motor Manager를 재시작합니다.\n\n'
+      + '재시작하는 동안 AC 서보·다이나믹셀 통신이 잠시 끊기거나 다시 초기화될 수 있습니다.\n'
       + '현재 서보가 부하를 잡고 있는 모터는 순간적으로 토크가 해제되어 부하가 풀릴 수 있습니다.\n'
       + '이때 중력, 외력, 기구 하중 때문에 의도하지 않은 움직임이 발생할 수 있습니다.\n\n'
       + '기구를 안전하게 지지하고, 작업자 접근을 막고, 움직여도 위험하지 않은 상태에서만 진행하세요.\n'
       + '웹 연결은 잠깐 끊긴 뒤 자동으로 다시 연결됩니다.\n\n'
-      + '위 위험을 확인했고 설정을 적용하기 위해 노드를 재시작할까요?',
-      { title: '설정 적용·재시작', confirmLabel: '적용·재시작', tone: 'danger' },
+      + '위 내용을 확인했다면, 설정을 적용하고 Motor Manager를 재시작할까요?',
+      { title: '장비에 적용 · 모터 재시작', confirmLabel: '적용·재시작', tone: 'danger' },
     );
     if (!confirmed) {
-      setAxisMessage('설정 적용 취소');
+      setAxisMessage('장비 적용을 취소했습니다');
       return false;
     }
 
@@ -3389,12 +3323,12 @@ export function createMotorConfigController({
     }
 
     setStatusMessage('설정 반영 중');
-    setAxisMessage('설정 반영 중. 웹 연결이 잠시 끊겨도 이 화면에서 자동 재연결을 기다립니다.');
+    setAxisMessage('장비에 적용하는 중입니다. 웹 연결이 잠시 끊겨도 자동으로 다시 연결될 때까지 기다립니다.');
     onConfigApplyStart?.();
     try {
       const payload = await applyMotorConfig();
       if (!payload.success) {
-        const message = uiMessage(payload.message, '설정 반영 실패');
+        const message = uiMessage(payload.message, '장비 적용 실패');
         setStatusMessage(message);
         setAxisMessage(message);
         onConfigApplyComplete?.();
@@ -3409,11 +3343,11 @@ export function createMotorConfigController({
       if (error instanceof TypeError) {
         latestScan = null;
         setStatusMessage('웹 연결 재시작 중');
-        setAxisMessage('웹 연결이 끊겼습니다. 재연결 후 모든 모터의 서보/토크가 켜질 때까지 기다립니다.');
+        setAxisMessage('웹 연결이 끊겼습니다. 다시 연결되면 모든 모터의 서보(토크)가 켜질 때까지 기다립니다.');
         return true;
       }
-      setStatusMessage('설정 반영 실패');
-      setAxisMessage('설정 반영 실패');
+      setStatusMessage('장비 적용 실패');
+      setAxisMessage('장비 적용 실패');
       onConfigApplyComplete?.();
       return false;
     } finally {
@@ -3502,7 +3436,7 @@ export function createMotorConfigController({
     const resultState = ethercatScan.available && ethercatScan.complete
       ? '검색 완료'
       : ethercatScan.available
-        ? '검색 부분 완료'
+        ? '검색 일부 완료'
         : '검색 실패';
     const masterSummary = masters.length
       ? ` · ${masters.map((master) => (
@@ -3526,7 +3460,7 @@ export function createMotorConfigController({
     const resultState = dynamixelScan.available && dynamixelScan.complete
       ? '검색 완료'
       : dynamixelScan.available
-        ? '검색 부분 완료'
+        ? '검색 일부 완료'
         : '검색 실패';
     el.dynamixelScanResult.textContent = `${resultState} · ${formatInt(devices.length)}개`;
   }
@@ -3536,7 +3470,7 @@ export function createMotorConfigController({
     if (!originalText) return;
     const expectedToken = projectLoadToken;
     if (el.scanResult) el.scanResult.textContent = 'AC 서보 검색 중';
-    if (!await openScanProgressPopup('scan:ac-servo', 'AC Servo 검색')) {
+    if (!await openScanProgressPopup('scan:ac-servo', 'AC 서보 검색')) {
       finishScanRequest(el.scanButton, originalText);
       return;
     }
@@ -3551,16 +3485,16 @@ export function createMotorConfigController({
       const scanPartial = payload.partial === true
         || payload.motor_operation?.status === 'partial';
       el.scanButton.textContent = payload.success
-        ? '직접 검색 완료'
+        ? '검색 완료'
         : scanPartial
-          ? '직접 검색 부분 완료'
-          : '직접 검색 실패';
+          ? '검색 일부 완료'
+          : '검색 실패';
       await finishScanProgressPopup(
         payload.success,
         payload.success
           ? 'AC 서보 검색 완료'
           : conciseMotorScanMessage(
-            uiMessage(payload.message, scanPartial ? 'AC 서보 검색 부분 완료' : 'AC 서보 검색 실패'),
+            uiMessage(payload.message, scanPartial ? 'AC 서보 검색 일부 완료' : 'AC 서보 검색 실패'),
           ),
         scanPartial ? 'partial' : '',
       );
@@ -3578,7 +3512,7 @@ export function createMotorConfigController({
     if (!originalText) return;
     const expectedToken = projectLoadToken;
     if (el.dynamixelScanResult) el.dynamixelScanResult.textContent = '다이나믹셀 연결 확인 중';
-    if (!await openScanProgressPopup('scan:dynamixel', 'Dynamixel 검색')) {
+    if (!await openScanProgressPopup('scan:dynamixel', '다이나믹셀 검색')) {
       finishScanRequest(el.dynamixelScanButton, originalText);
       return;
     }
@@ -3594,13 +3528,13 @@ export function createMotorConfigController({
       await finishScanProgressPopup(
         payload.success,
         payload.success
-          ? 'Dynamixel 검색 완료'
-          : conciseMotorScanMessage(uiMessage(payload.message, 'Dynamixel 검색 실패')),
+          ? '다이나믹셀 검색 완료'
+          : conciseMotorScanMessage(uiMessage(payload.message, '다이나믹셀 검색 실패')),
       );
     } catch (error) {
       if (el.dynamixelScanResult) el.dynamixelScanResult.textContent = '다이나믹셀 연결 확인 실패';
       el.dynamixelScanButton.textContent = '검색 실패';
-      await finishScanProgressPopup(false, `Dynamixel 검색 실패: ${error?.message || error}`);
+      await finishScanProgressPopup(false, `다이나믹셀 검색 실패: ${error?.message || error}`);
     } finally {
       finishScanRequest(el.dynamixelScanButton, originalText);
     }
@@ -3640,7 +3574,7 @@ export function createMotorConfigController({
         el.scanAllResult.textContent = scanComplete
           ? `검색 완료 · AC 서보 ${formatInt(summary.ethercatCount)}개 · 다이나믹셀 ${formatInt(summary.dynamixelCount)}개`
           : scanPartial
-            ? conciseMotorScanMessage(`부분 완료 · AC 서보 ${formatInt(summary.ethercatCount)}개 · 다이나믹셀 실패: ${dynamixelError || '직접 응답 없음'}`)
+            ? conciseMotorScanMessage(`일부 완료 · AC 서보 ${formatInt(summary.ethercatCount)}개 · 다이나믹셀 실패: ${dynamixelError || '응답 없음'}`)
             : conciseMotorScanMessage(uiMessage(payload.message, '전체 모터 검색 실패'));
       }
       setAxisMessage(scanComplete
@@ -3650,7 +3584,7 @@ export function createMotorConfigController({
           : conciseMotorScanMessage(uiMessage(payload.message, '전체 모터 검색 실패')),
       !scanComplete);
       if (payload.motion_state) renderLatestState(payload.motion_state);
-      el.scanAllButton.textContent = scanComplete ? '검색 완료' : (scanPartial ? '부분 완료' : '검색 실패');
+      el.scanAllButton.textContent = scanComplete ? '검색 완료' : (scanPartial ? '일부 완료' : '검색 실패');
       // **실패하면 서버가 말한 이유를 그대로 보여준다** · §6-224
       //
       // 전에는 고정 문구 「전체 모터 검색 실패」만 띄우고 `payload.message`
@@ -3661,7 +3595,7 @@ export function createMotorConfigController({
         scanComplete
           ? '전체 모터 검색 완료'
           : conciseMotorScanMessage(
-            uiMessage(payload.message, scanPartial ? '전체 모터 검색 부분 완료' : '전체 모터 검색 실패'),
+            uiMessage(payload.message, scanPartial ? '전체 모터 검색 일부 완료' : '전체 모터 검색 실패'),
           ),
         scanPartial ? 'partial' : '',
       );
@@ -3671,7 +3605,7 @@ export function createMotorConfigController({
           `전체 모터 검색 실패: ${error?.message || error}`,
         );
       }
-      setAxisMessage('전체 모터 검색에 실패했습니다. 고급 종류별 검색으로 연결을 확인할 수 있습니다.');
+      setAxisMessage('전체 모터 검색에 실패했습니다. 「AC 서보 검색」이나 「다이나믹셀 검색」으로 종류별로 확인해 보세요.');
       el.scanAllButton.textContent = '검색 실패';
       await finishScanProgressPopup(false, `전체 모터 검색 실패: ${error?.message || error}`);
     } finally {
@@ -3737,7 +3671,7 @@ export function createMotorConfigController({
         if (maintenance) {
           event.stopPropagation();
           if (absoluteSetupRunning) {
-            setAxisMessage('앱솔루트 설정 진행 중 · 끝난 뒤에 정비하세요', true);
+            setAxisMessage('앱솔루트 설정이 진행 중입니다. 끝난 뒤에 다시 시도하세요.', true);
             return;
           }
           await runDriveMaintenance(maintenance);
@@ -3799,7 +3733,7 @@ export function createMotorConfigController({
     addApplyReason(axes.length ? `모터 ${axes.join('·')} 운전 한계 바뀜` : '운전 한계 바뀜');
     configApplyPending = true;
     if (hasMotorConfigDataChanges() || hasAxisChanges()) {
-      setAxisMessage('조인트 매핑이 모터 운전 한계를 바꿨습니다 · 저장 안 한 편집을 정리한 뒤 「설정 다시 불러오기」', true);
+      setAxisMessage('조인트 매핑이 모터 운전 한계를 바꿨습니다. 저장하지 않은 모터 목록 편집을 저장하거나 되돌린 뒤 화면을 새로 고치세요.', true);
       return;
     }
     await fetchRegistry();

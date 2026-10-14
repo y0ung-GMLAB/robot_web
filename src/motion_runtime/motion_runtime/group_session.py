@@ -20,6 +20,13 @@ from motion_common.values import finite_float
 
 from . import motion_run_rules
 
+#: 스케줄 구간 끝이 보낸 회차 후 정지의 이유 · 브리지·연동 노드가 같은 글자를 쓴다
+SCHEDULE_END_REASON = 'schedule_end'
+#: 구간 끝 정상 정지 · 전에는 마스터의 세션 정리가 「그룹 실행 취소」 로 덮어 실패처럼 읽혔다 · 수정 목록 141
+SCHEDULE_END_STOP_MESSAGE = '구간 끝 · 회차 후 정지'
+#: 사람이 누른 「현재 회차 후 정지」
+GROUP_AFTER_CYCLE_STOP_MESSAGE = '현재 그룹 모션 회차 완료 후 정지'
+
 
 class GroupSession:
     def __init__(self, manager: Any, *, run_lock: threading.RLock) -> None:
@@ -34,20 +41,38 @@ class GroupSession:
         """즉시 정지 · 세션을 비활성으로 표시하고 대기 중인 쪽을 깨운다."""
         with self.condition:
             if self.session:
-                self.session.update({'active': False, 'state': 'stopping'})
+                # 즉시 정지가 회차 후 정지보다 이긴다 · 끝 문구도 「회차 후 정지」 로 쓰지 않는다 · 수정 목록 141
+                self.session.update({'active': False, 'state': 'stopping', 'stopped_now': True})
             self.condition.notify_all()
 
-    def request_stop_after_cycle(self, current: Dict[str, Any]) -> bool:
+    def after_cycle_stop_message(self, default: str = GROUP_AFTER_CYCLE_STOP_MESSAGE) -> str:
+        """회차 후 정지로 끝난 세션의 끝 문구 · 아니면 빈 글자 · 수정 목록 141
+
+        스케줄 구간 끝이면 「구간 끝 · 회차 후 정지」 · 사람이 누른 회차 후 정지면 `default` ·
+        회차 후 정지를 안 받았거나 그 뒤 즉시 정지가 왔으면 빈 글자(부르는 쪽 옛 문구 그대로).
+        """
+        with self.condition:
+            if not self.session.get('stop_after_cycle') or self.session.get('stopped_now'):
+                return ''
+            if str(self.session.get('stop_reason') or '') == SCHEDULE_END_REASON:
+                return SCHEDULE_END_STOP_MESSAGE
+            return default
+
+    def request_stop_after_cycle(self, current: Dict[str, Any], reason: str = '') -> bool:
         """이번 주기까지만 · 활성 세션이 없으면 거짓.
 
         정지 지시가 실제로 서려면 세션 표시만으로는 부족하다 · 재생 루프가 보는
         `_graceful_stop_event`도 함께 세운다. 아직 움직이는 중이 아니면
         `_stop_event`까지 세워 즉시 끝낸다.
+
+        `reason` · 스케줄 구간 끝이면 `schedule_end` · 끝 문구를 가른다 · 수정 목록 141
         """
         with self.condition:
             if not self.session.get('active'):
                 return False
             self.session['stop_after_cycle'] = True
+            if reason or not self.session.get('stop_reason'):
+                self.session['stop_reason'] = str(reason or '')
             self.manager._graceful_stop_event.set()
             finishing = {'running', 'verifying', 'motion_completed'}
             if self.session.get('independent'):
@@ -283,9 +308,15 @@ class GroupSession:
 
     def cancel(self, payload: Dict[str, Any]) -> Dict[str, Any]:
         execution_id = str(payload.get('execution_id') or '').strip()
+        # 끝까지 돈 1회 · 회차 후 정지도 마스터가 이 길로 세션을 정리한다 · 그때 「완료」 를 「취소」 로 덮어
+        # 끝까지 돈 재생이 실패처럼 보였다(2026-10-12 H-52) · 끝난 뒤 정리면 완료로 둔다 · 수정 목록 112 마
+        finished = str(self.manager.status().get('state') or '') in ('completed', 'motion_completed')
         with self.condition:
             if execution_id and self.session.get('execution_id') != execution_id:
                 raise ValueError('취소하려는 그룹 실행 세션이 일치하지 않습니다')
+            # 회차 후 정지(스케줄 구간 끝 · 사람이 누른 회차 후 정지) 뒤의 정리도 이 길이다 · 그것을
+            # 「그룹 실행 취소」 로 덮어 구간 끝 정상 정지가 실패처럼 읽혔다(실물 S-11 · 2026-10-14) · 수정 목록 141
+            after_cycle_text = self.after_cycle_stop_message()
             self.manager._stop_event.set()
             self.session.update({'active': False, 'state': 'stopped'})
             self.condition.notify_all()
@@ -304,6 +335,21 @@ class GroupSession:
                 'message': '이전 그룹 실행 정리 중입니다. 잠시 후 다시 시도하세요',
                 'status': self.manager.status(),
             }
+        if finished:
+            self.manager._update_status({
+                'state': 'completed',
+                'phase': 'completed',
+                'message': '그룹 실행 완료',
+            })
+            return {'success': True, 'message': '그룹 실행 완료 · 세션 정리', 'status': self.manager.status()}
+        if after_cycle_text:
+            self.manager._update_status({
+                'state': 'stopped',
+                'phase': 'stopped',
+                'message': after_cycle_text,
+                'phase_finished_at': time.time(),
+            })
+            return {'success': True, 'message': f'{after_cycle_text} · 세션 정리', 'status': self.manager.status()}
         self.manager._update_status({
             'state': 'stopped',
             'phase': 'stopped',
@@ -479,7 +525,7 @@ class GroupSession:
                     })
                     stop_after_cycle = bool(self.session.get('stop_after_cycle'))
                 if stop_after_cycle:
-                    self._finish('현재 그룹 모션 회차 완료 후 정지')
+                    self._finish(self.after_cycle_stop_message() or GROUP_AFTER_CYCLE_STOP_MESSAGE)
                     return
                 if not self._initialize_next_cycle(
                     execution_id, cycle_number, playlist, initialization_plan,
@@ -501,6 +547,8 @@ class GroupSession:
                     'phase_finished_at': time.time(),
                 })
         finally:
+            # 회차 사이(초기 위치 · 시작 대기)에 받은 회차 후 정지도 여기서 끝난다 · 같은 끝 문구 · 수정 목록 141
+            after_cycle_text = self.after_cycle_stop_message()
             with self.condition:
                 if self.session.get('execution_id') == execution_id:
                     self.session['active'] = False
@@ -514,7 +562,7 @@ class GroupSession:
                 self.manager._update_status({
                     'state': 'stopped',
                     'phase': 'stopped',
-                    'message': '그룹 실행 정지',
+                    'message': after_cycle_text or '그룹 실행 정지',
                     'phase_finished_at': time.time(),
                 })
 
@@ -610,10 +658,16 @@ class GroupSession:
         result = self.manager.status()
         if result.get('state') == 'error' or self.manager._stop_event.is_set():
             return
-        self._finish(
+        default = (
             str(result.get('message') or '')
             if result.get('state') == 'stopped'
             else '각자 재생 · 현재 회차 완료 후 정지'
+        )
+        # 스케줄 구간 끝이면 그 문구 · 수정 목록 141
+        self._finish(
+            SCHEDULE_END_STOP_MESSAGE
+            if self.after_cycle_stop_message(default) == SCHEDULE_END_STOP_MESSAGE
+            else default
         )
 
     def _wait_join_commit(self, execution_id: str, join_cycle: int) -> Optional[int]:

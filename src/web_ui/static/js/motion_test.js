@@ -171,7 +171,7 @@ export function recoveryTargetForMotor(motor) {
     return { targetDeg: null, boundary: '', message: '현재 위치를 확인할 수 없습니다' };
   }
   if (lower === null || upper === null || lower > upper) {
-    return { targetDeg: null, boundary: '', message: '유효한 위치 제한 하한·상한이 필요합니다' };
+    return { targetDeg: null, boundary: '', message: '위치 제한 하한·상한을 먼저 설정하세요' };
   }
   if (current < lower) {
     return { targetDeg: lower, boundary: 'lower', message: '하한 경계로 복귀합니다' };
@@ -410,9 +410,9 @@ function actionMotorLabel(motor) {
 function acServoReadyBlockReason(motor, actionText) {
   if (!motor) return '모터를 선택하세요';
   if (!isAcServoMotor(motor)) return `AC 서보 모터만 ${actionText} 가능합니다`;
-  if (String(motor.state || '') !== 'detected') return '선택 모터가 감지되지 않았습니다';
-  if (motor.servo_on !== true) return '서보가 켜진 상태가 아닙니다';
-  if (Boolean(motor.fault)) return '선택 모터에 에러가 있습니다';
+  if (String(motor.state || '') !== 'detected') return '선택한 모터가 감지되지 않았습니다';
+  if (motor.servo_on !== true) return '선택한 모터의 서보가 꺼져 있습니다';
+  if (Boolean(motor.fault)) return '선택한 모터에 에러가 있습니다';
   return '';
 }
 
@@ -423,8 +423,8 @@ function acServoReadyBlockReason(motor, actionText) {
  * 한 번씩** 적혀 있었다.
  */
 function dynamixelReadyBlockReason(motor) {
-  if (String(motor.state || '') !== 'detected') return '선택 모터가 감지되지 않았습니다';
-  if (Boolean(motor.fault)) return '선택 모터에 에러가 있습니다';
+  if (String(motor.state || '') !== 'detected') return '선택한 모터가 감지되지 않았습니다';
+  if (Boolean(motor.fault)) return '선택한 모터에 에러가 있습니다';
   return '';
 }
 
@@ -897,7 +897,7 @@ export function createMotionTestController({ el, getLatestState, getJointRow = (
           ? `${label} 범위 복귀 명령 전입니다.`
           : `${label} 절대 위치 동작 명령 전입니다.`,
         mode === 'recovery'
-          ? '복귀 버튼을 누르면 motion_supervisor에 위치 제한 경계 요청을 보냅니다.'
+          ? '「경계 위치로 복귀」를 누르면 위치 제한 경계로 이동합니다.'
           : '동작 실행 버튼을 누르면 motion_supervisor에 절대 위치 요청을 보냅니다.',
         '실제 위치 결과는 위 출력값 표의 결과값(동작 후)에 표시됩니다.',
       ].join('\n');
@@ -908,7 +908,7 @@ export function createMotionTestController({ el, getLatestState, getJointRow = (
     el.motionTestActualState.textContent = '명령 전';
     el.motionTestActualText.textContent = [
       `${jogMotorText} 조그 명령 전입니다.`,
-      '조그 버튼을 누르면 motion_supervisor에 조그 요청을 보냅니다.',
+      '「- 방향」 또는 「+ 방향」을 누르면 조그로 이동합니다.',
       '실제 위치 결과는 위 출력값 표의 결과값(동작 후)에 표시됩니다.',
     ].join('\n');
   }
@@ -927,7 +927,7 @@ export function createMotionTestController({ el, getLatestState, getJointRow = (
       el.motionTestJogJointMode.disabled = !joint;
       if (!joint) {
         el.motionTestJogJointMode.checked = false;
-        el.motionTestJogJointMode.title = '이 모터에 연결된 조인트 이름이 없습니다 · 모터 deg 로 움직입니다';
+        el.motionTestJogJointMode.title = '이 모터에 연결된 조인트 이름이 없습니다. 모터 deg로 움직입니다.';
       } else {
         el.motionTestJogJointMode.title = `${joint.motionId} · 모터 ${joint.signedRatio}x`;
         // 기본은 조인트 deg · 사람이 끈 것은 존중한다 (모터를 바꾸면 초기화)
@@ -991,7 +991,7 @@ export function createMotionTestController({ el, getLatestState, getJointRow = (
         el.motionTestMode?.value !== 'jog' ? '조그 모드를 선택하세요'
           : jogRequestInFlight ? '동작 명령을 처리하고 있습니다'
             : motionStopInFlight ? '모터 정지 요청을 처리하고 있습니다'
-              : motionCommandActive ? '현재 동작이 완료될 때까지 기다리거나 동작 정지를 누르세요'
+              : motionCommandActive ? '현재 동작이 끝날 때까지 기다리거나 「모터 동작 정지」를 누르세요'
                 : runtimeJogBlockReason(motor)
                   || (negativeJogPlan === null ? '조그 이동량과 현재 위치를 확인하세요' : '')
                   || positionLimitBlockReason(negativeJogPlan)
@@ -1004,7 +1004,7 @@ export function createMotionTestController({ el, getLatestState, getJointRow = (
         el.motionTestMode?.value !== 'jog' ? '조그 모드를 선택하세요'
           : jogRequestInFlight ? '동작 명령을 처리하고 있습니다'
             : motionStopInFlight ? '모터 정지 요청을 처리하고 있습니다'
-              : motionCommandActive ? '현재 동작이 완료될 때까지 기다리거나 동작 정지를 누르세요'
+              : motionCommandActive ? '현재 동작이 끝날 때까지 기다리거나 「모터 동작 정지」를 누르세요'
                 : runtimeJogBlockReason(motor)
                   || (positiveJogPlan === null ? '조그 이동량과 현재 위치를 확인하세요' : '')
                   || positionLimitBlockReason(positiveJogPlan)
@@ -1027,7 +1027,7 @@ export function createMotionTestController({ el, getLatestState, getJointRow = (
         !isActionMode ? '동작 모드를 선택하세요'
           : jogRequestInFlight ? '동작 명령을 처리하고 있습니다'
             : motionStopInFlight ? '모터 정지 요청을 처리하고 있습니다'
-              : motionCommandActive ? '현재 동작이 완료될 때까지 기다리거나 동작 정지를 누르세요'
+              : motionCommandActive ? '현재 동작이 끝날 때까지 기다리거나 「모터 동작 정지」를 누르세요'
                 : runtimeActionBlockReason(motor)
                   || (plan === null ? '목표 위치, 감속·기어비, 동작 시간을 확인하세요' : '')
                   || positionLimitBlockReason(plan)
@@ -1052,7 +1052,7 @@ export function createMotionTestController({ el, getLatestState, getJointRow = (
         !isRecoveryMode ? '범위 복귀 모드를 선택하세요'
           : jogRequestInFlight ? '동작 명령을 처리하고 있습니다'
             : motionStopInFlight ? '모터 정지 요청을 처리하고 있습니다'
-              : motionCommandActive ? '현재 동작이 완료될 때까지 기다리거나 동작 정지를 누르세요'
+              : motionCommandActive ? '현재 동작이 끝날 때까지 기다리거나 「모터 동작 정지」를 누르세요'
                 : runtimeActionBlockReason(motor)
                   || recovery.message
       );
@@ -1080,12 +1080,12 @@ export function createMotionTestController({ el, getLatestState, getJointRow = (
         guideText = '모터 동작 정지 요청을 처리하고 있습니다';
       } else if (jogRequestInFlight || motionCommandActive) {
         guideState = 'active';
-        guideText = '현재 동작 중입니다 · 완료를 기다리거나 모터 동작 정지를 누르세요';
+        guideText = '동작 중입니다. 끝날 때까지 기다리거나 「모터 동작 정지」를 누르세요';
       } else if (motor && el.motionTestMode?.value === 'jog') {
         if (!negativeJogDisabled || !positiveJogDisabled) {
           guideState = 'ready';
           guideText = negativeJogDisabled || positiveJogDisabled
-            ? '조그 준비 완료 · 위치 제한 안에서 활성화된 방향을 사용하세요'
+            ? '조그 준비 완료 · 위치 제한 안에서 누를 수 있는 방향 버튼을 사용하세요'
             : '조그 준비 완료 · 이동량을 확인하고 방향 버튼을 누르세요';
         } else {
           const reason = runtimeJogBlockReason(motor)
@@ -1290,7 +1290,7 @@ export function createMotionTestController({ el, getLatestState, getJointRow = (
     }
     if (scope === 'selected' && (!motor || !isAcServoMotor(motor))) {
       if (el.acServoControlMessage) {
-        el.acServoControlMessage.textContent = '선택 모터가 AC 서보가 아닙니다';
+        el.acServoControlMessage.textContent = '선택한 모터가 AC 서보가 아닙니다';
       }
       renderCurrentState();
       return;
@@ -1306,11 +1306,11 @@ export function createMotionTestController({ el, getLatestState, getJointRow = (
       const targetText = scope === 'all' ? '전체 AC 서보' : '선택 모터 AC 서보';
       const confirmed = await showConfirm(
         `${targetText} 서보 끄기 명령을 보냅니다.\n서보가 꺼지면 부하가 풀릴 수 있습니다. 계속할까요?`,
-        { title: 'AC Servo 끄기', confirmLabel: '서보 끄기', tone: 'danger' },
+        { title: 'AC 서보 끄기', confirmLabel: '서보 끄기', tone: 'danger' },
       );
       if (!confirmed) {
         if (el.acServoControlMessage) {
-          el.acServoControlMessage.textContent = '서보 끄기 취소';
+          el.acServoControlMessage.textContent = '서보 끄기를 취소했습니다';
         }
         return;
       }
@@ -1350,10 +1350,10 @@ export function createMotionTestController({ el, getLatestState, getJointRow = (
    * 하드웨어 오류(과부하·과열·전압)는 재부팅이나 전원 재투입으로만 풀린다 */
   async function sendDynamixelControl(action, axis) {
     const confirmText = {
-      torque_off: '선택 모터 다이나믹셀 토크를 끕니다.\n다이나믹셀은 브레이크가 없어 관절이 처질 수 있습니다. 계속할까요?',
-      reboot: '선택 모터 다이나믹셀을 재부팅합니다.\n'
-        + '하드웨어 오류가 풀리고 토크가 꺼집니다 · 브레이크가 없어 관절이 처질 수 있습니다.\n'
-        + '다회전 모드 모터는 바퀴 수가 사라져 위치 표시가 바뀔 수 있습니다 · 재부팅 뒤 위치를 확인하세요. 계속할까요?',
+      torque_off: '선택한 다이나믹셀 모터의 토크를 끕니다.\n다이나믹셀은 브레이크가 없어 관절이 처질 수 있습니다. 계속할까요?',
+      reboot: '선택한 다이나믹셀 모터를 재부팅합니다.\n'
+        + '하드웨어 오류가 해제되고 토크가 꺼집니다. 브레이크가 없어 관절이 처질 수 있습니다.\n'
+        + '다회전 모드 모터는 회전 수 정보가 초기화되어 위치 표시가 바뀔 수 있습니다. 재부팅 뒤 위치를 확인하세요. 계속할까요?',
     }[action];
     if (confirmText) {
       const label = action === 'reboot' ? '재부팅' : '토크 끄기';

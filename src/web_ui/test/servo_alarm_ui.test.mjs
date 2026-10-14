@@ -19,7 +19,7 @@ const main = fs.readFileSync(
 
 // 서보 에러 관리는 설정이 아니라 운영 중 대응이다 · [운영]으로 옮겼다 · §6-67
 test('서보 에러 관리는 운영 그룹에 있다', () => {
-  assert.match(index, /data-workspace-tab="config">모터 관리/);
+  assert.match(index, /data-workspace-tab="config">모터 설정/);
   assert.match(index, /data-workspace-tab="servo-errors">서보 에러 관리/);
   assert.match(index, /data-workspace-panel="servo-errors"/);
   assert.match(
@@ -34,10 +34,11 @@ test('프로젝트 등급 편집과 실제 안전상태 표시가 연결되어 �
   assert.match(controller, /fetchServoAlarmPolicy/);
   assert.match(controller, /saveServoAlarmPolicy/);
   assert.match(controller, /servo_alarm_grade3_latched/);
-  assert.match(controller, /프로그램 재시작 필요/);
-  assert.match(controller, /전체 항목을 기본 등급으로 변경/);
+  assert.match(controller, /3등급 차단 중 · 프로그램을 다시 시작해야 해제됩니다/);
+  assert.match(controller, /서보 에러 정책이 아직 적용되지 않았습니다/);
+  assert.match(controller, /모든 항목을 기본 등급으로 바꿨습니다/);
   assert.match(controller, /servo_alarm_policy_revision/);
-  assert.match(controller, /저장된 프로젝트 등급과 Supervisor 적용 등급이 일치하지 않습니다/);
+  assert.match(controller, /저장한 등급과 현재 적용 중인 등급이 다릅니다/);
 });
 
 test('통신 미수신 0xFFFF는 서보 에러 팝업으로 분류하지 않는다', () => {

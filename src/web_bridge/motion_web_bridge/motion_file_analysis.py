@@ -26,6 +26,14 @@ from motion_common.timing import CONTROL_PERIOD_SEC
 
 # MuJoCo 계산 기록 · `animation_preview.meta_path_for` 가 만든다
 SIM_META_SUFFIX = '.sim.meta.json'
+# 계산 시작 때 남기는 임시 기록 · `animation_preview.pending_path_for` · 수정 목록 120 (마)
+SIM_PENDING_SUFFIX = '.sim.pending.json'
+SIM_RECORD_SUFFIXES = (SIM_META_SUFFIX, SIM_PENDING_SUFFIX)
+
+
+def is_sim_record(name: str) -> bool:
+    """3D 계산 기록 파일(애니메이션 아님) · 목록에 「오류 · motion data rows not found」 로 보이던 것"""
+    return str(name or '').lower().endswith(SIM_RECORD_SUFFIXES)
 
 
 def motion_mapping_file_id(result: Dict[str, Any]) -> str:
@@ -87,13 +95,27 @@ def motion_id_sort_key(value: str) -> tuple[int, Any]:
         return (1, value)
 
 
+#: 상세 그래프 중 처음에 보이는 수 · 나머지는 `graph_series_extra` 로 같은 응답에 실어
+#: 화면의 「나머지 보기」 가 펼친다 · 수정 목록 138 (2026-10-13 · 나레이션 20 조인트 중 8 개가
+#: 말없이 빠졌다)
+GRAPH_SERIES_SHOWN = 12
+
+
 def motion_graph_series(
     groups: Dict[str, List[Dict[str, Any]]],
-    max_series: int = 12,
+    max_series: Optional[int] = None,
     max_points: int = 300,
 ) -> List[Dict[str, Any]]:
+    """조인트마다 그래프 점 · 이름 순 · `max_series` 없으면 전부
+
+    점은 조인트마다 최대 `max_points` 개로 솎는다 · 9 분 애니메이션이면 약 1.9 초 간격이라
+    짧은 튐은 그래프에 안 보일 수 있다(범위 검사는 솎지 않은 최소·최대로 한다) · 138 범위 밖.
+    """
     series = []
-    for motion_id in sorted(groups, key=motion_id_sort_key)[:max_series]:
+    motion_ids = sorted(groups, key=motion_id_sort_key)
+    if max_series is not None:
+        motion_ids = motion_ids[:max_series]
+    for motion_id in motion_ids:
         records = groups[motion_id]
         stride = max(1, int(math.ceil(len(records) / max_points)))
         points = [
@@ -108,6 +130,20 @@ def motion_graph_series(
             'points': points,
         })
     return series
+
+
+def _starts_with_motion_header(content: str) -> bool:
+    """첫 줄(빈 줄·# 줄 빼고)이 `{"type": "motion_header", …}` 인가 · 표준 모션 파일(JSON Lines)"""
+    for line in str(content or '').splitlines():
+        text = line.strip()
+        if not text or text.startswith('#'):
+            continue
+        try:
+            first = json.loads(text)
+        except json.JSONDecodeError:
+            return False
+        return isinstance(first, dict) and str(first.get('type') or '') == 'motion_header'
+    return False
 
 
 def analyze_motion_json(content: str, *, include_records: bool) -> Dict[str, Any]:
@@ -129,6 +165,8 @@ def analyze_motion_json(content: str, *, include_records: bool) -> Dict[str, Any
         },
         'errors': [],
         'warnings': [],
+        # 알림(정보) · 경고가 아닌 것 · 화면 검사 칸을 「경고」 로 바꾸지 않는다
+        'notes': [],
     }
     try:
         payload = json.loads(content)
@@ -141,7 +179,11 @@ def analyze_motion_json(content: str, *, include_records: bool) -> Dict[str, Any
                 result['errors'].append(text_error)
             return result
         result['message'] = 'motion data parsed from header/list rows'
-        result['warnings'].append('strict JSON 형식은 아니지만 헤더+대괄호 행 형식으로 해석했습니다')
+        if _starts_with_motion_header(content):
+            # Blender 내보내기 · 웹 녹화 형식(JSON Lines · 첫 줄 motion_header) · 정상 형식이라 경고가 아니다 · 수정 목록 120 (S-8)
+            result['notes'].append('헤더 + 프레임마다 한 줄(JSON Lines) 형식 · Blender 내보내기 형식')
+        else:
+            result['warnings'].append('strict JSON 형식은 아니지만 헤더+대괄호 행 형식으로 해석했습니다')
     else:
         result['json_valid'] = True
         rows, headers, source = motion_table.extract_rows(payload)
@@ -282,7 +324,13 @@ def analyze_motion_json(content: str, *, include_records: bool) -> Dict[str, Any
     }
     if include_records:
         result['preview_records'] = sorted_records[:80]
-        result['graph_series'] = motion_graph_series(groups)
+        # 138 · 처음 12 개는 `graph_series`(옛 화면도 이것만 본다) · 나머지는 `graph_series_extra` ·
+        # 따로 부르는 길을 두지 않고 같은 응답에 싣는다 · 상세는 캐시돼 한 번만 만들고
+        # 조인트 20 개 · 300 점이면 몇백 KB 수준
+        all_series = motion_graph_series(groups)
+        result['graph_series'] = all_series[:GRAPH_SERIES_SHOWN]
+        result['graph_series_extra'] = all_series[GRAPH_SERIES_SHOWN:]
+        result['graph_series_total'] = len(all_series)
 
     result['valid'] = len(errors) == 0
     result['message'] = 'motion data valid' if result['valid'] else 'motion data has errors'
@@ -302,7 +350,7 @@ def analyze_motion_json(content: str, *, include_records: bool) -> Dict[str, Any
 _SUMMARY_CACHE: 'OrderedDict[tuple, Dict[str, Any]]' = OrderedDict()
 _SUMMARY_CACHE_SIZE = 64
 #: 상세에만 있는 칸
-DETAIL_ONLY_KEYS = ('preview_records', 'graph_series')
+DETAIL_ONLY_KEYS = ('preview_records', 'graph_series', 'graph_series_extra', 'graph_series_total')
 
 
 def _cache_key(path: Path, stat) -> tuple:
@@ -397,8 +445,8 @@ def list_motion_files(
                 item.is_file()
                 and item.suffix.lower() == '.json'
                 and not item.name.startswith('__studio_')
-                # MuJoCo 계산 기록(`x.sim.meta.json`) · 애니메이션 아님
-                and not item.name.lower().endswith(SIM_META_SUFFIX)
+                # MuJoCo 계산 기록(`x.sim.meta.json` · 임시 `x.sim.pending.json`) · 애니메이션 아님
+                and not is_sim_record(item.name)
             )
         ),
         key=lambda item: item.stat().st_mtime if item.exists() else 0.0,
@@ -408,7 +456,7 @@ def list_motion_files(
     return {
         'success': True,
         'message': (
-            '현재 프로젝트 모션 파일을 불러왔습니다'
+            '현재 프로젝트의 애니메이션을 불러왔습니다'
             if repository.selected_project_id()
             else NO_PROJECT_SELECTED
         ),

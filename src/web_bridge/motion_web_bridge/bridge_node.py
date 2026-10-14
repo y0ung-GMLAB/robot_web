@@ -14,7 +14,7 @@ import rclpy
 import uvicorn
 import yaml
 from fastapi import FastAPI, HTTPException, Request
-from motion_common import generation, minas_absolute, rpc, topics, upper_restart
+from motion_common import generation, joint_mapping, minas_absolute, multiturn_clear, rpc, topics, upper_restart
 from motion_common import paths as common_paths
 from motion_common import motor_ref as motor_ref_rules
 from fastapi.responses import JSONResponse
@@ -29,17 +29,20 @@ from .wifi_settings import WifiSettings
 from .system_timezone import SystemTimezone
 from .ethercat_alias_manager import EthercatAliasError, EthercatAliasManager
 from .coordination_bridge import (
-    CoordinationWebBridge, local_motion_control, local_motion_readiness,
+    CoordinationWebBridge, LeaveNotice, local_motion_control, local_motion_readiness,
 )
-from . import motion_file_analysis, motor_config_rules, run_mode_gate
+from . import motion_file_analysis, motion_joint_values, motor_config_rules, run_mode_gate
 from .execution_context_service import ExecutionContextService
 from .manual_motor_commands import ManualMotorCommandService
 from .schedule_end import ScheduleEndService
 from .supervisor_watchdog import SupervisorWatchdog
 from .auto_backup import AutoBackupService
-from .absolute_setup import AbsoluteSetup
+from .absolute_setup import AbsoluteSetup, reference_prompt
 from .drive_maintenance import DriveMaintenance
+from .drive_params import DriveParams
+from . import boot_params, minas_params
 from .manual_stream import ManualStreamService
+from .manual_range_gate import ManualRangeGate
 from . import animation_preview, sim_scene
 from .motor_runtime_service import MotorRuntimeService
 from .project_service import ProjectService
@@ -77,6 +80,10 @@ from .servo_alarm_policy import (
     normalize_overrides,
     policy_revision,
 )
+
+
+#: 스케줄 노드 상태(1초마다)가 이보다 늙었으면 「구간 안」 을 믿지 않는다 · 수정 목록 131
+SCHEDULE_STATUS_FRESH_SEC = 10.0
 
 
 def _managed_motor_service() -> str:
@@ -427,10 +434,41 @@ class MotionWebBridge(Node):
             service_active=self._motor_runtime.managed_service_active,
             run_service=lambda action, service: self._motor_runtime.run_managed_service(action, service),
             wait_release=lambda: motor_config_rules.wait_for_ethercat_release(timeout_sec=5.0),
-            wait_recovery=lambda service, axes: self._motor_runtime.wait_for_runtime_recovery(
-                axes, timeout_sec=12.0, motor_service=service,
-            ),
+            # 온라인 뒤 서보가 다 켜질 때까지(최대 8 초) · 수정 목록 109 메모
+            wait_recovery=self._wait_maintenance_recovery,
             expected_axes=self._detected_axes,
+            record=self._record_drive_maintenance,
+            # 다회전 클리어만 하는 길도 PC 단위 표시 · 기준점 다시 지정 전까지 재생 막힘 · 수정 목록 140 ④
+            record_clear=self._record_multiturn_clear,
+        )
+        # 부팅 시 적용값 · **지금 도는** 세션이 쓴 값 · 지금 설정과 다르면 「설정 적용 필요」 · 수정 목록 116
+        self.boot_params = boot_params.BootParamsWatch(
+            config_file=self.project_repository.runtime.selected_runtime_motor_config,
+            expected=lambda axes: boot_params.expected_for(
+                self.workspace_root, (self._motor_config.load().get('registry') or {}).get('motors') or [],
+            )(axes),
+            labels=boot_params.LABELS,
+        )
+        # MINAS 파라미터 고급 보기·쓰기 · 드라이브 지금 · 부팅 때 · 팩토리값 · 수정 목록 109 · 114
+        self.drive_params = DriveParams(
+            target=self.drive_maintenance._target,
+            # 지금 도는 세션 기준 · 적용된 세션이 없으면 지금 설정으로 계산(예전 그대로) · 116
+            boot_values=lambda axis: (
+                self.boot_params.running_for_axis(axis)
+                or minas_params.boot_values(
+                    self.workspace_root, minas_params.param_overrides(self._registry_motor_for_axis(axis) or {}),
+                )
+            ),
+            boot_next=lambda axis: minas_params.boot_values(
+                self.workspace_root, minas_params.param_overrides(self._registry_motor_for_axis(axis) or {}),
+            ),
+            boot_stale=lambda: ' · '.join(filter(None, (
+                self.boot_params.status().get('message'), self.boot_params.status().get('detail'),
+            ))),
+            safety_blocker=lambda: (
+                self.absolute_setup.blocker()
+                or self._motor_runtime.ethercat_scan_safety_blocker(require_fresh_motor_state=True)
+            ),
             record=self._record_drive_maintenance,
         )
         # MINAS 「앱솔루트 설정」 · 앱솔루트 + 다회전 클리어 · 전원 재투입 감지 · 수정 목록 62 ③④
@@ -452,6 +490,11 @@ class MotionWebBridge(Node):
             ),
             expected_axes=self._detected_axes,
             record=self._record_absolute_setup,
+            # 실패한 작업 이어서 하기 · 웹 브리지·PC 를 다시 켜도 남게 작업 폴더 runtime/(git 밖) · 24 h · 시리얼 확인 · 134
+            resume_file=self.workspace_root / 'runtime' / 'absolute_setup_resume.json',
+            # Err40 인 드라이브만 클리어 · 클리어 직전 PC 단위 표시 · 끝나면 「기준점 다시 지정 대기」 · 수정 목록 140
+            record_clear=self._record_multiturn_clear,
+            pending_axes=lambda: multiturn_clear.pending_axes(self.multiturn_clear_state()),
         )
         # 스케줄 끝 · 기준점 주차 → 서보 OFF · 다음 시작 전 다시 켜기 · 수정 목록 36
         self.schedule_end = ScheduleEndService(
@@ -461,7 +504,17 @@ class MotionWebBridge(Node):
             dynamixel_torque_control=self._manual.dynamixel_torque_control,
             load_motor_registry=lambda: self._motor_config.load().get('registry') or {},
             alarm_grade=lambda: int((self._safety_status or {}).get('servo_alarm_grade') or 0),
+            # 스케줄 모드 PC 만 주차 · 수동·끔은 멈추기만 · 사용자 2026-10-13
+            run_mode=lambda: run_mode_gate.current_run_mode(self),
+            # 주차 다시 시도를 그만둘 때 · 구간이 다시 열렸나(마스터만 앎) · 수정 목록 131
+            in_window=self._schedule_window_open,
+            # 주차 실패 · 그 자리에서 서보 끔 · 모터 기록(운영 로그)에 · 수정 목록 131
+            record_event=lambda event_type, content, details: self._motor_event_log.append(
+                category='system', event_type=event_type, target='스케줄 끝',
+                content=content, details=details,
+            ),
         )
+        self._resume_schedule_end()
         self._manual_stream_request_publisher = self.create_publisher(
             String, self.manual_stream_request_topic, 10
         )
@@ -611,6 +664,7 @@ class MotionWebBridge(Node):
             self._motion_state_received_at = time.time()
         self._motor_event_log.record_motor_error_transitions(payload)
         self._motor_event_log.record_minas_absolute_transition(payload)
+        self._motor_event_log.record_mailbox_stuck_transition(payload)   # 멈춘 메일박스 · 139 ③
 
     def _record_upper_service_crash(self) -> None:
         """launch 가 남긴 비정상 종료 표지를 모터 이벤트로 옮긴다 · 수정 목록 72"""
@@ -748,6 +802,21 @@ class MotionWebBridge(Node):
             'reconcile_interval_sec': payload.get('reconcile_interval_sec'),
         }
 
+    def _resume_schedule_end(self) -> None:
+        """브리지가 다시 켜졌다 · 같은 구간 끝의 주차 다시 시도 · 포기 알림을 잇는다(횟수는 파일) · 수정 목록 131"""
+        try:
+            self.schedule_end.resume()
+        except Exception as exc:  # noqa: BLE001 · 이어 하지 못해도 브리지는 뜬다
+            self.get_logger().warn(f'[스케줄 끝] 지난 주차 다시 시도 기록을 읽지 못했습니다 · {exc}')
+
+    def _schedule_window_open(self) -> bool:
+        """스케줄 노드가 지금 운영 구간 안이라고 말하나 · 늙은 값 · 슬레이브(말 안 함)는 False · 수정 목록 131"""
+        status = self.schedule_node_status()
+        age = status.get('age_sec')
+        if not status.get('received') or age is None or age > SCHEDULE_STATUS_FRESH_SEC:
+            return False
+        return bool(status.get('active_schedule_id'))
+
     def _motion_run_status_callback(self, msg: String) -> None:
         try:
             payload = json.loads(msg.data)
@@ -832,11 +901,14 @@ class MotionWebBridge(Node):
             ),
             'motor_config_applied': motor_config_applied,
         }
+        # 적용된 조인트 매핑의 범위 미확인 줄 · 상단 빨간 칸 · 재생 계획과 같은 판정 · 수정 목록 97
+        mapping_range_blocker = ''
         if isinstance(motion_state, dict):
             mapping_rows = self._monitoring_mapping_rows_for_context(
                 execution_context,
                 selected_project_id,
             )
+            mapping_range_blocker = joint_mapping.range_block_reason(mapping_rows)
             current_generation = self.current_project_generation()
             if (
                 motion_value_state.get('project_id') != selected_project_id
@@ -890,6 +962,20 @@ class MotionWebBridge(Node):
             ),
             # 연결된 MINAS 드라이브 앱솔루트 미확인 사유 · 상단 빨간 칸 · 수정 목록 62
             'minas_absolute_blocker': self.minas_absolute_blocker(),
+            # 다회전 클리어 뒤 기준점 다시 지정 전 · 재생·초기 이동·스케줄·그룹 참가 막힘 · 「확인할 일」 · 수정 목록 140 ③
+            'multiturn_clear': self.multiturn_clear_status(),
+            # 조인트 범위 미확인 사유 · 재생·초기 이동이 막혀 있다 · 수정 목록 97
+            'mapping_range_blocker': mapping_range_blocker,
+            # 지금 도는 모터 프로그램의 부팅 값이 지금 설정과 다른가 · 「설정 적용 필요」 · 수정 목록 116
+            'boot_params': (
+                self.boot_params.public_status()
+                if getattr(self, 'boot_params', None) is not None else {}
+            ),
+            # 운영 종료 동작 · `notice` 가 있으면 「확인할 일」 (주차 실패 · 그 자리에서 서보 끔) · 수정 목록 131
+            'schedule_end': (
+                self.schedule_end.status()
+                if getattr(self, 'schedule_end', None) is not None else {}
+            ),
             'motion_run_status': motion_run_status,
             'motor_activity': motor_activity_snapshot(
                 motion_run_status,
@@ -942,7 +1028,34 @@ class MotionWebBridge(Node):
             'safety_status': safety_status,
             # 운전 모드 · 하트비트로 마스터에게 · 오프·수동 PC 는 그룹 시작에서 뺀다 · 수정 목록 30-6
             'operation_mode': self._cached_operation_mode(),
+            # 실행 준비 안 됨(설정 없음 · 모터 끊김 등) · 하트비트로 · 마스터가 선택 때 미리 뺀다 · 수정 목록 136
+            'start_blocker': self._cached_start_blocker(),
         }
+
+    def _cached_start_blocker(self) -> str:
+        """50ms 마다 불린다 · 1초에 한 번만 본다 · 사람 조작(조그 · 단독 재생)은 연동 노드가 따로 본다
+
+        준비 단계가 다시 맞춰 풀 수 있는 것(적용 중 · 노드 대기)은 넣지 않는다 · 빼기만 하고 넣지는 않는다.
+        """
+        now = time.monotonic()
+        cached = getattr(self, '_start_blocker_cache', None)
+        if cached is not None and now - cached[0] < 1.0:
+            return cached[1]
+        reason = ''
+        try:
+            context = getattr(self, '_execution_context', None)
+            terminal = getattr(context, 'terminal_block_reason', None)
+            reason = terminal() if callable(terminal) else ''
+            if not reason:
+                # 다회전 클리어 뒤 기준점 다시 지정 전 · 그룹 참가도 막는다 · 수정 목록 140 ③
+                reason = self.multiturn_clear_blocker()
+            if not reason:
+                reason = self.motor_runtime_control_blocker()
+        except Exception:  # noqa: BLE001 · 못 보면 빈 값 · 준비 단계가 다시 본다
+            reason = ''
+        text = f'실행 준비 안 됨 · {reason}'[:200] if reason else ''
+        self._start_blocker_cache = (now, text)
+        return text
 
     def _cached_operation_mode(self) -> str:
         """50ms 마다 불린다 · 파일은 1초에 한 번만 읽는다."""
@@ -1107,7 +1220,7 @@ class MotionWebBridge(Node):
             with self._safety_status_lock:
                 safety_status = dict(self._safety_status or {})
         if safety_status.get('emergency_latched'):
-            return '긴급정지 잠김 상태입니다. 프로그램 재시작이 필요합니다.'
+            return '긴급정지 잠김 상태입니다. 「프로그램 재시작」을 누르세요.'
         if safety_status.get('commands_blocked'):
             return str(
                 safety_status.get('message')
@@ -1183,7 +1296,7 @@ class MotionWebBridge(Node):
             if isinstance(motor, dict)
         ]
         if not motors:
-            return '실행할 모터축이 없습니다'
+            return '실행할 모터가 없습니다'
 
         unavailable = []
         faulted = []
@@ -1200,9 +1313,9 @@ class MotionWebBridge(Node):
             ):
                 unavailable.append(str(axis))
         if unavailable:
-            return f'온라인이 아닌 축이 있습니다: {", ".join(unavailable)}'
+            return f'연결되지 않은 모터가 있습니다: {", ".join(unavailable)}'
         if faulted:
-            return f'오류 축이 있습니다: {", ".join(faulted)}'
+            return f'오류 상태인 모터가 있습니다: {", ".join(faulted)}'
         setup = getattr(self, 'absolute_setup', None)
         if setup is not None and setup.active():
             return setup.blocker()
@@ -1238,7 +1351,7 @@ class MotionWebBridge(Node):
             acknowledged = self._manual.wait_for_action_result(boundary_id, timeout_sec=1.0)
             if not isinstance(acknowledged, dict) or acknowledged.get('success') is not True:
                 raise ValueError(
-                    '최종 모터 명령 노드가 프로젝트 세대 전환을 확인하지 않았습니다'
+                    '모터 명령 노드가 프로젝트 전환을 확인하지 않았습니다'
                 )
         policy_result = self.publish_servo_alarm_policy()
         if policy_result.get('success') is not True:
@@ -1326,7 +1439,7 @@ class MotionWebBridge(Node):
         if payload.get('confirmed') is not True:
             return {
                 'success': False,
-                'message': '사용자 확인값이 없어 EEPROM Alias 쓰기를 중단했습니다.',
+                'message': '확인을 받지 못해 EEPROM Alias 쓰기를 중단했습니다.',
             }
         try:
             master_index = int(payload.get('master_index', 0))
@@ -1347,7 +1460,7 @@ class MotionWebBridge(Node):
             }
         expected = payload.get('expected')
         if not isinstance(expected, dict):
-            return {'success': False, 'message': '선택 장비 확인값이 없습니다.'}
+            return {'success': False, 'message': '선택한 장비의 확인 정보가 없습니다.'}
         try:
             result = self.ethercat_alias_manager.write_alias(
                 slave_position,
@@ -1445,6 +1558,10 @@ class MotionWebBridge(Node):
     def _cached_motion_run_status(self) -> Dict[str, Any]:
         with self._motion_run_lock:
             return dict(self._motion_run_status) if self._motion_run_status else {}
+
+    def cached_run_status(self) -> Dict[str, Any]:
+        """마지막으로 받은 재생 상태 한 장 · 묻지 않는다(빠름) · 「프로그램 다시 시작」 이 본다 · 수정 목록 144"""
+        return self._cached_motion_run_status()
 
     @property
     def coordination(self):
@@ -1755,7 +1872,7 @@ class MotionWebBridge(Node):
         if not project_id:
             result['message'] = NO_PROJECT_SELECTED
         else:
-            result['message'] = '현재 프로젝트 조인트 매핑을 불러왔습니다'
+            result['message'] = '현재 프로젝트의 조인트 매핑을 불러왔습니다'
         # 어느 것이 **등록된** 파일인가를 같이 말한다 · §6-238
         #
         # 전에는 안 말해줬다 · 그래서 화면은 목록의 **첫 번째**를 골랐다 ·
@@ -1806,7 +1923,7 @@ class MotionWebBridge(Node):
         rows = validation.get('rows')
         if not isinstance(rows, dict):
             return
-        message = '이 모터가 모터축 설정에 없습니다 · 재생할 때 이 축은 건너뜁니다'
+        message = '이 모터는 모터 설정에 없습니다. 재생할 때 이 모터는 건너뜁니다'
         warnings = validation.setdefault('warnings', [])
         for row in mapping.get('mappings') or []:
             if not isinstance(row, dict) or row.get('enabled') is False:
@@ -1885,6 +2002,8 @@ class MotionWebBridge(Node):
             # (드라이브 반영은 「장비에 적용 · 모터 재시작」) · 2026-10-02
             limits = self._motor_config.sync_limits_from_mapping()
             result['motor_limits'] = limits
+            # 클리어 뒤 기준점을 다시 지정했으면 그 축 표시를 끈다 · 수정 목록 140 ③
+            result['multiturn_clear_released'] = self._release_multiturn_clear(result)
             # The active mapping file is one immutable part of the project
             # execution context. Reconcile the complete context after the
             # repository has confirmed the saved file and active-file selection.
@@ -1893,23 +2012,23 @@ class MotionWebBridge(Node):
             result['runtime_applied'] = bool(execution_context.get('ready'))
             if result['runtime_applied']:
                 result['message'] = (
-                    '조인트 매핑 저장 완료 · 실행 컨텍스트에 적용했습니다'
+                    '조인트 매핑을 저장하고 재생에 반영했습니다'
                 )
             else:
                 runtime_message = str(
                     execution_context.get('message')
-                    or '실행 컨텍스트 적용 대기'
+                    or '재생 반영 대기'
                 )
                 result['runtime_apply_warning'] = runtime_message
                 result['message'] = (
-                    '조인트 매핑은 저장됐지만 실행 컨텍스트 적용 대기 중입니다: '
+                    '조인트 매핑은 저장됐지만 아직 재생에 반영되지 않았습니다: '
                     f'{runtime_message}'
                 )
             if limits.get('changed'):
                 axes = ', '.join(str(item.get('controller_index')) for item in limits['changed'])
                 result['message'] += (
-                    f' · 모터 {axes} 운전 한계 갱신 · 드라이브 반영은 '
-                    '모터 관리 「장비에 적용 · 모터 재시작」'
+                    f'. {axes}번 모터의 운전 한계를 바꿨습니다. 드라이브에 반영하려면 '
+                    '모터 설정에서 「장비에 적용 · 모터 재시작」을 누르세요'
                 )
             elif limits.get('success') is False:
                 result['message'] += f" · {limits.get('message')}"
@@ -1970,6 +2089,16 @@ class MotionWebBridge(Node):
         result = self.drive_maintenance.run(payload if isinstance(payload, dict) else {})
         return {**result, **self.snapshot()}
 
+    def minas_drive_gains(self, payload: Dict[str, Any]) -> Dict[str, Any]:
+        """MINAS 게인 쓰기 · `POST /api/motor-config/drive-gains` · 수정 목록 108 (다)"""
+        result = self.drive_maintenance.write_gains(payload if isinstance(payload, dict) else {})
+        return {**result, **self.snapshot()}
+
+    def minas_eeprom_save_all(self, payload: Dict[str, Any]) -> Dict[str, Any]:
+        """모든 MINAS 축 EEPROM 저장 · 재시작 한 번 · `POST /api/motor-config/eeprom-save-all` · 108 (다)"""
+        result = self.drive_maintenance.save_eeprom_all(payload if isinstance(payload, dict) else {})
+        return {**result, **self.snapshot()}
+
     def _registry_motor_for_axis(self, axis: int) -> Optional[Dict[str, Any]]:
         registry = self._motor_config.load().get('registry') or {}
         for entry in registry.get('motors') or []:
@@ -1984,6 +2113,13 @@ class MotionWebBridge(Node):
                 if int(motor['controller_index']) == int(axis):
                     return motor
         return None
+
+    def _wait_maintenance_recovery(self, service: str, axes: List[int]) -> Dict[str, Any]:
+        """드라이브 정비 뒤 · 모터가 온라인으로 돌아오고 서보가 다 켜질 때까지 · 수정 목록 109 메모"""
+        recovery = self._motor_runtime.wait_for_runtime_recovery(axes, timeout_sec=12.0, motor_service=service)
+        if recovery.get('recovered'):
+            recovery.update(self._motor_runtime.wait_for_servo_on(axes, timeout_sec=8.0))
+        return recovery
 
     def _detected_axes(self) -> List[int]:
         state = self.motion_state()
@@ -2038,7 +2174,83 @@ class MotionWebBridge(Node):
         absolute = self.minas_absolute_blocker()
         if absolute:
             return {'success': False, 'message': f'실행 준비 검사 실패: {absolute}'}
+        cleared = self.multiturn_clear_blocker()
+        if cleared:
+            return {'success': False, 'message': f'실행 준비 검사 실패: {cleared}'}
         return self._request_motion_run('check', payload, timeout_sec=3.0)
+
+    # -- 다회전 클리어 뒤 기준점 보호 · 수정 목록 140 ③ ------------------------------------ #
+
+    def _multiturn_clear_path(self) -> Path:
+        return multiturn_clear.marker_path(getattr(self, 'workspace_root', None) or Path.cwd())
+
+    def multiturn_clear_state(self) -> Dict[str, Any]:
+        """PC 단위 표시 · 1초에 한 번만 읽는다(상태 · 하트비트가 자주 부름) · 우리가 쓰면 바로 다시 읽는다"""
+        now = time.monotonic()
+        cached = getattr(self, '_multiturn_clear_cache', None)
+        if cached is not None and now - cached[0] < 1.0:
+            return cached[1]
+        state = multiturn_clear.load(self._multiturn_clear_path())
+        self._multiturn_clear_cache = (now, state)
+        return state
+
+    def _active_mapping_rows(self) -> List[Dict[str, Any]]:
+        """지금 적용된 조인트 매핑 줄 · 실행 컨텍스트마다 한 번 읽음 · 못 읽으면 빈 목록(표시의 pending 은 그대로 막음)"""
+        try:
+            execution_context = self._execution_context.status(validate_files=False)
+            project_id = self.project_repository.selected_project_id()
+            return self._monitoring_mapping_rows_for_context(execution_context, project_id)
+        except Exception:  # noqa: BLE001
+            return []
+
+    def multiturn_clear_blocker(self) -> str:
+        """재생 · 초기 위치 이동 · 스케줄 · 그룹 참가를 막을 이유 · 수동 조그는 막지 않는다 · 판정은 `multiturn_clear`"""
+        state = self.multiturn_clear_state()
+        if not state.get('axes'):
+            return ''
+        return multiturn_clear.block_reason(state, self._active_mapping_rows())
+
+    def multiturn_clear_status(self) -> Dict[str, Any]:
+        """웹 상태 · 「확인할 일」 · 기준점 지정 화면의 「클리어 뒤 아직 안 맞춤」"""
+        state = self.multiturn_clear_state()
+        if not state.get('axes'):
+            return {'blocked_axes': [], 'pending_axes': [], 'stale_axes': [], 'message': '', 'prompt': ''}
+        summary = multiturn_clear.summary(state, self._active_mapping_rows())
+        summary['prompt'] = reference_prompt(summary['blocked_axes']) if summary['blocked_axes'] else ''
+        summary['not_aligned_label'] = multiturn_clear.NOT_ALIGNED_LABEL
+        return summary
+
+    def _record_multiturn_clear(self, drives: List[Dict[str, Any]]) -> None:
+        """클리어 명령 직전 · PC 단위 표시 + 모터 기록 · 못 쓰면 클리어를 하지 않는다(올린다)"""
+        axes = multiturn_clear.record_clear(self._multiturn_clear_path(), drives)
+        self._multiturn_clear_cache = None
+        if axes:
+            self._motor_event_log.append(
+                category='system',
+                event_type='minas_multiturn_clear_marked',
+                target=' · '.join(f'{axis}번 모터' for axis in axes),
+                content=f'{multiturn_clear.message_for(axes)} · 다시 지정해 저장하기 전까지 재생·초기 위치 이동·스케줄·그룹 참가 막음',
+                details={'drives': [dict(drive) for drive in drives]},
+            )
+
+    def _release_multiturn_clear(self, result: Dict[str, Any]) -> List[int]:
+        """조인트 매핑 저장 결과 · 클리어 뒤 기준점을 지정한 축의 표시를 끈다 · 이 프로젝트 줄은 같은 시각 칸으로 풀림"""
+        mapping = result.get('mapping') if isinstance(result.get('mapping'), dict) else {}
+        try:
+            released = multiturn_clear.mark_reference_saved(self._multiturn_clear_path(), mapping.get('mappings') or [])
+        except OSError as exc:
+            self.get_logger().warn(f'다회전 클리어 표시 갱신 실패: {exc}')
+            return []
+        self._multiturn_clear_cache = None
+        if released:
+            self._motor_event_log.append(
+                category='system',
+                event_type='minas_multiturn_clear_reference_set',
+                target=' · '.join(f'{axis}번 모터' for axis in released),
+                content='다회전 클리어 뒤 기준점을 다시 지정했습니다 · 이 축 표시 풀림 · 다른 프로젝트는 그 프로젝트에서 다시 지정할 때까지 막힘',
+                details={'axes': released},
+            )
+        return released
 
     def minas_absolute_blocker(self) -> str:
         """연결된 MINAS 드라이브 앱솔루트 미확인이면 그 이유 · 상태를 못 받았으면 빈 문자열
@@ -2052,6 +2264,25 @@ class MotionWebBridge(Node):
         if not isinstance(motion_state, dict):
             return ''
         return minas_absolute.block_reason(motion_state.get('minas_absolute'))
+
+    def manual_range_blocker(self, axis: Any = None) -> str:
+        """수동 조작(조그·다이얼·절대 이동·범위 복구·페이더)을 막을 이유 · 조인트 범위 확인 전 · 수정 목록 97"""
+        return self._manual_range_gate_instance().block_reason(axis)
+
+    def manual_range_axis_blocker(self, axis: Any) -> str:
+        """페이더 목표 하나 · 마지막 전체 판정 + 축 연결만 (초당 수십 번 불린다) · 수정 목록 97"""
+        return self._manual_range_gate_instance().cached_axis_reason(axis)
+
+    def manual_speed_limits(self, axis: Any) -> Dict[str, float]:
+        """수동 조작 상한 · 모터 rad/s · rad/s² · 매핑 이득으로 · 수정 목록 126"""
+        return self._manual_range_gate_instance().speed_limits(axis)
+
+    def _manual_range_gate_instance(self) -> ManualRangeGate:
+        gate = getattr(self, '_manual_range_gate', None)
+        if gate is None:
+            gate = ManualRangeGate(self)
+            self._manual_range_gate = gate
+        return gate
 
     def coordination_execution_blocker(self) -> str:
         service = getattr(self, '_coordination_web_bridge', None)
@@ -2068,7 +2299,7 @@ class MotionWebBridge(Node):
             conflict = self.coordination_execution_blocker()
             if conflict:
                 return {'success': False, 'message': f'초기 위치 이동 불가: {conflict}'}
-        blocker = self.motor_runtime_control_blocker()
+        blocker = self.multiturn_clear_blocker() or self.motor_runtime_control_blocker()
         if blocker:
             return {'success': False, 'message': f'초기 위치 이동 불가: {blocker}'}
         parked = self.schedule_end_start_blocker(payload)
@@ -2105,7 +2336,7 @@ class MotionWebBridge(Node):
             )
             if store.mode != SCHEDULE_MODE:
                 label = '오프' if store.mode == 'off' else '수동'
-                return f'운전 모드가 「{label}」입니다 · 스케줄은 시작시키지 않습니다'
+                return f'운전 모드가 「{label}」입니다. 스케줄을 시작하지 않습니다'
         except (OSError, ValueError) as exc:
             self.get_logger().warn(f'스케줄 시작 확인 실패: {exc}')
         return ''
@@ -2130,7 +2361,7 @@ class MotionWebBridge(Node):
             conflict = self.coordination_execution_blocker()
             if conflict:
                 return {'success': False, 'message': f'모션 실행 불가: {conflict}'}
-        blocker = self.motor_runtime_control_blocker()
+        blocker = self.multiturn_clear_blocker() or self.motor_runtime_control_blocker()
         if blocker:
             return {'success': False, 'message': f'모션 실행 불가: {blocker}'}
         parked = self.schedule_end_start_blocker(payload)
@@ -2203,7 +2434,7 @@ class MotionWebBridge(Node):
             return {'success': False, 'message': NO_PROJECT_SELECTED}
         name = str(file_id or '').strip()
         if not name:
-            return {'success': False, 'message': '삭제할 애니메이션이 정해지지 않았습니다'}
+            return {'success': False, 'message': '삭제할 애니메이션을 선택하세요'}
         registered = self._mapping_files_registering(project_id, name)
         if registered:
             return {
@@ -2211,7 +2442,7 @@ class MotionWebBridge(Node):
                 'deletion_blocked': 'registered_motion_file',
                 'registered_mapping_files': registered,
                 'message': (
-                    f'재생 등록된 애니메이션입니다: {name} · '
+                    f'재생 등록된 애니메이션입니다: {name}. '
                     f'재생 등록을 해제한 뒤 삭제하세요 (등록 파일: {", ".join(registered)})'
                 ),
             }
@@ -2273,6 +2504,14 @@ class MotionWebBridge(Node):
         """팩의 Blender 뷰 장면(scene.glb) · 없으면 None · 수정 목록 50"""
         return sim_scene.blender_scene_path(self.workspace_root)
 
+    def motion_joint_values(self, file_id: str) -> Dict[str, Any]:
+        """애니메이션 json 의 조인트 값(rad · 고른 시각표) · 웹 3D 「Blender 뷰」 가 노드를 돌린다 · 수정 목록 98"""
+        project_id = self.project_repository.selected_project_id()
+        if not project_id:
+            return {'success': False, 'message': NO_PROJECT_SELECTED}
+        motion_path = self.project_repository.export_path(project_id, 'motions', file_id)
+        return motion_joint_values.joint_values_payload(motion_path)
+
     def preview_motion_frames(self, file_id: str) -> Dict[str, Any]:
         """선택한 애니메이션의 MuJoCo 계산 결과(t · qpos) · 브라우저 재생용."""
         project_id = self.project_repository.selected_project_id()
@@ -2312,10 +2551,19 @@ class MotionWebBridge(Node):
         if end is not None and end.active():
             # 1분마다 오는 스케줄 점검이 주차 중인 초기 위치 이동을 끊지 않게
             return {'success': True, 'message': end.status().get('message') or '스케줄 끝 동작 중'}
-        result = self._request_motion_run('stop_after_cycle', {}, timeout_sec=2.0)
-        if str(payload.get('reason') or '') == 'schedule_end' and end is not None:
+        # 이유를 런타임까지 넘긴다 · 구간 끝 그룹 정지가 「그룹 실행 취소」 대신 「구간 끝 · 회차 후 정지」 로 끝나게 · 수정 목록 141
+        reason = str(payload.get('reason') or '')
+        result = self._request_motion_run(
+            'stop_after_cycle', {'reason': reason} if reason else {}, timeout_sec=2.0,
+        )
+        if reason == 'schedule_end' and end is not None:
             # 이미 멈춰 있어서 정지가 거절돼도 주차는 한다
-            result = {**result, 'schedule_end': end.begin()}
+            status = end.begin()
+            result = {**result, 'schedule_end': status}
+            if result.get('success') is False and status.get('state') != 'failed':
+                # 멈춰 있던 로봇 · 「반복 실행 중일 때만」 거절은 실패가 아니다 · 스케줄 화면에 빨강으로 남지 않게 · 사용자 2026-10-13
+                result = {**result, 'success': True, 'message': status.get('message') or '운영 종료 동작',
+                          'stop_message': result.get('message') or ''}
         return result
 
     def motion_group_prepare(self, payload: Dict[str, Any]) -> Dict[str, Any]:
@@ -2323,7 +2571,7 @@ class MotionWebBridge(Node):
         # 코디네이터가 전체 시작을 취소한다) · 정지·취소 명령은 계속 받는다
         off = run_mode_gate.motion_command_block_reason(self)
         if off:
-            return {'success': False, 'message': f'그룹 준비 불가: {off}'}
+            return {'success': False, 'message': f'그룹 실행 준비 불가: {off}'}
         blocker = self.motor_runtime_control_blocker()
         if blocker:
             return {'success': False, 'message': f'그룹 실행 준비 불가: {blocker}'}
@@ -2561,6 +2809,32 @@ def create_app(bridge: MotionWebBridge) -> FastAPI:
     return app
 
 
+class _LeaveNoticeServer(uvicorn.Server):
+    """종료 신호를 받은 그 순간 연동 노드에 「이 PC 빠짐」 · 수정 목록 145 ①
+
+    `systemctl --user restart motion-control` · systemd 자동 재시작 · 「프로그램 다시 시작」 이 모두
+    이 신호로 웹 서비스를 내린다 · 웹 서버가 연결을 닫는 동안 연동 노드가 0.5 s 안에 「상태 수신 중단」
+    을 보기 전에 닿아야 이 PC 만 빠진다(그룹 오류로 잠그지 않음) · uvicorn 이 신호마다 부르는 자리.
+    """
+
+    def __init__(self, config, on_exit) -> None:
+        super().__init__(config)
+        self._on_exit = on_exit
+
+    def handle_exit(self, sig, frame) -> None:
+        self._on_exit()
+        super().handle_exit(sig, frame)
+
+
+def _leave_notice(bridge: MotionWebBridge) -> LeaveNotice:
+    def send():
+        coordination = bridge.coordination
+        if coordination is None:
+            return {'success': True, 'skipped': True}
+        return coordination.notify_leaving('웹 서비스 다시 시작')
+    return LeaveNotice(send)
+
+
 def main(args=None) -> None:
     rclpy.init(args=args)
     bridge = MotionWebBridge()
@@ -2568,13 +2842,17 @@ def main(args=None) -> None:
     spin_thread.start()
 
     app = create_app(bridge)
+    leave_notice = _leave_notice(bridge)
     try:
         # 로깅 설정은 Config 가 만들 때 한다 · 그 뒤에 거름망을 달아야 지워지지 않는다 ·
         # 성공한 GET(화면 폴링) 접속 기록을 버린다 · 수정 목록 77
         config = uvicorn.Config(app, host=bridge.host, port=bridge.port, log_level='info')
         install_access_log_filter()
-        uvicorn.Server(config).run()
+        _LeaveNoticeServer(config, leave_notice.send).run()
     finally:
+        # 신호 없이 끝난 경우도 알린다 · 한 번만 간다 · 답을 잠깐 기다린다 · 수정 목록 145 ①
+        leave_notice.send()
+        leave_notice.wait()
         bridge.destroy_node()
         if rclpy.ok():
             rclpy.shutdown()

@@ -152,3 +152,25 @@ def test_the_restart_launcher_watches_its_log_size():
     script = (WORKSPACE / 'scripts/restart_motion_monitor.sh').read_text(encoding='utf-8')
     assert 'watch_log_size "${LOG_DIR}/restart-${STAMP}.log"' in script
     assert script.index('exec >> "${LOG_DIR}/restart-${STAMP}.log"') < script.index('watch_log_size')
+
+
+def test_restart_logs_keep_only_the_newest_by_count(tmp_path):
+    """수정 목록 112 아 · 재시작마다 새 파일(floating4 71 개 · 126 MB) · 최근 N 개만 · 돌린 조각도 같이"""
+    for day in range(1, 26):
+        (tmp_path / f'restart-202610{day:02d}-000000.log').write_text('x')
+    (tmp_path / 'restart-20261001-000000.log.1').write_text('x')
+    (tmp_path / 'other.txt').write_text('x')
+
+    result = _bash(f'prune_keep_newest "{tmp_path}" "restart-*.log" 20')
+
+    assert result.returncode == 0, result.stderr
+    left = sorted(p.name for p in tmp_path.iterdir())
+    assert 'other.txt' in left
+    restarts = [name for name in left if name.startswith('restart-')]
+    assert len(restarts) == 20
+    assert restarts[0] == 'restart-20261006-000000.log'      # 오래된 5 개와 그 조각은 지움
+
+
+def test_restart_script_prunes_by_count():
+    script = (WORKSPACE / 'scripts/restart_motion_monitor.sh').read_text(encoding='utf-8')
+    assert "prune_keep_newest \"${LOG_DIR}\" 'restart-*.log'" in script

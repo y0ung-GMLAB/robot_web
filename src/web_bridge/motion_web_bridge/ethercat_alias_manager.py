@@ -2,6 +2,8 @@ import re
 import subprocess
 from typing import Any, Callable, Dict, List, Optional
 
+from motion_common import ethercat_mailbox
+
 
 class EthercatAliasError(RuntimeError):
     pass
@@ -11,7 +13,8 @@ class EthercatAliasManager:
     """Read and write EtherCAT SII aliases without depending on motion_system."""
 
     def __init__(self, runner: Callable[..., Any] = subprocess.run) -> None:
-        self._runner = runner
+        # EEPROM 쓰기(`alias`)는 다른 SDO 와 한 번에 하나 · 버스 설정 중이면 안 보냄 · 목록 · SII 읽기는 그대로 · 수정 목록 125
+        self._runner = ethercat_mailbox.guarded(runner)
 
     @staticmethod
     def _parse_int(value: Any) -> Optional[int]:
@@ -237,7 +240,7 @@ class EthercatAliasManager:
             'product_code': actual['product_code'],
             'serial_number': actual['serial_number'],
             'message': (
-                'EEPROM Alias 쓰기 완료. 서보 드라이버 제어 전원을 재투입한 뒤 '
-                '전체 모터 검색을 실행하세요.'
+                'EEPROM Alias 쓰기 완료. 서보 드라이브 제어 전원을 껐다 켠 뒤 '
+                '모터 검색을 다시 실행하세요.'
             ),
         }

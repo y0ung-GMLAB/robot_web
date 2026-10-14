@@ -6,7 +6,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from motion_web_bridge.schedule_end import ScheduleEndService, motor_turns_off_at_end
+from motion_web_bridge.schedule_end import ScheduleEndService, idle_park_skip, mode_skip, motor_turns_off_at_end
 
 
 class _Clock:
@@ -87,7 +87,7 @@ def _bridge(tmp_path, *, states, end_action='park_servo_off', flags=None, alarm=
     return bridge, calls, runtime
 
 
-def _service(bridge):
+def _service(bridge, run_mode=None):
     clock = _Clock()
     return ScheduleEndService(
         bridge,
@@ -96,6 +96,7 @@ def _service(bridge):
         dynamixel_torque_control=bridge._manual.dynamixel_torque_control,
         load_motor_registry=lambda: bridge._motor_config.load().get('registry') or {},
         alarm_grade=lambda: bridge._safety_status.get('servo_alarm_grade'),
+        run_mode=run_mode,
         sleep=clock.sleep,
         monotonic=clock.monotonic,
     )
@@ -125,8 +126,8 @@ def test_finish_cycle_then_park_then_power_off_only_flagged_motors(tmp_path):
 
 @pytest.mark.parametrize('kwargs, reason', [
     ({'states': ['running', 'error']}, '오류'),
-    ({'states': ['completed'], 'alarm': 2}, 'Servo 알람'),
-    ({'states': ['completed'], 'init_ok': False}, '기준점 이동 시작 실패'),
+    ({'states': ['completed'], 'alarm': 2}, '서보 알람'),
+    ({'states': ['completed'], 'init_ok': False}, '기준점 이동 거절'),
     ({'states': ['completed', 'initializing', 'error']}, '끝나지 않음'),
 ])
 def test_no_servo_off_when_parking_did_not_succeed(tmp_path, kwargs, reason):
@@ -179,10 +180,69 @@ def test_start_is_refused_while_parking(tmp_path):
     service = _service(bridge)
     service._set('parking', '기준점 이동 중')
 
-    assert '스케줄 끝 동작' in service.start_blocker()
+    assert '운영 종료 동작' in service.start_blocker()
 
 
 def test_motor_flag_defaults_to_power_off():
     assert motor_turns_off_at_end({}) is True
     assert motor_turns_off_at_end({'config': {}}) is True
     assert motor_turns_off_at_end({'config': {'schedule_end_servo_off': False}}) is False
+
+
+# --------------------------------------------------------------------------- #
+# 구간 끝에 멈춰 있던 로봇 · 사용자 2026-10-13
+# --------------------------------------------------------------------------- #
+
+def _on(axis, motor_type='ac_servo', servo_on=True):
+    return {'controller_index': axis, 'state': 'detected', 'motor_type': motor_type, 'servo_on': servo_on}
+
+
+def test_idle_park_needs_servos_on_no_alarm_and_a_motor_to_turn_off():
+    assert idle_park_skip([_on(0), _on(1)], {}, 0) is None
+    assert idle_park_skip([_on(0)], {}, 2)[0] == 'failed', '알람이면 주차하지 않는다'
+    assert idle_park_skip([_on(0), _on(1)], {0: False, 1: False}, 0)[0] == 'skipped', '끌 모터가 없다(모터 설정)'
+    assert idle_park_skip([_on(0, servo_on=False), _on(1, servo_on=False)], {}, 0)[0] == 'skipped', '이미 꺼짐'
+    state, message = idle_park_skip([_on(0), _on(1, servo_on=False)], {}, 0)
+    assert state == 'failed' and '1번' in message, '억지로 켜지 않는다'
+    assert idle_park_skip([_on(0), _on(1, servo_on=False)], {1: False}, 0) is None, '켠 채 둘 모터는 안 본다'
+
+
+def test_only_a_schedule_mode_pc_parks():
+    assert mode_skip(None) is None, '모드를 안 읽는 배선(옛 동작)'
+    assert mode_skip('schedule') is None
+    assert mode_skip('manual')[0] == 'skipped'
+    assert mode_skip('off')[0] == 'skipped'
+    assert mode_skip('')[0] == 'failed', '못 읽으면 움직이지 않는다'
+
+
+def test_a_stopped_robot_is_parked_and_powered_off(tmp_path):
+    motors = [_on(0), _on(1)]
+    bridge, calls, _runtime = _bridge(tmp_path, states=['idle', 'idle', 'initializing', 'initialized'], motors=motors)
+    service = _service(bridge, run_mode=lambda: 'schedule')
+
+    assert service._skip() is None
+    assert service._park_and_power_off() == ''
+    assert calls == [('initialize', 'reference', 10.0), ('ac', 'servo_off', 0), ('ac', 'servo_off', 1)]
+
+
+@pytest.mark.parametrize('kwargs, run_mode, state', [
+    ({'motors': [_on(0), _on(1)]}, 'manual', 'skipped'),
+    # 지금 주차할 수 없는 것은 첫 실패로 센다 · 1분 뒤 다시 · 수정 목록 131 (흐름은 test_schedule_end_retry)
+    ({'motors': [_on(0, servo_on=False), _on(1)]}, 'schedule', 'retry_wait'),
+    ({'motors': [_on(0)], 'alarm': 1}, 'schedule', 'retry_wait'),
+    ({'motors': [_on(0)], 'flags': {0: False}}, 'schedule', 'skipped'),
+])
+def test_a_stopped_robot_that_cannot_park_is_left_alone(tmp_path, kwargs, run_mode, state):
+    bridge, calls, _runtime = _bridge(tmp_path, states=['idle'], **kwargs)
+    service = _service(bridge, run_mode=lambda: run_mode)
+    service._spawn = lambda *_args, **_kwargs: None   # 다시 시도 스레드는 띄우지 않는다
+
+    status = service.begin()
+
+    assert status['state'] == state
+    assert calls == [], '움직이지도 끄지도 않는다'
+
+
+def test_a_running_robot_keeps_the_old_path_even_with_the_mode_reader(tmp_path):
+    bridge, _calls, _runtime = _bridge(tmp_path, states=['running'], motors=[_on(0, servo_on=False)])
+    assert _service(bridge, run_mode=lambda: 'schedule')._skip() is None, '도는 중 · 회차 끝을 기다린다'

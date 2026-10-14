@@ -12,7 +12,7 @@ import yaml
 from motion_common import paths as common_paths
 from motion_common.execution_context import confirm_context_id
 from motion_common.paths import project_dir_for
-from motion_common import command_router, generation as generation_mod, motion_table, topics, wire_units
+from motion_common import command_router, generation as generation_mod, latest_tap, motion_table, topics, wire_units
 from motion_common.values import finite_float, optional_int
 from motion_control_msgs.msg import MotorStatus
 from rclpy.node import Node
@@ -258,14 +258,27 @@ class MotionRunManager(Node):
                 'motion_trace_max_mb', DEFAULT_MAX_BYTES // (1024 * 1024)).value) * 1024 * 1024,
         )
         self._motor_status_raw_sub = None
+        self._motor_status_tap = None
         if self._motion_trace.enabled:
-            self._motor_status_raw_sub = self.create_subscription(
-                MotorStatus,
-                str(self.declare_parameter('motor_status_topic', topics.MOTOR_STATUS).value),
-                self._motion_trace.on_motor_status,
-                qos,
-                raw=True,
+            motor_status_topic = str(
+                self.declare_parameter('motor_status_topic', topics.MOTOR_STATUS).value
             )
+            # 실행기 밖 구독 · 재생 틱에 마지막 한 장만 꺼낸다 · 서 있을 때 1 kHz 로 깨지 않게 · 수정 목록 130
+            self._motor_status_tap = latest_tap.open_tap(
+                self, MotorStatus, motor_status_topic,
+                node_class=Node, qos=qos, raw=True,
+                suffix='motor_status_tap', logger=self.get_logger(),
+            )
+            if self._motor_status_tap is not None:
+                self._motion_trace.set_poll(self._motor_status_tap.take_latest)
+            else:
+                self._motor_status_raw_sub = self.create_subscription(
+                    MotorStatus,
+                    motor_status_topic,
+                    self._motion_trace.on_motor_status,
+                    qos,
+                    raw=True,
+                )
 
         self.get_logger().info(
             f'motion_run_manager started: state={self.motion_state_topic}, '
@@ -288,6 +301,10 @@ class MotionRunManager(Node):
     def destroy_node(self):
         # 쓰다 만 회차 기록을 마저 쓴다
         self._motion_trace.close()
+        tap = getattr(self, '_motor_status_tap', None)
+        if tap is not None:
+            self._motion_trace.set_poll(None)
+            tap.close()
         return super().destroy_node()
 
     def _motion_state_callback(self, msg: String) -> None:
@@ -398,7 +415,7 @@ class MotionRunManager(Node):
         router.register('group_join_commit', self._group.commit_join)
         router.register('set_live_override', self._set_live_override)
         router.register('stop', lambda payload: self._handle_stop())
-        router.register('stop_after_cycle', lambda payload: self._handle_stop_after_cycle())
+        router.register('stop_after_cycle', self._handle_stop_after_cycle)
         return router
 
     def _invalidate_execution_context(self, payload: Dict[str, Any]) -> Dict[str, Any]:
@@ -937,7 +954,7 @@ class MotionRunManager(Node):
                 'state': 'stopped',
                 'phase': 'stopped',
                 'phase_finished_at': time.time(),
-                'message': 'stop requested during plan preparation',
+                'message': '계획 준비 중 정지 요청',
             })
         elif current.get('state') in (
             'initializing',
@@ -948,25 +965,32 @@ class MotionRunManager(Node):
             self._update_status({
                 'state': 'stopping',
                 'phase': 'stopping',
-                'message': 'stop requested',
+                'message': '정지 요청',
             })
         else:
             self._update_status({
                 'state': 'stopped',
                 'phase': 'stopped',
                 'phase_finished_at': time.time(),
-                'message': 'stop requested',
+                'message': '정지 요청',
             })
         return {
             'success': True,
-            'message': 'motion run stop requested',
+            'message': '정지합니다. 서보 토크 유지.',
             'status': self.status(),
         }
 
-    def _handle_stop_after_cycle(self) -> Dict[str, Any]:
+    def _handle_stop_after_cycle(self, payload: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
         current = self.status()
+        # 스케줄 구간 끝이면 `schedule_end` · 그룹 끝 문구를 가른다 · 수정 목록 141
+        reason = str(payload.get('reason') or '') if isinstance(payload, dict) else ''
         if current.get('group_execution'):
-            if not self._group.request_stop_after_cycle(current):
+            if not self._group.request_stop_after_cycle(current, reason):
+                # 그룹 세션도 실행 번호도 없으면 단독이다 · 아래 단독 길로 · 전에는 표시용
+                # `group_execution` 만 보고 거절해 단독 연속을 회차 후 정지로 못 멈췄다 · 수정 목록 111
+                if not str(current.get('execution_id') or '').strip():
+                    current = {**current, 'group_execution': False}
+                    return self._handle_stop_after_cycle_local(current)
                 return {
                     'success': False,
                     'message': '활성 그룹 실행이 없습니다',
@@ -977,6 +1001,9 @@ class MotionRunManager(Node):
                 'message': '현재 그룹 모션 회차 완료 후 정지 요청',
                 'status': self.status(),
             }
+        return self._handle_stop_after_cycle_local(current)
+
+    def _handle_stop_after_cycle_local(self, current: Dict[str, Any]) -> Dict[str, Any]:
         is_sync_repeat = bool(int(current.get('synchronized_repeat_count') or 0))
         is_continuous = current.get('run_mode') == 'continuous'
         is_automation = bool(current.get('automation_run'))
@@ -988,9 +1015,13 @@ class MotionRunManager(Node):
                 'status': current,
             }
         self._graceful_stop_event.set()
+        # 단독 연속 재생에 「동기」 라고 답했다(실물 R-41 · 2026-10-13) · 동기 반복일 때만 그 말 · 화면 글자와 같게
         return {
             'success': True,
-            'message': '현재 동기 반복 회차 완료 후 정지 요청',
+            'message': (
+                '이번 동기 반복 회차가 끝나면 정지합니다'
+                if is_sync_repeat else '이번 회차가 끝나면 정지합니다'
+            ),
             'status': self.status(),
         }
 

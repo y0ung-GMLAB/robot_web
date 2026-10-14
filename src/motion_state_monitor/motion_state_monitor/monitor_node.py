@@ -37,7 +37,7 @@ from .dynamixel_scanner import (
     DYNAMIXEL_SCAN_MAX_ID,
     DYNAMIXEL_SCAN_PROTOCOL,
 )
-from motion_common import topics
+from motion_common import latest_tap, topics
 
 
 MOTOR_SCAN_CONTRACT_VERSION = 3
@@ -176,6 +176,25 @@ class MotionStateMonitor(Node):
             f'motor_config_file={self.motor_config_file or "(none)"}, '
             f'output={self.output_topic}, max_motors={self.max_motors}'
         )
+
+    def _open_motor_status_tap(self):
+        """모터 상태 1 kHz 를 실행기 밖에서 받는다 · 못 열면 None(콜백 구독) · 수정 목록 130"""
+        from motion_control_msgs.msg import MotorStatus
+
+        return latest_tap.open_tap(
+            self, MotorStatus, self.input_topic,
+            node_class=Node,
+            qos=QoSProfile(depth=1, reliability=ReliabilityPolicy.BEST_EFFORT),
+            suffix='motor_status_tap', logger=self.get_logger(),
+        )
+
+    def destroy_node(self):
+        # 실행기 밖 구독 노드도 같이 내린다 · 수정 목록 130
+        try:
+            self._state._destroy_motor_status_subscription()
+        except Exception:  # noqa: BLE001 · 끄는 길
+            pass
+        return super().destroy_node()
 
     def _load_motor_metadata(self) -> None:
         self._motor_metadata = {}

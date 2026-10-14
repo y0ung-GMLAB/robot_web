@@ -61,7 +61,7 @@ def test_monitoring_resolves_mapping_motor_ref_for_topic_value():
 
     motor = state['motors'][0]
     assert motor['motion_value_rad'] == -7.5
-    assert motor['motion_value_message'] == '모션 실행 제어 모션값 수신'
+    assert motor['motion_value_message'] == '애니메이션 재생 제어 모션값 수신'
 
 
 def test_monitoring_resolves_master_scoped_ac_ref():

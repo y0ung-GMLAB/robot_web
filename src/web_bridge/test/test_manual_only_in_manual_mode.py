@@ -83,12 +83,14 @@ def test_manual_entry_points_use_the_manual_gate_and_servo_does_not():
     manual = (BRIDGE_DIR / 'manual_motor_commands.py').read_text(encoding='utf-8')
     start = manual.index('def _off_mode_block')
     body = manual[start:start + 500]
-    assert 'run_mode_gate.manual_control_block_reason(self.bridge)' in body
+    # 운전 모드 문 + 재생 상태(초기 위치 대기 · 재생 중) 문 · 2026-10-12
+    assert 'run_mode_gate.manual_motion_block_reason(self.bridge)' in body
     for entry in ('def ac_servo_jog', 'def dynamixel_jog',
                   'def ac_servo_action', 'def dynamixel_action'):
         start = manual.index(entry)
-        assert '_off_mode_block()' in manual[start:start + 400], entry
+        # 축을 넘긴다 · 조인트 범위 확인 문도 같이 지난다 · 수정 목록 97
+        assert '_off_mode_block(axis)' in manual[start:start + 400], entry
     servo = manual.index('def ac_servo_control')
     assert '_off_mode_block' not in manual[servo:servo + 400], '서보 제어는 막으면 안 된다'
     socket = (BRIDGE_DIR / 'manual_stream_socket.py').read_text(encoding='utf-8')
-    assert socket.count('manual_control_block_reason') >= 3   # import + 시작 + 0.5초 재확인
+    assert socket.count('manual_motion_block_reason') >= 2   # import + 연결·0.5초 재확인이 같이 쓰는 _stream_block_reason

@@ -23,7 +23,7 @@ from motion_common import local_clock
 from .system_update import _http_json, _row
 
 NOT_ALLOWED_HINT = (
-    '이 계정에 시간대 변경 권한이 없습니다 · 이 PC 터미널에서 한 번 · '
+    '이 계정에 시간대 변경 권한이 없습니다. PC 터미널에서 다음 명령을 한 번 실행하세요: '
     'bash ~/ros2_ws/scripts/allow_web_admin.sh'
 )
 RESTART_UNIT = 'robot-web-timezone-restart'
@@ -62,12 +62,12 @@ class SystemTimezone:
         zone = str(zone or '').strip()
         zones = list(self._zones())
         if not zone:
-            return {'success': False, 'message': '시간대를 고르세요 (예 Asia/Seoul · Europe/Paris)'}
+            return {'success': False, 'message': '시간대를 선택하세요 (예: Asia/Seoul, Europe/Paris)'}
         if zones and zone not in zones:
-            return {'success': False, 'message': f'목록에 없는 이름입니다 · {zone} · 도시 이름으로 고르세요'}
+            return {'success': False, 'message': f'목록에 없는 시간대입니다: {zone}. 목록에서 도시 이름으로 선택하세요.'}
         current = str(self._snapshot().get('timezone') or '')
         if zone == current:
-            return {'success': True, 'changed': False, 'message': f'이미 {zone} 입니다', 'clock': self._snapshot()}
+            return {'success': True, 'changed': False, 'message': f'이미 {zone}입니다', 'clock': self._snapshot()}
         reason = self._blocker()
         if reason:
             return {'success': False, 'message': reason}
@@ -87,7 +87,7 @@ class SystemTimezone:
         ])
         return {
             'success': True, 'changed': True, 'clock': self._snapshot(),
-            'message': f'{current or "?"} → {zone} · 2초 뒤 프로그램을 다시 띄웁니다(스케줄이 새 시간대로)',
+            'message': f'{current or "?"} → {zone}. 2초 뒤 프로그램을 다시 시작해 스케줄에 새 시간대를 적용합니다.',
         }
 
 
@@ -115,7 +115,7 @@ def apply_all(
                 result = http(f"{row['web_url']}/api/system/timezone", method='POST', timeout=25.0, body={'zone': zone})
                 rows.append({**row, **result})
             except (OSError, ValueError, urllib.error.URLError):
-                rows.append({**row, 'success': True, 'message': '스피커 · 옛 스피커 앱 · 건너뜀 (그 PC 터미널에서 install_speaker.sh 뒤 됨)'})
+                rows.append({**row, 'success': True, 'message': '스피커 · 이전 버전 스피커 앱이라 건너뜀 (해당 PC 터미널에서 install_speaker.sh를 실행한 뒤 가능)'})
             continue
         if row['is_local']:
             local_row = row
@@ -134,6 +134,6 @@ def apply_all(
     ok = [row for row in robots if row.get('success')]
     return {
         'success': bool(robots) and len(ok) == len(robots),
-        'message': f'로봇 PC {len(ok)}/{len(robots)}대 {zone}',
+        'message': f'로봇 PC {len(ok)}/{len(robots)}대 시간대 변경 · {zone}',
         'pcs': rows,
     }

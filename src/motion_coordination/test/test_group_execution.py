@@ -123,3 +123,70 @@ def test_next_start_waits_for_motion_and_cycle_initialization_barriers():
         execution.start_action(now=4.0)
     execution.mark_cycle_initialized('c', 1)
     assert execution.start_action(now=4.0).cycle_number == 2
+
+
+# --------------------------------------------------------------------------- #
+# 수정 목록 145 ① · 도는 중에 빠진 PC 만 기다리던 장벽을 넘긴다
+# --------------------------------------------------------------------------- #
+
+def _initializing_three():
+    execution = GroupExecution()
+    execution.begin('a', ('a', 'b', 'c'))
+    for pc in ('a', 'b', 'c'):
+        execution.mark_ready(pc)
+    execution.initialize_action(now=0.0)
+    return execution
+
+
+def test_leaving_during_the_initial_move_lets_the_rest_arm():
+    execution = _initializing_three()
+    execution.mark_armed('a', 1.0)
+    execution.mark_armed('c', 1.01)
+    execution.exclude({'b': '웹 다시 시작'})
+    assert execution.settle_after_exclude() == 'armed'
+    assert execution.state == 'armed'
+    assert execution.last_initialize_spread_ms == pytest.approx(10.0)
+
+
+def test_leaving_before_its_start_report_lets_the_cycle_run():
+    execution = _initializing_three()
+    for pc in ('a', 'b', 'c'):
+        execution.mark_armed(pc)
+    execution.start_action(now=1.0)
+    execution.mark_triggered('a', 1, 2.0)
+    execution.mark_triggered('c', 1, 2.0)
+    execution.exclude({'b': '웹 다시 시작'})
+    assert execution.settle_after_exclude() == 'running'
+    assert execution.state == 'running'
+    assert execution.cycle_number == 1
+
+
+def test_leaving_before_its_completion_report_completes_the_cycle():
+    execution = _initializing_three()
+    for pc in ('a', 'b', 'c'):
+        execution.mark_armed(pc)
+    execution.start_action(now=1.0)
+    for pc in ('a', 'b', 'c'):
+        execution.mark_triggered(pc, 1, 2.0)
+    execution.mark_motion_completed('a', 1)
+    execution.mark_motion_completed('c', 1)
+    execution.exclude({'b': '웹 다시 시작'})
+    assert execution.settle_after_exclude() == 'motion_completed'
+    assert execution.state == 'motion_completed'
+
+
+def test_leaving_while_others_still_owe_a_report_changes_nothing():
+    execution = _initializing_three()
+    execution.mark_armed('a')
+    execution.exclude({'b': '웹 다시 시작'})
+    assert execution.settle_after_exclude() == ''
+    assert execution.state == 'initializing'
+
+
+def test_leaving_during_release_finishes_the_release():
+    execution = _initializing_three()
+    execution.pending_command = 'cancel_before_start'
+    execution.pending_command_id = 'release-1'
+    execution.pending_acks = {'a', 'c'}
+    execution.exclude({'b': '웹 다시 시작'})
+    assert execution.settle_after_exclude() == 'released'

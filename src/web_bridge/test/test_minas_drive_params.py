@@ -49,7 +49,7 @@ def test_out_of_range_drive_values_never_reach_the_drive():
         'brake_delay_stop_ms': -50,      # 음수
         'brake_delay_run_ms': 999999,    # 과대
     }}
-    assert minas_params.param_overrides(motor) == {}
+    assert minas_params.param_overrides(motor) == {}   # 공통 값(yaml)이 쓰인다
 
 
 def test_overrides_are_appended_to_the_item_list(tmp_path):
@@ -96,7 +96,7 @@ def _motor(axis, **config_overrides):
     }
 
 
-def test_only_motors_with_drive_params_get_their_own_param_file(tmp_path):
+def test_every_minas_motor_gets_its_own_param_file(tmp_path):
     registry = {'motors': [
         _motor(0, brake_delay_stop_ms=200, encoder_absolute_mode=1),   # 옛 키는 무시
         _motor(1),
@@ -115,8 +115,22 @@ def test_only_motors_with_drive_params_get_their_own_param_file(tmp_path):
     payload = yaml.safe_load(Path(with_params).read_text(encoding='utf-8'))
     values = {int(item['index']): item['value'] for item in payload['items']}
     assert values[0x3437] == 200 and 0x3015 not in values
-    # 오버라이드 없는 모터는 플랫폼 param 경로 그대로
-    assert 'minas_params' not in str(drivers[driver_of[1]]['param_file'])
+    # 오버라이드 없는 모터도 제 param 파일 · 플랫폼 기반 값 고침(Pr5.12)이 있어서 · 수정 목록 113
+    plain = drivers[driver_of[1]]['param_file']
+    assert 'minas_params' in plain
+    plain_values = {int(item['index']): item['value']
+                    for item in yaml.safe_load(Path(plain).read_text(encoding='utf-8'))['items']}
+    # 칸을 비운 모터도 브레이크 지연 기본값 · 정지 150 ms · 동작 0 ms (사용자 결정 2026-10-13)
+    assert plain_values[0x3437] == 150 and plain_values[0x3438] == 0
+
+
+def test_overload_level_is_the_factory_default_not_50(tmp_path):
+    """수정 목록 113 · 플랫폼 minas.yaml 은 Pr5.12 = 50(정격 50 % 에서 Err16) · 매뉴얼 「통상은 0 (=115 %)」"""
+    for overrides in ({}, {'brake_delay_stop_ms': 100}):
+        path = minas_params.write_param_file(tmp_path, 7, overrides)
+        items = yaml.safe_load(Path(path).read_text(encoding='utf-8'))['items']
+        level = [item['value'] for item in items if int(item['index']) == 0x3512]
+        assert level == [0]
 
 
 def test_the_generated_file_warns_against_hand_edits(tmp_path):
@@ -167,3 +181,56 @@ def test_overload_entry_id_matches_motor_manager():
               'motor_interface/motor_driver.hpp').read_text(encoding='utf-8')
     assert 'ID_OVERLOAD_RATIO = 12;' in header
     assert minas_params.MONITOR_FIELDS['overload_monitor'][0]['id'] == 12
+
+
+def _values(path):
+    return {int(item['index']): item['value']
+            for item in yaml.safe_load(Path(path).read_text(encoding='utf-8'))['items']}
+
+
+def test_repo_site_base_has_the_decided_values():
+    """사용자 결정 2026-10-13 · 과부하 레벨 팩토리값 · 정지 중 브레이크 150 ms · 회전 중 0 ms"""
+    root = Path(__file__).resolve().parents[3]
+    values = {int(item['index']): item['value'] for item in minas_params.site_default_items(root)}
+    assert values == {0x3512: 0, 0x3437: 150, 0x3438: 0, 0x3510: 4, 0x3614: 200}
+
+
+def test_brake_delay_defaults_come_from_the_site_base_and_the_motor_field_wins(tmp_path):
+    values = _values(minas_params.write_param_file(tmp_path, 1, {}))
+    assert values[0x3437] == 150 and values[0x3438] == 0
+    values = _values(minas_params.write_param_file(tmp_path, 1, {'brake_delay_stop_ms': 300}))
+    assert values[0x3437] == 300
+
+
+def test_screen_values_go_to_the_local_file_and_win_over_the_repo_default(tmp_path):
+    view = minas_params.save_site_local(tmp_path, {'0x3437:0': 200, '0x3512:0': 0})
+    rows = {row['key']: row for row in view['items']}
+    assert rows['0x3437:0']['value'] == 200 and rows['0x3437:0']['default'] == 150
+    assert rows['0x3512:0']['local'] is None              # 기본값과 같으면 적지 않는다
+    assert (tmp_path / 'config' / 'minas_base.local.yaml').is_file()
+    assert _values(minas_params.write_param_file(tmp_path, 2, {}))[0x3437] == 200
+    # 빈 값 = 기본값으로
+    minas_params.save_site_local(tmp_path, {'0x3437:0': ''})
+    assert _values(minas_params.write_param_file(tmp_path, 2, {}))[0x3437] == 150
+
+
+def test_screen_refuses_out_of_range_and_unknown_objects(tmp_path):
+    import pytest
+    with pytest.raises(ValueError):
+        minas_params.save_site_local(tmp_path, {'0x3512:0': 116})     # 115 % 넘게는 못 씀(매뉴얼)
+    with pytest.raises(ValueError):
+        minas_params.save_site_local(tmp_path, {'0x60B2:0': 10})      # 화면에서 못 바꾸는 객체(0x60B2 안 씀)
+
+
+def test_alarm_stop_method_is_a_choice_of_two_and_time_cannot_be_zero(tmp_path):
+    """사용자 결정 2026-10-13 · Pr5.10 = 4(모터 힘으로 먼저 세움) · 0 과 4 만 · Pr6.14 = 0 은 즉시 정지를 끄므로 막음"""
+    import pytest
+    view = minas_params.site_base_view(tmp_path)
+    rows = {row['key']: row for row in view['items']}
+    assert [c['value'] for c in rows['0x3510:0']['choices']] == [4, 0]
+    assert rows['0x3510:0']['value'] == 4 and rows['0x3614:0']['value'] == 200
+    minas_params.save_site_local(tmp_path, {'0x3510:0': 0})
+    with pytest.raises(ValueError):
+        minas_params.save_site_local(tmp_path, {'0x3510:0': 1})       # 프리런 섞인 값은 안 받음
+    with pytest.raises(ValueError):
+        minas_params.save_site_local(tmp_path, {'0x3614:0': 0})

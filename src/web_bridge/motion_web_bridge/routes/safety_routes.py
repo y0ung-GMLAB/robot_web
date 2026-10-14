@@ -26,7 +26,7 @@ def register_safety_routes(app: FastAPI, bridge) -> None:
             service.stop,
             emergency=False,
             kind='전체 동작 정지',
-            message='전체 동작 정지 명령 우선 전송 완료',
+            message='전체 동작 정지 명령을 보냈습니다',
         )
 
     @app.post('/api/safety/emergency-stop')
@@ -35,5 +35,5 @@ def register_safety_routes(app: FastAPI, bridge) -> None:
             service.stop,
             emergency=True,
             kind='긴급 정지',
-            message='긴급정지 명령 우선 전송 완료',
+            message='긴급 정지 명령을 보냈습니다',
         )

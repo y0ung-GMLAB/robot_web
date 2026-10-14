@@ -59,13 +59,13 @@ def diagnose_motor_restart_failure(
     serial_pending = [item for item in pending if item['transport'] == 'serial']
     summary = _pending_summary(pending)
     if ethercat_pending:
-        message = 'AC Servo EtherCAT 연결을 확인하지 못했습니다.'
+        message = 'AC 서보 EtherCAT 연결을 확인하지 못했습니다.'
         if summary:
             message += f' 미연결: {summary}.'
         message += ' 서보 전원, EtherCAT 케이블 및 Master 상태를 확인하세요.'
         failure_code = 'ethercat_not_ready'
     elif serial_pending:
-        message = 'Dynamixel 통신 연결을 확인하지 못했습니다.'
+        message = '다이나믹셀 통신 연결을 확인하지 못했습니다.'
         if summary:
             message += f' 미연결: {summary}.'
         message += ' 모터 전원, USB/직렬 케이블 및 포트 상태를 확인하세요.'
@@ -95,7 +95,7 @@ def motor_restart_service_failure(error: Any) -> str:
     if detail:
         prefix += f' 원인: {detail}.'
     return (
-        f'{prefix} 서비스 상태를 확인하고, AC Servo 사용 시 '
+        f'{prefix} 서비스 상태를 확인하고, AC 서보를 사용한다면 '
         '서보 전원·EtherCAT 케이블·Master 상태를 확인하세요.'
     )
 
@@ -112,14 +112,14 @@ def _pending_axis(axis: int, motor: Any) -> Dict[str, Any]:
     if not isinstance(motor, dict):
         return {
             'controller_index': axis,
-            'label': f'축 {axis}',
+            'label': f'{axis}번 모터',
             'transport': '',
             'state': 'missing',
             'reason': '상태 미수신',
         }
     transport = str(motor.get('transport') or '').lower()
     state = str(motor.get('connection_state') or 'unknown').lower()
-    label = str(motor.get('display_name') or '').strip() or f'축 {axis}'
+    label = str(motor.get('display_name') or '').strip() or f'{axis}번 모터'
     if motor.get('fault') is True:
         reason = '모터 오류'
     elif state == 'bus_down':
@@ -145,4 +145,4 @@ def _pending_summary(pending: List[Dict[str, Any]]) -> str:
     visible = pending[:6]
     text = ', '.join(f"{item['label']} ({item['reason']})" for item in visible)
     remaining = len(pending) - len(visible)
-    return f'{text}, 외 {remaining}축' if remaining > 0 else text
+    return f'{text} 외 {remaining}개' if remaining > 0 else text

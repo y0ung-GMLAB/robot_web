@@ -77,7 +77,8 @@ def drive_problem(drive: Mapping[str, Any]) -> str:
     if status == DRIVE_MULTITURN_INVALID:
         return 'Err40 다회전 무효'
     if status == DRIVE_UNKNOWN:
-        return '확인 불가'
+        # 읽기가 실패한 것뿐 · 값이 틀린 것이 아니다 · 감시 쪽이 몇 초마다 다시 읽는다 (수정 목록 110)
+        return '확인 불가 · 드라이브 응답을 기다리며 다시 읽는 중'
     return ''
 
 
@@ -89,7 +90,7 @@ def blocked_message(drives: Iterable[Mapping[str, Any]]) -> str:
     ]
     if not parts:
         return ''
-    return '앱솔루트 미확인 · ' + ' · '.join(parts) + ' · 모터 관리에서 앱솔루트 설정'
+    return '앱솔루트 미확인 · ' + ' · '.join(parts) + ' · 모터 설정에서 「앱솔루트 설정」을 누르세요'
 
 
 def summary(drives: List[Dict[str, Any]], *, checked_at: Optional[float]) -> Dict[str, Any]:

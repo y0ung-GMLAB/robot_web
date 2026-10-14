@@ -76,7 +76,7 @@ test('run 은 실패해도 표시를 내린다', async () => {
 test('올리기 · 읽기 · 재생 등록이 표시를 쓴다 · 등록 중엔 다시 못 누른다', () => {
   assert.match(indexHtml, /<div id="motionBusy" class="motion-busy hidden" role="status"/);
   const data = readFileSync(new URL('../static/js/motion_data.js', import.meta.url), 'utf8');
-  assert.match(data, /busy\.begin\('upload', `올리는 중/);
+  assert.match(data, /busy\.begin\('upload', `업로드 중/);
   assert.match(data, /busy\.begin\('register'/);
   assert.match(data, /if \(l\) busy\.begin\('files'/);
   assert.match(data, /async function registerSelectedMotionFile\(\) \{\n    if \(mappingLoading\) return;/);

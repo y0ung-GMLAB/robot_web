@@ -21,7 +21,23 @@ const state = {
   supervisorProblem: '',
   // 앱솔루트 미확인 사유 · 판단은 서버(`minas_absolute_blocker`) · 수정 목록 62
   absoluteProblem: '',
+  // 조인트 범위 미확인 사유 · 판단은 서버(`mapping_range_blocker`) · 수정 목록 97
+  rangeProblem: '',
 };
+
+/** 조인트 범위 미확인 · 재생·초기 이동·수동 조작이 막혀 있다 · 누르면 모터 관리(조인트 매핑) · 수정 목록 97 */
+function rangeCell(problem) {
+  return problem
+    ? [{
+      key: 'range',
+      text: '범위 미확인',
+      on: false,
+      bad: true,
+      action: 'config',
+      title: `${problem} · 재생, 초기 위치 이동, 수동 조작(조그·다이얼·절대 이동·페이더)이 차단되어 있습니다. 누르면 모터 설정으로 이동합니다.`,
+    }]
+    : [];
+}
 
 /** 앱솔루트 미확인 · 모든 화면 · 누르면 모터 관리 · 수정 목록 62 */
 function absoluteCell(problem) {
@@ -32,7 +48,7 @@ function absoluteCell(problem) {
       on: false,
       bad: true,
       action: 'config',
-      title: `${problem} · 모든 모터 동작이 막혀 있습니다 · 누르면 모터 관리로 갑니다`,
+      title: `${problem} · 모든 모터 동작이 차단되어 있습니다. 누르면 모터 설정으로 이동합니다.`,
     }]
     : [];
 }
@@ -45,21 +61,22 @@ function supervisorCell(problem) {
       text: '모터 제어 응답 없음',
       on: false,
       bad: true,
-      title: `${problem} · 10초 넘게 계속되면 상위 프로그램을 자동으로 다시 띄웁니다 (모터는 제자리 홀드)`,
+      title: `${problem} · 10초 넘게 계속되면 상위 프로그램을 자동으로 다시 시작합니다. 모터는 현재 위치를 유지합니다.`,
     }]
     : [];
 }
 
 /** 순수 계산 · 화면을 모른다 · 시험은 이것만 본다 */
 export function motionHeaderConditionCells({
-  enabled, joined, inWindow, supervisorProblem = '', absoluteProblem = '',
+  enabled, joined, inWindow, supervisorProblem = '', absoluteProblem = '', rangeProblem = '',
 }) {
   if (enabled === null || joined === null) {
     return [
-      { key: 'scope', text: '그룹?', on: false, title: '그룹 참여 상태 확인 중' },
-      { key: 'window', text: '운영시간?', on: false, title: '스케줄 상태 확인 중' },
+      { key: 'scope', text: '그룹 확인 중', on: false, title: '그룹 참여 상태 확인 중' },
+      { key: 'window', text: '운영시간 확인 중', on: false, title: '스케줄 상태 확인 중' },
       ...supervisorCell(supervisorProblem),
       ...absoluteCell(absoluteProblem),
+      ...rangeCell(rangeProblem),
     ];
   }
   const grouped = Boolean(enabled) && Boolean(joined);
@@ -69,8 +86,8 @@ export function motionHeaderConditionCells({
       text: grouped ? '그룹 참여' : '그룹 미참여',
       on: grouped,
       title: grouped
-        ? '그룹 참여 중 · 다른 PC 들과 함께 재생합니다'
-        : '「그룹 참여」 꺼짐 · 이 PC 혼자 재생합니다 (PC 연동 설정 탭에서 켬)',
+        ? '그룹에 참여 중입니다. 다른 PC들과 함께 재생합니다.'
+        : '「그룹 참여」가 꺼져 있어 단독으로 재생합니다. 「PC 연동 설정」 탭에서 켤 수 있습니다.',
     },
     {
       key: 'window',
@@ -78,11 +95,12 @@ export function motionHeaderConditionCells({
       text: inWindow ? '운영시간' : '운영시간 외',
       on: Boolean(inWindow),
       title: inWindow
-        ? '지금은 스케줄 운영시간입니다'
-        : '지금은 스케줄 운영시간이 아닙니다 · 운영시간이 되면 스스로 켭니다',
+        ? '현재 스케줄 운영시간입니다'
+        : '현재 스케줄 운영시간이 아닙니다. 운영시간이 되면 자동으로 시작합니다.',
     },
     ...supervisorCell(supervisorProblem),
     ...absoluteCell(absoluteProblem),
+    ...rangeCell(rangeProblem),
   ];
 }
 

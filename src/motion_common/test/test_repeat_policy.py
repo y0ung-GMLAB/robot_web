@@ -20,10 +20,14 @@ def test_unknown_values_fall_back_to_the_default(value):
     assert repeat_policy.normalize_repeat_mode(value) == 'reinitialize'
 
 
-@pytest.mark.parametrize('value', ('direct', 'dwell', 'reinitialize', 'dwell_reinitialize'))
-def test_known_values_pass_through(value):
-    assert repeat_policy.normalize_repeat_mode(value) == value
-    assert repeat_policy.normalize_repeat_mode(value.upper()) == value
+@pytest.mark.parametrize('value, expected', (
+    ('reinitialize', 'reinitialize'), ('dwell_reinitialize', 'dwell_reinitialize'),
+    # 초기 위치를 거치지 않는 옛 방식은 초기 위치 방식으로 · 수정 목록 112 라 (사용자 결정 2026-10-13)
+    ('direct', 'reinitialize'), ('dwell', 'dwell_reinitialize'),
+))
+def test_known_values_are_read_as_the_safe_modes(value, expected):
+    assert repeat_policy.normalize_repeat_mode(value) == expected
+    assert repeat_policy.normalize_repeat_mode(value.upper()) == expected
 
 
 def test_only_non_reinitializing_modes_need_matching_ends():

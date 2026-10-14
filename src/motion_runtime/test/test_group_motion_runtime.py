@@ -255,3 +255,108 @@ def test_join_prepare_needs_no_initialize_time_but_a_normal_prepare_does():
         assert '트리거' in str(exc)
     else:
         raise AssertionError('normal prepare needs initialize_monotonic')
+
+
+def test_release_after_a_finished_once_run_stays_completed():
+    """수정 목록 112 마 · 끝까지 돈 그룹 1회를 마스터가 세션 정리(group_cancel)할 때 「취소」 로 덮지 않는다"""
+    manager = _group_manager()
+    manager._run_thread = None
+    manager._status = {'state': 'completed', 'message': '모션 실행 완료'}
+    result = manager._group.cancel({'execution_id': 'exec-a'})
+    assert result['success'] is True
+    assert manager._status['state'] == 'completed'
+    assert '완료' in manager._status['message']
+
+
+def test_cancel_before_the_motion_finished_is_still_a_cancel():
+    manager = _group_manager()
+    manager._run_thread = None
+    manager._status = {'state': 'initializing'}
+    manager._group.cancel({'execution_id': 'exec-a'})
+    assert manager._status['state'] == 'stopped'
+    assert manager._status['message'] == '그룹 실행 취소'
+
+
+# 회차 후 정지 뒤 세션 정리 · 수정 목록 141 ------------------------------------ #
+
+def test_schedule_end_release_after_the_cycle_says_window_end_not_cancel():
+    """실물 S-11 · 구간 끝 회차 후 정지 → 마스터의 세션 정리가 「그룹 실행 취소」 로 덮었다"""
+    manager = _group_manager()
+    manager._run_thread = None
+    manager._status = {'state': 'running', 'group_execution': True}
+    assert manager._handle_stop_after_cycle({'reason': 'schedule_end'})['success'] is True
+    assert manager._group.session['stop_reason'] == 'schedule_end'
+    manager._status = {'state': 'stopped', 'message': '구간 끝 · 회차 후 정지'}
+    result = manager._group.cancel({'execution_id': 'exec-a'})
+    assert result['success'] is True
+    assert manager._status['state'] == 'stopped'
+    assert manager._status['message'] == '구간 끝 · 회차 후 정지'
+    assert '취소' not in result['message']
+
+
+def test_human_stop_after_cycle_release_is_not_a_cancel_either():
+    manager = _group_manager()
+    manager._run_thread = None
+    manager._status = {'state': 'running', 'group_execution': True}
+    manager._handle_stop_after_cycle({})
+    manager._status = {'state': 'stopped'}
+    manager._group.cancel({'execution_id': 'exec-a'})
+    assert manager._status['message'] == '현재 그룹 모션 회차 완료 후 정지'
+
+
+def test_stop_now_after_a_stop_after_cycle_is_still_a_cancel():
+    """회차 후 정지를 받은 뒤 사람이 즉시 정지 · 회차 후 정지 문구로 덮지 않는다"""
+    manager = _group_manager()
+    manager._run_thread = None
+    manager._status = {'state': 'running', 'group_execution': True}
+    manager._handle_stop_after_cycle({'reason': 'schedule_end'})
+    manager._group.mark_stopping()
+    manager._status = {'state': 'stopping'}
+    manager._group.cancel({'execution_id': 'exec-a'})
+    assert manager._status['message'] == '그룹 실행 취소'
+
+
+def test_schedule_end_after_the_last_cycle_finishes_with_the_window_end_text():
+    manager = _group_manager()
+    manager._plan_builder.build = lambda payload, **kwargs: {
+        'run_mode': payload.get('run_mode', 'once'),
+        'repeat_mode': 'direct', 'dwell_sec': 0.0,
+        'group_execution': True,
+        'capabilities': {'continuous_run': {'available': True}},
+    }
+    manager._wait_group_deadline = lambda *_args, **_kwargs: None
+    manager._player._run_initialization = lambda _plan: manager._status.update({
+        'state': 'initialized', 'phase': 'initialized',
+    })
+    stop_sent = threading.Event()
+
+    def run_motion(plan):
+        # 회차 도중 구간 끝 · 회차 후 정지가 온다
+        manager._status.update({'state': 'running', 'group_execution': True})
+        manager._handle_stop_after_cycle({'reason': 'schedule_end'})
+        stop_sent.set()
+        manager._status.update({
+            'state': 'completed', 'phase': 'completed',
+            'lifecycle': {'motion_started_at': time.time()},
+        })
+
+    manager._player._run_motion = run_motion
+    manager._run_thread = None
+    worker = threading.Thread(target=manager._group._run, args=({
+        'execution_id': 'exec-a',
+        'initialize_monotonic': time.monotonic() + 1.0,
+    }, [{}]))
+    worker.start()
+    _wait_until(lambda: manager._group.session.get('state') == 'armed')
+    manager._group.schedule_cycle({
+        'execution_id': 'exec-a', 'cycle_number': 1,
+        'start_monotonic': time.monotonic() + 1.0,
+    })
+    worker.join(timeout=2.0)
+    assert not worker.is_alive()
+    assert stop_sent.is_set()
+    assert manager._status['state'] == 'stopped'
+    assert manager._status['message'] == '구간 끝 · 회차 후 정지'
+    # 마스터의 세션 정리가 와도 그대로
+    manager._group.cancel({'execution_id': 'exec-a'})
+    assert manager._status['message'] == '구간 끝 · 회차 후 정지'

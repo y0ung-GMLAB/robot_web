@@ -469,12 +469,41 @@ def scan_item_has_detected_devices(scan_item: Any) -> bool:
     return False
 
 
+def dynamixel_port_missing(scan_item: Any) -> bool:
+    """다이나믹셀 직렬 포트 자체가 없음 · 찾은 장치 없음 · 수정 목록 120 (바)"""
+    return (
+        isinstance(scan_item, dict)
+        and scan_item.get('skipped') is not True
+        and scan_item.get('available') is False
+        and not scan_item_has_detected_devices(scan_item)
+    )
+
+
+def registry_uses_dynamixel(registry: Any) -> bool:
+    """모터 설정에 다이나믹셀 모터가 하나라도 있나 · 지운 줄은 뺀다"""
+    motors = registry.get('motors') if isinstance(registry, dict) else None
+    return any(
+        isinstance(motor, dict)
+        and not motor.get('deleted')
+        and str(motor.get('motor_type') or '').strip().lower() == 'dynamixel'
+        for motor in (motors or [])
+    )
+
+
 def scan_operation_outcome(
     scan: Any,
     *,
     operation_type: str,
     fallback_success: bool,
+    dynamixel_expected: bool = True,
 ) -> str:
+    """검색 판정 · success | partial | failure
+
+    `dynamixel_expected=False` (프로젝트 모터 설정에 다이나믹셀이 없음) 이면
+    전체 검색에서 **다이나믹셀 포트가 아예 없는 것**은 덜 된 것이 아니다 ·
+    전에는 그것만으로 「검색 일부 완료」(실패처럼 읽힘)가 떴다 · 수정 목록 120 (바) ·
+    문구에는 정보로 남긴다(`scan_result_message`).
+    """
     if not isinstance(scan, dict):
         return 'success' if fallback_success else 'failure'
 
@@ -500,6 +529,14 @@ def scan_operation_outcome(
             if isinstance(item, dict) and item.get('skipped') is not True
         ]
     requested = [item for item in requested if isinstance(item, dict)]
+    if (
+        operation_type == 'full_scan'
+        and not dynamixel_expected
+        and isinstance(ethercat, dict)
+        and dynamixel_port_missing(dynamixel)
+    ):
+        # 쓰지 않는 다이나믹셀의 포트 없음은 판정에서 뺀다 · AC 서보만으로 판정
+        requested = [item for item in requested if item is not dynamixel]
     if not requested:
         return 'success' if fallback_success else 'failure'
     project_comparison = scan.get('project_comparison')
@@ -607,14 +644,14 @@ def scan_result_message(
         (
             '모터 검색 완료'
             if success
-            else '모터 검색 부분 완료'
+            else '모터 검색 일부 완료'
             if partial
             else '모터 검색 실패'
         )
     ]
     if isinstance(ethercat, dict) and ethercat.get('skipped') is not True:
         try:
-            parts.append(f'AC Servo {int(ethercat.get("slaves_count") or 0)}축')
+            parts.append(f'AC 서보 {int(ethercat.get("slaves_count") or 0)}대')
         except (TypeError, ValueError):
             pass
         master_rows = ethercat.get('masters')
@@ -623,7 +660,7 @@ def scan_result_message(
                 ' / '.join(
                     (
                         f'Master {int(row.get("master_index") or 0)} '
-                        f'{int(row.get("slaves_count") or 0)}축'
+                        f'{int(row.get("slaves_count") or 0)}대'
                     )
                     for row in master_rows
                     if isinstance(row, dict)
@@ -631,9 +668,12 @@ def scan_result_message(
             )
     if isinstance(dynamixel, dict) and dynamixel.get('skipped') is not True:
         try:
-            parts.append(f'Dynamixel {int(dynamixel.get("devices_count") or 0)}축')
+            parts.append(f'다이나믹셀 {int(dynamixel.get("devices_count") or 0)}대')
         except (TypeError, ValueError):
             pass
+        if success and dynamixel_port_missing(dynamixel):
+            # 판정에서 뺀 경우(프로젝트에 다이나믹셀 없음) · 정보로만 · 수정 목록 120 (바)
+            parts.append('다이나믹셀 직렬 포트 없음(정보 · 다이나믹셀 모터를 쓰지 않으면 괜찮습니다)')
     if project_compatible:
         parts.append('프로젝트 EtherCAT 구성 확인 완료')
         unused = ethercat_project.get('unused_registered_master_indices') or []
@@ -718,6 +758,10 @@ def wait_for_ethercat_release(timeout_sec: float) -> None:
     )
 
 
+#: 서비스 재시작을 거는 지연 · 응답이 먼저 나가게 · 수정 목록 132
+MANAGED_RESTART_DELAY_SEC = 2.0
+
+
 def schedule_managed_service_restart(*managed_services: str) -> None:
     """Return the HTTP response before stopping the process serving it.
 
@@ -737,11 +781,13 @@ def schedule_managed_service_restart(*managed_services: str) -> None:
         or any(service not in allowed_services for service in managed_services)
     ):
         raise ValueError('허용되지 않은 자동실행 서비스 이름입니다')
+    # 0.5 s 는 짧았다 · 재시작 요청 뒤에도 작업 기록 갱신 등이 0.5 s 넘게 걸려 응답 전에 브리지가 내려가
+    # 적용은 성공했는데 화면은 HTTP 500 · 수정 목록 132 (실물 2026-10-13) · 시간대 바꾸기(2 s)와 같게
     subprocess.Popen(
         [
             '/bin/bash',
             '-c',
-            'sleep 0.5; exec "$@"',
+            f'sleep {MANAGED_RESTART_DELAY_SEC:g}; exec "$@"',
             'motion-control-delayed-restart',
             '/usr/bin/systemctl',
             '--user',
@@ -768,7 +814,7 @@ def selected_motor_config_path(repository) -> Path:
     active = detail.get('project', {}).get('active_files') or {}
     file_name = str(active.get('motor_axes') or '').strip()
     if not file_name:
-        raise ValueError('현재 프로젝트에 모터축 설정 파일이 없습니다')
+        raise ValueError('현재 프로젝트에 모터 설정 파일이 없습니다')
     return repository.export_path(
         project_id, 'motor_axes', file_name
     )
@@ -853,7 +899,7 @@ def motor_operation_runtime_readiness(
         return {
             'ready': False,
             'failed': True,
-            'error': '검증할 설정 대상 모터축이 없습니다',
+            'error': '확인할 대상 모터가 없습니다',
         }
     motors = motion_state.get('motors')
     motors = motors if isinstance(motors, list) else []
@@ -965,7 +1011,7 @@ def runtime_service_status(
         runtime_message = 'motor_manager_node의 모터 상태 갱신이 중단되었습니다'
     else:
         runtime_phase = 'ready'
-        runtime_message = f'모터 상태 {motor_count}축 수신 중'
+        runtime_message = f'모터 {motor_count}대 상태 수신 중'
 
     return {
         'phase': runtime_phase,

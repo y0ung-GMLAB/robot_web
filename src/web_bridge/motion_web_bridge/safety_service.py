@@ -19,8 +19,8 @@ from typing import Any, Dict
 logger = logging.getLogger('bridge.safety')
 
 #: 정지 요청을 보내고 붙이는 꼬리말 · 화면이 이 말을 그대로 보여준다
-GROUP_STOP_SENT = ' · 그룹 실행도 함께 정지 요청'
-GROUP_STOP_FAILED = ' · 그룹 정지 요청 실패 · 연동 화면에서 확인하세요'
+GROUP_STOP_SENT = ' · 그룹 재생도 함께 정지를 요청했습니다'
+GROUP_STOP_FAILED = ' · 그룹 정지 요청에 실패했습니다. 「PC 연동 설정」에서 확인하세요'
 
 
 class SafetyService:

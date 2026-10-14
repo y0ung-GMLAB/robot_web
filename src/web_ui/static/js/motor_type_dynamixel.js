@@ -78,49 +78,7 @@ export function dynamixelMotorIdFromDevice(device) {
   return `dynamixel_serial_port_${port}_id_${busId}`;
 }
 
-export function dynamixelScanDeviceToMotor(device, baseMotor = null, options = {}) {
-  const axis = baseMotor?.config?.controller_index ?? baseMotor?.axis ?? options.nextAvailableAxis();
-  const scannedModel = String(options.model || modelTextFromDevice(device) || '').trim();
-  const model = scannedModel || baseMotor?.profile?.driver_model || 'Dynamixel';
-  const busId = device?.id === null || device?.id === undefined ? null : Number(device.id);
-  const baudrate = DYNAMIXEL_BAUDRATE;
-  const port = String(device?.port || baseMotor?.identity?.serial_port || baseMotor?.config?.serial_port || '');
-  const existingConfig = baseMotor?.config || {};
-  const existingIdentity = baseMotor?.identity || {};
-  const name = busId === null || busId === undefined ? 'ID -' : `ID ${busId}`;
-  return normalizeMotor({
-    id: baseMotor?.id || dynamixelMotorIdFromDevice(device),
-    enabled: baseMotor ? Boolean(baseMotor.enabled) : true,
-    hidden: baseMotor ? Boolean(baseMotor.hidden) : false,
-    deleted: false,
-    axis,
-    name,
-    motor_type: 'dynamixel',
-    driver_family: 'dynamixel',
-    transport: 'serial',
-    identity: {
-      ...existingIdentity,
-      node_id: busId,
-      bus_id: busId,
-      serial_port: port,
-      serial_baudrate: baudrate,
-    },
-    profile: {
-      driver_model: model,
-      model_confirmed: Boolean(scannedModel),
-      model_source: scannedModel ? 'physical_protocol' : '',
-    },
-    config: {
-      ...existingConfig,
-      controller_index: axis,
-      driver_id: existingConfig.driver_id ?? options.firstDynamixelDriverId(),
-      bus_id: busId,
-      serial_port: port,
-      serial_baudrate: baudrate,
-      profile_mode: existingConfig.profile_mode ?? 0,
-    },
-  });
-}
+// 검색 장치 → 모터 줄은 서버가 만든다(scan_proposal.py) · 수정 목록 100 · 여기 있던 dynamixelScanDeviceToMotor 는 지움
 
 export function dynamixelScanDeviceForValues(values, devices) {
   const nodeId = values.nodeId === null || values.nodeId === undefined

@@ -50,7 +50,7 @@ class ExecutionContextService:
         self._status: Dict[str, Any] = {
             'state': 'starting',
             'ready': False,
-            'message': '현재 프로젝트 실행 컨텍스트 확인 중',
+            'message': '현재 프로젝트 실행 설정을 확인하는 중입니다',
             'context_id': '',
             'project_id': '',
             'nodes': {},
@@ -70,7 +70,7 @@ class ExecutionContextService:
                 status.update({
                     'state': 'stale',
                     'ready': False,
-                    'message': '저장 설정이 변경되어 실행 컨텍스트 재적용 대기 중',
+                    'message': '저장된 설정이 바뀌어 다시 적용하기를 기다리는 중입니다',
                     'stored_context_id': current.get('context_id', ''),
                 })
         runtime_blocker = (
@@ -82,6 +82,21 @@ class ExecutionContextService:
         status['control_block_reason'] = runtime_blocker
         status['stored_equals_runtime'] = bool(status.get('ready'))
         return status
+
+    #: 다시 맞춰도 안 풀리는 「준비 안 됨」 · 사람이 파일을 고쳐야 풀린다 · 수정 목록 136
+    TERMINAL_NOT_READY_STATES = frozenset({'configuration_required', 'no_project', 'error'})
+
+    def terminal_block_reason(self) -> str:
+        """그룹 선택이 미리 볼 「실행 준비 안 됨」 · 잠금 하나 · 파일을 읽지 않는다 · 수정 목록 136
+
+        `reconcile` 로 풀릴 수 있는 상태(적용 중 · 노드 대기)는 빈 값 · 그런 PC 는 준비 단계가 다시 본다.
+        """
+        with self._lock:
+            state = str(self._status.get('state') or '')
+            message = str(self._status.get('message') or '')
+        if state not in self.TERMINAL_NOT_READY_STATES:
+            return ''
+        return message or state
 
     def _set_status(self, **values: Any) -> None:
         with self._lock:
@@ -118,7 +133,7 @@ class ExecutionContextService:
         """
         self._set_status(
             state='selected', ready=False, project_id=str(project_id), context_id='',
-            message='프로젝트 선택 완료 · 실행 컨텍스트 적용 대기 중', nodes={},
+            message='프로젝트를 선택했습니다. 설정 적용을 기다리는 중입니다', nodes={},
         )
 
     def context_id(self) -> str:
@@ -214,7 +229,7 @@ class ExecutionContextService:
             except (OSError, ValueError, json.JSONDecodeError) as exc:
                 self._set_status(
                     state='error', ready=False, project_id=project_id, context_id='',
-                    message=f'프로젝트 실행 컨텍스트 생성 실패: {exc}', nodes={},
+                    message=f'프로젝트 실행 설정을 만들지 못했습니다: {exc}', nodes={},
                 )
                 return self.status()
 
@@ -237,7 +252,7 @@ class ExecutionContextService:
                 self._set_status(
                     state='configuration_required', ready=False,
                     project_id=project_id, context_id=context_id,
-                    message='모터축 설정과 조인트 매핑 파일을 확정하세요',
+                    message='모터 설정과 조인트 매핑을 저장해 확정하세요',
                     missing=list(context.get('missing') or []), nodes={}, context=context,
                 )
                 return self.status()
@@ -302,7 +317,7 @@ class ExecutionContextService:
                 self._set_status(
                     state='motor_apply_required', ready=False,
                     project_id=project_id, context_id=context_id,
-                    message='프로젝트 파일은 각 노드에 전달됐지만 모터축 장비에 적용 · 모터 재시작이 필요합니다',
+                    message='프로젝트 파일은 각 노드에 전달됐지만, 모터 설정을 장비에 적용하고 모터를 재시작해야 합니다',
                     nodes=nodes, failures={}, context=context,
                 )
                 return self.status()
@@ -327,7 +342,7 @@ class ExecutionContextService:
                 self.invalidate_nodes(context_id)
                 self._set_status(
                     state='waiting_motor_runtime', ready=False, nodes=nodes,
-                    message='현재 프로젝트의 모터 관리 노드 상태 확인 대기 중',
+                    message='Motor Manager 상태 확인을 기다리는 중입니다',
                     failures={'motor_runtime': str(motor_runtime.get('message') or '')},
                 )
                 return self.status()
@@ -355,7 +370,7 @@ class ExecutionContextService:
                 return self.status()
             self._set_status(
                 state='ready', ready=True, nodes=nodes, failures={},
-                message='저장 설정과 실행 설정이 일치합니다 · 사용자 제어 가능',
+                message='저장된 설정이 적용되어 있습니다. 조작할 수 있습니다.',
                 verified_at=time.time(),
             )
             return self.status()

@@ -59,7 +59,7 @@ test('a model nobody knows is named but does not stop the apply', () => {
   ]);
 
   assert.match(warning, /0/);
-  assert.match(warning, /적용은 진행됩니다/);
+  assert.match(warning, /적용은 그대로 진행되며/);
   assert.doesNotMatch(warning, /적용 불가/);
 });
 

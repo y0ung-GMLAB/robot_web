@@ -22,6 +22,27 @@ prune_old_entries() {
   return 0
 }
 
+# 개수로 정리 · 수정 목록 112 아 (2026-10-12 floating4 · 재시작마다 새 파일 71 개 · 126 MB)
+# 폴더 바로 아래에서 <패턴> 에 맞는 파일 중 최근 <개수> 개만 남긴다 · 돌린 조각(.1 .2 …)도 같이
+#   prune_keep_newest <폴더> <패턴> [개수]   · LOG_KEEP_FILES (기본 20) · 0 이면 끔
+LOG_KEEP_FILES="${LOG_KEEP_FILES:-20}"
+
+prune_keep_newest() {
+  local dir="$1" pattern="$2"
+  local keep="${3:-${LOG_KEEP_FILES}}"
+  [[ -d "${dir}" ]] || return 0
+  [[ "${keep}" =~ ^[0-9]+$ ]] || return 0
+  (( keep > 0 )) || return 0
+  local old
+  # 이름에 시각이 들어 있다(restart-YYYYmmdd-HHMMSS.log) · 이름 역순 = 최근 순
+  while IFS= read -r old; do
+    [[ -n "${old}" ]] || continue
+    rm -f -- "${dir}/${old}" "${dir}/${old}".[0-9]* 2>/dev/null || true
+  done < <(find "${dir}" -mindepth 1 -maxdepth 1 -type f -name "${pattern}" -printf '%f\n' 2>/dev/null \
+             | sort -r | tail -n "+$((keep + 1))")
+  return 0
+}
+
 prepare_ros_log_dir() {
   local workspace="$1"
   local dir="${ROS_LOG_DIR:-${workspace}/log/ros}"

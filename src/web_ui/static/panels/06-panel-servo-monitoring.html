@@ -5,7 +5,7 @@
         <div class="section-head workspace-page-head">
           <div>
             <strong>서보 에러 관리</strong>
-            <small>Panasonic MINAS A6B 에러 내용과 현재 프로젝트 적용 등급을 관리합니다</small>
+            <small>Panasonic MINAS A6B 에러 내용과, 이 프로젝트에서 에러마다 적용할 등급을 관리합니다</small>
           </div>
           <div class="registry-actions">
             <button id="servoAlarmReloadButton" type="button">다시 불러오기</button>
@@ -19,7 +19,7 @@
         </div>
 
         <div class="servo-alarm-summary-grid" aria-label="서보 에러 등급 요약">
-          <div><span>1등급</span><strong id="servoAlarmGrade1Count">0개</strong><small>해당 에러 모터 정지</small></div>
+          <div><span>1등급</span><strong id="servoAlarmGrade1Count">0개</strong><small>에러가 난 모터만 정지</small></div>
           <div><span>2등급</span><strong id="servoAlarmGrade2Count">0개</strong><small>전체 재생 종료</small></div>
           <div><span>3등급</span><strong id="servoAlarmGrade3Count">0개</strong><small>전체 모터 제어 차단</small></div>
           <div><span>프로젝트 변경</span><strong id="servoAlarmModifiedCount">0개</strong><small id="servoAlarmProjectName">프로젝트 선택 필요</small></div>
@@ -42,7 +42,7 @@
                   <th>기본 등급</th>
                   <th>프로젝트 등급</th>
                   <th>적용 동작</th>
-                  <th>사용자 대처</th>
+                  <th>조치 방법</th>
                 </tr>
               </thead>
               <tbody id="servoAlarmRows">
@@ -56,7 +56,7 @@
       <section class="monitoring-panel workspace-panel" data-workspace-panel="monitoring" aria-label="실시간 모터 모니터링">
         <div class="section-head workspace-page-head">
           <strong>실시간 모니터링</strong>
-          <span id="monitoringViewSummary">설정 모터 기준 표시</span>
+          <span id="monitoringViewSummary">설정된 모터만 표시</span>
         </div>
         <div class="workspace-guide" aria-label="실시간 모니터링 사용 순서">
           <strong>사용 방법</strong>
@@ -65,7 +65,7 @@
 
         <div class="monitoring-summary-grid" aria-label="모터 상태 요약">
           <div><span>전체 모터</span><strong id="monitoringTotalCount">0개</strong></div>
-          <div><span>런타임 수신</span><strong id="monitoringOnlineCount">0개</strong></div>
+          <div><span>상태 수신</span><strong id="monitoringOnlineCount">0개</strong></div>
           <div><span>오류</span><strong id="monitoringFaultCount">0개</strong></div>
           <div><span>갱신 지연</span><strong id="monitoringStaleCount">0개</strong></div>
         </div>
@@ -94,7 +94,7 @@
                 <th>모터 종류</th>
                 <th>이름</th>
                 <th>물리 연결 (최근 검색)</th>
-                <th>런타임 수신</th>
+                <th>상태 수신</th>
                 <th>서보 상태</th>
                 <th>오류</th>
                 <th>모터 위치 (deg)</th>
@@ -108,7 +108,7 @@
             </thead>
             <tbody id="motorRows">
               <tr>
-                <td colspan="15" class="empty">모터 상태 수신 대기</td>
+                <td colspan="15" class="empty">모터 상태를 기다리는 중입니다</td>
               </tr>
             </tbody>
           </table>
@@ -125,7 +125,7 @@
             <button class="tab-button active" type="button" data-monitoring-detail-tab="basic">기본 정보</button>
             <button class="tab-button" type="button" data-monitoring-detail-tab="connection">연결·통신</button>
             <button class="tab-button" type="button" data-monitoring-detail-tab="operation">운전·오류</button>
-            <button class="tab-button" type="button" data-monitoring-detail-tab="realtime">실시간값</button>
+            <button class="tab-button" type="button" data-monitoring-detail-tab="realtime">실시간 값</button>
             <button class="tab-button" type="button" data-monitoring-detail-tab="specification">사양·설정</button>
           </div>
           <div id="monitoringDetailContent" class="monitoring-detail-content">

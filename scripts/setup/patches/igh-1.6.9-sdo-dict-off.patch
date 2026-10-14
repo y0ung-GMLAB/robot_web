@@ -1,0 +1,47 @@
+diff --git a/master/fsm_master.c b/master/fsm_master.c
+index b4f8f2ad..bd496069 100644
+--- a/master/fsm_master.c
++++ b/master/fsm_master.c
+@@ -628,7 +628,8 @@ void ec_fsm_master_action_idle(
+     for (slave = master->slaves;
+             slave < master->slaves + master->slave_count;
+             slave++) {
+-        if (!(slave->sii.mailbox_protocols & EC_MBOX_COE)
++        if (!ec_sdo_dict
++                || !(slave->sii.mailbox_protocols & EC_MBOX_COE)
+                 || (slave->sii.has_general
+                     && !slave->sii.coe_details.enable_sdo_info)
+                 || slave->sdo_dictionary_fetched
+diff --git a/master/globals.h b/master/globals.h
+index da738e8b..c14ecbf4 100644
+--- a/master/globals.h
++++ b/master/globals.h
+@@ -253,6 +253,7 @@ extern const char *ec_device_names[2]; // only main and backup!
+ /****************************************************************************/
+ 
+ extern char *ec_master_version_str;
++extern unsigned int ec_sdo_dict;
+ 
+ /****************************************************************************/
+ 
+diff --git a/master/module.c b/master/module.c
+index b8156a1d..e9b170a6 100644
+--- a/master/module.c
++++ b/master/module.c
+@@ -53,6 +53,7 @@ static unsigned int master_count; /**< Number of masters. */
+ static char *backup_devices[EC_MAX_MASTERS]; /**< Backup devices parameter. */
+ static unsigned int backup_count; /**< Number of backup devices. */
+ static unsigned int debug_level;  /**< Debug level parameter. */
++unsigned int ec_sdo_dict = 0; /**< Fetch SDO dictionaries automatically (0 = off). */
+ static unsigned int run_on_cpu = 0xffffffff; /**< Bind created kernel threads
+                                                to a cpu. Default do not bind.
+                                               */
+@@ -84,6 +85,8 @@ module_param_named(debug_level, debug_level, uint, S_IRUGO);
+ MODULE_PARM_DESC(debug_level, "Debug level");
+ module_param_named(run_on_cpu, run_on_cpu, uint, S_IRUGO);
+ MODULE_PARM_DESC(run_on_cpu, "Bind kthreads to a specific cpu");
++module_param_named(sdo_dict, ec_sdo_dict, uint, S_IRUGO | S_IWUSR);
++MODULE_PARM_DESC(sdo_dict, "Fetch SDO dictionaries automatically (0 = off)");
+ 
+ /** \endcond */
+ 

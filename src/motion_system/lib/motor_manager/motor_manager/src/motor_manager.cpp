@@ -238,6 +238,10 @@ void motor_manager::MotorManager::loadConfigurations(const std::string& config_f
         d_cfg.unit_effort = d["unit_effort"].as<double>();
         d_cfg.lower = d["lower"].as<double>();
         d_cfg.upper = d["upper"].as<double>();
+        // 드라이브 소프트 리밋 여유 · 없으면 2.0 모터 deg · 목표를 리밋과 똑같은 값에 세우면 추종 오차로
+        // 리밋을 넘어 내부 리밋이 걸렸다 (robot_web 수정 목록 103 · 실측 넘침 최대 0.66°)
+        d_cfg.soft_limit_margin = d["soft_limit_margin"] ? d["soft_limit_margin"].as<double>() : 2.0;
+        if (!(d_cfg.soft_limit_margin >= 0.0)) throw std::runtime_error("soft_limit_margin must be >= 0.");
         d_cfg.speed = d["speed"].as<double>();
         d_cfg.acceleration = d["acceleration"].as<double>();
         d_cfg.deceleration = d["deceleration"].as<double>();

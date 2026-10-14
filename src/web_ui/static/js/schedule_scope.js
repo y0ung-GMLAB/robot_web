@@ -48,14 +48,14 @@ export function motionScheduleBadgeState(status) {
   if (enabled && !isMaster) {
     return {
       scope: 'slave',
-      text: '스케줄러: 이 PC 에서는 설정하지 않습니다',
+      text: '스케줄러: 마스터 스케줄을 따름',
       tone: 'muted',
       canEdit: false,
       warning: '',
       blockedReason:
-        '이 PC 는 받는 쪽이라 스케줄도 실행 관리도 여기서는 '
-        + '아무 일을 하지 않습니다 · 다른 PC 가 보내는 실행만 이 PC 를 '
-        + '움직입니다 · 여기서 멈추려면 「전체 동작 정지」를 누르세요',
+        '슬레이브 PC라서 이 화면의 스케줄과 운전 모드는 '
+        + '아무 일을 하지 않습니다. 마스터 PC가 보내는 그룹 실행으로만 '
+        + '움직입니다. 여기서 멈추려면 「전체 동작 정지」를 누르세요',
     };
   }
   // 수동 모드면 스케줄은 아무것도 하지 않는다 · §6-143
@@ -74,7 +74,7 @@ export function motionScheduleBadgeState(status) {
       tone: 'muted',
       canEdit: true,
       warning: '',
-      blockedReason: '수동 모드입니다 · 스케줄이 시작·정지시키지 않습니다',
+      blockedReason: '수동 모드라서 스케줄이 재생을 시작하거나 정지하지 않습니다',
     };
   }
   // 오프 모드 · 명령 전부 차단 · 돌고 있던 것은 회차 후 멈춘다
@@ -85,7 +85,7 @@ export function motionScheduleBadgeState(status) {
       tone: 'muted',
       canEdit: true,
       warning: '',
-      blockedReason: '오프 모드입니다 · 움직임 명령이 전부 차단됩니다 (서보는 홀드 유지)',
+      blockedReason: '오프 모드라서 움직임 명령이 모두 차단됩니다(서보는 켠 채 유지)',
     };
   }
 
@@ -115,9 +115,9 @@ export function motionScheduleBadgeState(status) {
       tone: 'bad',
       canEdit: true,
       warning:
-        '시각을 읽을 수 없어 이 스케줄은 돌지 않습니다 · '
+        '시각을 읽을 수 없어 이 스케줄은 실행되지 않습니다 · '
         + `${read.unreadable.join(' · ')} · `
-        + '시각은 00:00~23:59 로 적으세요 (끝 시각은 24:00 도 됩니다)',
+        + '시각은 00:00~23:59로 입력하세요(종료 시각은 24:00도 됩니다)',
       blockedReason: '',
     };
   }
@@ -165,23 +165,23 @@ export function motionScheduleBadgeState(status) {
 export function motionScheduleScopeNote(status) {
   const state = motionScheduleBadgeState(status);
   if (state.scope === 'manual') {
-    return '수동 모드입니다 · 스케줄이 시작·정지시키지 않습니다 · '
-      + '스케줄 모드로 바꾸면 시각에 맞춰 관리합니다.';
+    return '수동 모드라서 스케줄이 재생을 시작하거나 정지하지 않습니다. '
+      + '스케줄 모드로 바꾸면 설정한 시각에 맞춰 재생합니다.';
   }
   if (state.scope === 'off') {
-    return '오프 모드입니다 · 조그·재생·그룹 시작이 전부 차단되고, '
-      + '돌고 있던 애니메이션은 현재 회차 후 멈춥니다 · 서보는 켠 채 유지됩니다.';
+    return '오프 모드라서 조그·재생·그룹 시작이 모두 차단되고, '
+      + '재생 중이던 애니메이션은 이번 회차가 끝나면 정지합니다. 서보는 켠 채 유지됩니다.';
   }
   if (state.scope === 'local') {
-    return '시각이 되면 이 PC 의 등록된 애니메이션을 연속 시작하고, '
-      + '종료 시각에 현재 회차 후 정지합니다.';
+    return '시작 시각이 되면 등록된 애니메이션을 연속 재생하고, '
+      + '종료 시각에는 이번 회차가 끝나면 정지합니다.';
   }
   if (state.scope === 'slave') {
     return state.blockedReason + '.';
   }
   if (state.scope === 'group') {
-    return '시각이 되면 등록된 애니메이션을 연속 시작하고, '
-      + '종료 시각에 현재 회차 후 정지합니다.';
+    return '시작 시각이 되면 등록된 애니메이션을 연속 재생하고, '
+      + '종료 시각에는 이번 회차가 끝나면 정지합니다.';
   }
   return '스케줄러 상태를 확인하고 있습니다.';
 }
@@ -208,8 +208,8 @@ export function motionScheduleResumeNote(status) {
   const seconds = Number(status?.reconcile_interval_sec);
   const within = Number.isFinite(seconds) && seconds > 0
     ? `최대 ${seconds.toFixed(0)}초 뒤` : '잠시 뒤';
-  return `스케줄 모드입니다 · ${within} 다시 시작합니다 · `
-    + '계속 멈춰 두려면 「📅 재생 스케줄」에서 수동 모드로 바꾸세요';
+  return `스케줄 모드라서 ${within} 다시 시작합니다. `
+    + '계속 정지해 두려면 「📅 재생 스케줄」에서 수동 모드로 바꾸세요';
 }
 
 
@@ -237,8 +237,8 @@ export function motionScheduleTimezoneDrift(schedules, timezone) {
   stamps.delete(now);
   if (stamps.size === 0) return '';
   const names = [...stamps].sort().join(', ');
-  return `⚠️ 이 스케줄은 ${names} 에서 만들어졌는데 이 PC 는 지금 ${now} 입니다 · `
-    + '시각을 다시 확인하세요 · 시간대를 바꾸려면 「터미널」 화면에서';
+  return `⚠️ 이 스케줄은 ${names} 시간대에서 만들었는데 PC는 지금 ${now}입니다. `
+    + '시각을 다시 확인하세요. 시간대는 「터미널」 화면에서 바꿀 수 있습니다';
 }
 
 

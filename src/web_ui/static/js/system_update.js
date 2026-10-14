@@ -14,22 +14,22 @@ const POLL_MS = 3000;
 const WATCH_AFTER_START_MS = 15 * 60 * 1000;
 
 const STATE_TEXT = {
-  idle: ['대기', ''],
+  idle: ['대기 상태', ''],
   running: ['업데이트 중', 'coordination-state-warn'],
   done: ['완료', 'coordination-state-ok'],
   failed: ['실패', 'coordination-state-bad'],
   unreachable: ['응답 없음 (재시작 중일 수 있음)', 'coordination-state-warn'],
   offline: ['연결 안 됨', 'coordination-state-bad'],
-  manual: ['터미널에서', ''],
+  manual: ['터미널에서 직접 업데이트', ''],
 };
 
 export function systemUpdateRows(pcs) {
   const list = Array.isArray(pcs) ? pcs : [];
-  if (!list.length) return '<tr><td colspan="4" class="empty">같은 망 PC 를 기다리는 중</td></tr>';
+  if (!list.length) return '<tr><td colspan="4" class="empty">같은 네트워크의 PC를 찾는 중</td></tr>';
   return list.map((pc) => {
     const [label, cls] = STATE_TEXT[pc.state] || [String(pc.state || '-'), ''];
     const name = pc.display_name || pc.pc_id || '-';
-    const local = pc.is_local ? ' <small>(이 PC)</small>' : '';
+    const local = pc.is_local ? ' <small>(현재 접속)</small>' : '';
     const tail = Array.isArray(pc.tail) && pc.tail.length ? pc.tail[pc.tail.length - 1] : '';
     const note = pc.message || tail || '';
     // 「옛 → 새」 는 끝까지 된 때만 · 실패면 지금 버전만 (82 · 그 사이 생긴 커밋을 결과처럼 보였다)
@@ -63,11 +63,11 @@ export function createSystemUpdateController({ el }) {
       if (el.systemUpdateRows) el.systemUpdateRows.innerHTML = systemUpdateRows(payload.pcs);
       const running = (payload.pcs || []).some((pc) => ['running', 'unreachable'].includes(pc.state));
       if (!running && Date.now() > watchUntil) stop();
-      if (!running && payload.same_version === false) setMessage('로봇 PC 버전이 서로 다릅니다 · 「모든 PC 업데이트」 로 맞추세요');
+      if (!running && payload.same_version === false) setMessage('로봇 PC의 버전이 서로 다릅니다. 「모든 PC 업데이트」로 맞추세요.');
       else if (!running) setMessage('');
     } catch (error) {
       // 이 PC 가 업데이트로 재시작 중이면 잠깐 실패한다 · 계속 본다
-      setMessage('이 PC 응답 없음 · 이 PC 도 업데이트 중이면 잠시 뒤 다시 연결됩니다');
+      setMessage('응답이 없습니다. 현재 접속한 PC도 업데이트 중이면 잠시 뒤 다시 연결됩니다.');
     }
   }
 
@@ -85,23 +85,23 @@ export function createSystemUpdateController({ el }) {
   async function updateAll() {
     if (busy) return;
     const confirmed = await showConfirm(
-      '같은 망의 로봇 PC 전부를 최신 코드로 업데이트합니다 (코드 받기 → 빌드 → 서비스 재시작 · PC 마다 몇 분).\n\n'
-      + '· 업데이트하는 동안 그 PC 는 재생이 멈추고 웹이 잠깐 끊깁니다 · 재생 중인 PC 는 거절합니다\n'
-      + '· 이 PC 도 마지막에 업데이트되어 이 화면이 잠깐 끊겼다 돌아옵니다\n'
-      + '· 스피커 PC 도 같이 합니다 (옛 스피커 앱이면 그 PC 터미널에서)\n\n'
-      + '운영 시간 밖에 하세요. 계속할까요?',
+      '같은 네트워크의 로봇 PC를 모두 최신 코드로 업데이트합니다(코드 받기 → 빌드 → 서비스 재시작, PC마다 몇 분 걸립니다).\n\n'
+      + '· 업데이트하는 동안 해당 PC는 재생이 멈추고 웹 화면이 잠시 끊깁니다. 재생 중인 PC는 업데이트하지 않습니다.\n'
+      + '· 현재 접속한 PC도 마지막에 업데이트되므로 이 화면이 잠시 끊겼다가 다시 연결됩니다.\n'
+      + '· 스피커 PC도 함께 업데이트합니다. 이전 스피커 앱이면 해당 PC의 터미널에서 직접 업데이트하세요.\n\n'
+      + '운영시간 외에 실행하세요. 계속할까요?',
       { title: '모든 PC 업데이트', confirmLabel: '업데이트', tone: 'warning' },
     );
     if (!confirmed) return;
     busy = true;
     if (el.systemUpdateAllButton) el.systemUpdateAllButton.disabled = true;
-    setMessage('업데이트 요청 보내는 중');
+    setMessage('업데이트 요청을 보내는 중');
     try {
       const payload = await requestSystemUpdateAll();
       if (el.systemUpdateRows) el.systemUpdateRows.innerHTML = systemUpdateRows(payload.pcs);
       setMessage(payload.message || '');
     } catch (error) {
-      setMessage(`업데이트 요청 실패 · ${error?.message || error} · 이 PC 가 먼저 재시작됐으면 잠시 뒤 표가 다시 채워집니다`);
+      setMessage(`업데이트 요청 실패 · ${error?.message || error} · 현재 접속한 PC가 먼저 재시작됐다면 잠시 뒤 표가 다시 채워집니다`);
     } finally {
       busy = false;
       if (el.systemUpdateAllButton) el.systemUpdateAllButton.disabled = false;

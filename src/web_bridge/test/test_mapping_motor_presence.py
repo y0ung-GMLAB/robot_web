@@ -81,7 +81,7 @@ def test_a_removed_motor_is_reported_on_its_row():
     rows = result['validation']['rows']
     assert rows['1-1']['status'] == 'ok'
     assert rows['1-2']['status'] == 'warning'
-    assert '모터축 설정에 없습니다' in ' '.join(rows['1-2']['messages'])
+    assert '모터 설정에 없습니다' in ' '.join(rows['1-2']['messages'])
     assert any('1-2' in text for text in result['validation']['warnings'])
 
 

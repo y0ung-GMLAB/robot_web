@@ -18,6 +18,9 @@
 | `report/<이름>_check.json` | 속도·가속 초과 구간 · MotorLimit 에 걸린 샘플 (deg) |
 
 - 씬 50 fps 권장 · 1 프레임 = 20 ms = 파일 1행 · 다른 fps 면 경고 후 재샘플
+- 속도·가속 한계(본 속성)의 **100% 를 넘는 곳이 하나라도 있으면 `<이름>.json` 을 쓰지 않음** (리포트·마커만 · 같은 폴더의 이전 `.json` 은 그대로 남음) · 80~100% 는 경고만 (2026-10-13)
+  - PC 조인트 매핑의 최대 속도·가속도와 같은 값으로 두면 Blender 에서 통과한 파일은 PC 에서도 거부되지 않음 (PC 는 같은 20 ms 차분)
+- 끝나면 창 · 조인트별 최대 % (속도 · 가속) · 100% 넘은 구간 (Blender 프레임)
 - 초과 구간 · 타임라인 마커 `ANIM! ...` · Empty `AnimSpeedCheck` 의 `<본>_vel_pct` / `<본>_acc_pct` 곡선 (Graph Editor · 100 = 한계 · 80 부터 경고)
 - .blend 안의 Text 는 디스크 파일의 **복사본** · 스크립트가 바뀌면 Text → Reload (Alt+R)
 
@@ -50,6 +53,7 @@
 ## 단위
 
 - 파일 값 rad · 헤더 `rotation_unit: "rad"` (2026-10-06 결정)
+- 0 근처 · 1e-6 rad (0.00006°) 보다 작은 값은 정확히 0 으로 씀 · 값을 본 행렬에서 다시 계산해서 (Blender 행렬 float32) 키가 0 이어도 ~1e-7 rad 가 남기 때문 (2026-10-12)
 - 본 속성 · 리포트 · Blender 안 검사 deg
 - 스택은 헤더 `rotation_unit` 을 읽어 내부 단위로 바꿈 (`docs/수정_목록.md` 6-2) · rad·deg 파일 모두 재생 · 그 전 버전이 깔린 PC 에서는 rad 파일이 약 1/57 로 움직임
 
@@ -59,4 +63,5 @@
 blender -b X.blend --python-expr "OUT_DIR=r'D:\out'; exec(open(r'scripts/blender/animation_export.py', encoding='utf-8').read())"
 ```
 
-- 전역 · `OUT_DIR` 출력 폴더 · `EXPORT_NAME` 파일 이름 · `ARMATURE` 아마추어 오브젝트 이름 (`joint_name` 본 있는 아마추어가 여러 개일 때)
+- 전역 · `OUT_DIR` 출력 폴더 · `EXPORT_NAME` 파일 이름 · `ARMATURE` 아마추어 오브젝트 이름 또는 이름 목록 (없으면 `joint_name` 본 있는 아마추어 전부)
+- 아마추어 여러 개(로봇 여러 대 · 예 플로팅 4대) · 한 파일에 모두 · `joint_name` 은 전체에서 겹치면 안 됨 · 리포트·검사 곡선 이름은 「리그:본」

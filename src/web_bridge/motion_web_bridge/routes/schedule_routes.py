@@ -10,6 +10,7 @@ import asyncio
 
 from fastapi import FastAPI, HTTPException, Request
 
+from motion_web_bridge import remote_run_mode
 from motion_web_bridge.schedule_service import (
     ScheduleNotFound,
     ScheduleOwnershipError,
@@ -35,6 +36,28 @@ def register_schedule_routes(app: FastAPI, bridge, project_call) -> None:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
         except RuntimeError as exc:
             raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+    # 같은 망 다른 로봇 PC 의 운전 모드 · 이 서버가 대신 부른다 · 2026-10-13 (밤샘 시험 F-1 이 막혔다)
+    def _network_pcs():
+        runtime = bridge.coordination.snapshot().get('runtime') or {}
+        return runtime.get('network_pcs') if isinstance(runtime, dict) else []
+
+    def _local_mode():
+        service._follow_selected_project()
+        return service.store.mode
+
+    @app.get('/api/remote/run-modes')
+    async def remote_run_modes():
+        return await asyncio.to_thread(lambda: remote_run_mode.run_modes(_network_pcs(), _local_mode))
+
+    @app.put('/api/remote/run-mode')
+    async def set_remote_run_mode(request: Request):
+        body = await request.json()
+        if not isinstance(body, dict):
+            raise HTTPException(status_code=400, detail='request body must be an object')
+        return await asyncio.to_thread(lambda: remote_run_mode.set_run_mode(
+            _network_pcs(), list(body.get('pc_ids') or []), str(body.get('run_mode') or ''), service.set_run_mode,
+        ))
 
     @app.get('/api/schedule/list')
     async def get_schedule_list():

@@ -80,7 +80,8 @@ def test_every_motion_command_entry_point_is_gated():
                   'def ac_servo_action', 'def dynamixel_action'):
         start = manual.index(entry)
         body = manual[start:start + 400]
-        assert '_off_mode_block()' in body, f'{entry} 에 오프 게이트가 없다'
+        # 축을 넘긴다 · 조인트 범위 확인 문도 같이 지난다 · 수정 목록 97
+        assert '_off_mode_block(axis)' in body, f'{entry} 에 오프 게이트가 없다'
 
     bridge = _source('bridge_node.py')
     for entry in ('def motion_run_start', 'def motion_run_initialize'):

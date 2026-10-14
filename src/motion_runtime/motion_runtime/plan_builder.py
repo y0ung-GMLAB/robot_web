@@ -16,7 +16,7 @@ import math
 import time
 from typing import Any, Dict, List, Mapping, Optional
 
-from motion_common import joint_mapping, repeat_policy, units, wire_units
+from motion_common import joint_mapping, multiturn_clear, repeat_policy, units, wire_units
 from motion_common.values import finite_float, optional_int
 
 from . import motion_run_rules
@@ -71,6 +71,16 @@ class PlanBuilder:
     def __init__(self, manager: Any) -> None:
         self.manager = manager
 
+    def _multiturn_clear_state(self) -> Dict[str, Any]:
+        """PC 단위 다회전 클리어 표시 · 작업 폴더 `runtime/` · 못 읽으면 빈 표시 · 수정 목록 140 ③"""
+        reader = getattr(self.manager, '_multiturn_clear_state', None)
+        if callable(reader):
+            return reader()
+        projects_dir = getattr(self.manager, 'motion_projects_dir', None)
+        if projects_dir is None:
+            return {}
+        return multiturn_clear.load(multiturn_clear.marker_path_for_projects(projects_dir))
+
     def build(
         self,
         payload: Dict[str, Any],
@@ -89,6 +99,8 @@ class PlanBuilder:
         ).strip().lower()
         if repeat_mode not in REPEAT_MODES:
             raise ValueError(f'지원하지 않는 자동 반복 방식입니다: {repeat_mode}')
+        # 옛 「바로 다음 · 대기 후 다음」 은 초기 위치를 거치게 바꾼다 · 수정 목록 112 라 (사용자 결정)
+        repeat_mode = repeat_policy.normalize_repeat_mode(repeat_mode)
         dwell_sec = finite_float(payload.get('dwell_sec'))
         dwell_sec = 0.0 if dwell_sec is None else dwell_sec
         if dwell_sec < 0.0:
@@ -249,7 +261,7 @@ class PlanBuilder:
         initialization_fallback_used = False
         if not motors:
             raise ValueError(
-                '모터 상태를 아직 못 받았습니다 · 모터 관리에서 적용·재시작이 끝났는지 확인하세요 '
+                '모터 상태를 아직 받지 못했습니다 · 모터 설정에서 장비에 적용이 끝났는지 확인하세요 '
                 '(current motion_state is unavailable)'
             )
 
@@ -258,6 +270,17 @@ class PlanBuilder:
             rows = []
         axes = []
         errors = []
+        # 범위를 사람이 확인 안 한 줄이 있으면 재생·초기 이동 모두 안 한다 ·
+        # 자동 생성 기본 −180 ~ 180° 는 기계 범위가 아니라 막는 것이 없다 · 수정 목록 97
+        # 맨 앞에 둔다 · 오류는 8개까지만 보인다
+        range_reason = joint_mapping.range_block_reason(rows)
+        if range_reason:
+            errors.append(range_reason)
+        # 다회전 클리어 뒤 기준점을 다시 지정하지 않은 축 · 재생·초기 위치 이동·스케줄·그룹 참가 모두 여기서 막힌다 ·
+        # 표시는 PC 단위(프로젝트를 바꾸거나 되돌려도 남음) · 이 매핑 줄의 기준점이 클리어 전 것이어도 막는다 · 수정 목록 140 ③
+        clear_reason = multiturn_clear.block_reason(self._multiturn_clear_state(), rows)
+        if clear_reason:
+            errors.insert(0, clear_reason)
         warnings = [unusable_motion_file_note] if unusable_motion_file_note else []
         # 모터가 이 PC 에 없는 축 · 막지 않고 건너뛴다 · §6-139
         missing_motor_motion_ids = []

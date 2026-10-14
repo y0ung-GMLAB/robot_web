@@ -311,7 +311,7 @@ function motorFilterKey(motor) {
 function monitoringColumnsForFilter(filter, rawMode) {
   const identity = [
     { label: '모터 번호', className: 'mono', cell: (motor) => axisText(motor) },
-    { label: '연결 ID', title: 'AC 서보 = EtherCAT Alias (0 이면 Slave 위치) · Dynamixel = 버스 ID · 「모터 번호」와 다른 값', className: 'mono', cell: (motor) => commonIdText(motor) },
+    { label: '연결 ID', title: 'AC 서보는 EtherCAT Alias(0이면 슬레이브 위치), Dynamixel은 버스 ID입니다. 「모터 번호」와 다를 수 있습니다.', className: 'mono', cell: (motor) => commonIdText(motor) },
     { label: '모터 종류', cell: (motor) => displayMotorTypeText(motor) },
     { label: '이름', cell: (motor) => displayNameText(motor) },
   ];
@@ -319,15 +319,15 @@ function monitoringColumnsForFilter(filter, rawMode) {
   const common = [
     ...identity,
     { label: '물리 연결 (최근 검색)', cell: (motor) => physicalConnectionCell(motor) },
-    { label: '런타임 수신', cell: (motor) => stateCell(motor) },
+    { label: '상태 수신', cell: (motor) => stateCell(motor) },
     { label: '서보 상태', className: (motor) => statusClass(motor), cell: (motor) => displayText(statusText(motor, rawMode)) },
     { label: '오류', className: (motor) => errorClass(motor), cell: (motor) => displayText(errorText(motor, rawMode)) },
-    { label: positionHeaderText(rawMode), title: '모터축 엔코더 위치 · 감속·기어비가 곱해진 값 (예: 목 상하 관절 1° = 150°)', className: 'mono', cell: (motor) => displayText(positionText(motor, rawMode)) },
-    { label: '모션 목표 (deg)', title: '애니메이션이 보내는 관절 목표값 · 감속·기어비 전 · 애니메이션 재생 중에만 갱신', className: (motor) => motionValueClass(motor), cell: (motor) => displayText(motionValueText(motor)) },
+    { label: positionHeaderText(rawMode), title: '모터축 엔코더 위치입니다. 감속비가 곱해진 값입니다(예: 목 상하 관절 1° = 모터 150°).', className: 'mono', cell: (motor) => displayText(positionText(motor, rawMode)) },
+    { label: '모션 목표 (deg)', title: '애니메이션이 보내는 조인트 목표값입니다(감속비 적용 전). 애니메이션 재생 중에만 갱신됩니다.', className: (motor) => motionValueClass(motor), cell: (motor) => displayText(motionValueText(motor)) },
     { label: '회전수 (turn)', className: 'mono', cell: (motor) => displayText(positionTurnText(motor)) },
     { label: velocityHeaderText(rawMode), className: 'mono', cell: (motor) => displayText(velocityText(motor, rawMode)) },
     { label: rawMode ? '원시 토크/전류' : '토크/전류', className: 'mono', cell: (motor) => displayText(effortText(motor, rawMode)) },
-    { label: '과부하율 (%)', title: '모터 정격 대비 부하 · MINAS 4D29h · 모터 관리 「과부하율 읽기」를 켠 모터만 · 100% 를 오래 넘으면 과부하 알람', className: (motor) => overloadClass(motor), cell: (motor) => displayText(overloadText(motor)) },
+    { label: '과부하율 (%)', title: '모터 정격 대비 부하입니다(MINAS 4D29h). 모터 설정에서 「과부하율 읽기」를 켠 모터만 표시됩니다. 100%를 오래 넘으면 과부하 알람이 납니다.', className: (motor) => overloadClass(motor), cell: (motor) => displayText(overloadText(motor)) },
     { label: '갱신 지연 (ms)', className: 'mono', cell: (motor) => displayText(ageText(motor)) },
   ];
   return common;
@@ -447,7 +447,7 @@ function detailRowsForTab(motor, tab, rawMode) {
             : '검색 전'],
       ['물리 연결 설명', motor.physical_connection_message || '-'],
       ['물리 검색 시각', dateTimeValue(motor.physical_connection_checked_at)],
-      ['런타임 수신 상태', (motor.connection_state || motor.state) === 'online'
+      ['상태 수신', (motor.connection_state || motor.state) === 'online'
         ? '수신 중'
         : stateLabel(motor.connection_state || motor.state)],
       ['통신 방식', transportValue(motor)],
@@ -617,10 +617,10 @@ export function renderMonitoring(state, options) {
 
   const registryFilteredCount = allMotors.length - registryFilteredMotors.length;
   const registryText = registryCount > 0
-    ? `설정 모터 표시 ${formatInt(registryFilteredMotors.length)}/${formatInt(registryCount)}개`
-    : '설정 모터 표시 0개';
+    ? `설정된 모터 ${formatInt(registryFilteredMotors.length)}/${formatInt(registryCount)}개 표시`
+    : '설정된 모터 0개';
   const filteredText = registryFilteredCount > 0
-    ? `, 설정 외 runtime ${formatInt(registryFilteredCount)}개 숨김`
+    ? `, 설정에 없는 모터 ${formatInt(registryFilteredCount)}개 숨김`
     : '';
   if (el.summaryText) {
     const offlineCount = Number(connectionSummary.offline || 0);
@@ -629,10 +629,10 @@ export function renderMonitoring(state, options) {
       + Number(connectionSummary.initializing || 0)
       + Number(connectionSummary.monitoring_off || 0)
       + Number(connectionSummary.unknown || 0);
-    el.summaryText.textContent = `런타임 수신: 수신 중 ${formatInt(onlineCount)}개, 수신 끊김 ${formatInt(offlineCount)}개, 버스 끊김 ${formatInt(busDownCount)}개, 확인 중 ${formatInt(pendingCount)}개 · 물리 연결은 최근 AC Servo 검색 결과 기준 · ${registryText}${filteredText} · 모터 타입 ${formatCounts(state.motor_type_counts)}`;
+    el.summaryText.textContent = `상태 수신: 수신 중 ${formatInt(onlineCount)}개, 수신 끊김 ${formatInt(offlineCount)}개, 버스 끊김 ${formatInt(busDownCount)}개, 확인 중 ${formatInt(pendingCount)}개 · 물리 연결은 최근 AC 서보 검색 결과 기준 · ${registryText}${filteredText} · 모터 종류 ${formatCounts(state.motor_type_counts)}`;
   }
   if (el.monitoringViewSummary) {
-    el.monitoringViewSummary.textContent = `${motorFilterLabel(activeMonitoringFilter)} · 설정 기준 ${formatInt(motors.length)}개 표시`;
+    el.monitoringViewSummary.textContent = `${motorFilterLabel(activeMonitoringFilter)} · 설정된 모터 ${formatInt(motors.length)}개 표시`;
   }
   renderMonitoringTabs(registryFilteredMotors, activeMonitoringFilter, el);
   renderMonitoringHeader(columns, el);
@@ -640,8 +640,8 @@ export function renderMonitoring(state, options) {
   if (!el.rows) return;
   if (motors.length === 0) {
     const emptyText = registryCount > 0
-      ? `설정된 ${motorFilterLabel(activeMonitoringFilter)} 실행 상태를 아직 수신하지 못했습니다`
-      : '설정된 모터가 없습니다. 모터 설정을 먼저 불러오세요.';
+      ? `설정된 ${motorFilterLabel(activeMonitoringFilter)} 모터의 상태를 아직 받지 못했습니다`
+      : '설정된 모터가 없습니다. 「모터 설정」에서 모터를 먼저 등록하세요.';
     const html = `<tr><td colspan="${columns.length}" class="empty">${displayText(emptyText)}</td></tr>`;
     if (el.rows.innerHTML !== html) el.rows.innerHTML = html;
     lastMonitoringRowsSignature = '';

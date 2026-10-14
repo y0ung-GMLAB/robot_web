@@ -7,7 +7,7 @@
         </div>
         <div class="workspace-guide" aria-label="재생 기록 사용 순서">
           <strong>사용 방법</strong>
-          <ol><li>날짜 선택</li><li>회차 선택</li><li>목표·실제 그래프 확인 · CSV 내려받기</li></ol>
+          <ol><li>날짜 선택</li><li>회차 선택</li><li>목표·실제 그래프 확인 · CSV 다운로드</li></ol>
         </div>
         <div class="motion-trace-toolbar">
           <label>
@@ -38,14 +38,14 @@
           </div>
           <div class="motion-trace-detail">
             <div class="motion-trace-detail-head">
-              <strong id="motionTraceDetailTitle">회차를 고르세요</strong>
+              <strong id="motionTraceDetailTitle">회차를 선택하세요</strong>
               <span class="motion-trace-legend">
                 <span class="motion-trace-legend-target">목표</span>
                 <span class="motion-trace-legend-actual">실제</span>
               </span>
-              <a id="motionTraceDownloadLink" class="motion-trace-download hidden" href="#" download>CSV 내려받기</a>
+              <a id="motionTraceDownloadLink" class="motion-trace-download hidden" href="#" download>CSV 다운로드</a>
             </div>
-            <p id="motionTraceDetailNote" class="motion-trace-note">값은 모션 각도(deg, 애니메이션과 같은 단위)입니다 · 오차에는 명령 한 틱(20ms) 지연이 포함됩니다</p>
+            <p id="motionTraceDetailNote" class="motion-trace-note">값은 조인트 각도(deg)입니다. 오차에는 명령 한 주기(20 ms)의 지연이 포함됩니다.</p>
             <div id="motionTraceCharts" class="motion-trace-charts"></div>
           </div>
         </div>

@@ -51,7 +51,7 @@ if (panel) {
         document_.available ? '' : 'missing',
       ].filter(Boolean).join(' ');
       button.setAttribute('aria-selected', document_.id === state.activeId ? 'true' : 'false');
-      if (!document_.available) button.title = `${document_.source} 파일이 이 PC 에 없습니다`;
+      if (!document_.available) button.title = `${document_.source} 파일이 없습니다`;
       button.addEventListener('click', () => selectDocument(document_.id));
       picker.appendChild(button);
     });
@@ -64,7 +64,7 @@ if (panel) {
     if (!usable.length) {
       const empty = document.createElement('span');
       empty.className = 'docs-outline-empty';
-      empty.textContent = '차례 없음';
+      empty.textContent = '목차 없음';
       outline.appendChild(empty);
       return;
     }

@@ -29,7 +29,7 @@ class _Logger:
 DAY = datetime(2026, 9, 17)
 
 
-def _node(tmp_path, *, run_state, run_mode='schedule', schedules=None, group=None):
+def _node(tmp_path, *, run_state, run_mode='schedule', schedules=None, group=None, local=None):
     node = MotionScheduleNode.__new__(MotionScheduleNode)
     node.projects_dir = str(tmp_path)
     node.coordination_file = str(tmp_path / 'motion_coordination.yaml')
@@ -41,6 +41,7 @@ def _node(tmp_path, *, run_state, run_mode='schedule', schedules=None, group=Non
     node._coordination_enabled = lambda: False
     node._coordination_joined = lambda: False
     node._local_run_state = lambda: run_state
+    node._local_run_status = lambda: {'state': run_state, **dict(local or {})}
     node._group_execution = lambda: dict(group or {})
     node._run_mode = run_mode
     node.sent = []
@@ -121,12 +122,12 @@ def test_manual_mode_still_stops_when_the_window_ends(tmp_path):
     모드에서는 정지 자체를 검사하지 않아서, 스케줄이 잘못 켠 모션이 구간이
     끝나도 영영 돌았다 (실측 17:58 시작 → 18:16 까지 18분).
 
-    「구간 밖에서는 아무것도 돌지 않는다」가 규칙이다 · 누가 켰는지는 묻지
-    않는다.
+    (2026-10-12 · 수정 목록 106) 스케줄이 켠 재생만 · 수동 모드에서 사람이 켠 것은
+    아래 시험들처럼 그대로 둔다.
     """
     node = _node(
         tmp_path, run_state='running', run_mode='manual',
-        schedules=[_day_schedule()],
+        schedules=[_day_schedule()], local={'schedule_id': 's1'},
     )
 
     node._reconcile(DAY.replace(hour=20))
@@ -154,7 +155,8 @@ def test_a_midnight_window_runs_through_the_night(tmp_path):
 
     node.sent.clear()
     node._reconcile(DAY.replace(day=18, hour=1, minute=30))
-    assert node.sent == [], '구간이 끝났는데 시작했다'
+    # 구간 끝 · 멈춰 있으니 주차만(사용자 2026-10-13) · 시작은 없다
+    assert [endpoint for endpoint, _payload in node.sent] == ['/api/motion-run/stop-after-cycle'], '구간이 끝났는데 시작했다'
 
 
 def test_a_disabled_schedule_is_ignored(tmp_path):
@@ -311,3 +313,155 @@ def test_an_old_mode_change_does_not_count_as_acknowledgement(tmp_path):
     node._local_run_status = lambda: {'state': 'error', 'auto_recovery_exhausted': True}
     node._reconcile(noon)
     assert node.sent == []
+
+
+# -- 수정 목록 106 · 구간 끝 정지는 스케줄이 켠 재생만 · 수동 모드에서 사람이 켠 것은 그대로 ------ #
+
+def _evening(node):
+    node._reconcile(DAY.replace(hour=20))
+    return node.sent
+
+
+def test_manual_mode_leaves_a_human_started_run_alone(tmp_path):
+    """오늘 floating4 · 구간 없는 날 수동 모드 그룹 시험이 1 분 안에 멈췄다"""
+    node = _node(tmp_path, run_state='running', run_mode='manual', schedules=[_day_schedule()],
+                 local={'schedule_id': ''})
+    assert _evening(node) == []
+
+
+def test_manual_mode_still_stops_what_the_schedule_started(tmp_path):
+    """17:58 사고 · 스케줄이 켜고 도중에 수동으로 바꿈 → 구간 끝에 멈춘다"""
+    node = _node(tmp_path, run_state='running', run_mode='manual', schedules=[_day_schedule()],
+                 local={'schedule_id': 's1'})
+    assert len(_evening(node)) == 1
+
+
+def test_manual_mode_human_group_is_left_alone_once_it_saw_nothing_running(tmp_path):
+    node = _node(tmp_path, run_state='stopped', run_mode='manual', schedules=[_day_schedule()])
+    node._reconcile(DAY.replace(hour=20))          # 멈춰 있는 것을 봄 → 다음 것은 사람이 켠 것
+    node._local_run_state = lambda: 'running'
+    node._local_run_status = lambda: {'state': 'running', 'group_execution': True}
+    assert _evening(node) == []
+
+
+def test_manual_mode_group_started_by_the_schedule_is_stopped(tmp_path):
+    node = _node(tmp_path, run_state='stopped', schedules=[_day_schedule()])
+    node._reconcile(DAY.replace(hour=13))           # 스케줄이 켬
+    node.sent.clear()
+    node._run_mode = 'manual'                       # 도중에 수동으로
+    node._local_run_state = lambda: 'running'
+    node._local_run_status = lambda: {'state': 'running', 'group_execution': True}
+    assert len(_evening(node)) == 1
+
+
+def test_unknown_starter_is_stopped(tmp_path):
+    """스케줄 노드가 막 다시 떠 누가 켰는지 모르는 그룹 · 멈추는 쪽"""
+    node = _node(tmp_path, run_state='running', run_mode='manual', schedules=[_day_schedule()],
+                 local={'group_execution': True})
+    node._schedule_started = None
+    assert len(_evening(node)) == 1
+
+
+@pytest.mark.parametrize('mode', ['schedule', 'off'])
+def test_schedule_and_off_modes_stop_a_human_started_run(tmp_path, mode):
+    node = _node(tmp_path, run_state='running', run_mode=mode, schedules=[_day_schedule()],
+                 local={'schedule_id': ''})
+    assert len(_evening(node)) == 1
+
+
+# --------------------------------------------------------------------------- #
+# 부팅 직후 준비 전에는 시작을 미룬다 · 받아들여졌는데 안 돌면 센다 · 수정 목록 124
+#
+# 실물 S-12 (2026-10-13 15:34) · 부팅 중 앱솔루트 확인 전에 그룹 시작 → 거절이 2등급으로
+# 잠겨 모터가 다 돌아온 뒤에도 안 시작 · 사람이 「그룹 오류 해제」 를 눌렀다.
+# --------------------------------------------------------------------------- #
+
+def test_inside_the_window_but_not_ready_waits_for_the_next_check(tmp_path):
+    node = _node(tmp_path, run_state='stopped', schedules=[_day_schedule()])
+    node._last_failure = {}
+    node._start_blocker = '앱솔루트 미확인 · 2번 모터 확인 불가'
+
+    node._reconcile(DAY.replace(hour=13))
+
+    assert node.sent == [], '준비 전에는 시작을 보내지 않는다'
+    assert node._last_failure['deferred'] is True
+    assert node._last_failure['message'] == '앱솔루트 미확인 · 2번 모터 확인 불가'
+
+    node._start_blocker = ''
+    node._reconcile(DAY.replace(hour=13, minute=1))
+
+    assert node.sent[0][0] == '/api/motion-run/start', '준비되면 다음 점검에 스스로 시작'
+
+
+def test_an_accepted_start_that_never_ran_is_counted(tmp_path):
+    """그룹 시작은 받아들여진 뒤 준비에서 실패한다 · 다음 점검에 안 돌면 거부로 센다 (S-11)"""
+    node = _node(tmp_path, run_state='stopped', schedules=[_day_schedule()])
+    node._last_failure = {}
+    node._read_json = lambda endpoint, **_kwargs: {
+        'runtime': {'last_start_failure': {'message': 'floating4 실행 준비 안 됨: 앱솔루트 미확인'}},
+    }
+
+    node._reconcile(DAY.replace(hour=13))
+    assert node._start_pending is True
+    node._reconcile(DAY.replace(hour=13, minute=1))
+
+    assert node._last_failure['count'] == 1
+    assert node._last_failure['message'] == 'floating4 실행 준비 안 됨: 앱솔루트 미확인'
+    assert len(node.sent) == 2, '그래도 다시 시작한다'
+
+
+def test_a_start_that_runs_is_not_counted(tmp_path):
+    node = _node(tmp_path, run_state='stopped', schedules=[_day_schedule()])
+    node._last_failure = {}
+    node._reconcile(DAY.replace(hour=13))
+    node._local_run_state = lambda: 'running'
+
+    node._reconcile(DAY.replace(hour=13, minute=1))
+
+    assert node._start_pending is False
+    assert node._last_failure == {}
+
+
+def _window_end(node, *, before='running', after='stopped'):
+    """13:00 구간 안 → 20:00 · 20:01 구간 밖"""
+    node._local_run_state = lambda: before
+    node._local_run_status = lambda: {'state': before}
+    node._reconcile(DAY.replace(hour=13))
+    node._local_run_state = lambda: after
+    node._local_run_status = lambda: {'state': after}
+    node._reconcile(DAY.replace(hour=20))
+    node._reconcile(DAY.replace(hour=20, minute=1))
+    return node.sent
+
+
+def test_window_end_parks_a_robot_that_was_already_stopped(tmp_path):
+    """사용자 2026-10-13 · 멈춰 있어도 주차 → 서보 OFF · 한 번만"""
+    node = _node(tmp_path, run_state='running', schedules=[_day_schedule()])
+    sent = _window_end(node)
+    assert sent == [('/api/motion-run/stop-after-cycle', {'schedule_id': 'window_end', 'reason': 'schedule_end'})]
+
+
+def test_window_end_idle_park_goes_the_group_way_when_joined(tmp_path):
+    node = _node(tmp_path, run_state='running', schedules=[_day_schedule()])
+    node._coordination_enabled = lambda: True
+    node._coordination_joined = lambda: True
+    endpoint, payload = _window_end(node)[0]
+    assert endpoint == '/api/coordination/control'
+    assert payload['command'] == 'stop_after_cycle' and payload['reason'] == 'schedule_end'
+
+
+def test_window_end_idle_park_is_not_sent_in_manual_mode(tmp_path):
+    node = _node(tmp_path, run_state='running', run_mode='manual', schedules=[_day_schedule()],
+                 local={'schedule_id': ''})
+    assert _window_end(node, before='stopped') == []
+
+
+def test_window_end_while_running_parks_through_the_stop_only(tmp_path):
+    """도는 중이면 회차 후 정지(schedule_end) 하나 · 멈춘 뒤 또 보내지 않는다"""
+    node = _node(tmp_path, run_state='running', schedules=[_day_schedule()])
+    node._reconcile(DAY.replace(hour=13))
+    node._reconcile(DAY.replace(hour=20))
+    node._local_run_state = lambda: 'stopped'
+    node._local_run_status = lambda: {'state': 'stopped'}
+    node._reconcile(DAY.replace(hour=20, minute=1))
+    assert [payload.get('reason') for _endpoint, payload in node.sent] == ['schedule_end']

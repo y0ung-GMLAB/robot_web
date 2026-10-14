@@ -36,7 +36,7 @@ test('automatic repeat has explicit enable policy and start controls', () => {
   }
   assert.match(html, /value="direct">바로 다음 회차/);
   assert.match(html, /value="dwell">대기 후 다음 회차/);
-  assert.match(html, /value="reinitialize" selected>초기 위치 이동 후 다음/);
+  assert.match(html, /value="reinitialize" selected>초기 위치로 돌아간 뒤 다음 회차/);
 });
 
 test('automatic repeat uses runtime APIs instead of browser timers', () => {
