@@ -3563,6 +3563,15 @@ class MotionCoordinationNode(Node):
                     'cycle_number': cycle_number,
                     'target_cycle_count': self._execution.target_cycle_count,
                     'sync_mode': self._execution.sync_mode,
+                    # 누가 시작했나 · human · schedule · 진행 PC 만 안다(시작 요청을 받은 PC) · 나머지는 빈 값 ·
+                    # 스케줄 노드가 구간 끝 정지 판정에 쓴다(제 기억보다 이것을 믿는다) · 로컬 상태 JSON 만 ·
+                    # DDS 메시지 · 약속 번호는 그대로 · 수정 목록 143
+                    'started_by': (
+                        self._execution.started_by
+                        if self._execution.execution_id
+                        and self._execution.coordinator_id == self._config.pc_id
+                        else ''
+                    ),
                     # 이번 실행에서 뺀 PC 와 이유 · 수정 목록 30
                     'excluded': dict(self._execution.excluded),
                     # 도는 중 복귀하는 PC · preparing(계획 만드는 중) · ready(다음 회차 경계 대기) · 30-3

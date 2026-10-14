@@ -82,6 +82,7 @@ class MotionScheduleNode(Node):
         # 한 시간 내내 매분 거부당하는 동안 아무도 몰랐다.
         self._last_failure = {}
         # 지금 도는 재생을 스케줄이 켰나 · True 켰음 · False 사람이 켬 · None 모름(기동 직후) · 수정 목록 106
+        # 그룹은 연동 상태의 `started_by` 를 먼저 믿는다 · 이 값은 그것을 못 읽을 때만 · 수정 목록 143
         self._schedule_started = None
         #: 조회가 연달아 몇 번 실패했나 · 상태가 바뀔 때만 적는다 · §6-271
         self._read_failures: Dict[str, int] = {}
@@ -395,8 +396,9 @@ class MotionScheduleNode(Node):
         wanted = self.engine.active(now, schedules)
         running = self._motion_is_running()
         self._warn_about_unreadable(schedules)
-        if not running:
-            # 멈춰 있는 것을 봤다 · 다음에 도는 것은 스케줄이 켰거나(`_execute_start`) 사람이 켠 것이다
+        if not running and not self._last_read_failed('/api/coordination'):
+            # 멈춰 있는 것을 봤다 · 다음에 도는 것은 스케줄이 켰거나(`_execute_start`) 사람이 켠 것이다 ·
+            # 그룹 상태를 못 읽은 점검은 「멈춤」 을 본 것이 아니다 · 기억을 바꾸지 않는다 · 수정 목록 143 ③
             self._schedule_started = False
         if running or wanted is None:
             # 지난 시작이 돌기 시작했거나 구간이 끝났다 · 셀 것이 없다 · 수정 목록 124
@@ -426,13 +428,23 @@ class MotionScheduleNode(Node):
             #
             # 수동 모드에서 사람이 켠 재생(단독 · 그룹)은 손대지 않는다 · 시험은 운영 구간이
             # 없는 날에도 돼야 한다 · 스케줄이 켰다가 도중에 수동으로 바꾼 것은 위 17:58 사고라
-            # 그대로 멈춘다 · 누가 켰는지 모르면(스케줄 노드 재시작 뒤 그룹) 멈추는 쪽 ·
+            # 그대로 멈춘다 · 그룹은 연동 상태의 `started_by` 로 안다(스케줄 노드가 재시작해도) ·
+            # 상태를 읽었는데도 누가 켰는지 모르면 멈추는 쪽 · 못 읽었으면 다음 점검 · 수정 목록 143 ·
             # 스케줄 모드 · 오프 모드는 누가 켰든 멈춘다.
-            if self._run_mode not in (SCHEDULE_MODE, OFF_MODE) and not self._started_by_schedule():
-                if not getattr(self, '_manual_run_noted', False):
-                    self._manual_run_noted = True
-                    self.get_logger().info("[점검] 구간 밖 · 수동 모드에서 사람이 켠 재생 · 그대로 둠")
-                return
+            if self._run_mode not in (SCHEDULE_MODE, OFF_MODE):
+                started = self._started_by_schedule()
+                if started is False:
+                    if not getattr(self, '_manual_run_noted', False):
+                        self._manual_run_noted = True
+                        self.get_logger().info("[점검] 구간 밖 · 수동 모드에서 사람이 켠 재생 · 그대로 둠")
+                    return
+                if started is None and not self._run_state_readable():
+                    # 상태를 못 읽었다 · 도는지도 누가 켰는지도 모른다 · 이번 점검은 정하지 않는다 ·
+                    # 다음 점검(1분)에 다시 본다 · 수정 목록 143 ③
+                    #
+                    # 전에는 못 읽은 상태를 「도는 단독 재생 · 스케줄 칸 없음」 으로 읽어 「사람이 켠 재생」
+                    # 으로 지나갔고, 기억(모름)은 그대로 남아 그다음 사람이 켠 그룹을 멈췄다(실물 V-28).
+                    return
             self._manual_run_noted = False
             self.get_logger().info("[점검] 구간 밖인데 돌고 있다 · 회차 후 정지")
             # 스케줄 모드에서 운영 시간이 끝났다 · 정지 뒤 PC 마다 제 설정대로
@@ -520,19 +532,60 @@ class MotionScheduleNode(Node):
         self.get_logger().warning(f"[점검] 지난 시작이 재생으로 이어지지 않음 · {message}")
         self._remember_failure('시작 뒤 재생 없음', message)
 
-    def _started_by_schedule(self) -> bool:
-        """지금 도는 재생을 스케줄이 켰나 · 모르면 켠 것으로 본다(멈추는 쪽) · 수정 목록 106
+    def _started_by_schedule(self):
+        """지금 도는 재생을 스케줄이 켰나 · True 켰음 · False 사람이 켬 · None 모름 · 수정 목록 106 · 143
 
         단독 재생은 런타임 상태의 `schedule_id` 가 답이다(스케줄만 그 칸을 채운다 · §6-270) ·
-        그룹은 그 칸이 없어 이 노드가 시작을 보낸 것을 기억한 값으로 본다.
+        그룹은 연동 상태의 `started_by` 가 답이다(진행 PC 인 이 PC 의 연동 노드가 시작 요청에서 받아
+        둔다 · 이 노드가 재시작해도 남는다) · 그것도 없으면 이 노드가 기억한 값.
+        모름(None)은 부르는 쪽이 정한다 · 상태를 읽었는데 모르면 멈추는 쪽(106) · 못 읽었으면 다음 점검.
+
+        전에는 그룹이면 기억만 봤다 · 재시작 직후 기억은 「모름」 이라, 사람이 켠 그룹도 구간 밖이면
+        멈췄다(실물 V-28 · 수정 목록 143).
         """
         try:
             status = self._local_run_status()
         except Exception:
             status = {}
-        if is_running(str(status.get('state') or '')) and not status.get('group_execution'):
+        state = str(status.get('state') or '').strip()
+        # 빈 상태는 「도는 단독 재생」 이 아니라 「못 읽음」 이다 · 수정 목록 143 ③
+        if state and is_running(state) and not status.get('group_execution'):
             return bool(str(status.get('schedule_id') or '').strip())
-        return getattr(self, '_schedule_started', None) is not False
+        starter = self._group_started_by_schedule()
+        if starter is not None:
+            # 연동 노드가 아는 답 · 기억도 맞춰 둔다(다음에 못 읽을 때를 위해)
+            self._schedule_started = starter
+            return starter
+        return getattr(self, '_schedule_started', None)
+
+    def _group_started_by_schedule(self):
+        """살아 있는 그룹 실행을 누가 켰나 · 연동 상태의 `started_by` · 없거나 모르면 None · 수정 목록 143
+
+        값은 연동 노드의 `participant_rules.STARTED_BY_*` 와 같은 글자다(`human` · `schedule`) ·
+        진행 PC 가 아니면 연동 노드가 빈 값을 준다 · 옛 연동 노드는 칸이 없다 · 둘 다 None.
+        """
+        execution = self._group_execution()
+        if not group_is_active(execution):
+            return None
+        started_by = str(execution.get('started_by') or '').strip().lower()
+        if started_by == 'schedule':
+            return True
+        if started_by == 'human':
+            return False
+        return None
+
+    def _last_read_failed(self, endpoint: str) -> bool:
+        """마지막 조회가 실패했나 · `_read_json` 이 세는 연속 실패 · 성공하면 지운다 · 수정 목록 143"""
+        return bool((getattr(self, '_read_failures', None) or {}).get(endpoint))
+
+    def _run_state_readable(self) -> bool:
+        """이번 점검이 이 PC 의 모션 상태와 그룹 상태를 **둘 다** 읽었나 · 수정 목록 143 ③
+
+        못 읽은 모션 상태는 빈 문자열이고 「도는 중」 으로 친다(`run_state.is_running`) · 시작을 막는 데는
+        맞지만, 「누가 켰나」 의 기억을 바꾸거나 정지를 정하는 근거로는 쓰지 않는다.
+        """
+        state = str(self._local_run_state() or '').strip()
+        return bool(state) and not self._last_read_failed('/api/coordination')
 
     def _warn_about_unreadable(self, schedules) -> None:
         """시각을 못 읽는 스케줄은 **말이라도 한다** · §6-285
