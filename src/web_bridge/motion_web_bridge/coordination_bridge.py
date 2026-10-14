@@ -348,33 +348,28 @@ def group_start_origin(payload: Mapping[str, Any]) -> str:
     return 'schedule' if str(payload.get('schedule_id') or '').strip() else 'human'
 
 
-#: 사람 조작 · 안전 상태 `manual_activity_modes` · `command_owner` 를 화면 글자로
-_MANUAL_ACTIVITY_TEXT = {'jog': '조그 이동', 'action': '목표 위치 이동'}
+#: 사람 조작 판정 · 연동 노드(선택 · 하트비트 · 마스터 자신)와 같이 쓴다 · 수정 목록 122 (나) · 136
+human_operation_reason = run_state.human_operation_reason
 
 
-def human_operation_reason(
-    motion_run_status: Optional[Mapping[str, Any]],
-    safety_status: Optional[Mapping[str, Any]],
-) -> str:
-    """이 PC 에서 사람이 지금 무언가 움직이는 중인가 · 그러면 그룹에 들어가지 않는다 · 수정 목록 122 (나)
+def stop_now_not_ours(bridge: Any, execution_id: str) -> str:
+    """그룹 즉시 정지가 이 PC 가 돌지 않는 실행 것인가 · 그러면 이유 · 수정 목록 136
 
-    수동 모드 PC 도 사람이 누른 그룹 재생에 들어간다 · 그런데 그 PC 앞에서 누가 조그 ·
-    페이더 · 단독 재생을 하고 있으면 그룹이 축을 빼앗는다 · 그 PC 만 준비를 거절하고 이유를
-    남긴다(진행 PC 가 「준비 거절 · 사람 조작 중 …」 으로 빼고 나머지로 간다).
+    전에는 실행 ID 를 안 보고 무조건 세웠다 · 그룹에 안 들어간 PC(단독 재생 중이라 빠진 마스터 ·
+    조그 중인 PC)에 그 그룹의 정지가 닿으면 단독 재생 · 조그가 멈췄다(실물 V-4 · V-5) ·
+    **이 PC 가 단독 재생 · 사람 조작 중이고 그 실행을 돌지 않을 때만** 무시한다 · 쉬는 중이거나
+    그룹 세션이 있으면(다른 번호여도 · 준비가 막 끝나 상태가 늦게 온 경우) 전처럼 세운다.
     """
-    run = motion_run_status if isinstance(motion_run_status, Mapping) else {}
-    safety = safety_status if isinstance(safety_status, Mapping) else {}
-    state = str(run.get('state') or '').strip().lower()
-    if state and not run.get('group_execution') and run_state.is_running(state):
-        return '사람 조작 중 · 단독 재생'
-    modes = safety.get('manual_activity_modes')
-    modes = {str(item) for item in modes} if isinstance(modes, (list, tuple, set)) else set()
-    for mode in ('jog', 'action'):
-        if mode in modes:
-            return f'사람 조작 중 · {_MANUAL_ACTIVITY_TEXT[mode]}'
-    if str(safety.get('command_owner') or '') == 'stream':
-        return '사람 조작 중 · 페이더'
-    return ''
+    execution_id = str(execution_id or '')
+    if not execution_id:
+        return ''
+    run = _locked_copy(bridge, '_motion_run_status', '_motion_run_lock')
+    if run.get('group_execution'):
+        return ''
+    busy = human_operation_reason(run, _locked_copy(bridge, '_safety_status', '_safety_status_lock'))
+    if not busy:
+        return ''
+    return f'이 PC 는 그룹 실행 {execution_id} 에 없음 · {busy} · 정지하지 않음'
 
 
 def _locked_copy(bridge: Any, value_name: str, lock_name: str) -> Dict[str, Any]:
@@ -473,6 +468,10 @@ def local_motion_control(bridge: Any, payload: Mapping[str, Any]) -> Dict[str, A
     """Execute one loopback-only high-level command through motion_run_manager."""
     command = str(payload.get('command') or '')
     if command in {'stop_motion', 'stop_initialize', 'stop_now'}:
+        # 그 실행을 돌지 않는 PC 의 단독 재생 · 조그는 그대로 둔다 · 수정 목록 136
+        ignored = stop_now_not_ours(bridge, str(payload.get('execution_id') or ''))
+        if ignored:
+            return {'success': True, 'ignored': True, 'message': ignored}
         return bridge.coordination_stop_now()
     if command in {'cancel_before_start', 'group_cancel'}:
         result = bridge.motion_group_cancel({
