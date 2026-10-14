@@ -13,6 +13,8 @@
 그래서 연동이든 단독이든 여기 한 곳으로 답이 나온다.
 """
 
+from collections.abc import Mapping
+
 #: 아무것도 돌지 않는 상태 · 여기 없으면 도는 중으로 본다
 #:
 #: 빈 값은 여기 **없다** · 「멈춰 있다」가 아니라 「못 읽었다」이고, 못 읽었으면
@@ -114,3 +116,34 @@ def group_is_active(execution) -> bool:
     if not str(execution.get('execution_id') or '').strip():
         return False
     return str(execution.get('state') or '').strip().lower() in GROUP_ACTIVE_STATES
+
+
+def solo_running(motion_run_status) -> bool:
+    """그룹이 아닌 제 재생(초기 이동 포함)이 도는 중인가 · 수정 목록 136"""
+    run = motion_run_status if isinstance(motion_run_status, Mapping) else {}
+    state = str(run.get('state') or '').strip().lower()
+    return bool(state) and not run.get('group_execution') and is_running(state)
+
+
+#: 사람 조작 · 안전 상태 `manual_activity_modes` · `command_owner` 를 화면 글자로
+_MANUAL_ACTIVITY_TEXT = {'jog': '조그 이동', 'action': '목표 위치 이동'}
+
+
+def human_operation_reason(motion_run_status, safety_status) -> str:
+    """이 PC 에서 사람이 지금 무언가 움직이는 중인가 · 그러면 그룹에 들어가지 않는다 · 수정 목록 122 (나)
+
+    수동 모드 PC 도 사람이 누른 그룹 재생에 들어간다 · 그런데 그 PC 앞에서 누가 조그 ·
+    페이더 · 단독 재생을 하고 있으면 그룹이 축을 빼앗는다 · 그 PC 만 빼고 이유를 남긴다 ·
+    브리지(준비 검사 · 정지 거르기)와 연동 노드(선택 · 하트비트 · 마스터 자신)가 같은 판정을 쓴다 · 수정 목록 136
+    """
+    safety = safety_status if isinstance(safety_status, Mapping) else {}
+    if solo_running(motion_run_status):
+        return '사람 조작 중 · 단독 재생'
+    modes = safety.get('manual_activity_modes')
+    modes = {str(item) for item in modes} if isinstance(modes, (list, tuple, set)) else set()
+    for mode in ('jog', 'action'):
+        if mode in modes:
+            return f'사람 조작 중 · {_MANUAL_ACTIVITY_TEXT[mode]}'
+    if str(safety.get('command_owner') or '') == 'stream':
+        return '사람 조작 중 · 페이더'
+    return ''

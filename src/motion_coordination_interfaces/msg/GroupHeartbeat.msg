@@ -22,3 +22,6 @@ uint32 current_cycle
 string operation_mode
 string web_url
 uint32 protocol_version
+# 그룹을 지금 시작 못 하는 이유(설정 없음 · 모터 끊김 · 조그 · 페이더 · 단독 재생) · 비면 됨 ·
+# 마스터가 선택 때 미리 뺀다 · 약속 번호 8 · 2026-10-14 · 수정 목록 136
+string start_blocker

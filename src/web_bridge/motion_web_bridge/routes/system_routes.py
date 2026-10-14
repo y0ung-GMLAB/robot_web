@@ -1,7 +1,9 @@
 import asyncio
+import functools
 import json
 import os
 import subprocess
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import List
 
@@ -25,6 +27,20 @@ def _is_not_modified(response_headers, request_headers) -> bool:
     if not request_etag:
         return False
     return request_etag == response_headers.get('etag')
+
+
+#: 연동 노드가 부르는 느린 로컬 길(준비 검사 · 그룹 명령) 전용 스레드 · 수정 목록 136 ④
+#:
+#: 이 길은 한 번에 2~5 s 를 기다린다(재생 관리자 답 · 실행 설정 맞추기) · 공용 스레드 풀
+#: (`asyncio.to_thread` · CPU 수 + 4 개)을 같이 쓰면 그룹 시작 · 취소 · 정지가 한꺼번에 올 때
+#: 풀이 차서 `/api/status` · 화면 스냅샷이 줄을 선다(실물 10-14 09:29 · 5 s 넘게 무응답 · 추정).
+_COORDINATION_POOL = ThreadPoolExecutor(max_workers=8, thread_name_prefix='coordination-local')
+
+
+async def _coordination_to_thread(function, *args):
+    """`asyncio.to_thread` 와 같다 · 연동 전용 스레드에서"""
+    loop = asyncio.get_running_loop()
+    return await loop.run_in_executor(_COORDINATION_POOL, functools.partial(function, *args))
 
 
 def register_system_routes(app: FastAPI, bridge, project_call) -> None:
@@ -252,7 +268,7 @@ def register_system_routes(app: FastAPI, bridge, project_call) -> None:
             body = await request.json()
         except Exception:
             body = {}
-        return await asyncio.to_thread(
+        return await _coordination_to_thread(
             bridge.coordination_local_readiness,
             body if isinstance(body, dict) else {},
         )
@@ -284,7 +300,7 @@ def register_system_routes(app: FastAPI, bridge, project_call) -> None:
         body = await request.json()
         if not isinstance(body, dict):
             raise HTTPException(status_code=400, detail='request body must be an object')
-        return await asyncio.to_thread(bridge.coordination_local_control, body)
+        return await _coordination_to_thread(bridge.coordination_local_control, body)
 
     @app.post('/api/system/program/restart')
     async def restart_managed_program():

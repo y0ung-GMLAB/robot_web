@@ -533,7 +533,7 @@ curl -fsSL https://raw.githubusercontent.com/y0ung-GMLAB/robot_web/main/scripts/
 - 손으로 할 때 · `systemctl --user stop motion-control motion-coordination motion-motor` → `mv ~/ros2_ws ~/ros2_ws_old` → 위 한 줄(옵션 없이)
 - **옮겨 오지 않는 것** · 옛 프로젝트·조인트 매핑·기준점·모터 설정 · 새 화면에서 처음부터 합니다 · `설정` → 모터 관리 `전체 모터 검색` → 앱솔루트 방식 확인 → 새 프로젝트 → 조인트 매핑 → 기준점 캡처 → 그룹
 - 옛 애니메이션 `.json` 은 그대로 올릴 수 있습니다 · 옛 폴더 `~/ros2_ws_old_*/motion_projects/<프로젝트>/motions/` 에서 꺼내 웹에 드래그
-- **그룹으로 묶는 PC 는 전부 새 스택 같은 버전**이어야 합니다(그룹 프로토콜 7) · 옛 스택 PC 와 섞이면 서로 못 붙습니다
+- **그룹으로 묶는 PC 는 전부 새 스택 같은 버전**이어야 합니다(그룹 프로토콜 8) · 옛 스택 PC 와 섞이면 서로 못 붙습니다
 - 새 것이 잘 돌면 옛 폴더를 지웁니다 · `rm -rf ~/ros2_ws_old_*` · 그 전에는 남겨 두면 옛 설정을 찾아볼 수 있습니다
 - 아직 실제 옛 스택 PC 에서 이 옵션을 돌려 본 적은 없습니다 · 처음 한 대는 옆에서 지켜보세요
 

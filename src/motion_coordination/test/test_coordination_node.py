@@ -2080,10 +2080,14 @@ def test_a_finished_execution_left_behind_is_reaped():
 # --------------------------------------------------------------------------- #
 
 def test_the_master_not_ready_cancels_without_latching():
-    """실물 S-12 · 앱솔루트 확인 전 · 전에는 GROUP_START_REJECTED 2등급"""
+    """실물 S-12 · 앱솔루트 확인 전 · 전에는 GROUP_START_REJECTED 2등급
+
+    다른 참가 PC 가 있으면 이제 마스터만 빠지고 나머지가 돈다(수정 목록 136 · `test_busy_master_group`) ·
+    여기는 마스터 혼자인 경우.
+    """
     node = _node()
     node._execution = GroupExecution()
-    execution_id = node._execution.begin('pc-a', ('pc-a', 'pc-b'))
+    execution_id = node._execution.begin('pc-a', ('pc-a',))
     events = []
     node._call_local_control = lambda payload, **_kwargs: (
         events.append(('local', payload['command'])) or {'success': True}
@@ -2095,7 +2099,6 @@ def test_the_master_not_ready_cancels_without_latching():
         event='rejected', success=False,
         message='실행 준비 검사 실패: 앱솔루트 미확인 · 2번 모터 확인 불가',
     ))
-    _peer_release_ack(node)
 
     assert node._execution.execution_id == ''
     assert node._coordination_error == {}, '잠그지 않는다 · 스케줄이 다음 점검에 다시'

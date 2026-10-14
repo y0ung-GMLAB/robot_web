@@ -19,7 +19,10 @@ rclpy 없이 시험한다 · 노드는 여기 답을 그대로 쓴다.
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from typing import Any, Optional
+
+from motion_common import run_state
 
 #: 그룹 재생을 누가 시작했나 · 사람(재생 화면) · 스케줄(스케줄 노드)
 STARTED_BY_HUMAN = 'human'
@@ -74,11 +77,43 @@ def exclusion_reason(
         return OFF_REASON
     if mode == 'manual' and normalize_started_by(started_by) == STARTED_BY_SCHEDULE:
         return MANUAL_REASON
-    # 그 PC 에서 단독 재생 중(사람이 켰거나 스케줄 끝 주차) · 그 PC 만 뺀다 ·
-    # 조그 · 페이더는 하트비트에 안 실린다 · 그 PC 가 준비 단계에서 「사람 조작 중」 으로 거절한다
+    # 그 PC 에서 단독 재생 중(사람이 켰거나 스케줄 끝 주차) · 그 PC 만 뺀다
     if solo_busy(getattr(member, 'motion_phase', '')):
         return SOLO_BUSY_REASON
+    # 그 PC 가 하트비트에 실은 「지금 시작 못 함」(설정 없음 · 모터 끊김 · 조그 · 페이더) · 준비 단계까지
+    # 가서 거절되면 그 늦은 거절이 정리와 겹쳐 전체 정지가 됐다(실물 V-4 · 수정 목록 136 ⑤)
+    blocker = str(getattr(member, 'start_blocker', '') or '').strip()
+    if blocker:
+        return blocker
     return ''
+
+
+def self_exclusion_reason(
+    motion_run_status: Optional[Any],
+    safety_status: Optional[Any],
+    start_blocker: Any = '',
+) -> str:
+    """진행 PC(마스터) 자신을 넣을 수 없는 이유 · 다른 PC 와 같은 규칙 · 수정 목록 136 ①
+
+    전에는 마스터를 늘 넣었다 · 단독 재생 · 조그 중인 마스터는 제 준비 답에서야 「사람 조작 중」 이
+    보여 그룹 시작을 통째로 취소했고, 그 정리 길이 마스터의 단독 재생 · 조그까지 세웠다(실물 V-4 · V-5) ·
+    이제 빼고 나머지로 돈다 · 운전 모드는 보지 않는다(시작을 누른 PC 다 · 끔은 시작 자체가 막힌다).
+    """
+    if run_state.solo_running(motion_run_status):
+        return SOLO_BUSY_REASON
+    busy = run_state.human_operation_reason(motion_run_status, safety_status)
+    if busy:
+        return busy
+    return str(start_blocker or '').strip()
+
+
+def local_start_blocker(local_status: Optional[Any]) -> str:
+    """이 PC 의 하트비트 `start_blocker` · 로컬 상태 한 장에서 · 사람 조작이 먼저 · 수정 목록 136 ⑤"""
+    status = local_status if isinstance(local_status, Mapping) else {}
+    busy = run_state.human_operation_reason(
+        status.get('motion_run_status'), status.get('safety_status'),
+    )
+    return (busy or str(status.get('start_blocker') or '').strip())[:200]
 
 
 #: 스케줄 구간 끝 · PC 마다 기준점 주차 → 서보 OFF · 수정 목록 36

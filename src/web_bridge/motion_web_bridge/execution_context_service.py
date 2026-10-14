@@ -83,6 +83,21 @@ class ExecutionContextService:
         status['stored_equals_runtime'] = bool(status.get('ready'))
         return status
 
+    #: 다시 맞춰도 안 풀리는 「준비 안 됨」 · 사람이 파일을 고쳐야 풀린다 · 수정 목록 136
+    TERMINAL_NOT_READY_STATES = frozenset({'configuration_required', 'no_project', 'error'})
+
+    def terminal_block_reason(self) -> str:
+        """그룹 선택이 미리 볼 「실행 준비 안 됨」 · 잠금 하나 · 파일을 읽지 않는다 · 수정 목록 136
+
+        `reconcile` 로 풀릴 수 있는 상태(적용 중 · 노드 대기)는 빈 값 · 그런 PC 는 준비 단계가 다시 본다.
+        """
+        with self._lock:
+            state = str(self._status.get('state') or '')
+            message = str(self._status.get('message') or '')
+        if state not in self.TERMINAL_NOT_READY_STATES:
+            return ''
+        return message or state
+
     def _set_status(self, **values: Any) -> None:
         with self._lock:
             self._status.update(values)

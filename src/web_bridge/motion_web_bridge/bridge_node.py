@@ -1020,7 +1020,31 @@ class MotionWebBridge(Node):
             'safety_status': safety_status,
             # 운전 모드 · 하트비트로 마스터에게 · 오프·수동 PC 는 그룹 시작에서 뺀다 · 수정 목록 30-6
             'operation_mode': self._cached_operation_mode(),
+            # 실행 준비 안 됨(설정 없음 · 모터 끊김 등) · 하트비트로 · 마스터가 선택 때 미리 뺀다 · 수정 목록 136
+            'start_blocker': self._cached_start_blocker(),
         }
+
+    def _cached_start_blocker(self) -> str:
+        """50ms 마다 불린다 · 1초에 한 번만 본다 · 사람 조작(조그 · 단독 재생)은 연동 노드가 따로 본다
+
+        준비 단계가 다시 맞춰 풀 수 있는 것(적용 중 · 노드 대기)은 넣지 않는다 · 빼기만 하고 넣지는 않는다.
+        """
+        now = time.monotonic()
+        cached = getattr(self, '_start_blocker_cache', None)
+        if cached is not None and now - cached[0] < 1.0:
+            return cached[1]
+        reason = ''
+        try:
+            context = getattr(self, '_execution_context', None)
+            terminal = getattr(context, 'terminal_block_reason', None)
+            reason = terminal() if callable(terminal) else ''
+            if not reason:
+                reason = self.motor_runtime_control_blocker()
+        except Exception:  # noqa: BLE001 · 못 보면 빈 값 · 준비 단계가 다시 본다
+            reason = ''
+        text = f'실행 준비 안 됨 · {reason}'[:200] if reason else ''
+        self._start_blocker_cache = (now, text)
+        return text
 
     def _cached_operation_mode(self) -> str:
         """50ms 마다 불린다 · 파일은 1초에 한 번만 읽는다."""

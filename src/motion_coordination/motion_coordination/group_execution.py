@@ -27,8 +27,11 @@ from .participant_rules import STARTED_BY_SCHEDULE, normalize_started_by
 #: 6 · 2026-10-12 `GroupCommand.initial_move_time_sec` (재생 화면 초기 이동 5/7/10 s) ·
 #: 7 · 2026-10-13 칸은 같고 그룹 동작이 바뀜 · 누가 시작했나(`started_by` · 수동 PC 넣기 · 수정 목록 122) ·
 #: 시작 전 미리 보기 · 뺀 PC 에만 보내는 풀기 명령 번호(123) · 도는 그룹 없이 구간 끝 주차(실행 ID 없는
-#: `stop_after_cycle` · 수정 목록 36 후속) · 옛 PC 와 섞이면 그룹 동작이 갈린다 → 같은 버전끼리만
-GROUP_PROTOCOL_VERSION = 7
+#: `stop_after_cycle` · 수정 목록 36 후속) · 옛 PC 와 섞이면 그룹 동작이 갈린다 → 같은 버전끼리만 ·
+#: 8 · 2026-10-14 `GroupHeartbeat.start_blocker`(실행 준비 안 됨 · 선택 때 미리 뺌) · 바쁜 마스터는 참가자에서
+#: 빠진 채 진행만 한다(참가 PC 가 참가 목록 밖 진행 PC 를 받아들임) · 즉시 정지는 그 실행을 도는 PC 만
+#: 세운다 · 진행 PC 는 제 `join` 을 처리하지 않는다 · 이미 놓은 실행의 풀기에는 「정지」 로 답한다(수정 목록 136)
+GROUP_PROTOCOL_VERSION = 8
 
 #: 진행 PC 가 **뺀 PC 하나에만** 보내는 풀기 명령의 번호 앞머리 · 수정 목록 123
 #:
@@ -51,6 +54,38 @@ def is_own_drop_release(command: str, command_id: str, coordinator_id: str, pc_i
         and str(command_id or '').startswith(DROP_RELEASE_PREFIX)
         and str(coordinator_id) == str(pc_id)
     )
+
+
+def is_own_join(command: str, coordinator_id: str, pc_id: str) -> bool:
+    """복귀 권유(`join`)가 진행 PC 자신에게 돌아왔나 · 그러면 처리하지 않는다 · 수정 목록 136
+
+    약속상 참가 목록에 진행 PC 도 적혀 진행 PC 도 이 명령을 받는다 · 전에는 그것을 제 복귀로
+    처리해 제 실행의 참가 목록을 {진행 PC, 복귀 PC} 로 덮어썼다 · 그래서 복귀 PC 의 거절이
+    「참가 PC 의 명령 실패」 로 읽혀 도는 그룹이 통째로 섰다(실물 V-8 · 2026-10-14 09:31 · floating1).
+    """
+    return str(command) == 'join' and str(coordinator_id) == str(pc_id)
+
+
+def late_refusal_reason(
+    *, event: str, command_id: str, state: str,
+    pending_command: str, pending_command_id: str, prepare_command_id: str,
+) -> str:
+    """진행 PC 가 받은 「거절」 이 늦게 온 것이라 무시할 것인가 · 그러면 이유 · 수정 목록 136 ③
+
+    정리(`releasing`) 중에 온 거절은 그 PC 의 준비 · 예약 답이 늦게 온 것이다 · 그 PC 는 거절하면서
+    실행을 이미 놓았거나 곧 올 풀기에 「정지」 로 답한다 · 전에는 이것을 「참가 PC 명령 실패」 로 읽어
+    모든 참가 PC 에 즉시 정지를 보내고 그룹 오류로 잠갔다(실물 V-4 · floating2) · 풀기 명령 자체의
+    거절(로컬 정리 실패일 수 있다)만 전처럼 본다 · 준비 단계를 지난 뒤 온 준비 거절도 무시한다.
+    """
+    if str(event) != 'rejected':
+        return ''
+    if str(state) == 'releasing' or str(pending_command) == 'cancel_before_start':
+        if command_id and str(command_id) == str(pending_command_id):
+            return ''
+        return '정리 중 늦은 거절'
+    if prepare_command_id and str(command_id) == str(prepare_command_id) and str(state) != 'preparing':
+        return '준비 단계 뒤 늦은 준비 거절'
+    return ''
 
 
 #: 끝난 실행(`stopped` · `error`)을 들고 있을 수 있는 최대 시간 · 수정 목록 123
@@ -143,6 +178,8 @@ class Member:
     operation_mode: str = ''
     web_url: str = ''
     protocol_version: int = 0
+    #: 그 PC 가 지금 그룹을 시작할 수 없는 이유(설정 없음 · 모터 끊김 · 사람 조작 중) · 수정 목록 136
+    start_blocker: str = ''
 
 
 class MemberRegistry:
@@ -264,6 +301,8 @@ class GroupExecution:
         self.pending_published_at = 0.0
         self.motion_start_report_deadline = 0.0
         self.release_error = False
+        #: 진행 PC · 이번 실행의 준비(`prepare`) 명령 번호 · 늦은 준비 거절을 가린다 · 수정 목록 136
+        self.prepare_command_id = ''
 
     def activate_claim(
         self, execution_id: str, coordinator_id: str,
@@ -324,11 +363,14 @@ class GroupExecution:
         sync_mode: str = GROUP_LOCKSTEP,
         initial_move_time_sec: float = 0.0,
         started_by: str = STARTED_BY_SCHEDULE,
+        coordinator_participates: bool = True,
     ) -> str:
+        """`coordinator_participates=False` · 진행 PC 가 바빠(단독 재생 · 사람 조작 · 준비 안 됨) 빠지고
+        진행만 한다 · 참가 목록에 진행 PC 가 없다 · 수정 목록 136"""
         selected = tuple(sorted(set(str(value) for value in participants if str(value))))
         if not 1 <= len(selected) <= 8:
             raise ValueError('그룹 실행 참가 PC는 1~8대여야 합니다')
-        if coordinator_id not in selected:
+        if coordinator_participates and coordinator_id not in selected:
             raise ValueError('임시 진행 PC가 참가 목록에 없습니다')
         if self.execution_id:
             raise ValueError('이전 그룹 실행 정리 확인 중입니다')
@@ -349,15 +391,17 @@ class GroupExecution:
         self.state = 'preparing'
         return self.execution_id
 
-    def exclude(self, reasons: Dict[str, str]) -> tuple[str, ...]:
+    def exclude(self, reasons: Dict[str, str], *, allow_coordinator: bool = False) -> tuple[str, ...]:
         """참가자에서 뺀다 · 진행 PC 는 빼지 않는다 · 뺀 PC 목록을 돌려준다.
 
         1대가 고장이어도 나머지는 돈다 · 수정 목록 30 · 빠진 PC 가 남긴 준비·
         완료 표시도 같이 지워야 장벽이 나머지만 보고 넘어간다.
+
+        `allow_coordinator` · 진행 PC 자신이 준비를 거절했을 때 · 진행만 하고 빠진다 · 수정 목록 136
         """
         drop = tuple(sorted(
             pc_id for pc_id in reasons
-            if pc_id in self.participants and pc_id != self.coordinator_id
+            if pc_id in self.participants and (allow_coordinator or pc_id != self.coordinator_id)
         ))
         if not drop:
             return ()
