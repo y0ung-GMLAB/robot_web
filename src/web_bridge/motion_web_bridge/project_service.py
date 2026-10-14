@@ -73,28 +73,29 @@ class ProjectService:
         self.ensure_selected(project_id)
         self.ensure_change_allowed()
 
+    def motor_job_running(self) -> bool:
+        """모터 설정·검색·재시작 작업이 도는가 · 프로젝트 변경과 「프로그램 다시 시작」 이 같이 본다 · 수정 목록 144"""
+        lifecycle_lock = getattr(self.bridge, '_motor_lifecycle_lock', None)
+        if lifecycle_lock is not None and lifecycle_lock.locked():
+            return True
+        repository = getattr(self, 'repository', None)
+        if (
+            repository is not None
+            and hasattr(getattr(repository, 'runtime', None), 'motor_operation_status')
+        ):
+            operation = repository.runtime.motor_operation_status()
+            if operation.get('status') == 'running':
+                return True
+        return False
+
     def change_blocker(
         self,
         *,
         ignore_motor_lifecycle: bool = False,
         allow_run_stopping: bool = False,
     ) -> str:
-        lifecycle_lock = getattr(self.bridge, '_motor_lifecycle_lock', None)
-        if (
-            not ignore_motor_lifecycle
-            and lifecycle_lock is not None
-            and lifecycle_lock.locked()
-        ):
+        if not ignore_motor_lifecycle and self.motor_job_running():
             return '모터 설정·검색·재시작 작업이 진행 중이므로 프로젝트를 변경할 수 없습니다'
-        repository = getattr(self, 'repository', None)
-        if (
-            not ignore_motor_lifecycle
-            and repository is not None
-            and hasattr(getattr(repository, 'runtime', None), 'motor_operation_status')
-        ):
-            operation = repository.runtime.motor_operation_status()
-            if operation.get('status') == 'running':
-                return '모터 설정·검색·재시작 작업이 진행 중이므로 프로젝트를 변경할 수 없습니다'
         run_lock = getattr(self.bridge, '_motion_run_lock', None)
         if run_lock is None:
             run_status = getattr(self.bridge, '_motion_run_status', {})

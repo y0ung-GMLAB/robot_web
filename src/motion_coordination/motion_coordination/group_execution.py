@@ -124,6 +124,15 @@ class StaleLeaseWatch:
         return float(now) - self._since >= self.limit_sec
 
 
+#: 웹 서비스가 내려가기 전에 참가 PC 가 진행 PC 에 보내는 사건 · 「이 PC 빠짐」 · 수정 목록 145 ①
+#:
+#: 메시지 칸은 그대로다(`GroupEvent.event` 글자 값 하나 추가) · 약속 번호를 올리지 않는다 ·
+#: 이 값을 모르는 옛 진행 PC 는 무시하고 전처럼(갑자기 끊김) 처리한다 · 동작이 갈리지 않고 옛 길로 돌아간다.
+PARTICIPANT_LEFT_EVENT = 'participant_left'
+
+#: 이 PC 의 웹 서비스가 갑자기 끊겨 그룹을 세웠다 · 잠그지 않는 기록 · 웹이 다시 뜨면 지운다 · 수정 목록 145 ②
+BRIDGE_LOST_CODE = 'GROUP_LOCAL_BRIDGE_LOST'
+
 #: 기동 뒤 이 시간 안에 로컬 Web Bridge 상태가 끊기는 것은 고장으로 잠그지 않는다 · 수정 목록 123·124
 #:
 #: 「프로그램 다시 시작」 은 웹 서비스와 연동 서비스를 같이 다시 띄운다 · 연동이 먼저 뜨고
@@ -136,14 +145,15 @@ PLANNED_RESTART_GRACE_SEC = 120.0
 PRE_MOTION_STATES = frozenset({'idle', 'ready', 'preparing', 'stopped', 'error'})
 
 
-def bridge_loss_latches(
+def bridge_loss_while_moving(
     *, state: str, now: float, boot_monotonic: float, planned_restart_until: float,
 ) -> bool:
-    """로컬 Web Bridge 상태가 끊겼을 때 그룹 오류(2등급)로 잠글 것인가
+    """로컬 Web Bridge 상태가 끊겼을 때 「움직이던 중 끊김」 으로 볼 것인가
 
-    모터가 그룹 명령으로 움직이는 중이면 잠근다(사람이 원인을 봐야 한다) ·
-    사람이 누른 다시 시작 · 기동 직후 · 움직이기 전 단계는 정리만 하고 잠그지 않는다 ·
-    스케줄이 다음 점검에 다시 시작한다.
+    참이면 모두 세우고 「웹 서비스 끊김으로 그룹 정지」 를 남긴다 · 거짓이면 조용히 정리만 한다 ·
+    **어느 쪽도 그룹 오류(2등급)로 잠그지 않는다** · 수정 목록 145 ② · 전에는 참이면 잠갔다
+    (`systemctl --user restart motion-control` 한 번에 「그룹 오류 해제」 를 눌러야 했다 · 실물 V-28 ④) ·
+    사람이 누른 다시 시작 · 기동 직후 · 움직이기 전 단계는 정리만 한다 · 스케줄이 다음 점검에 다시 시작한다.
     """
     if planned_restart_until and now < planned_restart_until:
         return False
@@ -421,6 +431,59 @@ class GroupExecution:
             for pc_id in drop:
                 table.pop(pc_id, None)
         return drop
+
+    def settle_after_exclude(self) -> str:
+        """뺀 PC 만 기다리던 장벽을 넘긴다 · 넘긴 단계 이름(없으면 빈 값) · 수정 목록 145 ①
+
+        도는 중에 PC 하나가 빠지면(웹 다시 시작) 남은 PC 는 그 단계 보고를 이미 끝냈을 수 있다 ·
+        그러면 다음 사건이 오지 않아 장벽이 영영 안 넘어가고 제한시간 초과로 그룹이 선다 ·
+        사건이 오면 넘기던 자리(`mark_*`)와 같은 규칙으로 여기서 넘긴다 · 그 뒤 할 일은 부르는 쪽.
+
+        - `released` · 풀기 확인이 남은 PC 모두에게서 왔다 · 실행을 놓는다
+        - `armed` · 초기 위치 완료 · 첫 회차 시작(또는 초기 위치만이면 끝)
+        - `running` · 모션 시작 보고가 다 왔다 · 회차 번호를 올린다
+        - `motion_completed` · 회차 완료 · 다음 회차 또는 정지
+        - `cycle_ready` · 회차 초기화 완료 · 다음 회차 시작
+        - `independent_stopped` · 각자 재생 · 남은 PC 가 다 멈췄다 · 그룹을 푼다
+        """
+        remaining = set(self.participants)
+        if not remaining or not self.execution_id:
+            return ''
+        if self.pending_command_id and self.pending_acks >= remaining:
+            if self.pending_command == 'cancel_before_start':
+                return 'released'
+            self.pending_command = ''
+            self.pending_command_id = ''
+            self.pending_ack_deadline = 0.0
+            self.pending_scheduled_at = 0.0
+            self.pending_published_at = 0.0
+        if self.state == 'initializing' and self.armed >= remaining:
+            if self.initialize_triggered.keys() >= remaining:
+                values = [self.initialize_triggered[pc_id] for pc_id in remaining]
+                self.last_initialize_spread_ms = (max(values) - min(values)) * 1000.0
+            self.state = 'armed'
+            return 'armed'
+        if self.state == 'start_scheduled' and self.triggered.keys() >= remaining:
+            values = [self.triggered[pc_id] for pc_id in remaining]
+            self.last_start_spread_ms = (max(values) - min(values)) * 1000.0
+            self.cycle_number += 1
+            self.state = (
+                'running_independent'
+                if self.sync_mode == GROUP_INDEPENDENT and self.run_mode == 'continuous'
+                else 'running'
+            )
+            return 'running'
+        if self.state == 'running' and self.motion_completed >= remaining:
+            self.state = 'motion_completed'
+            if self.target_cycle_count > 0 and self.cycle_number >= self.target_cycle_count:
+                self.request_stop_after_cycle()
+            return 'motion_completed'
+        if self.state == 'cycle_initializing' and self.cycle_initialized >= remaining:
+            self.state = 'cycle_ready'
+            return 'cycle_ready'
+        if self.state == 'running_independent' and self.independent_stopped >= remaining:
+            return 'independent_stopped'
+        return ''
 
     def mark_ready(self, pc_id: str) -> None:
         self._participant(pc_id)

@@ -29,7 +29,7 @@ from .wifi_settings import WifiSettings
 from .system_timezone import SystemTimezone
 from .ethercat_alias_manager import EthercatAliasError, EthercatAliasManager
 from .coordination_bridge import (
-    CoordinationWebBridge, local_motion_control, local_motion_readiness,
+    CoordinationWebBridge, LeaveNotice, local_motion_control, local_motion_readiness,
 )
 from . import motion_file_analysis, motion_joint_values, motor_config_rules, run_mode_gate
 from .execution_context_service import ExecutionContextService
@@ -1559,6 +1559,10 @@ class MotionWebBridge(Node):
         with self._motion_run_lock:
             return dict(self._motion_run_status) if self._motion_run_status else {}
 
+    def cached_run_status(self) -> Dict[str, Any]:
+        """마지막으로 받은 재생 상태 한 장 · 묻지 않는다(빠름) · 「프로그램 다시 시작」 이 본다 · 수정 목록 144"""
+        return self._cached_motion_run_status()
+
     @property
     def coordination(self):
         """연동 창구 · **없을 수 있다** · 쓰지 않는 PC 에서는 `None` 이다"""
@@ -2805,6 +2809,32 @@ def create_app(bridge: MotionWebBridge) -> FastAPI:
     return app
 
 
+class _LeaveNoticeServer(uvicorn.Server):
+    """종료 신호를 받은 그 순간 연동 노드에 「이 PC 빠짐」 · 수정 목록 145 ①
+
+    `systemctl --user restart motion-control` · systemd 자동 재시작 · 「프로그램 다시 시작」 이 모두
+    이 신호로 웹 서비스를 내린다 · 웹 서버가 연결을 닫는 동안 연동 노드가 0.5 s 안에 「상태 수신 중단」
+    을 보기 전에 닿아야 이 PC 만 빠진다(그룹 오류로 잠그지 않음) · uvicorn 이 신호마다 부르는 자리.
+    """
+
+    def __init__(self, config, on_exit) -> None:
+        super().__init__(config)
+        self._on_exit = on_exit
+
+    def handle_exit(self, sig, frame) -> None:
+        self._on_exit()
+        super().handle_exit(sig, frame)
+
+
+def _leave_notice(bridge: MotionWebBridge) -> LeaveNotice:
+    def send():
+        coordination = bridge.coordination
+        if coordination is None:
+            return {'success': True, 'skipped': True}
+        return coordination.notify_leaving('웹 서비스 다시 시작')
+    return LeaveNotice(send)
+
+
 def main(args=None) -> None:
     rclpy.init(args=args)
     bridge = MotionWebBridge()
@@ -2812,13 +2842,17 @@ def main(args=None) -> None:
     spin_thread.start()
 
     app = create_app(bridge)
+    leave_notice = _leave_notice(bridge)
     try:
         # 로깅 설정은 Config 가 만들 때 한다 · 그 뒤에 거름망을 달아야 지워지지 않는다 ·
         # 성공한 GET(화면 폴링) 접속 기록을 버린다 · 수정 목록 77
         config = uvicorn.Config(app, host=bridge.host, port=bridge.port, log_level='info')
         install_access_log_filter()
-        uvicorn.Server(config).run()
+        _LeaveNoticeServer(config, leave_notice.send).run()
     finally:
+        # 신호 없이 끝난 경우도 알린다 · 한 번만 간다 · 답을 잠깐 기다린다 · 수정 목록 145 ①
+        leave_notice.send()
+        leave_notice.wait()
         bridge.destroy_node()
         if rclpy.ok():
             rclpy.shutdown()

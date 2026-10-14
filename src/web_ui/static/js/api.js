@@ -221,7 +221,8 @@ export const fetchServoAlarmPolicy = () => request('GET', '/api/servo-alarm-poli
 
 export const saveServoAlarmPolicy = (overrides) => request('PUT', '/api/servo-alarm-policy', { body: { overrides } });
 
-export const restartManagedProgram = () => request('POST', '/api/system/program/restart');
+/** 재생 중이면 서버가 `needs_stop` 으로 거절 · `{ stop_first: true }` 면 정지 뒤 다시 시작 · 수정 목록 144 */
+export const restartManagedProgram = (body = {}) => request('POST', '/api/system/program/restart', { body, timeoutMs: 20000 });
 
 export const createDesktopShortcut = () => request('POST', '/api/system/desktop-shortcut');
 

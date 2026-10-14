@@ -16,7 +16,7 @@ from motion_coordination.group_execution import (
     DROP_RELEASE_PREFIX,
     STALE_LEASE_LIMIT_SEC,
     StaleLeaseWatch,
-    bridge_loss_latches,
+    bridge_loss_while_moving,
     drop_release_command_id,
     is_own_drop_release,
 )
@@ -76,28 +76,28 @@ def test_a_new_execution_restarts_the_clock():
     assert _observe(watch, 21.0, execution_id='exec-b') is True
 
 
-def _latches(state, *, now=10_000.0, boot=1.0, planned=0.0):
-    return bridge_loss_latches(
+def _moving(state, *, now=10_000.0, boot=1.0, planned=0.0):
+    return bridge_loss_while_moving(
         state=state, now=now, boot_monotonic=boot, planned_restart_until=planned,
     )
 
 
-def test_losing_the_bridge_while_moving_still_latches():
+def test_losing_the_bridge_while_moving_still_moving():
     for state in ('initializing', 'armed', 'start_scheduled', 'running', 'cycle_initializing'):
-        assert _latches(state) is True, state
+        assert _moving(state) is True, state
 
 
-def test_a_human_restart_does_not_latch():
+def test_a_human_restart_is_not_a_moving_loss():
     """「프로그램 다시 시작」 은 사람이 한 일 · S-11 다시"""
-    assert _latches('running', now=100.0, boot=1.0 - BOOT_GRACE_SEC, planned=200.0) is False
-    assert _latches('running', now=300.0, boot=1.0 - BOOT_GRACE_SEC, planned=200.0) is True
+    assert _moving('running', now=100.0, boot=1.0 - BOOT_GRACE_SEC, planned=200.0) is False
+    assert _moving('running', now=300.0, boot=1.0 - BOOT_GRACE_SEC, planned=200.0) is True
 
 
-def test_right_after_boot_does_not_latch():
-    assert _latches('running', now=50.0, boot=10.0) is False
-    assert _latches('running', now=10.0 + BOOT_GRACE_SEC, boot=10.0) is True
+def test_right_after_boot_is_not_a_moving_loss():
+    assert _moving('running', now=50.0, boot=10.0) is False
+    assert _moving('running', now=10.0 + BOOT_GRACE_SEC, boot=10.0) is True
 
 
-def test_nothing_moved_yet_does_not_latch():
+def test_nothing_moved_yet_is_not_a_moving_loss():
     for state in ('preparing', 'stopped', 'error', 'idle', 'ready'):
-        assert _latches(state) is False, state
+        assert _moving(state) is False, state

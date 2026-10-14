@@ -303,8 +303,15 @@ def register_system_routes(app: FastAPI, bridge, project_call) -> None:
         return await _coordination_to_thread(bridge.coordination_local_control, body)
 
     @app.post('/api/system/program/restart')
-    async def restart_managed_program():
-        return await project_call(bridge.motor_config.restart_managed_program)
+    async def restart_managed_program(request: Request):
+        # 프로젝트 변경 잠금 밖 · 재생 중이면 `needs_stop` 거절 · `stop_first` 면 정지 뒤 다시 시작 · 수정 목록 144
+        try:
+            body = await request.json()
+        except Exception:  # noqa: BLE001 · 빈 몸통 = 쉬는 중이면 바로 다시 시작
+            body = {}
+        return await asyncio.to_thread(
+            bridge.motor_config.restart_managed_program, body if isinstance(body, dict) else {},
+        )
 
     @app.post('/api/system/desktop-shortcut')
     async def create_desktop_shortcut():

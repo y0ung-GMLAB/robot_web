@@ -29,7 +29,7 @@ from motion_common.paths import NO_PROJECT_SELECTED
 
 import yaml
 
-from motion_common import store
+from motion_common import run_state, store
 from motion_common.values import optional_int
 
 from motion_web_bridge.motor_runtime_store import MOTOR_BUSY_MESSAGE
@@ -647,8 +647,34 @@ class MotorConfigService:
         """
         self.bridge.settle_stopping_run_state(self.RELEASE_SETTLED_MESSAGE)
 
-    def restart_managed_program(self) -> Dict[str, Any]:
-        """Restart only upper-level nodes while Motor Manager keeps running."""
+    #: 재생 중 「프로그램 다시 시작」 · 정지가 듣기를 기다리는 최대 시간 · 수정 목록 144
+    RESTART_STOP_WAIT_SEC = 5.0
+    RESTART_NEEDS_STOP_MESSAGE = '재생 중입니다 · 정지하고 다시 시작하려면 확인하세요'
+    RESTART_MOTOR_JOB_MESSAGE = (
+        '모터 설정·검색·재시작 작업이 진행 중입니다 · 끝난 뒤 다시 시작하세요'
+    )
+
+    def restart_managed_program(
+        self, payload: Optional[Dict[str, Any]] = None,
+    ) -> Dict[str, Any]:
+        """Restart only upper-level nodes while Motor Manager keeps running.
+
+        **재생 중이면 먼저 묻는다** · 수정 목록 144 (실물 V-28 ③ · 2026-10-14 11:35)
+
+        전에는 프로젝트 변경 잠금(`ensure_change_allowed`)을 지나 재생 중이면 「애니메이션이 동작
+        중(waiting)이라 프로젝트를 변경할 수 없습니다」 로 거절했다 · 프로젝트를 바꾸는 일이 아니고,
+        사람은 무엇을 해야 하는지 몰랐다.
+
+        - 재생(단독 · 그룹 · 초기 이동 · 대기) 중 · `stop_first` 없음 → 거절 · `needs_stop: true` ·
+          화면이 두 번째 확인을 받고 `stop_first: true` 로 다시 보낸다
+        - `stop_first` · 연동 노드에 「이 PC 빠짐」 을 먼저 알리고(그룹이면 이 PC 만 빠지고 나머지는
+          계속 · 수정 목록 145 ①) → 「정지」 버튼과 같은 정지(그 자리 · 서보 유지) → 멈출 때까지
+          최대 `RESTART_STOP_WAIT_SEC` 기다림 → 다시 시작
+        - 모터 설정·검색·재시작 작업 중이면 거절(그 작업을 끊지 않게)
+        - 이 PC 가 다른 PC 들의 그룹을 진행 중이면 연동 서비스는 다시 시작하지 않는다(진행이 끊기지 않게)
+        """
+        request = payload if isinstance(payload, dict) else {}
+        stop_first = request.get('stop_first') is True
         self.clear_stopping_release_state()
         managed_service = str(
             os.environ.get('MOTION_CONTROL_SERVICE_UNIT') or ''
@@ -670,19 +696,43 @@ class MotorConfigService:
                 ),
                 **self.bridge.snapshot(),
             }
-        self.project.ensure_change_allowed()
+        if self.project.motor_job_running():
+            return {
+                **self.bridge.snapshot(),
+                'success': False,
+                'message': self.RESTART_MOTOR_JOB_MESSAGE,
+            }
+        playing = self.playback_in_progress()
+        if playing and not stop_first:
+            return {
+                **self.bridge.snapshot(),
+                'success': False,
+                'needs_stop': True,
+                'run_state': playing,
+                'message': self.RESTART_NEEDS_STOP_MESSAGE,
+            }
         restart_services = [managed_service]
         coordination_service = str(
             os.environ.get('MOTION_COORDINATION_SERVICE_UNIT') or ''
         ).strip()
-        if coordination_service == 'motion-coordination.service':
-            restart_services.append(coordination_service)
-        # 사람이 누른 재시작이다 · 연동 노드가 브리지가 사라진 것을 그룹 오류로 잠그지 않게 먼저 알린다 ·
-        # 실패해도 재시작은 간다 · 수정 목록 123 (실물 S-11 다시)
-        coordination = getattr(self.bridge, '_coordination_web_bridge', None)
+        # 사람이 누른 재시작이다 · 연동 노드에 「이 PC 빠짐」 을 **정지보다 먼저** 알린다 · 그래야 이 PC 의
+        # 정지가 「참가 PC 먼저 정지 · 전체 풀기」 로 읽히지 않고 이 PC 만 빠진다 · 실패해도 재시작은 간다 ·
+        # 수정 목록 123 (실물 S-11 다시) · 145 ①
+        coordination = getattr(self.bridge, 'coordination', None)
         notify = getattr(coordination, 'notify_planned_restart', None)
-        if callable(notify):
-            notify()
+        notice = notify() if callable(notify) else {}
+        still_coordinating = bool(
+            isinstance(notice, dict) and notice.get('still_coordinating')
+        )
+        if coordination_service == 'motion-coordination.service' and not still_coordinating:
+            restart_services.append(coordination_service)
+        notes = []
+        # 이 PC 로컬 재생이 돌 때만 세운다 · 진행만 하던 마스터(로컬은 쉼)는 세울 것이 없다
+        stopped_playback = bool(playing and self._local_run_state())
+        if stopped_playback:
+            notes.append(self._stop_playback_before_restart())
+        if still_coordinating:
+            notes.append('연동 서비스는 다른 PC 그룹을 진행 중이라 다시 시작하지 않음')
         try:
             motor_config_rules.schedule_managed_service_restart(*restart_services)
         except OSError as exc:
@@ -694,13 +744,74 @@ class MotorConfigService:
             }
         return {
             'success': True,
-            'message': (
+            'message': ' · '.join([
                 '상위 프로그램 재시작을 시작했습니다. '
-                'Motor Manager와 현재 서보 상태는 유지됩니다'
-            ),
+                'Motor Manager와 현재 서보 상태는 유지됩니다',
+                *[note for note in notes if note],
+            ]),
             'restart_mode': 'upper_service',
+            'stopped_playback': stopped_playback,
+            'restart_services': list(restart_services),
             **self.bridge.snapshot(),
         }
+
+    def _run_status(self) -> Dict[str, Any]:
+        status = self.bridge.cached_run_status()
+        return dict(status) if isinstance(status, dict) else {}
+
+    def _local_run_state(self) -> str:
+        """이 PC 의 재생(단독 · 그룹 몫)이 돌면 그 상태 이름 · 아니면 빈 값"""
+        state = str(self._run_status().get('state') or '').strip().lower()
+        return state if state and run_state.is_running(state) else ''
+
+    def playback_in_progress(self) -> str:
+        """재생이 도는가 · 돌면 상태 이름 · 수정 목록 144
+
+        단독 재생 · 초기 이동 · 회차 대기 · 그룹 초기 위치 뒤 시작 대기 · 그룹 준비 단계(이 PC 로컬
+        재생은 아직 서 있다 · `run_state.group_is_active`)까지 「재생 중」 으로 본다.
+        """
+        local = self._local_run_state()
+        if local:
+            return local
+        status = self._run_status()
+        if str(status.get('state') or '') == 'initialized' and status.get('group_execution'):
+            return 'initialized'
+        coordination = getattr(self.bridge, 'coordination', None)
+        group_blocker = getattr(coordination, 'local_execution_blocker', None)
+        if callable(group_blocker):
+            try:
+                if group_blocker():
+                    return 'group'
+            except Exception:  # noqa: BLE001 · 연동 노드를 못 읽으면 로컬 상태만으로 판단
+                return ''
+        return ''
+
+    def _stop_playback_before_restart(self) -> str:
+        """「정지」 버튼과 같은 정지 · 최종 출력 정지 → 재생 정지 · 그 자리 · 서보 유지 · 수정 목록 144
+
+        멈출 때까지 최대 `RESTART_STOP_WAIT_SEC` 기다린다 · 넘기면 그대로 다시 시작한다(재생 노드가
+        재시작으로 내려가고 Motor Manager 는 마지막 목표에 선다) · 돌려주는 값은 응답에 붙일 한 줄.
+        """
+        failures = []
+        for label, call in (
+            ('최종 출력 정지', lambda: self.bridge.request_safety_stop(False)),
+            ('재생 정지', self.bridge.motion_run_stop),
+        ):
+            try:
+                result = call()
+            except Exception as exc:  # noqa: BLE001 · 정지 실패도 다시 시작은 간다
+                result = {'success': False, 'message': str(exc)}
+            if isinstance(result, dict) and result.get('success') is False:
+                failures.append(f'{label} 확인 실패: {result.get("message") or "응답 없음"}')
+        deadline = time.monotonic() + float(self.RESTART_STOP_WAIT_SEC)
+        while self._local_run_state() and time.monotonic() < deadline:
+            time.sleep(0.1)
+        remaining = self._local_run_state()
+        if remaining:
+            failures.append(
+                f'{self.RESTART_STOP_WAIT_SEC:g} s 안에 정지 확인 못 함({remaining}) · 그대로 다시 시작'
+            )
+        return ' · '.join(['재생을 정지했습니다', *failures])
 
     def restart_motor_control(self) -> Dict[str, Any]:
         """Restart the persistent Motor Manager only after explicit confirmation."""

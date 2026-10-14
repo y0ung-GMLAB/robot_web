@@ -5,6 +5,7 @@ from dataclasses import replace
 import json
 import os
 import subprocess
+import threading
 import time
 import urllib.error
 import urllib.request
@@ -23,6 +24,46 @@ from motion_common.group_config import (
     migrate_legacy_group_config,
     save_group_config,
 )
+
+
+#: 웹 서비스가 내려갈 때 「이 PC 빠짐」 알림을 기다리는 시간 · systemd 종료 제한(8 s) 안 · 수정 목록 145 ①
+LEAVE_NOTICE_TIMEOUT_SEC = 1.5
+
+
+class LeaveNotice:
+    """웹 서비스가 내려갈 때 한 번만 · 연동 노드에 「이 PC 빠짐」 · 수정 목록 145 ①
+
+    신호(SIGINT · SIGTERM)를 받은 바로 그때 보낸다 · 웹 서버가 연결을 닫는 동안 연동 노드는 0.5 s
+    안에 「상태 수신 중단」 을 본다 · 그보다 먼저 닿아야 이 PC 만 빠진다 · 신호 처리기를 막지 않게
+    따로 스레드에서 · 종료 끝에서 잠깐(`wait`) 기다린다 · 여러 번 불려도 한 번만 보낸다.
+    """
+
+    def __init__(self, send: Callable[[], Any]) -> None:
+        self._send = send
+        self._lock = threading.Lock()
+        self._thread: Optional[threading.Thread] = None
+        self.result: Any = None
+
+    def send(self) -> None:
+        with self._lock:
+            if self._thread is not None:
+                return
+            self._thread = threading.Thread(
+                target=self._run, name='coordination-leave-notice', daemon=True,
+            )
+            self._thread.start()
+
+    def wait(self, timeout_sec: float = LEAVE_NOTICE_TIMEOUT_SEC + 0.5) -> None:
+        with self._lock:
+            thread = self._thread
+        if thread is not None:
+            thread.join(timeout=max(float(timeout_sec), 0.0))
+
+    def _run(self) -> None:
+        try:
+            self.result = self._send()
+        except Exception as exc:  # noqa: BLE001 · 알림 실패가 종료를 막지 않는다
+            self.result = {'success': False, 'message': str(exc)}
 
 
 class CoordinationWebBridge:
@@ -264,18 +305,36 @@ class CoordinationWebBridge:
         return result
 
     def notify_planned_restart(self) -> Dict[str, Any]:
-        """「프로그램 다시 시작」 직전 · 연동 노드에 사람이 한 재시작임을 알린다 · 수정 목록 123
+        """「프로그램 다시 시작」 직전 · 연동 노드에 「이 PC 빠짐」 을 알린다 · 수정 목록 123 · 145 ①
 
         브리지가 사라지는 동안 연동 노드가 그것을 고장(GROUP_PARTICIPANT_FAILURE 2등급)으로
-        잠그지 않게 · 연동 노드가 없거나 답이 없어도 재시작은 그대로 간다.
+        잠그지 않게 · 그룹이 돌면 이 PC 만 빠지고 나머지는 계속 · 답에 `still_coordinating`
+        (이 PC 가 다른 PC 들의 그룹을 계속 진행) · 연동 노드가 없거나 답이 없어도 재시작은 그대로 간다.
         """
         try:
             return self._local_api('/control', {'command': 'planned_restart'})
         except (OSError, ValueError) as exc:
             return {'success': False, 'message': str(exc)}
 
+    def notify_leaving(
+        self, reason: str, *, timeout_sec: float = LEAVE_NOTICE_TIMEOUT_SEC,
+    ) -> Dict[str, Any]:
+        """웹 서비스가 내려간다(SIGTERM · SIGINT · systemd 다시 시작) · 「이 PC 빠짐」 · 수정 목록 145 ①
+
+        내려가는 중이라 오래 기다리지 않는다 · 실패해도 종료는 그대로 간다 · 그때 연동 노드는
+        「상태 수신 중단」 으로 보고 그룹을 세운다(잠그지 않음 · 145 ②).
+        """
+        try:
+            return self._local_api(
+                '/control', {'command': 'bridge_leaving', 'reason': str(reason or '')},
+                timeout_sec=timeout_sec,
+            )
+        except (OSError, ValueError) as exc:
+            return {'success': False, 'message': str(exc)}
+
     def _local_api(
-        self, path: str, payload: Mapping[str, Any] | None = None
+        self, path: str, payload: Mapping[str, Any] | None = None,
+        *, timeout_sec: float = 5.0,
     ) -> Dict[str, Any]:
         data = None
         method = 'GET'
@@ -289,7 +348,7 @@ class CoordinationWebBridge:
             data=data, headers=headers, method=method,
         )
         try:
-            with urllib.request.urlopen(request, timeout=5.0) as response:
+            with urllib.request.urlopen(request, timeout=float(timeout_sec)) as response:
                 value = json.loads(response.read(64 * 1024).decode('utf-8'))
         except (urllib.error.URLError, OSError, UnicodeError, ValueError) as exc:
             raise OSError(f'DDS 그룹 연동 노드 응답 없음: {exc}') from exc

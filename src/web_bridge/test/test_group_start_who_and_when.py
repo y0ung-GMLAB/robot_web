@@ -136,13 +136,15 @@ def test_program_restart_tells_the_coordination_node_first(monkeypatch):
     events = []
     bridge = SimpleNamespace(
         snapshot=lambda: {},
-        _coordination_web_bridge=SimpleNamespace(
+        cached_run_status=lambda: {'state': 'idle'},
+        coordination=SimpleNamespace(
             notify_planned_restart=lambda: events.append('notify') or {'success': True},
+            local_execution_blocker=lambda: '',
         ),
     )
     service = MotorConfigService.__new__(MotorConfigService)
     service.bridge = bridge
-    service.project = SimpleNamespace(ensure_change_allowed=lambda: None)
+    service.project = SimpleNamespace(motor_job_running=lambda: False)
     service.clear_stopping_release_state = lambda: None
     monkeypatch.setenv('MOTION_CONTROL_SERVICE_UNIT', 'motion-control.service')
     monkeypatch.setenv('MOTION_MOTOR_SERVICE_UNIT', 'motion-motor.service')

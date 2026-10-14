@@ -169,11 +169,15 @@ def test_state_tick_consumes_background_runtime_sample_before_event_check():
 
 
 def test_stale_local_runtime_status_stops_only_active_group_execution():
+    """움직이는 중 끊김 · 모두 세운다 · 잠그지 않는다 · 숫자를 남긴다 · 수정 목록 123 · 145 ②"""
     node = _node()
     node._execution.execution_id = 'exec-a'
-    # 움직이는 중이어야 잠근다 · 준비 중 · 기동 직후 · 사람이 한 재시작은 정리만 · 수정 목록 123
     node._execution.coordinator_id = 'pc-a'
+    node._execution.participants = ('pc-a', 'pc-b')
     node._execution.state = 'running'
+    node._boot_monotonic = 0.0
+    node._command_pub = _Publisher()
+    node._call_local_control = lambda payload, **_kwargs: {'success': True}
     node._local_runtime_monitor = SimpleNamespace(
         snapshot=lambda: {
             'status': {'bridge_state': 'ok'},
@@ -186,14 +190,16 @@ def test_stale_local_runtime_status_stops_only_active_group_execution():
             '최근 응답(ms) 12, 14, 300, 300 · 사유 bridge timeout'
         ),
     )
-    failures = []
-    node._stop_for_peer_failure = failures.append
+    node._stop_for_peer_failure = lambda _reason: pytest.fail('2등급으로 잠그지 않는다 · 145 ②')
 
     node._consume_local_runtime_status()
 
-    assert len(failures) == 1
-    said = failures[0]
-    assert said.startswith('로컬 Web Bridge 상태 수신 중단: ')
+    assert node._execution.execution_id == ''
+    assert [m.command for m in node._command_pub.messages] == ['stop_now']
+    assert node._coordination_error == {}
+    said = node._bridge_loss['message']
+    assert said.startswith('pc-a 웹 서비스 끊김으로 그룹 정지 · ')
+    assert node._bridge_loss['latched'] is False
     # 「몇 ms 걸렸나 · 몇 번 연속인가 · 직전은 어땠나」가 다 남아야 한다
     assert '마지막 성공 1000ms 전' in said
     assert '연속 실패 4회' in said
@@ -2132,18 +2138,21 @@ def test_the_master_not_ready_cancels_without_latching():
     assert '앱솔루트 미확인' in failure['message']
 
 
-def test_a_planned_restart_releases_without_latching():
-    """실물 S-11 다시 · 「프로그램 다시 시작」 이 GROUP_PARTICIPANT_FAILURE 를 만들었다"""
+def test_a_planned_restart_takes_only_this_pc_out():
+    """실물 S-11 다시 · 「프로그램 다시 시작」 이 GROUP_PARTICIPANT_FAILURE 를 만들었다 ·
+    이제 이 PC(진행 PC)만 빠지고 나머지는 돈다 · 진행은 계속 · 수정 목록 145 ①"""
     node = _node()
     node._execution = GroupExecution()
-    node._execution.begin('pc-a', ('pc-a', 'pc-b'))
+    execution_id = node._execution.begin('pc-a', ('pc-a', 'pc-b'))
     node._call_local_control = lambda payload, **_kwargs: {'success': True}
     node._command_pub = _Publisher()
 
     result = node._handle_local_request({'command': 'planned_restart'})
 
     assert result['success'] is True
-    assert node._execution.execution_id == ''
+    assert result['still_coordinating'] is True
+    assert node._execution.execution_id == execution_id
+    assert node._execution.participants == ('pc-b',)
     assert node._coordination_error == {}
     assert node._planned_restart_until > time.monotonic()
 
@@ -2168,15 +2177,17 @@ def test_losing_the_bridge_after_a_planned_restart_does_not_latch():
     assert node._coordination_error == {}
 
 
-def test_a_slave_losing_its_bridge_while_running_still_latches():
-    """슬레이브 실행 상태는 preparing 에 머문다 · 움직이는지는 로컬 상태로 본다"""
+def test_a_slave_losing_its_bridge_while_running_stops_without_latching():
+    """슬레이브 실행 상태는 preparing 에 머문다 · 움직이는지는 로컬 상태로 본다 ·
+    갑자기 끊기면 모두 세운다(안전) · 그러나 2등급으로 잠그지 않는다 · 수정 목록 145 ②"""
     node = _node()
     node._execution = GroupExecution()
     node._execution.activate_claim('exec-a', 'pc-b', ('pc-a', 'pc-b'))
     node._local_status = {'motion_run_status': {'group_execution': True, 'state': 'running'}}
     node._boot_monotonic = 0.0
-    failures = []
-    node._stop_for_peer_failure = failures.append
+    lost = []
+    node._stop_for_bridge_loss = lost.append
+    node._stop_for_peer_failure = lambda _reason: pytest.fail('2등급으로 잠그지 않는다')
     node._local_runtime_monitor = SimpleNamespace(
         snapshot=lambda: {'status': {}, 'received_monotonic': 1.0, 'active_since_monotonic': 0.0},
         diagnosis=lambda: '검사용',
@@ -2184,7 +2195,7 @@ def test_a_slave_losing_its_bridge_while_running_still_latches():
 
     node._consume_local_runtime_status()
 
-    assert len(failures) == 1
+    assert lost == ['검사용']
 
 
 # ---------------------------------------------------------------------- #

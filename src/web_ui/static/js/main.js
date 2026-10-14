@@ -1544,21 +1544,36 @@ if (el.programRestartButton) {
       { title: '프로그램 재시작', confirmLabel: '재시작', tone: 'warning' },
     );
     if (!confirmed) return;
-    appState.configApplyInProgress = true;
-    appState.configApplyStartedAtMs = Date.now();
-    appState.configApplyReadySinceMs = null;
-    appState.configApplyConnectionInterrupted = false;
-    appState.restartCheckMode = 'program';
-    appState.restartPreviousBridgeInstanceId = appState.bridgeInstanceId;
-    setRestartOverlay(
-      true,
-      '프로그램 재시작 중입니다',
-      '웹·Supervisor·애니메이션 재생이 다시 실행되고 웹도 자동으로 연결됩니다.',
-      '재시작 요청 전송 중',
-    );
-    startRestartProgressPolling();
+    const beginTracking = () => {
+      appState.configApplyInProgress = true;
+      appState.configApplyStartedAtMs = Date.now();
+      appState.configApplyReadySinceMs = null;
+      appState.configApplyConnectionInterrupted = false;
+      appState.restartCheckMode = 'program';
+      appState.restartPreviousBridgeInstanceId = appState.bridgeInstanceId;
+      setRestartOverlay(
+        true,
+        '프로그램 재시작 중입니다',
+        '웹·Supervisor·애니메이션 재생이 다시 실행되고 웹도 자동으로 연결됩니다.',
+        '재시작 요청 전송 중',
+      );
+      startRestartProgressPolling();
+    };
+    beginTracking();
     try {
-      const payload = await restartManagedProgram();
+      let payload = await restartManagedProgram();
+      if (payload?.success === false && payload?.needs_stop) {
+        // 재생 중 · 두 번째 확인 · 정지하고 다시 시작 · 수정 목록 144
+        clearRestartTracking();
+        setRestartOverlay(false);
+        const again = await appDialogs.confirm(
+          '재생을 멈추고 다시 시작합니다 · 서보 토크는 유지됩니다',
+          { title: '재생 중입니다', confirmLabel: '정지하고 다시 시작', tone: 'warning' },
+        );
+        if (!again) return;
+        beginTracking();
+        payload = await restartManagedProgram({ stop_first: true });
+      }
       if (payload?.success === false) throw new Error(payload.message || '재시작 요청 실패');
     } catch (error) {
       clearRestartTracking();

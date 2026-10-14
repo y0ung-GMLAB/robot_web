@@ -65,14 +65,42 @@ export async function faultReset() {
     (r) => (r?.skipped_axes ? r.message : '오류를 초기화했습니다. 알람이 있던 모터는 서보가 꺼져 있습니다. 원인을 확인한 뒤 서보를 켜세요.'));
 }
 
-export async function restartProgram() {
-  const ok = await confirmBox({
+/** 프로그램 다시 시작 · 확인 → 보냄 · 재생 중이면 서버가 `needs_stop` 으로 거절 → 두 번째 확인 →
+ *  `stop_first` 로 다시 보냄(서버가 재생을 멈추고 · 그룹이면 이 PC 만 빠지고 · 다시 시작) · 수정 목록 144
+ *  `request(body)` · `confirm(options)` 를 받는다(시험에서 바꿔 끼운다) · 취소면 null */
+export async function restartProgramFlow({ request, confirm }) {
+  const ok = await confirm({
     title: '프로그램 다시 시작',
     body: '로봇 프로그램을 다시 시작합니다. 30초 정도 화면 연결이 끊깁니다. 서보 토크는 유지됩니다.',
     confirmLabel: '다시 시작', tone: 'warning',
   });
   if (!ok) return null;
-  return attempt(() => api('POST', '/api/system/program/restart', { timeoutMs: 20000 }), '다시 시작합니다. 잠시 후 자동으로 다시 연결됩니다.');
+  try {
+    return await request({});
+  } catch (error) {
+    if (!error?.data?.needs_stop) throw error;
+  }
+  const again = await confirm({
+    title: '재생 중입니다',
+    body: '재생을 멈추고 다시 시작합니다 · 서보 토크는 유지됩니다',
+    confirmLabel: '정지하고 다시 시작', tone: 'warning',
+  });
+  if (!again) return null;
+  return request({ stop_first: true });
+}
+
+export async function restartProgram() {
+  try {
+    const result = await restartProgramFlow({
+      request: (body) => api('POST', '/api/system/program/restart', { body, timeoutMs: 20000 }),
+      confirm: confirmBox,
+    });
+    if (result) toast('다시 시작합니다. 잠시 후 자동으로 다시 연결됩니다.', 'ok');
+    return result;
+  } catch (error) {
+    toast(error.message || String(error), 'bad');
+    return null;
+  }
 }
 
 export function ackGroupError() {
