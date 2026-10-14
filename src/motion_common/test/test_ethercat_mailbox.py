@@ -235,7 +235,7 @@ def test_exclusive_hold_blocks_other_processes_but_not_the_holder():
     assert em.run(UPLOAD, runner=runner).returncode == 0
     assert len(runner.calls) == 1
 
-    other = os.getpid() + 1
+    other = os.getppid()                                          # 살아 있는 다른 프로세스 · `run()` 은 진짜로 살아 있나 본다(pid+1 은 가끔 없음)
     assert em.held_by_other(me=other, alive=lambda _pid: True)    # 감시 노드 쪽에서 보면
     marker = em.read_exclusive()
     marker['owner_pid'] = other                                   # 다른 프로세스가 세운 표시
