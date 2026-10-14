@@ -19,10 +19,10 @@ PC·노트북의 브라우저**로 들어가면 됩니다 · 미니 PC 를 열 �
 이름은 그대로라 같은 주소로 들어갑니다 · IP 주소 북마크는 망·공유기가 바뀌면 깨집니다.
 
 ```text
-http://floating1.local:8000/v2    ← 로봇 PC 1 (마스터)
+http://floating1.local:8000/v2    ← 로봇 PC 1
 http://floating2.local:8000/v2    ← 로봇 PC 2
 http://floating3.local:8000/v2    ← 로봇 PC 3
-http://floating4.local:8000/v2    ← 로봇 PC 4
+http://floating4.local:8000/v2    ← 로봇 PC 4 (마스터 · 애니데스크도 여기)
 http://speaker.local:8100         ← 스피커 PC
 ```
 
