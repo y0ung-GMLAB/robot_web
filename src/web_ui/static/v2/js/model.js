@@ -99,6 +99,12 @@ export function stuckSlaves(snap) {
   return Array.isArray(list) ? list.filter((s) => s && s.message) : [];
 }
 
+/** 메일박스(SDO)가 멈춘 드라이브 · 감시 노드가 판정한 목록 그대로 · 수정 목록 139 ③ */
+export function stuckMailboxes(snap) {
+  const list = snap?.motion_state?.minas_absolute?.stuck_mailboxes;
+  return Array.isArray(list) ? list.filter((s) => s && s.message) : [];
+}
+
 /** 운영 종료 동작 알림 · 서버 `schedule_end.notice` · 없으면 null · 수정 목록 131 */
 export function scheduleEndNotice(snap) {
   const notice = snap?.schedule_end?.notice;
@@ -130,6 +136,10 @@ export function collectIssues(snap, sched, { connected = true } = {}) {
   // OP 로 못 올라가고 멈춘 드라이브 · 시작 스크립트의 오류 플래그 해제로도 안 풀림 · 글은 서버 · 수정 목록 125
   for (const slave of stuckSlaves(snap)) {
     bad(slave.message, '모터 프로그램이 이 드라이브 설정을 마치지 못했습니다. 제어 전원을 껐다 켜면 다시 설정합니다. 그래도 그대로면 모터 프로그램을 다시 시작하세요.');
+  }
+  // 메일박스(SDO)만 멈춘 드라이브 · 재생 · PDO 는 그대로 · 제어 전원 재투입으로만 풀린다 · 글은 서버 · 수정 목록 139 ③
+  for (const box of stuckMailboxes(snap)) {
+    bad(box.message, '이 드라이브가 설정 읽기·쓰기(SDO)에 답하지 않습니다. 재생과 위치 명령은 그대로 됩니다. 앱솔루트 설정·게인 읽기 같은 설정 작업은 안 됩니다. 이 드라이브 읽기는 쉬고 30초마다 한 번만 확인합니다.');
   }
   // 자동조정 꺼진 MINAS 드라이브 · 막지 않음 · 알리기만 · 수정 목록 108 (나)
   const gainOff = (snap.motion_state?.minas_absolute?.drives || [])

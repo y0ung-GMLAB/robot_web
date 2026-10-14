@@ -21,6 +21,8 @@ const EVENT_TYPE_LABELS = {
   group_excluded: '그룹 재생에서 PC 제외',
   minas_absolute_blocked: '앱솔루트 미확인 · 동작 차단',
   minas_absolute_confirmed: '앱솔루트 확인 · 차단 해제',
+  ethercat_mailbox_stuck: '드라이브 메일박스 응답 없음',
+  ethercat_mailbox_recovered: '드라이브 메일박스 멈춤 해제',
   upper_service_crashed: '상위 서비스 비정상 종료 · 자동 재시작',
 };
 

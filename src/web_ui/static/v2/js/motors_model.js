@@ -3,7 +3,7 @@
  * 설정(registry · 파일)과 지금 상태(motion_state.motors · 런타임)를 번호(axis = controller_index)로 맞춘다.
  * 편집 칸은 기존 화면이 고치던 것만 · 이름 · 속도·가속 · 브레이크 · 과부하 감시 · 운영 끝 서보 끄기.
  */
-import { motorErrorText, motorLoad, stuckSlaves } from './model.js';
+import { motorErrorText, motorLoad, stuckMailboxes, stuckSlaves } from './model.js';
 
 /** 편집 칸 · [키, 이름, 단위, AC 전용, 범위] · config 아래(name 만 바깥) */
 export const EDIT_FIELDS = [
@@ -40,6 +40,8 @@ export function motorRows(registry, snap) {
   const drives = new Map((snap?.motion_state?.minas_absolute?.drives || []).map((d) => [Number(d.axis), d]));
   // PREOP 등에 멈춘 드라이브 · 감시 노드 판정 · 수정 목록 125
   const stuck = new Map(stuckSlaves(snap).filter((s) => s.axis !== null && s.axis !== undefined).map((s) => [Number(s.axis), s]));
+  // 메일박스(SDO)만 멈춘 드라이브 · 감시 노드 판정 · 수정 목록 139 ③
+  const mailbox = new Set(stuckMailboxes(snap).filter((s) => s.axis !== null && s.axis !== undefined).map((s) => Number(s.axis)));
   const motors = (registry?.motors || []).filter((m) => !m.deleted);
   return motors.map((motor) => {
     const axis = Number(motor.axis ?? motor.config?.controller_index);
@@ -71,6 +73,7 @@ export function motorRows(registry, snap) {
       // 게인 · 드라이브 EEPROM 값 그대로(우리 부팅 목록에 없음) · 수정 목록 108 (가)
       gains: ac && drive?.gains ? drive.gains : null,
       comm: stuck.has(axis) ? `${stuck.get(axis).state} 에 멈춤 · 드라이브 제어 전원을 껐다 켜세요`
+        : mailbox.has(axis) ? '메일박스 응답 없음 · 드라이브 제어 전원을 껐다 켜세요'
         : live.state === 'detected' ? '연결됨' : live.state ? `연결 안 됨 (${live.state})` : '연결 안 됨',
       masterIndex: Number(motor.identity?.ethercat_master_index ?? motor.config?.ethercat_master_index ?? 0),
       slavePosition: Number(motor.config?.position ?? motor.identity?.slave_position),
