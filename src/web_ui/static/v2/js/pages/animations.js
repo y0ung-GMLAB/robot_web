@@ -4,7 +4,7 @@
  * 범위 넘음은 이 PC 조인트 매핑과 비교 · 재생은 범위로 잘라서 돈다.
  */
 import { h, dot } from '../dom.js';
-import { checkState, factLine, fileRows, mappedCount, mujocoState, rangeIssues, seriesGeometry } from '../anim_model.js';
+import { checkState, factLine, fileRows, graphSeriesView, mappedCount, mujocoState, rangeIssues, seriesGeometry } from '../anim_model.js';
 import { PLAYLIST_MAX, isRunning, playlistAdd, registeredPlaylist, runStatus, signedDeg } from '../play_model.js';
 import { loadPlay } from './play.js';
 import { api } from '../net.js';
@@ -12,7 +12,8 @@ import { toast } from '../dialog.js';
 import * as act from '../actions.js';
 import { playlistCard } from './playlist_card.js';
 
-const ui = { selected: '', detail: null, detailFor: '', busy: '', upload: '' };
+// graphsOpen · 「나머지 보기」 를 누른 파일 이름 · 파일마다 · 138
+const ui = { selected: '', detail: null, detailFor: '', busy: '', upload: '', graphsOpen: new Set() };
 let current = { state: null, changed: () => {} };
 
 export async function loadAnimations(state, changed) {
@@ -134,6 +135,13 @@ function listCard(state, changed) {
 
 /* ---------- 상세 ---------- */
 
+/** 「나머지 보기」 / 「접기」 · 파일마다 따로 기억 · 138 */
+function toggleGraphs(id) {
+  const key = String(id);
+  if (ui.graphsOpen.has(key)) ui.graphsOpen.delete(key);
+  else ui.graphsOpen.add(key);
+}
+
 function chart(series, mappingRow) {
   const lower = mappingRow ? Number(mappingRow.motion_lower_rad) * 180 / Math.PI : null;
   const upper = mappingRow ? Number(mappingRow.motion_upper_rad) * 180 / Math.PI : null;
@@ -172,7 +180,9 @@ function detailCard(state, changed, navigate) {
   const check = checkState(file, play.mapping);
   const mujoco = mujocoState(file);
   const rows = new Map((play.mapping?.mappings || []).map((row) => [String(row.motion_id), row]));
-  const series = analysis.graph_series || detail?.graph_series || [];
+  const graphsOpen = ui.graphsOpen.has(ui.selected);
+  const graphs = graphSeriesView(analysis.graph_series ? analysis : detail, graphsOpen);
+  const series = graphs.series;
   const downloadUrl = play.projectId
     ? `/api/projects/${encodeURIComponent(play.projectId)}/files/motions/${encodeURIComponent(ui.selected)}/download` : '';
   const addToPlaylist = async () => {
@@ -194,6 +204,10 @@ function detailCard(state, changed, navigate) {
     series.length
       ? h('div', { class: 'charts' }, series.map((item) => chart(item, rows.get(String(item.motion_id)))))
       : h('p', { class: 'muted small', text: detail ? '그래프 없음' : '그래프 불러오는 중…' }),
+    graphs.note ? h('div', { class: 'row' },
+      h('span', { class: 'muted small', text: graphs.note }),
+      graphs.toggle ? h('button', { class: 'btn', type: 'button', 'aria-expanded': String(graphsOpen),
+        onclick: () => { toggleGraphs(file.id); changed(); } }, graphs.toggle) : null) : null,
     h('div', { class: 'row' },
       h('button', { class: 'btn btn-primary', type: 'button',
         disabled: running || check.tone === 'bad' || !play.mappingId || playlist.length >= PLAYLIST_MAX,
