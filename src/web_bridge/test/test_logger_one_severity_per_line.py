@@ -12,7 +12,7 @@ from pathlib import Path
 
 import pytest
 
-from motion_web_bridge.schedule_end import ScheduleEnd
+from motion_web_bridge.schedule_end import ScheduleEndService as ScheduleEnd
 
 ROOT = Path(__file__).resolve().parents[3]
 
