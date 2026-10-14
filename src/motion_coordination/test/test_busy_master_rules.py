@@ -43,7 +43,7 @@ def _member(**overrides):
 
 def test_protocol_is_eight():
     """하트비트 칸이 늘고 진행 PC 가 참가 목록 밖일 수 있다 · 옛 PC 와 섞이면 안 된다"""
-    assert GROUP_PROTOCOL_VERSION == 8
+    assert GROUP_PROTOCOL_VERSION == 9
 
 
 # ⑤ 선택 때 하트비트 `start_blocker` 로 미리 뺀다 ------------------------------------ #

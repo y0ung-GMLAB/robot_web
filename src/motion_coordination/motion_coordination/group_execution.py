@@ -31,7 +31,10 @@ from .participant_rules import STARTED_BY_SCHEDULE, normalize_started_by
 #: 8 · 2026-10-14 `GroupHeartbeat.start_blocker`(실행 준비 안 됨 · 선택 때 미리 뺌) · 바쁜 마스터는 참가자에서
 #: 빠진 채 진행만 한다(참가 PC 가 참가 목록 밖 진행 PC 를 받아들임) · 즉시 정지는 그 실행을 도는 PC 만
 #: 세운다 · 진행 PC 는 제 `join` 을 처리하지 않는다 · 이미 놓은 실행의 풀기에는 「정지」 로 답한다(수정 목록 136)
-GROUP_PROTOCOL_VERSION = 8
+#: 9 · 2026-10-14 칸은 같고 그룹 동작이 바뀜 · 웹 서비스가 정상 종료되면 `participant_left` 사건으로 그 PC 만
+#: 빠진다 · 알림 없는 끊김도 2등급으로 잠그지 않는다(수정 목록 144 · 145) · 옛 진행 PC 는 새 사건을 몰라
+#: 정지 + 2등급으로 갈린다 → 같은 버전끼리만
+GROUP_PROTOCOL_VERSION = 9
 
 #: 진행 PC 가 **뺀 PC 하나에만** 보내는 풀기 명령의 번호 앞머리 · 수정 목록 123
 #:
