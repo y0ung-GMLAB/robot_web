@@ -938,6 +938,31 @@ def test_start_leaves_out_broken_pcs_and_names_the_reason():
     assert node.snapshot()['execution']['excluded'] == result['excluded']
 
 
+@pytest.mark.parametrize('started_by', ['human', 'schedule'])
+def test_the_snapshot_says_who_started_the_group(started_by):
+    """수정 목록 143 · 스케줄 노드가 재시작 뒤에도 「누가 켰나」 를 연동 상태에서 읽는다"""
+    node = _node()
+    node._joined = True
+    node._command_pub = _Publisher()
+    node._registry.update(_member('pc-b'))
+
+    node._start_group_execution(request={'started_by': started_by})
+
+    assert node.snapshot()['execution']['started_by'] == started_by
+
+
+def test_the_snapshot_does_not_guess_who_started_when_another_pc_runs_it():
+    """진행 PC 가 아니면 시작 요청을 못 봤다 · 빈 값(모름) · 기본값 schedule 을 그대로 내보내지 않는다"""
+    node = _node()
+    node._joined = True
+    node._local_status = {}
+    node._execution.execution_id = 'exec-other'
+    node._execution.coordinator_id = 'pc-b'
+    node._execution.state = 'running'
+
+    assert node.snapshot()['execution']['started_by'] == ''
+
+
 def test_roster_marks_missing_and_outside_pcs():
     node = _node()
     node._joined = True
