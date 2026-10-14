@@ -292,8 +292,16 @@ class ScheduleEndService:
         logger = getattr(self.bridge, 'get_logger', None)
         if callable(logger):
             log = logger()
-            loud = state in {'failed', 'retry_wait', 'gave_up'}
-            (log.warn if loud else log.info)(f'[스케줄 끝] {message}')
+            # rclpy 로거는 **부르는 줄마다 등급 하나** · 한 줄에서 info 뒤 warn 이면
+            # 「Logger severity cannot be changed between calls」 로 스레드가 죽었다(수정 목록 137 · 실물 V-24) · 줄을 나눈다
+            # 로그가 실패해도 주차 판단 · 다시 시도는 계속 · 상태는 위에서 이미 남겼다(④)
+            try:
+                if state in {'failed', 'retry_wait', 'gave_up'}:
+                    log.warn(f'[스케줄 끝] {message}')
+                else:
+                    log.info(f'[스케줄 끝] {message}')
+            except Exception:  # noqa: BLE001
+                pass
 
     def _event(self, event_type: str, content: str, details: Optional[Dict[str, Any]] = None) -> None:
         """모터 기록(운영 로그)에 한 줄 · 못 써도 주차 판단은 계속 · 수정 목록 131"""

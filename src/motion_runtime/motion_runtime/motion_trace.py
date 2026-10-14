@@ -187,8 +187,15 @@ class MotionTraceRecorder:
     # 쓰기 스레드
 
     def _log(self, level: str, text: str) -> None:
-        if self.logger is not None:
-            getattr(self.logger, level, self.logger.info)(text)
+        # rclpy 로거는 부르는 줄마다 등급 하나 · 등급마다 줄을 나눈다 · 수정 목록 137
+        if self.logger is None:
+            return
+        if level == 'error':
+            self.logger.error(text)
+        elif level in ('warning', 'warn'):
+            self.logger.warning(text)
+        else:
+            self.logger.info(text)
 
     def _writer_loop(self) -> None:
         while True:
