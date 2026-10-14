@@ -127,6 +127,17 @@ if [[ "${ROLE}" == "robot" ]]; then
   else
     row 0 "EtherCAT master" "응답 없음 · Secure Boot · sudo systemctl status ethercat"
   fi
+  # IgH SDO 사전 자동 읽기 꺼짐(패치 · sdo_dict=0) · 모듈이 올라가 있을 때만 · 수정 목록 139
+  if [[ -d /sys/module/ec_master ]]; then
+    if [[ -r /sys/module/ec_master/parameters/sdo_dict ]]; then
+      sdo_dict="$(tr -d '[:space:]' < /sys/module/ec_master/parameters/sdo_dict)"
+      row "$([[ "${sdo_dict}" == "0" ]] && echo 1 || echo 0)" "EtherCAT SDO 사전 읽기 꺼짐" "sdo_dict=${sdo_dict}$([[ "${sdo_dict}" == "0" ]] || echo ' · 켜져 있음 · echo 0 | sudo tee /sys/module/ec_master/parameters/sdo_dict')"
+    elif grep -q '^sdo_dict:' <<<"$(modinfo -p ec_master 2>/dev/null)"; then
+      row 0 "EtherCAT SDO 사전 읽기 꺼짐" "새 모듈은 깔렸고 옛 모듈이 올라가 있음 · 모터 정지 → systemctl --user stop motion-motor → sudo systemctl restart ethercat → 모터 서비스 시작 · 수정 목록 139"
+    else
+      row 0 "EtherCAT SDO 사전 읽기 꺼짐" "패치 안 된 모듈 · sudo /usr/local/sbin/ethercat-rebuild --force 뒤 ethercat 재시작 · docs/수정_139_IgH_패치.md F"
+    fi
+  fi
 
   status="$(http_json http://localhost:8000/api/status)"
   row "$([[ -n "${status}" ]] && echo 1 || echo 0)" "웹 :8000" "$([[ -n "${status}" ]] && echo "http://${ip_addr:-localhost}:8000" || echo '응답 없음 · motion-control')"

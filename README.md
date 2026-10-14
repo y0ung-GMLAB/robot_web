@@ -683,6 +683,15 @@ sudo make modules_install install
 sudo depmod
 ```
 
+> **IgH 패치 필수 (수정 목록 139)** · 손으로 빌드할 때도 `./bootstrap` 전에
+> `git apply <작업공간>/scripts/setup/patches/igh-1.6.9-sdo-dict-off.patch` 를 넣는다
+> (재스캔 뒤 마스터가 SDO 사전을 저절로 읽다 우리 SDO 읽기·쓰기와 부딪쳐 드라이브 메일박스가 멈췄다 · 패치는 그 읽기를 끈다 · 모듈 파라미터 `sdo_dict` 기본 0).
+> `bash scripts/install.sh --site` 는 패치를 저절로 넣는다 · **이미 깔린 PC 는 커널 모듈만** 다시 빌드한다
+> (`make modules` · `modules_install` · `depmod` · PC 마다 IgH 가 깔린 자리가 달라서 `make install` 은 안 함 ·
+> `DEVICE_MODULES` 가 `generic` 이 아니거나 깔린 IgH 가 1.6.9 가 아니면 멈춤).
+> 새 모듈은 모터 서비스를 멈추고 `sudo systemctl restart ethercat` 해야 올라간다 · 순서는 `docs/설치_101.md` 5-1 ·
+> 커널이 바뀌면 `ethercat-rebuild.service` 가 부팅 때 패치를 넣어 다시 만든다(손으로 `sudo /usr/local/sbin/ethercat-rebuild --force`).
+
 설정 파일은 빌드 방식에 따라 `/etc/ethercat.conf` 또는 `/usr/local/etc/ethercat.conf` 경로에 생성됩니다. 설정 파일 경로를 확인한 후 편집합니다.
 
 ```bash
