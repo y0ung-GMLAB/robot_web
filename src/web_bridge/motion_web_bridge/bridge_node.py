@@ -659,6 +659,7 @@ class MotionWebBridge(Node):
             self._motion_state_received_at = time.time()
         self._motor_event_log.record_motor_error_transitions(payload)
         self._motor_event_log.record_minas_absolute_transition(payload)
+        self._motor_event_log.record_mailbox_stuck_transition(payload)   # 멈춘 메일박스 · 139 ③
 
     def _record_upper_service_crash(self) -> None:
         """launch 가 남긴 비정상 종료 표지를 모터 이벤트로 옮긴다 · 수정 목록 72"""

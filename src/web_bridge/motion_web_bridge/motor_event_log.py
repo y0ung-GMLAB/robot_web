@@ -81,6 +81,8 @@ class MotorEventLog:
         self._last_motion_run_state: Optional[str] = None
         #: 마지막으로 적은 앱솔루트 차단 문구 · '' = 막히지 않음 · None = 아직 모름 · 수정 목록 62
         self._last_minas_absolute_message: Optional[str] = None
+        #: 마지막으로 본 멈춘 메일박스 · (마스터, 링 위치) → 감시 노드 항목 · 수정 목록 139 ③
+        self._stuck_mailboxes: Dict[tuple, Dict[str, Any]] = {}
         #: 로그 폴더마다 정리 뒤 셈 · 건수 · 크기 · 파일 수 · 정리한 날 · 수정 목록 130
         self._tally: Dict[Path, Dict[str, Any]] = {}
 
@@ -90,6 +92,7 @@ class MotorEventLog:
             self._active_motor_errors = {}
             self._last_motion_run_state = None
             self._last_minas_absolute_message = None
+            self._stuck_mailboxes = {}
 
     def record_motor_error_transitions(self, payload: Dict[str, Any]) -> None:
         motors = payload.get('motors')
@@ -175,6 +178,48 @@ class MotorEventLog:
                 content='앱솔루트 확인됨 · 모터 동작 차단 해제',
                 details={'drives': summary.get('drives') or []},
             )
+
+    def record_mailbox_stuck_transition(self, payload: Dict[str, Any]) -> None:
+        """드라이브 메일박스 멈춤 · 풀림 · 바뀔 때만 드라이브마다 1건 · 수정 목록 139 ③
+
+        감시 노드가 `minas_absolute.stuck_mailboxes` 로 판정해 싣는다 · 칸이 없으면(옛 감시 노드 · 정보 없음)
+        아무것도 바꾸지 않는다.
+        """
+        summary = payload.get('minas_absolute') if isinstance(payload, dict) else None
+        if not isinstance(summary, dict) or not isinstance(summary.get('stuck_mailboxes'), list):
+            return
+        current: Dict[tuple, Dict[str, Any]] = {}
+        for item in summary['stuck_mailboxes']:
+            if not isinstance(item, dict) or not item.get('message'):
+                continue
+            slot = (optional_int(item.get('master_index'), 0) or 0, optional_int(item.get('slave_position'), None))
+            current[slot] = item
+        with self._lock:
+            previous = dict(self._stuck_mailboxes)
+            self._stuck_mailboxes = current
+        for slot, item in sorted(current.items(), key=lambda pair: str(pair[0])):
+            if slot not in previous:
+                self.append(
+                    category='error',
+                    event_type='ethercat_mailbox_stuck',
+                    target=self._mailbox_target(slot, item),
+                    content=str(item['message']),
+                    details=dict(item),
+                )
+        for slot, item in sorted(previous.items(), key=lambda pair: str(pair[0])):
+            if slot not in current:
+                self.append(
+                    category='system',
+                    event_type='ethercat_mailbox_recovered',
+                    target=self._mailbox_target(slot, item),
+                    content='메일박스 멈춤 해제 · 응답이 돌아왔거나 드라이브를 다시 잡음',
+                    details=dict(item),
+                )
+
+    @staticmethod
+    def _mailbox_target(slot: tuple, item: Dict[str, Any]) -> str:
+        axis = optional_int(item.get('axis'), None)
+        return f'{axis}번 드라이브' if axis is not None else f'슬레이브 {slot[1]}'
 
     def record_motion_run_transition(self, status: Dict[str, Any]) -> None:
         state = str(status.get('state') or 'idle')

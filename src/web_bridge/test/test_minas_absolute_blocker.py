@@ -74,6 +74,36 @@ def test_motor_event_log_records_block_and_release_once(tmp_path):
     assert [event['event_type'] for event in events] == ['minas_absolute_blocked', 'minas_absolute_confirmed']
 
 
+def test_motor_event_log_records_stuck_mailbox_and_release_once_per_drive():
+    """수정 목록 139 ③ · 감시 노드의 `minas_absolute.stuck_mailboxes` · 바뀔 때만 드라이브마다 1건"""
+    from motion_web_bridge.motor_event_log import MotorEventLog
+
+    events = []
+    log = MotorEventLog.__new__(MotorEventLog)
+    log._lock = threading.RLock()
+    log._stuck_mailboxes = {}
+    log.append = lambda **event: events.append(event)
+    stuck = {
+        'master_index': 0, 'slave_position': 2, 'axis': 2, 'since': 1.0,
+        'message': '2번 드라이브 메일박스 응답 없음 · 그 드라이브 제어 전원을 껐다 켜세요',
+    }
+
+    log.record_mailbox_stuck_transition({'minas_absolute': {'state': 'ok', 'stuck_mailboxes': []}})
+    log.record_mailbox_stuck_transition({'minas_absolute': {'state': 'ok'}})          # 옛 감시 노드 · 칸 없음
+    assert events == []
+
+    log.record_mailbox_stuck_transition({'minas_absolute': {'state': 'ok', 'stuck_mailboxes': [stuck]}})
+    log.record_mailbox_stuck_transition({'minas_absolute': {'state': 'checking', 'stuck_mailboxes': [stuck]}})
+    assert [event['event_type'] for event in events] == ['ethercat_mailbox_stuck']
+    assert events[0]['category'] == 'error'
+    assert events[0]['content'] == stuck['message'] and events[0]['target'] == '2번 드라이브'
+
+    log.record_mailbox_stuck_transition({'minas_absolute': None})                     # 정보 없음 · 그대로
+    log.record_mailbox_stuck_transition({'minas_absolute': {'state': 'ok', 'stuck_mailboxes': []}})
+    assert [event['event_type'] for event in events] == ['ethercat_mailbox_stuck', 'ethercat_mailbox_recovered']
+    assert events[1]['target'] == '2번 드라이브'
+
+
 def test_bridge_moves_the_crash_marker_into_one_motor_event(tmp_path):
     """수정 목록 72"""
     from types import SimpleNamespace

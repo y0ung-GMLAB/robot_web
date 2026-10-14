@@ -22,7 +22,6 @@ from __future__ import annotations
 import argparse
 import json
 import re
-import subprocess
 import sys
 import time
 from pathlib import Path
@@ -30,6 +29,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / 'src' / 'web_bridge'))
 sys.path.insert(0, str(ROOT / 'src' / 'motion_common'))   # drive_params → ethercat_mailbox(125) · 실물 S-0c 10-14
+from motion_common import ethercat_mailbox  # noqa: E402
 from motion_web_bridge.drive_params import CATALOG  # noqa: E402
 
 MINAS_VENDOR = 0x066F
@@ -37,7 +37,9 @@ ABSOLUTE_FACTORY = 1          # Pr0.15 팩토리값 · 인크리멘털 · A6B �
 
 
 def run(command, check=False):
-    done = subprocess.run(command, capture_output=True, text=True, timeout=20)
+    # SDO(upload · download · alias)는 웹 · 감시 노드와 같은 잠금 안에서 · 버스 설정 중이면 안 보냄 · 수정 목록 139 ④ ·
+    # 잠금 밖 `ethercat upload` 가 S 3회차 10:33 슬레이브 1·2 메일박스 멈춤에 보탬 · 메일박스가 아닌 명령은 그대로 보낸다
+    done = ethercat_mailbox.run(command, capture_output=True, text=True, timeout=20)
     if check and done.returncode != 0:
         raise RuntimeError(f"{' '.join(command)} · {(done.stderr or done.stdout).strip()}")
     return done

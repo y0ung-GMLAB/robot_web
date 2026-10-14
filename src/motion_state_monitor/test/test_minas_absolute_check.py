@@ -504,3 +504,173 @@ def test_preop_is_not_stuck_while_configuring_or_without_motor_program(monkeypat
     errored = _bus({0: 'PREOP'}, errors=[0], phase='Idle', active=False)
     scanner._stuck_slaves(errored, 200.0)
     assert scanner._stuck_slaves(errored, 300.0)[0]['message'].startswith('슬레이브 0 드라이브가 PREOP')
+
+
+# -- 수정 목록 139 ③ · 멈춘 메일박스 · 한 대만 응답 없음이 이어지면 알리고 그 드라이브엔 덜 보낸다 ------------- #
+
+EIO = 'Failed to upload SDO: Input/output error'
+
+
+class SilentEthercat(FakeEthercat):
+    """`silent` 의 슬레이브는 메일박스가 멈춘 것처럼 · CLI 는 EIO(커널 로그엔 「upload request … timeout」)"""
+
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+        self.silent = set()
+
+    def __call__(self, command, **kwargs):
+        if command[1] == 'upload' and int(command[command.index('-p') + 1]) in self.silent:
+            self.calls.append(' '.join(command))
+            return SimpleNamespace(returncode=1, stdout='', stderr=EIO)
+        return super().__call__(command, **kwargs)
+
+
+def _uploads_to(runner, position):
+    return [c for c in runner.calls if 'upload' in c and f' -p {position} ' in c]
+
+
+def _all_ok_first(runner, *, axes=None):
+    """처음엔 모두 정상으로 읽는다(앱솔루트 정상) · 그 뒤 게인 다시 읽기에서 응답 없음을 만든다"""
+    check, _ = _check(runner, clock=Clock(), axes=axes)
+    masters = _masters(0, 1)
+    _see(check, masters)
+    assert check.snapshot()['state'] == ma.STATE_OK and check.snapshot()['stuck_mailboxes'] == []
+    return check, masters
+
+
+def _gain_rounds(check, masters, rounds):
+    """게인 다시 읽기 · 첫 번은 `GAIN_REFRESH_SEC` 뒤 · 실패가 남으면 `GAIN_RETRY_SEC` 마다"""
+    from motion_state_monitor.absolute_check import GAIN_REFRESH_SEC, GAIN_RETRY_SEC
+    check._clock.now += GAIN_REFRESH_SEC + 1
+    check.observe(masters)
+    for _ in range(rounds - 1):
+        check._clock.now += GAIN_RETRY_SEC + 0.5
+        check.observe(masters)
+
+
+def _make_stuck(runner, *, axes=None):
+    check, masters = _all_ok_first(runner, axes=axes)
+    runner.silent = {1}
+    _gain_rounds(check, masters, 3)                        # 응답 없음 3 번 · 30 s 넘게 · 슬레이브 0 은 계속 답함
+    assert [s['slave_position'] for s in check.snapshot()['stuck_mailboxes']] == [1]
+    return check, masters
+
+
+def test_one_slave_timing_out_while_others_answer_is_a_stuck_mailbox():
+    runner = SilentEthercat()
+    check, masters = _all_ok_first(runner, axes={(0, 1): 2})
+    runner.silent = {1}
+    _gain_rounds(check, masters, 2)
+    assert check.snapshot()['stuck_mailboxes'] == []       # 아직 2 번
+    _gain_rounds(check, masters, 1)
+
+    snapshot = check.snapshot()
+    assert [(s['slave_position'], s['axis']) for s in snapshot['stuck_mailboxes']] == [(1, 2)]
+    assert snapshot['stuck_mailboxes'][0]['message'] == '2번 드라이브 메일박스 응답 없음 · 그 드라이브 제어 전원을 껐다 켜세요'
+    # 막지 않는다 · 앱솔루트 판정 · PDO · 재생은 그대로
+    assert snapshot['state'] == ma.STATE_OK and ma.block_reason(snapshot) == ''
+
+
+def test_three_quick_timeouts_are_not_enough_without_ten_seconds():
+    """연속 3 번이어도 첫 번째부터 10 s 가 안 됐으면 아직 · 재투입 직후 잠깐 겹치는 것과 가른다"""
+    runner = SilentEthercat()
+    clock = Clock()
+    check, _ = _check(runner, clock=clock)
+    runner.silent = {1}
+    masters = _masters(0, 1)
+    _see(check, masters)                                   # 0x3015 응답 없음 1 · 「확인 불가」 · 2 s 뒤 다시
+    for _ in range(2):
+        clock.now += 2.5
+        check.observe(masters)                             # 2 · 3 (첫 번째부터 5 s)
+    assert len(_uploads_to(runner, 1)) == 3
+    assert check.snapshot()['stuck_mailboxes'] == []
+    for _ in range(2):
+        clock.now += 2.5
+        check.observe(masters)                             # 4 · 5 (10 s)
+    assert [s['slave_position'] for s in check.snapshot()['stuck_mailboxes']] == [1]
+
+
+def test_all_slaves_timing_out_is_a_bus_problem_not_a_stuck_mailbox():
+    runner = SilentEthercat()
+    check, masters = _all_ok_first(runner)
+    runner.silent = {0, 1}
+    _gain_rounds(check, masters, 6)
+    assert check.snapshot()['stuck_mailboxes'] == []
+    # 둘 다 계속 물어본다(어느 쪽도 쉬지 않음)
+    assert sum('0x3002' in c for c in _uploads_to(runner, 1)) >= 6
+
+
+def test_aborts_are_answers_and_never_make_a_stuck_mailbox():
+    runner = SilentEthercat(fail={(1, '0x3002')})          # 「SDO upload aborted」 · 드라이브가 답한 것
+    check, masters = _all_ok_first(runner)
+    _gain_rounds(check, masters, 6)
+    assert check.snapshot()['stuck_mailboxes'] == []
+
+
+def test_reads_to_a_stuck_slave_stop_except_a_sparse_probe():
+    from motion_state_monitor.absolute_check import GAIN_RETRY_SEC, MAILBOX_PROBE_SEC
+    runner = SilentEthercat()
+    check, masters = _make_stuck(runner)
+    sent = len(_uploads_to(runner, 1))
+    other = len(_uploads_to(runner, 0))
+
+    check._clock.now += GAIN_RETRY_SEC + 0.5               # 다시 읽기 · 멈춘 드라이브엔 안 보냄
+    check.observe(masters)
+    assert len(_uploads_to(runner, 1)) == sent
+    assert len(_uploads_to(runner, 0)) > other             # 다른 드라이브는 그대로 읽음
+    assert '읽기 쉼' in check.snapshot()['drives'][1]['gains']['error']
+
+    check._clock.now += MAILBOX_PROBE_SEC - GAIN_RETRY_SEC  # 떠볼 때 · 한 번만
+    check.observe(masters)
+    assert len(_uploads_to(runner, 1)) == sent + 1
+    assert [s['slave_position'] for s in check.snapshot()['stuck_mailboxes']] == [1]   # 여전히 답 없음 · 그대로
+
+
+def test_an_answer_to_the_probe_clears_the_stuck_mailbox():
+    from motion_state_monitor.absolute_check import MAILBOX_PROBE_SEC
+    runner = SilentEthercat()
+    check, masters = _make_stuck(runner)
+    runner.silent = set()                                  # 다시 답함 · 떠보기로 안다
+    check._clock.now += MAILBOX_PROBE_SEC + 1
+    check.observe(masters)
+    assert check.snapshot()['stuck_mailboxes'] == []
+    assert check.snapshot()['drives'][1]['gains']['error'] == ''   # 풀리면 그 자리에서 게인을 다 읽음
+
+
+def test_leaving_op_or_a_rescan_clears_the_stuck_mailbox():
+    check, _ = _make_stuck(SilentEthercat())
+    check.observe(_states({0: 'OP', 1: 'PREOP'}))          # 그 슬레이브가 OP 를 벗어남(재설정 · 재스캔)
+    assert check.snapshot()['stuck_mailboxes'] == []
+
+    check, _ = _make_stuck(SilentEthercat())
+    check.observe(_masters(0, 1, 2))                       # 슬레이브 구성 바뀜
+    assert check.snapshot()['stuck_mailboxes'] == []
+
+
+def test_a_failed_master_poll_does_not_clear_the_stuck_mailbox():
+    check, _ = _make_stuck(SilentEthercat())
+    check.observe(_masters(0, 1, available=False))         # `ethercat slaves` 한 번 실패 · 모름 · 직전 그대로
+    assert [s['slave_position'] for s in check.snapshot()['stuck_mailboxes']] == [1]
+
+
+def test_timeouts_on_a_slave_not_in_op_do_not_count():
+    """OP 가 아니면 마스터가 설정 중일 수 있다 · 그때의 응답 없음은 판정에 안 쓴다"""
+    runner = SilentEthercat()
+    clock = Clock()
+    check, _ = _check(runner, clock=clock)
+    runner.silent = {1}
+    masters = _states({0: 'OP', 1: 'PREOP'})               # 모터 프로그램 없음 · PREOP 그대로면 읽는다
+    _see(check, masters)
+    for _ in range(20):
+        clock.now += 2.5
+        check.observe(masters)
+    assert len(_uploads_to(runner, 1)) >= 5
+    assert check.snapshot()['stuck_mailboxes'] == []
+
+
+def test_mailbox_answered_reads_the_cli_text():
+    from motion_state_monitor.absolute_check import mailbox_answered
+    assert mailbox_answered(EIO) is False
+    assert mailbox_answered('Reception of CoE upload request for SDO 0x3015:0 failed with timeout after 1000 ms') is False
+    assert mailbox_answered('SDO transfer aborted with code 0x06020000: This object does not exist') is True
+    assert mailbox_answered('Failed to open master device /dev/EtherCAT0') is None

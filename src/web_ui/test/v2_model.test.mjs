@@ -165,3 +165,16 @@ test('PREOP 에 멈춘 드라이브 · 감시 노드 글 그대로 빨강 · 제
   assert.match(stuck.detail, /제어 전원/);
   assert.equal(collectIssues({ motion_state: { ethercat: {} } }, { run_mode: 'manual' }).length, 0);
 });
+
+test('메일박스가 멈춘 드라이브 · 감시 노드 글 그대로 빨강 · 재생은 그대로라고 (수정 목록 139 ③)', () => {
+  const snap = { motion_state: { minas_absolute: { state: 'ok', drives: [], stuck_mailboxes: [
+    { master_index: 0, slave_position: 2, axis: 2, since: 1, message: '2번 드라이브 메일박스 응답 없음 · 그 드라이브 제어 전원을 껐다 켜세요' },
+  ] } } };
+  const issues = collectIssues(snap, { run_mode: 'manual' });
+  const box = issues.find((i) => i.title.includes('메일박스'));
+  assert.equal(box.tone, 'bad');
+  assert.equal(box.title, '2번 드라이브 메일박스 응답 없음 · 그 드라이브 제어 전원을 껐다 켜세요');
+  assert.match(box.detail, /재생/);
+  assert.equal(collectIssues({ motion_state: { minas_absolute: { state: 'ok', stuck_mailboxes: [] } } }, { run_mode: 'manual' }).length, 0);
+  assert.equal(collectIssues({ motion_state: { minas_absolute: { state: 'ok' } } }, { run_mode: 'manual' }).length, 0);
+});

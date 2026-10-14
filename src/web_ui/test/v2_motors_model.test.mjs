@@ -167,3 +167,11 @@ test('PREOP 에 멈춘 드라이브는 그 줄 통신 칸에 (수정 목록 125)
   assert.equal(rows[0].comm, '연결됨');
   assert.equal(rows[1].comm, 'PREOP 에 멈춤 · 드라이브 제어 전원을 껐다 켜세요');
 });
+
+test('메일박스가 멈춘 드라이브는 그 줄 통신 칸에 (수정 목록 139 ③)', () => {
+  const snap = { motion_state: { motors: [{ controller_index: 0, state: 'detected' }, { controller_index: 1, state: 'detected' }],
+    minas_absolute: { state: 'ok', drives: [], stuck_mailboxes: [{ slave_position: 1, axis: 1, message: '1번 드라이브 메일박스 응답 없음 · …' }] } } };
+  const rows = motorRows({ motors: [motor(0, 'A'), motor(1, 'B')] }, snap);
+  assert.equal(rows[0].comm, '연결됨');
+  assert.equal(rows[1].comm, '메일박스 응답 없음 · 드라이브 제어 전원을 껐다 켜세요');
+});

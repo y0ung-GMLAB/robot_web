@@ -51,10 +51,22 @@ motion_state 의 `minas_absolute` 로 싣는다 · 판정은 `motion_common.mina
     재투입으로 돌아온 드라이브는 OP 뒤 몇 초 동안 마스터가 SDO 사전 목록을 읽는다(우리 잠금 밖 · 표시도 없음) ·
     그 사이 게인 0x3002 읽기가 「SDO upload aborted」 · 「MBXERR_UNSUPPORTEDPROTOCOL」 과 겹쳤다 ·
     상태가 그대로여야 하는 시간 `SETTLE_SEC` 을 10 s 로 늘려 그 시간을 넘긴다(실패해도 2 s 뒤 다시 읽는 것은 그대로).
+
+멈춘 메일박스를 알린다 · 수정 목록 139 ③ (실물 S 3회차 · 2026-10-14 · 안전망)
+    SDO 충돌 뒤 드라이브 메일박스가 영구히 멈췄다 · OP · PDO 정상 · SDO 는 전부 「upload request … timeout」
+    (SM0 쓰기 WKC 0 · 커널 로그) · 제어 전원 재투입으로만 풀린다 · 원인(IgH SDO 사전 자동 읽기)은 커널 패치로 없애지만
+    다른 이유로 멈춰도 사람이 알아야 한다 · 그래서
+    ① OP 인 슬레이브 하나가 응답 없음(CLI 는 EIO 「Input/output error」 · 우리 제한 시간 초과)을 `MAILBOX_STUCK_COUNT` 번 연속 ·
+       첫 번째부터 `MAILBOX_STUCK_SPAN_SEC` 이상 · 그 사이 **다른 슬레이브는 답했으면** 그 드라이브 메일박스 멈춤 ·
+       모두 답이 없으면 버스 문제다(다른 검사가 본다) · 이 경고 아님 · SDO abort 는 드라이브가 답한 것으로 본다
+    ② 멈춘 동안 그 드라이브엔 SDO 를 보내지 않는다(계속 쏘지 않기) · `MAILBOX_PROBE_SEC` 마다 한 번만 떠본다 · PDO · 재생은 그대로
+    ③ 풀림 · 떠본 읽기가 답을 받거나 · 그 슬레이브가 OP 를 벗어나거나(재스캔 · 재설정) · 슬레이브 구성이 바뀌면
+    ④ motion_state 의 `minas_absolute.stuck_mailboxes` 로 싣는다 · 막지 않는다 · 화면 「확인할 일」 · 모터 기록은 받는 쪽
 """
 
 from __future__ import annotations
 
+import re
 import subprocess
 import threading
 import time
@@ -93,7 +105,20 @@ GAIN_OBJECTS: Tuple[Tuple[str, int, str], ...] = (
 GAIN_REFRESH_SEC = 60.0   # 화면에서 쓴 게인이 1 분 안에 표에 보이게 · 108 (다)
 GAIN_RETRY_SEC = 15.0
 
+#: 멈춘 메일박스 판정 · 139 ③ · 응답 없음 연속 횟수 · 첫 번째부터 걸린 시간 · 멈춘 동안 떠보는 간격
+MAILBOX_STUCK_COUNT = 3
+MAILBOX_STUCK_SPAN_SEC = 10.0
+MAILBOX_PROBE_SEC = 30.0
+MAILBOX_SKIPPED = '메일박스 응답 없음 · 읽기 쉼'
+
+#: 응답이 없었다는 CLI 글 · IgH 1.6.9 는 upload request 시간 초과(SM0 쓰기 WKC 0)를 커널 로그에만 「timeout」 으로 적고
+#: CLI 에는 「Failed to upload SDO: Input/output error」 (실물 S-4 · S 3회차) · 「wrong SDO」 도 같은 EIO 라 연속 횟수 · 시간으로 가른다
+_NO_RESPONSE = re.compile(r'input/output error|timeout|timed out', re.IGNORECASE)
+#: 드라이브가 abort 로 답함 · 메일박스는 살아 있다
+_ANSWERED = re.compile(r'abort', re.IGNORECASE)
+
 Signature = FrozenSet[Tuple[int, int]]
+Slot = Tuple[int, int]
 BusStates = FrozenSet[Tuple[int, int, str]]
 
 
@@ -142,6 +167,37 @@ def settle_needed(masters: Dict[str, Dict[str, Any]], states: BusStates) -> floa
     if master_claimed(masters) and any(state != 'OP' for _m, _p, state in states):
         return STUCK_SEC
     return SETTLE_SEC
+
+
+def mailbox_answered(detail: str) -> Optional[bool]:
+    """실패한 `ethercat upload` 의 글 → 드라이브가 답했나 · True 답함(abort) · False 응답 없음 · None 모름 · 139 ③"""
+    text = str(detail or '')
+    if _ANSWERED.search(text):
+        return True
+    if _NO_RESPONSE.search(text):
+        return False
+    return None
+
+
+def op_slaves(masters: Dict[str, Dict[str, Any]], previous: FrozenSet[Slot] = frozenset()) -> FrozenSet[Slot]:
+    """OP 인 (마스터, 링 위치) · 조회가 실패한 마스터는 직전 그대로(`visible_slaves` 와 같은 규칙) · 139 ③"""
+    found = set()
+    for key, status in (masters or {}).items():
+        if not isinstance(status, dict):
+            continue
+        master = parse_int(status.get('master_index'))
+        if master is None:
+            master = parse_int(key)
+        if master is None:
+            continue
+        if not status.get('available'):
+            found.update(item for item in previous if item[0] == int(master))
+            continue
+        for position, state in (status.get('states_by_position') or {}).items():
+            value = parse_int(position)
+            if value is not None and str(state or '').upper() == 'OP':
+                found.add((int(master), int(value)))
+    return frozenset(found)
 
 
 class _BusBusy(Exception):
@@ -204,6 +260,12 @@ class MinasAbsoluteCheck:
         #: 게인만 다시 읽을 때 · None = 잡히지 않음(앱솔루트 읽기가 끝나면 잡는다)
         self._gains_due: Optional[float] = None
         self._summary: Dict[str, Any] = minas_absolute.checking_summary()
+        #: 멈춘 메일박스 · 139 ③ · OP 인 슬레이브 · 슬롯 → 응답 없음 연속(횟수 · 첫 때) · 마지막으로 답한 때 ·
+        #: 멈춤(때 · 다음 떠보기)
+        self._op: FrozenSet[Slot] = frozenset()
+        self._no_answer: Dict[Slot, Dict[str, float]] = {}
+        self._answered_at: Dict[Slot, float] = {}
+        self._stuck: Dict[Slot, Dict[str, float]] = {}
 
     @staticmethod
     def _spawn_thread(target: Callable[[], None]) -> None:
@@ -220,6 +282,7 @@ class MinasAbsoluteCheck:
                 self._states_since = now
             self._settle_needed = settle_needed(masters, states)
             signature = visible_slaves(masters, self._signature)
+            self._observe_mailboxes(masters, signature)
             if signature != self._signature:
                 previous = list(self._summary.get('drives') or [])
                 self._signature = signature
@@ -257,7 +320,83 @@ class MinasAbsoluteCheck:
         with self._lock:
             summary = dict(self._summary)
             summary['drives'] = [dict(drive) for drive in summary.get('drives') or []]
+            # 멈춘 메일박스 · 막지 않는다(PDO · 재생은 그대로) · 알리기만 · 139 ③
+            summary['stuck_mailboxes'] = [
+                self._stuck_entry(slot, info) for slot, info in sorted(self._stuck.items())
+            ]
             return summary
+
+    # -- 멈춘 메일박스 · 139 ③ ---------------------------------------------- #
+
+    def _observe_mailboxes(self, masters: Dict[str, Dict[str, Any]], signature: Signature) -> None:
+        """폴링마다 · 잠금 안에서 부른다 · OP 를 벗어난 슬레이브 · 구성 변화(재스캔)는 판정을 처음부터"""
+        self._op = op_slaves(masters, self._op)
+        if signature != self._signature:
+            dropped = sorted(self._stuck)
+            self._no_answer.clear()
+            self._answered_at.clear()
+        else:
+            dropped = sorted(slot for slot in self._stuck if slot not in self._op)
+            self._no_answer = {slot: streak for slot, streak in self._no_answer.items() if slot in self._op}
+        for slot in dropped:
+            self._stuck.pop(slot, None)
+            self._log_warning(f'{self._slot_label(slot)} 드라이브 메일박스 멈춤 해제 · 슬레이브를 다시 잡음')
+
+    def _mailbox_may_send(self, slot: Slot) -> bool:
+        """멈춘 드라이브엔 안 보낸다 · `MAILBOX_PROBE_SEC` 마다 한 번만 떠본다"""
+        with self._lock:
+            stuck = self._stuck.get(slot)
+            if stuck is None:
+                return True
+            now = self._clock()
+            if now < stuck['probe_at']:
+                return False
+            stuck['probe_at'] = now + MAILBOX_PROBE_SEC
+            return True
+
+    def _note_mailbox(self, slot: Slot, answered: Optional[bool]) -> None:
+        """SDO 하나의 결과 · True 답함 · False 응답 없음 · None 모름(판정에 안 씀)"""
+        if answered is None:
+            return
+        now = self._clock()
+        message = ''
+        with self._lock:
+            if answered:
+                self._answered_at[slot] = now
+                self._no_answer.pop(slot, None)
+                if self._stuck.pop(slot, None) is not None:
+                    message = f'{self._slot_label(slot)} 드라이브 메일박스 응답 돌아옴 · 멈춤 해제'
+            elif slot in self._op:
+                # OP 가 아니면 마스터가 설정 중일 수 있다 · 판정에 안 쓴다
+                streak = self._no_answer.setdefault(slot, {'count': 0, 'first_at': now})
+                streak['count'] += 1
+                others_answered = any(
+                    other != slot and at >= streak['first_at'] for other, at in self._answered_at.items()
+                )
+                if (
+                    slot not in self._stuck
+                    and streak['count'] >= MAILBOX_STUCK_COUNT
+                    and now - streak['first_at'] >= MAILBOX_STUCK_SPAN_SEC
+                    and others_answered
+                ):
+                    self._stuck[slot] = {'since': now, 'probe_at': now + MAILBOX_PROBE_SEC}
+                    message = self._stuck_entry(slot, self._stuck[slot])['message']
+        if message:
+            self._log_warning(message)
+
+    def _slot_label(self, slot: Slot) -> str:
+        axis = self._axis_for_slave(*slot)
+        return f'{int(axis)}번' if axis is not None else f'슬레이브 {slot[1]}'
+
+    def _stuck_entry(self, slot: Slot, info: Dict[str, float]) -> Dict[str, Any]:
+        axis = self._axis_for_slave(*slot)
+        return {
+            'master_index': slot[0],
+            'slave_position': slot[1],
+            'axis': axis,
+            'since': info['since'],
+            'message': f'{self._slot_label(slot)} 드라이브 메일박스 응답 없음 · 그 드라이브 제어 전원을 껐다 켜세요',
+        }
 
     # -- 읽기 ------------------------------------------------------------- #
 
@@ -414,6 +553,9 @@ class MinasAbsoluteCheck:
         return vendors, ''
 
     def _upload(self, master: int, position: int, index: int, data_type: str) -> Tuple[Optional[int], str]:
+        slot = (int(master), int(position))
+        if not self._mailbox_may_send(slot):
+            return None, f'0x{index:04X} {MAILBOX_SKIPPED}'     # 멈춘 메일박스 · 떠볼 때까지 안 보냄 · 139 ③
         try:
             completed = self._sdo(
                 [
@@ -422,13 +564,18 @@ class MinasAbsoluteCheck:
                 ],
                 check=False, capture_output=True, text=True, timeout=UPLOAD_TIMEOUT_SEC,
             )
-        except (OSError, subprocess.TimeoutExpired) as exc:
+        except subprocess.TimeoutExpired as exc:
+            self._note_mailbox(slot, False)
+            return None, f'0x{index:04X} {exc}'
+        except OSError as exc:
             return None, f'0x{index:04X} {exc}'
         if ethercat_mailbox.is_refused(completed):
             raise _BusBusy((completed.stderr or '').strip())
         if completed.returncode != 0:
             detail = (completed.stderr or completed.stdout or '').strip() or 'unknown error'
+            self._note_mailbox(slot, mailbox_answered(detail))
             return None, f'0x{index:04X} {detail}'
+        self._note_mailbox(slot, True)
         parts = (completed.stdout or '').strip().split()
         # `0x0000 0` · 마지막 칸(10진) · 스캐너 `_read_drive_params` 와 같은 읽기
         value = parse_int(parts[-1]) if parts else None
