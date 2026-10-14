@@ -196,6 +196,70 @@ site_autologin() {
   site_mark_reboot "autologin"
 }
 
+# ------------------------------------------------------------------ #
+# 원격 · 애니데스크 · 마스터 PC 한 대에만 · 수정 목록 135 (사용자 결정 2026-10-14 · 회사 계정)
+#   `scripts/setup/anydesk.sh` 가 부른다 · install.sh 는 부르지 않는다(마스터에서만 손으로)
+# ------------------------------------------------------------------ #
+
+SITE_ANYDESK_KEY="${SITE_ANYDESK_KEY:-/etc/apt/keyrings/keys.anydesk.com.asc}"
+SITE_ANYDESK_LIST="${SITE_ANYDESK_LIST:-/etc/apt/sources.list.d/anydesk-stable.list}"
+
+# gdm3 custom.conf 에 WaylandEnable=false 를 넣은 결과 · stdout · 멱등 · 시험 가능
+#   애니데스크는 Wayland 화면을 조작하지 못한다(보기도 안 되는 경우) · 우분투 22.04 GNOME 기본이 Wayland
+site_render_gdm_wayland_off() {
+  local path="$1" existing=""
+  [[ -f "${path}" ]] && existing="$(cat "${path}")"
+  printf '%s\n' "${existing}" | grep -v -E '^\s*#?\s*WaylandEnable\s*=' | awk '
+    BEGIN { done = 0 }
+    /^\[daemon\]/ { print; print "WaylandEnable=false"; done = 1; next }
+    { print }
+    END { if (!done) { if (NR > 0) print ""; print "[daemon]"; print "WaylandEnable=false" } }
+  ' | sed -e :a -e '/^\n*$/{$d;N;ba' -e '}'
+}
+
+site_wayland_off() {
+  echo "Wayland 끄기 (애니데스크 원격 조작 · Xorg 로)"
+  if [[ -f "${SITE_GDM_CONF}" ]] && grep -q '^WaylandEnable=false' "${SITE_GDM_CONF}"; then
+    site_note "이미 꺼짐 · ${SITE_GDM_CONF}"
+    return 0
+  fi
+  if [[ ! -d "$(dirname "${SITE_GDM_CONF}")" && "${SITE_DRY_RUN}" != "1" ]]; then
+    site_warn "gdm3 없음 (${SITE_GDM_CONF}) · 데스크톱이 GNOME 이 아니면 손으로 Xorg 로"
+    return 0
+  fi
+  site_render_gdm_wayland_off "${SITE_GDM_CONF}" | site_write_root_file "${SITE_GDM_CONF}"
+  site_mark_reboot "wayland_off"
+}
+
+site_anydesk_install() {
+  echo "애니데스크 설치 (공식 저장소)"
+  if command -v anydesk >/dev/null 2>&1; then
+    site_note "이미 설치됨 · $(anydesk --version 2>/dev/null || echo 버전 미상)"
+  else
+    site_run sudo install -m 0755 -d "$(dirname "${SITE_ANYDESK_KEY}")"
+    site_run sudo curl -fsSL https://keys.anydesk.com/repos/DEB-GPG-KEY -o "${SITE_ANYDESK_KEY}"
+    site_run sudo chmod a+r "${SITE_ANYDESK_KEY}"
+    echo "deb [signed-by=${SITE_ANYDESK_KEY}] https://deb.anydesk.com all main" | site_write_root_file "${SITE_ANYDESK_LIST}"
+    site_run sudo apt-get update
+    site_run sudo apt-get install -y anydesk
+  fi
+  echo "애니데스크 · 부팅 때 자동 실행"
+  if systemctl is-enabled --quiet anydesk 2>/dev/null && systemctl is-active --quiet anydesk 2>/dev/null; then
+    site_note "이미 켜짐"
+  else
+    site_run sudo systemctl enable --now anydesk
+  fi
+}
+
+# 1 = 설치 · 서비스 켜짐 · Wayland 꺼짐
+site_anydesk_ok() {
+  if command -v anydesk >/dev/null 2>&1 && systemctl is-active --quiet anydesk 2>/dev/null      && [[ -f "${SITE_GDM_CONF}" ]] && grep -q '^WaylandEnable=false' "${SITE_GDM_CONF}"; then
+    echo 1
+  else
+    echo 0
+  fi
+}
+
 # 웹에서 하는 관리 · 이 계정만 · 수정 목록 81 (Wi-Fi) · 79 (시간대) · 2026-10-08
 #
 # 웹 서비스는 systemd 사용자 서비스라 로그인 세션 밖이다 · polkit 이 「비활성」 으로 보고

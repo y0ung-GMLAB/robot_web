@@ -199,3 +199,25 @@ def test_ethercat_rebuild_hook_exits_quietly_when_the_module_exists(tmp_path):
     (fake / 'modinfo').chmod(0o755)
     result = _bash(f'PATH="{fake}:$PATH" bash "{SCRIPTS / "setup" / "ethercat-rebuild.sh"}"')
     assert result.returncode == 0 and result.stdout == ''
+
+
+def test_wayland_off_line_is_added_once_and_keeps_autologin(tmp_path):
+    """애니데스크 · 마스터 PC 만 · Wayland 끄기 · 수정 목록 135 (2026-10-14)"""
+    conf = tmp_path / 'custom.conf'
+    conf.write_text('# GDM\n[daemon]\nAutomaticLoginEnable=true\nAutomaticLogin=robot\n#WaylandEnable=false\n\n[security]\n', encoding='utf-8')
+    out = _site(f'site_render_gdm_wayland_off "{conf}"')
+    assert out.count('WaylandEnable=false') == 1 and '#WaylandEnable' not in out
+    assert 'AutomaticLogin=robot' in out and '[security]' in out
+    conf.write_text(out, encoding='utf-8')
+    assert _site(f'site_render_gdm_wayland_off "{conf}"').strip() == out.strip()      # 멱등
+    out = _site(f'site_render_gdm_wayland_off "{tmp_path / "none.conf"}"')
+    assert out.strip().splitlines()[-2:] == ['[daemon]', 'WaylandEnable=false']
+
+
+def test_anydesk_script_parses_and_is_not_run_by_install():
+    script = SCRIPTS / 'setup' / 'anydesk.sh'
+    assert _bash(f'bash -n "{script}"').returncode == 0
+    install = (SCRIPTS / 'install.sh').read_text(encoding='utf-8')
+    assert 'anydesk' not in install.lower()        # 마스터에서만 손으로
+    text = script.read_text(encoding='utf-8')
+    assert 'site_wayland_off' in text and 'site_anydesk_install' in text
