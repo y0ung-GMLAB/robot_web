@@ -14,9 +14,10 @@ import { isRevisionConflict } from '../mapping_model.js';
 import { threeWayMerge } from '../merge_model.js';
 import { confirmConflicts } from '../conflict_dialog.js';
 import {
-  EDIT_FIELDS, absoluteJobText, absoluteLine, absoluteResumeConfirm, absoluteResumeView, absoluteSummary, gainText, gainWarnings, getField, motorChanges, motorProblems, motorRows, scanConfirmText,
+  EDIT_FIELDS, absoluteClearRule, absoluteJobText, absoluteLine, absoluteResumeConfirm, absoluteResumeView, absoluteSummary, gainText, gainWarnings, getField, motorChanges, motorProblems, motorRows, scanConfirmText,
   setField,
 } from '../motors_model.js';
+import { referenceRedoView } from '../model.js';
 import { signedDeg } from '../play_model.js';
 import { minasBaseCard } from './minas_base.js';
 import { autoTuneAll, gainField, saveAll } from './drive_gains.js';
@@ -124,7 +125,8 @@ function servoAllBar(rows, state, changed) {
 async function maintenance(row, action, state, changed) {
   const texts = {
     eeprom_save: { title: `${row.axis}번 드라이브 저장(EEPROM)`, body: '드라이브의 현재 설정값을 전원을 꺼도 유지되도록 저장합니다. 모터 프로그램을 잠시 정지했다가 다시 시작하며(몇 초), 그동안 서보 토크가 해제됩니다. 브레이크가 없는 모터는 처질 수 있습니다.\n저장하는 동안(최대 10초) 드라이브 전원을 끄지 마세요.', tone: 'warning', label: '저장' },
-    absolute_clear: { title: `${row.axis}번 다회전 클리어`, body: '엔코더의 회전 수 기록을 0으로 초기화합니다. 위치 기준이 바뀝니다.\n서보가 꺼져 있어야 합니다. 끝나면 드라이브 전원을 껐다 켜세요. 위치 값이 바뀌므로 기준점을 다시 캡처해야 하며, 그 전에는 재생하지 마세요.', tone: 'danger', label: '클리어' },
+    // 클리어만 하는 길(드라이브 정비)도 앱솔루트 설정과 같은 표시를 남긴다 · 수정 목록 140 ④
+    absolute_clear: { title: `${row.axis}번 다회전 클리어`, body: '엔코더의 회전 수 기록을 0으로 초기화합니다. 위치 기준이 바뀝니다.\n모든 프로젝트의 이 축 기준점이 무효가 됩니다(감속 있는 축은 눈으로 다시 맞춤). 기준점을 다시 지정해 저장하기 전까지 재생·초기 위치 이동·스케줄·그룹 참가가 막힙니다.\n서보가 꺼져 있어야 합니다. 끝나면 드라이브 전원을 껐다 켜세요.', tone: 'danger', label: '클리어' },
   }[action];
   if (action === 'absolute_clear' && row.servoOn) { toast('서보를 먼저 끄세요. 다회전 클리어는 서보가 꺼진 상태에서만 할 수 있습니다.', 'warn'); return; }
   const ok = await confirmBox({ ...texts, confirmLabel: texts.label });
@@ -183,7 +185,7 @@ async function absoluteSetup(scope, row, state, changed) {
   if (!targets.length) { toast(preview?.message || '설정할 모터가 없습니다. 모두 이미 앱솔루트 방식입니다.', 'ok'); return; }
   const ok = await confirmBox({
     title: '앱솔루트 설정',
-    body: `대상\n${targets.join('\n')}${skipped.length ? `\n\n건너뜀(이미 정상 · 다시 하면 기준점이 사라짐)\n${skipped.join('\n')}` : ''}\n\n${(preview?.steps || []).map((s, i) => `${i + 1}. ${s.label || s}`).join('\n')}\n\n대상 모터의 서보를 끄고 모터 프로그램을 두 번 잠시 정지합니다. 중간에 드라이브 전원을 두 번 껐다 켜야 합니다(화면에 안내가 나옵니다). 끝나면 위치 값이 바뀌므로 기준점을 다시 캡처해야 합니다.`,
+    body: `대상\n${targets.join('\n')}${skipped.length ? `\n\n건너뜀(이미 정상 · 다시 하면 기준점이 사라짐)\n${skipped.join('\n')}` : ''}\n\n${(preview?.steps || []).map((s, i) => `${i + 1}. ${s.label || s}`).join('\n')}\n\n중간에 드라이브 전원을 한 번 껐다 켜야 합니다(Err40으로 클리어하면 한 번 더 · 화면에 안내가 나옵니다).\n\n${absoluteClearRule()}`,
     confirmLabel: '시작', tone: 'danger',
   });
   if (!ok) return;
@@ -199,6 +201,13 @@ async function absoluteResume(state, changed) {
   if (!preview?.success) { toast(preview?.message || '이어서 할 수 없습니다', 'bad'); await loadMotors(state, changed); return; }
   if (!await confirmBox(absoluteResumeConfirm(preview))) return;
   await run('앱솔루트 설정 이어서 하기', () => api('POST', '/api/motor-config/absolute-setup', { body: { resume: true, confirmed: true }, timeoutMs: 20000 }), state, changed);
+}
+
+/** 다회전 클리어 뒤 기준점 지정 화면으로 · 클리어한 첫 축 · 수정 목록 140 */
+function referenceButton(state) {
+  const axes = ui.job?.reference_pending_axes || referenceRedoView(state.snap)?.axes || [];
+  if (!axes.length) return null;
+  return h('button', { class: 'btn btn-warn', type: 'button', onclick: () => { location.hash = `#/manual?axis=${axes[0]}`; } }, '기준점 지정 열기');
 }
 
 function resumeButton(resume, state, changed) {
@@ -405,8 +414,10 @@ export function motorsBody(state, changed) {
       h('span', { class: 'grow', text: absoluteLine(abs) }),
       abs.needsSetup ? h('button', { class: 'btn btn-warn', type: 'button', disabled: Boolean(ui.busy) || ui.job?.state === 'running',
         title: ui.job?.state === 'running' ? '앱솔루트 설정이 진행 중입니다' : ui.busy ? '다른 작업(검색·저장)이 진행 중입니다' : undefined, onclick: () => absoluteSetup('all', null, state, changed) }, '앱솔루트 설정 (전체)') : null),
-    jobText ? h('div', { class: `blocker ${ui.job.state === 'failed' ? 'bad' : ''}` }, dot(ui.job.state === 'failed' ? 'bad' : 'info'),
+    jobText ? h('div', { class: `blocker ${ui.job.state === 'failed' ? 'bad' : ''}` }, dot(ui.job.state === 'failed' ? 'bad' : ui.job.state === 'reference_pending' ? 'warn' : 'info'),
       h('span', { class: 'grow', text: resume?.inline ? `${jobText} · ${resume.note}` : jobText }),
+      // 다회전을 클리어하고 끝남 · 「완료」 대신 그 축 기준점 지정으로 바로 · 수정 목록 140
+      ui.job.state === 'reference_pending' ? referenceButton(state) : null,
       ui.job.state === 'running' ? h('button', { class: 'btn', type: 'button', onclick: () => run('취소', () => api('POST', '/api/motor-config/absolute-setup/cancel'), state, changed) }, '취소') : null,
       resume?.inline ? resumeButton(resume, state, changed) : null) : null,
     // 웹을 다시 켠 뒤 · 다른 작업 뒤에도 실패한 작업이 남아 있으면 따로 한 줄 · 134

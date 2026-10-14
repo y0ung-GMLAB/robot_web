@@ -153,8 +153,10 @@ class ScheduleService:
         reader = getattr(self.bridge, 'motor_action_blocker', None)
         if not callable(reader):
             return ''
+        # 다회전 클리어 뒤 기준점 다시 지정 전 · 수동 조그는 되므로 `motor_action_blocker` 밖 · 수정 목록 140 ③
+        cleared = getattr(self.bridge, 'multiturn_clear_blocker', None)
         try:
-            return str(reader() or '').strip()
+            return str(reader() or (cleared() if callable(cleared) else '') or '').strip()
         except Exception:  # 상태 조회 실패가 스케줄을 막지 않는다
             logger.debug('시작 가능 여부 조회 실패', exc_info=True)
             return ''

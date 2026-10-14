@@ -16,7 +16,7 @@ from std_msgs.msg import String
 from motion_common import paths as common_paths
 from motion_common.execution_context import verify_mapping_fingerprint
 from motion_common.paths import project_dir_for
-from motion_common import command_router, generation, joint_mapping, motion_table, topics, units, values
+from motion_common import command_router, generation, joint_mapping, motion_table, multiturn_clear, topics, units, values
 from motion_common import store as common_store
 from motion_runtime.motion_run_constants import DEFAULT_INITIAL_MODE
 from motion_runtime.midi_bank_store import (
@@ -364,6 +364,8 @@ class MotionMappingManager(Node):
         # MIDI 구간을 읽어 합치고 기록하는 동안 다른 기록이 끼어들면 뱅크가
         # 되돌아간다 · 읽기부터 기록까지 한 락 안에서 한다 (§6-24)
         with common_store.locked_update(path):
+            # 기준점을 지정한 시각 · 다회전 클리어 뒤 기준점 보호 · 수정 목록 140 ③
+            self._stamp_reference_set_at(mapping, mapping_payload, source_path or path, now)
             midi_banks = self._midi_banks_from_file(source_path or path)
             if midi_banks is not None:
                 # MIDI owns this section. A normal motion-axis mapping save must
@@ -402,6 +404,57 @@ class MotionMappingManager(Node):
             'validation': validation,
             'backup_file': str(backup) if backup is not None else '',
         }
+
+    def _stamp_reference_set_at(
+        self, mapping: Dict[str, Any], payload: Dict[str, Any], existing: Optional[Path], now: float,
+    ) -> None:
+        """줄마다 `reference_set_at` · 기준점을 언제 지정했나 · 수정 목록 140 ③
+
+        지금 저장으로 기준점을 지정했다 = 화면 캡처가 `reference_captured` 를 보냈거나(값이 그대로여도) ·
+        같은 줄(조인트 이름)의 기준점 값이 파일 값과 다름 → 지금 시각 · 아니면 파일에 있던 시각을 그대로 ·
+        모터 번호가 바뀐 줄은 시각을 버린다(다른 모터의 기준점) · 파일에 없던 줄은 화면이 들고 온 값(다른 이름으로
+        저장할 때 원래 파일의 시각) · 없으면 칸 없음(= 클리어 전으로 본다 · 안전한 쪽).
+        `reference_captured` 는 파일에 남기지 않는다(정규화가 이미 뺐다).
+        """
+        captured = {
+            str(row.get('motion_id') or '').strip()
+            for row in (payload.get('mappings') or payload.get('axes') or [])
+            if isinstance(row, dict) and row.get(multiturn_clear.REFERENCE_CAPTURED_FIELD) is True
+        }
+        previous: Dict[str, Dict[str, Any]] = {}
+        if existing is not None and existing.is_file():
+            try:
+                old = self._normalize_mapping(
+                    yaml.safe_load(existing.read_text(encoding='utf-8')) or {}, fallback_name=existing.stem,
+                )
+                previous = {str(row.get('motion_id')): row for row in old.get('mappings') or []}
+            except (OSError, ValueError, yaml.YAMLError):
+                previous = {}
+        field = multiturn_clear.REFERENCE_SET_AT_FIELD
+        for row in mapping.get('mappings') or []:
+            motion_id = str(row.get('motion_id') or '')
+            prev = previous.get(motion_id)
+            carried = values.finite_float(row.get(field))
+            if motion_id in captured:
+                row[field] = now
+                continue
+            if prev is not None:
+                same_motor = prev.get('motor_axis') == row.get('motor_axis')
+                same_value = abs(
+                    float(prev.get('reference_position_rad') or 0.0) - float(row.get('reference_position_rad') or 0.0)
+                ) <= 1e-9
+                if not same_motor:
+                    row.pop(field, None)
+                elif not same_value:
+                    row[field] = now
+                elif values.finite_float(prev.get(field)) is not None:
+                    row[field] = float(prev[field])
+                else:
+                    row.pop(field, None)
+            elif carried is not None:
+                row[field] = carried
+            else:
+                row.pop(field, None)
 
     @staticmethod
     def _with_deg_mirror(mapping: Dict[str, Any]) -> Dict[str, Any]:
@@ -693,6 +746,10 @@ class MotionMappingManager(Node):
                 'scale': self._optional_float(row.get('scale'), 1.0),
                 'gear_ratio': self._optional_float(row.get('gear_ratio'), 1.0),
             })
+            # 기준점을 지정한 시각 · 있을 때만(옛 파일 모양 유지) · 저장 때 다시 정한다 · 수정 목록 140 ③
+            set_at = values.finite_float(row.get(multiturn_clear.REFERENCE_SET_AT_FIELD))
+            if set_at is not None:
+                normalized_rows[-1][multiturn_clear.REFERENCE_SET_AT_FIELD] = set_at
             # 조인트 최대 속도·가속도 · 비우면 검사 안 함 · 적은 것만 둔다(옛 파일 모양 유지) · 수정 목록 5-2
             for rate_name, field in zip(('max_velocity', 'max_acceleration'), MOTION_RATE_LIMIT_FIELDS):
                 value = joint_mapping.rate(row, rate_name, units.RAD)

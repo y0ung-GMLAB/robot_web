@@ -243,11 +243,23 @@ export function absoluteJobText(job) {
   if (!job || !job.state || job.state === 'idle') return '';
   const step = job.step_count ? ` · ${job.step_index ?? 0}/${job.step_count}` : '';
   const label = job.step_label ? ` · ${job.step_label}` : '';
-  const head = { running: job.resumed ? '앱솔루트 설정 이어서 하는 중' : '앱솔루트 설정 중', done: '앱솔루트 설정 완료', failed: '앱솔루트 설정 실패' }[job.state] || job.state;
+  // 다회전을 클리어하고 끝나면 「완료」 가 아니라 기준점 다시 지정 대기 · 클리어한 축을 다 다시 지정하면 완료 · 수정 목록 140
+  const head = { running: job.resumed ? '앱솔루트 설정 이어서 하는 중' : '앱솔루트 설정 중', done: '앱솔루트 설정 완료', failed: '앱솔루트 설정 실패', reference_pending: '앱솔루트 설정 · 기준점 다시 지정 대기' }[job.state] || job.state;
   // 단계 이름·메시지가 머리말과 같은 말(「완료」 등)이면 한 번만
   const parts = [label, job.message, job.error].flatMap((part) => String(part || '').split(' · ')).map((part) => part.trim()).filter(Boolean);
   const unique = parts.filter((part, i) => !head.includes(part) && parts.indexOf(part) === i);
   return [`${head}${step}`, ...unique].join(' · ');
+}
+
+/**
+ * 앱솔루트 설정 확인 창에 늘 적는 규칙 · 수정 목록 140 (사용자 결정 2026-10-14)
+ * 다회전 클리어는 4/7 에서 Err40(다회전 무효)인 드라이브만 · 없으면 클리어 안 함 · 기준점 그대로
+ */
+export function absoluteClearRule() {
+  return '대상 모터의 서보를 끄고 모터 프로그램을 잠시 정지합니다. 다회전 클리어는 4/7에서 Err40(다회전 무효)인 드라이브만 합니다. '
+    + 'Err40이 없으면 클리어하지 않고 기준점도 그대로입니다(전원 재투입도 한 번). '
+    + '클리어하는 축은 엔코더 회전 수가 0이 되어 위치 값이 바뀌므로, 감속 있는 축은 기준점을 눈으로 다시 맞춰야 합니다 · 모든 프로젝트. '
+    + '다시 지정해 저장하기 전까지 재생·초기 위치 이동·스케줄·그룹 참가가 막힙니다.';
 }
 
 /** 앞서 실패한 앱솔루트 설정 「이어서 하기」 · 서버가 남긴 기록(job.resume · 웹을 다시 켜도 남음) · 진행 중엔 없음 · 수정 목록 134
@@ -257,7 +269,8 @@ export function absoluteResumeView(job) {
   if (!r || !r.from_index || job?.state === 'running') return null;
   const count = r.step_count || 7;
   const drives = (r.targets || []).map((t) => t.label).filter(Boolean).join(', ');
-  const note = `${drives || '대상 드라이브'} · ${r.from_index <= 5 ? '다회전 클리어를 아직 하지 않았습니다' : '다회전 클리어는 했고 전원 재투입·확인이 남았습니다'}`;
+  // 4/7 · 5/7 부터면 Err40 을 다시 읽어 그 드라이브만 클리어 · 6/7 부터는 클리어한 드라이브가 있을 때만 남는다 · 140 ⑤
+  const note = `${drives || '대상 드라이브'} · ${r.from_index <= 5 ? '다회전 클리어를 아직 하지 않았습니다 · Err40 인 드라이브만 클리어합니다' : r.from_index === 6 ? '다회전 클리어는 했고 전원 재투입·확인이 남았습니다' : '최종 확인이 남았습니다'}`;
   const inline = job?.state === 'failed' && job?.step === r.failed_step;
   return {
     inline,
@@ -267,7 +280,7 @@ export function absoluteResumeView(job) {
   };
 }
 
-/** 이어서 하기 확인 창 · 미리보기(서버) 그대로 · 다회전 클리어로 위치가 바뀌어 기준점을 다시 캡처해야 함을 늘 적는다 · 134 */
+/** 이어서 하기 확인 창 · 미리보기(서버) 그대로 · 134 · 클리어는 Err40 인 드라이브만 · 클리어한 축만 기준점 다시 지정 · 140 */
 export function absoluteResumeConfirm(preview) {
   const p = preview || {};
   const count = p.step_count || 7;
@@ -275,15 +288,15 @@ export function absoluteResumeConfirm(preview) {
   const steps = (p.steps || []).map((s, i) => `${from + i}. ${s}`);
   const cycles = (p.steps || []).filter((s) => String(s).includes('전원')).length;
   const clear = p.clear_done
-    ? '다회전 클리어는 이미 했습니다. 엔코더 회전 수가 0으로 초기화되어 위치 값이 바뀌었으므로, 끝나면 기준점을 다시 캡처해야 하며 그 전에는 재생하지 마세요.'
-    : '대상 모터의 서보를 끄고 모터 프로그램을 잠시 정지합니다. 다회전 클리어는 엔코더 회전 수를 0으로 초기화해 위치 값이 바뀝니다. 끝나면 기준점을 다시 캡처해야 하며, 그 전에는 재생하지 마세요.';
+    ? `다회전 클리어는 이미 했습니다(${(p.cleared || []).map((t) => t.label).filter(Boolean).join(', ') || '대상 드라이브'}). 엔코더 회전 수가 0으로 초기화되어 위치 값이 바뀌었으므로 끝나면 그 축의 기준점을 다시 지정해 저장해야 합니다. 그 전에는 모든 프로젝트에서 재생·초기 위치 이동·스케줄·그룹 참가가 막힙니다.`
+    : absoluteClearRule();
   return {
     title: `앱솔루트 설정 이어서 하기 (${from}/${count} 부터)`,
     body: [
       `앞서 ${p.failed_index ?? '?'}/${count} ${p.failed_label || ''}에서 멈춘 작업을 같은 드라이브로 이어서 합니다.${p.error ? `\n실패 이유 · ${p.error}` : ''}`,
       `대상\n${(p.targets || []).map((t) => `· ${t.label || t.axis}`).join('\n')}`,
       steps.join('\n'),
-      `${cycles ? `중간에 드라이브 전원을 ${cycles === 1 ? '한 번' : '두 번'} 더 껐다 켜야 합니다(화면에 안내가 나옵니다). ` : ''}${clear}`,
+      `${cycles ? `중간에 드라이브 전원을 ${cycles === 1 ? '한 번' : '최대 두 번'} 더 껐다 켜야 합니다(화면에 안내가 나옵니다 · 두 번째는 클리어할 때만). ` : ''}${clear}`,
     ].join('\n\n'),
     confirmLabel: '이어서 하기',
     tone: 'danger',

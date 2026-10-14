@@ -92,6 +92,21 @@ export function manualNotices(snap, axis = null) {
     .map((n) => ({ axis: Number(n.axis), kind: String(n.kind || ''), message: String(n.message) }));
 }
 
+/** 다회전 클리어 뒤 기준점 다시 지정 · 서버 `multiturn_clear` · 없으면 null · 수정 목록 140
+ *  웹을 다시 켜도 · 페이지를 닫아도 PC 단위 표시가 남아 같은 안내 · 버튼은 그 축 기준점 지정 화면(#/manual?axis=N)으로 */
+export function referenceRedoView(snap) {
+  const info = snap?.multiturn_clear || {};
+  const axes = (Array.isArray(info.blocked_axes) ? info.blocked_axes : []).map(Number).filter(Number.isFinite);
+  if (!axes.length) return null;
+  return {
+    axes,
+    title: String(info.prompt || `다회전 클리어한 ${axes.map((a) => `${a}번`).join(' · ')} 모터 · 몸을 정면·수평에 맞추고 기준점을 다시 지정해 저장하세요`),
+    detail: String(info.message || ''),
+    target: `manual?axis=${axes[0]}`,
+    label: '기준점 지정 열기',
+  };
+}
+
 /** 확인할 일 · 나쁜 것(bad)이 먼저 · action.kind 는 화면이 버튼으로 바꾼다 */
 /** PREOP 등에 멈춘 EtherCAT 드라이브 · 감시 노드가 판정한 목록 그대로 · 수정 목록 125 */
 export function stuckSlaves(snap) {
@@ -127,6 +142,10 @@ export function collectIssues(snap, sched, { connected = true } = {}) {
     bad('앱솔루트 방식이 확인되지 않아 모터를 움직일 수 없습니다', absolute,
       { kind: 'open', target: 'maintain-motors', label: '모터 설정 열기' });
   }
+  // 다회전 클리어 뒤 기준점 다시 지정 전 · 재생·초기 이동·스케줄·그룹 참가 막힘 · 수동 조그는 됨 · 수정 목록 140
+  // 웹을 다시 켜거나 페이지를 닫아도 PC 단위 표시가 남아 여기 남는다 · 버튼은 그 축 기준점 지정 화면
+  const redo = referenceRedoView(snap);
+  if (redo) bad(redo.title, `${redo.detail} · 그 전까지 재생·초기 위치 이동·스케줄·그룹 참가가 막힙니다(수동 조작은 됩니다)`, { kind: 'open', target: redo.target, label: redo.label });
   // OP 로 못 올라가고 멈춘 드라이브 · 시작 스크립트의 오류 플래그 해제로도 안 풀림 · 글은 서버 · 수정 목록 125
   for (const slave of stuckSlaves(snap)) {
     bad(slave.message, '모터 프로그램이 이 드라이브 설정을 마치지 못했습니다. 제어 전원을 껐다 켜면 다시 설정합니다. 그래도 그대로면 모터 프로그램을 다시 시작하세요.');

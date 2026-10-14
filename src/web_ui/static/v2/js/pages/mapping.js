@@ -214,6 +214,9 @@ function table(state, changed) {
       h('td', {}, h('input', { type: 'checkbox', checked: row.invert, 'aria-label': `${index + 1}번 줄 방향 반전`, onchange: (e) => { row.invert = e.target.checked; changed(); } })),
       h('td', {}, h('div', { class: 'cell-row' },
         numberInput(row, 'reference_position_deg', changed, { label: '기준점 모터 deg' }),
+        // 다회전 클리어 뒤 아직 다시 지정 안 한 축 · 수정 목록 140
+        (state.snap?.multiturn_clear?.blocked_axes || []).map(Number).includes(Number(row.motor_axis))
+          ? h('span', { class: 'chip chip-warn', title: String(state.snap.multiturn_clear.prompt || ''), text: '클리어 뒤 아직 안 맞춤' }) : null,
         h('button', { class: 'btn btn-mini', type: 'button', disabled: !canCapture || !motor || motor.positionDeg === null,
           // 막힌 이유를 그대로 · 전에는 늘 「장비에 적용」 이라고만 해서 모터를 못 찾은 경우와 갈리지 않았다 (2026-10-12)
           title: !canCapture ? (motorsDraft().problems[0]
@@ -222,7 +225,8 @@ function table(state, changed) {
             : !motor ? '이 줄에 연결된 모터를 찾지 못했습니다. 「모터」 칸을 확인하세요.'
               : motor.positionDeg === null ? '이 모터의 현재 위치를 아직 받지 못했습니다.'
                 : '현재 모터 위치를 기준점(조인트 0°)으로 설정합니다. 저장해야 반영됩니다.',
-          onclick: () => { row.reference_position_deg = Math.round(motor.positionDeg * 1e4) / 1e4; row.reference_enabled = true; changed(); } }, '캡처'))),
+          // reference_captured · 값이 그대로여도 「지금 지정함」 · 저장하면 서버가 지정 시각을 적는다 · 수정 목록 140
+          onclick: () => { row.reference_position_deg = Math.round(motor.positionDeg * 1e4) / 1e4; row.reference_enabled = true; row.reference_captured = true; changed(); } }, '캡처'))),
       h('td', {}, h('div', { class: 'cell-row' },
         numberInput(row, 'motion_lower_deg', changed, { label: '최소' }), h('span', { class: 'muted', text: '~' }),
         numberInput(row, 'motion_upper_deg', changed, { label: '최대' }))),

@@ -16,6 +16,15 @@
        (`fcntl.flock` · 마스터 하나로 묶음 · 단순하게) 안에서만 보낸다 · `begin` 도 같은 잠금을 잡고 표시를
        쓰므로 도는 SDO 가 끝난 뒤에 표시가 서고, 그 뒤 SDO 는 모두 표시를 본다(빈틈 없음).
 
+우리 작업 하나가 버스를 혼자 쓰는 동안 · 수정 목록 139 E-1 (실물 S 3회차 · 2026-10-14)
+    앱솔루트 설정(웹 브리지)이 Pr0.15 쓰기 · 재투입 · 다회전 클리어를 하는 동안 감시 노드의 앱솔루트 확인 ·
+    게인(0x3002) 다시 읽기가 끼면 재투입 직후 마스터의 SDO 사전 읽기와 겹쳐 메일박스를 더 흔든다 ·
+    그래서 `hold` 로 「혼자 씀」 표시(`ethercat-exclusive.json` · 세운 프로세스 pid · 마감)를 세우면
+    **다른 프로세스**는 `configuring()` 이 참 · 그 SDO 는 보내지 않고 돌려준다(감시 노드는 이미
+    `configuring()` 이 참이면 읽기를 미룬다) · 세운 프로세스 자신의 SDO 는 그대로 나간다 ·
+    `release` 로 내린다 · 프로세스가 죽거나 마감(`EXCLUSIVE_TIMEOUT_SEC` · 도는 동안 `hold` 를 다시 불러 늘림)이
+    지나면 없는 것으로 본다 · 모터 프로그램의 「버스 설정 중」 표시와 다른 파일이라 서로 덮어쓰지 않는다.
+
 표시가 낡지 않게
     표시 파일에 모터 프로그램 pid(`$$` · exec 해도 같다)와 마감(monotonic · 프로세스끼리 같은 시계)을 적는다 ·
     pid 가 죽었거나 마감이 지났으면 없는 것으로 본다 · 모터 서비스를 멈추면 같은 cgroup 의 `watch` 도 죽고
@@ -60,6 +69,7 @@ LOCK_WAIT_SEC = 15.0
 #: 보내지 않고 돌려준 결과의 종료 코드 · EX_TEMPFAIL · 부른 쪽이 「나중에 다시」 로 구분
 REFUSED_EXIT = 75
 CONFIGURING_MESSAGE = '버스 설정 중 · 모터 프로그램이 드라이브를 설정하고 있습니다 · 잠시 뒤 다시'
+EXCLUSIVE_MESSAGE = '앱솔루트 설정 중 · 끝날 때까지 다른 프로그램의 SDO 는 쉽니다 · 잠시 뒤 다시'
 BUSY_MESSAGE = '다른 SDO 요청이 끝나지 않았습니다 · 잠시 뒤 다시'
 
 #: `watch` · 표시를 이만큼 넘게 두지 않는다 · 부팅 때 ROS 기동 + 설정이 보통 10~20 s
@@ -71,7 +81,11 @@ ERROR_HOLD_SEC = 10.0
 POLL_SEC = 0.5
 SLAVES_TIMEOUT_SEC = 3.0
 
+#: 「혼자 씀」 표시 마감 · 도는 동안 다시 세워 늘린다 · 세운 프로세스가 멈춰 못 늘리면 이 뒤 저절로 풀림 · 139 E-1
+EXCLUSIVE_TIMEOUT_SEC = 300.0
+
 MARKER_NAME = 'ethercat-configuring.json'
+EXCLUSIVE_NAME = 'ethercat-exclusive.json'
 LOCK_NAME = 'ethercat-mailbox.lock'
 
 #: `ethercat slaves` 한 줄 · `0  0:0  OP  +  MADLN15BE`
@@ -97,6 +111,10 @@ def marker_path() -> str:
 
 def lock_path() -> str:
     return os.path.join(run_dir(), LOCK_NAME)
+
+
+def exclusive_path() -> str:
+    return os.path.join(run_dir(), EXCLUSIVE_NAME)
 
 
 # -- 버스 설정 중 표시 ------------------------------------------------------ #
@@ -125,30 +143,103 @@ def read_marker() -> Optional[Dict[str, Any]]:
     return payload if isinstance(payload, dict) else None
 
 
-def configuring(
-    *, now: Optional[float] = None, alive: Callable[[int], bool] = pid_alive,
-) -> bool:
-    """모터 프로그램이 버스를 설정하는 중인가 · 표시가 있고 · 마감 전이고 · 그 프로그램이 살아 있으면"""
-    marker = read_marker()
+def _live(marker: Optional[Dict[str, Any]], now: Optional[float], alive: Callable[[int], bool]) -> Optional[int]:
+    """표시가 살아 있으면 그 pid · 마감 전이고 그 프로세스가 살아 있으면"""
     if not marker:
-        return False
+        return None
     try:
         owner = int(marker.get('owner_pid'))
         deadline = float(marker.get('deadline_monotonic'))
     except (TypeError, ValueError):
-        return False
+        return None
     if (time.monotonic() if now is None else now) >= deadline:
+        return None
+    return owner if alive(owner) else None
+
+
+def motor_configuring(
+    *, now: Optional[float] = None, alive: Callable[[int], bool] = pid_alive,
+) -> bool:
+    """모터 프로그램이 버스를 설정하는 중인가 · 표시가 있고 · 마감 전이고 · 그 프로그램이 살아 있으면"""
+    return _live(read_marker(), now, alive) is not None
+
+
+def held_by_other(
+    *, now: Optional[float] = None, alive: Callable[[int], bool] = pid_alive, me: Optional[int] = None,
+) -> bool:
+    """다른 프로세스가 버스를 혼자 쓰는 중인가(앱솔루트 설정) · 세운 프로세스 자신에겐 거짓 · 139 E-1"""
+    owner = _live(read_exclusive(), now, alive)
+    return owner is not None and owner != (os.getpid() if me is None else int(me))
+
+
+def configuring(
+    *, now: Optional[float] = None, alive: Callable[[int], bool] = pid_alive,
+) -> bool:
+    """지금 SDO 를 보내면 안 되는가 · 모터 프로그램이 버스를 설정하는 중 · 또는 다른 프로세스가 혼자 쓰는 중(139 E-1)"""
+    return motor_configuring(now=now, alive=alive) or held_by_other(now=now, alive=alive)
+
+
+def read_exclusive() -> Optional[Dict[str, Any]]:
+    try:
+        with open(exclusive_path(), encoding='utf-8') as handle:
+            payload = json.load(handle)
+    except (OSError, ValueError):
+        return None
+    return payload if isinstance(payload, dict) else None
+
+
+def hold(
+    purpose: str = '',
+    *,
+    owner: Optional[int] = None,
+    timeout_sec: float = EXCLUSIVE_TIMEOUT_SEC,
+    lock_wait_sec: float = LOCK_WAIT_SEC,
+    wait_for_running: bool = True,
+) -> bool:
+    """「혼자 씀」 표시를 세운다(또는 마감을 늘린다) · 처음엔 도는 SDO 가 끝나길 기다린 뒤(같은 잠금) · 139 E-1
+
+    `wait_for_running` 거짓이면 잠금 없이 다시 쓰기만(마감 늘리기 · 이미 세운 뒤) · 잠금을 못 잡아도 표시는 세운다.
+    """
+    payload = {
+        'owner_pid': int(os.getpid() if owner is None else owner),
+        'purpose': str(purpose or ''),
+        'started_at': time.time(),
+        'deadline_monotonic': time.monotonic() + float(timeout_sec),
+    }
+    current = read_exclusive()
+    if current and current.get('owner_pid') == payload['owner_pid'] and current.get('started_at'):
+        payload['started_at'] = current['started_at']
+    if not wait_for_running:
+        _write_json(EXCLUSIVE_NAME, payload)
+        return True
+    with mailbox_lock(lock_wait_sec) as held:
+        _write_json(EXCLUSIVE_NAME, payload)
+    return held
+
+
+def release(owner: Optional[int] = None) -> bool:
+    """내 「혼자 씀」 표시면 내린다 · 남의 것은 건드리지 않는다"""
+    marker = read_exclusive()
+    if not marker or marker.get('owner_pid') != int(os.getpid() if owner is None else owner):
         return False
-    return bool(alive(owner))
+    try:
+        os.remove(exclusive_path())
+    except OSError:
+        return False
+    return True
+
+
+def _write_json(name: str, payload: Dict[str, Any]) -> None:
+    directory = run_dir()
+    os.makedirs(directory, exist_ok=True)
+    temporary = os.path.join(directory, f'.{name}.{os.getpid()}.{threading.get_ident()}')
+    with open(temporary, 'w', encoding='utf-8') as handle:
+        json.dump(payload, handle)
+    os.replace(temporary, os.path.join(directory, name))
 
 
 def _write_marker(payload: Dict[str, Any]) -> None:
-    directory = run_dir()
-    os.makedirs(directory, exist_ok=True)
-    temporary = os.path.join(directory, f'.{MARKER_NAME}.{os.getpid()}')
-    with open(temporary, 'w', encoding='utf-8') as handle:
-        json.dump(payload, handle)
-    os.replace(temporary, marker_path())
+    _write_json(MARKER_NAME, payload)
 
 
 def begin(owner: int, *, timeout_sec: float = CONFIGURE_TIMEOUT_SEC, lock_wait_sec: float = LOCK_WAIT_SEC) -> bool:
@@ -252,7 +343,8 @@ def run(
         if not held:
             return refused(command, BUSY_MESSAGE, kwargs)
         if configuring():
-            return refused(command, CONFIGURING_MESSAGE, kwargs)
+            # 판단은 하나(`configuring`) · 글만 나눈다 · 다른 프로세스의 「혼자 씀」 이면 그 까닭 · 139 E-1
+            return refused(command, EXCLUSIVE_MESSAGE if held_by_other() else CONFIGURING_MESSAGE, kwargs)
         return call(command, **kwargs)
 
 
@@ -344,7 +436,10 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     args = parser.parse_args(argv)
     if args.action == 'status':
         marker = read_marker()
-        print(json.dumps({'configuring': configuring(), 'marker': marker, 'path': marker_path()}, ensure_ascii=False))
+        print(json.dumps({
+            'configuring': configuring(), 'marker': marker, 'path': marker_path(),
+            'exclusive': read_exclusive(), 'exclusive_path': exclusive_path(),
+        }, ensure_ascii=False))
         return 0
     if args.owner <= 0:
         parser.error('--owner 가 필요합니다')

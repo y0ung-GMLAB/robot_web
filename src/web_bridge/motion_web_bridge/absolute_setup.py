@@ -7,15 +7,28 @@
     1 서보 OFF        등록된 대상 축 · 끄고 꺼졌는지 확인
     2 앱솔루트 쓰기    Motor Manager 멈춤 → 0x3015 = 0 → 되읽기 0 → EEPROM 저장 → 다시 띄움
     3 전원 재투입 1    사람이 드라이브 전원을 껐다 켬 · 대상 슬레이브가 빠졌다 돌아오면 다음
-    4 방식 확인        0x3015 되읽기 = 0 (재투입 뒤 EEPROM 값)
-    5 다회전 클리어    서보 OFF → 멈춤 → 0x4D01 = 0x0031 → 0x4D00:01 0 → 0x200 → 되읽기 bit9 → 다시 띄움
-    6 전원 재투입 2    3 과 같음
-    7 검증            0x3015 = 0 · 0x603F = 0 · |0x6064| < 1 바퀴(8,388,608 count) · 몇 초 다시 봄
+    4 방식 확인        0x3015 되읽기 = 0 (재투입 뒤 EEPROM 값) · 0x603F 를 읽어 Err40(다회전 무효)인 드라이브를 고름
+    5 다회전 클리어    **Err40 인 드라이브만** · 서보 OFF → 멈춤 → 0x4D01 = 0x0031 → 0x4D00:01 0 → 0x200 → 되읽기 bit9 → 다시 띄움 ·
+                      Err40 이 없으면 건너뜀(회전 수를 버리지 않는다 · 기준점 그대로)
+    6 전원 재투입 2    3 과 같음 · 클리어한 드라이브가 없으면 건너뜀
+    7 검증            0x3015 = 0 · 0x603F = 0 · 몇 초 다시 봄 · |0x6064| < 1 바퀴는 클리어한 드라이브만(클리어가 먹었나)
 
 어느 단계든 실패하면 거기서 멈추고 원인을 남긴다 · Motor Manager 는 반드시 다시 띄운다 ·
 전체 버튼은 대상 드라이브를 함께 처리한다(같은 전원이면 재투입 두 번으로 끝).
-차단 해제는 상태 모니터가 재투입 뒤 다시 읽어 판정한다(이 모듈은 해제하지 않는다) ·
-기준점 다시 캡처는 안내만 한다.
+차단 해제는 상태 모니터가 재투입 뒤 다시 읽어 판정한다(이 모듈은 해제하지 않는다).
+
+다회전 클리어는 Err40 일 때만 · 수정 목록 140 (사용자 결정 2026-10-14 · 실물 S 3회차)
+    클리어는 멀쩡한 회전 수를 버린다 · 몸은 그대로인데 엔코더 값이 모터 한 바퀴 단위로 바뀌어(1:20 축이면 조인트 18°)
+    **모든 프로젝트의 기준점**이 틀린 값이 된다 · 실물 10-14 S 2회차에서 인크리멘털 → 앱솔루트를 클리어 없이
+    끝냈는데 Err40 없이 정상이었다 → 클리어는 Err40(다회전 무효)인 드라이브만 · 옛 7/7 「|0x6064| < 1 바퀴」 는
+    1:20 · ±12° = 모터 ±240° 처럼 원래 한 바퀴를 넘나드는 축을 실패로 만들어 클리어를 사실상 강제했으므로 뺐다.
+    클리어를 한 경우에만 PC 단위 표시(`motion_common.multiturn_clear` · 축 · 시리얼 · 시각)를 **명령을 보내기 전에**
+    남긴다(중간에 끊겨도 남는 쪽) · 그 축 기준점을 다시 지정해 저장할 때까지 재생·초기 이동·스케줄·그룹 참가가 막힌다 ·
+    끝 상태는 「완료」 가 아니라 「기준점 다시 지정 대기」(`reference_pending`) · 클리어한 축이 모두 다시 지정되면 완료.
+
+설정 중엔 다른 프로그램의 SDO 를 쉬게 한다 · 수정 목록 139 E-1
+    도는 동안 `ethercat_mailbox.hold`(「혼자 씀」 표시)를 세워 감시 노드의 앱솔루트 확인 · 게인 다시 읽기를 멈춘다 ·
+    끝나면(성공 · 실패 · 취소 · 예상 못 한 오류) 내린다 · 웹 브리지가 죽으면 pid 로 · 멈추면 마감으로 저절로 풀린다.
 
 전원 재투입 자동화 · 부팅·적용 때 자동 쓰기 · `src/motion_system` 수정은 하지 않는다 ·
 `ethercat` CLI 예외 경로는 드라이브 정비(15)와 같은 승인(2026-10-02).
@@ -30,7 +43,8 @@
        값이 틀린 것은 다시 안 읽는다 · 쓰기는 보내지 않고 돌려받은 것(버스 설정 중 · 잠금)만 다시 ·
     ③ EEPROM 에 0 을 저장한 뒤(3/7~7/7)에서 실패하면 그 작업의 드라이브 · 단계를 파일에 남기고
        「이어서 하기」 로 **그 드라이브만** 이어 간다 · 3/7 은 3/7 부터 · 4/7 · 5/7 은 4/7 부터(클리어 전) ·
-       6/7 · 7/7 은 그 단계부터(클리어는 이미 함) · 확인 필요 · 24 시간 · 드라이브(시리얼)가 바뀌면 지운다.
+       6/7 · 7/7 은 그 단계부터(클리어는 이미 함) · 확인 필요 · 24 시간 · 드라이브(시리얼)가 바뀌면 지운다 ·
+       4/7 · 5/7 부터 이어 가면 Err40 을 다시 읽어 판정한다(140 ⑤) · 클리어했는지는 드라이브마다 기록(`cleared`).
 """
 
 from __future__ import annotations
@@ -74,6 +88,12 @@ READ_RETRY_WINDOW_SEC = 10.0
 VERIFY_RETRY_SEC = 20.0
 #: 서보 OFF 가 상태에 보일 때까지
 SERVO_OFF_TIMEOUT_SEC = 5.0
+#: 「혼자 씀」 표시 마감을 늘리는 간격 · 139 E-1
+HOLD_REFRESH_SEC = 30.0
+#: 끝 문구 · 140
+NO_CLEAR_MESSAGE = '앱솔루트 설정을 마쳤습니다 · 다회전 정상 · 클리어 안 함 · 기준점 그대로'
+REFERENCE_DONE_MESSAGE = '앱솔루트 설정을 마쳤습니다 · 다회전 클리어한 축의 기준점을 다시 지정했습니다'
+REFERENCE_PENDING_LABEL = '기준점 다시 지정 대기'
 #: 「이어서 하기」 기록을 두는 시간 · 134
 RESUME_EXPIRE_SEC = 24 * 3600.0
 RESUME_VERSION = 1
@@ -106,6 +126,12 @@ IDENTITY_FIELDS = ('serial_number', 'vendor_id', 'product_code')
 
 def step_index(key: str) -> int:
     return STEP_ORDER.index(key) + 1
+
+
+def reference_prompt(axes: List[int]) -> str:
+    """클리어한 축 · 기준점을 다시 지정하라는 글 · 화면 · 「확인할 일」 이 같은 글 · 140"""
+    names = ' · '.join(f'{int(axis)}번' for axis in sorted(set(axes)))
+    return f'다회전 클리어한 {names} 모터 · 몸을 정면·수평에 맞추고 기준점을 다시 지정해 저장하세요'
 
 
 def drive_key(drive: Dict[str, Any]) -> Tuple[int, int]:
@@ -159,6 +185,10 @@ class AbsoluteSetup:
         bus_configuring: Callable[[], bool] = ethercat_mailbox.configuring,
         resume_file: Optional[Union[str, Path]] = None,
         wall_clock: Callable[[], float] = time.time,
+        record_clear: Optional[Callable[[List[Dict[str, Any]]], Any]] = None,
+        pending_axes: Optional[Callable[[], List[int]]] = None,
+        hold_bus: Callable[..., Any] = ethercat_mailbox.hold,
+        release_bus: Callable[[], Any] = ethercat_mailbox.release,
     ) -> None:
         # SDO 는 다른 프로세스와 한 번에 하나 · 버스 설정 중이면 안 보냄 · 수정 목록 125
         self._runner = ethercat_mailbox.guarded(runner)
@@ -188,6 +218,13 @@ class AbsoluteSetup:
         #: 「이어서 하기」 · 웹 브리지를 다시 띄워도 남게 파일로 · None = 메모리만(시험) · 134
         self._resume_file = Path(resume_file) if resume_file else None
         self._resume: Optional[Dict[str, Any]] = self._read_resume_file()
+        #: 클리어 직전 PC 단위 표시 · 기준점 다시 지정을 기다리는 축 · 140 ③
+        self._record_clear = record_clear or (lambda _drives: None)
+        self._pending_axes = pending_axes or (lambda: [])
+        #: 버스 「혼자 씀」 표시 · 139 E-1
+        self._hold_bus = hold_bus
+        self._release_bus = release_bus
+        self._held_at: Optional[float] = None
 
     # -- 바깥에서 부른다 ---------------------------------------------------- #
 
@@ -204,7 +241,29 @@ class AbsoluteSetup:
             job['targets'] = [dict(item) for item in job.get('targets') or []]
             job['skipped'] = [dict(item) for item in job.get('skipped') or []]
         job['resume'] = self._resume_view()
+        self._reference_state(job)
         return job
+
+    def _reference_state(self, job: Dict[str, Any]) -> None:
+        """다회전을 클리어하고 끝난 일 · 클리어한 축의 기준점을 다 다시 지정할 때까지 「기준점 다시 지정 대기」 · 140
+
+        판정은 PC 단위 표시(`multiturn_clear`) · 웹을 다시 켜면 이 일은 사라지고 「확인할 일」 이 같은 표시로 이어 간다.
+        """
+        cleared = [int(axis) for axis in job.get('cleared_axes') or []]
+        if job.get('state') != 'done' or not cleared:
+            return
+        try:
+            pending = set(int(axis) for axis in self._pending_axes() or [])
+        except Exception:  # noqa: BLE001 · 못 읽으면 대기로 둔다(안전한 쪽)
+            pending = set(cleared)
+        waiting = [axis for axis in cleared if axis in pending]
+        if waiting:
+            job.update(
+                state='reference_pending', state_label=REFERENCE_PENDING_LABEL,
+                reference_pending_axes=waiting, message=reference_prompt(waiting),
+            )
+        else:
+            job.update(reference_pending_axes=[], message=REFERENCE_DONE_MESSAGE)
 
     def preview(self, payload: Dict[str, Any]) -> Dict[str, Any]:
         """확인 창에 띄울 처리 대상 · 건너뜀 목록"""
@@ -306,6 +365,8 @@ class AbsoluteSetup:
             if now:
                 fresh = self._view(now)
                 item.update(axis=fresh['axis'], label=fresh['label'], status=fresh['status'], problem=fresh['problem'])
+            if 'cleared' not in item and step_index(record['resume_from']) > step_index('clear'):
+                item['cleared'] = True      # 140 전 기록 · 그때는 늘 모든 대상을 클리어했다
         return record, targets, ''
 
     def _resume_preview(self, payload: Dict[str, Any]) -> Dict[str, Any]:
@@ -327,7 +388,8 @@ class AbsoluteSetup:
             'failed_index': step_index(record['failed_step']),
             'failed_label': STEP_LABELS[record['failed_step']],
             'error': record.get('error') or '',
-            'clear_done': step_index(first) > step_index('clear'),
+            'clear_done': any(item.get('cleared') for item in targets),
+            'cleared': [self._public_target(item) for item in targets if item.get('cleared')],
         }
 
     def _start_resume(self, payload: Dict[str, Any]) -> Dict[str, Any]:
@@ -485,6 +547,7 @@ class AbsoluteSetup:
             return step_index(key) >= first
 
         try:
+            self._hold(force=True)
             if not resumed:
                 targets = self._remember_identity(targets)
             if due('servo_off'):
@@ -499,30 +562,89 @@ class AbsoluteSetup:
                     self._servo_off_targets(targets)
                 self._wait_power_cycle(targets)
             if due('check_mode'):
-                self._step('check_mode', '전원을 다시 켠 뒤 Pr0.15를 다시 읽습니다')
+                self._step('check_mode', '전원을 다시 켠 뒤 Pr0.15와 오류 코드(Err40 다회전 무효)를 읽습니다')
                 if first == step_index('check_mode'):
                     self._wait_settled(targets)
-                self._check_mode(targets)
+                targets = self._check_mode(targets)
             if due('clear'):
-                self._step('clear', '서보 끄기 → Motor Manager 정지 → 다회전 클리어')
-                self._servo_off_targets(targets)
-                self._with_motor_manager_stopped(lambda: self._clear(targets))
+                # Err40 인 드라이브만 · 이미 클리어한 드라이브(이어서 하기)는 다시 안 함 · 140 ①
+                clearing = [item for item in targets if item.get('needs_clear') and not item.get('cleared')]
+                if clearing:
+                    names = ', '.join(item['label'] for item in clearing)
+                    self._step('clear', f'Err40(다회전 무효) · {names}만 다회전 클리어 · 서보 끄기 → Motor Manager 정지 → 클리어')
+                    self._servo_off_targets(clearing)
+                    self._with_motor_manager_stopped(lambda: self._clear(targets, clearing))
+                else:
+                    self._step('clear', '다회전 정상(Err40 없음) · 다회전 클리어를 건너뜁니다 · 기준점 그대로')
+            cleared = [item for item in targets if item.get('cleared')]
             if due('power_cycle_2'):
-                self._step('power_cycle_2', '드라이브 전원을 한 번 더 껐다 켜세요. 그래야 다회전 클리어가 적용됩니다')
-                if resumed:
-                    self._servo_off_targets(targets)
-                self._wait_power_cycle(targets)
-            self._step('verify', 'Pr0.15 · 오류 · 위치를 다시 읽습니다')
+                if cleared:
+                    self._step('power_cycle_2', '드라이브 전원을 한 번 더 껐다 켜세요. 그래야 다회전 클리어가 적용됩니다')
+                    if resumed:
+                        self._servo_off_targets(cleared)
+                    self._wait_power_cycle(cleared)
+                else:
+                    self._step('power_cycle_2', '다회전 클리어를 하지 않아 전원 재투입 2를 건너뜁니다')
+            self._step('verify', 'Pr0.15 · 오류 코드를 다시 읽습니다' + (' · 클리어한 드라이브는 위치도' if cleared else ''))
             if first == step_index('verify'):
                 self._wait_settled(targets)
             self._verify(targets)
         except _Stop as stop:
+            self._unhold()
             self._finish('failed', str(stop), resumable=stop.resumable)
             return
         except Exception as exc:  # noqa: BLE001 · 어떤 실패도 그 단계에서 멈추고 남긴다
+            self._unhold()
             self._finish('failed', f'예상하지 못한 오류: {exc}')
             return
-        self._finish('done', '앱솔루트 설정을 마쳤습니다. 위치 값이 바뀌었으니 기준점을 다시 캡처하세요')
+        except BaseException:
+            self._unhold()
+            raise
+        self._unhold()
+        self._finish_done(targets)
+
+    def _finish_done(self, targets: List[Dict[str, Any]]) -> None:
+        """끝 · 클리어한 축이 있으면 「기준점 다시 지정 대기」 로 이어진다(`status`) · 없으면 기준점 그대로 · 140"""
+        cleared = [item for item in targets if item.get('cleared')]
+        axes = sorted({int(item['axis']) for item in cleared if item.get('axis') is not None})
+        unregistered = [item['label'] for item in cleared if item.get('axis') is None]
+        with self._lock:
+            self._job['cleared_axes'] = axes
+            self._job['cleared'] = [self._public_target(item) for item in cleared]
+        if not cleared:
+            message = NO_CLEAR_MESSAGE
+        else:
+            parts = [reference_prompt(axes)] if axes else ['앱솔루트 설정을 마쳤습니다 · 다회전 클리어함']
+            if unregistered:
+                parts.append(f'{", ".join(unregistered)}도 클리어함 · 등록한 뒤 기준점을 지정하세요')
+            message = ' · '.join(parts)
+        self._finish('done', message)
+
+    def _hold(self, *, force: bool = False) -> None:
+        """버스 「혼자 씀」 표시 · 처음 · 그 뒤 `HOLD_REFRESH_SEC` 마다 늘림 · 못 세워도 설정은 한다 · 139 E-1"""
+        now = self._clock()
+        if not force and (self._held_at is None or now - self._held_at < HOLD_REFRESH_SEC):
+            return
+        try:
+            if force:
+                self._hold_bus('absolute_setup')
+            else:
+                self._hold_bus('absolute_setup', wait_for_running=False)
+        except Exception:  # noqa: BLE001 · 표시는 보조 · 설정을 막지 않는다
+            pass
+        self._held_at = now
+
+    def _unhold(self) -> None:
+        """「혼자 씀」 표시를 내린다 · 끝 상태를 쓰기 전에(상태 모니터가 바로 다시 읽게)"""
+        self._held_at = None
+        try:
+            self._release_bus()
+        except Exception:  # noqa: BLE001
+            pass
+
+    def _pause(self, seconds: float) -> None:
+        self._hold()
+        self._sleep(seconds)
 
     def _remember_identity(self, targets: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         """쓰기 전 드라이브 시리얼 · 이어서 하기가 같은 드라이브인지 볼 때 쓴다 · 못 읽으면 위치만 · 134"""
@@ -545,12 +667,14 @@ class AbsoluteSetup:
     def _step(self, key: str, message: str) -> None:
         if self._cancel.is_set():
             raise _Stop('사용자가 취소했습니다')
+        self._hold()
         with self._lock:
             self._job.update({
                 'step': key, 'step_label': STEP_LABELS[key], 'step_index': step_index(key), 'message': message,
             })
 
     def _note(self, message: str) -> None:
+        self._hold()
         with self._lock:
             self._job['message'] = message
 
@@ -610,7 +734,7 @@ class AbsoluteSetup:
                 return
             if self._clock() >= deadline:
                 raise _Stop(f'{", ".join(str(axis) for axis in still_on)}번 모터의 서보가 꺼지지 않았습니다')
-            self._sleep(0.2)
+            self._pause(0.2)
 
     def _with_motor_manager_stopped(self, work: Callable[[], None]) -> None:
         if not self._lifecycle_lock.acquire(blocking=False):
@@ -656,25 +780,52 @@ class AbsoluteSetup:
                 raise _Stop(f'{item["label"]} Pr0.15를 다시 읽은 값이 {value}입니다. 0이어야 합니다')
             self._cli(base + ['-t', 'uint32', '0x1010', '1', '0x65766173'], item)
 
-    def _check_mode(self, targets: List[Dict[str, Any]]) -> None:
+    def _check_mode(self, targets: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        """0x3015 = 0 확인 · 0x603F 로 Err40 판정 · 드라이브마다 `needs_clear` · 140 ①
+
+        Err40 코드는 `minas_absolute.ERR40_CODE`(0xFF28 · 실측 두 개에서 추론 · 매뉴얼 표 미확인) ·
+        다른 오류 코드(재투입 직후 Err88 등)는 클리어 사유가 아니다 · 7/7 이 0 이 될 때까지 다시 본다.
+        """
+        updated = []
         for item in targets:
-            value = self._upload(int(item['master_index']), int(item['slave_position']), '0x3015', 'int16', item)
+            master, position = int(item['master_index']), int(item['slave_position'])
+            value = self._upload(master, position, '0x3015', 'int16', item)
             if value != 0:
                 # EEPROM 에 0 이 없다 · 이어서 해도 같은 값 · 상태 모니터가 「앱솔루트 아님」 으로 보므로 처음부터 다시
                 raise _Stop(
                     f'{item["label"]} 전원을 다시 켠 뒤 Pr0.15 = {value}입니다. EEPROM에 저장되지 않았습니다',
                     resumable=False,
                 )
+            code = int(self._upload(master, position, '0x603F', 'uint16', item)) & 0xFFFF
+            updated.append({**item, 'error_code': code, 'needs_clear': code == minas_absolute.ERR40_CODE})
+        self._set_targets(updated)
+        return updated
 
-    def _clear(self, targets: List[Dict[str, Any]]) -> None:
+    def _set_targets(self, targets: List[Dict[str, Any]]) -> None:
+        """일의 대상 목록 · 실패하면 이어서 하기 기록에 그대로 남는다(Err40 판정 · 클리어 여부 포함)"""
+        with self._lock:
+            self._job['targets'] = [dict(item) for item in targets]
+
+    def _clear(self, targets: List[Dict[str, Any]], clearing: List[Dict[str, Any]]) -> None:
+        """`clearing` 만 클리어 · 명령 전에 PC 단위 표시 · 되읽기까지 맞으면 `cleared` · 140 ①③"""
+        keys = {drive_key(item) for item in clearing}
         for item in targets:
+            if drive_key(item) not in keys:
+                continue
             master, position = int(item['master_index']), int(item['slave_position'])
+            identity = item.get('identity') if isinstance(item.get('identity'), dict) else {}
+            self._record_clear([{
+                'axis': item.get('axis'), 'serial': identity.get('serial_number'),
+                'master_index': master, 'slave_position': position, 'source': 'absolute_setup',
+            }])
             for command in command_plan(ABSOLUTE_CLEAR, master, position):
                 self._cli(command, item)
             verify = verify_command(ABSOLUTE_CLEAR, master, position)
             value = self._read(verify, parse_upload_value, item, '0x4D00:01')
             if not value & ABSOLUTE_CLEAR_BIT:
                 raise _Stop(f'{item["label"]} 다회전 클리어 확인 실패 · 0x4D00:01 = {value}')
+            item['cleared'] = True
+            self._set_targets(targets)
 
     def _verify(self, targets: List[Dict[str, Any]]) -> None:
         deadline = self._clock() + VERIFY_RETRY_SEC
@@ -688,13 +839,17 @@ class AbsoluteSetup:
             if self._clock() >= deadline:
                 raise _Stop(' · '.join(problems))
             self._note('최종 확인 · ' + ' · '.join(problems) + ' · 다시 확인합니다')
-            self._sleep(1.0)
+            self._pause(1.0)
 
     def _verify_one(self, master: int, position: int, item: Dict[str, Any]) -> List[str]:
+        """0x3015 = 0 · 0x603F = 0 · 위치 한 바퀴 검사는 클리어한 드라이브만(클리어가 먹었나) · 140 ②
+
+        클리어 안 한 드라이브는 위치를 보지 않는다 · 감속 있는 축은 원래 모터 한 바퀴를 넘나든다(1:20 · ±12° = ±240°).
+        """
         try:
             mode = self._upload(master, position, '0x3015', 'int16', item)
             code = self._upload(master, position, '0x603F', 'uint16', item)
-            where = self._upload(master, position, '0x6064', 'int32', item)
+            where = self._upload(master, position, '0x6064', 'int32', item) if item.get('cleared') else 0
         except _Stop as stop:
             return [str(stop)]
         problems = []
@@ -703,7 +858,7 @@ class AbsoluteSetup:
         if code != 0:
             problems.append(f'{item["label"]} 오류 0x{code & 0xFFFF:04X}')
         if abs(int(where)) >= ONE_TURN_COUNTS:
-            problems.append(f'{item["label"]} 위치 {where} count · 한 바퀴를 넘음(다회전 값이 남아 있음)')
+            problems.append(f'{item["label"]} 위치 {where} count · 클리어했는데 한 바퀴를 넘음(다회전 값이 남아 있음)')
         return problems
 
     def _wait_power_cycle(self, targets: List[Dict[str, Any]]) -> None:
@@ -736,7 +891,7 @@ class AbsoluteSetup:
                 if waiting_on:
                     parts.append('다시 켜짐 대기 ' + ', '.join(f'슬레이브 {p}' for _m, p in waiting_on))
                 self._note('드라이브 전원을 껐다 켜세요 · ' + ' · '.join(parts))
-            self._sleep(POLL_SEC)
+            self._pause(POLL_SEC)
 
     def _wait_settled(self, targets: List[Dict[str, Any]]) -> None:
         """이어서 하기 · 재투입을 기다리지 않고 읽는 단계부터 · 그래도 버스가 자리 잡았는지 먼저 본다 · 134"""
@@ -766,7 +921,7 @@ class AbsoluteSetup:
                     return
             if self._clock() >= deadline:
                 return
-            self._sleep(POLL_SEC)
+            self._pause(POLL_SEC)
             slaves = self._visible_slaves() or []
 
     def _settle(self, keys: set) -> None:
@@ -795,7 +950,7 @@ class AbsoluteSetup:
             if now - started >= RECONFIGURE_WAIT_SEC:
                 return
             self._note(f'대상 드라이브가 다시 연결됐습니다. 마스터가 드라이브 정보를 읽는 동안 기다립니다 ({quiet:.0f}/{SETTLE_AFTER_RETURN_SEC:.0f} s)')
-            self._sleep(POLL_SEC)
+            self._pause(POLL_SEC)
 
     def _configuring(self) -> bool:
         try:
@@ -820,7 +975,7 @@ class AbsoluteSetup:
             result = self._call(command)
             if not (ethercat_mailbox.is_refused(result) and self._clock() < deadline):
                 break
-            self._sleep(READ_RETRY_INTERVAL_SEC)
+            self._pause(READ_RETRY_INTERVAL_SEC)
         if result.returncode != 0:
             detail = (result.stderr or result.stdout or '').strip() or f'종료 코드 {result.returncode}'
             raise _Stop(f'{item["label"]} {" ".join(command[6:])} 실패 · {detail}')
@@ -856,7 +1011,7 @@ class AbsoluteSetup:
             if attempt >= 2 and self._clock() >= deadline:
                 raise _Stop(f'{item["label"]} {what} 읽기 실패 · {detail} ({attempt}번 시도)')
             self._note(f'{item["label"]} {what} 읽기 실패 · 다시 읽습니다 ({attempt}번째) · {detail}')
-            self._sleep(READ_RETRY_INTERVAL_SEC)
+            self._pause(READ_RETRY_INTERVAL_SEC)
 
     # -- 도움 --------------------------------------------------------------- #
 

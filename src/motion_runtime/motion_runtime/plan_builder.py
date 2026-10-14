@@ -16,7 +16,7 @@ import math
 import time
 from typing import Any, Dict, List, Mapping, Optional
 
-from motion_common import joint_mapping, repeat_policy, units, wire_units
+from motion_common import joint_mapping, multiturn_clear, repeat_policy, units, wire_units
 from motion_common.values import finite_float, optional_int
 
 from . import motion_run_rules
@@ -70,6 +70,16 @@ def _axis_playback_spans(
 class PlanBuilder:
     def __init__(self, manager: Any) -> None:
         self.manager = manager
+
+    def _multiturn_clear_state(self) -> Dict[str, Any]:
+        """PC 단위 다회전 클리어 표시 · 작업 폴더 `runtime/` · 못 읽으면 빈 표시 · 수정 목록 140 ③"""
+        reader = getattr(self.manager, '_multiturn_clear_state', None)
+        if callable(reader):
+            return reader()
+        projects_dir = getattr(self.manager, 'motion_projects_dir', None)
+        if projects_dir is None:
+            return {}
+        return multiturn_clear.load(multiturn_clear.marker_path_for_projects(projects_dir))
 
     def build(
         self,
@@ -266,6 +276,11 @@ class PlanBuilder:
         range_reason = joint_mapping.range_block_reason(rows)
         if range_reason:
             errors.append(range_reason)
+        # 다회전 클리어 뒤 기준점을 다시 지정하지 않은 축 · 재생·초기 위치 이동·스케줄·그룹 참가 모두 여기서 막힌다 ·
+        # 표시는 PC 단위(프로젝트를 바꾸거나 되돌려도 남음) · 이 매핑 줄의 기준점이 클리어 전 것이어도 막는다 · 수정 목록 140 ③
+        clear_reason = multiturn_clear.block_reason(self._multiturn_clear_state(), rows)
+        if clear_reason:
+            errors.insert(0, clear_reason)
         warnings = [unusable_motion_file_note] if unusable_motion_file_note else []
         # 모터가 이 PC 에 없는 축 · 막지 않고 건너뛴다 · §6-139
         missing_motor_motion_ids = []

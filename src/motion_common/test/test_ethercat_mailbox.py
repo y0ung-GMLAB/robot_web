@@ -223,3 +223,44 @@ def test_motor_script_raises_the_marker_before_launch_and_watches_after():
     begin = script.index('ethercat_mailbox.py')
     assert script.index('begin --owner "$$"') < script.index('if ! recover_ethercat_errors_before_launch')
     assert begin < script.index('watch --owner "$$"') < script.index('exec "${MOTOR_EXECUTABLE}"')
+
+
+# -- 수정 목록 139 E-1 · 앱솔루트 설정이 버스를 혼자 쓰는 동안 ------------------------------ #
+
+def test_exclusive_hold_blocks_other_processes_but_not_the_holder():
+    """세운 프로세스 자신의 SDO 는 나가고 · 다른 프로세스(감시 노드)는 `configuring()` 참 · 돌려받음"""
+    runner = Runner()
+    assert em.hold('absolute_setup') is True
+    assert not em.configuring()                                   # 나(웹 브리지)는 그대로 보낸다
+    assert em.run(UPLOAD, runner=runner).returncode == 0
+    assert len(runner.calls) == 1
+
+    other = os.getpid() + 1
+    assert em.held_by_other(me=other, alive=lambda _pid: True)    # 감시 노드 쪽에서 보면
+    marker = em.read_exclusive()
+    marker['owner_pid'] = other                                   # 다른 프로세스가 세운 표시
+    em._write_json(em.EXCLUSIVE_NAME, marker)
+    assert em.configuring(alive=lambda _pid: True)
+    refused = em.run(UPLOAD, runner=runner, text=True)
+    assert em.is_refused(refused) and '앱솔루트 설정 중' in refused.stderr
+    assert len(runner.calls) == 1
+    assert em.release() is False                                  # 남의 표시는 안 내림
+    assert em.release(other) is True and not em.configuring(alive=lambda _pid: True)
+
+
+def test_exclusive_hold_expires_and_ignores_a_dead_owner():
+    em.hold('absolute_setup', owner=os.getpid() + 7, timeout_sec=5.0)
+    now = time.monotonic()
+    assert em.held_by_other(now=now, alive=lambda _pid: True)
+    assert not em.held_by_other(now=now + 6.0, alive=lambda _pid: True)   # 마감 지남(못 늘림)
+    assert not em.held_by_other(now=now, alive=lambda _pid: False)        # 세운 프로세스가 죽음
+
+
+def test_exclusive_hold_refresh_keeps_start_time_and_motor_marker_is_separate():
+    em.hold('absolute_setup', timeout_sec=5.0)
+    started = em.read_exclusive()['started_at']
+    em.begin(os.getpid() + 3)                                     # 모터 프로그램 재시작 · 다른 파일
+    em.hold('absolute_setup', wait_for_running=False)
+    assert em.read_exclusive()['started_at'] == started
+    assert em.read_marker()['owner_pid'] == os.getpid() + 3
+    assert em.release() is True and em.read_marker() is not None  # 모터 표시는 그대로

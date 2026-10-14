@@ -117,6 +117,8 @@ function fixButton(fix, navigate) {
     'ack-group-error': ['그룹 오류 해제', act.ackGroupError],
     'open-mapping': ['조인트 매핑 열기', () => navigate('mapping')],
   };
+  // 「open:화면」 · 그 화면으로 · 다회전 클리어 뒤 기준점 지정(#/manual?axis=N) · 수정 목록 140
+  if (String(fix || '').startsWith('open:')) map[fix] = ['기준점 지정 열기', () => navigate(fix.slice(5))];
   const entry = map[fix];
   return entry ? h('button', { class: 'btn btn-warn', type: 'button', onclick: entry[1] }, entry[0]) : null;
 }

@@ -45,9 +45,10 @@ def _service(*, servo_on=False, vendor=0x066F, blocker='', returncodes=None, act
         return SimpleNamespace(returncode=code, stdout=stdout, stderr='SDO 거부' if code else '')
 
     records = []
+    cleared = []
     service = DriveMaintenance(
         runner=runner,
-        read_slaves=lambda: [{'master_index': 0, 'slave_position': 2, 'vendor_id': vendor}],
+        read_slaves=lambda: [{'master_index': 0, 'slave_position': 2, 'vendor_id': vendor, 'serial_number': 77}],
         registry_motor=lambda axis: {'axis': axis, 'identity': {'slave_position': 2, 'ethercat_master_index': 0}}
         if axis == 1 else None,
         current_motor=lambda axis: {'controller_index': axis, 'servo_on': servo_on},
@@ -60,7 +61,9 @@ def _service(*, servo_on=False, vendor=0x066F, blocker='', returncodes=None, act
         wait_recovery=lambda _service, axes: calls.append(('recovery', tuple(axes))) or {'service_active': True},
         expected_axes=lambda: [0, 1],
         record=records.append,
+        record_clear=lambda drives: (cleared.extend(drives), calls.append(('marker',))),
     )
+    service.test_cleared = cleared
     return service, calls, records
 
 
@@ -86,7 +89,12 @@ def test_absolute_clear_needs_servo_off_and_asks_for_power_cycle():
     service, calls, _records = _service(servo_on=False)
     done = service.run({'action': ABSOLUTE_CLEAR, 'axis': 1, 'confirmed': True})
     assert done['success'] is True and done['power_cycle_required'] is True
-    assert '기준점을 다시 캡처' in done['message']
+    assert '모든 프로젝트의 이 축 기준점이 무효' in done['message'] and '다시 지정' in done['message']
+    # 클리어만 하는 길도 PC 단위 표시를 **명령 전에** 남긴다 · 수정 목록 140 ④
+    assert calls[0] == ('marker',)
+    assert service.test_cleared == [{
+        'axis': 1, 'serial': 77, 'master_index': 0, 'slave_position': 2, 'source': 'drive_maintenance',
+    }]
     # 쓰기 3번 뒤 되읽기 1번 · 수정 목록 66
     assert [call[1] for call in calls if call[0] == 'cli'] == [
         'download -m 0 -p 2 -t uint16 0x4D01 0 0x0031',
