@@ -104,8 +104,8 @@ test('「범위 확인」 칸 옆 주의 · 최소·최대 입력에 저절로 �
   const { readFile } = await import('node:fs/promises');
   const page = await readFile(new URL('../static/v2/js/pages/mapping.js', import.meta.url), 'utf8');
   const manual = await readFile(new URL('../static/v2/js/pages/manual.js', import.meta.url), 'utf8');
-  assert.match(page, /RANGE_NOTE = '범위 확인 유의';/);
-  assert.match(page, /RANGE_HINT = '[^']*직접 체크/, '자세한 안내는 마우스를 올리면');
+  assert.doesNotMatch(page, /RANGE_NOTE|range-note/, '칸 옆 노란 글씨 없음(사용자 2026-10-14)');
+  assert.match(page, /RANGE_HINT = '[^']*직접 체크/, '안내는 마우스를 올리면');
   assert.doesNotMatch(page, /autoConfirmRange|range_confirmed = true/);
   assert.doesNotMatch(manual, /autoConfirmRange|range_confirmed/);
   assert.doesNotMatch(page, /입력하거나 「범위 확인」/, '숫자 입력만으로 풀린다는 안내 없음');

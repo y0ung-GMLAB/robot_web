@@ -18,8 +18,7 @@ import { motorsDraft } from './motors.js';
 import { threeWayMerge } from '../merge_model.js';
 import { confirmConflicts } from '../conflict_dialog.js';
 
-/** 「범위 확인」 칸 옆 주의 · 짧게 · 자세한 건 마우스를 올리면 (사용자 2026-10-13 · 「노란 글씨가 너무 길어」) */
-export const RANGE_NOTE = '범위 확인 유의';
+/** 「범위 확인」 칸 안내 · 칸 옆 글씨 없이 마우스를 올리면만 (사용자 2026-10-14 · 「노란 글씨조차 없애자 · 툴팁처럼」) */
 export const RANGE_HINT = '최소·최대가 실제 기계 범위인지 확인한 뒤 직접 체크 · 숫자 입력만으로는 안 켜짐 · 저장 전에는 재생·수동 조작 막힘';
 
 const ui = { fileId: '', revision: '', name: '', saved: [], rows: null, selected: '', validation: null, busy: '', loadError: '', content: '' };
@@ -228,11 +227,10 @@ function table(state, changed) {
         numberInput(row, 'motion_lower_deg', changed, { label: '최소' }), h('span', { class: 'muted', text: '~' }),
         numberInput(row, 'motion_upper_deg', changed, { label: '최대' }))),
       // 숫자를 넣어도 저절로 체크되지 않는다 · 사람이 직접 (사용자 2026-10-13)
-      h('td', { class: row.enabled && !rangeConfirmed(row) ? 'range-unconfirmed' : '' }, h('div', { class: 'cell-row' },
+      h('td', { class: row.enabled && !rangeConfirmed(row) ? 'range-unconfirmed' : '', title: RANGE_HINT }, h('div', { class: 'cell-row' },
         h('input', { type: 'checkbox', checked: rangeConfirmed(row), 'aria-label': `${index + 1}번 줄 범위 확인`,
           title: RANGE_HINT,
-          onchange: (e) => { row.range_confirmed = e.target.checked; changed(); } }),
-        h('span', { class: 'small tone-text-warn range-note', text: RANGE_NOTE, title: RANGE_HINT }))),
+          onchange: (e) => { row.range_confirmed = e.target.checked; changed(); } }))),
       h('td', {}, h('div', { class: 'cell-row' },
         numberInput(row, 'max_velocity_deg_s', changed, { label: '최대 속도 deg/s', placeholder: '없음' }),
         numberInput(row, 'max_acceleration_deg_s2', changed, { label: '최대 가속 deg/s²', placeholder: '없음' }))),
