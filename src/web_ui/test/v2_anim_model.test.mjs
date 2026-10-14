@@ -1,7 +1,8 @@
 /** UI v2 · 애니메이션 화면 값 · 검사 칸 · 범위 넘음 · 재생 목록 칸 · 그래프 (설계안 2026-10-09) */
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { checkState, factLine, fileRows, mappedCount, mujocoState, playlistSlots, rangeIssues, seriesGeometry } from '../static/v2/js/anim_model.js';
+import { readFileSync } from 'node:fs';
+import { checkState, factLine, fileRows, graphSeriesView, mappedCount, mujocoState, playlistSlots, rangeIssues, seriesGeometry } from '../static/v2/js/anim_model.js';
 
 const R = Math.PI / 180;
 const mapping = { mappings: [
@@ -51,4 +52,37 @@ test('그래프 · 범위 선도 보이게 세로 폭 · 값은 deg', () => {
   assert.ok(geo.lowerY <= 50 && geo.upperY >= 0);
   assert.ok(Math.abs(geo.max - 2) < 1e-9);
   assert.equal(seriesGeometry([]), null);
+});
+
+test('그래프 12 개 넘음 · 「20 개 중 12 개」 + 「나머지 보기」 ↔ 「접기」 · 수정 목록 138', () => {
+  const one = (id) => ({ motion_id: id, points: [{ time_sec: 0, value: 0 }] });
+  const ids = Array.from({ length: 20 }, (_, i) => `f${Math.floor(i / 5) + 1}-${(i % 5) + 1}`);
+  const narration = { graph_series: ids.slice(0, 12).map(one), graph_series_extra: ids.slice(12).map(one), graph_series_total: 20 };
+
+  const closed = graphSeriesView(narration, false);
+  assert.equal(closed.series.length, 12);
+  assert.equal(closed.note, '20 개 중 12 개');
+  assert.equal(closed.toggle, '나머지 보기');
+
+  const open = graphSeriesView(narration, true);
+  assert.deepEqual(open.series.map((s) => s.motion_id), ids, '나머지 8 개가 뒤에 · 이름 순 그대로');
+  assert.equal(open.note, '20 개 모두');
+  assert.equal(open.toggle, '접기');
+
+  // 12 개 이하 · 줄 자체가 없다
+  assert.deepEqual(graphSeriesView({ graph_series: [one('a')], graph_series_extra: [], graph_series_total: 1 }), { series: [one('a')], note: '', toggle: '' });
+  // 옛 서버(칸 없음) · 상세 전
+  assert.deepEqual(graphSeriesView(null), { series: [], note: '', toggle: '' });
+  // 개수만 알고 나머지가 안 왔으면 안내만 · 누를 버튼은 없다
+  assert.deepEqual(graphSeriesView({ graph_series: narration.graph_series, graph_series_total: 20 }, true),
+    { series: narration.graph_series, note: '20 개 중 12 개', toggle: '' });
+});
+
+test('애니메이션 화면 · 펼침은 파일마다 ui 에 기억 · 버튼이 그것을 뒤집는다 (0.5 초 다시 그리기에도 유지)', () => {
+  const src = readFileSync(new URL('../static/v2/js/pages/animations.js', import.meta.url), 'utf8');
+  assert.match(src, /graphsOpen: new Set\(\)/);
+  assert.match(src, /const graphsOpen = ui\.graphsOpen\.has\(ui\.selected\);/);
+  assert.match(src, /graphSeriesView\([^;]*graphsOpen\)/);
+  assert.match(src, /onclick: \(\) => \{ toggleGraphs\(file\.id\); changed\(\); \}/);
+  assert.match(src, /'aria-expanded': String\(graphsOpen\)/);
 });

@@ -110,6 +110,22 @@ export function factLine(analysis) {
 }
 
 /**
+ * 상세 그래프 목록 · 처음엔 서버가 `graph_series` 로 준 것(12 개)만 · 나머지는 `graph_series_extra` ·
+ * 「20 개 중 12 개」 + 「나머지 보기」 / 「접기」 · 수정 목록 138
+ * → { series, note, toggle } · 다 보이면 note·toggle 은 ''
+ */
+export function graphSeriesView(analysis, expanded = false) {
+  const shown = Array.isArray(analysis?.graph_series) ? analysis.graph_series : [];
+  const extra = Array.isArray(analysis?.graph_series_extra) ? analysis.graph_series_extra : [];
+  const total = Math.max(Number(analysis?.graph_series_total) || 0, shown.length + extra.length);
+  if (total <= shown.length) return { series: shown, note: '', toggle: '' };
+  if (!extra.length) return { series: shown, note: `${total} 개 중 ${shown.length} 개`, toggle: '' };
+  return expanded
+    ? { series: [...shown, ...extra], note: `${total} 개 모두`, toggle: '접기' }
+    : { series: shown, note: `${total} 개 중 ${shown.length} 개`, toggle: '나머지 보기' };
+}
+
+/**
  * 조인트 하나 그래프 · SVG path · 값은 deg · 범위 선이 보이도록 세로 폭에 범위도 넣는다
  * points [{time_sec, value(rad)}] → { line, lowerY, upperY, min, max }
  */
