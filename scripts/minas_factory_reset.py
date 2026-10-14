@@ -29,6 +29,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / 'src' / 'web_bridge'))
+sys.path.insert(0, str(ROOT / 'src' / 'motion_common'))   # drive_params → ethercat_mailbox(125) · 실물 S-0c 10-14
 from motion_web_bridge.drive_params import CATALOG  # noqa: E402
 
 MINAS_VENDOR = 0x066F
