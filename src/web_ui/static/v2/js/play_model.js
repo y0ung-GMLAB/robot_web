@@ -196,6 +196,9 @@ export function startBlocker(snap, sched, { scope, playlist, mappingId }) {
     return { text: '재생 중입니다' };
   }
   if (snap?.mapping_range_blocker) return { text: String(snap.mapping_range_blocker), fix: 'open-mapping' };
+  // 다회전 클리어 뒤 기준점 다시 지정 전 · 서버 판정 글 그대로 · 수정 목록 140
+  const redo = (snap?.multiturn_clear?.blocked_axes || []).map(Number).filter(Number.isFinite);
+  if (redo.length) return { text: String(snap.multiturn_clear.message || ''), fix: `open:manual?axis=${redo[0]}` };
   if (snap?.execution_context && snap.execution_context.ready === false) {
     return { text: String(snap.execution_context.message || '실행 준비가 되지 않았습니다') };
   }

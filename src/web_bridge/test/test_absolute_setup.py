@@ -20,7 +20,9 @@ from motion_web_bridge.absolute_setup import (
 
 
 class FakeDrive:
-    def __init__(self, mode=1, eeprom=1, code=0, position=50_000_000):
+    def __init__(self, mode=1, eeprom=1, code=0, position=50_000_000, err40=True):
+        #: 처음 앱솔루트로 바꾸면 Err40 이 뜨는 드라이브인가 · 실물 floating4(배터리 정상)는 안 뜸 · 140
+        self.err40 = err40
         self.ram = mode
         self.eeprom = eeprom
         self.code = code
@@ -37,7 +39,7 @@ class FakeDrive:
             self.code = 0
             self.position = 12_345
             self.clear_pending = False
-        elif self.eeprom == 0 and changed_to_absolute:
+        elif self.eeprom == 0 and changed_to_absolute and self.err40:
             self.code = 0xFF28          # 처음 앱솔루트로 바꾸면 Err40
         self.clear_flag = 0
 
@@ -113,10 +115,50 @@ class PowerSwitch:
         ]
 
 
-def _setup(ethercat, minas, *, servo=None, records=None, switch=None, resume_file=None, wall=None, configuring=None):
+class ClearMarker:
+    """PC 단위 다회전 클리어 표시(가짜) · 적은 드라이브 · 기준점 다시 지정을 기다리는 축 · 140 ③"""
+
+    def __init__(self):
+        self.records = []
+        self.pending = set()
+
+    def record(self, drives):
+        for drive in drives:
+            self.records.append(dict(drive))
+            if drive.get('axis') is not None:
+                self.pending.add(int(drive['axis']))
+
+    def axes(self):
+        return sorted(self.pending)
+
+
+class Bus:
+    """버스 「혼자 씀」 표시(가짜) · 세움 · 늘림 · 내림 · 139 E-1"""
+
+    def __init__(self):
+        self.calls = []
+
+    def hold(self, purpose, **kwargs):
+        self.calls.append(('hold', purpose, kwargs.get('wait_for_running', True)))
+
+    def release(self):
+        self.calls.append(('release',))
+
+    @property
+    def held(self):
+        state = False
+        for call in self.calls:
+            state = call[0] == 'hold'
+        return state
+
+
+def _setup(ethercat, minas, *, servo=None, records=None, switch=None, resume_file=None, wall=None, configuring=None,
+           marker=None, bus=None):
     motors = servo if servo is not None else {}
     service_calls = []
     clock = [0.0]
+    marker = marker if marker is not None else ClearMarker()
+    bus = bus if bus is not None else Bus()
 
     def sleep(seconds):
         clock[0] += seconds
@@ -147,10 +189,16 @@ def _setup(ethercat, minas, *, servo=None, records=None, switch=None, resume_fil
         bus_configuring=configuring or (lambda: False),
         resume_file=resume_file,
         wall_clock=wall or (lambda: 1_000_000.0),
+        record_clear=marker.record,
+        pending_axes=marker.axes,
+        hold_bus=bus.hold,
+        release_bus=bus.release,
     )
     if isinstance(switch, PowerSwitch):
         switch.setup = setup
     setup.test_clock = clock
+    setup.test_marker = marker
+    setup.test_bus = bus
     return setup, service_calls, records
 
 
@@ -179,8 +227,12 @@ def test_full_run_goes_through_every_step_with_two_power_cycles():
 
     status = setup.status()
     assert started['success'] is True
-    assert status['state'] == 'done', status['message']
-    assert '기준점을 다시 캡처' in status['message']
+    # 처음 앱솔루트로 바꾼 드라이브가 Err40 → 클리어 → 「기준점 다시 지정 대기」 · 140
+    assert status['state'] == 'reference_pending', status['message']
+    assert status['message'] == '다회전 클리어한 0번 모터 · 몸을 정면·수평에 맞추고 기준점을 다시 지정해 저장하세요'
+    assert status['reference_pending_axes'] == [0] and status['cleared_axes'] == [0]
+    assert [r['slave_position'] for r in setup.test_marker.records] == [0, 1]      # 미등록(축 없음)도 넘긴다
+    assert setup.test_marker.records[0]['serial'] == 1000
     assert switch.cycles == 2
     assert servo[0] is False                                     # 등록 축 서보 끄기
     assert service_calls == ['stop', 'start', 'stop', 'start']   # 쓰기 두 번 · 늘 다시 띄움
@@ -371,7 +423,7 @@ def test_check_mode_retries_a_read_failure_then_goes_on():
     setup.start({'scope': 'all', 'confirmed': True})
 
     status = setup.status()
-    assert status['state'] == 'done', status['message']
+    assert status['state'] == 'reference_pending', status['message']      # Err40 → 클리어함 · 140
     assert ethercat.reads_after_cycle >= 4                      # 3 번 실패 뒤 4 번째에 읽음
     assert switch.cycles == 2
     assert status['resume'] is None
@@ -525,7 +577,8 @@ def test_resume_continues_from_check_mode_for_the_same_drives():
 
     status = setup.status()
     assert started['success'] is True and '4/7' in started['message']
-    assert status['state'] == 'done', status['message']
+    assert status['state'] == 'reference_pending', status['message']     # 4/7 에서 Err40 다시 판정 → 클리어 · 140 ⑤
+    assert status['reference_pending_axes'] == [0, 1]
     resumed_calls = ethercat.calls[calls_before:]
     assert not any(call.startswith('download') and '0x3015' in call for call in resumed_calls)   # 1/7 · 2/7 안 함
     assert any(call.startswith('download') and '0x4D00' in call for call in resumed_calls)       # 클리어 함
@@ -587,8 +640,9 @@ def test_resume_after_the_clear_starts_at_power_cycle_2_without_clearing_again()
     preview = setup.preview({'resume': True})
     assert preview['clear_done'] is True and preview['steps'] == ['드라이브 전원 껐다 켜기 2', '최종 확인']
     assert setup.start({'resume': True, 'confirmed': True})['success'] is True
-    assert setup.status()['state'] == 'done', setup.status()['message']
+    assert setup.status()['state'] == 'reference_pending', setup.status()['message']
     assert not any(call.startswith('download') and '0x4D00' in call for call in ethercat.calls[calls_before:])
+    assert any('0x6064' in call for call in ethercat.calls[calls_before:])     # 클리어한 드라이브라 위치도 봄
 
 
 def test_clear_failure_resumes_from_check_mode():
@@ -620,3 +674,185 @@ def test_resume_record_survives_a_bridge_restart_and_expires(tmp_path):
     path.write_text('{"version": 1, "failed_step": "write_mode"}', encoding='utf-8')   # 엉뚱한 기록은 버린다
     third, _calls, _records = _setup(ethercat, minas, switch=switch, resume_file=path)
     assert third.status()['resume'] is None and not path.exists()
+
+
+# -- 수정 목록 140 · 다회전 클리어는 Err40 일 때만 · 클리어한 경우만 기준점 보호 ------------------ #
+
+def test_without_err40_there_is_no_clear_no_second_power_cycle_and_references_stay():
+    """실물 10-14 · 인크리멘털 → 앱솔루트 뒤 Err40 없음 · 회전 수를 버리지 않는다 · 한 바퀴 넘는 위치도 정상"""
+    drives = {0: FakeDrive(err40=False), 1: FakeDrive(err40=False, position=-30_000_000)}
+    ethercat = FakeEthercat(drives)
+    switch = PowerSwitch(ethercat, [0, 1])
+    setup, service_calls, records = _setup(
+        ethercat, _minas(_drive(0, 'not_absolute', 0), _drive(1, 'not_absolute', 1)), switch=switch,
+    )
+
+    setup.start({'scope': 'all', 'confirmed': True})
+
+    status = setup.status()
+    assert status['state'] == 'done', status['message']
+    assert status['message'] == '앱솔루트 설정을 마쳤습니다 · 다회전 정상 · 클리어 안 함 · 기준점 그대로'
+    assert switch.cycles == 1                                    # 재투입 2 건너뜀
+    assert service_calls == ['stop', 'start']                    # 클리어용 정지 없음
+    assert not any('0x4D0' in call for call in ethercat.calls)   # 클리어 명령 없음
+    assert not any('0x6064' in call for call in ethercat.calls)  # 1 바퀴 검사 없음(감속 축은 원래 넘나든다)
+    assert drives[0].position == 50_000_000 and drives[1].position == -30_000_000   # 회전 수 그대로
+    assert setup.test_marker.records == [] and status['cleared_axes'] == []
+    assert [t['needs_clear'] for t in status['targets']] == [False, False]
+    assert records[-1]['event_type'] == 'minas_absolute_setup_done'
+
+
+def test_only_the_err40_drive_is_cleared_and_marked():
+    drives = {0: FakeDrive(err40=False), 1: FakeDrive(err40=True)}
+    ethercat = FakeEthercat(drives)
+    switch = PowerSwitch(ethercat, [0, 1])
+    setup, service_calls, _records = _setup(
+        ethercat, _minas(_drive(0, 'not_absolute', 0), _drive(1, 'not_absolute', 3)), switch=switch,
+    )
+
+    setup.start({'scope': 'all', 'confirmed': True})
+
+    status = setup.status()
+    assert status['state'] == 'reference_pending', status['message']
+    assert status['state_label'] == '기준점 다시 지정 대기'
+    assert status['message'] == '다회전 클리어한 3번 모터 · 몸을 정면·수평에 맞추고 기준점을 다시 지정해 저장하세요'
+    assert not any('-p 0' in call and '0x4D0' in call for call in ethercat.calls)
+    assert any('-p 1' in call and '0x4D00' in call for call in ethercat.calls)
+    assert any('-p 1' in call and '0x6064' in call for call in ethercat.calls)
+    assert not any('-p 0' in call and '0x6064' in call for call in ethercat.calls)
+    assert [(r['axis'], r['serial'], r['source']) for r in setup.test_marker.records] == [(3, 1001, 'absolute_setup')]
+    assert switch.cycles == 2 and service_calls == ['stop', 'start', 'stop', 'start']
+    assert drives[0].position == 50_000_000                      # 정상 드라이브는 그대로
+
+
+def test_reference_pending_turns_done_when_every_cleared_axis_is_saved():
+    """「기준점 다시 지정 대기」 → 클리어한 축의 기준점을 모두 다시 저장하면(표시 풀림) 완료 · 웹을 다시 켜면 일은 사라짐"""
+    drives = {0: FakeDrive(), 1: FakeDrive()}
+    ethercat = FakeEthercat(drives)
+    setup, _calls, _records = _setup(
+        ethercat, _minas(_drive(0, 'not_absolute', 0), _drive(1, 'not_absolute', 1)), switch=PowerSwitch(ethercat, [0, 1]),
+    )
+    setup.start({'scope': 'all', 'confirmed': True})
+    assert setup.status()['reference_pending_axes'] == [0, 1]
+    assert setup.blocker() == ''                                  # 진행 중 차단은 아님 · 막는 것은 PC 단위 표시
+
+    setup.test_marker.pending.discard(0)                          # 0번 기준점 저장
+    status = setup.status()
+    assert status['state'] == 'reference_pending' and status['reference_pending_axes'] == [1]
+    assert '1번 모터' in status['message'] and '0번' not in status['message']
+
+    setup.test_marker.pending.discard(1)
+    status = setup.status()
+    assert status['state'] == 'done'
+    assert status['message'] == '앱솔루트 설정을 마쳤습니다 · 다회전 클리어한 축의 기준점을 다시 지정했습니다'
+
+    # 표시를 못 읽으면 대기로 둔다(안전한 쪽)
+    setup._pending_axes = lambda: (_ for _ in ()).throw(OSError('x'))
+    assert setup.status()['state'] == 'reference_pending'
+
+
+def test_resume_from_check_mode_rejudges_err40_and_skips_the_clear_when_it_is_gone():
+    setup, ethercat, switch, _minas_state, servo, _records = _failed_at_check_mode()
+    for drive in ethercat.drives.values():
+        drive.code = 0                                            # 다시 보니 Err40 없음
+    setup.start({'resume': True, 'confirmed': True})
+    status = setup.status()
+    assert status['state'] == 'done', status['message']
+    assert status['message'].endswith('클리어 안 함 · 기준점 그대로')
+    assert switch.cycles == 1                                     # 재투입 2 없음
+    assert setup.test_marker.records == []
+
+
+def test_a_failed_clear_still_leaves_the_marker_because_it_is_written_first():
+    """클리어 명령 전에 표시를 남긴다 · 중간에 끊겨도(되읽기 실패 · 웹 재시작) 막는 쪽으로"""
+    drives = {0: FakeDrive()}
+    ethercat = FakeEthercat(drives, fail={('download', '0x4D00')})
+    setup, _calls, _records = _setup(ethercat, _minas(_drive(0, 'not_absolute', 2)), switch=PowerSwitch(ethercat, [0]))
+    setup.start({'scope': 'all', 'confirmed': True})
+    status = setup.status()
+    assert status['state'] == 'failed' and status['step'] == 'clear'
+    assert [r['axis'] for r in setup.test_marker.records] == [2]
+    assert status['resume']['from_step'] == 'check_mode'
+    assert [t.get('cleared') for t in status['targets']] == [None]   # 클리어 못 함 · 이어서 하면 다시 판정
+
+
+def test_resume_record_from_before_140_counts_as_cleared_after_the_clear_step():
+    """140 전 기록(드라이브마다 `cleared` 없음) · 6/7 부터면 그때 규칙대로 모두 클리어한 것으로"""
+    drives = {0: FakeDrive(eeprom=0, mode=0, code=0, position=12_345)}
+    ethercat = FakeEthercat(drives)
+    switch = PowerSwitch(ethercat, [0])
+    setup, _calls, _records = _setup(ethercat, _minas(_drive(0, 'ok', 0, 0)), switch=switch)
+    setup._save_resume({
+        'version': 1, 'failed_at': 1_000_000.0, 'failed_step': 'power_cycle_2', 'resume_from': 'power_cycle_2',
+        'error': 'x', 'scope': 'all',
+        'targets': [{'master_index': 0, 'slave_position': 0, 'axis': 0, 'label': '0번 모터',
+                     'identity': {'serial_number': 1000}}],
+    })
+    preview = setup.preview({'resume': True})
+    assert preview['clear_done'] is True
+    setup.start({'resume': True, 'confirmed': True})
+    status = setup.status()
+    assert status['cleared_axes'] == [0] and switch.cycles == 1
+    assert status['state'] == 'done'                              # 가짜 표시엔 기록이 없다(그때 남기지 않음)
+
+
+def test_the_bus_is_held_for_the_whole_run_refreshed_and_released_on_every_ending():
+    """139 E-1 · 앱솔루트 설정이 도는 동안 감시 노드의 SDO 를 쉬게 하는 표시 · 끝 · 실패 · 취소 모두 내림"""
+    from motion_web_bridge.absolute_setup import HOLD_REFRESH_SEC
+
+    drives = {0: FakeDrive(err40=False)}
+    ethercat = FakeEthercat(drives)
+    held_during = []
+
+    class Watching(FakeEthercat):
+        def __call__(self, command, **kwargs):
+            held_during.append(holder['setup'].test_bus.held)
+            return super().__call__(command, **kwargs)
+
+    holder = {}
+    ethercat = Watching(drives)
+    setup, _calls, _records = _setup(ethercat, _minas(_drive(0, 'not_absolute', 0)), switch=PowerSwitch(ethercat, [0]))
+    holder['setup'] = setup
+    setup.start({'scope': 'all', 'confirmed': True})
+    assert setup.status()['state'] == 'done'
+    assert held_during and all(held_during)                      # 모든 SDO 가 표시 아래에서
+    assert setup.test_bus.calls[0] == ('hold', 'absolute_setup', True)
+    assert setup.test_bus.calls[-1] == ('release',) and not setup.test_bus.held
+
+    # 실패해도 내림
+    ethercat = FakeEthercat({0: FakeDrive()}, fail={('download', '0x1010')})
+    setup, _calls, _records = _setup(ethercat, _minas(_drive(0, 'not_absolute', None)))
+    setup.start({'scope': 'all', 'confirmed': True})
+    assert setup.status()['state'] == 'failed' and not setup.test_bus.held
+
+    # 재투입을 오래 기다리면 마감을 늘리고 · 취소하면 내림
+    ethercat = FakeEthercat({0: FakeDrive()})
+    setup, _calls, _records = _setup(
+        ethercat, _minas(_drive(0, 'not_absolute', None)), switch=lambda: [{'master_index': 0, 'slave_position': 0}],
+    )
+    original_sleep = setup._sleep
+
+    def sleep_then_cancel(seconds):
+        original_sleep(seconds)
+        if setup.test_clock[0] > HOLD_REFRESH_SEC * 3:
+            setup._cancel.set()
+
+    setup._sleep = sleep_then_cancel
+    setup.start({'scope': 'all', 'confirmed': True})
+    refreshes = [call for call in setup.test_bus.calls if call[0] == 'hold' and call[2] is False]
+    assert len(refreshes) >= 2
+    assert setup.status()['state'] == 'failed' and not setup.test_bus.held
+
+
+def test_absolute_setup_holding_the_bus_makes_the_monitor_skip_its_reads(tmp_path, monkeypatch):
+    """실제 표시 파일 · 웹 브리지(세운 쪽)는 보내고 · 다른 프로세스(감시 노드)는 `configuring()` 참 · 139 E-1"""
+    import os
+
+    from motion_common import ethercat_mailbox
+
+    monkeypatch.setenv('ROBOT_WEB_RUN_DIR', str(tmp_path))
+    ethercat_mailbox.hold('absolute_setup')
+    assert not ethercat_mailbox.configuring()
+    assert ethercat_mailbox.held_by_other(me=os.getpid() + 1, alive=lambda _pid: True)
+    assert ethercat_mailbox.release() is True
+    assert not ethercat_mailbox.held_by_other(me=os.getpid() + 1, alive=lambda _pid: True)

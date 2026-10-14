@@ -14,7 +14,7 @@ import rclpy
 import uvicorn
 import yaml
 from fastapi import FastAPI, HTTPException, Request
-from motion_common import generation, joint_mapping, minas_absolute, rpc, topics, upper_restart
+from motion_common import generation, joint_mapping, minas_absolute, multiturn_clear, rpc, topics, upper_restart
 from motion_common import paths as common_paths
 from motion_common import motor_ref as motor_ref_rules
 from fastapi.responses import JSONResponse
@@ -37,7 +37,7 @@ from .manual_motor_commands import ManualMotorCommandService
 from .schedule_end import ScheduleEndService
 from .supervisor_watchdog import SupervisorWatchdog
 from .auto_backup import AutoBackupService
-from .absolute_setup import AbsoluteSetup
+from .absolute_setup import AbsoluteSetup, reference_prompt
 from .drive_maintenance import DriveMaintenance
 from .drive_params import DriveParams
 from . import boot_params, minas_params
@@ -438,6 +438,8 @@ class MotionWebBridge(Node):
             wait_recovery=self._wait_maintenance_recovery,
             expected_axes=self._detected_axes,
             record=self._record_drive_maintenance,
+            # 다회전 클리어만 하는 길도 PC 단위 표시 · 기준점 다시 지정 전까지 재생 막힘 · 수정 목록 140 ④
+            record_clear=self._record_multiturn_clear,
         )
         # 부팅 시 적용값 · **지금 도는** 세션이 쓴 값 · 지금 설정과 다르면 「설정 적용 필요」 · 수정 목록 116
         self.boot_params = boot_params.BootParamsWatch(
@@ -490,6 +492,9 @@ class MotionWebBridge(Node):
             record=self._record_absolute_setup,
             # 실패한 작업 이어서 하기 · 웹 브리지·PC 를 다시 켜도 남게 작업 폴더 runtime/(git 밖) · 24 h · 시리얼 확인 · 134
             resume_file=self.workspace_root / 'runtime' / 'absolute_setup_resume.json',
+            # Err40 인 드라이브만 클리어 · 클리어 직전 PC 단위 표시 · 끝나면 「기준점 다시 지정 대기」 · 수정 목록 140
+            record_clear=self._record_multiturn_clear,
+            pending_axes=lambda: multiturn_clear.pending_axes(self.multiturn_clear_state()),
         )
         # 스케줄 끝 · 기준점 주차 → 서보 OFF · 다음 시작 전 다시 켜기 · 수정 목록 36
         self.schedule_end = ScheduleEndService(
@@ -957,6 +962,8 @@ class MotionWebBridge(Node):
             ),
             # 연결된 MINAS 드라이브 앱솔루트 미확인 사유 · 상단 빨간 칸 · 수정 목록 62
             'minas_absolute_blocker': self.minas_absolute_blocker(),
+            # 다회전 클리어 뒤 기준점 다시 지정 전 · 재생·초기 이동·스케줄·그룹 참가 막힘 · 「확인할 일」 · 수정 목록 140 ③
+            'multiturn_clear': self.multiturn_clear_status(),
             # 조인트 범위 미확인 사유 · 재생·초기 이동이 막혀 있다 · 수정 목록 97
             'mapping_range_blocker': mapping_range_blocker,
             # 지금 도는 모터 프로그램의 부팅 값이 지금 설정과 다른가 · 「설정 적용 필요」 · 수정 목록 116
@@ -1039,6 +1046,9 @@ class MotionWebBridge(Node):
             context = getattr(self, '_execution_context', None)
             terminal = getattr(context, 'terminal_block_reason', None)
             reason = terminal() if callable(terminal) else ''
+            if not reason:
+                # 다회전 클리어 뒤 기준점 다시 지정 전 · 그룹 참가도 막는다 · 수정 목록 140 ③
+                reason = self.multiturn_clear_blocker()
             if not reason:
                 reason = self.motor_runtime_control_blocker()
         except Exception:  # noqa: BLE001 · 못 보면 빈 값 · 준비 단계가 다시 본다
@@ -1988,6 +1998,8 @@ class MotionWebBridge(Node):
             # (드라이브 반영은 「장비에 적용 · 모터 재시작」) · 2026-10-02
             limits = self._motor_config.sync_limits_from_mapping()
             result['motor_limits'] = limits
+            # 클리어 뒤 기준점을 다시 지정했으면 그 축 표시를 끈다 · 수정 목록 140 ③
+            result['multiturn_clear_released'] = self._release_multiturn_clear(result)
             # The active mapping file is one immutable part of the project
             # execution context. Reconcile the complete context after the
             # repository has confirmed the saved file and active-file selection.
@@ -2158,7 +2170,83 @@ class MotionWebBridge(Node):
         absolute = self.minas_absolute_blocker()
         if absolute:
             return {'success': False, 'message': f'실행 준비 검사 실패: {absolute}'}
+        cleared = self.multiturn_clear_blocker()
+        if cleared:
+            return {'success': False, 'message': f'실행 준비 검사 실패: {cleared}'}
         return self._request_motion_run('check', payload, timeout_sec=3.0)
+
+    # -- 다회전 클리어 뒤 기준점 보호 · 수정 목록 140 ③ ------------------------------------ #
+
+    def _multiturn_clear_path(self) -> Path:
+        return multiturn_clear.marker_path(getattr(self, 'workspace_root', None) or Path.cwd())
+
+    def multiturn_clear_state(self) -> Dict[str, Any]:
+        """PC 단위 표시 · 1초에 한 번만 읽는다(상태 · 하트비트가 자주 부름) · 우리가 쓰면 바로 다시 읽는다"""
+        now = time.monotonic()
+        cached = getattr(self, '_multiturn_clear_cache', None)
+        if cached is not None and now - cached[0] < 1.0:
+            return cached[1]
+        state = multiturn_clear.load(self._multiturn_clear_path())
+        self._multiturn_clear_cache = (now, state)
+        return state
+
+    def _active_mapping_rows(self) -> List[Dict[str, Any]]:
+        """지금 적용된 조인트 매핑 줄 · 실행 컨텍스트마다 한 번 읽음 · 못 읽으면 빈 목록(표시의 pending 은 그대로 막음)"""
+        try:
+            execution_context = self._execution_context.status(validate_files=False)
+            project_id = self.project_repository.selected_project_id()
+            return self._monitoring_mapping_rows_for_context(execution_context, project_id)
+        except Exception:  # noqa: BLE001
+            return []
+
+    def multiturn_clear_blocker(self) -> str:
+        """재생 · 초기 위치 이동 · 스케줄 · 그룹 참가를 막을 이유 · 수동 조그는 막지 않는다 · 판정은 `multiturn_clear`"""
+        state = self.multiturn_clear_state()
+        if not state.get('axes'):
+            return ''
+        return multiturn_clear.block_reason(state, self._active_mapping_rows())
+
+    def multiturn_clear_status(self) -> Dict[str, Any]:
+        """웹 상태 · 「확인할 일」 · 기준점 지정 화면의 「클리어 뒤 아직 안 맞춤」"""
+        state = self.multiturn_clear_state()
+        if not state.get('axes'):
+            return {'blocked_axes': [], 'pending_axes': [], 'stale_axes': [], 'message': '', 'prompt': ''}
+        summary = multiturn_clear.summary(state, self._active_mapping_rows())
+        summary['prompt'] = reference_prompt(summary['blocked_axes']) if summary['blocked_axes'] else ''
+        summary['not_aligned_label'] = multiturn_clear.NOT_ALIGNED_LABEL
+        return summary
+
+    def _record_multiturn_clear(self, drives: List[Dict[str, Any]]) -> None:
+        """클리어 명령 직전 · PC 단위 표시 + 모터 기록 · 못 쓰면 클리어를 하지 않는다(올린다)"""
+        axes = multiturn_clear.record_clear(self._multiturn_clear_path(), drives)
+        self._multiturn_clear_cache = None
+        if axes:
+            self._motor_event_log.append(
+                category='system',
+                event_type='minas_multiturn_clear_marked',
+                target=' · '.join(f'{axis}번 모터' for axis in axes),
+                content=f'{multiturn_clear.message_for(axes)} · 다시 지정해 저장하기 전까지 재생·초기 위치 이동·스케줄·그룹 참가 막음',
+                details={'drives': [dict(drive) for drive in drives]},
+            )
+
+    def _release_multiturn_clear(self, result: Dict[str, Any]) -> List[int]:
+        """조인트 매핑 저장 결과 · 클리어 뒤 기준점을 지정한 축의 표시를 끈다 · 이 프로젝트 줄은 같은 시각 칸으로 풀림"""
+        mapping = result.get('mapping') if isinstance(result.get('mapping'), dict) else {}
+        try:
+            released = multiturn_clear.mark_reference_saved(self._multiturn_clear_path(), mapping.get('mappings') or [])
+        except OSError as exc:
+            self.get_logger().warn(f'다회전 클리어 표시 갱신 실패: {exc}')
+            return []
+        self._multiturn_clear_cache = None
+        if released:
+            self._motor_event_log.append(
+                category='system',
+                event_type='minas_multiturn_clear_reference_set',
+                target=' · '.join(f'{axis}번 모터' for axis in released),
+                content='다회전 클리어 뒤 기준점을 다시 지정했습니다 · 이 축 표시 풀림 · 다른 프로젝트는 그 프로젝트에서 다시 지정할 때까지 막힘',
+                details={'axes': released},
+            )
+        return released
 
     def minas_absolute_blocker(self) -> str:
         """연결된 MINAS 드라이브 앱솔루트 미확인이면 그 이유 · 상태를 못 받았으면 빈 문자열
@@ -2207,7 +2295,7 @@ class MotionWebBridge(Node):
             conflict = self.coordination_execution_blocker()
             if conflict:
                 return {'success': False, 'message': f'초기 위치 이동 불가: {conflict}'}
-        blocker = self.motor_runtime_control_blocker()
+        blocker = self.multiturn_clear_blocker() or self.motor_runtime_control_blocker()
         if blocker:
             return {'success': False, 'message': f'초기 위치 이동 불가: {blocker}'}
         parked = self.schedule_end_start_blocker(payload)
@@ -2269,7 +2357,7 @@ class MotionWebBridge(Node):
             conflict = self.coordination_execution_blocker()
             if conflict:
                 return {'success': False, 'message': f'모션 실행 불가: {conflict}'}
-        blocker = self.motor_runtime_control_blocker()
+        blocker = self.multiturn_clear_blocker() or self.motor_runtime_control_blocker()
         if blocker:
             return {'success': False, 'message': f'모션 실행 불가: {blocker}'}
         parked = self.schedule_end_start_blocker(payload)

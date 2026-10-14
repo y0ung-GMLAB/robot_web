@@ -21,7 +21,7 @@ import {
   draftToRow, jointToMotor, motorForRow, motorRefFor, motorToJoint, patchRow, previewRow, rowToDraft, savedMismatch,
 } from '../mapping_model.js';
 import { registeredPlaylist, signedDeg } from '../play_model.js';
-import { manualNotices } from '../model.js';
+import { manualNotices, referenceRedoView } from '../model.js';
 
 const DEG = 180 / Math.PI;
 const RAD = Math.PI / 180;
@@ -37,6 +37,8 @@ const ui = {
   session: null, faders: new Map(), wheelAcc: 0, dragX: null,
   // 축 → { source, motor(deg), joint(deg|null), deadline } · 보낸 목표 · 도착하면 지운다 · 수정 목록 126
   goals: new Map(), spinX: null, dialOffset: 0,
+  // 주소 `#/manual?axis=N` 으로 고른 축 · 한 번만 · 수정 목록 140
+  hashAxis: null,
 };
 let ctx = { state: null, changed: () => {} };
 let loop = null;
@@ -396,6 +398,9 @@ async function recoverRange(item, changed) {
   changed();
 }
 
+/** 기준점 지정 화면 · 다회전 클리어 뒤 아직 다시 지정 안 한 축 · 서버 `multiturn_clear.NOT_ALIGNED_LABEL` 과 같다 · 수정 목록 140 */
+const NOT_ALIGNED_LABEL = '클리어 뒤 아직 안 맞춤';
+
 /* ---------- 여기를 하한 · 기준점 · 상한으로 ---------- */
 
 /**
@@ -406,7 +411,8 @@ export function capturePatch(row, kind, positionDeg) {
   const motorDeg = Math.round(Number(positionDeg) * 1e4) / 1e4;
   if (kind === 'reference') {
     return {
-      kind, label: '기준점', patch: { reference_position_deg: motorDeg, reference_enabled: true },
+      // reference_captured · 값이 그대로여도 「지금 지정함」 · 서버가 지정 시각을 적어 다회전 클리어 표시를 푼다(파일엔 안 남음) · 수정 목록 140
+      kind, label: '기준점', patch: { reference_position_deg: motorDeg, reference_enabled: true, reference_captured: true },
       text: `${row.motion_id} 기준점(조인트 0°)을 현재 모터 위치 ${signedDeg(motorDeg, 2)}°로`,
     };
   }
@@ -538,6 +544,8 @@ function axisPanel(state, changed, item) {
       h('strong', { class: 'mono', 'data-live': 'joint', 'data-axis': String(item.axis), text: item.joint === null ? '-' : `${signedDeg(item.joint, 2)}°` }),
       h('span', { class: 'mono muted', 'data-live': 'motor', 'data-axis': String(item.axis), text: item.position === null ? '-' : `모터 ${signedDeg(item.position, 1)}°` })),
     rangeBar(item),
+    notAlignedAxes(state.snap).has(item.axis) ? h('div', { class: 'blocker' }, dot('warn'),
+      h('span', { class: 'grow', text: `${NOT_ALIGNED_LABEL} · 다회전 클리어로 위치 값이 바뀌었습니다. 몸을 정면·수평에 맞추고 「기준점 지정」을 누르세요` })) : null,
     h('div', { class: 'row' },
       ['lower', 'reference', 'upper'].map((kind) => h('button', { class: 'btn btn-mini', type: 'button', disabled: !canCapture,
         title: canCapture ? { lower: '현재 위치를 하한점으로 지정합니다', reference: '현재 위치를 기준점(조인트 0°)으로 지정합니다', upper: '현재 위치를 상한점으로 지정합니다' }[kind] : '조인트 매핑 줄이 있고 모터 설정이 장비에 적용된 상태에서, 다이얼 이동이 끝나 있을 때 사용할 수 있습니다.',
@@ -634,10 +642,32 @@ function faderView(state, changed, list) {
     ui.message ? h('p', { class: 'tone-text-warn small', text: ui.message }) : null);
 }
 
+/** 다회전 클리어 뒤 기준점을 아직 다시 지정 안 한 축 · 서버 `multiturn_clear.blocked_axes` · 수정 목록 140 */
+export function notAlignedAxes(snap) {
+  return new Set(referenceRedoView(snap)?.axes || []);
+}
+
+/** 주소 `#/manual?axis=N` · 「확인할 일」 · 앱솔루트 설정 끝에서 그 축으로 바로 · 없으면 null */
+export function hashAxis(hash) {
+  const query = String(hash || '').split('?')[1] || '';
+  const value = new URLSearchParams(query).get('axis');
+  return value === null || value === '' || !Number.isFinite(Number(value)) ? null : Number(value);
+}
+
 export function renderManual(state, { changed }) {
   ctx = { state, changed };
   const list = axes(state);
+  // 주소로 온 축은 한 번만 고른다(그 뒤 사람이 고른 축을 덮지 않게) · 수정 목록 140
+  const wanted = hashAxis(location.hash);
+  if (wanted !== null && wanted !== ui.hashAxis && list.some((a) => a.axis === wanted)) {
+    if (ui.axis !== wanted) { endSession(true); ui.axis = wanted; ui.goal = ''; ui.message = ''; }
+    ui.hashAxis = wanted;
+    setTimeout(() => document.getElementById('part-axis')?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 50);
+  }
+  if (wanted === null) ui.hashAxis = null;
   if (ui.axis === null || !list.some((a) => a.axis === ui.axis)) ui.axis = list[0]?.axis ?? null;
+  const notAligned = notAlignedAxes(state.snap);
+  const redo = referenceRedoView(state.snap);
   const item = list.find((a) => a.axis === ui.axis) || null;
   const playlist = registeredPlaylist(ui.mappingDoc);
   // 초기 위치 이동은 PC 전체 판정만 · 고른 모터 사정은 상관없다
@@ -656,8 +686,10 @@ export function renderManual(state, { changed }) {
         [['part-faders', '① 전체 페이더'], ['part-axis', '② 모터 개별']].map(([id, label]) => h('a', { class: 'btn btn-mini', href: '#/manual',
           onclick: (event) => { event.preventDefault(); document.getElementById(id)?.scrollIntoView({ behavior: 'smooth', block: 'start' }); } }, label))),
       h('span', { class: 'spacer' }),
-      h('button', { class: 'btn', type: 'button', disabled: initDisabled, title: initDisabled && pcBlocker ? pcBlocker.text : '',
+      h('button', { class: 'btn', type: 'button', disabled: initDisabled || Boolean(redo), title: redo ? redo.detail : initDisabled && pcBlocker ? pcBlocker.text : '',
         onclick: initialize }, '초기 위치로')),
+    // 다회전 클리어 뒤 · 조그로 몸을 정면·수평에 맞추고 「기준점 지정」 · 수동 조작은 막지 않는다 · 수정 목록 140
+    redo ? h('div', { class: 'blocker' }, dot('warn'), h('span', { class: 'grow', text: `${redo.title} · 그 전까지 재생·초기 위치 이동·스케줄·그룹 참가가 막힙니다` })) : null,
     !list.length ? h('section', { class: 'card' }, h('p', { class: 'muted', text: '인식된 모터가 없습니다' })) : [
       // 한 페이지에 두 구획(사용자 2026-10-12 · 모터 설정과 같게) · 한쪽을 잡으면 다른 쪽 세션은 놓는다
       h('section', { class: 'setup-part', id: 'part-faders', 'aria-label': '전체 페이더' },
@@ -674,7 +706,8 @@ export function renderManual(state, { changed }) {
               h('span', { class: 'axis-pick-head' }, h('strong', { text: a.label }),
                 h('span', { class: 'mono', 'data-live': 'joint', 'data-axis': String(a.axis), text: a.joint === null ? '-' : `${signedDeg(a.joint, 2)}°` })),
               h('span', { class: 'axis-pick-meta' }, dot(a.fault ? 'bad' : a.servoOn ? 'ok' : 'warn'),
-                h('span', { class: 'muted small', text: `${a.fault ? '알람' : a.servoOn ? '서보 켜짐' : '서보 꺼짐'} · ${a.axis}번 · ${a.ac ? 'AC' : 'DXL'}${a.row ? ` · 1:${a.row.gear_ratio}` : ' · 매핑 없음'}` }))))))),
+                h('span', { class: 'muted small', text: `${a.fault ? '알람' : a.servoOn ? '서보 켜짐' : '서보 꺼짐'} · ${a.axis}번 · ${a.ac ? 'AC' : 'DXL'}${a.row ? ` · 1:${a.row.gear_ratio}` : ' · 매핑 없음'}` }),
+                notAligned.has(a.axis) ? h('span', { class: 'chip chip-warn', text: NOT_ALIGNED_LABEL }) : null)))))),
           item ? axisPanel(state, changed, item) : null))
     ],
   ];

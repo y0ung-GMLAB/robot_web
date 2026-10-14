@@ -149,8 +149,8 @@ def after_message(action: str, value: Optional[int] = None) -> str:
             '드라이브 전원을 껐다 켜야 적용됩니다. 전원을 켠 뒤 모터 검색으로 값을 확인하세요'
         )
     return (
-        '다회전 클리어를 마쳤습니다. 드라이브 전원을 껐다 켜세요. 위치 값이 바뀌므로 기준점을 다시 캡처해야 합니다. '
-        '그 전에는 위치가 맞지 않을 수 있으니 재생하지 마세요'
+        '다회전 클리어를 마쳤습니다. 드라이브 전원을 껐다 켜세요. 위치 값이 바뀌므로 모든 프로젝트의 이 축 기준점이 무효입니다. '
+        '몸을 정면·수평에 맞추고 기준점을 다시 지정해 저장하기 전까지 재생·초기 위치 이동·스케줄·그룹 참가가 막힙니다'
     )
 
 
@@ -171,6 +171,7 @@ class DriveMaintenance:
         wait_recovery: Callable[[str, List[int]], Dict[str, Any]],
         expected_axes: Callable[[], List[int]],
         record: Callable[[Dict[str, Any]], None],
+        record_clear: Optional[Callable[[List[Dict[str, Any]]], Any]] = None,
     ) -> None:
         # SDO 는 다른 프로세스와 한 번에 하나 · 버스 설정 중이면 안 보냄 · 수정 목록 125
         self._runner = ethercat_mailbox.guarded(runner)
@@ -186,6 +187,8 @@ class DriveMaintenance:
         self._wait_recovery = wait_recovery
         self._expected_axes = expected_axes
         self._record = record
+        #: 다회전 클리어만 하는 길(드라이브 정비)도 앱솔루트 설정과 같은 PC 단위 표시를 남긴다 · 수정 목록 140 ④
+        self._record_clear = record_clear or (lambda _drives: None)
 
     # -- 대상 ------------------------------------------------------------ #
 
@@ -215,7 +218,7 @@ class DriveMaintenance:
             vendor_id = -1
         if vendor_id != MINAS_VENDOR_ID:
             raise ValueError(f'{axis}번 모터 자리의 드라이브가 MINAS가 아닙니다(vendor {vendor})')
-        return {'master': master, 'position': position}
+        return {'master': master, 'position': position, 'serial': matches[0].get('serial_number')}
 
     # -- 실행 ------------------------------------------------------------ #
 
@@ -357,6 +360,12 @@ class DriveMaintenance:
         restore_error = ''
         recovery: Dict[str, Any] = {}
         try:
+            if action == ABSOLUTE_CLEAR:
+                # 명령 전에 남긴다 · 중간에 끊겨도 막는 쪽 · 그 축 기준점을 다시 지정해 저장할 때까지 재생 막힘 · 140 ④
+                self._record_clear([{
+                    'axis': axis, 'serial': target.get('serial'), 'master_index': target['master'],
+                    'slave_position': target['position'], 'source': 'drive_maintenance',
+                }])
             if was_active:
                 self._run_service('stop', service)
                 self._wait_release()

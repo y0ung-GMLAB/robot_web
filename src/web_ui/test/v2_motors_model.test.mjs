@@ -106,11 +106,12 @@ test('앱솔루트 설정 이어서 하기 · 4/7 에서 실패하면 버튼 · 
   assert.equal(box.title, '앱솔루트 설정 이어서 하기 (4/7 부터)');
   assert.equal(box.confirmLabel, '이어서 하기');
   assert.match(box.body, /4\. 앱솔루트 방식 확인\n5\. 다회전 클리어\n6\. 드라이브 전원 껐다 켜기 2\n7\. 최종 확인/);
-  assert.match(box.body, /다회전 클리어는 엔코더 회전 수를 0으로 초기화해 위치 값이 바뀝니다/);
-  assert.match(box.body, /기준점을 다시 캡처/);
+  // 클리어는 4/7 에서 Err40 인 드라이브만 · 없으면 기준점 그대로 · 수정 목록 140
+  assert.match(box.body, /Err40\(다회전 무효\)인 드라이브만/);
+  assert.match(box.body, /Err40이 없으면 클리어하지 않고 기준점도 그대로/);
   assert.match(box.body, /전원을 한 번 더/);
-  const after = absoluteResumeConfirm({ from_index: 7, step_count: 7, failed_index: 7, failed_label: '최종 확인', clear_done: true, steps: ['최종 확인'], targets: [] });
-  assert.match(after.body, /다회전 클리어는 이미 했습니다.*기준점을 다시 캡처/s);
+  const after = absoluteResumeConfirm({ from_index: 7, step_count: 7, failed_index: 7, failed_label: '최종 확인', clear_done: true, cleared: [{ label: '0번 모터' }], steps: ['최종 확인'], targets: [] });
+  assert.match(after.body, /다회전 클리어는 이미 했습니다\(0번 모터\).*기준점을 다시 지정해 저장/s);
   assert.doesNotMatch(after.body, /전원을/);
 });
 
