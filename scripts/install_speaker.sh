@@ -110,6 +110,8 @@ run sudo apt-get install -y \
   ros-humble-ros-base
 # 웹 터미널 · PC 성능 화면 · 없어도 설치는 끝난다 (89 · 로봇 PC 와 같은 것)
 run sudo apt-get install -y ttyd btop || echo "  !! ttyd · btop 설치 실패 · 웹 터미널·PC 성능 화면 없이 계속" >&2
+# 블루투스 앰프 · PulseAudio 없이 aplay 로 · 출력 장치 bluealsa:DEV=<MAC>,PROFILE=a2dp (2026-10-15)
+run sudo apt-get install -y bluez-alsa-utils || echo "  !! bluez-alsa-utils 설치 실패 · 블루투스 앰프 없이 계속 (유선 출력은 됨)" >&2
 if ! id -nG "$(id -un)" | tr ' ' '\n' | grep -qx audio; then
   run sudo usermod -aG audio "$(id -un)"
   site_mark_reboot "audio 그룹"
