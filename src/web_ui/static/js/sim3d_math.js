@@ -127,6 +127,34 @@ export function cameraPosition(camera) {
   return sub(lookat, scale(forward, d));
 }
 
+/** Blender 뷰 카메라 방향 · 로봇마다 맨 위 노드(리그)의 정면을 평균한 수평 방향(glTF) ·
+ * 리그 약속 · Blender 정면 −Y = glTF 리그 +Z · `rigQuats` = 리그 월드 회전 [w, x, y, z] 목록 ·
+ * 매장 배치로 로봇마다 돌아 있어 장면 +Z 에서 보면 얼굴을 옆에서 봤다 · 없거나 서로 지워지면 +Z */
+export function sceneFrontDir(rigQuats) {
+  let x = 0;
+  let z = 0;
+  for (const q of rigQuats || []) {
+    const f = rotVec(q, [0, 0, 1]);
+    const n = Math.hypot(f[0], f[2]);
+    if (n > 1e-6) { x += f[0] / n; z += f[2] / n; }
+  }
+  const n = Math.hypot(x, z);
+  return n > 1e-6 ? [x / n, 0, z / n] : [0, 0, 1];
+}
+
+/** 팩 `scene_glb.joints` 노드 → 그 로봇의 맨 위 노드(glTF 장면 바로 아래) 회전 [w, x, y, z] 목록 ·
+ * three 객체의 `parent` · `quaternion` 만 본다 · `find(이름)` 은 노드 찾기 · 로봇 하나에 하나 */
+export function rigQuatsFromJoints(root, joints, find) {
+  const tops = new Set();
+  for (const entry of Object.values(joints || {})) {
+    let node = entry?.node ? find(entry.node) : null;
+    while (node && node.parent && node.parent !== root) node = node.parent;
+    if (node && node.parent === root) tops.add(node);
+  }
+  const rootQ = root?.quaternion ? [root.quaternion.w, root.quaternion.x, root.quaternion.y, root.quaternion.z] : [1, 0, 0, 0];
+  return [...tops].map((top) => quatMul(rootQ, [top.quaternion.w, top.quaternion.x, top.quaternion.y, top.quaternion.z]));
+}
+
 /** 시각 → 프레임 번호 · t 는 오름차순 · 범위 밖은 양 끝 */
 export function frameIndexAt(times, seconds) {
   if (!times || !times.length) return 0;

@@ -29,7 +29,7 @@
 import { exportPreviewScene, fetchMotionJointValues, fetchPreviewFrames, fetchPreviewScene, fetchPreviewSceneData } from './api.js';
 import {
   actualQpos, blenderUsesJoints, blenderViewAllowed, bodyLocalPose, jointNodeRotation, sampleJointValues, cameraPosition, followEndSec, followPlayheadSec, followRunKey,
-  frameIndexAt, jointsByBody,
+  frameIndexAt, jointsByBody, rigQuatsFromJoints, sceneFrontDir,
 } from './sim3d_math.js';
 
 const THREE_URL = '/static/vendor/three/three.module.js';
@@ -501,14 +501,16 @@ export function createSim3dViewer({ el, getLatestState = () => null }) {
   // Blender 뷰 · 수정 목록 50
   // ------------------------------------------------------------------ //
 
-  /** 장면 전체가 보이게 · glTF 는 Y-up · Blender 의 정면(−Y)은 glTF +Z 쪽 */
-  function blenderHome(object) {
+  /** 장면 전체가 보이게 · glTF 는 Y-up · 로봇들 정면(리그 +Z = Blender −Y)의 평균 쪽에서 · MuJoCo 뷰처럼 정면 */
+  function blenderHome(object, joints) {
     const box = new THREE.Box3().setFromObject(object);
     const center = box.isEmpty() ? new THREE.Vector3() : box.getCenter(new THREE.Vector3());
     const size = box.isEmpty() ? 2 : Math.max(box.getSize(new THREE.Vector3()).length(), 0.5);
+    const [fx, , fz] = sceneFrontDir(rigQuatsFromJoints(object, joints, (name) => object.getObjectByName(name)
+      || object.getObjectByName(THREE.PropertyBinding.sanitizeNodeName(name))));
     return {
       target: center,
-      position: center.clone().add(new THREE.Vector3(0, size * 0.15, size * 0.9)),
+      position: center.clone().add(new THREE.Vector3(fx * size * 0.9, size * 0.15, fz * size * 0.9)),
       near: size / 1000,
       far: size * 20,
     };
@@ -560,7 +562,7 @@ export function createSim3dViewer({ el, getLatestState = () => null }) {
           duration = Math.max(duration, clip.duration);
         }
       }
-      const home = blenderHome(gltf.scene);
+      const home = blenderHome(gltf.scene, blenderInfo.joints);
       const cam = new THREE.PerspectiveCamera(40, 1, home.near, home.far);
       const orbit = new OrbitControls(cam, renderer.domElement);
       orbit.enabled = view === 'blender';
