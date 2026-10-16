@@ -170,6 +170,9 @@ class MotionTraceRecorder:
             'execution_id': str(plan.get('execution_id') or ''),
             'period_sec': float((plan.get('summary') or {}).get('period_sec') or 0.02),
             'planned_duration_sec': float((plan.get('summary') or {}).get('duration_sec') or 0.0),
+            # 구간 재생 · 파일 시각 · 0/0 = 통째로 · CSV 의 time_sec 은 구간 시작부터 · 2026-10-16
+            'segment_start_sec': float(plan.get('segment_start_sec') or 0.0),
+            'segment_end_sec': float(plan.get('segment_end_sec') or 0.0),
         }
         return CycleTrace(directory, meta, axes, self.latest)
 

@@ -9,7 +9,7 @@
 import { h } from './dom.js';
 import { api } from './net.js';
 import {
-  blenderUsesJoints, blenderViewAllowed, bodyLocalPose, cameraPosition, followEndSec, followPlayheadSec,
+  blenderUsesJoints, blenderViewAllowed, bodyLocalPose, cameraPosition, followEndSec, followPlayheadSec, followRestSec,
   frameIndexAt, jointNodeRotation, jointsByBody, nextClockOffset, rigQuatsFromJoints, sampleJointValues, sceneFrontDir,
 } from '../../js/sim3d_math.js';
 
@@ -346,7 +346,8 @@ function createViewer3d() {
     if (!node.isConnected) return;   // 화면에서 빠지면 멈춘다 · 다시 붙으면 update 가 깨운다
     const st = latest.status || {};
     const running = String(st.state || '') === 'running';
-    const playhead = followPlayheadSec(st, Date.now() / 1000, clock.offset) ?? 0;
+    // 파일 시각 · 구간 재생이면 구간 시작부터 · 쉬는 중엔 구간 시작 자세(초기 위치) · 2026-10-16
+    const playhead = followPlayheadSec(st, Date.now() / 1000, clock.offset) ?? followRestSec(st);
     const blenderShown = view === 'blender' && blenderAllowed() && bl;
     let duration = 0;
     if (blenderShown) {

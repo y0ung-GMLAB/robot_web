@@ -16,7 +16,7 @@ import math
 import time
 from typing import Any, Dict, List, Mapping, Optional
 
-from motion_common import joint_mapping, multiturn_clear, repeat_policy, units, wire_units
+from motion_common import joint_mapping, motion_segment, multiturn_clear, repeat_policy, units, wire_units
 from motion_common.values import finite_float, optional_int
 
 from . import motion_run_rules
@@ -251,6 +251,21 @@ class PlanBuilder:
                 if str(record.get('motion_id') or '') in mapping_motion_ids
             ]
 
+        # 구간 재생 · 파일 시각 [시작, 끝] 만 남기고 0 부터 다시 센다 · 2026-10-16
+        #
+        # 여기서 줄을 자르면 아래는 그대로 간다 · 첫 프레임(초기 위치 · 첫 프레임 잇기) · 범위 자르기 ·
+        # 속도·가속 검사 · 회차 길이가 모두 잘린 구간만 본다. 스케줄(자동 반복)·스튜디오는 구간을 쓰지 않는다.
+        segment_start, segment_end = (
+            (0.0, 0.0)
+            if automation_run or studio_request
+            else motion_segment.parse(payload)
+        )
+        segment_info: Dict[str, Any] = {}
+        if motion_segment.is_active(segment_start, segment_end) and motion_records:
+            motion_records, segment_info = motion_segment.slice_records(
+                motion_records, segment_start, segment_end,
+            )
+
         groups = motion_run_rules._motion_groups(motion_records)
         if request_source != 'motion_studio':
             requested_motion_ids = (
@@ -282,6 +297,11 @@ class PlanBuilder:
         if clear_reason:
             errors.insert(0, clear_reason)
         warnings = [unusable_motion_file_note] if unusable_motion_file_note else []
+        if segment_info.get('end_clamped'):
+            warnings.append(
+                f'구간 끝 {motion_segment.format_time(segment_end)} 이 애니메이션 길이 '
+                f'{motion_segment.format_time(segment_info["source_duration_sec"])} 보다 길어 끝까지 재생합니다'
+            )
         # 모터가 이 PC 에 없는 축 · 막지 않고 건너뛴다 · §6-139
         missing_motor_motion_ids = []
         # 모션 파일에 자료가 없는 축 · 이것도 막지 않는다 · §6-142
@@ -659,6 +679,8 @@ class PlanBuilder:
             # 그 시간을 쓸 수 있다. 샘플 계산은 그대로 두고 **발행 직전에만**
             # 거르므로, 로컬·그룹 실행 경로는 이 값이 없어 아무 영향이 없다.
             'axis_playback_spans': _axis_playback_spans(payload, axes),
+            # 구간 재생 · 파일 시각 · 0/0 = 통째로 · 끝은 실제 끝(끝까지면 파일 길이) · 2026-10-16
+            **_segment_plan_fields(segment_info),
             'samples': samples,
             'warnings': warnings,
             'capabilities': capabilities,
@@ -689,8 +711,22 @@ class PlanBuilder:
                 'synchronized_repeat_count': synchronized_repeat_count,
                 'operation_generation': operation_generation,
                 'target_cycle_count': target_cycle_count,
+                **_segment_plan_fields(segment_info),
             },
         }
+
+
+def _segment_plan_fields(segment_info: Mapping[str, Any]) -> Dict[str, float]:
+    """계획 · 상태 · 기록에 싣는 구간 칸 · 구간이 없으면 0/0 · 파일 길이는 구간일 때만"""
+    if not segment_info:
+        return {**motion_segment.fields(0.0, 0.0), 'source_duration_sec': 0.0}
+    return {
+        **motion_segment.fields(
+            float(segment_info.get(motion_segment.START_KEY) or 0.0),
+            float(segment_info.get(motion_segment.END_KEY) or 0.0),
+        ),
+        'source_duration_sec': float(segment_info.get('source_duration_sec') or 0.0),
+    }
 
 
 def _motion_rate_limit_error(axes, samples, period_sec: float) -> str:

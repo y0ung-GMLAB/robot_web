@@ -3,6 +3,7 @@
  * 서버 값은 rad · 화면에 낼 때만 deg (기존 화면 규칙 그대로 · 수정 목록 6).
  */
 import { pcName } from './model.js';
+import { segmentLabel } from './segment_model.js';
 
 const DEG = 180 / Math.PI;
 
@@ -217,6 +218,9 @@ export function playHeadline(snap) {
   const length = Number(status.playlist_length || 0);
   const parts = [];
   if (length > 1 && Number.isInteger(index)) parts.push(`목록 ${index + 1}/${length}`);
+  // 구간 재생 · 2026-10-16
+  const segment = segmentLabel(status.segment_start_sec, status.segment_end_sec);
+  if (segment) parts.push(segment);
   if (status.run_mode === 'continuous' || status.automation_run) parts.push('연속');
   else if (status.run_mode === 'once') parts.push('1회');
   if (status.group_execution) parts.push(status.automation?.group_sync_mode === 'independent' ? '각자 재생' : '회차 맞춤');

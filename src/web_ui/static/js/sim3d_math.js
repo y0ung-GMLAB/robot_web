@@ -240,6 +240,7 @@ export function nextClockOffset(samples, serverTimeSec, receivedAtSec, keep = 30
  *
  * 재생 상태의 `progress.elapsed_sec` 는 런타임이 `updated_at`(서버 시계) 에 적은 값 · 그 뒤 흐른 시간을 더한다 ·
  * 브라우저 시계는 서버와 다를 수 있어 `offsetSec`(서버 − 브라우저)으로 고친다.
+ * 구간 재생이면 진행 시각은 구간 시작부터다 · 파일 시각으로 돌려준다(`segment_start_sec` 를 더함 · 2026-10-16).
  */
 export function followPlayheadSec(status, browserNowSec, offsetSec = 0) {
   if (String(status?.state || '') !== 'running') return null;
@@ -248,7 +249,14 @@ export function followPlayheadSec(status, browserNowSec, offsetSec = 0) {
   const updated = Number(status?.updated_at);
   const serverNow = Number(browserNowSec) + (Number(offsetSec) || 0);
   const since = Number.isFinite(updated) && updated > 0 ? Math.max(0, serverNow - updated) : 0;
-  return elapsed + Math.min(since, 5);   // 상태가 5초 넘게 안 오면 더 앞서 나가지 않는다
+  // 상태가 5초 넘게 안 오면 더 앞서 나가지 않는다
+  return followRestSec(status) + elapsed + Math.min(since, 5);
+}
+
+/** 재생하지 않을 때 3D 가 서 있는 파일 시각 · 구간 재생이면 구간 시작(초기 위치 = 그 자세) · 아니면 0 · 2026-10-16 */
+export function followRestSec(status) {
+  const start = Number(status?.segment_start_sec);
+  return Number.isFinite(start) && start > 0 ? start : 0;
 }
 
 /** 실물 따라가기에서 한 회차의 끝 · 계산 결과 끝의 정착 3초는 빼고 애니메이션 길이만 */

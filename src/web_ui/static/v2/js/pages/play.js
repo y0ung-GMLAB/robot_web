@@ -7,9 +7,10 @@ import { h, dot } from '../dom.js';
 import { runSummary } from '../model.js';
 import {
   initialMoveChoices, REPEAT_MODES,
-  axisRows, defaultScope, excludedText, groupRows, groupRuntime, groupScopeBlocker, groupStartPreview, groupStopCommand,
+  axisRows, defaultScope, excludedText, fileInfo, groupRows, groupRuntime, groupScopeBlocker, groupStartPreview, groupStopCommand,
   isRunning, phaseSteps, playHeadline, registeredPlaylist, repeatChoice, runStatus, startBlocker,
 } from '../play_model.js';
+import { segmentCheck, segmentClock, segmentLabel } from '../segment_model.js';
 import { api } from '../net.js';
 import * as act from '../actions.js';
 import { playlistCard } from './playlist_card.js';
@@ -25,7 +26,22 @@ const ui = {
   targetCycles: 0,
   busy: false,
   show3d: null,   // 처음 그릴 때 브라우저 기억에서 읽는다
+  // 구간 재생 · 입력 칸 글 그대로 · 화면을 열 때마다 비어 있다(통째로) · 지난 구간은 버튼으로 다시 · 2026-10-16
+  segStart: '',
+  segEnd: '',
 };
+
+/** 지난 구간 · 브라우저마다 기억 · 칸은 비워 두고 「지난 구간」 버튼으로만 다시 넣는다(모르고 구간 재생하지 않게) */
+const SEGMENT_KEY = 'robot_web.v2.play_segment';
+function readLastSegment() {
+  try {
+    const saved = JSON.parse(localStorage.getItem(SEGMENT_KEY) || 'null');
+    return saved && (Number(saved.start_sec) > 0 || Number(saved.end_sec) > 0) ? saved : null;
+  } catch { return null; }
+}
+function writeLastSegment(payload) {
+  try { localStorage.setItem(SEGMENT_KEY, JSON.stringify(payload)); } catch { /* 기억 못 해도 된다 */ }
+}
 
 /** 3D 동시 재생 켬·끔 · 브라우저마다 기억 · 처음엔 끔
  *  3D 는 보는 쪽 브라우저가 계속 그린다(그래픽·CPU) · 로봇 PC 에서 화면을 띄워 둘 때 부담이 없게 */
@@ -91,14 +107,30 @@ function groupMoveTime(state) {
   return initialMoveChoices(state.play?.mapping?.mappings, ui.initialMove).selected ?? null;
 }
 
-function localPayload(state, run_mode) {
+function localPayload(state, run_mode, segment) {
   const play = state.play || {};
   return {
     motion_file_id: registeredPlaylist(play.mapping)[0] || '',
     mapping_file_id: play.mappingId || '',
     initial_move_time_sec: ui.initialMove,
     ...runSettings(run_mode),
+    ...(segment ? { segment } : {}),
   };
+}
+
+/** 구간 재생 · 재생 목록 1번 길이 · 검사 · 단독은 길이까지 보고 막는다 · 그룹은 PC 마다 1번이 달라 모양만(짧은 PC 는 빠짐) */
+function segmentState(state) {
+  const play = state.play || {};
+  const playlist = registeredPlaylist(play.mapping);
+  const first = playlist[0] || '';
+  const file = (play.files || []).find((item) => fileInfo(item).id === first);
+  const length = file ? fileInfo(file).duration : null;
+  const group = ui.scope === 'group';
+  const check = segmentCheck({ startText: ui.segStart, endText: ui.segEnd, length: group ? null : length });
+  // 그룹 · 이 PC 1번보다 길면 이 PC 만 빠진다 · 막지 않고 알린다
+  const localNote = group && check.active && !check.error && length !== null && check.start >= length
+    ? `이 PC 재생 목록 1번(${segmentClock(length)})보다 길어 이 PC는 빠집니다` : '';
+  return { playlist, first, length, check, localNote };
 }
 
 /** 고르기 칸 · 못 고르는 칸은 [값, 글, 이유] 로 · 이유가 툴팁 */
@@ -158,13 +190,20 @@ function nowCard(state, changed, navigate) {
   const play = state.play || {};
   const playlist = registeredPlaylist(play.mapping);
   const blocker = startBlocker(state.snap, state.sched, { scope: ui.scope, playlist, mappingId: play.mappingId });
-  const disabled = Boolean(blocker) || ui.busy;
+  const seg = segmentState(state);
+  const disabled = Boolean(blocker) || ui.busy || Boolean(seg.check.error);
   const scopeText = group ? '그룹 전체' : '단독';
+  // 구간 · 보내는 값 · 틀리면 버튼이 꺼져 있다 · 보낸 구간은 브라우저에 기억(다음에 「지난 구간」 버튼)
+  const segment = seg.check.payload;
+  const remember = (result) => { if (result && segment) writeLastSegment(segment); return result; };
+  const withSegment = segment ? { segment } : {};
 
   const start = (runMode) => busy(() => (group
-    ? act.startGroup({ ...runSettings(runMode), sync_mode: ui.syncMode || 'lockstep', initial_move_time_sec: groupMoveTime(state) })
-    : act.startLocal(localPayload(state, runMode))), state, changed);
-  const initialize = () => busy(() => (group ? act.initializeGroup({ initial_move_time_sec: groupMoveTime(state) }) : act.initializeLocal(localPayload(state, 'once'))), state, changed);
+    ? act.startGroup({ ...runSettings(runMode), sync_mode: ui.syncMode || 'lockstep', initial_move_time_sec: groupMoveTime(state), ...withSegment })
+    : act.startLocal(localPayload(state, runMode, segment))).then(remember), state, changed);
+  const initialize = () => busy(() => (group
+    ? act.initializeGroup({ initial_move_time_sec: groupMoveTime(state), ...withSegment })
+    : act.initializeLocal(localPayload(state, 'once', segment))).then(remember), state, changed);
   const stopAfter = () => (group ? act.stopGroupAfterCycle(groupStopCommand(state.snap)) : act.stopAfterCycle(false));
 
   return h('section', { class: `card card-now tone-${head.tone}`, 'aria-label': '지금' },
@@ -183,17 +222,58 @@ function nowCard(state, changed, navigate) {
     h('div', { class: 'controls' },
       h('div', { class: 'row' },
         h('button', { class: 'btn', type: 'button', disabled: disabled || running, onclick: initialize,
-          title: '재생 목록 첫 애니메이션의 초기 위치로 천천히 이동합니다' }, '초기 위치로'),
+          title: seg.check.active ? '재생 목록 1번 애니메이션의 구간 시작 자세로 천천히 이동합니다' : '재생 목록 첫 애니메이션의 초기 위치로 천천히 이동합니다' }, '초기 위치로'),
         h('button', { class: 'btn btn-primary', type: 'button', disabled: disabled || running, onclick: () => start('once') }, '1회 시작'),
         h('button', { class: 'btn btn-primary', type: 'button', disabled: disabled || running, onclick: () => start('continuous') }, '연속 시작')),
       h('span', { class: 'spacer' }),
       h('div', { class: 'row' },
         h('button', { class: 'btn', type: 'button', disabled: !running, onclick: stopAfter }, '이번 회차 후 정지'),
         h('button', { class: 'btn btn-danger', type: 'button', disabled: !running, onclick: () => act.stopNow(group) }, `즉시 정지 · ${scopeText}`))),
+    segmentRow(seg, group, running, changed),
     blocker && !running ? h('div', { class: 'blocker' },
       dot('warn'),
       h('span', { class: 'grow', text: `시작할 수 없는 이유: ${blocker.text}` }),
       fixButton(blocker.fix, navigate)) : null);
+}
+
+/** 구간 재생 줄 · 시작 · 끝(비우면 끝까지) · 처음부터 · 1번 길이 · 막는 이유 · 2026-10-16 */
+function segmentRow(seg, group, running, changed) {
+  const { check } = seg;
+  const last = readLastSegment();
+  const lastText = last ? segmentLabel(last.start_sec, last.end_sec) : '';
+  const typed = (key) => (event) => { ui[key] = event.target.value; changed(); };
+  const clear = () => { ui.segStart = ''; ui.segEnd = ''; changed(); };
+  const restore = () => {
+    ui.segStart = Number(last.start_sec) > 0 ? segmentClock(last.start_sec) : '';
+    ui.segEnd = Number(last.end_sec) > 0 ? segmentClock(last.end_sec) : '';
+    changed();
+  };
+  const notes = [];
+  if (check.active && !check.error) {
+    const what = segmentLabel(check.start, check.end);
+    notes.push(seg.playlist.length > 1
+      ? `재생 목록 1번 ${seg.first.replace(/[.]json$/i, '')}의 ${what}만 재생합니다 · 2번부터는 이번에 재생하지 않습니다`
+      : `${what}만 재생합니다`);
+    if (group) notes.push('모든 PC · 스피커가 같은 시각부터 · PC마다 자기 재생 목록 1번');
+    if (check.note) notes.push(check.note);
+    if (seg.localNote) notes.push(seg.localNote);
+  }
+  return h('div', { class: 'segment-row', role: 'group', 'aria-label': '구간 재생' },
+    h('span', { class: 'field-label', text: '구간' }),
+    h('label', { class: 'inline' }, '시작',
+      h('input', { class: 'input mono', type: 'text', inputmode: 'decimal', placeholder: '0:00', value: ui.segStart, disabled: running,
+        'aria-label': '구간 시작 (분:초)', oninput: typed('segStart') })),
+    h('label', { class: 'inline' }, '끝',
+      h('input', { class: 'input mono', type: 'text', inputmode: 'decimal', placeholder: '끝까지', value: ui.segEnd, disabled: running,
+        'aria-label': '구간 끝 (분:초 · 비우면 끝까지)', oninput: typed('segEnd') })),
+    h('button', { class: 'btn btn-mini', type: 'button', disabled: running || (!ui.segStart && !ui.segEnd), onclick: clear,
+      title: '구간을 비우고 처음부터 끝까지 재생합니다' }, '처음부터'),
+    lastText && !ui.segStart && !ui.segEnd ? h('button', { class: 'btn btn-mini', type: 'button', disabled: running, onclick: restore,
+      title: '이 브라우저에서 마지막으로 보낸 구간을 다시 넣습니다' }, `지난 ${lastText}`) : null,
+    seg.length !== null ? h('span', { class: 'muted small mono', text: `1번 길이 ${segmentClock(seg.length)}` }) : null,
+    check.error
+      ? h('span', { class: 'segment-note small tone-text-bad', text: `시작할 수 없는 이유: ${check.error}` })
+      : h('span', { class: 'segment-note small muted', text: notes.join(' · ') || '비우면 처음부터 끝까지 재생합니다 (m:ss · 예 1:20)' }));
 }
 
 /* ---------- PC 별 (매장 전체) ---------- */

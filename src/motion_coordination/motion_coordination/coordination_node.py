@@ -35,7 +35,7 @@ from rclpy.node import Node
 from rclpy.qos import DurabilityPolicy, QoSProfile, ReliabilityPolicy
 from .alarm_registry import AlarmRegistry
 from .command_dispatcher import CommandDispatcher
-from motion_common import cycle_failure, net_ready
+from motion_common import cycle_failure, motion_segment, net_ready
 from motion_common.group_config import (
     GroupConfig,
     load_group_config,
@@ -152,6 +152,17 @@ def _message_initial_move_time(message: Any) -> float:
     except (TypeError, ValueError):
         return 0.0
     return value if value > 0.0 else 0.0
+
+
+def _message_segment(message: Any) -> tuple[float, float]:
+    """그룹 명령의 구간 재생 · 옛 명령엔 칸이 없다 · 틀린 값도 통째로(0/0) · 2026-10-16"""
+    try:
+        return motion_segment.parse({
+            motion_segment.START_KEY: getattr(message, motion_segment.START_KEY, 0.0) or 0.0,
+            motion_segment.END_KEY: getattr(message, motion_segment.END_KEY, 0.0) or 0.0,
+        })
+    except ValueError:
+        return 0.0, 0.0
 
 
 class _LateCommandDropped(Exception):
@@ -1045,6 +1056,9 @@ class MotionCoordinationNode(Node):
                         getattr(message, 'target_cycle_count', 0) or 0
                     )
                     self._execution.initial_move_time_sec = _message_initial_move_time(message)
+                    (
+                        self._execution.segment_start_sec, self._execution.segment_end_sec,
+                    ) = _message_segment(message)
                 result = self._local_readiness()
                 event = 'ready' if result.get('success') else 'rejected'
                 self._publish_event(
@@ -1086,6 +1100,7 @@ class MotionCoordinationNode(Node):
                     'sync_mode': self._execution.sync_mode,
                     'target_cycle_count': self._execution.target_cycle_count,
                     'initial_move_time_sec': self._execution.initial_move_time_sec,
+                    **self._segment_fields(),
                 })
                 event = (
                     'initialize_scheduled'
@@ -1912,6 +1927,10 @@ class MotionCoordinationNode(Node):
             raise ValueError('초기 위치 이동 시간은 0초 이상이어야 합니다')
         # 누가 시작했나 · 사람(재생 화면)이면 수동 PC 도 넣는다 · 스케줄이면 스케줄 PC 만 · 수정 목록 122
         started_by = normalize_started_by(request.get('started_by'))
+        # 구간 재생 · 모든 PC 가 제 재생 목록 1번을 같은 시각으로 · 스케줄이 켠 그룹은 늘 통째로 · 2026-10-16
+        segment_start_sec, segment_end_sec = (
+            (0.0, 0.0) if started_by == STARTED_BY_SCHEDULE else motion_segment.parse(request)
+        )
         with self._lock:
             if self._duplicate_pc_boot_id:
                 raise ValueError('중복 PC ID를 수정하고 연동 서비스를 재시작하세요')
@@ -1946,6 +1965,8 @@ class MotionCoordinationNode(Node):
                 initial_move_time_sec=initial_move_time_sec,
                 started_by=started_by,
                 coordinator_participates=self._config.pc_id in participants,
+                segment_start_sec=segment_start_sec,
+                segment_end_sec=segment_end_sec,
             )
             self._execution.excluded = dict(excluded)
             # 새 시도 · 지난 실패는 스케줄이 이미 읽었다 · 수정 목록 124
@@ -1970,6 +1991,8 @@ class MotionCoordinationNode(Node):
                 run_mode=run_mode,
                 sync_mode=sync_mode,
                 initial_move_time_sec=initial_move_time_sec,
+                segment_start_sec=segment_start_sec,
+                segment_end_sec=segment_end_sec,
             )
             self._execution.pending_command = 'prepare'
             self._execution.pending_command_id = command.command_id
@@ -1999,6 +2022,7 @@ class MotionCoordinationNode(Node):
             'dwell_sec': dwell_sec,
             'sync_mode': sync_mode,
             'initial_move_time_sec': initial_move_time_sec,
+            **motion_segment.fields(segment_start_sec, segment_end_sec),
             'initialization_only': initialization_only,
             'excluded': excluded,
         }
@@ -2375,6 +2399,8 @@ class MotionCoordinationNode(Node):
                         run_mode=self._execution.run_mode,
                         sync_mode=self._execution.sync_mode,
                         initial_move_time_sec=self._execution.initial_move_time_sec,
+                        segment_start_sec=self._execution.segment_start_sec,
+                        segment_end_sec=self._execution.segment_end_sec,
                     ))
         for pc_id, reason in drops.items():
             self._drop_joiner(pc_id, reason)
@@ -2449,6 +2475,9 @@ class MotionCoordinationNode(Node):
             self._execution.sync_mode = normalize_group_sync_mode(getattr(message, 'sync_mode', ''))
             self._execution.target_cycle_count = int(getattr(message, 'target_cycle_count', 0) or 0)
             self._execution.initial_move_time_sec = _message_initial_move_time(message)
+            (
+                self._execution.segment_start_sec, self._execution.segment_end_sec,
+            ) = _message_segment(message)
             self._execution.join_cycle = int(message.cycle_number)
             self._execution.join_started = time.monotonic()
         result = self._local_readiness()
@@ -2465,6 +2494,7 @@ class MotionCoordinationNode(Node):
                 'sync_mode': self._execution.sync_mode,
                 'target_cycle_count': self._execution.target_cycle_count,
                 'initial_move_time_sec': self._execution.initial_move_time_sec,
+                **self._segment_fields(),
             })
         if result.get('success'):
             self._publish_event(message, 'join_accepted', True, '복귀 준비 시작')
@@ -2620,6 +2650,8 @@ class MotionCoordinationNode(Node):
             sound = {
                 'motion_file_id': self._local_motion_file_id(),
                 'start_delay_sec': float(action.scheduled_at) - time.monotonic(),
+                # 구간 재생 · 스피커가 그 시각부터 음원을 튼다 · 2026-10-16
+                **self._segment_fields(),
             }
         command = self._new_command(
             command=action.command,
@@ -2963,6 +2995,8 @@ class MotionCoordinationNode(Node):
         motion_file_id: str = '',
         start_delay_sec: float = 0.0,
         initial_move_time_sec: float = 0.0,
+        segment_start_sec: float = 0.0,
+        segment_end_sec: float = 0.0,
     ) -> GroupCommand:
         message = GroupCommand()
         message.group_id = self._config.group_id
@@ -2989,6 +3023,9 @@ class MotionCoordinationNode(Node):
         _set_optional_message_field(message, 'motion_file_id', str(motion_file_id))
         _set_optional_message_field(message, 'start_delay_sec', float(start_delay_sec))
         _set_optional_message_field(message, 'initial_move_time_sec', float(initial_move_time_sec or 0.0))
+        # 구간 재생 · 0/0 = 통째로 · 모든 명령에 채운다(빈 칸 없이) · 2026-10-16
+        _set_optional_message_field(message, 'segment_start_sec', max(float(segment_start_sec or 0.0), 0.0))
+        _set_optional_message_field(message, 'segment_end_sec', max(float(segment_end_sec or 0.0), 0.0))
         return message
 
     def _publish_event(
@@ -3283,8 +3320,16 @@ class MotionCoordinationNode(Node):
         budget = max(1.5, float(self._config.prepare_timeout_sec))
         return self._local_http(
             '/api/coordination/local-readiness',
-            {'budget_sec': budget},
+            # 구간 재생 · 재생 목록 1번이 구간 시작보다 짧으면 브리지가 거절한다(→ 이 PC 만 빠짐) · 2026-10-16
+            {'budget_sec': budget, **self._segment_fields()},
             timeout_sec=budget,
+        )
+
+    def _segment_fields(self) -> Dict[str, float]:
+        """지금 그룹 실행의 구간 재생 · 로컬 브리지 · 스피커 알림에 싣는 칸 · 0/0 = 통째로"""
+        return motion_segment.fields(
+            float(getattr(self._execution, 'segment_start_sec', 0.0) or 0.0),
+            float(getattr(self._execution, 'segment_end_sec', 0.0) or 0.0),
         )
 
     def _call_local_control(
@@ -3478,6 +3523,9 @@ class MotionCoordinationNode(Node):
                 motion_file_id=key[0],
                 # 이미 시작했다 · 음수 · 스피커가 받은 시각에서 빼서 같은 순간에 맞춘다
                 start_delay_sec=started_at - time.time(),
+                # 구간 재생 · 스피커가 그 시각부터 · 2026-10-16
+                segment_start_sec=float(status.get('segment_start_sec') or 0.0),
+                segment_end_sec=float(status.get('segment_end_sec') or 0.0),
             )
             self._remember_own_command(command.command_id)
             self._command_pub.publish(command)
@@ -3692,6 +3740,8 @@ class MotionCoordinationNode(Node):
                     'cycle_number': cycle_number,
                     'target_cycle_count': self._execution.target_cycle_count,
                     'sync_mode': self._execution.sync_mode,
+                    # 구간 재생 · 0/0 = 통째로 · 2026-10-16
+                    **self._segment_fields(),
                     # 누가 시작했나 · human · schedule · 진행 PC 만 안다(시작 요청을 받은 PC) · 나머지는 빈 값 ·
                     # 스케줄 노드가 구간 끝 정지 판정에 쓴다(제 기억보다 이것을 믿는다) · 로컬 상태 JSON 만 ·
                     # DDS 메시지 · 약속 번호는 그대로 · 수정 목록 143

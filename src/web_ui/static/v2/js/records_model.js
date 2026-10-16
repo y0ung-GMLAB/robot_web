@@ -1,4 +1,5 @@
 /** UI v2 · 기록 화면이 보는 값 · 화면 없이 시험되는 함수만 (설계안 2026-10-09 · 기록) */
+import { segmentLabel } from './segment_model.js';
 
 export const RESULT_TEXT = {
   completed: ['완료', 'ok'],
@@ -25,7 +26,9 @@ export function runRows(runs) {
       file: String(run.file || ''),
       time: String(run.started_text || '').slice(11, 19),
       cycle: Number(run.cycle) || 0,
-      motion: String(run.motion_file_id || '').replace(/\.json$/i, ''),
+      // 구간 재생이면 `a · 구간 1:20~1:45` · 2026-10-16
+      motion: [String(run.motion_file_id || '').replace(/\.json$/i, ''), segmentLabel(run.segment_start_sec, run.segment_end_sec)]
+        .filter(Boolean).join(' · '),
       result: label,
       tone,
       message: String(run.message || ''),

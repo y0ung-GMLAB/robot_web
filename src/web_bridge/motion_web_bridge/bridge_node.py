@@ -14,7 +14,7 @@ import rclpy
 import uvicorn
 import yaml
 from fastapi import FastAPI, HTTPException, Request
-from motion_common import generation, joint_mapping, minas_absolute, multiturn_clear, rpc, topics, upper_restart
+from motion_common import generation, joint_mapping, minas_absolute, motion_segment, multiturn_clear, rpc, topics, upper_restart
 from motion_common import paths as common_paths
 from motion_common import motor_ref as motor_ref_rules
 from fastapi.responses import JSONResponse
@@ -2288,6 +2288,15 @@ class MotionWebBridge(Node):
         service = getattr(self, '_coordination_web_bridge', None)
         return service.local_execution_blocker() if service is not None else ''
 
+    @staticmethod
+    def _with_motion_segment(payload: Dict[str, Any]) -> Dict[str, Any]:
+        """구간 재생 칸 정리 · 화면 `segment` → `segment_start_sec` · `segment_end_sec` · 2026-10-16
+
+        스케줄(`schedule_id`) · 자동 반복은 늘 통째로(0/0) · 틀린 값은 ValueError(받기 전에 거절).
+        """
+        allowed = not str(payload.get('schedule_id') or '').strip() and not payload.get('automation_run')
+        return motion_segment.apply_to_payload(payload, allowed=allowed)
+
     def motion_run_initialize(self, payload: Dict[str, Any]) -> Dict[str, Any]:
         off = run_mode_gate.motion_command_block_reason(self)
         if off:
@@ -2305,6 +2314,11 @@ class MotionWebBridge(Node):
         parked = self.schedule_end_start_blocker(payload)
         if parked:
             return {'success': False, 'message': f'초기 위치 이동 불가: {parked}'}
+        # 구간 재생이면 구간 시작 자세로 · 2026-10-16
+        try:
+            payload = self._with_motion_segment(dict(payload or {}))
+        except ValueError as exc:
+            return {'success': False, 'message': f'초기 위치 이동 불가: {exc}'}
         return self._request_motion_run('initialize', payload, timeout_sec=2.0)
 
     def schedule_start_blocked_by_manual_mode(self, payload: Dict[str, Any]) -> str:
@@ -2367,6 +2381,11 @@ class MotionWebBridge(Node):
         parked = self.schedule_end_start_blocker(payload)
         if parked:
             return {'success': False, 'message': f'모션 실행 불가: {parked}'}
+        # 구간 재생 · 틀린 값은 런타임에 가기 전에 거절 · 2026-10-16
+        try:
+            payload = self._with_motion_segment(payload)
+        except ValueError as exc:
+            return {'success': False, 'message': f'모션 실행 불가: {exc}'}
         # 스케줄러처럼 화면 없는 호출자는 무엇을 재생할지 모른다 ·
         # 프로젝트가 정해 둔 활성 파일로 채운다 · §6-68
         filled = self._with_active_project_files(payload)

@@ -4,6 +4,8 @@
  * 입력 · `snap` = `/ws/status` 한 장 · `sched` = `GET /api/schedule/status` · `connected` = 소켓 살아 있나
  */
 
+import { segmentProgressText } from './segment_model.js';
+
 export const RUN_MODE_LABEL = { schedule: '스케줄', manual: '수동', off: '끔' };
 
 /** 운전 모드 뜻 = 누가 시작하나 · 위 막대 버튼 설명 · 수정 목록 122 (사용자 결정 2026-10-13) */
@@ -292,7 +294,10 @@ export function runSummary(snap) {
     subtitle: parts.join(' · '),
     group,
     ratio,
-    timeText: duration > 0 && MOVING_STATES.has(state) ? `${formatClock(elapsed)} / ${formatClock(duration)}` : '',
+    // 구간 재생이면 파일 시각도 · `구간 1:20~1:45 · 지금 1:31` · 2026-10-16
+    timeText: duration > 0 && MOVING_STATES.has(state)
+      ? [`${formatClock(elapsed)} / ${formatClock(duration)}`, segmentProgressText(run, elapsed)].filter(Boolean).join(' · ')
+      : '',
   };
 }
 

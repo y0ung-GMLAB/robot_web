@@ -61,6 +61,10 @@ def _status_from_plan(state: str, message: str, plan: Dict[str, Any]) -> Dict[st
         'motion_playlist': list(plan.get('motion_playlist') or []),
         'playlist_index': int(plan.get('playlist_index') or 0),
         'playlist_length': int(plan.get('playlist_length') or 0),
+        # 구간 재생 · 파일 시각 · 0/0 = 통째로 · 화면 진행 · 3D 가 진행 시각에 시작을 더한다 · 2026-10-16
+        'segment_start_sec': float(plan.get('segment_start_sec') or 0.0),
+        'segment_end_sec': float(plan.get('segment_end_sec') or 0.0),
+        'source_duration_sec': float(plan.get('source_duration_sec') or 0.0),
         'cycle_count': 0,
         'current_cycle': 0,
         'summary': plan.get('summary', {}),
@@ -119,6 +123,10 @@ def _empty_status() -> Dict[str, Any]:
         'motion_playlist': [],
         'playlist_index': 0,
         'playlist_length': 0,
+        # 구간 재생 · 0/0 = 통째로 · 2026-10-16
+        'segment_start_sec': 0.0,
+        'segment_end_sec': 0.0,
+        'source_duration_sec': 0.0,
         'cycle_count': 0,
         'current_cycle': 0,
         'summary': {},

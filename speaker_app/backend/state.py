@@ -265,17 +265,24 @@ class AppState:
         motion = str(getattr(msg, "motion_file_id", "") or "")
         wanted = start_delay + offset
         delay = max(0.0, wanted)   # 수신보다 먼저 재생할 수는 없다
+        # 구간 재생(약속 번호 10) · 로봇이 애니메이션 1:20 부터 돌면 음원도 1:20 부터 · 옛 메시지는 0/0
+        segment_start = max(float(getattr(msg, "segment_start_sec", 0.0) or 0.0), 0.0)
+        segment_end = max(float(getattr(msg, "segment_end_sec", 0.0) or 0.0), 0.0)
+        segment = audio_prep.segment_label(segment_start, segment_end)
         path = config.resolve_file(self.cfg, motion)
         name = os.path.basename(path) if path else ""
         mapped = bool(motion) and self.cfg["audio"]["by_motion"].get(motion) == name
         self.last_trigger = {"cycle_number": cycle, "at": time.strftime("%H:%M:%S"),
-                             "motion_file_id": motion, "file_name": name}
+                             "motion_file_id": motion, "file_name": name,
+                             "segment": segment}
         if motion:
             self._seen_motions[motion] = time.time()
         self.trigger_count += 1
         self._trigger_times.append(time.time())
         what = "%s · %s" % (motion or "애니메이션 이름 없음",
                             (name or "음원 없음") + ("" if mapped else " (기본)"))
+        if segment:
+            what += " · " + segment
         if wanted < -0.05:
             self.log.add("start_at 수신 (cycle %d · %s) → 모션보다 %.1f초 늦게 재생"
                          % (cycle, what, -wanted))
@@ -284,6 +291,14 @@ class AppState:
         else:
             self.log.add("start_at 수신 (cycle %d · %s) → 재생" % (cycle, what))
         self._cancel_timer()
+        if segment and path:
+            # 받자마자 구간 wav 를 만든다 · 재생 시각에는 aplay 만 · 못 만들면(음원이 짧음 등) 틀지 않는다 ·
+            # 만드는 데 걸린 시간은 기다릴 시간에서 뺀다(같은 구간이면 두 번째 회차부터 다시 안 만듦)
+            began = time.monotonic()
+            path = audio_prep.segment_path(self._playable_path(path), segment_start, segment_end, self.log)
+            if not path:
+                return
+            delay = max(0.0, delay - (time.monotonic() - began))
         timer = threading.Timer(delay, self._play_trigger, args=(path,))
         timer.daemon = True
         with self._lock:

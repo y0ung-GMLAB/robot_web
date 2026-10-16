@@ -509,3 +509,8 @@ details.raw pre.raw-file { max-height: 480px; }
 .detail-group > label.inline { display: flex; margin-top: 6px; }
 .params-table tr.params-group td { font-weight: 600; padding-top: 12px; color: var(--muted, inherit); }
 details.detail-group > summary { cursor: pointer; }
+
+/* 재생 · 구간 재생 줄 · 2026-10-16 */
+.segment-row { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; }
+.segment-row .input { width: 104px; }
+.segment-row .segment-note { flex: 1 1 220px; }
