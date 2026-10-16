@@ -4,6 +4,8 @@
  * 입력 · `snap` = `/ws/status` 한 장 · `sched` = `GET /api/schedule/status` · `connected` = 소켓 살아 있나
  */
 
+import { segmentProgressText } from './segment_model.js';
+
 export const RUN_MODE_LABEL = { schedule: '스케줄', manual: '수동', off: '끔' };
 
 /** 운전 모드 뜻 = 누가 시작하나 · 위 막대 버튼 설명 · 수정 목록 122 (사용자 결정 2026-10-13) */
@@ -127,6 +129,34 @@ export function scheduleEndNotice(snap) {
   return { tone: notice.tone === 'bad' ? 'bad' : 'warn', title: String(notice.title), detail: String(notice.detail || '') };
 }
 
+/**
+ * 연동 노드의 「마지막 그룹 시작 실패」 노란 줄 제목 · `code` 로 나눈다 · 수정 목록 147
+ *
+ * 전에는 모두 「그룹 시작이 취소되었습니다」 였다 · 9회차 돈 뒤 PC 가 빠져 멈춘 것(GROUP_PARTICIPANT_LEFT)도
+ * 「시작이 취소」 로 읽혔고, 참가 0대 거절(GROUP_START_NOT_READY)은 다음 시작도 늘 실패라 줄이 계속 남았다
+ * (실물 2026-10-15 W-A10) · 코드는 `coordination_node._remember_start_failure` 부르는 곳 ·
+ * GROUP_RELEASED 는 이 PC 웹 서비스가 끊겨 잠그지 않고 놓은 것(`_release_without_latch`) ·
+ * GROUP_LOCAL_BRIDGE_LOST(145 ②)는 지금 `bridge_loss` 칸에만 남지만 이 칸에 오면 같은 제목.
+ * 그 밖(TRIGGER_SYNC_FAILED · GROUP_START_REJECTED · GROUP_SCHEDULE_ACK_TIMEOUT · GROUP_SCHEDULE_SELF_LATE ·
+ * 코드 없음)은 정말 시작 전 취소라 전 글 그대로.
+ */
+export const START_FAILURE_TITLE = {
+  GROUP_START_NOT_READY: '그룹 시작 불가',
+  GROUP_PARTICIPANT_LEFT: '그룹 실행 정지 · PC 빠짐',
+  GROUP_LOCAL_BRIDGE_LOST: '그룹 실행 정지 · 웹 서비스 끊김',
+  GROUP_RELEASED: '그룹 실행 정지 · 웹 서비스 끊김',
+};
+export const START_FAILURE_DEFAULT_TITLE = '그룹 시작이 취소되었습니다';
+
+export function startFailureView(failure) {
+  const code = String(failure?.code || '').trim().toUpperCase();
+  const title = START_FAILURE_TITLE[code] || START_FAILURE_DEFAULT_TITLE;
+  let detail = String(failure?.message || '').trim();
+  // 서버 글이 제목과 같은 말로 시작하면(「그룹 시작 불가 · 들어갈 PC 가 없습니다 …」) 한 번만
+  if (detail.startsWith(`${title} · `)) detail = detail.slice(title.length + 3);
+  return { title, detail };
+}
+
 export function collectIssues(snap, sched, { connected = true } = {}) {
   const issues = [];
   const bad = (title, detail = '', action = null) => issues.push({ tone: 'bad', title, detail, action });
@@ -146,7 +176,7 @@ export function collectIssues(snap, sched, { connected = true } = {}) {
   const absolute = String(snap.minas_absolute_blocker || '');
   if (absolute) {
     bad('앱솔루트 방식이 확인되지 않아 모터를 움직일 수 없습니다', absolute,
-      { kind: 'open', target: 'maintain-motors', label: '모터 설정 열기' });
+      { kind: 'open', target: 'motors', label: '모터 설정 열기' });
   }
   // 다회전 클리어 뒤 기준점 다시 지정 전 · 재생·초기 이동·스케줄·그룹 참가 막힘 · 수동 조그는 됨 · 수정 목록 140
   // 웹을 다시 켜거나 페이지를 닫아도 PC 단위 표시가 남아 여기 남는다 · 버튼은 그 축 기준점 지정 화면
@@ -166,7 +196,7 @@ export function collectIssues(snap, sched, { connected = true } = {}) {
     .map((d) => (d.axis === null || d.axis === undefined ? `슬레이브 ${d.slave_position}` : `${d.axis}번`));
   if (gainOff.length) {
     warn(`자동조정이 꺼진 드라이브 · ${gainOff.join(' · ')}`, '부하에 맞춰 게인이 바뀌지 않습니다. 벤치에서 꺼 둔 값이 남았을 수 있습니다. 모터 설정에서 확인하세요.',
-      { kind: 'open', target: 'maintain-motors', label: '모터 설정 열기' });
+      { kind: 'open', target: 'motors', label: '모터 설정 열기' });
   }
   // 조인트 범위 미확인 · 재생·초기 이동·수동 조작이 막혀 있다 · 판정은 서버 · 수정 목록 97
   const range = String(snap.mapping_range_blocker || '');
@@ -179,7 +209,7 @@ export function collectIssues(snap, sched, { connected = true } = {}) {
   if (boot) warn(boot.title, boot.detail, { kind: 'apply-motor-config', label: '장비에 적용' });
   // 조그 · 목표 이동을 끝내며 supervisor 가 남긴 알림 · 목표 근처 출렁임 등 · 5 분 · 실물 R-11
   for (const notice of manualNotices(snap)) {
-    warn(notice.message, '조작은 끝냈습니다. 다음 조작은 됩니다.', { kind: 'open', target: 'maintain-motors', label: '모터 설정 열기' });
+    warn(notice.message, '조작은 끝냈습니다. 다음 조작은 됩니다.', { kind: 'open', target: 'motors', label: '모터 설정 열기' });
   }
   const motors = Array.isArray(snap.motion_state?.motors) ? snap.motion_state.motors : [];
   const faulted = motors.filter((m) => m && m.fault);
@@ -200,7 +230,8 @@ export function collectIssues(snap, sched, { connected = true } = {}) {
   const startFailure = snap.coordination?.runtime?.last_start_failure || {};
   const groupActive = Boolean(snap.coordination?.runtime?.execution?.execution_id);
   if (!group.active && !groupActive && String(startFailure.message || '')) {
-    warn('그룹 시작이 취소되었습니다', String(startFailure.message));
+    const view = startFailureView(startFailure);
+    warn(view.title, view.detail);
   }
   // 구간 끝 주차 실패(다시 시도 중) · 그 자리에서 서보 끔 · 글과 색은 서버 · 다음 시작까지 남음 · 수정 목록 131
   const endNotice = scheduleEndNotice(snap);
@@ -292,7 +323,10 @@ export function runSummary(snap) {
     subtitle: parts.join(' · '),
     group,
     ratio,
-    timeText: duration > 0 && MOVING_STATES.has(state) ? `${formatClock(elapsed)} / ${formatClock(duration)}` : '',
+    // 구간 재생이면 파일 시각도 · `구간 1:20~1:45 · 지금 1:31` · 2026-10-16
+    timeText: duration > 0 && MOVING_STATES.has(state)
+      ? [`${formatClock(elapsed)} / ${formatClock(duration)}`, segmentProgressText(run, elapsed)].filter(Boolean).join(' · ')
+      : '',
   };
 }
 

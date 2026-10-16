@@ -23,3 +23,8 @@ string motion_file_id
 float64 start_delay_sec
 # 초기 위치 이동 시간(초) · 마스터 재생 화면에서 고른 5/7/10 · 0 이면 PC마다 조인트 매핑 값 · 2026-10-12
 float64 initial_move_time_sec
+# 구간 재생 · 재생 목록 1번을 이 파일 시각(초)부터 · 2026-10-16 · 약속 번호 10
+# 0 이면 처음부터 · PC 마다 제 1번을 같은 시각으로 자른다 · 스피커는 음원을 이 시각부터 튼다
+float64 segment_start_sec
+# 구간 끝(파일 시각 · 초) · 0 이면 끝까지 · 스피커는 (끝 − 시작) 초 뒤 멈춘다
+float64 segment_end_sec

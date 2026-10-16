@@ -79,6 +79,43 @@ test('스케줄 시작 대기 · 잠그지 않은 그룹 시작 실패 · 수정
   assert.equal(collectIssues(failed, {}).length, 0);
 });
 
+test('그룹 시작 실패 노란 줄 · 제목을 code 로 나눔 · 수정 목록 147', () => {
+  const issue = (failure) => {
+    const snap = { coordination: { runtime: { last_start_failure: failure, execution: {} } } };
+    const found = collectIssues(snap, {});
+    assert.equal(found.length, 1);
+    assert.equal(found[0].tone, 'warn');
+    return found[0];
+  };
+  // 실물 2026-10-15 12:42 · 참가 0대 거절 · 서버 글이 제목과 같은 말로 시작하면 한 번만
+  const empty = issue({ code: 'GROUP_START_NOT_READY', message: '그룹 시작 불가 · 들어갈 PC 가 없습니다 · 참가 0대' });
+  assert.equal(empty.title, '그룹 시작 불가');
+  assert.equal(empty.detail, '들어갈 PC 가 없습니다 · 참가 0대');
+  // 준비 중 거절 · 같은 코드 · 다른 글
+  assert.equal(issue({ code: 'GROUP_START_NOT_READY', message: 'floating4 실행 준비 안 됨: 앱솔루트 미확인' }).title, '그룹 시작 불가');
+  // W-A10 · 9회차 돈 뒤 PC 빠짐 · 「시작이 취소」 가 아니다
+  const left = issue({ code: 'GROUP_PARTICIPANT_LEFT', message: '그룹 실행 정지 · 남은 PC 없음 · 잠그지 않음 · floating4(웹 다시 시작)' });
+  assert.equal(left.title, '그룹 실행 정지 · PC 빠짐');
+  assert.match(left.detail, /남은 PC 없음/);
+  // 이 PC 웹 서비스 끊김 · 잠그지 않고 놓음(145) · 145 ② 코드가 이 칸에 와도 같은 제목
+  assert.equal(issue({ code: 'GROUP_RELEASED', message: '로컬 Web Bridge 상태 수신 중단: 519ms' }).title, '그룹 실행 정지 · 웹 서비스 끊김');
+  assert.equal(issue({ code: 'GROUP_LOCAL_BRIDGE_LOST', message: 'floating4 웹 서비스 끊김으로 그룹 정지' }).title, '그룹 실행 정지 · 웹 서비스 끊김');
+  // 정말 시작 전 취소 · 코드 없는 옛 연동 노드 · 전 글 그대로
+  for (const code of ['TRIGGER_SYNC_FAILED', 'GROUP_START_REJECTED', 'GROUP_SCHEDULE_ACK_TIMEOUT', 'GROUP_SCHEDULE_SELF_LATE', '', undefined]) {
+    const other = issue({ code, message: '예약 확인 늦음' });
+    assert.equal(other.title, '그룹 시작이 취소되었습니다', String(code));
+    assert.equal(other.detail, '예약 확인 늦음');
+  }
+  // 서버가 남기는 코드는 모두 여기서 다룬다(새 코드가 생기면 제목을 정할 것)
+  const node = readFileSync(new URL('../../motion_coordination/motion_coordination/coordination_node.py', import.meta.url), 'utf8');
+  const codes = new Set([...node.matchAll(/_(?:remember_start_failure|cancel_before_start)\([^)]*?code=(?:'([A-Z_]+)' if \w+ else '([A-Z_]+)'|'([A-Z_]+)')/gs)]
+    .flatMap((m) => m.slice(1).filter(Boolean)));
+  const known = ['GROUP_START_NOT_READY', 'GROUP_PARTICIPANT_LEFT', 'GROUP_RELEASED', 'TRIGGER_SYNC_FAILED',
+    'GROUP_START_REJECTED', 'GROUP_SCHEDULE_ACK_TIMEOUT', 'GROUP_SCHEDULE_SELF_LATE'];
+  assert.ok(codes.size >= 5, `코드를 못 찾음 · ${[...codes]}`);
+  for (const code of codes) assert.ok(known.includes(code), `제목을 정하지 않은 새 시작 실패 코드 · ${code}`);
+});
+
 test('운전 모드 버튼 설명 · 누가 시작하나 · 수정 목록 122', () => {
   const shell = readFileSync(new URL('../static/v2/js/shell.js', import.meta.url), 'utf8');
   assert.match(shell, /RUN_MODE_HINT\[button\.dataset\.mode\]/);

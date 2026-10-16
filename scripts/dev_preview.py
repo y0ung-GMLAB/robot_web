@@ -47,11 +47,11 @@ STATIC = ROOT / 'src' / 'web_ui' / 'static'
 
 JOINTS = [
     # (모션 ID, 축, 감속비, 최소, 최대)
-    ('Neck_Pitch', 0, 150.0, -10.0, 13.0),
-    ('Neck_Yaw', 1, 100.0, -15.0, 15.0),
-    ('Eye_Pitch', 2, 50.0, -10.0, 10.0),
-    ('Eye_Yaw_L', 3, 35.0, -12.0, 12.0),
-    ('Eye_Yaw_R', 4, 35.0, -12.0, 12.0),
+    ('f1_neck_pitch', 0, 150.0, -10.0, 13.0),
+    ('f1_neck_yaw', 1, 100.0, -15.0, 15.0),
+    ('f1_eye_pitch', 2, 50.0, -10.0, 10.0),
+    ('f1_eye_yaw_r', 3, 50.0, -12.0, 12.0),     # 플로팅 모터 순서 · 3 오른쪽 · 4 왼쪽 (2026-10-15)
+    ('f1_eye_yaw_l', 4, 50.0, -12.0, 12.0),
 ]
 
 state = {
@@ -1051,7 +1051,7 @@ async def preview_trace(date: str, file: str):
 
 @app.get('/api/motion-trace/download')
 async def preview_trace_download(date: str, file: str):
-    return HTMLResponse('time_sec,Neck_Pitch_target_deg,Neck_Pitch_actual_deg\n0,0,0\n', media_type='text/csv')
+    return HTMLResponse('time_sec,f1_neck_pitch_target_deg,f1_neck_pitch_actual_deg\n0,0,0\n', media_type='text/csv')
 
 
 def _preview_validate(body):
@@ -1176,7 +1176,8 @@ PREVIEW_GAINS = {}
 def _preview_gains(axis):
     if axis not in PREVIEW_GAINS:
         PREVIEW_GAINS[axis] = {'auto_tuning': 0 if axis == 2 else 1, 'stiffness': 12 if axis == 2 else 13,
-                               'inertia_ratio': [137, 143, 137, 250, 250][axis % 5], 'estimation_speed': 1, 'error': ''}
+                               'inertia_ratio': [137, 143, 137, 250, 250][axis % 5], 'estimation_speed': 1,
+                               'command_smoothing': 92, 'command_fir': 10, 'error': ''}   # 지령 필터 · 팩토리값 · 2026-10-16
     return dict(PREVIEW_GAINS[axis])
 
 
@@ -1307,7 +1308,7 @@ async def preview_absolute_job():
 
 @app.post('/api/motor-config/absolute-setup/preview')
 async def preview_absolute_preview(request: Request):
-    targets = [] if state['abs_done'] else [{'label': '4번 · Eye_Yaw_R', 'axis': 4, 'problem': 'Pr0.15=1(인크리멘털)'}]
+    targets = [] if state['abs_done'] else [{'label': '4번 · f1_eye_yaw_l', 'axis': 4, 'problem': 'Pr0.15=1(인크리멘털)'}]
     skipped = [{'label': f'{axis}번 · {name}', 'axis': axis, 'reason': '이미 정상'} for name, axis, *_ in JOINTS if axis != 4 or state['abs_done']]
     return {'success': True, 'targets': targets, 'skipped': skipped,
             'steps': ['서보 끄기', 'Pr0.15 = 0 · EEPROM', '드라이브 전원 껐다 켜기', '확인', '다회전 클리어', '드라이브 전원 한 번 더', '검증']}
@@ -1687,11 +1688,11 @@ def _demo_scene() -> dict:
         'meshes': {},
         'camera': {'lookat': [0, 0, 1.6], 'distance': 2.2, 'azimuth': -90, 'elevation': -10},
         'axes': [
-            {'joint': 'neck_pitch', 'motion_id': 'Neck_Pitch'},
-            {'joint': 'neck_yaw', 'motion_id': 'Neck_Yaw'},
-            {'joint': 'eye_pitch', 'motion_id': 'Eye_Pitch'},
-            {'joint': 'eye_yaw_l', 'motion_id': 'Eye_Yaw_L'},
-            {'joint': 'eye_yaw_r', 'motion_id': 'Eye_Yaw_R'},
+            {'joint': 'neck_pitch', 'motion_id': 'f1_neck_pitch'},
+            {'joint': 'neck_yaw', 'motion_id': 'f1_neck_yaw'},
+            {'joint': 'eye_pitch', 'motion_id': 'f1_eye_pitch'},
+            {'joint': 'eye_yaw_r', 'motion_id': 'f1_eye_yaw_r'},
+            {'joint': 'eye_yaw_l', 'motion_id': 'f1_eye_yaw_l'},
         ],
     }
 

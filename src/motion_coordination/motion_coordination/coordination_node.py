@@ -35,7 +35,7 @@ from rclpy.node import Node
 from rclpy.qos import DurabilityPolicy, QoSProfile, ReliabilityPolicy
 from .alarm_registry import AlarmRegistry
 from .command_dispatcher import CommandDispatcher
-from motion_common import cycle_failure, net_ready
+from motion_common import cycle_failure, motion_segment, net_ready
 from motion_common.group_config import (
     GroupConfig,
     load_group_config,
@@ -72,7 +72,8 @@ from .local_api import LocalCoordinationApi
 from .local_runtime_monitor import LocalRuntimeMonitor
 from .safety_stop import SafetyStopController, SafetyStopOutcome
 from .schedule_lead import (
-    ScheduleLeadPlanner, command_kind, is_timing_rejection, only_self_late,
+    SELF_LATE_WAIT_MAX_SEC, ScheduleLeadPlanner, command_kind, is_timing_rejection,
+    may_retry_own_cycle_initialize, only_self_late,
 )
 from motion_common import topics
 from motion_common.repeat_policy import GROUP_LOCKSTEP, normalize_group_sync_mode
@@ -152,6 +153,17 @@ def _message_initial_move_time(message: Any) -> float:
     except (TypeError, ValueError):
         return 0.0
     return value if value > 0.0 else 0.0
+
+
+def _message_segment(message: Any) -> tuple[float, float]:
+    """그룹 명령의 구간 재생 · 옛 명령엔 칸이 없다 · 틀린 값도 통째로(0/0) · 2026-10-16"""
+    try:
+        return motion_segment.parse({
+            motion_segment.START_KEY: getattr(message, motion_segment.START_KEY, 0.0) or 0.0,
+            motion_segment.END_KEY: getattr(message, motion_segment.END_KEY, 0.0) or 0.0,
+        })
+    except ValueError:
+        return 0.0, 0.0
 
 
 class _LateCommandDropped(Exception):
@@ -912,8 +924,9 @@ class MotionCoordinationNode(Node):
         self._sync_deadline = 0.0
         self._trigger_sync_status.update({'trigger_sync_state': 'ready'})
         # 여유는 잰 확인 시간으로 · 진행 PC 자신의 로컬 길도 0.4 s 안이라는 보장이 없다 · 수정 목록 130
+        # 회차 초기화는 따로 잰다 · 바닥 1.5 s · 수정 목록 153 ①
         lead = self._schedule_lead_sec(
-            'initialize' if next_action == 'initialize' else 'schedule'
+            next_action if next_action in {'initialize', 'cycle_initialize'} else 'schedule'
         )
         if next_action == 'initialize':
             action = self._execution.initialize_action(now=time.monotonic(), lead_sec=lead)
@@ -1045,6 +1058,9 @@ class MotionCoordinationNode(Node):
                         getattr(message, 'target_cycle_count', 0) or 0
                     )
                     self._execution.initial_move_time_sec = _message_initial_move_time(message)
+                    (
+                        self._execution.segment_start_sec, self._execution.segment_end_sec,
+                    ) = _message_segment(message)
                 result = self._local_readiness()
                 event = 'ready' if result.get('success') else 'rejected'
                 self._publish_event(
@@ -1068,25 +1084,23 @@ class MotionCoordinationNode(Node):
             else:
                 self._require_active_command(message, participants)
             if command in {'initialize_at', 'cycle_initialize_at'}:
-                local_target_ns = self._local_schedule_ns(message)
                 control_command = (
                     'group_prepare'
                     if command == 'initialize_at' else 'group_initialize_at'
                 )
-                result = self._call_local_control({
-                    'command': control_command,
-                    'execution_id': message.execution_id,
-                    'cycle_number': int(message.cycle_number),
-                    'initialize_monotonic': local_target_ns / 1_000_000_000.0,
-                    'network_operation_id': message.command_id,
-                    'repeat_mode': self._execution.repeat_mode,
-                    'dwell_sec': self._execution.dwell_sec,
-                    'initialization_only': self._execution.initialization_only,
-                    'run_mode': self._execution.run_mode,
-                    'sync_mode': self._execution.sync_mode,
-                    'target_cycle_count': self._execution.target_cycle_count,
-                    'initial_move_time_sec': self._execution.initial_move_time_sec,
-                })
+                try:
+                    local_target_ns = self._local_schedule_ns(message)
+                except ValueError as exc:
+                    # 진행 PC 자신의 회차 초기화가 여유 부족 · 아래에서 여유를 늘려 다시 예약 · 수정 목록 153 ②
+                    if not self._is_own_cycle_initialize(message):
+                        raise
+                    result = {'success': False, 'message': str(exc)}
+                else:
+                    result = self._call_local_control(self._local_initialize_payload(
+                        message, control_command, local_target_ns / 1_000_000_000.0,
+                    ))
+                if self._is_own_cycle_initialize(message):
+                    result = self._retry_own_cycle_initialize(message, result)
                 event = (
                     'initialize_scheduled'
                     if command == 'initialize_at' else 'cycle_initialize_scheduled'
@@ -1107,6 +1121,8 @@ class MotionCoordinationNode(Node):
                     'execution_id': message.execution_id,
                     'network_operation_id': message.command_id,
                     'reason': str(getattr(message, 'stop_reason', '') or ''),
+                    # 그룹 전체 정지 · 회차 맞춤은 제 회차 뒤 장벽에서 진행 PC 의 풀기를 기다린다 · 수정 목록 154
+                    'group_wide': True,
                 })
                 with self._lock:
                     if self._execution.coordinator_id == self._config.pc_id:
@@ -1426,8 +1442,9 @@ class MotionCoordinationNode(Node):
                         self._execution.stop_after_cycle
                         or self._execution.run_mode == 'once'
                     ) and self._execution.pending_command != 'cancel_before_start':
-                        # Runtime stop-after-cycle completes without emitting
-                        # cycle_ready. Start the same release handshake here.
+                        # 회차 후 정지 중 · 회차 맞춤 PC 는 제 회차를 끝내면 장벽(`motion_completed`)에 머물고
+                        # 풀기는 위 `motion_completed` 분기가 모두 끝난 뒤 한다 · 여기 오는 `stopped` 는 진짜 정지
+                        # (사람 정지 · 오류 · 회차 사이에 받아 바로 선 것 · 이 PC 만의 정지) · 바로 푼다 · 수정 목록 154
                         self._begin_group_release()
                     elif self._execution.state != 'releasing':
                         # 참가 PC 가 저 혼자 멈췄다 · 전에는 `stopped` 로만 두고 실행을 쥔 채 남아 다음 시작이
@@ -1912,6 +1929,10 @@ class MotionCoordinationNode(Node):
             raise ValueError('초기 위치 이동 시간은 0초 이상이어야 합니다')
         # 누가 시작했나 · 사람(재생 화면)이면 수동 PC 도 넣는다 · 스케줄이면 스케줄 PC 만 · 수정 목록 122
         started_by = normalize_started_by(request.get('started_by'))
+        # 구간 재생 · 모든 PC 가 제 재생 목록 1번을 같은 시각으로 · 스케줄이 켠 그룹은 늘 통째로 · 2026-10-16
+        segment_start_sec, segment_end_sec = (
+            (0.0, 0.0) if started_by == STARTED_BY_SCHEDULE else motion_segment.parse(request)
+        )
         with self._lock:
             if self._duplicate_pc_boot_id:
                 raise ValueError('중복 PC ID를 수정하고 연동 서비스를 재시작하세요')
@@ -1946,6 +1967,8 @@ class MotionCoordinationNode(Node):
                 initial_move_time_sec=initial_move_time_sec,
                 started_by=started_by,
                 coordinator_participates=self._config.pc_id in participants,
+                segment_start_sec=segment_start_sec,
+                segment_end_sec=segment_end_sec,
             )
             self._execution.excluded = dict(excluded)
             # 새 시도 · 지난 실패는 스케줄이 이미 읽었다 · 수정 목록 124
@@ -1970,6 +1993,8 @@ class MotionCoordinationNode(Node):
                 run_mode=run_mode,
                 sync_mode=sync_mode,
                 initial_move_time_sec=initial_move_time_sec,
+                segment_start_sec=segment_start_sec,
+                segment_end_sec=segment_end_sec,
             )
             self._execution.pending_command = 'prepare'
             self._execution.pending_command_id = command.command_id
@@ -1999,6 +2024,7 @@ class MotionCoordinationNode(Node):
             'dwell_sec': dwell_sec,
             'sync_mode': sync_mode,
             'initial_move_time_sec': initial_move_time_sec,
+            **motion_segment.fields(segment_start_sec, segment_end_sec),
             'initialization_only': initialization_only,
             'excluded': excluded,
         }
@@ -2375,6 +2401,8 @@ class MotionCoordinationNode(Node):
                         run_mode=self._execution.run_mode,
                         sync_mode=self._execution.sync_mode,
                         initial_move_time_sec=self._execution.initial_move_time_sec,
+                        segment_start_sec=self._execution.segment_start_sec,
+                        segment_end_sec=self._execution.segment_end_sec,
                     ))
         for pc_id, reason in drops.items():
             self._drop_joiner(pc_id, reason)
@@ -2449,6 +2477,9 @@ class MotionCoordinationNode(Node):
             self._execution.sync_mode = normalize_group_sync_mode(getattr(message, 'sync_mode', ''))
             self._execution.target_cycle_count = int(getattr(message, 'target_cycle_count', 0) or 0)
             self._execution.initial_move_time_sec = _message_initial_move_time(message)
+            (
+                self._execution.segment_start_sec, self._execution.segment_end_sec,
+            ) = _message_segment(message)
             self._execution.join_cycle = int(message.cycle_number)
             self._execution.join_started = time.monotonic()
         result = self._local_readiness()
@@ -2465,6 +2496,7 @@ class MotionCoordinationNode(Node):
                 'sync_mode': self._execution.sync_mode,
                 'target_cycle_count': self._execution.target_cycle_count,
                 'initial_move_time_sec': self._execution.initial_move_time_sec,
+                **self._segment_fields(),
             })
         if result.get('success'):
             self._publish_event(message, 'join_accepted', True, '복귀 준비 시작')
@@ -2537,6 +2569,7 @@ class MotionCoordinationNode(Node):
                     'execution_id': execution_id,
                     'network_operation_id': stop_message.command_id,
                     'reason': reason,
+                    'group_wide': True,   # DDS 로도 보낸다 · 수정 목록 154
                 })
             else:
                 # 바빠서 빠진 진행 PC · 제 단독 재생을 회차 끝에 세우지 않는다 · 수정 목록 136
@@ -2620,6 +2653,8 @@ class MotionCoordinationNode(Node):
             sound = {
                 'motion_file_id': self._local_motion_file_id(),
                 'start_delay_sec': float(action.scheduled_at) - time.monotonic(),
+                # 구간 재생 · 스피커가 그 시각부터 음원을 튼다 · 2026-10-16
+                **self._segment_fields(),
             }
         command = self._new_command(
             command=action.command,
@@ -2757,6 +2792,90 @@ class MotionCoordinationNode(Node):
             self._execution.pending_scheduled_at = 0.0
             self._execution.pending_published_at = 0.0
 
+    def _local_initialize_payload(
+        self, message: GroupCommand, control_command: str, initialize_monotonic: float,
+    ) -> Dict[str, Any]:
+        """초기 위치 · 회차 초기화 예약의 로컬 브리지 칸 · 다시 예약(153 ②)도 같은 칸"""
+        return {
+            'command': control_command,
+            'execution_id': message.execution_id,
+            'cycle_number': int(message.cycle_number),
+            'initialize_monotonic': float(initialize_monotonic),
+            'network_operation_id': message.command_id,
+            'repeat_mode': self._execution.repeat_mode,
+            'dwell_sec': self._execution.dwell_sec,
+            'initialization_only': self._execution.initialization_only,
+            'run_mode': self._execution.run_mode,
+            'sync_mode': self._execution.sync_mode,
+            'target_cycle_count': self._execution.target_cycle_count,
+            'initial_move_time_sec': self._execution.initial_move_time_sec,
+            **self._segment_fields(),
+        }
+
+    def _is_own_cycle_initialize(self, message: GroupCommand) -> bool:
+        return (
+            str(getattr(message, 'command', '')) == 'cycle_initialize_at'
+            and str(getattr(message, 'coordinator_id', '')) == str(self._config.pc_id)
+        )
+
+    def _retry_own_cycle_initialize(
+        self, message: GroupCommand, result: Mapping[str, Any],
+    ) -> Mapping[str, Any]:
+        """진행 PC 자신의 회차 초기화 예약이 시간 때문에 못 잡혔다 · 그룹 취소 대신 제 것만 여유를 늘려 다시 · 수정 목록 153 ②
+
+        실물 2026-10-16 14:35 floating3(마스터) · 3회차 끝 「자신의 예약 확인 늦음 · cycle_initialize_at」 →
+        그룹 취소 → 매장 약 40 s 멈춤 · 다른 PC 는 이미 받은 시각에 초기 위치로 간다(취소하지 않으면
+        그대로) · 마스터만 늦게 출발해도 다음 회차 `start_at` 은 모두 초기화를 마친 뒤라 맞는다.
+
+        - 확실히 안 받은 거절만(`may_retry_own_cycle_initialize`) · 최대 2번 · 넘으면 거절 그대로 → 옛 취소
+        - 여유 = 잰 값(방금 못 잡힌 값 포함) · 회차 초기화 바닥 1.5 s
+        - `_schedule_sent` 를 끊김 없이 이어 둔다 · 그동안 마감 검사가 기다린다(`_own_cycle_initialize_open`)
+        - 마감 검사가 이미 취소했거나 다른 명령으로 넘어갔으면 하지 않는다
+        """
+        command_id = str(getattr(message, 'command_id', ''))
+        attempts = 0
+        try:
+            while not result.get('success') and may_retry_own_cycle_initialize(
+                str(message.command), str(result.get('message') or ''), attempts,
+            ):
+                with self._lock:
+                    if (
+                        self._execution.execution_id != str(message.execution_id)
+                        or str(message.execution_id) in self._cancelled_execution_ids
+                        or self._execution.pending_command_id != command_id
+                        or self._execution.pending_command != 'cycle_initialize_at'
+                    ):
+                        return result
+                    sent = getattr(self, '_schedule_sent', None)
+                    if sent is None:
+                        sent = self._schedule_sent = {}
+                    entry = sent.get(command_id)
+                    now = time.monotonic()
+                    if entry is not None:
+                        # 못 잡힌 한 번도 잰다 · 다음 여유가 늘게
+                        self._lead_planner().record(
+                            'cycle_initialize', self._config.pc_id, now - float(entry[0]),
+                        )
+                    lead = self._schedule_lead_sec('cycle_initialize')
+                    sent[command_id] = (now, now + lead)
+                attempts += 1
+                self.get_logger().warn(
+                    f'그룹 회차 초기화 · {self._config.pc_id} 자신의 예약 못 잡음 · '
+                    f'{result.get("message") or ""} · 그룹 취소 대신 이 PC 만 다시 예약 · '
+                    f'여유 {lead:.2f} s · {attempts}번째 · {message.cycle_number}회차'
+                )
+                result = self._call_local_control(self._local_initialize_payload(
+                    message, 'group_initialize_at', now + lead,
+                ))
+                if result.get('success'):
+                    self.get_logger().info(
+                        f'그룹 회차 초기화 · {self._config.pc_id} 다시 예약 됨 · {attempts}번째 · '
+                        f'{message.cycle_number}회차'
+                    )
+        except Exception as exc:  # noqa: BLE001 · 명령 처리 스레드를 죽이지 않는다 · 거절로 돌려 옛 취소
+            return {'success': False, 'message': f'회차 초기화 다시 예약 실패: {exc}'}
+        return result
+
     def _note_own_schedule_latency(self, message: GroupCommand, result: Mapping[str, Any]) -> None:
         """진행 PC 자신의 예약 확인 시간 · 늦게 끝나도 잰다(다음 여유가 늘게) · 로그 · 수정 목록 130
 
@@ -2828,6 +2947,7 @@ class MotionCoordinationNode(Node):
         reason = ''
         command = ''
         self_late = False
+        wait_reason = ''
         with self._lock:
             if not self._execution.pending_command_id or time.monotonic() < self._execution.pending_ack_deadline:
                 return
@@ -2862,7 +2982,18 @@ class MotionCoordinationNode(Node):
             self_late = only_self_late(
                 missing, self._config.pc_id, self._execution.pending_command,
             )
-            if self_late:
+            if self_late and self._own_cycle_initialize_open():
+                # 회차 초기화 · 진행 PC 자신의 로컬 호출(또는 다시 예약)이 아직 · 끝날 때까지 기다린다 ·
+                # 됨 = 확인 · 못 잡힘 = 다시 예약 또는 거절 → 옛 취소 · 수정 목록 153 ②
+                waiting_id = self._execution.pending_command_id
+                if getattr(self, '_self_late_wait_logged', '') == waiting_id:
+                    return
+                self._self_late_wait_logged = waiting_id
+                wait_reason = (
+                    f'{self._config.pc_id} 자신의 회차 초기화 예약 확인 늦음 · 그룹 취소하지 않고 '
+                    f'제 답을 기다림 · {self._execution.cycle_number}회차'
+                )
+            elif self_late:
                 budget_ms = max(
                     self._execution.pending_ack_deadline - self._execution.pending_published_at, 0.0,
                 ) * 1000.0 if self._execution.pending_published_at else 0.0
@@ -2873,6 +3004,9 @@ class MotionCoordinationNode(Node):
                 )
         if silent:
             self._exclude_participants(silent)
+            return
+        if wait_reason:
+            self.get_logger().warn(wait_reason)
             return
         if self_late:
             self._release_self_late(reason)
@@ -2885,6 +3019,16 @@ class MotionCoordinationNode(Node):
             self._stop_for_peer_failure(reason)
         if reason:
             self.get_logger().error(reason)
+
+    def _own_cycle_initialize_open(self) -> bool:
+        """진행 PC 자신의 회차 초기화 확인이 아직 오는 중 · 락 안에서 · 수정 목록 153 ②"""
+        if self._execution.pending_command != 'cycle_initialize_at':
+            return False
+        sent = getattr(self, '_schedule_sent', None) or {}
+        if self._execution.pending_command_id not in sent:
+            return False
+        published_at = float(self._execution.pending_published_at or 0.0)
+        return published_at > 0.0 and time.monotonic() - published_at < SELF_LATE_WAIT_MAX_SEC
 
     def _enforce_motion_start_report_deadline(self) -> None:
         with self._lock:
@@ -2963,6 +3107,8 @@ class MotionCoordinationNode(Node):
         motion_file_id: str = '',
         start_delay_sec: float = 0.0,
         initial_move_time_sec: float = 0.0,
+        segment_start_sec: float = 0.0,
+        segment_end_sec: float = 0.0,
     ) -> GroupCommand:
         message = GroupCommand()
         message.group_id = self._config.group_id
@@ -2989,11 +3135,14 @@ class MotionCoordinationNode(Node):
         _set_optional_message_field(message, 'motion_file_id', str(motion_file_id))
         _set_optional_message_field(message, 'start_delay_sec', float(start_delay_sec))
         _set_optional_message_field(message, 'initial_move_time_sec', float(initial_move_time_sec or 0.0))
+        # 구간 재생 · 0/0 = 통째로 · 모든 명령에 채운다(빈 칸 없이) · 2026-10-16
+        _set_optional_message_field(message, 'segment_start_sec', max(float(segment_start_sec or 0.0), 0.0))
+        _set_optional_message_field(message, 'segment_end_sec', max(float(segment_end_sec or 0.0), 0.0))
         return message
 
     def _publish_event(
         self, command: GroupCommand, event: str, success: bool, message_text: str,
-        *, triggered_at: float = 0.0,
+        *, triggered_at: float = 0.0, state: str = '',
     ) -> None:
         message = GroupEvent()
         message.group_id = self._config.group_id
@@ -3002,7 +3151,7 @@ class MotionCoordinationNode(Node):
         message.pc_id = self._config.pc_id
         message.boot_id = self._boot_id
         message.event = event
-        message.state = self._local_group_state()
+        message.state = state or self._local_group_state()
         message.sequence = self._next_sequence()
         message.cycle_number = int(command.cycle_number)
         _set_stamp(message.occurred_at, time.time())
@@ -3038,6 +3187,14 @@ class MotionCoordinationNode(Node):
                 return
             execution_id = str(status.get('execution_id') or '')
             if not execution_id or execution_id != self._execution.execution_id:
+                return
+            if (
+                self._execution.coordinator_id == self._config.pc_id
+                and self._config.pc_id not in self._execution.participants
+            ):
+                # 진행 PC 가 참가에서 빠졌다(웹 다시 시작 · 145 ①) · 나머지는 계속 돈다 · 제 재생의
+                # 「정지」 를 그룹 사건으로 내면 스피커가 진행 PC 의 정지로 읽고 소리를 끊는다 · 146 ·
+                # 이 PC 자신도 실행 밖 PC 사건으로 버린다(`_event_callback`)
                 return
             phase = str(status.get('phase') or '')
             cycle = int(status.get('group_cycle_number') or status.get('current_cycle') or 0)
@@ -3283,8 +3440,16 @@ class MotionCoordinationNode(Node):
         budget = max(1.5, float(self._config.prepare_timeout_sec))
         return self._local_http(
             '/api/coordination/local-readiness',
-            {'budget_sec': budget},
+            # 구간 재생 · 재생 목록 1번이 구간 시작보다 짧으면 브리지가 거절한다(→ 이 PC 만 빠짐) · 2026-10-16
+            {'budget_sec': budget, **self._segment_fields()},
             timeout_sec=budget,
+        )
+
+    def _segment_fields(self) -> Dict[str, float]:
+        """지금 그룹 실행의 구간 재생 · 로컬 브리지 · 스피커 알림에 싣는 칸 · 0/0 = 통째로"""
+        return motion_segment.fields(
+            float(getattr(self._execution, 'segment_start_sec', 0.0) or 0.0),
+            float(getattr(self._execution, 'segment_end_sec', 0.0) or 0.0),
         )
 
     def _call_local_control(
@@ -3478,6 +3643,9 @@ class MotionCoordinationNode(Node):
                 motion_file_id=key[0],
                 # 이미 시작했다 · 음수 · 스피커가 받은 시각에서 빼서 같은 순간에 맞춘다
                 start_delay_sec=started_at - time.time(),
+                # 구간 재생 · 스피커가 그 시각부터 · 2026-10-16
+                segment_start_sec=float(status.get('segment_start_sec') or 0.0),
+                segment_end_sec=float(status.get('segment_end_sec') or 0.0),
             )
             self._remember_own_command(command.command_id)
             self._command_pub.publish(command)
@@ -3561,6 +3729,8 @@ class MotionCoordinationNode(Node):
                 'command': 'stop_after_cycle',
                 'execution_id': self._execution.execution_id,
                 'network_operation_id': f'local-grade1-{message.sequence}',
+                # 진행 PC 면 아래에서 모두에게 보낸다 · 슬레이브 혼자면 옛 그대로 회차 끝에 멈춘다 · 수정 목록 154
+                'group_wide': self._execution.coordinator_id == self._config.pc_id,
             })
             if self._execution.coordinator_id == self._config.pc_id:
                 self._broadcast_stop('stop_after_cycle')
@@ -3692,6 +3862,8 @@ class MotionCoordinationNode(Node):
                     'cycle_number': cycle_number,
                     'target_cycle_count': self._execution.target_cycle_count,
                     'sync_mode': self._execution.sync_mode,
+                    # 구간 재생 · 0/0 = 통째로 · 2026-10-16
+                    **self._segment_fields(),
                     # 누가 시작했나 · human · schedule · 진행 PC 만 안다(시작 요청을 받은 PC) · 나머지는 빈 값 ·
                     # 스케줄 노드가 구간 끝 정지 판정에 쓴다(제 기억보다 이것을 믿는다) · 로컬 상태 JSON 만 ·
                     # DDS 메시지 · 약속 번호는 그대로 · 수정 목록 143
@@ -3796,7 +3968,31 @@ class MotionCoordinationNode(Node):
                 active = self._execution.execution_id
                 self._cancelled_execution_ids = {active} if active else set()
 
+    def _announce_group_stopped(self) -> None:
+        """진행 PC 가 그룹 실행을 놓는다 · 그 실행의 「정지」 사건을 한 번 낸다 · 수정 목록 146 ②
+
+        스피커는 진행 PC 가 보낸 그 실행 번호의 `stopped` 로 소리를 멈춘다 · 전에는 즉시 정지 · 남은 PC
+        없음 · 회차 후 정지 끝 · 진행 PC 자신의 빠짐 어디서도 확실한 사건이 없었다(진행 PC 의 런타임
+        `stopped` 는 실행을 지운 뒤라 `_emit_local_runtime_event` 가 버렸다) · 그래서 지우기 **전에**
+        여기서 낸다 · `state` 는 캐시된 모션 상태가 아니라 `stopped` · 같은 실행에 두 번 내지 않는다 ·
+        진행 PC 자신은 이 사건을 지운 뒤에 받으므로(실행 번호가 다름) 장벽·풀기에 끼지 않는다.
+        """
+        execution_id = self._execution.execution_id
+        if not execution_id or self._execution.coordinator_id != self._config.pc_id:
+            return
+        if getattr(self, '_group_stop_announced_id', '') == execution_id:
+            return
+        self._group_stop_announced_id = execution_id
+        command = GroupCommand()
+        command.execution_id = execution_id
+        command.command_id = f'group-stopped-{execution_id}'
+        command.cycle_number = int(self._execution.cycle_number)
+        self._publish_event(
+            command, 'stopped', True, '그룹 실행 정지', state='stopped',
+        )
+
     def _clear_active_execution(self) -> None:
+        self._announce_group_stopped()
         if (
             self._execution.joining
             and self._execution.coordinator_id == self._config.pc_id

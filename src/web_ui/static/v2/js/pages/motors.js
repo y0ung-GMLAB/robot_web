@@ -63,7 +63,7 @@ function watchJob(state, changed) {
   if (ui.job?.state === 'running' && !jobTimer) {
     jobTimer = setInterval(async () => {
       try { ui.job = await api('GET', '/api/motor-config/absolute-setup', { timeoutMs: 3000 }); } catch { /* 다음에 */ }
-      if (ui.job?.state !== 'running' || !/^#\/(maintain-motors|mapping)/.test(location.hash)) { clearInterval(jobTimer); jobTimer = null; }
+      if (ui.job?.state !== 'running' || !/^#\/(maintain-motors|mapping|motors)/.test(location.hash)) { clearInterval(jobTimer); jobTimer = null; }
       changed();
     }, 1000);
   }
@@ -388,14 +388,14 @@ function detailCard(state, changed, row) {
       h('pre', { class: 'doc-code small' }, h('code', { text: JSON.stringify({ identity: motor.identity, profile: motor.profile, config: motor.config }, null, 2) }))));
 }
 
-/** ① 구획 머리 오른쪽 · 다시 검색 */
+/** ② 구획 머리 오른쪽 · 다시 검색 */
 export function motorsActions(state, changed) {
   return h('div', { class: 'segmented', role: 'group', 'aria-label': '모터 검색' },
     Object.entries(SCAN_KINDS).map(([kind, spec]) => h('button', { class: 'seg', type: 'button', disabled: Boolean(ui.busy),
       title: `${spec.label} 다시 검색 · 결과는 저장하기 전까지 화면에만 표시됩니다`, onclick: () => scan(kind, state, changed) }, `${spec.label} 검색`)));
 }
 
-/** ① 모터·드라이브 구획 본문 · 머리와 저장 칸은 motor_setup.js */
+/** ② 모터·드라이브 구획 본문 · 머리와 저장 칸은 motor_setup.js */
 export function motorsBody(state, changed) {
   if (!ui.draft) return h('p', { class: ui.error ? 'tone-text-bad' : 'muted', text: ui.error || '불러오는 중…' });
   const rows = motorRows(ui.draft, state.snap);

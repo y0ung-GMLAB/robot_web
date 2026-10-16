@@ -58,7 +58,9 @@ class GroupSession:
                 return SCHEDULE_END_STOP_MESSAGE
             return default
 
-    def request_stop_after_cycle(self, current: Dict[str, Any], reason: str = '') -> bool:
+    def request_stop_after_cycle(
+        self, current: Dict[str, Any], reason: str = '', group_wide: bool = False,
+    ) -> bool:
         """이번 주기까지만 · 활성 세션이 없으면 거짓.
 
         정지 지시가 실제로 서려면 세션 표시만으로는 부족하다 · 재생 루프가 보는
@@ -66,23 +68,47 @@ class GroupSession:
         `_stop_event`까지 세워 즉시 끝낸다.
 
         `reason` · 스케줄 구간 끝이면 `schedule_end` · 끝 문구를 가른다 · 수정 목록 141
+
+        `group_wide` · 진행 PC 가 아는 그룹 전체 회차 후 정지(연동 노드가 DDS 로 받거나 보낸 것) ·
+        회차 맞춤이면 제 회차를 끝내고 **장벽에 머문다** · 진행 PC 가 모든 PC 회차 끝을 보고 푼다 ·
+        전에는 짧은 PC 가 바로 멈춰(`stopped`) 긴 PC 의 마지막 회차가 잘렸다 · 수정 목록 154 ·
+        아니면(이 PC 만 · 1등급 알람 · 단독 길) 옛 그대로 회차 끝에 멈춘다 · 진행 PC 가 「먼저 정지」 로 푼다
         """
         with self.condition:
             if not self.session.get('active'):
                 return False
             self.session['stop_after_cycle'] = True
+            if group_wide:
+                self.session['stop_after_cycle_group'] = True
             if reason or not self.session.get('stop_reason'):
                 self.session['stop_reason'] = str(reason or '')
             self.manager._graceful_stop_event.set()
-            finishing = {'running', 'verifying', 'motion_completed'}
+            # `completed` · 회차 애니가 막 끝나 장벽 표시 직전 · 여기서 끊으면 회차 끝이 「정지」 로 나간다 · 154
+            finishing = {'running', 'verifying', 'completed', 'motion_completed'}
             if self.session.get('independent'):
                 # 각자 재생 · 회차 사이(초기 위치 이동·대기)도 재생 루프 안이다 ·
                 # 루프가 회차 후 정지를 보고 멈춘다 · 움직이는 도중 끊지 않는다
                 finishing |= {'initializing', 'initialized', 'waiting'}
             if current.get('state') not in finishing:
                 self.manager._stop_event.set()
+            # 이미 장벽에서 다른 PC 를 기다리는 중 · 화면에 「회차 후 정지 대기」 · 155
+            at_barrier = (
+                group_wide
+                and not self.session.get('independent')
+                and self.session.get('state') == 'motion_completed'
+            )
+            barrier_cycle = int(self.session.get('cycle_number') or 0)
             self.condition.notify_all()
-            return True
+        if at_barrier:
+            self._mark_stop_wait(barrier_cycle)
+        return True
+
+    def _mark_stop_wait(self, cycle_number: int) -> None:
+        """회차 맞춤 · 제 회차를 끝냈고 회차 후 정지 대기 · 상태 · 단계는 그대로(장벽 보고가 그것으로 나간다) · 155"""
+        self.manager._update_status({
+            'message': f'그룹 모션 {cycle_number}회차 완료 · 회차 후 정지 대기 · 다른 PC 회차 끝 기다림',
+            'group_stop_after_cycle': True,
+        })
 
     def prepare(self, payload: Dict[str, Any]) -> Dict[str, Any]:
         """Prepare one persistent group session without enabling local repeat.
@@ -335,13 +361,7 @@ class GroupSession:
                 'message': '이전 그룹 실행 정리 중입니다. 잠시 후 다시 시도하세요',
                 'status': self.manager.status(),
             }
-        if finished:
-            self.manager._update_status({
-                'state': 'completed',
-                'phase': 'completed',
-                'message': '그룹 실행 완료',
-            })
-            return {'success': True, 'message': '그룹 실행 완료 · 세션 정리', 'status': self.manager.status()}
+        # 회차 후 정지가 먼저 · 회차 맞춤은 장벽(`motion_completed`)에서 이 풀기를 기다린다 · 끝 문구는 회차 후 정지 · 154
         if after_cycle_text:
             self.manager._update_status({
                 'state': 'stopped',
@@ -350,6 +370,13 @@ class GroupSession:
                 'phase_finished_at': time.time(),
             })
             return {'success': True, 'message': f'{after_cycle_text} · 세션 정리', 'status': self.manager.status()}
+        if finished:
+            self.manager._update_status({
+                'state': 'completed',
+                'phase': 'completed',
+                'message': '그룹 실행 완료',
+            })
+            return {'success': True, 'message': '그룹 실행 완료 · 세션 정리', 'status': self.manager.status()}
         self.manager._update_status({
             'state': 'stopped',
             'phase': 'stopped',
@@ -524,9 +551,15 @@ class GroupSession:
                         'cycle_number': cycle_number,
                     })
                     stop_after_cycle = bool(self.session.get('stop_after_cycle'))
-                if stop_after_cycle:
+                    stop_wait = stop_after_cycle and bool(self.session.get('stop_after_cycle_group'))
+                if stop_after_cycle and not stop_wait:
+                    # 이 PC 만의 회차 후 정지 · 진행 PC 는 모른다 · 멈춰서 「먼저 정지」 로 알린다
                     self._finish(self.after_cycle_stop_message() or GROUP_AFTER_CYCLE_STOP_MESSAGE)
                     return
+                if stop_wait:
+                    # 그룹 전체 회차 후 정지 · 장벽(`motion_completed`)에 머문다 · 진행 PC 가 모든 PC 회차 끝을
+                    # 보고 풀기(`cancel`)를 보낸다 · 그때 끝 문구 · 1회 재생과 같은 길 · 수정 목록 154
+                    self._mark_stop_wait(cycle_number)
                 if not self._initialize_next_cycle(
                     execution_id, cycle_number, playlist, initialization_plan,
                 ):

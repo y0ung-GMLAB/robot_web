@@ -151,6 +151,40 @@ test('게인 쓰기 · 바뀐 칸만 · 범위 · 뜻은 마우스로 (수정 �
   assert.match(gainHint(GAIN_FIELDS[0], 3), /3 = 수직축/);
 });
 
+test('지령 필터 · 강성 옆 · 0.1 ms 정수 그대로 · ms 로 같이 보여 줌 · FIR 은 멈췄을 때만 (2026-10-16)', async () => {
+  const { gainChanges, gainHint, gainMs, gainValueText, GAIN_FIELDS } = await import('../static/v2/js/pages/drive_gains.js');
+  const keys = GAIN_FIELDS.map((f) => f.key);
+  assert.equal(keys.indexOf('command_smoothing'), keys.indexOf('stiffness') + 1);     // 강성 바로 옆
+  assert.equal(keys.indexOf('command_fir'), keys.indexOf('stiffness') + 2);
+  const smoothing = GAIN_FIELDS.find((f) => f.key === 'command_smoothing');
+  const fir = GAIN_FIELDS.find((f) => f.key === 'command_fir');
+  assert.equal(gainValueText(smoothing, 92), '92 (9.2 ms)');
+  assert.equal(gainValueText(fir, 10), '10 (1.0 ms)');
+  assert.equal(gainValueText(GAIN_FIELDS.find((f) => f.key === 'stiffness'), 13), '13');   // ms 칸이 아니면 숫자 그대로
+  assert.equal(gainValueText(fir, null), '-');
+  assert.equal(gainMs(fir, ''), '');
+  const gains = { stiffness: 13, command_smoothing: 92, command_fir: 10 };
+  assert.deepEqual(gainChanges(gains, { command_smoothing: '139', command_fir: '10' }).values, { command_smoothing: 139 });   // 입력은 0.1 ms 정수
+  assert.match(gainChanges(gains, { command_fir: '10001' }).problems[0], /0~10000 사이 정수 \(0\.1 ms 단위/);
+  assert.equal(gainChanges(gains, { command_smoothing: '9.2' }).problems.length, 1);       // ms 로 적으면 거절(정수만)
+  assert.match(gainHint(smoothing, 92), /92 = 9\.2 ms/);
+  assert.match(gainHint(smoothing, 92), /강성을 바꾸면 자동조정이 이 값을 다시 쓸 수 있음/);
+  assert.match(gainHint(fir, 10), /멈춰 있을 때만/);
+  assert.ok(fir.stoppedOnly && !smoothing.stoppedOnly);
+});
+
+test('지령 필터 · 표 마우스 글 · 축마다 다르면 알림 (2026-10-16)', async () => {
+  const { gainText, gainWarnings } = await import('../static/v2/js/motors_model.js');
+  const a = { auto_tuning: 1, stiffness: 13, inertia_ratio: 137, estimation_speed: 1, command_smoothing: 92, command_fir: 10, error: '' };
+  assert.match(gainText(a).hint, /지령 스무딩\(Pr2\.22\) 92 \(9\.2 ms\)/);
+  assert.match(gainText(a).hint, /지령 FIR\(Pr2\.23\) 10 \(1\.0 ms\)/);
+  assert.match(gainText({ ...a, command_fir: null }).hint, /지령 FIR\(Pr2\.23\) \?/);
+  assert.deepEqual(gainWarnings([{ axis: 0, ac: true, gains: a }, { axis: 1, ac: true, gains: a }]), []);
+  const warnings = gainWarnings([{ axis: 0, ac: true, gains: a }, { axis: 1, ac: true, gains: { ...a, command_fir: 50 } }]);
+  assert.equal(warnings.length, 1);
+  assert.match(warnings[0], /지령 FIR 필터가 다릅니다.*0번 10 \(1\.0 ms\) · 1번 50 \(5\.0 ms\)/);
+});
+
 test('파라미터 (고급) · 다름 표시 · 마우스 글 (수정 목록 109 · 114)', async () => {
   const { rowFlags, rowHint } = await import('../static/v2/js/pages/drive_params.js');
   const row = { number: 'Pr5.12', index: 0x3512, subindex: 0, type: 'int16', memo: '', factory: 0, drive: 50, boot: 0,

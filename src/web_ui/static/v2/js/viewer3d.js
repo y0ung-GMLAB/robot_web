@@ -9,8 +9,8 @@
 import { h } from './dom.js';
 import { api } from './net.js';
 import {
-  blenderUsesJoints, blenderViewAllowed, bodyLocalPose, cameraPosition, followEndSec, followPlayheadSec,
-  frameIndexAt, jointNodeRotation, jointsByBody, nextClockOffset, sampleJointValues,
+  blenderUsesJoints, blenderViewAllowed, bodyLocalPose, cameraPosition, followEndSec, followPlayheadSec, followRestSec,
+  frameIndexAt, jointNodeRotation, jointsByBody, nextClockOffset, rigQuatsFromJoints, sampleJointValues, sceneFrontDir,
 } from '../../js/sim3d_math.js';
 
 const THREE_URL = '/static/vendor/three/three.module.js';
@@ -229,12 +229,15 @@ function createViewer3d() {
           duration = Math.max(duration, clip.duration);
         }
       }
-      // 장면 전체가 보이게 · glTF 는 Y-up · 정면은 +Z
+      // 장면 전체가 보이게 · glTF 는 Y-up · 로봇들 정면(리그 +Z = Blender −Y)의 평균 쪽에서 · MuJoCo 뷰처럼 정면 ·
+      // 매장 배치로 로봇마다 돌아 있어 장면 +Z 에서 보면 얼굴을 옆에서 봤다
       const box = new THREE.Box3().setFromObject(gltf.scene);
       const center = box.getCenter(new THREE.Vector3());
       const radius = Math.max(box.getSize(new THREE.Vector3()).length() / 2, 0.5);
+      const [fx, , fz] = sceneFrontDir(rigQuatsFromJoints(gltf.scene, info.joints, (name) => gltf.scene.getObjectByName(name)
+        || gltf.scene.getObjectByName(THREE.PropertyBinding.sanitizeNodeName(name))));
       const camera = new THREE.PerspectiveCamera(40, 1, radius / 100, radius * 50);
-      camera.position.set(center.x, center.y + radius * 0.3, center.z + radius * 2.4);
+      camera.position.set(center.x + fx * radius * 2.4, center.y + radius * 0.3, center.z + fz * radius * 2.4);
       const controls = new OrbitControls(camera, renderer.domElement);
       controls.target.copy(center);
       controls.update();
@@ -343,7 +346,8 @@ function createViewer3d() {
     if (!node.isConnected) return;   // 화면에서 빠지면 멈춘다 · 다시 붙으면 update 가 깨운다
     const st = latest.status || {};
     const running = String(st.state || '') === 'running';
-    const playhead = followPlayheadSec(st, Date.now() / 1000, clock.offset) ?? 0;
+    // 파일 시각 · 구간 재생이면 구간 시작부터 · 쉬는 중엔 구간 시작 자세(초기 위치) · 2026-10-16
+    const playhead = followPlayheadSec(st, Date.now() / 1000, clock.offset) ?? followRestSec(st);
     const blenderShown = view === 'blender' && blenderAllowed() && bl;
     let duration = 0;
     if (blenderShown) {

@@ -20,7 +20,7 @@ from typing import Any, Dict, List, Mapping, Optional
 
 from motion_common import axis_ownership
 
-from motion_common import cycle_failure, joint_mapping, repeat_policy, units, wire_units
+from motion_common import cycle_failure, joint_mapping, motion_segment, repeat_policy, units, wire_units
 
 from motion_common.values import finite_float
 from std_msgs.msg import Int8MultiArray, String
@@ -281,10 +281,15 @@ class MotionPlayer:
         항목 순서는 목록 그대로 · 같은 파일이 두 번 있어도 된다 (계산은 한 번).
         재시작은 늘 1번부터 · 등록이 첫 항목을 `motion_file_id` 로 두므로
         요청 파일이 곧 1번이다.
+
+        구간 재생이면 목록을 쓰지 않는다 · 1번의 그 구간만 (연속이면 그 구간을 되풀이) · 2026-10-16
         """
         names = [str(name) for name in (plan.get('motion_playlist') or [])]
         if (
             len(names) <= 1
+            or motion_segment.is_active(
+                plan.get(motion_segment.START_KEY), plan.get(motion_segment.END_KEY),
+            )
             or (
                 require_continuous
                 and str(plan.get('run_mode') or '') != 'continuous'

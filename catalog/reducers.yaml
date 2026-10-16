@@ -36,7 +36,7 @@ KHY55-R44V:
 PGX44-H:
   vendor: 흥진ATG
   kind: planetary 2-stage
-  ratio: 35
+  ratio: 50   # 사용자 2026-10-15 · 1:50 (전 35) · 아래 토크는 35 기준 값 그대로 · 1:50 정격 확인 필요
   t2n_nm: 13
   t2b_nm: 23.4
   estop_nm: 39

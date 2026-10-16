@@ -5,6 +5,11 @@
 # aplay가 "Device or resource busy"로 실패해 소리가 전혀 나지 않는다.
 # 스피커 전용 PC이므로 PulseAudio를 봉인해 장치를 앱 전용으로 만든다.
 # (데스크톱 소리는 나지 않게 된다 — 의도한 동작이다)
+#
+# 블루투스 앰프·스피커는 PulseAudio 대신 bluez-alsa 로 낸다(aplay 그대로 · 2026-10-15 스피커 PC 확인):
+#   sudo apt install -y bluez-alsa-utils   (scripts/install_speaker.sh 가 깔아 둔다)
+#   bluetoothctl → scan on → pair <MAC> → trust <MAC> → connect <MAC>
+#   스피커 화면 출력 장치 = bluealsa:DEV=<MAC>,PROFILE=a2dp
 
 set -e
 

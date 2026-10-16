@@ -33,8 +33,10 @@ from .participant_rules import STARTED_BY_SCHEDULE, normalize_started_by
 #: 세운다 · 진행 PC 는 제 `join` 을 처리하지 않는다 · 이미 놓은 실행의 풀기에는 「정지」 로 답한다(수정 목록 136)
 #: 9 · 2026-10-14 칸은 같고 그룹 동작이 바뀜 · 웹 서비스가 정상 종료되면 `participant_left` 사건으로 그 PC 만
 #: 빠진다 · 알림 없는 끊김도 2등급으로 잠그지 않는다(수정 목록 144 · 145) · 옛 진행 PC 는 새 사건을 몰라
-#: 정지 + 2등급으로 갈린다 → 같은 버전끼리만
-GROUP_PROTOCOL_VERSION = 9
+#: 정지 + 2등급으로 갈린다 → 같은 버전끼리만 ·
+#: 10 · 2026-10-16 `GroupCommand.segment_start_sec`·`segment_end_sec` (구간 재생 · 재생 목록 1번을 같은
+#: 시각부터 · 스피커도 그 시각부터 음원) · 메시지 칸이 바뀜 → 로봇 PC · 스피커 모두 같은 버전 · 다시 빌드
+GROUP_PROTOCOL_VERSION = 10
 
 #: 진행 PC 가 **뺀 PC 하나에만** 보내는 풀기 명령의 번호 앞머리 · 수정 목록 123
 #:
@@ -286,6 +288,9 @@ class GroupExecution:
         self.dwell_sec = 0.0
         #: 초기 위치 이동 시간 · 0 = PC마다 조인트 매핑 값 · 2026-10-12
         self.initial_move_time_sec = 0.0
+        #: 구간 재생 · 파일 시각 · 0/0 = 통째로 · PC 마다 제 재생 목록 1번을 같은 시각으로 · 2026-10-16
+        self.segment_start_sec = 0.0
+        self.segment_end_sec = 0.0
         self.target_cycle_count = 0
         self.initialization_only = False
         #: 회차 맞춤(lockstep) / 각자 재생(independent) · 수정 목록 35
@@ -377,6 +382,8 @@ class GroupExecution:
         initial_move_time_sec: float = 0.0,
         started_by: str = STARTED_BY_SCHEDULE,
         coordinator_participates: bool = True,
+        segment_start_sec: float = 0.0,
+        segment_end_sec: float = 0.0,
     ) -> str:
         """`coordinator_participates=False` · 진행 PC 가 바빠(단독 재생 · 사람 조작 · 준비 안 됨) 빠지고
         진행만 한다 · 참가 목록에 진행 PC 가 없다 · 수정 목록 136"""
@@ -400,6 +407,8 @@ class GroupExecution:
         self.initialization_only = bool(initialization_only)
         self.sync_mode = normalize_group_sync_mode(sync_mode)
         self.initial_move_time_sec = max(float(initial_move_time_sec or 0.0), 0.0)
+        self.segment_start_sec = max(float(segment_start_sec or 0.0), 0.0)
+        self.segment_end_sec = max(float(segment_end_sec or 0.0), 0.0)
         self.started_by = normalize_started_by(started_by)
         self.state = 'preparing'
         return self.execution_id

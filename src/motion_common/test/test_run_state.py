@@ -53,6 +53,9 @@ def test_case_and_space_do_not_matter():
     'preparing', 'initializing', 'armed', 'start_scheduled', 'waiting',
     'running', 'waiting_cycle_ready', 'cycle_ready', 'stop_after_cycle',
     'releasing',
+    # 회차 맞춤 장벽 · 슬레이브 런타임 단계 · 수정 목록 155
+    'motion_completed', 'cycle_initializing', 'verifying', 'completed',
+    'initialized', 'join_ready',
 ])
 def test_a_live_group_execution_counts_as_running(state):
     """준비 단계도 「돌고 있다」다 · §6-145

@@ -1,8 +1,9 @@
-/** UI v2 · 모터 설정 · ① 모터·드라이브 와 ② 조인트 매핑 을 한 페이지의 두 구획으로 (사용자 결정 2026-10-12)
+/** UI v2 · 모터 설정 · ① 조인트 매핑 과 ② 모터·드라이브 를 한 페이지의 두 구획으로 (사용자 결정 2026-10-12)
  *
  * 따로 있던 두 화면이 각자 단계 표시와 「저장 후 장비에 적용」 을 갖고 있어 같은 일을 하는 것처럼 보였다 ·
  * 탭으로 나누는 것보다 한 페이지에 구획을 나눠 두는 쪽이 찾기 쉽다(사용자) · 머리 · 저장 칸은 여기 하나만.
- * 저장은 바뀐 쪽만 · 장비 적용은 둘 다 저장한 뒤 한 번 · #/mapping 주소는 ② 구획으로 스크롤.
+ * 저장은 바뀐 쪽만 · 장비 적용은 둘 다 저장한 뒤 한 번 · #/mapping 주소는 ① 구획 · #/motors 주소는 ② 구획으로 스크롤.
+ * 2026-10-16 (사용자) 조인트 매핑을 위로 · 처음 설치 순서(모터 검색 → 「인식 모터 자동 생성」)는 그대로, 화면 위치만 바뀜.
  */
 import { h, dot } from '../dom.js';
 import { bootParamsNotice } from '../model.js';
@@ -12,10 +13,14 @@ import { loadMotors, motorsActions, motorsBody, motorsDraft, revertMotors, saveM
 import { isRevisionConflict } from '../mapping_model.js';
 import { loadMapping, mappingActions, mappingBody, mappingDraft, mappingNote, revertMapping, saveMapping } from './mapping.js';
 
-const SETUP_PARTS = [
-  ['part-motors', '① 모터·드라이브', '실제 모터 · 검색 · 이름 · 속도 · 브레이크 · 서보 · 앱솔루트'],
-  ['part-mapping', '② 조인트 매핑', '애니메이션 조인트 값을 모터 값으로 바꾸는 규칙 · 감속·기어비 · 방향 · 기준점 · 범위'],
+// 화면 위에서부터 · [구획 id, 제목, 설명, 주소] · 2026-10-16 조인트 매핑을 위로 (사용자)
+export const SETUP_PARTS = [
+  ['part-mapping', '① 조인트 매핑', '애니메이션 조인트 값을 모터 값으로 바꾸는 규칙 · 감속·기어비 · 방향 · 기준점 · 범위', 'mapping'],
+  ['part-motors', '② 모터·드라이브', '실제 모터 · 검색 · 이름 · 속도 · 브레이크 · 서보 · 앱솔루트 · 게인', 'motors'],
 ];
+const part = (id) => SETUP_PARTS.find(([partId]) => partId === id);
+// 이 주소로 들어오면 그 구획으로 한 번 내려간다 · #/maintain-motors(메뉴)는 페이지 맨 위
+const SCROLL_ROUTES = Object.fromEntries(SETUP_PARTS.map(([id, , , route]) => [route, id]));
 
 const ui = { busy: false, scrolledFor: '' };
 
@@ -149,31 +154,32 @@ export function renderSetup(state, { changed }) {
   const status = setupStatus(state.snap, { dirty });
   const busy = ui.busy || Boolean(motors.busy) || Boolean(mapping.busy);
   const problems = [...motors.problems, ...mapping.problems];
-  // #/mapping 으로 들어오면 ② 구획으로 한 번만 내려간다
-  const route = location.hash.replace(/^#\/?/, '');
-  if (route === 'mapping' && ui.scrolledFor !== 'mapping' && mapping.ready) {
-    ui.scrolledFor = 'mapping';
-    requestAnimationFrame(() => jumpTo('part-mapping'));
-  } else if (route !== 'mapping') {
+  // #/mapping → ① 구획 · #/motors → ② 구획 · 한 번만 내려간다(다시 그릴 때마다 끌어내리지 않게)
+  const route = location.hash.replace(/^#\/?/, '').split('?')[0];
+  const target = SCROLL_ROUTES[route];
+  if (target && ui.scrolledFor !== route && mapping.ready) {
+    ui.scrolledFor = route;
+    requestAnimationFrame(() => jumpTo(target));
+  } else if (!target) {
     ui.scrolledFor = '';
   }
   return [
     h('div', { class: 'page-head' },
       h('h1', { text: '모터 설정' }),
       h('nav', { class: 'row part-jumps', 'aria-label': '바로 가기' },
-        SETUP_PARTS.map(([id, label]) => h('a', { class: 'btn btn-mini', href: `#/${id === 'part-mapping' ? 'mapping' : 'maintain-motors'}`,
+        SETUP_PARTS.map(([id, label, , partRoute]) => h('a', { class: 'btn btn-mini', href: `#/${partRoute}`,
           onclick: (event) => { event.preventDefault(); jumpTo(id); } }, label))),
       h('span', { class: `chip chip-${status.apply[1]}`, text: status.apply[0] })),
     // 지금 도는 모터 프로그램이 옛 부팅 값 · 업데이트만 하고 적용 안 함 · 수정 목록 116
     status.boot ? h('div', { class: 'blocker' }, dot('warn'),
       h('span', { class: 'grow' }, h('strong', { text: status.boot.title }), h('span', { class: 'muted small', text: ` · ${status.boot.detail}` })),
       h('button', { class: 'btn btn-warn', type: 'button', disabled: busy || Boolean(problems.length), onclick: () => save(state, changed, { apply: true }) }, '저장 후 장비에 적용')) : null,
-    h('section', { class: 'setup-part', id: 'part-motors', 'aria-label': '모터·드라이브' },
-      partHead(SETUP_PARTS[0], status.motors, motorsActions(state, changed)),
-      motorsBody(state, changed)),
     h('section', { class: 'setup-part', id: 'part-mapping', 'aria-label': '조인트 매핑' },
-      partHead(SETUP_PARTS[1], status.mapping, mappingActions(state, changed), mapping.ready ? mappingNote() : null),
+      partHead(part('part-mapping'), status.mapping, mappingActions(state, changed), mapping.ready ? mappingNote() : null),
       mappingBody(state, changed)),
+    h('section', { class: 'setup-part', id: 'part-motors', 'aria-label': '모터·드라이브' },
+      partHead(part('part-motors'), status.motors, motorsActions(state, changed)),
+      motorsBody(state, changed)),
     h('div', { class: 'apply-bar' },
       h('div', { class: 'grow' },
         h('span', { text: pendingText(motors.changes, mapping.changes) }),

@@ -14,8 +14,8 @@ export const NAV = [
   { label: '기록·도구', items: [['records', '기록'], ['tools', '터미널 · PC 성능'], ['docs', '사용법']] },
 ];
 
-/** 메뉴에 따로 없는 화면 → 메뉴에서 켜질 칸 · 조인트 매핑은 「모터 설정」 의 두 번째 탭 */
-export const NAV_ALIASES = { mapping: 'maintain-motors' };
+/** 메뉴에 따로 없는 화면 → 메뉴에서 켜질 칸 · 조인트 매핑(①) · 모터·드라이브(②)는 「모터 설정」 한 페이지의 구획 */
+export const NAV_ALIASES = { mapping: 'maintain-motors', motors: 'maintain-motors' };
 
 export function routeLabel(route) {
   const id = NAV_ALIASES[route] || route;

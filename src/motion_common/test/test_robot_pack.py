@@ -18,7 +18,7 @@ ROBOT = {
         {'joint': 'neck_pitch', 'motion_id': '2-1', 'motor': 'MSMF082L1T2', 'reducer': 'KHY-90-2-RV',
          'ratio': 150, 'range_deg': [-10, 13], 'servo_bw_hz': 5},
         {'joint': 'eye_yaw_l', 'motion_id': '2-4', 'motor': 'MSMF5AZL1', 'reducer': 'PGX44-H',
-         'ratio': 35, 'range_deg': [-12, 12], 'servo_bw_hz': 12},
+         'ratio': 50, 'range_deg': [-12, 12], 'servo_bw_hz': 12},
     ],
     'drive': {'profile_velocity_deg_s': 18000, 'profile_accel_deg_s2': 180000},
     'env': {
@@ -103,7 +103,7 @@ def test_ratio_differing_from_catalog_is_only_a_warning(tmp_path):
     axes = [dict(ROBOT['axes'][1], ratio=40)]
     report = robot_pack.inspect_pack(make_pack(tmp_path / 'p', _robot(axes=axes)))
     assert report.errors == []
-    assert any('ratio 40 ≠ 카탈로그 PGX44-H 35' in w for w in report.warnings)
+    assert any('ratio 40 ≠ 카탈로그 PGX44-H 50' in w for w in report.warnings)
 
 
 def test_axis_without_reducer_is_allowed(tmp_path):

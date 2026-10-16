@@ -14,5 +14,5 @@ test('출렁임 알림 · 축마다 · 홈에도', () => {
   const issue = collectIssues(snap).find((i) => i.title.startsWith('2번 모터가 목표 근처에서 출렁입니다'));
   assert.ok(issue);
   assert.equal(issue.tone, 'warn');
-  assert.deepEqual(issue.action, { kind: 'open', target: 'maintain-motors', label: '모터 설정 열기' });
+  assert.deepEqual(issue.action, { kind: 'open', target: 'motors', label: '모터 설정 열기' });
 });

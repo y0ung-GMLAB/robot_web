@@ -73,6 +73,9 @@ def resolve_display_step(status: Mapping[str, Any]) -> str:
         return '그룹 대기'
     phase = _text(status.get('phase'))
     state = _text(status.get('state'))
+    if phase == 'group_motion_completed' and status.get('group_stop_after_cycle'):
+        # 회차 맞춤 · 제 회차를 끝내고 다른 PC 회차 끝을 기다린다 · 그 뒤 같이 선다 · 수정 목록 155
+        return '회차 후 정지 대기'
     if phase in _GROUP_STEP_BY_PHASE:
         return _GROUP_STEP_BY_PHASE[phase]
     if state in _GROUP_STEP_BY_STATE:

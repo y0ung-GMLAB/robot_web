@@ -12,7 +12,7 @@ import urllib.request
 from pathlib import Path
 from typing import Any, Callable, Dict, Mapping, Optional
 
-from motion_common import repeat_policy
+from motion_common import motion_segment, repeat_policy
 
 from motion_web_bridge import run_mode_gate
 from motion_common import run_state
@@ -270,6 +270,13 @@ class CoordinationWebBridge:
             repeat_error = repeat_policy.request_repeat_mode_error(payload.get('repeat_mode'))
             if repeat_error:
                 return {'success': False, 'message': repeat_error}
+            # 구간 재생 · 모든 PC · 스피커가 같은 시각부터 · 스케줄이 보낸 시작은 늘 통째로 · 2026-10-16
+            try:
+                segment = motion_segment.apply_to_payload(
+                    payload, allowed=group_start_origin(payload) != 'schedule',
+                )
+            except ValueError as exc:
+                return {'success': False, 'message': str(exc)}
         start_generation = int(self._project_generation())
         try:
             request = {'command': command}
@@ -293,6 +300,8 @@ class CoordinationWebBridge:
                     # 누가 시작했나 · 스케줄이 보낸 것만 `schedule_id` 가 있다 · 사람이 누른 그룹 재생은
                     # 수동 PC 도 넣는다 · 수정 목록 122
                     'started_by': group_start_origin(payload),
+                    motion_segment.START_KEY: segment[motion_segment.START_KEY],
+                    motion_segment.END_KEY: segment[motion_segment.END_KEY],
                 })
             result = self._local_api('/control', request)
         except (OSError, ValueError) as exc:
@@ -507,11 +516,18 @@ def local_motion_readiness(
         reason = parked({})
         if reason:
             return {'success': False, 'message': reason}
+    # 구간 재생 · 이 PC 재생 목록 1번이 구간 시작보다 짧으면 여기서 거절 → 진행 PC 가 이 PC 를 빼고 간다 · 2026-10-16
+    try:
+        segment = motion_segment.apply_to_payload(request)
+    except ValueError as exc:
+        return {'success': False, 'message': str(exc)}
     return bridge.motion_run_check({
         **selection,
         'initial_move_time_sec': None,
         'run_mode': 'once',
         'request_source': 'network_readiness',
+        motion_segment.START_KEY: segment[motion_segment.START_KEY],
+        motion_segment.END_KEY: segment[motion_segment.END_KEY],
     })
 
 
@@ -521,6 +537,15 @@ def _group_initial_move_time(payload: Mapping[str, Any]) -> Optional[float]:
     except (TypeError, ValueError):
         return None
     return value if value > 0.0 else None
+
+
+def _group_segment(payload: Mapping[str, Any]) -> Dict[str, float]:
+    """연동 노드가 넘긴 구간 · 틀린 값(옛 · 깨진 명령)은 통째로 · 검사는 진행 PC 에서 이미 했다"""
+    try:
+        start, end = motion_segment.parse(payload)
+    except ValueError:
+        start, end = 0.0, 0.0
+    return motion_segment.fields(start, end)
 
 
 def local_motion_control(bridge: Any, payload: Mapping[str, Any]) -> Dict[str, Any]:
@@ -566,7 +591,11 @@ def local_motion_control(bridge: Any, payload: Mapping[str, Any]) -> Dict[str, A
             },
         )
     if command == 'stop_after_cycle':
-        result = bridge.motion_run_stop_after_cycle({'reason': payload.get('reason') or ''})
+        result = bridge.motion_run_stop_after_cycle({
+            'reason': payload.get('reason') or '',
+            # 그룹 전체 회차 후 정지 · 회차 맞춤은 장벽에서 풀기를 기다린다 · 수정 목록 154
+            'group_wide': payload.get('group_wide') is True,
+        })
         if (
             result.get('success') is False
             and '활성 그룹 실행이 없습니다' in str(result.get('message') or '')
@@ -617,6 +646,8 @@ def local_motion_control(bridge: Any, payload: Mapping[str, Any]) -> Dict[str, A
             'target_cycle_count': int(payload.get('target_cycle_count') or 0),
             # 마스터 재생 화면에서 고른 이동 시간 · 0 이면 None(조인트 매핑 값) · 2026-10-12
             'initial_move_time_sec': _group_initial_move_time(payload),
+            # 구간 재생 · 이 PC 재생 목록 1번을 같은 시각으로 자른다 · 0/0 = 통째로 · 2026-10-16
+            **_group_segment(payload),
             # Direct repetition must use the same continuity validation as a
             # local continuous run. Reinitializing policies deliberately
             # bypass that check because every cycle returns to the start pose.

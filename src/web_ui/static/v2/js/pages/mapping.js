@@ -281,12 +281,12 @@ export function autoBuildReason(state, motorCount) {
   if (motorCount > 0) return `지금 인식된 모터 ${motorCount}대마다 한 줄씩 만듭니다(이미 줄이 있는 모터는 건너뜀)`;
   const scope = state.snap?.project_scope || {};
   if (!scope.runtime_matches_selected) {
-    return '인식된 모터가 없습니다 · 모터 프로그램이 이 프로젝트 설정으로 돌고 있지 않습니다. ① 모터·드라이브에서 「저장 후 장비에 적용」을 먼저 누르세요(조인트 없이도 됩니다).';
+    return '인식된 모터가 없습니다 · 모터 프로그램이 이 프로젝트 설정으로 돌고 있지 않습니다. ② 모터·드라이브에서 「저장 후 장비에 적용」을 먼저 누르세요(조인트 없이도 됩니다).';
   }
-  return '인식된 모터가 없습니다 · 모터 프로그램이 모터 상태를 아직 보내지 않았습니다. 잠시 기다리거나 ① 모터·드라이브에서 통신 상태를 확인하세요.';
+  return '인식된 모터가 없습니다 · 모터 프로그램이 모터 상태를 아직 보내지 않았습니다. 잠시 기다리거나 ② 모터·드라이브에서 통신 상태를 확인하세요.';
 }
 
-/** ② 구획 머리 오른쪽 · 모터로 자동 생성 · 조인트 더하기 */
+/** ① 구획 머리 오른쪽 · 모터로 자동 생성 · 조인트 더하기 */
 export function mappingActions(state, changed) {
   if (!ui.rows) return null;
   const motors = motorList(state);
@@ -313,13 +313,13 @@ export function mappingActions(state, changed) {
   ];
 }
 
-/** ② 구획 설명 · 공식과 파일 이름 */
+/** ① 구획 설명 · 공식과 파일 이름 */
 export function mappingNote() {
   return h('p', { class: 'muted small' }, '애니메이션 조인트 값을 모터 값으로 바꿉니다. 모터 = 기준점 + 조인트 × 감속·기어비 × 방향 · 파일 ',
     h('span', { class: 'mono', text: ui.fileId || '(새 파일)' }), ' · ', h('a', { href: '#/pack', text: '로봇 팩과 비교' }));
 }
 
-/** ② 조인트 매핑 구획 본문 · 머리와 저장 칸은 motor_setup.js */
+/** ① 조인트 매핑 구획 본문 · 머리와 저장 칸은 motor_setup.js */
 export function mappingBody(state, changed) {
   if (!ui.rows) return h('p', { class: ui.loadError ? 'tone-text-bad' : 'muted', text: ui.loadError || '불러오는 중…' });
   return [

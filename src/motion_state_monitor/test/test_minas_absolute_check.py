@@ -295,8 +295,10 @@ def test_gains_are_read_with_the_absolute_values():
     _see(check, _masters(0))
     gains = check.snapshot()['drives'][0]['gains']
     assert set(gains) >= {'auto_tuning', 'stiffness', 'inertia_ratio', 'estimation_speed', 'error'}
+    assert set(gains) >= {'command_smoothing', 'command_fir'}     # 지령 필터 · 2026-10-16
     assert gains['error'] == ''
     assert any('0x3004' in call for call in runner.calls)
+    assert any('0x3222' in call for call in runner.calls) and any('0x3223' in call for call in runner.calls)
 
 
 def test_a_gain_read_failure_does_not_block():

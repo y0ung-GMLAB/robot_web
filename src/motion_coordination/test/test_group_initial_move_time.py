@@ -26,4 +26,4 @@ def test_received_command_reads_the_time_and_old_commands_mean_mapping():
 def test_protocol_version_moved_on_with_the_new_field():
     """칸이 늘었다(6) · 그룹 동작이 바뀌었다(7 · 수정 목록 122 · 123) · 같은 버전끼리만 그룹"""
     assert GROUP_PROTOCOL_VERSION >= 6
-    assert GROUP_PROTOCOL_VERSION == 9
+    assert GROUP_PROTOCOL_VERSION == 10

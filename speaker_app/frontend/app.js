@@ -155,8 +155,9 @@ function render(s) {
     hint = t
       ? "최근 트리거: cycle " + t.cycle_number + " / " + t.at +
         (t.motion_file_id ? " / " + t.motion_file_id : "") +
-        (t.file_name ? " → " + t.file_name : "")
-      : "아직 트리거를 받지 못했습니다.";
+        (t.file_name ? " → " + t.file_name : "") +
+        (t.segment ? " · " + t.segment : "")
+      :"아직 트리거를 받지 못했습니다.";
   }
   $("play-hint").textContent = hint;
 

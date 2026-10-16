@@ -15,12 +15,16 @@ import pytest
 
 from motion_coordination.group_execution import GroupExecution
 from motion_coordination.schedule_lead import (
+    CYCLE_INITIALIZE_LEAD_MIN_SEC,
+    CYCLE_INITIALIZE_SELF_RETRIES,
     INITIALIZE_LEAD_MIN_SEC,
     LATENCY_WINDOW,
     LEAD_MAX_SEC,
     ScheduleLeadPlanner,
     command_kind,
+    is_not_accepted_rejection,
     is_timing_rejection,
+    may_retry_own_cycle_initialize,
     only_self_late,
 )
 
@@ -87,7 +91,7 @@ def test_only_the_masters_own_late_ack_is_not_a_group_fault():
 def test_command_kinds_and_timing_rejections():
     assert command_kind('initialize_at') == 'initialize'
     assert command_kind('start_at') == 'schedule'
-    assert command_kind('cycle_initialize_at') == 'schedule'
+    assert command_kind('cycle_initialize_at') == 'cycle_initialize'
     assert command_kind('prepare') == ''
     assert is_timing_rejection('그룹 예약 트리거의 준비 여유가 부족합니다') is True
     assert is_timing_rejection('그룹 초기 위치 이동 예약 트리거가 이미 지났습니다') is True
@@ -108,3 +112,55 @@ def test_group_execution_uses_the_given_lead_but_never_less_than_the_setting():
     execution.mark_ready('floating4')
     action = execution.initialize_action(now=100.0, lead_sec=0.1)
     assert action.scheduled_at == pytest.approx(100.5)
+
+
+# ---------------------------------------------------------------------- #
+# 수정 목록 153 · 회차 맞춤 그룹 회차 사이 · 마스터 자신의 회차 초기화 확인이 늦어 그룹 전체 취소
+#
+# 실물 2026-10-16 14:35:05 floating3(마스터 38 s) · floating4(17 s) · 스케줄 그룹 연속 · 3회차 끝
+# 「floating3 자신의 예약 확인 늦음 · cycle_initialize_at · 679 ms 안에 답 없음」 → 취소 → 약 40 s 멈춤 ·
+# 그때 여유 0.83 s(`schedule` 종류 · 바닥 0 · 자기 확인 253~363 ms)
+# ---------------------------------------------------------------------- #
+
+def test_cycle_initialize_has_its_own_floor():
+    planner = ScheduleLeadPlanner()
+    assert CYCLE_INITIALIZE_LEAD_MIN_SEC == pytest.approx(1.5)
+    assert _lead(planner, 'cycle_initialize') == pytest.approx(CYCLE_INITIALIZE_LEAD_MIN_SEC)
+    # 실물 값 · 363 ms 를 재도 바닥이 먼저 · 전에는 0.83 s
+    planner.record('cycle_initialize', 'floating4', 0.363)
+    assert _lead(planner, 'cycle_initialize') == pytest.approx(1.5)
+    # 시작 예약은 그대로 가볍다
+    assert _lead(planner, 'schedule') == pytest.approx(0.5)
+
+
+def test_cycle_initialize_samples_do_not_mix_with_initialize():
+    planner = ScheduleLeadPlanner()
+    # group_prepare 는 무겁다 · 그 값이 회차 사이 여유를 부풀리지 않는다
+    planner.record('initialize', 'floating4', 1.2)
+    assert _lead(planner, 'cycle_initialize') == pytest.approx(CYCLE_INITIALIZE_LEAD_MIN_SEC)
+    planner.record('cycle_initialize', 'floating4', 0.9)
+    assert _lead(planner, 'cycle_initialize') == pytest.approx(1.9)
+    assert _lead(planner, 'initialize') == pytest.approx(2.5)
+    assert set(planner.snapshot()['recent_ack_ms']) == {'initialize', 'cycle_initialize'}
+
+
+def test_only_rejections_that_surely_did_not_book_are_retried():
+    assert is_not_accepted_rejection('그룹 예약 트리거의 준비 여유가 부족합니다') is True
+    assert is_not_accepted_rejection('그룹 회차 초기화 트리거가 이미 지났습니다') is True
+    # 받았는지 모른다 · 다시 예약하면 두 번 잡힐 수 있다
+    assert is_not_accepted_rejection('motion_run_manager response timeout') is False
+    assert is_not_accepted_rejection('로컬 Web Bridge 응답 없음: timed out') is False
+    assert is_not_accepted_rejection('다른 그룹 회차 초기화 명령이 이미 예약되었습니다') is False
+    assert is_not_accepted_rejection('') is False
+
+
+def test_own_cycle_initialize_retry_is_bounded_and_only_for_cycle_initialize():
+    late = '그룹 회차 초기화 트리거가 이미 지났습니다'
+    assert CYCLE_INITIALIZE_SELF_RETRIES == 2
+    assert may_retry_own_cycle_initialize('cycle_initialize_at', late, 0) is True
+    assert may_retry_own_cycle_initialize('cycle_initialize_at', late, 1) is True
+    assert may_retry_own_cycle_initialize('cycle_initialize_at', late, 2) is False
+    # 첫 초기 위치 · 시작은 다른 PC 와 같은 시각이어야 한다 · 옛 그대로 취소
+    assert may_retry_own_cycle_initialize('initialize_at', late, 0) is False
+    assert may_retry_own_cycle_initialize('start_at', late, 0) is False
+    assert may_retry_own_cycle_initialize('cycle_initialize_at', 'motion_run_manager response timeout', 0) is False
