@@ -19,6 +19,30 @@ MODE_DDS = "dds"
 MODE_STANDALONE = "standalone"
 
 
+def stop_matches(playing_for, msg):
+    """정지 사건이 지금 소리를 내는 실행의 것인가 · 수정 목록 146
+
+    `playing_for` = 마지막 `start_at` 의 (execution_id, coordinator_id) · 없으면 멈출 것이 없다.
+    - 그룹 · 실행 번호가 같고 **진행 PC 가 보낸** 사건만 · 참가 PC 하나가 빠질 때(뺀 PC 의 풀기 답 ·
+      복귀 실패) 그 PC 가 같은 실행 번호로 `stopped` 를 내도 나머지는 계속 돌므로 소리도 계속
+    - PC 1대(`solo_stopped`) · 로봇은 `solo-<pc>` 로 보낸다 · 시작은 `solo-<pc>-<ms>` (수정 목록 38-3)
+    - 진행 PC 를 모르는 시작(옛 메시지)이면 실행 번호만 본다
+    """
+    if not playing_for:
+        return False
+    execution_id, coordinator_id = playing_for
+    event_execution = str(getattr(msg, "execution_id", "") or "")
+    if not execution_id or not event_execution:
+        return False
+    if str(getattr(msg, "event", "") or "") == "solo_stopped":
+        same = execution_id == event_execution or execution_id.startswith(event_execution + "-")
+    else:
+        same = execution_id == event_execution
+    if not same:
+        return False
+    return not coordinator_id or str(getattr(msg, "pc_id", "") or "") == coordinator_id
+
+
 class AppState:
     def __init__(self):
         self.cfg = config.load()
@@ -35,6 +59,7 @@ class AppState:
         self.system = sysinfo.collect(int(self.cfg["web"]["port"]))
         self._lock = threading.Lock()
         self._timer = None
+        self._playing_for = None         # 마지막 start_at 의 (실행 번호, 진행 PC) · 정지 사건을 견준다 · 146
 
     # ---- 수명주기 ---------------------------------------------------
     def startup(self):
@@ -290,6 +315,9 @@ class AppState:
             self.log.add("start_at 수신 (cycle %d · %s) → %.1f초 후 재생" % (cycle, what, delay))
         else:
             self.log.add("start_at 수신 (cycle %d · %s) → 재생" % (cycle, what))
+        with self._lock:
+            self._playing_for = (str(getattr(msg, "execution_id", "") or ""),
+                                 str(getattr(msg, "coordinator_id", "") or ""))
         self._cancel_timer()
         if segment and path:
             # 받자마자 구간 wav 를 만든다 · 재생 시각에는 aplay 만 · 못 만들면(음원이 짧음 등) 틀지 않는다 ·
@@ -303,17 +331,31 @@ class AppState:
         timer.daemon = True
         with self._lock:
             self._timer = timer
+            timer.args = (path, timer)   # 울린 타이머가 제 자리를 비운다(_play_trigger)
         timer.start()
 
     def _on_stop(self, msg):
-        """모션 정지/오류 신호. 재생 중이었을 때만 멈춘다(3대가 보내므로 자연히 1회)."""
-        self._cancel_timer()
-        if not self.player.is_active():
-            return
-        self.player.stop()
-        self.log.add("모션 정지 신호 수신 (%s) → 재생 정지" % msg.state)
+        """모션 정지/오류 사건 · 지금 소리를 내는 실행의 정지일 때만 멈춘다 · 수정 목록 146
 
-    def _play_trigger(self, path=""):
+        전에는 아무 사건의 `state` 만 보고 멈춰 다음 실행의 `ready` 에 실린 낡은 `stopped` 가 새 소리를
+        끊었다(예약 타이머도 지웠다) · 이제 실행 번호 · 보낸 PC 를 견준다(`stop_matches`) · 한 번 멈추면
+        그 실행을 잊어 같은 정지가 여러 번 와도 1회.
+        """
+        with self._lock:
+            if not stop_matches(self._playing_for, msg):
+                return
+            self._playing_for = None
+        pending = self._cancel_timer()
+        if self.player.is_active():
+            self.player.stop()
+            self.log.add("모션 정지 신호 수신 (%s) → 재생 정지" % msg.event)
+        elif pending:
+            self.log.add("모션 정지 신호 수신 (%s) → 재생 예약 취소" % msg.event)
+
+    def _play_trigger(self, path="", timer=None):
+        with self._lock:
+            if timer is not None and self._timer is timer:
+                self._timer = None      # 울렸다 · 뒤의 정지를 「예약 취소」 로 적지 않게
         self.player.play(self._playable_path(path), self.cfg["audio"]["device"])
 
     def _playable_path(self, path=""):
@@ -321,11 +363,13 @@ class AppState:
         return audio_prep.ensure_stereo(path or config.resolve_file(self.cfg), self.log)
 
     def _cancel_timer(self):
+        """예약된 재생을 지운다 · 지운 것이 있으면 True"""
         with self._lock:
             timer = self._timer
             self._timer = None
         if timer is not None:
             timer.cancel()
+        return timer is not None
 
     def _start_dds(self):
         self.dds.start(

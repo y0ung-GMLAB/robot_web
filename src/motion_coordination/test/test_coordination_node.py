@@ -105,6 +105,8 @@ def _node():
     }
     node._time_sync_pub = _Publisher()
     node._time_probe_pub = _Publisher()
+    # 진행 PC 가 실행을 놓을 때 「정지」 사건을 낸다 · 수정 목록 146 ②
+    node._event_pub = _Publisher()
     return node
 
 
