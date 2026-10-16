@@ -22,8 +22,10 @@ Text 블록 「Register」 체크 + 환경설정 Auto Run Python Scripts 가 켜
 값 = 컨스트레인트까지 반영한 본 회전 (레스트 기준, 관절 각) · 감속기어비·부호·오프셋은
 각 PC 조인트 매핑이 적용 · Blender 안 검사·리포트는 deg, 파일만 rad.
 Blender 안: 초과 구간마다 타임라인 마커 "ANIM! ..." (ERR 마커만 선택 상태 = 밝게) · Empty "AnimSpeedCheck" 의
-<본>_vel_pct / <본>_acc_pct 곡선 (Graph Editor · 100 = 한계) · ANIM_issue 채널 (키 색: 빨강 Extreme = 100% 초과 ·
-파랑 Breakdown = 80% 이상 · Empty 선택하면 타임라인·도프시트에 보임).
+<본>_vel_pct / <본>_acc_pct 곡선 (Graph Editor · 100 = 한계 · 필요한 점만 베지어로, 오차 1%) · ANIM_issue 채널
+(키 종류 Extreme = 100% 초과 · Jitter = 80% 이상 · Empty 선택하면 타임라인·도프시트에 보임).
+문제 구간을 만든 본 애니메이션 키(앞 키 ~ 뒤 키)도 같은 키 종류로 칠함 → 그 본 선택하면 어느 키 사이인지 보임
+(복사 본은 원본 키에 · 다시 검사하면 지난 표시는 일반 키로 되돌림 · 평소 Extreme / Jitter 키 종류는 쓰지 말 것).
 
 exec 전에 둘 수 있는 전역: ARMATURE (오브젝트 이름 또는 이름 목록 · 없으면 joint_name 본이 있는 아마추어 전부) · EXPORT_NAME · OUT_DIR (창 없이 출력).
 blender -b 실행도 창 없이 출력 (OUT_DIR 없으면 기본 폴더).
@@ -42,7 +44,8 @@ ZERO_SNAP_RAD = 1e-6          # 파일 값 · 이보다 작으면 정확히 0 (B
 AXIS_INDEX = {'X': 0, 'Y': 1, 'Z': 2}
 MARKER_PREFIX = 'ANIM!'
 CHECK_OBJECT = 'AnimSpeedCheck'
-ISSUE_PROP = 'ANIM_issue'          # AnimSpeedCheck 의 문제 구간 채널 (키 색: 빨강 = 100% 초과 · 파랑 = 80% 이상)
+ISSUE_PROP = 'ANIM_issue'          # AnimSpeedCheck 의 문제 구간 채널 (키 종류: Extreme = 100% 초과 · Jitter = 80% 이상)
+CURVE_TOL = 1.0                    # 검사 곡선(%) 단순화 오차 · 프레임마다 굽지 않음
 DIR_PROP = 'anim_export_dir'
 
 BONE_PROPS = {
@@ -255,6 +258,74 @@ def write_animation(path, title, ids, n):
             f.write(json.dumps(row, ensure_ascii=False, separators=(',', ':')) + '\n')
 
 
+def _key_sources(pb):
+    """이 본 값을 정하는 키가 있는 본들 · 다른 본을 복사(Copy Rotation)하면 그 본도 (예: Eye_Yaw_R → Eye_Yaw_L)"""
+    out = [pb]
+    for c in pb.constraints:
+        if c.type in {'COPY_ROTATION', 'COPY_TRANSFORMS'} and not c.mute and c.target == pb.id_data and c.subtarget:
+            src = pb.id_data.pose.bones.get(c.subtarget)
+            if src is not None:
+                out.append(src)
+    return out
+
+
+def _axis_fcurve(pb):
+    ad = pb.id_data.animation_data
+    act = ad.action if ad else None
+    if act is None:
+        return None
+    dp = 'pose.bones["%s"].rotation_euler' % pb.name
+    idx = AXIS_INDEX[axis(pb)]
+    for l in act.layers:
+        for st in l.strips:
+            for cb in st.channelbags:
+                if getattr(ad, 'action_slot', None) is not None and cb.slot != ad.action_slot:
+                    continue
+                fc = cb.fcurves.find(dp, index=idx)
+                if fc is not None:
+                    return fc
+    return None
+
+
+def mark_keys(bones, flags):
+    """문제 구간을 만든 애니메이션 키에 색 · 키 종류 Extreme(빨강) = 100% 초과 · Jitter(분홍) = 80% 이상.
+    지난 검사 표시(Extreme / Jitter)는 먼저 일반 키로 되돌림 · 키 사이 구간 = 앞 키 ~ 뒤 키."""
+    fcs = {}
+    for pb in bones:
+        for src in _key_sources(pb):
+            fc = _axis_fcurve(src)
+            if fc is not None:
+                fcs[(src.id_data.name, src.name)] = fc
+    for fc in fcs.values():
+        for k in fc.keyframe_points:
+            if k.type in {'EXTREME', 'JITTER'}:
+                k.type = 'KEYFRAME'
+    by_label = {label(pb): pb for pb in bones}
+    marked = 0
+    for fl in sorted(flags, key=lambda f: f['level'] == 'error'):      # 에러가 나중에 칠해져 우선
+        pb = by_label.get(fl['bone'])
+        if pb is None:
+            continue
+        f0, f1 = (fl['over_blender_frames'] if fl.get('over_blender_frames') else
+                  (fl['blender_frame_from'], fl['blender_frame_to']))
+        for src in _key_sources(pb):
+            fc = fcs.get((src.id_data.name, src.name))
+            if fc is None or not len(fc.keyframe_points):
+                continue
+            xs = sorted(k.co.x for k in fc.keyframe_points)
+            lo = max([x for x in xs if x <= f0 + 2] or [xs[0]])      # ±2 프레임: 20 ms 차분이 구간 끝을 1~2 프레임 늦게 잡음
+            hi = min([x for x in xs if x >= f1 - 2] or [xs[-1]])
+            if hi <= lo:
+                hi = min([x for x in xs if x > lo] or [lo])
+            for k in fc.keyframe_points:
+                if lo - 1e-6 <= k.co.x <= hi + 1e-6:
+                    k.type = 'EXTREME' if fl['level'] == 'error' else 'JITTER'
+                    marked += 1
+    for fc in fcs.values():
+        fc.update()
+    return marked
+
+
 def update_markers(scene, flags):
     """마커는 색을 따로 못 줌 → ERR 마커만 선택 상태로 둬서 밝게 (다른 마커는 선택 해제)."""
     for m in [m for m in scene.timeline_markers if m.name.startswith(MARKER_PREFIX)]:
@@ -267,6 +338,30 @@ def update_markers(scene, flags):
         at = fl['over_blender_frames'][0] if fl.get('over_blender_frames') else fl['blender_frame_from']
         m = scene.timeline_markers.new(name, frame=int(math.floor(at)))
         m.select = fl['level'] == 'error'
+
+
+def _simplify(xs, ys, tol):
+    """Ramer–Douglas–Peucker · 남길 인덱스 (처음·끝·꺾이는 점) · 직선에서 tol 이상 벗어나는 점만"""
+    n = len(xs)
+    if n <= 2:
+        return list(range(n))
+    keep = [False] * n
+    keep[0] = keep[-1] = True
+    stack = [(0, n - 1)]
+    while stack:
+        i0, i1 = stack.pop()
+        x0, y0, x1, y1 = xs[i0], ys[i0], xs[i1], ys[i1]
+        dx = (x1 - x0) or 1e-9
+        worst, wi = tol, -1
+        for i in range(i0 + 1, i1):
+            d = abs(ys[i] - (y0 + (y1 - y0) * (xs[i] - x0) / dx))
+            if d > worst:
+                worst, wi = d, i
+        if wi >= 0:
+            keep[wi] = True
+            stack.append((i0, wi))
+            stack.append((wi, i1))
+    return [i for i in range(n) if keep[i]]
 
 
 def bake_check_curves(scene, arm, bones, frames, vel_pct, acc_pct, flags=()):
@@ -288,16 +383,18 @@ def bake_check_curves(scene, arm, bones, frames, vel_pct, acc_pct, flags=()):
             obj.keyframe_insert(data_path='["%s"]' % key, frame=frames[0])     # 곡선 만들기 (키 1개)
             keys.append((key, series))
     fcs = {fc.data_path: fc for fc in obj.animation_data.action.fcurves} if hasattr(obj.animation_data.action, 'fcurves')         else {fc.data_path: fc for l in obj.animation_data.action.layers for st in l.strips for cb in st.channelbags for fc in cb.fcurves}
-    lin = bpy.types.Keyframe.bl_rna.properties['interpolation'].enum_items['LINEAR'].value
-    for key, series in keys:      # 키 한 번에 채우기 (keyframe_insert 반복은 수만 프레임에서 몇 분 걸림)
+    for key, series in keys:      # 프레임마다 굽지 않고 모양에 필요한 점만 (오차 CURVE_TOL %) · 베지어로 이음
         fc = fcs['["%s"]' % key]
+        idx = _simplify(frames, series, CURVE_TOL)
         fc.keyframe_points.clear()
-        fc.keyframe_points.add(len(frames))
-        co = [0.0] * (2 * len(frames))
-        co[0::2] = frames
-        co[1::2] = [float(v) for v in series]
+        fc.keyframe_points.add(len(idx))
+        co = [0.0] * (2 * len(idx))
+        co[0::2] = [frames[i] for i in idx]
+        co[1::2] = [float(series[i]) for i in idx]
         fc.keyframe_points.foreach_set('co', co)
-        fc.keyframe_points.foreach_set('interpolation', [lin] * len(frames))
+        for kp in fc.keyframe_points:
+            kp.interpolation = 'BEZIER'
+            kp.handle_left_type = kp.handle_right_type = 'AUTO_CLAMPED'
         fc.update()
     # 문제 구간 채널 · 키 색 = 종류 (100% 초과 = Extreme 빨강 · 80% 이상 = Breakdown 파랑) · 값 = 최대 %
     if ISSUE_PROP in obj:
@@ -323,7 +420,7 @@ def bake_check_curves(scene, arm, bones, frames, vel_pct, acc_pct, flags=()):
             ratio, err = pts[f]
             kp.co = (f, round(ratio * 100, 1))
             kp.interpolation = 'CONSTANT'
-            kp.type = 'EXTREME' if err else 'BREAKDOWN'
+            kp.type = 'EXTREME' if err else 'JITTER'
         fc.update()
     return obj
 
@@ -435,6 +532,7 @@ def main(out_dir=None, write=True):
             json.dump(check, f, ensure_ascii=False, indent=1)
 
     update_markers(scene, flags)
+    mark_keys(bones, flags)
     bake_check_curves(scene, arm, bones, frames, vel_pct, acc_pct, flags)
 
     print(('exported' if check['exported'] else 'NOT exported (100% 초과)') if write else 'check only (파일 안 씀)',

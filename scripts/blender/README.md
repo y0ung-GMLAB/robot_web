@@ -27,7 +27,10 @@
 - 끝나면 창 · 조인트별 최대 % (속도 · 가속) · 100% 넘은 구간 (Blender 프레임)
 - 초과 구간 · 타임라인 마커 `ANIM! ...` · Empty `AnimSpeedCheck` 의 `<본>_vel_pct` / `<본>_acc_pct` 곡선 (Graph Editor · 100 = 한계 · 80 부터 경고)
   - 마커는 색을 따로 못 줌 → **`ANIM! ERR` 마커만 선택 상태**(밝게)로 남김 (다른 마커 선택은 해제)
-  - `AnimSpeedCheck` 의 **`ANIM_issue` 채널** · 키 색 = 빨강(Extreme) 100% 초과 · 파랑(Breakdown) 80% 이상 · 값 = 최대 % · Empty 를 선택하면 타임라인·도프시트에 보임
+  - **문제 구간을 만든 본 애니메이션 키**(앞 키 ~ 뒤 키)의 키 종류를 바꿔 색 표시 · **Extreme = 빨강 (100% 초과) · Jitter = 분홍 (80~100%)**
+    · 복사 본(Eye_Yaw_R ← Eye_Yaw_L)은 원본 키에 · 다시 검사하면 지난 표시는 일반 키로 되돌림 → **Extreme / Jitter 키 종류는 평소에 쓰지 말 것**
+  - `AnimSpeedCheck` 의 `ANIM_issue` 채널 · 같은 키 종류 · 값 = 최대 % · % 곡선은 프레임마다 굽지 않고 필요한 점만 베지어 (오차 1%)
+  - 색은 테마 · 이 PC 는 시작 스크립트가 Blender 켤 때 넣음 (Extreme 빨강 · Jitter 분홍 · 선택된 마커 빨강 · `THEME_COLORS = False` 로 끔)
 - 검사하는 동안 리그 없는 컬렉션을 잠깐 빼서 계산 (3만 프레임 ~7 s) · 오브젝트 숨김·선택·컬렉션 설정은 그대로 되돌림
 - Blender 켤 때 탭 자동 등록 (이 PC) · `%APPDATA%\Blender Foundation\Blender\5.2\scripts\startup\robot_anim_panel.py` 가 이 파일을 디스크에서 읽음
 - .blend 안의 Text 는 디스크 파일의 **복사본** · 스크립트가 바뀌면 Text → Reload (Alt+R)
