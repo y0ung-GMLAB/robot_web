@@ -3030,7 +3030,7 @@ class MotionCoordinationNode(Node):
 
     def _publish_event(
         self, command: GroupCommand, event: str, success: bool, message_text: str,
-        *, triggered_at: float = 0.0,
+        *, triggered_at: float = 0.0, state: str = '',
     ) -> None:
         message = GroupEvent()
         message.group_id = self._config.group_id
@@ -3039,7 +3039,7 @@ class MotionCoordinationNode(Node):
         message.pc_id = self._config.pc_id
         message.boot_id = self._boot_id
         message.event = event
-        message.state = self._local_group_state()
+        message.state = state or self._local_group_state()
         message.sequence = self._next_sequence()
         message.cycle_number = int(command.cycle_number)
         _set_stamp(message.occurred_at, time.time())
@@ -3075,6 +3075,14 @@ class MotionCoordinationNode(Node):
                 return
             execution_id = str(status.get('execution_id') or '')
             if not execution_id or execution_id != self._execution.execution_id:
+                return
+            if (
+                self._execution.coordinator_id == self._config.pc_id
+                and self._config.pc_id not in self._execution.participants
+            ):
+                # 진행 PC 가 참가에서 빠졌다(웹 다시 시작 · 145 ①) · 나머지는 계속 돈다 · 제 재생의
+                # 「정지」 를 그룹 사건으로 내면 스피커가 진행 PC 의 정지로 읽고 소리를 끊는다 · 146 ·
+                # 이 PC 자신도 실행 밖 PC 사건으로 버린다(`_event_callback`)
                 return
             phase = str(status.get('phase') or '')
             cycle = int(status.get('group_cycle_number') or status.get('current_cycle') or 0)
@@ -3846,7 +3854,31 @@ class MotionCoordinationNode(Node):
                 active = self._execution.execution_id
                 self._cancelled_execution_ids = {active} if active else set()
 
+    def _announce_group_stopped(self) -> None:
+        """진행 PC 가 그룹 실행을 놓는다 · 그 실행의 「정지」 사건을 한 번 낸다 · 수정 목록 146 ②
+
+        스피커는 진행 PC 가 보낸 그 실행 번호의 `stopped` 로 소리를 멈춘다 · 전에는 즉시 정지 · 남은 PC
+        없음 · 회차 후 정지 끝 · 진행 PC 자신의 빠짐 어디서도 확실한 사건이 없었다(진행 PC 의 런타임
+        `stopped` 는 실행을 지운 뒤라 `_emit_local_runtime_event` 가 버렸다) · 그래서 지우기 **전에**
+        여기서 낸다 · `state` 는 캐시된 모션 상태가 아니라 `stopped` · 같은 실행에 두 번 내지 않는다 ·
+        진행 PC 자신은 이 사건을 지운 뒤에 받으므로(실행 번호가 다름) 장벽·풀기에 끼지 않는다.
+        """
+        execution_id = self._execution.execution_id
+        if not execution_id or self._execution.coordinator_id != self._config.pc_id:
+            return
+        if getattr(self, '_group_stop_announced_id', '') == execution_id:
+            return
+        self._group_stop_announced_id = execution_id
+        command = GroupCommand()
+        command.execution_id = execution_id
+        command.command_id = f'group-stopped-{execution_id}'
+        command.cycle_number = int(self._execution.cycle_number)
+        self._publish_event(
+            command, 'stopped', True, '그룹 실행 정지', state='stopped',
+        )
+
     def _clear_active_execution(self) -> None:
+        self._announce_group_stopped()
         if (
             self._execution.joining
             and self._execution.coordinator_id == self._config.pc_id

@@ -19,8 +19,11 @@ EVENT_TOPIC = "/motion_group/event"
 PRESENCE_TOPIC = "/motion_group/presence"
 PRESENCE_INTERVAL_SEC = 2.0
 
-# 이 상태가 오면 재생을 멈춘다. motion_completed(정상 사이클 종료)는 제외한다.
-STOP_STATES = ("stopped", "error")
+# 이 사건(`GroupEvent.event`)이 오면 재생을 멈출지 본다 · motion_completed(정상 사이클 종료)는 제외한다 ·
+# `state` 칸은 보지 않는다 · 로봇은 그 순간 캐시된 모션 상태를 아무 사건에나 실어 보내 다음 실행의
+# `ready` 에 낡은 `stopped` 가 실려 왔다(수정 목록 146) · 어느 실행의 정지인지는 `AppState._on_stop` 이 본다.
+# `solo_stopped` = PC 1대 재생의 정지(수정 목록 38-3)
+STOP_EVENTS = ("stopped", "error", "solo_stopped")
 NODE_NAME = "speaker_trigger_listener"
 
 OFF = "off"
@@ -346,10 +349,10 @@ class DdsListener:
                 self._log.add("트리거 처리 오류: %s" % exc)
 
     def _on_event(self, msg):
-        """모션 정지/오류 이벤트. 판정을 단순하게 유지한다."""
+        """모션 정지/오류 사건 · 사건 이름만 거른다 · 실행 번호 · 보낸 PC 는 받는 쪽(`_on_stop`)이 본다"""
         if msg.group_id != self._group_id:
             return
-        if msg.state not in STOP_STATES:
+        if msg.event not in STOP_EVENTS:
             return
         callback = self._on_stop
         if callback is not None:
