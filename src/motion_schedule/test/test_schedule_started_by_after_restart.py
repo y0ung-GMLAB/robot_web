@@ -211,12 +211,19 @@ def test_a_read_group_without_starter_and_no_memory_is_still_stopped(tmp_path, m
     assert len(_stops(node)) == 1
 
 
-def test_schedule_mode_still_stops_an_unreadable_run(tmp_path, monkeypatch):
-    """스케줄 모드는 누가 켰든 구간 밖이면 멈춘다 · 못 읽은 상태도 도는 중으로 본다(전과 같음)"""
+def test_schedule_mode_waits_for_a_readable_state_before_stopping(tmp_path, monkeypatch):
+    """스케줄 모드도 못 읽은 상태(`''` = 도는 중으로 친 것)로는 멈추지 않는다 · 읽히면 멈춘다 · 수정 목록 148 ②
+
+    전에는 이 가드가 수동 모드 안에만 있어 스케줄 모드는 못 읽은 채 정지를 보냈다(실물 W-A10 ②).
+    """
     bridge = _Bridge()
     node = _fresh_node(tmp_path, monkeypatch, bridge, run_mode='schedule')
     bridge.down()
 
     node._reconcile(EVENING)
+    assert _stops(node) == [], '못 읽은 점검이 정지를 보냈다'
 
-    assert len(_stops(node)) == 1
+    bridge.local(state='running')
+    bridge.group(execution_id='', state='idle')
+    node._reconcile(EVENING.replace(minute=1))
+    assert len(_stops(node)) == 1, '읽은 뒤에는 스케줄 모드라 누가 켰든 멈춘다'
