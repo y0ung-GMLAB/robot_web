@@ -288,19 +288,38 @@ def _axis_fcurve(pb):
     return None
 
 
+def _bone_fcurves(pb):
+    """이 본의 모든 채널 (타임라인 요약 줄은 같은 프레임에 일반 키가 섞이면 흰색 → 같은 프레임 키를 모두 칠함)"""
+    ad = pb.id_data.animation_data
+    act = ad.action if ad else None
+    if act is None:
+        return []
+    head = 'pose.bones["%s"].' % pb.name
+    out = []
+    for l in act.layers:
+        for st in l.strips:
+            for cb in st.channelbags:
+                if getattr(ad, 'action_slot', None) is not None and cb.slot != ad.action_slot:
+                    continue
+                out += [fc for fc in cb.fcurves if fc.data_path.startswith(head)]
+    return out
+
+
 def mark_keys(bones, flags):
     """문제 구간을 만든 애니메이션 키에 색 · 키 종류 Extreme(빨강) = 100% 초과 · Jitter(분홍) = 80% 이상.
     지난 검사 표시(Extreme / Jitter)는 먼저 일반 키로 되돌림 · 키 사이 구간 = 앞 키 ~ 뒤 키."""
-    fcs = {}
+    fcs, allfc = {}, {}
     for pb in bones:
         for src in _key_sources(pb):
             fc = _axis_fcurve(src)
             if fc is not None:
                 fcs[(src.id_data.name, src.name)] = fc
-    for fc in fcs.values():
-        for k in fc.keyframe_points:
-            if k.type in {'EXTREME', 'JITTER'}:
-                k.type = 'KEYFRAME'
+                allfc[(src.id_data.name, src.name)] = _bone_fcurves(src)
+    for lst in allfc.values():
+        for fc in lst:
+            for k in fc.keyframe_points:
+                if k.type in {'EXTREME', 'JITTER'}:
+                    k.type = 'KEYFRAME'
     by_label = {label(pb): pb for pb in bones}
     marked = 0
     for fl in sorted(flags, key=lambda f: f['level'] == 'error'):      # 에러가 나중에 칠해져 우선
@@ -318,12 +337,22 @@ def mark_keys(bones, flags):
             hi = min([x for x in xs if x >= f1 - 2] or [xs[-1]])
             if hi <= lo:
                 hi = min([x for x in xs if x > lo] or [lo])
+            kt = 'EXTREME' if fl['level'] == 'error' else 'JITTER'
+            hit = set()
             for k in fc.keyframe_points:
                 if lo - 1e-6 <= k.co.x <= hi + 1e-6:
-                    k.type = 'EXTREME' if fl['level'] == 'error' else 'JITTER'
+                    k.type = kt
+                    hit.add(round(k.co.x, 2))
                     marked += 1
-    for fc in fcs.values():
-        fc.update()
+            for other in allfc.get((src.id_data.name, src.name), ()):      # 같은 본 · 같은 프레임 다른 채널 키도
+                if other is fc:
+                    continue
+                for k in other.keyframe_points:
+                    if round(k.co.x, 2) in hit and (k.type != 'EXTREME' or kt == 'EXTREME'):
+                        k.type = kt
+    for lst in allfc.values():
+        for fc in lst:
+            fc.update()
     return marked
 
 
