@@ -193,17 +193,29 @@ function nowCard(state, changed, navigate) {
   const seg = segmentState(state);
   const disabled = Boolean(blocker) || ui.busy || Boolean(seg.check.error);
   const scopeText = group ? '그룹 전체' : '단독';
-  // 구간 · 보내는 값 · 틀리면 버튼이 꺼져 있다 · 보낸 구간은 브라우저에 기억(다음에 「지난 구간」 버튼)
-  const segment = seg.check.payload;
-  const remember = (result) => { if (result && segment) writeLastSegment(segment); return result; };
-  const withSegment = segment ? { segment } : {};
 
-  const start = (runMode) => busy(() => (group
-    ? act.startGroup({ ...runSettings(runMode), sync_mode: ui.syncMode || 'lockstep', initial_move_time_sec: groupMoveTime(state), ...withSegment })
-    : act.startLocal(localPayload(state, runMode, segment))).then(remember), state, changed);
-  const initialize = () => busy(() => (group
-    ? act.initializeGroup({ initial_move_time_sec: groupMoveTime(state), ...withSegment })
-    : act.initializeLocal(localPayload(state, 'once', segment))).then(remember), state, changed);
+  // 구간 · 누르는 순간의 칸 값으로 다시 검사해 보낸다 · 칸에 커서가 있으면 화면을 다시 그리지 않아(dom.js)
+  // 그린 때 값은 낡았다 · 적자마자 누르면 구간 없이 통째로 재생됐다 · 틀리면 보내지 않고 이유를 보인다
+  // 보낸 구간은 브라우저에 기억(다음에 「지난 구간」 버튼)
+  const withSegmentNow = (send) => {
+    const check = segmentState(state).check;
+    if (check.error) {
+      if (document.activeElement instanceof HTMLElement) document.activeElement.blur();
+      changed();
+      return;
+    }
+    const segment = check.payload;
+    return busy(() => send(segment).then((result) => {
+      if (result && segment) writeLastSegment(segment);
+      return result;
+    }), state, changed);
+  };
+  const start = (runMode) => withSegmentNow((segment) => (group
+    ? act.startGroup({ ...runSettings(runMode), sync_mode: ui.syncMode || 'lockstep', initial_move_time_sec: groupMoveTime(state), ...(segment ? { segment } : {}) })
+    : act.startLocal(localPayload(state, runMode, segment))));
+  const initialize = () => withSegmentNow((segment) => (group
+    ? act.initializeGroup({ initial_move_time_sec: groupMoveTime(state), ...(segment ? { segment } : {}) })
+    : act.initializeLocal(localPayload(state, 'once', segment))));
   const stopAfter = () => (group ? act.stopGroupAfterCycle(groupStopCommand(state.snap)) : act.stopAfterCycle(false));
 
   return h('section', { class: `card card-now tone-${head.tone}`, 'aria-label': '지금' },

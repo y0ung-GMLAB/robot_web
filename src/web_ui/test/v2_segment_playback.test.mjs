@@ -93,8 +93,12 @@ test('기록 줄 · 구간 재생이면 애니메이션 옆에 구간', () => {
 test('재생 화면 · 구간 줄 · 단독·그룹 모두 시작 요청에 실음 · 지난 구간은 브라우저 기억(try/catch)', () => {
   const source = readFileSync(new URL('../static/v2/js/pages/play.js', import.meta.url), 'utf8');
   assert.match(source, /segmentRow\(seg, group, running, changed\)/);
-  assert.match(source, /act\.startGroup\(\{[^}]*\.\.\.withSegment \}\)/);
-  assert.match(source, /act\.initializeGroup\(\{[^}]*\.\.\.withSegment \}\)/);
+  assert.match(source, /act\.startGroup\(\{[^}]*\.\.\.\(segment \? \{ segment \} : \{\}\) \}\)/);
+  assert.match(source, /act\.initializeGroup\(\{[^}]*\.\.\.\(segment \? \{ segment \} : \{\}\) \}\)/);
+  // 누르는 순간 칸 값으로 다시 검사 · 칸에 커서가 있으면 다시 그리지 않아 그린 때 값이 낡는다(적자마자 누르면 통째 재생)
+  assert.match(source, /const withSegmentNow = \(send\) => \{\s*const check = segmentState\(state\)\.check;\s*if \(check\.error\)/);
+  assert.match(source, /const start = \(runMode\) => withSegmentNow\(/);
+  assert.match(source, /const initialize = \(\) => withSegmentNow\(/);
   assert.match(source, /localPayload\(state, runMode, segment\)/);
   assert.match(source, /모든 PC · 스피커가 같은 시각부터/);
   assert.match(source, /try \{ localStorage\.setItem\(SEGMENT_KEY/);
