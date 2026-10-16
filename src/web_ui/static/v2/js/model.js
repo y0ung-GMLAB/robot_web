@@ -176,7 +176,7 @@ export function collectIssues(snap, sched, { connected = true } = {}) {
   const absolute = String(snap.minas_absolute_blocker || '');
   if (absolute) {
     bad('앱솔루트 방식이 확인되지 않아 모터를 움직일 수 없습니다', absolute,
-      { kind: 'open', target: 'maintain-motors', label: '모터 설정 열기' });
+      { kind: 'open', target: 'motors', label: '모터 설정 열기' });
   }
   // 다회전 클리어 뒤 기준점 다시 지정 전 · 재생·초기 이동·스케줄·그룹 참가 막힘 · 수동 조그는 됨 · 수정 목록 140
   // 웹을 다시 켜거나 페이지를 닫아도 PC 단위 표시가 남아 여기 남는다 · 버튼은 그 축 기준점 지정 화면
@@ -196,7 +196,7 @@ export function collectIssues(snap, sched, { connected = true } = {}) {
     .map((d) => (d.axis === null || d.axis === undefined ? `슬레이브 ${d.slave_position}` : `${d.axis}번`));
   if (gainOff.length) {
     warn(`자동조정이 꺼진 드라이브 · ${gainOff.join(' · ')}`, '부하에 맞춰 게인이 바뀌지 않습니다. 벤치에서 꺼 둔 값이 남았을 수 있습니다. 모터 설정에서 확인하세요.',
-      { kind: 'open', target: 'maintain-motors', label: '모터 설정 열기' });
+      { kind: 'open', target: 'motors', label: '모터 설정 열기' });
   }
   // 조인트 범위 미확인 · 재생·초기 이동·수동 조작이 막혀 있다 · 판정은 서버 · 수정 목록 97
   const range = String(snap.mapping_range_blocker || '');
@@ -209,7 +209,7 @@ export function collectIssues(snap, sched, { connected = true } = {}) {
   if (boot) warn(boot.title, boot.detail, { kind: 'apply-motor-config', label: '장비에 적용' });
   // 조그 · 목표 이동을 끝내며 supervisor 가 남긴 알림 · 목표 근처 출렁임 등 · 5 분 · 실물 R-11
   for (const notice of manualNotices(snap)) {
-    warn(notice.message, '조작은 끝냈습니다. 다음 조작은 됩니다.', { kind: 'open', target: 'maintain-motors', label: '모터 설정 열기' });
+    warn(notice.message, '조작은 끝냈습니다. 다음 조작은 됩니다.', { kind: 'open', target: 'motors', label: '모터 설정 열기' });
   }
   const motors = Array.isArray(snap.motion_state?.motors) ? snap.motion_state.motors : [];
   const faulted = motors.filter((m) => m && m.fault);

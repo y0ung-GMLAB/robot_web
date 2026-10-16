@@ -1,6 +1,6 @@
 /**
- * UI v2 · 모터 설정 ① · 드라이브 게인 · 수정 목록 108 (다) (사용자 2026-10-13)
- * 자동조정(Pr0.02) · 강성(Pr0.03) · 추정 속도(Pr6.31) · 평소엔 잠김 · 「잠금 해제」 확인 뒤에만 쓴다.
+ * UI v2 · 모터 설정 ② · 드라이브 게인 · 수정 목록 108 (다) (사용자 2026-10-13)
+ * 자동조정(Pr0.02) · 강성(Pr0.03) · 지령 스무딩(Pr2.22) · 지령 FIR(Pr2.23) · 추정 속도(Pr6.31) · 평소엔 잠김 · 「잠금 해제」 확인 뒤에만 쓴다.
  * 쓰기는 모터 프로그램을 멈추지 않는다(토크가 안 풀림) · 드라이브 RAM 에만 · 남기려면 EEPROM 저장(재시작).
  * 값은 숫자 그대로 · 뜻은 마우스를 올리면 (사용자 2026-10-13).
  * 관성비는 자동조정이 정하므로 쓰지 않는다 · 위치·속도 게인도 자동조정이 강성과 관성비로 정한다.
@@ -14,11 +14,36 @@ export const GAIN_FIELDS = [
     meanings: { 0: '끔 · 게인이 그대로 고정', 1: '표준 · 보통은 이것', 2: '위치결정 · 짧게 자주 서는 축', 3: '수직축 · 중력이 늘 걸리는 축', 4: '마찰 보상' } },
   { key: 'stiffness', label: '강성', number: 'Pr0.03', min: 0, max: 31,
     meanings: null, note: '높을수록 단단하게 따라감 · 너무 높으면 떨림·소리 · 낮은 값부터 한 칸씩 · 팩토리값 13' },
+  // 지령 필터 · 입력은 드라이브 값 그대로(0.1 ms 정수 · 92 = 9.2 ms) · 옆에 ms 로 바꿔 보여 줌 · 2026-10-16 (사용자 요청)
+  { key: 'command_smoothing', label: '지령 스무딩 필터', number: 'Pr2.22', min: 0, max: 10000, msPerUnit: 0.1,
+    meanings: null, note: '위치 지령을 부드럽게(1차 지연) · 시작·정지가 부드러워지지만 그만큼 늦게 따라감'
+      + ' · 단위 0.1 ms(92 = 9.2 ms) · 팩토리값 92(A~C 프레임) · 139(D~H 프레임)'
+      + ' · 2 자유도 제어(Pr6.47 bit0 = 1)면 최대 2000(200.0 ms)'
+      + ' · 강성을 바꾸면 자동조정이 이 값을 다시 쓸 수 있음 · 한 로봇의 모든 모터를 같은 값으로' },
+  { key: 'command_fir', label: '지령 FIR 필터', number: 'Pr2.23', min: 0, max: 10000, msPerUnit: 0.1, stoppedOnly: true,
+    meanings: null, note: '위치 지령을 이 시간만큼 이동 평균 · 그 길이만큼 늦게 따라감'
+      + ' · 단위 0.1 ms(10 = 1.0 ms) · 팩토리값 10'
+      + ' · 모터가 모두 멈춰 있을 때만 바꿀 수 있음(움직이는 중이면 거절) · 한 로봇의 모든 모터를 같은 값으로' },
   { key: 'estimation_speed', label: '관성비 추정 속도', number: 'Pr6.31', min: 0, max: 3,
     meanings: { 0: '멈춤 · 관성비 고정', 1: '분 단위 · 천천히(팩토리값)', 2: '초 단위', 3: '급변 · 부하가 갑자기 바뀌는 축' } },
 ];
 
 const ui = { unlockedAxis: null, draft: {}, busy: false };
+
+/** 0.1 ms 칸 → 「9.2 ms」 · 다른 칸 · 숫자가 아니면 '' */
+export function gainMs(field, value) {
+  if (!field.msPerUnit || value === null || value === undefined || String(value).trim() === '') return '';
+  const number = Number(value);
+  if (!Number.isFinite(number)) return '';
+  return `${(number * field.msPerUnit).toFixed(1)} ms`;
+}
+
+/** 보여 주는 값 · 「92 (9.2 ms)」 · ms 칸이 아니면 숫자 그대로 · 없으면 「-」 */
+export function gainValueText(field, value) {
+  if (value === null || value === undefined || value === '') return '-';
+  const ms = gainMs(field, value);
+  return ms ? `${value} (${ms})` : String(value);
+}
 
 export function gainHint(field, value) {
   if (field.meanings) {
@@ -26,7 +51,8 @@ export function gainHint(field, value) {
     const all = Object.entries(field.meanings).map(([v, text]) => `${v} = ${text}`).join('\n');
     return `${field.number} ${field.label}${meaning ? ` · ${value} = ${meaning}` : ''}\n${all}`;
   }
-  return `${field.number} ${field.label} · ${field.note || ''}`;
+  const ms = gainMs(field, value);
+  return `${field.number} ${field.label}${ms ? ` · 지금 ${value} = ${ms}` : ''} · ${field.note || ''}`;
 }
 
 /** 바뀐 칸만 · 숫자 · 범위 밖이면 문제 글 */
@@ -39,7 +65,7 @@ export function gainChanges(gains, draft) {
     if (text === '') continue;
     const value = Number(text);
     if (!Number.isInteger(value) || value < field.min || value > field.max) {
-      problems.push(`${field.label}(${field.number}) 는 ${field.min}~${field.max} 사이 정수`);
+      problems.push(`${field.label}(${field.number}) 는 ${field.min}~${field.max} 사이 정수${field.msPerUnit ? ' (0.1 ms 단위 · 92 = 9.2 ms)' : ''}`);
       continue;
     }
     if (gains && gains[field.key] === value) continue;
@@ -52,7 +78,8 @@ async function unlock(row, changed) {
   const ok = await confirmBox({
     title: `${row.axis}번 게인 잠금 해제`,
     body: '드라이브 게인을 바꿉니다. 모터 프로그램을 멈추지 않고 바로 적용됩니다(전원을 끄면 사라짐).\n'
-      + '강성을 너무 높이면 떨리거나 소리가 납니다. 한 번에 한두 칸씩 바꾸고, 주변에 사람이 없는지 확인하세요.',
+      + '강성을 너무 높이면 떨리거나 소리가 납니다. 한 번에 한두 칸씩 바꾸고, 주변에 사람이 없는지 확인하세요.\n'
+      + '지령 필터(스무딩 · FIR)는 키울수록 부드럽지만 그만큼 늦게 따라갑니다. 한 로봇의 모든 모터를 같은 값으로 두세요.',
     confirmLabel: '잠금 해제', tone: 'warning',
   });
   if (!ok) return;
@@ -69,11 +96,14 @@ async function write(row, changed, reload) {
   const jump = values.stiffness !== undefined && Number.isInteger(before) && Math.abs(values.stiffness - before) > 2;
   const lines = Object.entries(values).map(([key, value]) => {
     const field = GAIN_FIELDS.find((f) => f.key === key);
-    return `· ${field.label}(${field.number}) ${row.gains?.[key] ?? '?'} → ${value}`;
+    const before = row.gains?.[key];
+    return `· ${field.label}(${field.number}) ${before === null || before === undefined ? '?' : gainValueText(field, before)} → ${gainValueText(field, value)}`;
   });
+  const stoppedOnly = GAIN_FIELDS.filter((f) => f.stoppedOnly && values[f.key] !== undefined).map((f) => f.label);
   const ok = await confirmBox({
     title: `${row.axis}번 게인 쓰기`,
     body: `${lines.join('\n')}\n\n${jump ? '강성을 한 번에 2칸 넘게 바꿉니다. 떨림이 생기면 바로 「정지」 후 되돌리세요.\n' : ''}`
+      + (stoppedOnly.length ? `${stoppedOnly.join(' · ')}는 모든 모터가 멈춰 있을 때만 바뀝니다(움직이는 중이면 거절).\n` : '')
       + '모터가 움직이지 않을 때만 씁니다. 지금부터 적용되고, 전원을 끄면 사라집니다.',
     confirmLabel: '쓰기', tone: jump ? 'danger' : 'warning',
   });
@@ -159,10 +189,14 @@ export function gainField(row, changed, reload) {
           onchange: (e) => { ui.draft[field.key] = e.target.value; changed(); } },
         Object.keys(field.meanings).map((v) => h('option', { value: v, title: `${v} = ${field.meanings[v]}`, selected: String(shown) === v ? '' : null }, v)))
         : h('input', { class: 'input mono num-input', type: 'number', min: field.min, max: field.max, step: '1', value: shown,
-          'aria-label': field.label, title: gainHint(field, current),
+          'aria-label': field.msPerUnit ? `${field.label} (0.1 ms 단위)` : field.label, title: gainHint(field, current),
           oninput: (e) => { ui.draft[field.key] = e.target.value; }, onchange: () => changed() }))
-      : h('span', { class: 'mono hint', text: current ?? '-', title: gainHint(field, current) });
-    return h('label', { class: 'field' }, h('span', { class: 'field-label', text: `${field.label} ` }, h('span', { class: 'muted small mono', text: field.number })), control);
+      : h('span', { class: 'mono hint', text: gainValueText(field, current), title: gainHint(field, current) });
+    // ms 칸 · 입력은 0.1 ms 정수 · 쓰는 중엔 바꾼 값을 ms 로 바로 아래에
+    const unit = field.msPerUnit
+      ? h('span', { class: 'muted small mono', text: unlocked && String(shown).trim() !== '' ? `× 0.1 ms = ${gainMs(field, shown) || '?'}` : '× 0.1 ms' })
+      : null;
+    return h('label', { class: 'field' }, h('span', { class: 'field-label', text: `${field.label} ` }, h('span', { class: 'muted small mono', text: field.number })), control, unit);
   });
   return h('div', { class: 'field' },
     h('div', { class: 'group-title', text: '게인' }),
@@ -174,5 +208,7 @@ export function gainField(row, changed, reload) {
           h('button', { class: 'btn btn-mini', type: 'button', disabled: ui.busy, onclick: () => { ui.unlockedAxis = null; ui.draft = {}; changed(); } }, '취소')]
         : h('button', { class: 'btn btn-mini', type: 'button', disabled: ui.busy || !gains, title: gains ? '' : '아직 드라이브에서 읽지 못했습니다',
           onclick: () => unlock(row, changed) }, '잠금 해제')),
-    h('p', { class: 'muted small', text: '자동조정이 켜져 있으면 관성비와 위치·속도 게인은 드라이브가 정합니다. 사람이 맞추는 것은 강성입니다. 쓰면 바로 적용되고 전원을 끄면 사라집니다(남기려면 「드라이브 저장(EEPROM)」).' }));
+    h('p', { class: 'muted small', text: '자동조정이 켜져 있으면 관성비와 위치·속도 게인은 드라이브가 정합니다. 사람이 맞추는 것은 강성입니다. '
+      + '지령 필터(스무딩 · FIR)는 0.1 ms 단위 정수(92 = 9.2 ms)로 적고, 키울수록 부드럽지만 그만큼 늦게 따라갑니다(모든 모터를 같은 값으로 · FIR 은 멈췄을 때만). '
+      + '쓰면 바로 적용되고 전원을 끄면 사라집니다(남기려면 「드라이브 저장(EEPROM)」).' }));
 }

@@ -81,6 +81,11 @@ export function motorRows(registry, snap) {
   }).sort((a, b) => a.axis - b.axis);
 }
 
+/** 지령 필터 값 · 0.1 ms 단위 → 「92 (9.2 ms)」 · 못 읽었으면 「?」 · 2026-10-16 */
+function filterText(value) {
+  return Number.isFinite(value) ? `${value} (${(value * 0.1).toFixed(1)} ms)` : '?';
+}
+
 /** 게인 칸 글 · 「자동 · 강성 13 · 관성비 137 %」 · 못 읽었으면 「-」 · 108 */
 export function gainText(gains) {
   if (!gains) return { text: '-', tone: 'idle', hint: '아직 못 읽음(드라이브가 자리 잡으면 읽음)' };
@@ -95,6 +100,8 @@ export function gainText(gains) {
     `강성(Pr0.03) ${gains.stiffness ?? '?'}`,
     `관성비(Pr0.04) ${gains.inertia_ratio ?? '?'} %`,
     `추정 속도(Pr6.31) ${gains.estimation_speed ?? '?'}`,
+    `지령 스무딩(Pr2.22) ${filterText(gains.command_smoothing)}`,
+    `지령 FIR(Pr2.23) ${filterText(gains.command_fir)}`,
     '드라이브에 저장된 값(우리 프로그램은 쓰지 않음)',
     gains.error ? `일부 못 읽음 · ${gains.error}` : '',
   ].filter(Boolean).join('\n');
@@ -109,6 +116,11 @@ export function gainWarnings(rows) {
   if (off.length) warnings.push(`자동조정 꺼짐 · ${off.join(' · ')} · 부하에 맞춰 게인이 바뀌지 않습니다(벤치에서 끈 값이 남았을 수 있음)`);
   const stiff = [...new Set(ac.map((r) => r.gains.stiffness).filter((v) => v !== null && v !== undefined))];
   if (stiff.length > 1) warnings.push(`드라이브마다 강성이 다릅니다 · ${ac.map((r) => `${r.axis}번 ${r.gains.stiffness ?? '?'}`).join(' · ')}`);
+  // 지령 필터가 축마다 다르면 늦게 따라가는 정도가 달라 축끼리 어긋난다 · 2026-10-16
+  for (const [key, label] of [['command_smoothing', '지령 스무딩 필터'], ['command_fir', '지령 FIR 필터']]) {
+    const seen = [...new Set(ac.map((r) => r.gains[key]).filter((v) => v !== null && v !== undefined))];
+    if (seen.length > 1) warnings.push(`드라이브마다 ${label}가 다릅니다(축끼리 어긋남) · ${ac.map((r) => `${r.axis}번 ${filterText(r.gains[key])}`).join(' · ')}`);
+  }
   return warnings;
 }
 

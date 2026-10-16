@@ -81,6 +81,16 @@ def test_write_needs_confirmation_range_and_no_motion():
     assert '재생 중' in moving.write({'axis': 1, 'object': 'Pr5.04', 'type': 'int16', 'value': '0', 'confirmed': True})['message']
 
 
+def test_command_filters_are_in_the_catalog_so_drive_read_shows_them():
+    """2026-10-16 · Pr2.22 지령 스무딩 · Pr2.23 지령 FIR · 「드라이브에서 읽기」 표에 · 0.1 ms 단위"""
+    assert parse_object('Pr2.22') == (0x3222, 0) and parse_object('Pr2.23') == (0x3223, 0)
+    service, _calls, _records, _values = _params({(0x3222, 0): 92, (0x3223, 0): 10})
+    rows = {row['number']: row for row in service.table(1)['rows']}
+    assert rows['Pr2.22']['drive'] == 92 and rows['Pr2.22']['differs_factory'] is False
+    assert rows['Pr2.23']['drive'] == 10 and rows['Pr2.23']['group'] == '지령 필터'
+    assert '0.1 ms' in rows['Pr2.22']['unit']
+
+
 def test_0x60b2_reason_is_the_user_decision():
     assert '사용자 결정' in write_block_reason(0x60B2)
 

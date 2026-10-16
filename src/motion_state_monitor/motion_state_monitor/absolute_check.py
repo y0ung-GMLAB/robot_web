@@ -100,6 +100,9 @@ GAIN_OBJECTS: Tuple[Tuple[str, int, str], ...] = (
     ('stiffness', 0x3003, 'int16'),
     ('inertia_ratio', 0x3004, 'int16'),
     ('estimation_speed', 0x3631, 'int16'),
+    # 지령 필터 · 0.1 ms 단위 그대로 · 화면 「드라이브 게인」 칸 되읽기 · 2026-10-16
+    ('command_smoothing', 0x3222, 'int16'),
+    ('command_fir', 0x3223, 'int16'),
 )
 #: 게인만 다시 읽는 간격 · 읽기 실패가 있으면 짧게
 GAIN_REFRESH_SEC = 60.0   # 화면에서 쓴 게인이 1 분 안에 표에 보이게 · 108 (다)
@@ -466,7 +469,7 @@ class MinasAbsoluteCheck:
             self._running = False
 
     def _read_gains(self, master: int, position: int) -> Dict[str, Any]:
-        """자동조정 · 강성 · 관성비 · 추정 속도 · 하나라도 못 읽으면 error 에 이유(값은 읽은 것만)"""
+        """자동조정 · 강성 · 관성비 · 추정 속도 · 지령 필터 둘 · 하나라도 못 읽으면 error 에 이유(값은 읽은 것만)"""
         gains: Dict[str, Any] = {name: None for name, _index, _type in GAIN_OBJECTS}
         errors = []
         for name, index, data_type in GAIN_OBJECTS:

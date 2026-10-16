@@ -179,7 +179,7 @@ function fixButton(blocker, item, changed) {
     stop: ['정지', act.stopAll],
     restart: ['프로그램 다시 시작', act.restartProgram],
     'open-mapping': ['조인트 매핑 열기', () => { location.hash = '#/mapping'; }],
-    'open-motors': ['모터 설정 열기', () => { location.hash = '#/maintain-motors'; }],
+    'open-motors': ['모터 설정 열기', () => { location.hash = '#/motors'; }],
     reset: ['오류 초기화', async () => { await act.servoControl(item, 'reset'); changed(); }],
     'servo-on': ['서보 켜기', async () => { await act.servoControl(item, 'on'); changed(); }],
   };

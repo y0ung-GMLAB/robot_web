@@ -36,8 +36,9 @@ const PAGES = {
   backup: { render: renderBackup, load: loadBackup, reloadMs: 5000 },
   pack: { render: renderPack, load: loadPack, reloadMs: 5000 },
   records: { render: renderRecords, load: loadRecords, reloadMs: 15000 },
-  // 모터 설정 한 페이지 · #/mapping 은 같은 페이지의 ② 구획
+  // 모터 설정 한 페이지 · #/mapping 은 같은 페이지의 ① 구획 · #/motors 는 ② 구획(2026-10-16 조인트 매핑이 위로)
   mapping: { render: renderSetup, load: loadSetup, reloadMs: 10000 },
+  motors: { render: renderSetup, load: loadSetup, reloadMs: 10000 },
   'maintain-motors': { render: renderSetup, load: loadSetup, reloadMs: 10000 },
   manual: { render: renderManual, load: loadManual, reloadMs: 15000 },
   // static · 들어올 때 한 번만 그린다 · iframe 을 다시 그리면 터미널 세션이 끊긴다

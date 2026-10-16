@@ -1,17 +1,34 @@
-/** UI v2 · 모터 설정 · ① 모터·드라이브 · ② 조인트 매핑 을 한 페이지 두 구획으로 (사용자 결정 2026-10-12) */
+/** UI v2 · 모터 설정 · ① 조인트 매핑 · ② 모터·드라이브 를 한 페이지 두 구획으로 (사용자 결정 2026-10-12 · 순서 2026-10-16) */
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { pendingText, setupStatus } from '../static/v2/js/pages/motor_setup.js';
+import { SETUP_PARTS, pendingText, setupStatus } from '../static/v2/js/pages/motor_setup.js';
 import { motorWhere } from '../static/v2/js/mapping_model.js';
 import { absoluteJobText } from '../static/v2/js/motors_model.js';
 import { NAV, routeLabel } from '../static/v2/js/shell.js';
 
-test('메뉴엔 「모터 설정」 하나 · 조인트 매핑 주소도 그 메뉴로 열린다', () => {
+test('메뉴엔 「모터 설정」 하나 · 조인트 매핑 · 모터·드라이브 주소도 그 메뉴로 열린다', () => {
   const ids = NAV.flatMap((group) => group.items.map(([id]) => id));
   assert.ok(ids.includes('maintain-motors'));
-  assert.ok(!ids.includes('mapping'));
+  assert.ok(!ids.includes('mapping') && !ids.includes('motors'));
   assert.equal(routeLabel('maintain-motors'), '모터 설정');
   assert.equal(routeLabel('mapping'), '모터 설정');
+  assert.equal(routeLabel('motors'), '모터 설정');
+});
+
+test('구획 순서 · ① 조인트 매핑이 위 · ② 모터·드라이브가 아래 · 바로 가기 주소 (사용자 2026-10-16)', async () => {
+  assert.deepEqual(SETUP_PARTS.map(([id, label, , route]) => [id, label, route]), [
+    ['part-mapping', '① 조인트 매핑', 'mapping'],
+    ['part-motors', '② 모터·드라이브', 'motors'],
+  ]);
+  const { readFileSync } = await import('node:fs');
+  const page = readFileSync(new URL('../static/v2/js/pages/motor_setup.js', import.meta.url), 'utf8');
+  const body = page.slice(page.indexOf('export function renderSetup'));
+  assert.ok(body.indexOf("id: 'part-mapping'") < body.indexOf("id: 'part-motors'"), '그리는 순서도 매핑이 먼저');
+  assert.ok(body.indexOf("id: 'part-motors'") < body.indexOf("class: 'apply-bar'"), '저장 칸은 두 구획 아래 하나');
+  const main = readFileSync(new URL('../static/v2/js/main.js', import.meta.url), 'utf8');
+  assert.match(main, /\n  motors: \{ render: renderSetup, load: loadSetup/);
+  const mapping = readFileSync(new URL('../static/v2/js/pages/mapping.js', import.meta.url), 'utf8');
+  assert.doesNotMatch(mapping, /① 모터·드라이브/);
 });
 
 test('구획 상태 · 모터 연결 수 · 범위 미확인 · 장비 적용', () => {
@@ -87,7 +104,7 @@ test('드라이브 공통 값 · 바뀐 칸 · 범위 검사 (수정 목록 114)
   assert.deepEqual(minasBaseProblems(rows, { '0x3437:0': '' }), []);
 });
 
-test('드라이브 공통 값 · 잠금 해제 확인 뒤에만 고침 · 모터 설정 ① 에 붙음', async () => {
+test('드라이브 공통 값 · 잠금 해제 확인 뒤에만 고침 · 모터 설정 ② 에 붙음', async () => {
   const { readFileSync } = await import('node:fs');
   const card = readFileSync(new URL('../static/v2/js/pages/minas_base.js', import.meta.url), 'utf8');
   const page = readFileSync(new URL('../static/v2/js/pages/motors.js', import.meta.url), 'utf8');

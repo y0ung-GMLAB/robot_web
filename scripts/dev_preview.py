@@ -1176,7 +1176,8 @@ PREVIEW_GAINS = {}
 def _preview_gains(axis):
     if axis not in PREVIEW_GAINS:
         PREVIEW_GAINS[axis] = {'auto_tuning': 0 if axis == 2 else 1, 'stiffness': 12 if axis == 2 else 13,
-                               'inertia_ratio': [137, 143, 137, 250, 250][axis % 5], 'estimation_speed': 1, 'error': ''}
+                               'inertia_ratio': [137, 143, 137, 250, 250][axis % 5], 'estimation_speed': 1,
+                               'command_smoothing': 92, 'command_fir': 10, 'error': ''}   # 지령 필터 · 팩토리값 · 2026-10-16
     return dict(PREVIEW_GAINS[axis])
 
 

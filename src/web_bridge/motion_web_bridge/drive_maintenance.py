@@ -82,8 +82,18 @@ GAIN_FIELDS: Dict[str, tuple] = {
     'auto_tuning': (0x3002, 0, 4),
     'stiffness': (0x3003, 0, 31),
     'estimation_speed': (0x3631, 0, 3),
+    # 지령 필터 · 단위 0.1 ms(92 = 9.2 ms) · 화면도 0.1 ms 정수 그대로 · 사용자 요청 2026-10-16(실물에서 파라미터 (고급)로 써 보고 효과 확인)
+    # Pr2.22 는 2 자유도 제어(Pr6.47 bit0 = 1)면 드라이브 최대 2000 · 넘으면 드라이브가 거절 → 쓰기 실패 · 되읽기로 드러난다
+    'command_smoothing': (0x3222, 0, 10000),
+    'command_fir': (0x3223, 0, 10000),
 }
-GAIN_LABELS = {'auto_tuning': '자동조정(Pr0.02)', 'stiffness': '강성(Pr0.03)', 'estimation_speed': '추정 속도(Pr6.31)'}
+GAIN_LABELS = {
+    'auto_tuning': '자동조정(Pr0.02)', 'stiffness': '강성(Pr0.03)', 'estimation_speed': '추정 속도(Pr6.31)',
+    'command_smoothing': '지령 스무딩 필터(Pr2.22)', 'command_fir': '지령 FIR 필터(Pr2.23)',
+}
+#: 지령이 멈춘 뒤에만 바꿔야 하는 값 · A6 매뉴얼 Pr2.23 「지령 정지 · 필터 전환 대기 시간 뒤 변경」 ·
+#: 움직이는 축이 있으면 거절(게인 쓰기 안전 차단과 같은 규칙 · 모든 EtherCAT 축) · 거절 이유 앞에 이 값 때문임을 붙인다
+STOPPED_ONLY_GAINS = ('command_fir',)
 
 
 def gain_commands(master: int, position: int, values: Dict[str, Any]) -> List[tuple]:
@@ -242,7 +252,9 @@ class DriveMaintenance:
             return {'success': False, 'message': f'게인 쓰기 불가 · {exc}'}
         blocker = self._safety_blocker()
         if blocker:
-            return {'success': False, 'message': f'게인 쓰기 불가 · {blocker}'}
+            stopped_only = [GAIN_LABELS[name] for name in STOPPED_ONLY_GAINS if name in values]
+            why = f"{' · '.join(stopped_only)}는 모터가 모두 멈춰 있을 때만 바꿀 수 있습니다 · " if stopped_only else ''
+            return {'success': False, 'message': f'게인 쓰기 불가 · {why}{blocker}'}
         if not self._lock.acquire(blocking=False):
             return {'success': False, 'message': '게인 쓰기 불가 · 다른 모터 작업이 진행 중입니다'}
         results = []

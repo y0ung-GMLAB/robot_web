@@ -199,6 +199,39 @@ def test_gain_write_needs_confirmation_and_no_motion():
     assert '재생 중' in moving.write_gains({'axis': 1, 'values': {'stiffness': 12}, 'confirmed': True})['message']
 
 
+def test_command_filters_are_written_like_stiffness_in_0_1_ms():
+    """2026-10-16 · Pr2.22 지령 스무딩(0x3222) · Pr2.23 지령 FIR(0x3223) · 0.1 ms 정수 그대로 · RAM 에만"""
+    service, calls, records = _service(upload_stdout='0x005c 92\n')
+    result = service.write_gains({'axis': 1, 'values': {'command_smoothing': 92}, 'confirmed': True})
+    assert result['success'] is True, result
+    assert ('cli', 'download -m 0 -p 2 -t int16 0x3222 0 92') in calls
+    assert ('cli', 'upload -m 0 -p 2 -t int16 0x3222 0') in calls
+    assert ('service', 'stop') not in calls and records[0]['read_back'] == {'command_smoothing': 92}
+    fir, fir_calls, _r = _service(upload_stdout='0x0014 20\n')
+    assert fir.write_gains({'axis': 1, 'values': {'command_fir': 20}, 'confirmed': True})['success'] is True
+    assert ('cli', 'download -m 0 -p 2 -t int16 0x3223 0 20') in fir_calls
+
+
+@pytest.mark.parametrize('values', [{'command_smoothing': 10001}, {'command_fir': -1}, {'command_fir': 'abc'}])
+def test_command_filters_refuse_out_of_range(values):
+    service, calls, _records = _service()
+    result = service.write_gains({'axis': 1, 'values': values, 'confirmed': True})
+    assert result['success'] is False
+    assert not [c for c in calls if c[0] == 'cli' and c[1].startswith('download')]
+
+
+def test_fir_is_refused_while_a_motor_moves_and_says_why():
+    """A6 매뉴얼 · Pr2.23 은 지령이 멈춘 뒤에만 바꾼다 · 움직이는 축이 있으면 거절 · 이유에 FIR 을 적는다"""
+    moving, calls, _records = _service(blocker='축 1이 움직이는 중입니다')
+    result = moving.write_gains({'axis': 1, 'values': {'command_fir': 20}, 'confirmed': True})
+    assert result['success'] is False
+    assert '지령 FIR 필터(Pr2.23)는 모터가 모두 멈춰 있을 때만' in result['message']
+    assert '움직이는 중' in result['message']
+    assert not [c for c in calls if c[0] == 'cli' and c[1].startswith('download')]
+    other = moving.write_gains({'axis': 1, 'values': {'stiffness': 12}, 'confirmed': True})
+    assert 'FIR' not in other['message'] and '움직이는 중' in other['message']
+
+
 def test_eeprom_save_all_restarts_motor_manager_once():
     service, calls, _records = _service()
     result = service.save_eeprom_all({'axes': [1], 'confirmed': True})
