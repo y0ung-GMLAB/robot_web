@@ -360,3 +360,116 @@ def test_schedule_end_after_the_last_cycle_finishes_with_the_window_end_text():
     # 마스터의 세션 정리가 와도 그대로
     manager._group.cancel({'execution_id': 'exec-a'})
     assert manager._status['message'] == '구간 끝 · 회차 후 정지'
+
+
+# 회차 맞춤 · 그룹 전체 회차 후 정지 · 장벽에서 풀기를 기다린다 · 수정 목록 154 · 155 ----------- #
+
+def _cycle_worker(manager, *, stop_payload=None):
+    """1회차를 돌린다 · `stop_payload` 가 있으면 회차 도중 회차 후 정지를 보낸다"""
+    manager._plan_builder.build = lambda payload, **kwargs: {
+        'run_mode': payload.get('run_mode', 'once'),
+        'repeat_mode': 'reinitialize', 'dwell_sec': 0.0,
+        'group_execution': True,
+        'capabilities': {'continuous_run': {'available': True}},
+    }
+    manager._wait_group_deadline = lambda *_args, **_kwargs: None
+    manager._player._run_initialization = lambda _plan: manager._status.update({
+        'state': 'initialized', 'phase': 'initialized',
+    })
+
+    def run_motion(plan):
+        manager._status.update({'state': 'running', 'phase': 'running', 'group_execution': True})
+        if stop_payload is not None:
+            manager._handle_stop_after_cycle(dict(stop_payload))
+        manager._status.update({
+            'state': 'completed', 'phase': 'completed',
+            'lifecycle': {'motion_started_at': time.time()},
+        })
+
+    manager._player._run_motion = run_motion
+    manager._run_thread = threading.Thread(target=manager._group._run, args=({
+        'execution_id': 'exec-a',
+        'initialize_monotonic': time.monotonic() + 1.0,
+    }, [{}]))
+    manager._run_thread.start()
+    _wait_until(lambda: manager._group.session.get('state') == 'armed')
+    manager._group.schedule_cycle({
+        'execution_id': 'exec-a', 'cycle_number': 1,
+        'start_monotonic': time.monotonic() + 1.0,
+    })
+    return manager._run_thread
+
+
+def test_group_wide_stop_after_cycle_waits_at_the_barrier_until_released():
+    """짧은 PC · 제 회차 끝 → 「정지」 대신 장벽에 선다 · 진행 PC 가 긴 PC 끝을 보고 푼다 · 154"""
+    from motion_runtime.motion_group_display import resolve_display_step
+
+    manager = _group_manager()
+    worker = _cycle_worker(manager, stop_payload={'reason': 'schedule_end', 'group_wide': True})
+
+    _wait_until(lambda: manager._status.get('phase') == 'group_motion_completed')
+    time.sleep(0.05)
+    assert worker.is_alive(), '장벽에서 기다린다 · 멈추지 않는다'
+    assert manager._status['state'] == 'motion_completed', '장벽 보고 · 진행 PC 가 회차 끝으로 읽는다'
+    assert manager._status['phase'] == 'group_motion_completed'
+    assert not manager._stop_event.is_set()
+    assert '회차 후 정지 대기' in manager._status['message']
+    assert resolve_display_step({**manager._status, 'execution_id': 'exec-a'}) == '회차 후 정지 대기'
+
+    result = manager._group.cancel({'execution_id': 'exec-a'})
+
+    assert not worker.is_alive()
+    assert result['success'] is True
+    assert manager._status['state'] == 'stopped'
+    assert manager._status['message'] == '구간 끝 · 회차 후 정지'
+
+
+def test_group_wide_stop_received_at_the_barrier_shows_the_wait():
+    """긴 PC 재생 중 · 짧은 PC 는 이미 장벽 · 그때 구간 끝 · 155"""
+    manager = _group_manager()
+    manager._group.session.update({'state': 'motion_completed', 'cycle_number': 2})
+    manager._status = {
+        'state': 'motion_completed', 'phase': 'group_motion_completed',
+        'group_execution': True, 'message': '그룹 모션 2회차 완료',
+    }
+
+    assert manager._handle_stop_after_cycle({'reason': 'schedule_end', 'group_wide': True})['success'] is True
+
+    assert not manager._stop_event.is_set()
+    assert manager._status['state'] == 'motion_completed'
+    assert manager._status['phase'] == 'group_motion_completed'
+    assert manager._status['message'].startswith('그룹 모션 2회차 완료 · 회차 후 정지 대기')
+
+
+def test_a_local_only_stop_after_cycle_still_finishes_at_the_cycle_end():
+    """이 PC 만의 회차 후 정지(1등급 알람 · 단독 길) · 진행 PC 는 모른다 · 옛 그대로 멈춰 「먼저 정지」 로 알린다"""
+    manager = _group_manager()
+    worker = _cycle_worker(manager, stop_payload={'reason': 'schedule_end'})
+
+    worker.join(timeout=2.0)
+
+    assert not worker.is_alive()
+    assert manager._status['state'] == 'stopped'
+    assert manager._status['message'] == '구간 끝 · 회차 후 정지'
+
+
+def test_stop_after_cycle_right_after_the_cycle_motion_does_not_cut_it():
+    """회차 애니가 막 끝나 장벽 표시 직전(`completed`) · 즉시 정지로 읽지 않는다 · 154"""
+    manager = _group_manager()
+    manager._status = {'state': 'completed', 'group_execution': True}
+
+    assert manager._handle_stop_after_cycle({'group_wide': True})['success'] is True
+
+    assert not manager._stop_event.is_set()
+    assert manager._graceful_stop_event.is_set()
+    assert manager._group.session['stop_after_cycle_group'] is True
+
+
+def test_group_wide_stop_between_cycles_still_stops_at_once():
+    """회차 사이(초기 위치 · 시작 대기)에 받은 회차 후 정지는 옛 그대로 바로 선다 · 모든 PC 가 같은 단계"""
+    manager = _group_manager()
+    manager._status = {'state': 'waiting', 'group_execution': True}
+
+    manager._handle_stop_after_cycle({'reason': 'schedule_end', 'group_wide': True})
+
+    assert manager._stop_event.is_set()

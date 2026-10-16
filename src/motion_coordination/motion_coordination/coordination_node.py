@@ -1121,6 +1121,8 @@ class MotionCoordinationNode(Node):
                     'execution_id': message.execution_id,
                     'network_operation_id': message.command_id,
                     'reason': str(getattr(message, 'stop_reason', '') or ''),
+                    # 그룹 전체 정지 · 회차 맞춤은 제 회차 뒤 장벽에서 진행 PC 의 풀기를 기다린다 · 수정 목록 154
+                    'group_wide': True,
                 })
                 with self._lock:
                     if self._execution.coordinator_id == self._config.pc_id:
@@ -1440,8 +1442,9 @@ class MotionCoordinationNode(Node):
                         self._execution.stop_after_cycle
                         or self._execution.run_mode == 'once'
                     ) and self._execution.pending_command != 'cancel_before_start':
-                        # Runtime stop-after-cycle completes without emitting
-                        # cycle_ready. Start the same release handshake here.
+                        # 회차 후 정지 중 · 회차 맞춤 PC 는 제 회차를 끝내면 장벽(`motion_completed`)에 머물고
+                        # 풀기는 위 `motion_completed` 분기가 모두 끝난 뒤 한다 · 여기 오는 `stopped` 는 진짜 정지
+                        # (사람 정지 · 오류 · 회차 사이에 받아 바로 선 것 · 이 PC 만의 정지) · 바로 푼다 · 수정 목록 154
                         self._begin_group_release()
                     elif self._execution.state != 'releasing':
                         # 참가 PC 가 저 혼자 멈췄다 · 전에는 `stopped` 로만 두고 실행을 쥔 채 남아 다음 시작이
@@ -2566,6 +2569,7 @@ class MotionCoordinationNode(Node):
                     'execution_id': execution_id,
                     'network_operation_id': stop_message.command_id,
                     'reason': reason,
+                    'group_wide': True,   # DDS 로도 보낸다 · 수정 목록 154
                 })
             else:
                 # 바빠서 빠진 진행 PC · 제 단독 재생을 회차 끝에 세우지 않는다 · 수정 목록 136
@@ -3725,6 +3729,8 @@ class MotionCoordinationNode(Node):
                 'command': 'stop_after_cycle',
                 'execution_id': self._execution.execution_id,
                 'network_operation_id': f'local-grade1-{message.sequence}',
+                # 진행 PC 면 아래에서 모두에게 보낸다 · 슬레이브 혼자면 옛 그대로 회차 끝에 멈춘다 · 수정 목록 154
+                'group_wide': self._execution.coordinator_id == self._config.pc_id,
             })
             if self._execution.coordinator_id == self._config.pc_id:
                 self._broadcast_stop('stop_after_cycle')

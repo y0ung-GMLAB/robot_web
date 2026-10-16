@@ -591,7 +591,11 @@ def local_motion_control(bridge: Any, payload: Mapping[str, Any]) -> Dict[str, A
             },
         )
     if command == 'stop_after_cycle':
-        result = bridge.motion_run_stop_after_cycle({'reason': payload.get('reason') or ''})
+        result = bridge.motion_run_stop_after_cycle({
+            'reason': payload.get('reason') or '',
+            # 그룹 전체 회차 후 정지 · 회차 맞춤은 장벽에서 풀기를 기다린다 · 수정 목록 154
+            'group_wide': payload.get('group_wide') is True,
+        })
         if (
             result.get('success') is False
             and '활성 그룹 실행이 없습니다' in str(result.get('message') or '')

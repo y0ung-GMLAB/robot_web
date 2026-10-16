@@ -124,6 +124,88 @@ def test_finish_cycle_then_park_then_power_off_only_flagged_motors(tmp_path):
     assert '켠 채 둠(모터 설정) 1번' in status['message']
 
 
+def _barrier_robot(tmp_path, *, release_after_polls):
+    """회차 맞춤 슬레이브 · 제 회차를 끝내고 장벽에서 긴 PC 를 기다린다 · `release_after_polls` 번 본 뒤 풀린다
+
+    실행 스레드가 살아 있는 동안 기준점 이동은 런타임 `_claim_run_slot` 처럼 거절한다 · 수정 목록 155
+    """
+    from motion_common import run_state
+
+    bridge, calls, runtime = _bridge(tmp_path, states=['motion_completed'])
+    robot = {'polls': 0, 'released': False, 'parked_at': 0.0}
+
+    def motion_run_status():
+        robot['polls'] += 1
+        if not robot['released'] and robot['polls'] > release_after_polls:
+            robot['released'] = True   # 진행 PC 가 긴 PC 회차 끝을 보고 풀었다
+        if robot['parked_at']:
+            return {'status': {'state': 'initialized', 'phase_started_at': robot['parked_at']}}
+        if robot['released']:
+            return {'status': {
+                'state': 'stopped', 'group_execution': True, 'execution_id': 'exec-a',
+                'message': '구간 끝 · 회차 후 정지', 'phase_finished_at': 0.0,
+            }}
+        return {'status': {
+            'state': 'motion_completed', 'phase': 'group_motion_completed',
+            'group_execution': True, 'execution_id': 'exec-a',
+        }}
+
+    def coordination_execution_blocker():
+        # 슬레이브 · 실행 상태 = 이 PC 런타임 상태 · 풀리면 실행 번호가 빈다
+        execution = (
+            {'execution_id': '', 'state': 'stopped'} if robot['released']
+            else {'execution_id': 'exec-a', 'state': 'motion_completed'}
+        )
+        return '그룹 재생 중' if run_state.group_is_active(execution) else ''
+
+    def motion_run_initialize(payload):
+        if not robot['released']:
+            calls.append(('refused',))
+            return {'success': False, 'message': 'previous motion run task is still running'}
+        calls.append(('initialize', payload.get('initial_mode_override'), payload.get('initial_move_time_sec')))
+        robot['parked_at'] = time.time() + 5
+        return {'success': True}
+
+    bridge.motion_run_status = motion_run_status
+    bridge.coordination_execution_blocker = coordination_execution_blocker
+    bridge.motion_run_initialize = motion_run_initialize
+    return bridge, calls, robot
+
+
+def test_parking_waits_for_the_group_barrier_then_parks_with_the_group(tmp_path):
+    """실물 2026-10-16 14:44:51 · 짧은 PC 가 장벽에서 기다릴 때 구간 끝 · 주차 거절 → 1분 뒤 · 155"""
+    bridge, calls, robot = _barrier_robot(tmp_path, release_after_polls=8)
+
+    assert _service(bridge)._park_and_power_off() == ''
+
+    assert ('refused',) not in calls, '장벽 중에는 기준점 이동을 보내지 않는다'
+    assert robot['released'] is True
+    assert calls[0] == ('initialize', 'reference', 10.0)
+    assert ('ac', 'servo_off', 0) in calls
+
+
+def test_parking_waits_on_the_local_barrier_even_without_the_coordination_status(tmp_path):
+    """연동 상태를 3초 넘게 못 받으면 막는 값이 빈다 · 그래도 로컬 장벽이면 기다린다 · 155"""
+    bridge, calls, robot = _barrier_robot(tmp_path, release_after_polls=8)
+    bridge.coordination_execution_blocker = lambda: ''
+
+    assert _service(bridge)._park_and_power_off() == ''
+
+    assert ('refused',) not in calls
+    assert calls[0] == ('initialize', 'reference', 10.0)
+
+
+def test_a_solo_motion_completed_is_still_a_finished_cycle():
+    from motion_web_bridge.schedule_end import cycle_finished
+
+    assert cycle_finished({'state': 'motion_completed'}) is True
+    assert cycle_finished({'state': 'motion_completed', 'group_execution': True}) is False
+    assert cycle_finished({'state': 'completed', 'group_execution': True}) is True, '1회 그룹 끝 · 풀린 뒤'
+    assert cycle_finished({'state': 'stopped', 'group_execution': True}) is True
+    assert cycle_finished({'state': 'running'}) is False
+    assert cycle_finished({'state': 'error'}) is True
+
+
 @pytest.mark.parametrize('kwargs, reason', [
     ({'states': ['running', 'error']}, '오류'),
     ({'states': ['completed'], 'alarm': 2}, '서보 알람'),

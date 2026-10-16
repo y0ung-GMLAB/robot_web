@@ -21,6 +21,7 @@ const stateLabels = {
   running_independent: '각자 재생 중',
   waiting_cycle_ready: '회차 준비 중', cycle_ready: '다음 시작 준비',
   stop_after_cycle: '이번 회차 후 정지 예정', releasing: '이전 그룹 실행 정리 중',
+  motion_completed: '회차 완료', cycle_initializing: '다음 회차 초기화',
   stopped: '정지', error: '오류',
   online: '정상', warning: '지연', offline: '통신 단절', ready: '정상',
   unavailable: '확인 불가', out_of_tolerance: '동기화 불량', unknown: '확인 불가',
@@ -45,6 +46,8 @@ const activeStates = new Set([
   'preparing', 'initializing', 'armed', 'start_scheduled', 'waiting', 'running',
   'running_independent', 'waiting_cycle_ready', 'cycle_ready', 'stop_after_cycle',
   'releasing',
+  // 회차 맞춤 장벽 · 슬레이브 런타임의 짧은 단계 · run_state.py 와 같게 · 수정 목록 155
+  'motion_completed', 'cycle_initializing', 'verifying', 'completed', 'initialized', 'join_ready',
 ]);
 
 function peerCycleText(peer = {}) {
