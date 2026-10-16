@@ -1,6 +1,9 @@
 """Blender 애니메이션 → 로봇 애니메이션 파일 (.json) + 속도·가속·리밋 검사. 로봇 무관.
 
-Blender 에서 Text Editor 로 열고 Run Script. 폴더 고르기 창 → 고른 폴더에 출력.
+Blender 에서 Text Editor 로 열고 Run Script → 3D 뷰 사이드바(N) 「Robot」 탭에 버튼 2개:
+  속도 검사   파일 안 쓰고 검사만 (아래 마커·곡선·창 그대로) · 저장 안 한 .blend 도 됨
+  내보내기    폴더 고르기 창 → 고른 폴더에 출력
+Text 블록 「Register」 체크 + 환경설정 Auto Run Python Scripts 가 켜져 있으면 파일 열 때 탭이 바로 생김.
   <이름>.json                 애니메이션 파일 (JSON Lines) · 헤더 1줄 + [frame, time_sec, id, rad, ...]
                               0.02 s 고정 주기 · rotation_unit "rad" · 이름 = .blend 파일 이름
   report/<이름>_limits.json   조인트별 MotorLimit · 클립 최소/최대 · 첫 프레임 (deg)
@@ -18,8 +21,9 @@ Blender 에서 Text Editor 로 열고 Run Script. 폴더 고르기 창 → 고�
 
 값 = 컨스트레인트까지 반영한 본 회전 (레스트 기준, 관절 각) · 감속기어비·부호·오프셋은
 각 PC 조인트 매핑이 적용 · Blender 안 검사·리포트는 deg, 파일만 rad.
-Blender 안: 초과 구간마다 타임라인 마커 "ANIM! ..." · Empty "AnimSpeedCheck" 의
-<본>_vel_pct / <본>_acc_pct 곡선 (Graph Editor · 100 = 한계).
+Blender 안: 초과 구간마다 타임라인 마커 "ANIM! ..." (ERR 마커만 선택 상태 = 밝게) · Empty "AnimSpeedCheck" 의
+<본>_vel_pct / <본>_acc_pct 곡선 (Graph Editor · 100 = 한계) · ANIM_issue 채널 (키 색: 빨강 Extreme = 100% 초과 ·
+파랑 Breakdown = 80% 이상 · Empty 선택하면 타임라인·도프시트에 보임).
 
 exec 전에 둘 수 있는 전역: ARMATURE (오브젝트 이름 또는 이름 목록 · 없으면 joint_name 본이 있는 아마추어 전부) · EXPORT_NAME · OUT_DIR (창 없이 출력).
 blender -b 실행도 창 없이 출력 (OUT_DIR 없으면 기본 폴더).
@@ -38,6 +42,7 @@ ZERO_SNAP_RAD = 1e-6          # 파일 값 · 이보다 작으면 정확히 0 (B
 AXIS_INDEX = {'X': 0, 'Y': 1, 'Z': 2}
 MARKER_PREFIX = 'ANIM!'
 CHECK_OBJECT = 'AnimSpeedCheck'
+ISSUE_PROP = 'ANIM_issue'          # AnimSpeedCheck 의 문제 구간 채널 (키 색: 빨강 = 100% 초과 · 파랑 = 80% 이상)
 DIR_PROP = 'anim_export_dir'
 
 BONE_PROPS = {
@@ -144,7 +149,61 @@ def follows_other_bone(pb):
     return any(c.type in {'COPY_ROTATION', 'COPY_TRANSFORMS'} and not c.mute for c in pb.constraints)
 
 
+def _exclude_others(arms):
+    """리그 없는 컬렉션을 잠깐 뺀다 (배경·메쉬까지 프레임마다 계산하면 ~10배 느림).
+    빼고 다시 넣으면 Blender 가 오브젝트별 숨김(눈 아이콘)·선택을 지우므로 전부 기록 → _restore 로 되돌림."""
+    vl = bpy.context.view_layer
+    state = {'objects': {o.name: (o.hide_get(), o.select_get()) for o in vl.objects},
+             'active': vl.objects.active.name if vl.objects.active else None, 'lc': [], 'off': []}
+
+    def record(lc):
+        for c in lc.children:
+            state['lc'].append((c, c.exclude, c.hide_viewport, c.holdout, c.indirect_only))
+            record(c)
+    record(vl.layer_collection)
+
+    def walk(lc):
+        for c in lc.children:
+            if c.exclude:
+                continue
+            if any(o in arms for o in c.collection.all_objects):
+                walk(c)
+            else:
+                state['off'].append(c)
+                c.exclude = True
+    walk(vl.layer_collection)
+    return state
+
+
+def _restore(state):
+    vl = bpy.context.view_layer
+    for c in state['off']:
+        c.exclude = False
+    for c, exc, hid, hold, ind in state['lc']:
+        if c.exclude != exc: c.exclude = exc
+        if c.hide_viewport != hid: c.hide_viewport = hid
+        if c.holdout != hold: c.holdout = hold
+        if c.indirect_only != ind: c.indirect_only = ind
+    for o in vl.objects:
+        st = state['objects'].get(o.name)
+        if st is None:
+            continue
+        if o.hide_get() != st[0]: o.hide_set(st[0])
+        if o.select_get() != st[1]: o.select_set(st[1])
+    if state['active'] and state['active'] in vl.objects:
+        vl.objects.active = vl.objects[state['active']]
+
+
 def sample(scene, bones):
+    arms = {pb.id_data for pb in bones}
+    state = _exclude_others(arms)
+    try:
+        return _sample(scene, bones)
+    finally:
+        _restore(state)
+
+
+def _sample(scene, bones):
     fps = scene.render.fps / scene.render.fps_base
     start, end = scene.frame_start, scene.frame_end
     n = int(round((end - start) / fps / PERIOD)) + 1
@@ -197,16 +256,20 @@ def write_animation(path, title, ids, n):
 
 
 def update_markers(scene, flags):
+    """마커는 색을 따로 못 줌 → ERR 마커만 선택 상태로 둬서 밝게 (다른 마커는 선택 해제)."""
     for m in [m for m in scene.timeline_markers if m.name.startswith(MARKER_PREFIX)]:
         scene.timeline_markers.remove(m)
+    for m in scene.timeline_markers:
+        m.select = False
     for fl in flags:
         tag = 'ERR' if fl['level'] == 'error' else 'warn'
         name = '%s %s %s %s %d%%' % (MARKER_PREFIX, tag, fl['bone'], fl['kind'], round(fl['peak_ratio'] * 100))
         at = fl['over_blender_frames'][0] if fl.get('over_blender_frames') else fl['blender_frame_from']
-        scene.timeline_markers.new(name, frame=int(math.floor(at)))
+        m = scene.timeline_markers.new(name, frame=int(math.floor(at)))
+        m.select = fl['level'] == 'error'
 
 
-def bake_check_curves(scene, arm, bones, frames, vel_pct, acc_pct):
+def bake_check_curves(scene, arm, bones, frames, vel_pct, acc_pct, flags=()):
     obj = bpy.data.objects.get(CHECK_OBJECT)
     if obj is None:
         obj = bpy.data.objects.new(CHECK_OBJECT, None)
@@ -218,12 +281,50 @@ def bake_check_curves(scene, arm, bones, frames, vel_pct, acc_pct):
         obj.animation_data.action = None
         if old.users == 0:
             bpy.data.actions.remove(old)
+    keys = []
     for pb in bones:
         for key, series in ((label(pb) + '_vel_pct', vel_pct[label(pb)]), (label(pb) + '_acc_pct', acc_pct[label(pb)])):
             obj[key] = 0.0
-            for f, v in zip(frames, series):
-                obj[key] = float(v)
-                obj.keyframe_insert(data_path='["%s"]' % key, frame=f)
+            obj.keyframe_insert(data_path='["%s"]' % key, frame=frames[0])     # 곡선 만들기 (키 1개)
+            keys.append((key, series))
+    fcs = {fc.data_path: fc for fc in obj.animation_data.action.fcurves} if hasattr(obj.animation_data.action, 'fcurves')         else {fc.data_path: fc for l in obj.animation_data.action.layers for st in l.strips for cb in st.channelbags for fc in cb.fcurves}
+    lin = bpy.types.Keyframe.bl_rna.properties['interpolation'].enum_items['LINEAR'].value
+    for key, series in keys:      # 키 한 번에 채우기 (keyframe_insert 반복은 수만 프레임에서 몇 분 걸림)
+        fc = fcs['["%s"]' % key]
+        fc.keyframe_points.clear()
+        fc.keyframe_points.add(len(frames))
+        co = [0.0] * (2 * len(frames))
+        co[0::2] = frames
+        co[1::2] = [float(v) for v in series]
+        fc.keyframe_points.foreach_set('co', co)
+        fc.keyframe_points.foreach_set('interpolation', [lin] * len(frames))
+        fc.update()
+    # 문제 구간 채널 · 키 색 = 종류 (100% 초과 = Extreme 빨강 · 80% 이상 = Breakdown 파랑) · 값 = 최대 %
+    if ISSUE_PROP in obj:
+        del obj[ISSUE_PROP]
+    pts = {}
+    for fl in flags:
+        f0, f1 = (fl['over_blender_frames'] if fl.get('over_blender_frames') else
+                  (fl['blender_frame_from'], fl['blender_frame_to']))
+        err = fl['level'] == 'error'
+        for f in (int(math.floor(f0)), int(math.ceil(f1))):
+            old = pts.get(f)
+            if old is None or (err and not old[1]) or (err == old[1] and fl['peak_ratio'] > old[0]):
+                pts[f] = (fl['peak_ratio'], err)
+    if pts:
+        obj[ISSUE_PROP] = 0.0
+        obj.keyframe_insert(data_path='["%s"]' % ISSUE_PROP, frame=min(pts))
+        fcs = {fc.data_path: fc for l in obj.animation_data.action.layers for st in l.strips
+               for cb in st.channelbags for fc in cb.fcurves}
+        fc = fcs['["%s"]' % ISSUE_PROP]
+        fc.keyframe_points.clear()
+        fc.keyframe_points.add(len(pts))
+        for kp, f in zip(fc.keyframe_points, sorted(pts)):
+            ratio, err = pts[f]
+            kp.co = (f, round(ratio * 100, 1))
+            kp.interpolation = 'CONSTANT'
+            kp.type = 'EXTREME' if err else 'BREAKDOWN'
+        fc.update()
     return obj
 
 
@@ -234,7 +335,8 @@ def default_out_dir():
     return os.path.join(os.path.dirname(bpy.data.filepath), 'export') if bpy.data.filepath else ''
 
 
-def main(out_dir=None):
+def main(out_dir=None, write=True):
+    """write=False → 검사만 (애니메이션 파일·리포트 안 씀 · 마커·검사 곡선·요약은 그대로)"""
     scene = bpy.context.scene
     global LABEL_WITH_RIG
     arms = find_armatures()
@@ -244,6 +346,12 @@ def main(out_dir=None):
         bpy.ops.object.mode_set(mode='POSE')
     bones = motor_bones(arms)
     name = export_name(arm)
+    chk = bpy.data.objects.get(CHECK_OBJECT)      # 지난 검사 곡선은 읽는 동안 떼어 둠 (프레임마다 같이 계산돼 느려짐)
+    if chk and chk.animation_data and chk.animation_data.action:
+        old = chk.animation_data.action
+        chk.animation_data.action = None
+        if old.users == 0:
+            bpy.data.actions.remove(old)
     fps, frames, values, raw = sample(scene, bones)
     n = len(frames)
     if abs(fps - 1.0 / PERIOD) > 1e-6:
@@ -254,10 +362,11 @@ def main(out_dir=None):
             values[label(pb)] = [min(max(s, lim[0]), lim[1]) if lim[0] - 1e-4 <= s <= lim[1] + 1e-4 else s
                                  for s in values[label(pb)]]
 
-    out_dir = out_dir or default_out_dir()
-    if not out_dir:
+    out_dir = (out_dir or default_out_dir()) if write else ''
+    if write and not out_dir:
         raise RuntimeError('.blend 를 저장하거나 OUT_DIR 지정')
-    os.makedirs(out_dir, exist_ok=True)
+    if write:
+        os.makedirs(out_dir, exist_ok=True)
     ids = [(joint_name(pb), values[label(pb)]) for pb in bones]
     path = os.path.join(out_dir, name + '.json')
 
@@ -313,21 +422,23 @@ def main(out_dir=None):
              'warnings': sum(1 for f in flags if f['level'] == 'warn'),
              'not_checked': unchecked,
              'axes': axes_report, 'segments': flags}
-    check['exported'] = check['errors'] == 0      # 100% 넘는 곳이 있으면 애니메이션 파일을 쓰지 않는다
+    check['exported'] = write and check['errors'] == 0      # 100% 넘는 곳이 있으면 애니메이션 파일을 쓰지 않는다
     if check['exported']:
         write_animation(path, name, ids, n)
-    report_dir = os.path.join(out_dir, 'report')
-    os.makedirs(report_dir, exist_ok=True)
-    base = os.path.join(report_dir, name)
-    with open(base + '_limits.json', 'w', encoding='utf-8') as f:
-        json.dump(limits_report, f, ensure_ascii=False, indent=1)
-    with open(base + '_check.json', 'w', encoding='utf-8') as f:
-        json.dump(check, f, ensure_ascii=False, indent=1)
+    if write:
+        report_dir = os.path.join(out_dir, 'report')
+        os.makedirs(report_dir, exist_ok=True)
+        base = os.path.join(report_dir, name)
+        with open(base + '_limits.json', 'w', encoding='utf-8') as f:
+            json.dump(limits_report, f, ensure_ascii=False, indent=1)
+        with open(base + '_check.json', 'w', encoding='utf-8') as f:
+            json.dump(check, f, ensure_ascii=False, indent=1)
 
     update_markers(scene, flags)
-    bake_check_curves(scene, arm, bones, frames, vel_pct, acc_pct)
+    bake_check_curves(scene, arm, bones, frames, vel_pct, acc_pct, flags)
 
-    print('exported' if check['exported'] else 'NOT exported (100% 초과)', path, '| samples', n, '| ids', [i for i, _ in ids])
+    print(('exported' if check['exported'] else 'NOT exported (100% 초과)') if write else 'check only (파일 안 씀)',
+          path if write else name, '| samples', n, '| ids', [i for i, _ in ids])
     for line in summary_lines(check):
         print('  ' + line)
     for ax in axes_report:
@@ -397,16 +508,68 @@ class ROBOT_OT_animation_export(bpy.types.Operator):
         return {'FINISHED'}
 
 
+class ROBOT_OT_animation_check(bpy.types.Operator):
+    """파일 안 쓰고 속도·가속·리밋 검사만 (마커 ANIM! · AnimSpeedCheck 곡선 · 요약 창)"""
+    bl_idname = 'robot.animation_check'
+    bl_label = '속도 검사'
+
+    def execute(self, context):
+        try:
+            check = main(write=False)
+        except Exception as exc:
+            self.report({'ERROR'}, '검사 실패: %s' % exc)
+            raise
+        lines = summary_lines(check)
+        if check['errors']:
+            title = '100%% 넘는 구간 %d곳 · 경고 %d (타임라인 ANIM!)' % (check['errors'], check['warnings'])
+            self.report({'ERROR'}, title)
+        else:
+            title = '통과 · 경고 %d (80%% 이상)' % check['warnings']
+            self.report({'WARNING'} if check['warnings'] else {'INFO'}, title)
+
+        def draw(menu, _context):
+            for line in lines:
+                menu.layout.label(text=line)
+
+        context.window_manager.popup_menu(draw, title=title, icon='ERROR' if check['errors'] else 'INFO')
+        return {'FINISHED'}
+
+
+class ROBOT_PT_animation(bpy.types.Panel):
+    bl_label = '애니메이션 검사 · 내보내기'
+    bl_space_type = 'VIEW_3D'
+    bl_region_type = 'UI'
+    bl_category = 'Robot'
+
+    def draw(self, context):
+        col = self.layout.column(align=True)
+        col.scale_y = 1.4
+        col.operator(ROBOT_OT_animation_check.bl_idname, icon='VIEWZOOM')
+        col.operator(ROBOT_OT_animation_export.bl_idname, text='내보내기', icon='EXPORT')
+        self.layout.label(text='50 fps · 80% 경고 · 100% 넘으면 안 내보냄')
+
+
+CLASSES = (ROBOT_OT_animation_export, ROBOT_OT_animation_check, ROBOT_PT_animation)
+
+
+def register():
+    for cls in CLASSES:      # 스크립트 재실행 → 이 버전으로 다시 등록
+        old = getattr(bpy.types, cls.__name__, None)
+        if old is not None:
+            bpy.utils.unregister_class(old)
+        bpy.utils.register_class(cls)
+
+
 def run():
     given = globals().get('OUT_DIR')
     if given or bpy.app.background:
         return main(given)
-    old = getattr(bpy.types, ROBOT_OT_animation_export.__name__, None)
-    if old is not None:      # 스크립트 재실행 → 이 버전 main() 으로 다시 등록
-        bpy.utils.unregister_class(old)
-    bpy.utils.register_class(ROBOT_OT_animation_export)
-    bpy.ops.robot.animation_export('INVOKE_DEFAULT')
+    register()
+    print('3D 뷰 사이드바(N) 「Robot」 탭 → 속도 검사 / 내보내기')
 
 
 if not globals().get('ANIM_NO_MAIN'):
-    run()
+    if __name__ == '__main__':
+        run()
+    else:                    # Text 「Register」 로 파일 열 때 실행 → 탭만 등록
+        register()

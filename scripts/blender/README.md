@@ -6,8 +6,12 @@
 ## 쓰는 법
 
 1. .blend 를 연다 (애니메이션 하나 = .blend 하나 · 파일 이름 = 애니메이션 이름)
-2. Text Editor → Open → `animation_export.py` → Run Script
-3. 폴더 고르기 창 → 출력 폴더 선택 (마지막 폴더 기억 · 씬 속성 `anim_export_dir`)
+2. Text Editor → Open → `animation_export.py` → Run Script (Blender 켤 때마다 한 번)
+3. 3D 뷰 사이드바(N) → **`Robot` 탭**
+   - **속도 검사** · 파일 안 쓰고 검사만 (아래 창·마커·곡선 그대로 · 저장 안 한 .blend 도 됨)
+   - **내보내기** · 폴더 고르기 창 → 출력 폴더 선택 (마지막 폴더 기억 · 씬 속성 `anim_export_dir`)
+- Text 의 `Register` 체크 + 환경설정 `Save & Load → Auto Run Python Scripts` 가 켜져 있으면 파일 열 때 탭이 바로 생김 (Run Script 안 해도 됨)
+- 2026-10-16 전 버전은 Run Script 하면 바로 폴더 창이 떴음 · 지금은 탭만 등록
 
 출력
 
@@ -22,6 +26,10 @@
   - PC 조인트 매핑의 최대 속도·가속도와 같은 값으로 두면 Blender 에서 통과한 파일은 PC 에서도 거부되지 않음 (PC 는 같은 20 ms 차분)
 - 끝나면 창 · 조인트별 최대 % (속도 · 가속) · 100% 넘은 구간 (Blender 프레임)
 - 초과 구간 · 타임라인 마커 `ANIM! ...` · Empty `AnimSpeedCheck` 의 `<본>_vel_pct` / `<본>_acc_pct` 곡선 (Graph Editor · 100 = 한계 · 80 부터 경고)
+  - 마커는 색을 따로 못 줌 → **`ANIM! ERR` 마커만 선택 상태**(밝게)로 남김 (다른 마커 선택은 해제)
+  - `AnimSpeedCheck` 의 **`ANIM_issue` 채널** · 키 색 = 빨강(Extreme) 100% 초과 · 파랑(Breakdown) 80% 이상 · 값 = 최대 % · Empty 를 선택하면 타임라인·도프시트에 보임
+- 검사하는 동안 리그 없는 컬렉션을 잠깐 빼서 계산 (3만 프레임 ~7 s) · 오브젝트 숨김·선택·컬렉션 설정은 그대로 되돌림
+- Blender 켤 때 탭 자동 등록 (이 PC) · `%APPDATA%\Blender Foundation\Blender\5.2\scripts\startup\robot_anim_panel.py` 가 이 파일을 디스크에서 읽음
 - .blend 안의 Text 는 디스크 파일의 **복사본** · 스크립트가 바뀌면 Text → Reload (Alt+R)
 
 ## 본 설정 (모터 하나 = 본 하나)
