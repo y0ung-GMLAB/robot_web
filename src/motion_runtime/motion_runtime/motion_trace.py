@@ -23,6 +23,7 @@ from __future__ import annotations
 
 import json
 import math
+import os
 import queue
 import re
 import shutil
@@ -45,6 +46,10 @@ DEFAULT_MAX_BYTES = 1024 * 1024 * 1024
 #: 실제 위치가 이보다 오래되면 비워 둔다 · 모터 노드가 멈춘 것이다
 DEFAULT_STALE_SEC = 0.2
 PRUNE_INTERVAL_SEC = 60.0
+#: 회차가 끝나고 이만큼 뒤에 쓴다(CSV 만들기 + 정리) · 회차 끝은 그룹 진행 PC 가 다음 회차 초기화를 예약하고
+#: 제 확인을 HTTP · ROS 로 받는 때다 · 같은 프로세스에서 약 1900 행 CSV · 14일치 정리가 그 확인과 겹쳤다
+#: (실물 2026-10-16 floating3 · 추정) · 뒤는 초기 위치 이동 5~10 s 라 3 s 뒤면 확인 창 밖 · 수정 목록 153 ③
+WRITE_DELAY_SEC = 3.0
 
 Decoder = Callable[[Any], Dict[int, float]]
 
@@ -111,7 +116,9 @@ class MotionTraceRecorder:
         self._latest: Tuple[Any, float] = (None, 0.0)
         #: 실행기 밖 구독에서 마지막 한 장을 꺼내는 함수 · 없으면 `on_motor_status` 로 받는다 · 130
         self._poll: Optional[Callable[[], Any]] = None
-        self._queue: 'queue.Queue[Optional[Tuple[CycleTrace, str, str]]]' = queue.Queue()
+        self._queue: 'queue.Queue[Optional[Tuple[CycleTrace, str, str, float]]]' = queue.Queue()
+        #: 닫는 중 · 쓰기 미룸 없이 바로 비운다
+        self._closing = threading.Event()
         self._last_prune: Dict[Path, float] = {}
         self._thread = threading.Thread(target=self._writer_loop, name='motion_trace_writer', daemon=True)
         self._thread.start()
@@ -180,9 +187,10 @@ class MotionTraceRecorder:
         if trace is None or not self.enabled:
             return
         trace.meta['finished_at'] = time.time()
-        self._queue.put((trace, str(result), str(message or '')))
+        self._queue.put((trace, str(result), str(message or ''), time.monotonic()))
 
     def close(self, timeout_sec: float = 5.0) -> None:
+        self._closing.set()
         self._queue.put(None)
         self._thread.join(timeout_sec)
 
@@ -205,7 +213,11 @@ class MotionTraceRecorder:
             item = self._queue.get()
             if item is None:
                 return
-            trace, result, message = item
+            trace, result, message, finished_at = item
+            # 회차 끝 바로 그때 쓰지 않는다 · 닫는 중이면 바로 · 수정 목록 153 ③
+            delay = finished_at + WRITE_DELAY_SEC - time.monotonic()
+            if delay > 0.0:
+                self._closing.wait(delay)
             try:
                 self.write(trace, result, message)
                 self.prune(trace.directory.parent)
@@ -314,17 +326,34 @@ class MotionTraceRecorder:
         if not root.is_dir():
             return
         cutoff = (datetime.now().astimezone() - timedelta(days=self.retention_days)).strftime('%Y-%m-%d')
-        days = sorted(p for p in root.iterdir() if p.is_dir() and not p.is_symlink() and re.fullmatch(r'\d{4}-\d{2}-\d{2}', p.name))
-        for day in days:
-            if day.name < cutoff:
-                shutil.rmtree(day, ignore_errors=True)
-        files = sorted(
-            (p for p in root.glob('*/*.csv') if p.is_file() and not p.is_symlink()),
-            key=lambda p: (p.parent.name, p.name),
-        )
-        total = sum(p.stat().st_size for p in files)
-        for path in files:
+        # `os.scandir` · 파일마다 stat 한 번(크기) · 전에는 glob + is_file + is_symlink + stat 두 번이라
+        # 14일치(회차마다 CSV 하나)면 파일 수만큼 시스템 호출이 네 배였다 · 수정 목록 153 ③
+        kept: List[Tuple[str, str]] = []
+        with os.scandir(root) as entries:
+            folders = sorted(
+                (entry.name, entry.path) for entry in entries if entry.is_dir(follow_symlinks=False)
+            )
+        for name, folder in folders:
+            if re.fullmatch(r'\d{4}-\d{2}-\d{2}', name) and name < cutoff:
+                shutil.rmtree(folder, ignore_errors=True)
+            else:
+                kept.append((name, folder))
+        files: List[Tuple[str, str, int, str]] = []
+        for name, folder in kept:
+            try:
+                with os.scandir(folder) as entries:
+                    for entry in entries:
+                        if entry.name.endswith('.csv') and entry.is_file(follow_symlinks=False):
+                            files.append((name, entry.name, entry.stat(follow_symlinks=False).st_size, entry.path))
+            except OSError:
+                continue
+        files.sort()
+        total = sum(size for _day, _name, size, _path in files)
+        for _day, _name, size, path in files:
             if total <= self.max_bytes:
                 break
-            total -= path.stat().st_size
-            path.unlink(missing_ok=True)
+            total -= size
+            try:
+                os.unlink(path)
+            except FileNotFoundError:
+                pass

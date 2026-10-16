@@ -72,7 +72,8 @@ from .local_api import LocalCoordinationApi
 from .local_runtime_monitor import LocalRuntimeMonitor
 from .safety_stop import SafetyStopController, SafetyStopOutcome
 from .schedule_lead import (
-    ScheduleLeadPlanner, command_kind, is_timing_rejection, only_self_late,
+    SELF_LATE_WAIT_MAX_SEC, ScheduleLeadPlanner, command_kind, is_timing_rejection,
+    may_retry_own_cycle_initialize, only_self_late,
 )
 from motion_common import topics
 from motion_common.repeat_policy import GROUP_LOCKSTEP, normalize_group_sync_mode
@@ -923,8 +924,9 @@ class MotionCoordinationNode(Node):
         self._sync_deadline = 0.0
         self._trigger_sync_status.update({'trigger_sync_state': 'ready'})
         # 여유는 잰 확인 시간으로 · 진행 PC 자신의 로컬 길도 0.4 s 안이라는 보장이 없다 · 수정 목록 130
+        # 회차 초기화는 따로 잰다 · 바닥 1.5 s · 수정 목록 153 ①
         lead = self._schedule_lead_sec(
-            'initialize' if next_action == 'initialize' else 'schedule'
+            next_action if next_action in {'initialize', 'cycle_initialize'} else 'schedule'
         )
         if next_action == 'initialize':
             action = self._execution.initialize_action(now=time.monotonic(), lead_sec=lead)
@@ -1082,26 +1084,23 @@ class MotionCoordinationNode(Node):
             else:
                 self._require_active_command(message, participants)
             if command in {'initialize_at', 'cycle_initialize_at'}:
-                local_target_ns = self._local_schedule_ns(message)
                 control_command = (
                     'group_prepare'
                     if command == 'initialize_at' else 'group_initialize_at'
                 )
-                result = self._call_local_control({
-                    'command': control_command,
-                    'execution_id': message.execution_id,
-                    'cycle_number': int(message.cycle_number),
-                    'initialize_monotonic': local_target_ns / 1_000_000_000.0,
-                    'network_operation_id': message.command_id,
-                    'repeat_mode': self._execution.repeat_mode,
-                    'dwell_sec': self._execution.dwell_sec,
-                    'initialization_only': self._execution.initialization_only,
-                    'run_mode': self._execution.run_mode,
-                    'sync_mode': self._execution.sync_mode,
-                    'target_cycle_count': self._execution.target_cycle_count,
-                    'initial_move_time_sec': self._execution.initial_move_time_sec,
-                    **self._segment_fields(),
-                })
+                try:
+                    local_target_ns = self._local_schedule_ns(message)
+                except ValueError as exc:
+                    # 진행 PC 자신의 회차 초기화가 여유 부족 · 아래에서 여유를 늘려 다시 예약 · 수정 목록 153 ②
+                    if not self._is_own_cycle_initialize(message):
+                        raise
+                    result = {'success': False, 'message': str(exc)}
+                else:
+                    result = self._call_local_control(self._local_initialize_payload(
+                        message, control_command, local_target_ns / 1_000_000_000.0,
+                    ))
+                if self._is_own_cycle_initialize(message):
+                    result = self._retry_own_cycle_initialize(message, result)
                 event = (
                     'initialize_scheduled'
                     if command == 'initialize_at' else 'cycle_initialize_scheduled'
@@ -2789,6 +2788,90 @@ class MotionCoordinationNode(Node):
             self._execution.pending_scheduled_at = 0.0
             self._execution.pending_published_at = 0.0
 
+    def _local_initialize_payload(
+        self, message: GroupCommand, control_command: str, initialize_monotonic: float,
+    ) -> Dict[str, Any]:
+        """초기 위치 · 회차 초기화 예약의 로컬 브리지 칸 · 다시 예약(153 ②)도 같은 칸"""
+        return {
+            'command': control_command,
+            'execution_id': message.execution_id,
+            'cycle_number': int(message.cycle_number),
+            'initialize_monotonic': float(initialize_monotonic),
+            'network_operation_id': message.command_id,
+            'repeat_mode': self._execution.repeat_mode,
+            'dwell_sec': self._execution.dwell_sec,
+            'initialization_only': self._execution.initialization_only,
+            'run_mode': self._execution.run_mode,
+            'sync_mode': self._execution.sync_mode,
+            'target_cycle_count': self._execution.target_cycle_count,
+            'initial_move_time_sec': self._execution.initial_move_time_sec,
+            **self._segment_fields(),
+        }
+
+    def _is_own_cycle_initialize(self, message: GroupCommand) -> bool:
+        return (
+            str(getattr(message, 'command', '')) == 'cycle_initialize_at'
+            and str(getattr(message, 'coordinator_id', '')) == str(self._config.pc_id)
+        )
+
+    def _retry_own_cycle_initialize(
+        self, message: GroupCommand, result: Mapping[str, Any],
+    ) -> Mapping[str, Any]:
+        """진행 PC 자신의 회차 초기화 예약이 시간 때문에 못 잡혔다 · 그룹 취소 대신 제 것만 여유를 늘려 다시 · 수정 목록 153 ②
+
+        실물 2026-10-16 14:35 floating3(마스터) · 3회차 끝 「자신의 예약 확인 늦음 · cycle_initialize_at」 →
+        그룹 취소 → 매장 약 40 s 멈춤 · 다른 PC 는 이미 받은 시각에 초기 위치로 간다(취소하지 않으면
+        그대로) · 마스터만 늦게 출발해도 다음 회차 `start_at` 은 모두 초기화를 마친 뒤라 맞는다.
+
+        - 확실히 안 받은 거절만(`may_retry_own_cycle_initialize`) · 최대 2번 · 넘으면 거절 그대로 → 옛 취소
+        - 여유 = 잰 값(방금 못 잡힌 값 포함) · 회차 초기화 바닥 1.5 s
+        - `_schedule_sent` 를 끊김 없이 이어 둔다 · 그동안 마감 검사가 기다린다(`_own_cycle_initialize_open`)
+        - 마감 검사가 이미 취소했거나 다른 명령으로 넘어갔으면 하지 않는다
+        """
+        command_id = str(getattr(message, 'command_id', ''))
+        attempts = 0
+        try:
+            while not result.get('success') and may_retry_own_cycle_initialize(
+                str(message.command), str(result.get('message') or ''), attempts,
+            ):
+                with self._lock:
+                    if (
+                        self._execution.execution_id != str(message.execution_id)
+                        or str(message.execution_id) in self._cancelled_execution_ids
+                        or self._execution.pending_command_id != command_id
+                        or self._execution.pending_command != 'cycle_initialize_at'
+                    ):
+                        return result
+                    sent = getattr(self, '_schedule_sent', None)
+                    if sent is None:
+                        sent = self._schedule_sent = {}
+                    entry = sent.get(command_id)
+                    now = time.monotonic()
+                    if entry is not None:
+                        # 못 잡힌 한 번도 잰다 · 다음 여유가 늘게
+                        self._lead_planner().record(
+                            'cycle_initialize', self._config.pc_id, now - float(entry[0]),
+                        )
+                    lead = self._schedule_lead_sec('cycle_initialize')
+                    sent[command_id] = (now, now + lead)
+                attempts += 1
+                self.get_logger().warn(
+                    f'그룹 회차 초기화 · {self._config.pc_id} 자신의 예약 못 잡음 · '
+                    f'{result.get("message") or ""} · 그룹 취소 대신 이 PC 만 다시 예약 · '
+                    f'여유 {lead:.2f} s · {attempts}번째 · {message.cycle_number}회차'
+                )
+                result = self._call_local_control(self._local_initialize_payload(
+                    message, 'group_initialize_at', now + lead,
+                ))
+                if result.get('success'):
+                    self.get_logger().info(
+                        f'그룹 회차 초기화 · {self._config.pc_id} 다시 예약 됨 · {attempts}번째 · '
+                        f'{message.cycle_number}회차'
+                    )
+        except Exception as exc:  # noqa: BLE001 · 명령 처리 스레드를 죽이지 않는다 · 거절로 돌려 옛 취소
+            return {'success': False, 'message': f'회차 초기화 다시 예약 실패: {exc}'}
+        return result
+
     def _note_own_schedule_latency(self, message: GroupCommand, result: Mapping[str, Any]) -> None:
         """진행 PC 자신의 예약 확인 시간 · 늦게 끝나도 잰다(다음 여유가 늘게) · 로그 · 수정 목록 130
 
@@ -2860,6 +2943,7 @@ class MotionCoordinationNode(Node):
         reason = ''
         command = ''
         self_late = False
+        wait_reason = ''
         with self._lock:
             if not self._execution.pending_command_id or time.monotonic() < self._execution.pending_ack_deadline:
                 return
@@ -2894,7 +2978,18 @@ class MotionCoordinationNode(Node):
             self_late = only_self_late(
                 missing, self._config.pc_id, self._execution.pending_command,
             )
-            if self_late:
+            if self_late and self._own_cycle_initialize_open():
+                # 회차 초기화 · 진행 PC 자신의 로컬 호출(또는 다시 예약)이 아직 · 끝날 때까지 기다린다 ·
+                # 됨 = 확인 · 못 잡힘 = 다시 예약 또는 거절 → 옛 취소 · 수정 목록 153 ②
+                waiting_id = self._execution.pending_command_id
+                if getattr(self, '_self_late_wait_logged', '') == waiting_id:
+                    return
+                self._self_late_wait_logged = waiting_id
+                wait_reason = (
+                    f'{self._config.pc_id} 자신의 회차 초기화 예약 확인 늦음 · 그룹 취소하지 않고 '
+                    f'제 답을 기다림 · {self._execution.cycle_number}회차'
+                )
+            elif self_late:
                 budget_ms = max(
                     self._execution.pending_ack_deadline - self._execution.pending_published_at, 0.0,
                 ) * 1000.0 if self._execution.pending_published_at else 0.0
@@ -2905,6 +3000,9 @@ class MotionCoordinationNode(Node):
                 )
         if silent:
             self._exclude_participants(silent)
+            return
+        if wait_reason:
+            self.get_logger().warn(wait_reason)
             return
         if self_late:
             self._release_self_late(reason)
@@ -2917,6 +3015,16 @@ class MotionCoordinationNode(Node):
             self._stop_for_peer_failure(reason)
         if reason:
             self.get_logger().error(reason)
+
+    def _own_cycle_initialize_open(self) -> bool:
+        """진행 PC 자신의 회차 초기화 확인이 아직 오는 중 · 락 안에서 · 수정 목록 153 ②"""
+        if self._execution.pending_command != 'cycle_initialize_at':
+            return False
+        sent = getattr(self, '_schedule_sent', None) or {}
+        if self._execution.pending_command_id not in sent:
+            return False
+        published_at = float(self._execution.pending_published_at or 0.0)
+        return published_at > 0.0 and time.monotonic() - published_at < SELF_LATE_WAIT_MAX_SEC
 
     def _enforce_motion_start_report_deadline(self) -> None:
         with self._lock:

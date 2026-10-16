@@ -168,3 +168,52 @@ def test_prune_drops_old_days_and_oldest_files_over_the_cap(tmp_path):
 
     assert not (root / '2000-01-01').exists()
     assert sorted(os.listdir(root / today)) == ['120000_c0003_m.csv']
+
+
+def test_writer_waits_after_the_cycle_end_but_close_flushes_now(tmp_path, monkeypatch):
+    """회차 끝 바로 그때 쓰지 않는다 · 그때 그룹 진행 PC 가 다음 회차 초기화를 예약한다 · 수정 목록 153 ③"""
+    from motion_runtime import motion_trace
+
+    monkeypatch.setattr(motion_trace, 'WRITE_DELAY_SEC', 0.4)
+    recorder = _recorder()
+    trace = recorder.begin(_plan(), 1, tmp_path)
+    trace.add({'time_sec': 0.0, 'positions': {0: _motor(0.0)}, 'motion_values': {'1-1': 0.0}})
+    recorder.finish(trace, 'completed')
+    index = trace.directory / INDEX_FILENAME
+    time.sleep(0.15)
+    assert not index.exists(), '회차 끝 직후에는 아직 안 쓴다'
+    deadline = time.monotonic() + 3.0
+    while not index.exists() and time.monotonic() < deadline:
+        time.sleep(0.02)
+    assert index.exists()
+
+    # 닫을 때는 기다리지 않는다 · 기본 미룸(3 s)보다 훨씬 빨리 끝난다
+    monkeypatch.setattr(motion_trace, 'WRITE_DELAY_SEC', 30.0)
+    second = recorder.begin(_plan(), 2, tmp_path)
+    recorder.finish(second, 'stopped')
+    started = time.monotonic()
+    recorder.close()
+    assert time.monotonic() - started < 2.0
+    assert len(index.read_text(encoding='utf-8').splitlines()) == 2
+
+
+def test_prune_counts_every_folder_and_keeps_newest_csv(tmp_path):
+    """`os.scandir` 로 바꾼 정리 · 날짜 아닌 폴더의 CSV 도 상한에 센다 · CSV 아닌 파일은 안 지운다 · 수정 목록 153 ③"""
+    root = tmp_path / 'motion_trace'
+    today = time.strftime('%Y-%m-%d')
+    (root / today).mkdir(parents=True)
+    (root / 'manual').mkdir()
+    (root / 'manual' / '000000_c0001_x.csv').write_bytes(b'0' * (600 * 1024))
+    for name in ('100000_c0001_m.csv', '110000_c0002_m.csv'):
+        (root / today / name).write_bytes(b'0' * (600 * 1024))
+    (root / today / INDEX_FILENAME).write_text('{}\n', encoding='utf-8')
+    (root / 'loose.csv').write_bytes(b'0' * (600 * 1024))
+
+    recorder = _recorder(retention_days=7, max_bytes=1024 * 1024)
+    recorder.prune(root, force=True)
+    recorder.close()
+
+    # 정렬 = (폴더 이름, 파일 이름) · 날짜 폴더(2026-…)가 'manual' 보다 앞 · 옛 glob 정렬과 같다
+    assert sorted(os.listdir(root / today)) == [INDEX_FILENAME]
+    assert os.listdir(root / 'manual') == ['000000_c0001_x.csv']
+    assert (root / 'loose.csv').exists(), '맨 위 파일은 옛 glob(*/*.csv)처럼 건드리지 않는다'
