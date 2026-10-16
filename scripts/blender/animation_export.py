@@ -3,7 +3,8 @@
 Blender 에서 Text Editor 로 열고 Run Script → 3D 뷰 사이드바(N) 「Robot」 탭에 버튼 2개:
   속도 검사   파일 안 쓰고 검사만 (아래 마커·곡선·창 그대로) · 저장 안 한 .blend 도 됨
   내보내기    폴더 고르기 창 → 고른 폴더에 출력
-Text 블록 「Register」 체크 + 환경설정 Auto Run Python Scripts 가 켜져 있으면 파일 열 때 탭이 바로 생김.
+Text 블록 「Register」 는 켜지 말 것 (Auto Run 이 켜져 있으면 파일 열 때 실행 · -b 로 열면 바로 내보냄) ·
+탭을 늘 띄우려면 Blender 시작 스크립트에서 ANIM_NO_MAIN=True 로 읽고 register() (README).
   <이름>.json                 애니메이션 파일 (JSON Lines) · 헤더 1줄 + [frame, time_sec, id, rad, ...]
                               0.02 s 고정 주기 · rotation_unit "rad" · 이름 = .blend 파일 이름
   report/<이름>_limits.json   조인트별 MotorLimit · 클립 최소/최대 · 첫 프레임 (deg)
