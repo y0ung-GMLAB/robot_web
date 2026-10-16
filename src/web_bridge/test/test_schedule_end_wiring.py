@@ -66,6 +66,26 @@ def test_schedule_end_reason_reaches_the_runtime():
     ]
 
 
+def test_group_wide_stop_reaches_the_runtime():
+    """연동 노드가 보낸 그룹 전체 회차 후 정지 · 회차 맞춤 런타임이 장벽에서 기다린다 · 수정 목록 154"""
+    end = _End()
+    bridge = MotionWebBridge.__new__(MotionWebBridge)
+    bridge.schedule_end = end
+    payloads = []
+    bridge._request_motion_run = lambda command, payload, timeout_sec=2.0: (
+        payloads.append((command, dict(payload))) or {'success': True, 'message': command}
+    )
+
+    bridge.motion_run_stop_after_cycle({'reason': 'schedule_end', 'group_wide': True})
+    bridge.motion_run_stop_after_cycle({'group_wide': False})
+
+    assert payloads == [
+        ('stop_after_cycle', {'reason': 'schedule_end', 'group_wide': True}),
+        ('stop_after_cycle', {}),
+    ]
+    assert end.begun == 1
+
+
 def test_repeated_schedule_stops_do_not_cut_the_park_move():
     end = _End(active=True)
     bridge, sent = _bridge(end)

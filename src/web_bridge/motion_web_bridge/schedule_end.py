@@ -48,6 +48,23 @@ POLL_SEC = 0.5
 
 #: 회차를 끝내고 멈춘 상태 · 여기서 주차를 시작한다
 FINISHED_STATES = {'idle', 'ready', 'stopped', 'completed', 'motion_completed', 'initialized'}
+#: 그룹 실행 안의 이 상태는 「끝」 이 아니다 · 회차 맞춤 장벽 · 실행 스레드가 살아 있다 · 수정 목록 155
+GROUP_BARRIER_STATES = {'motion_completed'}
+
+
+def cycle_finished(status: Dict[str, Any]) -> bool:
+    """이 PC 의 재생이 회차를 끝내고 섰나 · 주차를 시작해도 되나 · 오류로 끝나도 참(아래에서 거른다)
+
+    그룹 실행의 `motion_completed` 는 장벽이다 · 이 PC 회차는 끝났지만 다른 PC 를 기다리며 실행
+    스레드가 살아 있다 · 거기서 주차하면 「previous motion run task is still running」 으로 거절돼
+    1분 뒤 다시 했다(실물 2026-10-16 · 운영 종료 약 70초 늦음) · 풀리면 런타임이 상태를 바꾼다 · 155
+    """
+    state = str(status.get('state') or '').strip().lower()
+    if state in {'error', 'blocked'}:
+        return True
+    if state not in FINISHED_STATES:
+        return False
+    return not (status.get('group_execution') and state in GROUP_BARRIER_STATES)
 
 STATE_FILE = 'schedule_end_state.json'
 
@@ -663,11 +680,9 @@ class ScheduleEndService:
     def _park_and_power_off(self) -> str:
         # 1 · 지금 회차가 끝날 때까지
         # 오류로 끝나도 기다림은 끝이다 · 끄지는 않는다(아래에서 거른다)
-        if not self._wait(
-            lambda: self._motion_state() in FINISHED_STATES | {'error', 'blocked'},
-            CYCLE_WAIT_SEC,
-        ):
+        if not self._wait(lambda: cycle_finished(self._motion_status()), CYCLE_WAIT_SEC):
             return '회차 종료 대기 시간 초과'
+        # 그룹 장벽 · 진행 PC 가 모든 PC 회차 끝을 보고 풀 때까지 · 실행 상태 목록 `run_state.GROUP_ACTIVE_STATES` · 155
         if not self._wait(lambda: not self.bridge.coordination_execution_blocker(), GROUP_RELEASE_WAIT_SEC):
             return '그룹 재생이 해제되지 않음'
         if self._motion_state() == 'error':

@@ -99,6 +99,17 @@ GROUP_ACTIVE_STATES = frozenset({
     'cycle_ready',
     'stop_after_cycle',
     'releasing',
+    # 회차 맞춤 장벽 · 회차 끝 → 다음 회차 초기화 · 진행 PC 의 실행 상태 · 수정 목록 155
+    'motion_completed',
+    'cycle_initializing',
+    # 슬레이브 실행 상태 = 이 PC 런타임 상태(`_local_group_state`) · 회차 안팎의 짧은 단계와 복귀 대기 ·
+    # 전에는 장벽(`motion_completed`)에서 「그룹 끝」 으로 읽혀 구간 끝 주차가 살아 있는 그룹 실행
+    # 스레드에 막혔다(「previous motion run task is still running」 · 1분 뒤 다시) · 155 ·
+    # 실행이 풀리면 `execution_id` 가 비므로 여기 적어도 「끝난 그룹」 을 살리지 않는다
+    'verifying',
+    'completed',
+    'initialized',
+    'join_ready',
 })
 
 

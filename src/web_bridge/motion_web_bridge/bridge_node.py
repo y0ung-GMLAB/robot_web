@@ -2572,9 +2572,11 @@ class MotionWebBridge(Node):
             return {'success': True, 'message': end.status().get('message') or '스케줄 끝 동작 중'}
         # 이유를 런타임까지 넘긴다 · 구간 끝 그룹 정지가 「그룹 실행 취소」 대신 「구간 끝 · 회차 후 정지」 로 끝나게 · 수정 목록 141
         reason = str(payload.get('reason') or '')
-        result = self._request_motion_run(
-            'stop_after_cycle', {'reason': reason} if reason else {}, timeout_sec=2.0,
-        )
+        request: Dict[str, Any] = {'reason': reason} if reason else {}
+        if payload.get('group_wide') is True:
+            # 연동 노드가 보낸 그룹 전체 회차 후 정지 · 회차 맞춤은 장벽에서 풀기를 기다린다 · 수정 목록 154
+            request['group_wide'] = True
+        result = self._request_motion_run('stop_after_cycle', request, timeout_sec=2.0)
         if reason == 'schedule_end' and end is not None:
             # 이미 멈춰 있어서 정지가 거절돼도 주차는 한다
             status = end.begin()

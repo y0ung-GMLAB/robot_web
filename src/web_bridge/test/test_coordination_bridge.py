@@ -1,5 +1,6 @@
 import pytest
 from pathlib import Path
+from types import SimpleNamespace
 
 from motion_common.paths import NO_PROJECT_SELECTED
 from motion_web_bridge import run_mode_gate
@@ -213,6 +214,34 @@ def test_active_dds_execution_blocks_local_start(tmp_path):
         'execution': {'state': 'running', 'execution_id': 'exec-a'},
     }
     assert '그룹 재생 중이라 단독 재생을' in service.local_execution_blocker()
+
+
+@pytest.mark.parametrize('state', ['motion_completed', 'cycle_initializing', 'completed', 'initialized'])
+def test_the_lockstep_barrier_is_still_a_group_run(tmp_path, state):
+    """회차 맞춤 장벽 · 슬레이브 실행 상태 = 런타임 상태 · 전에는 「그룹 끝」 으로 읽어 구간 끝 주차가 거절됐다 · 155"""
+    node = _Node()
+    service = CoordinationWebBridge(node, tmp_path, lambda: node.generation[0])
+    service._local_api = lambda *_args, **_kwargs: {
+        'execution': {'state': state, 'execution_id': 'exec-a'},
+    }
+
+    assert '그룹 재생 중' in service.local_execution_blocker()
+
+
+def test_a_group_stop_after_cycle_reaches_the_bridge_as_group_wide():
+    """연동 노드 → 브리지 · 그룹 전체 회차 후 정지 표시를 넘긴다 · 수정 목록 154"""
+    calls = []
+    bridge = SimpleNamespace(
+        motion_run_stop_after_cycle=lambda payload: calls.append(dict(payload)) or {'success': True},
+    )
+
+    local_motion_control(bridge, {'command': 'stop_after_cycle', 'reason': 'schedule_end', 'group_wide': True})
+    local_motion_control(bridge, {'command': 'stop_after_cycle'})
+
+    assert calls == [
+        {'reason': 'schedule_end', 'group_wide': True},
+        {'reason': '', 'group_wide': False},
+    ]
 
 
 def test_stale_dds_display_state_without_lease_does_not_block_local_start(tmp_path):
