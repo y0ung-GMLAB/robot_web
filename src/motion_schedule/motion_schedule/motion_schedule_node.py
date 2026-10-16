@@ -28,7 +28,6 @@ from motion_common.repeat_policy import (
 from motion_common.run_state import group_is_active, is_running
 from motion_common.schedule_models import ScheduleItem
 from motion_common.schedule_store import (
-    DEFAULT_RUN_MODE,
     OFF_MODE,
     SCHEDULE_MODE,
     ScheduleStore,
@@ -74,7 +73,13 @@ class MotionScheduleNode(Node):
         self.store = ScheduleStore(projects_dir=self.projects_dir)
         self.engine = ScheduleEngine()
         self._last_reconcile_monotonic = 0.0
-        self._run_mode = DEFAULT_RUN_MODE
+        # 운전 모드 · **처음엔 모름(None)** · `/api/schedule/status` 를 한 번 읽어야 정해진다 · 수정 목록 148
+        #
+        # 전에는 기본값(`DEFAULT_RUN_MODE` = 스케줄)으로 시작했다 · 재시작 직후 첫 점검은 브리지가
+        # (같은 서비스라) 아직 안 떠 모드를 못 읽은 채 「스케줄」 로 보고, 수동 모드에서 사람이 켠
+        # 그룹에 「구간 밖인데 돌고 있다 · 회차 후 정지」 를 보냈다(실물 2026-10-15 W-A10 ②) ·
+        # 그룹 길이면 남은 PC 모두 회차 후 정지 · 스케줄 모드 PC 는 주차 → 서보 OFF.
+        self._run_mode = None
         # 마지막으로 거부당한 시도 · §6-147
         #
         # 전에는 아무 데도 안 남았다 · 스케줄이 발화하고 연동이 거부해도
@@ -380,11 +385,23 @@ class MotionScheduleNode(Node):
         if not self._is_master_pc():
             return
 
-        if time.monotonic() - self._last_reconcile_monotonic >= RECONCILE_INTERVAL_SEC:
+        # 모드를 처음 읽기 전에는 점검하지 않는다 · 점검 간격도 쓰지 않는다(읽히면 바로 점검) · 수정 목록 148
+        if self._run_mode is None:
+            self._note_run_mode_unknown()
+        elif time.monotonic() - self._last_reconcile_monotonic >= RECONCILE_INTERVAL_SEC:
             self._last_reconcile_monotonic = time.monotonic()
             self._reconcile(now)
 
         self._publish_status(now)
+
+    def _note_run_mode_unknown(self) -> None:
+        """운전 모드를 아직 못 읽어 점검을 미룬다 · 한 번만 적는다 · 수정 목록 148"""
+        if getattr(self, '_run_mode_wait_logged', False):
+            return
+        self._run_mode_wait_logged = True
+        self.get_logger().info(
+            "[점검] 운전 모드를 아직 못 읽음 · 시작 · 정지 · 주차 보내지 않음 · 읽히면 바로 점검"
+        )
 
     def _reconcile(self, now: datetime) -> None:
         """스케줄이 말하는 상태와 실제를 맞춘다 · §6-137
@@ -392,6 +409,9 @@ class MotionScheduleNode(Node):
         시각을 지나갔는지 보지 않는다 · **지금 구간 안인가**만 본다 · 그래서
         재부팅해도, 시작을 놓쳐도, 어긋나도 다음 점검에서 스스로 맞춘다.
         """
+        if getattr(self, '_run_mode', None) is None:
+            # 운전 모드를 아직 한 번도 못 읽었다 · 시작 · 정지 · 주차 아무것도 보내지 않는다 · 수정 목록 148
+            return
         schedules = self.store.list_schedules()
         wanted = self.engine.active(now, schedules)
         running = self._motion_is_running()
@@ -412,6 +432,11 @@ class MotionScheduleNode(Node):
         )
         self._window_end_pending = step == schedule_rules.WINDOW_END_WAIT
         if step == schedule_rules.IDLE_PARK:
+            if not self._run_state_readable():
+                # 그룹 상태를 못 읽어 「멈춤」 이 확실하지 않다(준비 중인 그룹일 수 있다) · 주차는 다음 점검 ·
+                # 할 일은 남겨 둔다 · 수정 목록 148 ②
+                self._window_end_pending = True
+                return
             self.get_logger().info("[점검] 구간 끝 · 멈춰 있다 · 기준점 주차 → 서보 OFF")
             self._execute_idle_park()
             return
@@ -431,19 +456,21 @@ class MotionScheduleNode(Node):
             # 그대로 멈춘다 · 그룹은 연동 상태의 `started_by` 로 안다(스케줄 노드가 재시작해도) ·
             # 상태를 읽었는데도 누가 켰는지 모르면 멈추는 쪽 · 못 읽었으면 다음 점검 · 수정 목록 143 ·
             # 스케줄 모드 · 오프 모드는 누가 켰든 멈춘다.
+            if not self._run_state_readable():
+                # 상태를 못 읽었다 · 도는지도 누가 켰는지도 모른다 · **모드와 상관없이** 이번 점검은
+                # 정하지 않는다 · 다음 점검(1분)에 다시 본다 · 수정 목록 143 ③ · 148 ②
+                #
+                # 전에는 못 읽은 상태를 「도는 단독 재생 · 스케줄 칸 없음」 으로 읽어 「사람이 켠 재생」
+                # 으로 지나갔고, 기억(모름)은 그대로 남아 그다음 사람이 켠 그룹을 멈췄다(실물 V-28) ·
+                # 그 가드가 수동 모드 안에만 있어 스케줄 모드(재시작 직후 기본값)에서는 못 읽은 상태
+                # (`''` = 도는 중)로 그룹 정지를 보냈다(실물 2026-10-15 W-A10 ② · 148).
+                return
             if self._run_mode not in (SCHEDULE_MODE, OFF_MODE):
                 started = self._started_by_schedule()
                 if started is False:
                     if not getattr(self, '_manual_run_noted', False):
                         self._manual_run_noted = True
                         self.get_logger().info("[점검] 구간 밖 · 수동 모드에서 사람이 켠 재생 · 그대로 둠")
-                    return
-                if started is None and not self._run_state_readable():
-                    # 상태를 못 읽었다 · 도는지도 누가 켰는지도 모른다 · 이번 점검은 정하지 않는다 ·
-                    # 다음 점검(1분)에 다시 본다 · 수정 목록 143 ③
-                    #
-                    # 전에는 못 읽은 상태를 「도는 단독 재생 · 스케줄 칸 없음」 으로 읽어 「사람이 켠 재생」
-                    # 으로 지나갔고, 기억(모름)은 그대로 남아 그다음 사람이 켠 그룹을 멈췄다(실물 V-28).
                     return
             self._manual_run_noted = False
             self.get_logger().info("[점검] 구간 밖인데 돌고 있다 · 회차 후 정지")
@@ -473,6 +500,9 @@ class MotionScheduleNode(Node):
         # 오프 = 「아무것도 움직이지 않는다 · 서보는 홀드」 · 사람이 켠 것이든
         # 스케줄이 켠 것이든 회차를 마치고 멈춘다 · 새 시작은 아래 공통 분기가 막는다.
         if self._run_mode == OFF_MODE and running:
+            if not self._run_state_readable():
+                # 못 읽은 상태(`''`)는 「도는 중」 으로 친 것뿐이다 · 정지는 읽은 뒤에 · 수정 목록 148 ②
+                return
             self.get_logger().info("[점검] 오프 모드인데 돌고 있다 · 회차 후 정지")
             self._execute_stop_after_cycle(None)
             return
@@ -583,9 +613,15 @@ class MotionScheduleNode(Node):
 
         못 읽은 모션 상태는 빈 문자열이고 「도는 중」 으로 친다(`run_state.is_running`) · 시작을 막는 데는
         맞지만, 「누가 켰나」 의 기억을 바꾸거나 정지를 정하는 근거로는 쓰지 않는다.
+
+        그룹 상태는 **여기서 새로 읽는다** · `_motion_is_running` 은 로컬이 돌면 그룹을 안 읽어서,
+        직전 조회 기록만 보면 이번 점검에 못 읽은 것을 모른다 · 수정 목록 148 ②
         """
         state = str(self._local_run_state() or '').strip()
-        return bool(state) and not self._last_read_failed('/api/coordination')
+        if not state:
+            return False
+        self._group_execution()
+        return not self._last_read_failed('/api/coordination')
 
     def _warn_about_unreadable(self, schedules) -> None:
         """시각을 못 읽는 스케줄은 **말이라도 한다** · §6-285

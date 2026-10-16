@@ -129,6 +129,34 @@ export function scheduleEndNotice(snap) {
   return { tone: notice.tone === 'bad' ? 'bad' : 'warn', title: String(notice.title), detail: String(notice.detail || '') };
 }
 
+/**
+ * 연동 노드의 「마지막 그룹 시작 실패」 노란 줄 제목 · `code` 로 나눈다 · 수정 목록 147
+ *
+ * 전에는 모두 「그룹 시작이 취소되었습니다」 였다 · 9회차 돈 뒤 PC 가 빠져 멈춘 것(GROUP_PARTICIPANT_LEFT)도
+ * 「시작이 취소」 로 읽혔고, 참가 0대 거절(GROUP_START_NOT_READY)은 다음 시작도 늘 실패라 줄이 계속 남았다
+ * (실물 2026-10-15 W-A10) · 코드는 `coordination_node._remember_start_failure` 부르는 곳 ·
+ * GROUP_RELEASED 는 이 PC 웹 서비스가 끊겨 잠그지 않고 놓은 것(`_release_without_latch`) ·
+ * GROUP_LOCAL_BRIDGE_LOST(145 ②)는 지금 `bridge_loss` 칸에만 남지만 이 칸에 오면 같은 제목.
+ * 그 밖(TRIGGER_SYNC_FAILED · GROUP_START_REJECTED · GROUP_SCHEDULE_ACK_TIMEOUT · GROUP_SCHEDULE_SELF_LATE ·
+ * 코드 없음)은 정말 시작 전 취소라 전 글 그대로.
+ */
+export const START_FAILURE_TITLE = {
+  GROUP_START_NOT_READY: '그룹 시작 불가',
+  GROUP_PARTICIPANT_LEFT: '그룹 실행 정지 · PC 빠짐',
+  GROUP_LOCAL_BRIDGE_LOST: '그룹 실행 정지 · 웹 서비스 끊김',
+  GROUP_RELEASED: '그룹 실행 정지 · 웹 서비스 끊김',
+};
+export const START_FAILURE_DEFAULT_TITLE = '그룹 시작이 취소되었습니다';
+
+export function startFailureView(failure) {
+  const code = String(failure?.code || '').trim().toUpperCase();
+  const title = START_FAILURE_TITLE[code] || START_FAILURE_DEFAULT_TITLE;
+  let detail = String(failure?.message || '').trim();
+  // 서버 글이 제목과 같은 말로 시작하면(「그룹 시작 불가 · 들어갈 PC 가 없습니다 …」) 한 번만
+  if (detail.startsWith(`${title} · `)) detail = detail.slice(title.length + 3);
+  return { title, detail };
+}
+
 export function collectIssues(snap, sched, { connected = true } = {}) {
   const issues = [];
   const bad = (title, detail = '', action = null) => issues.push({ tone: 'bad', title, detail, action });
@@ -202,7 +230,8 @@ export function collectIssues(snap, sched, { connected = true } = {}) {
   const startFailure = snap.coordination?.runtime?.last_start_failure || {};
   const groupActive = Boolean(snap.coordination?.runtime?.execution?.execution_id);
   if (!group.active && !groupActive && String(startFailure.message || '')) {
-    warn('그룹 시작이 취소되었습니다', String(startFailure.message));
+    const view = startFailureView(startFailure);
+    warn(view.title, view.detail);
   }
   // 구간 끝 주차 실패(다시 시도 중) · 그 자리에서 서보 끔 · 글과 색은 서버 · 다음 시작까지 남음 · 수정 목록 131
   const endNotice = scheduleEndNotice(snap);
