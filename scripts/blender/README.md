@@ -6,8 +6,13 @@
 ## 쓰는 법
 
 1. .blend 를 연다 (애니메이션 하나 = .blend 하나 · 파일 이름 = 애니메이션 이름)
-2. Text Editor → Open → `animation_export.py` → Run Script
-3. 폴더 고르기 창 → 출력 폴더 선택 (마지막 폴더 기억 · 씬 속성 `anim_export_dir`)
+2. Text Editor → Open → `animation_export.py` → Run Script (Blender 켤 때마다 한 번)
+3. 3D 뷰 사이드바(N) → **`Robot` 탭**
+   - **속도 검사** · 파일 안 쓰고 검사만 (아래 창·마커·곡선 그대로 · 저장 안 한 .blend 도 됨)
+   - **내보내기** · 폴더 고르기 창 → 출력 폴더 선택 (마지막 폴더 기억 · 씬 속성 `anim_export_dir`)
+- **Text 의 `Register` 는 켜지 말 것** · Auto Run Python Scripts 가 켜져 있으면 파일 열 때 실행되고, 백그라운드(`-b`)로 열면 바로 내보내기까지 함 (2026-10-16 확인) · 탭은 시작 스크립트로 띄움 (아래)
+- 이 파일을 여는 백그라운드 작업은 `blender -b -Y` (자동 실행 끔) 권장
+- 2026-10-16 전 버전은 Run Script 하면 바로 폴더 창이 떴음 · 지금은 탭만 등록
 
 출력
 
@@ -22,6 +27,13 @@
   - PC 조인트 매핑의 최대 속도·가속도와 같은 값으로 두면 Blender 에서 통과한 파일은 PC 에서도 거부되지 않음 (PC 는 같은 20 ms 차분)
 - 끝나면 창 · 조인트별 최대 % (속도 · 가속) · 100% 넘은 구간 (Blender 프레임)
 - 초과 구간 · 타임라인 마커 `ANIM! ...` · Empty `AnimSpeedCheck` 의 `<본>_vel_pct` / `<본>_acc_pct` 곡선 (Graph Editor · 100 = 한계 · 80 부터 경고)
+  - 마커는 색을 따로 못 줌 → **`ANIM! ERR` 마커만 선택 상태**(밝게)로 남김 (다른 마커 선택은 해제)
+  - **문제 구간을 만든 본 애니메이션 키**(앞 키 ~ 뒤 키)의 키 종류를 바꿔 색 표시 · **Extreme = 빨강 (100% 초과) · Jitter = 분홍 (80~100%)**
+    · 복사 본(Eye_Yaw_R ← Eye_Yaw_L)은 원본 키에 · 다시 검사하면 지난 표시는 일반 키로 되돌림 → **Extreme / Jitter 키 종류는 평소에 쓰지 말 것**
+  - `AnimSpeedCheck` 의 `ANIM_issue` 채널 · 같은 키 종류 · 값 = 최대 % · % 곡선은 프레임마다 굽지 않고 필요한 점만 베지어 (오차 1%)
+  - 색은 테마 · 이 PC 는 시작 스크립트가 Blender 켤 때 넣음 (Extreme 빨강 · Jitter 분홍 · 선택된 마커 빨강 · `THEME_COLORS = False` 로 끔)
+- 검사하는 동안 리그 없는 컬렉션을 잠깐 빼서 계산 (3만 프레임 ~7 s) · 오브젝트 숨김·선택·컬렉션 설정은 그대로 되돌림
+- Blender 켤 때 탭 자동 등록 (이 PC) · `%APPDATA%\Blender Foundation\Blender\5.2\scripts\startup\robot_anim_panel.py` 가 이 파일을 디스크에서 읽음
 - .blend 안의 Text 는 디스크 파일의 **복사본** · 스크립트가 바뀌면 Text → Reload (Alt+R)
 
 ## 본 설정 (모터 하나 = 본 하나)
@@ -41,6 +53,7 @@
   - 감속기어비 = 감속기 + 추가 기어·링크까지 합친 전체 비
 - 본 회전 = 실제 관절 움직임 · 감속기어비·부호·오프셋은 넣지 않음 (각 PC 조인트 매핑이 적용)
 - 다른 본을 따라 도는 본 (Copy Rotation) 도 자기 `joint_name` 으로 같이 나감
+- 모터 본이 조종 본을 따라가는 리그 (Copy Rotation · IK · Track 컨스트레인트) 도 그대로 내보냄 · 값은 컨스트레인트까지 계산한 최종 자세 · 속도 검사 키 색칠은 컨스트레인트를 거슬러 실제 키가 있는 본 (조종 본 · IK 타깃) 에 칠함
 
 ### ID 정리
 
@@ -53,7 +66,7 @@
 ## 단위
 
 - 파일 값 rad · 헤더 `rotation_unit: "rad"` (2026-10-06 결정)
-- 0 근처 · 1e-6 rad (0.00006°) 보다 작은 값은 정확히 0 으로 씀 · 값을 본 행렬에서 다시 계산해서 (Blender 행렬 float32) 키가 0 이어도 ~1e-7 rad 가 남기 때문 (2026-10-12)
+- 0 근처 · 1e-5 rad (0.0006°) 보다 작은 값은 정확히 0 으로 씀 · 값을 본 행렬에서 다시 계산해서 (Blender 행렬 float32) 키가 0 이어도 ~1e-7 rad, IK 로 움직이는 본은 ~2e-6 rad 가 남기 때문 (2026-10-12 · 2026-10-18 1e-6 → 1e-5)
 - 본 속성 · 리포트 · Blender 안 검사 deg
 - 스택은 헤더 `rotation_unit` 을 읽어 내부 단위로 바꿈 (`docs/수정_목록.md` 6-2) · rad·deg 파일 모두 재생 · 그 전 버전이 깔린 PC 에서는 rad 파일이 약 1/57 로 움직임
 
