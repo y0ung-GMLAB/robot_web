@@ -130,7 +130,7 @@ def _current_run_state(bridge: Any) -> str:
     return str(status.get('state') or '').strip().lower()
 
 
-def manual_motion_block_reason(bridge: Any) -> str:
+def manual_motion_block_reason(bridge: Any, *, allow_running: bool = False) -> str:
     """손으로 모터를 움직이는 명령(조그·다이얼·목표 이동·범위 복귀·페이더)의 문 · 2026-10-12
 
     긴급 정지 잠김이 맨 먼저 · 운전 모드 문(`manual_control_block_reason`) 다음에 **재생 상태**를 본다 ·
@@ -143,6 +143,9 @@ def manual_motion_block_reason(bridge: Any) -> str:
     reason = manual_control_block_reason(bridge)
     if reason:
         return reason
+    if allow_running:
+        # X-Touch 바탕 위 녹화 · 그 재생은 이 화면이 시작했다 · 재생이 안 쓰는 축·덮어쓰기만 받는다 · 수정 목록 156 ⑨
+        return ''
     state = _current_run_state(bridge)
     if state == 'initialized':
         return INITIALIZED_MANUAL_BLOCK_MESSAGE

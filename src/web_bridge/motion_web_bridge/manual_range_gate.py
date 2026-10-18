@@ -76,6 +76,46 @@ def axis_gain(rows: List[Dict[str, Any]], motors: List[Dict[str, Any]], axis: in
     return min(gains) if gains else None
 
 
+def axis_rows(rows: List[Dict[str, Any]], motors: List[Dict[str, Any]], axis: int) -> List[Dict[str, Any]]:
+    """이 모터를 모는 「사용」 줄들"""
+    return [
+        row for row in rows
+        if row.get('enabled') is not False and str(row.get('motion_id') or '').strip()
+        and axis in _row_axes(row, motors)
+    ]
+
+
+def xtouch_limits(
+    rows: List[Dict[str, Any]], motors: List[Dict[str, Any]], axis: int,
+) -> Tuple[Dict[str, float], str]:
+    """X-Touch 상한 · 조인트 매핑 최대 속도·가속도 × |이득| → 모터 rad/s · rad/s² · 수정 목록 156
+
+    웹 페이더·다이얼(조인트 2 °/s)과 달리 X-Touch 는 재생 검사와 같은 상한으로 따라간다
+    (사용자 결정 2026-10-18 · 잡기(pickup) 전에는 축이 안 움직여 잘못 찍어도 튀지 않는다) ·
+    상한이 빈 줄이면 (빈 dict, 이유) · 여러 줄이면 모터 기준 작은 쪽.
+    """
+    found = axis_rows(rows, motors, axis)
+    if not found:
+        return {}, f'{PREFIX}{axis}번 모터는 조인트 매핑의 「사용」 줄에 없습니다.'
+    velocity: Optional[float] = None
+    acceleration: Optional[float] = None
+    for row in found:
+        if not joint_mapping.rate_limits_set(row):
+            return {}, (
+                f'{PREFIX}{row.get("motion_id")} ({axis}번 모터) 속도·가속도 상한을 먼저 채우세요 · '
+                'X-Touch 는 조인트 매핑의 최대 속도·가속도로 따라갑니다'
+            )
+        gain_value = abs(joint_mapping.gain(row)) or 1.0
+        row_velocity = float(joint_mapping.rate(row, 'max_velocity')) * gain_value
+        row_acceleration = float(joint_mapping.rate(row, 'max_acceleration')) * gain_value
+        velocity = row_velocity if velocity is None else min(velocity, row_velocity)
+        acceleration = row_acceleration if acceleration is None else min(acceleration, row_acceleration)
+    return {
+        manual_speed.VELOCITY_FIELD: float(velocity),
+        manual_speed.ACCELERATION_FIELD: float(acceleration),
+    }, ''
+
+
 def block_reason(
     saved_rows: List[Dict[str, Any]],
     applied_rows: List[Dict[str, Any]],
@@ -166,6 +206,24 @@ class ManualRangeGate:
         axis_value = optional_int(axis, None)
         gain = axis_gain(saved, self._motors(), axis_value) if axis_value is not None else None
         return manual_speed.motor_limits(gain)
+
+    def xtouch_limits(self, axis: Any) -> Tuple[Dict[str, float], str]:
+        """X-Touch 상한 · 마지막 판정 때 읽은 저장 매핑으로 · 비면 (빈 dict, 이유) · 수정 목록 156"""
+        with self._lock:
+            _, saved = self._last
+        axis_value = optional_int(axis, None)
+        if axis_value is None:
+            return {}, f'{PREFIX}모터 번호가 없습니다'
+        return xtouch_limits(saved, self._motors(), axis_value)
+
+    def saved_rows(self) -> List[Dict[str, Any]]:
+        """마지막 판정 때 읽은 저장 매핑 줄 · 녹화가 조인트 이름·변환식을 여기서 얻는다 · 수정 목록 156"""
+        with self._lock:
+            _, saved = self._last
+        return [dict(row) for row in saved]
+
+    def motors(self) -> List[Dict[str, Any]]:
+        return self._motors()
 
     def cached_axis_reason(self, axis: Any) -> str:
         """페이더 목표 하나 · 마지막 전체 판정(0.5초마다 새로 봄)과 축 연결만"""

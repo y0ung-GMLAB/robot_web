@@ -103,10 +103,9 @@ def test_step_respects_speed_and_acceleration_and_lands_on_the_goal():
         position, velocity = new_position, new_velocity
         if done:
             break
-    assert done and position == 10.0 and velocity == 0.0
+    assert done and position == 10.0 and abs(velocity) <= amax * DT + 1e-12
     assert max(speeds) <= vmax + 1e-12
-    assert max(accels[:-1]) <= amax + 1e-9
-    assert accels[-1] <= 2.0 * amax + 1e-9            # 멈추는 마지막 한 주기만
+    assert max(accels) <= amax + 1e-9                 # 멈추는 마지막 주기도 (수정 목록 156)
 
 
 def test_step_turns_around_through_the_acceleration_limit():
@@ -120,6 +119,31 @@ def test_step_turns_around_through_the_acceleration_limit():
         if done:
             break
     assert done and position == -3.0
+
+
+def test_step_differences_stay_inside_the_limits_with_a_moving_goal():
+    """보낸 목표의 차분(재생 검사와 같은 잣대) · 목표가 끌리며 갑자기 가까워져도 상한 안 · 수정 목록 156
+
+    전에는 빠르게 가는 중 목표가 바로 앞으로 오면 그 자리에 섰다(차분 가속이 상한의 수백 배)
+    """
+    import random
+    rng = random.Random(7)
+    for _ in range(300):
+        vmax, amax = rng.uniform(0.05, 3.0), rng.uniform(0.05, 10.0)
+        position, velocity, goal = rng.uniform(-1, 1), 0.0, rng.uniform(-1, 1)
+        path = [position]
+        done = False
+        for tick in range(100000):
+            if tick < 300 and rng.random() < 0.2:
+                goal += rng.uniform(-0.05, 0.05)
+            position, velocity, done = manual_ramp.step(position, velocity, goal, vmax, amax, DT)
+            path.append(position)
+            if done and tick >= 300:
+                break
+        assert done and position == goal
+        speeds = [0.0] + [(b - a) / DT for a, b in zip(path, path[1:])] + [0.0]
+        assert max(abs(v) for v in speeds) <= vmax * (1 + 1e-6)
+        assert max(abs(b - a) / DT for a, b in zip(speeds, speeds[1:])) <= amax * (1 + 1e-6)
 
 
 # ---------------------------------------------------------- supervisor ---
@@ -263,3 +287,40 @@ def test_the_ramp_thread_runs_to_the_goal_and_exits():
         time.sleep(0.01)
     assert supervisor._ramp_thread is None
     assert _sent(supervisor)[-1][0] == pytest.approx(0.2)
+
+
+# ------------------------------------------------------- X-Touch 녹화 값 ---
+
+
+def test_xtouch_ramp_ticks_are_published_for_recording_with_a_running_seq():
+    """X-Touch 램프 값만 · 주기마다 하나 · 번호가 이어진다 · 녹화가 이것으로 프레임을 잇는다 · 수정 목록 156"""
+    import json as _json
+
+    supervisor = _supervisor(axes=(0, 1))
+    supervisor._manual_stream_samples_pub = CapturePublisher()
+    supervisor._accept_stream_goals([
+        _target(0, 50.0, gain=100.0, source='xtouch'),
+        _target(1, 50.0, gain=100.0, source='fader'),
+    ])
+    _run(supervisor, 3)
+    sent = [_json.loads(message.data) for message in supervisor._manual_stream_samples_pub.messages]
+    assert [item['seq'] for item in sent] == [1, 2, 3]
+    assert all([sample[0] for sample in item['samples']] == [0] for item in sent)   # 웹 페이더 축은 안 실음
+    commanded = [row[0] for row in _sent(supervisor)]
+    assert [D(item['samples'][0][1]) for item in sent] == pytest.approx(commanded)  # 모터로 보낸 값 그대로
+
+
+def test_step_never_passes_a_fixed_goal_from_rest():
+    """선 채로 고정 목표 · 지나치지 않는다 · 페이더 끝·범위 끝까지 가도 범위 밖 값이 없다 · 수정 목록 156"""
+    import random
+    rng = random.Random(11)
+    for _ in range(500):
+        vmax, amax = rng.uniform(0.01, 3.0), rng.uniform(0.01, 10.0)
+        position, goal, velocity = rng.uniform(-1, 1), rng.uniform(-1, 1), 0.0
+        sign = 1 if goal >= position else -1
+        for _ in range(100000):
+            position, velocity, done = manual_ramp.step(position, velocity, goal, vmax, amax, DT)
+            assert (goal - position) * sign >= -1e-12
+            if done:
+                break
+        assert done

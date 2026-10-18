@@ -13,46 +13,16 @@
 
 from __future__ import annotations
 
-import math
 from dataclasses import dataclass, field
 from typing import Any, Dict
 
-#: 이만큼 가까우면 도착 · rad (모터) · 조그 도착 판정(0.05°)보다 훨씬 작게
-ARRIVE_RAD = math.radians(1e-4)
+# 한 주기 계산은 motion_common 하나 · X-Touch 구간 덮어쓰기(재생 노드)도 같은 램프 · 수정 목록 156
+from motion_common.ramp import ARRIVE_RAD, step  # noqa: F401 · step 은 이 모듈 이름으로도 쓴다
 #: 도착한 채 목표가 안 오면 끝낸다 · 화면이 놓기 없이 사라져도 남지 않게 · 초
 IDLE_EXPIRE_SEC = 1.0
 #: 출처가 없으면(옛 화면 · MIDI) 이 이름 · 같은 출처끼리는 새 목표로 바꾼다
 DEFAULT_SOURCE = 'stream'
-SOURCE_LABELS = {'fader': '페이더', 'dial': '다이얼', DEFAULT_SOURCE: '수동 스트림'}
-
-
-def step(
-    position: float,
-    velocity: float,
-    goal: float,
-    max_velocity: float,
-    max_acceleration: float,
-    dt: float,
-) -> tuple[float, float, bool]:
-    """한 주기 · (새 위치, 새 속도, 도착) · 속도·가속 상한 · 목표에서 멈출 수 있게 미리 줄인다"""
-    vmax = abs(float(max_velocity))
-    amax = abs(float(max_acceleration))
-    dt = max(float(dt), 1e-6)
-    distance = goal - position
-    # 남은 거리가 한 주기 가속 거리(가속 × 주기²)보다 짧고 거의 섰으면 목표에 세운다 ·
-    # 그보다 짧은 거리는 아래 식이 속도 0 을 내서 영영 못 닿는다
-    if abs(distance) <= max(ARRIVE_RAD, amax * dt * dt) and abs(velocity) <= 2.0 * amax * dt:
-        return goal, 0.0, True
-    # 남은 거리에서 멈출 수 있는 최고 속도 · 한 주기 늦게 줄이는 만큼 빼 둔다
-    braking = math.sqrt(max(0.0, 2.0 * amax * abs(distance))) - amax * dt / 2.0
-    wanted = math.copysign(min(vmax, max(braking, 0.0)), distance)
-    change = max(-amax * dt, min(amax * dt, wanted - velocity))
-    new_velocity = velocity + change
-    new_position = position + new_velocity * dt
-    # 목표를 지나치면 목표에 세운다 · 남은 속도는 한 주기 줄일 만큼(≤ 2 × 가속 × 주기)
-    if distance != 0.0 and (goal - new_position) * distance <= 0.0 and new_velocity * distance > 0.0:
-        return goal, 0.0, True
-    return new_position, new_velocity, False
+SOURCE_LABELS = {'fader': '페이더', 'dial': '다이얼', 'xtouch': 'X-Touch', DEFAULT_SOURCE: '수동 스트림'}
 
 
 @dataclass
@@ -97,6 +67,9 @@ class AxisRamp:
             if arrived:
                 self.arrived = True
                 self.arrived_at = now
+        else:
+            # 서 있는 주기 · 같은 값을 보내므로 차분 속도 0 · 다음 새 목표는 0 에서 (수정 목록 156)
+            self.velocity = 0.0
         return self.position
 
     def finished(self, now: float) -> bool:

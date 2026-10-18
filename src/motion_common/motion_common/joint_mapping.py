@@ -168,3 +168,24 @@ def row_in_unit(row: Mapping[str, Any], unit: str) -> Dict[str, Any]:
         if value is not None:
             result[f'{name}{rad_suffix if unit == units.RAD else deg_suffix}'] = value
     return result
+
+
+#: X-Touch 페이더 번호 · 줄마다 · 1 ~ 8 · 없으면 칸 없음 · 수정 목록 156 (2026-10-17)
+FADER_FIELD = 'xtouch_fader'
+FADER_COUNT = 8
+
+
+def fader_number(row: Mapping[str, Any]) -> Optional[int]:
+    """이 줄을 모는 X-Touch 페이더 · 1 ~ 8 · 비었거나 틀리면 None"""
+    value = _number(row.get(FADER_FIELD)) if isinstance(row, Mapping) else None
+    if value is None or value != int(value):
+        return None
+    number = int(value)
+    return number if 1 <= number <= FADER_COUNT else None
+
+
+def rate_limits_set(row: Mapping[str, Any]) -> bool:
+    """최대 속도·가속도가 둘 다 있나 · X-Touch 조종·녹화는 이것이 있어야 한다 · 수정 목록 156"""
+    velocity = rate(row, 'max_velocity')
+    acceleration = rate(row, 'max_acceleration')
+    return bool(velocity and velocity > 0.0 and acceleration and acceleration > 0.0)

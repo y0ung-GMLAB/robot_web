@@ -248,6 +248,10 @@ class MotionSupervisor(Node):
         self._manual_stream_result_pub = self.create_publisher(
             String, self.manual_stream_result_topic, 10
         )
+        # X-Touch 램프 값 · 녹화(브리지)가 받는다 · 깊이는 1초치 · 수정 목록 156
+        self._manual_stream_samples_pub = self.create_publisher(
+            String, topics.MANUAL_STREAM_SAMPLES, 50
+        )
         safety_qos = QoSProfile(
             depth=1,
             reliability=ReliabilityPolicy.RELIABLE,
@@ -1007,10 +1011,39 @@ class MotionSupervisor(Node):
             ramps.pop(self._optional_int(result.get('axis')), None)
         if failed:
             self._publish_manual_stream_result(failed[0], False, failed[0]['message'], results=failed)
+        self._publish_ramp_samples(targets, results)
         for axis, ramp in list(ramps.items()):
             if ramp.finished(now):
                 ramps.pop(axis, None)
 
+
+    def _publish_ramp_samples(self, targets: list[Dict[str, Any]], results: list[Dict[str, Any]]) -> None:
+        """X-Touch 램프가 이번 주기에 모터로 보낸 값 · 녹화용 · 수정 목록 156
+
+        `seq` 는 주기 번호 · 한 축의 값이 이어진 번호면 정확히 한 주기(20 ms) 뒤 값이다 ·
+        녹화는 그 번호로 프레임을 잇는다(받은 시각으로 맞추면 흔들림이 차분 가속을 키운다) ·
+        `t` 는 보낸 벽시계 · 끊겼다 다시 시작한 값을 어느 프레임에 둘지만 정한다.
+        """
+        publisher = getattr(self, '_manual_stream_samples_pub', None)
+        if publisher is None:
+            return
+        sent = {
+            self._optional_int(result.get('axis'))
+            for result in results if result.get('success')
+        }
+        samples = [
+            [int(target['axis']), float(target['target_rad'])]
+            for target in targets
+            if target.get('source') == 'xtouch' and self._optional_int(target.get('axis')) in sent
+        ]
+        if not samples:
+            return
+        self._ramp_sample_seq = int(getattr(self, '_ramp_sample_seq', 0)) + 1
+        publisher.publish(String(data=json.dumps({
+            'seq': self._ramp_sample_seq,
+            't': time.time(),
+            'samples': samples,
+        })))
 
     @staticmethod
     def _stream_target_result(

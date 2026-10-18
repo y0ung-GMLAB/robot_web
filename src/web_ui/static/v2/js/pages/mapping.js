@@ -189,7 +189,7 @@ function table(state, changed) {
     ];
   };
   return h('div', { class: 'table-wrap' }, h('table', { class: 'table mapping-table' },
-    h('thead', {}, h('tr', {}, ['사용', '조인트', '모터', '감속·기어비', '방향 반전', '기준점 (모터°)', '범위 (조인트°)', '범위 확인', '최대 속도 · 가속', '초기 위치', '상태', ''].map((text) => h('th', { scope: 'col', text })))),
+    h('thead', {}, h('tr', {}, ['사용', '조인트', '모터', '감속·기어비', '방향 반전', '기준점 (모터°)', '범위 (조인트°)', '범위 확인', '최대 속도 · 가속', 'X-Touch 페이더', '초기 위치', '상태', ''].map((text) => h('th', { scope: 'col', text })))),
     h('tbody', {}, ui.rows.map((row, index) => {
       const status = rowStatus(row);
       const motor = motorForRow(row, motors);
@@ -238,6 +238,12 @@ function table(state, changed) {
       h('td', {}, h('div', { class: 'cell-row' },
         numberInput(row, 'max_velocity_deg_s', changed, { label: '최대 속도 deg/s', placeholder: '없음' }),
         numberInput(row, 'max_acceleration_deg_s2', changed, { label: '최대 가속 deg/s²', placeholder: '없음' }))),
+      // X-Touch 페이더 번호 · 수정 목록 156 · 조종·녹화는 최대 속도·가속도가 있어야 한다
+      h('td', {}, h('select', { class: 'select select-sm', 'aria-label': `${index + 1}번 줄 X-Touch 페이더`,
+        title: 'X-Touch 페이더 번호 · X-Touch 화면에서 이 조인트를 그 페이더로 움직이고 녹화합니다 · 최대 속도·가속도가 있어야 합니다',
+        onchange: (e) => { row.xtouch_fader = e.target.value === '' ? null : Number(e.target.value); changed(); } },
+        h('option', { value: '', selected: row.xtouch_fader === null || row.xtouch_fader === undefined }, '없음'),
+        [1, 2, 3, 4, 5, 6, 7, 8].map((n) => h('option', { value: String(n), selected: row.xtouch_fader === n }, String(n))))),
       h('td', {}, h('div', { class: 'cell-row' },
         h('select', { class: 'select select-sm', 'aria-label': '초기 위치', onchange: (e) => {
           row.initial_mode = e.target.value;
