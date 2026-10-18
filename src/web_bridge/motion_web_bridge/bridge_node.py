@@ -8,7 +8,7 @@ import subprocess
 import threading
 import time
 from pathlib import Path
-from typing import Any, Dict, Iterator, List, Optional
+from typing import Any, Dict, Iterator, List, Optional, Tuple
 
 import rclpy
 import uvicorn
@@ -42,6 +42,7 @@ from .drive_maintenance import DriveMaintenance
 from .drive_params import DriveParams
 from . import boot_params, minas_params
 from .manual_stream import ManualStreamService
+from .xtouch_recording import RecordingService
 from .manual_range_gate import ManualRangeGate
 from . import animation_preview, sim_scene
 from .motor_runtime_service import MotorRuntimeService
@@ -520,6 +521,24 @@ class MotionWebBridge(Node):
         )
         self.manual_stream = ManualStreamService(
             self, publisher=self._manual_stream_request_publisher
+        )
+        # X-Touch 녹화 · supervisor 램프 값을 받아 둔다 · 수정 목록 156
+        self.xtouch_recording = RecordingService(
+            self,
+            mapping=lambda: (
+                self._manual_range_gate_instance().saved_rows(),
+                self._manual_range_gate_instance().motors(),
+            ),
+            record_event=lambda event_type, content, details: self._motor_event_log.append(
+                category='system', event_type=event_type, target='X-Touch 녹화',
+                content=content, details=details,
+            ),
+        )
+        self._manual_stream_samples_subscription = self.create_subscription(
+            String,
+            topics.MANUAL_STREAM_SAMPLES,
+            lambda msg: self.xtouch_recording.samples_callback(msg),
+            50,
         )
         self._motion_mapping_request_publisher = self.create_publisher(
             String,
@@ -2276,6 +2295,10 @@ class MotionWebBridge(Node):
     def manual_speed_limits(self, axis: Any) -> Dict[str, float]:
         """수동 조작 상한 · 모터 rad/s · rad/s² · 매핑 이득으로 · 수정 목록 126"""
         return self._manual_range_gate_instance().speed_limits(axis)
+
+    def xtouch_speed_limits(self, axis: Any) -> Tuple[Dict[str, float], str]:
+        """X-Touch 상한 · 조인트 매핑 최대 속도·가속도 · 비면 (빈 dict, 이유) · 수정 목록 156"""
+        return self._manual_range_gate_instance().xtouch_limits(axis)
 
     def _manual_range_gate_instance(self) -> ManualRangeGate:
         gate = getattr(self, '_manual_range_gate', None)

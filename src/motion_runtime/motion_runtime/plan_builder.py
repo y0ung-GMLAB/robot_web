@@ -16,7 +16,7 @@ import math
 import time
 from typing import Any, Dict, List, Mapping, Optional
 
-from motion_common import joint_mapping, motion_segment, multiturn_clear, repeat_policy, units, wire_units
+from motion_common import joint_mapping, motion_segment, multiturn_clear, rate_check, repeat_policy, units, wire_units
 from motion_common.values import finite_float, optional_int
 
 from . import motion_run_rules
@@ -729,50 +729,5 @@ def _segment_plan_fields(segment_info: Mapping[str, Any]) -> Dict[str, float]:
     }
 
 
-def _motion_rate_limit_error(axes, samples, period_sec: float) -> str:
-    """조인트 최대 속도·가속도를 넘는 애니메이션이면 거부 사유 · 수정 목록 5-2 (2026-10-06)
-
-    전에는 어느 계층도 속도·가속도를 보지 않았다 · 너무 빠른 애니메이션은 모터가
-    못 따라가 「도달 실패」 로 끝나거나 기구에 무리가 갔다. 조인트 매핑에 축별
-    상한을 적으면(비우면 검사 안 함) 재생 계획(20 ms 재샘플 · 매핑 범위로 자른 값)
-    의 차분으로 잰다 · 재생과 같은 값을 보므로 「검사는 통과했는데 실제로는 넘는다」 가 없다.
-    """
-    if len(samples) < 2 or period_sec <= 0:
-        return ''
-    problems = []
-    for axis in axes:
-        row = axis.get('row') or {}
-        # 상한·재는 값 모두 rad · 글에만 deg · 수정 목록 6
-        max_velocity = joint_mapping.rate(row, 'max_velocity', units.RAD)
-        max_acceleration = joint_mapping.rate(row, 'max_acceleration', units.RAD)
-        if not max_velocity and not max_acceleration:
-            continue
-        motion_id = str(axis['motion_id'])
-        values = [float(sample['motion_values'][motion_id]) for sample in samples]
-        times = [float(sample['time_sec']) for sample in samples]
-        velocities = []
-        for index in range(1, len(values)):
-            dt = times[index] - times[index - 1]
-            if dt <= 1e-9:
-                continue
-            velocities.append(((values[index] - values[index - 1]) / dt, times[index]))
-        if max_velocity:
-            worst = max(velocities, key=lambda item: abs(item[0]), default=None)
-            if worst and abs(worst[0]) > max_velocity * (1 + 1e-6):
-                problems.append(
-                    f'{motion_id} 속도 {_deg(abs(worst[0])):.1f} deg/s > 상한 {round(_deg(max_velocity), 6):g} ({worst[1]:.2f} s)'
-                )
-        if max_acceleration and len(velocities) > 1:
-            accelerations = [
-                ((velocities[i][0] - velocities[i - 1][0]) / max(velocities[i][1] - velocities[i - 1][1], 1e-9),
-                 velocities[i][1])
-                for i in range(1, len(velocities))
-            ]
-            worst = max(accelerations, key=lambda item: abs(item[0]), default=None)
-            if worst and abs(worst[0]) > max_acceleration * (1 + 1e-6):
-                problems.append(
-                    f'{motion_id} 가속도 {_deg(abs(worst[0])):.0f} deg/s² > 상한 {round(_deg(max_acceleration), 6):g} ({worst[1]:.2f} s)'
-                )
-    if not problems:
-        return ''
-    return '애니메이션이 조인트 매핑의 속도·가속도 상한을 넘습니다 · ' + ' · '.join(problems[:4])
+# 검사는 motion_common 하나 · 녹화 저장(브리지)도 같은 잣대 · 수정 목록 156
+_motion_rate_limit_error = rate_check.rate_limit_error

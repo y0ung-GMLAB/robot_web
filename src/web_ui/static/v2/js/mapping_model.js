@@ -48,7 +48,15 @@ export function rowToDraft(row) {
   out.motor_ref = String(row?.motor_ref || '');
   // 범위 확인은 불러올 때 칸으로 굳힌다 · 옛 파일(칸 없음)도 · 그 뒤 숫자만 고쳐서는 안 바뀐다 · 사람이 체크 (사용자 2026-10-13)
   out.range_confirmed = rangeConfirmed(out);
+  out.xtouch_fader = faderNumber(row?.xtouch_fader);
   return out;
+}
+
+/** X-Touch 페이더 번호 · 1 ~ 8 · 아니면 null · 서버 joint_mapping.fader_number 와 같다 · 수정 목록 156 */
+export function faderNumber(value) {
+  if (value === null || value === undefined || value === '') return null;
+  const number = Number(value);
+  return Number.isInteger(number) && number >= 1 && number <= 8 ? number : null;
 }
 
 /** 초안 → 서버 · 최대 속도·가속은 비우면 칸을 뺀다(검사 안 함 · 5-2) */
@@ -68,6 +76,10 @@ export function draftToRow(draft) {
   out.motion_id = String(out.motion_id || '').trim();
   // 늘 칸을 적어 보낸다 · 옛 파일 짐작(±180)은 서버가 한 번만 · 수정 목록 97
   out.range_confirmed = rangeConfirmed(draft);
+  // 페이더는 있을 때만 · 비우면 칸을 뺀다(옛 파일 모양) · 수정 목록 156
+  const fader = faderNumber(draft.xtouch_fader);
+  if (fader === null) delete out.xtouch_fader;
+  else out.xtouch_fader = fader;
   return out;
 }
 
@@ -160,6 +172,7 @@ export function draftProblems(rows) {
   const problems = [];
   const names = new Map();
   const targets = new Map();
+  const faders = new Map();
   rows.forEach((row, index) => {
     const at = `${index + 1}번 줄`;
     const name = String(row.motion_id || '').trim();
@@ -177,6 +190,9 @@ export function draftProblems(rows) {
       if (!target) problems.push(`${at} · 「사용」이 켜진 줄에 모터가 지정되지 않았습니다`);
       else if (targets.has(target)) problems.push(`${at} · ${targets.get(target) + 1}번 줄과 같은 모터를 사용합니다`);
       else targets.set(target, index);
+      const fader = faderNumber(row.xtouch_fader);
+      if (fader !== null && faders.has(fader)) problems.push(`${at} · X-Touch 페이더 ${fader} 번을 ${faders.get(fader) + 1}번 줄도 씁니다`);
+      else if (fader !== null) faders.set(fader, index);
     }
   });
   if (!rows.length) problems.push('조인트가 하나도 없습니다');
@@ -210,7 +226,7 @@ const LABELS = {
   motion_id: '이름', enabled: '사용', motor_axis: '모터', gear_ratio: '감속·기어비', invert: '방향 반전',
   reference_position_deg: '기준점', motion_lower_deg: '최소', motion_upper_deg: '최대',
   max_velocity_deg_s: '최대 속도', max_acceleration_deg_s2: '최대 가속', initial_mode: '초기 위치',
-  initial_motion_position_deg: '지정 값', range_confirmed: '범위 확인',
+  initial_motion_position_deg: '지정 값', range_confirmed: '범위 확인', xtouch_fader: 'X-Touch 페이더',
 };
 
 function same(a, b) {

@@ -7,7 +7,8 @@
 결과 구독으로 받아 **축별 마지막 것**만 들고 있다가 화면에 돌려준다.
 
 목표는 「가고 싶은 곳」 · supervisor 가 조인트 2 °/s · 4 °/s² 로 천천히 다가간다 ·
-상한(모터 단위)은 여기서 매핑 이득으로 계산해 싣는다 · 수정 목록 126
+상한(모터 단위)은 여기서 매핑 이득으로 계산해 싣는다 · 수정 목록 126 ·
+출처가 X-Touch(`xtouch`)면 조인트 매핑 최대 속도·가속도로 · 비면 거절 · 수정 목록 156
 
     놓기(release)  `release_axes` · 멈추지 않고 마지막 목표까지 간 뒤 끝
     세우기(hold)   `hold_axes` · supervisor 가 현재 위치를 다시 목표로 박는다 ·
@@ -24,6 +25,9 @@ from typing import Any, Dict, List, Optional
 from std_msgs.msg import String
 
 from motion_common import generation
+
+#: X-Touch 출처 · 조인트 매핑 최대 속도·가속도로 따라간다 · 수정 목록 156
+XTOUCH_SOURCE = 'xtouch'
 
 
 class ManualStreamService:
@@ -106,9 +110,16 @@ class ManualStreamService:
             request['motion_rad'] = joint_rad
         # 같은 조작이면 새 목표로 · 다른 조작은 움직이는 동안 거절 (supervisor 판정)
         source_text = str(source or '').strip().lower()
-        if source_text in ('fader', 'dial'):
+        if source_text in ('fader', 'dial', XTOUCH_SOURCE):
             request['source'] = source_text
-        request.update(self._speed_limits(axis_int))
+        if source_text == XTOUCH_SOURCE:
+            # X-Touch 는 조인트 매핑 최대 속도·가속도로 · 비면 거절 · 수정 목록 156
+            limits, reason = self._xtouch_limits(axis_int)
+            if reason:
+                return {'success': False, 'axis': axis_int, 'message': reason}
+            request.update(limits)
+        else:
+            request.update(self._speed_limits(axis_int))
         self._publish(request)
         return {'success': True, 'axis': axis_int, 'request_id': request['request_id']}
 
@@ -130,6 +141,16 @@ class ManualStreamService:
             return dict(lookup(axis) or {})
         except Exception:  # noqa: BLE001 · 못 구하면 싣지 않는다 → supervisor 가 가장 느린 값
             return {}
+
+    def _xtouch_limits(self, axis: int) -> tuple:
+        lookup = getattr(self.bridge, 'xtouch_speed_limits', None)
+        if not callable(lookup):
+            return {}, 'X-Touch 상한을 읽을 수 없습니다'
+        try:
+            limits, reason = lookup(axis)
+        except Exception as exc:  # noqa: BLE001 · 모르면 거절(보수적)
+            return {}, f'X-Touch 상한을 읽을 수 없습니다 ({exc})'
+        return dict(limits or {}), str(reason or '')
 
     def hold(self, axes: Any) -> Dict[str, Any]:
         """그 자리에 세운다 · 정지 · 끊김 · supervisor 가 위치를 읽어 박는다."""

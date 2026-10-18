@@ -755,6 +755,10 @@ class MotionMappingManager(Node):
                 value = joint_mapping.rate(row, rate_name, units.RAD)
                 if value is not None:
                     normalized_rows[-1][field] = value
+            # X-Touch 페이더 번호 · 있을 때만(옛 파일 모양 유지) · 수정 목록 156
+            fader = joint_mapping.fader_number(row)
+            if fader is not None:
+                normalized_rows[-1][joint_mapping.FADER_FIELD] = fader
 
         playlist = playlist_from_mapping(mapping)
         normalized = {
@@ -798,12 +802,16 @@ class MotionMappingManager(Node):
 
         motion_id_counts: Dict[str, int] = {}
         target_counts: Dict[str, int] = {}
+        fader_counts: Dict[int, int] = {}
         for row in rows:
             if not isinstance(row, dict):
                 continue
             motion_id = str(row.get('motion_id') or '').strip()
             if motion_id:
                 motion_id_counts[motion_id] = motion_id_counts.get(motion_id, 0) + 1
+            fader = joint_mapping.fader_number(row)
+            if fader is not None and row.get('enabled'):
+                fader_counts[fader] = fader_counts.get(fader, 0) + 1
             if row.get('enabled'):
                 motor_ref = str(row.get('motor_ref') or '').strip()
                 motor_axis = row.get('motor_axis')
@@ -849,6 +857,9 @@ class MotionMappingManager(Node):
             )
             if enabled and target_key and target_counts.get(target_key, 0) > 1:
                 row_errors.append(f'duplicated motor target: {motor_ref or motor_axis}')
+            fader = joint_mapping.fader_number(row)
+            if enabled and fader is not None and fader_counts.get(fader, 0) > 1:
+                row_errors.append(f'X-Touch 페이더 {fader} 번을 두 줄이 씁니다')
             if scale is None or math.isclose(scale, 0.0, abs_tol=1e-12):
                 row_errors.append('scale must be a non-zero number')
             if gear_ratio is None or gear_ratio <= 0:

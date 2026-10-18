@@ -6,14 +6,17 @@
  *   ← {type:'release', axes:[..]}  → 마지막 목표까지 천천히 간 뒤 선다 (수정 목록 126)
  *   ← {type:'stop', axes:[..]}     → 그 자리에 선다 (페이지를 떠날 때)
  *   → {type:'result', success, message}
+ *   X-Touch 화면(수정 목록 156) · 인사에 watchdog_sec · ← ping → pong · ← record_start|record_add|record_stop|record_cancel → record
  * 목표는 「가고 싶은 곳」 · 서버가 조인트 2 °/s · 4 °/s² 로 천천히 다가간다 (수정 목록 126).
  * 수동 모드가 아니면 서버가 거절하고 닫는다 · 끊기면 서버가 만졌던 축을 그 자리에 세운다.
  */
 
 export class ManualStream {
-  constructor({ onResult = () => {}, onClose = () => {} } = {}) {
+  constructor({ onResult = () => {}, onClose = () => {}, onMessage = () => {} } = {}) {
     this.onResult = onResult;
     this.onClose = onClose;
+    // 그 밖의 응답(X-Touch · pong · record) · 수정 목록 156
+    this.onMessage = onMessage;
     this.socket = null;
     this.ready = null;
     this.hello = null;
@@ -41,6 +44,7 @@ export class ManualStream {
           return;
         }
         if (message.type === 'result') this.onResult(message);
+        else this.onMessage(message);
       };
       socket.onclose = () => {
         if (!settled) { settled = true; reject(new Error('수동 조작 연결이 끊겼습니다')); }
@@ -66,6 +70,13 @@ export class ManualStream {
   release(axes) {
     if (!this.isOpen()) return false;
     this.socket.send(JSON.stringify({ type: 'release', axes }));
+    return true;
+  }
+
+  /** 그 밖의 요청 · ping · 녹화(수정 목록 156) · 보냈으면 true */
+  send(payload) {
+    if (!this.isOpen()) return false;
+    this.socket.send(JSON.stringify(payload));
     return true;
   }
 

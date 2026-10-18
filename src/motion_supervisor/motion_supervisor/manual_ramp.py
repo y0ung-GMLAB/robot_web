@@ -23,7 +23,7 @@ ARRIVE_RAD = math.radians(1e-4)
 IDLE_EXPIRE_SEC = 1.0
 #: 출처가 없으면(옛 화면 · MIDI) 이 이름 · 같은 출처끼리는 새 목표로 바꾼다
 DEFAULT_SOURCE = 'stream'
-SOURCE_LABELS = {'fader': '페이더', 'dial': '다이얼', DEFAULT_SOURCE: '수동 스트림'}
+SOURCE_LABELS = {'fader': '페이더', 'dial': '다이얼', 'xtouch': 'X-Touch', DEFAULT_SOURCE: '수동 스트림'}
 
 
 def step(
@@ -34,25 +34,29 @@ def step(
     max_acceleration: float,
     dt: float,
 ) -> tuple[float, float, bool]:
-    """한 주기 · (새 위치, 새 속도, 도착) · 속도·가속 상한 · 목표에서 멈출 수 있게 미리 줄인다"""
+    """한 주기 · (새 위치, 새 속도, 도착) · 속도·가속 상한 · 목표에서 멈출 수 있게 미리 줄인다
+
+    속도 = 이번 주기에 간 거리 ÷ 주기 · 그래서 보낸 목표를 차분으로 재도 상한 안이다(재생 검사
+    `plan_builder._motion_rate_limit_error` 와 같은 잣대 · 녹화 파일이 그대로 재생된다 · 수정 목록 156) ·
+    전에는 목표에 「바로 세우기」 가 두 군데 있어 차분 가속이 상한의 몇 배가 됐다(움직이는 목표가 갑자기
+    가까워지면 빠른 채로 그 자리에 섰다) · 이제 못 서면 지나쳤다가 돌아온다.
+    """
     vmax = abs(float(max_velocity))
     amax = abs(float(max_acceleration))
     dt = max(float(dt), 1e-6)
+    dv = amax * dt
     distance = goal - position
-    # 남은 거리가 한 주기 가속 거리(가속 × 주기²)보다 짧고 거의 섰으면 목표에 세운다 ·
-    # 그보다 짧은 거리는 아래 식이 속도 0 을 내서 영영 못 닿는다
-    if abs(distance) <= max(ARRIVE_RAD, amax * dt * dt) and abs(velocity) <= 2.0 * amax * dt:
-        return goal, 0.0, True
-    # 남은 거리에서 멈출 수 있는 최고 속도 · 한 주기 늦게 줄이는 만큼 빼 둔다
-    braking = math.sqrt(max(0.0, 2.0 * amax * abs(distance))) - amax * dt / 2.0
+    # 목표에 세울 수 있나 · 이번 주기 속도(거리 ÷ 주기)로 바꾸는 것도, 다음 주기 0 으로 서는 것도 상한 안 ·
+    # 도착 속도는 그대로 돌려준다(0 이 아니라) · 다음 주기가 새 목표면 그 속도에서 이어 간다
+    landing = distance / dt
+    if abs(landing) <= min(dv, vmax) * (1 + 1e-9) and abs(landing - velocity) <= dv * (1 + 1e-9):
+        return goal, landing, True
+    # 남은 거리에서 멈출 수 있는 최고 속도 · 주기마다 dv 씩 줄이면 s·dt + (s − dv)·dt + … ≤ 거리
+    braking = math.sqrt(max(0.0, 2.0 * amax * abs(distance) + (dv / 2.0) ** 2)) - dv / 2.0
     wanted = math.copysign(min(vmax, max(braking, 0.0)), distance)
-    change = max(-amax * dt, min(amax * dt, wanted - velocity))
+    change = max(-dv, min(dv, wanted - velocity))
     new_velocity = velocity + change
-    new_position = position + new_velocity * dt
-    # 목표를 지나치면 목표에 세운다 · 남은 속도는 한 주기 줄일 만큼(≤ 2 × 가속 × 주기)
-    if distance != 0.0 and (goal - new_position) * distance <= 0.0 and new_velocity * distance > 0.0:
-        return goal, 0.0, True
-    return new_position, new_velocity, False
+    return position + new_velocity * dt, new_velocity, False
 
 
 @dataclass
@@ -97,6 +101,9 @@ class AxisRamp:
             if arrived:
                 self.arrived = True
                 self.arrived_at = now
+        else:
+            # 서 있는 주기 · 같은 값을 보내므로 차분 속도 0 · 다음 새 목표는 0 에서 (수정 목록 156)
+            self.velocity = 0.0
         return self.position
 
     def finished(self, now: float) -> bool:

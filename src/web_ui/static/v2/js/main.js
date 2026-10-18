@@ -21,6 +21,7 @@ import { loadPack, renderPack } from './pages/pack.js';
 import { loadRecords, renderRecords } from './pages/records.js';
 import { loadSetup, renderSetup } from './pages/motor_setup.js';
 import { loadManual, renderManual } from './pages/manual.js';
+import { loadXTouch, renderXTouch } from './pages/xtouch.js';
 
 const state = { snap: null, sched: null, schedules: [], events: [], connected: false };
 /** 화면 · render 는 상태로 그리기만 · load 는 그 화면만 쓰는 값을 받아 온다(들어올 때 + reloadMs 마다) */
@@ -41,6 +42,8 @@ const PAGES = {
   motors: { render: renderSetup, load: loadSetup, reloadMs: 10000 },
   'maintain-motors': { render: renderSetup, load: loadSetup, reloadMs: 10000 },
   manual: { render: renderManual, load: loadManual, reloadMs: 15000 },
+  // X-Touch 페이더 조종·녹화 · 수정 목록 156
+  xtouch: { render: renderXTouch, load: loadXTouch, reloadMs: 15000 },
   // static · 들어올 때 한 번만 그린다 · iframe 을 다시 그리면 터미널 세션이 끊긴다
   tools: { render: renderTools, static: true },
 };

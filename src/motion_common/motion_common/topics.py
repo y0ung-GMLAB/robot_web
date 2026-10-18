@@ -191,6 +191,8 @@ MANUAL_ACTION_RESULT = scoped('/manual/action_response')
 #: 수동 스트림(페이더) 위치 지정
 MANUAL_STREAM_REQUEST = scoped('/manual/stream_request')
 MANUAL_STREAM_RESULT = scoped('/manual/stream_response')
+#: X-Touch 램프가 주기마다 보낸 값 · 녹화가 받는다 · 수정 목록 156
+MANUAL_STREAM_SAMPLES = scoped('/manual/stream_samples')
 
 #: 안전
 SAFETY_REQUEST = scoped('/safety/request')
