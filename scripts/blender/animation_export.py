@@ -41,7 +41,7 @@ import bpy
 
 PERIOD = 0.02                 # motion_common/timing.py · 50 fps 고정
 WARN_RATIO = 0.8              # 한계의 80% 부터 경고 · 100% 초과 오류
-ZERO_SNAP_RAD = 1e-6          # 파일 값 · 이보다 작으면 정확히 0 (Blender 행렬 float32 → 키 0 이어도 ~1e-7 rad 잡음)
+ZERO_SNAP_RAD = 1e-5          # 파일 값 · 이보다 작으면 정확히 0 (Blender 행렬 float32 → 키 0 이어도 ~1e-7 rad 잡음 · IK 반복 계산 잔차 ~2e-6 rad)
 AXIS_INDEX = {'X': 0, 'Y': 1, 'Z': 2}
 MARKER_PREFIX = 'ANIM!'
 CHECK_OBJECT = 'AnimSpeedCheck'
@@ -259,24 +259,63 @@ def write_animation(path, title, ids, n):
             f.write(json.dumps(row, ensure_ascii=False, separators=(',', ':')) + '\n')
 
 
-def _key_sources(pb):
-    """이 본 값을 정하는 키가 있는 본들 · 다른 본을 복사(Copy Rotation)하면 그 본도 (예: Eye_Yaw_R → Eye_Yaw_L)"""
-    out = [pb]
-    for c in pb.constraints:
-        if c.type in {'COPY_ROTATION', 'COPY_TRANSFORMS'} and not c.mute and c.target == pb.id_data and c.subtarget:
-            src = pb.id_data.pose.bones.get(c.subtarget)
-            if src is not None:
-                out.append(src)
+AIM_TYPES = {'IK', 'TRACK_TO', 'DAMPED_TRACK', 'LOCKED_TRACK'}
+
+
+def _ik_on(pb):
+    """pb 를 사슬에 포함하는 IK 컨스트레인트들 (IK 는 사슬 끝 본에 걸림)"""
+    out = []
+    for other in pb.id_data.pose.bones:
+        for c in other.constraints:
+            if c.type != 'IK' or c.mute:
+                continue
+            b, n = other, 0
+            while b is not None and (c.chain_count == 0 or n < c.chain_count):
+                if b == pb:
+                    out.append(c)
+                    break
+                b, n = b.parent, n + 1
     return out
 
 
-def _axis_fcurve(pb):
+def _key_sources(pb):
+    """이 본 값을 정하는 키가 있는 (본, 회전 축 번호) 들 · 축 None = 그 본의 모든 채널 (바라보기 타깃 위치 키).
+    Copy Rotation 은 복사하는 축만 따라감 (Eye_Yaw_R → Eye_Yaw_L, 모터 본 → 조종 본),
+    IK · Track 컨스트레인트는 타깃 본까지 (조종 본 → 보조 본 → Look_Target)."""
+    arm = pb.id_data
+    out, seen, todo = [], set(), [(pb, AXIS_INDEX[axis(pb)])]
+    while todo:
+        b, idx = todo.pop(0)
+        if (b.name, idx) in seen:
+            continue
+        seen.add((b.name, idx))
+        out.append((b, idx))
+        own = list(b.constraints)
+        for c in own + [c for c in _ik_on(b) if not any(c == x for x in own)]:
+            if c.mute or getattr(c, 'target', None) != arm or not getattr(c, 'subtarget', ''):
+                continue
+            src = arm.pose.bones.get(c.subtarget)
+            if src is None:
+                continue
+            if c.type == 'COPY_TRANSFORMS':
+                todo.append((src, idx))
+            elif c.type == 'COPY_ROTATION':
+                if idx is None or (c.use_x, c.use_y, c.use_z)[idx]:
+                    todo.append((src, idx))
+            elif c.type in AIM_TYPES:
+                todo.append((src, None))
+    return out
+
+
+def _axis_fcurves(pb, idx):
+    """축 번호가 있으면 그 회전 채널 하나, None 이면 그 본의 모든 채널"""
+    if idx is None:
+        return _bone_fcurves(pb)
     ad = pb.id_data.animation_data
     act = ad.action if ad else None
     if act is None:
-        return None
+        return []
     dp = 'pose.bones["%s"].rotation_euler' % pb.name
-    idx = AXIS_INDEX[axis(pb)]
     for l in act.layers:
         for st in l.strips:
             for cb in st.channelbags:
@@ -284,8 +323,8 @@ def _axis_fcurve(pb):
                     continue
                 fc = cb.fcurves.find(dp, index=idx)
                 if fc is not None:
-                    return fc
-    return None
+                    return [fc]
+    return []
 
 
 def _bone_fcurves(pb):
@@ -310,10 +349,10 @@ def mark_keys(bones, flags):
     지난 검사 표시(Extreme / Jitter)는 먼저 일반 키로 되돌림 · 키 사이 구간 = 앞 키 ~ 뒤 키."""
     fcs, allfc = {}, {}
     for pb in bones:
-        for src in _key_sources(pb):
-            fc = _axis_fcurve(src)
-            if fc is not None:
-                fcs[(src.id_data.name, src.name)] = fc
+        for src, idx in _key_sources(pb):
+            lst = _axis_fcurves(src, idx)
+            if lst:
+                fcs[(src.id_data.name, src.name, idx)] = lst
                 allfc[(src.id_data.name, src.name)] = _bone_fcurves(src)
     for lst in allfc.values():
         for fc in lst:
@@ -328,24 +367,25 @@ def mark_keys(bones, flags):
             continue
         f0, f1 = (fl['over_blender_frames'] if fl.get('over_blender_frames') else
                   (fl['blender_frame_from'], fl['blender_frame_to']))
-        for src in _key_sources(pb):
-            fc = fcs.get((src.id_data.name, src.name))
-            if fc is None or not len(fc.keyframe_points):
+        for src, idx in _key_sources(pb):
+            lst = [fc for fc in fcs.get((src.id_data.name, src.name, idx), ()) if len(fc.keyframe_points)]
+            if not lst:
                 continue
-            xs = sorted(k.co.x for k in fc.keyframe_points)
+            xs = sorted({k.co.x for fc in lst for k in fc.keyframe_points})
             lo = max([x for x in xs if x <= f0 + 2] or [xs[0]])      # ±2 프레임: 20 ms 차분이 구간 끝을 1~2 프레임 늦게 잡음
             hi = min([x for x in xs if x >= f1 - 2] or [xs[-1]])
             if hi <= lo:
                 hi = min([x for x in xs if x > lo] or [lo])
             kt = 'EXTREME' if fl['level'] == 'error' else 'JITTER'
             hit = set()
-            for k in fc.keyframe_points:
-                if lo - 1e-6 <= k.co.x <= hi + 1e-6:
-                    k.type = kt
-                    hit.add(round(k.co.x, 2))
-                    marked += 1
+            for fc in lst:
+                for k in fc.keyframe_points:
+                    if lo - 1e-6 <= k.co.x <= hi + 1e-6:
+                        k.type = kt
+                        hit.add(round(k.co.x, 2))
+                        marked += 1
             for other in allfc.get((src.id_data.name, src.name), ()):      # 같은 본 · 같은 프레임 다른 채널 키도
-                if other is fc:
+                if other in lst:
                     continue
                 for k in other.keyframe_points:
                     if round(k.co.x, 2) in hit and (k.type != 'EXTREME' or kt == 'EXTREME'):
