@@ -194,3 +194,23 @@ test('조인트 매핑 「X-Touch 페이더」 · 1 ~ 8 · 비우면 칸을 뺀�
   ]);
   assert.ok(problems.some((p) => p.includes('X-Touch 페이더 1')), problems.join('\n'));
 });
+
+test('바탕 위 녹화 · 바탕 조인트는 선택 안 해도 재생 따라 · 잡으면 punch · 떼면 punch-release · 보통 축은 그대로', () => {
+  const { s, ctx, jointNow } = session({ 1: 0, 4: 0 });
+  assert.deepEqual(s.setTake(['neck_yaw']), []);
+  assert.equal(s.isPunch(0), true);
+  assert.equal(s.isPunch(2), false);
+  jointNow[1] = 4;
+  const follow = s.tick(ctx({ now: 500 }));
+  assert.deepEqual(follow, [{ type: 'feedback', channel: 0, value: jointToFader(-15, 15, 4) }], '선택 안 해도 따라감');
+  s.handle({ kind: 'button', group: 'select', channel: 0, down: true }, ctx());
+  s.handle({ kind: 'touch', channel: 0, down: true }, ctx());
+  s.handle({ kind: 'fader', channel: 0, value: jointToFader(-15, 15, 4.1) }, ctx());
+  s.handle({ kind: 'fader', channel: 0, value: jointToFader(-15, 15, 6) }, ctx());
+  const sent = s.tick(ctx({ now: 520 }));
+  assert.equal(sent[0].type, 'punch');
+  assert.equal(sent[0].motionId, 'neck_yaw');
+  assert.deepEqual(s.handle({ kind: 'touch', channel: 0, down: false }, ctx()), [{ type: 'punch-release', motionId: 'neck_yaw' }]);
+  assert.deepEqual(s.setTake([]).map((a) => a.type), ['led', 'punch-release'], '녹화 끝 · 잡던 덮어쓰기 채널은 놓음');
+  assert.equal(s.isPunch(0), false);
+});

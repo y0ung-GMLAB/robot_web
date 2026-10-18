@@ -365,6 +365,14 @@ async def ws_manual_stream(websocket: WebSocket):
             if kind == 'ping':
                 await websocket.send_text(json.dumps({'type': 'pong', 'record': _preview_record_status()}))
                 continue
+            if kind == 'punch':
+                # 구간 덮어쓰기 흉내 · 조인트 → 모터 deg
+                for name, axis, gear, *_ in JOINTS:
+                    if name == message.get('motion_id'):
+                        state['targets'][axis] = math.degrees(float(message.get('joint_rad') or 0.0)) * gear
+                continue
+            if kind == 'punch_release':
+                continue
             if kind in ('record_start', 'record_add', 'record_stop', 'record_cancel'):
                 await websocket.send_text(json.dumps({'type': 'record', **_preview_record(kind, message)}, ensure_ascii=False))
                 continue
@@ -397,8 +405,13 @@ def _preview_record_status():
         return {'state': 'idle'}
     now = time.time()
     t0 = PREVIEW_RECORD['t0']
-    return {'state': 'countdown' if now < t0 else 'recording', 'name': PREVIEW_RECORD['name'],
-            'axes': PREVIEW_RECORD['axes'], 'starts_in_sec': max(0.0, t0 - now), 'elapsed_sec': max(0.0, now - t0)}
+    status = {'state': 'countdown' if now < t0 else 'recording', 'name': PREVIEW_RECORD['name'],
+              'axes': PREVIEW_RECORD['axes'], 'starts_in_sec': max(0.0, t0 - now), 'elapsed_sec': max(0.0, now - t0)}
+    if PREVIEW_RECORD.get('base'):
+        # 바탕 위 녹화 흉내 · 바탕 조인트 = 상한 있는 축 전부 · 바탕 길이 20 s · 수정 목록 156 ⑨
+        status.update(base=PREVIEW_RECORD['base'], duration_sec=20.0,
+                      punch_ids=[name for name, axis, *_ in JOINTS if axis != 2])
+    return status
 
 
 def _preview_record(kind, message):
@@ -406,9 +419,13 @@ def _preview_record(kind, message):
         if PREVIEW_RECORD:
             return {'success': False, 'message': '이미 녹화 중입니다 · 정지한 뒤 다시 시작하세요'}
         axes = [int(a) for a in message.get('axes') or []]
-        if 2 in axes:
+        if 2 in axes and not message.get('base'):
             return {'success': False, 'message': '축 2 (f1_eye_pitch) 속도·가속도 상한을 먼저 채우세요 · 조인트 매핑의 최대 속도·가속도'}
-        PREVIEW_RECORD.update(t0=time.time() + 3.0, axes=axes, name=str(message.get('name') or 'xtouch_preview'))
+        base = str(message.get('base') or '')
+        if base:
+            axes = [axis for axis in axes if axis == 2]   # 바탕에 없는 축만 추가 녹화(흉내 · 눈 상하만 바탕에 없다고 침)
+        PREVIEW_RECORD.update(t0=time.time() + 3.0, axes=axes, base=base,
+                              name=str(message.get('name') or (f"{base.rsplit('.', 1)[0]}_xtouch" if base else 'xtouch_preview')))
         return {'success': True, 'message': '3초 뒤 녹화 시작', **_preview_record_status()}
     if kind == 'record_add':
         if PREVIEW_RECORD:

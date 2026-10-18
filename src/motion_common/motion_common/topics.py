@@ -174,6 +174,10 @@ MOTION_RUN_COMMAND = scoped('/motion_run/command')
 MOTION_RUN_REQUEST = scoped('/motion_run/request')
 MOTION_RUN_RESPONSE = scoped('/motion_run/response')
 MOTION_RUN_STATUS = scoped('/motion_run/status')
+#: X-Touch 구간 덮어쓰기 · 화면 → 브리지 → 재생 노드 · 조인트 목표 · 수정 목록 156 ⑨-2
+MOTION_RUN_PUNCH_INPUT = scoped('/motion_run/punch_input')
+#: X-Touch 녹화 재생 · 프레임마다 번호·시각 · 덮어쓴 조인트 값 · 재생 노드 → 브리지 녹화 · 수정 목록 156 ⑨
+MOTION_RUN_TAKE_FRAMES = scoped('/motion_run/take_frames')
 
 #: 모션 축 매핑
 MOTION_MAPPING_REQUEST = scoped('/motion_mapping/request')

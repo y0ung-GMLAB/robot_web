@@ -244,6 +244,13 @@ class MotionRunManager(Node):
             String, self.motion_value_topic, motion_value_qos
         )
         self._action_request_pub = self.create_publisher(String, self.action_request_topic, 10)
+        # X-Touch 녹화 재생 · 구간 덮어쓰기 입력 · 프레임 알림 · 수정 목록 156 ⑨
+        self._punch_lock = threading.Lock()
+        self._punch_controller = None
+        self._punch_input_sub = self.create_subscription(
+            String, topics.MOTION_RUN_PUNCH_INPUT, self._punch_input_callback, 50,
+        )
+        self._take_frame_pub = self.create_publisher(String, topics.MOTION_RUN_TAKE_FRAMES, 50)
         self._status_timer = self.create_timer(0.5, self._publish_status)
         self._automation_timer = None
 
@@ -1419,6 +1426,28 @@ class MotionRunManager(Node):
         msg = String()
         msg.data = json.dumps(payload, ensure_ascii=False)
         self._response_pub.publish(msg)
+
+    def _punch_input_callback(self, msg: String) -> None:
+        """화면 페이더 → 덮어쓸 조인트 목표 · 놓음 · 녹화 재생 중일 때만 · 수정 목록 156 ⑨-2"""
+        try:
+            payload = json.loads(msg.data)
+        except (AttributeError, json.JSONDecodeError):
+            return
+        if not isinstance(payload, dict):
+            return
+        motion_id = str(payload.get('motion_id') or '')
+        with self._punch_lock:
+            controller = self._punch_controller
+            if controller is None or not motion_id:
+                return
+            if payload.get('release'):
+                controller.release(motion_id)
+                return
+            try:
+                target = float(payload.get('target_rad'))
+            except (TypeError, ValueError):
+                return
+            controller.input(motion_id, target, time.monotonic())
 
     def _publish_status(self) -> None:
         with self._run_lock:

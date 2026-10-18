@@ -383,8 +383,8 @@ def test_a_silent_socket_is_treated_as_disconnected_and_the_take_is_saved(monkey
 
     original_start = bridge.xtouch_recording.start
 
-    def start_then_skip_countdown(owner, axes, name=''):
-        result = original_start(owner, axes, name)
+    def start_then_skip_countdown(owner, axes, name='', base=''):
+        result = original_start(owner, axes, name, base)
         clock.now = 5.0          # t0 = 3.0 · 마지막으로 받은 시각(10.0)까지 저장
         return result
 

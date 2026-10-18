@@ -26,6 +26,7 @@ from motion_common.values import finite_float
 from std_msgs.msg import Int8MultiArray, String
 
 from . import motion_run_rules
+from .xtouch_take import TakePlayback
 from .motion_run_constants import (
     CW_ENABLE_OPERATION_MINAS,
     CW_NEW_SET_POINT_MINAS,
@@ -513,6 +514,8 @@ class MotionPlayer:
         playlist: Optional[List[tuple]] = None,
     ) -> None:
         trace = None
+        # X-Touch 녹화 재생 · 프레임 알림 · 구간 덮어쓰기 · 수정 목록 156 ⑨
+        take = TakePlayback(self.manager, plan) if plan.get('xtouch_take') else None
         try:
             run_mode = str(plan.get('run_mode') or 'once')
             continuous = run_mode == 'continuous'
@@ -594,8 +597,11 @@ class MotionPlayer:
                     positions = self._owned_positions(
                         plan, sample['positions'], float(sample['time_sec']),
                     )
+                    motion_values = sample.get('motion_values')
+                    if take is not None:
+                        positions, motion_values = take.apply(index, positions, motion_values)
                     positions, motion_values = self._apply_live_overrides(
-                        plan['axes'], positions, sample.get('motion_values'),
+                        plan['axes'], positions, motion_values,
                     )
                     self._publish_motion_setpoints(
                         motors,
@@ -792,6 +798,9 @@ class MotionPlayer:
             self.manager._set_status(status)
             if bool(plan.get('automation_run')):
                 self.manager._automation_failure(str(exc))
+        finally:
+            if take is not None:
+                take.close()
 
     @staticmethod
     def _hand_to_auto_recovery(plan: Dict[str, Any], exc: BaseException) -> bool:

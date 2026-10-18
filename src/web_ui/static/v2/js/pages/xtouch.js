@@ -6,6 +6,10 @@
  *
  * 녹화 · 화면 버튼 또는 X-Touch REC · 3초 뒤 시작 · 선택(SELECT)한 축만 · 로봇 쪽이 램프 뒤 명령값을 기록 ·
  * 정지하면 애니메이션 목록에 저장(같은 이름이면 _2 · _3) · 화면이 끊기면 끊긴 순간까지 자동 저장.
+ *
+ * 바탕 위 녹화(⑨) · 「바탕」 에 애니메이션을 고르면 그것을 재생하면서 녹화 · 초기 위치 이동이 카운트다운 ·
+ * 바탕 조인트 페이더는 재생을 따라 움직이고 잡으면 그 구간만 덮어씀(⑨-2 · 놓으면 원본으로 이음) ·
+ * 바탕에 없는 축은 얹어 녹화(추가 녹화) · 결과는 새 파일(바탕은 안 바뀜).
  */
 import { h, dot } from '../dom.js';
 import { api } from '../net.js';
@@ -13,7 +17,7 @@ import { toast } from '../dialog.js';
 import * as act from '../actions.js';
 import { ManualStream } from '../manual_stream.js';
 import { jointToMotor, motorForRow, motorRefFor, motorToJoint, previewRow, rowToDraft } from '../mapping_model.js';
-import { signedDeg } from '../play_model.js';
+import { fileInfo, signedDeg } from '../play_model.js';
 import { manualBlocker } from './manual.js';
 import { MIDI_FLAG_URL, XTouchDevice, midiUnavailableReason } from '../xtouch_device.js';
 import {
@@ -29,7 +33,7 @@ const WATCHDOG_SEC = 2;
 const ROUTE = '#/xtouch';
 
 const ui = {
-  rows: null, fileId: '', revision: '', message: '', name: '',
+  rows: null, fileId: '', revision: '', message: '', name: '', base: '', files: [], lastResultAt: 0,
   record: { state: 'idle' }, recordAt: 0, lastSaved: null,
   dev: { status: 'off', name: '', message: '' },
 };
@@ -79,10 +83,12 @@ function config(state) {
   return channelConfig(ui.rows || [], (row) => motorForRow(row, list)?.axis ?? null);
 }
 
-/** 수동 조작을 막는 PC 전체 이유 · 빈 글자면 됨 */
+/** 수동 조작을 막는 PC 전체 이유 · 빈 글자면 됨 · 이 화면이 시작한 바탕 재생 중이면 「재생 중」 은 막지 않는다(⑨) */
 function blockedText(state) {
   const blocker = manualBlocker(state, null);
-  return blocker && blocker.text !== '모터를 선택하세요' ? blocker.text : '';
+  if (!blocker || blocker.text === '모터를 선택하세요') return '';
+  if (blocker.fix === 'stop' && ui.record.base && recording()) return '';
+  return blocker.text;
 }
 
 function sessionCtx() {
@@ -114,6 +120,8 @@ function run(actions) {
     else if (action.type === 'led') device.send(ledMessage(action.group, action.channel, action.state));
     else if (action.type === 'target') sendTarget(action);
     else if (action.type === 'release') stream.release(action.axes);
+    else if (action.type === 'punch') stream.send({ type: 'punch', motion_id: action.motionId, joint_rad: action.joint * RAD });
+    else if (action.type === 'punch-release') stream.send({ type: 'punch_release', motion_id: action.motionId });
     else if (action.type === 'record-toggle') toggleRecord();
     else if (action.type === 'record-add') stream.send({ type: 'record_add', axes: action.axes });
     else if (action.type === 'message') { ui.message = action.text; ctx.changed(); }
@@ -207,21 +215,37 @@ function tick() {
 
 function setRecord(record) {
   const next = record && typeof record === 'object' ? record : { state: 'idle' };
-  const changed = next.state !== ui.record.state || JSON.stringify(next.axes || []) !== JSON.stringify(ui.record.axes || []);
+  const changed = next.state !== ui.record.state || JSON.stringify(next.axes || []) !== JSON.stringify(ui.record.axes || [])
+    || next.base !== ui.record.base;
   ui.record = next;
   ui.recordAt = performance.now();
+  // 바탕 위 녹화 · 바탕 조인트는 덮어쓰기 채널 · 끝나면 보통으로
+  run(session.setTake(next.base && (next.state === 'countdown' || next.state === 'recording') ? next.punch_ids : []));
+  // 화면이 기다리는 사이(재생 끝 · 다른 곳에서 정지) 끝난 녹화 결과 · 처음 받은 것은 옛 결과라 알리지 않는다
+  const last = next.last_result;
+  if (last?.at && last.at !== ui.lastResultAt) {
+    const first = !ui.lastResultAt;
+    ui.lastResultAt = last.at;
+    if (!first) showResult(last);
+  }
   if (changed) { paintSurface(); ctx.changed(); }
 }
 
-function onRecordReply(message) {
-  if (message.success === false && message.message) { ui.message = message.message; toast(message.message, 'warn'); }
-  if (message.state === 'saved') {
-    ui.lastSaved = { file: message.file, duration: message.duration_sec, ids: message.motion_ids || [] };
-    toast(message.message || '저장했습니다', 'ok');
-    setRecord({ state: 'idle' });
-  } else if (message.state) {
-    setRecord(message);
+function showResult(result) {
+  if (result.success && result.file) {
+    ui.lastSaved = { file: result.file, duration: result.duration_sec, ids: result.motion_ids || [] };
+    toast(result.message || '저장했습니다', 'ok');
+  } else if (result.message) {
+    ui.message = result.message;
+    toast(result.message, 'warn');
   }
+  ctx.changed();
+}
+
+function onRecordReply(message) {
+  if (message.state === 'saved' || message.success === false) showResult(message);
+  if (message.state === 'saved') setRecord({ state: 'idle' });
+  else if (message.state) setRecord(message);
   ctx.changed();
 }
 
@@ -238,8 +262,9 @@ function startRecord() {
   const blocked = blockedText(ctx.state);
   if (blocked) { ui.message = blocked; ctx.changed(); return; }
   const axes = session.selectedAxes();
-  if (!axes.length) { ui.message = '녹화할 축이 없습니다 · X-Touch 에서 SELECT 로 축을 고르세요'; ctx.changed(); return; }
-  if (!stream.send({ type: 'record_start', axes, name: ui.name })) { ui.message = '로봇과 연결되지 않았습니다 · 잠시 뒤 다시'; ctx.changed(); return; }
+  // 바탕이 있으면 축을 안 골라도 된다(재생하면서 바탕 조인트를 잡으면 덮어씀)
+  if (!axes.length && !ui.base) { ui.message = '녹화할 축이 없습니다 · X-Touch 에서 SELECT 로 축을 고르세요'; ctx.changed(); return; }
+  if (!stream.send({ type: 'record_start', axes, name: ui.name, base: ui.base })) { ui.message = '로봇과 연결되지 않았습니다 · 잠시 뒤 다시'; ctx.changed(); return; }
   ui.message = '';
 }
 
@@ -255,10 +280,18 @@ function cancelRecord() {
 /** 카운트다운 남은 초 · 녹화 경과 · 서버 값 + 받은 뒤 지난 시간 */
 function recordText() {
   const since = (performance.now() - ui.recordAt) / 1000;
-  if (ui.record.state === 'countdown') return `${Math.max(0, Math.ceil(Number(ui.record.starts_in_sec || 0) - since))}초 뒤 시작`;
+  const clock = (sec) => `${Math.floor(sec / 60)}:${String(Math.floor(sec % 60)).padStart(2, '0')}`;
+  if (ui.record.state === 'countdown') {
+    if (ui.record.base) return `${ui.record.base} · 초기 위치로 이동 중 · 끝나면 재생과 함께 녹화`;
+    return `${Math.max(0, Math.ceil(Number(ui.record.starts_in_sec || 0) - since))}초 뒤 시작`;
+  }
   if (ui.record.state === 'recording') {
     const total = Number(ui.record.elapsed_sec || 0) + since;
-    return `녹화 중 ${Math.floor(total / 60)}:${String(Math.floor(total % 60)).padStart(2, '0')}`;
+    if (ui.record.base) {
+      const duration = Number(ui.record.duration_sec || 0);
+      return `녹화 중 ${clock(Math.min(total, duration || total))} / ${clock(duration)} · 바탕 ${ui.record.base}`;
+    }
+    return `녹화 중 ${clock(total)}`;
   }
   return '대기';
 }
@@ -285,6 +318,11 @@ export async function loadXTouch(state, changed) {
       ui.rows = [];
     }
   } catch { /* 옛 매핑 그대로 · 다음 주기에 다시 */ }
+  try {
+    const files = await api('GET', '/api/motion-files');
+    ui.files = (Array.isArray(files?.files) ? files.files : []).map(fileInfo).filter((f) => f.id);
+    if (ui.base && !ui.files.some((f) => f.id === ui.base)) ui.base = '';
+  } catch { /* 목록은 다음 주기에 */ }
   changed();
 }
 
@@ -333,7 +371,11 @@ function channelCard(state) {
         const motor = list.find((m) => m.axis === item.axis);
         const joint = motor && motor.position !== null ? motorToJoint(item.row, motor.position) : null;
         const ch = session.channels[channel];
-        const phase = ch.selected ? (ch.touched && ch.phase === 'pickup' ? '맞추는 중 · 축 값으로 페이더를 옮기세요' : PHASE_LABEL[ch.phase]) : PHASE_LABEL.idle;
+        const punch = session.isPunch(channel);
+        const suffix = punch ? (ch.phase === 'live' ? ' · 덮어쓰는 중' : ' · 잡으면 덮어씀') : '';
+        const phase = ch.selected
+          ? (ch.touched && ch.phase === 'pickup' ? '맞추는 중 · 축 값으로 페이더를 옮기세요' : `${PHASE_LABEL[ch.phase]}${suffix}`)
+          : punch ? '재생 따라감' : PHASE_LABEL.idle;
         return h('tr', { class: ch.selected ? 'selected' : '' },
           h('td', { class: 'mono', text: String(item.fader) }),
           h('td', {}, h('strong', { text: item.motionId })),
@@ -354,16 +396,22 @@ function recordCard(state, changed) {
   return h('section', { class: 'card', 'aria-label': '녹화' },
     h('div', { class: 'card-head' }, h('h2', { text: '녹화' })),
     h('div', { class: 'row' },
+      h('label', { class: 'inline' }, '바탕', h('select', { class: 'select select-sm', disabled: live, 'aria-label': '바탕 애니메이션',
+        title: '고르면 그 애니메이션을 재생하면서 녹화합니다 · 바탕 조인트는 잡은 구간만 덮어쓰고, 바탕에 없는 축은 얹어 녹화합니다 · 결과는 새 파일',
+        onchange: (e) => { ui.base = e.target.value; changed(); } },
+        h('option', { value: '', selected: !ui.base }, '없음 · 새로 녹화'),
+        ui.files.map((file) => h('option', { value: file.id, selected: ui.base === file.id }, file.name)))),
       h('label', { class: 'inline' }, '이름', h('input', { class: 'input mono', type: 'text', value: ui.name, placeholder: 'xtouch_날짜_시각', disabled: live,
         'aria-label': '녹화 이름', oninput: (e) => { ui.name = e.target.value; } })),
       live
         ? [h('button', { class: 'btn btn-primary', type: 'button', onclick: stopRecord }, '정지 · 저장'),
           h('button', { class: 'btn', type: 'button', onclick: cancelRecord }, '취소')]
-        : h('button', { class: 'btn btn-danger', type: 'button', disabled: !ready || !axes.length, title: !ready ? '수동 모드 · X-Touch 연결 뒤' : !axes.length ? 'SELECT 로 축을 고르세요' : '',
+        : h('button', { class: 'btn btn-danger', type: 'button', disabled: !ready || (!axes.length && !ui.base), title: !ready ? '수동 모드 · X-Touch 연결 뒤' : !axes.length && !ui.base ? 'SELECT 로 축을 고르세요' : '',
           onclick: () => { startRecord(); changed(); } }, '● 녹화 시작')),
     h('p', { class: 'mono', text: `${recordText()} · 축 ${names.length ? names.join(', ') : '없음'}` }),
     ui.lastSaved ? h('p', { class: 'small' }, `마지막 저장 · ${ui.lastSaved.file} · ${Number(ui.lastSaved.duration || 0).toFixed(2)} s · `,
       h('a', { href: '#/animations', text: '애니메이션 목록' })) : null,
+    h('p', { class: 'muted small', text: '바탕을 고르면 그 애니메이션을 재생하면서 녹화합니다(초기 위치 이동 뒤 시작). 바탕 조인트 페이더는 재생을 따라 움직이고, SELECT 한 채 잡으면 그 구간만 덮어씁니다. 놓으면 최대 속도·가속도 안에서 원본으로 이어집니다(최소 0.5초). 바탕에 없는 축은 얹어 녹화합니다. 끝까지 재생되면 바탕 길이, 중간에 정지하면 거기까지 저장합니다. 바탕 파일은 바뀌지 않습니다.' }),
     h('p', { class: 'muted small', text: 'X-Touch 의 REC 버튼으로도 시작·정지합니다. 시작하면 3초 뒤부터 기록합니다. 고른 축만, 모터가 실제로 받은 명령값을 20 ms 마다 기록해 애니메이션 목록에 저장합니다(같은 이름이면 _2, _3). 녹화 중 연결이 끊기면 축은 그 자리에 서고, 끊긴 순간까지 자동 저장합니다. 녹화할 축은 조인트 매핑의 최대 속도·가속도가 있어야 합니다.' }));
 }
 

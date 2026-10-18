@@ -523,6 +523,8 @@ class MotionWebBridge(Node):
             self, publisher=self._manual_stream_request_publisher
         )
         # X-Touch 녹화 · supervisor 램프 값을 받아 둔다 · 수정 목록 156
+        # 바탕 위 녹화(⑨) · 덮어쓰기 입력 → 재생 노드 · 재생 노드 프레임 알림 → 녹화
+        self._punch_input_publisher = self.create_publisher(String, topics.MOTION_RUN_PUNCH_INPUT, 50)
         self.xtouch_recording = RecordingService(
             self,
             mapping=lambda: (
@@ -533,6 +535,20 @@ class MotionWebBridge(Node):
                 category='system', event_type=event_type, target='X-Touch 녹화',
                 content=content, details=details,
             ),
+            read_motion=lambda file_id: self.project_repository.read_file(
+                self.project_repository.require_selected_project_id(), 'motions', file_id,
+            )['content'],
+            start_playback=self.motion_run_start,
+            stop_playback=self.motion_run_stop,
+            publish_punch=lambda payload: self._punch_input_publisher.publish(
+                String(data=json.dumps(payload, ensure_ascii=False))
+            ),
+        )
+        self._take_frames_subscription = self.create_subscription(
+            String,
+            topics.MOTION_RUN_TAKE_FRAMES,
+            lambda msg: self.xtouch_recording.take_frames_callback(msg),
+            100,
         )
         self._manual_stream_samples_subscription = self.create_subscription(
             String,

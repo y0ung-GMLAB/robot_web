@@ -308,3 +308,19 @@ def test_xtouch_ramp_ticks_are_published_for_recording_with_a_running_seq():
     assert all([sample[0] for sample in item['samples']] == [0] for item in sent)   # 웹 페이더 축은 안 실음
     commanded = [row[0] for row in _sent(supervisor)]
     assert [D(item['samples'][0][1]) for item in sent] == pytest.approx(commanded)  # 모터로 보낸 값 그대로
+
+
+def test_step_never_passes_a_fixed_goal_from_rest():
+    """선 채로 고정 목표 · 지나치지 않는다 · 페이더 끝·범위 끝까지 가도 범위 밖 값이 없다 · 수정 목록 156"""
+    import random
+    rng = random.Random(11)
+    for _ in range(500):
+        vmax, amax = rng.uniform(0.01, 3.0), rng.uniform(0.01, 10.0)
+        position, goal, velocity = rng.uniform(-1, 1), rng.uniform(-1, 1), 0.0
+        sign = 1 if goal >= position else -1
+        for _ in range(100000):
+            position, velocity, done = manual_ramp.step(position, velocity, goal, vmax, amax, DT)
+            assert (goal - position) * sign >= -1e-12
+            if done:
+                break
+        assert done

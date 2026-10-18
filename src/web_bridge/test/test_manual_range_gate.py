@@ -168,7 +168,9 @@ def test_every_manual_motion_command_passes_the_gate():
 def test_the_fader_stream_passes_the_gate():
     source = (BRIDGE_DIR / 'manual_stream_socket.py').read_text(encoding='utf-8')
 
-    assert source.count('asyncio.to_thread(_stream_block_reason, bridge)') == 2
+    # 연결 때 한 번 · 흐르는 중 0.5초마다 · 뒤쪽은 X-Touch 바탕 위 녹화면 재생 중도 받는다(수정 목록 156 ⑨)
+    assert source.count('asyncio.to_thread(_stream_block_reason, bridge)') == 1
+    assert source.count('asyncio.to_thread(_stream_block_reason, bridge, taking)') == 1
     assert "getattr(bridge, 'manual_range_axis_blocker', None)" in source
 
 

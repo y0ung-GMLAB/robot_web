@@ -67,6 +67,32 @@ def _axis_playback_spans(
     }
 
 
+def _punch_joints(payload: Dict[str, Any], axes: List[Dict[str, Any]]) -> Dict[str, Dict[str, float]]:
+    """X-Touch 녹화 재생에서 사람이 덮어쓸 수 있는 조인트 · 조인트 rad · 수정 목록 156 ⑨-2
+
+    요청 `xtouch_punch_ids` 중 이 재생에 있는 조인트 · 최대 속도·가속도가 둘 다 있어야(빈 줄은 빠짐 ·
+    녹화 시작에서 이미 막는다) · 범위는 재생과 같은 자르기 범위.
+    """
+    if not payload.get('xtouch_take'):
+        return {}
+    wanted = {str(item) for item in payload.get('xtouch_punch_ids') or [] if str(item)}
+    joints: Dict[str, Dict[str, float]] = {}
+    for axis in axes:
+        motion_id = str(axis['motion_id'])
+        row = axis.get('row') or {}
+        if motion_id not in wanted or not joint_mapping.rate_limits_set(row):
+            continue
+        lower = finite_float(axis.get('motion_limit_lower_rad'))
+        upper = finite_float(axis.get('motion_limit_upper_rad'))
+        joints[motion_id] = {
+            'max_velocity': float(joint_mapping.rate(row, 'max_velocity', units.RAD)),
+            'max_acceleration': float(joint_mapping.rate(row, 'max_acceleration', units.RAD)),
+            'lower': float(lower) if lower is not None else -math.inf,
+            'upper': float(upper) if upper is not None else math.inf,
+        }
+    return joints
+
+
 class PlanBuilder:
     def __init__(self, manager: Any) -> None:
         self.manager = manager
@@ -679,6 +705,10 @@ class PlanBuilder:
             # 그 시간을 쓸 수 있다. 샘플 계산은 그대로 두고 **발행 직전에만**
             # 거르므로, 로컬·그룹 실행 경로는 이 값이 없어 아무 영향이 없다.
             'axis_playback_spans': _axis_playback_spans(payload, axes),
+            # X-Touch 녹화 재생 · 프레임 시각을 알리고 덮어쓸 조인트를 사람 손에 · 수정 목록 156 ⑨
+            'xtouch_take': bool(payload.get('xtouch_take')),
+            'xtouch_take_id': str(payload.get('xtouch_take_id') or ''),
+            'punch_joints': _punch_joints(payload, axes),
             # 구간 재생 · 파일 시각 · 0/0 = 통째로 · 끝은 실제 끝(끝까지면 파일 길이) · 2026-10-16
             **_segment_plan_fields(segment_info),
             'samples': samples,

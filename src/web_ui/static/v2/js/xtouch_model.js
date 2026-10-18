@@ -12,6 +12,10 @@
  * 잡기(pickup · 전신 방식) · SELECT → 페이더를 그 축 지금 값으로 보냄 → 손을 대고 페이더가 축 값 0.5° 안에 들거나
  * 지나가면 그때부터 조종 · 그 전에는 「맞추는 중」 · 놓으면 release(마지막 목표까지 간 뒤 섬) · 다음에 손 대면 다시 잡기 ·
  * SELECT 를 끄면 놓음 · 손 안 댄 동안 선택된 페이더는 축을 따라 움직인다(재생 따라감).
+ *
+ * 바탕 위 녹화(⑨ · `setTake`) · 바탕에 있는 조인트 채널은 선택 안 해도 재생을 따라 움직인다 ·
+ * 선택하고 잡으면 「구간 덮어쓰기」(⑨-2) · 목표는 `punch`(조인트 값 · 재생 노드가 램프·잇기) · 놓으면 `punch-release` ·
+ * 바탕에 없는 조인트는 「추가 녹화」 · 보통 조종과 같다(`target`).
  */
 
 export const FADER_MAX = 16383;
@@ -118,12 +122,35 @@ export const PHASE_LABEL = { idle: '선택 안 됨', pickup: '맞추는 중', re
  * 채널 8개의 상태 · 일(event)을 받아 할 일(action) 목록을 돌려준다 · 보내기는 화면이
  *   action · {type:'feedback', channel, value} {type:'led', group, channel, state} {type:'target', channel, axis, joint, motionId}
  *            {type:'release', axes} {type:'record-toggle'} {type:'record-add', axes} {type:'message', text}
+ *            {type:'punch', channel, axis, joint, motionId} {type:'punch-release', motionId}  (바탕 위 녹화의 바탕 조인트)
  * ctx · {jointOf(axis) → 지금 조인트 deg | null, blocked: 막는 이유 글('' = 됨), recording: bool}
  */
 export class XTouchSession {
   constructor() {
     this.config = new Array(CHANNELS).fill(null);
     this.channels = Array.from({ length: CHANNELS }, () => blankChannel());
+    this.punchIds = new Set();
+  }
+
+  /** 바탕 위 녹화 · 덮어쓸 수 있는 조인트 이름들 · 빈 목록 = 보통 */
+  setTake(punchIds) {
+    const next = new Set(punchIds || []);
+    const same = next.size === this.punchIds.size && [...next].every((id) => this.punchIds.has(id));
+    if (same) return [];
+    // 덮어쓰기 ↔ 보통 이 바뀐 채널은 놓는다(목표 길이 다름)
+    const actions = [];
+    this.config.forEach((item, channel) => {
+      if (item && this.channels[channel].selected && next.has(item.motionId) !== this.punchIds.has(item.motionId)) {
+        actions.push(...this.deselect(channel));
+      }
+    });
+    this.punchIds = next;
+    return actions;
+  }
+
+  isPunch(channel) {
+    const item = this.config[channel];
+    return Boolean(item && this.punchIds.has(item.motionId));
   }
 
   /** 매핑이 바뀜 · 연결이 바뀐 채널은 놓는다 */
@@ -181,7 +208,7 @@ export class XTouchSession {
     const state = this.channels[channel];
     const item = this.config[channel];
     const actions = [{ type: 'led', group: 'select', channel, state: 'off' }];
-    if (state.sent && Number.isInteger(item?.axis)) actions.push({ type: 'release', axes: [item.axis] });
+    if (state.sent && Number.isInteger(item?.axis)) actions.push(this.releaseAction(channel));
     Object.assign(state, blankChannel());
     return actions;
   }
@@ -198,7 +225,7 @@ export class XTouchSession {
     const actions = [];
     const item = this.config[channel];
     if (state.phase === 'live' && state.dirty) actions.push(this.target(channel));
-    if (state.phase === 'live' && Number.isInteger(item?.axis)) actions.push({ type: 'release', axes: [item.axis] });
+    if (state.phase === 'live' && Number.isInteger(item?.axis)) actions.push(this.releaseAction(channel));
     state.phase = 'ready';
     state.lastFollowAt = 0;
     return actions;
@@ -226,13 +253,18 @@ export class XTouchSession {
     return [];
   }
 
-  /** 주기 · 쌓인 목표 보내기(채널마다 마지막 값 하나) · 손 안 댄 선택 페이더는 축 따라 */
+  releaseAction(channel) {
+    const item = this.config[channel];
+    return this.isPunch(channel) ? { type: 'punch-release', motionId: item.motionId } : { type: 'release', axes: [item.axis] };
+  }
+
+  /** 주기 · 쌓인 목표 보내기(채널마다 마지막 값 하나) · 손 안 댄 선택 페이더는 축 따라 · 바탕 조인트는 선택 안 해도 */
   tick(ctx) {
     const actions = [];
     const now = Number(ctx?.now ?? 0);
     this.channels.forEach((state, channel) => {
       const item = this.config[channel];
-      if (!state.selected || !item) return;
+      if (!item || (!state.selected && !this.isPunch(channel))) return;
       if (state.phase === 'live' && state.dirty) actions.push(this.target(channel));
       if (state.touched || now - state.lastFollowAt < FOLLOW_EVERY_MS) return;
       const joint = ctx?.jointOf?.(item.axis);
@@ -248,7 +280,7 @@ export class XTouchSession {
     const item = this.config[channel];
     state.dirty = false;
     state.sent = true;
-    return { type: 'target', channel, axis: item.axis, joint: state.goal, motionId: item.motionId };
+    return { type: this.isPunch(channel) ? 'punch' : 'target', channel, axis: item.axis, joint: state.goal, motionId: item.motionId };
   }
 
   /** 모터 페이더를 보냄 · 보낸 값을 지금 페이더 자리로 친다(장치는 모터로 움직인 값을 돌려주지 않는다) */

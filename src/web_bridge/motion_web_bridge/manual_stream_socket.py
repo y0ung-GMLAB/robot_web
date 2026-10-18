@@ -28,6 +28,8 @@ X-Touch 화면(수정 목록 156) · 인사에 `watchdog_sec` 를 주면 그 시
     ← {type:'record_add', axes:[..]}             → {type:'record', …}   # 녹화 중 SELECT 로 더한 축
     ← {type:'record_stop'}                       → {type:'record', success, state:'saved', file, …}
     ← {type:'record_cancel'}                     → {type:'record', state:'idle'}
+    record_start 에 `base`(애니메이션 파일)를 주면 그 위에 녹화(재생 노드가 재생) · 그동안 재생 중이어도 받는다 ·
+    ← {type:'punch', motion_id, joint_rad} · {type:'punch_release', motion_id}   # 바탕 조인트 덮어쓰기(⑨-2)
 """
 
 from __future__ import annotations
@@ -56,9 +58,10 @@ STALE_MAPPING_MESSAGE = (
 )
 
 
-def _stream_block_reason(bridge: Any) -> str:
-    """페이더 연결·0.5초마다 · 운전 모드 + 조인트 범위 확인(수정 목록 97)"""
-    reason = manual_motion_block_reason(bridge)
+def _stream_block_reason(bridge: Any, allow_running: bool = False) -> str:
+    """페이더 연결·0.5초마다 · 운전 모드 + 조인트 범위 확인(수정 목록 97) ·
+    `allow_running` · 이 화면이 시작한 X-Touch 바탕 위 녹화 재생 중(수정 목록 156 ⑨)"""
+    reason = manual_motion_block_reason(bridge, allow_running=allow_running)
     if reason:
         return reason
     range_blocker = getattr(bridge, 'manual_range_blocker', None)
@@ -117,7 +120,8 @@ async def run_manual_stream_socket(bridge: Any, websocket: Any) -> None:
             now = time.monotonic()
             if now - last_block_check > BLOCK_RECHECK_SEC:
                 last_block_check = now
-                block = await asyncio.to_thread(_stream_block_reason, bridge)
+                taking = recording is not None and recording.base_active_for(owner)
+                block = await asyncio.to_thread(_stream_block_reason, bridge, taking)
                 if block:
                     await refuse(block)
                     return
@@ -125,6 +129,14 @@ async def run_manual_stream_socket(bridge: Any, websocket: Any) -> None:
             kind = message.get('type')
             if kind == 'ping':
                 await send({'type': 'pong', 'record': recording.status() if recording else {'state': 'idle'}})
+                continue
+            if kind in ('punch', 'punch_release'):
+                # 구간 덮어쓰기 · 재생 노드로 · 20 ms 마다 오므로 실패만 알린다 · 수정 목록 156 ⑨-2
+                result = recording.punch(
+                    owner, message.get('motion_id'), message.get('joint_rad'), release=kind == 'punch_release',
+                ) if recording is not None else {'success': False, 'message': '녹화를 지원하지 않습니다'}
+                if not result.get('success'):
+                    await send({'type': 'result', **result})
                 continue
             if kind in RECORD_MESSAGES:
                 await send({'type': 'record', **await asyncio.to_thread(
@@ -186,7 +198,7 @@ def _record_request(recording: Any, owner: Any, kind: str, message: dict) -> dic
     if recording is None:
         return {'success': False, 'message': '이 서버는 녹화를 지원하지 않습니다'}
     if kind == 'record_start':
-        return recording.start(owner, message.get('axes'), message.get('name'))
+        return recording.start(owner, message.get('axes'), message.get('name'), message.get('base'))
     if kind == 'record_add':
         return recording.add_axes(owner, message.get('axes'))
     if kind == 'record_stop':
