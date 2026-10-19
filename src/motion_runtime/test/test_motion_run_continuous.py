@@ -1183,6 +1183,34 @@ def test_normal_motion_run_still_rejects_mapping_file_mismatch():
         raise AssertionError('normal motion run must preserve strict mapping-file binding')
 
 
+def test_xtouch_base_take_may_play_an_unregistered_animation():
+    """X-Touch 바탕 위 녹화 · 사람이 수동 모드에서 고른 바탕 · 등록 안 된 파일도 · floating4 2026-10-19"""
+    manager = MotionRunManager.__new__(MotionRunManager)
+    manager._player = MotionPlayer(manager)
+    manager._plan_builder = PlanBuilder(manager)
+    manager.period_sec = 0.02
+    manager._motion_file_path = lambda _file_id: None
+    manager._mapping_file_path = lambda _file_id: None
+    manager._load_motion_records = lambda _path: [
+        {'time_sec': 0.02, 'motion_id': '1-1', 'value': 0.0},
+    ]
+    manager._load_mapping = lambda _path: {
+        'motion_file_id': 'original.json',
+        'mappings': [{'motion_id': '1-1', 'motor_axis': 0}],
+    }
+    manager._current_motors = lambda: []
+
+    try:
+        manager._plan_builder.build({
+            'motion_file_id': 'different.json',
+            'mapping_file_id': 'mapping.yaml',
+            'xtouch_take': True,
+            'xtouch_take_id': 't1',
+        })
+    except ValueError as exc:
+        assert 'expects motion file' not in str(exc), exc
+
+
 def test_run_manager_resolves_assets_only_inside_requested_project(tmp_path):
     root = (tmp_path / 'motion_projects').resolve()
     for project_id, marker in (('first', 'one'), ('second', 'two')):

@@ -34,7 +34,7 @@ from motion_common import joint_mapping, smoothing
 from .xtouch_base_take import BaseTake, load_base, mapped_rows, punchable
 from .xtouch_recording_core import (  # noqa: F401 · 시험·다른 모듈이 이 이름으로도 쓴다
     COUNTDOWN_SEC, DEFAULT_PREFIX, PERIOD_SEC, SAME_NAME_TEXT, Take, TakeAxis,
-    animation_text, clean_name, rate_problem, save_unique,
+    animation_text, clean_name, rate_problem, save_over, save_unique,
 )
 
 
@@ -85,6 +85,8 @@ class RecordingService:
         self._base: Optional[BaseTake] = None
         self._owner: Any = None
         self._name = ''
+        #: 같은 이름이면 덮어쓰기(화면에서 고름 · 전 파일은 휴지통에 사본) · 사용자 2026-10-19
+        self._overwrite = False
         self._finishing = False
         self.last_event_error = ''
         #: 마지막 결과 · 화면이 끊겨 있던 사이 끝난 녹화도 다음 ping 에 알린다
@@ -182,7 +184,7 @@ class RecordingService:
     def _busy(self) -> bool:
         return self._take is not None or self._base is not None or self._finishing
 
-    def start(self, owner: Any, axes: Any, name: Any = '', base: Any = '') -> Dict[str, Any]:
+    def start(self, owner: Any, axes: Any, name: Any = '', base: Any = '', overwrite: Any = False) -> Dict[str, Any]:
         with self._lock:
             if self._busy():
                 return {'success': False, 'message': BUSY_MESSAGE}
@@ -190,7 +192,7 @@ class RecordingService:
         if block:
             return {'success': False, 'message': block}
         if str(base or '').strip():
-            return self._start_base(owner, axes, name, str(base).strip())
+            return self._start_base(owner, axes, name, str(base).strip(), bool(overwrite))
         resolved, error = self._resolve_axes(axes)
         if error:
             return {'success': False, 'message': error}
@@ -206,6 +208,7 @@ class RecordingService:
             self._take = take
             self._owner = owner
             self._name = clean_name(name)
+            self._overwrite = bool(overwrite)
         return {'success': True, 'message': f'{COUNTDOWN_SEC:g}초 뒤 녹화 시작', **self.status()}
 
     def _split_axes(self, base: BaseTake | Any, axes: Any) -> Tuple[List[int], List[str], str]:
@@ -232,7 +235,7 @@ class RecordingService:
             overdub.append(axis)
         return overdub, punch_ids, ''
 
-    def _start_base(self, owner: Any, axes: Any, name: Any, base_file: str) -> Dict[str, Any]:
+    def _start_base(self, owner: Any, axes: Any, name: Any, base_file: str, overwrite: bool = False) -> Dict[str, Any]:
         if self._read_motion is None or self._start_playback is None:
             return {'success': False, 'message': '이 서버는 바탕 위 녹화를 지원하지 않습니다'}
         try:
@@ -258,7 +261,10 @@ class RecordingService:
                 return {'success': False, 'message': BUSY_MESSAGE}
             self._base = take
             self._owner = owner
-            self._name = clean_name(name or f'{base_file.rsplit(".", 1)[0]}_xtouch')
+            # 덮어쓰기에 이름이 비면 바탕 파일 그 자체에 · 아니면 `바탕_xtouch` 새 파일
+            stem = base_file.rsplit('.', 1)[0]
+            self._name = clean_name(name or (stem if overwrite else f'{stem}_xtouch'))
+            self._overwrite = overwrite
         try:
             result = self._start_playback({
                 'motion_file_id': base_file, 'run_mode': 'once', 'repeat_mode': 'reinitialize',
@@ -354,6 +360,9 @@ class RecordingService:
             base = self._base
             take = self._take
             name = self._name
+            # 끊김 등으로 저절로 저장할 때(reason 있음)는 덮어쓰지 않는다 · 사람이 누른 정지만
+            wanted = self._overwrite
+            overwrite = wanted and not reason
             if base is None:
                 self._take = None
                 self._owner = None
@@ -362,7 +371,8 @@ class RecordingService:
         end = self._clock() if end_wall is None else float(end_wall)
         if end < take.t0 + PERIOD_SEC:
             return {'success': False, 'state': 'idle', 'message': '카운트다운 중에 멈췄습니다 · 저장할 녹화가 없습니다'}
-        return self._remember(self._save(take.joint_series(end), name, reason))
+        kept = '연결이 끊겨 자동 저장' if wanted and not overwrite else ''
+        return self._remember(self._save(take.joint_series(end), name, reason, overwrite=overwrite, kept=kept))
 
     def _stop_base(self, base: BaseTake, reason: str) -> Dict[str, Any]:
         """재생을 멈추고 끝 알림을 기다린 뒤 저장 · 재생 노드 알림이 먼저 저장했으면 그 결과"""
@@ -394,9 +404,12 @@ class RecordingService:
                 return None
             self._finishing = True
             name = self._name
+            wanted = self._overwrite
         try:
             base = expected
-            if base.frame_count() == 0:
+            if base.frame_count() == 0 and base.error:
+                result = {'success': False, 'state': 'idle', 'message': f'바탕 재생을 시작하지 못했습니다 · {base.error}'}
+            elif base.frame_count() == 0:
                 result = {'success': False, 'state': 'idle', 'message': '초기 위치 이동 중에 멈췄습니다 · 저장할 녹화가 없습니다'}
             elif base.overrun:
                 problem = f'원본으로 잇기가 10초 안에 상한을 못 맞췄습니다 · {", ".join(sorted(base.overrun))}'
@@ -404,11 +417,21 @@ class RecordingService:
                 result = {'success': False, 'state': 'idle', 'message': f'저장 안 함 · {problem}'}
             else:
                 joints, _count = base.compose()
-                result = self._save(joints, name, reason, start=base.base.start, base_file=base.base.file_id)
+                # 덮어쓰기는 바탕 끝까지 간 것만 · 중간에 멈춘 것으로 덮으면 바탕이 잘린다 · 끊김 자동 저장도 안 함
+                full = base.frame_count() >= base.base.count
+                overwrite = wanted and full and reason in ('재생 끝', '정지')
+                kept = '' if overwrite or not wanted else (
+                    '바탕 끝까지 가지 않음' if not full else '연결이 끊겨 자동 저장'
+                )
+                result = self._save(
+                    joints, name, reason, start=base.base.start, base_file=base.base.file_id,
+                    overwrite=overwrite, kept=kept,
+                )
         finally:
             with self._lock:
                 self._base = None
                 self._owner = None
+                self._overwrite = False
                 self._finishing = False
         return self._remember(result)
 
@@ -453,23 +476,29 @@ class RecordingService:
 
     def _save(
         self, joints: List[Tuple[str, Any, List[float]]], name: str, reason: str,
-        *, start: float = PERIOD_SEC, base_file: str = '',
+        *, start: float = PERIOD_SEC, base_file: str = '', overwrite: bool = False, kept: str = '',
     ) -> Dict[str, Any]:
+        """저장 · 덮어쓰기면 같은 이름 파일을 휴지통에 사본으로 두고 그 자리에 · 아니면 `_2` · `_3`
+        `kept` · 덮어쓰기를 골랐지만 이번엔 새 이름으로 저장한 이유(화면에 알림)"""
         frames = len(joints[0][2]) if joints else 0
         problem = rate_problem(joints)
         if problem:
             self._record_event('xtouch_record_refused', f'녹화 저장 거절 · {problem}', {'name': name})
             return {'success': False, 'state': 'idle', 'message': f'저장 안 함 · {problem}'}
         repository = self.bridge.project_repository
+        backup = ''
         try:
             project_id = repository.require_selected_project_id()
-            file_name = save_unique(
-                lambda candidate: repository.import_text(
-                    project_id, 'motions', candidate,
-                    animation_text(candidate[:-len('.json')], joints, start=start, base=base_file),
-                ),
-                name,
-            )
+            if overwrite:
+                file_name, backup = save_over(repository, project_id, name, joints, start=start, base_file=base_file)
+            else:
+                file_name = save_unique(
+                    lambda candidate: repository.import_text(
+                        project_id, 'motions', candidate,
+                        animation_text(candidate[:-len('.json')], joints, start=start, base=base_file),
+                    ),
+                    name,
+                )
         except Exception as exc:  # noqa: BLE001 · 화면에 그대로
             self._record_event('xtouch_record_failed', f'녹화 저장 실패 · {exc}', {'name': name})
             return {'success': False, 'state': 'idle', 'message': f'저장 실패 · {exc}'}
@@ -478,15 +507,24 @@ class RecordingService:
         content = f'X-Touch 녹화 저장 · {file_name} · {duration:.2f} s · {", ".join(ids)}'
         if base_file:
             content = f'{content} · 바탕 {base_file}'
+        if backup:
+            content = f'{content} · 덮어씀(전 파일은 휴지통)'
+        if kept:
+            content = f'{content} · 덮어쓰지 않음({kept})'
         if reason:
             content = f'{content} · {reason}'
         self._record_event('xtouch_record_saved', content, {
             'file': file_name, 'frames': frames, 'motion_ids': ids, 'reason': reason, 'base_file': base_file,
+            'overwritten': bool(backup), 'backup': backup,
         })
         return {
             'success': True, 'state': 'saved', 'file': file_name, 'frames': frames,
-            'duration_sec': duration, 'motion_ids': ids, 'base_file': base_file,
-            'message': f'저장했습니다 · {file_name} · {duration:.2f} s' + (f' · {reason}' if reason else ''),
+            'duration_sec': duration, 'motion_ids': ids, 'base_file': base_file, 'overwritten': bool(backup),
+            'message': (
+                f'{"덮어썼습니다(전 파일은 휴지통)" if backup else "저장했습니다"} · {file_name} · {duration:.2f} s'
+                + (f' · 덮어쓰지 않고 새 이름으로({kept})' if kept else '')
+                + (f' · {reason}' if reason else '')
+            ),
         }
 
     def _record_event(self, event_type: str, content: str, details: Dict[str, Any]) -> None:

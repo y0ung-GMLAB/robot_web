@@ -23,6 +23,11 @@ JOINT_MAX_VELOCITY_DEG_S = 2.0
 #: 조인트 최대 가속 · °/s²
 JOINT_MAX_ACCELERATION_DEG_S2 = 4.0
 
+#: X-Touch 는 조인트 매핑 최대 속도·가속도의 이만큼으로 따라간다 · 수정 목록 156 · floating4 실물 2026-10-19 ·
+#: 상한에 딱 맞춘 녹화는 파일에 쓸 때 반올림(소수 9자리)만으로 재생 검사 여유(1e-6)를 넘어 「가속도 35 > 상한 35」 로
+#: 재생이 거절됐다 · 2 % 여유
+XTOUCH_LIMIT_RATIO = 0.98
+
 #: 요청 칸 이름 · 모터 rad/s · rad/s²
 VELOCITY_FIELD = 'manual_max_velocity_rad_s'
 ACCELERATION_FIELD = 'manual_max_acceleration_rad_s2'

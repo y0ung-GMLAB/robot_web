@@ -756,13 +756,7 @@ class ProjectRepository:
         source = self._asset_path(project_id, safe_category, file_name)
         manifest = self._read_manifest(project_dir)
         was_active = manifest['active_files'].get(safe_category) == source.name
-        trash_dir = local_directory(project_dir, 'trash', safe_category)
-        stamp = time.strftime('%Y%m%d-%H%M%S')
-        target = trash_dir / f'{stamp}-{source.name}'
-        counter = 1
-        while target.exists():
-            target = trash_dir / f'{stamp}-{counter}-{source.name}'
-            counter += 1
+        target = self._trash_target(project_dir, safe_category, source.name)
         source.rename(target)
         replacement = ''
         if was_active:
@@ -783,6 +777,26 @@ class ProjectRepository:
             'trash_path': str(target),
         })
         return result
+
+    def copy_to_trash(self, project_id: Any, category: Any, file_name: Any) -> Path:
+        """덮어쓰기 전 사본을 프로젝트 휴지통에 · 원본은 그대로 · 휴지통에서 되살릴 수 있다 · 수정 목록 156"""
+        project_dir = self._project_dir(project_id)
+        safe_category = self._category(category)
+        source = self._asset_path(project_id, safe_category, file_name)
+        target = self._trash_target(project_dir, safe_category, source.name)
+        shutil.copy2(source, target)
+        return target
+
+    @staticmethod
+    def _trash_target(project_dir: Path, category: str, name: str) -> Path:
+        trash_dir = local_directory(project_dir, 'trash', category)
+        stamp = time.strftime('%Y%m%d-%H%M%S')
+        target = trash_dir / f'{stamp}-{name}'
+        counter = 1
+        while target.exists():
+            target = trash_dir / f'{stamp}-{counter}-{name}'
+            counter += 1
+        return target
 
     def set_active(
         self, project_id: Any, category: Any, file_name: Any

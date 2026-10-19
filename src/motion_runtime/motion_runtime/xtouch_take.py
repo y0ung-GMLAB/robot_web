@@ -81,6 +81,17 @@ class TakePlayback:
         if publisher is not None:
             publisher.publish(String(data=json.dumps(payload)))
 
+    @staticmethod
+    def announce_failure(manager: Any, payload: Dict[str, Any], message: str) -> None:
+        """재생을 시작도 못 했거나 오류로 끝남 · 녹화(브리지)가 기다리지 않게 끝 알림 + 이유 · 2026-10-19"""
+        take_id = str(payload.get('xtouch_take_id') or '')
+        publisher = getattr(manager, '_take_frame_pub', None)
+        if not payload.get('xtouch_take') or not take_id or publisher is None:
+            return
+        publisher.publish(String(data=json.dumps(
+            {'take_id': take_id, 'end': True, 'error': str(message), 't': time.time()}, ensure_ascii=False,
+        )))
+
     def close(self) -> None:
         with self.manager._punch_lock:
             if self.manager._punch_controller is self.controller:

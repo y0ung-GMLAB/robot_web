@@ -28,18 +28,14 @@ export const FOLLOW_MIN_STEP = 8;
 /** 놓은 뒤 축이 놓은 자리에 닿기를 기다리는 최대 시간 · 그 뒤엔 다시 축을 따라감 */
 export const SETTLE_MAX_MS = 8000;
 /**
- * 손 판정 · 터치 신호를 믿지 않는다 · floating4 실물 2026-10-19 · 이 X-Touch 는 손을 댄 채로도 「뗌」 이 오고(1·4번 ·
- * 미는 도중 0.4 s 마다) 5번은 터치 신호가 아예 안 온다 → 전에는 미는 중에 놓고 페이더를 원래 자리로 되돌려 보냈고,
- * 그 뒤 움직임을 무시해 「조작이 안 됨」.
- *   손이 있음 = 터치 「누름」 상태 또는 HAND_RELEASE_MS 안에 페이더가 움직임
- *   놓음      = 터치도 없고 HAND_RELEASE_MS 동안 안 움직임 · 그 뒤 HAND_QUIET_MS 는 되돌려 보내지 않음
- * 내가 보낸 값 그대로(±ECHO_STEP · 손을 대면 장치가 지금 자리를 알려 줌)는 움직임이 아니다.
+ * 손 판정 · 터치 신호만 · 사용자 결정 2026-10-19 「터치만 하자」 · 페이더가 움직이기만 한 것(모터가 움직인 것 포함)은 손이 아님 ·
+ * 전에는 움직임도 손으로 쳤다(「뗌」 이 미는 중에 오던 것 · 실은 놓을 때 페이더가 되돌아가던 탓이 컸다 · 되돌려 보내기로 고친 뒤
+ * 18:40 이후 기록은 1·2·4·7·8번 터치가 깨끗) · 터치 신호가 안 오는 페이더(floating4 3·5번)는 조종이 안 된다
+ *   손 있음 = 터치 「누름」
+ *   놓음    = 「뗌」 뒤 TOUCH_GRACE_MS 안에 다시 「누름」 이 안 오면(잠깐 끊김 · 실물 60 ms) · 그 뒤 HAND_QUIET_MS 는 따라가지 않음
  */
-export const HAND_RELEASE_MS = 500;
+export const TOUCH_GRACE_MS = 200;
 export const HAND_QUIET_MS = 600;
-export const ECHO_STEP = 16;
-/** 터치 「누름」 인데 이만큼 안 움직이면 놓은 것으로(뗌 신호를 못 받은 채 남는 것 막기) */
-export const TOUCH_STALE_MS = 5000;
 /**
  * 스무딩 단계 · 화면은 받은 페이더 값 그대로(주기마다 마지막 값) 보내고, 거르는 것은 로봇 쪽(supervisor 램프 앞 ·
  * 펀치는 재생 노드)이 이 시간으로 · 사용자 결정 2026-10-19 「로우데이터대로 · 스무딩은 중간에서 · 정도는 내가 고르게」 ·
@@ -88,11 +84,25 @@ export function ledMessage(group, channel, state) {
   return [0x90, NOTE[group] + channel, velocity];
 }
 
+/** 글씨 칸 한 줄 · 7 글자 · ASCII 만 */
+const lcdFit = (text) => String(text ?? '').replace(/[^\x20-\x7E]/g, '?').slice(0, LCD_CHARS).padEnd(LCD_CHARS, ' ');
+
 /** 글씨 칸 한 채널 · 위·아래 줄 7 글자씩 · ASCII 만 */
 export function lcdMessages(deviceId, channel, top, bottom) {
-  const fit = (text) => String(text ?? '').replace(/[^\x20-\x7E]/g, '?').slice(0, LCD_CHARS).padEnd(LCD_CHARS, ' ');
-  const one = (offset, text) => [0xF0, 0x00, 0x00, 0x66, deviceId, 0x12, offset, ...[...fit(text)].map((c) => c.charCodeAt(0) & 0x7F), 0xF7];
+  const one = (offset, text) => [0xF0, 0x00, 0x00, 0x66, deviceId, 0x12, offset, ...[...lcdFit(text)].map((c) => c.charCodeAt(0) & 0x7F), 0xF7];
   return [one(channel * LCD_CHARS, top), one(LCD_BOTTOM + channel * LCD_CHARS, bottom)];
+}
+
+/**
+ * 글씨 칸 색·반전 · Behringer 전용 SysEx(F0 00 20 32 dd 4C nn cc 글자14 F7) · cc 아래 3비트 = 색(7 흰색) ·
+ * 0x10 위 줄 반전 · 0x20 아래 줄 반전 · 손 인식 표시(밝아짐) · 사용자 2026-10-19 · 이 명령을 모르는 펌웨어는 무시한다
+ */
+export const LCD_WHITE = 7;
+export const LCD_INVERT = 0x30;
+
+export function lcdColorMessage(deviceId, channel, top, bottom, color = LCD_WHITE, invert = false) {
+  const chars = [...(lcdFit(top) + lcdFit(bottom))].map((c) => c.charCodeAt(0) & 0x7F);
+  return [0xF0, 0x00, 0x20, 0x32, deviceId, 0x4C, channel & 0x07, (color & 0x07) | (invert ? LCD_INVERT : 0), ...chars, 0xF7];
 }
 
 /** 장치 이름으로 · Extender 면 15 · 아니면 14 */
@@ -279,15 +289,32 @@ export class XTouchSession {
     return actions;
   }
 
-  /** 터치 신호 · 「누름」 은 손 · 「뗌」 은 그것만으로 놓지 않는다(tick 이 움직임까지 보고 정함) */
+  /** 터치 신호 · 「누름」 은 손 · 「뗌」 은 TOUCH_GRACE_MS 뒤에 확정(tick) · 그 안에 다시 누르면 그대로 */
   touchEvent(channel, down, now) {
     const state = this.channels[channel];
     state.touchDown = down;
+    state.lastHandAt = now;
     if (down) {
-      state.touchAt = now;
       if (!state.touched) this.grab(channel, now);
+    } else {
+      state.touchUpAt = now;
     }
     return [];
+  }
+
+  /**
+   * 손 인식 표시 · 바뀐 채널만(force 면 모두) · SOLO 불빛 켬/끔 + {type:'hand'} (글씨 칸 반전 · 화면) ·
+   * 손 = 터치 신호 또는 움직임(0.5 s) · 선택 안 한 채널도 · 사용자 2026-10-19 「터치 인식 됐는지 띄우기」
+   */
+  handIndicators(force = false) {
+    const actions = [];
+    this.channels.forEach((state, channel) => {
+      const hand = Boolean(state.touched);
+      if (!force && state.handShown === hand) return;
+      state.handShown = hand;
+      actions.push({ type: 'led', group: 'solo', channel, state: hand ? 'on' : 'off' }, { type: 'hand', channel, on: hand });
+    });
+    return actions;
   }
 
   /** 손이 닿음 · 조종 중이 아니면 「맞추는 중」 부터 */
@@ -339,14 +366,8 @@ export class XTouchSession {
     const item = this.config[channel];
     const previous = state.value;
     state.value = value;
-    const now = Number(ctx?.now ?? 0);
-    // 움직임 = 손 · 내가 보낸 값 그대로(손을 대면 장치가 지금 자리를 알려 줌)는 움직임이 아님
-    const echo = !state.touched && state.lastFeedback !== null && Math.abs(value - state.lastFeedback) <= ECHO_STEP;
-    if (!echo) {
-      state.lastMoveAt = now;
-      if (!state.touched) this.grab(channel, now);
-      state.lastHandAt = now;
-    }
+    // 손(터치) 없이 움직인 값은 조종에 안 씀 · 모터가 움직인 것 · 터치 신호가 안 오는 페이더
+    if (state.touched) state.lastHandAt = Number(ctx?.now ?? 0);
     if (!state.selected || !state.touched || !item) return [];
     if (ctx?.blocked) return [];
     const joint = faderToJoint(item.lower, item.upper, value);
@@ -374,13 +395,12 @@ export class XTouchSession {
     const now = Number(ctx?.now ?? 0);
     this.channels.forEach((state, channel) => {
       const item = this.config[channel];
-      if (!item || (!state.selected && !this.isPunch(channel))) return;
-      // 손이 떠남 · 터치도 없고 0.5 s 동안 안 움직임 · 터치 「누름」 이 남아 있어도 5 s 안 움직이면
-      const idle = now - (state.lastMoveAt ?? -Infinity);
-      if (state.touched && ((!state.touchDown && idle > HAND_RELEASE_MS) || idle > TOUCH_STALE_MS)) {
+      // 손이 떠남 · 「뗌」 뒤 TOUCH_GRACE_MS 안에 다시 안 누름 · 선택 안 한 채널도(손 인식 표시가 켜진 채 남지 않게)
+      if (state.touched && !state.touchDown && now - (state.touchUpAt ?? -Infinity) > TOUCH_GRACE_MS) {
         actions.push(...this.release(channel, now));
         return;
       }
+      if (!item || (!state.selected && !this.isPunch(channel))) return;
       // 받은 값 그대로 · 주기마다 마지막 값 하나 · 거르는 것은 로봇 쪽(고른 스무딩 시간)
       if (state.phase === 'live' && state.dirty) actions.push(this.target(channel));
       // 페이더를 축 따라 움직이는 것은 바탕 위 녹화의 바탕 조인트(재생 따라감)만 · 보통 조종은 SELECT 때 한 번뿐 ·
@@ -425,7 +445,7 @@ function blankChannel() {
   return {
     selected: false, touched: false, phase: 'idle', value: null, goal: null, dirty: false, sent: false,
     reference: null, lastFeedback: null, lastFollowAt: 0, settleGoal: null, settleSince: null,
-    touchDown: false, touchAt: null, lastMoveAt: null, lastHandAt: null,
+    touchDown: false, touchUpAt: null, lastHandAt: null, handShown: null,
   };
 }
 

@@ -64,8 +64,11 @@ def _motor(axis, position_rad=0.0):
 def test_xtouch_limits_are_the_mapping_rates_times_the_gain():
     limits, reason = manual_range_gate.xtouch_limits([_row()], [_motor(1)], 1)
     assert reason == ''
-    assert limits[manual_speed.VELOCITY_FIELD] == pytest.approx(R(9.0) * 100.0)
-    assert limits[manual_speed.ACCELERATION_FIELD] == pytest.approx(R(14.0) * 100.0)
+    # 상한의 98 % · 딱 맞추면 녹화 파일이 반올림만으로 재생 검사를 넘었다(floating4 2026-10-19)
+    ratio = manual_speed.XTOUCH_LIMIT_RATIO
+    assert ratio == pytest.approx(0.98)
+    assert limits[manual_speed.VELOCITY_FIELD] == pytest.approx(R(9.0) * 100.0 * ratio)
+    assert limits[manual_speed.ACCELERATION_FIELD] == pytest.approx(R(14.0) * 100.0 * ratio)
 
 
 def test_xtouch_limits_refuse_an_axis_without_rates_or_without_a_row():
@@ -148,10 +151,10 @@ def test_samples_for_axes_not_recorded_are_ignored():
     assert set(take.series(100.04)) == {1}
 
 
-def _ramp_take(goals, vmax_joint=9.0, amax_joint=14.0, gear=100.0):
-    """램프가 실제로 보내는 값 · 가는 중 목표가 바뀌고 놓았다 다시 잡음"""
+def _ramp_take(goals, vmax_joint=9.0, amax_joint=14.0, gear=100.0, ratio=manual_speed.XTOUCH_LIMIT_RATIO):
+    """램프가 실제로 보내는 값 · 가는 중 목표가 바뀌고 놓았다 다시 잡음 · 상한은 브리지처럼 98 %"""
     row = _row(gear=gear, velocity=vmax_joint, acceleration=amax_joint)
-    vmax, amax = R(vmax_joint) * gear, R(amax_joint) * gear
+    vmax, amax = R(vmax_joint) * gear * ratio, R(amax_joint) * gear * ratio
     start = R(30.0)
     take = Take(t0=0.0)
     take.add_axis(TakeAxis(axis=1, rows=[row], start_motor=start))
@@ -182,6 +185,16 @@ def test_a_recorded_ramp_passes_the_same_rate_check_as_playback():
     assert joints[0][0] == 'neck_yaw'
     assert max(abs(v) for v in joints[0][2]) > R(4.0)     # 실제로 움직였다
     assert xtouch_recording.rate_problem(joints) == ''
+
+
+def test_a_ramp_at_exactly_the_limit_fails_after_rounding_so_xtouch_keeps_a_margin():
+    """floating4 2026-10-19 「가속도 35 > 상한 35」 · 상한에 딱 맞춘 램프는 파일 반올림(소수 9자리)만으로 넘는다 ·
+    그래서 X-Touch 는 98 % · 저장 검사도 반올림한 값으로(저장은 됐는데 재생 거절 없음)"""
+    goals = [(10.0, 40), (-12.0, 25), (5.0, 400), (14.0, 3), (-3.0, 400)]
+    take, end = _ramp_take(goals, ratio=1.0)
+    assert '가속도' in xtouch_recording.rate_problem(take.joint_series(end))
+    take, end = _ramp_take(goals)
+    assert xtouch_recording.rate_problem(take.joint_series(end)) == ''
 
 
 def test_the_rate_check_refuses_a_jump():
@@ -228,6 +241,7 @@ def test_clean_name_strips_unsafe_text_and_defaults_to_a_timestamp():
 class _Repository:
     def __init__(self, existing=()):
         self.files = {name: '' for name in existing}
+        self.trash = []
 
     def require_selected_project_id(self):
         return 'p'
@@ -236,6 +250,15 @@ class _Repository:
         assert category == 'motions'
         if name in self.files:
             raise ValueError(f'같은 이름의 파일이 이미 있습니다: {name}')
+        self.files[name] = text
+
+    def copy_to_trash(self, project_id, category, name):
+        if name not in self.files:
+            raise ValueError(f'프로젝트 파일을 찾을 수 없습니다: {name}')
+        self.trash.append((name, self.files[name]))
+        return f'trash/{len(self.trash)}-{name}'
+
+    def save_file(self, project_id, category, name, text):
         self.files[name] = text
 
 
@@ -383,8 +406,8 @@ def test_a_silent_socket_is_treated_as_disconnected_and_the_take_is_saved(monkey
 
     original_start = bridge.xtouch_recording.start
 
-    def start_then_skip_countdown(owner, axes, name='', base=''):
-        result = original_start(owner, axes, name, base)
+    def start_then_skip_countdown(owner, axes, name='', base='', overwrite=False):
+        result = original_start(owner, axes, name, base, overwrite)
         clock.now = 5.0          # t0 = 3.0 · 마지막으로 받은 시각(10.0)까지 저장
         return result
 
@@ -402,3 +425,50 @@ def test_a_silent_socket_is_treated_as_disconnected_and_the_take_is_saved(monkey
     assert len(lines) - 1 == 351                             # 3.0 → 10.0 s · 20 ms
     saved = [event for event in bridge._motor_event_log.events if event['event_type'] == 'xtouch_record_saved']
     assert saved and '끊김' in saved[0]['content']
+
+
+# ------------------------------------------------------------ 덮어쓰기 ---
+# 사용자 2026-10-19 「이미 있는거에 저장」 · 화면에서 골랐을 때만 · 전 파일은 휴지통에 사본
+
+
+def _record(service, owner, clock, *, reason=''):
+    for k in range(1, 51):
+        service.samples_callback(_samples_msg(k, 1003.0 + k * PERIOD_SEC, 1, R(30.0) + k * 1e-3))
+    clock.now = 1004.0
+    return service.stop(owner, reason=reason)
+
+
+def test_overwrite_saves_over_the_same_name_and_keeps_a_copy_in_trash():
+    clock = _Clock()
+    bridge = _bridge(existing=('take.json',))
+    service = _service(bridge, clock)
+    owner = object()
+    assert service.start(owner, [1], 'take', '', True)['success']
+    result = _record(service, owner, clock)
+    assert result['success'] and result['file'] == 'take.json' and result['overwritten'] is True
+    assert '덮어썼습니다' in result['message']
+    assert bridge.project_repository.trash == [('take.json', '')]            # 전 파일 사본
+    assert bridge.project_repository.files['take.json'].startswith('{')      # 새 내용
+
+
+def test_overwrite_is_not_used_for_an_automatic_save_after_a_disconnect():
+    clock = _Clock()
+    bridge = _bridge(existing=('take.json',))
+    service = _service(bridge, clock)
+    owner = object()
+    service.start(owner, [1], 'take', '', True)
+    result = _record(service, owner, clock, reason='화면 연결 끊김')
+    assert result['success'] and result['file'] == 'take_2.json'
+    assert '덮어쓰지 않고' in result['message']
+    assert bridge.project_repository.trash == []
+    assert bridge.project_repository.files['take.json'] == ''
+
+
+def test_without_overwrite_the_same_name_still_gets_a_number():
+    clock = _Clock()
+    bridge = _bridge(existing=('take.json',))
+    service = _service(bridge, clock)
+    owner = object()
+    service.start(owner, [1], 'take')
+    result = _record(service, owner, clock)
+    assert result['file'] == 'take_2.json' and result['overwritten'] is False

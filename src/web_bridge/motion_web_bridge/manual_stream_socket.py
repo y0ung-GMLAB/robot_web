@@ -25,7 +25,9 @@ X-Touch 화면(수정 목록 156) · 인사에 `watchdog_sec` 를 주면 그 시
 녹화 요청도 이 소켓으로 · 끊기면 녹화는 마지막으로 받은 순간까지 자동 저장:
 
     ← {type:'ping'}                              → {type:'pong', record:{state, …}}
-    ← {type:'record_start', axes:[..], name?}    → {type:'record', success, state, …}
+    ← {type:'record_start', axes:[..], name?, base?, overwrite?}    → {type:'record', success, state, …}
+                                                 # overwrite · 같은 이름에 덮어쓰기(전 파일은 휴지통에 사본 · 끊김 자동 저장 ·
+                                                 # 바탕 끝까지 안 간 것은 새 이름) · 이름이 비고 바탕이 있으면 바탕 파일에
     ← {type:'record_add', axes:[..]}             → {type:'record', …}   # 녹화 중 SELECT 로 더한 축
     ← {type:'record_stop'}                       → {type:'record', success, state:'saved', file, …}
     ← {type:'record_cancel'}                     → {type:'record', state:'idle'}
@@ -228,7 +230,9 @@ def _record_request(recording: Any, owner: Any, kind: str, message: dict) -> dic
     if recording is None:
         return {'success': False, 'message': '이 서버는 녹화를 지원하지 않습니다'}
     if kind == 'record_start':
-        return recording.start(owner, message.get('axes'), message.get('name'), message.get('base'))
+        return recording.start(
+            owner, message.get('axes'), message.get('name'), message.get('base'), bool(message.get('overwrite')),
+        )
     if kind == 'record_add':
         return recording.add_axes(owner, message.get('axes'))
     if kind == 'record_stop':

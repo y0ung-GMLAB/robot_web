@@ -259,6 +259,8 @@ class MotionPlayer:
         elif exhausted.startswith('blocked:'):
             status['message'] = f'{status["message"]} · 자동 복구 안 함({exhausted[8:]})'
         self.manager._set_status(status)
+        # X-Touch 바탕 위 녹화 · 녹화가 「초기 위치 이동 중」 으로 계속 기다리지 않게 이유를 알린다 · 2026-10-19
+        TakePlayback.announce_failure(self.manager, payload, status['message'])
         if bool(payload.get('automation_run')):
             self.manager._automation_failure(
                 str(status['message']) if exhausted == 'exhausted' else str(exc)
