@@ -469,24 +469,31 @@ export async function loadXTouch(state, changed) {
 const DEV_TONE = { ready: 'ok', connecting: 'warn', off: 'idle', missing: 'warn', choose: 'warn', busy: 'bad', denied: 'bad', unavailable: 'bad' };
 const DEV_TEXT = { ready: '연결됨', connecting: '연결 중', off: '연결 안 됨', missing: '장치 없음', choose: '어느 X-Touch 인지 고르세요', busy: '다른 곳에서 쓰는 중', denied: '권한 없음', unavailable: '이 주소에서 MIDI 불가' };
 
-/** 여러 대 꽂혔을 때 · 이 로봇에 쓸 X-Touch 고르기 · 이 로봇 주소에 기억 · 2026-10-19 */
+/**
+ * 이 로봇에 쓸 X-Touch 고르기 · 늘 보임 · 사용자 2026-10-19 「어떤 xtouch 인지는 어디서 고르냐 · 허브면 여러 포트」 ·
+ * 전에는 2대 이상일 때만 나와 1대일 때·연결 전에는 고르는 곳이 안 보였다 · 연결 전에는 안내만(목록은 MIDI 권한 뒤)
+ */
 function deviceChooser(changed) {
+  const tag = thisRobotTag();
+  const label = `이 로봇(${tag})에 쓸 X-Touch`;
+  if (!device.access) {
+    return h('div', { class: 'row' }, h('span', { class: 'muted small',
+      text: `${label} · 「X-Touch 연결」 을 누르면 이 PC 에 꽂힌 X-Touch 목록이 여기 나옵니다(허브로 여러 대면 여기서 고름)` }));
+  }
   const ports = device.ports || [];
-  if (ports.length < 2 && !['choose', 'missing'].includes(ui.dev.status)) return null;
-  if (!ports.length) return null;
   const current = device.input?.id || '';
   return h('div', { class: 'row' },
-    h('label', { class: 'inline' }, `이 로봇(${thisRobotTag()})에 쓸 X-Touch`,
-      h('select', { class: 'select select-sm', 'aria-label': '이 로봇에 쓸 X-Touch',
+    h('label', { class: 'inline' }, label,
+      h('select', { class: 'select select-sm', 'aria-label': '이 로봇에 쓸 X-Touch', disabled: !ports.length,
         onchange: async (e) => {
           if (!e.target.value) return;
           run(session.reset());
           if (await device.choose(e.target.value)) { ensureLoop(); paintSurface(); }
           changed();
         } },
-      h('option', { value: '', selected: !current }, '고르세요'),
-      ports.map((port) => h('option', { value: port.id, selected: port.id === current }, port.name)))),
-    h('span', { class: 'muted small', text: '고르면 이 로봇 주소에 기억합니다 · X-Touch 글씨 칸에 로봇 표시가 뜹니다' }));
+      h('option', { value: '', selected: !current }, ports.length ? '고르세요' : '찾은 X-Touch 없음 · USB 확인'),
+      ports.map((port, index) => h('option', { value: port.id, selected: port.id === current }, `${index + 1}. ${port.name}`)))),
+    h('span', { class: 'muted small', text: `${ports.length}대 찾음 · 고르면 이 로봇 주소에 기억 · 고른 X-Touch 글씨 칸에 「${tag}」 표시로 확인` }));
 }
 
 function connectCard(state, changed) {
