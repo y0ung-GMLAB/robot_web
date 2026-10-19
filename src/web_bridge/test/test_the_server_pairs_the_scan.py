@@ -379,3 +379,50 @@ def test_a_dynamixel_scan_says_only_serial():
     out = _rows([_servo(), _dynamixel()], _scan(devices=[_device()], ethercat=False))
 
     assert out['scanned_transports'] == ['serial']
+
+
+# --------------------------------------------------------------------------- #
+# 체인 앞에 새 드라이브 · 수정 목록 157 (floating4 실물 2026-10-19)
+# --------------------------------------------------------------------------- #
+
+def _floating4():
+    """저장 3대(눈 · 위치 0~2) · 검색 5대(새 목 2대가 위치 0·1 · 눈이 2~4 로 밀림)"""
+    saved = [_servo(axis=i, alias=0, slave=i, serial=0x26042697 + i, model='MADLN05BE') for i in range(3)]
+    for motor in saved:
+        motor['id'] = f'ac_servo_ethercat_master_0_slave_{motor["identity"]["slave_position"]}'
+    scanned = [
+        _slave(alias=0, slave=0, serial=0x21091191, model='MCDLN35BE'),
+        _slave(alias=0, slave=1, serial=0x21091393, model='MCDLN35BE'),
+    ] + [_slave(alias=0, slave=2 + i, serial=0x26042697 + i, model='MADLN05BE') for i in range(3)]
+    return saved, scanned
+
+
+def test_new_drives_in_front_of_the_chain_are_new_devices():
+    saved, scanned = _floating4()
+    out = _rows(saved, _scan(slaves=scanned, dynamixel=False))
+    assert out['summary']['matched'] == 3
+    assert out['summary']['new'] == 2
+    by_axis = {row['axis']: row for row in out['axes']}
+    for axis in range(3):
+        assert by_axis[axis]['scanned']['slave_position'] == axis + 2      # 제조번호로 · 위치만 바뀜
+        assert by_axis[axis]['confirmation_required'] is False
+        assert 'slave_position' in by_axis[axis]['changed']
+    news = sorted(row['scanned']['slave_position'] for row in out['new_devices'])
+    assert news == [0, 1]
+    assert all(row['model'] == 'MCDLN35BE' for row in out['new_devices'])
+    # 위치가 같던 눈은 이미 제조번호로 짝지었으니 후보도 아니다
+    assert all(row['association_candidates'] == [] for row in out['new_devices'])
+
+
+def test_a_drive_without_a_serial_match_still_falls_back_to_a_free_position():
+    """제조번호가 바뀐(교체한) 드라이브 · 그 자리의 짝 없는 축에 「연결 확인 필요」 로 · 전과 같다"""
+    saved, _ = _floating4()
+    scanned = [
+        _slave(alias=0, slave=0, serial=0x11111111),            # 0번 자리 드라이브 교체
+        _slave(alias=0, slave=1, serial=0x26042698),
+        _slave(alias=0, slave=2, serial=0x26042699),
+    ]
+    out = _rows(saved, _scan(slaves=scanned, dynamixel=False))
+    by_axis = {row['axis']: row for row in out['axes']}
+    assert by_axis[0]['state'] == 'matched' and by_axis[0]['confirmation_required'] is True
+    assert out['new_devices'] == []

@@ -108,3 +108,15 @@ def test_empty_project_gets_every_device_from_zero():
     result = _propose([], _scan(slaves=[_slave()], devices=[_device()]))
     assert [m['axis'] for m in result['registry']['motors']] == [0, 1]
     assert result['notes'] == []
+
+
+def test_new_drives_in_front_of_the_chain_join_the_proposal():
+    """floating4 2026-10-19 · 눈 3대(위치 0~2) 앞에 목 2대 · 제안에 5대 · 수정 목록 157"""
+    from test_the_server_pairs_the_scan import _floating4
+
+    saved, scanned = _floating4()
+    result = _propose(saved, _scan(slaves=scanned, dynamixel=False))
+    motors = result['registry']['motors']
+    assert len(motors) == 5
+    assert result['summary']['matched'] == 3
+    assert sorted(m['identity']['serial_number'] for m in motors) == sorted(s['serial_number'] for s in scanned)
