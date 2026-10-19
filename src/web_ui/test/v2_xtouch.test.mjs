@@ -93,16 +93,25 @@ test('SELECT · 불빛 켜고 페이더를 축 위치로 · 손 대고 맞추면
   assert.equal(s.channels[0].phase, 'live');
   s.handle({ kind: 'fader', channel: 0, value: jointToFader(-15, 15, 6) }, ctx());
   s.handle({ kind: 'fader', channel: 0, value: jointToFader(-15, 15, 7) }, ctx());
-  const sent = s.tick(ctx());
-  assert.equal(sent.length, 1, '주기마다 마지막 값 하나');
+  // 걸러진 목표가 20 ms 마다 · 주기마다 하나 · 0.15 s 시간상수로 7° 에 다가감 (툭툭 끊김 · 2026-10-19)
+  const sent = [];
+  for (let t = 20; t <= 1000; t += 20) {
+    const out = s.tick(ctx({ now: t }));
+    assert.ok(out.length <= 1, '주기마다 하나');
+    sent.push(...out);
+  }
   assert.equal(sent[0].type, 'target');
   assert.equal(sent[0].axis, 1);
-  assert.ok(Math.abs(sent[0].joint - 7) < 0.01);
-  assert.deepEqual(s.tick(ctx()), [], '새 값이 없으면 안 보냄 · 손 대는 중엔 따라가기 없음');
+  assert.ok(sent[0].joint > 3.2 && sent[0].joint < 4.0, `첫 값은 조금만 ${sent[0].joint}`);
+  for (let i = 1; i < sent.length; i += 1) assert.ok(sent[i].joint >= sent[i - 1].joint, '튀지 않고 이어서');
+  assert.ok(Math.abs(sent.at(-1).joint - 7) < 0.01, '결국 페이더 값');
+  assert.deepEqual(s.tick(ctx({ now: 1020 })), [], '다 가면 안 보냄 · 손 대는 중엔 따라가기 없음');
 
-  // 「뗌」 은 0.2 s 기다렸다 확정(터치 끊김 · 2026-10-19)
-  assert.deepEqual(s.handle({ kind: 'touch', channel: 0, down: false }, ctx({ now: 1000 })), []);
-  assert.deepEqual(s.tick(ctx({ now: 1300 })), [{ type: 'release', axes: [1] }]);
+  // 놓음 · 터치 없음 + 0.5 s 안 움직임
+  assert.deepEqual(s.handle({ kind: 'touch', channel: 0, down: false }, ctx({ now: 1100 })), []);
+  const released = s.tick(ctx({ now: 1300 }));
+  assert.deepEqual(released.at(-1), { type: 'release', axes: [1] });
+  assert.ok(released.slice(0, -1).every((a) => a.type === 'target' && Math.abs(a.joint - 7) < 0.01), '놓기 전 마지막 페이더 값 그대로');
   assert.equal(s.channels[0].phase, 'ready');
 });
 
@@ -203,7 +212,7 @@ test('바탕 위 녹화 · 바탕 조인트는 선택 안 해도 재생 따라 �
   assert.equal(sent[0].type, 'punch');
   assert.equal(sent[0].motionId, 'neck_yaw');
   assert.deepEqual(s.handle({ kind: 'touch', channel: 0, down: false }, ctx({ now: 600 })), []);
-  assert.deepEqual(s.tick(ctx({ now: 900 })), [{ type: 'punch-release', motionId: 'neck_yaw' }]);
+  assert.deepEqual(s.tick(ctx({ now: 900 })).at(-1), { type: 'punch-release', motionId: 'neck_yaw' });
   assert.deepEqual(s.setTake([]).map((a) => a.type), ['led', 'punch-release'], '녹화 끝 · 잡던 덮어쓰기 채널은 놓음');
   assert.equal(s.isPunch(0), false);
 });
@@ -282,8 +291,8 @@ test('터치 신호가 아예 안 오는 페이더(floating4 5번) · 움직이�
   assert.equal(s.channels[0].phase, 'live');
   s.handle({ kind: 'fader', channel: 0, value: jointToFader(-15, 15, 3) }, ctx({ now: 1100 }));
   assert.equal(s.tick(ctx({ now: 1120 }))[0].type, 'target');
-  assert.deepEqual(s.tick(ctx({ now: 1500 })), []);
-  assert.deepEqual(s.tick(ctx({ now: 1700 })).map((a) => a.type), ['release']);
+  assert.ok(s.tick(ctx({ now: 1500 })).every((a) => a.type === 'target'), '걸러진 목표만 · 아직 안 놓음');
+  assert.equal(s.tick(ctx({ now: 1700 })).at(-1).type, 'release');
 });
 
 test('손을 대면 장치가 알려 주는 지금 자리(보낸 값 ±16)는 움직임이 아님', () => {

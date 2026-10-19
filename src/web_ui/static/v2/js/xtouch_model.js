@@ -40,6 +40,13 @@ export const HAND_QUIET_MS = 600;
 export const ECHO_STEP = 16;
 /** 터치 「누름」 인데 이만큼 안 움직이면 놓은 것으로(뗌 신호를 못 받은 채 남는 것 막기) */
 export const TOUCH_STALE_MS = 5000;
+/**
+ * 로봇으로 보내는 목표 필터 · 1차 저역(시간상수) · 20 ms 마다 걸러진 값을 이어서 보냄 · 사용자 2026-10-19 「툭툭 끊긴다」 ·
+ * X-Touch 값이 띄엄띄엄 오면 로봇 램프가 목표마다 서려고 줄였다 다시 가 가다 서다 · 놓을 때는 마지막 페이더 값 그대로
+ */
+export const SMOOTH_TAU_MS = 150;
+/** 이만큼(조인트 °) 안 바뀌면 다시 안 보냄 */
+const SMOOTH_SEND_STEP = 0.002;
 const LCD_CHARS = 7;
 const LCD_BOTTOM = 56;
 
@@ -297,7 +304,8 @@ export class XTouchSession {
     if (!state.selected) return [];
     const actions = [];
     const item = this.config[channel];
-    if (state.phase === 'live' && state.dirty) actions.push(this.target(channel));
+    // 놓을 때는 걸러진 값이 아니라 마지막 페이더 값까지 · 로봇 램프가 그 자리에 세운다
+    if (state.phase === 'live' && Number.isFinite(state.goal) && state.lastSentJoint !== state.goal) actions.push(this.target(channel, state.goal));
     if (state.phase === 'live' && Number.isInteger(item?.axis)) {
       actions.push(this.releaseAction(channel));
       // 놓은 자리에 둔다 · 축이 아직 따라오는 중인데 「지금 축 위치」 로 보내면 페이더가 거꾸로 툭 튀었다 (실물 2026-10-19)
@@ -343,6 +351,8 @@ export class XTouchSession {
       const before = Number.isFinite(previous) ? faderToJoint(item.lower, item.upper, previous) : NaN;
       if (!pickupReached(before, joint, state.reference)) return [];
       state.phase = 'live';
+      state.smooth = joint;          // 필터는 잡은 자리에서 시작
+      state.lastTickAt = now;
     }
     if (state.phase !== 'live') return [];
     state.goal = joint;
@@ -368,7 +378,16 @@ export class XTouchSession {
         actions.push(...this.release(channel, now));
         return;
       }
-      if (state.phase === 'live' && state.dirty) actions.push(this.target(channel));
+      if (state.phase === 'live' && Number.isFinite(state.goal)) {
+        const dt = Math.max(0, now - (state.lastTickAt ?? now));
+        state.lastTickAt = now;
+        if (!Number.isFinite(state.smooth)) state.smooth = state.goal;
+        state.smooth += (state.goal - state.smooth) * (1 - Math.exp(-dt / SMOOTH_TAU_MS));
+        if (Math.abs(state.goal - state.smooth) < SMOOTH_SEND_STEP) state.smooth = state.goal;
+        if (state.lastSentJoint === null || Math.abs(state.smooth - state.lastSentJoint) >= SMOOTH_SEND_STEP) {
+          actions.push(this.target(channel, state.smooth));
+        }
+      }
       // 페이더를 축 따라 움직이는 것은 바탕 위 녹화의 바탕 조인트(재생 따라감)만 · 보통 조종은 SELECT 때 한 번뿐 ·
       // 놓으면 로봇이 페이더 자리로 가므로 되돌릴 이유가 없다 · 전에는 놓을 때마다 되돌려 「원래 자리로 휙」 (사용자 2026-10-19)
       if (!this.isPunch(channel)) return;
@@ -389,12 +408,13 @@ export class XTouchSession {
     return actions;
   }
 
-  target(channel) {
+  target(channel, joint = this.channels[channel].goal) {
     const state = this.channels[channel];
     const item = this.config[channel];
     state.dirty = false;
     state.sent = true;
-    return { type: this.isPunch(channel) ? 'punch' : 'target', channel, axis: item.axis, joint: state.goal, motionId: item.motionId };
+    state.lastSentJoint = joint;
+    return { type: this.isPunch(channel) ? 'punch' : 'target', channel, axis: item.axis, joint, motionId: item.motionId };
   }
 
   /** 모터 페이더를 보냄 · 보낸 값을 지금 페이더 자리로 친다(장치는 모터로 움직인 값을 돌려주지 않는다) */
@@ -411,7 +431,7 @@ function blankChannel() {
   return {
     selected: false, touched: false, phase: 'idle', value: null, goal: null, dirty: false, sent: false,
     reference: null, lastFeedback: null, lastFollowAt: 0, settleGoal: null, settleSince: null,
-    touchDown: false, touchAt: null, lastMoveAt: null, lastHandAt: null,
+    touchDown: false, touchAt: null, lastMoveAt: null, lastHandAt: null, smooth: null, lastTickAt: null, lastSentJoint: null,
   };
 }
 

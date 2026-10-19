@@ -147,7 +147,10 @@ function onDeviceEvent(event) {
   // 받은 페이더 값을 그대로 돌려보낸다(Mackie Control 호스트 방식) · X-Touch 는 손을 떼면 모터 페이더를 「호스트가 마지막으로
   // 보낸 위치」 로 되돌린다 · 전에는 안 돌려보내서 놓을 때마다 마지막 SELECT 위치로 휙 돌아갔다 (floating4 실물 2026-10-19 18:02 ·
   // SELECT 때 보낸 10252 로 되돌아감) · 채널마다 · 선택 안 한 채널도
-  if (event.kind === 'fader') device.send(faderMessage(event.channel, event.value));
+  if (event.kind === 'fader') {
+    device.send(faderMessage(event.channel, event.value));
+    diag(`echo${event.channel}`, `되돌림 페이더 ${event.channel + 1} ${event.value}`, 200);
+  }
   const context = sessionCtx();
   run(session.handle(event, context));
   if (event.kind === 'fader') {
