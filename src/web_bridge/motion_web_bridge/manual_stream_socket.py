@@ -80,11 +80,13 @@ async def run_manual_stream_socket(bridge: Any, websocket: Any) -> None:
 
     block = await asyncio.to_thread(_stream_block_reason, bridge)
     if block:
+        await asyncio.to_thread(_write_diag, bridge, [f'[로봇] 연결 거절 · {block}'])
         await refuse(block)
         return
 
     hello = await _handshake(bridge, websocket, refuse)
     if hello is None:
+        await asyncio.to_thread(_write_diag, bridge, ['[로봇] 인사 거절(낡은 매핑 · 인사 없음)'])
         return
     await send({'type': 'hello_ok'})
 
@@ -104,6 +106,7 @@ async def run_manual_stream_socket(bridge: Any, websocket: Any) -> None:
                     raw = await websocket.receive_text()
             except asyncio.TimeoutError:
                 # 연결은 살아 있는데 안 온다(무선 멈춤 등) · 끊긴 것으로 · 수정 목록 156
+                await asyncio.to_thread(_write_diag, bridge, [f'[로봇] {watchdog:g} s 동안 안 옴 · 끊긴 것으로'])
                 with contextlib.suppress(Exception):   # 이미 끊겼으면 그만
                     await websocket.close()
                 return
@@ -123,6 +126,8 @@ async def run_manual_stream_socket(bridge: Any, websocket: Any) -> None:
                 taking = recording is not None and recording.base_active_for(owner)
                 block = await asyncio.to_thread(_stream_block_reason, bridge, taking)
                 if block:
+                    if watchdog:
+                        await asyncio.to_thread(_write_diag, bridge, [f'[로봇] 흐르는 중 막힘 · 닫음 · {block}'])
                     await refuse(block)
                     return
 

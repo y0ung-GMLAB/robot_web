@@ -51,9 +51,14 @@ const device = new XTouchDevice({
 });
 const stream = new ManualStream({
   onResult: (result) => {
-    if (result.success === false && result.message) { ui.message = result.message; ctx.changed(); }
+    if (result.success === false && result.message) {
+      diag('reject', `거절 ${result.axis ?? ''} ${String(result.message).slice(0, 140)}`);
+      ui.message = result.message;
+      ctx.changed();
+    }
   },
   onClose: (reason) => {
+    diag('close', `로봇 연결 닫힘 ${reason || '(이유 없음)'} · 선택 ${session.selectedAxes().join(',') || '없음'} 놓음`);
     if (reason) ui.message = reason;
     run(session.reset());
     ctx.changed();
@@ -64,6 +69,7 @@ const stream = new ManualStream({
   },
 });
 let loop = null;
+let lastBlocked = null;
 let lastPing = 0;
 let lastOpenTry = 0;
 let lastLcd = '';
@@ -136,8 +142,16 @@ function noteMidi(bytes, event) {
 
 function onDeviceEvent(event) {
   // 보이는 탭만 · 다른 탭에서 같은 장치를 받아도 움직이지 않게
-  if (document.hidden || !location.hash.startsWith(ROUTE)) return;
-  run(session.handle(event, sessionCtx()));
+  if (document.hidden || !location.hash.startsWith(ROUTE)) { diag('hidden', '무시 · 탭이 안 보임', 1000); return; }
+  const context = sessionCtx();
+  run(session.handle(event, context));
+  if (event.kind === 'fader') {
+    // 왜 안 먹나 · 채널 상태 · 0.5 s 에 한 줄
+    const ch = session.channels[event.channel];
+    const item = session.config[event.channel];
+    diag(`st${event.channel}`, `상태 페이더 ${event.channel + 1} 선택 ${ch.selected ? 'O' : 'X'} 손 ${ch.touched ? (ch.movedTouch ? '움직임' : '터치') : 'X'} `
+      + `단계 ${ch.phase} 축값 ${item ? (context.jointOf(item.axis) ?? 'null') : '연결없음'} 막힘 ${context.blocked || '없음'} 연결 ${stream.isOpen() ? 'O' : 'X'}`, 500);
+  }
 }
 
 /** 진단 · 받은 것·보낸 것을 로봇 기록으로(1 s 마다 묶어) · 화면 밖에서 원인을 보려고 · 2026-10-19 */
@@ -240,14 +254,19 @@ function tick() {
   }
   const now = performance.now();
   const blocked = blockedText(ctx.state);
-  run(session.configure(config(ctx.state)));
+  if (blocked !== lastBlocked) { diag('blk', `막힘 바뀜 · ${blocked || '없음'}`); lastBlocked = blocked; }
+  const configActions = session.configure(config(ctx.state));
+  if (configActions.length) diag('cfg', `매핑 바뀜 · 채널 놓음 ${configActions.length}`);
+  run(configActions);
   if (blocked) {
-    if (session.selectedAxes().length) { run(session.reset()); ctx.changed(); }
+    if (session.selectedAxes().length) { diag('blkreset', `막혀서 선택 놓음 · ${blocked}`); run(session.reset()); ctx.changed(); }
     if (stream.isOpen()) stream.close();
   } else if (device.ready() && !stream.isOpen() && now - lastOpenTry > 1000) {
     lastOpenTry = now;
+    diag('open', '로봇 연결 여는 중', 0);
     stream.open({ mapping_file_id: ui.fileId, base_mapping_revision: ui.revision, watchdog_sec: WATCHDOG_SEC })
-      .catch((error) => { ui.message = error.message; ctx.changed(); });
+      .then(() => diag('opened', '로봇 연결 열림'))
+      .catch((error) => { diag('openfail', `로봇 연결 거절 · ${error.message}`); ui.message = error.message; ctx.changed(); });
   }
   if (stream.isOpen()) {
     run(session.tick(sessionCtx()));
