@@ -100,8 +100,9 @@ test('SELECT · 불빛 켜고 페이더를 축 위치로 · 손 대고 맞추면
   assert.ok(Math.abs(sent[0].joint - 7) < 0.01);
   assert.deepEqual(s.tick(ctx()), [], '새 값이 없으면 안 보냄 · 손 대는 중엔 따라가기 없음');
 
-  const up = s.handle({ kind: 'touch', channel: 0, down: false }, ctx());
-  assert.deepEqual(up, [{ type: 'release', axes: [1] }]);
+  // 「뗌」 은 0.2 s 기다렸다 확정(터치 끊김 · 2026-10-19)
+  assert.deepEqual(s.handle({ kind: 'touch', channel: 0, down: false }, ctx({ now: 1000 })), []);
+  assert.deepEqual(s.tick(ctx({ now: 1300 })), [{ type: 'release', axes: [1] }]);
   assert.equal(s.channels[0].phase, 'ready');
 });
 
@@ -210,7 +211,8 @@ test('바탕 위 녹화 · 바탕 조인트는 선택 안 해도 재생 따라 �
   const sent = s.tick(ctx({ now: 520 }));
   assert.equal(sent[0].type, 'punch');
   assert.equal(sent[0].motionId, 'neck_yaw');
-  assert.deepEqual(s.handle({ kind: 'touch', channel: 0, down: false }, ctx()), [{ type: 'punch-release', motionId: 'neck_yaw' }]);
+  assert.deepEqual(s.handle({ kind: 'touch', channel: 0, down: false }, ctx({ now: 600 })), []);
+  assert.deepEqual(s.tick(ctx({ now: 900 })), [{ type: 'punch-release', motionId: 'neck_yaw' }]);
   assert.deepEqual(s.setTake([]).map((a) => a.type), ['led', 'punch-release'], '녹화 끝 · 잡던 덮어쓰기 채널은 놓음');
   assert.equal(s.isPunch(0), false);
 });
@@ -249,7 +251,7 @@ test('놓은 뒤 · 축이 아직 따라오는 중이면 페이더를 놓은 자
   s.tick(ctx({ now: 0 }));
   s.handle({ kind: 'touch', channel: 0, down: false }, ctx());                          // 바로 놓음
   jointNow[1] = 3;                                                                      // 축은 아직 위쪽
-  assert.deepEqual(s.tick(ctx({ now: 200 })), [], '위로 안 보낸다');
+  assert.deepEqual(s.tick(ctx({ now: 200 })).filter((a) => a.type === 'feedback'), [], '위로 안 보낸다');
   jointNow[1] = -2;
   assert.deepEqual(s.tick(ctx({ now: 600 })), [], '가는 중에도 그대로');
   jointNow[1] = -9.8;                                                                   // 닿음(0.5° 안)
@@ -270,8 +272,9 @@ test('놓은 자리에 끝내 못 닿으면 8 s 뒤 다시 축을 따라감', as
   s.tick(ctx({ now: 0 }));
   s.handle({ kind: 'touch', channel: 0, down: false }, ctx());
   jointNow[1] = 2;                                                                      // 거절 등으로 멈춤
-  assert.deepEqual(s.tick(ctx({ now: 500 })), []);
-  assert.equal(s.tick(ctx({ now: 500 + SETTLE_MAX_MS + 10 }))[0]?.type, 'feedback');
+  assert.deepEqual(s.tick(ctx({ now: 500 })).filter((a) => a.type === 'feedback'), []);
+  assert.deepEqual(s.tick(ctx({ now: 700 })), []);
+  assert.equal(s.tick(ctx({ now: 700 + SETTLE_MAX_MS + 10 }))[0]?.type, 'feedback');
 });
 
 test('터치 신호가 안 오는 페이더 · 움직이면 손으로 침 · 0.5 s 멈추면 놓음 · 보낸 값이 되돌아온 것은 무시 (floating4 5번 · 2026-10-19)', () => {
@@ -304,4 +307,33 @@ test('되먹임 막기 · 보낸 뒤 1 s 안의 움직임(모터가 가는 중�
   other.s.handle({ kind: 'touch', channel: 0, down: false }, other.ctx({ now: 200 }));
   other.s.handle({ kind: 'fader', channel: 0, value: 2000 }, other.ctx({ now: 5000 }));      // 터치 없는 움직임
   assert.equal(other.s.channels[0].touched, false, '이 채널은 터치 신호를 보냄 · 움직임으로 안 침');
+});
+
+test('터치가 미는 도중 끊겼다 붙어도(floating4 4번 실물 기록) 조종은 이어지고 페이더를 되돌려 보내지 않음', () => {
+  const { s, ctx, jointNow } = session({ 1: -9 });
+  const v = (deg) => jointToFader(-15, 15, deg);
+  s.handle({ kind: 'button', group: 'select', channel: 0, down: true }, ctx({ now: 0 }));
+  s.handle({ kind: 'touch', channel: 0, down: true }, ctx({ now: 2000 }));
+  s.handle({ kind: 'fader', channel: 0, value: v(-9) }, ctx({ now: 2010 }));
+  const out = [];
+  let t = 2010;
+  for (let deg = -8.5; deg <= 2; deg += 0.5) {
+    t += 50;
+    if (Math.round(deg * 2) % 8 === 0) {          // 0.4 s 마다 끊겼다 25 ms 뒤 붙음
+      out.push(...s.handle({ kind: 'touch', channel: 0, down: false }, ctx({ now: t })));
+      out.push(...s.tick(ctx({ now: t + 10 })));
+      out.push(...s.handle({ kind: 'touch', channel: 0, down: true }, ctx({ now: t + 25 })));
+    }
+    out.push(...s.handle({ kind: 'fader', channel: 0, value: v(deg) }, ctx({ now: t + 30 })));
+    jointNow[1] = deg - 1;                         // 축은 조금 늦게 따라옴
+    out.push(...s.tick(ctx({ now: t + 40 })));
+  }
+  assert.equal(out.filter((a) => a.type === 'release').length, 0, '끊김마다 놓지 않음');
+  assert.equal(out.filter((a) => a.type === 'feedback').length, 0, '페이더를 되돌려 보내지 않음');
+  const targets = out.filter((a) => a.type === 'target');
+  assert.ok(targets.at(-1).joint > 1.5, `마지막 목표까지 따라감 ${targets.at(-1).joint}`);
+  // 진짜로 놓음 · 0.2 s 뒤 확정
+  s.handle({ kind: 'touch', channel: 0, down: false }, ctx({ now: t + 100 }));
+  assert.deepEqual(s.tick(ctx({ now: t + 150 })).map((a) => a.type), []);
+  assert.ok(s.tick(ctx({ now: t + 400 })).some((a) => a.type === 'release'));
 });

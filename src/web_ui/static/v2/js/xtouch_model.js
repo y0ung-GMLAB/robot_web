@@ -31,6 +31,10 @@ export const SETTLE_MAX_MS = 8000;
 export const ECHO_WINDOW_MS = 1000;
 /** 움직임으로 친 터치 · 이만큼 안 움직이면 놓은 것으로 */
 export const MOVE_RELEASE_MS = 500;
+/** 조종 중 터치 「뗌」 · 이만큼 다시 안 닿고 안 움직여야 놓은 것 (터치 끊김 · 2026-10-19) */
+export const TOUCH_RELEASE_DEBOUNCE_MS = 200;
+/** 손으로 움직인 뒤 이만큼은 페이더를 축 위치로 되돌려 보내지 않음 */
+export const HAND_QUIET_MS = 600;
 const LCD_CHARS = 7;
 const LCD_BOTTOM = 56;
 
@@ -232,7 +236,7 @@ export class XTouchSession {
     if (event.kind === 'touch') {
       // 진짜 터치 신호 · 이 채널은 앞으로 터치 신호만 믿는다
       this.touchSeen[event.channel] = true;
-      return this.touch(event.channel, event.down);
+      return this.touchEvent(event.channel, event.down, Number(ctx?.now ?? 0));
     }
     if (event.kind === 'fader') return this.fader(event.channel, event.value, ctx);
     return [];
@@ -263,9 +267,33 @@ export class XTouchSession {
     return actions;
   }
 
+  /**
+   * 진짜 터치 신호 · 조종 중 「뗌」 은 바로 놓지 않는다 · 0.2 s 안에 다시 닿거나 페이더가 계속 움직이면 이어서 조종 ·
+   * 실물 2026-10-19 floating4 4번 페이더 · 미는 도중 터치가 0.4 s 마다 끊겼다 붙음(뗌 → 20~30 ms 뒤 누름) ·
+   * 전에는 끊길 때마다 놓고 「맞추는 중」 부터 다시라 축이 멈춰 있고, 놓을 때 페이더를 그 축 위치(반대편)로 되돌려 보냈다
+   */
+  touchEvent(channel, down, now) {
+    const state = this.channels[channel];
+    state.movedTouch = false;
+    if (down) {
+      if (state.releaseAt !== null && state.releaseAt !== undefined) {
+        state.releaseAt = null;          // 끊겼다 다시 닿음 · 조종 그대로
+        state.touched = true;
+        return [];
+      }
+      return this.touch(channel, true);
+    }
+    if (state.selected && state.phase === 'live') {
+      state.releaseAt = now + TOUCH_RELEASE_DEBOUNCE_MS;   // 손은 아직 닿은 것으로 · tick 이 확정
+      return [];
+    }
+    return this.touch(channel, false);
+  }
+
   touch(channel, down) {
     const state = this.channels[channel];
     state.touched = down;
+    state.releaseAt = null;
     // 진짜 터치 신호가 오면 그것을 따른다 · 움직임으로 친 터치는 끝
     state.movedTouch = false;
     if (!state.selected) return [];
@@ -309,6 +337,9 @@ export class XTouchSession {
       }
     }
     if (state.movedTouch) state.lastMoveAt = now;
+    // 손으로 움직인 때 · 이 뒤 잠깐은 페이더를 되돌려 보내지 않는다 · 「뗌」 을 기다리는 중이면 계속 움직이는 것 = 아직 손
+    if (state.touched) state.lastHandAt = now;
+    if (state.releaseAt !== null && state.releaseAt !== undefined) state.releaseAt = now + TOUCH_RELEASE_DEBOUNCE_MS;
     // 손 안 댄 움직임(내가 보낸 것)은 조종에 쓰지 않는다
     if (!state.selected || !state.touched || !item) return [];
     if (ctx?.blocked) return [];
@@ -343,8 +374,15 @@ export class XTouchSession {
         actions.push(...this.touch(channel, false));
         return;
       }
+      // 「뗌」 이 0.2 s 동안 다시 안 닿고 페이더도 안 움직였으면 정말 놓은 것
+      if (state.releaseAt !== null && state.releaseAt !== undefined && now >= state.releaseAt) {
+        actions.push(...this.touch(channel, false));
+        return;
+      }
       if (state.phase === 'live' && state.dirty) actions.push(this.target(channel));
       if (state.touched || now - state.lastFollowAt < FOLLOW_EVERY_MS) return;
+      // 방금 손으로 움직인 페이더는 되돌려 보내지 않는다
+      if (now - (state.lastHandAt || -Infinity) < HAND_QUIET_MS) return;
       const joint = ctx?.jointOf?.(item.axis);
       if (!Number.isFinite(joint)) return;
       if (state.settleGoal !== null && state.settleGoal !== undefined) {
@@ -381,7 +419,7 @@ function blankChannel() {
   return {
     selected: false, touched: false, phase: 'idle', value: null, goal: null, dirty: false, sent: false,
     reference: null, lastFeedback: null, lastFollowAt: 0, settleGoal: null, settleSince: null,
-    movedTouch: false, lastMoveAt: 0,
+    movedTouch: false, lastMoveAt: 0, releaseAt: null, lastHandAt: null,
   };
 }
 
