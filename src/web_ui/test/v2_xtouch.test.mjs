@@ -214,3 +214,28 @@ test('바탕 위 녹화 · 바탕 조인트는 선택 안 해도 재생 따라 �
   assert.deepEqual(s.setTake([]).map((a) => a.type), ['led', 'punch-release'], '녹화 끝 · 잡던 덮어쓰기 채널은 놓음');
   assert.equal(s.isPunch(0), false);
 });
+
+test('여러 대 · 이 로봇이 고른 것 · 한 대면 그것 · 여러 대인데 안 골랐으면 아무것도 안 엶 (2026-10-19)', async () => {
+  const { pickPort, matchOutput, robotTag } = await import('../static/v2/js/xtouch_model.js');
+  const a = { id: 'in-a', name: 'X-Touch-Ext' };
+  const b = { id: 'in-b', name: '2- X-Touch-Ext' };
+  assert.equal(pickPort([], null).status, 'none');
+  assert.equal(pickPort([a], null).port, a);
+  const choose = pickPort([a, b], null);
+  assert.equal(choose.port, null);
+  assert.equal(choose.status, 'choose');
+  assert.match(choose.message, /2대/);
+  assert.equal(pickPort([a, b], { id: 'in-b', name: '2- X-Touch-Ext' }).port, b);
+  assert.equal(pickPort([a, b], { id: 'gone', name: '2- X-Touch-Ext' }).port, b, 'id 가 바뀌어도 이름이 하나면');
+  const missing = pickPort([a], { id: 'in-b', name: '2- X-Touch-Ext' });
+  assert.equal(missing.port, null, '고른 것이 없으면 다른 것을 대신 열지 않음');
+  assert.equal(missing.status, 'missing');
+  const outA = { id: 'out-a', name: 'X-Touch-Ext' };
+  const outB = { id: 'out-b', name: '2- X-Touch-Ext' };
+  assert.equal(matchOutput(b, [a, b], [outA, outB]), outB, '이름이 같은 것 · 「X-Touch-Ext」 가 「2- X-Touch-Ext」 안에 들어 있어도 헷갈리지 않음');
+  assert.equal(matchOutput(a, [a, b], [outA, outB]), outA);
+  assert.equal(matchOutput(b, [a, b], [{ id: 'o1', name: 'MIDIOUT2 (X-Touch-Ext)' }, { id: 'o2', name: 'MIDIOUT3 (2- X-Touch-Ext)' }]).id, 'o2');
+  assert.equal(robotTag('floating3'), 'f3');
+  assert.equal(robotTag('floating12.local'), 'f12');
+  assert.equal(robotTag('stage-a.local'), 'stage-a');
+});

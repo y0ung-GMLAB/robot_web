@@ -7,8 +7,26 @@
  *   처음 연결할 때 MIDI 권한 허용 · 글씨 칸(SysEx)은 따로 허용 · 거절해도 조종은 된다.
  * Windows MIDI 는 한 프로그램만 장치를 연다 · 다른 프로그램이 쥐고 있으면 열기가 거절된다 → 「다른 곳에서 쓰는 중」.
  * USB 를 뽑았다 꽂으면 다시 붙는다(statechange).
+ *
+ * 여러 대(허브) · 사용자 결정 2026-10-19 · 로봇 화면마다 쓸 X-Touch 를 골라 그 로봇 주소에 기억(localStorage) ·
+ * 여러 대인데 안 골랐으면 아무것도 안 연다 · 같은 로봇의 다른 탭이 같은 장치를 잡으면 먼저 탭이 놓는다(BroadcastChannel) ·
+ * 다른 로봇 화면끼리는 브라우저가 주소별로 갈라 서로 모른다 → 글씨 칸에 로봇 표시(f3 등)로 눈으로 확인.
  */
-import { looksLikeXTouch, lcdDeviceId, parseMidi } from './xtouch_model.js';
+import { looksLikeXTouch, lcdDeviceId, matchOutput, parseMidi, pickPort } from './xtouch_model.js';
+
+const STORAGE_KEY = 'robotweb.xtouch.port';
+const CLAIM_CHANNEL = 'robotweb-xtouch';
+
+function loadPreferred() {
+  try {
+    const value = JSON.parse(globalThis.localStorage?.getItem(STORAGE_KEY) || 'null');
+    return value && (value.id || value.name) ? { id: String(value.id || ''), name: String(value.name || '') } : null;
+  } catch { return null; }
+}
+
+function savePreferred(value) {
+  try { globalThis.localStorage?.setItem(STORAGE_KEY, JSON.stringify(value)); } catch { /* 저장 못 하면 이번만 */ }
+}
 
 export const MIDI_FLAG_URL = 'chrome://flags/#unsafely-treat-insecure-origin-as-secure';
 
@@ -32,7 +50,33 @@ export class XTouchDevice {
     this.sysex = false;
     this.attaching = null;
     this.again = false;
+    this.preferred = loadPreferred();
+    /** 연결된 X-Touch 입력 · 고르기 칸 */
+    this.ports = [];
+    this.tab = Math.random().toString(36).slice(2);
+    this.claims = null;
     this.state = { status: 'off', name: '', message: '' };
+  }
+
+  /** 이 로봇에 쓸 장치를 고름 · 이 로봇 주소에 기억 · 바로 그것으로 다시 연다 */
+  choose(portId) {
+    const port = this.ports.find((item) => item.id === portId);
+    if (!port) return Promise.resolve(false);
+    this.preferred = { id: port.id, name: port.name };
+    savePreferred(this.preferred);
+    return this.attach();
+  }
+
+  /** 같은 로봇 화면의 다른 탭 · 같은 장치를 잡으면 먼저 잡은 탭이 놓는다 */
+  listenClaims() {
+    if (this.claims || typeof globalThis.BroadcastChannel !== 'function') return;
+    this.claims = new BroadcastChannel(CLAIM_CHANNEL);
+    this.claims.onmessage = (event) => {
+      const claim = event?.data || {};
+      if (claim.tab !== this.tab && this.input && claim.id === this.input.id) {
+        this.disconnect('같은 로봇의 다른 탭(창)이 이 X-Touch 를 가져갔습니다 · 여기서는 놓았습니다');
+      }
+    };
   }
 
   setState(next) {
@@ -63,7 +107,9 @@ export class XTouchDevice {
       const port = event?.port;
       if (!port || !looksLikeXTouch(port.name)) return;
       if (port.state === 'disconnected' || !this.input) this.attach();
+      else this.refreshPorts();
     };
+    this.listenClaims();
     return this.attach();
   }
 
@@ -82,15 +128,29 @@ export class XTouchDevice {
     return this.attaching;
   }
 
-  async attachOnce() {
-    if (!this.access) return false;
+  connectedPorts() {
     const inputs = [...this.access.inputs.values()].filter((port) => looksLikeXTouch(port.name) && port.state === 'connected');
     const outputs = [...this.access.outputs.values()].filter((port) => looksLikeXTouch(port.name) && port.state === 'connected');
-    const input = inputs[0] || null;
-    const output = outputs.find((port) => input && sameDevice(port.name, input.name)) || outputs[0] || null;
+    return { inputs, outputs };
+  }
+
+  /** 고르기 칸 목록만 새로 · 꽂힌 장치가 늘거나 줄 때 */
+  refreshPorts() {
+    if (!this.access) return;
+    this.ports = this.connectedPorts().inputs.map((port) => ({ id: port.id, name: port.name }));
+    this.setState({});
+  }
+
+  async attachOnce() {
+    if (!this.access) return false;
+    const { inputs, outputs } = this.connectedPorts();
+    this.ports = inputs.map((port) => ({ id: port.id, name: port.name }));
+    const picked = pickPort(this.ports, this.preferred);
+    const input = picked.port ? inputs.find((port) => port.id === picked.port.id) : null;
+    const output = matchOutput(input, inputs, outputs);
     if (!input) {
       this.detach();
-      this.setState({ status: 'missing', name: '', message: 'X-Touch 를 찾지 못했습니다 · USB 를 확인하세요' });
+      this.setState({ status: picked.status === 'none' ? 'missing' : picked.status, name: '', message: picked.message });
       return false;
     }
     if (this.input === input && this.output === output && this.state.status === 'ready') return true;
@@ -110,6 +170,8 @@ export class XTouchDevice {
       if (event) this.onEvent(event);
     };
     this.setState({ status: 'ready', name: input.name, message: output ? '' : '보낼 포트가 없어 페이더 모터·불빛이 움직이지 않습니다' });
+    // 같은 로봇의 다른 탭에 알림 · 그 탭은 놓는다
+    try { this.claims?.postMessage({ tab: this.tab, id: input.id }); } catch { /* 알림 못 해도 연결은 됨 */ }
     return true;
   }
 
@@ -122,11 +184,12 @@ export class XTouchDevice {
     this.output = null;
   }
 
-  disconnect() {
+  disconnect(message = '') {
     if (this.access) this.access.onstatechange = null;
     this.detach();
     this.access = null;
-    this.setState({ status: 'off', name: '', message: '' });
+    this.ports = [];
+    this.setState({ status: 'off', name: '', message });
   }
 
   ready() {
@@ -137,10 +200,4 @@ export class XTouchDevice {
     if (!this.output || (bytes[0] === 0xF0 && !this.sysex)) return false;
     try { this.output.send(bytes); return true; } catch { return false; }
   }
-}
-
-/** 같은 장치의 입력·출력 이름 · Windows 는 「X-Touch-Ext」 · 「MIDIOUT2 (X-Touch-Ext)」 처럼 다를 수 있다 */
-function sameDevice(a, b) {
-  const key = (name) => String(name || '').toLowerCase().replace(/midi(in|out)\d*|[()\s]/g, '');
-  return key(a) === key(b) || key(a).includes(key(b)) || key(b).includes(key(a));
 }

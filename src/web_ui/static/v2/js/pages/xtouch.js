@@ -21,7 +21,7 @@ import { fileInfo, signedDeg } from '../play_model.js';
 import { manualBlocker } from './manual.js';
 import { MIDI_FLAG_URL, XTouchDevice, midiUnavailableReason } from '../xtouch_device.js';
 import {
-  CHANNELS, PHASE_LABEL, XTouchSession, channelConfig, faderMessage, lcdMessages, ledMessage, recordLed,
+  CHANNELS, PHASE_LABEL, XTouchSession, channelConfig, faderMessage, lcdMessages, ledMessage, recordLed, robotTag,
 } from '../xtouch_model.js';
 
 const DEG = 180 / Math.PI;
@@ -154,12 +154,18 @@ function paintSurface() {
   paintLcd(true);
 }
 
+function thisRobotTag() {
+  return robotTag(ctx.state?.snap?.system_info?.hostname || location.hostname);
+}
+
 function paintLcd(force = false) {
   if (!device.ready() || !device.sysex) return;
+  // 어느 X-Touch 가 어느 로봇인지 · 빈 칸·안 고른 채널에 로봇 표시(f3 등) · 여러 대 꽂을 때(2026-10-19)
+  const tag = thisRobotTag();
   const texts = session.config.map((item, channel) => {
-    if (!item) return ['-', ''];
+    if (!item) return [tag, ''];
     const state = session.channels[channel];
-    const bottom = state.selected ? { ready: 'SEL', pickup: 'MATCH', live: 'LIVE', idle: '' }[state.phase] : '';
+    const bottom = state.selected ? { ready: 'SEL', pickup: 'MATCH', live: 'LIVE', idle: tag }[state.phase] : tag;
     return [item.motionId.replace(/^f\d+_/, ''), ui.record.state === 'recording' && state.selected ? 'REC' : bottom];
   });
   const key = JSON.stringify(texts);
@@ -328,8 +334,28 @@ export async function loadXTouch(state, changed) {
 
 /* ---------- 그리기 ---------- */
 
-const DEV_TONE = { ready: 'ok', connecting: 'warn', off: 'idle', missing: 'warn', busy: 'bad', denied: 'bad', unavailable: 'bad' };
-const DEV_TEXT = { ready: '연결됨', connecting: '연결 중', off: '연결 안 됨', missing: '장치 없음', busy: '다른 곳에서 쓰는 중', denied: '권한 없음', unavailable: '이 주소에서 MIDI 불가' };
+const DEV_TONE = { ready: 'ok', connecting: 'warn', off: 'idle', missing: 'warn', choose: 'warn', busy: 'bad', denied: 'bad', unavailable: 'bad' };
+const DEV_TEXT = { ready: '연결됨', connecting: '연결 중', off: '연결 안 됨', missing: '장치 없음', choose: '어느 X-Touch 인지 고르세요', busy: '다른 곳에서 쓰는 중', denied: '권한 없음', unavailable: '이 주소에서 MIDI 불가' };
+
+/** 여러 대 꽂혔을 때 · 이 로봇에 쓸 X-Touch 고르기 · 이 로봇 주소에 기억 · 2026-10-19 */
+function deviceChooser(changed) {
+  const ports = device.ports || [];
+  if (ports.length < 2 && !['choose', 'missing'].includes(ui.dev.status)) return null;
+  if (!ports.length) return null;
+  const current = device.input?.id || '';
+  return h('div', { class: 'row' },
+    h('label', { class: 'inline' }, `이 로봇(${thisRobotTag()})에 쓸 X-Touch`,
+      h('select', { class: 'select select-sm', 'aria-label': '이 로봇에 쓸 X-Touch',
+        onchange: async (e) => {
+          if (!e.target.value) return;
+          run(session.reset());
+          if (await device.choose(e.target.value)) { ensureLoop(); paintSurface(); }
+          changed();
+        } },
+      h('option', { value: '', selected: !current }, '고르세요'),
+      ports.map((port) => h('option', { value: port.id, selected: port.id === current }, port.name)))),
+    h('span', { class: 'muted small', text: '고르면 이 로봇 주소에 기억합니다 · X-Touch 글씨 칸에 로봇 표시가 뜹니다' }));
+}
 
 function connectCard(state, changed) {
   const unavailable = midiUnavailableReason();
@@ -347,6 +373,7 @@ function connectCard(state, changed) {
           if (await device.connect()) { ensureLoop(); paintSurface(); }
           changed();
         } }, 'X-Touch 연결')),
+    deviceChooser(changed),
     ui.dev.message ? h('p', { class: 'tone-text-warn small', text: ui.dev.message }) : null,
     unavailable ? h('div', { class: 'blocker' }, dot('warn'), h('span', { class: 'grow', text: unavailable })) : null,
     unavailable ? h('ol', { class: 'small muted' },
@@ -356,7 +383,7 @@ function connectCard(state, changed) {
     blocked ? h('div', { class: 'blocker' }, dot('warn'), h('span', { class: 'grow', text: `X-Touch 입력을 무시합니다 · ${blocked}` }),
       blocker?.fix === 'mode-manual' ? h('button', { class: 'btn btn-warn', type: 'button', onclick: () => act.setRunMode('manual') }, '수동 모드로 전환') : null,
       blocker?.fix === 'stop' ? h('button', { class: 'btn btn-warn', type: 'button', onclick: act.stopAll }, '정지') : null) : null,
-    h('p', { class: 'muted small', text: '한 번에 로봇 한 대 · 이 탭이 보일 때만 움직입니다(다른 탭으로 가면 놓고 연결을 끊습니다). SELECT 로 축을 고르면 페이더가 그 축 위치로 가고, 손을 대고 축 값에 맞추면(0.5° 안 또는 지나감) 그때부터 따라갑니다. 손을 떼면 마지막 목표까지 가서 섭니다. 속도·가속도는 조인트 매핑의 최대 값입니다.' }));
+    h('p', { class: 'muted small', text: 'X-Touch 한 대 = 로봇 한 대 · 여러 대를 허브로 꽂으면 로봇 화면마다 쓸 장치를 고릅니다(다른 로봇 화면끼리는 서로 모르니 같은 장치를 고르지 마세요 · 글씨 칸의 로봇 표시로 확인). 이 탭이 보일 때만 움직입니다(다른 탭으로 가면 놓고 연결을 끊습니다). SELECT 로 축을 고르면 페이더가 그 축 위치로 가고, 손을 대고 축 값에 맞추면(0.5° 안 또는 지나감) 그때부터 따라갑니다. 손을 떼면 마지막 목표까지 가서 섭니다. 속도·가속도는 조인트 매핑의 최대 값입니다.' }));
 }
 
 function channelCard(state) {

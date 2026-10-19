@@ -76,6 +76,44 @@ export function looksLikeXTouch(portName) {
   return /x-?touch|behringer/i.test(String(portName || ''));
 }
 
+/**
+ * 여러 대 중 이 로봇에 쓸 X-Touch · 사용자 결정 2026-10-19 (허브로 여러 대 · 로봇마다 하나)
+ * ports · [{id, name}] (연결된 X-Touch 입력) · preferred · 이 로봇 화면이 기억한 {id, name} | null
+ * → {port, status, message} · status ok | choose(여러 대 · 아직 안 고름) | missing(고른 것이 없음) | none
+ * 여러 대인데 고르지 않았으면 **아무것도 열지 않는다** · 엉뚱한 로봇이 움직이지 않게
+ */
+export function pickPort(ports, preferred) {
+  const list = Array.isArray(ports) ? ports : [];
+  if (!list.length) return { port: null, status: 'none', message: 'X-Touch 를 찾지 못했습니다 · USB 를 확인하세요' };
+  if (preferred?.id || preferred?.name) {
+    const byId = list.find((port) => preferred.id && port.id === preferred.id);
+    if (byId) return { port: byId, status: 'ok', message: '' };
+    const byName = list.filter((port) => preferred.name && port.name === preferred.name);
+    if (byName.length === 1) return { port: byName[0], status: 'ok', message: '' };
+    return { port: null, status: 'missing', message: `이 로봇에 고른 X-Touch(${preferred.name || preferred.id})가 없습니다 · 꽂혀 있는지 보고 다시 고르세요` };
+  }
+  if (list.length === 1) return { port: list[0], status: 'ok', message: '' };
+  return { port: null, status: 'choose', message: `X-Touch 가 ${list.length}대 꽂혀 있습니다 · 이 로봇에 쓸 것을 고르세요` };
+}
+
+/** 입력 포트와 같은 장치의 출력 · 이름이 똑같은 것 먼저 · 없으면 같은 순번 · Windows 는 둘째 대가 「2- X-Touch-Ext」 */
+export function matchOutput(input, inputs, outputs) {
+  if (!input) return null;
+  const key = (name) => String(name || '').toLowerCase().replace(/midi(in|out)\d*|[()\s]/g, '');
+  const exact = outputs.find((port) => key(port.name) === key(input.name));
+  if (exact) return exact;
+  const index = inputs.indexOf(input);
+  return index >= 0 && index < outputs.length ? outputs[index] : null;
+}
+
+/** 글씨 칸에 띄울 로봇 표시 · floating3 → f3 · 그 밖은 앞 7 글자 · 어느 X-Touch 가 어느 로봇인지 눈으로 */
+export function robotTag(name) {
+  const text = String(name || '').trim();
+  const floating = /floating[-_]?(\d+)/i.exec(text);
+  if (floating) return `f${floating[1]}`;
+  return text.split('.')[0].slice(0, 7);
+}
+
 /** 페이더 0 ~ 16383 ↔ 조인트 범위 전체(맨 아래 = 최소 · 맨 위 = 최대) · deg */
 export function faderToJoint(lower, upper, value) {
   const ratio = Math.max(0, Math.min(1, Number(value) / FADER_MAX));
