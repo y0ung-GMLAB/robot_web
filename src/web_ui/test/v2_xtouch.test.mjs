@@ -239,3 +239,37 @@ test('여러 대 · 이 로봇이 고른 것 · 한 대면 그것 · 여러 대�
   assert.equal(robotTag('floating12.local'), 'f12');
   assert.equal(robotTag('stage-a.local'), 'stage-a');
 });
+
+test('놓은 뒤 · 축이 아직 따라오는 중이면 페이더를 놓은 자리에 둔다 · 닿으면 다시 따라감 (툭 튀던 것 · 실물 2026-10-19)', () => {
+  const { s, ctx, jointNow } = session({ 1: 5 });
+  s.handle({ kind: 'button', group: 'select', channel: 0, down: true }, ctx());
+  s.handle({ kind: 'touch', channel: 0, down: true }, ctx());
+  s.handle({ kind: 'fader', channel: 0, value: jointToFader(-15, 15, 5) }, ctx());
+  s.handle({ kind: 'fader', channel: 0, value: jointToFader(-15, 15, -10) }, ctx());   // 빠르게 아래로
+  s.tick(ctx({ now: 0 }));
+  s.handle({ kind: 'touch', channel: 0, down: false }, ctx());                          // 바로 놓음
+  jointNow[1] = 3;                                                                      // 축은 아직 위쪽
+  assert.deepEqual(s.tick(ctx({ now: 200 })), [], '위로 안 보낸다');
+  jointNow[1] = -2;
+  assert.deepEqual(s.tick(ctx({ now: 600 })), [], '가는 중에도 그대로');
+  jointNow[1] = -9.8;                                                                   // 닿음(0.5° 안)
+  const near = s.tick(ctx({ now: 1000 }));
+  assert.ok(near.every((a) => Math.abs(a.value - jointToFader(-15, 15, -10)) <= jointToFader(-15, 15, -9.5) - jointToFader(-15, 15, -10)),
+    '닿은 뒤 보정은 놓은 자리 0.5° 안 · 튀지 않음');
+  jointNow[1] = -6;                                                                     // 그 뒤엔 다시 따라감
+  assert.equal(s.tick(ctx({ now: 1200 }))[0]?.type, 'feedback');
+});
+
+test('놓은 자리에 끝내 못 닿으면 8 s 뒤 다시 축을 따라감', async () => {
+  const { SETTLE_MAX_MS } = await import('../static/v2/js/xtouch_model.js');
+  const { s, ctx, jointNow } = session({ 1: 0 });
+  s.handle({ kind: 'button', group: 'select', channel: 0, down: true }, ctx());
+  s.handle({ kind: 'touch', channel: 0, down: true }, ctx());
+  s.handle({ kind: 'fader', channel: 0, value: jointToFader(-15, 15, 0) }, ctx());
+  s.handle({ kind: 'fader', channel: 0, value: jointToFader(-15, 15, 10) }, ctx());
+  s.tick(ctx({ now: 0 }));
+  s.handle({ kind: 'touch', channel: 0, down: false }, ctx());
+  jointNow[1] = 2;                                                                      // 거절 등으로 멈춤
+  assert.deepEqual(s.tick(ctx({ now: 500 })), []);
+  assert.equal(s.tick(ctx({ now: 500 + SETTLE_MAX_MS + 10 }))[0]?.type, 'feedback');
+});

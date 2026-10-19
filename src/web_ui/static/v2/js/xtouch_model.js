@@ -25,6 +25,8 @@ export const NOTE = { rec: 0, solo: 8, mute: 16, select: 24, touch: 104 };
 /** 손 안 댄 페이더를 축 따라 움직이는 간격 · 이만큼 달라졌을 때만 */
 export const FOLLOW_EVERY_MS = 100;
 export const FOLLOW_MIN_STEP = 8;
+/** 놓은 뒤 축이 놓은 자리에 닿기를 기다리는 최대 시간 · 그 뒤엔 다시 축을 따라감 */
+export const SETTLE_MAX_MS = 8000;
 const LCD_CHARS = 7;
 const LCD_BOTTOM = 56;
 
@@ -263,7 +265,14 @@ export class XTouchSession {
     const actions = [];
     const item = this.config[channel];
     if (state.phase === 'live' && state.dirty) actions.push(this.target(channel));
-    if (state.phase === 'live' && Number.isInteger(item?.axis)) actions.push(this.releaseAction(channel));
+    if (state.phase === 'live' && Number.isInteger(item?.axis)) {
+      actions.push(this.releaseAction(channel));
+      // 놓은 자리에 둔다 · 축이 아직 따라오는 중인데 「지금 축 위치」 로 보내면 페이더가 거꾸로 툭 튀었다 (실물 2026-10-19)
+      state.settleGoal = state.goal;
+      state.settleSince = null;
+    }
+    // 장치는 손으로 옮긴 자리를 안다 · 그 자리를 마지막으로 보낸 값으로 친다
+    if (Number.isFinite(state.value)) state.lastFeedback = state.value;
     state.phase = 'ready';
     state.lastFollowAt = 0;
     return actions;
@@ -307,6 +316,12 @@ export class XTouchSession {
       if (state.touched || now - state.lastFollowAt < FOLLOW_EVERY_MS) return;
       const joint = ctx?.jointOf?.(item.axis);
       if (!Number.isFinite(joint)) return;
+      if (state.settleGoal !== null && state.settleGoal !== undefined) {
+        // 놓은 뒤 · 축이 놓은 자리에 닿을 때까지(0.5° 안) 페이더를 그대로 둔다 · 못 닿으면 8 s 뒤 다시 따라감
+        if (state.settleSince === null) state.settleSince = now;
+        if (Math.abs(joint - state.settleGoal) > PICKUP_TOLERANCE_DEG && now - state.settleSince < SETTLE_MAX_MS) return;
+        state.settleGoal = null;
+      }
       const value = jointToFader(item.lower, item.upper, joint);
       if (state.lastFeedback === null || Math.abs(value - state.lastFeedback) >= FOLLOW_MIN_STEP) actions.push(this.feedback(channel, value, now));
     });
@@ -334,7 +349,7 @@ export class XTouchSession {
 function blankChannel() {
   return {
     selected: false, touched: false, phase: 'idle', value: null, goal: null, dirty: false, sent: false,
-    reference: null, lastFeedback: null, lastFollowAt: 0,
+    reference: null, lastFeedback: null, lastFollowAt: 0, settleGoal: null, settleSince: null,
   };
 }
 
