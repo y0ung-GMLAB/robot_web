@@ -41,6 +41,7 @@ let ctx = { state: null, changed: () => {} };
 const session = new XTouchSession();
 const device = new XTouchDevice({
   onEvent: (event) => onDeviceEvent(event),
+  onRaw: (bytes, event) => noteMidi(bytes, event),
   onState: (state) => {
     ui.dev = state;
     if (state.status !== 'ready') run(session.reset());
@@ -107,6 +108,29 @@ function sessionCtx() {
 }
 
 /* ---------- 장치 → 할 일 ---------- */
+
+/** 받은 MIDI 마지막 몇 개 · 채널 하나가 안 먹을 때 무엇이 오는지(오기는 하는지) 보려고 · 2026-10-19 */
+const MIDI_LOG_SIZE = 12;
+const midiLog = [];
+let lastFaderLog = new Map();
+
+function noteMidi(bytes, event) {
+  const hex = bytes.map((b) => b.toString(16).padStart(2, '0')).join(' ');
+  let text;
+  if (!event) text = `모름 · ${hex}`;
+  else if (event.kind === 'fader') text = `페이더 ${event.channel + 1} · ${event.value}`;
+  else if (event.kind === 'touch') text = `페이더 ${event.channel + 1} 터치 ${event.down ? '누름' : '뗌'}`;
+  else text = `${{ rec: 'REC', solo: 'SOLO', mute: 'MUTE', select: 'SELECT' }[event.group]} ${event.channel + 1} ${event.down ? '누름' : '뗌'}`;
+  // 페이더 값은 채널마다 0.3 초에 한 줄만(쏟아져서 다른 것이 밀려나지 않게)
+  if (event?.kind === 'fader') {
+    const now = performance.now();
+    if (now - (lastFaderLog.get(event.channel) || 0) < 300) return;
+    lastFaderLog.set(event.channel, now);
+  }
+  midiLog.unshift(`${new Date().toLocaleTimeString()} · ${text}`);
+  midiLog.length = Math.min(midiLog.length, MIDI_LOG_SIZE);
+  ctx.changed();
+}
 
 function onDeviceEvent(event) {
   // 보이는 탭만 · 다른 탭에서 같은 장치를 받아도 움직이지 않게
@@ -374,6 +398,10 @@ function connectCard(state, changed) {
           changed();
         } }, 'X-Touch 연결')),
     deviceChooser(changed),
+    ui.dev.status === 'ready' ? h('details', { class: 'small' },
+      h('summary', { text: `MIDI 받은 것 (마지막 ${MIDI_LOG_SIZE}개 · 채널 하나가 안 먹을 때 보기)` }),
+      midiLog.length ? h('ul', { class: 'mono small' }, midiLog.map((line) => h('li', { text: line })))
+        : h('p', { class: 'muted small', text: '아직 받은 것 없음 · 페이더·버튼을 만져 보세요' })) : null,
     ui.dev.message ? h('p', { class: 'tone-text-warn small', text: ui.dev.message }) : null,
     unavailable ? h('div', { class: 'blocker' }, dot('warn'), h('span', { class: 'grow', text: unavailable })) : null,
     unavailable ? h('ol', { class: 'small muted' },

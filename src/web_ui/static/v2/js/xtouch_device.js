@@ -40,8 +40,10 @@ export function midiUnavailableReason(win = globalThis) {
 }
 
 export class XTouchDevice {
-  constructor({ onEvent = () => {}, onState = () => {} } = {}) {
+  constructor({ onEvent = () => {}, onState = () => {}, onRaw = () => {} } = {}) {
     this.onEvent = onEvent;
+    // 받은 그대로 · 화면 「MIDI 받은 것」 (진단 · 2026-10-19)
+    this.onRaw = onRaw;
     this.onState = onState;
     this.access = null;
     this.input = null;
@@ -167,6 +169,7 @@ export class XTouchDevice {
     this.deviceId = lcdDeviceId(input.name);
     input.onmidimessage = (message) => {
       const event = parseMidi(message.data);
+      this.onRaw(Array.from(message.data || []), event);
       if (event) this.onEvent(event);
     };
     this.setState({ status: 'ready', name: input.name, message: output ? '' : '보낼 포트가 없어 페이더 모터·불빛이 움직이지 않습니다' });
