@@ -144,6 +144,10 @@ function noteMidi(bytes, event) {
 function onDeviceEvent(event) {
   // 보이는 탭만 · 다른 탭에서 같은 장치를 받아도 움직이지 않게
   if (!location.hash.startsWith(ROUTE)) { diag('hidden', '무시 · X-Touch 화면이 아님', 1000); return; }
+  // 받은 페이더 값을 그대로 돌려보낸다(Mackie Control 호스트 방식) · X-Touch 는 손을 떼면 모터 페이더를 「호스트가 마지막으로
+  // 보낸 위치」 로 되돌린다 · 전에는 안 돌려보내서 놓을 때마다 마지막 SELECT 위치로 휙 돌아갔다 (floating4 실물 2026-10-19 18:02 ·
+  // SELECT 때 보낸 10252 로 되돌아감) · 채널마다 · 선택 안 한 채널도
+  if (event.kind === 'fader') device.send(faderMessage(event.channel, event.value));
   const context = sessionCtx();
   run(session.handle(event, context));
   if (event.kind === 'fader') {
