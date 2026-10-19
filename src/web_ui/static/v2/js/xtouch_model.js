@@ -27,14 +27,19 @@ export const FOLLOW_EVERY_MS = 100;
 export const FOLLOW_MIN_STEP = 8;
 /** 놓은 뒤 축이 놓은 자리에 닿기를 기다리는 최대 시간 · 그 뒤엔 다시 축을 따라감 */
 export const SETTLE_MAX_MS = 8000;
-/** 터치 신호 없이 움직이면 손으로 침 · 내가 보낸 값이 되돌아온 것은 빼고(보낸 뒤 이 시간 안 · 이만큼 가까우면) */
-export const ECHO_WINDOW_MS = 1000;
-/** 움직임으로 친 터치 · 이만큼 안 움직이면 놓은 것으로 */
-export const MOVE_RELEASE_MS = 500;
-/** 조종 중 터치 「뗌」 · 이만큼 다시 안 닿고 안 움직여야 놓은 것 (터치 끊김 · 2026-10-19) */
-export const TOUCH_RELEASE_DEBOUNCE_MS = 200;
-/** 손으로 움직인 뒤 이만큼은 페이더를 축 위치로 되돌려 보내지 않음 */
+/**
+ * 손 판정 · 터치 신호를 믿지 않는다 · floating4 실물 2026-10-19 · 이 X-Touch 는 손을 댄 채로도 「뗌」 이 오고(1·4번 ·
+ * 미는 도중 0.4 s 마다) 5번은 터치 신호가 아예 안 온다 → 전에는 미는 중에 놓고 페이더를 원래 자리로 되돌려 보냈고,
+ * 그 뒤 움직임을 무시해 「조작이 안 됨」.
+ *   손이 있음 = 터치 「누름」 상태 또는 HAND_RELEASE_MS 안에 페이더가 움직임
+ *   놓음      = 터치도 없고 HAND_RELEASE_MS 동안 안 움직임 · 그 뒤 HAND_QUIET_MS 는 되돌려 보내지 않음
+ * 내가 보낸 값 그대로(±ECHO_STEP · 손을 대면 장치가 지금 자리를 알려 줌)는 움직임이 아니다.
+ */
+export const HAND_RELEASE_MS = 500;
 export const HAND_QUIET_MS = 600;
+export const ECHO_STEP = 16;
+/** 터치 「누름」 인데 이만큼 안 움직이면 놓은 것으로(뗌 신호를 못 받은 채 남는 것 막기) */
+export const TOUCH_STALE_MS = 5000;
 const LCD_CHARS = 7;
 const LCD_BOTTOM = 56;
 
@@ -178,8 +183,6 @@ export class XTouchSession {
     this.config = new Array(CHANNELS).fill(null);
     this.channels = Array.from({ length: CHANNELS }, () => blankChannel());
     this.punchIds = new Set();
-    // 터치 신호를 한 번이라도 보낸 채널 · 그 채널은 터치 신호만 믿는다(움직임으로 치지 않음) · 2026-10-19
-    this.touchSeen = new Array(CHANNELS).fill(false);
   }
 
   /** 바탕 위 녹화 · 덮어쓸 수 있는 조인트 이름들 · 빈 목록 = 보통 */
@@ -233,11 +236,7 @@ export class XTouchSession {
     if (!event) return [];
     if (event.kind === 'button' && event.group === 'rec') return event.down ? [{ type: 'record-toggle' }] : [];
     if (event.kind === 'button' && event.group === 'select') return event.down ? this.toggleSelect(event.channel, ctx) : [];
-    if (event.kind === 'touch') {
-      // 진짜 터치 신호 · 이 채널은 앞으로 터치 신호만 믿는다
-      this.touchSeen[event.channel] = true;
-      return this.touchEvent(event.channel, event.down, Number(ctx?.now ?? 0));
-    }
+    if (event.kind === 'touch') return this.touchEvent(event.channel, event.down, Number(ctx?.now ?? 0));
     if (event.kind === 'fader') return this.fader(event.channel, event.value, ctx);
     return [];
   }
@@ -267,41 +266,35 @@ export class XTouchSession {
     return actions;
   }
 
-  /**
-   * 진짜 터치 신호 · 조종 중 「뗌」 은 바로 놓지 않는다 · 0.2 s 안에 다시 닿거나 페이더가 계속 움직이면 이어서 조종 ·
-   * 실물 2026-10-19 floating4 4번 페이더 · 미는 도중 터치가 0.4 s 마다 끊겼다 붙음(뗌 → 20~30 ms 뒤 누름) ·
-   * 전에는 끊길 때마다 놓고 「맞추는 중」 부터 다시라 축이 멈춰 있고, 놓을 때 페이더를 그 축 위치(반대편)로 되돌려 보냈다
-   */
+  /** 터치 신호 · 「누름」 은 손 · 「뗌」 은 그것만으로 놓지 않는다(tick 이 움직임까지 보고 정함) */
   touchEvent(channel, down, now) {
     const state = this.channels[channel];
-    state.movedTouch = false;
+    state.touchDown = down;
     if (down) {
-      if (state.releaseAt !== null && state.releaseAt !== undefined) {
-        state.releaseAt = null;          // 끊겼다 다시 닿음 · 조종 그대로
-        state.touched = true;
-        return [];
-      }
-      return this.touch(channel, true);
+      state.touchAt = now;
+      if (!state.touched) this.grab(channel, now);
     }
-    if (state.selected && state.phase === 'live') {
-      state.releaseAt = now + TOUCH_RELEASE_DEBOUNCE_MS;   // 손은 아직 닿은 것으로 · tick 이 확정
-      return [];
-    }
-    return this.touch(channel, false);
+    return [];
   }
 
-  touch(channel, down) {
+  /** 손이 닿음 · 조종 중이 아니면 「맞추는 중」 부터 */
+  grab(channel, now) {
     const state = this.channels[channel];
-    state.touched = down;
-    state.releaseAt = null;
-    // 진짜 터치 신호가 오면 그것을 따른다 · 움직임으로 친 터치는 끝
-    state.movedTouch = false;
-    if (!state.selected) return [];
-    if (down) {
+    state.touched = true;
+    state.lastHandAt = now;
+    if (state.selected && state.phase !== 'live') {
       state.phase = 'pickup';
       state.reference = null;
-      return [];
     }
+  }
+
+  /** 손이 떠남 · 마지막 목표 보내고 놓음 · 페이더는 놓은 자리에(축이 닿을 때까지) */
+  release(channel, now = 0) {
+    const state = this.channels[channel];
+    state.touched = false;
+    state.touchDown = false;
+    state.lastHandAt = now;
+    if (!state.selected) return [];
     const actions = [];
     const item = this.config[channel];
     if (state.phase === 'live' && state.dirty) actions.push(this.target(channel));
@@ -318,29 +311,29 @@ export class XTouchSession {
     return actions;
   }
 
+  /** 옛 이름 · 시험·다른 곳 · down 이면 손 닿음 · 아니면 바로 놓음 */
+  touch(channel, down, now = 0) {
+    if (down) {
+      this.channels[channel].touchDown = true;
+      this.grab(channel, now);
+      return [];
+    }
+    return this.release(channel, now);
+  }
+
   fader(channel, value, ctx) {
     const state = this.channels[channel];
     const item = this.config[channel];
     const previous = state.value;
     state.value = value;
     const now = Number(ctx?.now ?? 0);
-    // 터치 신호 없이 움직임 · 사람 손으로 친다(전신과 같음) · 실물 2026-10-19 floating4 5번 페이더는 터치 신호가 아예 안 옴 ·
-    // 터치 신호를 보내는 채널에는 안 쓴다 · 보낸 뒤 1 s 는 모터가 가는 중이라 그 사이 값(중간 위치 포함)은 손이 아니다 ·
-    // 전에는 보낸 값 근처만 걸러 중간 위치가 손으로 잡히고 로봇·페이더가 서로 쫓으며 튀었다 (실물 2026-10-19)
-    if (state.selected && item && !state.touched && !this.touchSeen[channel]) {
-      const echo = state.lastFeedback !== null && now - state.lastFollowAt < ECHO_WINDOW_MS;
-      if (!echo) {
-        state.touched = true;
-        state.movedTouch = true;
-        state.phase = 'pickup';
-        state.reference = null;
-      }
+    // 움직임 = 손 · 내가 보낸 값 그대로(손을 대면 장치가 지금 자리를 알려 줌)는 움직임이 아님
+    const echo = !state.touched && state.lastFeedback !== null && Math.abs(value - state.lastFeedback) <= ECHO_STEP;
+    if (!echo) {
+      state.lastMoveAt = now;
+      if (!state.touched) this.grab(channel, now);
+      state.lastHandAt = now;
     }
-    if (state.movedTouch) state.lastMoveAt = now;
-    // 손으로 움직인 때 · 이 뒤 잠깐은 페이더를 되돌려 보내지 않는다 · 「뗌」 을 기다리는 중이면 계속 움직이는 것 = 아직 손
-    if (state.touched) state.lastHandAt = now;
-    if (state.releaseAt !== null && state.releaseAt !== undefined) state.releaseAt = now + TOUCH_RELEASE_DEBOUNCE_MS;
-    // 손 안 댄 움직임(내가 보낸 것)은 조종에 쓰지 않는다
     if (!state.selected || !state.touched || !item) return [];
     if (ctx?.blocked) return [];
     const joint = faderToJoint(item.lower, item.upper, value);
@@ -369,20 +362,17 @@ export class XTouchSession {
     this.channels.forEach((state, channel) => {
       const item = this.config[channel];
       if (!item || (!state.selected && !this.isPunch(channel))) return;
-      // 움직임으로 친 터치 · 0.5 초 안 움직이면 놓은 것으로
-      if (state.movedTouch && now - state.lastMoveAt > MOVE_RELEASE_MS) {
-        actions.push(...this.touch(channel, false));
-        return;
-      }
-      // 「뗌」 이 0.2 s 동안 다시 안 닿고 페이더도 안 움직였으면 정말 놓은 것
-      if (state.releaseAt !== null && state.releaseAt !== undefined && now >= state.releaseAt) {
-        actions.push(...this.touch(channel, false));
+      // 손이 떠남 · 터치도 없고 0.5 s 동안 안 움직임 · 터치 「누름」 이 남아 있어도 5 s 안 움직이면
+      const idle = now - (state.lastMoveAt ?? -Infinity);
+      if (state.touched && ((!state.touchDown && idle > HAND_RELEASE_MS) || idle > TOUCH_STALE_MS)) {
+        actions.push(...this.release(channel, now));
         return;
       }
       if (state.phase === 'live' && state.dirty) actions.push(this.target(channel));
+      // 페이더를 축 따라 움직이는 것은 바탕 위 녹화의 바탕 조인트(재생 따라감)만 · 보통 조종은 SELECT 때 한 번뿐 ·
+      // 놓으면 로봇이 페이더 자리로 가므로 되돌릴 이유가 없다 · 전에는 놓을 때마다 되돌려 「원래 자리로 휙」 (사용자 2026-10-19)
+      if (!this.isPunch(channel)) return;
       if (state.touched || now - state.lastFollowAt < FOLLOW_EVERY_MS) return;
-      // 방금 손으로 움직인 페이더는 되돌려 보내지 않는다
-      if (now - (state.lastHandAt || -Infinity) < HAND_QUIET_MS) return;
       const joint = ctx?.jointOf?.(item.axis);
       if (!Number.isFinite(joint)) return;
       if (state.settleGoal !== null && state.settleGoal !== undefined) {
@@ -391,6 +381,8 @@ export class XTouchSession {
         if (Math.abs(joint - state.settleGoal) > PICKUP_TOLERANCE_DEG && now - state.settleSince < SETTLE_MAX_MS) return;
         state.settleGoal = null;
       }
+      // 방금 손으로 움직인 페이더는 되돌려 보내지 않는다
+      if (now - (state.lastHandAt ?? -Infinity) < HAND_QUIET_MS) return;
       const value = jointToFader(item.lower, item.upper, joint);
       if (state.lastFeedback === null || Math.abs(value - state.lastFeedback) >= FOLLOW_MIN_STEP) actions.push(this.feedback(channel, value, now));
     });
@@ -419,7 +411,7 @@ function blankChannel() {
   return {
     selected: false, touched: false, phase: 'idle', value: null, goal: null, dirty: false, sent: false,
     reference: null, lastFeedback: null, lastFollowAt: 0, settleGoal: null, settleSince: null,
-    movedTouch: false, lastMoveAt: 0, releaseAt: null, lastHandAt: null,
+    touchDown: false, touchAt: null, lastMoveAt: null, lastHandAt: null,
   };
 }
 

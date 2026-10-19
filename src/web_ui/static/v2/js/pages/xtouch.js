@@ -149,7 +149,7 @@ function onDeviceEvent(event) {
     // 왜 안 먹나 · 채널 상태 · 0.5 s 에 한 줄
     const ch = session.channels[event.channel];
     const item = session.config[event.channel];
-    diag(`st${event.channel}`, `상태 페이더 ${event.channel + 1} 선택 ${ch.selected ? 'O' : 'X'} 손 ${ch.touched ? (ch.movedTouch ? '움직임' : '터치') : 'X'} `
+    diag(`st${event.channel}`, `상태 페이더 ${event.channel + 1} 선택 ${ch.selected ? 'O' : 'X'} 손 ${ch.touched ? (ch.touchDown ? '터치' : '움직임') : 'X'} `
       + `단계 ${ch.phase} 축값 ${item ? (context.jointOf(item.axis) ?? 'null') : '연결없음'} 막힘 ${context.blocked || '없음'} 연결 ${stream.isOpen() ? 'O' : 'X'}`, 500);
   }
 }
