@@ -131,3 +131,13 @@ def test_override_field_list_matches_the_editable_screen_fields():
         'speed', 'acceleration', 'deceleration',
         'profile_velocity', 'profile_acceleration', 'profile_deceleration',
     }
+
+
+def test_rated_power_is_gone_and_old_files_drop_it_on_the_next_save():
+    """정격 출력(`rated_power_w`)은 어디서도 안 읽는다 · 새 설정에 안 넣고 옛 파일 값은 다음 저장 때 뺀다 (사용자 2026-10-19)"""
+    assert 'rated_power_w' not in default_motor_config(WORKSPACE)['drivers'][0]
+    old = default_motor_config(WORKSPACE)
+    old['drivers'][0]['rated_power_w'] = 50
+    config = _build([_motor(0), _motor(1)], current=old)
+    assert config['drivers']
+    assert all('rated_power_w' not in driver for driver in config['drivers'])

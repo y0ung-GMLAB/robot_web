@@ -46,6 +46,11 @@ def dynamixel_param_file_for_model(workspace_root: Path, driver_model: str) -> s
     return str(workspace_root / 'config/dynamixel_xm540_w270.yaml')
 
 
+#: 더 안 쓰는 드라이버 칸 · 옛 파일에 남아 있으면 다음 저장 때 뺀다
+#: `rated_power_w` · 정격 출력 · 어디서도 안 읽고 이전 화면 표시에만 나와 틀린 값(템플릿 50 W)이 그대로 보였다 (사용자 2026-10-19)
+OBSOLETE_DRIVER_KEYS = ('rated_power_w',)
+
+
 def normalize_driver_configs(
     workspace_root: Path, drivers: List[Dict[str, Any]]
 ) -> List[Dict[str, Any]]:
@@ -54,7 +59,7 @@ def normalize_driver_configs(
         if not isinstance(driver, dict):
             normalized.append(driver)
             continue
-        item = dict(driver)
+        item = {key: value for key, value in driver.items() if key not in OBSOLETE_DRIVER_KEYS}
         if str(item.get('type') or '') == 'dynamixel':
             item['param_file'] = dynamixel_param_file_for_model(
                 workspace_root, str(item.get('driver_model') or '')
@@ -123,7 +128,6 @@ def default_motor_config(workspace_root: Path) -> Dict[str, Any]:
                 'rated_effort': 0.16,
                 'unit_effort': 0.1,
                 'rated_current': 1.1,
-                'rated_power_w': 50,
                 'rated_speed_rpm': 3000,
                 'lower': -36000.0,
                 'upper': 36000.0,

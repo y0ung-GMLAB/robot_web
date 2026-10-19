@@ -452,7 +452,6 @@ class StatePublisher:
                 'transport': metadata.get('transport', 'unknown'),
                 'transport_label': metadata.get('transport_label', 'Unknown'),
                 'driver_model': metadata.get('driver_model', ''),
-                'rated_power_w': metadata.get('rated_power_w'),
                 'ethercat_alias': metadata.get('alias'),
                 'ethercat_master_index': metadata.get('ethercat_master_index', 0),
                 'slave_position': metadata.get('slave_position'),
@@ -474,7 +473,6 @@ class StatePublisher:
                 'transport_label': motor.get('transport_label', 'Unknown'),
                 'driver_model': motor.get('driver_model', ''),
                 'driver_name': motor.get('driver_name', ''),
-                'rated_power_w': motor.get('rated_power_w'),
                 'ethercat_alias': motor.get('alias'),
                 'ethercat_master_index': motor.get(
                     'ethercat_master_index',

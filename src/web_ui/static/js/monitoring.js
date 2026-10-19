@@ -80,19 +80,6 @@ function displayMotorTypeText(motor) {
     : motorFilterLabel(key));
 }
 
-function powerText(motor) {
-  if (motor.rated_power_w === null || motor.rated_power_w === undefined || Number.isNaN(Number(motor.rated_power_w))) {
-    return '-';
-  }
-  return `${formatInt(motor.rated_power_w)}W`;
-}
-
-function driverText(motor, rawMode) {
-  const name = motor.driver_name || motor.driver_model || '-';
-  const power = powerText(motor);
-  return rawMode ? displayText(power) : displayText(name);
-}
-
 /** 연결 ID · 숫자만 쓰면 「모터 번호」와 헷갈린다 · 무슨 번호인지 이름을 붙인다 (2026-10-02)
  *
  * AC 서보 · `Alias 3` · Alias 0(안 정함)은 모두 같아 보이므로 랜선 위치를 덧붙인다 `Alias 0 · Slave 2`
@@ -510,7 +497,6 @@ function detailRowsForTab(motor, tab, rawMode) {
       ['프로파일 감속도', numberUnit(motor.profile_deceleration, 3, 'deg/s²')],
       ['정격 토크', numberUnit(motor.rated_torque_nm, 4, 'Nm')],
       ['정격 전류', numberUnit(motor.rated_current_a, 4, 'A')],
-      ['정격 출력', numberUnit(motor.rated_power_w, 0, 'W')],
       ['정격 속도', numberUnit(motor.rated_speed_rpm, 0, 'rpm')],
       ['회전당 펄스', integerUnit(motor.pulse_per_revolution, 'count/rev')],
     ];
