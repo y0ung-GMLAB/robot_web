@@ -2,7 +2,7 @@
  *
  * X-Touch 는 이 화면을 연 PC 에 USB · 브라우저가 Web MIDI 로 읽고 쓴다(xtouch_device.js) ·
  * 페이더 값은 수동 페이더와 같은 소켓 · 출처 `xtouch` · 서버가 조인트 매핑 최대 속도·가속도로 따라간다(빈 축은 거절) ·
- * 수동 모드에서만 · 한 번에 로봇 한 대 · 이 탭이 보일 때만(다른 탭으로 가면 놓고 연결을 끊는다).
+ * 수동 모드에서만 · 한 번에 로봇 한 대 · 창이 가려지거나 다른 탭이어도 그대로(X-Touch 화면을 떠나면 끊음 · 2026-10-19).
  *
  * 녹화 · 화면 버튼 또는 X-Touch REC · 3초 뒤 시작 · 선택(SELECT)한 축만 · 로봇 쪽이 램프 뒤 명령값을 기록 ·
  * 정지하면 애니메이션 목록에 저장(같은 이름이면 _2 · _3) · 화면이 끊기면 끊긴 순간까지 자동 저장.
@@ -43,6 +43,7 @@ const device = new XTouchDevice({
   onEvent: (event) => onDeviceEvent(event),
   onRaw: (bytes, event) => noteMidi(bytes, event),
   onState: (state) => {
+    if (state.status !== ui.dev.status) diag('dev', `장치 ${ui.dev.status} → ${state.status} ${state.name || ''} ${state.message || ''}`);
     ui.dev = state;
     if (state.status !== 'ready') run(session.reset());
     else paintSurface();
@@ -142,7 +143,7 @@ function noteMidi(bytes, event) {
 
 function onDeviceEvent(event) {
   // 보이는 탭만 · 다른 탭에서 같은 장치를 받아도 움직이지 않게
-  if (document.hidden || !location.hash.startsWith(ROUTE)) { diag('hidden', '무시 · 탭이 안 보임', 1000); return; }
+  if (!location.hash.startsWith(ROUTE)) { diag('hidden', '무시 · X-Touch 화면이 아님', 1000); return; }
   const context = sessionCtx();
   run(session.handle(event, context));
   if (event.kind === 'fader') {
@@ -157,11 +158,14 @@ function onDeviceEvent(event) {
 /** 진단 · 받은 것·보낸 것을 로봇 기록으로(1 s 마다 묶어) · 화면 밖에서 원인을 보려고 · 2026-10-19 */
 const diagQueue = [];
 const diagLast = new Map();
+/** 화면 하나마다 다른 표 · 같은 로봇 화면이 여럿 열려 있으면 기록에서 가른다 */
+const PAGE_ID = Math.random().toString(36).slice(2, 6);
+
 function diag(key, text, throttleMs = 0) {
   const now = performance.now();
   if (throttleMs && now - (diagLast.get(key) || 0) < throttleMs) return;
   diagLast.set(key, now);
-  if (diagQueue.length < 400) diagQueue.push(`${Math.round(now)} ${text}`);
+  if (diagQueue.length < 400) diagQueue.push(`[${PAGE_ID}] ${Math.round(now)} ${text}`);
 }
 
 function run(actions) {
@@ -231,27 +235,45 @@ function paintLcd(force = false) {
 
 /* ---------- 주기 ---------- */
 
+/**
+ * 주기는 Web Worker 타이머로 · 창이 가려지거나 다른 탭이어도 느려지지 않게 · 2026-10-19 floating4 실물 ·
+ * 크롬은 가려진 창도 「안 보임」 으로 치고 그 창의 타이머를 1 s(5 분 뒤 1 분)로 늦춘다 · 전에는 안 보이면 연결을 끊어
+ * 다른 창(VS Code 등)을 띄우는 순간 선택이 다 풀리고 X-Touch 포트가 닫혀 페이더가 내려갔다
+ */
+function makeTicker(callback) {
+  try {
+    const source = `let t=null;onmessage=(e)=>{clearInterval(t);if(e.data>0)t=setInterval(()=>postMessage(0),e.data);}`;
+    const worker = new Worker(URL.createObjectURL(new Blob([source], { type: 'text/javascript' })));
+    worker.onmessage = callback;
+    worker.postMessage(TICK_MS);
+    return { stop: () => { worker.postMessage(0); worker.terminate(); } };
+  } catch {
+    const timer = setInterval(callback, TICK_MS);
+    return { stop: () => clearInterval(timer) };
+  }
+}
+
 function ensureLoop() {
   if (loop) return;
-  loop = setInterval(tick, TICK_MS);
+  loop = makeTicker(tick);
 }
 
 function teardown(reason = '') {
+  diag('teardown', `X-Touch 끊음 · ${reason || 'X-Touch 화면을 떠남 또는 「연결 끊기」'} · 주소 ${location.hash}`);
   run(session.reset());
   paintSurface();
   stream.close();
   device.disconnect();
-  if (loop) { clearInterval(loop); loop = null; }
+  if (loop) { loop.stop(); loop = null; }
   if (reason) ui.message = reason;
 }
 
+let lastHidden = false;
+
 function tick() {
   if (!location.hash.startsWith(ROUTE)) { teardown(); return; }
-  if (document.hidden) {
-    if (device.state.status !== 'off') teardown('다른 탭으로 가서 X-Touch 연결을 끊었습니다 · 녹화 중이었다면 그 순간까지 저장됐습니다');
-    ctx.changed();
-    return;
-  }
+  // 가려지거나 다른 탭이어도 그대로 쓴다 · 기록만
+  if (document.hidden !== lastHidden) { lastHidden = document.hidden; diag('vis', document.hidden ? '창 안 보임(가려짐·다른 탭) · 계속 씀' : '창 보임'); }
   const now = performance.now();
   const blocked = blockedText(ctx.state);
   if (blocked !== lastBlocked) { diag('blk', `막힘 바뀜 · ${blocked || '없음'}`); lastBlocked = blocked; }
@@ -449,7 +471,7 @@ function connectCard(state, changed) {
     blocked ? h('div', { class: 'blocker' }, dot('warn'), h('span', { class: 'grow', text: `X-Touch 입력을 무시합니다 · ${blocked}` }),
       blocker?.fix === 'mode-manual' ? h('button', { class: 'btn btn-warn', type: 'button', onclick: () => act.setRunMode('manual') }, '수동 모드로 전환') : null,
       blocker?.fix === 'stop' ? h('button', { class: 'btn btn-warn', type: 'button', onclick: act.stopAll }, '정지') : null) : null,
-    h('p', { class: 'muted small', text: 'X-Touch 한 대 = 로봇 한 대 · 여러 대를 허브로 꽂으면 로봇 화면마다 쓸 장치를 고릅니다(다른 로봇 화면끼리는 서로 모르니 같은 장치를 고르지 마세요 · 글씨 칸의 로봇 표시로 확인). 이 탭이 보일 때만 움직입니다(다른 탭으로 가면 놓고 연결을 끊습니다). SELECT 로 축을 고르면 페이더가 그 축 위치로 가고, 손을 대고 축 값에 맞추면(0.5° 안 또는 지나감) 그때부터 따라갑니다. 손을 떼면 마지막 목표까지 가서 섭니다. 속도·가속도는 조인트 매핑의 최대 값입니다.' }));
+    h('p', { class: 'muted small', text: 'X-Touch 한 대 = 로봇 한 대 · 여러 대를 허브로 꽂으면 로봇 화면마다 쓸 장치를 고릅니다(다른 로봇 화면끼리는 서로 모르니 같은 장치를 고르지 마세요 · 글씨 칸의 로봇 표시로 확인). 창이 가려지거나 다른 탭으로 가도 그대로 움직입니다(X-Touch 화면을 떠나면 끊습니다). SELECT 로 축을 고르면 페이더가 그 축 위치로 가고, 손을 대고 축 값에 맞추면(0.5° 안 또는 지나감) 그때부터 따라갑니다. 손을 떼면 마지막 목표까지 가서 섭니다. 속도·가속도는 조인트 매핑의 최대 값입니다.' }));
 }
 
 function channelCard(state) {
