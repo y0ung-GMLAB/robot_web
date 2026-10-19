@@ -110,9 +110,11 @@ def xtouch_limits(
         row_acceleration = float(joint_mapping.rate(row, 'max_acceleration')) * gain_value
         velocity = row_velocity if velocity is None else min(velocity, row_velocity)
         acceleration = row_acceleration if acceleration is None else min(acceleration, row_acceleration)
+    # 상한에 딱 맞추면 녹화 파일이 반올림만으로 재생 검사를 넘는다 · 2 % 아래로
+    ratio = manual_speed.XTOUCH_LIMIT_RATIO
     return {
-        manual_speed.VELOCITY_FIELD: float(velocity),
-        manual_speed.ACCELERATION_FIELD: float(acceleration),
+        manual_speed.VELOCITY_FIELD: float(velocity) * ratio,
+        manual_speed.ACCELERATION_FIELD: float(acceleration) * ratio,
     }, ''
 
 

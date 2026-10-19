@@ -2,7 +2,7 @@
  *
  * X-Touch 는 이 화면을 연 PC 에 USB · 브라우저가 Web MIDI 로 읽고 쓴다(xtouch_device.js) ·
  * 페이더 값은 수동 페이더와 같은 소켓 · 출처 `xtouch` · 서버가 조인트 매핑 최대 속도·가속도로 따라간다(빈 축은 거절) ·
- * 수동 모드에서만 · 한 번에 로봇 한 대 · 이 탭이 보일 때만(다른 탭으로 가면 놓고 연결을 끊는다).
+ * 수동 모드에서만 · 한 번에 로봇 한 대 · 창이 가려지거나 다른 탭이어도 그대로(X-Touch 화면을 떠나면 끊음 · 2026-10-19).
  *
  * 녹화 · 화면 버튼 또는 X-Touch REC · 3초 뒤 시작 · 선택(SELECT)한 축만 · 로봇 쪽이 램프 뒤 명령값을 기록 ·
  * 정지하면 애니메이션 목록에 저장(같은 이름이면 _2 · _3) · 화면이 끊기면 끊긴 순간까지 자동 저장.
@@ -13,7 +13,7 @@
  */
 import { h, dot } from '../dom.js';
 import { api } from '../net.js';
-import { toast } from '../dialog.js';
+import { confirmBox, toast } from '../dialog.js';
 import * as act from '../actions.js';
 import { ManualStream } from '../manual_stream.js';
 import { jointToMotor, motorForRow, motorRefFor, motorToJoint, previewRow, rowToDraft } from '../mapping_model.js';
@@ -21,7 +21,8 @@ import { fileInfo, signedDeg } from '../play_model.js';
 import { manualBlocker } from './manual.js';
 import { MIDI_FLAG_URL, XTouchDevice, midiUnavailableReason } from '../xtouch_device.js';
 import {
-  CHANNELS, PHASE_LABEL, XTouchSession, channelConfig, faderMessage, lcdMessages, ledMessage, recordLed,
+  CHANNELS, DEFAULT_SMOOTH_SEC, LCD_WHITE, PHASE_LABEL, SMOOTH_LEVELS, XTouchSession, channelConfig, faderMessage, lcdColorMessage,
+  lcdMessages, ledMessage, recordLed, robotTag,
 } from '../xtouch_model.js';
 
 const DEG = 180 / Math.PI;
@@ -31,17 +32,51 @@ const PING_MS = 500;
 /** 이만큼 아무것도 안 오면 서버가 끊긴 것으로 본다(무선 멈춤) · 화면은 0.5 s 마다 ping */
 const WATCHDOG_SEC = 2;
 const ROUTE = '#/xtouch';
+/**
+ * 스무딩 · 조인트마다 · 이 브라우저에 기억(로봇 주소마다 다른 저장소) · 사용자 결정 2026-10-19 「조인트별로 고를 수 있게」 ·
+ * 고른 적 없는 조인트는 기본(0.25 s) · 전에 하나로 고른 값(`rw.xtouch.smooth_sec`)이 있으면 그것
+ */
+const SMOOTH_KEY = 'rw.xtouch.smooth_by_joint';
+const OLD_SMOOTH_KEY = 'rw.xtouch.smooth_sec';
+const isLevel = (value) => SMOOTH_LEVELS.some((level) => level.sec === value);
+
+function loadSmooth() {
+  const out = { fallback: DEFAULT_SMOOTH_SEC, joints: {} };
+  try {
+    const old = globalThis.localStorage?.getItem(OLD_SMOOTH_KEY);
+    if (old !== null && old !== undefined && isLevel(Number(old))) out.fallback = Number(old);
+    const saved = JSON.parse(globalThis.localStorage?.getItem(SMOOTH_KEY) || 'null');
+    if (saved && typeof saved === 'object') {
+      for (const [id, value] of Object.entries(saved)) if (isLevel(Number(value))) out.joints[id] = Number(value);
+    }
+  } catch { /* 기본값 */ }
+  return out;
+}
+
+function smoothFor(motionId) {
+  return ui.smooth.joints[motionId] ?? ui.smooth.fallback;
+}
+
+function setSmooth(motionId, value) {
+  ui.smooth.joints[motionId] = value;
+  try { globalThis.localStorage?.setItem(SMOOTH_KEY, JSON.stringify(ui.smooth.joints)); } catch { /* 이번만 */ }
+}
 
 const ui = {
   rows: null, fileId: '', revision: '', message: '', name: '', base: '', files: [], lastResultAt: 0,
   record: { state: 'idle' }, recordAt: 0, lastSaved: null,
   dev: { status: 'off', name: '', message: '' },
+  smooth: loadSmooth(),
+  /** 같은 이름이면 덮어쓰기 · 기억하지 않음(화면을 열 때마다 끔) · 사용자 2026-10-19 */
+  overwrite: false,
 };
 let ctx = { state: null, changed: () => {} };
 const session = new XTouchSession();
 const device = new XTouchDevice({
   onEvent: (event) => onDeviceEvent(event),
+  onRaw: (bytes, event) => noteMidi(bytes, event),
   onState: (state) => {
+    if (state.status !== ui.dev.status) diag('dev', `장치 ${ui.dev.status} → ${state.status} ${state.name || ''} ${state.message || ''}`);
     ui.dev = state;
     if (state.status !== 'ready') run(session.reset());
     else paintSurface();
@@ -50,9 +85,14 @@ const device = new XTouchDevice({
 });
 const stream = new ManualStream({
   onResult: (result) => {
-    if (result.success === false && result.message) { ui.message = result.message; ctx.changed(); }
+    if (result.success === false && result.message) {
+      diag('reject', `거절 ${result.axis ?? ''} ${String(result.message).slice(0, 140)}`);
+      ui.message = result.message;
+      ctx.changed();
+    }
   },
   onClose: (reason) => {
+    diag('close', `로봇 연결 닫힘 ${reason || '(이유 없음)'} · 선택 ${session.selectedAxes().join(',') || '없음'} 놓음`);
     if (reason) ui.message = reason;
     run(session.reset());
     ctx.changed();
@@ -63,6 +103,7 @@ const stream = new ManualStream({
   },
 });
 let loop = null;
+let lastBlocked = null;
 let lastPing = 0;
 let lastOpenTry = 0;
 let lastLcd = '';
@@ -108,23 +149,80 @@ function sessionCtx() {
 
 /* ---------- 장치 → 할 일 ---------- */
 
+/** 받은 MIDI 마지막 몇 개 · 채널 하나가 안 먹을 때 무엇이 오는지(오기는 하는지) 보려고 · 2026-10-19 */
+const MIDI_LOG_SIZE = 12;
+const midiLog = [];
+let lastFaderLog = new Map();
+
+function noteMidi(bytes, event) {
+  const hex = bytes.map((b) => b.toString(16).padStart(2, '0')).join(' ');
+  let text;
+  if (!event) text = `모름 · ${hex}`;
+  else if (event.kind === 'fader') text = `페이더 ${event.channel + 1} · ${event.value}`;
+  else if (event.kind === 'touch') text = `페이더 ${event.channel + 1} 터치 ${event.down ? '누름' : '뗌'}`;
+  else text = `${{ rec: 'REC', solo: 'SOLO', mute: 'MUTE', select: 'SELECT' }[event.group]} ${event.channel + 1} ${event.down ? '누름' : '뗌'}`;
+  if (event?.kind === 'fader') diag(`inf${event.channel}`, `받음 페이더 ${event.channel + 1} ${event.value}`, 100);
+  // 페이더 값은 채널마다 0.3 초에 한 줄만(쏟아져서 다른 것이 밀려나지 않게)
+  if (event?.kind === 'fader') {
+    const now = performance.now();
+    if (now - (lastFaderLog.get(event.channel) || 0) < 300) return;
+    lastFaderLog.set(event.channel, now);
+  }
+  if (event?.kind !== 'fader') diag('in', `받음 ${text}`);
+  midiLog.unshift(`${new Date().toLocaleTimeString()} · ${text}`);
+  midiLog.length = Math.min(midiLog.length, MIDI_LOG_SIZE);
+  ctx.changed();
+}
+
 function onDeviceEvent(event) {
   // 보이는 탭만 · 다른 탭에서 같은 장치를 받아도 움직이지 않게
-  if (document.hidden || !location.hash.startsWith(ROUTE)) return;
-  run(session.handle(event, sessionCtx()));
+  if (!location.hash.startsWith(ROUTE)) { diag('hidden', '무시 · X-Touch 화면이 아님', 1000); return; }
+  // 받은 페이더 값을 그대로 돌려보낸다(Mackie Control 호스트 방식) · X-Touch 는 손을 떼면 모터 페이더를 「호스트가 마지막으로
+  // 보낸 위치」 로 되돌린다 · 전에는 안 돌려보내서 놓을 때마다 마지막 SELECT 위치로 휙 돌아갔다 (floating4 실물 2026-10-19 18:02 ·
+  // SELECT 때 보낸 10252 로 되돌아감) · 채널마다 · 선택 안 한 채널도
+  if (event.kind === 'fader') {
+    device.send(faderMessage(event.channel, event.value));
+    diag(`echo${event.channel}`, `되돌림 페이더 ${event.channel + 1} ${event.value}`, 200);
+  }
+  const context = sessionCtx();
+  run(session.handle(event, context));
+  if (event.kind === 'fader') {
+    // 왜 안 먹나 · 채널 상태 · 0.5 s 에 한 줄
+    const ch = session.channels[event.channel];
+    const item = session.config[event.channel];
+    diag(`st${event.channel}`, `상태 페이더 ${event.channel + 1} 선택 ${ch.selected ? 'O' : 'X'} 손 ${ch.touched ? (ch.touchDown ? '터치' : '뗌 확인 중') : 'X'} `
+      + `단계 ${ch.phase} 축값 ${item ? (context.jointOf(item.axis) ?? 'null') : '연결없음'} 막힘 ${context.blocked || '없음'} 연결 ${stream.isOpen() ? 'O' : 'X'}`, 500);
+  }
+}
+
+/** 진단 · 받은 것·보낸 것을 로봇 기록으로(1 s 마다 묶어) · 화면 밖에서 원인을 보려고 · 2026-10-19 */
+const diagQueue = [];
+const diagLast = new Map();
+/** 화면 하나마다 다른 표 · 같은 로봇 화면이 여럿 열려 있으면 기록에서 가른다 */
+const PAGE_ID = Math.random().toString(36).slice(2, 6);
+
+function diag(key, text, throttleMs = 0) {
+  const now = performance.now();
+  if (throttleMs && now - (diagLast.get(key) || 0) < throttleMs) return;
+  diagLast.set(key, now);
+  if (diagQueue.length < 400) diagQueue.push(`[${PAGE_ID}] ${Math.round(now)} ${text}`);
 }
 
 function run(actions) {
   for (const action of actions || []) {
+    if (action.type === 'feedback') diag(`fb${action.channel}`, `보냄 페이더 ${action.channel + 1} ${action.value}`);
+    else if (action.type === 'target' || action.type === 'punch') diag(`t${action.channel}`, `목표 ${action.motionId} ${action.joint.toFixed(2)}°`, 200);
+    else if (action.type === 'release' || action.type === 'punch-release') diag(`r${action.type}`, `놓음 ${action.motionId || action.axes}`);
     if (action.type === 'feedback') device.send(faderMessage(action.channel, action.value));
     else if (action.type === 'led') device.send(ledMessage(action.group, action.channel, action.state));
     else if (action.type === 'target') sendTarget(action);
     else if (action.type === 'release') stream.release(action.axes);
-    else if (action.type === 'punch') stream.send({ type: 'punch', motion_id: action.motionId, joint_rad: action.joint * RAD });
+    else if (action.type === 'punch') stream.send({ type: 'punch', motion_id: action.motionId, joint_rad: action.joint * RAD, smooth_sec: smoothFor(action.motionId) });
     else if (action.type === 'punch-release') stream.send({ type: 'punch_release', motion_id: action.motionId });
     else if (action.type === 'record-toggle') toggleRecord();
     else if (action.type === 'record-add') stream.send({ type: 'record_add', axes: action.axes });
     else if (action.type === 'message') { ui.message = action.text; ctx.changed(); }
+    else if (action.type === 'hand') { diag(`hand${action.channel}`, `손 ${action.channel + 1} ${action.on ? '인식' : '없음'}`); paintLcd(); ctx.changed(); }
   }
 }
 
@@ -136,7 +234,8 @@ function sendTarget(action) {
   const lower = Math.max(motor.lower, view.motorMin);
   const upper = Math.min(motor.upper, view.motorMax);
   const motorDeg = Math.min(upper, Math.max(lower, jointToMotor(item.row, action.joint)));
-  stream.target(action.axis, motorDeg * RAD, { motion_id: action.motionId, motion_rad: action.joint * RAD, source: 'xtouch' });
+  // 받은 값 그대로 · 거르는 것은 로봇 쪽이 고른 시간으로(supervisor 램프 앞)
+  stream.target(action.axis, motorDeg * RAD, { motion_id: action.motionId, motion_rad: action.joint * RAD, source: 'xtouch', smooth_sec: smoothFor(action.motionId) });
 }
 
 /** 불빛 · 글씨 칸 · 연결 직후와 상태가 바뀔 때 */
@@ -151,62 +250,101 @@ function paintSurface() {
     const lit = recordState !== 'off' && (armed.size ? armed.has(item?.axis) : channel === 0);
     device.send(ledMessage('rec', channel, lit ? recordState : 'off'));
   }
+  run(session.handIndicators(true));
   paintLcd(true);
+}
+
+function thisRobotTag() {
+  return robotTag(ctx.state?.snap?.system_info?.hostname || location.hostname);
 }
 
 function paintLcd(force = false) {
   if (!device.ready() || !device.sysex) return;
+  // 어느 X-Touch 가 어느 로봇인지 · 빈 칸·안 고른 채널에 로봇 표시(f3 등) · 여러 대 꽂을 때(2026-10-19)
+  const tag = thisRobotTag();
   const texts = session.config.map((item, channel) => {
-    if (!item) return ['-', ''];
+    if (!item) return [tag, ''];
     const state = session.channels[channel];
-    const bottom = state.selected ? { ready: 'SEL', pickup: 'MATCH', live: 'LIVE', idle: '' }[state.phase] : '';
+    const bottom = state.selected ? { ready: 'SEL', pickup: 'MATCH', live: 'LIVE', idle: tag }[state.phase] : tag;
     return [item.motionId.replace(/^f\d+_/, ''), ui.record.state === 'recording' && state.selected ? 'REC' : bottom];
   });
-  const key = JSON.stringify(texts);
+  // 손이 닿은 채널은 글씨 칸을 반전(밝게) · 2026-10-19
+  const hands = session.channels.map((state) => Boolean(state.touched));
+  const key = JSON.stringify([texts, hands]);
   if (!force && key === lastLcd) return;
   lastLcd = key;
   texts.forEach(([top, bottom], channel) => {
     for (const message of lcdMessages(device.deviceId, channel, top, bottom)) device.send(message);
+    device.send(lcdColorMessage(device.deviceId, channel, top, bottom, LCD_WHITE, hands[channel]));
   });
 }
 
 /* ---------- 주기 ---------- */
 
+/**
+ * 주기는 Web Worker 타이머로 · 창이 가려지거나 다른 탭이어도 느려지지 않게 · 2026-10-19 floating4 실물 ·
+ * 크롬은 가려진 창도 「안 보임」 으로 치고 그 창의 타이머를 1 s(5 분 뒤 1 분)로 늦춘다 · 전에는 안 보이면 연결을 끊어
+ * 다른 창(VS Code 등)을 띄우는 순간 선택이 다 풀리고 X-Touch 포트가 닫혀 페이더가 내려갔다
+ */
+function makeTicker(callback) {
+  try {
+    const source = `let t=null;onmessage=(e)=>{clearInterval(t);if(e.data>0)t=setInterval(()=>postMessage(0),e.data);}`;
+    const worker = new Worker(URL.createObjectURL(new Blob([source], { type: 'text/javascript' })));
+    worker.onmessage = callback;
+    worker.postMessage(TICK_MS);
+    return { stop: () => { worker.postMessage(0); worker.terminate(); } };
+  } catch {
+    const timer = setInterval(callback, TICK_MS);
+    return { stop: () => clearInterval(timer) };
+  }
+}
+
 function ensureLoop() {
   if (loop) return;
-  loop = setInterval(tick, TICK_MS);
+  loop = makeTicker(tick);
 }
 
 function teardown(reason = '') {
+  diag('teardown', `X-Touch 끊음 · ${reason || 'X-Touch 화면을 떠남 또는 「연결 끊기」'} · 주소 ${location.hash}`);
   run(session.reset());
   paintSurface();
   stream.close();
   device.disconnect();
-  if (loop) { clearInterval(loop); loop = null; }
+  if (loop) { loop.stop(); loop = null; }
   if (reason) ui.message = reason;
 }
 
+let lastHidden = false;
+
 function tick() {
   if (!location.hash.startsWith(ROUTE)) { teardown(); return; }
-  if (document.hidden) {
-    if (device.state.status !== 'off') teardown('다른 탭으로 가서 X-Touch 연결을 끊었습니다 · 녹화 중이었다면 그 순간까지 저장됐습니다');
-    ctx.changed();
-    return;
-  }
+  // 가려지거나 다른 탭이어도 그대로 쓴다 · 기록만
+  if (document.hidden !== lastHidden) { lastHidden = document.hidden; diag('vis', document.hidden ? '창 안 보임(가려짐·다른 탭) · 계속 씀' : '창 보임'); }
   const now = performance.now();
   const blocked = blockedText(ctx.state);
-  run(session.configure(config(ctx.state)));
+  if (blocked !== lastBlocked) { diag('blk', `막힘 바뀜 · ${blocked || '없음'}`); lastBlocked = blocked; }
+  const configActions = session.configure(config(ctx.state));
+  if (configActions.length) diag('cfg', `매핑 바뀜 · 채널 놓음 ${configActions.length}`);
+  run(configActions);
   if (blocked) {
-    if (session.selectedAxes().length) { run(session.reset()); ctx.changed(); }
+    if (session.selectedAxes().length) { diag('blkreset', `막혀서 선택 놓음 · ${blocked}`); run(session.reset()); ctx.changed(); }
     if (stream.isOpen()) stream.close();
   } else if (device.ready() && !stream.isOpen() && now - lastOpenTry > 1000) {
     lastOpenTry = now;
+    diag('open', '로봇 연결 여는 중', 0);
     stream.open({ mapping_file_id: ui.fileId, base_mapping_revision: ui.revision, watchdog_sec: WATCHDOG_SEC })
-      .catch((error) => { ui.message = error.message; ctx.changed(); });
+      .then(() => diag('opened', '로봇 연결 열림'))
+      .catch((error) => { diag('openfail', `로봇 연결 거절 · ${error.message}`); ui.message = error.message; ctx.changed(); });
   }
+  // 손 인식 표시는 로봇과 연결 안 돼도(터치가 되는지만 볼 때)
+  if (device.ready()) run(session.handIndicators());
   if (stream.isOpen()) {
     run(session.tick(sessionCtx()));
-    if (now - lastPing >= PING_MS) { lastPing = now; stream.send({ type: 'ping' }); }
+    if (now - lastPing >= PING_MS) {
+      lastPing = now;
+      stream.send({ type: 'ping' });
+      if (diagQueue.length) stream.send({ type: 'diag', lines: diagQueue.splice(0) });
+    }
   }
   paintLcd();
 }
@@ -264,7 +402,7 @@ function startRecord() {
   const axes = session.selectedAxes();
   // 바탕이 있으면 축을 안 골라도 된다(재생하면서 바탕 조인트를 잡으면 덮어씀)
   if (!axes.length && !ui.base) { ui.message = '녹화할 축이 없습니다 · X-Touch 에서 SELECT 로 축을 고르세요'; ctx.changed(); return; }
-  if (!stream.send({ type: 'record_start', axes, name: ui.name, base: ui.base })) { ui.message = '로봇과 연결되지 않았습니다 · 잠시 뒤 다시'; ctx.changed(); return; }
+  if (!stream.send({ type: 'record_start', axes, name: ui.name, base: ui.base, overwrite: ui.overwrite })) { ui.message = '로봇과 연결되지 않았습니다 · 잠시 뒤 다시'; ctx.changed(); return; }
   ui.message = '';
 }
 
@@ -328,8 +466,28 @@ export async function loadXTouch(state, changed) {
 
 /* ---------- 그리기 ---------- */
 
-const DEV_TONE = { ready: 'ok', connecting: 'warn', off: 'idle', missing: 'warn', busy: 'bad', denied: 'bad', unavailable: 'bad' };
-const DEV_TEXT = { ready: '연결됨', connecting: '연결 중', off: '연결 안 됨', missing: '장치 없음', busy: '다른 곳에서 쓰는 중', denied: '권한 없음', unavailable: '이 주소에서 MIDI 불가' };
+const DEV_TONE = { ready: 'ok', connecting: 'warn', off: 'idle', missing: 'warn', choose: 'warn', busy: 'bad', denied: 'bad', unavailable: 'bad' };
+const DEV_TEXT = { ready: '연결됨', connecting: '연결 중', off: '연결 안 됨', missing: '장치 없음', choose: '어느 X-Touch 인지 고르세요', busy: '다른 곳에서 쓰는 중', denied: '권한 없음', unavailable: '이 주소에서 MIDI 불가' };
+
+/** 여러 대 꽂혔을 때 · 이 로봇에 쓸 X-Touch 고르기 · 이 로봇 주소에 기억 · 2026-10-19 */
+function deviceChooser(changed) {
+  const ports = device.ports || [];
+  if (ports.length < 2 && !['choose', 'missing'].includes(ui.dev.status)) return null;
+  if (!ports.length) return null;
+  const current = device.input?.id || '';
+  return h('div', { class: 'row' },
+    h('label', { class: 'inline' }, `이 로봇(${thisRobotTag()})에 쓸 X-Touch`,
+      h('select', { class: 'select select-sm', 'aria-label': '이 로봇에 쓸 X-Touch',
+        onchange: async (e) => {
+          if (!e.target.value) return;
+          run(session.reset());
+          if (await device.choose(e.target.value)) { ensureLoop(); paintSurface(); }
+          changed();
+        } },
+      h('option', { value: '', selected: !current }, '고르세요'),
+      ports.map((port) => h('option', { value: port.id, selected: port.id === current }, port.name)))),
+    h('span', { class: 'muted small', text: '고르면 이 로봇 주소에 기억합니다 · X-Touch 글씨 칸에 로봇 표시가 뜹니다' }));
+}
 
 function connectCard(state, changed) {
   const unavailable = midiUnavailableReason();
@@ -347,6 +505,11 @@ function connectCard(state, changed) {
           if (await device.connect()) { ensureLoop(); paintSurface(); }
           changed();
         } }, 'X-Touch 연결')),
+    deviceChooser(changed),
+    ui.dev.status === 'ready' ? h('details', { class: 'small' },
+      h('summary', { text: `MIDI 받은 것 (마지막 ${MIDI_LOG_SIZE}개 · 채널 하나가 안 먹을 때 보기)` }),
+      midiLog.length ? h('ul', { class: 'mono small' }, midiLog.map((line) => h('li', { text: line })))
+        : h('p', { class: 'muted small', text: '아직 받은 것 없음 · 페이더·버튼을 만져 보세요' })) : null,
     ui.dev.message ? h('p', { class: 'tone-text-warn small', text: ui.dev.message }) : null,
     unavailable ? h('div', { class: 'blocker' }, dot('warn'), h('span', { class: 'grow', text: unavailable })) : null,
     unavailable ? h('ol', { class: 'small muted' },
@@ -356,18 +519,33 @@ function connectCard(state, changed) {
     blocked ? h('div', { class: 'blocker' }, dot('warn'), h('span', { class: 'grow', text: `X-Touch 입력을 무시합니다 · ${blocked}` }),
       blocker?.fix === 'mode-manual' ? h('button', { class: 'btn btn-warn', type: 'button', onclick: () => act.setRunMode('manual') }, '수동 모드로 전환') : null,
       blocker?.fix === 'stop' ? h('button', { class: 'btn btn-warn', type: 'button', onclick: act.stopAll }, '정지') : null) : null,
-    h('p', { class: 'muted small', text: '한 번에 로봇 한 대 · 이 탭이 보일 때만 움직입니다(다른 탭으로 가면 놓고 연결을 끊습니다). SELECT 로 축을 고르면 페이더가 그 축 위치로 가고, 손을 대고 축 값에 맞추면(0.5° 안 또는 지나감) 그때부터 따라갑니다. 손을 떼면 마지막 목표까지 가서 섭니다. 속도·가속도는 조인트 매핑의 최대 값입니다.' }));
+    h('p', { class: 'muted small', text: 'X-Touch 한 대 = 로봇 한 대 · 여러 대를 허브로 꽂으면 로봇 화면마다 쓸 장치를 고릅니다(다른 로봇 화면끼리는 서로 모르니 같은 장치를 고르지 마세요 · 글씨 칸의 로봇 표시로 확인). 창이 가려지거나 다른 탭으로 가도 그대로 움직입니다(X-Touch 화면을 떠나면 끊습니다). SELECT 로 축을 고르면 페이더가 그 축 위치로 가고, 손을 대고 축 값에 맞추면(0.5° 안 또는 지나감) 그때부터 따라갑니다. 손을 떼면 마지막 목표까지 가서 섭니다. 속도·가속도는 조인트 매핑의 최대 값입니다. 손은 페이더 터치 신호로만 인식합니다(움직이기만 해서는 조종하지 않음 · 터치 신호가 안 오는 페이더는 쓸 수 없음). 인식하면 그 채널 SOLO 불이 켜지고 글씨 칸이 밝아집니다(아래 표 「손」 칸).' }));
 }
 
-function channelCard(state) {
+/** 조인트 스무딩 고르기 · 바로 다음 값부터 · 잡고 있는 중에 바꿔도 된다 */
+function smoothPicker(motionId, changed) {
+  const current = smoothFor(motionId);
+  return h('select', { class: 'select select-sm', 'aria-label': `${motionId} 스무딩`,
+    title: '페이더 값은 그대로 보내고 로봇 쪽에서 이 시간만큼 부드럽게 거릅니다 · 길수록 부드럽고 늦게 따라옵니다 · 녹화에는 거른 값이 들어갑니다',
+    onchange: (e) => { setSmooth(motionId, Number(e.target.value)); diag(`smooth${motionId}`, `스무딩 ${motionId} ${e.target.value} s`); changed(); } },
+  SMOOTH_LEVELS.map((level) => h('option', { value: String(level.sec), selected: level.sec === current }, level.label)));
+}
+
+/** 손 인식 · 터치 신호만 · 「뗌」 뒤 0.2 s 는 아직 손(잠깐 끊김) */
+function handCell(ch) {
+  if (!ch.touched) return h('td', { class: 'muted', text: '-' });
+  return h('td', {}, h('span', { class: 'chip chip-ok', text: '● 터치' }));
+}
+
+function channelCard(state, changed) {
   const list = motors(state);
   const rows = session.config;
   return h('section', { class: 'card', 'aria-label': '채널' },
     h('div', { class: 'card-head' }, h('h2', { text: '페이더 · 축' })),
     rows.some(Boolean) ? h('div', { class: 'table-wrap' }, h('table', { class: 'table' },
-      h('thead', {}, h('tr', {}, ['페이더', '조인트', '모터', '상태', '현재', '목표'].map((text) => h('th', { scope: 'col', text })))),
+      h('thead', {}, h('tr', {}, ['페이더', '조인트', '모터', '손', '상태', '현재', '목표', '스무딩'].map((text) => h('th', { scope: 'col', text })))),
       h('tbody', {}, rows.map((item, channel) => {
-        if (!item) return h('tr', { class: 'muted-row' }, h('td', { class: 'mono', text: String(channel + 1) }), h('td', { colspan: '5', class: 'muted', text: '연결 안 됨' }));
+        if (!item) return h('tr', { class: 'muted-row' }, h('td', { class: 'mono', text: String(channel + 1) }), h('td', { colspan: '7', class: 'muted', text: '연결 안 됨' }));
         const motor = list.find((m) => m.axis === item.axis);
         const joint = motor && motor.position !== null ? motorToJoint(item.row, motor.position) : null;
         const ch = session.channels[channel];
@@ -380,12 +558,21 @@ function channelCard(state) {
           h('td', { class: 'mono', text: String(item.fader) }),
           h('td', {}, h('strong', { text: item.motionId })),
           h('td', { class: 'mono', text: Number.isInteger(item.axis) ? `${item.axis}번` : '없음' }),
+          handCell(ch),
           h('td', {}, item.ratesSet ? h('span', { class: `chip chip-${ch.phase === 'live' ? 'ok' : ch.selected ? 'warn' : 'idle'}`, text: phase })
             : h('span', { class: 'chip chip-bad', text: '속도·가속도 상한 없음' })),
           h('td', { class: 'mono', text: joint === null ? '-' : `${signedDeg(joint, 2)}°` }),
-          h('td', { class: 'mono', text: ch.phase === 'live' && Number.isFinite(ch.goal) ? `${signedDeg(ch.goal, 2)}°` : '-' }));
+          h('td', { class: 'mono', text: ch.phase === 'live' && Number.isFinite(ch.goal) ? `${signedDeg(ch.goal, 2)}°` : '-' }),
+          h('td', {}, smoothPicker(item.motionId, changed)));
       })))) : h('p', { class: 'muted', text: '페이더가 연결된 조인트가 없습니다 · 「모터 설정 → ① 조인트 매핑」 에서 「X-Touch 페이더」 칸에 1 ~ 8 을 넣고 저장하세요.' }),
     ui.message ? h('p', { class: 'tone-text-warn small', text: ui.message }) : null);
+}
+
+/** 이름 칸 안내 · 덮어쓰기 + 바탕이면 바탕 이름 · 바탕만이면 바탕_xtouch */
+function namePlaceholder() {
+  const stem = ui.base ? ui.base.replace(/\.json$/i, '') : '';
+  if (stem) return ui.overwrite ? `${stem} (바탕에 덮어씀)` : `${stem}_xtouch`;
+  return 'xtouch_날짜_시각';
 }
 
 function recordCard(state, changed) {
@@ -401,8 +588,23 @@ function recordCard(state, changed) {
         onchange: (e) => { ui.base = e.target.value; changed(); } },
         h('option', { value: '', selected: !ui.base }, '없음 · 새로 녹화'),
         ui.files.map((file) => h('option', { value: file.id, selected: ui.base === file.id }, file.name)))),
-      h('label', { class: 'inline' }, '이름', h('input', { class: 'input mono', type: 'text', value: ui.name, placeholder: 'xtouch_날짜_시각', disabled: live,
+      h('label', { class: 'inline' }, '이름', h('input', { class: 'input mono', type: 'text', value: ui.name, placeholder: namePlaceholder(), disabled: live,
         'aria-label': '녹화 이름', oninput: (e) => { ui.name = e.target.value; } })),
+      h('label', { class: 'inline', title: '같은 이름의 애니메이션이 있으면 그 파일에 저장합니다 · 전 파일은 프로젝트 휴지통에 사본으로 남습니다 · 바탕이 있고 이름이 비면 바탕 파일에 저장합니다' },
+        h('input', { type: 'checkbox', checked: ui.overwrite, disabled: live, 'aria-label': '같은 이름이면 덮어쓰기',
+          onchange: async (e) => {
+            if (e.target.checked) {
+              const ok = await confirmBox({
+                title: '같은 이름이면 덮어쓰기',
+                body: `녹화가 끝나면 ${ui.name || (ui.base ? `바탕(${ui.base})` : '같은 이름의 애니메이션')}에 저장합니다. 전 파일은 프로젝트 휴지통에 사본으로 남아 되살릴 수 있습니다. 연결이 끊겨 자동 저장되거나 바탕이 끝까지 재생되지 않으면 덮어쓰지 않고 새 이름으로 저장합니다.`,
+                confirmLabel: '덮어쓰기 켬', tone: 'warning',
+              });
+              ui.overwrite = Boolean(ok);
+            } else {
+              ui.overwrite = false;
+            }
+            changed();
+          } }), '같은 이름이면 덮어쓰기'),
       live
         ? [h('button', { class: 'btn btn-primary', type: 'button', onclick: stopRecord }, '정지 · 저장'),
           h('button', { class: 'btn', type: 'button', onclick: cancelRecord }, '취소')]
@@ -421,7 +623,7 @@ export function renderXTouch(state, { changed }) {
   return [
     h('div', { class: 'page-head' }, h('h1', { text: 'X-Touch' })),
     connectCard(state, changed),
-    channelCard(state),
+    channelCard(state, changed),
     recordCard(state, changed),
   ];
 }

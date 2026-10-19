@@ -8,7 +8,8 @@
 
 목표는 「가고 싶은 곳」 · supervisor 가 조인트 2 °/s · 4 °/s² 로 천천히 다가간다 ·
 상한(모터 단위)은 여기서 매핑 이득으로 계산해 싣는다 · 수정 목록 126 ·
-출처가 X-Touch(`xtouch`)면 조인트 매핑 최대 속도·가속도로 · 비면 거절 · 수정 목록 156
+출처가 X-Touch(`xtouch`)면 조인트 매핑 최대 속도·가속도로 · 비면 거절 · 수정 목록 156 ·
+X-Touch 는 날 값 + `smooth_sec`(화면에서 고른 스무딩) · 거르는 것은 supervisor
 
     놓기(release)  `release_axes` · 멈추지 않고 마지막 목표까지 간 뒤 끝
     세우기(hold)   `hold_axes` · supervisor 가 현재 위치를 다시 목표로 박는다 ·
@@ -24,7 +25,7 @@ from typing import Any, Dict, List, Optional
 
 from std_msgs.msg import String
 
-from motion_common import generation
+from motion_common import generation, smoothing
 
 #: X-Touch 출처 · 조인트 매핑 최대 속도·가속도로 따라간다 · 수정 목록 156
 XTOUCH_SOURCE = 'xtouch'
@@ -93,6 +94,7 @@ class ManualStreamService:
         motion_id: Any = None,
         motion_rad: Any = None,
         source: Any = None,
+        smooth_sec: Any = None,
     ) -> Dict[str, Any]:
         axis_int = _optional_axis(axis)
         if axis_int is None:
@@ -118,6 +120,10 @@ class ManualStreamService:
             if reason:
                 return {'success': False, 'axis': axis_int, 'message': reason}
             request.update(limits)
+            # 화면은 날 값 · 스무딩은 supervisor 램프 앞에서 · 사용자 결정 2026-10-19
+            smooth = smoothing.smooth_sec_from(smooth_sec)
+            if smooth > 0.0:
+                request['smooth_sec'] = smooth
         else:
             request.update(self._speed_limits(axis_int))
         self._publish(request)

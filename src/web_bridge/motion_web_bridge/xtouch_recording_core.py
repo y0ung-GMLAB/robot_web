@@ -4,6 +4,7 @@
     animation_text  Blender 내보내기와 같은 JSON Lines
     rate_problem    재생과 같은 속도·가속도 검사
     save_unique     같은 이름이면 _2 · _3
+    save_over       같은 이름에 덮어쓰기(전 파일은 휴지통에 사본)
 """
 
 from __future__ import annotations
@@ -143,7 +144,8 @@ def rate_problem(joints: List[Tuple[str, Any, List[float]]]) -> str:
     samples = [
         {
             'time_sec': (index + 1) * PERIOD_SEC,
-            'motion_values': {motion_id: values[index] for motion_id, _, values in joints},
+            # 파일에 쓰는 값 그대로(소수 9자리) 잰다 · 재생이 읽는 값과 같게 · 2026-10-19
+            'motion_values': {motion_id: round(values[index], 9) for motion_id, _, values in joints},
         }
         for index in range(count)
     ]
@@ -163,6 +165,22 @@ def clean_name(value: Any, now: Optional[datetime] = None) -> str:
 
 #: 저장소가 같은 이름을 거절할 때 쓰는 글 · `ProjectRepository.import_text`
 SAME_NAME_TEXT = '같은 이름의 파일이 이미 있습니다'
+
+
+def save_over(repository: Any, project_id: str, base: str, joints: Any, *, start: float, base_file: str = '') -> Tuple[str, str]:
+    """같은 이름에 덮어쓰기 · 있으면 휴지통에 사본(되살릴 수 있음) 뒤 그 자리에 · 없으면 새로 · (쓴 이름, 사본 경로 | '')
+
+    사용자 2026-10-19 「이미 있는거에 저장」 · 화면에서 덮어쓰기를 골랐을 때만
+    """
+    name = f'{base}.json'
+    text = animation_text(base, joints, start=start, base=base_file)
+    try:
+        backup = repository.copy_to_trash(project_id, 'motions', name)
+    except ValueError:              # 그 이름이 없음 · 새로
+        repository.import_text(project_id, 'motions', name, text)
+        return name, ''
+    repository.save_file(project_id, 'motions', name, text)
+    return name, str(backup)
 
 
 def save_unique(write: Callable[[str], Any], base: str, limit: int = 1000) -> str:

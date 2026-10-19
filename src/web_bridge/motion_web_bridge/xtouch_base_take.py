@@ -100,10 +100,13 @@ class BaseTake:
     last_frame: int = -1
     ended: bool = False
     overrun: set = field(default_factory=set)
+    #: 재생 노드가 알린 실패 이유(시작도 못 함 · 오류로 끝남) · 2026-10-19
+    error: str = ''
 
     def on_frame(self, payload: Dict[str, Any], dt: float = PERIOD_SEC) -> None:
         if payload.get('end'):
             self.ended = True
+            self.error = str(payload.get('error') or '')
             return
         try:
             frame = int(payload.get('frame'))

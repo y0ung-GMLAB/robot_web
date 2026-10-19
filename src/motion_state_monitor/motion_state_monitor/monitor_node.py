@@ -273,7 +273,6 @@ class MotionStateMonitor(Node):
                     'driver_model': driver_model,
                     'pulse_per_revolution': pulse_per_revolution,
                     **raw_model,
-                    'rated_power_w': unchecked_float(driver.get('rated_power_w')),
                     'rated_torque_nm': unchecked_float(
                         driver.get('rated_effort', driver.get('rated_torque'))
                     ),

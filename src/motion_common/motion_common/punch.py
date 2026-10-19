@@ -6,8 +6,9 @@
 
     재생(play)    원본 값 그대로
     잡음(live)    램프(`motion_common.ramp`)가 페이더 목표로 · 시작은 지금 위치·속도 그대로(튐 없음) ·
-                  상한 = 조인트 매핑 최대 속도·가속도
-    놓음          마지막 목표까지 간 뒤
+                  상한 = 조인트 매핑 최대 속도·가속도 · 램프 앞에 스무딩(`motion_common.smoothing` · 화면에서 고른
+                  시간 · 화면은 날 값을 보낸다 · 사용자 결정 2026-10-19)
+    놓음          마지막 목표까지(거른 값이 날 값에 닿을 때까지) 간 뒤
     잇기(blend)   선 자리(h)에서 원본(o)으로 · x = (1 − w)·h + w·o · w 는 5차 smoothstep(끝에서 속도·가속 0) ·
                   길이 = 상한 안에 드는 가장 짧은 길이 · 최소 0.5 초 · 잇는 중에 다시 잡으면 그 자리·속도에서 잡음
     끊김          잡은 채 입력이 0.5 초 안 오면(화면이 사라짐) 놓은 것으로
@@ -23,6 +24,7 @@ from collections.abc import Sequence
 from typing import Dict, List, Optional, Tuple
 
 from .ramp import step as ramp_step
+from .smoothing import Smoother
 
 #: 잇는 최소 길이 · 사용자 결정 2026-10-17
 MIN_BLEND_SEC = 0.5
@@ -137,6 +139,8 @@ class PunchJoint:
     last_input_at: float = 0.0
     blend: List[float] = field(default_factory=list)
     blend_ok: bool = True
+    smooth_sec: float = 0.0
+    smoother: Optional[Smoother] = None
 
     def clamp(self, value: float) -> float:
         return min(self.upper, max(self.lower, float(value)))
@@ -158,17 +162,19 @@ class PunchController:
             for motion_id, spec in (joints or {}).items()
         }
 
-    def input(self, motion_id: str, target: float, now: float) -> bool:
+    def input(self, motion_id: str, target: float, now: float, smooth_sec: float = 0.0) -> bool:
         joint = self.joints.get(str(motion_id))
         if joint is None or not math.isfinite(float(target)):
             return False
         joint.target = joint.clamp(target)
         joint.released = False
         joint.last_input_at = float(now)
+        joint.smooth_sec = float(smooth_sec)
         if joint.state != LIVE:
-            # 재생·잇기 중이던 자리와 속도 그대로에서 램프 시작
+            # 재생·잇기 중이던 자리와 속도 그대로에서 램프 시작 · 스무딩도 그 자리에서(아직 안 보냈으면 프레임 때)
             joint.state = LIVE
             joint.blend = []
+            joint.smoother = Smoother(joint.position) if joint.position is not None else None
         return True
 
     def release(self, motion_id: str) -> bool:
@@ -193,10 +199,16 @@ class PunchController:
                 if not joint.released and now - joint.last_input_at > INPUT_TIMEOUT_SEC:
                     joint.released = True
                 start = joint.position if joint.position is not None else float(original[0])
-                value, joint.velocity, arrived = ramp_step(
-                    start, joint.velocity, joint.target if joint.target is not None else start,
+                raw = joint.target if joint.target is not None else start
+                if joint.smoother is None:
+                    joint.smoother = Smoother(start)
+                smoothed = joint.smoother.update(raw, self.dt, joint.smooth_sec)
+                value, joint.velocity, reached = ramp_step(
+                    start, joint.velocity, smoothed,
                     joint.max_velocity, joint.max_acceleration, self.dt,
                 )
+                # 거른 값이 아직 날 값으로 가는 중이면 안 닿음 · 놓아도 거기까지 간 뒤 잇는다
+                arrived = reached and joint.smoother.settled(raw)
                 # 목표가 끝에서 멈추면 못 서고 조금 지날 수 있다 · 조인트 범위 밖으로는 안 보낸다
                 value = joint.clamp(value)
                 if arrived and joint.released:

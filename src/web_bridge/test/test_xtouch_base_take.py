@@ -91,6 +91,7 @@ def test_overdub_axis_samples_land_on_playback_frames():
 class _Repo:
     def __init__(self):
         self.files = {}
+        self.trash = []
 
     def require_selected_project_id(self):
         return 'p'
@@ -98,6 +99,15 @@ class _Repo:
     def import_text(self, project_id, category, name, text):
         if name in self.files:
             raise ValueError(f'같은 이름의 파일이 이미 있습니다: {name}')
+        self.files[name] = text
+
+    def copy_to_trash(self, project_id, category, name):
+        if name not in self.files:
+            raise ValueError(f'프로젝트 파일을 찾을 수 없습니다: {name}')
+        self.trash.append((name, self.files[name]))
+        return f'trash/{len(self.trash)}-{name}'
+
+    def save_file(self, project_id, category, name, text):
         self.files[name] = text
 
 
@@ -191,3 +201,53 @@ def test_blend_overrun_refuses_to_save():
     result = service.stop(owner)
     assert result['success'] is False and '잇기' in result['message']
     assert bridge.project_repository.files == {}
+
+
+def _wait_idle(service):
+    import time as _time
+    for _ in range(200):
+        if service.status()['state'] == 'idle':
+            return
+        _time.sleep(0.01)
+
+
+def test_playback_that_never_starts_ends_the_take_with_the_reason():
+    """재생 노드가 시작도 못 함(등록 안 된 파일 거절 등 · floating4 2026-10-19) · 계속 기다리지 않음"""
+    service, bridge, calls = _service([_row('neck_yaw', 1)])
+    owner = object()
+    service.start(owner, [], '', 'base.json')
+    take_id = calls['start'][0]['xtouch_take_id']
+    service.take_frames_callback(SimpleNamespace(data=json.dumps(
+        {'take_id': take_id, 'end': True, 'error': '모션 실행 준비 실패: 재생 등록에 없는 애니메이션입니다'})))
+    _wait_idle(service)
+    last = service.status()['last_result']
+    assert last['success'] is False
+    assert '바탕 재생을 시작하지 못했습니다' in last['message'] and '재생 등록에 없는' in last['message']
+    assert bridge.project_repository.files == {}
+
+
+def test_overwrite_with_empty_name_saves_over_the_base_when_played_to_the_end():
+    service, bridge, calls = _service([_row('neck_yaw', 1)])
+    bridge.project_repository.files['base.json'] = 'old'
+    owner = object()
+    started = service.start(owner, [], '', 'base.json', True)
+    assert started['name'] == 'base'
+    _frames(service, calls['start'][0]['xtouch_take_id'], 100)
+    _wait_idle(service)
+    last = service.status()['last_result']
+    assert last['success'] and last['file'] == 'base.json' and last['overwritten'] is True
+    assert bridge.project_repository.trash == [('base.json', 'old')]
+    assert len(bridge.project_repository.files['base.json'].splitlines()) == 101
+
+
+def test_overwrite_of_the_base_is_skipped_when_stopped_before_the_end():
+    """중간에 멈춘 것으로 바탕을 덮으면 바탕이 잘린다 · 새 이름으로"""
+    service, bridge, calls = _service([_row('neck_yaw', 1)])
+    bridge.project_repository.files['base.json'] = 'old'
+    owner = object()
+    service.start(owner, [], '', 'base.json', True)
+    _frames(service, calls['start'][0]['xtouch_take_id'], 40, end=False)
+    result = service.stop(owner)
+    assert result['success'] and result['file'] == 'base_2.json'
+    assert '바탕 끝까지 가지 않음' in result['message']
+    assert bridge.project_repository.files['base.json'] == 'old' and bridge.project_repository.trash == []

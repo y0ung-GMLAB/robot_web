@@ -25,6 +25,30 @@ export const NOTE = { rec: 0, solo: 8, mute: 16, select: 24, touch: 104 };
 /** 손 안 댄 페이더를 축 따라 움직이는 간격 · 이만큼 달라졌을 때만 */
 export const FOLLOW_EVERY_MS = 100;
 export const FOLLOW_MIN_STEP = 8;
+/** 놓은 뒤 축이 놓은 자리에 닿기를 기다리는 최대 시간 · 그 뒤엔 다시 축을 따라감 */
+export const SETTLE_MAX_MS = 8000;
+/**
+ * 손 판정 · 터치 신호만 · 사용자 결정 2026-10-19 「터치만 하자」 · 페이더가 움직이기만 한 것(모터가 움직인 것 포함)은 손이 아님 ·
+ * 전에는 움직임도 손으로 쳤다(「뗌」 이 미는 중에 오던 것 · 실은 놓을 때 페이더가 되돌아가던 탓이 컸다 · 되돌려 보내기로 고친 뒤
+ * 18:40 이후 기록은 1·2·4·7·8번 터치가 깨끗) · 터치 신호가 안 오는 페이더(floating4 3·5번)는 조종이 안 된다
+ *   손 있음 = 터치 「누름」
+ *   놓음    = 「뗌」 뒤 TOUCH_GRACE_MS 안에 다시 「누름」 이 안 오면(잠깐 끊김 · 실물 60 ms) · 그 뒤 HAND_QUIET_MS 는 따라가지 않음
+ */
+export const TOUCH_GRACE_MS = 200;
+export const HAND_QUIET_MS = 600;
+/**
+ * 스무딩 단계 · 화면은 받은 페이더 값 그대로(주기마다 마지막 값) 보내고, 거르는 것은 로봇 쪽(supervisor 램프 앞 ·
+ * 펀치는 재생 노드)이 이 시간으로 · 사용자 결정 2026-10-19 「로우데이터대로 · 스무딩은 중간에서 · 정도는 내가 고르게」 ·
+ * 초 ≈ 늦음 · 0 = 안 거름
+ */
+export const SMOOTH_LEVELS = [
+  { sec: 0, label: '끔' },
+  { sec: 0.1, label: '약하게 · 0.1 s' },
+  { sec: 0.25, label: '보통 · 0.25 s' },
+  { sec: 0.5, label: '강하게 · 0.5 s' },
+  { sec: 1, label: '아주 강하게 · 1 s' },
+];
+export const DEFAULT_SMOOTH_SEC = 0.25;
 const LCD_CHARS = 7;
 const LCD_BOTTOM = 56;
 
@@ -60,11 +84,25 @@ export function ledMessage(group, channel, state) {
   return [0x90, NOTE[group] + channel, velocity];
 }
 
+/** 글씨 칸 한 줄 · 7 글자 · ASCII 만 */
+const lcdFit = (text) => String(text ?? '').replace(/[^\x20-\x7E]/g, '?').slice(0, LCD_CHARS).padEnd(LCD_CHARS, ' ');
+
 /** 글씨 칸 한 채널 · 위·아래 줄 7 글자씩 · ASCII 만 */
 export function lcdMessages(deviceId, channel, top, bottom) {
-  const fit = (text) => String(text ?? '').replace(/[^\x20-\x7E]/g, '?').slice(0, LCD_CHARS).padEnd(LCD_CHARS, ' ');
-  const one = (offset, text) => [0xF0, 0x00, 0x00, 0x66, deviceId, 0x12, offset, ...[...fit(text)].map((c) => c.charCodeAt(0) & 0x7F), 0xF7];
+  const one = (offset, text) => [0xF0, 0x00, 0x00, 0x66, deviceId, 0x12, offset, ...[...lcdFit(text)].map((c) => c.charCodeAt(0) & 0x7F), 0xF7];
   return [one(channel * LCD_CHARS, top), one(LCD_BOTTOM + channel * LCD_CHARS, bottom)];
+}
+
+/**
+ * 글씨 칸 색·반전 · Behringer 전용 SysEx(F0 00 20 32 dd 4C nn cc 글자14 F7) · cc 아래 3비트 = 색(7 흰색) ·
+ * 0x10 위 줄 반전 · 0x20 아래 줄 반전 · 손 인식 표시(밝아짐) · 사용자 2026-10-19 · 이 명령을 모르는 펌웨어는 무시한다
+ */
+export const LCD_WHITE = 7;
+export const LCD_INVERT = 0x30;
+
+export function lcdColorMessage(deviceId, channel, top, bottom, color = LCD_WHITE, invert = false) {
+  const chars = [...(lcdFit(top) + lcdFit(bottom))].map((c) => c.charCodeAt(0) & 0x7F);
+  return [0xF0, 0x00, 0x20, 0x32, deviceId, 0x4C, channel & 0x07, (color & 0x07) | (invert ? LCD_INVERT : 0), ...chars, 0xF7];
 }
 
 /** 장치 이름으로 · Extender 면 15 · 아니면 14 */
@@ -74,6 +112,44 @@ export function lcdDeviceId(portName) {
 
 export function looksLikeXTouch(portName) {
   return /x-?touch|behringer/i.test(String(portName || ''));
+}
+
+/**
+ * 여러 대 중 이 로봇에 쓸 X-Touch · 사용자 결정 2026-10-19 (허브로 여러 대 · 로봇마다 하나)
+ * ports · [{id, name}] (연결된 X-Touch 입력) · preferred · 이 로봇 화면이 기억한 {id, name} | null
+ * → {port, status, message} · status ok | choose(여러 대 · 아직 안 고름) | missing(고른 것이 없음) | none
+ * 여러 대인데 고르지 않았으면 **아무것도 열지 않는다** · 엉뚱한 로봇이 움직이지 않게
+ */
+export function pickPort(ports, preferred) {
+  const list = Array.isArray(ports) ? ports : [];
+  if (!list.length) return { port: null, status: 'none', message: 'X-Touch 를 찾지 못했습니다 · USB 를 확인하세요' };
+  if (preferred?.id || preferred?.name) {
+    const byId = list.find((port) => preferred.id && port.id === preferred.id);
+    if (byId) return { port: byId, status: 'ok', message: '' };
+    const byName = list.filter((port) => preferred.name && port.name === preferred.name);
+    if (byName.length === 1) return { port: byName[0], status: 'ok', message: '' };
+    return { port: null, status: 'missing', message: `이 로봇에 고른 X-Touch(${preferred.name || preferred.id})가 없습니다 · 꽂혀 있는지 보고 다시 고르세요` };
+  }
+  if (list.length === 1) return { port: list[0], status: 'ok', message: '' };
+  return { port: null, status: 'choose', message: `X-Touch 가 ${list.length}대 꽂혀 있습니다 · 이 로봇에 쓸 것을 고르세요` };
+}
+
+/** 입력 포트와 같은 장치의 출력 · 이름이 똑같은 것 먼저 · 없으면 같은 순번 · Windows 는 둘째 대가 「2- X-Touch-Ext」 */
+export function matchOutput(input, inputs, outputs) {
+  if (!input) return null;
+  const key = (name) => String(name || '').toLowerCase().replace(/midi(in|out)\d*|[()\s]/g, '');
+  const exact = outputs.find((port) => key(port.name) === key(input.name));
+  if (exact) return exact;
+  const index = inputs.indexOf(input);
+  return index >= 0 && index < outputs.length ? outputs[index] : null;
+}
+
+/** 글씨 칸에 띄울 로봇 표시 · floating3 → f3 · 그 밖은 앞 7 글자 · 어느 X-Touch 가 어느 로봇인지 눈으로 */
+export function robotTag(name) {
+  const text = String(name || '').trim();
+  const floating = /floating[-_]?(\d+)/i.exec(text);
+  if (floating) return `f${floating[1]}`;
+  return text.split('.')[0].slice(0, 7);
 }
 
 /** 페이더 0 ~ 16383 ↔ 조인트 범위 전체(맨 아래 = 최소 · 맨 위 = 최대) · deg */
@@ -183,7 +259,7 @@ export class XTouchSession {
     if (!event) return [];
     if (event.kind === 'button' && event.group === 'rec') return event.down ? [{ type: 'record-toggle' }] : [];
     if (event.kind === 'button' && event.group === 'select') return event.down ? this.toggleSelect(event.channel, ctx) : [];
-    if (event.kind === 'touch') return this.touch(event.channel, event.down);
+    if (event.kind === 'touch') return this.touchEvent(event.channel, event.down, Number(ctx?.now ?? 0));
     if (event.kind === 'fader') return this.fader(event.channel, event.value, ctx);
     return [];
   }
@@ -213,22 +289,76 @@ export class XTouchSession {
     return actions;
   }
 
-  touch(channel, down) {
+  /** 터치 신호 · 「누름」 은 손 · 「뗌」 은 TOUCH_GRACE_MS 뒤에 확정(tick) · 그 안에 다시 누르면 그대로 */
+  touchEvent(channel, down, now) {
     const state = this.channels[channel];
-    state.touched = down;
-    if (!state.selected) return [];
+    state.touchDown = down;
+    state.lastHandAt = now;
     if (down) {
+      if (!state.touched) this.grab(channel, now);
+    } else {
+      state.touchUpAt = now;
+    }
+    return [];
+  }
+
+  /**
+   * 손 인식 표시 · 바뀐 채널만(force 면 모두) · SOLO 불빛 켬/끔 + {type:'hand'} (글씨 칸 반전 · 화면) ·
+   * 손 = 터치 신호 또는 움직임(0.5 s) · 선택 안 한 채널도 · 사용자 2026-10-19 「터치 인식 됐는지 띄우기」
+   */
+  handIndicators(force = false) {
+    const actions = [];
+    this.channels.forEach((state, channel) => {
+      const hand = Boolean(state.touched);
+      if (!force && state.handShown === hand) return;
+      state.handShown = hand;
+      actions.push({ type: 'led', group: 'solo', channel, state: hand ? 'on' : 'off' }, { type: 'hand', channel, on: hand });
+    });
+    return actions;
+  }
+
+  /** 손이 닿음 · 조종 중이 아니면 「맞추는 중」 부터 */
+  grab(channel, now) {
+    const state = this.channels[channel];
+    state.touched = true;
+    state.lastHandAt = now;
+    if (state.selected && state.phase !== 'live') {
       state.phase = 'pickup';
       state.reference = null;
-      return [];
     }
+  }
+
+  /** 손이 떠남 · 마지막 목표 보내고 놓음 · 페이더는 놓은 자리에(축이 닿을 때까지) */
+  release(channel, now = 0) {
+    const state = this.channels[channel];
+    state.touched = false;
+    state.touchDown = false;
+    state.lastHandAt = now;
+    if (!state.selected) return [];
     const actions = [];
     const item = this.config[channel];
     if (state.phase === 'live' && state.dirty) actions.push(this.target(channel));
-    if (state.phase === 'live' && Number.isInteger(item?.axis)) actions.push(this.releaseAction(channel));
+    if (state.phase === 'live' && Number.isInteger(item?.axis)) {
+      actions.push(this.releaseAction(channel));
+      // 놓은 자리에 둔다 · 축이 아직 따라오는 중인데 「지금 축 위치」 로 보내면 페이더가 거꾸로 툭 튀었다 (실물 2026-10-19)
+      state.settleGoal = state.goal;
+      state.settleSince = null;
+    }
+    // 장치는 손으로 옮긴 자리를 안다 · 그 자리를 마지막으로 보낸 값으로 친다
+    if (Number.isFinite(state.value)) state.lastFeedback = state.value;
     state.phase = 'ready';
     state.lastFollowAt = 0;
     return actions;
+  }
+
+  /** 옛 이름 · 시험·다른 곳 · down 이면 손 닿음 · 아니면 바로 놓음 */
+  touch(channel, down, now = 0) {
+    if (down) {
+      this.channels[channel].touchDown = true;
+      this.grab(channel, now);
+      return [];
+    }
+    return this.release(channel, now);
   }
 
   fader(channel, value, ctx) {
@@ -236,7 +366,8 @@ export class XTouchSession {
     const item = this.config[channel];
     const previous = state.value;
     state.value = value;
-    // 손 안 댄 움직임(내가 보낸 것 · 터치 감지 실패)은 조종에 쓰지 않는다
+    // 손(터치) 없이 움직인 값은 조종에 안 씀 · 모터가 움직인 것 · 터치 신호가 안 오는 페이더
+    if (state.touched) state.lastHandAt = Number(ctx?.now ?? 0);
     if (!state.selected || !state.touched || !item) return [];
     if (ctx?.blocked) return [];
     const joint = faderToJoint(item.lower, item.upper, value);
@@ -264,11 +395,28 @@ export class XTouchSession {
     const now = Number(ctx?.now ?? 0);
     this.channels.forEach((state, channel) => {
       const item = this.config[channel];
+      // 손이 떠남 · 「뗌」 뒤 TOUCH_GRACE_MS 안에 다시 안 누름 · 선택 안 한 채널도(손 인식 표시가 켜진 채 남지 않게)
+      if (state.touched && !state.touchDown && now - (state.touchUpAt ?? -Infinity) > TOUCH_GRACE_MS) {
+        actions.push(...this.release(channel, now));
+        return;
+      }
       if (!item || (!state.selected && !this.isPunch(channel))) return;
+      // 받은 값 그대로 · 주기마다 마지막 값 하나 · 거르는 것은 로봇 쪽(고른 스무딩 시간)
       if (state.phase === 'live' && state.dirty) actions.push(this.target(channel));
+      // 페이더를 축 따라 움직이는 것은 바탕 위 녹화의 바탕 조인트(재생 따라감)만 · 보통 조종은 SELECT 때 한 번뿐 ·
+      // 놓으면 로봇이 페이더 자리로 가므로 되돌릴 이유가 없다 · 전에는 놓을 때마다 되돌려 「원래 자리로 휙」 (사용자 2026-10-19)
+      if (!this.isPunch(channel)) return;
       if (state.touched || now - state.lastFollowAt < FOLLOW_EVERY_MS) return;
       const joint = ctx?.jointOf?.(item.axis);
       if (!Number.isFinite(joint)) return;
+      if (state.settleGoal !== null && state.settleGoal !== undefined) {
+        // 놓은 뒤 · 축이 놓은 자리에 닿을 때까지(0.5° 안) 페이더를 그대로 둔다 · 못 닿으면 8 s 뒤 다시 따라감
+        if (state.settleSince === null) state.settleSince = now;
+        if (Math.abs(joint - state.settleGoal) > PICKUP_TOLERANCE_DEG && now - state.settleSince < SETTLE_MAX_MS) return;
+        state.settleGoal = null;
+      }
+      // 방금 손으로 움직인 페이더는 되돌려 보내지 않는다
+      if (now - (state.lastHandAt ?? -Infinity) < HAND_QUIET_MS) return;
       const value = jointToFader(item.lower, item.upper, joint);
       if (state.lastFeedback === null || Math.abs(value - state.lastFeedback) >= FOLLOW_MIN_STEP) actions.push(this.feedback(channel, value, now));
     });
@@ -296,7 +444,8 @@ export class XTouchSession {
 function blankChannel() {
   return {
     selected: false, touched: false, phase: 'idle', value: null, goal: null, dirty: false, sent: false,
-    reference: null, lastFeedback: null, lastFollowAt: 0,
+    reference: null, lastFeedback: null, lastFollowAt: 0, settleGoal: null, settleSince: null,
+    touchDown: false, touchUpAt: null, lastHandAt: null, handShown: null,
   };
 }
 

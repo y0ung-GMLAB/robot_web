@@ -16,7 +16,7 @@ import math
 import time
 from typing import Any, Dict, List, Mapping, Optional
 
-from motion_common import joint_mapping, motion_segment, multiturn_clear, rate_check, repeat_policy, units, wire_units
+from motion_common import joint_mapping, manual_speed, motion_segment, multiturn_clear, rate_check, repeat_policy, units, wire_units
 from motion_common.values import finite_float, optional_int
 
 from . import motion_run_rules
@@ -84,9 +84,11 @@ def _punch_joints(payload: Dict[str, Any], axes: List[Dict[str, Any]]) -> Dict[s
             continue
         lower = finite_float(axis.get('motion_limit_lower_rad'))
         upper = finite_float(axis.get('motion_limit_upper_rad'))
+        # 덮어쓰기·잇기도 상한의 98 % 로 · 녹화 파일이 반올림만으로 재생 검사를 넘지 않게(2026-10-19)
+        ratio = manual_speed.XTOUCH_LIMIT_RATIO
         joints[motion_id] = {
-            'max_velocity': float(joint_mapping.rate(row, 'max_velocity', units.RAD)),
-            'max_acceleration': float(joint_mapping.rate(row, 'max_acceleration', units.RAD)),
+            'max_velocity': float(joint_mapping.rate(row, 'max_velocity', units.RAD)) * ratio,
+            'max_acceleration': float(joint_mapping.rate(row, 'max_acceleration', units.RAD)) * ratio,
             'lower': float(lower) if lower is not None else -math.inf,
             'upper': float(upper) if upper is not None else math.inf,
         }
@@ -242,12 +244,15 @@ class PlanBuilder:
         mapping = self.manager._load_mapping(mapping_path)
 
         mapping_motion_file_id = str(mapping.get('motion_file_id') or '').strip()
-        # 재생 목록 안의 파일이면 된다 · 수정 목록 35 · 목록이 없으면 옛 규칙(등록 파일 하나)
+        # 재생 목록 안의 파일이면 된다 · 수정 목록 35 · 목록이 없으면 옛 규칙(등록 파일 하나) ·
+        # X-Touch 바탕 위 녹화는 사람이 수동 모드에서 고른 바탕을 한 번 재생 · 등록 안 된 파일도 된다
+        # (floating4 실물 2026-10-19 · 「바탕이 재생이 안 됨」 = 이 거절 · 수정 목록 156 ⑨)
         registered_playlist = playlist_from_mapping(mapping)
         if (
             mapping_motion_file_id
             and motion_file_id not in registered_playlist
             and not studio_request
+            and not payload.get('xtouch_take')
             and not (initialization_only and not motion_file_id)
         ):
             raise ValueError(

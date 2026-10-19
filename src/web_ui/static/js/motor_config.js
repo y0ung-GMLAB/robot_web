@@ -1189,7 +1189,6 @@ export function createMotorConfigController({
       rated_effort: '정격 토크',
       unit_effort: '토크 단위 환산값',
       rated_current: '정격 전류',
-      rated_power_w: '정격 출력',
       rated_speed_rpm: '정격 속도',
       lower: '최소 위치',
       upper: '최대 위치',
@@ -1237,7 +1236,6 @@ export function createMotorConfigController({
     if (item === 'period') return 'ns';
     if (item === 'serial_baudrate') return 'bps';
     if (item === 'rated_current') return 'A';
-    if (item === 'rated_power_w') return 'W';
     if (item === 'rated_speed_rpm') return 'rpm';
     if (item === 'pulse_per_revolution') return 'count/rev';
     if (item === 'lower' || item === 'upper') return 'deg';

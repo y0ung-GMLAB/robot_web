@@ -4,7 +4,8 @@
 
     ← {type:'hello', mapping_file_id?, base_mapping_revision?}
     → {type:'hello_ok'}  |  {type:'error', message}  (보내고 닫는다)
-    ← {type:'target', axis, target_rad, motion_id?, motion_rad?, source?}   # 모터 rad (수정 목록 6) · source fader|dial
+    ← {type:'target', axis, target_rad, motion_id?, motion_rad?, source?, smooth_sec?}   # 모터 rad (수정 목록 6) · source fader|dial|xtouch
+                                         # smooth_sec · X-Touch 날 값을 supervisor 가 거르는 시간(초 · 0 = 안 거름)
     ← {type:'release', axes:[..]}        # 놓음 → 마지막 목표까지 천천히 간 뒤 끝 (수정 목록 126)
     ← {type:'stop', axes:[..]}           # 세움 → 현재 위치에 hold (페이지를 떠남 등)
     → {type:'result', ...}               # supervisor 의 축별 마지막 승인·거부
@@ -24,12 +25,14 @@ X-Touch 화면(수정 목록 156) · 인사에 `watchdog_sec` 를 주면 그 시
 녹화 요청도 이 소켓으로 · 끊기면 녹화는 마지막으로 받은 순간까지 자동 저장:
 
     ← {type:'ping'}                              → {type:'pong', record:{state, …}}
-    ← {type:'record_start', axes:[..], name?}    → {type:'record', success, state, …}
+    ← {type:'record_start', axes:[..], name?, base?, overwrite?}    → {type:'record', success, state, …}
+                                                 # overwrite · 같은 이름에 덮어쓰기(전 파일은 휴지통에 사본 · 끊김 자동 저장 ·
+                                                 # 바탕 끝까지 안 간 것은 새 이름) · 이름이 비고 바탕이 있으면 바탕 파일에
     ← {type:'record_add', axes:[..]}             → {type:'record', …}   # 녹화 중 SELECT 로 더한 축
     ← {type:'record_stop'}                       → {type:'record', success, state:'saved', file, …}
     ← {type:'record_cancel'}                     → {type:'record', state:'idle'}
     record_start 에 `base`(애니메이션 파일)를 주면 그 위에 녹화(재생 노드가 재생) · 그동안 재생 중이어도 받는다 ·
-    ← {type:'punch', motion_id, joint_rad} · {type:'punch_release', motion_id}   # 바탕 조인트 덮어쓰기(⑨-2)
+    ← {type:'punch', motion_id, joint_rad, smooth_sec?} · {type:'punch_release', motion_id}   # 바탕 조인트 덮어쓰기(⑨-2)
 """
 
 from __future__ import annotations
@@ -80,11 +83,13 @@ async def run_manual_stream_socket(bridge: Any, websocket: Any) -> None:
 
     block = await asyncio.to_thread(_stream_block_reason, bridge)
     if block:
+        await asyncio.to_thread(_write_diag, bridge, [f'[로봇] 연결 거절 · {block}'])
         await refuse(block)
         return
 
     hello = await _handshake(bridge, websocket, refuse)
     if hello is None:
+        await asyncio.to_thread(_write_diag, bridge, ['[로봇] 인사 거절(낡은 매핑 · 인사 없음)'])
         return
     await send({'type': 'hello_ok'})
 
@@ -104,6 +109,7 @@ async def run_manual_stream_socket(bridge: Any, websocket: Any) -> None:
                     raw = await websocket.receive_text()
             except asyncio.TimeoutError:
                 # 연결은 살아 있는데 안 온다(무선 멈춤 등) · 끊긴 것으로 · 수정 목록 156
+                await asyncio.to_thread(_write_diag, bridge, [f'[로봇] {watchdog:g} s 동안 안 옴 · 끊긴 것으로'])
                 with contextlib.suppress(Exception):   # 이미 끊겼으면 그만
                     await websocket.close()
                 return
@@ -123,10 +129,16 @@ async def run_manual_stream_socket(bridge: Any, websocket: Any) -> None:
                 taking = recording is not None and recording.base_active_for(owner)
                 block = await asyncio.to_thread(_stream_block_reason, bridge, taking)
                 if block:
+                    if watchdog:
+                        await asyncio.to_thread(_write_diag, bridge, [f'[로봇] 흐르는 중 막힘 · 닫음 · {block}'])
                     await refuse(block)
                     return
 
             kind = message.get('type')
+            if kind == 'diag':
+                # 화면 진단 줄 · 받은 MIDI · 보낸 값 · 로봇 기록 폴더에 · 2026-10-19
+                await asyncio.to_thread(_write_diag, bridge, message.get('lines'))
+                continue
             if kind == 'ping':
                 await send({'type': 'pong', 'record': recording.status() if recording else {'state': 'idle'}})
                 continue
@@ -134,6 +146,7 @@ async def run_manual_stream_socket(bridge: Any, websocket: Any) -> None:
                 # 구간 덮어쓰기 · 재생 노드로 · 20 ms 마다 오므로 실패만 알린다 · 수정 목록 156 ⑨-2
                 result = recording.punch(
                     owner, message.get('motion_id'), message.get('joint_rad'), release=kind == 'punch_release',
+                    smooth_sec=message.get('smooth_sec'),
                 ) if recording is not None else {'success': False, 'message': '녹화를 지원하지 않습니다'}
                 if not result.get('success'):
                     await send({'type': 'result', **result})
@@ -156,6 +169,7 @@ async def run_manual_stream_socket(bridge: Any, websocket: Any) -> None:
                     motion_id=message.get('motion_id'),
                     motion_rad=message.get('motion_rad'),
                     source=message.get('source'),
+                    smooth_sec=message.get('smooth_sec'),
                 )
                 if not result.get('success'):
                     await send({'type': 'result', **result})
@@ -192,13 +206,33 @@ async def run_manual_stream_socket(bridge: Any, websocket: Any) -> None:
 
 
 RECORD_MESSAGES = ('record_start', 'record_add', 'record_stop', 'record_cancel')
+#: 화면 진단 줄 · 한 번에 이만큼까지 · 파일은 날마다 하나
+DIAG_MAX_LINES = 400
+
+
+def _write_diag(bridge: Any, lines: Any) -> None:
+    """`<작업공간>/log/xtouch/<날짜>.log` 에 덧붙인다 · 못 쓰면 그만(조종과 무관)"""
+    root = getattr(bridge, 'workspace_root', None)
+    if root is None or not isinstance(lines, list):
+        return
+    from datetime import datetime
+    from pathlib import Path
+    folder = Path(root) / 'log' / 'xtouch'
+    stamp = datetime.now()
+    text = ''.join(f'{stamp:%H:%M:%S} {str(line)[:200]}\n' for line in lines[:DIAG_MAX_LINES])
+    with contextlib.suppress(OSError):
+        folder.mkdir(parents=True, exist_ok=True)
+        with (folder / f'{stamp:%Y-%m-%d}.log').open('a', encoding='utf-8') as handle:
+            handle.write(text)
 
 
 def _record_request(recording: Any, owner: Any, kind: str, message: dict) -> dict:
     if recording is None:
         return {'success': False, 'message': '이 서버는 녹화를 지원하지 않습니다'}
     if kind == 'record_start':
-        return recording.start(owner, message.get('axes'), message.get('name'), message.get('base'))
+        return recording.start(
+            owner, message.get('axes'), message.get('name'), message.get('base'), bool(message.get('overwrite')),
+        )
     if kind == 'record_add':
         return recording.add_axes(owner, message.get('axes'))
     if kind == 'record_stop':
