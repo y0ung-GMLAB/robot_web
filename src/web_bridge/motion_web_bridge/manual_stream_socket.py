@@ -4,7 +4,8 @@
 
     ← {type:'hello', mapping_file_id?, base_mapping_revision?}
     → {type:'hello_ok'}  |  {type:'error', message}  (보내고 닫는다)
-    ← {type:'target', axis, target_rad, motion_id?, motion_rad?, source?}   # 모터 rad (수정 목록 6) · source fader|dial
+    ← {type:'target', axis, target_rad, motion_id?, motion_rad?, source?, smooth_sec?}   # 모터 rad (수정 목록 6) · source fader|dial|xtouch
+                                         # smooth_sec · X-Touch 날 값을 supervisor 가 거르는 시간(초 · 0 = 안 거름)
     ← {type:'release', axes:[..]}        # 놓음 → 마지막 목표까지 천천히 간 뒤 끝 (수정 목록 126)
     ← {type:'stop', axes:[..]}           # 세움 → 현재 위치에 hold (페이지를 떠남 등)
     → {type:'result', ...}               # supervisor 의 축별 마지막 승인·거부
@@ -29,7 +30,7 @@ X-Touch 화면(수정 목록 156) · 인사에 `watchdog_sec` 를 주면 그 시
     ← {type:'record_stop'}                       → {type:'record', success, state:'saved', file, …}
     ← {type:'record_cancel'}                     → {type:'record', state:'idle'}
     record_start 에 `base`(애니메이션 파일)를 주면 그 위에 녹화(재생 노드가 재생) · 그동안 재생 중이어도 받는다 ·
-    ← {type:'punch', motion_id, joint_rad} · {type:'punch_release', motion_id}   # 바탕 조인트 덮어쓰기(⑨-2)
+    ← {type:'punch', motion_id, joint_rad, smooth_sec?} · {type:'punch_release', motion_id}   # 바탕 조인트 덮어쓰기(⑨-2)
 """
 
 from __future__ import annotations
@@ -143,6 +144,7 @@ async def run_manual_stream_socket(bridge: Any, websocket: Any) -> None:
                 # 구간 덮어쓰기 · 재생 노드로 · 20 ms 마다 오므로 실패만 알린다 · 수정 목록 156 ⑨-2
                 result = recording.punch(
                     owner, message.get('motion_id'), message.get('joint_rad'), release=kind == 'punch_release',
+                    smooth_sec=message.get('smooth_sec'),
                 ) if recording is not None else {'success': False, 'message': '녹화를 지원하지 않습니다'}
                 if not result.get('success'):
                     await send({'type': 'result', **result})
@@ -165,6 +167,7 @@ async def run_manual_stream_socket(bridge: Any, websocket: Any) -> None:
                     motion_id=message.get('motion_id'),
                     motion_rad=message.get('motion_rad'),
                     source=message.get('source'),
+                    smooth_sec=message.get('smooth_sec'),
                 )
                 if not result.get('success'):
                     await send({'type': 'result', **result})

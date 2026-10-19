@@ -324,3 +324,61 @@ def test_step_never_passes_a_fixed_goal_from_rest():
             if done:
                 break
         assert done
+
+
+# ---------------------------------------------------------- 스무딩 ---
+# X-Touch 는 날 값 · 거르는 것은 램프 앞 · 사용자 결정 2026-10-19 · 수정 목록 156
+
+
+def _xtouch(axis, motor_deg, smooth_sec, gain=50.0):
+    """눈 축 · 조인트 13 °/s · 35 °/s² (모터 = × 이득)"""
+    return _target(axis, motor_deg, source='xtouch', smooth_sec=smooth_sec, **{
+        manual_speed.VELOCITY_FIELD: R(13.0 * gain),
+        manual_speed.ACCELERATION_FIELD: R(35.0 * gain),
+    })
+
+
+def _sparse_drag(smooth_sec):
+    """페이더를 조인트 5 °/s 로 미는데 값이 0.1 s 마다 띄엄띄엄 옴(로그 2026-10-19 · 받음 줄 간격) · 모터 °/주기"""
+    supervisor = _supervisor()
+    gain = 50.0
+    for tick in range(300):
+        if tick % 5 == 0:
+            joint = 5.0 * tick * DT
+            supervisor._accept_stream_goals([_xtouch(0, joint * gain, smooth_sec)])
+        _run(supervisor, 1)
+    path = [0.0] + [row[0] for row in _sent(supervisor)]
+    return [(b - a) / gain for a, b in zip(path, path[1:])]     # 조인트 ° / 주기
+
+
+def test_sparse_raw_values_move_steadily_with_smoothing():
+    """띄엄띄엄 오는 날 값 · 안 거르면 받을 때마다 속도가 출렁(0.1 s 주기 · 약 ±15 %) · 거르면 고르게"""
+    steady = 5.0 * DT
+    ripple = {
+        sec: (max(path) - min(path)) / steady
+        for sec in (0.0, 0.1, 0.25, 0.5)
+        for path in [_sparse_drag(sec)[150:290]]
+    }
+    assert ripple[0.0] > 0.2, ripple
+    assert ripple[0.1] < ripple[0.0] and ripple[0.25] < ripple[0.1] and ripple[0.5] < ripple[0.25], ripple
+    assert ripple[0.25] < 0.05, ripple
+
+
+def test_smoothing_starts_from_the_current_position_and_finishes_on_release():
+    supervisor = _supervisor(position_deg=10.0)
+    supervisor._accept_stream_goals([_xtouch(0, 60.0, 0.5)])
+    _run(supervisor, 1)
+    first = _sent(supervisor)[0][0]
+    assert 10.0 < first < 10.5, '잡은 자리에서 조금만'
+    supervisor._release_stream_ramps([0])
+    _run(supervisor, 20)
+    assert 0 in supervisor._stream_ramps, '거른 값이 닿기 전엔 안 끝남'
+    _run(supervisor, 400)
+    assert _sent(supervisor)[-1][0] == pytest.approx(60.0)
+    assert supervisor._stream_ramps == {}
+
+
+def test_web_fader_without_smooth_sec_is_unchanged():
+    """웹 페이더·다이얼은 안 거름(전과 같음)"""
+    assert manual_ramp.smooth_of(_target(0, 10.0)) == 0.0
+    assert manual_ramp.smooth_of(_xtouch(0, 10.0, 0.25)) == 0.25

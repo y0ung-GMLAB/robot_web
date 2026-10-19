@@ -893,6 +893,8 @@ class MotionSupervisor(Node):
                 }
                 request['atomic'] = self._optional_int(target.get('channel')) in atomic_channels
                 source = manual_ramp.source_of(target)
+                # X-Touch 는 날 값 · 여기서 거른다(화면에서 고른 시간) · 수정 목록 156
+                smooth_sec = manual_ramp.smooth_of(target)
                 ramp = ramps.get(axis)
                 if ramp is None:
                     ramps[axis] = manual_ramp.AxisRamp(
@@ -904,10 +906,11 @@ class MotionSupervisor(Node):
                         source=source,
                         updated_at=now,
                         request=request,
+                        smooth_sec=smooth_sec,
                     )
                 else:
                     ramp.source = source
-                    ramp.retarget(goal, velocity, acceleration, request, now)
+                    ramp.retarget(goal, velocity, acceleration, request, now, smooth_sec)
             accepted_axes = {item[0] for item in accepted}
             for index, target in enumerate(requests):
                 axis = self._optional_int(target.get('axis'))

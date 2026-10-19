@@ -12,7 +12,7 @@ import yaml
 from motion_common import paths as common_paths
 from motion_common.execution_context import confirm_context_id
 from motion_common.paths import project_dir_for
-from motion_common import command_router, generation as generation_mod, latest_tap, motion_table, topics, wire_units
+from motion_common import command_router, generation as generation_mod, latest_tap, motion_table, smoothing, topics, wire_units
 from motion_common.values import finite_float, optional_int
 from motion_control_msgs.msg import MotorStatus
 from rclpy.node import Node
@@ -1447,7 +1447,10 @@ class MotionRunManager(Node):
                 target = float(payload.get('target_rad'))
             except (TypeError, ValueError):
                 return
-            controller.input(motion_id, target, time.monotonic())
+            # 화면은 날 값 · 거르는 것은 펀치 쪽(화면에서 고른 시간) · 사용자 결정 2026-10-19
+            controller.input(
+                motion_id, target, time.monotonic(), smooth_sec=smoothing.smooth_sec_from(payload.get('smooth_sec')),
+            )
 
     def _publish_status(self) -> None:
         with self._run_lock:

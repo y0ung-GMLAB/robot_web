@@ -29,7 +29,7 @@ import time
 import uuid
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
-from motion_common import joint_mapping
+from motion_common import joint_mapping, smoothing
 
 from .xtouch_base_take import BaseTake, load_base, mapped_rows, punchable
 from .xtouch_recording_core import (  # noqa: F401 · 시험·다른 모듈이 이 이름으로도 쓴다
@@ -304,7 +304,9 @@ class RecordingService:
                     self._take.add_axis(item)
         return {'success': True, 'message': '', **self.status()}
 
-    def punch(self, owner: Any, motion_id: Any, target_rad: Any = None, *, release: bool = False) -> Dict[str, Any]:
+    def punch(
+        self, owner: Any, motion_id: Any, target_rad: Any = None, *, release: bool = False, smooth_sec: Any = None,
+    ) -> Dict[str, Any]:
         """구간 덮어쓰기 입력 → 재생 노드 · 바탕 조인트만 · 수정 목록 156 ⑨-2"""
         name = str(motion_id or '')
         with self._lock:
@@ -324,7 +326,12 @@ class RecordingService:
             return {'success': False, 'message': '목표(조인트 rad)가 필요합니다'}
         if not math.isfinite(value):
             return {'success': False, 'message': '목표(조인트 rad)가 필요합니다'}
-        self._publish_punch({'motion_id': name, 'target_rad': value})
+        payload = {'motion_id': name, 'target_rad': value}
+        # 화면은 날 값 · 재생 노드가 거른다(화면에서 고른 시간) · 사용자 결정 2026-10-19
+        smooth = smoothing.smooth_sec_from(smooth_sec)
+        if smooth > 0.0:
+            payload['smooth_sec'] = smooth
+        self._publish_punch(payload)
         return {'success': True}
 
     def cancel(self, owner: Any) -> Dict[str, Any]:

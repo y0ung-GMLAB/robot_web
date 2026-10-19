@@ -21,7 +21,8 @@ import { fileInfo, signedDeg } from '../play_model.js';
 import { manualBlocker } from './manual.js';
 import { MIDI_FLAG_URL, XTouchDevice, midiUnavailableReason } from '../xtouch_device.js';
 import {
-  CHANNELS, PHASE_LABEL, XTouchSession, channelConfig, faderMessage, lcdMessages, ledMessage, recordLed, robotTag,
+  CHANNELS, DEFAULT_SMOOTH_SEC, PHASE_LABEL, SMOOTH_LEVELS, XTouchSession, channelConfig, faderMessage, lcdMessages, ledMessage,
+  recordLed, robotTag,
 } from '../xtouch_model.js';
 
 const DEG = 180 / Math.PI;
@@ -31,11 +32,27 @@ const PING_MS = 500;
 /** 이만큼 아무것도 안 오면 서버가 끊긴 것으로 본다(무선 멈춤) · 화면은 0.5 s 마다 ping */
 const WATCHDOG_SEC = 2;
 const ROUTE = '#/xtouch';
+/** 스무딩 · 이 브라우저에 기억(로봇 주소마다 다른 저장소) · 사용자 결정 2026-10-19 */
+const SMOOTH_KEY = 'rw.xtouch.smooth_sec';
+
+function loadSmooth() {
+  try {
+    const text = globalThis.localStorage?.getItem(SMOOTH_KEY);
+    const value = Number(text);
+    if (text !== null && text !== undefined && SMOOTH_LEVELS.some((level) => level.sec === value)) return value;
+  } catch { /* 기본값 */ }
+  return DEFAULT_SMOOTH_SEC;
+}
+
+function saveSmooth(value) {
+  try { globalThis.localStorage?.setItem(SMOOTH_KEY, String(value)); } catch { /* 이번만 */ }
+}
 
 const ui = {
   rows: null, fileId: '', revision: '', message: '', name: '', base: '', files: [], lastResultAt: 0,
   record: { state: 'idle' }, recordAt: 0, lastSaved: null,
   dev: { status: 'off', name: '', message: '' },
+  smoothSec: loadSmooth(),
 };
 let ctx = { state: null, changed: () => {} };
 const session = new XTouchSession();
@@ -184,7 +201,7 @@ function run(actions) {
     else if (action.type === 'led') device.send(ledMessage(action.group, action.channel, action.state));
     else if (action.type === 'target') sendTarget(action);
     else if (action.type === 'release') stream.release(action.axes);
-    else if (action.type === 'punch') stream.send({ type: 'punch', motion_id: action.motionId, joint_rad: action.joint * RAD });
+    else if (action.type === 'punch') stream.send({ type: 'punch', motion_id: action.motionId, joint_rad: action.joint * RAD, smooth_sec: ui.smoothSec });
     else if (action.type === 'punch-release') stream.send({ type: 'punch_release', motion_id: action.motionId });
     else if (action.type === 'record-toggle') toggleRecord();
     else if (action.type === 'record-add') stream.send({ type: 'record_add', axes: action.axes });
@@ -200,7 +217,8 @@ function sendTarget(action) {
   const lower = Math.max(motor.lower, view.motorMin);
   const upper = Math.min(motor.upper, view.motorMax);
   const motorDeg = Math.min(upper, Math.max(lower, jointToMotor(item.row, action.joint)));
-  stream.target(action.axis, motorDeg * RAD, { motion_id: action.motionId, motion_rad: action.joint * RAD, source: 'xtouch' });
+  // 받은 값 그대로 · 거르는 것은 로봇 쪽이 고른 시간으로(supervisor 램프 앞)
+  stream.target(action.axis, motorDeg * RAD, { motion_id: action.motionId, motion_rad: action.joint * RAD, source: 'xtouch', smooth_sec: ui.smoothSec });
 }
 
 /** 불빛 · 글씨 칸 · 연결 직후와 상태가 바뀔 때 */
@@ -481,11 +499,20 @@ function connectCard(state, changed) {
     h('p', { class: 'muted small', text: 'X-Touch 한 대 = 로봇 한 대 · 여러 대를 허브로 꽂으면 로봇 화면마다 쓸 장치를 고릅니다(다른 로봇 화면끼리는 서로 모르니 같은 장치를 고르지 마세요 · 글씨 칸의 로봇 표시로 확인). 창이 가려지거나 다른 탭으로 가도 그대로 움직입니다(X-Touch 화면을 떠나면 끊습니다). SELECT 로 축을 고르면 페이더가 그 축 위치로 가고, 손을 대고 축 값에 맞추면(0.5° 안 또는 지나감) 그때부터 따라갑니다. 손을 떼면 마지막 목표까지 가서 섭니다. 속도·가속도는 조인트 매핑의 최대 값입니다.' }));
 }
 
-function channelCard(state) {
+/** 스무딩 고르기 · 바로 다음 값부터 · 잡고 있는 중에 바꿔도 된다 */
+function smoothPicker(changed) {
+  return h('label', { class: 'inline' }, '스무딩',
+    h('select', { class: 'select select-sm', 'aria-label': '스무딩',
+      title: '페이더 값은 그대로 보내고 로봇 쪽에서 이 시간만큼 부드럽게 거릅니다 · 길수록 부드럽고 늦게 따라옵니다 · 녹화에는 거른 값이 들어갑니다',
+      onchange: (e) => { ui.smoothSec = Number(e.target.value); saveSmooth(ui.smoothSec); diag('smooth', `스무딩 ${ui.smoothSec} s`); changed(); } },
+    SMOOTH_LEVELS.map((level) => h('option', { value: String(level.sec), selected: level.sec === ui.smoothSec }, level.label))));
+}
+
+function channelCard(state, changed) {
   const list = motors(state);
   const rows = session.config;
   return h('section', { class: 'card', 'aria-label': '채널' },
-    h('div', { class: 'card-head' }, h('h2', { text: '페이더 · 축' })),
+    h('div', { class: 'card-head' }, h('h2', { text: '페이더 · 축' }), smoothPicker(changed)),
     rows.some(Boolean) ? h('div', { class: 'table-wrap' }, h('table', { class: 'table' },
       h('thead', {}, h('tr', {}, ['페이더', '조인트', '모터', '상태', '현재', '목표'].map((text) => h('th', { scope: 'col', text })))),
       h('tbody', {}, rows.map((item, channel) => {
@@ -543,7 +570,7 @@ export function renderXTouch(state, { changed }) {
   return [
     h('div', { class: 'page-head' }, h('h1', { text: 'X-Touch' })),
     connectCard(state, changed),
-    channelCard(state),
+    channelCard(state, changed),
     recordCard(state, changed),
   ];
 }
