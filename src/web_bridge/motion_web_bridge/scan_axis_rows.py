@@ -24,7 +24,8 @@
                저장된 alias 가 있으면                        → alias 로
                저장된 rotary 가 있으면                       → rotary 로
                그래도 못 찾으면, Slave 값이 같은 축이 **딱 하나**일 때만
-               「연결 확인 필요」로 짝지어 준다
+               「연결 확인 필요」로 짝지어 준다 · 이것은 위 셋으로 모든 슬레이브를 짝지은
+               **뒤에**, 아직 짝 없는 축끼리만 (수정 목록 157)
 
     Dynamixel  포트와 ID 로
 """
@@ -316,19 +317,35 @@ def axis_rows_from_scan(
     used_slaves = set()
     used_devices = set()
 
+    # 두 번 돈다 · 수정 목록 157 (floating4 실물 2026-10-19)
+    #
+    # 전에는 슬레이브 순서대로 한 번에 정했다 · 체인 앞(위치 0·1)에 새 드라이브를 끼우면
+    # 그 새 드라이브가 위치만 같은 저장 모터(옛 위치 0·1 의 눈)에 먼저 붙고, 뒤에서 그 눈이
+    # 제조번호로 다시 잡혀 짝은 덮어써졌는데 새 드라이브는 「쓴 슬레이브」 로 남아 새 장치
+    # 목록에서 빠졌다(5대 중 3대만 보임) · 이제 ① 제조번호·alias·rotary 로 모두 먼저 짝짓고
+    # ② 남은 슬레이브만 아직 짝 없는 저장 모터에 위치로 붙인다(「연결 확인 필요」).
+    ethercat_motors = [m for m in motors if m.get('transport') == 'ethercat']
+    taken = set()
     for index, slave in enumerate(slaves):
-        match = next((m for m in motors if m.get('transport') == 'ethercat'
+        match = next((m for m in ethercat_motors if str(m.get('id')) not in taken
                       and _ac_servo_matches(slave, m)), None)
-        required = False
-        if match is None:
-            shares = [m for m in motors if m.get('transport') == 'ethercat'
-                      and _ac_servo_shares_position(slave, m)]
-            if len(shares) == 1:
-                match, required = shares[0], True
         if match is None:
             continue
+        taken.add(str(match.get('id')))
         paired[str(match.get('id'))] = _scanned_ac_servo_view(slave)
-        confirmation[str(match.get('id'))] = required
+        confirmation[str(match.get('id'))] = False
+        used_slaves.add(index)
+    for index, slave in enumerate(slaves):
+        if index in used_slaves:
+            continue
+        shares = [m for m in ethercat_motors if str(m.get('id')) not in taken
+                  and _ac_servo_shares_position(slave, m)]
+        if len(shares) != 1:
+            continue
+        match = shares[0]
+        taken.add(str(match.get('id')))
+        paired[str(match.get('id'))] = _scanned_ac_servo_view(slave)
+        confirmation[str(match.get('id'))] = True
         used_slaves.add(index)
 
     for index, device in enumerate(devices):
@@ -365,8 +382,9 @@ def axis_rows_from_scan(
                 (m.get('config') or {}).get('controller_index'),
                 optional_int(m.get('axis'), None),
             )
-            for m in motors
-            if m.get('transport') == 'ethercat' and _ac_servo_shares_position(slave, m)
+            for m in ethercat_motors
+            # 이미 다른 슬레이브와 짝지은 모터는 후보가 아니다 · 수정 목록 157
+            if str(m.get('id')) not in taken and _ac_servo_shares_position(slave, m)
         ]
         new_devices.append(
             _new_device_row(
