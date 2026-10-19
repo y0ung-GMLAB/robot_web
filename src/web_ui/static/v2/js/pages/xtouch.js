@@ -121,12 +121,14 @@ function noteMidi(bytes, event) {
   else if (event.kind === 'fader') text = `페이더 ${event.channel + 1} · ${event.value}`;
   else if (event.kind === 'touch') text = `페이더 ${event.channel + 1} 터치 ${event.down ? '누름' : '뗌'}`;
   else text = `${{ rec: 'REC', solo: 'SOLO', mute: 'MUTE', select: 'SELECT' }[event.group]} ${event.channel + 1} ${event.down ? '누름' : '뗌'}`;
+  if (event?.kind === 'fader') diag(`inf${event.channel}`, `받음 페이더 ${event.channel + 1} ${event.value}`, 100);
   // 페이더 값은 채널마다 0.3 초에 한 줄만(쏟아져서 다른 것이 밀려나지 않게)
   if (event?.kind === 'fader') {
     const now = performance.now();
     if (now - (lastFaderLog.get(event.channel) || 0) < 300) return;
     lastFaderLog.set(event.channel, now);
   }
+  if (event?.kind !== 'fader') diag('in', `받음 ${text}`);
   midiLog.unshift(`${new Date().toLocaleTimeString()} · ${text}`);
   midiLog.length = Math.min(midiLog.length, MIDI_LOG_SIZE);
   ctx.changed();
@@ -138,8 +140,21 @@ function onDeviceEvent(event) {
   run(session.handle(event, sessionCtx()));
 }
 
+/** 진단 · 받은 것·보낸 것을 로봇 기록으로(1 s 마다 묶어) · 화면 밖에서 원인을 보려고 · 2026-10-19 */
+const diagQueue = [];
+const diagLast = new Map();
+function diag(key, text, throttleMs = 0) {
+  const now = performance.now();
+  if (throttleMs && now - (diagLast.get(key) || 0) < throttleMs) return;
+  diagLast.set(key, now);
+  if (diagQueue.length < 400) diagQueue.push(`${Math.round(now)} ${text}`);
+}
+
 function run(actions) {
   for (const action of actions || []) {
+    if (action.type === 'feedback') diag(`fb${action.channel}`, `보냄 페이더 ${action.channel + 1} ${action.value}`);
+    else if (action.type === 'target' || action.type === 'punch') diag(`t${action.channel}`, `목표 ${action.motionId} ${action.joint.toFixed(2)}°`, 200);
+    else if (action.type === 'release' || action.type === 'punch-release') diag(`r${action.type}`, `놓음 ${action.motionId || action.axes}`);
     if (action.type === 'feedback') device.send(faderMessage(action.channel, action.value));
     else if (action.type === 'led') device.send(ledMessage(action.group, action.channel, action.state));
     else if (action.type === 'target') sendTarget(action);
@@ -236,7 +251,11 @@ function tick() {
   }
   if (stream.isOpen()) {
     run(session.tick(sessionCtx()));
-    if (now - lastPing >= PING_MS) { lastPing = now; stream.send({ type: 'ping' }); }
+    if (now - lastPing >= PING_MS) {
+      lastPing = now;
+      stream.send({ type: 'ping' });
+      if (diagQueue.length) stream.send({ type: 'diag', lines: diagQueue.splice(0) });
+    }
   }
   paintLcd();
 }

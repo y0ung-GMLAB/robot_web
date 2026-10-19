@@ -127,6 +127,10 @@ async def run_manual_stream_socket(bridge: Any, websocket: Any) -> None:
                     return
 
             kind = message.get('type')
+            if kind == 'diag':
+                # 화면 진단 줄 · 받은 MIDI · 보낸 값 · 로봇 기록 폴더에 · 2026-10-19
+                await asyncio.to_thread(_write_diag, bridge, message.get('lines'))
+                continue
             if kind == 'ping':
                 await send({'type': 'pong', 'record': recording.status() if recording else {'state': 'idle'}})
                 continue
@@ -192,6 +196,24 @@ async def run_manual_stream_socket(bridge: Any, websocket: Any) -> None:
 
 
 RECORD_MESSAGES = ('record_start', 'record_add', 'record_stop', 'record_cancel')
+#: 화면 진단 줄 · 한 번에 이만큼까지 · 파일은 날마다 하나
+DIAG_MAX_LINES = 400
+
+
+def _write_diag(bridge: Any, lines: Any) -> None:
+    """`<작업공간>/log/xtouch/<날짜>.log` 에 덧붙인다 · 못 쓰면 그만(조종과 무관)"""
+    root = getattr(bridge, 'workspace_root', None)
+    if root is None or not isinstance(lines, list):
+        return
+    from datetime import datetime
+    from pathlib import Path
+    folder = Path(root) / 'log' / 'xtouch'
+    stamp = datetime.now()
+    text = ''.join(f'{stamp:%H:%M:%S} {str(line)[:200]}\n' for line in lines[:DIAG_MAX_LINES])
+    with contextlib.suppress(OSError):
+        folder.mkdir(parents=True, exist_ok=True)
+        with (folder / f'{stamp:%Y-%m-%d}.log').open('a', encoding='utf-8') as handle:
+            handle.write(text)
 
 
 def _record_request(recording: Any, owner: Any, kind: str, message: dict) -> dict:

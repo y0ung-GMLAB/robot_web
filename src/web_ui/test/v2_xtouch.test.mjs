@@ -292,3 +292,16 @@ test('터치 신호가 안 오는 페이더 · 움직이면 손으로 침 · 0.5
   assert.deepEqual(release.map((a) => a.type), ['release'], '0.5 s 멈춤 = 놓음');
   assert.equal(s.channels[0].touched, false);
 });
+
+test('되먹임 막기 · 보낸 뒤 1 s 안의 움직임(모터가 가는 중간 위치 포함)은 손이 아님 · 터치 신호를 보내는 채널은 움직임으로 안 침', () => {
+  const { s, ctx } = session({ 1: 0 });
+  s.handle({ kind: 'button', group: 'select', channel: 0, down: true }, ctx({ now: 0 }));
+  s.handle({ kind: 'fader', channel: 0, value: 1000 }, ctx({ now: 300 }));                   // 가는 중간 위치(보낸 값과 멂)
+  assert.equal(s.channels[0].touched, false);
+  const other = session({ 1: 0 });
+  other.s.handle({ kind: 'button', group: 'select', channel: 0, down: true }, other.ctx({ now: 0 }));
+  other.s.handle({ kind: 'touch', channel: 0, down: true }, other.ctx({ now: 100 }));
+  other.s.handle({ kind: 'touch', channel: 0, down: false }, other.ctx({ now: 200 }));
+  other.s.handle({ kind: 'fader', channel: 0, value: 2000 }, other.ctx({ now: 5000 }));      // 터치 없는 움직임
+  assert.equal(other.s.channels[0].touched, false, '이 채널은 터치 신호를 보냄 · 움직임으로 안 침');
+});

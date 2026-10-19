@@ -28,8 +28,7 @@ export const FOLLOW_MIN_STEP = 8;
 /** 놓은 뒤 축이 놓은 자리에 닿기를 기다리는 최대 시간 · 그 뒤엔 다시 축을 따라감 */
 export const SETTLE_MAX_MS = 8000;
 /** 터치 신호 없이 움직이면 손으로 침 · 내가 보낸 값이 되돌아온 것은 빼고(보낸 뒤 이 시간 안 · 이만큼 가까우면) */
-export const ECHO_WINDOW_MS = 500;
-export const ECHO_STEP = 160;
+export const ECHO_WINDOW_MS = 1000;
 /** 움직임으로 친 터치 · 이만큼 안 움직이면 놓은 것으로 */
 export const MOVE_RELEASE_MS = 500;
 const LCD_CHARS = 7;
@@ -175,6 +174,8 @@ export class XTouchSession {
     this.config = new Array(CHANNELS).fill(null);
     this.channels = Array.from({ length: CHANNELS }, () => blankChannel());
     this.punchIds = new Set();
+    // 터치 신호를 한 번이라도 보낸 채널 · 그 채널은 터치 신호만 믿는다(움직임으로 치지 않음) · 2026-10-19
+    this.touchSeen = new Array(CHANNELS).fill(false);
   }
 
   /** 바탕 위 녹화 · 덮어쓸 수 있는 조인트 이름들 · 빈 목록 = 보통 */
@@ -228,7 +229,11 @@ export class XTouchSession {
     if (!event) return [];
     if (event.kind === 'button' && event.group === 'rec') return event.down ? [{ type: 'record-toggle' }] : [];
     if (event.kind === 'button' && event.group === 'select') return event.down ? this.toggleSelect(event.channel, ctx) : [];
-    if (event.kind === 'touch') return this.touch(event.channel, event.down);
+    if (event.kind === 'touch') {
+      // 진짜 터치 신호 · 이 채널은 앞으로 터치 신호만 믿는다
+      this.touchSeen[event.channel] = true;
+      return this.touch(event.channel, event.down);
+    }
     if (event.kind === 'fader') return this.fader(event.channel, event.value, ctx);
     return [];
   }
@@ -292,10 +297,10 @@ export class XTouchSession {
     state.value = value;
     const now = Number(ctx?.now ?? 0);
     // 터치 신호 없이 움직임 · 사람 손으로 친다(전신과 같음) · 실물 2026-10-19 floating4 5번 페이더는 터치 신호가 아예 안 옴 ·
-    // 내가 보낸 모터 이동이 되돌아온 값(보낸 직후 · 보낸 값 근처)은 손이 아니다
-    if (state.selected && item && !state.touched) {
-      const echo = state.lastFeedback !== null && now - state.lastFollowAt < ECHO_WINDOW_MS
-        && Math.abs(value - state.lastFeedback) <= ECHO_STEP;
+    // 터치 신호를 보내는 채널에는 안 쓴다 · 보낸 뒤 1 s 는 모터가 가는 중이라 그 사이 값(중간 위치 포함)은 손이 아니다 ·
+    // 전에는 보낸 값 근처만 걸러 중간 위치가 손으로 잡히고 로봇·페이더가 서로 쫓으며 튀었다 (실물 2026-10-19)
+    if (state.selected && item && !state.touched && !this.touchSeen[channel]) {
+      const echo = state.lastFeedback !== null && now - state.lastFollowAt < ECHO_WINDOW_MS;
       if (!echo) {
         state.touched = true;
         state.movedTouch = true;
