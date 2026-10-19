@@ -27,6 +27,11 @@ export const FOLLOW_EVERY_MS = 100;
 export const FOLLOW_MIN_STEP = 8;
 /** 놓은 뒤 축이 놓은 자리에 닿기를 기다리는 최대 시간 · 그 뒤엔 다시 축을 따라감 */
 export const SETTLE_MAX_MS = 8000;
+/** 터치 신호 없이 움직이면 손으로 침 · 내가 보낸 값이 되돌아온 것은 빼고(보낸 뒤 이 시간 안 · 이만큼 가까우면) */
+export const ECHO_WINDOW_MS = 500;
+export const ECHO_STEP = 160;
+/** 움직임으로 친 터치 · 이만큼 안 움직이면 놓은 것으로 */
+export const MOVE_RELEASE_MS = 500;
 const LCD_CHARS = 7;
 const LCD_BOTTOM = 56;
 
@@ -256,6 +261,8 @@ export class XTouchSession {
   touch(channel, down) {
     const state = this.channels[channel];
     state.touched = down;
+    // 진짜 터치 신호가 오면 그것을 따른다 · 움직임으로 친 터치는 끝
+    state.movedTouch = false;
     if (!state.selected) return [];
     if (down) {
       state.phase = 'pickup';
@@ -283,7 +290,21 @@ export class XTouchSession {
     const item = this.config[channel];
     const previous = state.value;
     state.value = value;
-    // 손 안 댄 움직임(내가 보낸 것 · 터치 감지 실패)은 조종에 쓰지 않는다
+    const now = Number(ctx?.now ?? 0);
+    // 터치 신호 없이 움직임 · 사람 손으로 친다(전신과 같음) · 실물 2026-10-19 floating4 5번 페이더는 터치 신호가 아예 안 옴 ·
+    // 내가 보낸 모터 이동이 되돌아온 값(보낸 직후 · 보낸 값 근처)은 손이 아니다
+    if (state.selected && item && !state.touched) {
+      const echo = state.lastFeedback !== null && now - state.lastFollowAt < ECHO_WINDOW_MS
+        && Math.abs(value - state.lastFeedback) <= ECHO_STEP;
+      if (!echo) {
+        state.touched = true;
+        state.movedTouch = true;
+        state.phase = 'pickup';
+        state.reference = null;
+      }
+    }
+    if (state.movedTouch) state.lastMoveAt = now;
+    // 손 안 댄 움직임(내가 보낸 것)은 조종에 쓰지 않는다
     if (!state.selected || !state.touched || !item) return [];
     if (ctx?.blocked) return [];
     const joint = faderToJoint(item.lower, item.upper, value);
@@ -312,6 +333,11 @@ export class XTouchSession {
     this.channels.forEach((state, channel) => {
       const item = this.config[channel];
       if (!item || (!state.selected && !this.isPunch(channel))) return;
+      // 움직임으로 친 터치 · 0.5 초 안 움직이면 놓은 것으로
+      if (state.movedTouch && now - state.lastMoveAt > MOVE_RELEASE_MS) {
+        actions.push(...this.touch(channel, false));
+        return;
+      }
       if (state.phase === 'live' && state.dirty) actions.push(this.target(channel));
       if (state.touched || now - state.lastFollowAt < FOLLOW_EVERY_MS) return;
       const joint = ctx?.jointOf?.(item.axis);
@@ -350,6 +376,7 @@ function blankChannel() {
   return {
     selected: false, touched: false, phase: 'idle', value: null, goal: null, dirty: false, sent: false,
     reference: null, lastFeedback: null, lastFollowAt: 0, settleGoal: null, settleSince: null,
+    movedTouch: false, lastMoveAt: 0,
   };
 }
 
