@@ -515,8 +515,9 @@ function connectCard(state, changed) {
     deviceChooser(changed),
     ui.dev.status === 'ready' ? h('details', { class: 'small' },
       h('summary', { text: `MIDI 받은 것 (마지막 ${MIDI_LOG_SIZE}개 · 채널 하나가 안 먹을 때 보기)` }),
-      midiLog.length ? h('ul', { class: 'mono small' }, midiLog.map((line) => h('li', { text: line })))
-        : h('p', { class: 'muted small', text: '아직 받은 것 없음 · 페이더·버튼을 만져 보세요' })) : null,
+      // 높이 고정 · 줄이 늘어도 아래가 안 밀림 (2026-10-20)
+      h('ul', { class: 'mono small midi-log' }, midiLog.length ? midiLog.map((line) => h('li', { text: line }))
+        : h('li', { class: 'muted', text: '아직 받은 것 없음 · 페이더·버튼을 만져 보세요' }))) : null,
     ui.dev.message ? h('p', { class: 'tone-text-warn small', text: ui.dev.message }) : null,
     unavailable ? h('div', { class: 'blocker' }, dot('warn'), h('span', { class: 'grow', text: unavailable })) : null,
     unavailable ? h('ol', { class: 'small muted' },
@@ -549,7 +550,9 @@ function channelCard(state, changed) {
   const rows = session.config;
   return h('section', { class: 'card', 'aria-label': '채널' },
     h('div', { class: 'card-head' }, h('h2', { text: '페이더 · 축' })),
-    rows.some(Boolean) ? h('div', { class: 'table-wrap' }, h('table', { class: 'table' },
+    // 칸 너비 고정 · 손·상태·목표 글이 바뀌어도 표가 안 출렁임 (2026-10-20)
+    rows.some(Boolean) ? h('div', { class: 'table-wrap' }, h('table', { class: 'table xtouch-table' },
+      h('colgroup', {}, ['6%', '17%', '7%', '10%', '24%', '10%', '10%', '16%'].map((width) => h('col', { style: { width } }))),
       h('thead', {}, h('tr', {}, ['페이더', '조인트', '모터', '손', '상태', '현재', '목표', '스무딩'].map((text) => h('th', { scope: 'col', text })))),
       h('tbody', {}, rows.map((item, channel) => {
         if (!item) return h('tr', { class: 'muted-row' }, h('td', { class: 'mono', text: String(channel + 1) }), h('td', { colspan: '7', class: 'muted', text: '연결 안 됨' }));
@@ -572,7 +575,8 @@ function channelCard(state, changed) {
           h('td', { class: 'mono', text: ch.phase === 'live' && Number.isFinite(ch.goal) ? `${signedDeg(ch.goal, 2)}°` : '-' }),
           h('td', {}, smoothPicker(item.motionId, changed)));
       })))) : h('p', { class: 'muted', text: '페이더가 연결된 조인트가 없습니다 · 「모터 설정 → ① 조인트 매핑」 에서 「X-Touch 페이더」 칸에 1 ~ 8 을 넣고 저장하세요.' }),
-    ui.message ? h('p', { class: 'tone-text-warn small', text: ui.message }) : null);
+    // 안내 줄은 늘 자리를 둔다 · 생겼다 사라지며 아래를 밀지 않게 · 길면 … (전체는 마우스를 올리면)
+    h('p', { class: 'tone-text-warn small msg-slot', text: ui.message || '', title: ui.message || undefined }));
 }
 
 /** 이름 칸 안내 · 덮어쓰기 + 바탕이면 바탕 이름 · 바탕만이면 바탕_xtouch */
