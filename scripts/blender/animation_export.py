@@ -16,11 +16,12 @@ Text 블록 「Register」 는 켜지 말 것 (Auto Run 이 켜져 있으면 파
   → 한 파일에 모두 · joint_name 은 전체에서 겹치면 안 됨 · 리포트·검사 곡선 이름은 「리그:본」:
   joint_name      조인트 이름 = 각 로봇 PC 웹 「조인트 매핑」의 조인트 이름과 완전히 같게
   motor_axis      본 로컬 회전축 X / Y / Z
-  max_vel_deg_s   관절 최대 속도 (deg/s) · 0 = 검사 안 함
-  max_acc_deg_s2  관절 최대 가속도 (deg/s²) · 0 = 검사 안 함
+  max_vel_deg_s   관절 최대 속도 (deg/s) · 0 = 검사 안 함 · 내보내는 값 기준
+  max_acc_deg_s2  관절 최대 가속도 (deg/s²) · 0 = 검사 안 함 · 내보내는 값 기준
+  export_scale    (선택) 내보낼 때 곱하는 배율 · 없으면 1 · 링크 비율 (본 = 실제 움직임, PC = 링크 앞 축)
   가동범위 = 본의 Limit Rotation 컨스트레인트 "MotorLimit" (LOCAL)
 
-값 = 컨스트레인트까지 반영한 본 회전 (레스트 기준, 관절 각) · 감속기어비·부호·오프셋은
+값 = 컨스트레인트까지 반영한 본 회전 (레스트 기준, 관절 각) × export_scale · 감속기어비·부호·오프셋은
 각 PC 조인트 매핑이 적용 · Blender 안 검사·리포트는 deg, 파일만 rad.
 Blender 안: 초과 구간마다 타임라인 마커 "ANIM! ..." (ERR 마커만 선택 상태 = 밝게) · Empty "AnimSpeedCheck" 의
 <본>_vel_pct / <본>_acc_pct 곡선 (Graph Editor · 100 = 한계 · 필요한 점만 베지어로, 오차 1%) · ANIM_issue 채널
@@ -53,11 +54,15 @@ BONE_PROPS = {
     'joint_name': ('', '조인트 이름 · 각 로봇 PC 웹 「조인트 매핑」의 조인트 이름과 완전히 같게 '
                        '(애니메이션 파일의 id)'),
     'motor_axis': ('', '이 본이 도는 로컬 축 · X / Y / Z 중 하나'),
-    'max_vel_deg_s': (0.0, '관절 최대 속도 (deg/s) · 0 = 검사 안 함\n'
-                           '= 모터 최대 rpm × 6 ÷ 감속기어비 (감속기 + 추가 기어·링크까지 합친 전체 비)'),
-    'max_acc_deg_s2': (0.0, '관절 최대 가속도 (deg/s²) · 0 = 검사 안 함\n'
-                            '= 모터 가속도 (deg/s²) ÷ 감속기어비 (감속기 + 추가 기어·링크까지 합친 전체 비)'),
+    'max_vel_deg_s': (0.0, '관절 최대 속도 (deg/s) · 0 = 검사 안 함 · 내보내는 값(export_scale 곱한 뒤) 기준\n'
+                           '= 모터 최대 rpm × 6 ÷ 감속기어비 (PC 조인트 매핑에 넣는 비)'),
+    'max_acc_deg_s2': (0.0, '관절 최대 가속도 (deg/s²) · 0 = 검사 안 함 · 내보내는 값(export_scale 곱한 뒤) 기준\n'
+                            '= 모터 가속도 (deg/s²) ÷ 감속기어비 (PC 조인트 매핑에 넣는 비)'),
+    'export_scale': (1.0, '내보낼 때 본 각도에 곱하는 배율 · 1 = 그대로 · 음수 = 부호 반대\n'
+                          '본은 실제 움직임(예: 눈알 각도), PC 는 링크 앞 축(예: 크랭크 각도)을 받을 때 링크 비율 → '
+                          'PC 값 = 본 각도 × 배율 · 파일 값 · 속도 검사 · 리포트가 모두 곱한 뒤 값'),
 }
+SIGNED_PROPS = {'export_scale'}        # 음수 허용 (나머지 숫자 속성은 0 이상)
 
 
 def find_armatures():
@@ -87,7 +92,7 @@ def ensure_bone_props(pb):
         if key not in pb:
             pb[key] = default
         ui = pb.id_properties_ui(key)
-        if isinstance(default, float):
+        if isinstance(default, float) and key not in SIGNED_PROPS:
             ui.update(description=desc, min=0.0, soft_min=0.0)
         else:
             ui.update(description=desc)
@@ -118,6 +123,10 @@ def joint_name(pb):
 
 def axis(pb):
     return str(pb['motor_axis']).upper()
+
+
+def export_scale(pb):
+    return float(pb.get('export_scale', 1.0))
 
 
 def export_name(arm):
@@ -528,6 +537,10 @@ def main(out_dir=None, write=True):
         if lim:
             values[label(pb)] = [min(max(s, lim[0]), lim[1]) if lim[0] - 1e-4 <= s <= lim[1] + 1e-4 else s
                                  for s in values[label(pb)]]
+    for pb in bones:   # 본 각도 → PC 가 받는 값 (링크 비율) · 아래 파일·검사·리포트는 모두 이 값
+        k = export_scale(pb)
+        if k != 1.0:
+            values[label(pb)] = [s * k for s in values[label(pb)]]
 
     out_dir = (out_dir or default_out_dir()) if write else ''
     if write and not out_dir:
@@ -566,8 +579,11 @@ def main(out_dir=None, write=True):
         clamped = 0
         if lim and not follows_other_bone(pb):
             clamped = sum(1 for r in raw[label(pb)] if r < lim[0] - 1e-6 or r > lim[1] + 1e-6)
+        k = export_scale(pb)
         limits_report.append({'bone': label(pb), 'joint_name': jid,
                               'blender_limit_deg': [round(d, 3) for d in lim] if lim else None,
+                              'export_scale': k,
+                              'export_limit_deg': [round(d, 3) for d in sorted((lim[0] * k, lim[1] * k))] if lim else None,
                               'clip_min_deg': round(min(x), 3), 'clip_max_deg': round(max(x), 3),
                               'first_frame_deg': round(x[0], 3)})
         axes_report.append({
