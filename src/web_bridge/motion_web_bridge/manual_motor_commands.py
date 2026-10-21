@@ -263,7 +263,7 @@ class ManualMotorCommandService:
                 'message': f'{axis_value}번 모터를 현재 모터 상태에서 찾을 수 없습니다',
                 **self.bridge.snapshot(),
             }
-        if not motor_config_rules.is_dynamixel_motor(motor):
+        if not motor_config_rules.is_serial_servo_motor(motor):   # 다이나믹셀 · Feetech · 수정 목록 158
             return {
                 'success': False,
                 'message': f'{axis_value}번 모터는 다이나믹셀이 아닙니다',
@@ -441,7 +441,7 @@ class ManualMotorCommandService:
                 'message': f'{axis_value}번 모터를 현재 모터 상태에서 찾을 수 없습니다',
                 **self.bridge.snapshot(),
             }
-        if not motor_config_rules.is_dynamixel_motor(motor):
+        if not motor_config_rules.is_serial_servo_motor(motor):   # 다이나믹셀 · Feetech · 수정 목록 158
             return {
                 'success': False,
                 'message': f'{axis_value}번 모터는 다이나믹셀이 아닙니다',

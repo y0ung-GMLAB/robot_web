@@ -247,7 +247,8 @@ export function createManualFaderController({ el, getLatestState }) {
     if (!motor) return '모터 프로그램에서 이 모터를 찾지 못했습니다';
     if (String(motor.state || '') !== 'detected') return '모터가 감지되지 않았습니다';
     if (motor.fault) return '모터에 오류가 있습니다';
-    if (motor.servo_on !== true && String(motor.motor_type || '') !== 'dynamixel') {
+    // 직렬 버스 서보(다이나믹셀 · Feetech)는 서보 ON 없음 · 수정 목록 158
+    if (motor.servo_on !== true && !['dynamixel', 'feetech'].includes(String(motor.motor_type || ''))) {
       return '서보가 꺼져 있습니다';
     }
     return '';

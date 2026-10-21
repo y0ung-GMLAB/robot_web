@@ -1,0 +1,25 @@
+# Feetech STS 기본 · SCS/STS 패킷 (scs) · 수정 목록 158 · 실물 미검증 (설계 §9 F-1~F-5)
+# 저장 때 `serial_params.write_param_file` 이 이 파일로 `config/serial_params/driver_<id>.yaml` 을 만든다
+# 재부팅 없음(reboot 0) · 0x06 = 공장 초기화 · 금지 · Torque Enable 은 0/1 만 (128 = 중앙 보정 · 금지)
+protocol: { packet: scs, broadcast_id: 254, read: 2, write: 3, status: 0, bulk_read: 0, bulk_write: 0, sync_read: 130, sync_write: 131, reboot: 0 }
+byte_order: little
+model_file: ""
+# Acceleration raw 1 = 100 step/s² = 8.7890625 deg/s²
+acceleration_unit: 8.7890625
+# 한 바퀴 · 목표 위치 자르기 범위
+position_raw_min: 0
+position_raw_max: 4095
+items:
+  - { id: 30, name: "Operating Mode", type: u8, value: 0 }
+  - { id: 55, name: "Acceleration", type: u8, optional: true }
+  - { id: 54, name: "Goal Velocity", type: u16, optional: true }
+interfaces:
+  - { id: 98, index: 0 }
+  - { id: 0, name: "Torque Enable", type: u8 }
+  - { id: 1, name: "Goal Position", type: s16, sign_bit: 15 }
+  - { id: 99, index: 0 }
+  - { id: 4, name: "Torque Enable", type: u8 }
+  - { id: 5, name: "Status", type: u8, optional: true }
+  - { id: 6, name: "Present Position", type: s16, sign_bit: 15 }
+  - { id: 7, name: "Present Velocity", type: s16, sign_bit: 15 }
+  - { id: 8, name: "Present Current", type: s16, optional: true }

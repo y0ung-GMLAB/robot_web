@@ -77,6 +77,8 @@ void fillYamlValue(const YAML::Node& node, motor_interface::entry_table_t& entry
     }
 }
 
+uint8_t readOptionalProtocolByte(const YAML::Node& protocol, const char* key, uint8_t fallback);
+
 uint8_t readProtocolByte(const YAML::Node& protocol, const char* key)
 {
     if (!protocol[key]) throw std::runtime_error(std::string("Dynamixel protocol requires ") + key + ".");
@@ -87,11 +89,18 @@ uint8_t readProtocolByte(const YAML::Node& protocol, const char* key)
     return static_cast<uint8_t>(value);
 }
 
+uint8_t readOptionalProtocolByte(const YAML::Node& protocol, const char* key, uint8_t fallback)
+{
+    if (!protocol[key]) return fallback;
+    return readProtocolByte(protocol, key);
+}
+
 } // namespace
 
 dynamixel::DynamixelDriver::DynamixelDriver(const motor_interface::driver_config_t& config)
     : motor_interface::MotorDriver(config)
 {
+    sign_bits_.fill(-1);
 }
 
 void dynamixel::DynamixelDriver::loadParameters(const std::string& param_file)
@@ -102,15 +111,36 @@ void dynamixel::DynamixelDriver::loadParameters(const std::string& param_file)
     YAML::Node protocol = root["protocol"];
     if (!protocol || !protocol.IsMap()) throw std::runtime_error("Dynamixel protocol configuration is required.");
 
+    // `packet` · dxl2 (default · every existing file) | scs (Feetech) · fix-list 158
+    const std::string packet = protocol["packet"] ? protocol["packet"].as<std::string>() : "dxl2";
+
     serial_protocol_.configured = true;
     serial_protocol_.broadcast_id = readProtocolByte(protocol, "broadcast_id");
     serial_protocol_.instruction_read = readProtocolByte(protocol, "read");
     serial_protocol_.instruction_write = readProtocolByte(protocol, "write");
-    serial_protocol_.instruction_status = readProtocolByte(protocol, "status");
-    serial_protocol_.instruction_bulk_read = readProtocolByte(protocol, "bulk_read");
-    serial_protocol_.instruction_bulk_write = readProtocolByte(protocol, "bulk_write");
-    // Optional so existing parameter files keep loading · default 0x08 (robot_web fix-list 24-1)
-    if (protocol["reboot"]) serial_protocol_.instruction_reboot = readProtocolByte(protocol, "reboot");
+    if (packet == "dxl2") {
+        serial_protocol_.packet = serial::PacketFormat::Dxl2;
+        serial_protocol_.instruction_status = readProtocolByte(protocol, "status");
+        serial_protocol_.instruction_bulk_read = readProtocolByte(protocol, "bulk_read");
+        serial_protocol_.instruction_bulk_write = readProtocolByte(protocol, "bulk_write");
+        // Optional so existing parameter files keep loading · default 0x08 (robot_web fix-list 24-1)
+        if (protocol["reboot"]) serial_protocol_.instruction_reboot = readProtocolByte(protocol, "reboot");
+    } else if (packet == "scs") {
+        serial_protocol_.packet = serial::PacketFormat::Scs;
+        serial_protocol_.instruction_status = readOptionalProtocolByte(protocol, "status", 0);
+        serial_protocol_.instruction_sync_read = readOptionalProtocolByte(protocol, "sync_read", 0);
+        serial_protocol_.instruction_sync_write = readOptionalProtocolByte(protocol, "sync_write", 0);
+        // No reboot unless the file names one · Feetech 0x06 is a factory reset
+        serial_protocol_.instruction_reboot = readOptionalProtocolByte(protocol, "reboot", 0);
+    } else {
+        throw std::runtime_error("Unknown serial packet format: " + packet + ".");
+    }
+
+    if (root["byte_order"]) {
+        const std::string order = root["byte_order"].as<std::string>();
+        if (order != "little" && order != "big") throw std::runtime_error("byte_order must be little or big.");
+        big_endian_ = order == "big";
+    }
 
     if (root["model_file"]) {
         std::filesystem::path model_path(root["model_file"].as<std::string>());
@@ -142,6 +172,23 @@ void dynamixel::DynamixelDriver::loadParameters(const std::string& param_file)
             throw std::runtime_error("Dynamixel extended_position_raw_limit must be a positive int32.");
         }
         extended_position_raw_limit_ = static_cast<int32_t>(limit);
+    }
+    if (root["position_raw_min"] || root["position_raw_max"]) {
+        if (!root["position_raw_min"] || !root["position_raw_max"]) {
+            throw std::runtime_error("position_raw_min and position_raw_max go together.");
+        }
+        position_raw_min_ = root["position_raw_min"].as<int64_t>();
+        position_raw_max_ = root["position_raw_max"].as<int64_t>();
+        if (position_raw_min_ >= position_raw_max_ ||
+            position_raw_min_ < INT32_MIN || position_raw_max_ > INT32_MAX)
+        {
+            throw std::runtime_error("Invalid position_raw_min / position_raw_max.");
+        }
+        has_position_raw_range_ = true;
+    }
+    if (root["acceleration_unit"]) {
+        acceleration_unit_ = root["acceleration_unit"].as<double>();
+        if (!(acceleration_unit_ > 0.0)) throw std::runtime_error("acceleration_unit must be > 0.");
     }
     if (root["velocity_unit"]) {
         velocity_unit_ = root["velocity_unit"].as<double>();
@@ -179,7 +226,7 @@ void dynamixel::DynamixelDriver::loadParameters(const std::string& param_file)
         {
             const double value = config_.profile_acceleration > 0.0 ?
                 config_.profile_acceleration : config_.acceleration;
-            motor_interface::fill<uint32_t>(accelerationRawFromDegreePerSec2(value), e_cfg.data);
+            motor_interface::fill<uint32_t>(accelerationRaw(value), e_cfg.data);
         } else if (e_cfg.id == motor_interface::ID_MAX_EFFORT) {
             const int16_t current = effort(config_.rated_effort);
             if (e_cfg.type == motor_interface::DataType::U16) {
@@ -190,6 +237,9 @@ void dynamixel::DynamixelDriver::loadParameters(const std::string& param_file)
         } else {
             fillYamlValue(i, e_cfg);
         }
+
+        // Values above are built little endian · a big-endian bus gets them turned
+        if (big_endian_) std::reverse(e_cfg.data, e_cfg.data + e_cfg.size);
 
         items_[i_idx++] = e_cfg;
     }
@@ -204,6 +254,12 @@ void dynamixel::DynamixelDriver::loadParameters(const std::string& param_file)
 
         motor_interface::entry_table_t e_cfg{};
         if (!loadEntry(i, e_cfg, true)) continue;
+
+        if (i["sign_bit"]) {
+            const int bit = i["sign_bit"].as<int>();
+            if (bit < 1 || bit >= e_cfg.size * 8) throw std::runtime_error("Invalid sign_bit.");
+            sign_bits_[e_cfg.id] = static_cast<int8_t>(bit);
+        }
 
         if (e_cfg.id != motor_interface::ID_RXPDO && e_cfg.id != motor_interface::ID_TXPDO) {
             if (e_cfg.id <= motor_interface::ID_TARGET_EFFORT) {
@@ -285,6 +341,12 @@ int32_t dynamixel::DynamixelDriver::position(const double value)
         // motor_manager 전체가 서므로 클램프는 남긴다 · 운전 한계는 상위(supervisor ·
         // plan_builder)가 lower/upper 로 지킨다 · robot_web 2026-10-04 (사용자 지시)
         const double raw = std::lround(zero_position_ + value * DEG_TO_RAD / positionUnit());
+        if (has_position_raw_range_) {
+            // One-turn devices (Feetech STS 0~4095) · a goal outside is clamped like
+            // the extended range below · the mapping refuses such ranges at save
+            return static_cast<int32_t>(std::clamp(
+                raw, static_cast<double>(position_raw_min_), static_cast<double>(position_raw_max_)));
+        }
         const double limit = static_cast<double>(extended_position_raw_limit_);
         return static_cast<int32_t>(std::clamp(raw, -limit, limit));
     }
@@ -423,6 +485,57 @@ bool dynamixel::DynamixelDriver::loadEntry(
     }
 
     return true;
+}
+
+uint32_t dynamixel::DynamixelDriver::accelerationRaw(double degree_per_sec2) const
+{
+    if (acceleration_unit_ <= 0.0) return accelerationRawFromDegreePerSec2(degree_per_sec2);
+    if (degree_per_sec2 <= 0.0) return 0;
+    return static_cast<uint32_t>(std::lround(degree_per_sec2 / acceleration_unit_));
+}
+
+motor_interface::entry_table_t dynamixel::DynamixelDriver::nativeOrder(
+    const motor_interface::entry_table_t& entry) const
+{
+    motor_interface::entry_table_t out = entry;
+    if (big_endian_) std::reverse(out.data, out.data + std::min<uint8_t>(out.size, motor_interface::MAX_DATA_SIZE));
+    return out;
+}
+
+void dynamixel::DynamixelDriver::encode(
+    const motor_interface::entry_table_t& descriptor,
+    int64_t value,
+    uint8_t* out) const
+{
+    int64_t raw = value;
+    const int8_t bit = sign_bits_[descriptor.id];
+    if (bit > 0) {
+        // Sign-magnitude · bit `bit` = negative, the rest = size (Feetech STS)
+        const int64_t magnitude_max = (int64_t{1} << bit) - 1;
+        const int64_t magnitude = std::min<int64_t>(value < 0 ? -value : value, magnitude_max);
+        raw = magnitude | (value < 0 ? (int64_t{1} << bit) : 0);
+    }
+
+    serial::SerialDriver::encode(descriptor, raw, out);
+    if (big_endian_) std::reverse(out, out + std::min<uint8_t>(descriptor.size, motor_interface::MAX_DATA_SIZE));
+}
+
+int64_t dynamixel::DynamixelDriver::decodeSigned(const motor_interface::entry_table_t& entry) const
+{
+    const motor_interface::entry_table_t native = nativeOrder(entry);
+    const int8_t bit = sign_bits_[entry.id];
+    if (bit > 0) {
+        const uint64_t raw = serial::SerialDriver::decodeUnsigned(native);
+        const uint64_t magnitude = raw & ((uint64_t{1} << bit) - 1);
+        return (raw & (uint64_t{1} << bit)) != 0 ? -static_cast<int64_t>(magnitude) : static_cast<int64_t>(magnitude);
+    }
+
+    return serial::SerialDriver::decodeSigned(native);
+}
+
+uint64_t dynamixel::DynamixelDriver::decodeUnsigned(const motor_interface::entry_table_t& entry) const
+{
+    return serial::SerialDriver::decodeUnsigned(nativeOrder(entry));
 }
 
 double dynamixel::DynamixelDriver::positionUnit() const

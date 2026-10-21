@@ -1,5 +1,6 @@
 #include <algorithm>
 #include <chrono>
+#include <cstdio>
 #include <cstring>
 #include <iomanip>
 #include <sstream>
@@ -11,8 +12,11 @@ namespace {
 
 // robot_web fix-list 23 · 24 · 25 (2026-10-06)
 constexpr uint8_t DXL_ACCESS_ERROR = 7;                       // e.g. EEPROM write while torque is on
-constexpr uint16_t DXL_COMMUNICATION_LOSS_MISSES = 20;        // bulk reads in a row · about 1 s when silent
+constexpr uint16_t DXL_COMMUNICATION_LOSS_MISSES = 20;        // read cycles in a row · about 1 s when silent
 constexpr uint16_t COMMUNICATION_UNAVAILABLE_ERROR = 0xFFFF;  // same code the state monitor already reads
+// Boot items not written yet · torque on and commands wait (fix-list 158)
+constexpr uint16_t CONFIGURATION_PENDING_ERROR = 0xFFFE;
+constexpr auto SERIAL_CONFIG_RETRY = std::chrono::milliseconds(1000);
 constexpr uint16_t DXL_REBOOT_CONTROLWORD_BIT = 0x0080;       // the fault-reset bit · REBOOT for a Dynamixel
 constexpr auto DXL_REBOOT_SETTLE = std::chrono::milliseconds(1000);
 constexpr auto DXL_REAPPLY_RETRY = std::chrono::milliseconds(1000);
@@ -128,6 +132,7 @@ void serial::SerialController::initialize(motor_interface::MotorMaster& master, 
     node_ = master_->node(bus_id_);
     if (!node_) throw std::runtime_error("Failed to get serial node data.");
 
+    master_generation_ = master_->generation();
     registerEntries();
 }
 
@@ -139,6 +144,14 @@ void serial::SerialController::registerEntries()
 
 bool serial::SerialController::enable()
 {
+    noteReconnect();
+    if (config_pending_) {
+        // Torque stays off until the boot items are on the device (operating
+        // mode first · a goal in the wrong mode is not a position)
+        if (std::chrono::steady_clock::now() < next_config_retry_) return false;
+        if (!retryConfig(true)) return false;
+    }
+
     const motor_interface::entry_table_t* status = txInterface(motor_interface::ID_STATUSWORD);
     const motor_interface::entry_table_t* control = rxInterface(motor_interface::ID_CONTROLWORD);
     if (!status || !control) throw std::runtime_error("Dynamixel enable interfaces are not configured.");
@@ -191,6 +204,12 @@ void serial::SerialController::check(const motor_interface::motor_frame_t& statu
 {
     (void)status;
 
+    noteReconnect();
+    if (config_pending_ && std::chrono::steady_clock::now() >= next_config_retry_) {
+        // The axis was running · never turn its torque off to write an item
+        (void)retryConfig(false);
+    }
+
     // A reboot puts RAM items (profile velocity and so on) back to their
     // defaults · write the configured items again once the device is back.
     // EEPROM items survive the reboot, so this never needs torque off.
@@ -230,17 +249,32 @@ void serial::SerialController::write(const motor_interface::motor_frame_t& comma
         if (command.target_interface_id[i] == motor_interface::ID_CONTROLWORD &&
             (command.controlword & DXL_REBOOT_CONTROLWORD_BIT) != 0)
         {
-            rebootNode();
+            if (master_->supportsReboot()) {
+                rebootNode();
+            } else {
+                torqueOffForReset();
+            }
             return;
         }
     }
 
+    // A bad command skips that value · it used to throw and stop motor_manager
+    // for every axis (fix-list 158 · 27-1)
     for (uint8_t i = 0; i < n_rx; ++i) {
         const uint8_t id = command.target_interface_id[i];
         const motor_interface::entry_table_t* descriptor = rxInterface(id);
-        if (!descriptor) throw std::runtime_error("Invalid serial RX interface ID.");
+        if (!descriptor) {
+            log("command skipped · interface " + std::to_string(id) + " is not active on this axis");
+            continue;
+        }
 
         if (id == motor_interface::ID_CONTROLWORD) {
+            // Torque Enable takes 0 or 1 only · Feetech STS 128 recentres the
+            // encoder on the current position, so anything else is never written
+            if (command.controlword > 1) {
+                log("controlword " + std::to_string(command.controlword) + " skipped · Torque Enable is 0 or 1");
+                continue;
+            }
             fillInterfaceValue(*descriptor, command.controlword, rx_interfaces[i]);
         } else if (id == motor_interface::ID_TARGET_POSITION) {
             fillInterfaceValue(*descriptor, driver_->position(command.position), rx_interfaces[i]);
@@ -249,7 +283,8 @@ void serial::SerialController::write(const motor_interface::motor_frame_t& comma
         } else if (id == motor_interface::ID_TARGET_EFFORT) {
             fillInterfaceValue(*descriptor, driver_->effort(command.effort), rx_interfaces[i]);
         } else {
-            throw std::runtime_error("Invalid serial target interface ID.");
+            log("command skipped · interface " + std::to_string(id) + " has no target value");
+            continue;
         }
     }
 
@@ -273,17 +308,20 @@ void serial::SerialController::read(motor_interface::motor_frame_t& status)
             status.velocity = driver_->velocity(static_cast<int32_t>(readSignedValue(e)));
         } else if (e.id == motor_interface::ID_CURRENT_EFFORT) {
             status.effort = driver_->effort(static_cast<int16_t>(readSignedValue(e)));
-        } else {
-            throw std::runtime_error("Invalid serial TX interface ID.");
         }
+        // Other ids (temperature …) are read but have no field here yet
     }
 
     status.controller_index = index_;
 
     // No answer for a run of bulk reads · say so instead of repeating the last
     // values (robot_web fix-list 23-3). The next answer clears it.
-    if (node_ && node_->missed_responses >= DXL_COMMUNICATION_LOSS_MISSES) {
+    if (!master_->online() ||
+        (node_ && node_->missed_responses >= DXL_COMMUNICATION_LOSS_MISSES))
+    {
         status.errorcode = COMMUNICATION_UNAVAILABLE_ERROR;
+    } else if (config_pending_) {
+        status.errorcode = CONFIGURATION_PENDING_ERROR;
     }
 }
 
@@ -295,7 +333,7 @@ void serial::SerialController::writeData(const motor_interface::entry_table_t* r
 
         if (!master_->setBulkWriteData(bus_id_, e.index, e.data, e.size)) {
             if (!master_->writeRegister(bus_id_, e.index, e.data, e.size)) {
-                throw std::runtime_error("Failed to write Dynamixel register.");
+                log("write failed · address " + std::to_string(e.index));
             }
         }
     }
@@ -315,8 +353,62 @@ void serial::SerialController::readData(motor_interface::entry_table_t* tx_inter
 
 void serial::SerialController::addSlaveConfigItems()
 {
+    // A port or device that is not there at start no longer stops motor_manager
+    // (every other axis with it) · the axis waits with 0xFFFE and retries
+    // every second from enable() · fix-list 158 · 27-1
+    config_pending_ = true;
+    (void)retryConfig(true);
+}
+
+bool serial::SerialController::retryConfig(bool allow_torque_off)
+{
     std::string error;
-    if (!applyConfigItems(true, error)) throw std::runtime_error(error);
+    bool applied = false;
+    try {
+        if (!master_->online()) {
+            error = "serial port is not open";
+        } else {
+            applied = applyConfigItems(allow_torque_off, error);
+        }
+    } catch (const std::exception& e) {
+        error = e.what();
+    }
+
+    if (applied) {
+        if (!config_error_.empty()) log("boot items written");
+        config_pending_ = false;
+        config_error_.clear();
+        return true;
+    }
+
+    config_pending_ = true;
+    next_config_retry_ = std::chrono::steady_clock::now() + SERIAL_CONFIG_RETRY;
+    if (error != config_error_) {
+        log("boot items not written, retrying every 1 s · " + error);
+        config_error_ = error;
+    }
+    return false;
+}
+
+void serial::SerialController::noteReconnect()
+{
+    const uint32_t generation = master_->generation();
+    if (generation == master_generation_) return;
+
+    master_generation_ = generation;
+    config_pending_ = true;
+    next_config_retry_ = std::chrono::steady_clock::now();
+}
+
+void serial::SerialController::log(const std::string& message) const
+{
+    std::fprintf(
+        stderr,
+        "[motor_manager serial] %s id %u · %s\n",
+        master_ ? master_->port().c_str() : "?",
+        static_cast<unsigned int>(bus_id_),
+        message.c_str());
+    std::fflush(stderr);
 }
 
 bool serial::SerialController::applyConfigItems(bool allow_torque_off, std::string& error)
@@ -404,6 +496,22 @@ bool serial::SerialController::disableTorqueForConfiguration(std::string& error)
     return true;
 }
 
+void serial::SerialController::torqueOffForReset()
+{
+    const motor_interface::entry_table_t* control = rxInterface(motor_interface::ID_CONTROLWORD);
+    if (!control) return;
+
+    motor_interface::entry_table_t off{};
+    fillInterfaceValue(*control, 0, off);
+    try {
+        if (!master_->setBulkWriteData(bus_id_, off.index, off.data, off.size)) {
+            (void)master_->writeRegister(bus_id_, off.index, off.data, off.size);
+        }
+    } catch (const std::exception& e) {
+        log(std::string("alarm reset (torque off) failed · ") + e.what());
+    }
+}
+
 void serial::SerialController::rebootNode()
 {
     // A failed reboot leaves the alarm as it is · the operator sees no change
@@ -479,60 +587,15 @@ void serial::SerialController::fillInterfaceValue(
         {0}
     };
 
-    switch (descriptor.type) {
-    case motor_interface::DataType::U8:
-        motor_interface::fill<uint8_t>(static_cast<uint8_t>(value), out.data);
-        break;
-    case motor_interface::DataType::U16:
-        motor_interface::fill<uint16_t>(static_cast<uint16_t>(value), out.data);
-        break;
-    case motor_interface::DataType::U32:
-        motor_interface::fill<uint32_t>(static_cast<uint32_t>(value), out.data);
-        break;
-    case motor_interface::DataType::S8:
-        motor_interface::fill<int8_t>(static_cast<int8_t>(value), out.data);
-        break;
-    case motor_interface::DataType::S16:
-        motor_interface::fill<int16_t>(static_cast<int16_t>(value), out.data);
-        break;
-    case motor_interface::DataType::S32:
-        motor_interface::fill<int32_t>(static_cast<int32_t>(value), out.data);
-        break;
-    default:
-        throw std::runtime_error("Invalid serial interface data type.");
-    }
+    serial_driver_->encode(descriptor, value, out.data);
 }
 
 uint64_t serial::SerialController::readUnsignedValue(const motor_interface::entry_table_t& entry) const
 {
-    switch (entry.size) {
-    case 1:
-        return motor_interface::value<uint8_t>(entry.data);
-    case 2:
-        return motor_interface::value<uint16_t>(entry.data);
-    case 4:
-        return motor_interface::value<uint32_t>(entry.data);
-    default:
-        throw std::runtime_error("Invalid unsigned serial data size.");
-    }
+    return serial_driver_->decodeUnsigned(entry);
 }
 
 int64_t serial::SerialController::readSignedValue(const motor_interface::entry_table_t& entry) const
 {
-    switch (entry.type) {
-    case motor_interface::DataType::U8:
-        return motor_interface::value<uint8_t>(entry.data);
-    case motor_interface::DataType::U16:
-        return motor_interface::value<uint16_t>(entry.data);
-    case motor_interface::DataType::U32:
-        return motor_interface::value<uint32_t>(entry.data);
-    case motor_interface::DataType::S8:
-        return motor_interface::value<int8_t>(entry.data);
-    case motor_interface::DataType::S16:
-        return motor_interface::value<int16_t>(entry.data);
-    case motor_interface::DataType::S32:
-        return motor_interface::value<int32_t>(entry.data);
-    default:
-        throw std::runtime_error("Invalid signed serial data type.");
-    }
+    return serial_driver_->decodeSigned(entry);
 }

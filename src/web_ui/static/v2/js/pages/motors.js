@@ -19,6 +19,7 @@ import {
 } from '../motors_model.js';
 import { referenceRedoView } from '../model.js';
 import { signedDeg } from '../play_model.js';
+import { kindSpec } from '../motor_kinds.js';
 import { minasBaseCard } from './minas_base.js';
 import { autoTuneAll, gainField, saveAll } from './drive_gains.js';
 import { paramsField } from './drive_params.js';
@@ -221,6 +222,7 @@ const SCAN_KINDS = {
   all: { label: '전체', path: '/api/motors/scan' },
   ac: { label: 'AC 서보', path: '/api/motors/scan/ac-servo' },
   dxl: { label: '다이나믹셀', path: '/api/motors/scan/dynamixel' },
+  ft: { label: 'Feetech', path: '/api/motors/scan/feetech' },
 };
 
 async function scan(kind, state, changed) {
@@ -336,6 +338,7 @@ function detailCard(state, changed, row) {
   const motor = ui.draft?.motors?.find((m) => Number(m.axis) === row.axis);
   if (!motor) return null;
   const busy = Boolean(ui.busy);
+  const spec = kindSpec(row.kindKey);
   const input = (field) => {
     if (field.ac && !row.ac) return null;
     const value = getField(motor, field.key);
@@ -362,10 +365,11 @@ function detailCard(state, changed, row) {
     h('div', { class: 'detail-group' }, h('div', { class: 'field' },
       h('div', { class: 'group-title', text: '드라이브 관리' }),
       h('div', { class: 'row' },
-        h('button', { class: 'btn btn-mini', type: 'button', disabled: busy, onclick: () => servo(row, 'reset', state, changed) }, row.ac ? `오류 초기화${row.fault ? '' : ' (알람 없음)'}` : '재부팅'),
+        // 종류 표대로 · 재부팅은 다이나믹셀만(Feetech 없음) · 직렬 서보 아닌 모터는 전처럼 AC 버튼 · 수정 목록 158
+        spec.reset ? h('button', { class: 'btn btn-mini', type: 'button', disabled: busy, onclick: () => servo(row, 'reset', state, changed) }, row.ac ? `오류 초기화${row.fault ? '' : ' (알람 없음)'}` : spec.reset) : null,
         row.servoOn
-          ? h('button', { class: 'btn btn-mini', type: 'button', disabled: busy, onclick: () => servo(row, 'off', state, changed) }, row.ac ? '서보 끄기' : '토크 끄기')
-          : h('button', { class: 'btn btn-mini', type: 'button', disabled: busy || row.fault || !row.detected, onclick: () => servo(row, 'on', state, changed) }, row.ac ? '서보 켜기' : '토크 켜기'),
+          ? h('button', { class: 'btn btn-mini', type: 'button', disabled: busy, onclick: () => servo(row, 'off', state, changed) }, `${spec.power} 끄기`)
+          : h('button', { class: 'btn btn-mini', type: 'button', disabled: busy || row.fault || !row.detected, onclick: () => servo(row, 'on', state, changed) }, `${spec.power} 켜기`),
         row.ac ? h('button', { class: 'btn btn-mini', type: 'button', disabled: busy, title: '드라이브 안(EEPROM)에 저장 · 전원을 꺼도 지금 값이 남음 · 모터 프로그램이 몇 초 멈췄다 다시 켜짐', onclick: () => maintenance(row, 'eeprom_save', state, changed) }, '드라이브 저장(EEPROM)') : null,
         row.ac ? h('button', { class: 'btn btn-mini', type: 'button', disabled: busy || row.absolute === '정상', title: row.absolute === '정상' ? '이미 앱솔루트 방식입니다. 다시 설정하면 기준점이 사라집니다.' : '',
           onclick: () => absoluteSetup('one', row, state, changed) }, row.absolute === '정상' ? '앱솔루트 정상' : '앱솔루트 설정') : null,
@@ -424,8 +428,15 @@ export function motorsBody(state, changed) {
     resume && !resume.inline ? h('div', { class: 'blocker bad' }, dot('bad'), h('span', { class: 'grow', text: resume.text }), resumeButton(resume, state, changed)) : null,
     faults.map((row) => h('div', { class: 'issue issue-bad' }, dot('bad'),
       h('div', { class: 'issue-text' }, h('strong', { text: `${row.axis}번 · ${row.name} · ${row.error || '알람'}` }),
-        h('span', { text: '기구에 걸린 것이 없는지 확인한 뒤 오류를 초기화하고 서보를 켜세요' })),
-      h('button', { class: 'btn btn-danger-soft', type: 'button', disabled: Boolean(ui.busy), onclick: () => servo(row, 'reset', state, changed) }, row.ac ? '오류 초기화' : '재부팅'))),
+        h('span', { text: kindSpec(row.kindKey).reset
+          ? '기구에 걸린 것이 없는지 확인한 뒤 오류를 초기화하고 서보를 켜세요'
+          : '기구에 걸린 것이 없는지 확인한 뒤 토크를 껐다 켜세요' })),
+      // Feetech · 재부팅 없음 · 오류 해제 = 토크 끄기(설계 §4 · 실물 미검증 F-4) · 수정 목록 158
+      kindSpec(row.kindKey).reset
+        ? h('button', { class: 'btn btn-danger-soft', type: 'button', disabled: Boolean(ui.busy), onclick: () => servo(row, 'reset', state, changed) }, kindSpec(row.kindKey).reset)
+        : row.servoOn
+          ? h('button', { class: 'btn btn-danger-soft', type: 'button', disabled: Boolean(ui.busy), onclick: () => servo(row, 'off', state, changed) }, `${kindSpec(row.kindKey).power} 끄기`)
+          : null)),
     servoAllBar(rows, state, changed),
     // 게인 알림 · 막지 않음 · 108 (나) · 자동조정 꺼짐이면 「모두 켜기」 · 108 (다)
     gainWarnings(rows).map((text) => h('div', { class: 'blocker' }, dot('warn'), h('span', { class: 'grow', text }),

@@ -3,6 +3,7 @@
 # 이름: {type, ...} · type 별 필수 수치 (motion_common/robot_pack.py MOTOR_TYPE_FIELDS)
 #   ac_servo   rated_rpm, max_rpm, rated_torque_nm, peak_torque_nm, rotor_inertia_kgm2
 #   dynamixel  max_rpm, stall_torque_nm
+#   feetech    max_rpm, stall_torque_nm (STS 계열 · 수정 목록 158)
 # 단위 · 모터축 기준 · rpm, N·m, kg·m²
 # confirmed: false = 모델명 추정 (현장 명판 확인 전)
 

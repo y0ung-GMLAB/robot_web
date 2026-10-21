@@ -20,9 +20,14 @@ MOTOR_TYPE_LABELS = {
     'minas': 'AC Servo',
     'zeroerr': 'ZeroErr Motor',
     'dynamixel': 'Dynamixel',
+    'feetech': 'Feetech',
     'cubemars': 'CubeMars',
     'unknown': 'Unknown',
 }
+
+#: 직렬 서보 · 설정 항목(운전 모드 등)을 아직 못 씀 · 토크 켜기·명령 막힘 · motor_manager 새 코드 · 수정 목록 158
+#: (0xFFFF 「통신 불가」 와 나란히 · AC 서보에는 쓰지 않는다)
+SERIAL_CONFIG_PENDING_ERROR = 0xFFFE
 
 TRANSPORT_LABELS = {
     'ethercat': 'EtherCAT',
@@ -39,6 +44,9 @@ __all__ = [
     'counts_to_degrees',
     'statusword_text',
     'dynamixel_statusword_text',
+    'feetech_error_text',
+    'serial_config_pending_text',
+    'SERIAL_CONFIG_PENDING_ERROR',
     'error_text',
     'normalized_errorcode',
     'hex16',
@@ -121,6 +129,33 @@ def dynamixel_error_text(errorcode: int) -> str:
     if unknown:
         names.append(f'Unknown bit 0x{unknown:02X}')
     return ' · '.join(names) + f' (0x{code:02X})'
+
+#: Feetech STS Status(주소 65) 비트 · 공개 자료 기준 · **실물 미검증** (설계 §9 F-5)
+FEETECH_STATUS_ERROR_BITS = (
+    (0x01, 'Voltage error'),
+    (0x02, 'Sensor (angle) error'),
+    (0x04, 'Overheating error'),
+    (0x08, 'Overcurrent error'),
+    (0x20, 'Overload error'),
+)
+
+
+def feetech_error_text(errorcode: int) -> str:
+    """Feetech Status → 비트 이름 · 뜻은 실물 미검증 · 표시에 그 사실을 붙인다."""
+    code = int(errorcode) & 0xFF
+    if code == 0:
+        return 'No error'
+    names = [name for bit, name in FEETECH_STATUS_ERROR_BITS if code & bit]
+    known = sum(bit for bit, _ in FEETECH_STATUS_ERROR_BITS)
+    unknown = code & ~known
+    if unknown:
+        names.append(f'Unknown bit 0x{unknown:02X}')
+    return ' · '.join(names) + f' (0x{code:02X} · 비트 뜻 실물 미검증)'
+
+
+def serial_config_pending_text() -> str:
+    return '설정 대기 · 직렬 서보 설정 항목을 아직 못 씀 (0xFFFE)'
+
 
 def normalized_errorcode(raw_errorcode: int, metadata: Dict[str, Any]) -> int:
     if (

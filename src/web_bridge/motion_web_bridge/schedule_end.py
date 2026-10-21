@@ -825,7 +825,7 @@ class ScheduleEndService:
                 continue
             if motor_config_rules.is_ac_servo_motor(motor):
                 ac_axes.append(int(axis))
-            elif motor_config_rules.is_dynamixel_motor(motor):
+            elif motor_config_rules.is_serial_servo_motor(motor):   # 다이나믹셀 · Feetech · 수정 목록 158
                 dxl_axes.append(int(axis))
         return sorted(ac_axes), sorted(dxl_axes)
 

@@ -22,6 +22,7 @@ from motion_web_bridge import (
     motor_config_rules,
     motor_identity,
     robot_pack_service,
+    serial_params,
 )
 
 #: 검사 대상 순수 모듈 · 분해가 진행되면 여기에 추가한다
@@ -30,6 +31,7 @@ PURE_MODULES = [
     motor_config_rules,
     motor_config_build,
     minas_params,          # motor_config_build 가 쓴다 · yaml · motion_common 만 의존 (10-7)
+    serial_params,         # motor_config_build 가 쓴다 · 직렬 서보 param 파일 · yaml · motion_common 만 (158)
     motion_file_analysis,
     desktop_shortcut,
     ethercat_project_compat,

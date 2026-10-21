@@ -39,6 +39,9 @@ DEFAULT_MOTION_PROJECTS_DIR = common_paths.motion_projects_dir()
 #: 초기 위치 · 첫 장면(first_frame) · 직접 지정(manual) · 기준점(reference = 모션 0°) · 2026-10-02
 #: 조인트 최대 속도(rad/s)·가속도(rad/s²) · 애니메이션이 넘으면 재생 거부 · 수정 목록 5-2
 MOTION_RATE_LIMIT_FIELDS = ('max_velocity_rad_s', 'max_acceleration_rad_s2')
+
+#: Feetech STS 한 바퀴 반폭 · 모터 rad · 다회전 없음 · 수정 목록 158
+FEETECH_SINGLE_TURN_HALF_RANGE_RAD = math.pi
 #: 매핑 파일의 각도 단위 · 2026-10-06 부터 rad · 수정 목록 6-3
 #:
 #: 파일에는 rad 칸(`*_rad`)과 같은 값의 deg 사본(`*_deg`)을 함께 쓴다 · 사본은
@@ -935,6 +938,16 @@ class MotionMappingManager(Node):
                     if initial_position is not None
                     else None
                 )
+                # Feetech · 한 바퀴 장치(raw 2048 중심 −180°~+180°) · 모터 범위가 밖이면 저장 거부 · 수정 목록 158
+                if motor_ref.lower().startswith('feetech:'):
+                    single_turn = FEETECH_SINGLE_TURN_HALF_RANGE_RAD + 1e-9
+                    low_target = min(lower_target, upper_target)
+                    high_target = max(lower_target, upper_target)
+                    if low_target < -single_turn or high_target > single_turn:
+                        row_errors.append(
+                            f'Feetech 모터 범위 {math.degrees(low_target):.1f}°~{math.degrees(high_target):.1f}° 가 '
+                            '한 바퀴 범위(−180°~+180°)를 벗어납니다 · 기준점 · 조인트 범위 · 감속·기어비 · 배율을 줄이세요'
+                        )
                 preview.update({
                     'motion_lower_output_rad': lower_output,
                     'motion_upper_output_rad': upper_output,
@@ -999,7 +1012,8 @@ class MotionMappingManager(Node):
                         or (parts[3] == 'slave' and int(parts[4], 0) >= 0)
                     )
                 )
-            if len(parts) == 5 and parts[0] == 'dynamixel':
+            # 직렬 서보 · `dynamixel:port:…:id:n` · `feetech:port:…:id:n` (수정 목록 158 · 옛 이름 없음)
+            if len(parts) == 5 and parts[0] in ('dynamixel', 'feetech'):
                 return (
                     parts[1] == 'port'
                     and bool(parts[2])

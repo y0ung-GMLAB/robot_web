@@ -12,7 +12,8 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-from motion_web_bridge import minas_params
+from motion_web_bridge import minas_params, serial_params
+from motion_common import serial_servo_models
 from motion_common.values import optional_int
 
 from motion_web_bridge.motor_identity import (
@@ -39,7 +40,15 @@ DYNAMIXEL_BAUDRATE = 1000000
 DYNAMIXEL_EXTENDED_POSITION_MODE = 4
 
 
+#: Feetech STS 운전 모드 · 0 = 위치 (한 바퀴 · raw 0~4095) · 수정 목록 158
+FEETECH_POSITION_MODE = 0
+
+#: 직렬 서보 driver type · 저장 때 param 파일을 만든다 (`serial_params`)
+SERIAL_SERVO_DRIVER_TYPES = ('dynamixel', 'feetech')
+
+
 def dynamixel_param_file_for_model(workspace_root: Path, driver_model: str) -> str:
+    """옛 정적 param 파일 · 저장 전 옛 설정 · 본보기 드라이버가 가리킨다 · 저장 때 `serial_params` 생성 파일로 바뀐다"""
     model = driver_model.lower().replace('_', '-')
     if 'xm540-w150' in model:
         return str(workspace_root / 'config/dynamixel_xm540_w150.yaml')
@@ -61,10 +70,14 @@ def normalize_driver_configs(
             continue
         item = {key: value for key, value in driver.items() if key not in OBSOLETE_DRIVER_KEYS}
         if str(item.get('type') or '') == 'dynamixel':
-            item['param_file'] = dynamixel_param_file_for_model(
-                workspace_root, str(item.get('driver_model') or '')
-            )
+            # 저장 때 만든 파일(`config/serial_params/`)은 그대로 · 그 밖은 전처럼 정적 파일
+            if not serial_params.is_generated_path(workspace_root, item.get('param_file')):
+                item['param_file'] = dynamixel_param_file_for_model(
+                    workspace_root, str(item.get('driver_model') or '')
+                )
             item['profile_position_value'] = DYNAMIXEL_EXTENDED_POSITION_MODE
+        elif str(item.get('type') or '') == 'feetech':
+            item['profile_position_value'] = FEETECH_POSITION_MODE
         normalized.append(item)
     return normalized
 
@@ -84,12 +97,21 @@ def default_dynamixel_driver(workspace_root: Path, driver_model: str = '') -> Di
     rated_speed_rpm, velocity = DYNAMIXEL_DRIVE_VALUES.get(
         canonical_model, DYNAMIXEL_DEFAULT_DRIVE_VALUES
     )
+    # 모델 제어표를 찾으면 한 바퀴 raw · 전류 단위를 시리즈 값으로 · 수정 목록 158
+    # XM540 은 표 값이 전과 같다 (4096 · 0.00269) · 못 찾으면 전 기본값 그대로
+    pulse_per_revolution, unit_effort = 4096, 0.00269
+    if canonical_model not in DYNAMIXEL_DRIVE_VALUES:
+        info = serial_servo_models.dynamixel_model(workspace_root, model_name=canonical_model)
+        if info.get('supported'):
+            pulse_per_revolution = int(info.get('pulse_per_revolution') or 4096)
+            if info.get('unit_effort'):
+                unit_effort = float(info['unit_effort'])
 
     return {
         'driver_model': canonical_model,
-        'pulse_per_revolution': 4096,
+        'pulse_per_revolution': pulse_per_revolution,
         'rated_effort': 1.0,
-        'unit_effort': 0.00269,
+        'unit_effort': unit_effort,
         'rated_current': 1.0,
         'rated_speed_rpm': rated_speed_rpm,
         'lower': -180.0,
@@ -105,6 +127,42 @@ def default_dynamixel_driver(workspace_root: Path, driver_model: str = '') -> Di
         'profile_effort_value': 0,
         'type': 'dynamixel',
         'param_file': dynamixel_param_file_for_model(workspace_root, canonical_model),
+    }
+
+
+#: Feetech STS 운전 값 · 느린 쪽 · 실물 미검증 (설계 §9 F-2 · F-3)
+#:   profile_velocity 180 deg/s (≈ 2048 step/s · 30 rpm · STS3215 무부하 최대 ≈ 270 deg/s @7.4 V) ·
+#:   0(= 장치 최대)은 적용 검사(`motor_profile_validation` · 0 보다 커야 함)가 거절하므로 쓰지 않는다
+#:   profile_acceleration 439.453125 deg/s² = Acceleration raw 50 (raw 1 = 100 step/s² = 8.7890625 deg/s²)
+FEETECH_PROFILE_VELOCITY_DEG_S = 180.0
+FEETECH_PROFILE_ACCELERATION_DEG_S2 = 50 * serial_servo_models.FEETECH_SERIES['acceleration_unit']
+
+
+def default_feetech_driver(workspace_root: Path, driver_model: str = '') -> Dict[str, Any]:
+    """Feetech STS 드라이버 기본값 · 한 바퀴(−180~+180 deg · raw 2048 중심) · 수정 목록 158"""
+    info = serial_servo_models.feetech_model(workspace_root, model_name=driver_model)
+    model = str(driver_model or '').strip() or str(info.get('model_name') or 'STS')
+    return {
+        'driver_model': model,
+        'pulse_per_revolution': int(serial_servo_models.FEETECH_SERIES['pulse_per_revolution']),
+        'rated_effort': 1.0,
+        'unit_effort': float(serial_servo_models.FEETECH_SERIES['unit_effort']),
+        'rated_current': 1.0,
+        'rated_speed_rpm': FEETECH_PROFILE_VELOCITY_DEG_S / 6.0,
+        'lower': -180.0,
+        'upper': 180.0,
+        'speed': FEETECH_PROFILE_VELOCITY_DEG_S,
+        'acceleration': FEETECH_PROFILE_ACCELERATION_DEG_S2,
+        'deceleration': FEETECH_PROFILE_ACCELERATION_DEG_S2,
+        'profile_velocity': FEETECH_PROFILE_VELOCITY_DEG_S,
+        'profile_acceleration': FEETECH_PROFILE_ACCELERATION_DEG_S2,
+        'profile_deceleration': FEETECH_PROFILE_ACCELERATION_DEG_S2,
+        'profile_position_value': FEETECH_POSITION_MODE,
+        'profile_velocity_value': 1,     # STS 운전 모드 1 = 속도(휠) · 지금 안 씀
+        'profile_effort_value': FEETECH_POSITION_MODE,   # STS 는 전류 제어 모드 없음 · 위치로 둔다
+        'type': 'feetech',
+        # 저장 때 `serial_params.write_param_file` 이 드라이버 id 로 만든 파일로 바뀐다
+        'param_file': '',
     }
 
 
@@ -309,6 +367,13 @@ def driver_id_for_registry_motor(
             driver['param_file'] = minas_params.write_param_file(
                 workspace_root, driver_id, drive_params,
             )
+        # 직렬 서보도 드라이버마다 제 param 파일 · 패킷 기본 + 모델 제어표 · 수정 목록 158
+        elif str(driver.get('type') or '') in SERIAL_SERVO_DRIVER_TYPES:
+            driver['param_file'] = serial_params.write_param_file(
+                workspace_root, driver_id, str(driver.get('type')),
+                str(driver.get('driver_model') or ''),
+                serial_params.identity_model_number(motor),
+            )
         return driver_id
 
     def unclaimed(driver_id) -> bool:
@@ -362,6 +427,9 @@ def append_driver_for_registry_motor(
         # registered Dynamixel profile and merely rename it, because scan
         # order would then give W150 values to W270 (or vice versa).
         template = default_dynamixel_driver(workspace_root, driver_model)
+    elif driver_type == 'feetech':
+        # Feetech 도 모델 기본값에서 · 다른 축 복제 안 함 · 수정 목록 158
+        template = default_feetech_driver(workspace_root, driver_model)
     else:
         # 본보기 고르기 · 이 축이 원래 가리키던 드라이버 → 같은 모델 → 같은 타입
         # 이번 빌드에서 이미 오버라이드가 얹힌 드라이버는 **원본 사본**(pristine)
@@ -417,7 +485,7 @@ def append_driver_for_registry_motor(
 
     template['id'] = next_driver_id
     template['type'] = driver_type
-    if driver_model and driver_type != 'dynamixel':
+    if driver_model and driver_type not in SERIAL_SERVO_DRIVER_TYPES:
         template['driver_model'] = driver_model
     elif not template.get('driver_model'):
         template['driver_model'] = driver_type
@@ -439,6 +507,10 @@ def serial_masters_from_registry(
 ) -> List[Dict[str, Any]]:
     if claimed_driver_ids is None:
         claimed_driver_ids = set()
+    # 한 포트 = 한 종류 · 다이나믹셀과 Feetech 를 한 버스에 섞지 않는다 · 저장 거부 · 수정 목록 158
+    conflicts = serial_params.registry_port_kind_conflicts(registry.get('motors') or [])
+    if conflicts:
+        raise ValueError(conflicts[0])
     serial_masters_by_key: Dict[tuple, Dict[str, Any]] = {}
     used_master_ids = {
         optional_int(master.get('id'), -1)
@@ -501,7 +573,12 @@ def serial_masters_from_registry(
             motor_config.get('serial_baudrate'),
             optional_int(identity.get('serial_baudrate'), None),
         )
-        if str(motor.get('driver_family') or motor.get('motor_type') or '') == 'dynamixel':
+        # 속도 = 검색이 찾은 `serial_baudrate` · 값이 없을 때만 1 Mbps · 수정 목록 158
+        # (전에는 다이나믹셀을 1 Mbps 로 고정 · 검색이 1 Mbps 만 돌았으므로 저장된 값도 1 Mbps)
+        if (
+            baudrate is None
+            and str(motor.get('driver_family') or motor.get('motor_type') or '') in SERIAL_SERVO_DRIVER_TYPES
+        ):
             baudrate = DYNAMIXEL_BAUDRATE
         if axis is None or bus_id is None or not port or baudrate is None:
             continue

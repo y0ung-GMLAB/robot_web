@@ -162,6 +162,10 @@ class MotionWebBridge(Node):
             'scan_dynamixel_service',
             topics.SCAN_DYNAMIXEL_MOTORS,
         ).value
+        self.scan_feetech_service = self.declare_parameter(
+            'scan_feetech_service',
+            topics.SCAN_FEETECH_MOTORS,
+        ).value
         self.scan_progress_topic = self.declare_parameter(
             'scan_progress_topic',
             topics.MOTOR_SCAN_PROGRESS,
@@ -393,6 +397,7 @@ class MotionWebBridge(Node):
         self._scan_client = self.create_client(Trigger, self.scan_service)
         self._scan_ac_servo_client = self.create_client(Trigger, self.scan_ac_servo_service)
         self._scan_dynamixel_client = self.create_client(Trigger, self.scan_dynamixel_service)
+        self._scan_feetech_client = self.create_client(Trigger, self.scan_feetech_service)
         self._scan = ScanOrchestrator(
             self,
             project=self._project,
@@ -406,6 +411,8 @@ class MotionWebBridge(Node):
             scan_ac_servo_service=self.scan_ac_servo_service,
             scan_dynamixel_service=self.scan_dynamixel_service,
             load_motor_config=self._motor_config.load,
+            scan_feetech_client=self._scan_feetech_client,
+            scan_feetech_service=self.scan_feetech_service,
         )
         self._jog_request_publisher = self.create_publisher(String, self.jog_request_topic, 10)
         self._safety_request_publisher = self.create_publisher(

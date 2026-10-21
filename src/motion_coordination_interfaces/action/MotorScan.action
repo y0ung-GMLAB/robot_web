@@ -9,7 +9,7 @@
 # 기존 열거정보를 폐기한 뒤 다시 열거한다.
 
 # --- 목표 ---
-# 검색할 장치 종류 · 'all' | 'ac_servo' | 'dynamixel'
+# 검색할 장치 종류 · 'all' | 'ac_servo' | 'dynamixel' | 'feetech' (수정 목록 158 · 'all' = 셋 다)
 string transport
 ---
 # --- 결과 ---

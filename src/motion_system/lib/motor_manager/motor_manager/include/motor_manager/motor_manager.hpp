@@ -32,6 +32,7 @@ enum class DriverType {
     Zeroerr,
     Dynamixel,
     Cubemars,
+    Feetech,
 };
 
 inline CommunicationType toCommunicationType(const std::string& type) {
@@ -48,6 +49,7 @@ inline DriverType toDriverType(const std::string& type) {
     if (type == "zeroerr") return DriverType::Zeroerr;
     if (type == "dynamixel") return DriverType::Dynamixel;
     if (type == "cubemars") return DriverType::Cubemars;
+    if (type == "feetech") return DriverType::Feetech;
     throw std::runtime_error("Invalid driver type.");
 }
 
@@ -111,6 +113,8 @@ private:
     void stopSerial();
 
     void serialRun(uint8_t master_id);
+
+    void publishIdleSerialStatus(const std::vector<uint8_t>& controller_indices, bool include_enabled);
 
     void setSerialException(std::exception_ptr exception);
 

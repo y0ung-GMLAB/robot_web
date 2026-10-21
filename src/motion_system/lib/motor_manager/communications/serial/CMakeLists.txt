@@ -1,4 +1,5 @@
 add_library(serial
+  src/serial_driver.cpp
   src/serial_master.cpp
   src/serial_controller.cpp
 )

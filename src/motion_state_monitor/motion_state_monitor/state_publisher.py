@@ -17,7 +17,7 @@ import time
 from copy import deepcopy
 from typing import Any, Dict, List, Optional
 
-from motion_common import units, wire_units
+from motion_common import motor_kinds, units, wire_units
 from motion_control_msgs.msg import MotorStatus
 from std_msgs.msg import String
 
@@ -28,12 +28,15 @@ from .connection_state import (
 )
 from .motor_values import (
     MOTOR_TYPE_LABELS,
+    SERIAL_CONFIG_PENDING_ERROR,
     array_value,
     count_values,
     dynamixel_position_raw,
     dynamixel_statusword_text,
     dynamixel_error_text,
     error_text,
+    feetech_error_text,
+    serial_config_pending_text,
     hex16,
     motor_type_label,
     normalized_errorcode,
@@ -46,6 +49,7 @@ MOTOR_TYPE_CATALOG = [
     {'type': 'minas', 'label': MOTOR_TYPE_LABELS['minas']},
     {'type': 'zeroerr', 'label': MOTOR_TYPE_LABELS['zeroerr']},
     {'type': 'dynamixel', 'label': MOTOR_TYPE_LABELS['dynamixel']},
+    {'type': 'feetech', 'label': MOTOR_TYPE_LABELS['feetech']},
     {'type': 'cubemars', 'label': MOTOR_TYPE_LABELS['cubemars']},
     {'type': 'unknown', 'label': MOTOR_TYPE_LABELS['unknown']},
 ]
@@ -181,7 +185,11 @@ class StatePublisher:
         errorcode = normalized_errorcode(raw_errorcode, metadata)
         communication_unavailable = raw_errorcode == COMMUNICATION_UNAVAILABLE_ERROR
         motor_type = str(metadata.get('motor_type', '')).lower()
-        is_dynamixel = motor_type == 'dynamixel'
+        # 직렬 서보(다이나믹셀 · Feetech) 공통 · 토크 비트 · 오류 코드 · 전류 · 수정 목록 158
+        kind = motor_kinds.kind_for_driver_type(motor_type)
+        is_dynamixel = motor_kinds.is_serial_servo(kind)
+        # 설정 대기(0xFFFE) · 직렬 서보만 · AC 서보는 전처럼 알람 코드로 읽는다
+        config_pending = is_dynamixel and raw_errorcode == SERIAL_CONFIG_PENDING_ERROR
         internal_limit_active = bool(statusword & 0x0800) and not is_dynamixel
         status_text = (
             'Communication unavailable'
@@ -192,6 +200,8 @@ class StatePublisher:
                 else statusword_text(statusword)
             )
         )
+        if config_pending:
+            status_text = f'{status_text} · 설정 대기'
         if internal_limit_active and not communication_unavailable:
             status_text = f'{status_text} · Internal limit active'
         servo_on = bool(statusword & 0x01) if is_dynamixel else (statusword & 0x006F) == 0x0027
@@ -205,6 +215,16 @@ class StatePublisher:
             if is_dynamixel
             else None
         )
+        if communication_unavailable:
+            error_message = 'Communication unavailable'
+        elif config_pending:
+            error_message = serial_config_pending_text()
+        elif kind == motor_kinds.FEETECH:
+            error_message = feetech_error_text(errorcode)
+        elif is_dynamixel:
+            error_message = dynamixel_error_text(errorcode)
+        else:
+            error_message = error_text(errorcode, '')
         return {
             'controller_index': controller_index,
             'display_name': f'{controller_index}번 모터',
@@ -222,15 +242,9 @@ class StatePublisher:
             'errorcode': errorcode,
             'errorcode_raw': raw_errorcode,
             'errorcode_hex': hex16(raw_errorcode),
-            'error_text': (
-                'Communication unavailable'
-                if communication_unavailable
-                else (
-                    dynamixel_error_text(errorcode)
-                    if is_dynamixel
-                    else error_text(errorcode, '')
-                )
-            ),
+            'error_text': error_message,
+            # 직렬 서보 설정 대기 · 화면 · 수동 명령 차단 사유 · 직렬 서보에만 붙는다(AC 축 모양 그대로) · 수정 목록 158
+            **({'config_pending': config_pending} if is_dynamixel else {}),
             'station_alias_register': None,
             'position_rad': position,
             'velocity_rad_s': velocity,

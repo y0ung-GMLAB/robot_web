@@ -5,6 +5,7 @@
  */
 
 import { segmentProgressText } from './segment_model.js';
+import { isSerialServo, motorKind } from './motor_kinds.js';
 
 export const RUN_MODE_LABEL = { schedule: '스케줄', manual: '수동', off: '끔' };
 
@@ -32,13 +33,26 @@ export function modePhrase(sched) {
   return '상태 확인 중';
 }
 
+/** 직렬 서보 errorcode 0xFFFE · 설정 항목을 아직 못 씀 · 토크·명령 막힘 · 수정 목록 158 (motor_manager) */
+const SERIAL_CONFIG_PENDING = 0xFFFE;
+
+/** Feetech 상태 오류 비트 · 서버가 error_text 를 안 줄 때만 · 실물 미검증(F-5) · 수정 목록 158 */
+const FEETECH_ERROR_BITS = [[0x01, '전압'], [0x02, '센서'], [0x04, '온도'], [0x08, '전류'], [0x20, '과부하']];
+
 /** 모터 오류 글 · 서버 칸은 error_text(영문)·errorcode(숫자) · 없으면 빈 글 */
 export function motorErrorText(motor) {
+  const kind = motorKind(motor);
+  // 0xFFFE 는 직렬 서보만 · AC 길(모르는 종류 포함)은 지금 그대로
+  if (isSerialServo(kind) && Number(motor?.errorcode_raw ?? motor?.errorcode) === SERIAL_CONFIG_PENDING) return '설정 대기';
   const text = String(motor?.error_text || '').trim();
   if (text && text !== 'No error') {
     return text === 'Communication unavailable' ? '통신 없음' : text.replace(/^Error\s+/i, '오류 ');
   }
   const code = Number(motor?.errorcode);
+  if (kind === 'feetech' && Number.isInteger(code) && code > 0 && code < 0x100) {
+    const names = FEETECH_ERROR_BITS.filter(([bit]) => code & bit).map(([, name]) => name);
+    return `오류 ${names.length ? names.join(' · ') : code}`;
+  }
   return Number.isFinite(code) && code !== 0 ? `오류 ${code}` : '';
 }
 

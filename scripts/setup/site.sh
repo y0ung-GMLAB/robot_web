@@ -9,7 +9,7 @@
 #   SITE_ETHERCAT_NIC=enp2s0  EtherCAT 랜카드 지정 · 없으면 자동 감지(IP 없는 유선 포트)
 #   SITE_RESET_ETHERCAT=1   이미 적힌 /etc/ethercat.conf 를 다시 쓴다
 #   SITE_ETHERLAB_VERSION   EtherLab 태그 (기본 1.6.9 · README 검증 버전)
-#   SITE_SCAN=1             자가 점검에서 모터 스캔 1회 (최대 50초)
+#   SITE_SCAN=1             자가 점검에서 모터 스캔 1회 (최대 110초 · 수정 목록 158)
 #
 # EtherLab 은 SDO 사전 읽기 끄기 패치(patches/igh-1.6.9-sdo-dict-off.patch)를 넣어 빌드한다 · 수정 목록 139 ·
 # 이미 깔린 PC 는 커널 모듈만 다시 빌드(make install 안 함 · PC 마다 깔린 자리가 다름)
@@ -578,6 +578,21 @@ RULE
   site_run sudo udevadm control --reload-rules || true
 }
 
+# 직렬 서보 어댑터(U2D2 = FTDI FT232H · 0403:6014) 응답 지연 · 수정 목록 158-5
+#   FTDI latency_timer 기본 16 ms → 왕복마다 16 ms 대기 · 1 ms 로 · 다이나믹셀 · Feetech 공통
+#   멱등 · 같은 내용을 다시 쓰고 규칙을 다시 읽는다 · 이미 꽂힌 장치에도 적용(trigger)
+#   포트 이름은 /dev/serial/by-id/... 를 쓴다 (USB 순서가 바뀌어도 같음 · 검색이 이미 이 경로 우선)
+SITE_SERIAL_UDEV_RULE="${SITE_SERIAL_UDEV_RULE:-/etc/udev/rules.d/99-robot-serial.rules}"
+site_serial_udev() {
+  echo "직렬 서보 어댑터 응답 지연 1 ms (FTDI latency_timer · udev)"
+  site_write_root_file "${SITE_SERIAL_UDEV_RULE}" <<'RULE'
+# robot_web 수정 목록 158-5 · FTDI USB 직렬(U2D2 등) latency_timer 16 ms → 1 ms
+ACTION=="add", SUBSYSTEM=="usb-serial", DRIVER=="ftdi_sio", ATTR{latency_timer}="1"
+RULE
+  site_run sudo udevadm control --reload-rules || true
+  site_run sudo udevadm trigger --subsystem-match=usb-serial --action=add || true
+}
+
 # 모터용 랜카드 고르기 · 시험 가능 · 출력 "이름 MAC" 또는 빈 줄
 #   $1 `ip -br link` 출력 · $2 `ip -o -4 addr show scope global` 출력 · $3 기본 경로 장치 이름
 #   규칙 · 유선(en*/eth*)만 · IP 가 있는 포트(사내망)와 기본 경로 포트는 제외 ·
@@ -755,9 +770,10 @@ site_selfcheck() {
   http="$(curl -s -o /dev/null -w '%{http_code}' --max-time 5 http://localhost:8000/api/status 2>/dev/null || echo 000)"
   site_check_row "$([[ "${http}" == "200" ]] && echo 1 || echo 0)" "웹 http://localhost:8000" "HTTP ${http}"
   if [[ "${SITE_SCAN:-0}" == "1" && "${http}" == "200" ]]; then
-    echo "  모터 스캔 1회 (최대 50초) …"
+    # 전체 = AC 10 + 다이나믹셀 40 + Feetech 60 초 · 수정 목록 158 (직렬 포트가 없으면 금방 끝난다)
+    echo "  모터 스캔 1회 (최대 110초) …"
     local scan
-    scan="$(curl -s --max-time 70 -X POST http://localhost:8000/api/motors/scan 2>/dev/null || echo '{}')"
+    scan="$(curl -s --max-time 130 -X POST http://localhost:8000/api/motors/scan 2>/dev/null || echo '{}')"
     site_check_row "$(printf '%s' "${scan}" | grep -q '"success": *true' && echo 1 || echo 0)" "전체 모터 검색" "$(printf '%s' "${scan}" | head -c 160)"
   fi
   if [[ "${SITE_CHECK_FAILED}" == "1" ]]; then

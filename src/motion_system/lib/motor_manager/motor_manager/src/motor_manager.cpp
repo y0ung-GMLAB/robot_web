@@ -1,5 +1,6 @@
 #include <algorithm>
 #include <chrono>
+#include <cstdio>
 #include <cstring>
 #include <filesystem>
 
@@ -12,8 +13,10 @@
 
 #include "motor_manager/motor_manager.hpp"
 
+#ifdef MOTOR_MANAGER_WITH_ETHERCAT
 #include "ethercat/ethercat_master.hpp"
 #include "ethercat/ethercat_controller.hpp"
+#endif
 #include "canopen/canopen_master.hpp"
 #include "canopen/canopen_controller.hpp"
 #include "socketcan/socketcan_master.hpp"
@@ -24,6 +27,7 @@
 #include "minas/minas_driver.hpp"
 #include "zeroerr/zeroerr_driver.hpp"
 #include "dynamixel/dynamixel_driver.hpp"
+#include "feetech/feetech_driver.hpp"
 #include "cubemars/cubemars_driver.hpp"
 
 namespace {
@@ -37,6 +41,15 @@ void stack_prefault()
 {
     unsigned char dummy[8 * 1024];
     std::memset(dummy, 0, sizeof(dummy));
+}
+
+// A serial port that fails is reopened this often · robot_web fix-list 27-2 (158)
+constexpr auto SERIAL_REOPEN_INTERVAL = std::chrono::milliseconds(1000);
+
+void logSerialPort(const std::string& port, const std::string& message)
+{
+    std::fprintf(stderr, "[motor_manager serial] %s · %s\n", port.c_str(), message.c_str());
+    std::fflush(stderr);
 }
 
 } // namespace
@@ -139,6 +152,9 @@ void motor_manager::MotorManager::loadConfigurations(const std::string& config_f
         switch (toCommunicationType(m["type"].as<std::string>()))
         {
         case CommunicationType::Ethercat: {
+#ifndef MOTOR_MANAGER_WITH_ETHERCAT
+            throw std::runtime_error("EtherCAT is not built in (MOTOR_MANAGER_WITH_ETHERCAT=OFF).");
+#else
             m_cfg.ethercat_master_index = m["ethercat_master_index"].as<unsigned int>();
             masters_[m_cfg.id] = std::make_unique<ethercat::EthercatMaster>(m_cfg);
 
@@ -158,6 +174,7 @@ void motor_manager::MotorManager::loadConfigurations(const std::string& config_f
                 s_idx++;
             }
             break;
+#endif
         }
         case CommunicationType::Canopen: {
             m_cfg.can_interface_index = m["can_interface_index"].as<unsigned int>();
@@ -262,6 +279,9 @@ void motor_manager::MotorManager::loadConfigurations(const std::string& config_f
         } case DriverType::Dynamixel: {
             drivers_[d_cfg.id] = std::make_unique<dynamixel::DynamixelDriver>(d_cfg);
             break;
+        } case DriverType::Feetech: {
+            drivers_[d_cfg.id] = std::make_unique<feetech::FeetechDriver>(d_cfg);
+            break;
         } case DriverType::Cubemars: {
             drivers_[d_cfg.id] = std::make_unique<cubemars::CubemarsDriver>(d_cfg);
             break;
@@ -291,7 +311,19 @@ void motor_manager::MotorManager::initialize()
     frequency_ = NSEC_PER_SEC / period_;
 
     for (auto& m_iter : masters_) m_iter.second->initialize();
-    for (auto& m_iter : serial_masters_) m_iter.second->initialize();
+
+    // A serial port that is missing at start used to stop motor_manager (every
+    // EtherCAT axis with it) · now that port starts offline and is reopened from
+    // its thread · robot_web fix-list 158 · 27-1
+    for (auto& m_iter : serial_masters_) {
+        auto* serial_master = static_cast<serial::SerialMaster*>(m_iter.second.get());
+        try {
+            serial_master->initialize();
+        } catch (const std::exception& e) {
+            logSerialPort(serial_master->port(), std::string("offline at start · ") + e.what());
+            serial_master->markOffline();
+        }
+    }
 
     for (uint8_t i : controller_indices_) {
         const uint8_t m_id = controllers_[i]->master_id();
@@ -536,8 +568,13 @@ void motor_manager::MotorManager::serialRun(uint8_t master_id)
             throw std::runtime_error("Serial worker controller indices do not exist.");
         }
 
+        auto* serial_master = static_cast<serial::SerialMaster*>(master_iter->second.get());
+        const std::vector<uint8_t>& controller_indices = controller_indices_iter->second;
+
         const auto cycle = std::chrono::nanoseconds(period_);
         auto next_wakeup = std::chrono::steady_clock::now();
+        auto next_reopen = next_wakeup;
+        std::string last_reopen_error;
 
         while (serial_running_.load(std::memory_order_acquire) &&
                running_.load(std::memory_order_acquire))
@@ -551,12 +588,40 @@ void motor_manager::MotorManager::serialRun(uint8_t master_id)
                 break;
             }
 
-            motor_interface::MotorMaster& master = *master_iter->second;
-            master.receive();
+            if (!serial_master->online() && std::chrono::steady_clock::now() >= next_reopen) {
+                next_reopen = std::chrono::steady_clock::now() + SERIAL_REOPEN_INTERVAL;
+                try {
+                    serial_master->reopen();
+                    logSerialPort(serial_master->port(), "reopened");
+                    last_reopen_error.clear();
+                } catch (const std::exception& e) {
+                    if (last_reopen_error != e.what()) {
+                        logSerialPort(serial_master->port(), std::string("reopen failed, retrying every 1 s · ") + e.what());
+                        last_reopen_error = e.what();
+                    }
+                }
+            }
 
-            applyControllerRequests(controller_indices_iter->second);
+            if (serial_master->online()) {
+                // A failure here takes only this port offline · the EtherCAT
+                // loop and the other ports keep running (fix-list 27-1 · 158)
+                try {
+                    serial_master->receive();
 
-            master.transmit();
+                    applyControllerRequests(controller_indices);
+                    publishIdleSerialStatus(controller_indices, false);
+
+                    serial_master->transmit();
+                } catch (const std::exception& e) {
+                    logSerialPort(serial_master->port(), std::string("offline · ") + e.what());
+                    serial_master->markOffline();
+                    next_reopen = std::chrono::steady_clock::now() + SERIAL_REOPEN_INTERVAL;
+                }
+            }
+
+            if (!serial_master->online()) {
+                publishIdleSerialStatus(controller_indices, true);
+            }
 
             const auto now = std::chrono::steady_clock::now();
             if (next_wakeup < now - cycle) {
@@ -567,6 +632,25 @@ void motor_manager::MotorManager::serialRun(uint8_t master_id)
         setSerialException(std::current_exception());
         serial_running_.store(false, std::memory_order_release);
         running_.store(false, std::memory_order_release);
+    }
+}
+
+void motor_manager::MotorManager::publishIdleSerialStatus(
+    const std::vector<uint8_t>& controller_indices,
+    bool include_enabled)
+{
+    // updateController() publishes only enabled axes · a serial axis that never
+    // got enabled (port offline · boot items pending) or whose port is offline
+    // still reports its state (0xFFFF 통신 불가 · 0xFFFE 설정 대기). No I/O here.
+    for (uint8_t i : controller_indices) {
+        if (i >= motor_interface::MAX_CONTROLLER_SIZE || !controllers_[i]) continue;
+        if (!include_enabled && controller_enabled_[i].load(std::memory_order_acquire)) continue;
+
+        motor_interface::motor_frame_t controller_status{};
+        controllers_[i]->read(controller_status);
+
+        std::lock_guard<std::mutex> lock(frame_mutex_);
+        status_[i] = controller_status;
     }
 }
 

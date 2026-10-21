@@ -1495,7 +1495,7 @@ class MotionPlayer:
             )
             command.controlword[slot] = (
                 DYNAMIXEL_TORQUE_ENABLE
-                if axis_plan.get('motor_type') == 'dynamixel'
+                if axis_plan.get('motor_type') in ('dynamixel', 'feetech')
                 else CW_NEW_SET_POINT_MINAS
             )
             # 안쪽은 rad · 명령 토픽 단위로는 여기서만 바꾼다 · 수정 목록 6
@@ -1576,7 +1576,7 @@ class MotionPlayer:
         AC 서보는 **관절** 허용 오차 × |감속비 × scale| 를 모터로 환산 · 모터 값은 바닥 · 수정 목록 57 ·
         다이나믹셀은 그대로(모터 deg 고정).
         """
-        if axis_plan.get('motor_type') == 'dynamixel':
+        if axis_plan.get('motor_type') in ('dynamixel', 'feetech'):
             return units.deg_to_rad(self.manager._runtime_float_parameter(
                 'dynamixel_target_tolerance_deg',
                 self.manager.dynamixel_target_tolerance_deg,

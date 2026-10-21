@@ -22,10 +22,18 @@ from typing import Any, Dict, List, Optional
 
 import yaml
 
+from motion_common import serial_servo_models
+
 #: 검색 규약 · 화면과 `scan_contract`가 같은 값을 쓴다
-DYNAMIXEL_SCAN_BAUDRATES = (1000000,)
+#: 첫 속도(1 Mbps) · Broadcast Ping + ID 0~252 개별 보조 Ping (불변조건 그대로)
+#: 그 뒤 속도 · 57600 (X 공장값) · 4 Mbps · **Broadcast Ping 만** · 수정 목록 158 (설계 §5)
+DYNAMIXEL_SCAN_BAUDRATES = (1000000, 57600, 4000000)
 DYNAMIXEL_SCAN_MAX_ID = 252
 DYNAMIXEL_SCAN_PROTOCOL = '2.0'
+DYNAMIXEL_SCAN_RULE = (
+    'auto serial port, baudrate 1000000, broadcast ping plus ID 0-252; '
+    'then 57600 and 4000000 broadcast ping only'
+)
 
 
 class DynamixelScanner:
@@ -54,7 +62,7 @@ class DynamixelScanner:
                 'scanned_at': started_at,
                 'mode': 'direct_ping',
                 'protocol': DYNAMIXEL_SCAN_PROTOCOL,
-                'scan_rule': 'auto serial port, baudrate 1000000, broadcast ping plus ID 0-252',
+                'scan_rule': DYNAMIXEL_SCAN_RULE,
                 'error': (
                     'Dynamixel 직렬 포트를 찾지 못했습니다. '
                     '/dev/serial/by-id, /dev/ttyUSB*, /dev/ttyACM* 경로를 확인했습니다.'
@@ -66,10 +74,15 @@ class DynamixelScanner:
 
         devices: List[Dict[str, Any]] = []
         errors: List[str] = []
+        warnings: List[str] = []
+        #: 포트 · ID 하나는 한 번만 · 첫 속도(1 Mbps)에서 찾은 장치가 이긴다
+        seen: set = set()
         for target in targets:
             port = str(target.get('port') or '')
             baudrate = int(target.get('baudrate') or 0)
             ids = list(target.get('ids') or [])
+            # 덧붙인 속도(57600 · 4 Mbps) · Broadcast Ping 만 · 못 열어도 검색 실패가 아니다 · 수정 목록 158
+            extra_baudrate = baudrate != DYNAMIXEL_SCAN_BAUDRATES[0]
             if not port or not baudrate:
                 continue
             self.monitor._publish_scan_progress(
@@ -80,8 +93,11 @@ class DynamixelScanner:
             )
             try:
                 fd = self._open_dynamixel_port(port, baudrate)
-            except OSError as exc:
-                errors.append(f'{port}@{baudrate}: {exc}')
+            except (OSError, AttributeError, termios.error) as exc:
+                if extra_baudrate:
+                    warnings.append(f'{port}@{baudrate}: {exc}')
+                else:
+                    errors.append(f'{port}@{baudrate}: {exc}')
                 continue
             try:
                 devices_by_id: Dict[int, Dict[str, Any]] = {}
@@ -97,7 +113,7 @@ class DynamixelScanner:
                             continue
                         devices_by_id[int(device['id'])] = device
 
-                    if self.monitor.dynamixel_scan_id_fallback:
+                    if self.monitor.dynamixel_scan_id_fallback and not extra_baudrate:
                         for dxl_id in ids:
                             current = devices_by_id.get(int(dxl_id))
                             if current is not None and self._dynamixel_device_has_valid_model(current):
@@ -114,6 +130,10 @@ class DynamixelScanner:
                         break
 
                 for device in devices_by_id.values():
+                    key = (str(target.get('resolved') or port), int(device['id']))
+                    if key in seen:
+                        continue
+                    seen.add(key)
                     device.update({
                         'port': port,
                         'baudrate': baudrate,
@@ -143,11 +163,11 @@ class DynamixelScanner:
             'scanned_at': started_at,
             'mode': 'direct_ping',
             'protocol': DYNAMIXEL_SCAN_PROTOCOL,
-            'scan_rule': 'auto serial port, baudrate 1000000, broadcast ping plus ID 0-252',
+            'scan_rule': DYNAMIXEL_SCAN_RULE,
             'error': '; '.join(errors) if errors else (
                 '' if devices else '직접 Ping에 응답한 Dynamixel이 없습니다'
             ),
-            'warning': '',
+            'warning': '; '.join(warnings),
             'targets': targets,
             'attempts': max(1, int(self.monitor.dynamixel_scan_attempts)),
             'id_fallback': bool(self.monitor.dynamixel_scan_id_fallback),
@@ -185,10 +205,15 @@ class DynamixelScanner:
                 targets.append({
                     'port': port_info['port'],
                     'port_source': port_info['source'],
+                    'resolved': port_info.get('resolved', port_info['port']),
                     'baudrate': baudrate,
                     'protocol': DYNAMIXEL_SCAN_PROTOCOL,
                     'ids': ids,
-                    'id_range': f'broadcast ping plus ID 0-{scan_max_id}',
+                    'id_range': (
+                        f'broadcast ping plus ID 0-{scan_max_id}'
+                        if baudrate == DYNAMIXEL_SCAN_BAUDRATES[0]
+                        else 'broadcast ping only'
+                    ),
                 })
         return targets
 
@@ -472,15 +497,14 @@ class DynamixelScanner:
 
     @staticmethod
     def _dynamixel_model_name(model_number: Any) -> str:
+        """모델 번호 → 검색 이름 · 모델 목록(`dynamixel.model`)에서 · 수정 목록 158
+
+        전에는 4개(1120 · 1130 · 1100 · 1110)만 손으로 적어 두었다 · 그 넷의 이름은 전과 같다
+        (`XM540-W270` · 정식 이름 `XM540-W270-R` 은 `canonical_dynamixel_model` 이 붙인다)
+        """
         if model_number is None:
             return ''
-        known = {
-            1120: 'XM540-W270',
-            1130: 'XM540-W150',
-            1100: 'XH540-W270',
-            1110: 'XH540-W150',
-        }
-        return known.get(int(model_number), '')
+        return serial_servo_models.dynamixel_scan_name(model_number)
 
     @staticmethod
     def _dynamixel_device_has_valid_model(device: Dict[str, Any]) -> bool:
@@ -502,7 +526,7 @@ class DynamixelScanner:
                 'scanned_at': time.time(),
                 'mode': 'direct_ping',
                 'protocol': DYNAMIXEL_SCAN_PROTOCOL,
-                'scan_rule': 'auto serial port, baudrate 1000000, broadcast ping plus ID 0-252',
+                'scan_rule': DYNAMIXEL_SCAN_RULE,
                 'error': str(exc),
                 'targets': [],
                 'devices_count': 0,
@@ -518,7 +542,7 @@ class DynamixelScanner:
             'scanned_at': scanned_at,
             'mode': 'direct_ping',
             'protocol': DYNAMIXEL_SCAN_PROTOCOL,
-            'scan_rule': 'auto serial port, baudrate 1000000, broadcast ping plus ID 0-252',
+            'scan_rule': DYNAMIXEL_SCAN_RULE,
             'error': '',
             'targets': [],
             'devices_count': 0,

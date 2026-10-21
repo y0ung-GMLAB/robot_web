@@ -40,6 +40,7 @@ from motion_web_bridge import (
     motion_file_analysis,
     motor_config_build,
     motor_config_rules,
+    serial_params,
 )
 
 
@@ -278,6 +279,13 @@ class MotorConfigService:
             config, _ = mapping_motor_limits.apply_mapping_limits(
                 config, mapping_motor_limits.active_mapping(self.repository),
             )
+            # Feetech 한 바퀴 범위 · 한 포트 한 종류 · 어기면 저장 거부 · 수정 목록 158 (AC 만 있으면 해당 없음)
+            serial_errors = [
+                *mapping_motor_limits.single_turn_errors(config),
+                *serial_params.port_kind_conflicts(config.get('masters') or [], config.get('drivers') or []),
+            ]
+            if serial_errors:
+                raise ValueError(serial_errors[0])
             content = yaml.safe_dump(config, sort_keys=False, allow_unicode=True)
             configured_axes = len(
                 motor_config_rules.registry_from_motor_config(
@@ -388,6 +396,10 @@ class MotorConfigService:
             updated, changed = mapping_motor_limits.apply_mapping_limits(
                 config, mapping_motor_limits.active_mapping(self.repository),
             )
+            # Feetech 한 바퀴 밖이면 모터 설정에 안 쓴다 · 수정 목록 158
+            single_turn = mapping_motor_limits.single_turn_errors(updated) if changed else []
+            if single_turn:
+                raise ValueError(single_turn[0])
             if changed:
                 self._write(
                     yaml.safe_dump(updated, sort_keys=False, allow_unicode=True), path,

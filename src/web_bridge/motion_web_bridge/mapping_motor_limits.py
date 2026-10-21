@@ -83,7 +83,8 @@ def _config_axes(config: Dict[str, Any]) -> Iterable[Tuple[Dict[str, Any], Dict[
             driver_type = str(driver.get('type') or '')
             motor = {
                 'controller_index': optional_int(slave.get('controller_index'), None),
-                'motor_type': 'dynamixel' if driver_type == 'dynamixel' else driver_type,
+                # `minas` · `dynamixel` · `feetech` · 판정은 `motor_ref.motor_type` (종류 표)
+                'motor_type': driver_type,
             }
             if master.get('type') == 'serial':
                 motor.update({
@@ -150,6 +151,47 @@ def apply_mapping_limits(
             'previous_upper': previous[1],
         })
     return result, changes
+
+
+#: Feetech STS 한 바퀴 · raw 2048 중심 −180 ~ +180 모터 deg · 다회전 없음 · 수정 목록 158
+SINGLE_TURN_HALF_RANGE_RAD = units.deg_to_rad(180.0)
+
+#: 한 바퀴 장치 · 모터 설정 파일 drivers[].type
+SINGLE_TURN_DRIVER_TYPES = ('feetech',)
+
+
+def single_turn_range_error(motor_lower_rad: float, motor_upper_rad: float) -> str:
+    """모터 범위(모터 rad · 기준 포함)가 한 바퀴 장치 범위 안인가 · 밖이면 사유."""
+    tolerance = 1e-9
+    if motor_lower_rad < -SINGLE_TURN_HALF_RANGE_RAD - tolerance or (
+        motor_upper_rad > SINGLE_TURN_HALF_RANGE_RAD + tolerance
+    ):
+        return (
+            f'모터 범위 {units.rad_to_deg(motor_lower_rad):.1f}°~{units.rad_to_deg(motor_upper_rad):.1f}° 가 '
+            'Feetech 한 바퀴 범위(−180°~+180° · raw 2048 중심)를 벗어납니다 · '
+            '기준점 · 조인트 범위 · 감속·기어비 · 배율을 줄이세요'
+        )
+    return ''
+
+
+def single_turn_errors(config: Dict[str, Any]) -> List[str]:
+    """한 바퀴 장치(Feetech) 드라이버의 lower/upper 가 장치 범위 밖이면 축마다 사유 · 저장 거부용."""
+    errors: List[str] = []
+    if not isinstance(config, dict):
+        return errors
+    for _slave, driver, motor in _config_axes(config):
+        if str(driver.get('type') or '') not in SINGLE_TURN_DRIVER_TYPES:
+            continue
+        lower = _float(driver.get('lower'), None)
+        upper = _float(driver.get('upper'), None)
+        if lower is None or upper is None:
+            continue
+        lower_rad = units.convert(lower, wire_units.MOTOR_CONFIG_UNIT, units.RAD)
+        upper_rad = units.convert(upper, wire_units.MOTOR_CONFIG_UNIT, units.RAD)
+        reason = single_turn_range_error(lower_rad, upper_rad)
+        if reason:
+            errors.append(f'{motor.get("controller_index")}번 모터 · {reason}')
+    return errors
 
 
 def active_mapping(repository) -> Optional[Dict[str, Any]]:

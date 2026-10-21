@@ -70,6 +70,7 @@ function motorLabel(motor) {
   const typeLabels = {
     ac_servo: 'AC 서보',
     dynamixel: '다이나믹셀',
+    feetech: 'Feetech',
     cubemars: '큐브마스',
   };
   return `모터 ${formatInt(motor.controller_index)} / ID ${motorIdText(motor)} / ${typeLabels[motorTypeKey(motor)] || '확인 불가'} / ${motor.display_name || '-'}`;
@@ -385,8 +386,15 @@ function isAcServoMotor(motor) {
   return motorTypeKey(motor) === 'ac_servo';
 }
 
+/** 직렬 버스 서보 통로(`/api/motion-test/dynamixel/*`) · 다이나믹셀 · Feetech 공통 · 이름은 옛 그대로 · 수정 목록 158 */
 function isDynamixelMotor(motor) {
-  return motorTypeKey(motor) === 'dynamixel';
+  const key = motorTypeKey(motor);
+  return key === 'dynamixel' || key === 'feetech';
+}
+
+/** Feetech · 재부팅 없음(0x06 = 공장 초기화 · 금지) · 오류 해제 = 토크 끄기 · 수정 목록 158 */
+function isFeetechMotor(motor) {
+  return motorTypeKey(motor) === 'feetech';
 }
 
 /** 서보 버튼 자리 → 다이나믹셀 명령 · 오류 초기화 자리 = 재부팅 · 수정 목록 24 */
@@ -396,14 +404,16 @@ export const DYNAMIXEL_CONTROL_ACTIONS = Object.freeze({
   fault_reset: 'reboot',
 });
 
-/** 서보 버튼 3개의 글자 · 모터 종류별 */
+/** 서보 버튼 3개의 글자 · 모터 종류별 · Feetech 은 재부팅 버튼 꺼짐 */
 export function servoButtonLabels(motor) {
+  if (isFeetechMotor(motor)) return { on: '토크 켜기', off: '토크 끄기', reset: '재부팅 없음' };
   return isDynamixelMotor(motor)
     ? { on: '토크 켜기', off: '토크 끄기', reset: '재부팅' }
     : { on: '서보 켜기', off: '서보 끄기', reset: '오류 초기화' };
 }
 
 function actionMotorLabel(motor) {
+  if (isFeetechMotor(motor)) return 'Feetech';
   return isDynamixelMotor(motor) ? '다이나믹셀' : 'AC 서보';
 }
 
@@ -904,7 +914,7 @@ export function createMotionTestController({ el, getLatestState, getJointRow = (
       return;
     }
     const motor = selectedMotor();
-    const jogMotorText = isDynamixelMotor(motor) ? '다이나믹셀' : 'AC 서보';
+    const jogMotorText = actionMotorLabel(motor);
     el.motionTestActualState.textContent = '명령 전';
     el.motionTestActualText.textContent = [
       `${jogMotorText} 조그 명령 전입니다.`,
@@ -1136,6 +1146,8 @@ export function createMotionTestController({ el, getLatestState, getJointRow = (
     ].forEach((button) => {
       if (button) button.disabled = !selectedAcServoReady || servoControlInFlight;
     });
+    // Feetech · 재부팅 없음 · 수정 목록 158
+    if (el.selectedAcServoFaultResetButton && isFeetechMotor(motor)) el.selectedAcServoFaultResetButton.disabled = true;
     [
       el.allAcServoOnButton,
       el.allAcServoOffButton,
@@ -1172,7 +1184,7 @@ export function createMotionTestController({ el, getLatestState, getJointRow = (
     const plan = commandPlan({ jogDirection: direction });
     const motor = plan?.motor;
     const isDynamixel = isDynamixelMotor(motor);
-    const motorLabelText = isDynamixel ? '다이나믹셀' : 'AC 서보';
+    const motorLabelText = actionMotorLabel(motor);
     const jogValue = numericValue(el.motionTestJogDistance?.value, null);
     const maxJog = jogInputMaxDeg(motor);
     const jogLimitReason = (
@@ -1284,6 +1296,12 @@ export function createMotionTestController({ el, getLatestState, getJointRow = (
   async function sendAcServoControl(action, scope = 'selected', axisOverride = null) {
     const axis = axisOverride ?? selectedAxis;
     const motor = axisOverride === null ? selectedMotor() : motorByAxis(getLatestState(), axisOverride);
+    // Feetech · 재부팅 없음 · 보내지 않음 · 수정 목록 158
+    if (scope === 'selected' && motor && isFeetechMotor(motor) && action === 'fault_reset') {
+      if (el.acServoControlMessage) el.acServoControlMessage.textContent = 'Feetech 은 재부팅이 없습니다 · 토크를 껐다 켜세요';
+      renderCurrentState();
+      return;
+    }
     if (scope === 'selected' && motor && isDynamixelMotor(motor)) {
       await sendDynamixelControl(DYNAMIXEL_CONTROL_ACTIONS[action] || action, axis);
       return;
@@ -1349,8 +1367,10 @@ export function createMotionTestController({ el, getLatestState, getJointRow = (
   /** 다이나믹셀 토크 켜기·끄기·재부팅 · 같은 버튼 자리 · 수정 목록 24 (2026-10-06)
    * 하드웨어 오류(과부하·과열·전압)는 재부팅이나 전원 재투입으로만 풀린다 */
   async function sendDynamixelControl(action, axis) {
+    // 같은 통로 · Feetech 도 토크 켜기·끄기 · 이름만 종류대로 · 수정 목록 158
+    const kindText = isFeetechMotor(motorByAxis(getLatestState(), axis)) ? 'Feetech' : '다이나믹셀';
     const confirmText = {
-      torque_off: '선택한 다이나믹셀 모터의 토크를 끕니다.\n다이나믹셀은 브레이크가 없어 관절이 처질 수 있습니다. 계속할까요?',
+      torque_off: `선택한 ${kindText} 모터의 토크를 끕니다.\n${kindText}은 브레이크가 없어 관절이 처질 수 있습니다. 계속할까요?`,
       reboot: '선택한 다이나믹셀 모터를 재부팅합니다.\n'
         + '하드웨어 오류가 해제되고 토크가 꺼집니다. 브레이크가 없어 관절이 처질 수 있습니다.\n'
         + '다회전 모드 모터는 회전 수 정보가 초기화되어 위치 표시가 바뀔 수 있습니다. 재부팅 뒤 위치를 확인하세요. 계속할까요?',
@@ -1358,7 +1378,7 @@ export function createMotionTestController({ el, getLatestState, getJointRow = (
     if (confirmText) {
       const label = action === 'reboot' ? '재부팅' : '토크 끄기';
       const confirmed = await showConfirm(confirmText, {
-        title: `다이나믹셀 ${label}`, confirmLabel: label, tone: 'danger',
+        title: `${kindText} ${label}`, confirmLabel: label, tone: 'danger',
       });
       if (!confirmed) {
         if (el.acServoControlMessage) el.acServoControlMessage.textContent = `${label} 취소`;

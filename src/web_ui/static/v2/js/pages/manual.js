@@ -22,6 +22,7 @@ import {
 } from '../mapping_model.js';
 import { registeredPlaylist, signedDeg } from '../play_model.js';
 import { manualNotices, referenceRedoView } from '../model.js';
+import { isSerialServo, kindSpec, motorKind, rowKind } from '../motor_kinds.js';
 
 const DEG = 180 / Math.PI;
 const RAD = Math.PI / 180;
@@ -115,7 +116,9 @@ function axes(state) {
   const motors = (state.snap?.motion_state?.motors || []).map((m) => ({
     raw: m,
     axis: Number(m.controller_index),
-    ac: m.motor_type !== 'dynamixel',
+    // 종류 표 · 직렬 서보(dynamixel · feetech)만 AC 아님 · 그 밖(minas · unknown …)은 전처럼 AC · 수정 목록 158
+    kindKey: motorKind(m),
+    ac: !isSerialServo(motorKind(m)),
     ref: motorRefFor(m),
     name: String(m.name || m.display_name || ''),
     detected: m.state === 'detected',
@@ -167,6 +170,9 @@ export function manualBlocker(state, item) {
   if (snap.motor_action_blocker) return { text: String(snap.motor_action_blocker) };
   if (!item) return { text: '모터를 선택하세요' };
   if (!item.detected) return { text: `${item.axis}번 모터 통신 없음` };
+  // 종류 표 · Feetech 은 재부팅 없음(토크 끄기로 해제) · 수정 목록 158
+  const spec = kindSpec(rowKind(item));
+  if (item.fault && !spec.reset) return { text: `${item.axis}번 모터 오류 · 토크를 껐다 켜세요` };
   if (item.fault) return { text: `${item.axis}번 모터 알람 · 오류를 초기화한 뒤 서보를 켜세요`, fix: 'reset' };
   if (item.ac && !item.servoOn) return { text: `${item.axis}번 서보가 꺼져 있습니다`, fix: 'servo-on' };
   if (!item.row) return { text: `조인트 매핑에 ${item.axis}번 모터를 쓰는 줄이 없거나 「사용」이 꺼져 있습니다. 매핑에 없는 모터는 수동 조작할 수 없습니다.`, fix: 'open-mapping' };
@@ -359,6 +365,11 @@ async function cancelMotion() {
 
 /* ---------- 목표 위치 · 범위 복귀 ---------- */
 
+/** 절대 이동 통로 · 직렬 서보(DXL · Feetech) `/api/motion-test/dynamixel/action` · 그 밖(모르는 종류 포함)은 전처럼 `/api/motion-test/ac-servo/action` · 158 */
+function actionPath(item) {
+  return `${kindSpec(rowKind(item)).controlPath}/action`;
+}
+
 async function moveTo(item, changed) {
   const blocker = manualBlocker(ctx.state, item);
   if (blocker) { toast(blocker.text, 'warn'); return; }
@@ -372,7 +383,7 @@ async function moveTo(item, changed) {
     return;
   }
   if (item.position !== null && Math.abs(motorDeg - item.position) < 1e-4) { toast('이미 목표 위치에 있습니다', 'ok'); return; }
-  const path = item.ac ? '/api/motion-test/ac-servo/action' : '/api/motion-test/dynamixel/action';
+  const path = actionPath(item);
   ui.busy = 'move';
   changed();
   try {
@@ -391,7 +402,7 @@ async function recoverRange(item, changed) {
   const ok = await confirmBox({ title: '범위 안으로 복귀', body: `${item.axis}번 모터가 운전 한계를 벗어나 있습니다(현재 모터 ${signedDeg(item.position, 2)}°).\n가장 가까운 한계(${signedDeg(bound, 2)}°)까지 천천히(조인트 ${MANUAL_JOINT_SPEED_DEG_S} °/s) 이동합니다. 주변에 사람이나 물건이 없는지 확인하세요.`, confirmLabel: '복귀', tone: 'warning' });
   if (!ok) return;
   try {
-    const result = await api('POST', item.ac ? '/api/motion-test/ac-servo/action' : '/api/motion-test/dynamixel/action',
+    const result = await api('POST', actionPath(item),
       { body: { axis: item.axis, target_rad: bound * RAD, range_recovery: true }, timeoutMs: 15000 });
     toast(result?.message || '복귀합니다', 'ok');
   } catch (error) { toast(error.message || String(error), 'bad'); }
@@ -488,6 +499,7 @@ function rangeBar(item) {
 function axisPanel(state, changed, item) {
   const blocker = manualBlocker(state, item);
   const disabled = Boolean(blocker);
+  const spec = kindSpec(rowKind(item));
   const jointUnit = ui.unit === 'joint' && Boolean(item.row);
   const scope = state.snap?.project_scope || {};
   const canCapture = Boolean(item.row) && scope.runtime_matches_selected === true && scope.motor_config_applied === true && !ui.session;
@@ -581,10 +593,11 @@ function axisPanel(state, changed, item) {
       h('div', { class: 'row' },
         dot(item.fault ? 'bad' : item.servoOn ? 'ok' : 'warn'),
         h('span', { class: 'grow', text: `${item.servoOn ? '켜짐' : '꺼짐'} · ${item.fault ? '알람' : '알람 없음'}` }),
+        // 종류 표대로 · 재부팅은 다이나믹셀만 · 모르는 종류는 버튼 없음 · 수정 목록 158
         item.servoOn
-          ? h('button', { class: 'btn btn-mini', type: 'button', onclick: async () => { endSession(true); await act.servoControl(item, 'off'); changed(); } }, item.ac ? '서보 끄기' : '토크 끄기')
-          : h('button', { class: 'btn btn-mini', type: 'button', disabled: item.fault || !item.detected, onclick: async () => { await act.servoControl(item, 'on'); changed(); } }, item.ac ? '서보 켜기' : '토크 켜기'),
-        h('button', { class: 'btn btn-mini', type: 'button', onclick: async () => { await act.servoControl(item, 'reset'); changed(); } }, item.ac ? `오류 초기화${item.fault ? '' : ' (알람 없음)'}` : '재부팅'))),
+          ? h('button', { class: 'btn btn-mini', type: 'button', onclick: async () => { endSession(true); await act.servoControl(item, 'off'); changed(); } }, `${spec.power} 끄기`)
+          : h('button', { class: 'btn btn-mini', type: 'button', disabled: item.fault || !item.detected, onclick: async () => { await act.servoControl(item, 'on'); changed(); } }, `${spec.power} 켜기`),
+        spec.reset ? h('button', { class: 'btn btn-mini', type: 'button', onclick: async () => { await act.servoControl(item, 'reset'); changed(); } }, item.ac ? `오류 초기화${item.fault ? '' : ' (알람 없음)'}` : spec.reset) : null)),
     ui.message ? h('p', { class: 'tone-text-warn small', text: ui.message }) : null);
 }
 
@@ -706,7 +719,7 @@ export function renderManual(state, { changed }) {
               h('span', { class: 'axis-pick-head' }, h('strong', { text: a.label }),
                 h('span', { class: 'mono', 'data-live': 'joint', 'data-axis': String(a.axis), text: a.joint === null ? '-' : `${signedDeg(a.joint, 2)}°` })),
               h('span', { class: 'axis-pick-meta' }, dot(a.fault ? 'bad' : a.servoOn ? 'ok' : 'warn'),
-                h('span', { class: 'muted small', text: `${a.fault ? '알람' : a.servoOn ? '서보 켜짐' : '서보 꺼짐'} · ${a.axis}번 · ${a.ac ? 'AC' : 'DXL'}${a.row ? ` · 1:${a.row.gear_ratio}` : ' · 매핑 없음'}` }),
+                h('span', { class: 'muted small', text: `${a.fault ? '알람' : a.servoOn ? '서보 켜짐' : '서보 꺼짐'} · ${a.axis}번 · ${kindSpec(rowKind(a)).short}${a.row ? ` · 1:${a.row.gear_ratio}` : ' · 매핑 없음'}` }),
                 notAligned.has(a.axis) ? h('span', { class: 'chip chip-warn', text: NOT_ALIGNED_LABEL }) : null)))))),
           item ? axisPanel(state, changed, item) : null))
     ],

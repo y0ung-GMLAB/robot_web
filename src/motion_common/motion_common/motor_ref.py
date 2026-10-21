@@ -12,23 +12,13 @@
 from typing import Any, Dict, List
 from urllib.parse import quote
 
+from motion_common import motor_kinds
 from motion_common.values import optional_int
 
 
 def motor_type(motor: Dict[str, Any]) -> str:
-    values = [
-        motor.get('motor_type'),
-        motor.get('motor_type_label'),
-        motor.get('driver_model'),
-        motor.get('driver_name'),
-        motor.get('transport'),
-    ]
-    text = ' '.join(str(value or '').lower() for value in values)
-    if 'dynamixel' in text:
-        return 'dynamixel'
-    if 'minas' in text or 'ac servo' in text or 'ac_servo' in text:
-        return 'ac_servo'
-    return 'unknown'
+    """`ac_servo` | `dynamixel` | `feetech` | `unknown` · 판정은 종류 표 한 곳 · 수정 목록 158"""
+    return motor_kinds.motor_kind(motor)
 
 
 def motor_ref_for_motor(motor: Dict[str, Any]) -> str:
@@ -49,11 +39,12 @@ def motor_ref_for_motor(motor: Dict[str, Any]) -> str:
             and master_index >= 0
             else ''
         )
-    if kind == 'dynamixel':
+    if kind in motor_kinds.SERIAL_SERVO_KINDS:
+        # 다이나믹셀 `dynamixel:port:…:id:n` (기존) · Feetech `feetech:port:…:id:n` (새 · 옛 이름 없음)
         bus_id = optional_int(motor.get('bus_id', motor.get('node_id')))
         serial_port = str(motor.get('serial_port') or '').strip()
         return (
-            f'dynamixel:port:{quote(serial_port, safe="")}:id:{bus_id}'
+            f'{kind}:port:{quote(serial_port, safe="")}:id:{bus_id}'
             if bus_id is not None and bus_id >= 0 and serial_port else ''
         )
     return ''

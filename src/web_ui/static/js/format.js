@@ -2,6 +2,7 @@ const motorTypeFilters = [
   { key: 'all', label: '전체' },
   { key: 'ac_servo', label: 'AC 서보' },
   { key: 'dynamixel', label: '다이나믹셀' },
+  { key: 'feetech', label: 'Feetech' },
   { key: 'cubemars', label: '큐브마스' },
   { key: 'unknown', label: '확인 불가' },
 ];
@@ -105,6 +106,8 @@ export function normalizeMotorTypeKey(type, label) {
     return 'ac_servo';
   }
   if (value.includes('dynamixel')) return 'dynamixel';
+  // 직렬 버스 서보 · 다이나믹셀과 같은 통로(토크 · 조그 · 절대 이동) · 재부팅 없음 · 수정 목록 158
+  if (value.includes('feetech')) return 'feetech';
   if (value.includes('cubemars') || value.includes('cube mars')) return 'cubemars';
   return 'unknown';
 }

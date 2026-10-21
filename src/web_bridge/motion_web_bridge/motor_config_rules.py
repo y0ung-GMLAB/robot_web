@@ -18,34 +18,29 @@ from pathlib import Path
 from urllib.parse import quote
 from typing import Any, Dict, List
 
-from motion_common import store
+from motion_common import motor_kinds, store
 from motion_common.values import optional_float, optional_int
 
 from motion_web_bridge.motor_identity import driver_model_from, model_is_unknown
 
 
 def is_ac_servo_motor(motor: Dict[str, Any]) -> bool:
-    values = [
-        motor.get('motor_type'),
-        motor.get('motor_type_label'),
-        motor.get('driver_model'),
-        motor.get('driver_name'),
-        motor.get('transport'),
-    ]
-    text = ' '.join(str(value or '').lower() for value in values)
-    return 'minas' in text or 'ac servo' in text or 'ac_servo' in text
+    """판정은 종류 표 한 곳 (`motion_common.motor_kinds`) · 수정 목록 158"""
+    return motor_kinds.is_ac_servo(motor)
 
 
 def is_dynamixel_motor(motor: Dict[str, Any]) -> bool:
-    values = [
-        motor.get('motor_type'),
-        motor.get('motor_type_label'),
-        motor.get('driver_model'),
-        motor.get('driver_name'),
-        motor.get('transport'),
-    ]
-    text = ' '.join(str(value or '').lower() for value in values)
-    return 'dynamixel' in text
+    """다이나믹셀 **만** · 재부팅 · 모델 이름 · 검색 같은 다이나믹셀 전용 동작"""
+    return motor_kinds.is_dynamixel(motor)
+
+
+def is_feetech_motor(motor: Dict[str, Any]) -> bool:
+    return motor_kinds.is_feetech(motor)
+
+
+def is_serial_servo_motor(motor: Dict[str, Any]) -> bool:
+    """다이나믹셀 · Feetech 공통 동작(토크 켜기/끄기 · 조그 · 절대 이동)"""
+    return motor_kinds.is_serial_servo(motor)
 
 
 def empty_motor_registry() -> Dict[str, Any]:
@@ -481,13 +476,32 @@ def dynamixel_port_missing(scan_item: Any) -> bool:
 
 def registry_uses_dynamixel(registry: Any) -> bool:
     """모터 설정에 다이나믹셀 모터가 하나라도 있나 · 지운 줄은 뺀다"""
+    return _registry_uses_kind(registry, 'dynamixel')
+
+
+def registry_uses_feetech(registry: Any) -> bool:
+    """모터 설정에 Feetech 모터가 하나라도 있나 · 지운 줄은 뺀다 · 수정 목록 158"""
+    return _registry_uses_kind(registry, 'feetech')
+
+
+def _registry_uses_kind(registry: Any, kind: str) -> bool:
     motors = registry.get('motors') if isinstance(registry, dict) else None
     return any(
         isinstance(motor, dict)
         and not motor.get('deleted')
-        and str(motor.get('motor_type') or '').strip().lower() == 'dynamixel'
+        and str(motor.get('motor_type') or '').strip().lower() == kind
         for motor in (motors or [])
     )
+
+
+def _scan_section(scan: Dict[str, Any], name: str) -> Any:
+    """`<name>_scan` · 없으면 `physical_scan.<name>`"""
+    section = scan.get(f'{name}_scan')
+    if not isinstance(section, dict):
+        physical = scan.get('physical_scan')
+        if isinstance(physical, dict):
+            section = physical.get(name)
+    return section
 
 
 def scan_operation_outcome(
@@ -496,6 +510,7 @@ def scan_operation_outcome(
     operation_type: str,
     fallback_success: bool,
     dynamixel_expected: bool = True,
+    feetech_expected: bool = False,
 ) -> str:
     """검색 판정 · success | partial | failure
 
@@ -503,6 +518,10 @@ def scan_operation_outcome(
     전체 검색에서 **다이나믹셀 포트가 아예 없는 것**은 덜 된 것이 아니다 ·
     전에는 그것만으로 「검색 일부 완료」(실패처럼 읽힘)가 떴다 · 수정 목록 120 (바) ·
     문구에는 정보로 남긴다(`scan_result_message`).
+
+    Feetech (수정 목록 158) · 같은 규칙 · 전체 검색에 Feetech 구획이 있을 때만 판정에 든다 ·
+    결과에 구획이 없으면(옛 노드) 판정은 전과 같다 · 기본 `feetech_expected=False`
+    (Feetech 를 안 쓰는 프로젝트의 응답 없음은 판정에서 뺀다 → AC 전용 판정 변화 없음).
     """
     if not isinstance(scan, dict):
         return 'success' if fallback_success else 'failure'
@@ -515,17 +534,20 @@ def scan_operation_outcome(
             ethercat = physical.get('ethercat')
         if not isinstance(dynamixel, dict):
             dynamixel = physical.get('dynamixel')
+    feetech = _scan_section(scan, 'feetech')
 
     if operation_type == 'full_scan':
-        requested = [ethercat, dynamixel]
+        requested = [ethercat, dynamixel, feetech]
     elif operation_type == 'ac_servo_scan':
         requested = [ethercat]
     elif operation_type == 'dynamixel_scan':
         requested = [dynamixel]
+    elif operation_type == 'feetech_scan':
+        requested = [feetech]
     else:
         requested = [
             item
-            for item in (ethercat, dynamixel)
+            for item in (ethercat, dynamixel, feetech)
             if isinstance(item, dict) and item.get('skipped') is not True
         ]
     requested = [item for item in requested if isinstance(item, dict)]
@@ -537,6 +559,13 @@ def scan_operation_outcome(
     ):
         # 쓰지 않는 다이나믹셀의 포트 없음은 판정에서 뺀다 · AC 서보만으로 판정
         requested = [item for item in requested if item is not dynamixel]
+    if (
+        operation_type == 'full_scan'
+        and isinstance(feetech, dict)
+        and (feetech.get('skipped') is True or (not feetech_expected and dynamixel_port_missing(feetech)))
+    ):
+        # 쓰지 않는 Feetech 의 응답 없음 · 건너뛴 구획은 판정에서 뺀다
+        requested = [item for item in requested if item is not feetech]
     if not requested:
         return 'success' if fallback_success else 'failure'
     project_comparison = scan.get('project_comparison')
@@ -605,11 +634,15 @@ def scan_result_message(
         physical = scan.get('physical_scan')
         if isinstance(physical, dict):
             dynamixel = physical.get('dynamixel')
+    feetech = _scan_section(scan, 'feetech')
     requested = [
         item
         for item in (ethercat, dynamixel)
         if isinstance(item, dict) and item.get('skipped') is not True
     ]
+    # Feetech 는 장치를 찾았을 때만 판정 글에 든다 · 안 쓰는 PC 의 문구는 전과 같다 · 수정 목록 158
+    if scan_item_has_detected_devices(feetech):
+        requested.append(feetech)
     project_comparison = scan.get('project_comparison')
     ethercat_project = (
         project_comparison.get('ethercat_project')
@@ -674,6 +707,20 @@ def scan_result_message(
         if success and dynamixel_port_missing(dynamixel):
             # 판정에서 뺀 경우(프로젝트에 다이나믹셀 없음) · 정보로만 · 수정 목록 120 (바)
             parts.append('다이나믹셀 직렬 포트 없음(정보 · 다이나믹셀 모터를 쓰지 않으면 괜찮습니다)')
+    feetech_only = not any(
+        isinstance(item, dict) and item.get('skipped') is not True for item in (ethercat, dynamixel)
+    )
+    if isinstance(feetech, dict) and feetech.get('skipped') is not True and (
+        scan_item_has_detected_devices(feetech) or feetech_only
+    ):
+        # 찾았거나 Feetech 만 검색했을 때만 · 안 쓰는 PC 의 전체 검색 문구는 전과 같다 · 수정 목록 158
+        try:
+            parts.append(f'Feetech {int(feetech.get("devices_count") or 0)}대')
+        except (TypeError, ValueError):
+            pass
+        warning = str(feetech.get('warning') or '').strip()
+        if warning:
+            parts.append(warning)
     if project_compatible:
         parts.append('프로젝트 EtherCAT 구성 확인 완료')
         unused = ethercat_project.get('unused_registered_master_indices') or []

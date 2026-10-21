@@ -1039,6 +1039,7 @@ function restartReadyState(payload) {
       discovery.hasDirectScan ? `버스 검색 감지 ${Number(discovery.discoveredCount || 0)}개` : '',
       discovery.ethercatScanned ? `EtherCAT ${discovery.ethercatCount}개` : '',
       discovery.dynamixelScanned ? `다이나믹셀 ${discovery.dynamixelCount}개` : '',
+      discovery.feetechScanned ? `Feetech ${discovery.feetechCount}개` : '',
       `미연결 ${disconnectedMotors.length}개`,
       `오류 ${faultMotors.length}개`,
     ].filter(Boolean).join(' · '),
