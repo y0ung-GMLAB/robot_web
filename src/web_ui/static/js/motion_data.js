@@ -292,14 +292,15 @@ export function motionMotorRef(motor) {
       ? `ac_servo:master:${masterIndex}:slave:${slavePosition}`
       : '';
   }
-  if (motorType === 'dynamixel') {
+  // 직렬 버스 서보 · feetech 은 옛 이름(`feetech:id:n`) 없음 · 수정 목록 158
+  if (motorType === 'dynamixel' || motorType === 'feetech') {
     const busId = motor.bus_id ?? motor.node_id;
     const numericBusId = Number(busId);
     const serialPort = String(motor.serial_port ?? '').trim();
     return busId === null || busId === undefined || busId === ''
       || !Number.isInteger(numericBusId) || numericBusId < 0 || !serialPort
       ? ''
-      : `dynamixel:port:${encodeURIComponent(serialPort)}:id:${numericBusId}`;
+      : `${motorType}:port:${encodeURIComponent(serialPort)}:id:${numericBusId}`;
   }
   return '';
 }
@@ -339,10 +340,10 @@ export function motionMotorIdentityLabel(motor) {
         + ` · EEPROM Alias 미설정 · Slave Position ${formatInt(motor?.slave_position)}`
       );
   }
-  if (motorType === 'dynamixel') {
+  if (motorType === 'dynamixel' || motorType === 'feetech') {
     const serialPort = String(motor?.serial_port ?? '').trim() || '직렬 포트 미설정';
     const busId = motor?.bus_id ?? motor?.node_id ?? motor?.id ?? motor?.device_id;
-    return `Dynamixel ${serialPort} · ID ${formatInt(busId)}`;
+    return `${motorType === 'feetech' ? 'Feetech' : 'Dynamixel'} ${serialPort} · ID ${formatInt(busId)}`;
   }
   const motorId = motor?.id ?? motor?.device_id;
   return `ID ${formatInt(motorId)}`;

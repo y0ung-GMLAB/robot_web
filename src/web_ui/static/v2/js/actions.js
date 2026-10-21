@@ -1,6 +1,7 @@
 /** UI v2 · 버튼이 하는 일 · 위험한 것은 확인 창 (정지 두 개는 확인 없음 · 지금 UI 결정 그대로) */
 import { api } from './net.js';
 import { confirmBox, toast } from './dialog.js';
+import { isSerialServo, kindSpec, rowKind } from './motor_kinds.js';
 
 async function attempt(work, done) {
   try {
@@ -313,17 +314,22 @@ export async function applyBootParams() {
 /* ---------- 서보 · 한 축 (모터·드라이브 · 수동 조작 같이 씀) ---------- */
 
 /**
- * 서보(AC) · 토크(DXL) 켜기/끄기 · 오류 초기화(AC) / 재부팅(DXL)
+ * 서보(AC) · 토크(DXL · Feetech) 켜기/끄기 · 오류 초기화(AC) / 재부팅(DXL 만)
  * 운전 모드와 무관(서버 run_mode_gate) · 끄기·재부팅은 확인(수정 목록 24) · 오류 초기화 뒤 서보는 꺼진 채(수정 목록 71)
+ * 직렬 서보(DXL · Feetech)는 같은 통로 `/api/motion-test/dynamixel/control` · 그 밖(모르는 종류 포함)은 전처럼 AC · 수정 목록 158
  */
 export async function servoControl(motor, action) {
-  const ac = motor.ac !== false;
+  const kind = rowKind(motor);
+  const spec = kindSpec(kind);
+  // 직렬 서보가 아니면 전처럼 AC 길(모르는 종류 포함)
+  const ac = !isSerialServo(kind);
+  if (action === 'reset' && !spec.reset) { toast(`${motor.axis}번 · ${spec.label} 은 재부팅이 없습니다 · 토크를 껐다 켜세요`, 'warn'); return null; }
   const label = `${motor.axis}번${motor.name ? ` · ${motor.name}` : ''}`;
   if (action === 'off') {
     const ok = await confirmBox({
       title: `${label} ${ac ? '서보' : '토크'} 끄기`,
       body: ac ? '서보를 끕니다.\n브레이크 보드가 연결된 모터는 브레이크가 잡아 주지만, 브레이크가 없는 모터는 부하를 지탱하지 못해 처질 수 있습니다.'
-        : '토크를 끕니다.\n다이나믹셀은 브레이크가 없어 관절이 처질 수 있습니다.',
+        : `토크를 끕니다.\n${spec.label}은 브레이크가 없어 관절이 처질 수 있습니다.`,
       confirmLabel: '끄기', tone: 'warning',
     });
     if (!ok) return null;
@@ -343,12 +349,13 @@ export async function servoControl(motor, action) {
 
 /**
  * 서보 · 모두 켜기/끄기 (사용자 2026-10-12 · 모터 설정 화면)
- * AC 는 서버 scope 'all'(감지된 AC 축 전부) 한 번 · 다이나믹셀은 감지된 축마다 · 끄기는 확인 창
+ * AC 는 서버 scope 'all'(감지된 AC 축 전부) 한 번 · 직렬 서보(다이나믹셀 · Feetech)는 감지된 축마다 · 끄기는 확인 창
+ * 직렬 서보가 아닌 모터(모르는 종류 포함)는 전처럼 AC 쪽 · 수정 목록 158
  */
 export async function servoAll(motors, action) {
   const detected = (motors || []).filter((m) => m.detected);
-  const ac = detected.filter((m) => m.ac !== false);
-  const dxl = detected.filter((m) => m.ac === false);
+  const ac = detected.filter((m) => !isSerialServo(rowKind(m)));
+  const dxl = detected.filter((m) => isSerialServo(rowKind(m)));
   if (!detected.length) { toast('감지된 모터가 없습니다. 「전체 검색」을 먼저 하세요.', 'warn'); return null; }
   if (action === 'off') {
     const ok = await confirmBox({

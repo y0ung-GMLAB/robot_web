@@ -5,6 +5,8 @@
  * offset · scale 은 화면에 안 보이지만 그대로 들고 다닌다(기존 화면과 같음).
  */
 
+import { isSerialServo, kindSpec, motorKind } from './motor_kinds.js';
+
 const DEG = 180 / Math.PI;
 const RAD = Math.PI / 180;
 
@@ -112,15 +114,16 @@ export function newRow(motorAxis = null, name = '') {
 
 /**
  * 모터 고유 이름(motor_ref) · 서버 형식 그대로 · 번호가 바뀌어도 같은 드라이브를 가리킨다
- * AC · ac_servo:master:<m>:alias:<n>(alias>0) 또는 :slave:<pos> · DXL · dynamixel:port:<포트>:id:<id>
+ * AC · ac_servo:master:<m>:alias:<n>(alias>0) 또는 :slave:<pos> · DXL · dynamixel:port:<포트>:id:<id> · FT · feetech:port:<포트>:id:<id>
  */
-/** 모터 고르기 목록에 붙일 「어느 드라이브인지」 · AC 는 슬레이브 번호와 alias · 다이나믹셀은 포트와 ID */
+/** 모터 고르기 목록에 붙일 「어느 드라이브인지」 · AC 는 슬레이브 번호와 alias · 직렬 서보(DXL · FT)는 포트와 ID · 종류 표(motor_kinds.js) · 158 */
 export function motorWhere(motor) {
   if (!motor) return '';
-  if (String(motor.motor_type || '').toLowerCase() === 'dynamixel') {
+  const kind = motorKind(motor);
+  if (isSerialServo(kind)) {
     const id = Number(motor.bus_id ?? motor.node_id);
     const port = String(motor.serial_port ?? '').trim();
-    return ['DXL', port, Number.isInteger(id) ? `ID ${id}` : ''].filter(Boolean).join(' · ');
+    return [kindSpec(kind).short, port, Number.isInteger(id) ? `ID ${id}` : ''].filter(Boolean).join(' · ');
   }
   const slave = Number(motor.slave_position);
   const alias = Number(motor.alias ?? motor.ethercat_alias);
@@ -142,10 +145,11 @@ export function motorRefFor(motor) {
     const slave = Number(motor.slave_position);
     return Number.isInteger(slave) && slave >= 0 ? `ac_servo:master:${master}:slave:${slave}` : '';
   }
-  if (type === 'dynamixel') {
+  // 직렬 서보 · 서버 motor_ref 와 같은 글 · feetech 은 옛 이름 없음 · 158
+  if (type === 'dynamixel' || type === 'feetech') {
     const id = Number(motor.bus_id ?? motor.node_id);
     const port = String(motor.serial_port ?? '').trim();
-    return Number.isInteger(id) && id >= 0 && port ? `dynamixel:port:${encodeURIComponent(port)}:id:${id}` : '';
+    return Number.isInteger(id) && id >= 0 && port ? `${type}:port:${encodeURIComponent(port)}:id:${id}` : '';
   }
   return '';
 }

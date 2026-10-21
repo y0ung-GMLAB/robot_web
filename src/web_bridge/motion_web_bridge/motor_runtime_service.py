@@ -294,7 +294,7 @@ class MotorRuntimeService:
                     continue
                 if axis not in wanted:
                     continue
-                if motor.get('fault') is True or str(motor.get('motor_type') or '') == 'dynamixel':
+                if motor.get('fault') is True or str(motor.get('motor_type') or '') in ('dynamixel', 'feetech'):
                     skip.append(axis)
                 elif motor.get('servo_on') is True:
                     on.append(axis)

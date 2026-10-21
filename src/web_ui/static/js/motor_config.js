@@ -4,6 +4,7 @@ import {
   requestMotorScan,
   requestAcServoScan,
   requestDynamixelScan,
+  requestFeetechScan,
   fetchMotorScanProgress,
   writeEthercatAlias,
   saveMotorConfig,
@@ -266,6 +267,7 @@ export function createMotorConfigController({
     [el.scanButton, el.dynamixelScanButton, el.scanAllButton].forEach((button) => {
       if (button) button.disabled = disabled;
     });
+    if (el.feetechScanButton) el.feetechScanButton.disabled = disabled;   // 수정 목록 158
   }
 
   function beginScanRequest(button, runningText) {
@@ -638,6 +640,7 @@ export function createMotorConfigController({
     const type = motor?.motor_type || fallback;
     if (type === 'ac_servo') return 'AC 서보';
     if (type === 'dynamixel') return '다이나믹셀';
+    if (type === 'feetech') return 'Feetech';
     if (type === 'cubemars') return '큐브마스';
     return type || '확인 불가';
   }
@@ -1704,7 +1707,7 @@ export function createMotorConfigController({
         ].filter(Boolean).join(' · '),
       };
     }
-    if (rowMotorType(row) === 'dynamixel') {
+    if (rowMotorType(row) === 'dynamixel' || rowMotorType(row) === 'feetech') {
       const model = firstDefined(
         row.scanDevice?.model_name,
         row.scanDevice?.model_number,
@@ -1712,8 +1715,10 @@ export function createMotorConfigController({
         driverLabel(row),
       );
       const firmware = firstDefined(row.scanDevice?.firmware_version, runtime.firmware_version);
+      // Feetech · 다이나믹셀과 같은 모양 · 수정 목록 158
+      const family = rowMotorType(row) === 'feetech' ? 'Feetech' : 'Dynamixel';
       return {
-        title: model ? `Dynamixel ${model}` : 'Dynamixel',
+        title: model ? `${family} ${model}` : family,
         detail: firmware === null || firmware === undefined
           ? `${axisIdLabel(row)} · FW 미수신`
           : `${axisIdLabel(row)} · FW ${firmware}`,
@@ -1794,7 +1799,8 @@ export function createMotorConfigController({
 
   function rowDriveView(row) {
     const runtime = row.runtimeMotor;
-    const driveName = rowMotorType(row) === 'dynamixel' ? '토크' : '서보';
+    const serialServo = rowMotorType(row) === 'dynamixel' || rowMotorType(row) === 'feetech';
+    const driveName = serialServo ? '토크' : '서보';
     if (!runtime) {
       return { text: `${driveName} 확인 불가`, detail: '실행 상태 미수신', className: 'review', ready: false };
     }
@@ -1804,7 +1810,7 @@ export function createMotorConfigController({
     const ready = runtime.servo_on === true;
     return {
       text: `${driveName} ${ready ? 'ON' : 'OFF'}`,
-      detail: rowMotorType(row) === 'dynamixel'
+      detail: serialServo
         ? 'Torque Enable 상태'
         : '서보 드라이버 상태',
       className: ready ? 'matched' : 'review',
@@ -2649,6 +2655,9 @@ export function createMotorConfigController({
           // 다이나믹셀 · 토크 ON/OFF · 재부팅(하드웨어 오류 해제) · 수정 목록 24
           const showDynamixelControls = rowMotorType(row) === 'dynamixel' &&
             Boolean(row.motor && !row.motor.deleted && row.motor.enabled);
+          // Feetech · 토크 ON/OFF 만 · 재부팅 없음 · 수정 목록 158
+          const showFeetechControls = rowMotorType(row) === 'feetech' &&
+            Boolean(row.motor && !row.motor.deleted && row.motor.enabled);
           return {
             row,
             settingText,
@@ -2678,6 +2687,7 @@ export function createMotorConfigController({
             drive,
             showAcServoControls,
             showDynamixelControls,
+            showFeetechControls,
             limits: Object.fromEntries([...AXIS_LIMIT_FIELDS, ...MINAS_RATE_FIELDS].map((field) => [field, {
               value: rowLimitOverride(row, field),
               placeholder: rowLimitPlaceholder(row, field),
@@ -2721,6 +2731,7 @@ export function createMotorConfigController({
         drive: view.drive,
         showAcServoControls: view.showAcServoControls,
         showDynamixelControls: view.showDynamixelControls,
+        showFeetechControls: view.showFeetechControls,
         limits: view.limits,
         driveParams: view.driveParams,
         driveRead: view.driveRead,
@@ -2802,6 +2813,12 @@ export function createMotorConfigController({
                     <button type="button" data-axis-servo-action="servo_on" data-axis-servo-index="${escapeHtml(view.axisValue ?? '')}">토크 켜기</button>
                     <button type="button" data-axis-servo-action="servo_off" data-axis-servo-index="${escapeHtml(view.axisValue ?? '')}">토크 끄기</button>
                     <button type="button" class="danger" data-axis-servo-action="fault_reset" data-axis-servo-index="${escapeHtml(view.axisValue ?? '')}">재부팅</button>
+                  </div>
+                ` : ''}
+                ${view.showFeetechControls ? `
+                  <div class="axis-inline-actions" title="Feetech 은 재부팅이 없습니다. 오류는 토크를 껐다 켜서 해제합니다.">
+                    <button type="button" data-axis-servo-action="servo_on" data-axis-servo-index="${escapeHtml(view.axisValue ?? '')}">토크 켜기</button>
+                    <button type="button" data-axis-servo-action="servo_off" data-axis-servo-index="${escapeHtml(view.axisValue ?? '')}">토크 끄기</button>
                   </div>
                 ` : ''}
               </td>
@@ -2900,6 +2917,7 @@ export function createMotorConfigController({
     if (el.dynamixelScanResult) {
       el.dynamixelScanResult.textContent = '아직 검색하지 않았습니다';
     }
+    if (el.feetechScanResult) el.feetechScanResult.textContent = '아직 검색하지 않았습니다';
     await fetchRegistry(expectedToken);
   }
 
@@ -3364,6 +3382,7 @@ export function createMotorConfigController({
       matching_rows: scan?.matching_rows,
       matching_summary: scan?.matching_summary,
       dynamixel_scan: latestScan?.dynamixel_scan,
+      feetech_scan: latestScan?.feetech_scan,
     };
     return latestScan;
   }
@@ -3376,6 +3395,21 @@ export function createMotorConfigController({
       matching_rows: latestScan?.matching_rows,
       matching_summary: latestScan?.matching_summary,
       dynamixel_scan: scan?.dynamixel_scan,
+      feetech_scan: latestScan?.feetech_scan,
+    };
+    return latestScan;
+  }
+
+  /** Feetech 만 검색한 결과 · 다른 종류 검색 결과는 그대로 · 수정 목록 158 */
+  function mergeFeetechScan(scan) {
+    latestScan = {
+      ...(latestScan || {}),
+      ...(scan || {}),
+      ethercat_scan: latestScan?.ethercat_scan,
+      matching_rows: latestScan?.matching_rows,
+      matching_summary: latestScan?.matching_summary,
+      dynamixel_scan: latestScan?.dynamixel_scan,
+      feetech_scan: scan?.feetech_scan,
     };
     return latestScan;
   }
@@ -3391,18 +3425,26 @@ export function createMotorConfigController({
     const dynamixelCount = dynamixelScanned && Array.isArray(dynamixelScan.devices)
       ? dynamixelScan.devices.length
       : 0;
+    // Feetech · 서버가 feetech_scan 을 줄 때만 · 수정 목록 158
+    const feetechScan = latestScan?.feetech_scan;
+    const feetechScanned = Boolean(feetechScan && !feetechScan.skipped);
+    const feetechCount = feetechScanned && Array.isArray(feetechScan.devices)
+      ? feetechScan.devices.length
+      : 0;
     const connectionSummary = latestScan?.connection_summary || {};
     const connectionRows = Array.isArray(latestScan?.connection_rows)
       ? latestScan.connection_rows
       : [];
     return {
-      hasDirectScan: ethercatScanned || dynamixelScanned,
+      hasDirectScan: ethercatScanned || dynamixelScanned || feetechScanned,
       ethercatScanned,
       dynamixelScanned,
+      feetechScanned,
       ethercatCount,
       dynamixelCount,
+      feetechCount,
       connectedCount: Number(connectionSummary.online || 0),
-      discoveredCount: ethercatCount + dynamixelCount,
+      discoveredCount: ethercatCount + dynamixelCount + feetechCount,
       connectionSummary,
       connectionRows,
       scannedAt: Number(latestScan?.scanned_at || 0),
@@ -3463,6 +3505,21 @@ export function createMotorConfigController({
     el.dynamixelScanResult.textContent = `${resultState} · ${formatInt(devices.length)}개`;
   }
 
+  /** Feetech 검색 결과 한 줄 · `feetech_scan` {devices · error · available · complete} · 수정 목록 158 */
+  function renderFeetechScan(scan) {
+    if (!el.feetechScanResult) return;
+    const feetechScan = scan?.feetech_scan;
+    if (!feetechScan || feetechScan.skipped) {
+      el.feetechScanResult.textContent = 'Feetech 검색 안 함';
+      return;
+    }
+    const devices = Array.isArray(feetechScan.devices) ? feetechScan.devices : [];
+    const failed = feetechScan.available === false || (Boolean(feetechScan.error) && !devices.length);
+    const partial = !failed && (feetechScan.complete === false || Boolean(feetechScan.error));
+    const resultState = failed ? '검색 실패' : partial ? '검색 일부 완료' : '검색 완료';
+    el.feetechScanResult.textContent = `${resultState} · ${formatInt(devices.length)}개`;
+  }
+
   async function scanMotors() {
     const originalText = beginScanRequest(el.scanButton, '검색 중');
     if (!originalText) return;
@@ -3505,36 +3562,58 @@ export function createMotorConfigController({
     }
   }
 
-  async function scanDynamixel() {
-    const originalText = beginScanRequest(el.dynamixelScanButton, '검색 중');
+  /** 직렬 버스 서보 한 종류 검색 · 다이나믹셀 · Feetech 같은 순서 · 글만 종류대로 · 수정 목록 158 */
+  const SERIAL_SCANS = {
+    dynamixel: {
+      button: () => el.dynamixelScanButton, result: () => el.dynamixelScanResult, label: '다이나믹셀',
+      progressId: 'scan:dynamixel', request: requestDynamixelScan, merge: mergeDynamixelScan, render: renderDynamixelScan,
+    },
+    feetech: {
+      button: () => el.feetechScanButton, result: () => el.feetechScanResult, label: 'Feetech',
+      progressId: 'scan:feetech', request: requestFeetechScan, merge: mergeFeetechScan, render: renderFeetechScan,
+    },
+  };
+
+  function scanDynamixel() {
+    return scanSerialServo('dynamixel');
+  }
+
+  function scanFeetech() {
+    return scanSerialServo('feetech');
+  }
+
+  async function scanSerialServo(kind) {
+    const spec = SERIAL_SCANS[kind];
+    const button = spec.button();
+    const originalText = beginScanRequest(button, '검색 중');
     if (!originalText) return;
     const expectedToken = projectLoadToken;
-    if (el.dynamixelScanResult) el.dynamixelScanResult.textContent = '다이나믹셀 연결 확인 중';
-    if (!await openScanProgressPopup('scan:dynamixel', '다이나믹셀 검색')) {
-      finishScanRequest(el.dynamixelScanButton, originalText);
+    if (spec.result()) spec.result().textContent = `${spec.label} 연결 확인 중`;
+    if (!await openScanProgressPopup(spec.progressId, `${spec.label} 검색`)) {
+      finishScanRequest(button, originalText);
       return;
     }
     try {
-      const payload = await requestDynamixelScan();
+      const payload = await spec.request();
       if (expectedToken !== projectLoadToken) return;
-      renderDynamixelScan(mergeDynamixelScan(payload.scan));
+      spec.render(spec.merge(payload.scan));
       adoptScanIntoDraft();
       renderAxisSettings();
-      setAxisMessage(scanAdoptedMessage('다이나믹셀 검색 완료'));
+      setAxisMessage(scanAdoptedMessage(`${spec.label} 검색 완료`));
       if (payload.motion_state) renderLatestState(payload.motion_state);
-      el.dynamixelScanButton.textContent = payload.success ? '검색 완료' : '검색 실패';
+      button.textContent = payload.success ? '검색 완료' : '검색 실패';
       await finishScanProgressPopup(
         payload.success,
         payload.success
-          ? '다이나믹셀 검색 완료'
-          : conciseMotorScanMessage(uiMessage(payload.message, '다이나믹셀 검색 실패')),
+          ? `${spec.label} 검색 완료`
+          : conciseMotorScanMessage(uiMessage(payload.message, `${spec.label} 검색 실패`)),
       );
     } catch (error) {
-      if (el.dynamixelScanResult) el.dynamixelScanResult.textContent = '다이나믹셀 연결 확인 실패';
-      el.dynamixelScanButton.textContent = '검색 실패';
-      await finishScanProgressPopup(false, `다이나믹셀 검색 실패: ${error?.message || error}`);
+      if (spec.result()) spec.result().textContent = `${spec.label} 연결 확인 실패`;
+      button.textContent = '검색 실패';
+      await finishScanProgressPopup(false, `${spec.label} 검색 실패: ${error?.message || error}`);
     } finally {
-      finishScanRequest(el.dynamixelScanButton, originalText);
+      finishScanRequest(button, originalText);
     }
   }
 
@@ -3542,7 +3621,7 @@ export function createMotorConfigController({
     const originalText = beginScanRequest(el.scanAllButton, '전체 검색 중');
     if (!originalText) return;
     const expectedToken = projectLoadToken;
-    if (el.scanAllResult) el.scanAllResult.textContent = 'AC 서보와 다이나믹셀을 검색하고 있습니다';
+    if (el.scanAllResult) el.scanAllResult.textContent = 'AC 서보 · 다이나믹셀 · Feetech 검색 중';
     if (!await openScanProgressPopup('scan:all', '전체 모터 검색')) {
       finishScanRequest(el.scanAllButton, originalText);
       return;
@@ -3553,6 +3632,7 @@ export function createMotorConfigController({
       latestScan = payload.scan || null;
       renderScan(latestScan);
       renderDynamixelScan(latestScan);
+      renderFeetechScan(latestScan);
       adoptScanIntoDraft();
       renderAxisSettings();
       const summary = getDiscoverySummary();
@@ -3567,12 +3647,16 @@ export function createMotorConfigController({
       // 옛 칸을 보고 있었다.
       const scanComplete = payload.success === true;
       const scanPartial = payload.partial === true;
-      const dynamixelError = payload.scan?.dynamixel_scan?.error || '';
+      // Feetech · 서버가 feetech_scan 을 줄 때만 글에 붙인다 · 수정 목록 158
+      const feetechError = payload.scan?.feetech_scan?.error || '';
+      const dynamixelError = [payload.scan?.dynamixel_scan?.error, feetechError ? `Feetech ${feetechError}` : '']
+        .filter(Boolean).join(' · ');
+      const feetechText = summary.feetechScanned ? ` · Feetech ${formatInt(summary.feetechCount)}개` : '';
       if (el.scanAllResult) {
         el.scanAllResult.textContent = scanComplete
-          ? `검색 완료 · AC 서보 ${formatInt(summary.ethercatCount)}개 · 다이나믹셀 ${formatInt(summary.dynamixelCount)}개`
+          ? `검색 완료 · AC 서보 ${formatInt(summary.ethercatCount)}개 · 다이나믹셀 ${formatInt(summary.dynamixelCount)}개${feetechText}`
           : scanPartial
-            ? conciseMotorScanMessage(`일부 완료 · AC 서보 ${formatInt(summary.ethercatCount)}개 · 다이나믹셀 실패: ${dynamixelError || '응답 없음'}`)
+            ? conciseMotorScanMessage(`일부 완료 · AC 서보 ${formatInt(summary.ethercatCount)}개 · ${feetechError ? '직렬 서보' : '다이나믹셀'} 실패: ${dynamixelError || '응답 없음'}`)
             : conciseMotorScanMessage(uiMessage(payload.message, '전체 모터 검색 실패'));
       }
       setAxisMessage(scanComplete
@@ -3719,6 +3803,7 @@ export function createMotorConfigController({
     if (el.scanAllButton) el.scanAllButton.addEventListener('click', scanAllMotors);
     if (el.scanButton) el.scanButton.addEventListener('click', scanMotors);
     if (el.dynamixelScanButton) el.dynamixelScanButton.addEventListener('click', scanDynamixel);
+    if (el.feetechScanButton) el.feetechScanButton.addEventListener('click', scanFeetech);
   }
 
   /** 조인트 매핑 저장이 모터 설정 파일의 운전 한계를 바꿨을 때 · 2026-10-02

@@ -168,7 +168,8 @@ export function createJogDialController({
         motor?.transport_label, motor?.driver_model, motor?.driver_name].join(' '),
       '',
     );
-    return key === 'dynamixel';
+    // 직렬 버스 서보(다이나믹셀 · Feetech) · 같은 통로 · 서보 ON 없음 · 수정 목록 158
+    return key === 'dynamixel' || key === 'feetech';
   }
 
   function blockReason(motor) {

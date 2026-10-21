@@ -58,11 +58,6 @@ uint16_t readLe16(const uint8_t low, const uint8_t high)
 // values, so the fault never reached the status (robot_web fix-list 23-1).
 constexpr uint8_t DXL_ALERT_BIT = 0x80;
 
-bool isPacketFailure(uint8_t error)
-{
-    return (error & static_cast<uint8_t>(~DXL_ALERT_BIT)) != 0;
-}
-
 uint32_t remainingTimeoutMs(uint64_t deadline_ns)
 {
     const uint64_t now = nowNs();
@@ -218,8 +213,16 @@ speed_t baudToTermios(unsigned int baudrate)
     }
 }
 
-} // namespace
 
+// Feetech packet checksum · ~(ID + LEN + INST/ERR + parameters) · robot_web fix-list 158
+uint8_t scsChecksum(const uint8_t* data, std::size_t size)
+{
+    uint32_t sum = 0;
+    for (std::size_t i = 0; i < size; ++i) sum += data[i];
+    return static_cast<uint8_t>(~sum & 0xFF);
+}
+
+} // namespace
 serial::SerialMaster::SerialMaster(const motor_interface::master_config_t& config)
     : motor_interface::MotorMaster(config)
     , port_(config.serial_port)
@@ -272,8 +275,35 @@ void serial::SerialMaster::deactivate()
     }
 }
 
+void serial::SerialMaster::markOffline()
+{
+    deactivate();
+    rx_buffer_.clear();
+    last_tx_.clear();
+
+    // A goal written before the failure must not go out after the reconnect
+    for (auto& node : nodes_) {
+        if (!node.registered) continue;
+        node.missed_responses = UINT16_MAX;
+        for (uint8_t j = 0; j < node.number_of_rx_entries; ++j) {
+            node.rx_entries[j].dirty = false;
+        }
+    }
+}
+
+void serial::SerialMaster::reopen()
+{
+    deactivate();
+    rx_buffer_.clear();
+    last_tx_.clear();
+    initialize();
+    ++generation_;
+}
+
 void serial::SerialMaster::transmit()
 {
+    if (fd_ < 0) return;
+
     bool sent[motor_interface::MAX_CONTROLLER_SIZE][motor_interface::MAX_INTERFACE_SIZE]{};
 
     for (uint8_t i = 0; i < motor_interface::MAX_CONTROLLER_SIZE; ++i) {
@@ -300,49 +330,60 @@ void serial::SerialMaster::transmit()
                 }
             }
 
-            bulkWrite(entry.address, entry.size, group);
+            if (isScs()) {
+                syncWrite(entry.address, entry.size, group);
+            } else {
+                bulkWrite(entry.address, entry.size, group);
+            }
         }
     }
 }
 
 void serial::SerialMaster::receive()
 {
-    for (uint8_t node_probe = 0; node_probe < motor_interface::MAX_CONTROLLER_SIZE; ++node_probe) {
-        const uint8_t i = static_cast<uint8_t>(
-            (next_receive_node_ + node_probe) % motor_interface::MAX_CONTROLLER_SIZE);
-        const serial_node_data_t& node = nodes_[i];
+    if (fd_ < 0) {
+        for (auto& node : nodes_) {
+            if (node.registered) node.missed_responses = UINT16_MAX;
+        }
+        return;
+    }
+
+    if (read_plan_dirty_) buildReadPlan();
+
+    uint8_t max_spans = 0;
+    for (auto& node : nodes_) {
         if (!node.registered) continue;
-        if (node.number_of_tx_entries == 0) continue;
+        for (uint8_t k = 0; k < node.number_of_spans; ++k) node.spans[k].answered = false;
+        max_spans = std::max(max_spans, node.number_of_spans);
+    }
 
-        const uint8_t entry_start = node_probe == 0 ? next_receive_entry_ : 0;
-        for (uint8_t entry_probe = 0; entry_probe < node.number_of_tx_entries; ++entry_probe) {
-            const uint8_t j = static_cast<uint8_t>(
-                (entry_start + entry_probe) % node.number_of_tx_entries);
-            const serial_bulk_entry_t& entry = node.tx_entries[j];
+    for (uint8_t k = 0; k < max_spans; ++k) {
+        std::vector<serial_node_data_t*> nodes;
+        for (auto& node : nodes_) {
+            if (node.registered && node.number_of_spans > k) nodes.push_back(&node);
+        }
 
-            std::vector<uint8_t> node_ids;
-            for (uint8_t ni = 0; ni < motor_interface::MAX_CONTROLLER_SIZE; ++ni) {
-                serial_node_data_t& candidate = nodes_[ni];
-                if (!candidate.registered) continue;
+        if (isScs()) {
+            syncReadSpans(k, nodes);
+        } else {
+            bulkReadSpans(k, nodes);
+        }
+    }
 
-                for (uint8_t ei = 0; ei < candidate.number_of_tx_entries; ++ei) {
-                    const serial_bulk_entry_t& other = candidate.tx_entries[ei];
-                    if (other.address != entry.address || other.size != entry.size) continue;
+    // A node counts as answering only when every span came back this cycle ·
+    // the controller reports COMMUNICATION_UNAVAILABLE after a run of misses
+    for (auto& node : nodes_) {
+        if (!node.registered || node.number_of_spans == 0) continue;
 
-                    node_ids.push_back(candidate.node_id);
-                    break;
-                }
-            }
+        bool answered = true;
+        for (uint8_t k = 0; k < node.number_of_spans; ++k) {
+            answered = answered && node.spans[k].answered;
+        }
 
-            bulkRead(entry.address, entry.size, node_ids);
-            next_receive_node_ = i;
-            next_receive_entry_ = static_cast<uint8_t>(j + 1);
-            if (next_receive_entry_ >= node.number_of_tx_entries) {
-                next_receive_entry_ = 0;
-                next_receive_node_ = static_cast<uint8_t>(
-                    (i + 1) % motor_interface::MAX_CONTROLLER_SIZE);
-            }
-            return;
+        if (answered) {
+            node.missed_responses = 0;
+        } else if (node.missed_responses < UINT16_MAX) {
+            ++node.missed_responses;
         }
     }
 }
@@ -368,6 +409,7 @@ void serial::SerialMaster::registerNode(uint8_t node_id)
         node = serial_node_data_t{};
         node.registered = true;
         node.node_id = node_id;
+        read_plan_dirty_ = true;
         return;
     }
 
@@ -380,14 +422,18 @@ void serial::SerialMaster::configureProtocol(const serial::serial_protocol_confi
 
     if (protocol_.configured) {
         const bool same =
+            protocol_.packet == protocol.packet &&
             protocol_.broadcast_id == protocol.broadcast_id &&
             protocol_.instruction_read == protocol.instruction_read &&
             protocol_.instruction_write == protocol.instruction_write &&
             protocol_.instruction_status == protocol.instruction_status &&
             protocol_.instruction_bulk_read == protocol.instruction_bulk_read &&
             protocol_.instruction_bulk_write == protocol.instruction_bulk_write &&
+            protocol_.instruction_sync_read == protocol.instruction_sync_read &&
+            protocol_.instruction_sync_write == protocol.instruction_sync_write &&
             protocol_.instruction_reboot == protocol.instruction_reboot;
 
+        // One port carries one kind of servo (Dynamixel and Feetech never share a bus)
         if (!same) throw std::runtime_error("Conflicting serial protocol configuration on one master.");
         return;
     }
@@ -404,6 +450,9 @@ void serial::SerialMaster::registerBulkWrite(uint8_t node_id, uint16_t address, 
 {
     if (size == 0 || size > motor_interface::MAX_DATA_SIZE) {
         throw std::runtime_error("Invalid Dynamixel bulk-write size.");
+    }
+    if (isScs() && address + size > 0x100) {
+        throw std::runtime_error("Feetech register address must be below 256.");
     }
 
     serial_node_data_t* n = findNode(node_id);
@@ -422,6 +471,9 @@ void serial::SerialMaster::registerBulkRead(uint8_t node_id, uint16_t address, u
     if (size == 0 || size > motor_interface::MAX_DATA_SIZE) {
         throw std::runtime_error("Invalid Dynamixel bulk-read size.");
     }
+    if (isScs() && address + size > 0x100) {
+        throw std::runtime_error("Feetech register address must be below 256.");
+    }
 
     serial_node_data_t* n = findNode(node_id);
     if (!n) throw std::runtime_error("Serial node is not registered.");
@@ -432,6 +484,7 @@ void serial::SerialMaster::registerBulkRead(uint8_t node_id, uint16_t address, u
     }
 
     n->tx_entries[n->number_of_tx_entries++] = serial_bulk_entry_t{address, size, {0}, false, false};
+    read_plan_dirty_ = true;
 }
 
 bool serial::SerialMaster::setBulkWriteData(uint8_t node_id, uint16_t address, const uint8_t* data, uint8_t size)
@@ -464,10 +517,11 @@ bool serial::SerialMaster::writeRegister(uint8_t node_id, uint16_t address, cons
     ensureProtocolConfigured();
 
     if (size == 0 || size > motor_interface::MAX_DATA_SIZE || node_id >= protocol_.broadcast_id) return false;
+    if (isScs() && address + size > 0x100) return false;
 
     std::vector<uint8_t> parameters;
     parameters.reserve(2 + size);
-    appendLe16(parameters, address);
+    appendAddress(parameters, address);
     parameters.insert(parameters.end(), data, data + size);
 
     sendPacket(node_id, protocol_.instruction_write, parameters);
@@ -490,11 +544,12 @@ bool serial::SerialMaster::readRegister(uint8_t node_id, uint16_t address, uint8
     ensureProtocolConfigured();
 
     if (size == 0 || size > motor_interface::MAX_DATA_SIZE || node_id >= protocol_.broadcast_id) return false;
+    if (isScs() && address + size > 0x100) return false;
 
     std::vector<uint8_t> parameters;
     parameters.reserve(4);
-    appendLe16(parameters, address);
-    appendLe16(parameters, size);
+    appendAddress(parameters, address);
+    appendLength(parameters, size);
 
     sendPacket(node_id, protocol_.instruction_read, parameters);
 
@@ -518,6 +573,9 @@ bool serial::SerialMaster::reboot(uint8_t node_id)
 {
     ensureProtocolConfigured();
 
+    // No reboot on this bus (Feetech) · never fall back to another instruction:
+    // Feetech 0x06 RESET is a factory reset (ID · baud rate · limits) · fix-list 158
+    if (!supportsReboot()) return false;
     if (node_id >= protocol_.broadcast_id) return false;
 
     // The device answers first, then restarts (torque off, RAM items back to
@@ -539,10 +597,10 @@ bool serial::SerialMaster::reboot(uint8_t node_id)
 
 void serial::SerialMaster::noteResponse(uint8_t node_id, uint8_t error)
 {
+    // Only the packet error · the cycle read (receive) owns missed_responses
     serial_node_data_t* n = findNode(node_id);
     if (!n) return;
     n->last_packet_error = error;
-    n->missed_responses = 0;
 }
 
 serial::serial_node_data_t* serial::SerialMaster::findNode(uint8_t node_id)
@@ -589,35 +647,82 @@ const serial::serial_bulk_entry_t* serial::SerialMaster::findEntry(
     return nullptr;
 }
 
+bool serial::SerialMaster::isPacketFailure(uint8_t error) const
+{
+    // Scs status error byte = servo state bits (voltage · sensor · temperature ·
+    // current · overload), not a packet error · the data is still valid
+    if (isScs()) return false;
+    return (error & static_cast<uint8_t>(~DXL_ALERT_BIT)) != 0;
+}
+
+void serial::SerialMaster::appendAddress(std::vector<uint8_t>& data, uint16_t address) const
+{
+    if (isScs()) {
+        data.push_back(static_cast<uint8_t>(address & 0xFF));
+    } else {
+        appendLe16(data, address);
+    }
+}
+
+void serial::SerialMaster::appendLength(std::vector<uint8_t>& data, uint16_t length) const
+{
+    if (isScs()) {
+        data.push_back(static_cast<uint8_t>(length & 0xFF));
+    } else {
+        appendLe16(data, length);
+    }
+}
+
+std::size_t serial::SerialMaster::statusOverhead() const
+{
+    // Dxl2 · FF FF FD 00 · ID · LEN(2) · INST · ERR · CRC(2) · Scs · FF FF · ID · LEN · ERR · CHK
+    return isScs() ? 6U : 11U;
+}
+
 void serial::SerialMaster::sendPacket(uint8_t id, uint8_t instruction, const std::vector<uint8_t>& parameters)
 {
     ensureProtocolConfigured();
 
     if (fd_ < 0) throw std::runtime_error("Serial port is not initialized.");
 
-    std::vector<uint8_t> payload;
-    payload.reserve(1 + parameters.size());
-    payload.push_back(instruction);
-    payload.insert(payload.end(), parameters.begin(), parameters.end());
-
-    const std::vector<uint8_t> stuffed_payload = stuffPayload(payload);
-    if (stuffed_payload.size() + 2 > 0xFFFF) throw std::runtime_error("Dynamixel packet is too large.");
-
     std::vector<uint8_t> packet;
-    packet.reserve(7 + stuffed_payload.size() + 2);
-    packet.push_back(0xFF);
-    packet.push_back(0xFF);
-    packet.push_back(0xFD);
-    packet.push_back(0x00);
-    packet.push_back(id);
-    appendLe16(packet, static_cast<uint16_t>(stuffed_payload.size() + 2));
-    packet.insert(packet.end(), stuffed_payload.begin(), stuffed_payload.end());
 
-    const uint16_t crc = updateCrc(0, packet.data(), packet.size());
-    appendLe16(packet, crc);
+    if (isScs()) {
+        if (parameters.size() + 2 > 0xFF) throw std::runtime_error("Feetech packet is too large.");
+
+        packet.reserve(6 + parameters.size());
+        packet.push_back(0xFF);
+        packet.push_back(0xFF);
+        packet.push_back(id);
+        packet.push_back(static_cast<uint8_t>(parameters.size() + 2));
+        packet.push_back(instruction);
+        packet.insert(packet.end(), parameters.begin(), parameters.end());
+        packet.push_back(scsChecksum(packet.data() + 2, packet.size() - 2));
+    } else {
+        std::vector<uint8_t> payload;
+        payload.reserve(1 + parameters.size());
+        payload.push_back(instruction);
+        payload.insert(payload.end(), parameters.begin(), parameters.end());
+
+        const std::vector<uint8_t> stuffed_payload = stuffPayload(payload);
+        if (stuffed_payload.size() + 2 > 0xFFFF) throw std::runtime_error("Dynamixel packet is too large.");
+
+        packet.reserve(7 + stuffed_payload.size() + 2);
+        packet.push_back(0xFF);
+        packet.push_back(0xFF);
+        packet.push_back(0xFD);
+        packet.push_back(0x00);
+        packet.push_back(id);
+        appendLe16(packet, static_cast<uint16_t>(stuffed_payload.size() + 2));
+        packet.insert(packet.end(), stuffed_payload.begin(), stuffed_payload.end());
+
+        const uint16_t crc = updateCrc(0, packet.data(), packet.size());
+        appendLe16(packet, crc);
+    }
 
     flushInput();
     writeExact(packet.data(), packet.size());
+    last_tx_ = packet;
 }
 
 bool serial::SerialMaster::receiveStatus(status_packet_t& packet, uint32_t timeout_ms)
@@ -638,61 +743,129 @@ bool serial::SerialMaster::receiveStatus(status_packet_t& packet, uint32_t timeo
             return false;
         }
 
-        while (rx_buffer_.size() >= 4) {
-            static constexpr uint8_t HEADER[] = {0xFF, 0xFF, 0xFD};
-            auto header = std::search(
-                rx_buffer_.begin(),
-                rx_buffer_.end(),
-                std::begin(HEADER),
-                std::end(HEADER));
-
-            if (header == rx_buffer_.end()) {
-                if (rx_buffer_.size() > 3) rx_buffer_.erase(rx_buffer_.begin(), rx_buffer_.end() - 3);
-                break;
-            }
-
-            if (header != rx_buffer_.begin()) {
-                rx_buffer_.erase(rx_buffer_.begin(), header);
-            }
-
-            if (rx_buffer_.size() < 7) break;
-
-            if (rx_buffer_[3] != 0x00) {
-                rx_buffer_.erase(rx_buffer_.begin());
-                continue;
-            }
-
-            const uint16_t length = readLe16(rx_buffer_[5], rx_buffer_[6]);
-            if (length < 4 || length > MAX_PACKET_SIZE - 7) {
-                rx_buffer_.erase(rx_buffer_.begin());
-                continue;
-            }
-
-            const std::size_t total = static_cast<std::size_t>(length) + 7;
-            if (rx_buffer_.size() < total) break;
-
-            const uint16_t expected_crc = readLe16(rx_buffer_[total - 2], rx_buffer_[total - 1]);
-            const uint16_t actual_crc = updateCrc(0, rx_buffer_.data(), total - 2);
-            if (actual_crc != expected_crc) {
-                rx_buffer_.erase(rx_buffer_.begin());
-                continue;
-            }
-
-            const std::size_t encoded_payload_size = static_cast<std::size_t>(length) - 2;
-            const std::vector<uint8_t> payload = unstuffPayload(rx_buffer_.data() + 7, encoded_payload_size);
-            if (payload.size() < 2 || payload[0] != protocol_.instruction_status) {
-                rx_buffer_.erase(rx_buffer_.begin());
-                continue;
-            }
-
-            packet.id = rx_buffer_[4];
-            packet.error = payload[1];
-            packet.parameters.assign(payload.begin() + 2, payload.end());
-            rx_buffer_.erase(rx_buffer_.begin(), rx_buffer_.begin() + total);
-            return true;
-        }
+        if (isScs() ? parseScsStatus(packet) : parseDxl2Status(packet)) return true;
 
         if (n <= 0) sleepBriefly();
+    }
+
+    return false;
+}
+
+bool serial::SerialMaster::parseDxl2Status(status_packet_t& packet)
+{
+    while (rx_buffer_.size() >= 4) {
+        static constexpr uint8_t HEADER[] = {0xFF, 0xFF, 0xFD};
+        auto header = std::search(
+            rx_buffer_.begin(),
+            rx_buffer_.end(),
+            std::begin(HEADER),
+            std::end(HEADER));
+
+        if (header == rx_buffer_.end()) {
+            if (rx_buffer_.size() > 3) rx_buffer_.erase(rx_buffer_.begin(), rx_buffer_.end() - 3);
+            break;
+        }
+
+        if (header != rx_buffer_.begin()) {
+            rx_buffer_.erase(rx_buffer_.begin(), header);
+        }
+
+        if (rx_buffer_.size() < 7) break;
+
+        if (rx_buffer_[3] != 0x00) {
+            rx_buffer_.erase(rx_buffer_.begin());
+            continue;
+        }
+
+        const uint16_t length = readLe16(rx_buffer_[5], rx_buffer_[6]);
+        if (length < 4 || length > MAX_PACKET_SIZE - 7) {
+            rx_buffer_.erase(rx_buffer_.begin());
+            continue;
+        }
+
+        const std::size_t total = static_cast<std::size_t>(length) + 7;
+        if (rx_buffer_.size() < total) break;
+
+        const uint16_t expected_crc = readLe16(rx_buffer_[total - 2], rx_buffer_[total - 1]);
+        const uint16_t actual_crc = updateCrc(0, rx_buffer_.data(), total - 2);
+        if (actual_crc != expected_crc) {
+            rx_buffer_.erase(rx_buffer_.begin());
+            continue;
+        }
+
+        const std::size_t encoded_payload_size = static_cast<std::size_t>(length) - 2;
+        const std::vector<uint8_t> payload = unstuffPayload(rx_buffer_.data() + 7, encoded_payload_size);
+        if (payload.size() < 2 || payload[0] != protocol_.instruction_status) {
+            rx_buffer_.erase(rx_buffer_.begin());
+            continue;
+        }
+
+        packet.id = rx_buffer_[4];
+        packet.error = payload[1];
+        packet.parameters.assign(payload.begin() + 2, payload.end());
+        rx_buffer_.erase(rx_buffer_.begin(), rx_buffer_.begin() + total);
+        return true;
+    }
+
+    return false;
+}
+
+bool serial::SerialMaster::parseScsStatus(status_packet_t& packet)
+{
+    while (rx_buffer_.size() >= 2) {
+        static constexpr uint8_t HEADER[] = {0xFF, 0xFF};
+        auto header = std::search(
+            rx_buffer_.begin(),
+            rx_buffer_.end(),
+            std::begin(HEADER),
+            std::end(HEADER));
+
+        if (header == rx_buffer_.end()) {
+            // Keep a trailing FF · it may be the first half of the next header
+            if (rx_buffer_.back() == 0xFF) {
+                rx_buffer_.erase(rx_buffer_.begin(), rx_buffer_.end() - 1);
+            } else {
+                rx_buffer_.clear();
+            }
+            break;
+        }
+
+        if (header != rx_buffer_.begin()) {
+            rx_buffer_.erase(rx_buffer_.begin(), header);
+        }
+
+        if (rx_buffer_.size() < 4) break;
+
+        const uint8_t id = rx_buffer_[2];
+        const uint8_t length = rx_buffer_[3];
+        if (id == 0xFF || length < 2) {
+            rx_buffer_.erase(rx_buffer_.begin());
+            continue;
+        }
+
+        const std::size_t total = static_cast<std::size_t>(length) + 4;
+        if (rx_buffer_.size() < total) break;
+
+        if (scsChecksum(rx_buffer_.data() + 2, total - 3) != rx_buffer_[total - 1]) {
+            rx_buffer_.erase(rx_buffer_.begin());
+            continue;
+        }
+
+        // An adapter that echoes what we sent would hand our own instruction
+        // back as a "status" (same layout) · skip it
+        const bool echo =
+            id == protocol_.broadcast_id ||
+            (last_tx_.size() == total && std::equal(last_tx_.begin(), last_tx_.end(), rx_buffer_.begin()));
+        if (echo) {
+            rx_buffer_.erase(rx_buffer_.begin(), rx_buffer_.begin() + total);
+            continue;
+        }
+
+        packet.id = id;
+        packet.error = rx_buffer_[4];
+        packet.parameters.assign(rx_buffer_.begin() + 5, rx_buffer_.begin() + total - 1);
+        rx_buffer_.erase(rx_buffer_.begin(), rx_buffer_.begin() + total);
+        return true;
     }
 
     return false;
@@ -743,18 +916,75 @@ void serial::SerialMaster::ensureProtocolConfigured() const
     if (!protocol_.configured) throw std::runtime_error("Serial protocol is not configured.");
 }
 
-void serial::SerialMaster::bulkRead(uint16_t address, uint8_t size, const std::vector<uint8_t>& node_ids)
+void serial::SerialMaster::buildReadPlan()
+{
+    for (auto& node : nodes_) {
+        if (!node.registered) continue;
+
+        std::vector<std::pair<uint16_t, uint16_t>> entries;
+        for (uint8_t j = 0; j < node.number_of_tx_entries; ++j) {
+            entries.emplace_back(node.tx_entries[j].address, node.tx_entries[j].size);
+        }
+        std::sort(entries.begin(), entries.end());
+
+        node.number_of_spans = 0;
+        for (const auto& [address, size] : entries) {
+            const uint32_t end = static_cast<uint32_t>(address) + size;
+            if (node.number_of_spans > 0) {
+                serial_read_span_t& last = node.spans[node.number_of_spans - 1];
+                const uint32_t last_end = static_cast<uint32_t>(last.address) + last.size;
+                const uint32_t merged_end = std::max(last_end, end);
+                if (address <= last_end + READ_SPAN_MERGE_GAP &&
+                    merged_end - last.address <= MAX_READ_SPAN_SIZE)
+                {
+                    last.size = static_cast<uint16_t>(merged_end - last.address);
+                    continue;
+                }
+            }
+
+            if (node.number_of_spans >= MAX_READ_SPANS) {
+                throw std::runtime_error("Serial read entries are too far apart (more than 4 read spans).");
+            }
+            node.spans[node.number_of_spans++] = serial_read_span_t{address, size, false};
+        }
+    }
+
+    read_plan_dirty_ = false;
+}
+
+void serial::SerialMaster::storeSpan(
+    serial_node_data_t& node,
+    uint8_t span_index,
+    const std::vector<uint8_t>& parameters)
+{
+    serial_read_span_t& span = node.spans[span_index];
+    span.answered = true;
+    if (parameters.size() < span.size) return;
+
+    for (uint8_t j = 0; j < node.number_of_tx_entries; ++j) {
+        serial_bulk_entry_t& entry = node.tx_entries[j];
+        if (entry.address < span.address || entry.address + entry.size > span.address + span.size) continue;
+
+        std::memcpy(entry.data, parameters.data() + (entry.address - span.address), entry.size);
+        entry.updated = true;
+    }
+}
+
+void serial::SerialMaster::bulkReadSpans(uint8_t span_index, const std::vector<serial_node_data_t*>& nodes)
 {
     ensureProtocolConfigured();
 
-    if (node_ids.empty()) return;
+    if (nodes.empty()) return;
 
     std::vector<uint8_t> parameters;
-    parameters.reserve(node_ids.size() * 5);
-    for (uint8_t id : node_ids) {
-        parameters.push_back(id);
-        appendLe16(parameters, address);
-        appendLe16(parameters, size);
+    parameters.reserve(nodes.size() * 5);
+    std::size_t expected_response_bytes = 0;
+    for (const serial_node_data_t* node : nodes) {
+        const serial_read_span_t& span = node->spans[span_index];
+        parameters.push_back(node->node_id);
+        appendLe16(parameters, span.address);
+        appendLe16(parameters, span.size);
+        expected_response_bytes += static_cast<std::size_t>(span.size) + statusOverhead();
     }
 
     sendPacket(protocol_.broadcast_id, protocol_.instruction_bulk_read, parameters);
@@ -762,41 +992,110 @@ void serial::SerialMaster::bulkRead(uint16_t address, uint8_t size, const std::v
     // Dynamixel SDK waits for sum(data_length + 10) bytes and includes the
     // Linux USB-serial latency timer. A fixed 1-3 ms timeout drops valid
     // BulkRead replies on the default 16 ms latency setting.
-    const std::size_t expected_response_bytes =
-        node_ids.size() * (static_cast<std::size_t>(size) + 10U);
     const uint32_t timeout_ms =
         packetTimeoutMs(SERIAL_RUNTIME_TIMEOUT_MS, baudrate_, expected_response_bytes, latency_timer_ms_);
-    std::vector<uint8_t> remaining = node_ids;
+    std::vector<serial_node_data_t*> remaining = nodes;
     const uint64_t deadline = nowNs() + static_cast<uint64_t>(timeout_ms) * NSEC_PER_MSEC;
     while (!remaining.empty() && nowNs() < deadline) {
         status_packet_t status{};
         const uint32_t receive_timeout_ms = remainingTimeoutMs(deadline);
         if (receive_timeout_ms == 0 || !receiveStatus(status, receive_timeout_ms)) break;
 
-        auto it = std::find(remaining.begin(), remaining.end(), status.id);
+        auto it = std::find_if(remaining.begin(), remaining.end(), [&](const serial_node_data_t* node) {
+            return node->node_id == status.id;
+        });
         if (it == remaining.end()) continue;
 
-        serial_node_data_t* n = findNode(status.id);
-        if (!n) {
-            remaining.erase(it);
-            continue;
-        }
-
         noteResponse(status.id, status.error);
-        serial_bulk_entry_t* entry = findEntry(n->tx_entries, n->number_of_tx_entries, address, size);
-        if (entry && !isPacketFailure(status.error) && status.parameters.size() >= size) {
-            std::memcpy(entry->data, status.parameters.data(), size);
-            entry->updated = true;
+        if (isPacketFailure(status.error)) {
+            (*it)->spans[span_index].answered = true;
+        } else {
+            storeSpan(**it, span_index, status.parameters);
         }
 
         remaining.erase(it);
     }
+}
 
-    // Nodes that stayed silent · the controller reports them as
-    // COMMUNICATION_UNAVAILABLE after a run of misses (robot_web fix-list 23-3)
-    for (uint8_t id : remaining) {
-        serial_node_data_t* n = findNode(id);
-        if (n && n->missed_responses < UINT16_MAX) ++n->missed_responses;
+void serial::SerialMaster::syncReadSpans(uint8_t span_index, const std::vector<serial_node_data_t*>& nodes)
+{
+    ensureProtocolConfigured();
+
+    if (protocol_.instruction_sync_read == 0) {
+        for (serial_node_data_t* node : nodes) readSpanSingle(*node, span_index);
+        return;
+    }
+
+    // Sync Read asks every node for the same address and size
+    std::vector<bool> done(nodes.size(), false);
+    for (std::size_t i = 0; i < nodes.size(); ++i) {
+        if (done[i]) continue;
+
+        const serial_read_span_t& span = nodes[i]->spans[span_index];
+        std::vector<serial_node_data_t*> group;
+        for (std::size_t j = i; j < nodes.size(); ++j) {
+            const serial_read_span_t& other = nodes[j]->spans[span_index];
+            if (done[j] || other.address != span.address || other.size != span.size) continue;
+            group.push_back(nodes[j]);
+            done[j] = true;
+        }
+
+        std::vector<uint8_t> parameters;
+        parameters.reserve(2 + group.size());
+        parameters.push_back(static_cast<uint8_t>(span.address & 0xFF));
+        parameters.push_back(static_cast<uint8_t>(span.size & 0xFF));
+        for (const serial_node_data_t* node : group) parameters.push_back(node->node_id);
+
+        sendPacket(protocol_.broadcast_id, protocol_.instruction_sync_read, parameters);
+
+        const std::size_t expected_response_bytes = group.size() * (static_cast<std::size_t>(span.size) + statusOverhead());
+        const uint32_t timeout_ms =
+            packetTimeoutMs(SERIAL_RUNTIME_TIMEOUT_MS, baudrate_, expected_response_bytes, latency_timer_ms_);
+        const uint64_t deadline = nowNs() + static_cast<uint64_t>(timeout_ms) * NSEC_PER_MSEC;
+        while (!group.empty() && nowNs() < deadline) {
+            status_packet_t status{};
+            const uint32_t receive_timeout_ms = remainingTimeoutMs(deadline);
+            if (receive_timeout_ms == 0 || !receiveStatus(status, receive_timeout_ms)) break;
+
+            auto it = std::find_if(group.begin(), group.end(), [&](const serial_node_data_t* node) {
+                return node->node_id == status.id;
+            });
+            if (it == group.end()) continue;
+
+            noteResponse(status.id, status.error);
+            storeSpan(**it, span_index, status.parameters);
+            group.erase(it);
+        }
+    }
+}
+
+void serial::SerialMaster::readSpanSingle(serial_node_data_t& node, uint8_t span_index)
+{
+    const serial_read_span_t& span = node.spans[span_index];
+
+    std::vector<uint8_t> parameters;
+    parameters.reserve(4);
+    appendAddress(parameters, span.address);
+    appendLength(parameters, span.size);
+
+    sendPacket(node.node_id, protocol_.instruction_read, parameters);
+
+    const uint32_t timeout_ms = packetTimeoutMs(
+        SERIAL_RUNTIME_TIMEOUT_MS, baudrate_, static_cast<std::size_t>(span.size) + statusOverhead(), latency_timer_ms_);
+    const uint64_t deadline = nowNs() + static_cast<uint64_t>(timeout_ms) * NSEC_PER_MSEC;
+    while (nowNs() < deadline) {
+        status_packet_t status{};
+        const uint32_t receive_timeout_ms = remainingTimeoutMs(deadline);
+        if (receive_timeout_ms == 0 || !receiveStatus(status, receive_timeout_ms)) return;
+        if (status.id != node.node_id) continue;
+
+        noteResponse(status.id, status.error);
+        if (isPacketFailure(status.error)) {
+            node.spans[span_index].answered = true;
+        } else {
+            storeSpan(node, span_index, status.parameters);
+        }
+        return;
     }
 }
 
@@ -824,6 +1123,52 @@ void serial::SerialMaster::bulkWrite(uint16_t address, uint8_t size, const std::
     if (parameters.empty()) return;
 
     sendPacket(protocol_.broadcast_id, protocol_.instruction_bulk_write, parameters);
+
+    for (serial_node_data_t* node : nodes) {
+        if (!node) continue;
+        serial_bulk_entry_t* entry = findEntry(node->rx_entries, node->number_of_rx_entries, address, size);
+        if (entry) entry->dirty = false;
+    }
+}
+
+void serial::SerialMaster::syncWrite(uint16_t address, uint8_t size, const std::vector<serial_node_data_t*>& nodes)
+{
+    ensureProtocolConfigured();
+
+    if (nodes.empty()) return;
+
+    if (protocol_.instruction_sync_write == 0) {
+        // No group write · one WRITE per node (each answers)
+        for (serial_node_data_t* node : nodes) {
+            if (!node) continue;
+            serial_bulk_entry_t* entry = findEntry(node->rx_entries, node->number_of_rx_entries, address, size);
+            if (!entry || !entry->dirty) continue;
+            entry->dirty = false;
+            (void)writeRegister(node->node_id, address, entry->data, size);
+        }
+        return;
+    }
+
+    std::vector<uint8_t> parameters;
+    parameters.reserve(2 + nodes.size() * (1 + size));
+    parameters.push_back(static_cast<uint8_t>(address & 0xFF));
+    parameters.push_back(size);
+
+    bool any = false;
+    for (serial_node_data_t* node : nodes) {
+        if (!node) continue;
+
+        serial_bulk_entry_t* entry = findEntry(node->rx_entries, node->number_of_rx_entries, address, size);
+        if (!entry || !entry->dirty) continue;
+
+        parameters.push_back(node->node_id);
+        parameters.insert(parameters.end(), entry->data, entry->data + size);
+        any = true;
+    }
+
+    if (!any) return;
+
+    sendPacket(protocol_.broadcast_id, protocol_.instruction_sync_write, parameters);
 
     for (serial_node_data_t* node : nodes) {
         if (!node) continue;

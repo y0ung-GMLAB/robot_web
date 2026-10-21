@@ -265,7 +265,11 @@ class ConnectionStateTest(unittest.TestCase):
         )
 
         contract = result['scan_contract']
-        self.assertEqual(contract['version'], 3)
+        # 4 · Feetech 구획 · 수정 목록 158 (3 → 4)
+        self.assertEqual(contract['version'], 4)
+        self.assertEqual(contract['feetech_id_max'], 253)
+        self.assertEqual(contract['feetech_instructions'], ['ping', 'read'])
+        self.assertTrue(result['feetech_scan'].get('skipped'))
         self.assertTrue(contract['physical_only'])
         self.assertTrue(contract['ethercat_requires_rescan'])
         self.assertEqual(contract['dynamixel_id_min'], 0)
@@ -991,8 +995,46 @@ class MotorScanActionTest(unittest.TestCase):
         self.assertFalse(result['cancelled'])
 
     def test_transport_map_covers_every_scan_kind(self):
-        """검색 종류 세 가지가 모두 Action 목표로 표현된다."""
+        """검색 종류 네 가지가 모두 Action 목표로 표현된다 · (EtherCAT, 다이나믹셀, Feetech) · 수정 목록 158"""
         self.assertEqual(
             MotionStateMonitor.SCAN_TRANSPORTS,
-            {'all': (True, True), 'ac_servo': (True, False), 'dynamixel': (False, True)},
+            {
+                'all': (True, True, True),
+                'ac_servo': (True, False, False),
+                'dynamixel': (False, True, False),
+                'feetech': (False, False, True),
+            },
         )
+
+    def test_full_scan_runs_feetech_after_dynamixel_and_cancel_skips_it(self):
+        monitor = self._monitor()
+        calls = []
+        monitor._ethercat._safe_scan_ethercat_slaves = lambda: (
+            calls.append('ethercat') or {'available': True, 'complete': True, 'slaves_count': 1}
+        )
+        monitor._dynamixel._safe_scan_dynamixel_motors = lambda: (
+            calls.append('dynamixel') or {'available': True, 'complete': True, 'devices_count': 1, 'devices': []}
+        )
+        monitor._ethercat._current_ethercat_status = lambda now: {}
+        monitor._state._current_motor_list = lambda now: []
+        monitor._state._configured_axis_list = lambda motors: []
+        monitor._build_matching_rows = lambda slaves, axes: []
+        from motion_state_monitor.feetech_scanner import FeetechScanner
+        monitor._feetech = FeetechScanner(monitor)
+        monitor._feetech._safe_scan_feetech_motors = lambda: (
+            calls.append('feetech') or {'available': True, 'complete': True, 'devices_count': 1, 'devices': []}
+        )
+
+        result = monitor._build_scan_result(scan_ethercat=True, scan_dynamixel=True, scan_feetech=True)
+        self.assertEqual(calls, ['ethercat', 'dynamixel', 'feetech'])
+        self.assertEqual(result['scan_outcome'], 'complete')
+
+        calls.clear()
+        answers = iter([False, True])
+        result = monitor._build_scan_result(
+            scan_ethercat=True, scan_dynamixel=True, scan_feetech=True,
+            cancel_requested=lambda: next(answers),
+        )
+        self.assertEqual(calls, ['ethercat', 'dynamixel'])
+        self.assertTrue(result['cancelled'])
+        self.assertTrue(result['feetech_scan'].get('skipped'))

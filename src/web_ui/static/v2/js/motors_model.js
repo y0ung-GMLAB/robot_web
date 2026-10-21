@@ -4,6 +4,7 @@
  * 편집 칸은 기존 화면이 고치던 것만 · 이름 · 속도·가속 · 브레이크 · 과부하 감시 · 운영 끝 서보 끄기.
  */
 import { motorErrorText, motorLoad, stuckMailboxes, stuckSlaves } from './model.js';
+import { isAcPath, kindSpec, motorKind } from './motor_kinds.js';
 
 /** 편집 칸 · [키, 이름, 단위, AC 전용, 범위] · config 아래(name 만 바깥) */
 export const EDIT_FIELDS = [
@@ -28,8 +29,9 @@ export function setField(motor, key, value) {
   else motor.config = { ...(motor.config || {}), [key]: value };
 }
 
+/** AC 길 · 직렬 서보(dynamixel · feetech)가 아닌 모든 모터 · 전 `motor_type !== 'dynamixel'` 과 같은 뜻 · 수정 목록 158 */
 function isAc(motor) {
-  return String(motor?.motor_type || '') !== 'dynamixel';
+  return isAcPath(motorKind(motor));
 }
 
 const ABS_TEXT = { ok: ['정상', 'ok'], not_absolute: ['앱솔루트 아님', 'bad'], unknown: ['다시 읽는 중', 'warn'], multiturn_invalid: ['다회전 무효(Err40)', 'bad'] };
@@ -47,9 +49,11 @@ export function motorRows(registry, snap) {
     const axis = Number(motor.axis ?? motor.config?.controller_index);
     const live = runtime.get(axis) || {};
     const drive = drives.get(axis);
-    const ac = isAc(motor);
+    const kindKey = motorKind(motor);
+    const spec = kindSpec(kindKey);
+    const ac = isAcPath(kindKey);
     let servo = live.state !== 'detected' ? ['통신 없음', 'bad'] : live.fault ? ['알람', 'bad'] : live.servo_on ? ['켜짐', 'ok'] : ['꺼짐', 'warn'];
-    if (!ac && live.state === 'detected') servo = live.fault ? ['오류', 'bad'] : live.servo_on ? ['토크 켜짐', 'ok'] : ['토크 꺼짐', 'warn'];
+    if (spec.serial && live.state === 'detected') servo = live.fault ? ['오류', 'bad'] : live.servo_on ? ['토크 켜짐', 'ok'] : ['토크 꺼짐', 'warn'];
     const position = live.position_rad === null || live.position_rad === undefined ? null : Number(live.position_rad) * 180 / Math.PI;
     const [absText, absTone] = !ac ? ['-', 'idle'] : drive ? (ABS_TEXT[drive.status] || [String(drive.status), 'warn']) : ['-', 'idle'];
     return {
@@ -57,7 +61,9 @@ export function motorRows(registry, snap) {
       axis,
       name: String(motor.name || ''),
       ac,
-      kind: `${ac ? 'AC' : 'DXL'}${motor.profile?.driver_model ? ` · ${motor.profile.driver_model}` : ''}`,
+      // 종류 · ac_servo | dynamixel | feetech | unknown · 버튼(재부팅 · 토크) 판단은 이것으로 · 158
+      kindKey,
+      kind: `${spec.short}${motor.profile?.driver_model ? ` · ${motor.profile.driver_model}` : ''}`,
       servo: servo[0],
       servoTone: servo[1],
       fault: live.fault === true,
@@ -143,7 +149,7 @@ export function absoluteSummary(rows) {
  * 다른 프로젝트 것이면 정지만 하고 안 켬(옛 프로젝트 설정으로 되살리지 않게) · 이 프로젝트 설정을 「저장 후 장비에 적용」 해야 켜짐
  */
 export function scanConfirmText(kind, scope = {}, { dirty = false } = {}) {
-  const what = kind === 'dxl' ? '다이나믹셀' : kind === 'ac' ? 'AC 서보(EtherCAT)' : 'AC 서보와 다이나믹셀';
+  const what = kind === 'dxl' ? '다이나믹셀' : kind === 'ft' ? 'Feetech' : kind === 'ac' ? 'AC 서보(EtherCAT)' : 'AC 서보 · 다이나믹셀 · Feetech';
   const runtime = String(scope.runtime_project_id || '');
   const restart = scope.runtime_matches_selected === true
     ? '검색하는 동안 모터 프로그램이 잠시 정지했다가 다시 시작됩니다.'

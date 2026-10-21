@@ -80,10 +80,15 @@ function displayMotorTypeText(motor) {
     : motorFilterLabel(key));
 }
 
+/** 직렬 버스 서보(다이나믹셀 · Feetech) · 버스 ID · 전류 표시 공통 · 수정 목록 158 */
+function isSerialServoKey(type) {
+  return type === 'dynamixel' || type === 'feetech';
+}
+
 /** 연결 ID · 숫자만 쓰면 「모터 번호」와 헷갈린다 · 무슨 번호인지 이름을 붙인다 (2026-10-02)
  *
  * AC 서보 · `Alias 3` · Alias 0(안 정함)은 모두 같아 보이므로 랜선 위치를 덧붙인다 `Alias 0 · Slave 2`
- * Dynamixel · `ID 3` · CubeMars · `CAN ID 3`
+ * Dynamixel · Feetech · `ID 3` · CubeMars · `CAN ID 3`
  */
 function connectionIdLabel(motor) {
   const type = motorFilterKey(motor);
@@ -97,7 +102,7 @@ function connectionIdLabel(motor) {
   };
   const busId = num(motor.bus_id ?? motor.node_id ?? motor.id ?? motor.device_id);
   if (type === 'ac_servo') return aliasLabel() || '-';
-  if (type === 'dynamixel') return busId === null ? '-' : `ID ${busId}`;
+  if (type === 'dynamixel' || type === 'feetech') return busId === null ? '-' : `ID ${busId}`;
   if (type === 'cubemars') return busId === null ? '-' : `CAN ID ${busId}`;
   return aliasLabel() || (busId === null ? '-' : `ID ${busId}`);
 }
@@ -203,7 +208,7 @@ function currentText(motor, rawMode) {
 
 function effortText(motor, rawMode) {
   const type = motorFilterKey(motor);
-  if (type === 'dynamixel') {
+  if (isSerialServoKey(type)) {
     const value = currentText(motor, rawMode);
     return value === '-' || rawMode ? value : `${value} A`;
   }
@@ -422,7 +427,7 @@ function detailRowsHtml(rows) {
 
 function detailRowsForTab(motor, tab, rawMode) {
   const type = motorFilterKey(motor);
-  const isDynamixel = type === 'dynamixel';
+  const isDynamixel = isSerialServoKey(type);
   if (tab === 'connection') {
     return [
       ['물리 연결 (최근 검색)', motor.physical_connection_state === 'detected'

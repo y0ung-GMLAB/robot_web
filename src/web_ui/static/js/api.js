@@ -289,6 +289,9 @@ export const requestAcServoScan = () => request('POST', '/api/motors/scan/ac-ser
 
 export const requestDynamixelScan = () => request('POST', '/api/motors/scan/dynamixel');
 
+/** Feetech(STS) 검색 · 수정 목록 158 */
+export const requestFeetechScan = () => request('POST', '/api/motors/scan/feetech');
+
 export const fetchMotorScanProgress = () => request('GET', '/api/motors/scan/progress');
 
 export const writeEthercatAlias = (payload) => request('POST', '/api/motors/ethercat-alias', { body: payload });

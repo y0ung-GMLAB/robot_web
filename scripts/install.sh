@@ -188,6 +188,8 @@ prepare_site() {
   site_firewall
   echo "-- 웹 관리 권한 (Wi-Fi · 시간대)"
   site_web_admin_permissions "$(id -un)"
+  echo "-- 직렬 서보 어댑터 (다이나믹셀 · Feetech · udev)"
+  site_serial_udev
   echo "-- EtherLab (빌드에 필수 · motor_manager 가 libethercat 에 링크)"
   site_ethercat_install
   echo "-- EtherCAT 랜카드"

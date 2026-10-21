@@ -21,7 +21,7 @@ from std_msgs.msg import Int8MultiArray, String
 from motion_supervisor import manual_ramp, manual_settle
 from motion_supervisor.command_arbiter import CommandArbiter, CommandOwner
 from motion_supervisor.servo_alarm_guard import ServoAlarmGuard
-from motion_common import manual_speed, minas_absolute, motor_readiness, units, values, topics, wire_units
+from motion_common import manual_speed, minas_absolute, motor_kinds, motor_readiness, units, values, topics, wire_units
 
 
 #: 긴급정지가 걸렸을 때 하는 말 · §6-178
@@ -785,7 +785,7 @@ class MotionSupervisor(Node):
             # 것이라 리밋 검사를 건너뛴다.
             error = self._stream_readiness_error(motor, axis, check_internal_limit=not hold)
             controlword = CW_NEW_SET_POINT_MINAS
-        elif self._is_dynamixel(motor):
+        elif self._is_serial_servo(motor):
             error = self._stream_readiness_error(motor, axis, is_ac_servo=False)
             controlword = DYNAMIXEL_TORQUE_ENABLE
         else:
@@ -1427,7 +1427,7 @@ class MotionSupervisor(Node):
         motor = self._motor_for_axis(axis, motors)
         if motor is None:
             return False, f'{axis}번 모터를 모터 상태에서 찾을 수 없습니다'
-        if not self._is_dynamixel(motor):
+        if not self._is_serial_servo(motor):
             return False, f'{axis}번 모터는 다이나믹셀이 아닙니다'
         ready_error = self._manual_readiness_error(motor, axis, is_ac_servo=False)
         if ready_error:
@@ -1582,7 +1582,7 @@ class MotionSupervisor(Node):
         motor = self._motor_for_axis(axis, motors)
         if motor is None:
             return False, f'{axis}번 모터를 모터 상태에서 찾을 수 없습니다'
-        if not self._is_dynamixel(motor):
+        if not self._is_serial_servo(motor):
             return False, f'{axis}번 모터는 다이나믹셀이 아닙니다'
         # ±180 한 바퀴 검사는 없앴다 · Extended Position(멀티턴) · 한계는 모터
         # 운전 한계(`lower/upper` = 조인트 매핑 환산값) 하나 · AC 서보와 같다 · 2026-10-04
@@ -1921,7 +1921,7 @@ class MotionSupervisor(Node):
             commands_sent_at=self._optional_float(active.get('commands_sent_at')),
             peak_error=self._optional_float(active.get('settle_peak_error')),
             moving_at=self._optional_float(active.get('settle_moving_at')),
-            near=manual_settle.near_for(not self._is_dynamixel(motor)),
+            near=manual_settle.near_for(not self._is_serial_servo(motor)),
             settle_sec=settle_sec,
             now=now,
             timed_out=timed_out,
@@ -1941,7 +1941,7 @@ class MotionSupervisor(Node):
         """
         if result not in manual_settle.NOTICE_VERDICTS:
             return ''
-        if motor is not None and self._is_dynamixel(motor):
+        if motor is not None and self._is_serial_servo(motor):
             return ''
         text = manual_settle.notice_text(
             axis,
@@ -1980,7 +1980,7 @@ class MotionSupervisor(Node):
             if motor is not None and manual_settle.can_take_over(
                 active,
                 position,
-                manual_settle.near_for(not self._is_dynamixel(motor)),
+                manual_settle.near_for(not self._is_serial_servo(motor)),
                 self._target_tolerance(motor),
             ):
                 active_targets.pop(axis, None)
@@ -2447,7 +2447,7 @@ class MotionSupervisor(Node):
         return units.deg_to_rad(self._target_tolerance_deg(motor))
 
     def _target_tolerance_deg(self, motor: Dict[str, Any]) -> float:
-        if not self._is_dynamixel(motor):
+        if not self._is_serial_servo(motor):
             return JOG_TARGET_TOLERANCE_DEG
 
         raw_per_degree = self._optional_float(motor.get('position_raw_per_degree'))
@@ -2465,7 +2465,7 @@ class MotionSupervisor(Node):
 
     def _done_velocity(self, motor: Dict[str, Any]) -> float:
         """멈췄다고 볼 속도 · rad/s"""
-        if self._is_dynamixel(motor):
+        if self._is_serial_servo(motor):
             return units.deg_to_rad(DYNAMIXEL_DONE_VELOCITY_DEG_SEC)
         return units.deg_to_rad(JOG_DONE_VELOCITY_DEG_SEC)
 
@@ -2608,7 +2608,7 @@ class MotionSupervisor(Node):
         axes = []
         for motor in motors:
             axis = self._optional_int(motor.get('controller_index'))
-            if axis is None or not self._is_dynamixel(motor):
+            if axis is None or not self._is_serial_servo(motor):
                 continue
             if str(motor.get('state') or '') != 'detected':
                 continue
@@ -2621,6 +2621,19 @@ class MotionSupervisor(Node):
         if not axes:
             return False, 'Dynamixel axis not found'
         if action == 'reboot':
+            # 재부팅은 다이나믹셀만 · Feetech 는 재부팅 명령이 없다(0x06 = 공장 초기화 · 금지) · 수정 목록 158
+            feetech_axes = [
+                axis for axis in axes
+                if motor_kinds.is_feetech(self._motor_for_axis(axis, motors) or {})
+            ]
+            if feetech_axes and isinstance(requested, list):
+                return False, (
+                    f'{feetech_axes[0]}번 모터는 Feetech 라 재부팅이 없습니다 · '
+                    '오류 해제는 토크 끄기 · 계속되면 전원을 다시 넣으세요'
+                )
+            axes = [axis for axis in axes if axis not in feetech_axes]
+            if not axes:
+                return False, 'Dynamixel axis not found'
             self._publish_controlword(motors, axes, DYNAMIXEL_REBOOT)
             return True, (
                 f'Dynamixel reboot command sent: axes {self._axis_list_text(axes)} · '
@@ -2631,12 +2644,27 @@ class MotionSupervisor(Node):
             absolute_reason = self._absolute_block_reason()
             if absolute_reason:
                 return False, absolute_reason
+            # 직렬 설정 대기(0xFFFE) · 설정 항목을 아직 못 썼다 · motor_manager 도 막는다 · 수정 목록 158
+            pending_axes = [
+                axis for axis in axes
+                if bool((self._motor_for_axis(axis, motors) or {}).get('config_pending', False))
+            ]
+            if pending_axes:
+                return False, (
+                    f'{pending_axes[0]}번 모터가 설정 대기 중입니다(0xFFFE) · '
+                    '모터 프로그램이 설정 항목을 쓴 뒤 다시 켜세요'
+                )
             # 하드웨어 오류 중에는 장치가 토크 켜기를 받지 않는다 · 먼저 재부팅
             fault_axes = [
                 axis for axis in axes
                 if bool((self._motor_for_axis(axis, motors) or {}).get('fault', False))
             ]
             if fault_axes:
+                if motor_kinds.is_feetech(self._motor_for_axis(fault_axes[0], motors) or {}):
+                    return False, (
+                        f'{fault_axes[0]}번 모터에 오류가 있습니다 · '
+                        'Feetech 는 토크 끄기로 오류를 풀고 다시 켜세요 · 계속되면 전원을 다시 넣으세요'
+                    )
                 return False, (
                     f'{fault_axes[0]}번 모터에 하드웨어 오류가 있습니다 · '
                     '먼저 재부팅하세요'
@@ -2779,7 +2807,7 @@ class MotionSupervisor(Node):
                     continue
                 position = self._motor_position(motor)
                 if emergency and (
-                    self._is_ac_servo(motor) or self._is_dynamixel(motor)
+                    self._is_ac_servo(motor) or self._is_serial_servo(motor)
                 ):
                     command.number_of_target_interfaces[axis] = 1
                     command.target_interface_id[axis] = Int8MultiArray(data=[ID_CONTROLWORD])
@@ -3037,15 +3065,8 @@ class MotionSupervisor(Node):
 
     @staticmethod
     def _is_ac_servo(motor: Dict[str, Any]) -> bool:
-        values = [
-            motor.get('motor_type'),
-            motor.get('motor_type_label'),
-            motor.get('driver_model'),
-            motor.get('driver_name'),
-            motor.get('transport'),
-        ]
-        text = ' '.join(str(value or '').lower() for value in values)
-        return 'minas' in text or 'ac servo' in text or 'ac_servo' in text
+        """판정은 종류 표 한 곳 (`motion_common.motor_kinds`) · 수정 목록 158"""
+        return motor_kinds.is_ac_servo(motor)
 
     def _stream_readiness_error(
         self,
@@ -3102,15 +3123,16 @@ class MotionSupervisor(Node):
 
     @staticmethod
     def _is_dynamixel(motor: Dict[str, Any]) -> bool:
-        values = [
-            motor.get('motor_type'),
-            motor.get('motor_type_label'),
-            motor.get('driver_model'),
-            motor.get('driver_name'),
-            motor.get('transport'),
-        ]
-        text = ' '.join(str(value or '').lower() for value in values)
-        return 'dynamixel' in text or 'serial' in text and 'xm' in text
+        """다이나믹셀 **만** (재부팅) · 옛 `serial`+`xm` 규칙 그대로 · 종류 표 · 수정 목록 158"""
+        return motor_kinds.is_dynamixel(motor, serial_xm_is_dynamixel=True)
+
+    @staticmethod
+    def _is_serial_servo(motor: Dict[str, Any]) -> bool:
+        """직렬 서보(다이나믹셀 · Feetech) 공통 · 토크 켜기/끄기 · 조그 · 절대 이동 · 정지 · 수정 목록 158
+
+        Feetech 가 아닌 모터는 옛 `_is_dynamixel` 과 결과가 같다.
+        """
+        return motor_kinds.is_serial_servo(motor, serial_xm_is_dynamixel=True)
 
     def _publish_result(self, request_id: str, success: bool, message: str) -> None:
         payload = {

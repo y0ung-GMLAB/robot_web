@@ -72,6 +72,8 @@ INSTALLED_NAME = '.installed.json'
 MOTOR_TYPE_FIELDS: Dict[str, Tuple[str, ...]] = {
     'ac_servo': ('rated_rpm', 'max_rpm', 'rated_torque_nm', 'peak_torque_nm', 'rotor_inertia_kgm2'),
     'dynamixel': ('max_rpm', 'stall_torque_nm'),
+    # Feetech STS · 다이나믹셀과 같은 항목 · 수정 목록 158
+    'feetech': ('max_rpm', 'stall_torque_nm'),
 }
 REDUCER_FIELDS = ('ratio', 't2n_nm', 't2b_nm', 'max_input_rpm')
 

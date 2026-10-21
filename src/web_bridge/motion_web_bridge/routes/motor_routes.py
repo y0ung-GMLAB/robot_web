@@ -2,6 +2,8 @@ import asyncio
 
 from fastapi import FastAPI, HTTPException, Request
 
+from motion_common import motor_kinds
+
 
 def register_motor_routes(app: FastAPI, bridge, project_call) -> None:
     @app.post('/api/motors/scan')
@@ -15,6 +17,11 @@ def register_motor_routes(app: FastAPI, bridge, project_call) -> None:
     @app.post('/api/motors/scan/dynamixel')
     async def scan_dynamixel_motors():
         return await asyncio.to_thread(bridge.scan.scan_dynamixel)
+
+    @app.post('/api/motors/scan/feetech')
+    async def scan_feetech_motors():
+        # Feetech (STS) 만 · 결과 `scan.feetech_scan` · 수정 목록 158
+        return await asyncio.to_thread(bridge.scan.scan_feetech)
 
     @app.get('/api/motors/scan/progress')
     async def motor_scan_progress():
@@ -38,7 +45,11 @@ def register_motor_routes(app: FastAPI, bridge, project_call) -> None:
 
     @app.get('/api/motor-config')
     async def motor_config():
-        return await asyncio.to_thread(bridge.motor_config.load)
+        result = await asyncio.to_thread(bridge.motor_config.load)
+        if isinstance(result, dict):
+            # 모터 종류 표 · 화면 사본(`motor_kinds.js`)보다 우선 · 수정 목록 158
+            result = {**result, 'kind_table': motor_kinds.kind_table_payload()}
+        return result
 
     @app.put('/api/motor-config')
     async def save_motor_config(request: Request):

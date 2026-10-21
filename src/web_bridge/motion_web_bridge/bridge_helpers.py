@@ -107,12 +107,14 @@ def _monitoring_motor_ref(motor: Dict[str, Any]) -> str:
         str(motor.get(key) or '').lower()
         for key in ('motor_type', 'motor_type_label', 'driver_model', 'transport')
     )
-    if 'dynamixel' in text:
+    # Feetech 먼저 · 그 밖은 전과 같은 판정 · 수정 목록 158
+    serial_kind = 'feetech' if 'feetech' in text else ('dynamixel' if 'dynamixel' in text else '')
+    if serial_kind:
         value = motor.get('bus_id', motor.get('node_id'))
         serial_port = str(motor.get('serial_port') or '').strip()
         try:
             return (
-                f'dynamixel:port:{quote(serial_port, safe="")}:id:{int(value)}'
+                f'{serial_kind}:port:{quote(serial_port, safe="")}:id:{int(value)}'
                 if serial_port
                 else ''
             )
@@ -150,7 +152,9 @@ def _monitoring_motor_refs(motor: Dict[str, Any]) -> List[str]:
         for key in ('motor_type', 'motor_type_label', 'driver_model', 'transport')
     )
     try:
-        if 'minas' in text or 'ac servo' in text or 'ac_servo' in text:
+        if 'feetech' in text:
+            legacy = ''   # Feetech 는 옛 이름 없음 · 수정 목록 158
+        elif 'minas' in text or 'ac servo' in text or 'ac_servo' in text:
             alias = int(motor.get('alias', motor.get('ethercat_alias')))
             legacy = f'ac_servo:alias:{alias}' if alias > 0 else ''
         elif 'dynamixel' in text:

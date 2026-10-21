@@ -28,12 +28,14 @@
                **뒤에**, 아직 짝 없는 축끼리만 (수정 목록 157)
 
     Dynamixel  포트와 ID 로
+    Feetech    포트와 ID 로 · Feetech 검색 결과로만 · 수정 목록 158
 """
 
 from __future__ import annotations
 
 from typing import Any, Dict, List, Optional
 
+from motion_common import motor_kinds, serial_servo_models
 from motion_common.values import optional_int
 
 from motion_web_bridge.motor_config_rules import motor_id_for
@@ -203,7 +205,44 @@ def _scanned_dynamixel_view(device: Dict[str, Any]) -> Dict[str, Any]:
         'firmware_version': optional_int(device.get('firmware_version'), None),
         'serial_port': str(device.get('port') or ''),
         'bus_id': optional_int(device.get('id'), None),
+        # 찾은 속도 · 1 Mbps 뒤 57600 · 4 Mbps 도 본다 · 수정 목록 158
+        'baudrate': optional_int(device.get('baudrate'), None),
     }
+
+
+def scanned_feetech_model(device: Dict[str, Any]) -> str:
+    """Feetech 검색 이름 · 모델 번호로 읽은 것 (`STS3215` · 모르는 번호 `STS (모델 n)`) · 수정 목록 158"""
+    raw = str(device.get('model_name') or '').strip()
+    if raw:
+        return raw
+    number = optional_int(device.get('model_number'), None)
+    return serial_servo_models.feetech_model_name(number) if number is not None else ''
+
+
+def _scanned_feetech_view(device: Dict[str, Any]) -> Dict[str, Any]:
+    return {
+        'model': scanned_feetech_model(device),
+        'alias': None,
+        'rotary_alias': None,
+        'slave_position': None,
+        'serial_number': None,
+        'vendor_id': None,
+        'product_code': None,
+        'master_index': None,
+        'device_state': '',
+        'identity_source': str(device.get('source') or ''),
+        'model_number': optional_int(device.get('model_number'), None),
+        'firmware_version': None,
+        'serial_port': str(device.get('port') or device.get('serial_port') or ''),
+        'bus_id': optional_int(device.get('id', device.get('bus_id')), None),
+        'baudrate': optional_int(device.get('baudrate'), None),
+        # 모델 번호를 모르면(STS 제어표로 동작) 확인 필요
+        'model_confirm': bool(device.get('model_confirm', False)),
+    }
+
+
+def _is_feetech(motor: Dict[str, Any]) -> bool:
+    return motor_kinds.is_feetech(motor) or str(motor.get('driver_family') or '').lower() == 'feetech'
 
 
 #: 저장된 값과 검색값을 견주는 항목 · 다른 것만 이름을 댄다
@@ -307,10 +346,14 @@ def axis_rows_from_scan(
     scan = scan or {}
     ethercat = scan.get('ethercat_scan') or {}
     dynamixel = scan.get('dynamixel_scan') or {}
+    feetech = scan.get('feetech_scan') or {}
     ethercat_scanned = bool(ethercat) and not ethercat.get('skipped')
     dynamixel_scanned = bool(dynamixel) and not dynamixel.get('skipped')
+    feetech_scanned = bool(feetech) and not feetech.get('skipped')
     slaves = [s for s in ethercat.get('slaves') or [] if isinstance(s, dict)]
     devices = [d for d in dynamixel.get('devices') or [] if isinstance(d, dict)]
+    feetech_devices = [d for d in feetech.get('devices') or [] if isinstance(d, dict)]
+    used_feetech = set()
 
     paired: Dict[str, Dict[str, Any]] = {}
     confirmation: Dict[str, bool] = {}
@@ -349,12 +392,24 @@ def axis_rows_from_scan(
         used_slaves.add(index)
 
     for index, device in enumerate(devices):
+        # Feetech 모터는 다이나믹셀 검색으로 짝짓지 않는다 · 그 밖은 전과 같다 · 수정 목록 158
         match = next((m for m in motors if m.get('transport') != 'ethercat'
+                      and not _is_feetech(m)
                       and _dynamixel_matches(device, m)), None)
         if match is None:
             continue
         paired[str(match.get('id'))] = _scanned_dynamixel_view(device)
         used_devices.add(index)
+
+    for index, device in enumerate(feetech_devices):
+        # 포트 · ID 가 같은 Feetech 모터 (짝 맞추기 규칙은 다이나믹셀과 같다)
+        match = next((m for m in motors if _is_feetech(m)
+                      and str(m.get('id')) not in paired
+                      and _dynamixel_matches(device, m)), None)
+        if match is None:
+            continue
+        paired[str(match.get('id'))] = _scanned_feetech_view(device)
+        used_feetech.add(index)
 
     axes = []
     for motor in motors:
@@ -364,6 +419,8 @@ def axis_rows_from_scan(
             state = 'matched'
         elif motor.get('transport') == 'ethercat':
             state = 'missing' if ethercat_scanned else 'not_scanned'
+        elif _is_feetech(motor):
+            state = 'missing' if feetech_scanned else 'not_scanned'
         else:
             state = 'missing' if dynamixel_scanned else 'not_scanned'
         axes.append(
@@ -403,12 +460,25 @@ def axis_rows_from_scan(
             _new_device_row(_scanned_dynamixel_view(device), 'dynamixel', 'serial', next_axis)
         )
         next_axis += 1
+    for index, device in enumerate(feetech_devices):
+        if index in used_feetech:
+            continue
+        new_devices.append(
+            _new_device_row(_scanned_feetech_view(device), 'feetech', 'serial', next_axis)
+        )
+        next_axis += 1
 
     return {
         #: 이번 검색이 실제로 돌아간 통로 · 목록을 이 통로만 맞춘다
+        #: `serial` 은 다이나믹셀 검색일 때만 (전과 같음) · 종류별은 `scanned_kinds` · 수정 목록 158
         'scanned_transports': (
             (['ethercat'] if ethercat_scanned else [])
             + (['serial'] if dynamixel_scanned else [])
+        ),
+        'scanned_kinds': (
+            (['ac_servo'] if ethercat_scanned else [])
+            + (['dynamixel'] if dynamixel_scanned else [])
+            + (['feetech'] if feetech_scanned else [])
         ),
         'axes': axes,
         'new_devices': new_devices,

@@ -4,6 +4,7 @@
  */
 import { pcName } from './model.js';
 import { segmentLabel } from './segment_model.js';
+import { kindSpec, motorKind } from './motor_kinds.js';
 
 const DEG = 180 / Math.PI;
 
@@ -321,7 +322,8 @@ export function axisRows(snap, mapping) {
     return {
       id,
       axis: Number.isFinite(axis) ? axis : null,
-      motorType: String(row.motor_type || plan.motor_type || motor.motor_type || '') === 'dynamixel' ? 'DXL' : 'AC',
+      // 종류 표 짧은 이름 · AC · DXL · FT · 모르면 「?」(전 AC) · 수정 목록 158
+      motorType: kindSpec(motorKind({ motor_type: row.motor_type || plan.motor_type || motor.motor_type, transport: motor.transport })).short,
       range: lower === null || upper === null ? '-' : `${signedDeg(lower)} ~ ${signedDeg(upper)}°`,
       now: signedDeg(deg(motor.motion_actual_rad), 2),
       clamped: plan.motion_clamped === true ? '잘라서 재생' : plan.motion_id ? '없음' : '-',

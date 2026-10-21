@@ -1,0 +1,63 @@
+[type info]
+name	value
+value_of_zero_radian_position	2048
+value_of_max_radian_position	4096
+value_of_min_radian_position	0
+min_radian	-3.14159265
+max_radian	3.14159265
+
+[unit info]
+Data Name	value	unit	Sign Type
+Present Velocity	0.0015339808	rad/s	signed
+Goal Velocity	0.0015339808	rad/s	signed
+Present Current	1.0	raw	signed
+
+[control table]
+Address	Size	Data Name
+0	1	Firmware Major Version
+1	1	Firmware Minor Version
+3	2	Model Number
+5	1	ID
+6	1	Baud Rate
+7	1	Return Delay Time
+8	1	Status Return Level
+9	2	Min Position Limit
+11	2	Max Position Limit
+13	1	Temperature Limit
+14	1	Max Voltage Limit
+15	1	Min Voltage Limit
+16	2	Max Torque Limit
+18	1	Phase
+19	1	Unloading Condition
+20	1	LED Alarm Condition
+21	1	Position P Gain
+22	1	Position D Gain
+23	1	Position I Gain
+24	2	Minimum Startup Force
+26	1	CW Dead Zone
+27	1	CCW Dead Zone
+28	2	Protection Current
+30	1	Angular Resolution
+31	2	Homing Offset
+33	1	Operating Mode
+34	1	Protective Torque
+35	1	Protection Time
+36	1	Overload Torque
+37	1	Velocity P Gain
+38	1	Over Current Protection Time
+39	1	Velocity I Gain
+40	1	Torque Enable
+41	1	Acceleration
+42	2	Goal Position
+44	2	Goal Time
+46	2	Goal Velocity
+48	2	Torque Limit
+55	1	Lock
+56	2	Present Position
+58	2	Present Velocity
+60	2	Present Load
+62	1	Present Voltage
+63	1	Present Temperature
+65	1	Status
+66	1	Moving
+69	2	Present Current

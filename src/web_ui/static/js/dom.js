@@ -54,6 +54,8 @@ export function getElements() {
     scanResult: document.getElementById('scanResult'),
     dynamixelScanButton: document.getElementById('dynamixelScanButton'),
     dynamixelScanResult: document.getElementById('dynamixelScanResult'),
+    feetechScanButton: document.getElementById('feetechScanButton'),
+    feetechScanResult: document.getElementById('feetechScanResult'),
     axisSettingsTabs: document.getElementById('axisSettingsTabs'),
     axisSettingsPanels: document.querySelectorAll('[data-axis-settings-panel]'),
     axisRows: document.getElementById('axisRows'),

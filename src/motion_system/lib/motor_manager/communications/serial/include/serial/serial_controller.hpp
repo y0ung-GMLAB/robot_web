@@ -32,6 +32,10 @@ public:
 
     void read(motor_interface::motor_frame_t& status) override;
 
+    // Boot items not written yet (port closed · device silent · refused) ·
+    // torque on and commands wait · errorcode 0xFFFE · robot_web fix-list 158
+    bool configPending() const { return config_pending_; }
+
 private:
     void writeData(const motor_interface::entry_table_t* rx_interfaces, uint8_t number_of_rx_interfaces) override;
 
@@ -46,6 +50,16 @@ private:
     bool disableTorqueForConfiguration(std::string& error);
 
     void rebootNode();
+
+    // Alarm reset where the bus has no REBOOT (Feetech) · Torque Enable 0
+    void torqueOffForReset();
+
+    // After a reconnect the items are checked again (the device may have lost power)
+    void noteReconnect();
+
+    bool retryConfig(bool allow_torque_off);
+
+    void log(const std::string& message) const;
 
     void addBulkEntries();
 
@@ -80,6 +94,17 @@ private:
     bool reapply_items_pending_{false};
 
     std::chrono::steady_clock::time_point next_reapply_at_{};
+
+    bool config_pending_{false};
+
+    std::string config_error_;
+
+    std::chrono::steady_clock::time_point next_config_retry_{};
+
+    uint32_t master_generation_{0};
+
+    // Last write/command problem logged · the same one is not repeated every cycle
+    std::string last_write_error_;
 };
 
 } // namespace serial

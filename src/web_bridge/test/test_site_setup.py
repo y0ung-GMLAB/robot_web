@@ -113,6 +113,8 @@ def test_dry_run_site_install_changes_nothing_and_lists_every_step(tmp_path):
     assert 'loginctl enable-linger' in linger or '이미 켜져 있음' in linger, linger
     for command in ['20auto-upgrades', 'AutomaticLoginEnable=true',
                     'timedatectl set-timezone Pacific/Kiritimati', '--enable-generic=yes', '99-ethercat.rules',
+                    # 직렬 서보 어댑터 latency_timer 1 ms · 수정 목록 158-5
+                    '99-robot-serial.rules',
                     'ethercat-rebuild.service', 'UPDOWN_INTERFACES="eth9"', 'systemctl enable --now ethercat',
                     # SDO 사전 읽기 끄기 패치 · 빌드 전에 · 재빌드 훅이 읽을 고정 자리 · 수정 목록 139
                     'igh-1.6.9-sdo-dict-off.patch', '/usr/local/share/robot_web/igh-sdo-dict-off.patch']:
@@ -484,6 +486,19 @@ def test_wayland_off_line_is_added_once_and_keeps_autologin(tmp_path):
     assert _site(f'site_render_gdm_wayland_off "{conf}"').strip() == out.strip()      # 멱등
     out = _site(f'site_render_gdm_wayland_off "{tmp_path / "none.conf"}"')
     assert out.strip().splitlines()[-2:] == ['[daemon]', 'WaylandEnable=false']
+
+
+def test_serial_adapter_latency_rule_is_written_and_reloaded_in_dry_run(tmp_path):
+    """직렬 서보 어댑터(U2D2 · FTDI) latency_timer 1 ms · 멱등 · 수정 목록 158-5"""
+    rule = tmp_path / '99-robot-serial.rules'
+    out = _site('site_serial_udev', {'SITE_DRY_RUN': '1', 'SITE_SERIAL_UDEV_RULE': str(rule)})
+    assert f'[dry-run] {rule}' in out
+    assert 'ACTION=="add", SUBSYSTEM=="usb-serial", DRIVER=="ftdi_sio", ATTR{latency_timer}="1"' in out
+    assert 'udevadm control --reload-rules' in out
+    assert 'udevadm trigger --subsystem-match=usb-serial --action=add' in out
+    assert not rule.exists()          # dry-run 은 쓰지 않는다
+    install = (SCRIPTS / 'install.sh').read_text(encoding='utf-8')
+    assert 'site_serial_udev' in install    # EtherCAT 과 무관하게 현장 준비에서 돈다
 
 
 def test_anydesk_script_parses_and_is_not_run_by_install():

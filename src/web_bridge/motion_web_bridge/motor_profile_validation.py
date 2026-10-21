@@ -177,7 +177,14 @@ def validate_runtime_motor_profiles(payload: Dict[str, Any]) -> None:
                     raise ValueError(
                         f'{axis}번 모터의 Dynamixel ID가 올바르지 않습니다'
                     ) from exc
-                if bus_id < 0 or bus_id > 252:
+                # Feetech ID 는 0~253 (254 = 방송) · 다이나믹셀은 전처럼 0~252 · 수정 목록 158
+                serial_driver = drivers.get(slave.get('driver_id'))
+                if isinstance(serial_driver, dict) and str(serial_driver.get('type') or '') == 'feetech':
+                    if bus_id < 0 or bus_id > 253:
+                        raise ValueError(
+                            f'{axis}번 모터의 Feetech ID는 0~253여야 합니다'
+                        )
+                elif bus_id < 0 or bus_id > 252:
                     raise ValueError(
                         f'{axis}번 모터의 Dynamixel ID는 0~252여야 합니다'
                     )

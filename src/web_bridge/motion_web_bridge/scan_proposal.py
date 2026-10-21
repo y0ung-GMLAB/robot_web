@@ -121,8 +121,14 @@ def _matched_motor(saved: Dict[str, Any], scanned: Dict[str, Any], raw: Dict[str
         identity.update(_ac_identity(raw, scanned))
         config.update(_ac_address(scanned))
     else:
-        baudrate = identity.get('serial_baudrate') or config.get('serial_baudrate') or DYNAMIXEL_DEFAULT_BAUDRATE
+        # 찾은 속도가 있으면 그것 · 없으면 전처럼 저장된 값 → 1 Mbps · 수정 목록 158
+        baudrate = (
+            optional_int(scanned.get('baudrate'), None)
+            or identity.get('serial_baudrate') or config.get('serial_baudrate') or DYNAMIXEL_DEFAULT_BAUDRATE
+        )
         identity.update(_dxl_identity(scanned, baudrate))
+        if str(motor.get('motor_type') or '') == 'feetech' and scanned.get('model_number') is not None:
+            identity['model_number'] = scanned.get('model_number')
         config.update({'bus_id': scanned.get('bus_id'), 'serial_port': str(scanned.get('serial_port') or ''), 'serial_baudrate': baudrate})
     motor['identity'] = identity
     motor['config'] = config
@@ -146,14 +152,23 @@ def _new_motor(row: Dict[str, Any], raw: Dict[str, Any], dxl_driver_id: int) -> 
         }
     bus = scanned.get('bus_id')
     profile = _scanned_profile(scanned, 'serial') or {'driver_model': '', 'model_confirmed': False, 'model_source': ''}
+    # 직렬 서보 · 다이나믹셀 · Feetech · 속도 = 찾은 속도 (없으면 1 Mbps) · 수정 목록 158
+    kind = 'feetech' if row.get('motor_type') == 'feetech' else 'dynamixel'
+    baudrate = optional_int(scanned.get('baudrate'), None) or DYNAMIXEL_DEFAULT_BAUDRATE
+    identity = _dxl_identity(scanned, baudrate)
+    if kind == 'feetech':
+        identity['model_number'] = scanned.get('model_number')
+        if scanned.get('model_confirm'):
+            # 모르는 STS 번호 · STS 제어표로 동작 · 확인 필요 표시
+            profile = {**profile, 'model_confirmed': False}
     return {
         'id': row['id'], 'enabled': True, 'hidden': False, 'deleted': False, 'axis': axis,
         'name': _new_name(axis),
-        'motor_type': 'dynamixel', 'driver_family': 'dynamixel', 'transport': 'serial',
-        'identity': _dxl_identity(scanned, DYNAMIXEL_DEFAULT_BAUDRATE),
+        'motor_type': kind, 'driver_family': kind, 'transport': 'serial',
+        'identity': identity,
         'profile': profile,
         'config': {'controller_index': axis, 'driver_id': dxl_driver_id, 'bus_id': bus,
-                   'serial_port': str(scanned.get('serial_port') or ''), 'serial_baudrate': DYNAMIXEL_DEFAULT_BAUDRATE,
+                   'serial_port': str(scanned.get('serial_port') or ''), 'serial_baudrate': baudrate,
                    'profile_mode': 0},
     }
 

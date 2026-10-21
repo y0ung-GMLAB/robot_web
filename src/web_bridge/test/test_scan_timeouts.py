@@ -16,9 +16,10 @@ def _default_timeout(method_name):
 
 
 def test_full_scan_budget_covers_both_transports():
-    """전체 검색은 두 종류를 차례로 돌린다 · 합보다 짧으면 안 된다."""
+    """전체 검색은 세 종류(AC · 다이나믹셀 · Feetech)를 차례로 돌린다 · 합보다 짧으면 안 된다 · 수정 목록 158"""
     assert _default_timeout('scan_all') >= (
         _default_timeout('scan_ac_servo') + _default_timeout('scan_dynamixel')
+        + _default_timeout('scan_feetech')
     )
 
 
@@ -27,8 +28,9 @@ def test_each_scan_uses_the_shared_constant():
     assert _default_timeout('scan_all') == so.FULL_SCAN_TIMEOUT_SEC
     assert _default_timeout('scan_ac_servo') == so.AC_SERVO_SCAN_TIMEOUT_SEC
     assert _default_timeout('scan_dynamixel') == so.DYNAMIXEL_SCAN_TIMEOUT_SEC
+    assert _default_timeout('scan_feetech') == so.FEETECH_SCAN_TIMEOUT_SEC
     assert so.FULL_SCAN_TIMEOUT_SEC == (
-        so.AC_SERVO_SCAN_TIMEOUT_SEC + so.DYNAMIXEL_SCAN_TIMEOUT_SEC
+        so.AC_SERVO_SCAN_TIMEOUT_SEC + so.DYNAMIXEL_SCAN_TIMEOUT_SEC + so.FEETECH_SCAN_TIMEOUT_SEC
     )
 
 

@@ -37,10 +37,18 @@ from .dynamixel_scanner import (
     DYNAMIXEL_SCAN_MAX_ID,
     DYNAMIXEL_SCAN_PROTOCOL,
 )
-from motion_common import latest_tap, topics
+from .feetech_scanner import (
+    FeetechScanner,
+    FEETECH_SCAN_BAUDRATES,
+    FEETECH_SCAN_MAX_ID,
+    FEETECH_SCAN_PROTOCOL,
+    ports_answering_both,
+)
+from motion_common import latest_tap, motor_kinds, topics
 
 
-MOTOR_SCAN_CONTRACT_VERSION = 3
+#: 4 · Feetech 구획 · 다이나믹셀 덧붙인 속도(Broadcast Ping 만) · 수정 목록 158
+MOTOR_SCAN_CONTRACT_VERSION = 4
 
 
 class MotionStateMonitor(Node):
@@ -104,6 +112,16 @@ class MotionStateMonitor(Node):
         self.dynamixel_scan_id_fallback = bool(
             self.declare_parameter('dynamixel_scan_id_fallback', True).value
         )
+        # Feetech 검색 · ID 0~253 개별 Ping · ID 하나 20 ms (USB 직렬 지연) · 수정 목록 158
+        self.feetech_scan_max_id = int(
+            self.declare_parameter('feetech_scan_max_id', FEETECH_SCAN_MAX_ID).value
+        )
+        self.feetech_scan_timeout_sec = float(
+            self.declare_parameter('feetech_scan_timeout_sec', 0.02).value
+        )
+        self.feetech_scan_settle_sec = float(
+            self.declare_parameter('feetech_scan_settle_sec', 0.05).value
+        )
         self.monitoring_enabled = bool(
             self.declare_parameter('monitoring_enabled', True).value
         )
@@ -118,6 +136,7 @@ class MotionStateMonitor(Node):
         # 연결된 MINAS 드라이브 전부 앱솔루트 확인 · 폴링이 구성 변화를 보면 읽는다 · 수정 목록 62
         self._ethercat.enable_absolute_check()
         self._dynamixel = DynamixelScanner(self)
+        self._feetech = FeetechScanner(self)
         self._scan_sequence = 0
         self._active_scan_id = ''
 
@@ -143,6 +162,11 @@ class MotionStateMonitor(Node):
             Trigger,
             topics.SCAN_DYNAMIXEL_MOTORS,
             self._scan_dynamixel_motors_service,
+        )
+        self._scan_feetech_service = self.create_service(
+            Trigger,
+            topics.SCAN_FEETECH_MOTORS,
+            self._scan_feetech_motors_service,
         )
         # 장기 작업 Action · 진행 상황을 같은 통로로 보내고 취소를 받는다 (§6-26)
         # 기존 Trigger 서비스는 그대로 둔다 · 구코드 호출자가 남아 있을 수 있다
@@ -259,7 +283,12 @@ class MotionStateMonitor(Node):
                     or ''
                 )
                 display_name = str(slave.get('name') or f'{controller_index}번 모터')
-                raw_model = self._dynamixel_raw_model_info(driver) if motor_type == 'dynamixel' else {}
+                # 직렬 서보(다이나믹셀 · Feetech) · param 파일 → 모델 제어표의 raw 범위 · 수정 목록 158
+                raw_model = (
+                    self._dynamixel_raw_model_info(driver)
+                    if motor_kinds.is_serial_servo(motor_kinds.kind_for_driver_type(motor_type))
+                    else {}
+                )
                 pulse_per_revolution = driver.get('pulse_per_revolution')
                 self._motor_metadata[controller_index] = {
                     'display_name': display_name,
@@ -399,7 +428,7 @@ class MotionStateMonitor(Node):
 
     def _scan_motors(self, request: Trigger.Request, response: Trigger.Response):
         del request
-        result = self._build_scan_result(scan_ethercat=True, scan_dynamixel=True)
+        result = self._build_scan_result(scan_ethercat=True, scan_dynamixel=True, scan_feetech=True)
         response.success = bool(result.get('scan_complete'))
         response.message = json.dumps(result, ensure_ascii=False, separators=(',', ':'))
         if not self.monitoring_enabled:
@@ -428,15 +457,27 @@ class MotionStateMonitor(Node):
             self.get_logger().warn('Dynamixel scan requested while monitoring is disabled.')
         return response
 
+    def _scan_feetech_motors_service(self, request: Trigger.Request, response: Trigger.Response):
+        del request
+        result = self._build_scan_result(scan_ethercat=False, scan_dynamixel=False, scan_feetech=True)
+        response.success = self._physical_section_success(
+            result.get('feetech_scan'), 'devices_count'
+        )
+        response.message = json.dumps(result, ensure_ascii=False, separators=(',', ':'))
+        if not self.monitoring_enabled:
+            self.get_logger().warn('Feetech scan requested while monitoring is disabled.')
+        return response
+
     # ------------------------------------------------------------------ #
     # 모터 검색 Action · §6-26
     # ------------------------------------------------------------------ #
 
-    #: 취소를 받아들이는 지점 · 물리 검색 한 종류가 끝난 뒤
+    #: 검색 종류 → (EtherCAT, 다이나믹셀, Feetech) · 취소는 물리 검색 한 종류가 끝난 뒤
     SCAN_TRANSPORTS = {
-        'all': (True, True),
-        'ac_servo': (True, False),
-        'dynamixel': (False, True),
+        'all': (True, True, True),
+        'ac_servo': (True, False, False),
+        'dynamixel': (False, True, False),
+        'feetech': (False, False, True),
     }
 
     def _accept_scan_cancel(self, goal_handle) -> CancelResponse:
@@ -462,13 +503,14 @@ class MotionStateMonitor(Node):
             )
             return result
 
-        scan_ethercat, scan_dynamixel = self.SCAN_TRANSPORTS[transport]
+        scan_ethercat, scan_dynamixel, scan_feetech = self.SCAN_TRANSPORTS[transport]
         with self._scan_goal_lock:
             self._active_scan_goal = goal_handle
         try:
             payload = self._build_scan_result(
                 scan_ethercat=scan_ethercat,
                 scan_dynamixel=scan_dynamixel,
+                scan_feetech=scan_feetech,
                 cancel_requested=goal_handle.is_cancel_requested,
             )
         finally:
@@ -488,6 +530,10 @@ class MotionStateMonitor(Node):
             result.success = self._physical_section_success(
                 payload.get('ethercat_scan'), 'slaves_count'
             )
+        elif transport == 'feetech':
+            result.success = self._physical_section_success(
+                payload.get('feetech_scan'), 'devices_count'
+            )
         else:
             result.success = self._physical_section_success(
                 payload.get('dynamixel_scan'), 'devices_count'
@@ -500,15 +546,21 @@ class MotionStateMonitor(Node):
         *,
         scan_ethercat: bool,
         scan_dynamixel: bool,
+        scan_feetech: bool = False,
         cancel_requested: Optional[Callable[[], bool]] = None,
     ) -> Dict[str, Any]:
         self._scan_sequence = int(getattr(self, '_scan_sequence', 0)) + 1
         self._active_scan_id = f'{int(time.time() * 1000)}-{self._scan_sequence}'
+        # 시험 스텁(`__new__`)은 Feetech 검색기 없이 선다 · 처음 쓸 때 만든다
+        if getattr(self, '_feetech', None) is None:
+            self._feetech = FeetechScanner(self)
         requested_labels = []
         if scan_ethercat:
             requested_labels.append('EtherCAT')
         if scan_dynamixel:
             requested_labels.append('Dynamixel')
+        if scan_feetech:
+            requested_labels.append('Feetech')
         self._publish_scan_progress(
             'started',
             f'{" + ".join(requested_labels)} 직접 스캔을 시작합니다',
@@ -539,6 +591,32 @@ class MotionStateMonitor(Node):
             if scan_dynamixel
             else self._dynamixel._skipped_dynamixel_scan(now)
         )
+        # Feetech · 다이나믹셀 뒤 · 취소는 여기서도 장치 종류 사이에서만 · 수정 목록 158
+        if scan_feetech and callable(cancel_requested) and (scan_ethercat or scan_dynamixel):
+            if bool(cancel_requested()):
+                cancelled = True
+        if cancelled and scan_feetech:
+            self._publish_scan_progress(
+                'cancelled',
+                '앞 검색 후 취소 요청을 확인해 Feetech 검색을 중단합니다',
+                transport='feetech',
+            )
+            scan_feetech = False
+        feetech_scan = (
+            self._feetech._safe_scan_feetech_motors()
+            if scan_feetech
+            else self._feetech._skipped_feetech_scan(now)
+        )
+        # 한 포트 = 한 종류 · 두 종류가 다 답한 포트는 경고 (설계 §5)
+        mixed_ports = ports_answering_both(dynamixel_scan, feetech_scan) if scan_feetech else []
+        serial_port_warnings = [
+            f'직렬 포트 {port} 에서 다이나믹셀과 Feetech 가 모두 응답했습니다 · 한 포트에는 한 종류만'
+            for port in mixed_ports
+        ]
+        if serial_port_warnings:
+            feetech_scan['warning'] = '; '.join(
+                item for item in (str(feetech_scan.get('warning') or ''), *serial_port_warnings) if item
+            )
         matching_rows = (
             self._build_matching_rows(ethercat_scan.get('slaves', []), configured_axes)
             if scan_ethercat
@@ -550,6 +628,8 @@ class MotionStateMonitor(Node):
             dynamixel_scan,
             scan_ethercat=scan_ethercat,
             scan_dynamixel=scan_dynamixel,
+            feetech_scan=feetech_scan,
+            scan_feetech=scan_feetech,
         )
         connected_axes = [
             {
@@ -588,6 +668,8 @@ class MotionStateMonitor(Node):
             'transport_counts': count_values(motors, 'transport_label'),
             'ethercat_scan': ethercat_scan,
             'dynamixel_scan': dynamixel_scan,
+            'feetech_scan': feetech_scan,
+            'serial_port_warnings': serial_port_warnings,
             'matching_rows': matching_rows,
             'matching_summary': self._matching_summary(matching_rows),
             'connection_rows': connection_rows,
@@ -602,6 +684,8 @@ class MotionStateMonitor(Node):
             requested_sections.append(('ethercat', ethercat_scan, 'slaves_count'))
         if scan_dynamixel:
             requested_sections.append(('dynamixel', dynamixel_scan, 'devices_count'))
+        if scan_feetech:
+            requested_sections.append(('feetech', feetech_scan, 'devices_count'))
         successful_sections = [
             name for name, section, count_key in requested_sections
             if self._physical_section_success(section, count_key)
@@ -632,6 +716,13 @@ class MotionStateMonitor(Node):
                 'dynamixel_baudrate': DYNAMIXEL_SCAN_BAUDRATES[0],
                 'dynamixel_id_min': 0,
                 'dynamixel_id_max': DYNAMIXEL_SCAN_MAX_ID,
+                # 1 Mbps 뒤 덧붙인 속도 · Broadcast Ping 만 · 수정 목록 158
+                'dynamixel_extra_baudrates_broadcast_only': list(DYNAMIXEL_SCAN_BAUDRATES[1:]),
+                'feetech_protocol': FEETECH_SCAN_PROTOCOL,
+                'feetech_baudrates': list(FEETECH_SCAN_BAUDRATES),
+                'feetech_id_min': 0,
+                'feetech_id_max': FEETECH_SCAN_MAX_ID,
+                'feetech_instructions': ['ping', 'read'],
                 'full_success_requires_all_requested_transports': True,
             },
             'scan_success': bool(successful_sections),
@@ -641,6 +732,7 @@ class MotionStateMonitor(Node):
             'physical_scan': {
                 'ethercat': ethercat_scan,
                 'dynamixel': dynamixel_scan,
+                'feetech': feetech_scan,
             },
             'project_comparison': {
                 'matching_rows': matching_rows,
@@ -661,7 +753,8 @@ class MotionStateMonitor(Node):
             (
                 f'직접 스캔 완료: EtherCAT {ethercat_scan.get("slaves_count", 0)}축, '
                 f'Dynamixel {dynamixel_scan.get("devices_count", 0)}개, '
-                f'총 {scan_duration_ms:g}ms, ID {self._active_scan_id}'
+                + (f'Feetech {feetech_scan.get("devices_count", 0)}개, ' if scan_feetech else '')
+                + f'총 {scan_duration_ms:g}ms, ID {self._active_scan_id}'
                 if scan_outcome == 'complete'
                 else (
                     f'직접 스캔 부분 완료: {failed_summary}'
@@ -676,6 +769,7 @@ class MotionStateMonitor(Node):
                 'outcome': scan_outcome,
                 'ethercat_count': ethercat_scan.get('slaves_count', 0),
                 'dynamixel_count': dynamixel_scan.get('devices_count', 0),
+                'feetech_count': feetech_scan.get('devices_count', 0),
                 'scan_duration_ms': scan_duration_ms,
                 'scan_id': self._active_scan_id,
             },

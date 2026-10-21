@@ -1,0 +1,894 @@
+{
+ "ac_existing_tuned_drivers": {
+  "config": {
+   "drivers": [
+    {
+     "acceleration": 180000.0,
+     "deceleration": 180000.0,
+     "driver_model": "MADLN05BE",
+     "id": 0,
+     "lower": -36000.0,
+     "param_file": "<PARAMS>/minas_params/driver_0.yaml",
+     "profile_acceleration": 180000.0,
+     "profile_deceleration": 180000.0,
+     "profile_effort_value": 4,
+     "profile_position_value": 1,
+     "profile_velocity": 18000.0,
+     "profile_velocity_value": 3,
+     "pulse_per_revolution": 8388608,
+     "rated_current": 1.1,
+     "rated_effort": 0.16,
+     "rated_speed_rpm": 3000,
+     "speed": 123456.0,
+     "type": "minas",
+     "unit_effort": 0.1,
+     "upper": 36000.0
+    },
+    {
+     "acceleration": 180000.0,
+     "deceleration": 180000.0,
+     "driver_model": "MCDLN35BE",
+     "id": 5,
+     "lower": -36000.0,
+     "param_file": "<PARAMS>/minas_params/driver_5.yaml",
+     "profile_acceleration": 180000.0,
+     "profile_deceleration": 180000.0,
+     "profile_effort_value": 4,
+     "profile_position_value": 1,
+     "profile_velocity": 18000.0,
+     "profile_velocity_value": 3,
+     "pulse_per_revolution": 8388608,
+     "rated_current": 1.1,
+     "rated_effort": 0.16,
+     "rated_speed_rpm": 3000,
+     "speed": 3000.0,
+     "type": "minas",
+     "unit_effort": 0.1,
+     "upper": 36000.0
+    },
+    {
+     "acceleration": 180000.0,
+     "deceleration": 180000.0,
+     "driver_model": "MADLN05BE",
+     "id": 6,
+     "lower": -36000.0,
+     "param_file": "<PARAMS>/minas_params/driver_6.yaml",
+     "profile_acceleration": 180000.0,
+     "profile_deceleration": 180000.0,
+     "profile_effort_value": 4,
+     "profile_position_value": 1,
+     "profile_velocity": 18000.0,
+     "profile_velocity_value": 3,
+     "pulse_per_revolution": 8388608,
+     "rated_current": 1.1,
+     "rated_effort": 0.16,
+     "rated_speed_rpm": 3000,
+     "speed": 123456.0,
+     "type": "minas",
+     "unit_effort": 0.1,
+     "upper": 36000.0
+    }
+   ],
+   "masters": [
+    {
+     "ethercat_master_index": 0,
+     "id": 0,
+     "number_of_slaves": 3,
+     "slaves": [
+      {
+       "alias": 0,
+       "controller_index": 0,
+       "driver_id": 0,
+       "name": "모터 0",
+       "position": 0,
+       "product_id": 1614282756,
+       "profile_mode": 0,
+       "ring_position": 0,
+       "vendor_id": 1647
+      },
+      {
+       "alias": 0,
+       "controller_index": 1,
+       "driver_id": 6,
+       "name": "모터 1",
+       "position": 1,
+       "product_id": 1614282756,
+       "profile_mode": 0,
+       "ring_position": 1,
+       "vendor_id": 1647
+      },
+      {
+       "alias": 0,
+       "controller_index": 2,
+       "driver_id": 5,
+       "name": "모터 2",
+       "position": 2,
+       "product_id": 1614282756,
+       "profile_mode": 0,
+       "ring_position": 2,
+       "vendor_id": 1647
+      }
+     ],
+     "type": "ethercat"
+    }
+   ],
+   "period": 1000000,
+   "web_axis_identities": [
+    {
+     "controller_index": 0,
+     "eeprom_alias": 0,
+     "ethercat_master_index": 0,
+     "identity_source": "sii",
+     "product_id": 1614282756,
+     "revision_number": 65536,
+     "rotary_alias": null,
+     "serial_number": 553648128,
+     "sii_device_name": "",
+     "sii_order_number": "MADLN05BE",
+     "slave_position": 0,
+     "vendor_id": 1647
+    },
+    {
+     "controller_index": 1,
+     "eeprom_alias": 0,
+     "ethercat_master_index": 0,
+     "identity_source": "sii",
+     "product_id": 1614282756,
+     "revision_number": 65536,
+     "rotary_alias": null,
+     "serial_number": 553648129,
+     "sii_device_name": "",
+     "sii_order_number": "MADLN05BE",
+     "slave_position": 1,
+     "vendor_id": 1647
+    },
+    {
+     "controller_index": 2,
+     "eeprom_alias": 0,
+     "ethercat_master_index": 0,
+     "identity_source": "sii",
+     "product_id": 1614282756,
+     "revision_number": 65536,
+     "rotary_alias": null,
+     "serial_number": 553648130,
+     "sii_device_name": "",
+     "sii_order_number": "MCDLN35BE",
+     "slave_position": 2,
+     "vendor_id": 1647
+    }
+   ],
+   "web_axis_profiles": [
+    {
+     "controller_index": 0,
+     "driver_model": "MADLN05BE",
+     "model_confirmed": true,
+     "model_source": "user_nameplate"
+    },
+    {
+     "controller_index": 1,
+     "driver_model": "MADLN05BE",
+     "model_confirmed": true,
+     "model_source": "user_nameplate"
+    },
+    {
+     "controller_index": 2,
+     "driver_model": "MCDLN35BE",
+     "model_confirmed": true,
+     "model_source": "user_nameplate"
+    }
+   ]
+  },
+  "minas_params": {
+   "driver_0.yaml": "# 이 파일은 저장할 때마다 다시 만들어진다 · 손으로 고치지 말 것\n# (모터 관리 화면의 드라이브 설정 → config/minas_params/) · P8\nitems:\n- id: 30\n  index: 24672\n  subindex: 0\n  value: 1\n  type: s8\n- id: 31\n  index: 13585\n  subindex: 0\n  value: 100\n  type: s16\n- id: 32\n  index: 13586\n  subindex: 0\n  value: 0\n  type: s16\n- id: 33\n  index: 13587\n  subindex: 0\n  value: 0\n  type: s16\n- id: 34\n  index: 13588\n  subindex: 0\n  value: 1\n  type: s16\n- id: 35\n  index: 24703\n  subindex: 0\n  value: 279620000\n  type: u32\n- id: 36\n  index: 24706\n  subindex: 0\n  value: 500\n  type: u32\n- id: 37\n  index: 24753\n  subindex: 0\n  value: 0\n  type: s32\n- id: 38\n  index: 24754\n  subindex: 0\n  value: 0\n  type: s16\n- id: 50\n  index: 24690\n  subindex: 0\n  value: 0\n  type: u16\n- id: 51\n  index: 24699\n  subindex: 1\n  value: 0\n  type: s32\n- id: 52\n  index: 24699\n  subindex: 2\n  value: 0\n  type: s32\n- id: 51\n  index: 24701\n  subindex: 1\n  value: 0\n  type: s32\n- id: 52\n  index: 24701\n  subindex: 2\n  value: 0\n  type: s32\n- id: 53\n  index: 24704\n  subindex: 0\n  value: 0\n  type: u32\n- id: 54\n  index: 24705\n  subindex: 0\n  value: 0\n  type: u32\n- id: 55\n  index: 24707\n  subindex: 0\n  value: 0\n  type: u32\n- id: 56\n  index: 24708\n  subindex: 0\n  value: 0\n  type: u32\n- id: 57\n  index: 24773\n  subindex: 0\n  value: 0\n  type: u32\n- id: 58\n  index: 24774\n  subindex: 0\n  value: 0\n  type: u32\n- id: 59\n  index: 13367\n  subindex: 0\n  value: 150\n  type: s16\n- id: 60\n  index: 13368\n  subindex: 0\n  value: 0\n  type: s16\n- id: 61\n  index: 13584\n  subindex: 0\n  value: 4\n  type: s16\n- id: 62\n  index: 13844\n  subindex: 0\n  value: 200\n  type: s16\ninterfaces:\n- id: 98\n  index: 5632\n- id: 0\n  index: 24640\n  subindex: 0\n  size: 2\n  type: u16\n- id: 1\n  index: 24698\n  subindex: 0\n  size: 4\n  type: s32\n- id: 2\n  index: 24831\n  subindex: 0\n  size: 4\n  type: s32\n- id: 3\n  index: 24689\n  subindex: 0\n  size: 2\n  type: s16\n- id: 99\n  index: 6656\n- id: 4\n  index: 24641\n  subindex: 0\n  size: 2\n  type: u16\n- id: 5\n  index: 24639\n  subindex: 0\n  size: 2\n  type: u16\n- id: 6\n  index: 24676\n  subindex: 0\n  size: 4\n  type: s32\n- id: 7\n  index: 24684\n  subindex: 0\n  size: 4\n  type: s32\n- id: 8\n  index: 24695\n  subindex: 0\n  size: 2\n  type: s16\n",
+   "driver_5.yaml": "# 이 파일은 저장할 때마다 다시 만들어진다 · 손으로 고치지 말 것\n# (모터 관리 화면의 드라이브 설정 → config/minas_params/) · P8\nitems:\n- id: 30\n  index: 24672\n  subindex: 0\n  value: 1\n  type: s8\n- id: 31\n  index: 13585\n  subindex: 0\n  value: 100\n  type: s16\n- id: 32\n  index: 13586\n  subindex: 0\n  value: 0\n  type: s16\n- id: 33\n  index: 13587\n  subindex: 0\n  value: 0\n  type: s16\n- id: 34\n  index: 13588\n  subindex: 0\n  value: 1\n  type: s16\n- id: 35\n  index: 24703\n  subindex: 0\n  value: 279620000\n  type: u32\n- id: 36\n  index: 24706\n  subindex: 0\n  value: 500\n  type: u32\n- id: 37\n  index: 24753\n  subindex: 0\n  value: 0\n  type: s32\n- id: 38\n  index: 24754\n  subindex: 0\n  value: 0\n  type: s16\n- id: 50\n  index: 24690\n  subindex: 0\n  value: 0\n  type: u16\n- id: 51\n  index: 24699\n  subindex: 1\n  value: 0\n  type: s32\n- id: 52\n  index: 24699\n  subindex: 2\n  value: 0\n  type: s32\n- id: 51\n  index: 24701\n  subindex: 1\n  value: 0\n  type: s32\n- id: 52\n  index: 24701\n  subindex: 2\n  value: 0\n  type: s32\n- id: 53\n  index: 24704\n  subindex: 0\n  value: 0\n  type: u32\n- id: 54\n  index: 24705\n  subindex: 0\n  value: 0\n  type: u32\n- id: 55\n  index: 24707\n  subindex: 0\n  value: 0\n  type: u32\n- id: 56\n  index: 24708\n  subindex: 0\n  value: 0\n  type: u32\n- id: 57\n  index: 24773\n  subindex: 0\n  value: 0\n  type: u32\n- id: 58\n  index: 24774\n  subindex: 0\n  value: 0\n  type: u32\n- id: 59\n  index: 13367\n  subindex: 0\n  value: 150\n  type: s16\n- id: 60\n  index: 13368\n  subindex: 0\n  value: 0\n  type: s16\n- id: 61\n  index: 13584\n  subindex: 0\n  value: 4\n  type: s16\n- id: 62\n  index: 13844\n  subindex: 0\n  value: 200\n  type: s16\ninterfaces:\n- id: 98\n  index: 5632\n- id: 0\n  index: 24640\n  subindex: 0\n  size: 2\n  type: u16\n- id: 1\n  index: 24698\n  subindex: 0\n  size: 4\n  type: s32\n- id: 2\n  index: 24831\n  subindex: 0\n  size: 4\n  type: s32\n- id: 3\n  index: 24689\n  subindex: 0\n  size: 2\n  type: s16\n- id: 99\n  index: 6656\n- id: 4\n  index: 24641\n  subindex: 0\n  size: 2\n  type: u16\n- id: 5\n  index: 24639\n  subindex: 0\n  size: 2\n  type: u16\n- id: 6\n  index: 24676\n  subindex: 0\n  size: 4\n  type: s32\n- id: 7\n  index: 24684\n  subindex: 0\n  size: 4\n  type: s32\n- id: 8\n  index: 24695\n  subindex: 0\n  size: 2\n  type: s16\n",
+   "driver_6.yaml": "# 이 파일은 저장할 때마다 다시 만들어진다 · 손으로 고치지 말 것\n# (모터 관리 화면의 드라이브 설정 → config/minas_params/) · P8\nitems:\n- id: 30\n  index: 24672\n  subindex: 0\n  value: 1\n  type: s8\n- id: 31\n  index: 13585\n  subindex: 0\n  value: 100\n  type: s16\n- id: 32\n  index: 13586\n  subindex: 0\n  value: 0\n  type: s16\n- id: 33\n  index: 13587\n  subindex: 0\n  value: 0\n  type: s16\n- id: 34\n  index: 13588\n  subindex: 0\n  value: 1\n  type: s16\n- id: 35\n  index: 24703\n  subindex: 0\n  value: 279620000\n  type: u32\n- id: 36\n  index: 24706\n  subindex: 0\n  value: 500\n  type: u32\n- id: 37\n  index: 24753\n  subindex: 0\n  value: 0\n  type: s32\n- id: 38\n  index: 24754\n  subindex: 0\n  value: 0\n  type: s16\n- id: 50\n  index: 24690\n  subindex: 0\n  value: 0\n  type: u16\n- id: 51\n  index: 24699\n  subindex: 1\n  value: 0\n  type: s32\n- id: 52\n  index: 24699\n  subindex: 2\n  value: 0\n  type: s32\n- id: 51\n  index: 24701\n  subindex: 1\n  value: 0\n  type: s32\n- id: 52\n  index: 24701\n  subindex: 2\n  value: 0\n  type: s32\n- id: 53\n  index: 24704\n  subindex: 0\n  value: 0\n  type: u32\n- id: 54\n  index: 24705\n  subindex: 0\n  value: 0\n  type: u32\n- id: 55\n  index: 24707\n  subindex: 0\n  value: 0\n  type: u32\n- id: 56\n  index: 24708\n  subindex: 0\n  value: 0\n  type: u32\n- id: 57\n  index: 24773\n  subindex: 0\n  value: 0\n  type: u32\n- id: 58\n  index: 24774\n  subindex: 0\n  value: 0\n  type: u32\n- id: 59\n  index: 13367\n  subindex: 0\n  value: 150\n  type: s16\n- id: 60\n  index: 13368\n  subindex: 0\n  value: 0\n  type: s16\n- id: 61\n  index: 13584\n  subindex: 0\n  value: 4\n  type: s16\n- id: 62\n  index: 13844\n  subindex: 0\n  value: 200\n  type: s16\ninterfaces:\n- id: 98\n  index: 5632\n- id: 0\n  index: 24640\n  subindex: 0\n  size: 2\n  type: u16\n- id: 1\n  index: 24698\n  subindex: 0\n  size: 4\n  type: s32\n- id: 2\n  index: 24831\n  subindex: 0\n  size: 4\n  type: s32\n- id: 3\n  index: 24689\n  subindex: 0\n  size: 2\n  type: s16\n- id: 99\n  index: 6656\n- id: 4\n  index: 24641\n  subindex: 0\n  size: 2\n  type: u16\n- id: 5\n  index: 24639\n  subindex: 0\n  size: 2\n  type: u16\n- id: 6\n  index: 24676\n  subindex: 0\n  size: 4\n  type: s32\n- id: 7\n  index: 24684\n  subindex: 0\n  size: 4\n  type: s32\n- id: 8\n  index: 24695\n  subindex: 0\n  size: 2\n  type: s16\n"
+  }
+ },
+ "ac_overrides_alias_two_masters": {
+  "config": {
+   "drivers": [
+    {
+     "acceleration": 180000.0,
+     "deceleration": 180000.0,
+     "driver_model": "MADLN05BE",
+     "id": 1,
+     "lower": -36000.0,
+     "param_file": "<PARAMS>/minas_params/driver_1.yaml",
+     "profile_acceleration": 40000.0,
+     "profile_deceleration": 40000.0,
+     "profile_effort_value": 4,
+     "profile_position_value": 1,
+     "profile_velocity": 9000.0,
+     "profile_velocity_value": 3,
+     "pulse_per_revolution": 8388608,
+     "rated_current": 1.1,
+     "rated_effort": 0.16,
+     "rated_speed_rpm": 3000,
+     "speed": 2000.0,
+     "type": "minas",
+     "unit_effort": 0.1,
+     "upper": 36000.0
+    },
+    {
+     "acceleration": 90000.0,
+     "deceleration": 90000.0,
+     "driver_model": "MADLN05BE",
+     "id": 2,
+     "lower": -36000.0,
+     "param_file": "<PARAMS>/minas_params/driver_2.yaml",
+     "profile_acceleration": 180000.0,
+     "profile_deceleration": 180000.0,
+     "profile_effort_value": 4,
+     "profile_position_value": 1,
+     "profile_velocity": 18000.0,
+     "profile_velocity_value": 3,
+     "pulse_per_revolution": 8388608,
+     "rated_current": 1.1,
+     "rated_effort": 0.16,
+     "rated_speed_rpm": 3000,
+     "speed": 2000000.0,
+     "type": "minas",
+     "unit_effort": 0.1,
+     "upper": 36000.0
+    },
+    {
+     "acceleration": 180000.0,
+     "deceleration": 180000.0,
+     "driver_model": "MCDLN35BE",
+     "id": 3,
+     "lower": -36000.0,
+     "param_file": "<PARAMS>/minas_params/driver_3.yaml",
+     "profile_acceleration": 180000.0,
+     "profile_deceleration": 180000.0,
+     "profile_effort_value": 4,
+     "profile_position_value": 1,
+     "profile_velocity": 18000.0,
+     "profile_velocity_value": 3,
+     "pulse_per_revolution": 8388608,
+     "rated_current": 1.1,
+     "rated_effort": 0.16,
+     "rated_speed_rpm": 3000,
+     "speed": 99999.0,
+     "type": "minas",
+     "unit_effort": 0.1,
+     "upper": 36000.0
+    }
+   ],
+   "masters": [
+    {
+     "ethercat_master_index": 0,
+     "id": 0,
+     "number_of_slaves": 2,
+     "slaves": [
+      {
+       "alias": 103,
+       "controller_index": 0,
+       "driver_id": 1,
+       "name": "모터 0",
+       "position": 0,
+       "product_id": 1614282756,
+       "profile_mode": 0,
+       "ring_position": 0,
+       "vendor_id": 1647
+      },
+      {
+       "alias": 403,
+       "controller_index": 1,
+       "driver_id": 2,
+       "name": "모터 1",
+       "position": 0,
+       "product_id": 1614282756,
+       "profile_mode": 0,
+       "ring_position": 1,
+       "vendor_id": 1647
+      }
+     ],
+     "type": "ethercat"
+    },
+    {
+     "ethercat_master_index": 1,
+     "id": 1,
+     "number_of_slaves": 1,
+     "slaves": [
+      {
+       "alias": 0,
+       "controller_index": 2,
+       "driver_id": 3,
+       "name": "모터 2",
+       "position": 0,
+       "product_id": 1614282756,
+       "profile_mode": 0,
+       "ring_position": 0,
+       "vendor_id": 1647
+      }
+     ],
+     "type": "ethercat"
+    }
+   ],
+   "period": 1000000,
+   "web_axis_identities": [
+    {
+     "controller_index": 0,
+     "eeprom_alias": 103,
+     "ethercat_master_index": 0,
+     "identity_source": "sii",
+     "product_id": 1614282756,
+     "revision_number": 65536,
+     "rotary_alias": null,
+     "serial_number": 553648128,
+     "sii_device_name": "",
+     "sii_order_number": "MADLN05BE",
+     "slave_position": 0,
+     "vendor_id": 1647
+    },
+    {
+     "controller_index": 1,
+     "eeprom_alias": 403,
+     "ethercat_master_index": 0,
+     "identity_source": "sii",
+     "product_id": 1614282756,
+     "revision_number": 65536,
+     "rotary_alias": null,
+     "serial_number": 553648129,
+     "sii_device_name": "",
+     "sii_order_number": "MADLN05BE",
+     "slave_position": 1,
+     "vendor_id": 1647
+    },
+    {
+     "controller_index": 2,
+     "eeprom_alias": 0,
+     "ethercat_master_index": 1,
+     "identity_source": "sii",
+     "product_id": 1614282756,
+     "revision_number": 65536,
+     "rotary_alias": null,
+     "serial_number": 553648130,
+     "sii_device_name": "",
+     "sii_order_number": "MCDLN35BE",
+     "slave_position": 0,
+     "vendor_id": 1647
+    }
+   ],
+   "web_axis_profiles": [
+    {
+     "controller_index": 0,
+     "driver_model": "MADLN05BE",
+     "model_confirmed": true,
+     "model_source": "user_nameplate"
+    },
+    {
+     "controller_index": 1,
+     "driver_model": "MADLN05BE",
+     "model_confirmed": true,
+     "model_source": "user_nameplate"
+    },
+    {
+     "controller_index": 2,
+     "driver_model": "MCDLN35BE",
+     "model_confirmed": true,
+     "model_source": "user_nameplate"
+    }
+   ]
+  },
+  "minas_params": {
+   "driver_1.yaml": "# 이 파일은 저장할 때마다 다시 만들어진다 · 손으로 고치지 말 것\n# (모터 관리 화면의 드라이브 설정 → config/minas_params/) · P8\n# brake_delay_run_ms=0 · Pr4.38 회전 중 서보OFF 시 브레이크 동작 설정 (ms)\n# brake_delay_stop_ms=150 · Pr4.37 정지 중 서보OFF 시 브레이크 동작 지연 (ms)\n# max_profile_velocity_count=279620267 · 0x607F 최대 프로파일 속도 (count/s · 최대 속도 rpm 환산)\n# overload_monitor=1 · 4D29h 과부하율 읽기 (0 끔 · 1 켬) · 드라이브 Ver1.03 이상만\nitems:\n- id: 30\n  index: 24672\n  subindex: 0\n  value: 1\n  type: s8\n- id: 31\n  index: 13585\n  subindex: 0\n  value: 100\n  type: s16\n- id: 32\n  index: 13586\n  subindex: 0\n  value: 0\n  type: s16\n- id: 33\n  index: 13587\n  subindex: 0\n  value: 0\n  type: s16\n- id: 34\n  index: 13588\n  subindex: 0\n  value: 1\n  type: s16\n- id: 35\n  index: 24703\n  subindex: 0\n  value: 279620267\n  type: u32\n- id: 36\n  index: 24706\n  subindex: 0\n  value: 500\n  type: u32\n- id: 37\n  index: 24753\n  subindex: 0\n  value: 0\n  type: s32\n- id: 38\n  index: 24754\n  subindex: 0\n  value: 0\n  type: s16\n- id: 50\n  index: 24690\n  subindex: 0\n  value: 0\n  type: u16\n- id: 51\n  index: 24699\n  subindex: 1\n  value: 0\n  type: s32\n- id: 52\n  index: 24699\n  subindex: 2\n  value: 0\n  type: s32\n- id: 51\n  index: 24701\n  subindex: 1\n  value: 0\n  type: s32\n- id: 52\n  index: 24701\n  subindex: 2\n  value: 0\n  type: s32\n- id: 53\n  index: 24704\n  subindex: 0\n  value: 0\n  type: u32\n- id: 54\n  index: 24705\n  subindex: 0\n  value: 0\n  type: u32\n- id: 55\n  index: 24707\n  subindex: 0\n  value: 0\n  type: u32\n- id: 56\n  index: 24708\n  subindex: 0\n  value: 0\n  type: u32\n- id: 57\n  index: 24773\n  subindex: 0\n  value: 0\n  type: u32\n- id: 58\n  index: 24774\n  subindex: 0\n  value: 0\n  type: u32\n- id: 59\n  index: 13367\n  subindex: 0\n  value: 150\n  type: s16\n- id: 60\n  index: 13368\n  subindex: 0\n  value: 0\n  type: s16\n- id: 61\n  index: 13584\n  subindex: 0\n  value: 4\n  type: s16\n- id: 62\n  index: 13844\n  subindex: 0\n  value: 200\n  type: s16\ninterfaces:\n- id: 98\n  index: 5632\n- id: 0\n  index: 24640\n  subindex: 0\n  size: 2\n  type: u16\n- id: 1\n  index: 24698\n  subindex: 0\n  size: 4\n  type: s32\n- id: 2\n  index: 24831\n  subindex: 0\n  size: 4\n  type: s32\n- id: 3\n  index: 24689\n  subindex: 0\n  size: 2\n  type: s16\n- id: 99\n  index: 6656\n- id: 4\n  index: 24641\n  subindex: 0\n  size: 2\n  type: u16\n- id: 5\n  index: 24639\n  subindex: 0\n  size: 2\n  type: u16\n- id: 6\n  index: 24676\n  subindex: 0\n  size: 4\n  type: s32\n- id: 7\n  index: 24684\n  subindex: 0\n  size: 4\n  type: s32\n- id: 8\n  index: 24695\n  subindex: 0\n  size: 2\n  type: s16\n- id: 12\n  index: 19753\n  subindex: 0\n  size: 2\n  type: u16\n",
+   "driver_2.yaml": "# 이 파일은 저장할 때마다 다시 만들어진다 · 손으로 고치지 말 것\n# (모터 관리 화면의 드라이브 설정 → config/minas_params/) · P8\nitems:\n- id: 30\n  index: 24672\n  subindex: 0\n  value: 1\n  type: s8\n- id: 31\n  index: 13585\n  subindex: 0\n  value: 100\n  type: s16\n- id: 32\n  index: 13586\n  subindex: 0\n  value: 0\n  type: s16\n- id: 33\n  index: 13587\n  subindex: 0\n  value: 0\n  type: s16\n- id: 34\n  index: 13588\n  subindex: 0\n  value: 1\n  type: s16\n- id: 35\n  index: 24703\n  subindex: 0\n  value: 279620000\n  type: u32\n- id: 36\n  index: 24706\n  subindex: 0\n  value: 500\n  type: u32\n- id: 37\n  index: 24753\n  subindex: 0\n  value: 0\n  type: s32\n- id: 38\n  index: 24754\n  subindex: 0\n  value: 0\n  type: s16\n- id: 50\n  index: 24690\n  subindex: 0\n  value: 0\n  type: u16\n- id: 51\n  index: 24699\n  subindex: 1\n  value: 0\n  type: s32\n- id: 52\n  index: 24699\n  subindex: 2\n  value: 0\n  type: s32\n- id: 51\n  index: 24701\n  subindex: 1\n  value: 0\n  type: s32\n- id: 52\n  index: 24701\n  subindex: 2\n  value: 0\n  type: s32\n- id: 53\n  index: 24704\n  subindex: 0\n  value: 0\n  type: u32\n- id: 54\n  index: 24705\n  subindex: 0\n  value: 0\n  type: u32\n- id: 55\n  index: 24707\n  subindex: 0\n  value: 0\n  type: u32\n- id: 56\n  index: 24708\n  subindex: 0\n  value: 0\n  type: u32\n- id: 57\n  index: 24773\n  subindex: 0\n  value: 0\n  type: u32\n- id: 58\n  index: 24774\n  subindex: 0\n  value: 0\n  type: u32\n- id: 59\n  index: 13367\n  subindex: 0\n  value: 150\n  type: s16\n- id: 60\n  index: 13368\n  subindex: 0\n  value: 0\n  type: s16\n- id: 61\n  index: 13584\n  subindex: 0\n  value: 4\n  type: s16\n- id: 62\n  index: 13844\n  subindex: 0\n  value: 200\n  type: s16\ninterfaces:\n- id: 98\n  index: 5632\n- id: 0\n  index: 24640\n  subindex: 0\n  size: 2\n  type: u16\n- id: 1\n  index: 24698\n  subindex: 0\n  size: 4\n  type: s32\n- id: 2\n  index: 24831\n  subindex: 0\n  size: 4\n  type: s32\n- id: 3\n  index: 24689\n  subindex: 0\n  size: 2\n  type: s16\n- id: 99\n  index: 6656\n- id: 4\n  index: 24641\n  subindex: 0\n  size: 2\n  type: u16\n- id: 5\n  index: 24639\n  subindex: 0\n  size: 2\n  type: u16\n- id: 6\n  index: 24676\n  subindex: 0\n  size: 4\n  type: s32\n- id: 7\n  index: 24684\n  subindex: 0\n  size: 4\n  type: s32\n- id: 8\n  index: 24695\n  subindex: 0\n  size: 2\n  type: s16\n",
+   "driver_3.yaml": "# 이 파일은 저장할 때마다 다시 만들어진다 · 손으로 고치지 말 것\n# (모터 관리 화면의 드라이브 설정 → config/minas_params/) · P8\nitems:\n- id: 30\n  index: 24672\n  subindex: 0\n  value: 1\n  type: s8\n- id: 31\n  index: 13585\n  subindex: 0\n  value: 100\n  type: s16\n- id: 32\n  index: 13586\n  subindex: 0\n  value: 0\n  type: s16\n- id: 33\n  index: 13587\n  subindex: 0\n  value: 0\n  type: s16\n- id: 34\n  index: 13588\n  subindex: 0\n  value: 1\n  type: s16\n- id: 35\n  index: 24703\n  subindex: 0\n  value: 279620000\n  type: u32\n- id: 36\n  index: 24706\n  subindex: 0\n  value: 500\n  type: u32\n- id: 37\n  index: 24753\n  subindex: 0\n  value: 0\n  type: s32\n- id: 38\n  index: 24754\n  subindex: 0\n  value: 0\n  type: s16\n- id: 50\n  index: 24690\n  subindex: 0\n  value: 0\n  type: u16\n- id: 51\n  index: 24699\n  subindex: 1\n  value: 0\n  type: s32\n- id: 52\n  index: 24699\n  subindex: 2\n  value: 0\n  type: s32\n- id: 51\n  index: 24701\n  subindex: 1\n  value: 0\n  type: s32\n- id: 52\n  index: 24701\n  subindex: 2\n  value: 0\n  type: s32\n- id: 53\n  index: 24704\n  subindex: 0\n  value: 0\n  type: u32\n- id: 54\n  index: 24705\n  subindex: 0\n  value: 0\n  type: u32\n- id: 55\n  index: 24707\n  subindex: 0\n  value: 0\n  type: u32\n- id: 56\n  index: 24708\n  subindex: 0\n  value: 0\n  type: u32\n- id: 57\n  index: 24773\n  subindex: 0\n  value: 0\n  type: u32\n- id: 58\n  index: 24774\n  subindex: 0\n  value: 0\n  type: u32\n- id: 59\n  index: 13367\n  subindex: 0\n  value: 150\n  type: s16\n- id: 60\n  index: 13368\n  subindex: 0\n  value: 0\n  type: s16\n- id: 61\n  index: 13584\n  subindex: 0\n  value: 4\n  type: s16\n- id: 62\n  index: 13844\n  subindex: 0\n  value: 200\n  type: s16\ninterfaces:\n- id: 98\n  index: 5632\n- id: 0\n  index: 24640\n  subindex: 0\n  size: 2\n  type: u16\n- id: 1\n  index: 24698\n  subindex: 0\n  size: 4\n  type: s32\n- id: 2\n  index: 24831\n  subindex: 0\n  size: 4\n  type: s32\n- id: 3\n  index: 24689\n  subindex: 0\n  size: 2\n  type: s16\n- id: 99\n  index: 6656\n- id: 4\n  index: 24641\n  subindex: 0\n  size: 2\n  type: u16\n- id: 5\n  index: 24639\n  subindex: 0\n  size: 2\n  type: u16\n- id: 6\n  index: 24676\n  subindex: 0\n  size: 4\n  type: s32\n- id: 7\n  index: 24684\n  subindex: 0\n  size: 4\n  type: s32\n- id: 8\n  index: 24695\n  subindex: 0\n  size: 2\n  type: s16\n"
+  }
+ },
+ "ac_prunes_old_serial": {
+  "config": {
+   "drivers": [
+    {
+     "acceleration": 180000.0,
+     "deceleration": 180000.0,
+     "driver_model": "MADLN05BE",
+     "id": 2,
+     "lower": -36000.0,
+     "param_file": "<PARAMS>/minas_params/driver_2.yaml",
+     "profile_acceleration": 180000.0,
+     "profile_deceleration": 180000.0,
+     "profile_effort_value": 4,
+     "profile_position_value": 1,
+     "profile_velocity": 18000.0,
+     "profile_velocity_value": 3,
+     "pulse_per_revolution": 8388608,
+     "rated_current": 1.1,
+     "rated_effort": 0.16,
+     "rated_speed_rpm": 3000,
+     "speed": 2000000.0,
+     "type": "minas",
+     "unit_effort": 0.1,
+     "upper": 36000.0
+    },
+    {
+     "acceleration": 180000.0,
+     "deceleration": 180000.0,
+     "driver_model": "MCDLN35BE",
+     "id": 3,
+     "lower": -36000.0,
+     "param_file": "<PARAMS>/minas_params/driver_3.yaml",
+     "profile_acceleration": 180000.0,
+     "profile_deceleration": 180000.0,
+     "profile_effort_value": 4,
+     "profile_position_value": 1,
+     "profile_velocity": 18000.0,
+     "profile_velocity_value": 3,
+     "pulse_per_revolution": 8388608,
+     "rated_current": 1.1,
+     "rated_effort": 0.16,
+     "rated_speed_rpm": 3000,
+     "speed": 2000000.0,
+     "type": "minas",
+     "unit_effort": 0.1,
+     "upper": 36000.0
+    }
+   ],
+   "masters": [
+    {
+     "ethercat_master_index": 0,
+     "id": 0,
+     "number_of_slaves": 2,
+     "slaves": [
+      {
+       "alias": 0,
+       "controller_index": 0,
+       "driver_id": 2,
+       "name": "모터 0",
+       "position": 0,
+       "product_id": 1614282756,
+       "profile_mode": 0,
+       "ring_position": 0,
+       "vendor_id": 1647
+      },
+      {
+       "alias": 0,
+       "controller_index": 1,
+       "driver_id": 3,
+       "name": "모터 1",
+       "position": 1,
+       "product_id": 1614282756,
+       "profile_mode": 0,
+       "ring_position": 1,
+       "vendor_id": 1647
+      }
+     ],
+     "type": "ethercat"
+    }
+   ],
+   "period": 1000000,
+   "web_axis_identities": [
+    {
+     "controller_index": 0,
+     "eeprom_alias": 0,
+     "ethercat_master_index": 0,
+     "identity_source": "sii",
+     "product_id": 1614282756,
+     "revision_number": 65536,
+     "rotary_alias": null,
+     "serial_number": 553648128,
+     "sii_device_name": "",
+     "sii_order_number": "MADLN05BE",
+     "slave_position": 0,
+     "vendor_id": 1647
+    },
+    {
+     "controller_index": 1,
+     "eeprom_alias": 0,
+     "ethercat_master_index": 0,
+     "identity_source": "sii",
+     "product_id": 1614282756,
+     "revision_number": 65536,
+     "rotary_alias": null,
+     "serial_number": 553648129,
+     "sii_device_name": "",
+     "sii_order_number": "MCDLN35BE",
+     "slave_position": 1,
+     "vendor_id": 1647
+    }
+   ],
+   "web_axis_profiles": [
+    {
+     "controller_index": 0,
+     "driver_model": "MADLN05BE",
+     "model_confirmed": true,
+     "model_source": "user_nameplate"
+    },
+    {
+     "controller_index": 1,
+     "driver_model": "MCDLN35BE",
+     "model_confirmed": true,
+     "model_source": "user_nameplate"
+    }
+   ]
+  },
+  "minas_params": {
+   "driver_2.yaml": "# 이 파일은 저장할 때마다 다시 만들어진다 · 손으로 고치지 말 것\n# (모터 관리 화면의 드라이브 설정 → config/minas_params/) · P8\nitems:\n- id: 30\n  index: 24672\n  subindex: 0\n  value: 1\n  type: s8\n- id: 31\n  index: 13585\n  subindex: 0\n  value: 100\n  type: s16\n- id: 32\n  index: 13586\n  subindex: 0\n  value: 0\n  type: s16\n- id: 33\n  index: 13587\n  subindex: 0\n  value: 0\n  type: s16\n- id: 34\n  index: 13588\n  subindex: 0\n  value: 1\n  type: s16\n- id: 35\n  index: 24703\n  subindex: 0\n  value: 279620000\n  type: u32\n- id: 36\n  index: 24706\n  subindex: 0\n  value: 500\n  type: u32\n- id: 37\n  index: 24753\n  subindex: 0\n  value: 0\n  type: s32\n- id: 38\n  index: 24754\n  subindex: 0\n  value: 0\n  type: s16\n- id: 50\n  index: 24690\n  subindex: 0\n  value: 0\n  type: u16\n- id: 51\n  index: 24699\n  subindex: 1\n  value: 0\n  type: s32\n- id: 52\n  index: 24699\n  subindex: 2\n  value: 0\n  type: s32\n- id: 51\n  index: 24701\n  subindex: 1\n  value: 0\n  type: s32\n- id: 52\n  index: 24701\n  subindex: 2\n  value: 0\n  type: s32\n- id: 53\n  index: 24704\n  subindex: 0\n  value: 0\n  type: u32\n- id: 54\n  index: 24705\n  subindex: 0\n  value: 0\n  type: u32\n- id: 55\n  index: 24707\n  subindex: 0\n  value: 0\n  type: u32\n- id: 56\n  index: 24708\n  subindex: 0\n  value: 0\n  type: u32\n- id: 57\n  index: 24773\n  subindex: 0\n  value: 0\n  type: u32\n- id: 58\n  index: 24774\n  subindex: 0\n  value: 0\n  type: u32\n- id: 59\n  index: 13367\n  subindex: 0\n  value: 150\n  type: s16\n- id: 60\n  index: 13368\n  subindex: 0\n  value: 0\n  type: s16\n- id: 61\n  index: 13584\n  subindex: 0\n  value: 4\n  type: s16\n- id: 62\n  index: 13844\n  subindex: 0\n  value: 200\n  type: s16\ninterfaces:\n- id: 98\n  index: 5632\n- id: 0\n  index: 24640\n  subindex: 0\n  size: 2\n  type: u16\n- id: 1\n  index: 24698\n  subindex: 0\n  size: 4\n  type: s32\n- id: 2\n  index: 24831\n  subindex: 0\n  size: 4\n  type: s32\n- id: 3\n  index: 24689\n  subindex: 0\n  size: 2\n  type: s16\n- id: 99\n  index: 6656\n- id: 4\n  index: 24641\n  subindex: 0\n  size: 2\n  type: u16\n- id: 5\n  index: 24639\n  subindex: 0\n  size: 2\n  type: u16\n- id: 6\n  index: 24676\n  subindex: 0\n  size: 4\n  type: s32\n- id: 7\n  index: 24684\n  subindex: 0\n  size: 4\n  type: s32\n- id: 8\n  index: 24695\n  subindex: 0\n  size: 2\n  type: s16\n",
+   "driver_3.yaml": "# 이 파일은 저장할 때마다 다시 만들어진다 · 손으로 고치지 말 것\n# (모터 관리 화면의 드라이브 설정 → config/minas_params/) · P8\nitems:\n- id: 30\n  index: 24672\n  subindex: 0\n  value: 1\n  type: s8\n- id: 31\n  index: 13585\n  subindex: 0\n  value: 100\n  type: s16\n- id: 32\n  index: 13586\n  subindex: 0\n  value: 0\n  type: s16\n- id: 33\n  index: 13587\n  subindex: 0\n  value: 0\n  type: s16\n- id: 34\n  index: 13588\n  subindex: 0\n  value: 1\n  type: s16\n- id: 35\n  index: 24703\n  subindex: 0\n  value: 279620000\n  type: u32\n- id: 36\n  index: 24706\n  subindex: 0\n  value: 500\n  type: u32\n- id: 37\n  index: 24753\n  subindex: 0\n  value: 0\n  type: s32\n- id: 38\n  index: 24754\n  subindex: 0\n  value: 0\n  type: s16\n- id: 50\n  index: 24690\n  subindex: 0\n  value: 0\n  type: u16\n- id: 51\n  index: 24699\n  subindex: 1\n  value: 0\n  type: s32\n- id: 52\n  index: 24699\n  subindex: 2\n  value: 0\n  type: s32\n- id: 51\n  index: 24701\n  subindex: 1\n  value: 0\n  type: s32\n- id: 52\n  index: 24701\n  subindex: 2\n  value: 0\n  type: s32\n- id: 53\n  index: 24704\n  subindex: 0\n  value: 0\n  type: u32\n- id: 54\n  index: 24705\n  subindex: 0\n  value: 0\n  type: u32\n- id: 55\n  index: 24707\n  subindex: 0\n  value: 0\n  type: u32\n- id: 56\n  index: 24708\n  subindex: 0\n  value: 0\n  type: u32\n- id: 57\n  index: 24773\n  subindex: 0\n  value: 0\n  type: u32\n- id: 58\n  index: 24774\n  subindex: 0\n  value: 0\n  type: u32\n- id: 59\n  index: 13367\n  subindex: 0\n  value: 150\n  type: s16\n- id: 60\n  index: 13368\n  subindex: 0\n  value: 0\n  type: s16\n- id: 61\n  index: 13584\n  subindex: 0\n  value: 4\n  type: s16\n- id: 62\n  index: 13844\n  subindex: 0\n  value: 200\n  type: s16\ninterfaces:\n- id: 98\n  index: 5632\n- id: 0\n  index: 24640\n  subindex: 0\n  size: 2\n  type: u16\n- id: 1\n  index: 24698\n  subindex: 0\n  size: 4\n  type: s32\n- id: 2\n  index: 24831\n  subindex: 0\n  size: 4\n  type: s32\n- id: 3\n  index: 24689\n  subindex: 0\n  size: 2\n  type: s16\n- id: 99\n  index: 6656\n- id: 4\n  index: 24641\n  subindex: 0\n  size: 2\n  type: u16\n- id: 5\n  index: 24639\n  subindex: 0\n  size: 2\n  type: u16\n- id: 6\n  index: 24676\n  subindex: 0\n  size: 4\n  type: s32\n- id: 7\n  index: 24684\n  subindex: 0\n  size: 4\n  type: s32\n- id: 8\n  index: 24695\n  subindex: 0\n  size: 2\n  type: s16\n"
+  }
+ },
+ "ac_three_same_model": {
+  "config": {
+   "drivers": [
+    {
+     "acceleration": 180000.0,
+     "deceleration": 180000.0,
+     "driver_model": "MADLN05BE",
+     "id": 1,
+     "lower": -36000.0,
+     "param_file": "<PARAMS>/minas_params/driver_1.yaml",
+     "profile_acceleration": 180000.0,
+     "profile_deceleration": 180000.0,
+     "profile_effort_value": 4,
+     "profile_position_value": 1,
+     "profile_velocity": 18000.0,
+     "profile_velocity_value": 3,
+     "pulse_per_revolution": 8388608,
+     "rated_current": 1.1,
+     "rated_effort": 0.16,
+     "rated_speed_rpm": 3000,
+     "speed": 2000000.0,
+     "type": "minas",
+     "unit_effort": 0.1,
+     "upper": 36000.0
+    },
+    {
+     "acceleration": 180000.0,
+     "deceleration": 180000.0,
+     "driver_model": "MADLN05BE",
+     "id": 2,
+     "lower": -36000.0,
+     "param_file": "<PARAMS>/minas_params/driver_2.yaml",
+     "profile_acceleration": 180000.0,
+     "profile_deceleration": 180000.0,
+     "profile_effort_value": 4,
+     "profile_position_value": 1,
+     "profile_velocity": 18000.0,
+     "profile_velocity_value": 3,
+     "pulse_per_revolution": 8388608,
+     "rated_current": 1.1,
+     "rated_effort": 0.16,
+     "rated_speed_rpm": 3000,
+     "speed": 2000000.0,
+     "type": "minas",
+     "unit_effort": 0.1,
+     "upper": 36000.0
+    },
+    {
+     "acceleration": 180000.0,
+     "deceleration": 180000.0,
+     "driver_model": "MADLN05BE",
+     "id": 3,
+     "lower": -36000.0,
+     "param_file": "<PARAMS>/minas_params/driver_3.yaml",
+     "profile_acceleration": 180000.0,
+     "profile_deceleration": 180000.0,
+     "profile_effort_value": 4,
+     "profile_position_value": 1,
+     "profile_velocity": 18000.0,
+     "profile_velocity_value": 3,
+     "pulse_per_revolution": 8388608,
+     "rated_current": 1.1,
+     "rated_effort": 0.16,
+     "rated_speed_rpm": 3000,
+     "speed": 2000000.0,
+     "type": "minas",
+     "unit_effort": 0.1,
+     "upper": 36000.0
+    }
+   ],
+   "masters": [
+    {
+     "ethercat_master_index": 0,
+     "id": 0,
+     "number_of_slaves": 3,
+     "slaves": [
+      {
+       "alias": 0,
+       "controller_index": 0,
+       "driver_id": 1,
+       "name": "모터 0",
+       "position": 0,
+       "product_id": 1614282756,
+       "profile_mode": 0,
+       "ring_position": 0,
+       "vendor_id": 1647
+      },
+      {
+       "alias": 0,
+       "controller_index": 1,
+       "driver_id": 2,
+       "name": "모터 1",
+       "position": 1,
+       "product_id": 1614282756,
+       "profile_mode": 0,
+       "ring_position": 1,
+       "vendor_id": 1647
+      },
+      {
+       "alias": 0,
+       "controller_index": 2,
+       "driver_id": 3,
+       "name": "모터 2",
+       "position": 2,
+       "product_id": 1614282756,
+       "profile_mode": 0,
+       "ring_position": 2,
+       "vendor_id": 1647
+      }
+     ],
+     "type": "ethercat"
+    }
+   ],
+   "period": 1000000,
+   "web_axis_identities": [
+    {
+     "controller_index": 0,
+     "eeprom_alias": 0,
+     "ethercat_master_index": 0,
+     "identity_source": "sii",
+     "product_id": 1614282756,
+     "revision_number": 65536,
+     "rotary_alias": null,
+     "serial_number": 553648128,
+     "sii_device_name": "",
+     "sii_order_number": "MADLN05BE",
+     "slave_position": 0,
+     "vendor_id": 1647
+    },
+    {
+     "controller_index": 1,
+     "eeprom_alias": 0,
+     "ethercat_master_index": 0,
+     "identity_source": "sii",
+     "product_id": 1614282756,
+     "revision_number": 65536,
+     "rotary_alias": null,
+     "serial_number": 553648129,
+     "sii_device_name": "",
+     "sii_order_number": "MADLN05BE",
+     "slave_position": 1,
+     "vendor_id": 1647
+    },
+    {
+     "controller_index": 2,
+     "eeprom_alias": 0,
+     "ethercat_master_index": 0,
+     "identity_source": "sii",
+     "product_id": 1614282756,
+     "revision_number": 65536,
+     "rotary_alias": null,
+     "serial_number": 553648130,
+     "sii_device_name": "",
+     "sii_order_number": "MADLN05BE",
+     "slave_position": 2,
+     "vendor_id": 1647
+    }
+   ],
+   "web_axis_profiles": [
+    {
+     "controller_index": 0,
+     "driver_model": "MADLN05BE",
+     "model_confirmed": true,
+     "model_source": "user_nameplate"
+    },
+    {
+     "controller_index": 1,
+     "driver_model": "MADLN05BE",
+     "model_confirmed": true,
+     "model_source": "user_nameplate"
+    },
+    {
+     "controller_index": 2,
+     "driver_model": "MADLN05BE",
+     "model_confirmed": true,
+     "model_source": "user_nameplate"
+    }
+   ]
+  },
+  "minas_params": {
+   "driver_1.yaml": "# 이 파일은 저장할 때마다 다시 만들어진다 · 손으로 고치지 말 것\n# (모터 관리 화면의 드라이브 설정 → config/minas_params/) · P8\nitems:\n- id: 30\n  index: 24672\n  subindex: 0\n  value: 1\n  type: s8\n- id: 31\n  index: 13585\n  subindex: 0\n  value: 100\n  type: s16\n- id: 32\n  index: 13586\n  subindex: 0\n  value: 0\n  type: s16\n- id: 33\n  index: 13587\n  subindex: 0\n  value: 0\n  type: s16\n- id: 34\n  index: 13588\n  subindex: 0\n  value: 1\n  type: s16\n- id: 35\n  index: 24703\n  subindex: 0\n  value: 279620000\n  type: u32\n- id: 36\n  index: 24706\n  subindex: 0\n  value: 500\n  type: u32\n- id: 37\n  index: 24753\n  subindex: 0\n  value: 0\n  type: s32\n- id: 38\n  index: 24754\n  subindex: 0\n  value: 0\n  type: s16\n- id: 50\n  index: 24690\n  subindex: 0\n  value: 0\n  type: u16\n- id: 51\n  index: 24699\n  subindex: 1\n  value: 0\n  type: s32\n- id: 52\n  index: 24699\n  subindex: 2\n  value: 0\n  type: s32\n- id: 51\n  index: 24701\n  subindex: 1\n  value: 0\n  type: s32\n- id: 52\n  index: 24701\n  subindex: 2\n  value: 0\n  type: s32\n- id: 53\n  index: 24704\n  subindex: 0\n  value: 0\n  type: u32\n- id: 54\n  index: 24705\n  subindex: 0\n  value: 0\n  type: u32\n- id: 55\n  index: 24707\n  subindex: 0\n  value: 0\n  type: u32\n- id: 56\n  index: 24708\n  subindex: 0\n  value: 0\n  type: u32\n- id: 57\n  index: 24773\n  subindex: 0\n  value: 0\n  type: u32\n- id: 58\n  index: 24774\n  subindex: 0\n  value: 0\n  type: u32\n- id: 59\n  index: 13367\n  subindex: 0\n  value: 150\n  type: s16\n- id: 60\n  index: 13368\n  subindex: 0\n  value: 0\n  type: s16\n- id: 61\n  index: 13584\n  subindex: 0\n  value: 4\n  type: s16\n- id: 62\n  index: 13844\n  subindex: 0\n  value: 200\n  type: s16\ninterfaces:\n- id: 98\n  index: 5632\n- id: 0\n  index: 24640\n  subindex: 0\n  size: 2\n  type: u16\n- id: 1\n  index: 24698\n  subindex: 0\n  size: 4\n  type: s32\n- id: 2\n  index: 24831\n  subindex: 0\n  size: 4\n  type: s32\n- id: 3\n  index: 24689\n  subindex: 0\n  size: 2\n  type: s16\n- id: 99\n  index: 6656\n- id: 4\n  index: 24641\n  subindex: 0\n  size: 2\n  type: u16\n- id: 5\n  index: 24639\n  subindex: 0\n  size: 2\n  type: u16\n- id: 6\n  index: 24676\n  subindex: 0\n  size: 4\n  type: s32\n- id: 7\n  index: 24684\n  subindex: 0\n  size: 4\n  type: s32\n- id: 8\n  index: 24695\n  subindex: 0\n  size: 2\n  type: s16\n",
+   "driver_2.yaml": "# 이 파일은 저장할 때마다 다시 만들어진다 · 손으로 고치지 말 것\n# (모터 관리 화면의 드라이브 설정 → config/minas_params/) · P8\nitems:\n- id: 30\n  index: 24672\n  subindex: 0\n  value: 1\n  type: s8\n- id: 31\n  index: 13585\n  subindex: 0\n  value: 100\n  type: s16\n- id: 32\n  index: 13586\n  subindex: 0\n  value: 0\n  type: s16\n- id: 33\n  index: 13587\n  subindex: 0\n  value: 0\n  type: s16\n- id: 34\n  index: 13588\n  subindex: 0\n  value: 1\n  type: s16\n- id: 35\n  index: 24703\n  subindex: 0\n  value: 279620000\n  type: u32\n- id: 36\n  index: 24706\n  subindex: 0\n  value: 500\n  type: u32\n- id: 37\n  index: 24753\n  subindex: 0\n  value: 0\n  type: s32\n- id: 38\n  index: 24754\n  subindex: 0\n  value: 0\n  type: s16\n- id: 50\n  index: 24690\n  subindex: 0\n  value: 0\n  type: u16\n- id: 51\n  index: 24699\n  subindex: 1\n  value: 0\n  type: s32\n- id: 52\n  index: 24699\n  subindex: 2\n  value: 0\n  type: s32\n- id: 51\n  index: 24701\n  subindex: 1\n  value: 0\n  type: s32\n- id: 52\n  index: 24701\n  subindex: 2\n  value: 0\n  type: s32\n- id: 53\n  index: 24704\n  subindex: 0\n  value: 0\n  type: u32\n- id: 54\n  index: 24705\n  subindex: 0\n  value: 0\n  type: u32\n- id: 55\n  index: 24707\n  subindex: 0\n  value: 0\n  type: u32\n- id: 56\n  index: 24708\n  subindex: 0\n  value: 0\n  type: u32\n- id: 57\n  index: 24773\n  subindex: 0\n  value: 0\n  type: u32\n- id: 58\n  index: 24774\n  subindex: 0\n  value: 0\n  type: u32\n- id: 59\n  index: 13367\n  subindex: 0\n  value: 150\n  type: s16\n- id: 60\n  index: 13368\n  subindex: 0\n  value: 0\n  type: s16\n- id: 61\n  index: 13584\n  subindex: 0\n  value: 4\n  type: s16\n- id: 62\n  index: 13844\n  subindex: 0\n  value: 200\n  type: s16\ninterfaces:\n- id: 98\n  index: 5632\n- id: 0\n  index: 24640\n  subindex: 0\n  size: 2\n  type: u16\n- id: 1\n  index: 24698\n  subindex: 0\n  size: 4\n  type: s32\n- id: 2\n  index: 24831\n  subindex: 0\n  size: 4\n  type: s32\n- id: 3\n  index: 24689\n  subindex: 0\n  size: 2\n  type: s16\n- id: 99\n  index: 6656\n- id: 4\n  index: 24641\n  subindex: 0\n  size: 2\n  type: u16\n- id: 5\n  index: 24639\n  subindex: 0\n  size: 2\n  type: u16\n- id: 6\n  index: 24676\n  subindex: 0\n  size: 4\n  type: s32\n- id: 7\n  index: 24684\n  subindex: 0\n  size: 4\n  type: s32\n- id: 8\n  index: 24695\n  subindex: 0\n  size: 2\n  type: s16\n",
+   "driver_3.yaml": "# 이 파일은 저장할 때마다 다시 만들어진다 · 손으로 고치지 말 것\n# (모터 관리 화면의 드라이브 설정 → config/minas_params/) · P8\nitems:\n- id: 30\n  index: 24672\n  subindex: 0\n  value: 1\n  type: s8\n- id: 31\n  index: 13585\n  subindex: 0\n  value: 100\n  type: s16\n- id: 32\n  index: 13586\n  subindex: 0\n  value: 0\n  type: s16\n- id: 33\n  index: 13587\n  subindex: 0\n  value: 0\n  type: s16\n- id: 34\n  index: 13588\n  subindex: 0\n  value: 1\n  type: s16\n- id: 35\n  index: 24703\n  subindex: 0\n  value: 279620000\n  type: u32\n- id: 36\n  index: 24706\n  subindex: 0\n  value: 500\n  type: u32\n- id: 37\n  index: 24753\n  subindex: 0\n  value: 0\n  type: s32\n- id: 38\n  index: 24754\n  subindex: 0\n  value: 0\n  type: s16\n- id: 50\n  index: 24690\n  subindex: 0\n  value: 0\n  type: u16\n- id: 51\n  index: 24699\n  subindex: 1\n  value: 0\n  type: s32\n- id: 52\n  index: 24699\n  subindex: 2\n  value: 0\n  type: s32\n- id: 51\n  index: 24701\n  subindex: 1\n  value: 0\n  type: s32\n- id: 52\n  index: 24701\n  subindex: 2\n  value: 0\n  type: s32\n- id: 53\n  index: 24704\n  subindex: 0\n  value: 0\n  type: u32\n- id: 54\n  index: 24705\n  subindex: 0\n  value: 0\n  type: u32\n- id: 55\n  index: 24707\n  subindex: 0\n  value: 0\n  type: u32\n- id: 56\n  index: 24708\n  subindex: 0\n  value: 0\n  type: u32\n- id: 57\n  index: 24773\n  subindex: 0\n  value: 0\n  type: u32\n- id: 58\n  index: 24774\n  subindex: 0\n  value: 0\n  type: u32\n- id: 59\n  index: 13367\n  subindex: 0\n  value: 150\n  type: s16\n- id: 60\n  index: 13368\n  subindex: 0\n  value: 0\n  type: s16\n- id: 61\n  index: 13584\n  subindex: 0\n  value: 4\n  type: s16\n- id: 62\n  index: 13844\n  subindex: 0\n  value: 200\n  type: s16\ninterfaces:\n- id: 98\n  index: 5632\n- id: 0\n  index: 24640\n  subindex: 0\n  size: 2\n  type: u16\n- id: 1\n  index: 24698\n  subindex: 0\n  size: 4\n  type: s32\n- id: 2\n  index: 24831\n  subindex: 0\n  size: 4\n  type: s32\n- id: 3\n  index: 24689\n  subindex: 0\n  size: 2\n  type: s16\n- id: 99\n  index: 6656\n- id: 4\n  index: 24641\n  subindex: 0\n  size: 2\n  type: u16\n- id: 5\n  index: 24639\n  subindex: 0\n  size: 2\n  type: u16\n- id: 6\n  index: 24676\n  subindex: 0\n  size: 4\n  type: s32\n- id: 7\n  index: 24684\n  subindex: 0\n  size: 4\n  type: s32\n- id: 8\n  index: 24695\n  subindex: 0\n  size: 2\n  type: s16\n"
+  }
+ },
+ "mixed_ac_xm540": {
+  "config": {
+   "drivers": [
+    {
+     "acceleration": 180000.0,
+     "deceleration": 180000.0,
+     "driver_model": "MADLN05BE",
+     "id": 1,
+     "lower": -36000.0,
+     "param_file": "<PARAMS>/minas_params/driver_1.yaml",
+     "profile_acceleration": 180000.0,
+     "profile_deceleration": 180000.0,
+     "profile_effort_value": 4,
+     "profile_position_value": 1,
+     "profile_velocity": 18000.0,
+     "profile_velocity_value": 3,
+     "pulse_per_revolution": 8388608,
+     "rated_current": 1.1,
+     "rated_effort": 0.16,
+     "rated_speed_rpm": 3000,
+     "speed": 2000000.0,
+     "type": "minas",
+     "unit_effort": 0.1,
+     "upper": 36000.0
+    },
+    {
+     "acceleration": 180000.0,
+     "deceleration": 180000.0,
+     "driver_model": "MCDLN35BE",
+     "id": 2,
+     "lower": -36000.0,
+     "param_file": "<PARAMS>/minas_params/driver_2.yaml",
+     "profile_acceleration": 180000.0,
+     "profile_deceleration": 180000.0,
+     "profile_effort_value": 4,
+     "profile_position_value": 1,
+     "profile_velocity": 18000.0,
+     "profile_velocity_value": 3,
+     "pulse_per_revolution": 8388608,
+     "rated_current": 1.1,
+     "rated_effort": 0.16,
+     "rated_speed_rpm": 3000,
+     "speed": 2000000.0,
+     "type": "minas",
+     "unit_effort": 0.1,
+     "upper": 36000.0
+    },
+    {
+     "acceleration": 703104.5,
+     "deceleration": 703104.5,
+     "driver_model": "XM540-W150",
+     "id": 3,
+     "lower": -180.0,
+     "param_file": "<WS>/config/dynamixel_xm540_w150.yaml",
+     "profile_acceleration": 703104.5,
+     "profile_deceleration": 703104.5,
+     "profile_effort_value": 0,
+     "profile_position_value": 4,
+     "profile_velocity": 396.0,
+     "profile_velocity_value": 1,
+     "pulse_per_revolution": 4096,
+     "rated_current": 1.0,
+     "rated_effort": 1.0,
+     "rated_speed_rpm": 66,
+     "speed": 396.0,
+     "type": "dynamixel",
+     "unit_effort": 0.00269,
+     "upper": 180.0
+    },
+    {
+     "acceleration": 703104.5,
+     "deceleration": 703104.5,
+     "driver_model": "XM540-W270-R",
+     "id": 4,
+     "lower": -180.0,
+     "param_file": "<WS>/config/dynamixel_xm540_w270.yaml",
+     "profile_acceleration": 703104.5,
+     "profile_deceleration": 703104.5,
+     "profile_effort_value": 0,
+     "profile_position_value": 4,
+     "profile_velocity": 222.0,
+     "profile_velocity_value": 1,
+     "pulse_per_revolution": 4096,
+     "rated_current": 1.0,
+     "rated_effort": 1.0,
+     "rated_speed_rpm": 37,
+     "speed": 222.0,
+     "type": "dynamixel",
+     "unit_effort": 0.00269,
+     "upper": 180.0
+    }
+   ],
+   "masters": [
+    {
+     "ethercat_master_index": 0,
+     "id": 0,
+     "number_of_slaves": 2,
+     "slaves": [
+      {
+       "alias": 0,
+       "controller_index": 0,
+       "driver_id": 1,
+       "name": "모터 0",
+       "position": 0,
+       "product_id": 1614282756,
+       "profile_mode": 0,
+       "ring_position": 0,
+       "vendor_id": 1647
+      },
+      {
+       "alias": 0,
+       "controller_index": 3,
+       "driver_id": 2,
+       "name": "모터 3",
+       "position": 3,
+       "product_id": 1614282756,
+       "profile_mode": 0,
+       "ring_position": 3,
+       "vendor_id": 1647
+      }
+     ],
+     "type": "ethercat"
+    },
+    {
+     "id": 1,
+     "number_of_slaves": 2,
+     "serial_baudrate": 1000000,
+     "serial_port": "/dev/serial/by-id/usb-FTDI_U2D2-if00-port0",
+     "slaves": [
+      {
+       "bus_id": 1,
+       "controller_index": 1,
+       "driver_id": 3,
+       "name": "모터 1",
+       "profile_mode": 0
+      },
+      {
+       "bus_id": 2,
+       "controller_index": 2,
+       "driver_id": 4,
+       "name": "모터 2",
+       "profile_mode": 0
+      }
+     ],
+     "type": "serial"
+    }
+   ],
+   "period": 1000000,
+   "web_axis_identities": [
+    {
+     "controller_index": 0,
+     "eeprom_alias": 0,
+     "ethercat_master_index": 0,
+     "identity_source": "sii",
+     "product_id": 1614282756,
+     "revision_number": 65536,
+     "rotary_alias": null,
+     "serial_number": 553648128,
+     "sii_device_name": "",
+     "sii_order_number": "MADLN05BE",
+     "slave_position": 0,
+     "vendor_id": 1647
+    },
+    {
+     "controller_index": 3,
+     "eeprom_alias": 0,
+     "ethercat_master_index": 0,
+     "identity_source": "sii",
+     "product_id": 1614282756,
+     "revision_number": 65536,
+     "rotary_alias": null,
+     "serial_number": 553648131,
+     "sii_device_name": "",
+     "sii_order_number": "MCDLN35BE",
+     "slave_position": 3,
+     "vendor_id": 1647
+    }
+   ],
+   "web_axis_profiles": [
+    {
+     "controller_index": 0,
+     "driver_model": "MADLN05BE",
+     "model_confirmed": true,
+     "model_source": "user_nameplate"
+    },
+    {
+     "controller_index": 3,
+     "driver_model": "MCDLN35BE",
+     "model_confirmed": true,
+     "model_source": "user_nameplate"
+    }
+   ]
+  },
+  "minas_params": {
+   "driver_1.yaml": "# 이 파일은 저장할 때마다 다시 만들어진다 · 손으로 고치지 말 것\n# (모터 관리 화면의 드라이브 설정 → config/minas_params/) · P8\nitems:\n- id: 30\n  index: 24672\n  subindex: 0\n  value: 1\n  type: s8\n- id: 31\n  index: 13585\n  subindex: 0\n  value: 100\n  type: s16\n- id: 32\n  index: 13586\n  subindex: 0\n  value: 0\n  type: s16\n- id: 33\n  index: 13587\n  subindex: 0\n  value: 0\n  type: s16\n- id: 34\n  index: 13588\n  subindex: 0\n  value: 1\n  type: s16\n- id: 35\n  index: 24703\n  subindex: 0\n  value: 279620000\n  type: u32\n- id: 36\n  index: 24706\n  subindex: 0\n  value: 500\n  type: u32\n- id: 37\n  index: 24753\n  subindex: 0\n  value: 0\n  type: s32\n- id: 38\n  index: 24754\n  subindex: 0\n  value: 0\n  type: s16\n- id: 50\n  index: 24690\n  subindex: 0\n  value: 0\n  type: u16\n- id: 51\n  index: 24699\n  subindex: 1\n  value: 0\n  type: s32\n- id: 52\n  index: 24699\n  subindex: 2\n  value: 0\n  type: s32\n- id: 51\n  index: 24701\n  subindex: 1\n  value: 0\n  type: s32\n- id: 52\n  index: 24701\n  subindex: 2\n  value: 0\n  type: s32\n- id: 53\n  index: 24704\n  subindex: 0\n  value: 0\n  type: u32\n- id: 54\n  index: 24705\n  subindex: 0\n  value: 0\n  type: u32\n- id: 55\n  index: 24707\n  subindex: 0\n  value: 0\n  type: u32\n- id: 56\n  index: 24708\n  subindex: 0\n  value: 0\n  type: u32\n- id: 57\n  index: 24773\n  subindex: 0\n  value: 0\n  type: u32\n- id: 58\n  index: 24774\n  subindex: 0\n  value: 0\n  type: u32\n- id: 59\n  index: 13367\n  subindex: 0\n  value: 150\n  type: s16\n- id: 60\n  index: 13368\n  subindex: 0\n  value: 0\n  type: s16\n- id: 61\n  index: 13584\n  subindex: 0\n  value: 4\n  type: s16\n- id: 62\n  index: 13844\n  subindex: 0\n  value: 200\n  type: s16\ninterfaces:\n- id: 98\n  index: 5632\n- id: 0\n  index: 24640\n  subindex: 0\n  size: 2\n  type: u16\n- id: 1\n  index: 24698\n  subindex: 0\n  size: 4\n  type: s32\n- id: 2\n  index: 24831\n  subindex: 0\n  size: 4\n  type: s32\n- id: 3\n  index: 24689\n  subindex: 0\n  size: 2\n  type: s16\n- id: 99\n  index: 6656\n- id: 4\n  index: 24641\n  subindex: 0\n  size: 2\n  type: u16\n- id: 5\n  index: 24639\n  subindex: 0\n  size: 2\n  type: u16\n- id: 6\n  index: 24676\n  subindex: 0\n  size: 4\n  type: s32\n- id: 7\n  index: 24684\n  subindex: 0\n  size: 4\n  type: s32\n- id: 8\n  index: 24695\n  subindex: 0\n  size: 2\n  type: s16\n",
+   "driver_2.yaml": "# 이 파일은 저장할 때마다 다시 만들어진다 · 손으로 고치지 말 것\n# (모터 관리 화면의 드라이브 설정 → config/minas_params/) · P8\nitems:\n- id: 30\n  index: 24672\n  subindex: 0\n  value: 1\n  type: s8\n- id: 31\n  index: 13585\n  subindex: 0\n  value: 100\n  type: s16\n- id: 32\n  index: 13586\n  subindex: 0\n  value: 0\n  type: s16\n- id: 33\n  index: 13587\n  subindex: 0\n  value: 0\n  type: s16\n- id: 34\n  index: 13588\n  subindex: 0\n  value: 1\n  type: s16\n- id: 35\n  index: 24703\n  subindex: 0\n  value: 279620000\n  type: u32\n- id: 36\n  index: 24706\n  subindex: 0\n  value: 500\n  type: u32\n- id: 37\n  index: 24753\n  subindex: 0\n  value: 0\n  type: s32\n- id: 38\n  index: 24754\n  subindex: 0\n  value: 0\n  type: s16\n- id: 50\n  index: 24690\n  subindex: 0\n  value: 0\n  type: u16\n- id: 51\n  index: 24699\n  subindex: 1\n  value: 0\n  type: s32\n- id: 52\n  index: 24699\n  subindex: 2\n  value: 0\n  type: s32\n- id: 51\n  index: 24701\n  subindex: 1\n  value: 0\n  type: s32\n- id: 52\n  index: 24701\n  subindex: 2\n  value: 0\n  type: s32\n- id: 53\n  index: 24704\n  subindex: 0\n  value: 0\n  type: u32\n- id: 54\n  index: 24705\n  subindex: 0\n  value: 0\n  type: u32\n- id: 55\n  index: 24707\n  subindex: 0\n  value: 0\n  type: u32\n- id: 56\n  index: 24708\n  subindex: 0\n  value: 0\n  type: u32\n- id: 57\n  index: 24773\n  subindex: 0\n  value: 0\n  type: u32\n- id: 58\n  index: 24774\n  subindex: 0\n  value: 0\n  type: u32\n- id: 59\n  index: 13367\n  subindex: 0\n  value: 150\n  type: s16\n- id: 60\n  index: 13368\n  subindex: 0\n  value: 0\n  type: s16\n- id: 61\n  index: 13584\n  subindex: 0\n  value: 4\n  type: s16\n- id: 62\n  index: 13844\n  subindex: 0\n  value: 200\n  type: s16\ninterfaces:\n- id: 98\n  index: 5632\n- id: 0\n  index: 24640\n  subindex: 0\n  size: 2\n  type: u16\n- id: 1\n  index: 24698\n  subindex: 0\n  size: 4\n  type: s32\n- id: 2\n  index: 24831\n  subindex: 0\n  size: 4\n  type: s32\n- id: 3\n  index: 24689\n  subindex: 0\n  size: 2\n  type: s16\n- id: 99\n  index: 6656\n- id: 4\n  index: 24641\n  subindex: 0\n  size: 2\n  type: u16\n- id: 5\n  index: 24639\n  subindex: 0\n  size: 2\n  type: u16\n- id: 6\n  index: 24676\n  subindex: 0\n  size: 4\n  type: s32\n- id: 7\n  index: 24684\n  subindex: 0\n  size: 4\n  type: s32\n- id: 8\n  index: 24695\n  subindex: 0\n  size: 2\n  type: s16\n"
+  }
+ }
+}

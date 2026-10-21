@@ -46,7 +46,11 @@ from motion_web_bridge import (
 #: 유도해 다시 갈라지지 않게 한다 · §6-37
 AC_SERVO_SCAN_TIMEOUT_SEC = 10.0
 DYNAMIXEL_SCAN_TIMEOUT_SEC = 40.0
-FULL_SCAN_TIMEOUT_SEC = AC_SERVO_SCAN_TIMEOUT_SEC + DYNAMIXEL_SCAN_TIMEOUT_SEC
+#: Feetech · 포트마다 ID 0~253 × 20 ms × 속도 3 (찾으면 그 속도에서 멈춤) ≈ 15 s · 포트 여럿 · 수정 목록 158
+FEETECH_SCAN_TIMEOUT_SEC = 60.0
+FULL_SCAN_TIMEOUT_SEC = (
+    AC_SERVO_SCAN_TIMEOUT_SEC + DYNAMIXEL_SCAN_TIMEOUT_SEC + FEETECH_SCAN_TIMEOUT_SEC
+)
 
 
 class ScanOrchestrator:
@@ -65,6 +69,8 @@ class ScanOrchestrator:
         scan_ac_servo_service: str,
         scan_dynamixel_service: str,
         load_motor_config: Any,
+        scan_feetech_client: Any = None,
+        scan_feetech_service: str = topics.SCAN_FEETECH_MOTORS,
     ) -> None:
         self.bridge = bridge
         #: 프로젝트 서비스 협력자 (§6-23)
@@ -80,6 +86,9 @@ class ScanOrchestrator:
         self.scan_service = scan_service
         self.scan_ac_servo_service = scan_ac_servo_service
         self.scan_dynamixel_service = scan_dynamixel_service
+        #: Feetech 검색 · 수정 목록 158 · 옛 시험 스텁은 없이 만든다
+        self._scan_feetech_client = scan_feetech_client
+        self.scan_feetech_service = scan_feetech_service
         #: 프로젝트 설정을 읽어오는 콜러블 · `MotorConfigService.load` (§6-19)
         self.load_motor_config = load_motor_config
         #: 장기 작업 Action · 진행 상황과 취소를 같은 통로로 (§6-26)
@@ -247,6 +256,16 @@ class ScanOrchestrator:
             operation_type='dynamixel_scan',
         )
 
+    def scan_feetech(self, timeout_sec: float = FEETECH_SCAN_TIMEOUT_SEC) -> Dict[str, Any]:
+        """Feetech 검색 · 다이나믹셀과 같이 **매니저를 비우고 한다** (같은 직렬 선) · 수정 목록 158"""
+        return self._call_service(
+            getattr(self, '_scan_feetech_client', None),
+            getattr(self, 'scan_feetech_service', topics.SCAN_FEETECH_MOTORS),
+            timeout_sec,
+            release_ethercat=True,
+            operation_type='feetech_scan',
+        )
+
     def _call_service(
         self,
         client,
@@ -320,6 +339,7 @@ class ScanOrchestrator:
                 operation_type=operation_type,
                 fallback_success=result.get('success') is True,
                 dynamixel_expected=self._project_uses_dynamixel(),
+                feetech_expected=self._project_uses_feetech(),
             )
             result['partial'] = outcome == 'partial'
             result['success'] = outcome == 'success'
@@ -402,6 +422,7 @@ class ScanOrchestrator:
         topics.SCAN_MOTORS.rsplit('/', 1)[-1]: 'all',
         topics.SCAN_AC_SERVO_MOTORS.rsplit('/', 1)[-1]: 'ac_servo',
         topics.SCAN_DYNAMIXEL_MOTORS.rsplit('/', 1)[-1]: 'dynamixel',
+        topics.SCAN_FEETECH_MOTORS.rsplit('/', 1)[-1]: 'feetech',
     }
 
     def _scan_action_client(self) -> Any:
@@ -516,7 +537,8 @@ class ScanOrchestrator:
     ) -> Dict[str, Any]:
         scan_project_id = self.repository.selected_project_id()
         scan_generation = self.bridge.current_project_generation()
-        if not client.wait_for_service(timeout_sec=0.2):
+        # 클라이언트 없음 = Trigger 예비 통로 없이 Action 으로만 (Feetech 를 모르는 옛 브리지 스텁) · 수정 목록 158
+        if client is not None and not client.wait_for_service(timeout_sec=0.2):
             return {
                 'success': False,
                 'message': f'scan service unavailable: {service_name}',
@@ -811,6 +833,19 @@ class ScanOrchestrator:
         except (OSError, ValueError, TypeError, AttributeError):
             return True
         return motor_config_rules.registry_uses_dynamixel(registry)
+
+    def _project_uses_feetech(self) -> bool:
+        """선택한 프로젝트 모터 설정에 Feetech 가 있나 · 못 읽으면 **없다**고 본다 · 수정 목록 158
+
+        Feetech 를 안 쓰는 PC(지금 로봇 전부)의 전체 검색 판정이 전과 같게 · 응답 없는 Feetech 구획은 판정에서 빠진다.
+        """
+        try:
+            if not self.repository.selected_project_id():
+                return False
+            registry = (self.load_motor_config() or {}).get('registry') or {}
+        except (OSError, ValueError, TypeError, AttributeError):
+            return False
+        return motor_config_rules.registry_uses_feetech(registry)
 
     def _expected_runtime_axes(self) -> List[int]:
         repository = getattr(self, 'repository', None)

@@ -1,7 +1,8 @@
 import { normalizeMotor } from './motor_registry.js';
 
-const DYNAMIXEL_BAUDRATE = 1000000;
+// 통신 속도는 검색 결과(장치마다 `baudrate` · 레지스트리 `serial_baudrate`) 그대로 · 1 Mbps 고정 상수 지움 · 수정 목록 158
 
+/** 다이나믹셀인가 · 직렬(serial) 이라도 Feetech 은 아님 · 수정 목록 158 */
 export function runtimeIsDynamixel(motor) {
   const value = [
     motor?.motor_type,
@@ -11,6 +12,7 @@ export function runtimeIsDynamixel(motor) {
     motor?.driver_model,
     motor?.driver_name,
   ].join(' ').toLowerCase();
+  if (value.includes('feetech')) return false;
   return value.includes('dynamixel') || value.includes('serial') || value.includes('xm540');
 }
 

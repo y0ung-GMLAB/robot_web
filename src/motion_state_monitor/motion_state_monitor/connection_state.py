@@ -13,6 +13,8 @@ from __future__ import annotations
 
 from typing import Any, Dict, List, Optional
 
+from motion_common import motor_kinds
+
 from .motor_values import parse_int
 
 
@@ -198,6 +200,8 @@ def build_scan_connection_rows(
     *,
     scan_ethercat: bool,
     scan_dynamixel: bool,
+    feetech_scan: Optional[Dict[str, Any]] = None,
+    scan_feetech: bool = False,
 ) -> List[Dict[str, Any]]:
     ethercat_aliases = {
         parse_int(slave.get('ethercat_alias'))
@@ -209,10 +213,18 @@ def build_scan_connection_rows(
         for device in dynamixel_scan.get('devices', [])
         if parse_int(device.get('id')) is not None
     }
+    feetech_scan = feetech_scan if isinstance(feetech_scan, dict) else {}
+    feetech_ids = {
+        parse_int(device.get('id'))
+        for device in feetech_scan.get('devices', [])
+        if parse_int(device.get('id')) is not None
+    }
     rows: List[Dict[str, Any]] = []
     for motor in motors:
         transport = str(motor.get('transport', '')).lower()
         motor_type = str(motor.get('motor_type', '')).lower()
+        # Feetech 는 Feetech 검색으로만 · 다이나믹셀 검색 결과로 짝짓지 않는다 · 수정 목록 158
+        is_feetech = motor_kinds.motor_kind(motor) == motor_kinds.FEETECH
         scanned = False
         scan_available = False
         found = False
@@ -223,6 +235,17 @@ def build_scan_connection_rows(
             scan_available = bool(ethercat_scan.get('available', False))
             found = parse_int(motor.get('alias')) in ethercat_aliases
             scan_source = 'ethercat_slave_scan'
+        elif is_feetech:
+            if scan_feetech:
+                scanned = not bool(feetech_scan.get('skipped', False))
+                scan_available = bool(feetech_scan.get('available', False))
+                raw_identity = (
+                    motor.get('bus_id')
+                    if motor.get('bus_id') is not None
+                    else motor.get('node_id')
+                )
+                found = parse_int(raw_identity) in feetech_ids
+                scan_source = 'direct_ping'
         elif (transport == 'serial' or motor_type == 'dynamixel') and scan_dynamixel:
             scanned = not bool(dynamixel_scan.get('skipped', False))
             scan_available = bool(dynamixel_scan.get('available', False))
