@@ -133,7 +133,7 @@ def test_fake_servos_on_a_pty_are_found_with_model_numbers_and_only_ping_read_is
     devices = {d['id']: d for d in result['devices']}
     assert set(devices) == {1, 4}
     assert devices[1]['model_name'] == 'STS3215' and devices[1]['model_confirm'] is False
-    assert devices[4]['model_name'] == 'STS (모델 1234)' and devices[4]['model_confirm'] is True
+    assert devices[4]['model_name'] == 'Feetech (버전 1234)' and devices[4]['model_confirm'] is True
     assert devices[1]['baudrate'] == 1000000 and devices[1]['source'] == 'id_ping'
     assert devices[1]['serial_port'] == port and devices[1]['bus_id'] == 1
     # 첫 속도에서 찾았으니 다른 속도는 안 본다

@@ -139,9 +139,9 @@ FEETECH_PROFILE_ACCELERATION_DEG_S2 = 50 * serial_servo_models.FEETECH_SERIES['a
 
 
 def default_feetech_driver(workspace_root: Path, driver_model: str = '') -> Dict[str, Any]:
-    """Feetech STS 드라이버 기본값 · 한 바퀴(−180~+180 deg · raw 2048 중심) · 수정 목록 158"""
+    """Feetech(STS · HLS) 드라이버 기본값 · 한 바퀴(−180~+180 deg · raw 2048 중심) · 수정 목록 158"""
     info = serial_servo_models.feetech_model(workspace_root, model_name=driver_model)
-    model = str(driver_model or '').strip() or str(info.get('model_name') or 'STS')
+    model = str(driver_model or '').strip() or str(info.get('model_name') or 'Feetech')
     return {
         'driver_model': model,
         'pulse_per_revolution': int(serial_servo_models.FEETECH_SERIES['pulse_per_revolution']),

@@ -2,7 +2,7 @@
 
 - Dynamixel · 모델 번호 → 제어표 파일 · `motion_system` 의 `control_table/dynamixel.model` 을 실행 때 읽는다 (읽기만)
 - 시리즈 표 · 운전 모드 · 가속 단위 · 전류 단위 · 위치 범위 · 지원 여부
-- Feetech · STS 계열 · 모델 번호 777 STS3215 · 2825 STS3250 · 그 밖의 STS 번호 → `STS (모델 <n>)` + 확인 필요
+- Feetech · STS 계열 · 모델 번호 777 STS3215 · 2825 STS3250 · 그 밖의 번호 → `Feetech (버전 <n>)` + 확인 필요 (STS · HLS 공통 제어표로 동작 · 주소 3~4 는 서보 버전 번호)
 - 이름 · 다이나믹셀은 제어표 파일 이름에서 (`xm430_w350.model` → `XM430-W350`) ·
   XM540-W270 은 `XM540-W270-R` (전부터 쓰던 이름 · `motor_identity.canonical_dynamixel_model` 과 같음)
 
@@ -353,12 +353,12 @@ def dynamixel_model(
 
 
 def feetech_model_name(model_number: Any) -> str:
-    """검색 · 모델 번호 → 이름 · 모르는 번호는 `STS (모델 <n>)`."""
+    """검색 · 모델 번호 → 이름 · 모르는 번호는 `Feetech (버전 <n>)` · 시리즈(STS · HLS)를 단정하지 않는다 (사용자 2026-10-22)."""
     try:
         number = int(model_number)
     except (TypeError, ValueError):
         return ''
-    return FEETECH_MODEL_NAMES.get(number, f'STS (모델 {number})')
+    return FEETECH_MODEL_NAMES.get(number, f'Feetech (버전 {number})')
 
 
 def feetech_model(
@@ -367,7 +367,7 @@ def feetech_model(
     model_number: Any = None,
     model_name: Any = '',
 ) -> Dict[str, Any]:
-    """Feetech 한 모델의 사실 · STS 제어표 하나 · 모르는 번호도 STS 로 동작 + 확인 필요."""
+    """Feetech 한 모델의 사실 · 제어표 하나(STS · HLS 가 쓰는 주소 같음) · 모르는 번호도 같은 표로 동작 + 확인 필요."""
     number: Optional[int]
     try:
         number = int(model_number) if model_number not in (None, '') else None
@@ -380,7 +380,7 @@ def feetech_model(
     if number is not None:
         name = feetech_model_name(number)
     elif not name:
-        name = 'STS'
+        name = 'Feetech'
     return {
         'kind': 'feetech',
         'model_number': number,
