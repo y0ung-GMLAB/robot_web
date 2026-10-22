@@ -211,7 +211,7 @@ def _scanned_dynamixel_view(device: Dict[str, Any]) -> Dict[str, Any]:
 
 
 def scanned_feetech_model(device: Dict[str, Any]) -> str:
-    """Feetech 검색 이름 · 모델 번호로 읽은 것 (`STS3215` · 모르는 번호 `STS (모델 n)`) · 수정 목록 158"""
+    """Feetech 검색 이름 · 모델 번호로 읽은 것 (`STS3215` · 모르는 번호 `Feetech (버전 n)`) · 수정 목록 158"""
     raw = str(device.get('model_name') or '').strip()
     if raw:
         return raw

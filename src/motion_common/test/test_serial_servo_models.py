@@ -72,7 +72,7 @@ def test_feetech_sts_models():
     assert sts['model_file'].replace('\\', '/').endswith('hardware/feetech/control_table/sts.model')
     assert models.feetech_model(WORKSPACE, model_number=2825)['model_name'] == 'STS3250'
     other = models.feetech_model(WORKSPACE, model_number=1234)
-    assert other['model_name'] == 'STS (모델 1234)' and other['confirm'] is True and other['supported'] is True
+    assert other['model_name'] == 'Feetech (버전 1234)' and other['confirm'] is True and other['supported'] is True
     assert models.feetech_model(WORKSPACE, model_name='STS3215')['model_number'] == 777
     assert models.feetech_model_name(None) == ''
     assert models.serial_model(WORKSPACE, 'ac_servo') == {}

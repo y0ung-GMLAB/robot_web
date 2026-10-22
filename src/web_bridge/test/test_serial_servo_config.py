@@ -157,7 +157,7 @@ def test_feetech_scan_becomes_registry_rows_and_feetech_motor_refs():
                 {'id': 1, 'bus_id': 1, 'port': U2D2_B, 'serial_port': U2D2_B, 'baudrate': 500000,
                  'model_number': 777, 'model_name': 'STS3215', 'model_confirm': False, 'source': 'id_ping'},
                 {'id': 2, 'bus_id': 2, 'port': U2D2_B, 'serial_port': U2D2_B, 'baudrate': 500000,
-                 'model_number': 1234, 'model_name': 'STS (모델 1234)', 'model_confirm': True, 'source': 'id_ping'},
+                 'model_number': 1234, 'model_name': 'Feetech (버전 1234)', 'model_confirm': True, 'source': 'id_ping'},
             ],
         },
     }
