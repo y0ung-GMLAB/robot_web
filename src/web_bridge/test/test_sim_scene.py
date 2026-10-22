@@ -168,14 +168,22 @@ def test_blender_scene_route_streams_the_file():
     assert 'return sim_scene.blender_scene_path(self.workspace_root)' in bridge
 
 
-def test_blender_scene_names_the_animations_it_holds(tmp_path):
-    """수정 목록 60 · pack.yaml scene_glb.animations · 없으면 빈 목록(화면이 Blender 뷰를 끈다)"""
-    from motion_common import robot_pack
-
+def test_blender_scene_says_whether_a_derived_table_is_there(tmp_path):
+    """수정 목록 159 · pack.yaml scene_glb.derived · 화면은 있으면 표를 받아 보간 · 옛 animations 칸은 없음"""
     pack = _pack(tmp_path)
     (pack / 'scene.glb').write_bytes(b'glTF' + b'\x00' * 20)
-    assert sim_scene.scene_state(tmp_path)['blender']['animations'] == []
+    info = sim_scene.scene_state(tmp_path)['blender']
+    assert info['derived'] is False and 'animations' not in info
     text = (pack / 'pack.yaml').read_text(encoding='utf-8')
-    (pack / 'pack.yaml').write_text(text + '\nscene_glb:\n  animations: [floating_narration_all]\n', encoding='utf-8')
-    assert sim_scene.scene_state(tmp_path)['blender']['animations'] == ['floating_narration_all']
-    assert robot_pack.scene_glb_animations(pack) == ['floating_narration_all']
+    (pack / 'pack.yaml').write_text(text + '\nscene_glb:\n  derived: derived.json\n', encoding='utf-8')
+    assert sim_scene.scene_state(tmp_path)['blender']['derived'] is False  # 파일 없음
+    (pack / 'derived.json').write_text('{"version": 1, "tables": []}', encoding='utf-8')
+    assert sim_scene.scene_state(tmp_path)['blender']['derived'] is True
+    assert sim_scene.blender_derived_path(tmp_path) == pack / 'derived.json'
+
+
+def test_blender_derived_route_streams_the_file():
+    routes = (BRIDGE_DIR / 'routes' / 'motion_run_routes.py').read_text(encoding='utf-8')
+    assert "@app.get('/api/preview/blender-scene-derived')" in routes
+    bridge = (BRIDGE_DIR / 'bridge_node.py').read_text(encoding='utf-8')
+    assert 'return sim_scene.blender_derived_path(self.workspace_root)' in bridge

@@ -415,6 +415,10 @@ export const fetchPreviewFrames = (fileId) =>
 export const fetchMotionJointValues = (fileId) =>
   request('GET', `/api/motion-files/${encodeURIComponent(fileId)}/joint-values`, { timeoutMs: 30000 });
 
+/** Blender 뷰 · 팩의 파생 관절 표(derived.json) · 지문이 바뀌면 다시 · 수정 목록 159 */
+export const fetchBlenderDerived = (fingerprint) =>
+  request('GET', `/api/preview/blender-scene-derived?v=${encodeURIComponent(fingerprint || '')}`, { timeoutMs: 60000 });
+
 /** MuJoCo 계산 시작 · 무거운 물리 시뮬 · 업로드 직후 자동으로도 부른다 · P7 */
 export const precomputeMotionFile = (fileId) =>
   request('POST', `/api/motion-files/${encodeURIComponent(fileId)}/preview-precompute`);

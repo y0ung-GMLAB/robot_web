@@ -103,6 +103,14 @@ def register_motion_run_routes(app: FastAPI, bridge, safety_first_stop) -> None:
             raise HTTPException(status_code=404, detail='로봇 팩에 scene.glb가 없습니다')
         return FileResponse(str(path), media_type='model/gltf-binary', headers={'Cache-Control': 'no-cache'})
 
+    # Blender 뷰 · 파생 관절 표 그대로 · 화면이 json 값으로 보간 · 수정 목록 159
+    @app.get('/api/preview/blender-scene-derived')
+    async def preview_blender_scene_derived():
+        path = await asyncio.to_thread(bridge.preview_blender_derived_path)
+        if path is None:
+            raise HTTPException(status_code=404, detail='로봇 팩에 파생 관절 표가 없습니다')
+        return FileResponse(str(path), media_type='application/json', headers={'Cache-Control': 'no-cache'})
+
     # Blender 뷰 · 애니메이션 json 값 그대로(glb 에 굽지 않음) · 수정 목록 98
     @app.get('/api/motion-files/{file_id}/joint-values')
     async def motion_joint_values(file_id: str):

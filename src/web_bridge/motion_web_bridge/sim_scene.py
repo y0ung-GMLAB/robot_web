@@ -77,6 +77,11 @@ def blender_scene_path(workspace_root: Path) -> Optional[Path]:
     return robot_pack.scene_glb_path(robot_pack.pack_root(Path(workspace_root)))
 
 
+def blender_derived_path(workspace_root: Path) -> Optional[Path]:
+    """팩의 파생 관절 표 파일 · 없으면 None · 수정 목록 159"""
+    return robot_pack.scene_glb_derived_path(robot_pack.pack_root(Path(workspace_root)))
+
+
 def blender_scene_info(workspace_root: Path) -> Dict[str, Any]:
     """화면이 「Blender 뷰」 체크를 보일지 · 팩 지문은 브라우저 캐시 열쇠"""
     path = blender_scene_path(workspace_root)
@@ -87,10 +92,11 @@ def blender_scene_info(workspace_root: Path) -> Dict[str, Any]:
         'available': True,
         'size_bytes': path.stat().st_size,
         'fingerprint': robot_pack.current_fingerprint(pack_dir)[:16],
-        # 이 장면이 담은 애니메이션 · 화면은 고른 애니메이션이 여기 있을 때만 Blender 뷰를 켠다 · 수정 목록 60
-        'animations': robot_pack.scene_glb_animations(pack_dir),
-        # 조인트 → glb 노드 · 있으면 어떤 애니메이션이든 json 값으로 돌린다(animations 무시) · 수정 목록 98
+        # 조인트 → glb 노드 · 어떤 애니메이션이든 json 값으로 돌린다 · 수정 목록 98
         'joints': robot_pack.scene_glb_joints(pack_dir),
+        # 파생 관절 표 · 있으면 화면이 `/api/preview/blender-scene-derived` 를 받아 보간 · 수정 목록 159
+        # (glb 에 구운 클립 · 옛 `animations` 방식은 159 에서 지움 · 쓰는 팩 없음)
+        'derived': robot_pack.scene_glb_derived_path(pack_dir) is not None,
     }
 
 

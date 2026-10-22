@@ -81,8 +81,9 @@ test('Blender view loads the pack glb with the vendored loader and follows the r
   const viewer = read('../static/js/sim3d.js');
   assert.match(viewer, /const BLENDER_SCENE_URL = '\/api\/preview\/blender-scene';/);
   assert.match(viewer, /import\(GLTF_LOADER_URL\)/);
-  // 시각은 실물 따라가기 시계 · glTF 애니메이션은 setTime
-  assert.match(viewer, /blender\.mixer\.setTime\(/);
+  // 시각은 실물 따라가기 시계 · 자세는 json 값(조인트 · 파생 표) · glTF 클립 재생은 159 에서 지움
+  assert.match(viewer, /if \(blender\) applyJointPose\(Math\.min\(playhead, blender\.duration\)\);/);
+  assert.doesNotMatch(viewer, /mixer/);
   assert.match(viewer, /const following = follow && \(view === 'blender' \? Boolean\(blender\) : Boolean\(frames\)\);/);
 });
 
