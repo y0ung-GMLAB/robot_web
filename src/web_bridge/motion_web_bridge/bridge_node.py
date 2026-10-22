@@ -2569,6 +2569,10 @@ class MotionWebBridge(Node):
         """팩의 Blender 뷰 장면(scene.glb) · 없으면 None · 수정 목록 50"""
         return sim_scene.blender_scene_path(self.workspace_root)
 
+    def preview_blender_derived_path(self) -> Optional[Path]:
+        """팩의 파생 관절 표(derived.json) · 없으면 None · 수정 목록 159"""
+        return sim_scene.blender_derived_path(self.workspace_root)
+
     def motion_joint_values(self, file_id: str) -> Dict[str, Any]:
         """애니메이션 json 의 조인트 값(rad · 고른 시각표) · 웹 3D 「Blender 뷰」 가 노드를 돌린다 · 수정 목록 98"""
         project_id = self.project_repository.selected_project_id()

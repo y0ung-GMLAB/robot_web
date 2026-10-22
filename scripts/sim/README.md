@@ -27,8 +27,8 @@ uv run --no-project --with mujoco --with numpy --with pyyaml python scripts/sim/
 
 ```
 pack.yaml       name, version, created · scene.glb 가 있으면
-                scene_glb: {joints: {<조인트 이름>: {node: <glb 노드 이름>, axis: [x, y, z]}}}   # 98 · 권장
-                scene_glb: {animations: [애니메이션 파일 이름(확장자 뺌)]}                       # 60 · 옛 방식
+                scene_glb: {joints: {<조인트 이름>: {node: <glb 노드 이름>, axis: [x, y, z]}}}   # 98 · 노드 1:1 회전
+                scene_glb: {derived: derived.json}                                             # 159 · 파생 관절 표
 robot.yaml      axes: [{joint, motion_id, motor, reducer, ratio, range_deg: [min, max], servo_bw_hz}]
                 drive: {profile_velocity_deg_s, profile_accel_deg_s2}     # 모터축 기준
                 env:   {settle_body, settle_s, torsion_k, torsion_c,
@@ -55,8 +55,8 @@ scene.glb       웹 3D 「Blender 뷰」 장면 (선택 · glTF 2.0 바이너리
   같은 파일을 모든 PC 팩에 넣는다 · 있으면 웹 3D 에 「Blender 뷰」 체크가 생기고 실제 재생 시각을 따라 애니메이션을 그린다 ·
   담기지 않는 것 · 오디오 · Blender 화면 설정 · 절차적 재질(굽거나 단순색으로) · Area 라이트 · HDRI(조명은 웹에서) ·
   검사 · 머리말(glTF 2) · 길이 · 크기만 · 좌표는 glTF 기본(Y-up · Blender 내보내기 기본값 +Y Up)
-- scene.glb 를 넣으면 `pack.yaml` 에 그 장면이 담은 애니메이션 이름을 적는다 · 예) `scene_glb: {animations: [floating_narration_all]}` ·
-  웹은 지금 보는 애니메이션이 이 목록에 있을 때만 「Blender 뷰」 를 켠다 · 안 적으면 Blender 뷰가 꺼지고 팩 검사가 경고한다 · 수정 목록 60
+- 옛 방식 `scene_glb.animations`(glb 에 구운 클립 · 수정 목록 60) · **159 에서 지움** · 쓰는 팩 없음 · 남아 있으면 경고만 · 무시 ·
+  `joints` · `derived` 둘 다 없으면 Blender 뷰 꺼짐(경고)
 - **권장 · `scene_glb.joints` (수정 목록 98)** · glb 에 애니메이션을 굽지 않고 **모델만** 내보낸다 · 웹이 지금 보는(실물과 같이면 재생 중인)
   애니메이션 json 의 조인트 값을 재생 시각으로 보간해 노드를 돌린다 · 새 애니메이션마다 glb 를 다시 만들 필요 없음
   · `joints` 의 키 = 애니메이션 json 의 조인트 이름(motion_id · 예 `f1_neck_yaw`) · `node` = glb 노드 이름 · `axis` = 그 노드의
@@ -73,6 +73,36 @@ scene.glb       웹 3D 「Blender 뷰」 장면 (선택 · glTF 2.0 바이너리
         f1_neck_yaw:   {node: f1_neck_yaw,   axis: [0, 1, 0]}
         f1_neck_pitch: {node: f1_neck_pitch, axis: [1, 0, 0]}
     ```
+- **`scene_glb.derived` · 파생 관절 표 (수정 목록 159 · 2026-10-22 · 닭)** · 애니메이션 json 값이 모터(크랭크) 각도이고 기구가
+  닫힌 루프(평행 목)라 joints(노드 1:1)로 못 그리는 노드 · 위치·회전·크기(실리콘 늘어남)를 터미널 세션이 리그로 미리 계산 ·
+  웹은 json 값으로 격자를 보간만 · 어떤 json 이든(X-Touch 녹화 포함) 보인다
+  · `pack.yaml` · `scene_glb: {joints: {...}, derived: derived.json}` · 파일은 팩 루트 기준 상대 경로 · `..` · 절대경로 금지 · joints 는 선택
+  · `derived.json` (UTF-8 · 20 MB 이하)
+    ```json
+    {
+      "version": 1,
+      "tables": [
+        { "inputs":   ["<json 조인트 id>", "..."],
+          "grid":     [{"min": -0.6, "max": 0.6, "n": 25}, "..."],
+          "nodes":    ["<glb 노드 이름>", "..."],
+          "channels": "trs",
+          "values_b64": "<float32 little-endian 배열 base64>" }
+      ]
+    }
+    ```
+  · `inputs` 1~3개 · 표 안 중복 금지 · `grid` 입력마다 `{min < max (rad), n ≥ 2}` · 균일 간격 · `nodes` 1개 이상 · 중복 금지
+  · `channels` · `trs` = t(x, y, z) q(x, y, z, w) s(x, y, z) = 10 · `r` = q(x, y, z, w) = 4 (위치·크기는 glb 기본 그대로)
+  · 값 순서 · 격자 점(첫 입력이 가장 느리고 마지막 입력이 가장 빠름 · C 순서) → 노드 → 채널 · 개수 = Π n × 노드 수 × 채널 수
+  · 값 · glb 부모 기준 로컬 TRS 전체(델타 아님) · t 는 glTF 단위(m · Y-up · glb 노드 translation 과 같은 좌표)
+  · 입력 값 · json 조인트 값을 헤더 `rotation_unit` 대로 rad 로(joints 와 같은 파서) · 매핑 scale·invert·감속비 안 씀 ·
+    json 에 없는 입력 = 0 · 격자 밖 = 끝값(clamp)
+  · 보간 · 다중선형 · 회전은 모서리 쿼터니언을 첫 모서리와 같은 부호로 맞춘 가중합 → 정규화(nlerp) · 위치·크기 선형
+  · 스킨 메쉬 · 뼈도 glb 노드라 노드 TRS 만 바꾸면 three.js SkinnedMesh 가 따라감(닭 실리콘 본)
+  · 팩 거부 · version ≠ 1 · 노드가 glb 에 없음 · 한 노드가 표 둘에 · joints 노드와 겹침 · 값 개수 틀림 · NaN · Inf ·
+    길이 0 쿼터니언 · inputs 0개 또는 4개 이상 · 크기 초과
+  · 화면 · 서버 `/api/preview/blender-scene-derived`(팩 지문으로 캐시) · 두 화면(`static/js/sim3d.js` · `static/v2/js/viewer3d.js`)이
+    같은 함수(`static/js/sim3d_math.js` `prepareDerived` · `sampleDerivedTable`)
+  · 크기 감 · 3D 표 n = (25, 25, 25) × 노드 12 × trs 10 × 4 바이트 ≈ 7.5 MB → base64 약 10 MB
 
 ## 웹 업로드
 

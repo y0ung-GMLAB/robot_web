@@ -6,7 +6,7 @@
 
     pack.yaml       name, version, created
                     scene_glb: {joints: {<조인트 이름>: {node: <glb 노드>, axis: [x, y, z]}}}   # 애니메이션 json 값으로 (수정 목록 98)
-                    scene_glb: {animations: [floating_narration_all]}   # 옛 방식 · glb 에 구운 클립 (수정 목록 60)
+                    scene_glb: {derived: derived.json}   # 파생 관절 표 · 모터 값 → 종속 노드 TRS (닭 · 수정 목록 159)
     robot.yaml      axes: [{joint, motion_id, motor, reducer, ratio, range_deg, servo_bw_hz}]
                     drive: {profile_velocity_deg_s, profile_accel_deg_s2}   # 모터축 기준
                     env:   {settle_body, settle_s, torsion_k, torsion_c,
@@ -16,6 +16,8 @@
     robot.urdf      참고용 (선택)
     preview.yaml    미리보기 명령 (선택 · config/animation_preview.example.yaml 형식)
     scene.glb       웹 3D 「Blender 뷰」 장면 (선택 · glTF 2.0 바이너리 · 수정 목록 50)
+    derived.json    파생 관절 표 (선택 · scene_glb.derived 가 가리키는 파일 · 수정 목록 159)
+    derived.json    파생 관절 표 (선택 · scene_glb.derived 가 가리키는 파일 · 수정 목록 159)
 
 각도는 칸 이름대로 deg 다 · 사람(터미널 세션)이 적는 계약이라 스택 안쪽이 rad 로
 옮겨 간 뒤에도(수정 목록 6) 형식은 그대로 두고, 읽는 쪽이 이름을 보고 바꾼다 · 6-7.
@@ -26,10 +28,16 @@
 
 from __future__ import annotations
 
+import base64
+import base64
 import hashlib
 import json
 import math
 import re
+import sys
+from array import array
+import sys
+from array import array
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
@@ -40,8 +48,10 @@ __all__ = [
     'Axis',
     'SCENE_GLB_MAX_BYTES',
     'SCENE_GLB_NAME',
+    'DERIVED_MAX_BYTES',
     'check_scene_glb',
     'glb_info',
+    'scene_glb_derived_path',
     'scene_glb_joints',
     'scene_glb_path',
     'INSTALLED_NAME',
@@ -72,7 +82,7 @@ INSTALLED_NAME = '.installed.json'
 MOTOR_TYPE_FIELDS: Dict[str, Tuple[str, ...]] = {
     'ac_servo': ('rated_rpm', 'max_rpm', 'rated_torque_nm', 'peak_torque_nm', 'rotor_inertia_kgm2'),
     'dynamixel': ('max_rpm', 'stall_torque_nm'),
-    # Feetech STS · 다이나믹셀과 같은 항목 · 수정 목록 158
+    # Feetech (STS · HLS) · 다이나믹셀과 같은 항목 · 수정 목록 158
     'feetech': ('max_rpm', 'stall_torque_nm'),
 }
 REDUCER_FIELDS = ('ratio', 't2n_nm', 't2b_nm', 'max_input_rpm')
@@ -361,15 +371,27 @@ def inspect_pack(pack_dir: Path) -> PackReport:
     if scene_glb is not None:
         glb_errors = check_scene_glb(scene_glb)
         errors += glb_errors
-        raw_joints = _scene_glb_section(pack_dir).get('joints')
+        section = _scene_glb_section(pack_dir)
+        raw_joints = section.get('joints')
         if raw_joints is not None:
             # 수정 목록 98 · 애니메이션 json 값으로 노드를 돌린다 · glb 는 모델만
             joint_errors, joint_warnings = _check_scene_glb_joints(raw_joints, None if glb_errors else scene_glb)
             errors += joint_errors
             report.warnings.extend(joint_warnings)
-        elif not scene_glb_animations(pack_dir):
+        if section.get('derived') is not None:
+            # 수정 목록 159 · 모터 값 → 종속 노드 자세 표 (닭 평행 링크 · 실리콘 늘어남)
+            joint_nodes = [entry['node'] for entry in scene_glb_joints(pack_dir).values()]
+            errors += _check_scene_glb_derived(
+                pack_dir, section.get('derived'), None if glb_errors else scene_glb, joint_nodes,
+            )
+        if section.get('animations') is not None:
             report.warnings.append(
-                'pack.yaml · scene_glb.joints 도 animations 도 없음 · Blender 뷰 꺼짐 '
+                'pack.yaml · scene_glb.animations 는 더 이상 쓰지 않습니다(glb 에 구운 클립 · 수정 목록 159 에서 지움) · '
+                'joints · derived 로 · 이 칸은 무시'
+            )
+        if raw_joints is None and section.get('derived') is None:
+            report.warnings.append(
+                'pack.yaml · scene_glb.joints 도 derived 도 없음 · Blender 뷰 꺼짐 '
                 '(joints 를 적으면 어떤 애니메이션이든 json 값으로 · 수정 목록 98)'
             )
     return report
@@ -419,7 +441,7 @@ def scene_glb_joints(pack_dir: Path) -> Dict[str, Dict[str, Any]]:
 
     조인트 이름 = 애니메이션 json 의 조인트(motion_id) · node = glb 노드 이름 · axis = 노드 로컬 축
     (단위 벡터로 맞춤 · + = 애니메이션 값 + 방향) · 화면은 노드 회전 = 기본 자세 × 축 회전(값) ·
-    잘못 적힌 줄은 뺀다(검사는 `inspect_pack` 이 오류로) · 없으면 빈 표 → 옛 방식(animations).
+    잘못 적힌 줄은 뺀다(검사는 `inspect_pack` 이 오류로) · 없으면 빈 표.
     """
     raw = _scene_glb_section(pack_dir).get('joints')
     if not isinstance(raw, dict):
@@ -486,23 +508,158 @@ def _check_scene_glb_joints(raw: Any, glb_path: Optional[Path]) -> Tuple[List[st
     return errors, warnings
 
 
-def scene_glb_animations(pack_dir: Path) -> List[str]:
-    """scene.glb 가 담은 애니메이션 이름 · `pack.yaml` `scene_glb: {animations: [...]}` · 수정 목록 60
+#: 파생 관절 표 · 수정 목록 159 (2026-10-22 · 터미널 세션 요청 · 사용자 결정)
+#:
+#: 애니메이션 json 값이 모터(크랭크) 각도이고 기구가 닫힌 루프(닭 평행 목)라 joints(노드 1:1 회전)로는
+#: 목·머리·로드·실리콘 늘어남을 못 그린다 · 터미널 세션이 리그로 「입력 1~3개 → 노드 로컬 TRS」 를
+#: 정규 격자로 미리 계산해 팩에 넣고, 화면은 json 값으로 격자를 보간만 한다 · 형식 `scripts/sim/README.md`
+DERIVED_MAX_BYTES = 20 * 1024 * 1024
+DERIVED_CHANNELS = {'trs': 10, 'r': 4}
+DERIVED_MAX_INPUTS = 3
 
-    glb 의 클립 이름은 리그 이름(`FH_Rig_1` …)이라 어떤 애니메이션인지 알 수 없다 · 사람이 적는다 ·
-    이름 = 애니메이션 파일 이름(확장자 뺌) · 안 적힌 옛 팩은 빈 목록 → 화면이 Blender 뷰를 끈다.
-    """
+
+def _derived_relative(raw: Any) -> Optional[str]:
+    """팩 루트 기준 상대 경로만 · 절대경로 · '..' · 빈 글은 None"""
+    text = str(raw or '').strip().replace('\\', '/')
+    if not text or text.startswith('/') or re.match(r'^[A-Za-z]:', text):
+        return None
+    if any(part in ('', '.', '..') for part in text.split('/')):
+        return None
+    return text
+
+
+def scene_glb_derived_path(pack_dir: Path) -> Optional[Path]:
+    """`scene_glb.derived` 가 가리키는 파일 · 없거나 잘못 적혔으면 None (검사는 `inspect_pack`)"""
+    relative = _derived_relative(_scene_glb_section(pack_dir).get('derived'))
+    if relative is None:
+        return None
+    path = Path(pack_dir) / relative
+    return path if path.is_file() else None
+
+
+def _float32_le(raw: bytes) -> array:
+    values = array('f')
+    values.frombytes(raw)
+    if sys.byteorder != 'little':
+        values.byteswap()
+    return values
+
+
+def _check_derived_table(index: int, table: Any, seen: Dict[str, int]) -> Tuple[List[str], List[str]]:
+    """표 하나 · (오류, 이 표의 노드)"""
+    where = f'tables[{index}]'
+    if not isinstance(table, dict):
+        return [f'{where} · 표 필요'], []
+    errors: List[str] = []
+    inputs = table.get('inputs')
+    if (not isinstance(inputs, list) or not 1 <= len(inputs) <= DERIVED_MAX_INPUTS
+            or not all(isinstance(name, str) and name.strip() for name in inputs)):
+        errors.append(f'{where} · inputs 는 조인트 이름 1~{DERIVED_MAX_INPUTS}개')
+        inputs = []
+    elif len(set(inputs)) != len(inputs):
+        errors.append(f'{where} · inputs 중복')
+    grid = table.get('grid')
+    points = 1
+    if not isinstance(grid, list) or len(grid) != len(inputs):
+        errors.append(f'{where} · grid 는 inputs 와 같은 길이의 [{{min, max, n}}]')
+        points = 0
+    else:
+        for axis, cell in enumerate(grid):
+            try:
+                low, high, count = float(cell['min']), float(cell['max']), cell['n']
+            except (TypeError, KeyError, ValueError):
+                errors.append(f'{where} · grid[{axis}] · min · max · n 필요')
+                points = 0
+                continue
+            if not (math.isfinite(low) and math.isfinite(high) and low < high):
+                errors.append(f'{where} · grid[{axis}] · min < max 인 숫자')
+                points = 0
+            if isinstance(count, bool) or not isinstance(count, int) or count < 2:
+                errors.append(f'{where} · grid[{axis}] · n 은 2 이상 정수')
+                points = 0
+            else:
+                points *= count
+    nodes = table.get('nodes')
+    if not isinstance(nodes, list) or not nodes or not all(isinstance(name, str) and name.strip() for name in nodes):
+        errors.append(f'{where} · nodes 는 glb 노드 이름 1개 이상')
+        nodes = []
+    elif len(set(nodes)) != len(nodes):
+        errors.append(f'{where} · nodes 중복')
+    for node in nodes:
+        if node in seen:
+            errors.append(f'{where} · 노드 {node!r} 가 tables[{seen[node]}] 에도 있음 · 한 노드는 표 하나에만')
+        else:
+            seen[node] = index
+    channels = table.get('channels')
+    width = DERIVED_CHANNELS.get(channels) if isinstance(channels, str) else None
+    if width is None:
+        errors.append(f'{where} · channels 는 "trs" 또는 "r"')
+    raw = table.get('values_b64')
+    if not isinstance(raw, str):
+        errors.append(f'{where} · values_b64 (float32 little-endian base64) 필요')
+    elif not errors:
+        try:
+            data = base64.b64decode(raw, validate=True)
+        except (ValueError, TypeError):
+            return errors + [f'{where} · values_b64 · base64 가 아닙니다'], nodes
+        expected = points * len(nodes) * width
+        if len(data) != expected * 4:
+            return errors + [
+                f'{where} · 값 개수 {len(data) // 4} · 필요 {expected} (격자 {points} × 노드 {len(nodes)} × 채널 {width})'
+            ], nodes
+        values = _float32_le(data)
+        if not all(math.isfinite(value) for value in values):
+            return errors + [f'{where} · NaN · Inf 값'], nodes
+        offset = 3 if channels == 'trs' else 0
+        for base in range(0, expected, width):
+            qx, qy, qz, qw = values[base + offset:base + offset + 4]
+            if qx * qx + qy * qy + qz * qz + qw * qw < 1e-12:
+                errors.append(f'{where} · 길이 0 인 쿼터니언 (값 {base // width}번째 노드 자세)')
+                break
+    return errors, nodes
+
+
+def _check_scene_glb_derived(
+    pack_dir: Path, raw: Any, glb_path: Optional[Path], joint_nodes: List[str],
+) -> List[str]:
+    where = 'pack.yaml · scene_glb.derived'
+    relative = _derived_relative(raw)
+    if relative is None:
+        return [f'{where} · 팩 안 상대 경로(파일 이름) 필요 · 절대경로 · ".." 금지']
+    path = Path(pack_dir) / relative
+    if not path.is_file():
+        return [f'{where} · {relative} 파일이 팩에 없습니다']
+    size = path.stat().st_size
+    if size > DERIVED_MAX_BYTES:
+        return [f'{relative} · 크기 초과: {size / 1e6:.1f} MB > {DERIVED_MAX_BYTES / 1e6:.0f} MB (격자를 줄여서)']
     try:
-        payload = yaml.safe_load((Path(pack_dir) / 'pack.yaml').read_text(encoding='utf-8'))
-    except (OSError, yaml.YAMLError):
-        return []
-    scene = payload.get('scene_glb') if isinstance(payload, dict) else None
-    names = scene.get('animations') if isinstance(scene, dict) else None
-    if isinstance(names, str):
-        names = [names]
-    if not isinstance(names, list):
-        return []
-    return [str(name).strip() for name in names if str(name or '').strip()]
+        document = json.loads(path.read_text(encoding='utf-8'))
+    except (OSError, UnicodeDecodeError, ValueError) as exc:
+        return [f'{relative} · JSON 읽기 실패: {exc}']
+    if not isinstance(document, dict) or document.get('version') != 1:
+        return [f'{relative} · version 1 인 표 필요']
+    tables = document.get('tables')
+    if not isinstance(tables, list) or not tables:
+        return [f'{relative} · tables 1개 이상']
+    errors: List[str] = []
+    seen: Dict[str, int] = {}
+    all_nodes: List[str] = []
+    for index, table in enumerate(tables):
+        table_errors, nodes = _check_derived_table(index, table, seen)
+        errors += [f'{relative} · {error}' for error in table_errors]
+        all_nodes += nodes
+    for node in all_nodes:
+        if node in joint_nodes:
+            errors.append(f'{relative} · 노드 {node!r} 가 scene_glb.joints 에도 있음 · 한 노드는 한 방식으로만')
+    if glb_path is not None:
+        try:
+            present = set(glb_info(glb_path)['nodes'])
+        except (OSError, ValueError) as exc:
+            return errors + [f'{SCENE_GLB_NAME} · 노드 이름을 못 읽음: {exc}']
+        for node in all_nodes:
+            if node not in present:
+                errors.append(f'{relative} · 노드 {node!r} 가 {SCENE_GLB_NAME} 에 없습니다')
+    return errors
 
 
 def check_scene_glb(path: Path) -> List[str]:

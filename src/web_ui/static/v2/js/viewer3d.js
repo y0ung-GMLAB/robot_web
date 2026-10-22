@@ -10,7 +10,8 @@ import { h } from './dom.js';
 import { api } from './net.js';
 import {
   blenderUsesJoints, blenderViewAllowed, bodyLocalPose, cameraPosition, followEndSec, followPlayheadSec, followRestSec,
-  frameIndexAt, jointNodeRotation, jointsByBody, nextClockOffset, rigQuatsFromJoints, sampleJointValues, sceneFrontDir,
+  frameIndexAt, jointNodeRotation, jointsByBody, nextClockOffset, prepareDerived, rigQuatsFromJoints, sampleDerivedTable,
+  sampleJointValues, sceneFrontDir,
 } from '../../js/sim3d_math.js';
 
 const THREE_URL = '/static/vendor/three/three.module.js';
@@ -55,7 +56,7 @@ function createViewer3d() {
   let framesLoading = '';
   let framesFailedAt = 0;      // 계산 결과가 없으면 15초마다 다시 본다(그사이 계산이 끝날 수 있다)
   // Blender
-  let bl = null;               // {scene, camera, controls, mixer, duration, rig, jointMode, fingerprint}
+  let bl = null;               // {scene, camera, controls, rig, derived, jointMode, fingerprint}
   let blLoading = false;
   let values = null;
   let valuesFor = '';
@@ -212,22 +213,17 @@ function createViewer3d() {
       scene.add(sun);
       scene.add(gltf.scene);
       const jointMode = blenderUsesJoints(info);
-      const mixer = new THREE.AnimationMixer(gltf.scene);
-      let duration = 0;
+      const find = (name) => gltf.scene.getObjectByName(name) || gltf.scene.getObjectByName(THREE.PropertyBinding.sanitizeNodeName(name));
       const rig = [];
-      if (jointMode) {
-        for (const [name, entry] of Object.entries(info.joints || {})) {
-          const target = gltf.scene.getObjectByName(entry.node) || gltf.scene.getObjectByName(THREE.PropertyBinding.sanitizeNodeName(entry.node));
-          if (target) rig.push({ name, node: target, axis: entry.axis, base: [target.quaternion.x, target.quaternion.y, target.quaternion.z, target.quaternion.w] });
-        }
-      } else {
-        for (const clip of gltf.animations || []) {
-          const action = mixer.clipAction(clip);
-          action.setLoop(THREE.LoopOnce, 1);
-          action.clampWhenFinished = true;
-          action.play();
-          duration = Math.max(duration, clip.duration);
-        }
+      for (const [name, entry] of Object.entries(info.joints || {})) {
+        const target = find(entry.node);
+        if (target) rig.push({ name, node: target, axis: entry.axis, base: [target.quaternion.x, target.quaternion.y, target.quaternion.z, target.quaternion.w] });
+      }
+      // 파생 관절 표 · json 값 → 종속 노드 TRS(닭 평행 목 · 실리콘 늘어남) · 수정 목록 159
+      let derived = [];
+      if (info.derived) {
+        const doc = await api('GET', `/api/preview/blender-scene-derived?v=${encodeURIComponent(info.fingerprint || '')}`, { timeoutMs: 60000 });
+        derived = prepareDerived(doc).map((table) => ({ table, nodes: table.nodes.map(find) }));
       }
       // 장면 전체가 보이게 · glTF 는 Y-up · 로봇들 정면(리그 +Z = Blender −Y)의 평균 쪽에서 · MuJoCo 뷰처럼 정면 ·
       // 매장 배치로 로봇마다 돌아 있어 장면 +Z 에서 보면 얼굴을 옆에서 봤다
@@ -241,7 +237,7 @@ function createViewer3d() {
       const controls = new OrbitControls(camera, renderer.domElement);
       controls.target.copy(center);
       controls.update();
-      bl = { scene, camera, controls, mixer, duration, rig, jointMode, fingerprint: info.fingerprint };
+      bl = { scene, camera, controls, rig, derived, jointMode, fingerprint: info.fingerprint };
       resize();
     } catch (error) {
       say(`Blender 장면 불러오기 실패 · ${error.message || error}`);
@@ -267,14 +263,19 @@ function createViewer3d() {
 
   function poseBlender(seconds, fileId) {
     if (!bl) return;
-    if (bl.jointMode) {
-      const sample = values && valuesFor === fileId ? sampleJointValues(values, seconds) : {};
-      for (const joint of bl.rig) {
-        const [x, y, z, w] = jointNodeRotation(joint.base, joint.axis, sample, joint.name);
-        joint.node.quaternion.set(x, y, z, w);
-      }
-    } else {
-      bl.mixer.setTime(Math.min(seconds, bl.duration));
+    const sample = values && valuesFor === fileId ? sampleJointValues(values, seconds) : {};
+    for (const joint of bl.rig) {
+      const [x, y, z, w] = jointNodeRotation(joint.base, joint.axis, sample, joint.name);
+      joint.node.quaternion.set(x, y, z, w);
+    }
+    for (const { table, nodes } of bl.derived) {
+      sampleDerivedTable(table, sample).forEach((pose, index) => {
+        const node = nodes[index];
+        if (!node) return;
+        node.quaternion.set(pose.q[0], pose.q[1], pose.q[2], pose.q[3]);
+        if (pose.t) node.position.set(pose.t[0], pose.t[1], pose.t[2]);
+        if (pose.s) node.scale.set(pose.s[0], pose.s[1], pose.s[2]);
+      });
     }
   }
 
@@ -290,9 +291,7 @@ function createViewer3d() {
     if (!info?.available) return '로봇 팩에 Blender 장면(scene.glb)이 없습니다';
     if (!latest.fileId) return '보여 줄 애니메이션이 없습니다';
     if (blenderAllowed()) return '';
-    const held = (Array.isArray(info.animations) ? info.animations : []).filter(Boolean);
-    return `${latest.fileId}은(는) 이 팩의 Blender 장면에 없습니다${held.length ? ` · 들어 있는 것 · ${held.join(', ')}` : ''}`
-      + ' · 어떤 애니메이션이든 Blender 로 보려면 조인트(joints) 팩이 필요합니다 · 지금은 MuJoCo';
+    return '로봇 팩에 조인트(scene_glb.joints)도 파생 관절 표(scene_glb.derived)도 없어 Blender 로 움직일 수 없습니다 · 지금은 MuJoCo';
   }
 
   function setView(next) {
@@ -351,11 +350,11 @@ function createViewer3d() {
     const blenderShown = view === 'blender' && blenderAllowed() && bl;
     let duration = 0;
     if (blenderShown) {
-      duration = bl.jointMode ? Number(values?.duration_sec) || 0 : bl.duration;
+      duration = Number(values?.duration_sec) || 0;
       poseBlender(Math.min(playhead, duration || playhead), latest.fileId);
       bl.controls.update();
       renderer.render(bl.scene, bl.camera);
-      say(`Blender · ${latest.fileId || '애니메이션 없음'}${bl.jointMode ? ' · 애니메이션 값' : ' · 장면 내장 동작'}${running ? ' · 동시 재생 중' : ' · 대기 상태(초기 위치)'}`);
+      say(`Blender · ${latest.fileId || '애니메이션 없음'} · 애니메이션 값${running ? ' · 동시 재생 중' : ' · 대기 상태(초기 위치)'}`);
     } else if (mj) {
       const ok = frames && framesFor === latest.fileId;
       duration = ok ? followEndSec(frames) : 0;

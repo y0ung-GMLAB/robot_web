@@ -257,5 +257,99 @@ def test_scene_glb_without_joints_or_animations_warns(tmp_path):
     pack = make_pack(tmp_path / 'p')
     (pack / 'scene.glb').write_bytes(_glb())
     report = robot_pack.inspect_pack(pack)
-    assert any('scene_glb.joints 도 animations 도 없음' in w for w in report.warnings)
+    assert any('scene_glb.joints 도 derived 도 없음' in w for w in report.warnings)
     assert robot_pack.scene_glb_joints(pack) == {}
+
+
+# scene_glb.derived · 파생 관절 표 · 수정 목록 159
+# --------------------------------------------------------------------------- #
+
+def _b64(values):
+    import base64
+    import struct
+    return base64.b64encode(struct.pack('<%df' % len(values), *values)).decode()
+
+
+def _identity_trs(points, nodes):
+    return [0, 0, 0, 0, 0, 0, 1, 1, 1, 1] * (points * nodes)
+
+
+def _derived_pack(tmp_path, tables, *, joints=None, nodes=('Neck', 'Rod_L', 'f1_neck_yaw'), derived='derived.json',
+                  extra=None):
+    import json as _json
+    document = {'asset': {'version': '2.0'}, 'nodes': [{'name': name} for name in nodes]}
+    scene = {'derived': derived}
+    if joints:
+        scene['joints'] = joints
+    if extra:
+        scene.update(extra)
+    pack = make_pack(tmp_path / 'p', pack={'name': 'chicken', 'version': '1.0', 'created': '2026-10-22', 'scene_glb': scene})
+    (pack / 'scene.glb').write_bytes(_glb(_json.dumps(document).encode()))
+    (pack / 'derived.json').write_text(_json.dumps({'version': 1, 'tables': tables}), encoding='utf-8')
+    return pack
+
+
+def _table(inputs=('c1', 'c2'), n=(3, 2), nodes=('Neck', 'Rod_L'), channels='trs', values=None):
+    width = 10 if channels == 'trs' else 4
+    points = 1
+    for count in n:
+        points *= count
+    if values is None:
+        values = _identity_trs(points, len(nodes)) if channels == 'trs' else [0, 0, 0, 1] * (points * len(nodes))
+    return {'inputs': list(inputs), 'grid': [{'min': -0.5, 'max': 0.5, 'n': count} for count in n],
+            'nodes': list(nodes), 'channels': channels, 'values_b64': _b64(values)}
+
+
+def test_scene_glb_derived_table_passes_and_turns_the_blender_view_on(tmp_path):
+    pack = _derived_pack(tmp_path, [_table(), _table(inputs=('c3',), n=(4,), nodes=('f1_neck_yaw',), channels='r')])
+    report = robot_pack.inspect_pack(pack)
+    assert report.errors == []
+    assert not any('scene_glb' in w for w in report.warnings), report.warnings
+    assert robot_pack.scene_glb_derived_path(pack) == pack / 'derived.json'
+
+
+def test_scene_glb_derived_rejects_bad_tables(tmp_path):
+    cases = [
+        (_table(values=[0.0] * 5), '값 개수 5 · 필요 120 (격자 6 × 노드 2 × 채널 10)'),
+        (_table(inputs=('c1', 'c2', 'c3', 'c4'), n=(2, 2, 2, 2)), 'inputs 는 조인트 이름 1~3개'),
+        (_table(inputs=('c1', 'c1')), 'inputs 중복'),
+        (_table(n=(1, 2)), 'n 은 2 이상 정수'),
+        (_table(channels='xyz'), 'channels 는 "trs" 또는 "r"'),
+        (_table(nodes=('Nope',)), "노드 'Nope' 가 scene.glb 에 없습니다"),
+        (_table(values=[0, 0, 0, 0, 0, 0, 0, 1, 1, 1] * 12), '길이 0 인 쿼터니언'),
+        (_table(values=[float('nan')] + [0] * 119), 'NaN · Inf'),
+    ]
+    for index, (table, message) in enumerate(cases):
+        pack = _derived_pack(tmp_path / str(index), [table])
+        errors = '\n'.join(robot_pack.validate_pack_dir(pack))
+        assert message in errors, (message, errors)
+
+
+def test_scene_glb_derived_node_belongs_to_one_place_only(tmp_path):
+    pack = _derived_pack(tmp_path / 'a', [_table(), _table(inputs=('c3',), n=(2,), nodes=('Neck',))])
+    assert "노드 'Neck' 가 tables[0] 에도 있음" in '\n'.join(robot_pack.validate_pack_dir(pack))
+    pack = _derived_pack(tmp_path / 'b', [_table()], joints={'c9': {'node': 'Neck', 'axis': [1, 0, 0]}})
+    assert "노드 'Neck' 가 scene_glb.joints 에도 있음" in '\n'.join(robot_pack.validate_pack_dir(pack))
+
+
+def test_scene_glb_derived_path_must_stay_inside_the_pack(tmp_path):
+    for index, path in enumerate(('../derived.json', '/abs/derived.json', 'C:/x.json', 'missing.json')):
+        pack = _derived_pack(tmp_path / str(index), [_table()], derived=path)
+        errors = '\n'.join(robot_pack.validate_pack_dir(pack))
+        assert 'scene_glb.derived' in errors, (path, errors)
+        assert robot_pack.scene_glb_derived_path(pack) is None
+
+
+def test_scene_glb_derived_size_limit(tmp_path, monkeypatch):
+    pack = _derived_pack(tmp_path, [_table()])
+    monkeypatch.setattr(robot_pack, 'DERIVED_MAX_BYTES', 10)
+    assert '크기 초과' in '\n'.join(robot_pack.validate_pack_dir(pack))
+
+
+def test_scene_glb_old_animations_key_is_ignored_with_a_warning(tmp_path):
+    pack = _derived_pack(tmp_path, [_table()], extra={'animations': ['floating_narration_all']})
+    report = robot_pack.inspect_pack(pack)
+    assert report.errors == []
+    assert any('scene_glb.animations 는 더 이상 쓰지 않습니다' in w for w in report.warnings)
+    assert not hasattr(robot_pack, 'scene_glb_animations')
+

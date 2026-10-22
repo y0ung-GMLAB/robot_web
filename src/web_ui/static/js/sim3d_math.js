@@ -267,32 +267,19 @@ export function followEndSec(frames = {}) {
 }
 
 
-/** Blender 장면(glb)이 이 애니메이션을 담았나 · 수정 목록 60
- *
- * 서버 `blender.animations` = 팩 `pack.yaml` `scene_glb.animations` · 이름 = 파일 이름(확장자 뺌) ·
- * 대소문자 무시 · 이름이 안 적힌 옛 팩은 알 수 없으므로 **안 보인다**.
- */
-export function blenderHoldsAnimation(info, file) {
-  if (!info?.available || !file) return false;
-  const names = (Array.isArray(info.animations) ? info.animations : [])
-    .map((name) => String(name || '').trim().toLowerCase()).filter(Boolean);
-  if (!names.length) return false;
-  const stem = (value) => String(value || '').trim().replace(/\.json$/i, '').toLowerCase();
-  return [file.id, file.filename].some((value) => value && names.includes(stem(value)));
-}
-
-
 /* ---------- Blender 뷰 · json 값으로 노드 돌리기 · 수정 목록 98 ---------- */
 
-/** 팩에 조인트 → 노드가 적혀 있나 · 있으면 어떤 애니메이션이든 json 값으로 */
+/** 팩이 json 값으로 장면을 움직이나 · 조인트 → 노드(98) 또는 파생 관절 표(159) · 어떤 애니메이션이든 */
 export function blenderUsesJoints(info) {
-  return Boolean(info?.available) && Boolean(info?.joints) && Object.keys(info.joints).length > 0;
+  if (!info?.available) return false;
+  const joints = Boolean(info.joints) && Object.keys(info.joints).length > 0;
+  return joints || info.derived === true;
 }
 
-/** Blender 뷰를 켤 수 있나 · 조인트 방식이면 애니메이션 하나만 고르면 · 아니면 옛 방식(60) */
+/** Blender 뷰를 켤 수 있나 · 애니메이션 하나를 골랐고 팩이 json 값 방식이면 · glb 에 구운 클립(옛 60)은 159 에서 지움 */
 export function blenderViewAllowed(info, file) {
   if (!info?.available || !file) return false;
-  return blenderUsesJoints(info) || blenderHoldsAnimation(info, file);
+  return blenderUsesJoints(info);
 }
 
 /** 그 시각의 조인트 값(rad) · 서버가 고른 시각표 · 두 점 사이 선형 · 끝 밖은 끝 값 */
@@ -338,4 +325,90 @@ function multiplyQuaternion(a, b) {
 export function jointNodeRotation(base, axis, values, name) {
   const angle = Number(values?.[name]);
   return multiplyQuaternion(base, axisAngleQuaternion(axis, Number.isFinite(angle) ? angle : 0));
+}
+
+
+/* ---------- Blender 뷰 · 파생 관절 표 · 수정 목록 159 ---------- */
+// 형식 `scripts/sim/README.md` 「scene_glb.derived」 · 입력 1~3개(json 조인트 값 · rad) → 노드 로컬 TRS ·
+// 정규 격자 · 격자 사이 다중선형 · 회전은 첫 모서리와 부호 맞춘 가중합 → 정규화(nlerp) · 격자 밖은 끝값
+
+const DERIVED_WIDTH = Object.freeze({ trs: 10, r: 4 });
+
+/** base64 → float32 (little-endian) */
+export function decodeFloat32Base64(text) {
+  const binary = atob(String(text || ''));
+  const bytes = new Uint8Array(binary.length);
+  for (let i = 0; i < binary.length; i += 1) bytes[i] = binary.charCodeAt(i);
+  if (bytes.length % 4) throw new Error('float32 길이가 아닙니다');
+  const view = new DataView(bytes.buffer);
+  const out = new Float32Array(bytes.length / 4);
+  for (let i = 0; i < out.length; i += 1) out[i] = view.getFloat32(i * 4, true);
+  return out;
+}
+
+/** derived.json → 보간에 쓰는 표 · 서버 팩 검사를 통과한 것만 오지만 모양이 틀리면 던진다 */
+export function prepareDerived(document) {
+  if (!document || document.version !== 1 || !Array.isArray(document.tables)) throw new Error('파생 관절 표 형식(version 1)이 아닙니다');
+  return document.tables.map((table, index) => {
+    const width = DERIVED_WIDTH[table?.channels];
+    const inputs = Array.isArray(table?.inputs) ? table.inputs.map(String) : [];
+    const grid = Array.isArray(table?.grid) ? table.grid.map((cell) => ({ min: Number(cell.min), max: Number(cell.max), n: Number(cell.n) })) : [];
+    const nodes = Array.isArray(table?.nodes) ? table.nodes.map(String) : [];
+    if (!width || !inputs.length || grid.length !== inputs.length || !nodes.length) throw new Error(`파생 관절 표 ${index} · 모양이 틀립니다`);
+    const strides = new Array(grid.length);
+    let points = 1;
+    for (let axis = grid.length - 1; axis >= 0; axis -= 1) {
+      strides[axis] = points;
+      points *= grid[axis].n;
+    }
+    const values = decodeFloat32Base64(table.values_b64);
+    if (values.length !== points * nodes.length * width) throw new Error(`파생 관절 표 ${index} · 값 개수가 틀립니다`);
+    return { inputs, grid, nodes, channels: table.channels, width, strides, values };
+  });
+}
+
+/** 표 하나 · json 값({조인트: rad}) → 노드마다 {t, q, s} · r 표는 t · s 가 null(glb 기본 그대로) */
+export function sampleDerivedTable(table, jointValues) {
+  const cells = table.grid.map((cell, axis) => {
+    const raw = Number(jointValues?.[table.inputs[axis]]);
+    const value = Number.isFinite(raw) ? raw : 0;
+    const clamped = Math.min(Math.max(value, cell.min), cell.max);
+    const position = (clamped - cell.min) / (cell.max - cell.min) * (cell.n - 1);
+    const index = Math.min(Math.floor(position), cell.n - 2);
+    return { index, frac: position - index };
+  });
+  const corners = [];
+  for (let mask = 0; mask < (1 << cells.length); mask += 1) {
+    let weight = 1;
+    let point = 0;
+    cells.forEach((cell, axis) => {
+      const upper = (mask >> axis) & 1;
+      weight *= upper ? cell.frac : 1 - cell.frac;
+      point += (cell.index + upper) * table.strides[axis];
+    });
+    corners.push({ weight, base: point * table.nodes.length * table.width });
+  }
+  const trs = table.channels === 'trs';
+  const qOffset = trs ? 3 : 0;
+  return table.nodes.map((_name, node) => {
+    const at = (corner, channel) => table.values[corner.base + node * table.width + channel];
+    const ref = corners[0];
+    const q = [0, 0, 0, 0];
+    const t = trs ? [0, 0, 0] : null;
+    const s = trs ? [0, 0, 0] : null;
+    for (const corner of corners) {
+      if (!corner.weight) continue;
+      const dot = [0, 1, 2, 3].reduce((sum, k) => sum + at(corner, qOffset + k) * at(ref, qOffset + k), 0);
+      const sign = dot < 0 ? -1 : 1;
+      for (let k = 0; k < 4; k += 1) q[k] += corner.weight * sign * at(corner, qOffset + k);
+      if (trs) {
+        for (let k = 0; k < 3; k += 1) {
+          t[k] += corner.weight * at(corner, k);
+          s[k] += corner.weight * at(corner, 7 + k);
+        }
+      }
+    }
+    const length = Math.hypot(q[0], q[1], q[2], q[3]) || 1;
+    return { t, q: q.map((value) => value / length), s };
+  });
 }

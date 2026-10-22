@@ -20,16 +20,16 @@
  * 「Blender 뷰」(수정 목록 50) · 팩에 `scene.glb` 가 있으면 체크가 보인다 · 켜면 MuJoCo
  * 장면 대신 Blender 가 내보낸 glTF 장면(헤드 4대 · 매장 오브제)을 그린다 · 물리 없음 ·
  * 시각은 실물 따라가기와 같은 시계(running · 회차 · 파일이 바뀌면 0 부터 · 멈추면 멈춤) ·
- * 애니메이션은 `AnimationMixer.setTime(t)` · 계산(.sim.npz) 없이 바로 된다.
+ * 자세는 애니메이션 json 값 · 조인트 → 노드 회전(98) · 파생 관절 표 → 노드 TRS(159) · 계산(.sim.npz) 없이 바로 된다.
  *
  * 「실물 위치」(수정 목록 7-c) · 실제 모터 위치를 서버가 매핑 식으로 되돌린 조인트 각도
  * (`motion_actual_rad` · 화면에는 deg)로 같은 로봇을 주황 반투명으로 겹쳐 그린다 · 계획
  * (MuJoCo 프레임)과 실물의 차이가 보인다 · MuJoCo 뷰에서만(glTF 는 관절을 따로 못 움직인다).
  */
-import { exportPreviewScene, fetchMotionJointValues, fetchPreviewFrames, fetchPreviewScene, fetchPreviewSceneData } from './api.js';
+import { exportPreviewScene, fetchBlenderDerived, fetchMotionJointValues, fetchPreviewFrames, fetchPreviewScene, fetchPreviewSceneData } from './api.js';
 import {
   actualQpos, blenderUsesJoints, blenderViewAllowed, bodyLocalPose, jointNodeRotation, sampleJointValues, cameraPosition, followEndSec, followPlayheadSec, followRunKey,
-  frameIndexAt, jointsByBody, rigQuatsFromJoints, sceneFrontDir,
+  frameIndexAt, jointsByBody, prepareDerived, rigQuatsFromJoints, sampleDerivedTable, sceneFrontDir,
 } from './sim3d_math.js';
 
 const THREE_URL = '/static/vendor/three/three.module.js';
@@ -72,7 +72,7 @@ export function createSim3dViewer({ el, getLatestState = () => null }) {
   // Blender 뷰 · 수정 목록 50
   let view = 'mujoco';        // 'mujoco' | 'blender'
   let blenderInfo = null;     // 서버 · {available, size_bytes, fingerprint}
-  let blender = null;         // {scene, camera, controls, mixer, duration, fingerprint, home}
+  let blender = null;         // {scene, camera, controls, duration, fingerprint, home, rig, derived}
   let blenderLoading = false;
   // 수정 목록 98 · 팩에 조인트 → 노드가 있으면 애니메이션 json 값으로 노드를 돌린다(glb 클립 안 씀)
   let jointValues = null;     // 서버 · {fps, sample_count, duration_sec, joints:{id:[rad…]}}
@@ -411,7 +411,7 @@ export function createSim3dViewer({ el, getLatestState = () => null }) {
     rafId = 0;
   }
 
-  /** 지금 보는 뷰에 시간축이 있나 · MuJoCo 는 계산 프레임 · Blender 는 glTF 애니메이션 */
+  /** 지금 보는 뷰에 시간축이 있나 · MuJoCo 는 계산 프레임 · Blender 는 애니메이션 json 값 */
   function hasTimeline() {
     return view === 'blender' ? Boolean(blender) : Boolean(frames);
   }
@@ -430,8 +430,7 @@ export function createSim3dViewer({ el, getLatestState = () => null }) {
   /** 지금 시각의 자세를 보는 뷰에 */
   function showTime() {
     if (view === 'blender') {
-      if (blender?.jointMode) applyJointPose(Math.min(playhead, blender.duration));
-      else if (blender) blender.mixer.setTime(Math.min(playhead, blender.duration));
+      if (blender) applyJointPose(Math.min(playhead, blender.duration));
     } else if (frames) {
       applyPose(frames.qpos[frameIndexAt(frames.t, playhead)]);
     }
@@ -544,44 +543,34 @@ export function createSim3dViewer({ el, getLatestState = () => null }) {
       sun.position.set(2, 4, 3);
       scene.add(sun);
       scene.add(gltf.scene);
-      const mixer = new THREE.AnimationMixer(gltf.scene);
       const jointMode = blenderUsesJoints(blenderInfo);
-      let duration = 0;
-      let rig = [];
-      let missing = [];
-      if (jointMode) {
-        // 조인트마다 노드 · 기본 자세(로드한 그대로)를 기억 · 그 위에 축 회전 · 수정 목록 98
-        ({ rig, missing } = buildJointRig(gltf.scene, blenderInfo.joints));
-        duration = jointValues && jointValuesFor === currentFile?.id ? Number(jointValues.duration_sec) || 0 : 0;
-      } else {
-        for (const clip of gltf.animations || []) {
-          const action = mixer.clipAction(clip);
-          action.setLoop(THREE.LoopOnce, 1);
-          action.clampWhenFinished = true;
-          action.play();
-          duration = Math.max(duration, clip.duration);
-        }
+      // 조인트마다 노드 · 기본 자세(로드한 그대로)를 기억 · 그 위에 축 회전 · 수정 목록 98
+      const { rig, missing } = buildJointRig(gltf.scene, blenderInfo.joints);
+      // 파생 관절 표 · json 값 → 종속 노드 TRS(닭 평행 목 · 실리콘 늘어남) · 수정 목록 159
+      let derived = [];
+      if (blenderInfo.derived) {
+        const doc = await fetchBlenderDerived(blenderInfo.fingerprint);
+        derived = prepareDerived(doc).map((table) => ({ table, nodes: table.nodes.map((name) => findNode(gltf.scene, name)) }));
+        for (const { table, nodes } of derived) table.nodes.forEach((name, index) => { if (!nodes[index]) missing.push(name); });
       }
+      const duration = jointValues && jointValuesFor === currentFile?.id ? Number(jointValues.duration_sec) || 0 : 0;
       const home = blenderHome(gltf.scene, blenderInfo.joints);
       const cam = new THREE.PerspectiveCamera(40, 1, home.near, home.far);
       const orbit = new OrbitControls(cam, renderer.domElement);
       orbit.enabled = view === 'blender';
       blender = {
-        scene, camera: cam, controls: orbit, mixer, duration, home,
+        scene, camera: cam, controls: orbit, duration, home,
         fingerprint: blenderInfo.fingerprint,
-        jointMode, rig,
+        jointMode, rig, derived,
       };
       placeBlenderCamera();
       resize();
       playhead = Math.min(playhead, duration);
       showTime();
       startLoop();
-      if (jointMode) {
-        setMessage(`Blender 뷰 · 조인트 ${rig.length}개 · 애니메이션 json 값으로${missing.length ? ` · glb에 없는 노드 ${missing.join(', ')}` : ''} · ${sizeMb.toFixed(1)} MB`);
-        await loadJointValues(currentFile);
-      } else {
-        setMessage(`Blender 뷰 · 애니메이션 ${(gltf.animations || []).length}개 · ${duration.toFixed(1)}초 · ${sizeMb.toFixed(1)} MB`);
-      }
+      const derivedNodes = derived.reduce((sum, entry) => sum + entry.nodes.length, 0);
+      setMessage(`Blender 뷰 · 조인트 ${rig.length}개${derivedNodes ? ` · 파생 노드 ${derivedNodes}개` : ''} · 애니메이션 json 값으로${missing.length ? ` · glb에 없는 노드 ${missing.join(', ')}` : ''} · ${sizeMb.toFixed(1)} MB`);
+      if (jointMode) await loadJointValues(currentFile);
     } catch (error) {
       setMessage(`Blender 장면 불러오기 실패: ${error?.message || error}`);
       view = 'mujoco';
@@ -592,13 +581,17 @@ export function createSim3dViewer({ el, getLatestState = () => null }) {
     }
   }
 
-  /** 팩의 조인트 → glb 노드 · 이름 그대로 또는 three 가 고친 이름(공백·점 등) */
+  /** glb 노드 · 이름 그대로 또는 three 가 고친 이름(공백·점 등) */
+  function findNode(root, name) {
+    return root.getObjectByName(name) || root.getObjectByName(THREE.PropertyBinding.sanitizeNodeName(name));
+  }
+
+  /** 팩의 조인트 → glb 노드 */
   function buildJointRig(root, joints) {
     const rig = [];
     const missing = [];
     for (const [name, entry] of Object.entries(joints || {})) {
-      const node = root.getObjectByName(entry.node)
-        || root.getObjectByName(THREE.PropertyBinding.sanitizeNodeName(entry.node));
+      const node = findNode(root, entry.node);
       if (!node) { missing.push(entry.node); continue; }
       const q = node.quaternion;
       rig.push({ name, node, axis: entry.axis, base: [q.x, q.y, q.z, q.w] });
@@ -606,13 +599,22 @@ export function createSim3dViewer({ el, getLatestState = () => null }) {
     return { rig, missing };
   }
 
-  /** 그 시각 · json 값 → 노드 회전 · 값이 아직 없거나 json 에 없는 조인트는 기본 자세 */
+  /** 그 시각 · json 값 → 노드 회전 · 파생 표 노드 TRS · 값이 아직 없거나 json 에 없는 조인트는 0 */
   function applyJointPose(seconds) {
     if (!blender?.rig) return;
     const values = jointValues && jointValuesFor === currentFile?.id ? sampleJointValues(jointValues, seconds) : {};
     for (const joint of blender.rig) {
       const [x, y, z, w] = jointNodeRotation(joint.base, joint.axis, values, joint.name);
       joint.node.quaternion.set(x, y, z, w);
+    }
+    for (const { table, nodes } of blender.derived || []) {
+      sampleDerivedTable(table, values).forEach((pose, index) => {
+        const node = nodes[index];
+        if (!node) return;
+        node.quaternion.set(pose.q[0], pose.q[1], pose.q[2], pose.q[3]);
+        if (pose.t) node.position.set(pose.t[0], pose.t[1], pose.t[2]);
+        if (pose.s) node.scale.set(pose.s[0], pose.s[1], pose.s[2]);
+      });
     }
   }
 
@@ -631,7 +633,8 @@ export function createSim3dViewer({ el, getLatestState = () => null }) {
       jointValuesFor = file.id;
       if (blender) blender.duration = Number(payload.duration_sec) || 0;
       const used = blender ? blender.rig.filter((joint) => joint.name in (payload.joints || {})).length : 0;
-      setMessage(`Blender 뷰 · ${file.id} · ${Number(payload.duration_sec || 0).toFixed(1)}초 · 움직이는 조인트 ${used}/${blender?.rig.length || 0} (나머지는 기본 자세)`);
+      const tables = blender ? (blender.derived || []).filter(({ table }) => table.inputs.some((name) => name in (payload.joints || {}))).length : 0;
+      setMessage(`Blender 뷰 · ${file.id} · ${Number(payload.duration_sec || 0).toFixed(1)}초 · 움직이는 조인트 ${used}/${blender?.rig.length || 0}${blender?.derived?.length ? ` · 파생 표 ${tables}/${blender.derived.length}` : ''} (나머지는 기본 자세)`);
       playhead = Math.min(playhead, blender?.duration || 0);
       showTime();
     } catch (error) {
@@ -644,7 +647,6 @@ export function createSim3dViewer({ el, getLatestState = () => null }) {
 
   function disposeBlender() {
     if (!blender) return;
-    blender.mixer.stopAllAction();
     blender.controls.dispose();
     blender.scene.traverse((node) => {
       if (node.geometry) node.geometry.dispose();
@@ -660,7 +662,7 @@ export function createSim3dViewer({ el, getLatestState = () => null }) {
   }
 
   /** 체크 · 「Blender 뷰」 ↔ 「MuJoCo 계산」 · 같은 캔버스를 바꿔 그린다 */
-  /** 지금 보는(같이 보기면 등록) 애니메이션이 glb 에 들어 있을 때만 · 수정 목록 60 */
+  /** 애니메이션을 골랐고 팩이 json 값 방식(joints · derived)일 때만 · 수정 목록 98 · 159 */
   function blenderAllowed() {
     return blenderViewAllowed(blenderInfo, currentFile);
   }
@@ -705,12 +707,8 @@ export function createSim3dViewer({ el, getLatestState = () => null }) {
       const why = !currentFile
         ? '애니메이션을 먼저 선택하세요'
         : jointMode ? 'Blender 뷰를 켤 수 없습니다'
-          : !(blenderInfo?.animations || []).length
-            ? '로봇 팩에 조인트-노드 연결(pack.yaml scene_glb.joints)도, 장면에 담긴 애니메이션 이름도 없어 Blender 뷰를 쓸 수 없습니다. MuJoCo 뷰로 봅니다.'
-            : `이 애니메이션의 Blender 장면이 없어 MuJoCo 뷰로 봅니다 (장면: ${(blenderInfo.animations || []).join(', ')})`;
-      const tip = allowed
-        ? (jointMode ? 'Blender 장면을 이 애니메이션 json 값으로 움직입니다' : 'Blender 에서 구운 장면으로 봅니다')
-        : why;
+          : '로봇 팩에 조인트-노드 연결(pack.yaml scene_glb.joints)도 파생 관절 표(scene_glb.derived)도 없어 Blender 뷰를 쓸 수 없습니다. MuJoCo 뷰로 봅니다.';
+      const tip = allowed ? 'Blender 장면을 이 애니메이션 json 값으로 움직입니다' : why;
       el.sim3dBlenderToggle.title = tip;
       if (has('sim3dBlenderLabel')) el.sim3dBlenderLabel.title = tip;
     }

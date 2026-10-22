@@ -5,14 +5,14 @@ import { blenderUsesJoints, blenderViewAllowed, jointNodeRotation, sampleJointVa
 
 const close = (a, b) => a.every((v, i) => Math.abs(v - b[i]) < 1e-9);
 
-test('조인트 방식이면 어떤 애니메이션이든 · 아니면 옛 방식(60) 그대로', () => {
+test('조인트 방식이면 어떤 애니메이션이든 · 옛 방식(60 · 구운 클립)은 159 에서 지움', () => {
   const joints = { available: true, joints: { f1_neck_yaw: { node: 'f1_neck_yaw', axis: [0, 1, 0] } } };
   assert.equal(blenderUsesJoints(joints), true);
   assert.equal(blenderViewAllowed(joints, { id: 'floating1_dir_test.json' }), true);
   assert.equal(blenderViewAllowed(joints, null), false, '애니메이션을 안 골랐으면 아님');
   const old = { available: true, animations: ['floating_narration_all'] };
   assert.equal(blenderUsesJoints(old), false);
-  assert.equal(blenderViewAllowed(old, { id: 'floating_narration_all.json' }), true);
+  assert.equal(blenderViewAllowed(old, { id: 'floating_narration_all.json' }), false);
   assert.equal(blenderViewAllowed(old, { id: 'floating1_dir_test.json' }), false);
   assert.equal(blenderViewAllowed({ available: false, joints: joints.joints }, { id: 'x' }), false);
 });
