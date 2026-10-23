@@ -522,6 +522,10 @@ def scan_operation_outcome(
     Feetech (수정 목록 158) · 같은 규칙 · 전체 검색에 Feetech 구획이 있을 때만 판정에 든다 ·
     결과에 구획이 없으면(옛 노드) 판정은 전과 같다 · 기본 `feetech_expected=False`
     (Feetech 를 안 쓰는 프로젝트의 응답 없음은 판정에서 뺀다 → AC 전용 판정 변화 없음).
+
+    직렬 서보 검색(`dynamixel_scan` · 다이나믹셀 + Feetech 한 번에) · 프로젝트가 안 쓰고
+    찾지도 못한 종류는 판정에서 뺀다 · 다이나믹셀만 쓰는 PC 의 Feetech 응답 없음이
+    「일부 완료」 가 되지 않게 · 둘 다 빠지면 다이나믹셀로 판정(전과 같음).
     """
     if not isinstance(scan, dict):
         return 'success' if fallback_success else 'failure'
@@ -541,9 +545,13 @@ def scan_operation_outcome(
     elif operation_type == 'ac_servo_scan':
         requested = [ethercat]
     elif operation_type == 'dynamixel_scan':
-        requested = [dynamixel]
-    elif operation_type == 'feetech_scan':
-        requested = [feetech]
+        requested = [
+            item
+            for item, expected in ((dynamixel, dynamixel_expected), (feetech, feetech_expected))
+            if isinstance(item, dict)
+            and item.get('skipped') is not True
+            and (expected or scan_item_has_detected_devices(item))
+        ] or [dynamixel]
     else:
         requested = [
             item
@@ -704,16 +712,14 @@ def scan_result_message(
             parts.append(f'다이나믹셀 {int(dynamixel.get("devices_count") or 0)}대')
         except (TypeError, ValueError):
             pass
-        if success and dynamixel_port_missing(dynamixel):
+        if success and dynamixel_port_missing(dynamixel) and not scan_item_has_detected_devices(feetech):
             # 판정에서 뺀 경우(프로젝트에 다이나믹셀 없음) · 정보로만 · 수정 목록 120 (바)
             parts.append('다이나믹셀 직렬 포트 없음(정보 · 다이나믹셀 모터를 쓰지 않으면 괜찮습니다)')
-    feetech_only = not any(
-        isinstance(item, dict) and item.get('skipped') is not True for item in (ethercat, dynamixel)
-    )
+    serial_only = not (isinstance(ethercat, dict) and ethercat.get('skipped') is not True)
     if isinstance(feetech, dict) and feetech.get('skipped') is not True and (
-        scan_item_has_detected_devices(feetech) or feetech_only
+        scan_item_has_detected_devices(feetech) or serial_only
     ):
-        # 찾았거나 Feetech 만 검색했을 때만 · 안 쓰는 PC 의 전체 검색 문구는 전과 같다 · 수정 목록 158
+        # 찾았거나 직렬 서보 검색일 때만 · 안 쓰는 PC 의 전체 검색 문구는 전과 같다 · 수정 목록 158
         try:
             parts.append(f'Feetech {int(feetech.get("devices_count") or 0)}대')
         except (TypeError, ValueError):

@@ -43,7 +43,7 @@ test('검색 확인 창 · 다른 프로젝트로 돌던 모터 프로그램은 
   const same = scanConfirmText('ac', { runtime_matches_selected: true });
   assert.match(same, /잠시 정지했다가 다시 시작됩니다/);
   assert.match(same, /검색하지 않은 종류의 모터는 그대로 둡니다/);
-  const none = scanConfirmText('dxl', {}, { dirty: true });
+  const none = scanConfirmText('serial', {}, { dirty: true });
   assert.doesNotMatch(none, /다시 시작됩니다/);
   assert.match(none, /저장하지 않은 변경 내용은 검색 결과로 대체됩니다/);
   assert.match(MOTORS_SRC, /body: scanConfirmText\(kind, state\.snap\?\.project_scope/);

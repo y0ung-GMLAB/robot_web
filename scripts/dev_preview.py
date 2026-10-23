@@ -1416,7 +1416,10 @@ async def preview_motion_stop():
 
 
 def _preview_scan(ethercat=True, dynamixel=True):
-    """검색 흉내 · 가짜 5축 + 새 AC 하나 + 다이나믹셀 하나 · 짝 맞추기·제안은 서버 모듈 그대로 · 수정 목록 100"""
+    """검색 흉내 · 가짜 5축 + 새 AC 하나 + 다이나믹셀 하나 + Feetech 둘 · 짝 맞추기·제안은 서버 모듈 그대로 · 수정 목록 100
+
+    `dynamixel` = 직렬 서보 검색(다이나믹셀 + Feetech 한 번에) · 수정 목록 158 · Feetech 둘째는 모르는 모델 번호(확인 필요)
+    """
     from motion_web_bridge import scan_axis_rows, scan_proposal
     slaves = [{'master_index': 0, 'slave_position': axis, 'ethercat_alias': 100 + axis, 'rotary_alias': None,
                'serial_number': 9000 + axis, 'vendor_id': 1647, 'product_code': 1614282756, 'order_number': 'MADLN05BE',
@@ -1428,11 +1431,14 @@ def _preview_scan(ethercat=True, dynamixel=True):
         'ethercat_scan': {'available': True, 'slaves': slaves, 'masters': [{'master_index': 0, 'complete': True}]} if ethercat else {'skipped': True},
         'dynamixel_scan': {'available': True, 'error': '', 'devices': [{'id': 3, 'port': '/dev/ttyUSB0', 'model_number': 1130,
                                                                          'model_name': 'XM540-W150', 'firmware_version': 50}]} if dynamixel else {'skipped': True},
+        'feetech_scan': {'available': True, 'complete': True, 'error': '', 'devices_count': 2, 'devices': [
+            {'id': 1, 'port': '/dev/ttyUSB1', 'model_number': 777, 'baudrate': 1000000},
+            {'id': 2, 'port': '/dev/ttyUSB1', 'model_number': 9999, 'baudrate': 1000000, 'model_confirm': True}]} if dynamixel else {'skipped': True},
     }
     registry = _preview_registry()
     scan['axis_rows'] = scan_axis_rows.axis_rows_from_scan(registry, scan)
     scan['proposed_registry'] = scan_proposal.proposed_registry(registry, scan, scan['axis_rows'])
-    return {'success': True, 'message': f'프리뷰 · 검색 흉내 · AC {len(slaves) if ethercat else 0} · 다이나믹셀 {1 if dynamixel else 0}', 'scan': scan}
+    return {'success': True, 'message': f'프리뷰 · 검색 흉내 · AC {len(slaves) if ethercat else 0} · 다이나믹셀 {1 if dynamixel else 0} · Feetech {2 if dynamixel else 0}', 'scan': scan}
 
 
 @app.post('/api/motors/scan')

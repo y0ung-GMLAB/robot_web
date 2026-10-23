@@ -43,8 +43,6 @@ ALLOWED = {
     '/favicon.ico',
     # 아직 버튼을 안 붙인 길 · 지우지 말 것
     '/api/motors/scan/cancel',
-    # Feetech 검색 · 서버 먼저 · 화면 버튼 「Feetech 검색」 은 화면 작업(수정 목록 158)이 붙인다
-    '/api/motors/scan/feetech',
 }
 
 

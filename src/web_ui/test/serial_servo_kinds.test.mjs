@@ -132,13 +132,13 @@ test('모터 표 · motor_type unknown · 칸 없음 · cubemars 줄은 전(HEAD
   assert.equal(motorErrorText({ motor_type: 'unknown', errorcode: 0xFFFE }), '오류 65534');
 });
 
-test('모터 검색 · 「Feetech 검색」 · /api/motors/scan/feetech · 확인 창 글', () => {
+test('모터 검색 · 「직렬 서보 검색」 하나 · 다이나믹셀 + Feetech 한 번에 · 확인 창 글', () => {
   const page = read('../static/v2/js/pages/motors.js');
-  assert.match(page, /ft: \{ label: 'Feetech', path: '\/api\/motors\/scan\/feetech' \}/);
+  assert.match(page, /serial: \{ label: '직렬 서보', path: '\/api\/motors\/scan\/dynamixel' \}/);
+  assert.doesNotMatch(page, /scan\/feetech|label: 'Feetech'|label: '다이나믹셀'/);
   assert.match(page, /`\$\{spec\.label\} 검색`/);
-  assert.match(scanConfirmText('ft', {}), /^Feetech 모터를 검색합니다/);
+  assert.match(scanConfirmText('serial', {}), /^직렬 서보\(다이나믹셀 · Feetech\) 모터를 검색합니다/);
   assert.match(scanConfirmText('all', {}), /^AC 서보 · 다이나믹셀 · Feetech 모터를 검색합니다/);
-  assert.match(scanConfirmText('dxl', {}), /^다이나믹셀 모터를 검색합니다/);
   assert.match(scanConfirmText('ac', {}), /^AC 서보\(EtherCAT\) 모터를 검색합니다/);
 });
 
@@ -239,12 +239,14 @@ test('이전 화면 · Feetech 은 다이나믹셀도 AC 도 아님 · 직렬 �
   assert.doesNotMatch(read('../static/js/motor_type_dynamixel.js'), /DYNAMIXEL_BAUDRATE|1000000/);
 });
 
-test('이전 화면 · 「Feetech 검색」 버튼 · 다이나믹셀 옆 · 같은 검색 순서', () => {
+test('이전 화면 · 「직렬 서보 검색」 버튼 하나 · 결과 글은 다이나믹셀 · Feetech 따로', () => {
   const panel = read('../static/panels/05-panel-registration.html');
-  assert.match(panel, /id="dynamixelScanButton"[\s\S]*id="feetechScanButton"[^>]*>Feetech 검색</);
+  assert.match(panel, /id="dynamixelScanButton"[^>]*>직렬 서보 검색</);
+  assert.match(panel, /id="dynamixelScanResult"[\s\S]*id="feetechScanResult"/);
+  assert.doesNotMatch(panel, /feetechScanButton/);
   const controller = read('../static/js/motor_config.js');
-  assert.match(controller, /feetechScanButton\.addEventListener\('click', scanFeetech\)/);
-  assert.match(controller, /progressId: 'scan:feetech', request: requestFeetechScan/);
-  assert.match(read('../static/js/api.js'), /request\('POST', '\/api\/motors\/scan\/feetech'\)/);
-  assert.match(read('../static/js/dom.js'), /feetechScanButton: document\.getElementById\('feetechScanButton'\)/);
+  assert.match(controller, /render: \(scan\) => \{ renderDynamixelScan\(scan\); renderFeetechScan\(scan\); \}/);
+  assert.match(controller, /feetech_scan: scan\?\.feetech_scan \|\| latestScan\?\.feetech_scan/);
+  assert.doesNotMatch(controller, /feetechScanButton|requestFeetechScan|scan\/feetech/);
+  assert.doesNotMatch(read('../static/js/api.js'), /scan\/feetech/);
 });

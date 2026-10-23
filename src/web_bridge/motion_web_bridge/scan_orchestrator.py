@@ -48,9 +48,9 @@ AC_SERVO_SCAN_TIMEOUT_SEC = 10.0
 DYNAMIXEL_SCAN_TIMEOUT_SEC = 40.0
 #: Feetech · 포트마다 ID 0~253 × 20 ms × 속도 3 (찾으면 그 속도에서 멈춤) ≈ 15 s · 포트 여럿 · 수정 목록 158
 FEETECH_SCAN_TIMEOUT_SEC = 60.0
-FULL_SCAN_TIMEOUT_SEC = (
-    AC_SERVO_SCAN_TIMEOUT_SEC + DYNAMIXEL_SCAN_TIMEOUT_SEC + FEETECH_SCAN_TIMEOUT_SEC
-)
+#: 직렬 서보 검색 = 다이나믹셀 + Feetech 를 차례로 · 둘의 합 · 수정 목록 158
+SERIAL_SCAN_TIMEOUT_SEC = DYNAMIXEL_SCAN_TIMEOUT_SEC + FEETECH_SCAN_TIMEOUT_SEC
+FULL_SCAN_TIMEOUT_SEC = AC_SERVO_SCAN_TIMEOUT_SEC + SERIAL_SCAN_TIMEOUT_SEC
 
 
 class ScanOrchestrator:
@@ -69,8 +69,6 @@ class ScanOrchestrator:
         scan_ac_servo_service: str,
         scan_dynamixel_service: str,
         load_motor_config: Any,
-        scan_feetech_client: Any = None,
-        scan_feetech_service: str = topics.SCAN_FEETECH_MOTORS,
     ) -> None:
         self.bridge = bridge
         #: 프로젝트 서비스 협력자 (§6-23)
@@ -86,9 +84,6 @@ class ScanOrchestrator:
         self.scan_service = scan_service
         self.scan_ac_servo_service = scan_ac_servo_service
         self.scan_dynamixel_service = scan_dynamixel_service
-        #: Feetech 검색 · 수정 목록 158 · 옛 시험 스텁은 없이 만든다
-        self._scan_feetech_client = scan_feetech_client
-        self.scan_feetech_service = scan_feetech_service
         #: 프로젝트 설정을 읽어오는 콜러블 · `MotorConfigService.load` (§6-19)
         self.load_motor_config = load_motor_config
         #: 장기 작업 Action · 진행 상황과 취소를 같은 통로로 (§6-26)
@@ -232,8 +227,11 @@ class ScanOrchestrator:
             operation_type='ac_servo_scan',
         )
 
-    def scan_dynamixel(self, timeout_sec: float = DYNAMIXEL_SCAN_TIMEOUT_SEC) -> Dict[str, Any]:
-        """다이나믹셀 검색 · **매니저를 비우고 한다** · §6-200
+    def scan_dynamixel(self, timeout_sec: float = SERIAL_SCAN_TIMEOUT_SEC) -> Dict[str, Any]:
+        """직렬 서보 검색 · 다이나믹셀 + Feetech 한 번에 · **매니저를 비우고 한다** · §6-200
+
+        이름은 옛 그대로(통로 `/motor/scan_dynamixel` · API `/scan/dynamixel`) · 둘은 같은
+        직렬 선이라 따로 검색하면 모터 프로그램을 두 번 멈췄다 · 수정 목록 158
 
         검색과 모터 매니저가 **같은 시리얼 선**을 동시에 쓴다 · 매니저는
         10Hz 로 계속 읽고 쓰는데, 그 사이에 검색이 「누구 있니?」를 방송하면
@@ -254,16 +252,6 @@ class ScanOrchestrator:
             timeout_sec,
             release_ethercat=True,
             operation_type='dynamixel_scan',
-        )
-
-    def scan_feetech(self, timeout_sec: float = FEETECH_SCAN_TIMEOUT_SEC) -> Dict[str, Any]:
-        """Feetech 검색 · 다이나믹셀과 같이 **매니저를 비우고 한다** (같은 직렬 선) · 수정 목록 158"""
-        return self._call_service(
-            getattr(self, '_scan_feetech_client', None),
-            getattr(self, 'scan_feetech_service', topics.SCAN_FEETECH_MOTORS),
-            timeout_sec,
-            release_ethercat=True,
-            operation_type='feetech_scan',
         )
 
     def _call_service(
@@ -422,7 +410,6 @@ class ScanOrchestrator:
         topics.SCAN_MOTORS.rsplit('/', 1)[-1]: 'all',
         topics.SCAN_AC_SERVO_MOTORS.rsplit('/', 1)[-1]: 'ac_servo',
         topics.SCAN_DYNAMIXEL_MOTORS.rsplit('/', 1)[-1]: 'dynamixel',
-        topics.SCAN_FEETECH_MOTORS.rsplit('/', 1)[-1]: 'feetech',
     }
 
     def _scan_action_client(self) -> Any:

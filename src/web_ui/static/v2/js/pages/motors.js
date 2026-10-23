@@ -221,8 +221,8 @@ function resumeButton(resume, state, changed) {
 const SCAN_KINDS = {
   all: { label: '전체', path: '/api/motors/scan' },
   ac: { label: 'AC 서보', path: '/api/motors/scan/ac-servo' },
-  dxl: { label: '다이나믹셀', path: '/api/motors/scan/dynamixel' },
-  ft: { label: 'Feetech', path: '/api/motors/scan/feetech' },
+  // 다이나믹셀 + Feetech 한 번에 · 같은 직렬 선이라 모터 프로그램을 한 번만 멈춤 · 수정 목록 158
+  serial: { label: '직렬 서보', path: '/api/motors/scan/dynamixel' },
 };
 
 async function scan(kind, state, changed) {
