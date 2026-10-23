@@ -287,10 +287,8 @@ export const requestMotorScan = () => request('POST', '/api/motors/scan');
 
 export const requestAcServoScan = () => request('POST', '/api/motors/scan/ac-servo');
 
+/** 직렬 서보 검색 · 다이나믹셀 + Feetech 한 번에 · 수정 목록 158 */
 export const requestDynamixelScan = () => request('POST', '/api/motors/scan/dynamixel');
-
-/** Feetech(STS) 검색 · 수정 목록 158 */
-export const requestFeetechScan = () => request('POST', '/api/motors/scan/feetech');
 
 export const fetchMotorScanProgress = () => request('GET', '/api/motors/scan/progress');
 

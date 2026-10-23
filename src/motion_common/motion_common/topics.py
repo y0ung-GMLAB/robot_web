@@ -162,10 +162,8 @@ MOTOR_SCAN_ACTION = scoped('/motor/scan')
 SCAN_MOTORS = scoped('/motor/scan_all')
 #: AC 서보만 검색
 SCAN_AC_SERVO_MOTORS = scoped('/motor/scan_ac_servo')
-#: 다이나믹셀만 검색
+#: 직렬 서보 검색 · 다이나믹셀 + Feetech 한 번에 · 이름은 옛 그대로 · 수정 목록 158
 SCAN_DYNAMIXEL_MOTORS = scoped('/motor/scan_dynamixel')
-#: Feetech 만 검색 · 수정 목록 158
-SCAN_FEETECH_MOTORS = scoped('/motor/scan_feetech')
 #: 상태 감시 켜고 끄기
 SET_MONITORING = scoped('/motor/set_monitoring')
 #: 선택 프로젝트 전파

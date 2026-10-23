@@ -3,14 +3,14 @@
 - 작성 · 2026-10-03 · 수정 목록 10-5 · `AGENTS.md` 「모터 스캔 영구 불변조건」의 코드·테스트 대응표
 - 계약 버전 · `MOTOR_SCAN_CONTRACT_VERSION = 4` (`src/motion_state_monitor/motion_state_monitor/monitor_node.py`)
   - 4 · 2026-10-21 · 수정 목록 158 · Feetech(STS) 검색 추가 · 다이나믹셀 덧붙인 속도(57600 · 4 Mbps · Broadcast Ping 만) · 기존 불변조건 완화 없음
-- 적용 범위 · 「전체 모터 검색」 · 「AC Servo 검색」 · 「Dynamixel 검색」 · 「Feetech 검색」 (화면 `05-panel-registration.html` · 버튼 `scanAllButton` · `scanButton` · `scanDynamixelButton` · Feetech 버튼은 화면 작업)
+- 적용 범위 · 「전체 모터 검색」 · 「AC Servo 검색」 · 「직렬 서보 검색」(다이나믹셀 + Feetech 한 번에 · 수정 목록 158) (화면 `05-panel-registration.html` · 버튼 `scanAllButton` · `scanButton` · `dynamixelScanButton`)
 - 규칙 · 아래 불변조건은 세션·프로그램·컴퓨터 재시작 후에도 변경하거나 완화하지 않는다 · 스캔 코드를 수정하거나 완료로 보고하기 전에 이 문서와 §4 테스트를 확인한다
 
 ## 1. 경로 · 누가 무엇을 한다
 
 | 단계 | 위치 | 역할 |
 |---|---|---|
-| 화면 | `src/web_ui/static/js/motor_config.js` · `motor_config_actions.js` | 버튼 → `POST /api/motors/scan` · `/scan/ac-servo` · `/scan/dynamixel` · `/scan/feetech` · 진행 `GET /api/motors/scan/progress` · 취소 `POST /api/motors/scan/cancel`(버튼 미부착) |
+| 화면 | `src/web_ui/static/js/motor_config.js` · `motor_config_actions.js` | 버튼 → `POST /api/motors/scan` · `/scan/ac-servo` · `/scan/dynamixel`(= 직렬 서보 · 다이나믹셀 + Feetech) · 진행 `GET /api/motors/scan/progress` · 취소 `POST /api/motors/scan/cancel`(버튼 미부착) |
 | 조율 | `src/web_bridge/motion_web_bridge/scan_orchestrator.py` · `ScanOrchestrator` | 스캔 요청 락 · 시한(`AC 10s` · `Dynamixel 40s` · `Feetech 60s` · 전체 = 합 110s) · 진행 이벤트 수집 · 결과를 프로젝트 축과 대조(서버가 합친다 · `motor_config_rules.py`) · 재시도 1회(`_scan_with_retry`) · Feetech · Dynamixel 검색도 Motor Manager 를 비우고(같은 직렬 선) |
 | 전송 | ROS 2 Action `MotorScan` (`src/motion_coordination_interfaces/action/MotorScan.action`) · `transport` = `all` / `ac_servo` / `dynamixel` / `feetech` | 피드백 = 진행 이벤트(`scan_id` 포함) · 취소는 **장치 종류 사이에서만** 확인 (EtherCAT → Dynamixel → Feetech) |
 | 물리 검색 | `src/motion_state_monitor/motion_state_monitor/monitor_node.py` · `_execute_scan_goal` → `_build_scan_result` | `scan_id` 발급(`<ms>-<seq>`) · 장치 종류별 섹션 실행 · `complete` / `partial` / `failed` 판정 · `scan_contract` 블록 기록 |
@@ -77,7 +77,7 @@ cancelled             장치 종류 사이에서 취소됐는가
 | `src/motion_state_monitor/test/test_ping_reply_is_really_a_ping_reply.py` | Ping 응답 검증(CRC · 포트 공유 시 오염 거부) | 없음 |
 | 〃 · `test_full_scan_runs_feetech_after_dynamixel_and_cancel_skips_it` | Feetech 순서 · 취소 위치 | 〃 |
 | `src/motion_state_monitor/test/test_feetech_scanner.py` | I-3F · 패킷 · 체크섬 · PING · READ 외 금지 · 가짜 서보(pty) · I-3S | 없음(Linux pty) |
-| `src/web_bridge/test/test_serial_servo_config.py` | Feetech 검색 → 목록 · 전체 검색 판정 · 한 포트 한 종류 | 없음 |
+| `src/web_bridge/test/test_serial_servo_config.py` | Feetech 검색 → 목록 · 전체 · 직렬 서보 검색 판정 · 한 포트 한 종류 | 없음 |
 | `src/web_bridge/test/test_scan_timeouts.py` | 시한 · 전체 = AC + Dynamixel + Feetech | ROS 2 |
 | `src/web_bridge/test/test_scan_progress.py` | 진행 이벤트 수집 · `scan_id` | ROS 2 |
 | `src/web_bridge/test/test_a_failed_scan_tries_again.py` | 조율층 재시도 1회 | ROS 2 |
@@ -97,7 +97,7 @@ ROS 없는 PC · `rclpy` 를 쓰는 파일은 수집 오류로 빠진다 · 그 
 - 모터 1대 전원 차단 후 검색 → 해당 장치 `실패`/빠짐 · 이전 값 미표시
 - AC Servo 만 연결 · Dynamixel 포트 분리 → 결과 `부분 완료`
 - 검색 중 `ethercat slaves` 로 `OP` 상태 Slave 확인 → `rescan_blocked` 사유 표시
-- Feetech · U2D2 + STS3215 · 「Feetech 검색」 → ID · 모델 번호 777 · 속도 (설계 `SERIAL_SERVO_DESIGN.md` §9 F-1) · 실물 미검증
+- Feetech · U2D2 + STS3215 · 「직렬 서보 검색」 → ID · 모델 번호 777 · 속도 (설계 `SERIAL_SERVO_DESIGN.md` §9 F-1) · 실물 미검증
 - Feetech · 검색 중 서보에 쓰기 없음(토크 · ID · 보정값 그대로) 확인 · 실물 미검증
 - Dynamixel · 57600 공장값 X 시리즈 1대 · 덧붙인 속도 Broadcast Ping 으로 찾는가 · 실물 미검증
 - 한 포트에 두 종류 연결 → `serial_port_warnings` · 실물 미검증

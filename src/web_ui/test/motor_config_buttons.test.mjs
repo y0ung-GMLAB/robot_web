@@ -78,7 +78,7 @@ test('motor type scans and the full scan are directly available without nested c
   );
   assert.ok(scanSection, 'primary motor type scan section missing');
   assert.match(scanSection[1], /id="scanButton"[^>]*>AC 서보 검색</);
-  assert.match(scanSection[1], /id="dynamixelScanButton"[^>]*>다이나믹셀 검색</);
+  assert.match(scanSection[1], /id="dynamixelScanButton"[^>]*>직렬 서보 검색</);
   assert.match(scanSection[1], /id="scanAllButton"[^>]*>전체 모터 검색</);
   assert.match(
     scanSection[1],
@@ -101,7 +101,7 @@ test('motor type scans and the full scan are directly available without nested c
     controller,
     /`\$\{resultState\} · \$\{formatInt\(slaves\.length\)\}개\$\{masterSummary\}`/,
   );
-  assert.match(controller, /dynamixelScanResult\.textContent = `\$\{resultState\} · \$\{formatInt\(devices\.length\)\}개`/);
+  assert.match(controller, /dynamixelScanResult\.textContent = `다이나믹셀 \$\{resultState\} · \$\{formatInt\(devices\.length\)\}개`/);
   assert.doesNotMatch(controller, /검색된 축: \$\{slaveText\}/);
   assert.doesNotMatch(controller, /후보 \$\{formatInt\(targetCount\)\}개/);
 });

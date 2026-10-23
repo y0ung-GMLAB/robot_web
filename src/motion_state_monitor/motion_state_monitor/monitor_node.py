@@ -163,11 +163,6 @@ class MotionStateMonitor(Node):
             topics.SCAN_DYNAMIXEL_MOTORS,
             self._scan_dynamixel_motors_service,
         )
-        self._scan_feetech_service = self.create_service(
-            Trigger,
-            topics.SCAN_FEETECH_MOTORS,
-            self._scan_feetech_motors_service,
-        )
         # 장기 작업 Action · 진행 상황을 같은 통로로 보내고 취소를 받는다 (§6-26)
         # 기존 Trigger 서비스는 그대로 둔다 · 구코드 호출자가 남아 있을 수 있다
         self._scan_action_group = ReentrantCallbackGroup()
@@ -447,25 +442,13 @@ class MotionStateMonitor(Node):
         return response
 
     def _scan_dynamixel_motors_service(self, request: Trigger.Request, response: Trigger.Response):
+        # 이름은 옛 그대로 · 직렬 서보 검색 = 다이나믹셀 + Feetech 한 번에 · 수정 목록 158
         del request
-        result = self._build_scan_result(scan_ethercat=False, scan_dynamixel=True)
-        response.success = self._physical_section_success(
-            result.get('dynamixel_scan'), 'devices_count'
-        )
+        result = self._build_scan_result(scan_ethercat=False, scan_dynamixel=True, scan_feetech=True)
+        response.success = self._serial_scan_success(result)
         response.message = json.dumps(result, ensure_ascii=False, separators=(',', ':'))
         if not self.monitoring_enabled:
-            self.get_logger().warn('Dynamixel scan requested while monitoring is disabled.')
-        return response
-
-    def _scan_feetech_motors_service(self, request: Trigger.Request, response: Trigger.Response):
-        del request
-        result = self._build_scan_result(scan_ethercat=False, scan_dynamixel=False, scan_feetech=True)
-        response.success = self._physical_section_success(
-            result.get('feetech_scan'), 'devices_count'
-        )
-        response.message = json.dumps(result, ensure_ascii=False, separators=(',', ':'))
-        if not self.monitoring_enabled:
-            self.get_logger().warn('Feetech scan requested while monitoring is disabled.')
+            self.get_logger().warn('Serial servo scan requested while monitoring is disabled.')
         return response
 
     # ------------------------------------------------------------------ #
@@ -473,11 +456,13 @@ class MotionStateMonitor(Node):
     # ------------------------------------------------------------------ #
 
     #: 검색 종류 → (EtherCAT, 다이나믹셀, Feetech) · 취소는 물리 검색 한 종류가 끝난 뒤
+    #:
+    #: `dynamixel` = **직렬 서보 검색** · 다이나믹셀과 Feetech 를 한 번에 돈다 · 같은 직렬 선이라
+    #: 모터 프로그램을 한 번만 멈춘다 · 이름은 옛 통로 그대로 · 수정 목록 158
     SCAN_TRANSPORTS = {
         'all': (True, True, True),
         'ac_servo': (True, False, False),
-        'dynamixel': (False, True, False),
-        'feetech': (False, False, True),
+        'dynamixel': (False, True, True),
     }
 
     def _accept_scan_cancel(self, goal_handle) -> CancelResponse:
@@ -530,14 +515,8 @@ class MotionStateMonitor(Node):
             result.success = self._physical_section_success(
                 payload.get('ethercat_scan'), 'slaves_count'
             )
-        elif transport == 'feetech':
-            result.success = self._physical_section_success(
-                payload.get('feetech_scan'), 'devices_count'
-            )
         else:
-            result.success = self._physical_section_success(
-                payload.get('dynamixel_scan'), 'devices_count'
-            )
+            result.success = self._serial_scan_success(payload)
         goal_handle.succeed()
         return result
 
@@ -827,6 +806,19 @@ class MotionStateMonitor(Node):
             goal.publish_feedback(feedback)
         except Exception as exc:  # noqa: BLE001 - 진행 알림 실패가 스캔을 막으면 안 된다
             self.get_logger().warn(f'scan feedback publish failed: {exc}')
+
+    @classmethod
+    def _serial_scan_success(cls, payload: Dict[str, Any]) -> bool:
+        """직렬 서보 검색 · 다이나믹셀이든 Feetech 든 하나라도 찾았으면 된 것 · 수정 목록 158
+
+        한 PC 에 한 종류만 꽂혀 있는 게 보통이다 · 안 꽂힌 종류의 「응답 없음」 을 실패로 치면
+        다이나믹셀만 쓰는 PC 의 검색이 전부 실패가 된다 · 프로젝트 기준 판정은 서버
+        (`motor_config_rules.scan_operation_outcome`) 가 다시 내린다.
+        """
+        return any(
+            cls._physical_section_success(payload.get(key), 'devices_count')
+            for key in ('dynamixel_scan', 'feetech_scan')
+        )
 
     @staticmethod
     def _physical_section_success(section: Any, count_key: str) -> bool:

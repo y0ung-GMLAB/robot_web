@@ -204,10 +204,42 @@ def test_full_scan_outcome_ignores_an_unused_feetech_bus():
         new_shape, operation_type='full_scan', fallback_success=False,
         dynamixel_expected=False, feetech_expected=True,
     ) == 'partial'
-    found = {**no_ft, 'available': True, 'complete': True, 'devices_count': 1, 'devices': [{'id': 1}]}
+
+
+def test_serial_scan_outcome_judges_only_the_kinds_in_use():
+    """직렬 서보 검색(다이나믹셀 + Feetech 한 번에) · 안 쓰고 못 찾은 종류는 판정에서 뺀다 · 수정 목록 158"""
+    none = {'available': False, 'complete': False, 'devices_count': 0, 'devices': []}
+    dxl = {'available': True, 'complete': True, 'devices_count': 1, 'devices': [{'id': 3}]}
+    ft = {'available': True, 'complete': True, 'devices_count': 1, 'devices': [{'id': 1}]}
+    skipped = {'skipped': True}
+
+    def outcome(dynamixel, feetech, **expected):
+        scan = {'ethercat_scan': skipped, 'dynamixel_scan': dynamixel, 'feetech_scan': feetech}
+        return motor_config_rules.scan_operation_outcome(
+            scan, operation_type='dynamixel_scan', fallback_success=False, **expected)
+
+    # 다이나믹셀만 쓰는 PC · Feetech 응답 없음은 상관없음 (전과 같음)
+    assert outcome(dxl, none, dynamixel_expected=True, feetech_expected=False) == 'success'
+    assert outcome(none, none, dynamixel_expected=True, feetech_expected=False) == 'failure'
+    # Feetech 만 쓰는 PC
+    assert outcome(none, ft, dynamixel_expected=False, feetech_expected=True) == 'success'
+    # 둘 다 쓰는데 하나만 찾음 → 일부
+    assert outcome(dxl, none, dynamixel_expected=True, feetech_expected=True) == 'partial'
+    assert outcome(dxl, ft, dynamixel_expected=True, feetech_expected=True) == 'success'
+    # 아직 모터 설정 없음 · 찾은 쪽만으로
+    assert outcome(none, ft, dynamixel_expected=False, feetech_expected=False) == 'success'
+    assert outcome(none, none, dynamixel_expected=False, feetech_expected=False) == 'failure'
+    # 옛 노드(Feetech 구획 없음) · 전과 같음
     assert motor_config_rules.scan_operation_outcome(
-        {'feetech_scan': found}, operation_type='feetech_scan', fallback_success=False,
-    ) == 'success'
+        {'dynamixel_scan': dxl}, operation_type='dynamixel_scan', fallback_success=False) == 'success'
+
+    # 문구 · 직렬 서보 검색이면 두 종류 수를 다 보여 준다 · 다이나믹셀 포트 없음 안내는 Feetech 를 찾았으면 안 붙인다
+    message = motor_config_rules.scan_result_message(
+        True, {'ethercat_scan': skipped, 'dynamixel_scan': none, 'feetech_scan': ft}, '')
+    assert '다이나믹셀 0대' in message and 'Feetech 1대' in message
+    assert '직렬 포트 없음' not in message
+    assert 'Feetech 0대' in motor_config_rules.scan_result_message(
+        True, {'ethercat_scan': skipped, 'dynamixel_scan': dxl, 'feetech_scan': none}, '')
 
 
 def test_monitoring_refs_are_unchanged_for_old_motors_and_new_for_feetech():

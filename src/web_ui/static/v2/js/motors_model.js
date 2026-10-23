@@ -149,7 +149,7 @@ export function absoluteSummary(rows) {
  * 다른 프로젝트 것이면 정지만 하고 안 켬(옛 프로젝트 설정으로 되살리지 않게) · 이 프로젝트 설정을 「저장 후 장비에 적용」 해야 켜짐
  */
 export function scanConfirmText(kind, scope = {}, { dirty = false } = {}) {
-  const what = kind === 'dxl' ? '다이나믹셀' : kind === 'ft' ? 'Feetech' : kind === 'ac' ? 'AC 서보(EtherCAT)' : 'AC 서보 · 다이나믹셀 · Feetech';
+  const what = kind === 'serial' ? '직렬 서보(다이나믹셀 · Feetech)' : kind === 'ac' ? 'AC 서보(EtherCAT)' : 'AC 서보 · 다이나믹셀 · Feetech';
   const runtime = String(scope.runtime_project_id || '');
   const restart = scope.runtime_matches_selected === true
     ? '검색하는 동안 모터 프로그램이 잠시 정지했다가 다시 시작됩니다.'

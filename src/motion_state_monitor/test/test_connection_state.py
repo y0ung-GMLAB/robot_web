@@ -995,16 +995,24 @@ class MotorScanActionTest(unittest.TestCase):
         self.assertFalse(result['cancelled'])
 
     def test_transport_map_covers_every_scan_kind(self):
-        """검색 종류 네 가지가 모두 Action 목표로 표현된다 · (EtherCAT, 다이나믹셀, Feetech) · 수정 목록 158"""
+        """검색 종류 세 가지 · (EtherCAT, 다이나믹셀, Feetech) · `dynamixel` = 직렬 서보(다이나믹셀 + Feetech) · 수정 목록 158"""
         self.assertEqual(
             MotionStateMonitor.SCAN_TRANSPORTS,
             {
                 'all': (True, True, True),
                 'ac_servo': (True, False, False),
-                'dynamixel': (False, True, False),
-                'feetech': (False, False, True),
+                'dynamixel': (False, True, True),
             },
         )
+
+    def test_serial_scan_succeeds_when_either_kind_answers(self):
+        """직렬 서보 검색 · 다이나믹셀만 · Feetech 만 꽂힌 PC 모두 성공 · 둘 다 없으면 실패 · 수정 목록 158"""
+        found = {'available': True, 'complete': True, 'devices_count': 1}
+        none = {'available': False, 'complete': False, 'devices_count': 0}
+        ok = MotionStateMonitor._serial_scan_success
+        self.assertTrue(ok({'dynamixel_scan': found, 'feetech_scan': none}))
+        self.assertTrue(ok({'dynamixel_scan': none, 'feetech_scan': found}))
+        self.assertFalse(ok({'dynamixel_scan': none, 'feetech_scan': none}))
 
     def test_full_scan_runs_feetech_after_dynamixel_and_cancel_skips_it(self):
         monitor = self._monitor()

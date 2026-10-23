@@ -19,19 +19,18 @@ def test_full_scan_budget_covers_both_transports():
     """전체 검색은 세 종류(AC · 다이나믹셀 · Feetech)를 차례로 돌린다 · 합보다 짧으면 안 된다 · 수정 목록 158"""
     assert _default_timeout('scan_all') >= (
         _default_timeout('scan_ac_servo') + _default_timeout('scan_dynamixel')
-        + _default_timeout('scan_feetech')
     )
+    # 직렬 서보 검색 = 다이나믹셀 + Feetech 를 차례로
+    assert _default_timeout('scan_dynamixel') >= so.DYNAMIXEL_SCAN_TIMEOUT_SEC + so.FEETECH_SCAN_TIMEOUT_SEC
 
 
 def test_each_scan_uses_the_shared_constant():
     """기본값을 숫자로 다시 적으면 또 갈라진다 · 상수에서만 나와야 한다."""
     assert _default_timeout('scan_all') == so.FULL_SCAN_TIMEOUT_SEC
     assert _default_timeout('scan_ac_servo') == so.AC_SERVO_SCAN_TIMEOUT_SEC
-    assert _default_timeout('scan_dynamixel') == so.DYNAMIXEL_SCAN_TIMEOUT_SEC
-    assert _default_timeout('scan_feetech') == so.FEETECH_SCAN_TIMEOUT_SEC
-    assert so.FULL_SCAN_TIMEOUT_SEC == (
-        so.AC_SERVO_SCAN_TIMEOUT_SEC + so.DYNAMIXEL_SCAN_TIMEOUT_SEC + so.FEETECH_SCAN_TIMEOUT_SEC
-    )
+    assert _default_timeout('scan_dynamixel') == so.SERIAL_SCAN_TIMEOUT_SEC
+    assert so.SERIAL_SCAN_TIMEOUT_SEC == so.DYNAMIXEL_SCAN_TIMEOUT_SEC + so.FEETECH_SCAN_TIMEOUT_SEC
+    assert so.FULL_SCAN_TIMEOUT_SEC == so.AC_SERVO_SCAN_TIMEOUT_SEC + so.SERIAL_SCAN_TIMEOUT_SEC
 
 
 def test_dynamixel_keeps_the_raised_budget():

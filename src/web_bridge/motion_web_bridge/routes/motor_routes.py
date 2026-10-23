@@ -16,12 +16,8 @@ def register_motor_routes(app: FastAPI, bridge, project_call) -> None:
 
     @app.post('/api/motors/scan/dynamixel')
     async def scan_dynamixel_motors():
+        # 직렬 서보 검색 · 다이나믹셀 + Feetech 한 번에 · 결과 `scan.dynamixel_scan` + `scan.feetech_scan` · 수정 목록 158
         return await asyncio.to_thread(bridge.scan.scan_dynamixel)
-
-    @app.post('/api/motors/scan/feetech')
-    async def scan_feetech_motors():
-        # Feetech (STS) 만 · 결과 `scan.feetech_scan` · 수정 목록 158
-        return await asyncio.to_thread(bridge.scan.scan_feetech)
 
     @app.get('/api/motors/scan/progress')
     async def motor_scan_progress():
