@@ -469,24 +469,31 @@ export async function loadXTouch(state, changed) {
 const DEV_TONE = { ready: 'ok', connecting: 'warn', off: 'idle', missing: 'warn', choose: 'warn', busy: 'bad', denied: 'bad', unavailable: 'bad' };
 const DEV_TEXT = { ready: '연결됨', connecting: '연결 중', off: '연결 안 됨', missing: '장치 없음', choose: '어느 X-Touch 인지 고르세요', busy: '다른 곳에서 쓰는 중', denied: '권한 없음', unavailable: '이 주소에서 MIDI 불가' };
 
-/** 여러 대 꽂혔을 때 · 이 로봇에 쓸 X-Touch 고르기 · 이 로봇 주소에 기억 · 2026-10-19 */
+/**
+ * 이 로봇에 쓸 X-Touch 고르기 · 늘 보임 · 사용자 2026-10-19 「어떤 xtouch 인지는 어디서 고르냐 · 허브면 여러 포트」 ·
+ * 전에는 2대 이상일 때만 나와 1대일 때·연결 전에는 고르는 곳이 안 보였다 · 연결 전에는 안내만(목록은 MIDI 권한 뒤)
+ */
 function deviceChooser(changed) {
+  const tag = thisRobotTag();
+  const label = `이 로봇(${tag})에 쓸 X-Touch`;
+  if (!device.access) {
+    return h('div', { class: 'row' }, h('span', { class: 'muted small',
+      text: `${label} · 「X-Touch 연결」 을 누르면 이 PC 에 꽂힌 X-Touch 목록이 여기 나옵니다(허브로 여러 대면 여기서 고름)` }));
+  }
   const ports = device.ports || [];
-  if (ports.length < 2 && !['choose', 'missing'].includes(ui.dev.status)) return null;
-  if (!ports.length) return null;
   const current = device.input?.id || '';
   return h('div', { class: 'row' },
-    h('label', { class: 'inline' }, `이 로봇(${thisRobotTag()})에 쓸 X-Touch`,
-      h('select', { class: 'select select-sm', 'aria-label': '이 로봇에 쓸 X-Touch',
+    h('label', { class: 'inline' }, label,
+      h('select', { class: 'select select-sm', 'aria-label': '이 로봇에 쓸 X-Touch', disabled: !ports.length,
         onchange: async (e) => {
           if (!e.target.value) return;
           run(session.reset());
           if (await device.choose(e.target.value)) { ensureLoop(); paintSurface(); }
           changed();
         } },
-      h('option', { value: '', selected: !current }, '고르세요'),
-      ports.map((port) => h('option', { value: port.id, selected: port.id === current }, port.name)))),
-    h('span', { class: 'muted small', text: '고르면 이 로봇 주소에 기억합니다 · X-Touch 글씨 칸에 로봇 표시가 뜹니다' }));
+      h('option', { value: '', selected: !current }, ports.length ? '고르세요' : '찾은 X-Touch 없음 · USB 확인'),
+      ports.map((port, index) => h('option', { value: port.id, selected: port.id === current }, `${index + 1}. ${port.name}`)))),
+    h('span', { class: 'muted small', text: `${ports.length}대 찾음 · 고르면 이 로봇 주소에 기억 · 고른 X-Touch 글씨 칸에 「${tag}」 표시로 확인` }));
 }
 
 function connectCard(state, changed) {
@@ -508,8 +515,9 @@ function connectCard(state, changed) {
     deviceChooser(changed),
     ui.dev.status === 'ready' ? h('details', { class: 'small' },
       h('summary', { text: `MIDI 받은 것 (마지막 ${MIDI_LOG_SIZE}개 · 채널 하나가 안 먹을 때 보기)` }),
-      midiLog.length ? h('ul', { class: 'mono small' }, midiLog.map((line) => h('li', { text: line })))
-        : h('p', { class: 'muted small', text: '아직 받은 것 없음 · 페이더·버튼을 만져 보세요' })) : null,
+      // 높이 고정 · 줄이 늘어도 아래가 안 밀림 (2026-10-20)
+      h('ul', { class: 'mono small midi-log' }, midiLog.length ? midiLog.map((line) => h('li', { text: line }))
+        : h('li', { class: 'muted', text: '아직 받은 것 없음 · 페이더·버튼을 만져 보세요' }))) : null,
     ui.dev.message ? h('p', { class: 'tone-text-warn small', text: ui.dev.message }) : null,
     unavailable ? h('div', { class: 'blocker' }, dot('warn'), h('span', { class: 'grow', text: unavailable })) : null,
     unavailable ? h('ol', { class: 'small muted' },
@@ -542,7 +550,9 @@ function channelCard(state, changed) {
   const rows = session.config;
   return h('section', { class: 'card', 'aria-label': '채널' },
     h('div', { class: 'card-head' }, h('h2', { text: '페이더 · 축' })),
-    rows.some(Boolean) ? h('div', { class: 'table-wrap' }, h('table', { class: 'table' },
+    // 칸 너비 고정 · 손·상태·목표 글이 바뀌어도 표가 안 출렁임 (2026-10-20)
+    rows.some(Boolean) ? h('div', { class: 'table-wrap' }, h('table', { class: 'table xtouch-table' },
+      h('colgroup', {}, ['6%', '17%', '7%', '10%', '24%', '10%', '10%', '16%'].map((width) => h('col', { style: { width } }))),
       h('thead', {}, h('tr', {}, ['페이더', '조인트', '모터', '손', '상태', '현재', '목표', '스무딩'].map((text) => h('th', { scope: 'col', text })))),
       h('tbody', {}, rows.map((item, channel) => {
         if (!item) return h('tr', { class: 'muted-row' }, h('td', { class: 'mono', text: String(channel + 1) }), h('td', { colspan: '7', class: 'muted', text: '연결 안 됨' }));
@@ -565,7 +575,8 @@ function channelCard(state, changed) {
           h('td', { class: 'mono', text: ch.phase === 'live' && Number.isFinite(ch.goal) ? `${signedDeg(ch.goal, 2)}°` : '-' }),
           h('td', {}, smoothPicker(item.motionId, changed)));
       })))) : h('p', { class: 'muted', text: '페이더가 연결된 조인트가 없습니다 · 「모터 설정 → ① 조인트 매핑」 에서 「X-Touch 페이더」 칸에 1 ~ 8 을 넣고 저장하세요.' }),
-    ui.message ? h('p', { class: 'tone-text-warn small', text: ui.message }) : null);
+    // 안내 줄은 늘 자리를 둔다 · 생겼다 사라지며 아래를 밀지 않게 · 길면 … (전체는 마우스를 올리면)
+    h('p', { class: 'tone-text-warn small msg-slot', text: ui.message || '', title: ui.message || undefined }));
 }
 
 /** 이름 칸 안내 · 덮어쓰기 + 바탕이면 바탕 이름 · 바탕만이면 바탕_xtouch */

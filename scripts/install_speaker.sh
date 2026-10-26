@@ -82,8 +82,12 @@ step "2. 코드 갱신"
 if git -C "${WORKSPACE_DIR}" remote get-url origin >/dev/null 2>&1; then
   if [[ -n "$(git -C "${WORKSPACE_DIR}" status --porcelain --untracked-files=no)" ]]; then
     echo "!! 고친 파일이 있어 갱신을 건너뜁니다 · 지금 코드로 설치합니다 (git -C ${WORKSPACE_DIR} status)" >&2
-  elif ! run git -C "${WORKSPACE_DIR}" pull --ff-only; then
-    echo "!! 갱신 실패(인터넷 · 이력 갈라짐) · 지금 코드로 설치합니다" >&2
+  elif ! run git -C "${WORKSPACE_DIR}" fetch --prune origin; then
+    echo "!! 갱신 실패(인터넷) · 지금 코드로 설치합니다" >&2
+  else
+    # pull --ff-only 는 원격 이력을 다시 쓰면(2026-10-26 커밋 정리) 실패한다 · install.sh 처럼 원격에 맞춘다
+    upstream="$(git -C "${WORKSPACE_DIR}" rev-parse --abbrev-ref --symbolic-full-name '@{u}' 2>/dev/null || echo 'origin/main')"
+    run git -C "${WORKSPACE_DIR}" reset --hard "${upstream}"
   fi
 fi
 echo "코드 · $(git -C "${WORKSPACE_DIR}" log --oneline -1 2>/dev/null || echo '(git 아님)')"

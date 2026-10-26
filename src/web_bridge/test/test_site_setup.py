@@ -152,7 +152,7 @@ def test_bootstrap_refuses_root_and_other_repos_but_updates_our_workspace():
     source = (SCRIPTS / 'bootstrap.sh').read_text(encoding='utf-8')
     assert 'id -u' in source and 'robot_web' in source
     assert 'exec bash scripts/install.sh --site' in source
-    assert 'pull --ff-only' in source and 'git clone -b' in source
+    assert 'reset --hard "origin/${BRANCH}"' in source and 'git clone -b' in source
 
 
 def _os_release_blocks_bootstrap():

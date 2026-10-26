@@ -194,6 +194,12 @@ p { margin: 0; }
 .chip-bad { background: var(--bad-soft); color: var(--bad-ink); }
 .chip-info { background: #1E2A40; color: var(--blue-ink); }
 .table-wrap { overflow-x: auto; }
+/* X-Touch · 손을 대면 칸 글이 바뀌어도 표·화면이 안 밀리게 · 칸 너비 고정 · 받은 MIDI 목록·안내 줄 높이 고정 (2026-10-20) */
+.xtouch-table { table-layout: fixed; min-width: 860px; }
+.xtouch-table td { overflow: hidden; text-overflow: ellipsis; }
+.midi-log { height: calc(12 * 1.6em); overflow: hidden; margin: 6px 0 0; padding-left: 1.4em; }
+.midi-log li { line-height: 1.6em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.msg-slot { min-height: 1.6em; margin: 8px 0 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .table { width: 100%; border-collapse: collapse; font-size: 14px; }
 .table th { text-align: left; font-weight: 500; font-size: 13px; color: var(--muted); padding: 6px 10px; border-bottom: 1px solid var(--line); white-space: nowrap; }
 .table td { padding: 8px 10px; border-bottom: 1px solid #20262E; white-space: nowrap; }

@@ -117,10 +117,11 @@ if [[ -d "${WORKSPACE}/.git" ]]; then
     echo "${WORKSPACE} 에 커밋되지 않은 변경이 있습니다 · 정리한 뒤 다시 실행하세요 (git -C ${WORKSPACE} status)" >&2
     exit 1
   fi
-  echo "기존 작업공간 갱신 · git pull (${BRANCH})"
+  echo "기존 작업공간 갱신 · 원격 ${BRANCH} 와 같게"
   git -C "${WORKSPACE}" fetch origin "${BRANCH}"
   git -C "${WORKSPACE}" checkout -q "${BRANCH}"
-  git -C "${WORKSPACE}" pull --ff-only origin "${BRANCH}"
+  # pull --ff-only 는 원격 이력을 다시 쓰면(2026-10-26 커밋 정리) 실패한다 · 고친 파일은 위에서 이미 막았다
+  git -C "${WORKSPACE}" reset --hard "origin/${BRANCH}"
 else
   echo "코드 받기 · git clone"
   git clone -b "${BRANCH}" "${REPO}" "${WORKSPACE}"
