@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # 스피커 PC 한 번에 설치 · 우분투 22.04 · 수정 목록 38 · 75 (2026-10-07)
 #
-#   새 PC   · curl -fsSL https://raw.githubusercontent.com/y0ung-GMLAB/robot_web/humble/scripts/bootstrap.sh | bash -s -- --speaker
+#   새 PC   · curl -fsSL https://raw.githubusercontent.com/y0ung-GMLAB/robot_web/jazzy/scripts/bootstrap.sh | bash -s -- --speaker
 #   갱신    · bash ~/robot_web/scripts/install_speaker.sh      (같은 명령 · 몇 번 쳐도 같은 결과)
 #
 # 하는 일 · ROS 2(기본만) · 그룹 메시지 빌드(모터 쪽 빌드 안 함) · 사운드 장치 독점 · 사운드 카드 자동 선택 ·

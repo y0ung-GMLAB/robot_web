@@ -166,7 +166,7 @@ ros2_ws/
 우분투 22.04 를 깐 직후, **늘 쓸 계정**으로 로그인해 터미널에서 한 줄만 칩니다.
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/y0ung-GMLAB/robot_web/humble/scripts/bootstrap.sh | bash
+curl -fsSL https://raw.githubusercontent.com/y0ung-GMLAB/robot_web/jazzy/scripts/bootstrap.sh | bash
 ```
 
 - sudo 비밀번호 1회 · 시간대 질문 1회(Enter = 현재) · 모터 랜카드는 **IP 없는 유선 포트**를 자동으로 고릅니다(둘 이상이면 묻습니다)
@@ -370,7 +370,7 @@ sudo apt install -y git
 
 ```bash
 cd ~
-git clone -b humble https://github.com/y0ung-GMLAB/robot_web.git ros2_ws
+git clone -b jazzy https://github.com/y0ung-GMLAB/robot_web.git ros2_ws
 cd ~/ros2_ws
 ```
 
@@ -532,7 +532,7 @@ bash scripts/install.sh
 옛 폴더를 옮겨 두고 새로 까는 옵션을 붙여 다시 칩니다.
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/y0ung-GMLAB/robot_web/humble/scripts/bootstrap.sh | bash -s -- --replace-old
+curl -fsSL https://raw.githubusercontent.com/y0ung-GMLAB/robot_web/jazzy/scripts/bootstrap.sh | bash -s -- --replace-old
 # PC 이름도 바꾸려면 · ... | bash -s -- --replace-old --name floating1
 ```
 
@@ -746,7 +746,7 @@ ethercat slaves
 
 ```bash
 cd ~
-git clone -b humble \
+git clone -b jazzy \
   https://github.com/y0ung-GMLAB/robot_web.git ros2_ws
 cd ~/ros2_ws
 ```
