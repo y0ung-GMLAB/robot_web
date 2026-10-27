@@ -269,7 +269,8 @@ sync_git_repository() {
 
   local upstream
   upstream="$(git -C "${WORKSPACE_DIR}" rev-parse --abbrev-ref \
-    --symbolic-full-name '@{u}' 2>/dev/null \n    || echo "origin/$(git -C "${WORKSPACE_DIR}" rev-parse --abbrev-ref HEAD)")"
+    --symbolic-full-name '@{u}' 2>/dev/null \
+    || echo "origin/$(git -C "${WORKSPACE_DIR}" rev-parse --abbrev-ref HEAD)")"
 
   # **어떤 PC 든 이 명령 하나로 원격과 같아진다** · §6-102
   #
