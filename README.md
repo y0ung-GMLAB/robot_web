@@ -191,6 +191,7 @@ curl -fsSL https://raw.githubusercontent.com/y0ung-GMLAB/robot_web/jazzy/scripts
 | 인터넷이 안 되는 매장 | 한 줄 설치는 인터넷이 필요합니다 · 사무실에서 설치한 뒤 들고 가세요 |
 | 미리 보기만 | `bash scripts/install.sh --site --dry-run` · 바꾸지 않고 할 일만 찍습니다 |
 | 랜카드 지정 · 시간대 지정 | `SITE_ETHERCAT_NIC=enp2s0 SITE_TIMEZONE=Europe/Paris bash scripts/install.sh --site` |
+| 직렬 서보만 쓰는 PC (라즈베리파이 등 · AC 서보 없음) | 한 줄 설치 끝을 `... bootstrap.sh \| SITE_ETHERCAT_NIC=none bash` 로 · 유선 포트를 EtherCAT 에 묶지 않음 · 이미 설치했으면 `bash scripts/ethercat_nic.sh none` (묶인 것 풀기) · 다시 쓰려면 `bash scripts/ethercat_nic.sh <랜카드>` |
 
 아래는 **손으로 할 때**의 순서입니다 (한 줄 설치가 하는 일의 설명이기도 합니다).
 

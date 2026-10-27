@@ -121,7 +121,10 @@ if [[ "${ROLE}" == "robot" ]]; then
     [[ "${unit}" == "motion-motor" && "${state}" != "active" ]] && detail="${detail} · 모터 설정 적용 전이면 정상(웹 모터 관리 → 저장 → 장비에 적용)"
     row "$([[ "${state}" == "active" ]] && echo 1 || echo 0)" "${unit}" "${detail}"
   done
-  if ethercat master >/dev/null 2>&1; then
+  # 랜카드를 안 묶은 PC(직렬 서보 전용 · SITE_ETHERCAT_NIC=none)는 EtherCAT 이 없는 게 정상 · 2026-10-27
+  if ! grep -qs '^MASTER0_DEVICE="[^"]\+"' /etc/ethercat.conf; then
+    row 1 "EtherCAT" "랜카드 안 씀 (직렬 서보 전용) · 쓰려면 bash scripts/ethercat_nic.sh <랜카드>"
+  elif ethercat master >/dev/null 2>&1; then
     phase="$(ethercat master 2>/dev/null | awk -F: '/Phase/ { gsub(/^ +/, "", $2); print $2; exit }')"
     slaves="$(ethercat slaves 2>/dev/null | wc -l)"
     row 1 "EtherCAT master" "${phase:-?}"
