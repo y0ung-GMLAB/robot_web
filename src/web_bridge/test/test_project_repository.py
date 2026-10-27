@@ -1786,7 +1786,7 @@ def test_motion_web_install_script_runs_full_first_install_flow():
         / 'scripts' / 'update.sh'
     ).read_text(encoding='utf-8')
 
-    assert 'require_ubuntu_2204' in installer
+    assert 'require_supported_ubuntu' in installer   # 22.04 humble · 24.04 jazzy (2026-10-27)
     assert 'sync_git_repository' in installer
     # `pull --ff-only` 는 이력이 갈라진 PC 에서 실패하고 `set -e` 로 스크립트를
     # 통째로 죽였다 · 빌드 근처에도 못 갔다 · 지금은 원격에 맞춘다 · §6-102

@@ -24,6 +24,13 @@ def test_ethercat_error_recovery_keeps_master_and_slave_position_together(
         (Path(__file__).resolve().parents[1] / 'deploy' / 'log_retention.sh').read_text(encoding='utf-8'),
         encoding='utf-8',
     )
+    # ROS 환경은 OS 버전으로 고른다(humble · jazzy) · 2026-10-27 · 없으면 humble 로 떨어져 24.04 에서 실패
+    distro = workspace / 'scripts' / 'lib' / 'ros_distro.sh'
+    distro.parent.mkdir(parents=True)
+    distro.write_text(
+        (Path(__file__).resolve().parents[3] / 'scripts' / 'lib' / 'ros_distro.sh').read_text(encoding='utf-8'),
+        encoding='utf-8',
+    )
 
     command_log = tmp_path / 'ethercat.log'
     recovery_state = tmp_path / 'recovery'

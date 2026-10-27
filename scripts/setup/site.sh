@@ -289,9 +289,51 @@ ResultActive=yes
 PKLA
 }
 
+# 우분투 24.04 polkit 124 는 .pkla 를 안 읽는다 · 같은 허용을 JS 규칙(rules.d)으로 · 2026-10-27 (jazzy)
+SITE_POLKIT_RULES_FILE="${SITE_POLKIT_RULES_FILE:-/etc/polkit-1/rules.d/50-robot-web.rules}"
+
+# pkla | rules · SITE_POLKIT_MODE 로 정할 수 있음(시험) · pkaction 이 없으면 OS 버전으로
+site_polkit_mode() {
+  if [[ -n "${SITE_POLKIT_MODE:-}" ]]; then
+    echo "${SITE_POLKIT_MODE}"
+    return 0
+  fi
+  local version
+  version="$(pkaction --version 2>/dev/null | awk '{print $NF}')"
+  if [[ -z "${version}" ]]; then
+    version="$( (. /etc/os-release 2>/dev/null && echo "${VERSION_ID:-}") || true)"
+    [[ "${version}" == 22.* || -z "${version}" ]] && echo pkla || echo rules
+    return 0
+  fi
+  [[ "${version}" == 0.* ]] && echo pkla || echo rules
+}
+
+site_render_polkit_rules() {
+  local user="$1"
+  cat <<RULES
+// robot_web · 웹에서 Wi-Fi · 시간대 바꾸기 · ${user} 만 (scripts/setup/site.sh)
+polkit.addRule(function(action, subject) {
+  if (subject.user == "${user}" &&
+      (action.id.indexOf("org.freedesktop.NetworkManager.") == 0 ||
+       action.id == "org.freedesktop.timedate1.set-timezone")) {
+    return polkit.Result.YES;
+  }
+});
+RULES
+}
+
 site_web_admin_permissions() {
   local user="${1:-$(id -un)}"
   echo "웹에서 Wi-Fi · 시간대 바꾸기 허용 (${user} 만)"
+  if [[ "$(site_polkit_mode)" == "rules" ]]; then
+    if [[ -f "${SITE_POLKIT_RULES_FILE}" ]] && grep -q "subject.user == \"${user}\"" "${SITE_POLKIT_RULES_FILE}"; then
+      site_note "이미 허용됨 · ${SITE_POLKIT_RULES_FILE}"
+      return 0
+    fi
+    site_run sudo mkdir -p "$(dirname "${SITE_POLKIT_RULES_FILE}")"
+    site_render_polkit_rules "${user}" | site_write_root_file "${SITE_POLKIT_RULES_FILE}"
+    return 0
+  fi
   if [[ -f "${SITE_POLKIT_FILE}" ]] && grep -q "unix-user:${user}$" "${SITE_POLKIT_FILE}"; then
     site_note "이미 허용됨 · ${SITE_POLKIT_FILE}"
     return 0

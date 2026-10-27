@@ -43,6 +43,8 @@ trap 'echo; echo "!! ${LINENO}번째 줄에서 멈췄습니다 · ${BASH_COMMAND
 
 # shellcheck disable=SC1091
 source "${SCRIPT_DIR}/setup/site.sh"
+# shellcheck disable=SC1091
+source "${SCRIPT_DIR}/lib/ros_distro.sh"
 
 step "0. 사전 확인"
 if [[ "$(id -u)" == "0" ]]; then
@@ -51,8 +53,8 @@ if [[ "$(id -u)" == "0" ]]; then
 fi
 # shellcheck disable=SC1091
 source /etc/os-release
-if [[ "${ID:-}" != "ubuntu" || "${VERSION_ID:-}" != "22.04" ]]; then
-  echo "지원 대상: Ubuntu 22.04 · 현재: ${PRETTY_NAME:-unknown}" >&2
+if ! robot_os_supported; then
+  echo "지원 대상: Ubuntu 22.04 (humble) · 24.04 (jazzy) · 현재: ${PRETTY_NAME:-unknown}" >&2
   [[ "${DRY_RUN}" == true ]] || exit 1
 fi
 echo "작업공간 · ${WORKSPACE_DIR}"
@@ -125,7 +127,7 @@ run sudo apt-get update
 run sudo apt-get install -y \
   alsa-utils git build-essential cmake \
   python3-colcon-common-extensions python3-fastapi python3-uvicorn python3-yaml \
-  ros-humble-ros-base
+  "ros-${ROBOT_ROS_DISTRO}-ros-base"
 # 웹 터미널 · PC 성능 화면 · 없어도 설치는 끝난다 (89 · 로봇 PC 와 같은 것)
 run sudo apt-get install -y ttyd btop || echo "  !! ttyd · btop 설치 실패 · 웹 터미널·PC 성능 화면 없이 계속" >&2
 # 블루투스 앰프 · PulseAudio 없이 aplay 로 · 출력 장치 bluealsa:DEV=<MAC>,PROFILE=a2dp (2026-10-15)
@@ -144,7 +146,7 @@ else
     cd "${WORKSPACE_DIR}"
     unset AMENT_PREFIX_PATH CMAKE_PREFIX_PATH COLCON_PREFIX_PATH PYTHONPATH || true
     set +u
-    source /opt/ros/humble/setup.bash
+    source "${ROBOT_ROS_SETUP}"
     set -u
     rm -rf build install
     # midi_msgs 가 딸려 온다 · 그룹 메시지가 쓴다 · --packages-select 로 하나만 고르면 실패
