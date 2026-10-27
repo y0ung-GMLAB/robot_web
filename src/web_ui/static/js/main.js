@@ -511,7 +511,9 @@ function renderGitVersion(version = {}) {
   const message = String(version.message || '');
   const remoteUrl = String(version.remote_url || '');
   const remoteWebUrl = String(version.remote_web_url || remoteUrl || '');
-  const branchText = branch === 'main' ? 'main' : `${branch} (main 아님)`;
+  // 운영 브랜치 = ROS 버전 humble · jazzy (2026-10-27 · main 은 옮기는 동안만)
+  const isRelease = ['humble', 'jazzy', 'main'].includes(branch);
+  const branchText = isRelease ? branch : `${branch} (운영 브랜치 아님)`;
   const detail = [
     remoteUrl ? `주소: ${remoteUrl}` : '',
     `브랜치: ${branchText}`,
@@ -525,7 +527,7 @@ function renderGitVersion(version = {}) {
     badge.title = detail || 'Git 정보 없음';
     badge.href = remoteWebUrl || '#';
     badge.style.display = '';
-    badge.classList.toggle('warning-text', branch !== 'main');
+    badge.classList.toggle('warning-text', !isRelease);
   }
   if (el.systemGitRemote) {
     el.systemGitRemote.textContent = remoteUrl || '-';
@@ -535,7 +537,7 @@ function renderGitVersion(version = {}) {
   if (el.systemGitBranch) {
     el.systemGitBranch.textContent = branchText;
     el.systemGitBranch.title = branchText;
-    el.systemGitBranch.classList.toggle('warning-text', branch !== 'main');
+    el.systemGitBranch.classList.toggle('warning-text', !isRelease);
   }
   if (el.systemGitHead) {
     el.systemGitHead.textContent = hash;

@@ -48,7 +48,7 @@ test('system information displays host and workspace paths', () => {
   assert.match(main, /systemInfo\.workspace_root/);
   assert.match(main, /systemInfo\.motion_projects_dir/);
   assert.match(main, /function renderGitVersion/);
-  assert.match(main, /branch === 'main' \? 'main' : `\$\{branch\} \(main 아님\)`/);
+  assert.match(main, /const branchText = isRelease \? branch : `\$\{branch\} \(운영 브랜치 아님\)`/);
   assert.match(main, /systemGitRemote\.href = remoteWebUrl/);
   assert.match(main, /systemGitHead\.title = fullHash/);
 });

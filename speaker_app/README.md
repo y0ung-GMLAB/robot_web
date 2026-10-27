@@ -51,7 +51,7 @@ ROS 2 Humble 모션 제어 시스템(robot_web)의 DDS 트리거를 **구독만*
 우분투 22.04 를 깐 직후, 늘 쓸 계정으로 로그인해 터미널에서 한 줄만 친다.
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/y0ung-GMLAB/robot_web/main/scripts/bootstrap.sh | bash -s -- --speaker
+curl -fsSL https://raw.githubusercontent.com/y0ung-GMLAB/robot_web/humble/scripts/bootstrap.sh | bash -s -- --speaker
 ```
 
 - sudo 비밀번호 1회 · 나머지 자동 · 코드는 `~/robot_web` · 로봇 PC 서비스(모터 · 웹 `:8000` · 연동)는 깔지 않는다

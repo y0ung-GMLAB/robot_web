@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # 한 줄 설치 · 우분투 22.04 설치 직후 터미널에서 · 수정 목록 11 (2026-10-04)
 #
-#   curl -fsSL https://raw.githubusercontent.com/y0ung-GMLAB/robot_web/main/scripts/bootstrap.sh | bash
+#   curl -fsSL https://raw.githubusercontent.com/y0ung-GMLAB/robot_web/humble/scripts/bootstrap.sh | bash
 #
 #   · sudo 비밀번호 1회 · 시간대 질문 1회(Enter = 현재) · 나머지 자동 · 재부팅 1회 뒤 저절로 이어서 끝남
 #   · 코드는 ~/ros2_ws 에 받는다 (MOTION_WORKSPACE 로 변경) · 이미 있으면 갱신만 한다
@@ -10,7 +10,7 @@
 #   · 수작업으로 남는 것 · BIOS 「전원 복구 시 켜기」 · 로봇 팩·모터 설정(웹)
 #
 # 스피커 PC · 끝에 `-s -- --speaker` 를 붙인다 · 코드는 ~/robot_web · scripts/install_speaker.sh 로 이어간다
-#   curl -fsSL https://raw.githubusercontent.com/y0ung-GMLAB/robot_web/main/scripts/bootstrap.sh | bash -s -- --speaker
+#   curl -fsSL https://raw.githubusercontent.com/y0ung-GMLAB/robot_web/humble/scripts/bootstrap.sh | bash -s -- --speaker
 #
 # PC 이름 · `--name floating1` · 컴퓨터 이름(hostname)을 바꾼다 · 로봇 PC 는 이것이 `이 PC ID`(웹에서 못 바꿈) ·
 #   스피커 PC 는 「같은 망 PC」 표의 이름 · 예) ... | bash -s -- --name floating1 · ... | bash -s -- --speaker --name speaker
@@ -41,7 +41,8 @@ if [[ -n "${PC_NAME}" && ! "${PC_NAME}" =~ ^[A-Za-z0-9][A-Za-z0-9-]{0,62}$ ]]; t
 fi
 
 REPO="${MOTION_REPO:-https://github.com/y0ung-GMLAB/robot_web.git}"
-BRANCH="${MOTION_BRANCH:-main}"
+# 브랜치 = ROS 버전 · humble(Ubuntu 22.04) · jazzy(Ubuntu 24.04) · 2026-10-27 main → humble
+BRANCH="${MOTION_BRANCH:-humble}"
 # 스피커 PC 는 ~/robot_web · 옛 스피커 앱이 쓰던 ~/ros2_ws(옛 메시지 빌드)와 섞이지 않게
 if [[ "${SPEAKER}" == true ]]; then
   WORKSPACE="${MOTION_WORKSPACE:-${HOME}/robot_web}"

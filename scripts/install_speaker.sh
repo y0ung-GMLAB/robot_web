@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # 스피커 PC 한 번에 설치 · 우분투 22.04 · 수정 목록 38 · 75 (2026-10-07)
 #
-#   새 PC   · curl -fsSL https://raw.githubusercontent.com/y0ung-GMLAB/robot_web/main/scripts/bootstrap.sh | bash -s -- --speaker
+#   새 PC   · curl -fsSL https://raw.githubusercontent.com/y0ung-GMLAB/robot_web/humble/scripts/bootstrap.sh | bash -s -- --speaker
 #   갱신    · bash ~/robot_web/scripts/install_speaker.sh      (같은 명령 · 몇 번 쳐도 같은 결과)
 #
 # 하는 일 · ROS 2(기본만) · 그룹 메시지 빌드(모터 쪽 빌드 안 함) · 사운드 장치 독점 · 사운드 카드 자동 선택 ·
@@ -78,6 +78,18 @@ site_timezone
 site_web_admin_permissions "$(id -un)"
 fi
 
+# main → humble 전환 · 2026-10-27 (브랜치를 ROS 버전 이름 humble · jazzy 로 나눔)
+# main 을 따라가던 PC 는 같은 커밋에서 humble 로 갈아탄다 · 코드는 그대로 · 다음 업데이트부터 humble 을 받는다
+# 원격에 humble 이 없으면(아직 못 받음) 아무것도 안 함
+switch_main_to_humble() {
+  local dir="$1"
+  [[ "$(git -C "${dir}" rev-parse --abbrev-ref HEAD 2>/dev/null)" == "main" ]] || return 0
+  git -C "${dir}" rev-parse -q --verify refs/remotes/origin/humble >/dev/null || return 0
+  git -C "${dir}" checkout -q -B humble \
+    && git -C "${dir}" branch -q --set-upstream-to=origin/humble humble \
+    && echo "브랜치 main → humble 로 바꿨습니다 · 다음 업데이트부터 humble 을 받습니다"
+}
+
 step "2. 코드 갱신"
 if git -C "${WORKSPACE_DIR}" remote get-url origin >/dev/null 2>&1; then
   if [[ -n "$(git -C "${WORKSPACE_DIR}" status --porcelain --untracked-files=no)" ]]; then
@@ -86,7 +98,8 @@ if git -C "${WORKSPACE_DIR}" remote get-url origin >/dev/null 2>&1; then
     echo "!! 갱신 실패(인터넷) · 지금 코드로 설치합니다" >&2
   else
     # pull --ff-only 는 원격 이력을 다시 쓰면(2026-10-26 커밋 정리) 실패한다 · install.sh 처럼 원격에 맞춘다
-    upstream="$(git -C "${WORKSPACE_DIR}" rev-parse --abbrev-ref --symbolic-full-name '@{u}' 2>/dev/null || echo 'origin/main')"
+    switch_main_to_humble "${WORKSPACE_DIR}"
+    upstream="$(git -C "${WORKSPACE_DIR}" rev-parse --abbrev-ref --symbolic-full-name '@{u}' 2>/dev/null \n      || echo "origin/$(git -C "${WORKSPACE_DIR}" rev-parse --abbrev-ref HEAD)")"
     run git -C "${WORKSPACE_DIR}" reset --hard "${upstream}"
   fi
 fi
