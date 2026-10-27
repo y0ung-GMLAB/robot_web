@@ -77,6 +77,38 @@ def test_polkit_writes_js_rules_on_new_polkit_and_pkla_on_old(tmp_path):
     assert '이미 허용됨' in out.stdout   # 두 번째는 그대로 둔다(멱등)
 
 
+ETHERCAT_NONE = r'''
+set -uo pipefail
+OUT="$2"
+source "$1" >/dev/null 2>&1
+site_write_root_file() { cat > "$1"; }
+site_run() { echo "RUN $*" >> "${OUT}/calls"; }
+export SITE_ETHERCAT_CONF="${OUT}/ethercat.conf"
+printf 'MASTER0_DEVICE="aa:bb:cc:dd:ee:ff"\nDEVICE_MODULES="generic"\nUPDOWN_INTERFACES="eth0"\n' > "$SITE_ETHERCAT_CONF"
+SITE_ETHERCAT_NIC=none site_ethercat_configure
+echo "== again"
+unset SITE_ETHERCAT_NIC
+site_ethercat_configure
+'''
+
+
+def test_ethercat_nic_none_releases_a_bound_port_and_never_auto_picks(tmp_path):
+    """직렬 서보만 쓰는 PC · SITE_ETHERCAT_NIC=none · 2026-10-27
+    묶인 랜카드를 풀고(서비스 끄기 · MASTER0_DEVICE 비움) · 자동 감지(IP 없는 유선 포트)를 하지 않는다."""
+    out = subprocess.run(['bash', '-c', ETHERCAT_NONE, 'x', SITE.as_posix(), tmp_path.as_posix()],
+                         capture_output=True, text=True, encoding='utf-8', timeout=30)
+    conf = (tmp_path / 'ethercat.conf').read_text(encoding='utf-8')
+    assert 'MASTER0_DEVICE=""' in conf and 'UPDOWN_INTERFACES' not in conf
+    calls = (tmp_path / 'calls').read_text(encoding='utf-8')
+    assert 'systemctl disable --now ethercat' in calls
+    assert 'enable --now ethercat' not in calls.replace('disable --now', '')
+    first, again = out.stdout.split('== again')
+    assert '랜카드 안 씀' in first
+    # 설치를 다시 돌려도(랜카드 지정 없음) 기억한 「안 씀」 을 지킨다 · 자동 감지로 묶지 않음
+    assert '안 씀 유지' in again
+    assert 'robot_web-ethercat: none' in conf
+
+
 def test_every_service_script_takes_ros_from_the_shared_file():
     scripts = [
         'scripts/install.sh', 'scripts/install_speaker.sh', 'scripts/build_and_restart.sh', 'scripts/ship.sh',

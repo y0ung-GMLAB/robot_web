@@ -7,6 +7,7 @@
 #   SITE_DRY_RUN=1          실제로 바꾸지 않고 할 일만 찍는다
 #   SITE_TIMEZONE=Asia/Seoul  시간대 · 없으면 터미널에서 묻고, 물을 수 없으면 현재 값 유지
 #   SITE_ETHERCAT_NIC=enp2s0  EtherCAT 랜카드 지정 · 없으면 자동 감지(IP 없는 유선 포트)
+#   SITE_ETHERCAT_NIC=none    EtherCAT 랜카드 안 씀 (직렬 서보만 쓰는 PC · 라즈베리파이) · 이미 묶였으면 풀어 줌
 #   SITE_RESET_ETHERCAT=1   이미 적힌 /etc/ethercat.conf 를 다시 쓴다
 #   SITE_ETHERLAB_VERSION   EtherLab 태그 (기본 1.6.9 · README 검증 버전)
 #   SITE_SCAN=1             자가 점검에서 모터 스캔 1회 (최대 50초)
@@ -648,7 +649,35 @@ site_pick_ethercat_nic_from() {
     }'
 }
 
+# EtherCAT 랜카드 안 씀 · SITE_ETHERCAT_NIC=none · 2026-10-27
+#   직렬 서보만 쓰는 PC(라즈베리파이 등)는 하나뿐인 유선 포트를 일반 랜으로 쓴다 · 자동 감지가 그 포트를
+#   EtherCAT 에 묶지 않게 · 이미 묶였으면 서비스를 끄고 랜카드 자리를 비운다(EtherLab 자체는 그대로 · 빌드에 필요)
+#   「안 씀」 은 설정 파일 표시(SITE_ETHERCAT_NONE_MARK)로 기억 · 나중에 설치를 다시 돌려도 자동 감지로 묶지 않음
+SITE_ETHERCAT_NONE_MARK="# robot_web-ethercat: none"
+site_ethercat_release() {
+  if [[ -f "${SITE_ETHERCAT_CONF}" ]] && grep -q '^MASTER0_DEVICE="[^"]\+"' "${SITE_ETHERCAT_CONF}"; then
+    echo "EtherCAT 랜카드 풀기 · $(grep '^MASTER0_DEVICE' "${SITE_ETHERCAT_CONF}")"
+  fi
+  site_run sudo systemctl disable --now ethercat || true
+  site_write_root_file "${SITE_ETHERCAT_CONF}" <<CONF
+# robot_web 설치 스크립트가 적음 · $(date +%F) · EtherCAT 랜카드 안 씀 (SITE_ETHERCAT_NIC=none)
+${SITE_ETHERCAT_NONE_MARK}
+MASTER0_DEVICE=""
+DEVICE_MODULES="generic"
+CONF
+  site_note "EtherCAT 랜카드 안 씀 · 직렬 서보만 · 나중에 쓰려면 bash scripts/ethercat_nic.sh <랜카드 이름>"
+}
+
 site_ethercat_configure() {
+  if [[ "${SITE_ETHERCAT_NIC:-}" == "none" ]]; then
+    site_ethercat_release
+    return 0
+  fi
+  if [[ -z "${SITE_ETHERCAT_NIC:-}" && "${SITE_RESET_ETHERCAT:-0}" != "1" && -f "${SITE_ETHERCAT_CONF}" ]] \
+     && grep -qxF "${SITE_ETHERCAT_NONE_MARK}" "${SITE_ETHERCAT_CONF}"; then
+    site_note "EtherCAT 랜카드 안 씀 유지 (${SITE_ETHERCAT_CONF}) · 쓰려면 bash scripts/ethercat_nic.sh <랜카드 이름>"
+    return 0
+  fi
   if [[ -f "${SITE_ETHERCAT_CONF}" ]] && grep -q '^MASTER0_DEVICE="[^"]\+"' "${SITE_ETHERCAT_CONF}" \
      && [[ "${SITE_RESET_ETHERCAT:-0}" != "1" ]]; then
     site_note "EtherCAT 설정 유지 · $(grep '^MASTER0_DEVICE' "${SITE_ETHERCAT_CONF}") (${SITE_ETHERCAT_CONF}) · 다시 쓰려면 SITE_RESET_ETHERCAT=1"
