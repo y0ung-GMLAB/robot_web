@@ -165,7 +165,7 @@ def register_system_routes(app: FastAPI, bridge, project_call) -> None:
                 'message': msg,
                 'remote_url': remote,
                 'remote_web_url': _web_url(remote),
-                'is_main': branch == 'main',
+                'is_main': branch in ('humble', 'jazzy', 'main'),   # 운영 브랜치 = ROS 버전 · 2026-10-27
             }
         except Exception:
             return {

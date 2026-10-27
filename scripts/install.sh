@@ -233,8 +233,22 @@ install_system_packages() {
     ttyd
 }
 
+# main → humble 전환 · 2026-10-27 (브랜치를 ROS 버전 이름 humble · jazzy 로 나눔)
+# main 을 따라가던 PC 는 같은 커밋에서 humble 로 갈아탄다 · 코드는 그대로 · 다음 업데이트부터 humble 을 받는다
+# 원격에 humble 이 없으면(아직 못 받음) 아무것도 안 함
+switch_main_to_humble() {
+  local dir="$1"
+  [[ "$(git -C "${dir}" rev-parse --abbrev-ref HEAD 2>/dev/null)" == "main" ]] || return 0
+  git -C "${dir}" rev-parse -q --verify refs/remotes/origin/humble >/dev/null || return 0
+  git -C "${dir}" checkout -q -B humble \
+    && git -C "${dir}" branch -q --set-upstream-to=origin/humble humble \
+    && echo "브랜치 main → humble 로 바꿨습니다 · 다음 업데이트부터 humble 을 받습니다"
+}
+
 sync_git_repository() {
   if [[ "${MOTION_WEB_SKIP_GIT_PULL:-}" == "1" ]]; then
+    # 옛 install.sh 가 코드를 받고 이 스크립트를 다시 실행한 경우 · 전환만 여기서
+    switch_main_to_humble "${WORKSPACE_DIR}"
     echo "Git 수신 건너뜀 · MOTION_WEB_SKIP_GIT_PULL=1"
     return 0
   fi
@@ -251,9 +265,11 @@ sync_git_repository() {
     return 0
   fi
 
+  switch_main_to_humble "${WORKSPACE_DIR}"
+
   local upstream
   upstream="$(git -C "${WORKSPACE_DIR}" rev-parse --abbrev-ref \
-    --symbolic-full-name '@{u}' 2>/dev/null || echo 'origin/main')"
+    --symbolic-full-name '@{u}' 2>/dev/null \n    || echo "origin/$(git -C "${WORKSPACE_DIR}" rev-parse --abbrev-ref HEAD)")"
 
   # **어떤 PC 든 이 명령 하나로 원격과 같아진다** · §6-102
   #

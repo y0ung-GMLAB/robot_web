@@ -74,11 +74,13 @@ case "${ROLE}" in
   *) row 0 "역할" "설치 안 됨 · docs/설치_101.md 2 또는 3" ;;
 esac
 head_line="$(git -C "${WORKSPACE_DIR}" log --oneline -1 2>/dev/null || echo '')"
-if timeout 15 git -C "${WORKSPACE_DIR}" fetch -q origin main 2>/dev/null; then
-  if [[ "$(git -C "${WORKSPACE_DIR}" rev-parse HEAD 2>/dev/null)" == "$(git -C "${WORKSPACE_DIR}" rev-parse origin/main 2>/dev/null)" ]]; then
-    row 1 "코드 (최신 main)" "${head_line}"
+# 브랜치 = ROS 버전(humble · jazzy) · 이 PC 가 따라가는 브랜치의 최신과 비교 · 2026-10-27
+git_branch="$(git -C "${WORKSPACE_DIR}" rev-parse --abbrev-ref HEAD 2>/dev/null || echo '?')"
+if timeout 15 git -C "${WORKSPACE_DIR}" fetch -q origin 2>/dev/null; then
+  if [[ "$(git -C "${WORKSPACE_DIR}" rev-parse HEAD 2>/dev/null)" == "$(git -C "${WORKSPACE_DIR}" rev-parse '@{u}' 2>/dev/null)" ]]; then
+    row 1 "코드 (최신 ${git_branch})" "${head_line}"
   else
-    row 0 "코드 (최신 main)" "${head_line} · 최신 아님 · 갱신 · docs/설치_101.md 5"
+    row 0 "코드 (최신 ${git_branch})" "${head_line} · 최신 아님 · 갱신 · docs/설치_101.md 5"
   fi
 else
   info "코드" "${head_line:-git 아님} · 인터넷이 안 돼 최신인지 못 봄"

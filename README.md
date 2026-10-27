@@ -134,7 +134,14 @@ ros2_ws/
 없습니다. 실제 설치 조합은 **이 저장소의 Git 커밋 하나**입니다 · Motion System 도
 같은 커밋 안에 들어 있습니다(2026-10-02 서브모듈에서 합침).
 
-운영 브랜치 · `main`
+운영 브랜치 = ROS 버전 · 한 매장(그룹)은 모든 PC 를 같은 브랜치로 설치 · 2026-10-27
+
+| 브랜치 | OS · ROS | 쓰는 곳 |
+|---|---|---|
+| `humble` | Ubuntu 22.04 · ROS 2 Humble | 미니 PC · AC 서보(EtherCAT) · 지금 플로팅 |
+| `jazzy` | Ubuntu 24.04 · ROS 2 Jazzy | 라즈베리파이 5 등 · 직렬 서보(Dynamixel · Feetech) |
+
+- 옛 `main` 은 `humble` 로 바뀜 · `main` 을 따라가던 PC 는 다음 `업데이트` 때 `humble` 로 저절로 바뀜
 
 ## Git 저장소
 
@@ -159,7 +166,7 @@ ros2_ws/
 우분투 22.04 를 깐 직후, **늘 쓸 계정**으로 로그인해 터미널에서 한 줄만 칩니다.
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/y0ung-GMLAB/robot_web/main/scripts/bootstrap.sh | bash
+curl -fsSL https://raw.githubusercontent.com/y0ung-GMLAB/robot_web/humble/scripts/bootstrap.sh | bash
 ```
 
 - sudo 비밀번호 1회 · 시간대 질문 1회(Enter = 현재) · 모터 랜카드는 **IP 없는 유선 포트**를 자동으로 고릅니다(둘 이상이면 묻습니다)
@@ -363,7 +370,7 @@ sudo apt install -y git
 
 ```bash
 cd ~
-git clone -b main https://github.com/y0ung-GMLAB/robot_web.git ros2_ws
+git clone -b humble https://github.com/y0ung-GMLAB/robot_web.git ros2_ws
 cd ~/ros2_ws
 ```
 
@@ -525,7 +532,7 @@ bash scripts/install.sh
 옛 폴더를 옮겨 두고 새로 까는 옵션을 붙여 다시 칩니다.
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/y0ung-GMLAB/robot_web/main/scripts/bootstrap.sh | bash -s -- --replace-old
+curl -fsSL https://raw.githubusercontent.com/y0ung-GMLAB/robot_web/humble/scripts/bootstrap.sh | bash -s -- --replace-old
 # PC 이름도 바꾸려면 · ... | bash -s -- --replace-old --name floating1
 ```
 
@@ -735,16 +742,16 @@ ethercat slaves
 
 ## 3. 전체 소스 설치
 
-저장소(`main`) 하나를 받습니다 · Motion System 도 그 안에 있습니다(서브모듈 없음).
+저장소의 운영 브랜치(`humble` · `jazzy`) 하나를 받습니다 · Motion System 도 그 안에 있습니다(서브모듈 없음).
 
 ```bash
 cd ~
-git clone -b main \
+git clone -b humble \
   https://github.com/y0ung-GMLAB/robot_web.git ros2_ws
 cd ~/ros2_ws
 ```
 
-이미 복제한 저장소라면 설치 명령 하나로 `main` 최신까지 맞춰집니다.
+이미 복제한 저장소라면 설치 명령 하나로 그 브랜치 최신까지 맞춰집니다.
 손으로 `git pull` 할 필요가 없습니다.
 
 ```bash
@@ -997,7 +1004,7 @@ motion-control.service 재시작 완료
 
 ## 8. Git 작업 방법
 
-코드·문서·설정 예시는 상위 저장소(`main`)에서 함께 커밋합니다.
+코드·문서·설정 예시는 상위 저장소의 운영 브랜치(`humble` · `jazzy` · 어느 쪽인지 먼저 정함)에서 함께 커밋합니다.
 
 ```bash
 cd ~/ros2_ws
