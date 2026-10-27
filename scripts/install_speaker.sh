@@ -99,7 +99,8 @@ if git -C "${WORKSPACE_DIR}" remote get-url origin >/dev/null 2>&1; then
   else
     # pull --ff-only 는 원격 이력을 다시 쓰면(2026-10-26 커밋 정리) 실패한다 · install.sh 처럼 원격에 맞춘다
     switch_main_to_humble "${WORKSPACE_DIR}"
-    upstream="$(git -C "${WORKSPACE_DIR}" rev-parse --abbrev-ref --symbolic-full-name '@{u}' 2>/dev/null \n      || echo "origin/$(git -C "${WORKSPACE_DIR}" rev-parse --abbrev-ref HEAD)")"
+    upstream="$(git -C "${WORKSPACE_DIR}" rev-parse --abbrev-ref --symbolic-full-name '@{u}' 2>/dev/null \
+      || echo "origin/$(git -C "${WORKSPACE_DIR}" rev-parse --abbrev-ref HEAD)")"
     run git -C "${WORKSPACE_DIR}" reset --hard "${upstream}"
   fi
 fi
