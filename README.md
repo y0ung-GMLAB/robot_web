@@ -163,11 +163,14 @@ ros2_ws/
 
 ### 한 줄 설치 (권장 · 2026-10-04)
 
-우분투 22.04 를 깐 직후, **늘 쓸 계정**으로 로그인해 터미널에서 한 줄만 칩니다.
+우분투를 깐 직후, **늘 쓸 계정**으로 로그인해 터미널에서 한 줄만 칩니다.
+주소의 브랜치는 OS 에 맞춥니다 · **22.04 = `humble`** (아래) · 24.04 = `jazzy` · 안 맞으면 bootstrap 이 알맞은 주소를 찍고 멈춥니다.
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/y0ung-GMLAB/robot_web/humble/scripts/bootstrap.sh | bash
 ```
+
+- **jazzy (24.04)** 는 주소의 `humble` 을 `jazzy` 로 · ROS 2 Jazzy · 라즈베리파이 5 등 · 직렬 서보(Dynamixel · Feetech) · **humble PC 와 한 그룹으로 쓰지 않음**
 
 - sudo 비밀번호 1회 · 시간대 질문 1회(Enter = 현재) · 모터 랜카드는 **IP 없는 유선 포트**를 자동으로 고릅니다(둘 이상이면 묻습니다)
 - 아래 2~8단계를 전부 대신합니다 · 자동 업데이트·절전·화면 잠금 끄기 · 자동 로그인 · 로그아웃해도 유지(linger) ·
@@ -195,7 +198,7 @@ curl -fsSL https://raw.githubusercontent.com/y0ung-GMLAB/robot_web/humble/script
 
 | | |
 |---|---|
-| 운영체제 | **Ubuntu 22.04 LTS** · 다른 버전이면 설치가 중간에 멈춥니다 |
+| 운영체제 | **Ubuntu 22.04 LTS** (`humble`) 또는 24.04 (`jazzy`) · 다른 버전이면 설치가 중간에 멈춥니다 |
 | 네트워크 | 인터넷 연결 |
 | 계정 | 이 PC 를 늘 쓸 계정 하나 · **모든 단계를 그 계정으로** 합니다 |
 | GitHub | 저장소가 비공개일 때만 사용자 이름과 **토큰** (계정 비밀번호로는 안 됩니다 · 6단계) · 공개 저장소면 필요 없음 |

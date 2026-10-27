@@ -3,13 +3,15 @@ set -Eeuo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 WORKSPACE="${MOTION_WORKSPACE:-$(cd "${SCRIPT_DIR}/.." && pwd)}"
-ROS_SETUP="/opt/ros/humble/setup.bash"
+# shellcheck disable=SC1091
+source "${SCRIPT_DIR}/lib/ros_distro.sh" 2>/dev/null || ROBOT_ROS_SETUP="/opt/ros/humble/setup.bash"
+ROS_SETUP="${ROBOT_ROS_SETUP}"
 WORKSPACE_SETUP="${WORKSPACE}/install/setup.bash"
 
 cd "${WORKSPACE}"
 
 if [[ ! -f "${ROS_SETUP}" ]]; then
-  echo "ROS 2 Humble 환경을 찾을 수 없습니다: ${ROS_SETUP}" >&2
+  echo "ROS 2 환경을 찾을 수 없습니다: ${ROS_SETUP}" >&2
   exit 1
 fi
 

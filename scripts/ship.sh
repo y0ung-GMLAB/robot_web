@@ -46,8 +46,10 @@ if [[ ${CHECK_ONLY} -eq 1 ]]; then
 fi
 
 step 3/5 "빌드"
+# shellcheck disable=SC1091
+source "$(dirname "${BASH_SOURCE[0]}")/lib/ros_distro.sh" 2>/dev/null || ROBOT_ROS_SETUP="/opt/ros/humble/setup.bash"
 set +u
-source /opt/ros/humble/setup.bash
+source "${ROBOT_ROS_SETUP}"
 set -u
 if [[ ${#PACKAGES[@]} -gt 0 ]]; then
   colcon build --symlink-install --packages-select "${PACKAGES[@]}" || fail "빌드 실패"

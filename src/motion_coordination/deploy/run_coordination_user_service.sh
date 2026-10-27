@@ -16,12 +16,15 @@ if [[ -f "${GROUP_ENV_HELPER}" ]]; then
 fi
 # 도우미가 없거나 실패해도 서비스는 떠야 한다 · 빈 값이면 예전 이름 그대로다
 export MOTION_PC_NAMESPACE="${MOTION_PC_NAMESPACE:-}"
-ROS_SETUP="/opt/ros/humble/setup.bash"
+# ROS 버전 = OS 버전 (humble · jazzy) · scripts/lib/ros_distro.sh
+# shellcheck disable=SC1091
+source "${WORKSPACE}/scripts/lib/ros_distro.sh" 2>/dev/null || ROBOT_ROS_SETUP="/opt/ros/humble/setup.bash"
+ROS_SETUP="${ROBOT_ROS_SETUP}"
 WORKSPACE_SETUP="${WORKSPACE}/install/setup.bash"
 EXECUTABLE="${WORKSPACE}/install/motion_coordination/lib/motion_coordination/motion_coordination_node"
 
 if [[ ! -f "${ROS_SETUP}" ]]; then
-  echo "ROS 2 Humble 환경을 찾을 수 없습니다: ${ROS_SETUP}" >&2
+  echo "ROS 2 환경을 찾을 수 없습니다: ${ROS_SETUP}" >&2
   exit 1
 fi
 if [[ ! -f "${WORKSPACE_SETUP}" ]]; then

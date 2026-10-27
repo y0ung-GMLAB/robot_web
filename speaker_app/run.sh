@@ -5,8 +5,10 @@
 set -e
 APP_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 WS_DIR="$(dirname "$APP_DIR")"
+# shellcheck disable=SC1091
+source "$WS_DIR/scripts/lib/ros_distro.sh" 2>/dev/null || ROBOT_ROS_SETUP="/opt/ros/humble/setup.bash"
 set +u
-source /opt/ros/humble/setup.bash
+source "$ROBOT_ROS_SETUP"
 if [ -f "$WS_DIR/install/setup.bash" ]; then
   source "$WS_DIR/install/setup.bash"
 else

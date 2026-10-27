@@ -160,10 +160,10 @@ def _os_release_blocks_bootstrap():
     if not path.exists():
         return False
     text = path.read_text(encoding='utf-8', errors='replace')
-    return not ('ID=ubuntu' in text and 'VERSION_ID="22.04"' in text)
+    return not ('ID=ubuntu' in text and ('VERSION_ID="22.04"' in text or 'VERSION_ID="24.04"' in text))
 
 
-@pytest.mark.skipif(_os_release_blocks_bootstrap(), reason='bootstrap 은 우분투 22.04 에서만 앞으로 간다')
+@pytest.mark.skipif(_os_release_blocks_bootstrap(), reason='bootstrap 은 우분투 22.04 · 24.04 에서만 앞으로 간다')
 def test_bootstrap_stops_on_an_old_stack_and_moves_it_only_with_replace_old(tmp_path):
     """옛 스택(kimjoonho motion_web)도 ~/ros2_ws · 2026-10-13
     옵션 없으면 아무것도 안 바꾸고 멈춤(sudo·PC 이름 전) · --replace-old 면 옛 서비스 멈추고 폴더를 옮김(지우지 않음)."""
@@ -175,7 +175,8 @@ def test_bootstrap_stops_on_an_old_stack_and_moves_it_only_with_replace_old(tmp_
     for name, code in (('sudo', 1), ('systemctl', 0)):
         (fake / name).write_text(f'#!/bin/sh\necho "{name} $*" >> "{calls}"\nexit {code}\n', encoding='utf-8')
         (fake / name).chmod(0o755)
-    env = {'MOTION_WORKSPACE': str(old), 'PATH': f'{fake}{os.pathsep}{os.environ["PATH"]}'}
+    # 브랜치를 직접 정하면 OS 와 브랜치가 안 맞아도 멈추지 않는다(2026-10-27) · 이 시험은 옛 스택 처리만 본다
+    env = {'MOTION_WORKSPACE': str(old), 'MOTION_BRANCH': 'jazzy', 'PATH': f'{fake}{os.pathsep}{os.environ["PATH"]}'}
 
     refused = _bash(f'bash "{SCRIPTS / "bootstrap.sh"}" --name floating9 </dev/null', env)
     assert refused.returncode == 1

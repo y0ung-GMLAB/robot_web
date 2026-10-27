@@ -128,6 +128,8 @@ if [[ "${CODE_ONLY}" == true ]]; then
 fi
 # shellcheck disable=SC1091
 source "${SCRIPT_DIR}/setup/site.sh"
+# shellcheck disable=SC1091
+source "${SCRIPT_DIR}/lib/ros_distro.sh"
 if [[ "${MOTION_SITE_RESUME:-}" == "1" ]]; then RESUME_MODE=true; fi
 
 # 중간에 멈추는 흔한 이유 둘을 **먼저** 걸러낸다
@@ -158,15 +160,15 @@ preflight_checks() {
   fi
 }
 
-require_ubuntu_2204() {
+require_supported_ubuntu() {
   if [[ ! -f /etc/os-release ]]; then
     echo "Ubuntu 버전을 확인할 수 없습니다." >&2
     exit 1
   fi
   # shellcheck disable=SC1091
   source /etc/os-release
-  if [[ "${ID:-}" != "ubuntu" || "${VERSION_ID:-}" != "22.04" ]]; then
-    echo "지원 대상: Ubuntu 22.04" >&2
+  if ! robot_os_supported; then
+    echo "지원 대상: Ubuntu 22.04 (humble) · 24.04 (jazzy)" >&2
     echo "현재 OS: ${PRETTY_NAME:-unknown}" >&2
     if [[ "${DRY_RUN}" == true ]]; then
       echo "[dry-run] 버전이 달라도 계속 찍습니다" >&2
@@ -220,13 +222,16 @@ install_system_packages() {
     gcc-12 \
     g++-12 \
     git \
+    libasound2-dev \
+    librtmidi-dev \
     locales \
+    pkg-config \
     python3-colcon-common-extensions \
     python3-fastapi \
     python3-rosdep \
     python3-uvicorn \
     python3-yaml \
-    ros-humble-desktop \
+    "ros-${ROBOT_ROS_DISTRO}-desktop" \
     software-properties-common \
     ttyd
 }
@@ -399,7 +404,7 @@ clean_dead_dds_segments() {
 # 아래 `apt <패키지>`) 만 실패로 본다 · 모르는 이름은 참고로 찍는다.
 code_only_dependency_check() {
   local out missing unresolved
-  out="$( (set +u; source /opt/ros/humble/setup.bash; set -u; \
+  out="$( (set +u; source "${ROBOT_ROS_SETUP}"; set -u; \
     rosdep check --from-paths "${WORKSPACE_DIR}/src" --ignore-src) 2>&1 || true)"
   missing="$(printf '%s\n' "${out}" | awk '/System dependencies have not been satisfied/ {f = 1; next} f && /^(apt|pip|pip3)[ \t]/ {print $2}' | sort -u | tr '\n' ' ')"
   unresolved="$(printf '%s\n' "${out}" | grep -o 'Cannot locate rosdep definition for \[[^]]*\]' | sed 's/.*\[\(.*\)\]/\1/' | sort -u | tr '\n' ' ' || true)"
@@ -426,7 +431,7 @@ build_workspace() {
   # `CMAKE_INCLUDE_PATH`·`CMAKE_LIBRARY_PATH` 는 7단계가 정해 준 EtherCAT
   # 자리다 · 여기서 지우면 다시 못 찾는다
   set +u
-  source /opt/ros/humble/setup.bash
+  source "${ROBOT_ROS_SETUP}"
   set -u
   # 코드만 갱신은 7단계 뒤에 따로 검사했다(서비스를 끄기 전 · 82)
   if [[ "${CODE_ONLY}" != true ]]; then
@@ -619,7 +624,8 @@ print_step "0. 사전 확인"
 preflight_checks
 
 print_step "1. Ubuntu 버전 확인"
-require_ubuntu_2204
+require_supported_ubuntu
+echo "ROS 2 · ${ROBOT_ROS_DISTRO}"
 
 if [[ "${SITE_MODE}" == true ]]; then
   print_step "1-1. 현장 준비 (자동 업데이트·절전 끄기 · 자동 로그인 · 시간대 · 방화벽 · EtherLab)"

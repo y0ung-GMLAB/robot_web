@@ -121,9 +121,11 @@ fi
 # 사람이 터미널에서 부를 때는 이미 켜져 있어 보이지 않던 문제다 · 웹 업데이트는
 # 깨끗한 환경(`systemd-run`)에서 돌기 때문에 **늘 여기서 죽었다** ·
 # `No package metadata was found for motion-web-bridge`.
+# shellcheck disable=SC1091
+source "${WORKSPACE}/scripts/lib/ros_distro.sh" 2>/dev/null || ROBOT_ROS_SETUP="/opt/ros/humble/setup.bash"
 set +u
 # shellcheck disable=SC1091
-source /opt/ros/humble/setup.bash
+source "${ROBOT_ROS_SETUP}"
 # shellcheck disable=SC1091
 source "${WORKSPACE}/install/setup.bash"
 set -u

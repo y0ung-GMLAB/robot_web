@@ -202,8 +202,11 @@ if [[ "${ROLE}" == "speaker" ]]; then
   # 웹 터미널 · 웹 관리 권한 · 로봇 PC 와 같은 것 (수정 목록 89)
   tstate="$(systemctl --user is-active motion-terminal.service 2>/dev/null; true)"
   row "$([[ "${tstate}" == "active" ]] && echo 1 || echo 0)" "웹 터미널 :8081" "${tstate:-없음} $([[ "${tstate}" == "active" ]] || echo '· bash scripts/install_speaker.sh (ttyd 설치 · 관리자 비밀번호)')"
-  pkla="/etc/polkit-1/localauthority/50-local.d/50-robot-web.pkla"
-  row "$(grep -qs "unix-user:$(id -un)$" "${pkla}" && echo 1 || echo 0)" "웹 Wi-Fi·시간대 권한" "$(grep -qs "unix-user:$(id -un)$" "${pkla}" && echo 있음 || echo '없음 · bash scripts/allow_web_admin.sh')"
+  # 22.04 = .pkla · 24.04 = rules.d JS 규칙 (scripts/setup/site.sh · 2026-10-27)
+  admin_ok=0
+  grep -qs "unix-user:$(id -un)$" /etc/polkit-1/localauthority/50-local.d/50-robot-web.pkla && admin_ok=1
+  grep -qs "subject.user == \"$(id -un)\"" /etc/polkit-1/rules.d/50-robot-web.rules && admin_ok=1
+  row "${admin_ok}" "웹 Wi-Fi·시간대 권한" "$([[ "${admin_ok}" == 1 ]] && echo 있음 || echo '없음 · bash scripts/allow_web_admin.sh')"
   sstate="$(http_json "http://localhost:${port}/api/state")"
   row "$([[ -n "${sstate}" ]] && echo 1 || echo 0)" "스피커 화면 :${port}" "$([[ -n "${sstate}" ]] && echo "http://${ip_addr:-localhost}:${port}" || echo '응답 없음 · journalctl --user -u speaker-app')"
   if [[ -n "${sstate}" ]]; then

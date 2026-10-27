@@ -61,8 +61,15 @@ echo "PC 이름  · ${PC_NAME:-$(hostname) (그대로)}"
 if [[ -f /etc/os-release ]]; then
   # shellcheck disable=SC1091
   source /etc/os-release
-  if [[ "${ID:-}" != "ubuntu" || "${VERSION_ID:-}" != "22.04" ]]; then
-    echo "지원 대상: Ubuntu 22.04 · 현재: ${PRETTY_NAME:-unknown}" >&2
+  if [[ "${ID:-}" != "ubuntu" || ( "${VERSION_ID:-}" != "22.04" && "${VERSION_ID:-}" != "24.04" ) ]]; then
+    echo "지원 대상: Ubuntu 22.04 (humble) · 24.04 (jazzy) · 현재: ${PRETTY_NAME:-unknown}" >&2
+    exit 1
+  fi
+  # 브랜치 = ROS 버전 · OS 와 안 맞는 주소로 받았으면 멈춤 · MOTION_BRANCH 로 직접 정하면 그대로
+  os_branch="$([[ "${VERSION_ID:-}" == "24.04" ]] && echo jazzy || echo humble)"
+  if [[ -z "${MOTION_BRANCH:-}" && "${BRANCH}" != "${os_branch}" ]]; then
+    echo "Ubuntu ${VERSION_ID} 은 ${os_branch} 브랜치입니다 · 이 주소는 ${BRANCH}" >&2
+    echo "  curl -fsSL https://raw.githubusercontent.com/y0ung-GMLAB/robot_web/${os_branch}/scripts/bootstrap.sh | bash" >&2
     exit 1
   fi
 fi
