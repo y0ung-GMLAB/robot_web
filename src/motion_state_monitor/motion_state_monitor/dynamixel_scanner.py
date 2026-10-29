@@ -105,14 +105,15 @@ class DynamixelScanner:
                 for attempt in range(attempts):
                     if self.monitor.dynamixel_scan_settle_sec > 0:
                         time.sleep(float(self.monitor.dynamixel_scan_settle_sec))
-                    for device in self._broadcast_ping_dynamixel(
-                        fd,
-                        float(self.monitor.dynamixel_broadcast_timeout_sec),
-                    ):
-                        if ids and int(device['id']) not in ids:
-                            continue
-                        devices_by_id[int(device['id'])] = device
-
+                    # 개별 Ping 을 **먼저** · Broadcast 는 그 뒤 · 수정 목록 162 (chicken2 실물 2026-10-29)
+                    #
+                    # 전에는 Broadcast(0.5 s) 바로 뒤에 개별 Ping 을 0 번부터 쐈다 · 그래서 ID 0 은
+                    # 언제나 「Broadcast 직후 첫 질문」 이었다 · 실물 · XM430-W350 ID 0 이 개별 Ping 엔
+                    # 늘 답하고 Broadcast 엔 한 번도 안 답했는데, 검색 결과엔 ID 1 · 2 만 있었다 ·
+                    # Broadcast 답장 차례(ID 순 · SDK 는 최대 ~0.8 s 를 기다림)를 아직 기다리는 서보가
+                    # 그 사이 들어온 질문을 흘린다고 보면 들어맞는다 (실물 미확인 · 수정 목록 162)
+                    # 개별 Ping 을 먼저 하면 첫 회차의 개별 Ping 은 Broadcast 와 겹치지 않는다 ·
+                    # 있는 ID 는 몇 ms 에 답하므로 시간은 거의 같다 · 찾은 ID 는 Broadcast 가 덮지 않는다
                     if self.monitor.dynamixel_scan_id_fallback and not extra_baudrate:
                         for dxl_id in ids:
                             current = devices_by_id.get(int(dxl_id))
@@ -126,6 +127,17 @@ class DynamixelScanner:
                             if device is None:
                                 continue
                             devices_by_id[int(device['id'])] = device
+
+                    for device in self._broadcast_ping_dynamixel(
+                        fd,
+                        float(self.monitor.dynamixel_broadcast_timeout_sec),
+                    ):
+                        if ids and int(device['id']) not in ids:
+                            continue
+                        current = devices_by_id.get(int(device['id']))
+                        if current is not None and self._dynamixel_device_has_valid_model(current):
+                            continue
+                        devices_by_id[int(device['id'])] = device
                     if attempt >= attempts - 1:
                         break
 

@@ -27,7 +27,7 @@ from motion_common.values import optional_int
 
 from motion_web_bridge.motor_config_rules import motor_id_for
 from motion_web_bridge.motor_identity import model_is_unknown
-from motion_web_bridge import scan_axis_rows
+from motion_web_bridge import scan_axis_rows, serial_params
 
 DYNAMIXEL_DEFAULT_BAUDRATE = 1_000_000
 
@@ -258,6 +258,10 @@ def proposed_registry(registry: Dict[str, Any], scan: Dict[str, Any], axis_rows:
         motors.append(motor)
     if renumbered:
         notes.append(f'모터 번호가 바뀝니다 · {" · ".join(renumbered)}. 번호로 연결된 조인트 매핑 줄을 확인하세요.')
+    # 한 포트 = 한 속도 · 이대로 저장하면 거부된다 · 저장 누르기 전에 알린다 · 수정 목록 161
+    # (검색은 1 Mbps 뒤 57600 · 4 Mbps 도 보므로 공장값 서보가 섞여 있으면 여기서 처음 드러난다)
+    for line in serial_params.registry_port_baudrate_conflicts(motors):
+        notes.append(f'{line} · 이대로는 저장되지 않습니다.')
 
     return {
         'registry': {'version': int(registry.get('version') or 1), 'motors': motors},

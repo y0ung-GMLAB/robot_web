@@ -13,6 +13,7 @@ MINAS 의 `minas_params` 와 같은 방식 · 저장 때 드라이버마다 제 
 - 옛 정적 파일은 그대로 둔다 · 저장 전 옛 설정 파일이 아직 가리킨다
 - 모델을 모르는 다이나믹셀 · 전과 같이 XM540-W270 제어표 (전 동작 그대로 · `model_warning` 표시)
 - 한 포트 = 한 종류 · 다이나믹셀과 Feetech 를 한 포트에 두면 저장 거부 (`port_kind_conflicts`)
+- 한 포트 = 한 속도 · 같은 포트에 속도가 다른 모터를 두면 저장 거부 (`port_baudrate_conflicts`) · 수정 목록 161
 """
 
 from __future__ import annotations
@@ -187,6 +188,88 @@ def registry_port_kind_conflicts(motors: List[Dict[str, Any]]) -> List[str]:
         for port, kinds in sorted(kinds_by_port.items())
         if len(kinds) > 1
     ]
+
+
+#: 속도 칸이 비었을 때 · `motor_config_build.DYNAMIXEL_BAUDRATE` 와 같은 값 · 같은 종류에만
+DEFAULT_SERIAL_BAUDRATE = 1000000
+_DEFAULT_BAUDRATE_KINDS = ('dynamixel', 'feetech')
+
+#: 한 포트에 속도가 둘 이상일 때 · 무엇을 해야 하는지까지 · 수정 목록 161
+_BAUDRATE_FIX = (
+    '한 포트에는 한 속도만 (한 선을 두 속도로 두 번 열면 어느 쪽도 제대로 답하지 않습니다) · '
+    '그 포트의 서보를 모두 같은 속도로 바꾼 뒤(다이나믹셀은 Dynamixel Wizard 의 Baud Rate) 다시 검색하세요'
+)
+
+
+def _baud_text(baudrate: int) -> str:
+    return f'{baudrate:,} bps'
+
+
+def _baudrate_conflict_lines(axes_by_port: Dict[str, Dict[int, List[str]]]) -> List[str]:
+    lines = []
+    for port, by_baud in sorted(axes_by_port.items()):
+        if len(by_baud) < 2:
+            continue
+        parts = ' / '.join(
+            f'{_baud_text(baud)} · {"·".join(axes)}번 모터' if axes else _baud_text(baud)
+            for baud, axes in sorted(by_baud.items(), key=lambda item: (-len(item[1]), item[0]))
+        )
+        lines.append(f'직렬 포트 {port} 에 통신 속도가 다른 모터가 있습니다 ({parts}) · {_BAUDRATE_FIX}')
+    return lines
+
+
+def registry_motor_baudrate(motor: Dict[str, Any]) -> Optional[int]:
+    """레지스트리 직렬 모터의 속도 · `serial_masters_from_registry` 와 같은 순서 (config → identity → 1 Mbps)."""
+    config = motor.get('config') if isinstance(motor.get('config'), dict) else {}
+    identity = motor.get('identity') if isinstance(motor.get('identity'), dict) else {}
+    baudrate = optional_int(config.get('serial_baudrate'), optional_int(identity.get('serial_baudrate'), None))
+    if baudrate is None and str(motor.get('driver_family') or motor.get('motor_type') or '') in _DEFAULT_BAUDRATE_KINDS:
+        baudrate = DEFAULT_SERIAL_BAUDRATE
+    return baudrate
+
+
+def registry_port_baudrate_conflicts(motors: List[Dict[str, Any]]) -> List[str]:
+    """한 포트 = 한 속도 · 저장 전 레지스트리 판정 · 수정 목록 161 (chicken2 실물 2026-10-29)
+
+    직렬 마스터는 (포트, 속도) 마다 하나다 · 같은 포트에 1 Mbps 둘 · 57600 하나를 저장하면
+    마스터가 둘이 되어 **한 선을 두 번** 연다 · 57600 서보는 끝내 답하지 않았고 1 Mbps 서보는
+    온라인 · 오프라인을 오갔다 · 쓰는 모터(사용 · 안 지움)만 본다
+    """
+    axes_by_port: Dict[str, Dict[int, List[str]]] = {}
+    for motor in motors or []:
+        if not isinstance(motor, dict) or motor.get('deleted') or not motor.get('enabled', False):
+            continue
+        if motor.get('transport') != 'serial':
+            continue
+        config = motor.get('config') if isinstance(motor.get('config'), dict) else {}
+        identity = motor.get('identity') if isinstance(motor.get('identity'), dict) else {}
+        port = str(config.get('serial_port') or identity.get('serial_port') or '').strip()
+        baudrate = registry_motor_baudrate(motor)
+        if not port or baudrate is None:
+            continue
+        axis = optional_int(config.get('controller_index'), optional_int(motor.get('axis'), None))
+        axes = axes_by_port.setdefault(port, {}).setdefault(baudrate, [])
+        if axis is not None:
+            axes.append(str(axis))
+    return _baudrate_conflict_lines(axes_by_port)
+
+
+def port_baudrate_conflicts(masters: List[Dict[str, Any]]) -> List[str]:
+    """한 포트 = 한 속도 · 만든 설정(직렬 마스터) 판정 · 설정 파일을 손으로 고친 저장 길도 · 수정 목록 161"""
+    axes_by_port: Dict[str, Dict[int, List[str]]] = {}
+    for master in masters or []:
+        if not isinstance(master, dict) or master.get('type') != 'serial':
+            continue
+        port = str(master.get('serial_port') or master.get('port') or '').strip()
+        baudrate = optional_int(master.get('serial_baudrate'), None)
+        if not port or baudrate is None:
+            continue
+        axes = axes_by_port.setdefault(port, {}).setdefault(baudrate, [])
+        for slave in master.get('slaves') or []:
+            axis = optional_int(slave.get('controller_index'), None) if isinstance(slave, dict) else None
+            if axis is not None:
+                axes.append(str(axis))
+    return _baudrate_conflict_lines(axes_by_port)
 
 
 def identity_model_number(motor: Optional[Dict[str, Any]]) -> Optional[int]:

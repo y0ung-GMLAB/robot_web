@@ -280,9 +280,11 @@ class MotorConfigService:
                 config, mapping_motor_limits.active_mapping(self.repository),
             )
             # Feetech 한 바퀴 범위 · 한 포트 한 종류 · 어기면 저장 거부 · 수정 목록 158 (AC 만 있으면 해당 없음)
+            # 한 포트 한 속도 · 수정 목록 161
             serial_errors = [
                 *mapping_motor_limits.single_turn_errors(config),
                 *serial_params.port_kind_conflicts(config.get('masters') or [], config.get('drivers') or []),
+                *serial_params.port_baudrate_conflicts(config.get('masters') or []),
             ]
             if serial_errors:
                 raise ValueError(serial_errors[0])

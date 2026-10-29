@@ -625,13 +625,23 @@ class ScanOrchestrator:
         # EtherCAT 검색에만 해당한다 · 다이나믹셀만 쓰는 PC 가 그 조건에
         # 걸려 영영 검색을 못 하면 안 된다.
         needs_ethercat_axes = operation_type in {'full_scan', 'ac_servo_scan'}
+        # 직렬 서보 검색 · 매니저가 도는 중에도 된다 · 수정 목록 160 (chicken2 실물 2026-10-29)
+        #
+        # 위 `needs_ethercat_axes` 를 안전 검사에는 안 넘겨서, 직렬 서보만 쓰는 PC 는
+        # 매니저가 돌면 늘 「모터 상태에서 AC 서보 모터를 찾을 수 없습니다」 로 거절됐다 ·
+        # 매니저를 멈추면 직렬 축도 멈추므로 움직임은 **모든 축**을 본다 · 「상태에 축이
+        # 보여야 한다」 도 아무 축이나 · 거절 문구도 「AC 서보」 가 아니라 「직렬 서보」
+        serial_scan = operation_type == 'dynamixel_scan'
+        scan_label = '직렬 서보 검색' if serial_scan else 'AC 서보 검색'
+        refused = f'{scan_label}을 하지 않았습니다'
         blocker = self.runtime.ethercat_scan_safety_blocker(
             require_fresh_motor_state=False,
+            all_transports=serial_scan,
         )
         if blocker:
             return {
                 'success': False,
-                'message': f'AC 서보 검색을 하지 않았습니다: {blocker}',
+                'message': f'{refused}: {blocker}',
                 'scan': None,
                 'scan_blocked': True,
                 'project_id': self.repository.selected_project_id(),
@@ -645,11 +655,12 @@ class ScanOrchestrator:
         if restore_runtime:
             blocker = self.runtime.ethercat_scan_safety_blocker(
                 require_fresh_motor_state=True,
+                all_transports=serial_scan,
             )
             if blocker:
                 return {
                     'success': False,
-                    'message': f'AC 서보 검색을 하지 않았습니다: {blocker}',
+                    'message': f'{refused}: {blocker}',
                     'scan': None,
                     'scan_blocked': True,
                     'project_id': self.repository.selected_project_id(),
@@ -691,10 +702,7 @@ class ScanOrchestrator:
         if restore_runtime and not expected_recovery_axes:
             return {
                 'success': False,
-                'message': (
-                    'AC 서보 검색을 하지 않았습니다: 실행 설정에서 검색 뒤 다시 켤 모터 목록을 '
-                    '확인할 수 없습니다'
-                ),
+                'message': f'{refused}: 실행 설정에서 검색 뒤 다시 켤 모터 목록을 확인할 수 없습니다',
                 'scan': None,
                 'scan_blocked': True,
                 'project_id': self.repository.selected_project_id(),
@@ -709,13 +717,20 @@ class ScanOrchestrator:
             'online_axes': [],
             'recovered': not restore_runtime,
         }
+        # EtherCAT 을 놓았는지 기다리는 것 · 직렬 서보 검색은 실행 설정에 EtherCAT 축이 있을 때만 · 수정 목록 160
+        #
+        # 직렬 서보만 쓰는 PC(SITE_ETHERCAT_NIC=none)는 `ethercat master` 가 늘 실패한다 ·
+        # 그대로 두면 5 초 뒤 「EtherCAT Master … 해제되지 않았습니다」 로 검색이 끝난다 ·
+        # 직렬 포트는 `systemctl stop` 이 매니저 프로세스가 끝날 때까지 기다리므로 따로 볼 것 없음
         try:
             if was_active:
+                wait_ethercat = not serial_scan or bool(self._expected_runtime_ethercat_axes())
                 if operation_id:
+                    released = '직렬 포트' if not wait_ethercat else 'EtherCAT 소유권'
                     stop_message = (
-                        '이전 프로젝트 Motor Manager 정지 및 EtherCAT 소유권 해제 중'
+                        f'이전 프로젝트 Motor Manager 정지 및 {released} 해제 중'
                         if runtime_handoff['required']
-                        else 'Motor Manager 정지 및 EtherCAT 소유권 해제 중'
+                        else f'Motor Manager 정지 및 {released} 해제 중'
                     )
                     self.repository.runtime.update_motor_operation(
                         operation_id,
@@ -723,18 +738,19 @@ class ScanOrchestrator:
                         message=stop_message,
                     )
                 self.runtime.run_managed_service('stop', motor_service)
-                motor_config_rules.wait_for_ethercat_release(timeout_sec=5.0)
+                if wait_ethercat:
+                    motor_config_rules.wait_for_ethercat_release(timeout_sec=5.0)
             if operation_id:
                 self.repository.runtime.update_motor_operation(
                     operation_id,
                     'scanning',
-                    message='AC Servo 물리 검색 진행 중',
+                    message='직렬 서보 물리 검색 진행 중' if serial_scan else 'AC Servo 물리 검색 진행 중',
                 )
             result = self._call_service_locked(client, service_name, timeout_sec)
         except (OSError, RuntimeError, subprocess.TimeoutExpired) as exc:
             result = {
                 'success': False,
-                'message': f'AC 서보 검색을 하지 않았습니다: {exc}',
+                'message': f'{refused}: {exc}',
                 'scan': None,
                 'scan_blocked': True,
                 'project_id': self.repository.selected_project_id(),
@@ -790,7 +806,7 @@ class ScanOrchestrator:
         result['runtime_handoff'] = runtime_handoff
         if runtime_handoff['required'] and result.get('success') is True:
             result['message'] = (
-                f'{result.get("message") or "AC 서보 검색 완료"}. '
+                f'{result.get("message") or f"{scan_label} 완료"}. '
                 '이전 프로젝트의 모터 실행은 정지했습니다. '
                 '현재 프로젝트 설정을 저장한 뒤 「장비에 적용 · 모터 재시작」을 누르세요'
             )
@@ -798,7 +814,7 @@ class ScanOrchestrator:
         if missing_axes and not restore_error:
             # 검색 결과는 그대로 살린다 · 무엇이 없었는지만 덧붙인다
             result['message'] = (
-                f'{result.get("message") or "AC 서보 검색 완료"}. '
+                f'{result.get("message") or f"{scan_label} 완료"}. '
                 f'검색 전 설정의 {", ".join(str(a) for a in missing_axes)}번 모터가 '
                 '다시 연결되지 않았습니다. 연결이 빠졌거나 알람 상태인지 확인하세요'
             )
@@ -806,7 +822,7 @@ class ScanOrchestrator:
             result['success'] = False
             result['restore_error'] = restore_error
             result['message'] = (
-                f'{result.get("message") or "AC 서보 검색 종료"}. '
+                f'{result.get("message") or f"{scan_label} 종료"}. '
                 f'Motor Manager 복구 실패: {restore_error}'
             )
         return result

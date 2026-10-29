@@ -100,7 +100,17 @@ class MotorRuntimeService:
         *,
         require_fresh_motor_state: bool = True,
         allow_run_stopping: bool = False,
+        all_transports: bool = False,
     ) -> str:
+        """모터 매니저를 잠시 멈춰도 되는가 · 빈 글 = 된다
+
+        `all_transports` · 직렬 서보 검색 · 수정 목록 160
+        매니저를 멈추면 직렬 축도 같이 멈춘다 · 그래서 **모든 축**의 움직임을 본다 ·
+        「살아 있는 상태에 축이 보여야 한다」 도 EtherCAT 축이 아니라 아무 축이나 ·
+        전에는 직렬 서보만 쓰는 PC 가 「AC 서보 모터를 찾을 수 없습니다」 로 매니저가
+        도는 동안 재검색을 못 했다 (chicken2 실물 2026-10-29)
+        기본값(False) = 전과 같다 · AC 서보 검색 · 드라이브 정비 · 앱솔루트 설정은 EtherCAT 축만
+        """
         blocker = self.project.change_blocker(
             ignore_motor_lifecycle=True,
             allow_run_stopping=allow_run_stopping,
@@ -129,7 +139,7 @@ class MotorRuntimeService:
         for motor in motion_state.get('motors') or []:
             if not isinstance(motor, dict):
                 continue
-            if str(motor.get('transport') or '').lower() != 'ethercat':
+            if not all_transports and str(motor.get('transport') or '').lower() != 'ethercat':
                 continue
             observed_axes.append(str(motor.get('controller_index', '?')))
             if (
@@ -159,11 +169,12 @@ class MotorRuntimeService:
             moving = velocity is not None and abs(velocity) > MOVING_DEG_PER_SEC
             if moving:
                 moving_axes.append(str(motor.get('controller_index', '?')))
+        kind = '' if all_transports else 'AC 서보 '
         if require_fresh_motor_state and not observed_axes:
-            return '모터 상태에서 AC 서보 모터를 찾을 수 없습니다'
+            return f'모터 상태에서 {kind}모터를 찾을 수 없습니다'
         if moving_axes:
             return (
-                f'AC 서보 {", ".join(moving_axes)}번 모터가 움직이는 중입니다. '
+                f'{kind}{", ".join(moving_axes)}번 모터가 움직이는 중입니다. '
                 '완전히 정지한 뒤 다시 검색하세요'
             )
         return ''

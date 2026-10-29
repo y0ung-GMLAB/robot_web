@@ -120,3 +120,43 @@ def test_new_drives_in_front_of_the_chain_join_the_proposal():
     assert len(motors) == 5
     assert result['summary']['matched'] == 3
     assert sorted(m['identity']['serial_number'] for m in motors) == sorted(s['serial_number'] for s in scanned)
+
+
+U2D2 = '/dev/serial/by-id/usb-FTDI_USB__-__Serial_Converter_FT1-if00-port0'
+
+
+def _xm430(bus_id, *, port=U2D2, baudrate=1000000):
+    return {**_device(bus_id=bus_id, port=port, model_number=1020, model_name='XM430-W350'), 'baudrate': baudrate}
+
+
+def test_dynamixel_id_zero_becomes_a_motor_with_bus_id_zero():
+    """ID 0 은 「없음」 이 아니다 · 검색 → 행 → 제안까지 그대로 · 수정 목록 162 (chicken2 2026-10-29)"""
+    devices = [_xm430(0), _xm430(1), _xm430(2)]
+    result = _propose([], _scan(devices=devices, ethercat=False))
+    motors = result['registry']['motors']
+    assert [m['config']['bus_id'] for m in motors] == [0, 1, 2]
+    zero = motors[0]
+    assert zero['identity']['bus_id'] == 0 and zero['identity']['node_id'] == 0
+    assert zero['id'].endswith('_id_0')
+    assert result['notes'] == []
+
+    # 저장된 ID 0 모터와 다시 짝지어진다 (새 장치로 또 생기지 않는다)
+    again = _propose(motors, _scan(devices=devices, ethercat=False))
+    assert again['summary']['matched'] == 3 and again['summary']['added'] == 0
+
+
+def test_one_port_at_two_baudrates_is_noted_before_saving():
+    """같은 포트에 1 Mbps 둘 · 57600 하나 · 저장하면 거부되므로 제안에서 먼저 알린다 · 수정 목록 161"""
+    devices = [_xm430(1), _xm430(2), _xm430(3, baudrate=57600)]
+    result = _propose([], _scan(devices=devices, ethercat=False))
+    notes = [note for note in result['notes'] if '통신 속도가 다른' in note]
+    assert len(notes) == 1
+    assert U2D2 in notes[0]
+    assert '1,000,000 bps · 0·1번 모터' in notes[0] and '57,600 bps · 2번 모터' in notes[0]
+    assert 'Dynamixel Wizard' in notes[0] and '저장되지 않습니다' in notes[0]
+
+
+def test_two_ports_at_their_own_baudrates_are_fine():
+    devices = [_xm430(1), _xm430(1, port='/dev/ttyUSB1', baudrate=57600)]
+    result = _propose([], _scan(devices=devices, ethercat=False))
+    assert not any('통신 속도가 다른' in note for note in result['notes'])

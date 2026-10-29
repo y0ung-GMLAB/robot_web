@@ -80,10 +80,11 @@
 
 - `MotorScan.action` `transport` · `all` · `ac_servo` · `dynamixel` · `feetech` (문자열 · 메시지 구조 변경 없음)
 - `전체 모터 검색` · AC · Dynamixel · Feetech 각각 새로 물리 검색 · 하나라도 실패 → `부분 완료`
-- Dynamixel · 지금 규칙 그대로 (Protocol 2.0 Broadcast Ping + ID 0~252 보조 Ping) · 속도 목록 · 1 Mbps 먼저 · 그 뒤 57600 (X 공장값) · 4 Mbps
+- Dynamixel · 지금 규칙 그대로 (Protocol 2.0 Broadcast Ping + ID 0~252 보조 Ping · 1 Mbps 에서는 회차마다 개별 Ping 먼저 · Broadcast 뒤 · 수정 목록 162) · 속도 목록 · 1 Mbps 먼저 · 그 뒤 57600 (X 공장값) · 4 Mbps
 - Feetech · 포트마다 · 속도 1 Mbps 먼저 · 그 뒤 500000 · 115200 · ID 0~253 개별 Ping(0x01) · 응답 ID 의 모델 번호(주소 3 · 2 바이트) 읽기
 - 모델 번호 · STS3215 777 · STS3250 2825 · 그 외 → `Feetech (버전 <n>)` (같은 제어표로 동작 · 확인 필요 표시 · 주소 3~4 = 서보 버전 번호 · HLS 도 우리가 쓰는 주소 33 · 40~46 · 56~69 가 STS 와 같음 · 2026-10-22)
 - 한 포트에서 두 종류 모두 응답 → 검색 결과 경고 (한 포트 = 한 종류)
+- 한 포트에 속도가 다른 모터 → 검색 제안 알림 · 저장 거부 (한 포트 = 한 속도 · 수정 목록 161)
 
 ## 6. 화면
 

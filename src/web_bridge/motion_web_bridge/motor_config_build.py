@@ -509,6 +509,8 @@ def serial_masters_from_registry(
         claimed_driver_ids = set()
     # 한 포트 = 한 종류 · 다이나믹셀과 Feetech 를 한 버스에 섞지 않는다 · 저장 거부 · 수정 목록 158
     conflicts = serial_params.registry_port_kind_conflicts(registry.get('motors') or [])
+    # 한 포트 = 한 속도 · (포트, 속도) 마다 마스터라 섞이면 한 선을 두 번 연다 · 저장 거부 · 수정 목록 161
+    conflicts += serial_params.registry_port_baudrate_conflicts(registry.get('motors') or [])
     if conflicts:
         raise ValueError(conflicts[0])
     serial_masters_by_key: Dict[tuple, Dict[str, Any]] = {}

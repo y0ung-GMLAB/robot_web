@@ -119,6 +119,42 @@ def test_one_port_carries_one_kind_only():
     assert not serial_params.port_kind_conflicts(masters, [{'id': 1, 'type': 'dynamixel'}, {'id': 2, 'type': 'dynamixel'}])
 
 
+def test_one_port_carries_one_baudrate_only():
+    """chicken2 2026-10-29 · U2D2 한 포트에 1 Mbps 둘 · 57600 하나 → 마스터 둘(한 선을 두 번 열기) · 수정 목록 161"""
+    chicken2 = [
+        _serial(0, 'dynamixel', 'XM430-W350', 1, model_number=1020),
+        _serial(1, 'dynamixel', 'XM430-W350', 2, model_number=1020),
+        _serial(2, 'dynamixel', 'XM430-W350', 3, baudrate=57600, model_number=1020),
+    ]
+    with pytest.raises(ValueError, match='한 포트에는 한 속도만') as refused:
+        _build(chicken2)
+    assert U2D2 in str(refused.value)
+    assert '57,600 bps · 2번 모터' in str(refused.value)
+
+    # 속도 칸이 빈 다이나믹셀 = 1 Mbps · 1 Mbps 와 같이 있어도 된다
+    _build([chicken2[0], _serial(1, 'dynamixel', 'XM430-W350', 2, baudrate=None, model_number=1020)])
+    # 끈 모터 · 지운 모터는 보지 않는다
+    off = dict(chicken2[2], enabled=False)
+    gone = dict(chicken2[2], deleted=True)
+    _build([chicken2[0], chicken2[1], off])
+    _build([chicken2[0], chicken2[1], gone])
+    # 다른 포트면 속도가 달라도 된다
+    _build([chicken2[0], _serial(1, 'dynamixel', 'XM430-W350', 1, port=U2D2_B, baudrate=57600, model_number=1020)])
+
+
+def test_a_hand_written_config_with_one_port_at_two_baudrates_is_refused_too():
+    """설정 파일 저장 길 · 만든 설정의 직렬 마스터로 본다 · 수정 목록 161"""
+    masters = [
+        {'type': 'serial', 'serial_port': U2D2, 'serial_baudrate': 1000000,
+         'slaves': [{'controller_index': 0}, {'controller_index': 1}]},
+        {'type': 'serial', 'serial_port': U2D2, 'serial_baudrate': 57600, 'slaves': [{'controller_index': 2}]},
+        {'type': 'ethercat', 'slaves': [{'controller_index': 3}]},
+    ]
+    conflicts = serial_params.port_baudrate_conflicts(masters)
+    assert len(conflicts) == 1 and '1,000,000 bps · 0·1번 모터 / 57,600 bps · 2번 모터' in conflicts[0]
+    assert not serial_params.port_baudrate_conflicts(masters[:1] + masters[2:])
+
+
 def _mapping_row(ref, lower_deg, upper_deg, *, reference_deg=0.0, gear=1.0, scale=1.0):
     import math
 
