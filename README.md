@@ -22,7 +22,7 @@ PC·노트북의 브라우저**로 들어가면 됩니다 · 미니 PC 를 열 �
 http://floating1.local:8000/v2    ← 로봇 PC 1
 http://floating2.local:8000/v2    ← 로봇 PC 2
 http://floating3.local:8000/v2    ← 로봇 PC 3
-http://floating4.local:8000/v2    ← 로봇 PC 4 (마스터 · 애니데스크도 여기)
+http://floating4.local:8000/v2    ← 로봇 PC 4 (마스터)
 http://speaker.local:8100         ← 스피커 PC
 ```
 
@@ -59,8 +59,8 @@ http://localhost:8000/v2         ← 그 PC 자신의 화면에서
 
 ### 밖에서 · 애니데스크 (2026-10-14)
 
-현장 밖(해외 등)에서는 **마스터 PC(floating4)에 깐 애니데스크**(회사 계정)로 들어가 그 PC 브라우저로 웹을 엽니다 ·
-다른 PC 는 「같은 망 PC」 새 탭 · 설치는 마스터에서 `bash ~/ros2_ws/scripts/setup/anydesk.sh` → 재부팅(Wayland 끄기) ·
+현장 밖(해외 등)에서는 **애니데스크**(회사 계정)로 로봇 PC 에 들어가 그 PC 브라우저로 웹을 엽니다 ·
+깔 PC 수 제한 없음 · 안 깐 PC 는 깐 PC 웹의 「같은 망 PC」 새 탭 · 설치는 그 PC 에서 `bash ~/ros2_ws/scripts/setup/anydesk.sh` → 재부팅(Wayland 끄기) ·
 자세히 [설치 101](docs/설치_101.md) 4-1 · 웹 포트(8000 등)를 인터넷에 직접 열지 않습니다(웹에는 로그인이 없음)
 
 ## 구성

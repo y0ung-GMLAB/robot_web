@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# 원격 · 애니데스크 · **마스터 PC(floating4) 한 대에만** · 수정 목록 135 (사용자 결정 2026-10-14 · 회사 계정)
+# 원격 · 애니데스크 · 필요한 PC 마다 손으로 · 수정 목록 135 (사용자 결정 2026-10-14 · 회사 계정 · 대수 제한 없앰 2026-10-29)
 #
 #   bash ~/ros2_ws/scripts/setup/anydesk.sh            설치 · Wayland 끄기 · 부팅 때 자동 실행
 #   SITE_DRY_RUN=1 bash ~/ros2_ws/scripts/setup/anydesk.sh   바꾸지 않고 할 일만
@@ -27,7 +27,7 @@ if [[ -f /etc/os-release ]]; then
 fi
 
 echo "========================================="
-echo "애니데스크 · 마스터 PC 원격 · $(hostname)"
+echo "애니데스크 · 원격 · $(hostname)"
 echo "========================================="
 [[ "${SITE_DRY_RUN}" == "1" ]] || sudo -v
 site_anydesk_install

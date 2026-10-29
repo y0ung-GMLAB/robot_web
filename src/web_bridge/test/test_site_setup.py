@@ -506,6 +506,6 @@ def test_anydesk_script_parses_and_is_not_run_by_install():
     script = SCRIPTS / 'setup' / 'anydesk.sh'
     assert _bash(f'bash -n "{script}"').returncode == 0
     install = (SCRIPTS / 'install.sh').read_text(encoding='utf-8')
-    assert 'anydesk' not in install.lower()        # 마스터에서만 손으로
+    assert 'anydesk' not in install.lower()        # 깔 PC 에서 손으로
     text = script.read_text(encoding='utf-8')
     assert 'site_wayland_off' in text and 'site_anydesk_install' in text

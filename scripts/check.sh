@@ -95,7 +95,7 @@ if [[ -n "${wifi_conn}" ]]; then
   row "$([[ "${wifi_ps}" == "2" || "${wifi_ps}" == "disable" ]] && echo 1 || echo 0)" "Wi-Fi 절전 꺼짐" "${wifi_conn} · powersave=${wifi_ps:-미상} (2 = 끔 · 바꾼 뒤 재연결)"
 fi
 info "시간대" "$(timedatectl show -p Timezone --value 2>/dev/null || echo 미상) · $(date '+%H:%M')"
-# 원격 · 애니데스크 · 깔린 PC(마스터)만 본다 · 수정 목록 135
+# 원격 · 애니데스크 · 깔린 PC 만 본다 · 수정 목록 135
 if command -v anydesk >/dev/null 2>&1; then
   row "$(systemctl is-active --quiet anydesk 2>/dev/null && echo 1 || echo 0)" "애니데스크 켜짐" "$(systemctl is-active anydesk 2>/dev/null || echo 미상) · 부팅 때 자동"
   row "$(grep -qs '^WaylandEnable=false' /etc/gdm3/custom.conf && echo 1 || echo 0)" "Wayland 꺼짐 (애니데스크 조작)" "지금 화면 방식 ${XDG_SESSION_TYPE:-미상} · 바꾼 뒤 재부팅 · scripts/setup/anydesk.sh"
