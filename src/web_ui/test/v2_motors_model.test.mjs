@@ -1,7 +1,7 @@
 /** UI v2 · 모터·드라이브 · 표 줄 · 앱솔루트 · 막는 것 · 바뀐 것 (설계안 2026-10-09) */
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { absoluteJobText, absoluteLine, absoluteSummary, motorChanges, motorProblems, motorRows, setField } from '../static/v2/js/motors_model.js';
+import { EDIT_FIELDS, absoluteJobText, absoluteLine, absoluteSummary, fieldNote, fieldPlaceholder, motorChanges, motorProblems, motorRows, setField } from '../static/v2/js/motors_model.js';
 
 const motor = (axis, name, extra = {}) => ({ id: `m${axis}`, axis, name, motor_type: 'ac_servo', profile: { driver_model: 'MINAS A6B' },
   config: { controller_index: axis, profile_velocity: 18000, max_speed_rpm: 3000, acceleration: 180000, profile_acceleration: 180000 }, ...extra });
@@ -209,4 +209,27 @@ test('메일박스가 멈춘 드라이브는 그 줄 통신 칸에 (수정 목�
   const rows = motorRows({ motors: [motor(0, 'A'), motor(1, 'B')] }, snap);
   assert.equal(rows[0].comm, '연결됨');
   assert.equal(rows[1].comm, '메일박스 응답 없음 · 드라이브 제어 전원을 껐다 켜세요');
+});
+
+test('직렬 서보 속도·가속 0 = 서보 최대 · 칸 아래 안내 · 더 낮은 값 허용 · AC 는 전과 같음 (수정 목록 163)', () => {
+  const field = (key) => EDIT_FIELDS.find((f) => f.key === key);
+  for (const key of ['profile_velocity', 'acceleration', 'profile_acceleration']) {
+    assert.equal(fieldNote(field(key), 0, false), '서보 최대', key);
+    assert.equal(fieldNote(field(key), '0', false), '서보 최대', key);
+    assert.equal(fieldNote(field(key), 120, false), '', key);
+    assert.equal(fieldNote(field(key), null, false), '', key);
+    assert.equal(fieldNote(field(key), 0, true), '', `${key} · AC`);
+    assert.match(fieldPlaceholder(field(key), false), /0 = 서보 최대/);
+    assert.equal(fieldPlaceholder(field(key), true), '비워 두면 드라이브 값 유지');
+  }
+  assert.equal(fieldPlaceholder(field('brake_delay_stop_ms'), true), '비우면 공통 설정(기본값 150)');
+  assert.equal(fieldPlaceholder(field('name'), false), '');
+  // 0 과 더 낮은 값 모두 막지 않음 · 음수만 막음
+  const dxl = { ...motor(0, 'A'), motor_type: 'dynamixel', config: { controller_index: 0, profile_velocity: 0, acceleration: 0, profile_acceleration: 0 } };
+  assert.deepEqual(motorProblems([dxl]), []);
+  setField(dxl, 'profile_velocity', 90);
+  setField(dxl, 'profile_acceleration', 500);
+  assert.deepEqual(motorProblems([dxl]), [], '최대 가속 0(서보 최대) 아래 프로파일 가속 500 은 허용');
+  setField(dxl, 'profile_velocity', -1);
+  assert.match(motorProblems([dxl]).join(), /프로파일 속도 값은 0~/);
 });

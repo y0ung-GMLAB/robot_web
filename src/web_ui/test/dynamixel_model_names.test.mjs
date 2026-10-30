@@ -51,7 +51,8 @@ test('the server names the model in one place', () => {
 
 test('the driver builder looks up drive values by that one name', () => {
   // 이름과 운전 값은 다른 사실이다 · 이름으로 찾되 표는 따로 둔다.
+  // 모델마다 다른 값은 정격 속도만 · 프로파일 속도·가속은 0 = 서보 최대 (수정 목록 163)
   assert.match(SERVER_DRIVER, /canonical_dynamixel_model\(driver_model\)/);
-  assert.match(SERVER_DRIVER, /DYNAMIXEL_DRIVE_VALUES/);
+  assert.match(SERVER_DRIVER, /DYNAMIXEL_RATED_SPEED_RPM\.get\(/);
   assert.doesNotMatch(SERVER_DRIVER, /canonical_model = 'XM540/);
 });

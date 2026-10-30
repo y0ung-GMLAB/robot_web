@@ -78,7 +78,7 @@ def test_p_series_xl330_and_sts3215_param_files():
 
     driver, sts, master = _param(config, 3)
     assert driver['type'] == 'feetech' and driver['profile_position_value'] == 0
-    assert driver['profile_velocity'] > 0 and driver['profile_acceleration'] > 0   # 적용 검사 통과
+    assert driver['profile_velocity'] == 0 and driver['profile_acceleration'] == 0   # 0 = 서보 최대 · 수정 목록 163
     assert (driver['lower'], driver['upper']) == (-180.0, 180.0)
     assert sts['protocol']['packet'] == 'scs' and sts['protocol']['reboot'] == 0
     assert sts['protocol']['sync_read'] == 130 and sts['protocol']['sync_write'] == 131

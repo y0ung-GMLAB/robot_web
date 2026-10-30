@@ -82,25 +82,88 @@ def normalize_driver_configs(
     return normalized
 
 
-#: 모델 **이름**으로 찾는 운전 값 · 이름 짓기는 `motor_identity` 가 한다 · §6-214
-DYNAMIXEL_DRIVE_VALUES = {
-    'XM540-W150': (66, 396.0),
-    'XM540-W270-R': (37, 222.0),
+#: 직렬 서보 운전 값 · **0 = 서보 최대** · 사용자 2026-10-30 · 수정 목록 163
+#:   AC 는 구조 안전 때문에 속도·가속 상한을 둔다 · 직렬 서보는 작아서 구조 안전이 걸리지 않음 · 서보가 낼 수 있는 만큼
+#:   Dynamixel X · Profile Velocity 0 = 프로파일 없음(장치 Velocity Limit 까지) · Profile Acceleration 0 = 무한
+#:   Feetech STS · Goal Velocity(주소 46) 0 = 최대 · Acceleration(주소 41) 0 = 최대
+#:   motor_manager 는 0 을 raw 0 으로 쓴다 (`dynamixel_driver.cpp` · 속도 llround(0 / 단위) = 0 ·
+#:   가속 accelerationRaw(0) = 0 · profile_acceleration 이 0 이면 acceleration 을 쓰므로 둘 다 0)
+#:   사람이 더 낮은 값을 적으면 그 값 (화면 축별 칸 · `_axis_profile_overrides`)
+SERIAL_SERVO_MAX = 0.0
+SERIAL_PROFILE_FIELDS = (
+    'speed', 'acceleration', 'deceleration',
+    'profile_velocity', 'profile_acceleration', 'profile_deceleration',
+)
+
+#: 옛 기본값 · 물려받은 값이지 사람이 정한 값이 아니다 · 수정 목록 163
+#:   Dynamixel 속도 100(모르는 모델) · 396(XM540-W150) · 222(XM540-W270-R) · 가속 703104.5
+#:   Feetech 속도 180 · 가속 439.453125(raw 50) · 703104.5(옛 다이나믹셀 본보기)
+_OLD_SERIAL_VELOCITY_DEFAULTS = {
+    'dynamixel': (100.0, 396.0, 222.0),
+    'feetech': (180.0,),
+}
+_OLD_SERIAL_ACCELERATION_DEFAULTS = {
+    'dynamixel': (703104.5,),
+    'feetech': (439.453125, 703104.5),
+}
+_VELOCITY_FIELDS = ('speed', 'profile_velocity')
+
+
+def serial_max_profile() -> Dict[str, float]:
+    """직렬 서보 기본 운전 값 · 6칸 모두 0 (= 서보 최대)"""
+    return {field: SERIAL_SERVO_MAX for field in SERIAL_PROFILE_FIELDS}
+
+
+def migrate_serial_profile_defaults(drivers: List[Any]) -> List[Any]:
+    """저장된 직렬 드라이버의 **옛 기본값만** 0 으로 · 수정 목록 163
+
+    규칙 · 칸 값이 그 종류의 옛 기본값과 **정확히 같으면** 물려받은 값으로 보고 0 · 그 밖 값은
+    사람이 정한 값으로 보고 그대로 · AC · 모르는 종류는 손대지 않는다.
+    빌드 맨 앞(축별 오버라이드 전)에서 부른다 · 같은 저장에서 화면에 적은 값은 뒤에 얹혀 살아남는다.
+    한계 · 옛 기본값과 똑같은 수를 손으로 적어 둔 경우는 구별 못 함 → 0 (다시 적으면 됨)
+    """
+    migrated = []
+    for driver in drivers:
+        kind = str(driver.get('type') or '') if isinstance(driver, dict) else ''
+        if kind not in SERIAL_SERVO_DRIVER_TYPES:
+            migrated.append(driver)
+            continue
+        item = dict(driver)
+        for field in SERIAL_PROFILE_FIELDS:
+            olds = (
+                _OLD_SERIAL_VELOCITY_DEFAULTS if field in _VELOCITY_FIELDS
+                else _OLD_SERIAL_ACCELERATION_DEFAULTS
+            ).get(kind, ())
+            try:
+                value = float(item.get(field))
+            except (TypeError, ValueError):
+                continue
+            if any(abs(value - old) < 1e-9 for old in olds):
+                item[field] = SERIAL_SERVO_MAX
+        migrated.append(item)
+    return migrated
+
+
+#: 모델 **이름**으로 찾는 정격 속도(rpm) · 정보 · 수동 조작 상한(`supervisor_node._velocity_limit`) ·
+#: 이름 짓기는 `motor_identity` · §6-214 · 운전 값(프로파일 속도·가속)은 모델과 무관하게 0 = 서보 최대 · 수정 목록 163
+DYNAMIXEL_RATED_SPEED_RPM = {
+    'XM540-W150': 66,
+    'XM540-W270-R': 37,
 }
 
-#: 이름을 모르는 모델의 운전 값 · 느린 쪽으로 둔다
-DYNAMIXEL_DEFAULT_DRIVE_VALUES = (30, 100.0)
+#: 이름을 모르는 모델의 정격 속도(rpm) · 느린 쪽으로 둔다
+DYNAMIXEL_DEFAULT_RATED_SPEED_RPM = 30
 
 
 def default_dynamixel_driver(workspace_root: Path, driver_model: str = '') -> Dict[str, Any]:
     canonical_model = canonical_dynamixel_model(driver_model) or DYNAMIXEL_UNKNOWN_MODEL
-    rated_speed_rpm, velocity = DYNAMIXEL_DRIVE_VALUES.get(
-        canonical_model, DYNAMIXEL_DEFAULT_DRIVE_VALUES
+    rated_speed_rpm = DYNAMIXEL_RATED_SPEED_RPM.get(
+        canonical_model, DYNAMIXEL_DEFAULT_RATED_SPEED_RPM
     )
     # 모델 제어표를 찾으면 한 바퀴 raw · 전류 단위를 시리즈 값으로 · 수정 목록 158
     # XM540 은 표 값이 전과 같다 (4096 · 0.00269) · 못 찾으면 전 기본값 그대로
     pulse_per_revolution, unit_effort = 4096, 0.00269
-    if canonical_model not in DYNAMIXEL_DRIVE_VALUES:
+    if canonical_model not in DYNAMIXEL_RATED_SPEED_RPM:
         info = serial_servo_models.dynamixel_model(workspace_root, model_name=canonical_model)
         if info.get('supported'):
             pulse_per_revolution = int(info.get('pulse_per_revolution') or 4096)
@@ -116,12 +179,7 @@ def default_dynamixel_driver(workspace_root: Path, driver_model: str = '') -> Di
         'rated_speed_rpm': rated_speed_rpm,
         'lower': -180.0,
         'upper': 180.0,
-        'speed': velocity,
-        'acceleration': 703104.5,
-        'deceleration': 703104.5,
-        'profile_velocity': velocity,
-        'profile_acceleration': 703104.5,
-        'profile_deceleration': 703104.5,
+        **serial_max_profile(),
         'profile_position_value': DYNAMIXEL_EXTENDED_POSITION_MODE,
         'profile_velocity_value': 1,
         'profile_effort_value': 0,
@@ -130,12 +188,9 @@ def default_dynamixel_driver(workspace_root: Path, driver_model: str = '') -> Di
     }
 
 
-#: Feetech STS 운전 값 · 느린 쪽 · 실물 미검증 (설계 §9 F-2 · F-3)
-#:   profile_velocity 180 deg/s (≈ 2048 step/s · 30 rpm · STS3215 무부하 최대 ≈ 270 deg/s @7.4 V) ·
-#:   0(= 장치 최대)은 적용 검사(`motor_profile_validation` · 0 보다 커야 함)가 거절하므로 쓰지 않는다
-#:   profile_acceleration 439.453125 deg/s² = Acceleration raw 50 (raw 1 = 100 step/s² = 8.7890625 deg/s²)
-FEETECH_PROFILE_VELOCITY_DEG_S = 180.0
-FEETECH_PROFILE_ACCELERATION_DEG_S2 = 50 * serial_servo_models.FEETECH_SERIES['acceleration_unit']
+#: Feetech STS 정격 속도(rpm) · 정보 · 수동 조작 상한 · 옛 기본 프로파일 속도 180 deg/s 와 같은 값
+#: 운전 값은 0 = 서보 최대 (Goal Velocity · Acceleration raw 0) · 적용 검사도 직렬 서보는 0 을 받는다 · 수정 목록 163
+FEETECH_RATED_SPEED_RPM = 30.0
 
 
 def default_feetech_driver(workspace_root: Path, driver_model: str = '') -> Dict[str, Any]:
@@ -148,15 +203,10 @@ def default_feetech_driver(workspace_root: Path, driver_model: str = '') -> Dict
         'rated_effort': 1.0,
         'unit_effort': float(serial_servo_models.FEETECH_SERIES['unit_effort']),
         'rated_current': 1.0,
-        'rated_speed_rpm': FEETECH_PROFILE_VELOCITY_DEG_S / 6.0,
+        'rated_speed_rpm': FEETECH_RATED_SPEED_RPM,
         'lower': -180.0,
         'upper': 180.0,
-        'speed': FEETECH_PROFILE_VELOCITY_DEG_S,
-        'acceleration': FEETECH_PROFILE_ACCELERATION_DEG_S2,
-        'deceleration': FEETECH_PROFILE_ACCELERATION_DEG_S2,
-        'profile_velocity': FEETECH_PROFILE_VELOCITY_DEG_S,
-        'profile_acceleration': FEETECH_PROFILE_ACCELERATION_DEG_S2,
-        'profile_deceleration': FEETECH_PROFILE_ACCELERATION_DEG_S2,
+        **serial_max_profile(),
         'profile_position_value': FEETECH_POSITION_MODE,
         'profile_velocity_value': 1,     # STS 운전 모드 1 = 속도(휠) · 지금 안 씀
         'profile_effort_value': FEETECH_POSITION_MODE,   # STS 는 전류 제어 모드 없음 · 위치로 둔다
@@ -311,6 +361,7 @@ def axis_speed_limit_error(motor: Dict[str, Any]) -> str:
             return None
         return value if value > 0 else None
 
+    # 0 = 직렬 서보 최대 · 견주지 않음(`number` 가 0 이하를 None 으로) · 수정 목록 163
     axis = motor.get('axis')
     profile_velocity = number('profile_velocity')
     max_rpm = number('max_speed_rpm')
@@ -624,6 +675,8 @@ def motor_config_from_registry(
     if not isinstance(drivers, list) or not drivers:
         drivers = default_motor_config(workspace_root)['drivers']
     drivers = [dict(driver) if isinstance(driver, dict) else {} for driver in drivers]
+    # 직렬 서보 옛 기본값 → 0 (서보 최대) · 축별 오버라이드보다 먼저 · 수정 목록 163
+    drivers = migrate_serial_profile_defaults(drivers)
 
     masters = config.get('masters')
     if not isinstance(masters, list) or not masters:

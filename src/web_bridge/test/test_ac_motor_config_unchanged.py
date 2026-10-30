@@ -5,7 +5,8 @@
 AC 전용 레지스트리는 바이트 단위로 같아야 한다 (MINAS param 파일 내용 포함).
 
 섞인 레지스트리(AC + XM540) · AC 쪽 드라이버·마스터는 같아야 한다 ·
-다이나믹셀 드라이버의 `param_file` 만 새 생성 파일(`config/serial_params/`)로 바뀐다.
+다이나믹셀 드라이버의 `param_file` 만 새 생성 파일(`config/serial_params/`)로 바뀐다 ·
+운전 값(속도·가속)은 0 = 서보 최대로 바뀐다 (수정 목록 163).
 
 다시 뜨기 (변경 전 코드에서만) · `python3 test_ac_motor_config_unchanged.py <출력.json>`
 """
@@ -142,11 +143,20 @@ def build_outputs(workspace: Path, params_dir: Path) -> dict:
             serial_params.output_root = original_root
 
 
+#: 다이나믹셀 운전 값 · 옛 기본(396 · 222 · 703104.5) → 0 = 서보 최대 · 수정 목록 163 · 떠 둔 파일은 그대로 두고 견줄 때만 뺀다
+_DYNAMIXEL_PROFILE_FIELDS = (
+    'speed', 'acceleration', 'deceleration',
+    'profile_velocity', 'profile_acceleration', 'profile_deceleration',
+)
+
+
 def _without_dynamixel_param_files(config: dict) -> dict:
     result = copy.deepcopy(config)
     for driver in result.get('drivers', []):
         if driver.get('type') == 'dynamixel':
             driver.pop('param_file', None)
+            for field in _DYNAMIXEL_PROFILE_FIELDS:
+                driver.pop(field, None)
     return result
 
 
@@ -171,6 +181,7 @@ def test_mixed_registry_keeps_ac_part_and_only_moves_dynamixel_param_file(tmp_pa
     for driver in actual['config']['drivers']:
         if driver.get('type') == 'dynamixel':
             assert driver['param_file'] == f'<PARAMS>/serial_params/driver_{driver["id"]}.yaml'
+            assert all(driver[field] == 0.0 for field in _DYNAMIXEL_PROFILE_FIELDS)
 
 
 def test_generated_xm540_param_files_equal_the_old_static_files(tmp_path, monkeypatch):

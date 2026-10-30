@@ -10,13 +10,31 @@ import { isAcPath, kindSpec, motorKind } from './motor_kinds.js';
 export const EDIT_FIELDS = [
   { key: 'name', label: '이름', top: true },
   { key: 'max_speed_rpm', label: '최대 속도', unit: 'rpm', ac: true, min: 1, max: 6500 },
-  { key: 'profile_velocity', label: '프로파일 속도', unit: 'deg/s', min: 0 },
-  { key: 'acceleration', label: '최대 가속', unit: 'deg/s²', min: 0 },
-  { key: 'profile_acceleration', label: '프로파일 가속', unit: 'deg/s²', min: 0 },
+  // serialMax · 직렬 서보는 0 = 서보 최대 (기본값) · 더 낮은 값을 적으면 그 값 · 수정 목록 163
+  { key: 'profile_velocity', label: '프로파일 속도', unit: 'deg/s', min: 0, serialMax: true },
+  { key: 'acceleration', label: '최대 가속', unit: 'deg/s²', min: 0, serialMax: true },
+  { key: 'profile_acceleration', label: '프로파일 가속', unit: 'deg/s²', min: 0, serialMax: true },
   // 비우면 「드라이브 공통 설정」(아래 칸 · config/minas_base.yaml) · 이름은 공통 설정과 같은 말 · 사용자 2026-10-13
   { key: 'brake_delay_stop_ms', label: '브레이크 지연 · 멈춰 있을 때', unit: 'ms', ac: true, min: 0, max: 10000, blank: '비우면 공통 설정(기본값 150)' },
   { key: 'brake_delay_run_ms', label: '브레이크 지연 · 움직이는 중', unit: 'ms', ac: true, min: 0, max: 10000, blank: '비우면 공통 설정(기본값 0)' },
 ];
+
+/** 직렬 서보 0 = 서보 최대 · 수정 목록 163 */
+export const SERIAL_MAX_TEXT = '서보 최대';
+
+/** 칸 아래 안내 · 직렬 서보 속도·가속 칸에 0 이 적혀 있으면 「서보 최대」 · AC 는 빈 글(전과 같음) */
+export function fieldNote(field, value, ac) {
+  if (ac || !field?.serialMax) return '';
+  if (value === null || value === undefined || value === '') return '';
+  return Number(value) === 0 ? SERIAL_MAX_TEXT : '';
+}
+
+/** 빈 칸 안내 · 직렬 서보 속도·가속 칸은 0 의 뜻을 같이 · AC 는 전과 같음 */
+export function fieldPlaceholder(field, ac) {
+  if (field?.top) return '';
+  if (!ac && field?.serialMax) return `0 = ${SERIAL_MAX_TEXT} · 비워 두면 저장된 값 유지`;
+  return field?.blank || '비워 두면 드라이브 값 유지';
+}
 
 export function getField(motor, key) {
   const field = EDIT_FIELDS.find((f) => f.key === key);

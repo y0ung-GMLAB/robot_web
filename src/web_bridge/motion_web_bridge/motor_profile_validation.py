@@ -11,9 +11,15 @@
 
 from __future__ import annotations
 
+import math
 from typing import Any, Dict
 
+from motion_common import motor_kinds
+
 from .motor_identity import missing_ethercat_identity
+
+#: 운전 값 0 = 서보 최대를 받는 드라이버 종류 · 수정 목록 163
+SERIAL_SERVO_TYPES = (motor_kinds.DYNAMIXEL, motor_kinds.FEETECH)
 
 
 def validate_runtime_motor_profiles(payload: Dict[str, Any]) -> None:
@@ -237,6 +243,18 @@ def validate_runtime_motor_profiles(payload: Dict[str, Any]) -> None:
             #
             # 다이나믹셀은 모델이 param_file 과 정격 속도를 고르므로 사정이
             # 다르지만, 이 검사는 애초에 minas 만 보고 있었다.
+            # 직렬 서보는 0 = 서보 최대 · 0 이상 숫자면 통과 · AC 는 전처럼 0 보다 커야 · 수정 목록 163
+            if str(driver.get('type') or '') in SERIAL_SERVO_TYPES:
+                for field in required_positive:
+                    try:
+                        value = float(driver.get(field))
+                    except (TypeError, ValueError):
+                        value = None
+                    if value is None or not math.isfinite(value) or value < 0.0:
+                        raise ValueError(
+                            f'{axis}번 모터의 {field} 값을 0 이상으로 설정하세요 (0 = 서보 최대)'
+                        )
+                continue
             for field in required_positive:
                 try:
                     value = float(driver.get(field))

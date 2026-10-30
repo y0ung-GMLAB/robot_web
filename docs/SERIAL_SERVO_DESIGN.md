@@ -60,6 +60,18 @@
 
 - P · MX · XL330 · Feetech 값 · e-manual · 공개 SDK 기준 · **실물 미검증**
 
+### 3-3. 운전 값 (속도 · 가속) · 기본 0 = 서보 최대 · 수정 목록 163
+
+- 사용자 결정 2026-10-30 · AC 서보는 구조 안전 때문에 속도·가속 상한 · 직렬 서보는 작아서 구조 안전 문제 없음 · 서보가 낼 수 있는 만큼
+- 새 직렬 드라이버(Dynamixel · Feetech) · `speed` · `acceleration` · `deceleration` · `profile_velocity` · `profile_acceleration` · `profile_deceleration` 모두 0
+- 장치 뜻 · Dynamixel X Profile Velocity 0 = 프로파일 없음(Velocity Limit 주소 44 까지) · Profile Acceleration 0 = 무한 · Feetech STS Goal Velocity(주소 46) 0 = 최대 · Acceleration(주소 41) 0 = 최대
+- motor_manager · 0 → raw 0 그대로 (`dynamixel_driver.cpp` · 가속은 `profile_acceleration` 이 0 이면 `acceleration` 을 쓰므로 둘 다 0)
+- 장치에 쓰는 곳 · Feetech 만 (`feetech_sts.yaml` items 54 Goal Velocity · 55 Acceleration) · Dynamixel param 은 Operating Mode 만 씀 → Profile Velocity · Acceleration 은 장치 RAM 기본(0) 그대로
+- 정격 속도 `rated_speed_rpm` · 정보로 유지 (XM540-W150 66 · W270 37 · 그 밖 Dynamixel 30 · Feetech 30) · supervisor 수동 조작(조그 · 절대 이동 · 범위 복귀) 상한으로만 쓰임
+- 0 을 읽는 곳 · supervisor 수동 조작 상한(0 이하는 빼고 최소) · 저장 검사(최대 ≥ 프로파일 · 0 이면 안 견줌) · 적용 검사(직렬 서보 0 이상 · AC 는 0 보다 커야) · 재생 · 초기 위치 이동 · X-Touch 는 모터 설정 속도를 안 읽음 (조인트 매핑 최대 속도·가속)
+- 사람이 낮추기 · v2 모터 설정 「프로파일 속도 · 최대 가속 · 프로파일 가속」 칸 · 0 이면 칸 아래 「서보 최대」
+- 저장된 옛 값 옮기기 · 모터 설정 저장 때 · 칸 값이 옛 기본값(Dynamixel 속도 100 · 396 · 222 · 가속 703104.5 · Feetech 속도 180 · 가속 439.453125 · 703104.5)과 정확히 같으면 0 · 그 밖 값은 사람이 정한 값으로 보고 유지
+
 ## 4. motor_manager (C++) 변경
 
 - `SerialMaster` · 패킷 형식 둘 (`dxl2` 지금 그대로 · `scs` 새)
@@ -117,6 +129,8 @@
 - F-3 · 가속 단위 (100 step/s²) · 속도 단위 (step/s)
 - F-4 · 과부하 보호 뒤 알람 리셋(토크 OFF) 으로 풀리는가
 - F-5 · Status(주소 65) 비트 뜻
+- F-6 · Goal Velocity 0 · Acceleration 0 이 정지가 아닌 최대 속도·가속인지 (STS · HLS · 수정 목록 163)
 - D-1 · Dynamixel X 외 모델(XL330 · P) · 전류 · 가속 단위
+- D-3 · Profile Velocity · Acceleration 0(장치 RAM 기본) · 계단 애니메이션 속도가 Velocity Limit(주소 44)까지 나오는지 (수정 목록 163)
 - D-2 · 포트 하나에 여러 모델 · 매 주기 전 항목 읽기 · 주기 시간
 - C-1 · 섞어 쓰기 · AC + Dynamixel + Feetech · USB 뽑기 → AC 계속 동작 · 다시 꽂기 → 복귀

@@ -97,3 +97,17 @@ def test_profile_limits_from_the_degree_config_become_rad_per_second():
     assert supervisor._acceleration_limit({}) == pytest.approx(R(180000.0))
     supervisor._driver_config_for_motor = lambda _motor: {'rated_speed_rpm': 3000.0}
     assert supervisor._velocity_limit({}) == pytest.approx(3000.0 * 2.0 * math.pi / 60.0)
+
+
+def test_serial_servo_zero_means_servo_max_not_zero_speed():
+    """직렬 서보 0 = 서보 최대 · 상한에서 빠지고 정격 속도만 남음 · 0 으로 나누지 않음 · 수정 목록 163"""
+    supervisor = _supervisor([])
+    zeros = dict.fromkeys(
+        ('speed', 'acceleration', 'deceleration',
+         'profile_velocity', 'profile_acceleration', 'profile_deceleration'), 0.0,
+    )
+    supervisor._driver_config_for_motor = lambda _motor: {**zeros, 'rated_speed_rpm': 30}
+    assert supervisor._velocity_limit({}) == pytest.approx(30 * 2.0 * math.pi / 60.0)
+    assert supervisor._acceleration_limit({}) is None
+    supervisor._driver_config_for_motor = lambda _motor: dict(zeros)
+    assert supervisor._velocity_limit({}) is None

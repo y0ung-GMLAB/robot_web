@@ -80,18 +80,19 @@ def test_motor_model_defaults_match_verified_development_config(tmp_path):
     w150 = motor_config_build.default_dynamixel_driver(tmp_path, 'XM540-W150')
     assert w150['driver_model'] == 'XM540-W150'
     assert w150['profile_position_value'] == 4      # Extended Position
-    assert w150['rated_speed_rpm'] == 66
-    assert w150['speed'] == 396.0
-    assert w150['profile_velocity'] == 396.0
-    assert w150['profile_acceleration'] == 703104.5
+    assert w150['rated_speed_rpm'] == 66            # 정격 속도는 모델 정보로 남음
+    # 운전 값 · 0 = 서보 최대 · 수정 목록 163 (전 396 · 703104.5)
+    assert w150['speed'] == 0.0
+    assert w150['profile_velocity'] == 0.0
+    assert w150['profile_acceleration'] == 0.0
     assert w150['param_file'].endswith('dynamixel_xm540_w150.yaml')
 
     w270 = motor_config_build.default_dynamixel_driver(tmp_path, 'XM540-W270')
     assert w270['driver_model'] == 'XM540-W270-R'
     assert w270['rated_speed_rpm'] == 37
-    assert w270['speed'] == 222.0
-    assert w270['profile_velocity'] == 222.0
-    assert w270['profile_acceleration'] == 703104.5
+    assert w270['speed'] == 0.0
+    assert w270['profile_velocity'] == 0.0
+    assert w270['profile_acceleration'] == 0.0
     assert w270['param_file'].endswith('dynamixel_xm540_w270.yaml')
 
 
@@ -106,9 +107,10 @@ def test_dynamixel_defaults_do_not_depend_on_scan_order(tmp_path):
     )
     by_id = {driver['id']: driver for driver in drivers}
 
-    assert by_id[w150_id]['speed'] == 396.0
+    # 모델마다 다른 값은 정격 속도 · 운전 값은 둘 다 0 (서보 최대) · 수정 목록 163
+    assert by_id[w150_id]['rated_speed_rpm'] == 66
     assert by_id[w150_id]['driver_model'] == 'XM540-W150'
-    assert by_id[w270_id]['speed'] == 222.0
+    assert by_id[w270_id]['rated_speed_rpm'] == 37
     assert by_id[w270_id]['driver_model'] == 'XM540-W270-R'
 
 

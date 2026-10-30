@@ -14,7 +14,7 @@ import { isRevisionConflict } from '../mapping_model.js';
 import { threeWayMerge } from '../merge_model.js';
 import { confirmConflicts } from '../conflict_dialog.js';
 import {
-  EDIT_FIELDS, absoluteClearRule, absoluteJobText, absoluteLine, absoluteResumeConfirm, absoluteResumeView, absoluteSummary, gainText, gainWarnings, getField, motorChanges, motorProblems, motorRows, scanConfirmText,
+  EDIT_FIELDS, fieldNote, fieldPlaceholder, absoluteClearRule, absoluteJobText, absoluteLine, absoluteResumeConfirm, absoluteResumeView, absoluteSummary, gainText, gainWarnings, getField, motorChanges, motorProblems, motorRows, scanConfirmText,
   setField,
 } from '../motors_model.js';
 import { referenceRedoView } from '../model.js';
@@ -342,11 +342,14 @@ function detailCard(state, changed, row) {
   const input = (field) => {
     if (field.ac && !row.ac) return null;
     const value = getField(motor, field.key);
+    // 직렬 서보 속도·가속 0 = 서보 최대 · 칸 아래 「서보 최대」 · 수정 목록 163
+    const note = fieldNote(field, value, row.ac);
     return h('label', { class: 'field' }, h('span', { class: 'field-label', text: `${field.label}${field.unit ? ` (${field.unit})` : ''}` }),
       h('input', { class: `input${field.top ? '' : ' mono'}`, type: field.top ? 'text' : 'number', step: 'any', value: value ?? '',
-        placeholder: field.top ? '' : (field.blank || '비워 두면 드라이브 값 유지'),
+        placeholder: fieldPlaceholder(field, row.ac),
         oninput: (e) => setField(motor, field.key, field.top ? e.target.value : (e.target.value === '' ? null : Number(e.target.value))),
-        onchange: () => changed() }));
+        onchange: () => changed() }),
+      note ? h('span', { class: 'small muted', text: note }) : null);
   };
   return h('section', { class: 'card', id: 'motor-detail', 'aria-label': `${row.axis}번 설정` },
     // 내부 ID 는 「원본」 안으로 · 사용자 2026-10-13
