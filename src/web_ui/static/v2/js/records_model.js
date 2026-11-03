@@ -72,3 +72,14 @@ export function traceGeometry(time, target, actual, { width = 600, height = 120 
 export function eventTime(event) {
   return String(event?.timestamp_text || '').slice(11, 19);
 }
+
+/** 운영 로그 한 줄의 대상 · 「0번 모터 · f2_neck_yaw」 · 없으면 빈 글 · 수정 목록 167 */
+export function eventTarget(event) {
+  return String(event?.target || '').trim();
+}
+
+/** 운영 로그 점 색 · 모터 오류 bad · MINAS 경고(A0 등 · 드라이브는 계속 돎) warn · 그룹 info · 수정 목록 166 */
+export function eventTone(event) {
+  if (event?.category === 'error') return event?.details?.error_kind === 'warning' ? 'warn' : 'bad';
+  return event?.category === 'coordination' ? 'info' : 'ok';
+}

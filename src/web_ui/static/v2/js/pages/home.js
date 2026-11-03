@@ -1,6 +1,7 @@
 /** UI v2 · 홈 · 운영자 첫 화면 · 「지금 무엇이 · 무엇을 확인할지 · 매장 PC · 오늘 · 모터 · 최근 일」 */
 import { h, dot } from '../dom.js';
 import { headline, motorChips, pcRows, runSummary, todayWindows } from '../model.js';
+import { eventTarget } from '../records_model.js';
 import { issueRow } from '../shell.js';
 import * as act from '../actions.js';
 
@@ -103,6 +104,7 @@ function recentCard(state) {
     events.length
       ? h('ul', { class: 'list' }, events.map((event) => h('li', { class: 'list-row' },
         h('span', { class: 'mono muted time', text: String(event.timestamp_text || '').slice(11, 19) }),
+        eventTarget(event) ? h('span', { class: 'mono', text: eventTarget(event) }) : null,
         h('span', { class: 'grow', text: String(event.content || event.event_type || '') }))))
       : h('p', { class: 'muted', text: '기록 없음' }));
 }

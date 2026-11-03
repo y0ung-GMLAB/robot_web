@@ -94,7 +94,16 @@ class MotorEventLog:
             self._last_minas_absolute_message = None
             self._stuck_mailboxes = {}
 
-    def record_motor_error_transitions(self, payload: Dict[str, Any]) -> None:
+    def record_motor_error_transitions(
+        self,
+        payload: Dict[str, Any],
+        joint_names: Optional[Callable[[], Dict[int, str]]] = None,
+    ) -> None:
+        """모터 오류·경고가 바뀔 때만 1건 · `target` 은 「0번 모터 · 조인트 이름」 ·
+        조인트 매핑 이름이 있으면 모터 설정 이름(「모터 0」)보다 먼저 · 수정 목록 167 ·
+        `joint_names` 는 축 → 조인트 이름을 돌려주는 함수 · 새로 적을 것이 있을 때만 잠금 밖에서 한 번 부른다
+        (오류가 오래 남아도 10 Hz 마다 매핑을 찾지 않게) ·
+        MINAS 경고(A0 등 · `error_kind` warning)는 details 에 표시만 · 같은 「모터 오류」 칸 · 수정 목록 166"""
         motors = payload.get('motors')
         if not isinstance(motors, list):
             return
@@ -128,6 +137,7 @@ class MotorEventLog:
                     continue
 
                 name = str(motor.get('display_name') or f'{axis}번 모터')
+                kind = str(motor.get('error_kind') or '')
                 new_events.append({
                     'category': 'error',
                     'event_type': 'motor_error',
@@ -136,6 +146,9 @@ class MotorEventLog:
                     'details': {
                         'axis': axis,
                         'name': name,
+                        'joint': str(motor.get('motion_id') or '').strip(),
+                        # 'warning' 이면 드라이브는 계속 돈다(Fault 아님) · 화면이 경고 색으로
+                        'error_kind': kind,
                         'motor_type': str(motor.get('motor_type_label') or motor.get('motor_type') or ''),
                         'errorcode': errorcode,
                         'errorcode_hex': error_hex,
@@ -145,7 +158,17 @@ class MotorEventLog:
                 })
             self._active_motor_errors = current_errors
 
+        if new_events and joint_names is not None:
+            try:
+                names = joint_names() or {}
+            except (AttributeError, KeyError, OSError, TypeError, ValueError):
+                names = {}
+            for event in new_events:
+                details = event['details']
+                details['joint'] = str(names.get(details['axis']) or details['joint'] or '').strip()
         for event in new_events:
+            if event['details']['joint']:
+                event['target'] = f"{event['details']['axis']}번 모터 · {event['details']['joint']}"
             self.append(**event)
 
     def record_minas_absolute_transition(self, payload: Dict[str, Any]) -> None:

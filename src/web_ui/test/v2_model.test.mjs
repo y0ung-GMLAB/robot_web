@@ -150,6 +150,13 @@ test('모터 · 조인트 값이 있으면 조인트 deg · 알람·서보 꺼�
   ]);
 });
 
+test('모터 · MINAS 경고(A0)는 알람이 아니라 경고 색 · 수정 목록 166', () => {
+  const [chip] = motorChips({ motion_state: { motors: [
+    { controller_index: 0, servo_on: true, fault: false, errorcode: 160, error_kind: 'warning', error_text: '경고 A0 · 과부하 경고' },
+  ] } });
+  assert.deepEqual([chip.tone, chip.note], ['warn', '경고 A0 · 과부하 경고']);
+});
+
 test('매장 PC 줄 · 연결 안 됨 · 버전 다름 · 그룹 참여 꺼짐', () => {
   const rows = pcRows(pcs({ pc_id: 'f1', online: false }, { pc_id: 'f2', version_differs: true }, { pc_id: 'f3', joined: false }, { pc_id: 'sp', role: 'speaker' }));
   assert.deepEqual(rows.map((r) => r.note), ['마스터', '연결 안 됨', '버전 다름', '그룹 미참여', '스피커']);

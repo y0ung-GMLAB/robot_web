@@ -342,6 +342,8 @@ export function motorChips(snap) {
     let tone = 'ok';
     let note = '';
     if (m.fault) { tone = 'bad'; note = `알람${motorErrorText(m) ? ` ${motorErrorText(m)}` : ''}`; }
+    // MINAS 경고(A0 과부하 경고 등) · 드라이브는 계속 돈다 · 알람이 아니라 경고 색 · 수정 목록 166
+    else if (m.error_kind === 'warning') { tone = 'warn'; note = motorErrorText(m); }
     else if (!m.servo_on) { tone = 'warn'; note = '서보 꺼짐'; }
     return {
       name: String(m.motion_id || m.name || m.display_name || `${m.controller_index}번 모터`),

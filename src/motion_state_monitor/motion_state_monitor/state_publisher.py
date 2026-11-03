@@ -34,6 +34,8 @@ from .motor_values import (
     dynamixel_statusword_text,
     dynamixel_error_text,
     error_text,
+    minas_error_kind,
+    minas_error_text,
     hex16,
     motor_type_label,
     normalized_errorcode,
@@ -228,8 +230,18 @@ class StatePublisher:
                 else (
                     dynamixel_error_text(errorcode)
                     if is_dynamixel
-                    else error_text(errorcode, '')
+                    else (
+                        minas_error_text(errorcode)
+                        if motor_type == 'minas'
+                        else error_text(errorcode, '')
+                    )
                 )
+            ),
+            # 'alarm' · 'warning'(MINAS 경고 A0 등 · 드라이브는 계속 돔) · '' · 화면 색 · 수정 목록 166
+            'error_kind': (
+                minas_error_kind(errorcode)
+                if motor_type == 'minas' and not communication_unavailable
+                else ('alarm' if errorcode and not communication_unavailable else '')
             ),
             'station_alias_register': None,
             'position_rad': position,
@@ -424,6 +436,7 @@ class StatePublisher:
             'errorcode_raw': 0,
             'errorcode_hex': hex16(0),
             'error_text': 'No error',
+            'error_kind': '',
             'station_alias_register': None,
             'position_rad': None,
             'velocity_rad_s': None,

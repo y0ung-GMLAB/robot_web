@@ -1,7 +1,7 @@
 /** UI v2 · 기록 · 회차 줄 · 목표·실제 그래프 (설계안 2026-10-09) */
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { runRows, traceGeometry } from '../static/v2/js/records_model.js';
+import { eventTarget, eventTone, runRows, traceGeometry } from '../static/v2/js/records_model.js';
 
 test('회차 줄 · 결과 글 · 최대 오차는 축 중 가장 큰 것 · 최근 것이 위', () => {
   const rows = runRows([
@@ -20,4 +20,15 @@ test('그래프 · 같은 눈금 · 빠진 표본은 선을 끊는다', () => {
   assert.equal((geo.actual.match(/M/g) || []).length, 2, 'null 뒤에서 새로 시작');
   assert.equal(traceGeometry([0], [1], [1]), null);
   assert.equal(traceGeometry([0, 1], [null, null], [null, null]), null);
+});
+
+test('운영 로그 · 어느 모터인지 · MINAS 경고는 경고 색 · 수정 목록 166 · 167', () => {
+  const warning = { category: 'error', target: '0번 모터 · f2_neck_yaw', details: { error_kind: 'warning' } };
+  assert.equal(eventTarget(warning), '0번 모터 · f2_neck_yaw');
+  assert.equal(eventTone(warning), 'warn');
+  assert.equal(eventTone({ category: 'error', details: { error_kind: 'alarm' } }), 'bad');
+  assert.equal(eventTone({ category: 'error' }), 'bad', '옛 기록(종류 없음)은 그대로 빨강');
+  assert.equal(eventTone({ category: 'coordination' }), 'info');
+  assert.equal(eventTone({ category: 'motion' }), 'ok');
+  assert.equal(eventTarget({}), '');
 });

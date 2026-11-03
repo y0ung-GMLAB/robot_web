@@ -51,6 +51,42 @@ def test_records_motor_error_transition_once(tmp_path):
     assert events[0]['details']['axis'] == 2
 
 
+def test_motor_error_target_names_the_joint_and_marks_minas_warnings(tmp_path):
+    """수정 목록 167 · 운영 로그가 어느 모터인지 · 조인트 이름이 모터 설정 이름(「모터 0」)보다 먼저 ·
+    수정 목록 166 · MINAS 경고 A0 는 error_kind warning"""
+    bridge = event_log_bridge(tmp_path)
+    warning = {
+        'controller_index': 0,
+        'display_name': '모터 0',
+        'fault': False,
+        'errorcode': 0xA0,
+        'errorcode_hex': '0xFFA0',
+        'error_text': '경고 A0 · 과부하 경고',
+        'error_kind': 'warning',
+        'statusword': 0x0237,
+    }
+    alarm = {**warning, 'controller_index': 1, 'display_name': '모터 1', 'fault': True,
+             'errorcode': 16, 'errorcode_hex': '0xFF10', 'error_text': 'Err16 · 과부하·토크 포화',
+             'error_kind': 'alarm', 'statusword': 0x0008}
+    calls = []
+
+    def joint_names():
+        calls.append(1)
+        return {0: 'f2_neck_yaw'}
+
+    bridge.record_motor_error_transitions({'motors': [warning, alarm]}, joint_names)
+    bridge.record_motor_error_transitions({'motors': [warning, alarm]}, joint_names)
+    assert len(calls) == 1, '새로 적을 것이 있을 때만 매핑을 찾는다'
+    events = {event['details']['axis']: event for event in bridge.events()['events']}
+    assert events[0]['target'] == '0번 모터 · f2_neck_yaw'
+    assert events[0]['details']['joint'] == 'f2_neck_yaw'
+    assert events[0]['details']['error_kind'] == 'warning'
+    assert events[0]['content'] == '0xFFA0 경고 A0 · 과부하 경고'
+    # 매핑에 없는 모터는 예전처럼 모터 설정 이름
+    assert events[1]['target'] == '1번 모터 · 모터 1'
+    assert events[1]['details']['error_kind'] == 'alarm'
+
+
 def test_records_motion_lifecycle_transitions(tmp_path):
     bridge = event_log_bridge(tmp_path)
     base = {
