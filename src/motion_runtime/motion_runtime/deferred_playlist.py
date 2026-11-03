@@ -12,12 +12,21 @@
 멈춘다(「재생 목록 N번 …」 오류) · 1번 파일은 전처럼 시작 전에 거절된다.
 
 `list` 처럼 쓴다 · `len` · `bool` · `[i]` · 끝까지 돌기 · `map` (항목마다 표시를 붙인 보기).
+
+**언제 짓기 시작하나 · 수정 목록 171** · 만들 때가 아니라 `start()` 를 부를 때 · 그룹은 1회차가 시작되고
+조금 뒤(`group_session.DEFERRED_BUILD_DELAY_SEC`) · 전에는 만들자마자 지어서 초기 위치 이동 · 「모션 시작
+대기」 · `start_at` 확인과 겹쳤다 · 짓기가 GIL 을 쥐어 진행 PC 가 제 `start_at` 확인을 0.4 s 안에 못 했다
+(NY 실물 2026-11-03 · floating1 「자신의 예약 확인 늦음」). 그 전에 쓰이면(`wait` · `[1]` 이후) 그때 바로 짓는다 ·
+그 전에 정지가 오면 짓지 않는다. 짓는 스레드는 GIL 을 나눠 쓴다(`background_pacing`).
 """
 
 from __future__ import annotations
 
 import threading
+import time
 from typing import Any, Callable, Iterator, List, Optional
+
+from . import background_pacing
 
 #: 정지를 보는 간격 · 기다리는 동안
 _WAIT_POLL_SEC = 0.05
@@ -35,16 +44,47 @@ class DeferredPlaylist:
     ) -> None:
         self._first = first
         self._length = max(int(length), 0)
+        self._build = build
         self._stop_event = stop_event
+        self._name = name
         self._done = threading.Event()
+        #: 미뤄 둔 시작을 앞당긴다(`wait`) · 171
+        self._go = threading.Event()
+        self._start_lock = threading.Lock()
+        self._thread: Optional[threading.Thread] = None
         self._entries: Optional[List[tuple]] = None
         self._error: Optional[BaseException] = None
-        self._thread = threading.Thread(target=self._run, args=(build,), name=name, daemon=True)
-        self._thread.start()
 
-    def _run(self, build: Callable[[], List[tuple]]) -> None:
+    def start(self, delay_sec: float = 0.0) -> None:
+        """짓기 시작 · `delay_sec` 뒤에 · 그 사이 `wait` 가 오면 바로 · 여러 번 불러도 한 번만 짓는다 · 171"""
+        delay = max(float(delay_sec or 0.0), 0.0)
+        if delay <= 0.0:
+            self._go.set()
+        with self._start_lock:
+            if self._thread is None:
+                self._thread = threading.Thread(
+                    target=self._run, args=(delay,), name=self._name, daemon=True,
+                )
+                self._thread.start()
+
+    def started(self) -> bool:
+        return self._thread is not None
+
+    def _stopped(self) -> bool:
+        return self._stop_event is not None and self._stop_event.is_set()
+
+    def _run(self, delay_sec: float) -> None:
         try:
-            entries = list(build())
+            deadline = time.monotonic() + delay_sec
+            while not self._go.is_set() and not self._stopped():
+                remaining = deadline - time.monotonic()
+                if remaining <= 0.0:
+                    break
+                self._go.wait(min(_WAIT_POLL_SEC, remaining))
+            if self._stopped():
+                raise InterruptedError()
+            background_pacing.pace_current_thread()
+            entries = list(self._build())
             if len(entries) != self._length:
                 raise RuntimeError(
                     f'재생 목록 계획 수가 맞지 않습니다 · {len(entries)} / {self._length}'
@@ -65,7 +105,10 @@ class DeferredPlaylist:
         return self._error if self._done.is_set() else None
 
     def wait(self) -> List[tuple]:
-        """다 지을 때까지 · 실패면 그 예외 · 정지가 오면 `InterruptedError`"""
+        """다 지을 때까지 · 실패면 그 예외 · 정지가 오면 `InterruptedError` · 아직 안 지었으면 지금 짓는다"""
+        if self._stopped() and not self._done.is_set():
+            raise InterruptedError()
+        self.start()
         while not self._done.wait(_WAIT_POLL_SEC):
             if self._stop_event is not None and self._stop_event.is_set():
                 raise InterruptedError()

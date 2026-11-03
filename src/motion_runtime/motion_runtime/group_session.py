@@ -27,6 +27,14 @@ SCHEDULE_END_REASON = 'schedule_end'
 SCHEDULE_END_STOP_MESSAGE = '구간 끝 · 회차 후 정지'
 #: 사람이 누른 「현재 회차 후 정지」
 GROUP_AFTER_CYCLE_STOP_MESSAGE = '현재 그룹 모션 회차 완료 후 정지'
+#: 재생 목록 2번부터 짓기 시작 · 1회차 시작 시각 + 이만큼 · 수정 목록 171
+#:
+#: 그룹 시작은 「준비 → 초기 위치 이동 예약 확인 → 이동 → 모션 시작 대기 → `start_at` 확인 → 시작 →
+#: 시작 보고(진행 PC 가 1 s 안에 받아야 함 · `trigger_report_timeout_sec`)」 가 모두 마감이 있다 ·
+#: 짓기가 이 사이에 돌면 GIL 을 두고 다퉈 확인이 늦었다(NY 실물 2026-11-03 · 진행 PC 제 `start_at`
+#: 확인 0.4 s 넘김 · 그룹 취소) · 그래서 시작 보고까지 지나고 짓는다 · 2번은 1회차가 끝나야 쓴다.
+#: 1회차가 이보다 짧으면 쓸 때(회차 끝) 바로 짓는다.
+DEFERRED_BUILD_DELAY_SEC = 1.5
 
 
 class GroupSession:
@@ -398,7 +406,8 @@ class GroupSession:
         - 「검증 계획」 을 따로 짓지 않는다 · 옛 길은 같은 요청으로 세 번 지었다 · 검증 계획이 따로
           보던 이음매 값 차이는 막지 않기로 했다(§6-142 · 검사 함수가 빈 사유만 돌려준다) ·
           그 검사는 재생 계획으로 한다
-        - 재생 목록 2번부터는 뒤에서 짓는다(`DeferredPlaylist`) · 처음 쓰일 때 기다린다
+        - 재생 목록 2번부터는 뒤에서 짓는다(`DeferredPlaylist`) · 처음 쓰일 때 기다린다 ·
+          짓기 시작은 1회차가 시작되고 나서다(`DEFERRED_BUILD_DELAY_SEC`) · 여기서는 만들기만 · 171
         """
         # 회차 맞춤 / 각자 재생 · 수정 목록 35
         continuous = (
@@ -490,9 +499,8 @@ class GroupSession:
                 })
                 if self.manager._stop_event.is_set() or self.manager.status().get('state') != 'initialized':
                     return
-                # 뒤에서 짓던 재생 목록이 벌써 실패했으면 1회차를 시작하기 전에 멈춘다 · 164
-                if isinstance(playlist, DeferredPlaylist) and playlist.failed() is not None:
-                    raise playlist.failed()
+                # 재생 목록 2번부터는 아직 안 짓는다 · 1회차가 시작된 뒤에 · 깨진 파일은 1회차 도중에
+                # 알게 되고 그 파일을 쓰기 전(회차 끝)에 멈춘다 · 171
                 with self.condition:
                     self.session.update({
                         'state': 'armed',
@@ -532,6 +540,9 @@ class GroupSession:
                 )
                 if self.manager._stop_event.is_set():
                     break
+                if isinstance(playlist, DeferredPlaylist):
+                    # 1회차 시작 · 시작 보고가 나간 뒤에 2번부터 짓는다 · 두 번째부터는 아무 일 없음 · 171
+                    playlist.start(DEFERRED_BUILD_DELAY_SEC)
                 group_context = {
                     'scheduled_start_at': 0.0,
                     'group_execution': True,
@@ -554,6 +565,9 @@ class GroupSession:
                 #
                 # 회차 사이 초기화 예약(`cycle_initialize_at`)은 지금 + 1.5 s 다 · 그 안에서 기다리면 예약
                 # 시각을 놓친다. 여기서 기다리면 다른 PC 가 장벽에서 조금 더 기다릴 뿐이다.
+                # 1회차가 짓기보다 짧으면 이 기다림이 길어진다(짓기는 1회차 시작 뒤에 시작 · 171) · 장벽에는
+                # 제한시간이 없고 모두 마지막 프레임에 서 있다 · 다 지은 뒤에야 회차 끝을 알리므로
+                # `cycle_initialize_at` 확인은 짓기와 겹치지 않는다.
                 if isinstance(playlist, DeferredPlaylist):
                     playlist.wait()
                 triggered_at = float(
