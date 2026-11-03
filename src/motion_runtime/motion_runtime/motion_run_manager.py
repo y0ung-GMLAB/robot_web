@@ -663,6 +663,8 @@ class MotionRunManager(Node):
             self._warm_thread.start()
 
     def _warm_motion_cache_now(self, project_id: str, mapping_file_id: str) -> None:
+        # 뒤 작업 · 실행기·재생 틱이 GIL 을 받게 쉬어 가며 읽는다 · 수정 목록 171
+        background_pacing.pace_current_thread()
         try:
             _, motion_files_dir, mappings_dir = self._project_asset_dirs({'project_id': project_id})
             mapping = self._load_mapping(self._mapping_file_path(mapping_file_id, mappings_dir))
