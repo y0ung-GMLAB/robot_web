@@ -54,7 +54,7 @@ def _manager(rows, state):
         ('_motor_type', lambda _motor: 'ac_servo'),
     ):
         mock.patch.object(motion_run_rules, name, value).start()
-    manager._load_motion_records = lambda _path: [
+    manager._load_motion_records = lambda _path, **_kw: [
         {'motion_id': row['motion_id'], 'time_sec': time_sec, 'value': 0.0}
         for time_sec in (0.02, 0.04) for row in rows
     ]

@@ -481,6 +481,8 @@ def local_motion_readiness(
     except (TypeError, ValueError):
         budget = DEFAULT_READINESS_BUDGET_SEC
     timeout_sec = max(0.5, budget - READINESS_MARGIN_SEC)
+    # 안쪽 일 전부(실행 컨텍스트 맞추기 + 실행 준비 검사)가 이 마감 안에 · 수정 목록 164
+    deadline = time.monotonic() + timeout_sec
     # 사람이 이 PC 를 만지는 중이면 그룹에 안 들어간다 · 수정 목록 122 (나)
     busy = human_operation_reason(
         _locked_copy(bridge, '_motion_run_status', '_motion_run_lock'),
@@ -521,6 +523,8 @@ def local_motion_readiness(
         segment = motion_segment.apply_to_payload(request)
     except ValueError as exc:
         return {'success': False, 'message': str(exc)}
+    # 검사는 남은 예산을 다 쓴다 · 전에는 3 s 고정이라 예산(6 s − 여백 1 s)이 남아도 긴 애니(920 s ×
+    # 20 조인트)의 첫 검사가 「motion_run_manager response timeout」 으로 끝났다 · 수정 목록 164
     return bridge.motion_run_check({
         **selection,
         'initial_move_time_sec': None,
@@ -528,7 +532,7 @@ def local_motion_readiness(
         'request_source': 'network_readiness',
         motion_segment.START_KEY: segment[motion_segment.START_KEY],
         motion_segment.END_KEY: segment[motion_segment.END_KEY],
-    })
+    }, timeout_sec=max(0.5, deadline - time.monotonic()))
 
 
 def _group_initial_move_time(payload: Mapping[str, Any]) -> Optional[float]:

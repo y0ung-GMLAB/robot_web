@@ -311,6 +311,44 @@ def expand_pair_rows(rows: List[Any], headers: Any = None) -> List[Any]:
     return expanded if changed else rows
 
 
+def pair_rows_expandable(headers: Any = None) -> bool:
+    """`expand_pair_rows` 가 짝 줄을 펼치는 헤더인가 · 헤더 없음 또는 frame, time, id, value 순서"""
+    mapping = header_map(headers)
+    return not mapping or (
+        mapping.get('frame') == 0
+        and mapping.get('time') == 1
+        and mapping.get('motion_id') == 2
+        and mapping.get('value') == 3
+    )
+
+
+def keep_pairs(row: Any, keep: Any, memo: Optional[Dict[Any, bool]] = None) -> Tuple[Any, int]:
+    """펼치기 전 짝 줄에서 `keep` 에 없는 조인트 쌍을 뺀다 · (줄, 뺀 쌍 수) · 수정 목록 164
+
+    한 파일에 여러 로봇의 조인트가 들어 있어도(4대 × 5 = 20) 이 PC 는 제 매핑의 조인트만 쓴다(N16) ·
+    펼치고 레코드를 만든 뒤 버리던 것을 펼치기 전에 뺀다 · 남는 레코드는 그대로 같다.
+    짝 줄(`[frame, time, id1, v1, ...]` · 4칸 초과 · 짝 맞음)이 아니면 손대지 않는다(뒤에서 거른다).
+    `memo` · 글자 조인트 이름 → 남길지 · 줄마다 같은 이름이 되풀이되므로.
+    """
+    if not isinstance(row, list) or len(row) <= 4 or (len(row) - 2) % 2 != 0:
+        return row, 0
+    kept = row[:2]
+    dropped = 0
+    for index in range(2, len(row), 2):
+        raw = row[index]
+        keep_it = memo.get(raw) if memo is not None and isinstance(raw, str) else None
+        if keep_it is None:
+            keep_it = motion_id_text(raw) in keep
+            if memo is not None and isinstance(raw, str):
+                memo[raw] = keep_it
+        if keep_it:
+            kept.append(raw)
+            kept.append(row[index + 1])
+        else:
+            dropped += 1
+    return kept, dropped
+
+
 # --------------------------------------------------------------------------- #
 # 행 추출
 # --------------------------------------------------------------------------- #

@@ -19,6 +19,7 @@ from motion_common import repeat_policy
 from motion_common.values import finite_float
 
 from . import motion_run_rules
+from .deferred_playlist import DeferredPlaylist
 
 #: 스케줄 구간 끝이 보낸 회차 후 정지의 이유 · 브리지·연동 노드가 같은 글자를 쓴다
 SCHEDULE_END_REASON = 'schedule_end'
@@ -385,75 +386,90 @@ class GroupSession:
         })
         return {'success': True, 'message': '그룹 실행 취소', 'status': self.manager.status()}
 
+    def _prepare_plans(
+        self, payload: Dict[str, Any], motors_snapshot: List[Dict[str, Any]],
+    ) -> tuple:
+        """초기 위치 이동 예약 시각 **전에** 하는 일 · (연속, 각자, 1회차 계획, 초기 위치 계획, 재생 목록)
+
+        예약 시각은 그룹 준비를 받은 때 + 1.5~3 s 다 · 이 안에 끝나야 한다 · 수정 목록 164
+
+        - 1회차 재생 계획 하나 · 초기 위치 계획 하나만 짓는다 · 둘 다 준비 검사(`check`)가 지어 둔
+          재료(읽은 파일 · 20 ms 재샘플)를 다시 쓴다(`PlanBuilder` 캐시)
+        - 「검증 계획」 을 따로 짓지 않는다 · 옛 길은 같은 요청으로 세 번 지었다 · 검증 계획이 따로
+          보던 이음매 값 차이는 막지 않기로 했다(§6-142 · 검사 함수가 빈 사유만 돌려준다) ·
+          그 검사는 재생 계획으로 한다
+        - 재생 목록 2번부터는 뒤에서 짓는다(`DeferredPlaylist`) · 처음 쓰일 때 기다린다
+        """
+        # 회차 맞춤 / 각자 재생 · 수정 목록 35
+        continuous = (
+            not payload.get('initialization_only')
+            and str(payload.get('run_mode') or 'once') == 'continuous'
+        )
+        independent = continuous and (
+            repeat_policy.normalize_group_sync_mode(payload.get('sync_mode'))
+            == repeat_policy.GROUP_INDEPENDENT
+        )
+        motion_payload = {
+            **payload,
+            # 각자 재생은 1회차 시작 뒤 이 PC 가 혼자 잇는다 · 로컬 연속 재생과 같은 길
+            'run_mode': 'continuous' if independent else 'once',
+            'automation_run': False,
+            'group_execution': True,
+            'request_source': 'group_control',
+            'scheduled_start_at': 0.0,
+            'synchronized_cycle_sec': 0.0,
+            'synchronized_repeat_count': 0,
+        }
+        builder = self.manager._plan_builder
+        plan = builder.build(motion_payload, motors_snapshot=motors_snapshot)
+        guard_error = motion_run_rules._motion_auto_start_guard_error(plan)
+        if guard_error:
+            raise ValueError(guard_error)
+        initialization_plan = builder.build(
+            motion_payload,
+            initialization_only=True,
+            motors_snapshot=motors_snapshot,
+        )
+        playlist: Any = []
+        if continuous:
+            player = self.manager._player
+            names = player._playlist_names(plan, require_continuous=False)
+            if names:
+                first = (
+                    {**plan, **player._playlist_marks(0, names)},
+                    {**initialization_plan, **player._playlist_marks(0, names)},
+                )
+                stop_event = self.manager._stop_event
+                playlist = DeferredPlaylist(
+                    first,
+                    len(names),
+                    lambda: player._build_playlist_entries(
+                        motion_payload, plan, initialization_plan, motors_snapshot,
+                        require_continuous=False, should_stop=stop_event.is_set,
+                    ),
+                    stop_event=stop_event,
+                    name=f'group-playlist-{str(payload.get("execution_id") or "")[:20]}',
+                )
+                plan, initialization_plan = playlist[0]
+        return continuous, independent, plan, initialization_plan, playlist
+
     def _run(
         self, payload: Dict[str, Any], motors_snapshot: List[Dict[str, Any]]
     ) -> None:
         execution_id = str(payload.get('execution_id') or '')
         try:
-            validation_payload = {
-                **payload,
-                # A direct group repeat has the same end-to-start continuity
-                # requirement as a local continuous run. Validate it before
-                # the per-cycle plan is deliberately converted to one-shot.
-                'run_mode': (
-                    'continuous'
-                    if (
-                        not payload.get('initialization_only')
-                        and str(payload.get('run_mode') or 'once') == 'continuous'
-                        and repeat_policy.needs_loop_value_match(
-                            payload.get('repeat_mode')
-                        )
-                    ) else 'once'
-                ),
-            }
-            validation_plan = self.manager._plan_builder.build(
-                validation_payload, motors_snapshot=motors_snapshot,
+            continuous, independent, plan, initialization_plan, playlist = self._prepare_plans(
+                payload, motors_snapshot,
             )
-            guard_error = motion_run_rules._motion_auto_start_guard_error(validation_plan)
-            if guard_error:
-                raise ValueError(guard_error)
-            # 회차 맞춤 / 각자 재생 · 수정 목록 35
-            continuous = (
-                not payload.get('initialization_only')
-                and str(payload.get('run_mode') or 'once') == 'continuous'
-            )
-            independent = continuous and (
-                repeat_policy.normalize_group_sync_mode(payload.get('sync_mode'))
-                == repeat_policy.GROUP_INDEPENDENT
-            )
-            motion_payload = {
-                **payload,
-                # 각자 재생은 1회차 시작 뒤 이 PC 가 혼자 잇는다 · 로컬 연속 재생과 같은 길
-                'run_mode': 'continuous' if independent else 'once',
-                'automation_run': False,
-                'group_execution': True,
-                'request_source': 'group_control',
-                'scheduled_start_at': 0.0,
-                'synchronized_cycle_sec': 0.0,
-                'synchronized_repeat_count': 0,
-            }
-            plan = self.manager._plan_builder.build(motion_payload, motors_snapshot=motors_snapshot)
-            initialization_plan = self.manager._plan_builder.build(
-                motion_payload,
-                initialization_only=True,
-                motors_snapshot=motors_snapshot,
-            )
-            # 재생 목록 · 회차 N 은 목록의 (N-1) 번째 · 이 PC 의 목록만 본다
-            playlist = (
-                self.manager._player._build_playlist_entries(
-                    motion_payload, plan, initialization_plan, motors_snapshot,
-                    require_continuous=False,
-                )
-                if continuous else []
-            )
-            if playlist:
-                plan, initialization_plan = playlist[0]
             if self.manager._stop_event.is_set():
                 return
             join_cycle = int(payload.get('join_cycle_number') or 0)
             cycle_number = 0
             if join_cycle:
-                # 복귀 · 계획만 만들고 서 있는다 · 모터는 아직 움직이지 않는다 · 30-3
+                # 복귀 · 계획만 만들고 서 있는다 · 모터는 아직 움직이지 않는다 · 30-3 ·
+                # 재생 목록도 다 짓고 나서 「복귀 준비」 를 알린다 · 예약 시각에 쫓기지 않는 자리 · 164
+                if isinstance(playlist, DeferredPlaylist):
+                    playlist.wait()
                 committed = self._wait_join_commit(execution_id, join_cycle)
                 if committed is None:
                     return
@@ -474,6 +490,9 @@ class GroupSession:
                 })
                 if self.manager._stop_event.is_set() or self.manager.status().get('state') != 'initialized':
                     return
+                # 뒤에서 짓던 재생 목록이 벌써 실패했으면 1회차를 시작하기 전에 멈춘다 · 164
+                if isinstance(playlist, DeferredPlaylist) and playlist.failed() is not None:
+                    raise playlist.failed()
                 with self.condition:
                     self.session.update({
                         'state': 'armed',
@@ -531,6 +550,12 @@ class GroupSession:
                 result = self.manager.status()
                 if result.get('state') == 'error' or self.manager._stop_event.is_set():
                     break
+                # 다음 회차 애니 계획 · 뒤에서 짓던 것이 아직이면 **회차 끝을 알리기 전에** 기다린다 · 164
+                #
+                # 회차 사이 초기화 예약(`cycle_initialize_at`)은 지금 + 1.5 s 다 · 그 안에서 기다리면 예약
+                # 시각을 놓친다. 여기서 기다리면 다른 PC 가 장벽에서 조금 더 기다릴 뿐이다.
+                if isinstance(playlist, DeferredPlaylist):
+                    playlist.wait()
                 triggered_at = float(
                     (result.get('lifecycle') or {}).get('motion_started_at') or 0.0
                 )
@@ -677,10 +702,15 @@ class GroupSession:
         with self.condition:
             self.session['independent'] = True
         marks = {**group_context, 'independent_group': True}
-        entries = [
-            ({**item_plan, **marks}, {**item_init, **marks})
-            for item_plan, item_init in playlist
-        ]
+        # 뒤에서 짓는 목록이면 다 기다리지 않고 쓸 때 본다 · 1번은 바로 있다 · 164
+        entries = (
+            playlist.map(lambda entry: ({**entry[0], **marks}, {**entry[1], **marks}))
+            if isinstance(playlist, DeferredPlaylist)
+            else [
+                ({**item_plan, **marks}, {**item_init, **marks})
+                for item_plan, item_init in playlist
+            ]
+        )
         run_plan = entries[0][0] if entries else {**plan, **marks}
         run_init = entries[0][1] if entries else {**initialization_plan, **marks}
         if not entries and run_plan.get('repeat_mode') not in {

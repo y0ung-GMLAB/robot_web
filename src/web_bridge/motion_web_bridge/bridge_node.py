@@ -2204,7 +2204,8 @@ class MotionWebBridge(Node):
             return ''
         return end.start_blocker()
 
-    def motion_run_check(self, payload: Dict[str, Any]) -> Dict[str, Any]:
+    def motion_run_check(self, payload: Dict[str, Any], timeout_sec: float = 3.0) -> Dict[str, Any]:
+        """실행 준비 검사 · `timeout_sec` · 그룹 참가 준비는 남은 준비 예산을 넘긴다 · 수정 목록 164"""
         # 검사·그룹 참가 준비(`local_motion_readiness`)도 앱솔루트 확인 뒤에만 · 수정 목록 62
         absolute = self.minas_absolute_blocker()
         if absolute:
@@ -2212,7 +2213,7 @@ class MotionWebBridge(Node):
         cleared = self.multiturn_clear_blocker()
         if cleared:
             return {'success': False, 'message': f'실행 준비 검사 실패: {cleared}'}
-        return self._request_motion_run('check', payload, timeout_sec=3.0)
+        return self._request_motion_run('check', payload, timeout_sec=max(float(timeout_sec), 0.5))
 
     # -- 다회전 클리어 뒤 기준점 보호 · 수정 목록 140 ③ ------------------------------------ #
 

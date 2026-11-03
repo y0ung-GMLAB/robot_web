@@ -384,7 +384,7 @@ def test_initialization_with_an_empty_registered_file_falls_back_to_zero():
     manager = _initialization_only_manager(_zero_row_mapping('empty.json'))
     manager._motion_file_path = lambda _file_id: 'empty.json'
 
-    def empty(_path):
+    def empty(_path, **_kw):
         raise ValueError('motion file has no valid records')
 
     manager._load_motion_records = empty
@@ -448,7 +448,7 @@ def test_motion_run_initialization_uses_every_enabled_mapping_axis():
     manager.period_sec = 0.02
     manager._motion_file_path = lambda _file_id: None
     manager._mapping_file_path = lambda _file_id: None
-    manager._load_motion_records = lambda _path: [
+    manager._load_motion_records = lambda _path, **_kw: [
         {'time_sec': 0.02, 'motion_id': '1-2', 'value': 3.0},
     ]
     manager._load_mapping = lambda _path: {
@@ -503,7 +503,7 @@ def test_plan_uses_motion_state_captured_before_slow_motion_file_processing():
     manager._mapping_file_path = lambda _file_id: None
     started_at = time.monotonic()
 
-    def slow_motion_records(_path):
+    def slow_motion_records(_path, **_kw):
         time.sleep(1.05)
         return [
             {'time_sec': 0.00, 'motion_id': '1-1', 'value': 0.0},
@@ -596,7 +596,7 @@ def test_motion_run_initialization_fails_when_any_mapping_axis_is_not_ready():
     manager.period_sec = 0.02
     manager._motion_file_path = lambda _file_id: None
     manager._mapping_file_path = lambda _file_id: None
-    manager._load_motion_records = lambda _path: [
+    manager._load_motion_records = lambda _path, **_kw: [
         {'time_sec': 0.02, 'motion_id': '1-1', 'value': 0.0},
         {'time_sec': 0.02, 'motion_id': '1-2', 'value': 0.0},
     ]
@@ -635,7 +635,7 @@ def test_motion_run_playback_uses_only_motion_ids_present_in_file():
     manager.period_sec = 0.02
     manager._motion_file_path = lambda _file_id: None
     manager._mapping_file_path = lambda _file_id: None
-    manager._load_motion_records = lambda _path: [
+    manager._load_motion_records = lambda _path, **_kw: [
         {'time_sec': 0.02, 'motion_id': '1-2', 'value': 0.0},
         {'time_sec': 0.04, 'motion_id': '1-2', 'value': R(2.0)},
     ]
@@ -945,7 +945,7 @@ def test_plan_keeps_single_run_available_when_continuous_seam_fails():
     manager.period_sec = 0.02
     manager._motion_file_path = lambda _file_id: None
     manager._mapping_file_path = lambda _file_id: None
-    manager._load_motion_records = lambda _path: [
+    manager._load_motion_records = lambda _path, **_kw: [
         {'time_sec': 0.0, 'motion_id': 'joint', 'value': 0.0},
         {'time_sec': 1.0, 'motion_id': 'joint', 'value': R(6.0)},
     ]
@@ -990,7 +990,7 @@ def test_plan_resolves_current_axis_from_stable_alias_instead_of_saved_axis():
     manager.period_sec = 0.02
     manager._motion_file_path = lambda _file_id: None
     manager._mapping_file_path = lambda _file_id: None
-    manager._load_motion_records = lambda _path: [
+    manager._load_motion_records = lambda _path, **_kw: [
         {'time_sec': 0.0, 'motion_id': 'joint', 'value': 0.0},
         {'time_sec': 0.02, 'motion_id': 'joint', 'value': 1.0},
     ]
@@ -1075,7 +1075,7 @@ def test_plan_runs_with_out_of_range_data_and_clamps_every_command():
     manager.period_sec = 0.5
     manager._motion_file_path = lambda _file_id: None
     manager._mapping_file_path = lambda _file_id: None
-    manager._load_motion_records = lambda _path: [
+    manager._load_motion_records = lambda _path, **_kw: [
         {'time_sec': 0.0, 'motion_id': 'joint', 'value': R(-35.0)},
         {'time_sec': 0.5, 'motion_id': 'joint', 'value': 0.0},
         {'time_sec': 1.0, 'motion_id': 'joint', 'value': R(35.0)},
@@ -1125,7 +1125,7 @@ def test_motion_studio_can_use_read_only_mapping_with_generated_preview_file():
     manager.period_sec = 0.02
     manager._motion_file_path = lambda _file_id: None
     manager._mapping_file_path = lambda _file_id: None
-    manager._load_motion_records = lambda _path: [
+    manager._load_motion_records = lambda _path, **_kw: [
         {'time_sec': 0.02, 'motion_id': '1-2', 'value': 0.0},
         {'time_sec': 0.04, 'motion_id': '1-2', 'value': R(2.0)},
     ]
@@ -1163,7 +1163,7 @@ def test_normal_motion_run_still_rejects_mapping_file_mismatch():
     manager.period_sec = 0.02
     manager._motion_file_path = lambda _file_id: None
     manager._mapping_file_path = lambda _file_id: None
-    manager._load_motion_records = lambda _path: [
+    manager._load_motion_records = lambda _path, **_kw: [
         {'time_sec': 0.02, 'motion_id': '1-1', 'value': 0.0},
     ]
     manager._load_mapping = lambda _path: {
@@ -1191,7 +1191,7 @@ def test_xtouch_base_take_may_play_an_unregistered_animation():
     manager.period_sec = 0.02
     manager._motion_file_path = lambda _file_id: None
     manager._mapping_file_path = lambda _file_id: None
-    manager._load_motion_records = lambda _path: [
+    manager._load_motion_records = lambda _path, **_kw: [
         {'time_sec': 0.02, 'motion_id': '1-1', 'value': 0.0},
     ]
     manager._load_mapping = lambda _path: {
@@ -1271,7 +1271,7 @@ def test_plan_builder_reads_project_dirs_from_the_manager(tmp_path):
         asked.append(('mapping', directory)) or None
     )
     manager._load_mapping = lambda path: {'mappings': []}
-    manager._load_motion_records = lambda path: []
+    manager._load_motion_records = lambda path, **_kw: []
     manager._current_motors = lambda: [{'axis': 0}]
 
     with pytest.raises(ValueError):
@@ -1309,7 +1309,7 @@ def _shared_file_manager(mapping_motion_ids, records):
             for index, motion_id in enumerate(mapping_motion_ids)
         ],
     }
-    manager._load_motion_records = lambda _path: list(records)
+    manager._load_motion_records = lambda _path, **_kw: list(records)
     manager._current_motors = lambda: [{'axis': 0}, {'axis': 1}]
     manager._motor_for_axis = lambda axis, motors: motors[axis]
     _patch_rule('_motor_ready_error', lambda _motor: '')

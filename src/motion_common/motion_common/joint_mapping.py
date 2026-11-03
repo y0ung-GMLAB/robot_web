@@ -18,7 +18,7 @@
 from __future__ import annotations
 
 import math
-from typing import Any, Dict, Iterable, List, Mapping, Optional
+from typing import Any, Callable, Dict, Iterable, List, Mapping, Optional
 
 from . import units
 
@@ -90,8 +90,23 @@ def reference(row: Mapping[str, Any], unit: str = units.RAD) -> float:
 
 def motor_target(row: Mapping[str, Any], joint: float, unit: str = units.RAD) -> float:
     """조인트 값 → 모터 값 · 들어오고 나가는 단위가 같다(`unit`)"""
+    return motor_target_function(row, unit)(joint)
+
+
+def motor_target_function(row: Mapping[str, Any], unit: str = units.RAD) -> Callable[[float], float]:
+    """`motor_target` 을 한 줄에 대해 미리 풀어 둔 함수 · 같은 식 · 같은 값 · 수정 목록 164
+
+    재생 계획은 20 ms 마다 축마다 부른다(920 s 애니 · 5축이면 23만 번) · 그때마다 매핑 줄의 칸을
+    다시 읽던 것이 계획 짓기 시간의 절반이었다.
+    """
     offset = float(angle(row, 'offset', unit))
-    return reference(row, unit) + (float(joint) + offset) * gain(row)
+    base = reference(row, unit)
+    factor = gain(row)
+
+    def target(joint: float) -> float:
+        return base + (float(joint) + offset) * factor
+
+    return target
 
 
 def joint_from_motor(row: Mapping[str, Any], motor: float, unit: str = units.RAD) -> Optional[float]:

@@ -74,7 +74,7 @@ class _Bridge:
         #: 실행 컨텍스트는 서비스가 갖는다 (§6-20)
         self._execution_context = _FakeExecutionContext()
 
-    def motion_run_check(self, payload):
+    def motion_run_check(self, payload, timeout_sec=3.0):
         self.payload = payload
         return {'success': True, 'status': {'state': 'ready'}}
 

@@ -4,6 +4,7 @@ import json
 import math
 import threading
 import time
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
@@ -33,6 +34,8 @@ from . import motion_run_rules
 from .group_session import GroupSession
 from .motion_player import MotionPlayer
 from .plan_builder import PlanBuilder
+from .plan_cache import SingleFlightCache
+from .registered_motion_file import playlist_from_mapping
 from .motion_automation_store import (
     MotionAutomationStore,
     default_automation_state,
@@ -40,6 +43,10 @@ from .motion_automation_store import (
 )
 from .motion_group_display import apply_group_display
 from .motion_trace import DEFAULT_MAX_BYTES, DEFAULT_RETENTION_DAYS, MotionTraceRecorder
+
+
+#: 캐시를 처음 쓸 때 만드는 곳이 두 스레드에서 겹치지 않게 · 수정 목록 164
+_LAZY_CACHE_LOCK = threading.Lock()
 
 
 # 프로젝트 폴더는 `motion_common.paths` 하나가 정한다 · 파라미터로 받지 않는다 · 수정 목록 32
@@ -306,6 +313,9 @@ class MotionRunManager(Node):
             return None
 
     def destroy_node(self):
+        executor = getattr(self, '_check_executor', None)
+        if executor is not None:
+            executor.shutdown(wait=False)
         # 쓰다 만 회차 기록을 마저 쓴다
         self._motion_trace.close()
         tap = getattr(self, '_motor_status_tap', None)
@@ -479,6 +489,10 @@ class MotionRunManager(Node):
             else:
                 if command in self.COMMANDS_REQUIRING_CONTEXT:
                     self._require_execution_context(payload)
+                if command in self.BACKGROUND_COMMANDS:
+                    # 답은 작업 스레드가 다 지은 뒤에 보낸다 · 실행기는 바로 다음 요청으로 · 수정 목록 164
+                    self._submit_background(command, request, payload)
+                    return
                 response = handler(payload)
         except Exception as exc:  # Defensive boundary for the web bridge.
             command_router.log_command_failure(
@@ -490,6 +504,57 @@ class MotionRunManager(Node):
 
         self._publish_response(command_router.finalize(response, request))
         self._publish_status()
+
+    #: 실행기(단일 스레드) 밖에서 처리하고 끝나면 답하는 명령 · 수정 목록 164
+    #:
+    #: 실행 준비 검사(`check`)는 계획을 통째로 짓는다(파일 읽기 · 20 ms 재샘플 · 속도 검사) ·
+    #: 920 s × 20 조인트 파일이면 데스크톱에서도 2 s 를 넘었다 · 그동안 실행기가 막혀 뒤따른
+    #: `group_prepare` · `status` · `stop` 이 줄을 섰고 브리지가 2 s 만에 「response timeout」 으로
+    #: 끝냈다(NY 실물 2026-11-03 · 「준비 거절 · motion_run_manager response timeout」).
+    #:
+    #: 이제 검사는 작업 스레드 하나가 차례로 처리한다 · 실행기는 정지 · 상태 · 그룹 명령에 바로 답한다.
+    #: 실행 슬롯은 잡지 않는다 · 검사는 아무것도 움직이지 않는다.
+    BACKGROUND_COMMANDS = frozenset({'check'})
+
+    def _background_executor(self) -> ThreadPoolExecutor:
+        executor = getattr(self, '_check_executor', None)
+        if executor is None:
+            with _LAZY_CACHE_LOCK:
+                executor = getattr(self, '_check_executor', None)
+                if executor is None:
+                    executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix='motion-check')
+                    self._check_executor = executor
+        return executor
+
+    def _submit_background(self, command: str, request: Any, payload: Dict[str, Any]) -> None:
+        # 상태 표 차례를 받을 때 본다 · 검사 도중 실행이 시작됐거나 상태가 바뀌었으면 검사 결과로 덮지 않는다
+        status_epoch = self._status_epoch_now()
+        self._background_executor().submit(
+            self._run_background, command, request, payload, status_epoch,
+        )
+
+    def _run_background(
+        self, command: str, request: Any, payload: Dict[str, Any], status_epoch: int,
+    ) -> None:
+        try:
+            if command == 'check':
+                response = self._handle_check(payload, status_epoch=status_epoch)
+            else:
+                response = self._command_router().resolve(command)(payload)
+        except Exception as exc:  # noqa: BLE001 · 답은 꼭 보낸다 · 안 보내면 브리지가 시간 초과로만 안다
+            command_router.log_command_failure(
+                self.get_logger(), f'motion run command failed: {command}', exc,
+            )
+            response = command_router.error_response(f'motion run command failed: {exc}')
+        try:
+            self._publish_response(command_router.finalize(response, request))
+            self._publish_status()
+        except Exception as exc:  # noqa: BLE001 · 노드가 내려가는 중
+            self.get_logger().warning(f'motion run background response not sent: {exc}')
+
+    def _status_epoch_now(self) -> int:
+        with self._run_lock:
+            return int(getattr(self, '_status_epoch', 0))
 
     #: 실행 컨텍스트를 새로 세우는 명령 · 이때만 세대가 오를 수 있다
     #:
@@ -558,11 +623,67 @@ class MotionRunManager(Node):
             #
             # 시작은 사람이 누르거나 스케줄이 시킨다 · 판단 주체가 하나다.
             self._execution_context_ready = True
+            context = dict(self._execution_context)
+        self._warm_motion_cache(context)
         return {
             'success': True,
             'message': '모션 실행 허용',
             **self._execution_context,
         }
+
+    def _warm_motion_cache(self, context: Dict[str, Any]) -> None:
+        """재생 등록 애니를 미리 읽어 둔다 · 뒤에서 · 실행 중이면 안 한다 · 수정 목록 164
+
+        부팅 뒤 첫 그룹 시작(스케줄)은 준비 검사가 920 s 파일을 처음 읽는다 · 미니 PC 에서 몇 초다 ·
+        준비 확인 예산(6 s) 을 넘기 쉽다. 실행 허용이 서는 때 미리 읽어 두면 검사는 캐시에서 시작한다.
+        이미 읽은 파일은 파일 정보만 보고 끝난다 · 읽기만 한다(계획은 모터 상태가 있어야 짓는다).
+        """
+        project_id = str(context.get('project_id') or '').strip()
+        mapping_file_id = str(context.get('mapping_file_id') or '').strip()
+        # 노드 없이 만든 시험 객체(폴더 모름)는 건너뛴다
+        if not project_id or not mapping_file_id or getattr(self, 'motion_files_dir', None) is None:
+            return
+        with self._run_lock:
+            run_thread = self._run_thread
+            if run_thread is not None and run_thread.is_alive():
+                return
+            warm = getattr(self, '_warm_thread', None)
+            if warm is not None and warm.is_alive():
+                return
+            self._warm_thread = threading.Thread(
+                target=self._warm_motion_cache_now,
+                args=(project_id, mapping_file_id),
+                name='motion-cache-warm',
+                daemon=True,
+            )
+            self._warm_thread.start()
+
+    def _warm_motion_cache_now(self, project_id: str, mapping_file_id: str) -> None:
+        try:
+            _, motion_files_dir, mappings_dir = self._project_asset_dirs({'project_id': project_id})
+            mapping = self._load_mapping(self._mapping_file_path(mapping_file_id, mappings_dir))
+            motion_ids = frozenset(
+                str(row.get('motion_id') or '').strip()
+                for row in (mapping.get('mappings') or [])
+                if isinstance(row, dict)
+            ) or None
+            names = []
+            for name in playlist_from_mapping(mapping):
+                if name and name not in names:
+                    names.append(name)
+            for name in names[:self.MOTION_CACHE_SIZE]:
+                with self._run_lock:
+                    run_thread = self._run_thread
+                    if run_thread is not None and run_thread.is_alive():
+                        return
+                try:
+                    path = self._motion_file_path(name, motion_files_dir)
+                    self._load_motion_records(path, motion_ids=motion_ids)
+                except (OSError, ValueError):
+                    continue
+        except Exception as exc:  # noqa: BLE001 · 미리 읽기는 실패해도 그만이다 · 검사가 다시 읽는다
+            self.get_logger().info(f'motion cache warm-up skipped: {exc}')
+
 
     def _require_execution_context(self, payload: Dict[str, Any]) -> None:
         context_id = str(payload.get('context_id') or '').strip()
@@ -711,7 +832,14 @@ class MotionRunManager(Node):
 
 
 
-    def _handle_check(self, payload: Dict[str, Any]) -> Dict[str, Any]:
+    def _handle_check(
+        self, payload: Dict[str, Any], *, status_epoch: Optional[int] = None,
+    ) -> Dict[str, Any]:
+        """실행 준비 검사 · 계획을 지어 보고 버린다 · 지은 재료는 계획 캐시에 남아 그룹 준비가 다시 쓴다(164)
+
+        `status_epoch` · 작업 스레드에서 돌 때 요청을 받은 때의 상태 차례 · 그 사이 상태가 바뀌었으면
+        (실행 시작 · 정지 등) 검사 결과로 상태 표를 덮지 않는다 · 답은 그대로 보낸다.
+        """
         try:
             plan = self._plan_builder.build(payload)
         except Exception as exc:
@@ -727,7 +855,7 @@ class MotionRunManager(Node):
                 'capabilities': motion_run_rules._unavailable_capabilities(reason),
                 'updated_at': time.time(),
             })
-            self._set_status(status)
+            self._set_check_status(status, status_epoch)
             return {
                 'success': False,
                 'message': reason,
@@ -744,7 +872,7 @@ class MotionRunManager(Node):
             'motion_started_at': None,
             'motion_finished_at': None,
         }
-        self._set_status(status)
+        self._set_check_status(status, status_epoch)
         return {
             'success': True,
             'message': 'motion run check complete',
@@ -773,6 +901,8 @@ class MotionRunManager(Node):
         motors_snapshot = self._current_motors()
         if not motors_snapshot:
             raise ValueError('current motion_state is unavailable')
+        # 도는 중인 준비 검사의 결과가 이 실행의 상태 표를 덮지 않게 · 164
+        self._status_epoch = int(getattr(self, '_status_epoch', 0)) + 1
         self._stop_event.clear()
         self._graceful_stop_event.clear()
         return motors_snapshot
@@ -1160,9 +1290,38 @@ class MotionRunManager(Node):
     #:
     #: 파일이 바뀌면 자동으로 버린다 (`mtime` 과 크기를 같이 본다) · 그래서
     #: 스튜디오가 새로 내보낸 파일을 옛것으로 돌릴 일이 없다.
+    #:
+    #: 이 PC 매핑의 조인트만 담는다 · 키에 조인트 묶음이 들어간다 · 수정 목록 164 ·
+    #: 920 s × 20 조인트 파일이 레코드 92만 개(수백 MB)였다 · 5 조인트면 그 1/4.
     MOTION_CACHE_SIZE = 4
 
-    def _load_motion_records(self, path: Path) -> List[Dict[str, Any]]:
+    def _records_cache(self) -> SingleFlightCache:
+        """모션 파일 레코드 캐시 · `__new__` 로 만든 시험 객체도 처음 쓸 때 만든다"""
+        cache = getattr(self, '_motion_record_cache', None)
+        if cache is None:
+            with _LAZY_CACHE_LOCK:
+                cache = getattr(self, '_motion_record_cache', None)
+                if cache is None:
+                    cache = SingleFlightCache(self.MOTION_CACHE_SIZE)
+                    self._motion_record_cache = cache
+        return cache
+
+    def _motion_records_token(self, path: Any, motion_ids: Any = None) -> Optional[tuple]:
+        """이 파일 · 이 조인트 묶음의 레코드를 가리키는 키 · 파일이 바뀌면 키도 바뀐다 · 수정 목록 164
+
+        계획 캐시(`PlanBuilder`)가 이 키로 「같은 레코드」 를 알아본다 · 파일을 못 보거나
+        읽는 함수를 갈아 끼운 객체(시험 대역)면 None · 그때는 계획 캐시를 안 쓴다.
+        """
+        if path is None or '_load_motion_records' in vars(self):
+            return None
+        try:
+            stat = Path(path).stat()
+        except (OSError, TypeError, ValueError):
+            return None
+        ids = None if motion_ids is None else frozenset(str(item) for item in motion_ids)
+        return (str(path), stat.st_mtime_ns, stat.st_size, ids)
+
+    def _load_motion_records(self, path: Path, motion_ids: Any = None) -> List[Dict[str, Any]]:
         """모션 파일을 읽어 행 목록으로 · 같은 파일이면 다시 안 읽는다 · §6-173
 
         **돌려주는 목록은 매번 새로 만든다** · 부르는 쪽이 여기에 덧붙이기
@@ -1170,31 +1329,24 @@ class MotionRunManager(Node):
         돌려주면 그 값이 다음 계획에 쌓인다.
 
         행 하나하나(`dict`)는 나눠 쓴다 · 읽은 뒤에 그것을 고치는 곳은 없다.
+
+        `motion_ids` · 이 조인트만 남긴다(읽으면서 뺀다) · None 이면 전부 · 수정 목록 164 ·
+        여러 스레드가 같은 파일을 같이 찾으면 한 번만 읽는다.
         """
-        try:
-            stat = path.stat()
-            key = (str(path), stat.st_mtime_ns, stat.st_size)
-        except OSError:
-            key = None
-        if key is not None:
-            cache = getattr(self, '_motion_record_cache', None)
-            if cache is None:
-                cache = {}
-                self._motion_record_cache = cache
-            cached = cache.get(key)
-            if cached is not None:
-                return list(cached)
+        key = self._motion_records_token(path, motion_ids)
 
-        records = self._parse_motion_records(path)
+        def parse():
+            if motion_ids is None:
+                return self._parse_motion_records(path)
+            return self._parse_motion_records(path, motion_ids)
 
-        if key is not None:
-            cache = self._motion_record_cache
-            cache[key] = records
-            while len(cache) > self.MOTION_CACHE_SIZE:
-                cache.pop(next(iter(cache)))
-        return list(records)
+        return list(self._records_cache().get_or_compute(key, parse))
 
-    def _parse_motion_records(self, path: Path) -> List[Dict[str, Any]]:
+    def _parse_motion_records(self, path: Path, motion_ids: Any = None) -> List[Dict[str, Any]]:
+        keep = None if motion_ids is None else {str(item) for item in motion_ids}
+        #: 조인트 매핑에 없어 뺀 것 · 파일에 자료는 있었다는 뜻 · 「쓸 수 있는 줄 없음」 과 가른다
+        dropped = 0
+        memo: Dict[Any, bool] = {}
         first_line = ''
         with path.open('r', encoding='utf-8') as handle:
             for raw_line in handle:
@@ -1221,6 +1373,7 @@ class MotionRunManager(Node):
                 )
                 # 헤더의 `rotation_unit` · rad 파일을 deg 로 읽던 것을 막는다 · 수정 목록 6-2
                 unit = motion_table.header_rotation_unit(first_payload)
+                pairs_first = keep is not None and motion_table.pair_rows_expandable(headers)
                 records = []
                 row_index = 0
                 for raw_line in handle:
@@ -1230,14 +1383,22 @@ class MotionRunManager(Node):
                     parsed = motion_table.parse_text_row(line)
                     if parsed is None:
                         continue
+                    if pairs_first:
+                        parsed, skipped = motion_table.keep_pairs(parsed, keep, memo)
+                        dropped += skipped
                     for row in motion_table.expand_pair_rows([parsed]):
                         record, _row_error = motion_table.parse_row(row, headers)
                         if record is None:
+                            continue
+                        if keep is not None and record['motion_id'] not in keep:
+                            dropped += 1
                             continue
                         record['row_index'] = row_index
                         row_index += 1
                         records.append(record)
                 if not records:
+                    if dropped:
+                        return []
                     raise ValueError('motion file has no valid records')
                 motion_table.scale_record_values(records, unit)
                 return sorted(
@@ -1256,9 +1417,14 @@ class MotionRunManager(Node):
             record, _row_error = motion_table.parse_row(row, headers)
             if record is None:
                 continue
+            if keep is not None and record['motion_id'] not in keep:
+                dropped += 1
+                continue
             record['row_index'] = index
             records.append(record)
         if not records:
+            if dropped:
+                return []
             raise ValueError('motion file has no valid records')
         motion_table.scale_record_values(
             records, motion_table.rotation_unit_from_content(content),
@@ -1303,10 +1469,33 @@ class MotionRunManager(Node):
     def _set_status(self, status: Dict[str, Any]) -> None:
         with self._run_lock:
             self._status = status
+            self._status_epoch = int(getattr(self, '_status_epoch', 0)) + 1
         self._publish_status()
+
+    def _set_check_status(self, status: Dict[str, Any], status_epoch: Optional[int]) -> bool:
+        """검사 결과를 상태 표에 · 검사하는 사이 상태가 바뀌었거나 실행이 돌면 쓰지 않는다 · 164
+
+        검사가 실행기에서 돌 때는 그 사이에 다른 명령이 끼어들 수 없었다 · 이제 작업 스레드라
+        `group_prepare` · `start` 가 먼저 끝날 수 있다 · 늦게 끝난 검사가 「준비 완료」 로 덮으면
+        실행 중 표시가 지워진다.
+        """
+        if status_epoch is None:
+            self._set_status(status)
+            return True
+        with self._run_lock:
+            if int(getattr(self, '_status_epoch', 0)) != int(status_epoch):
+                return False
+            run_thread = getattr(self, '_run_thread', None)
+            if run_thread is not None and run_thread.is_alive():
+                return False
+            self._status = status
+            self._status_epoch = int(status_epoch) + 1
+        self._publish_status()
+        return True
 
     def _update_status(self, values: Dict[str, Any]) -> None:
         with self._run_lock:
+            self._status_epoch = int(getattr(self, '_status_epoch', 0)) + 1
             self._status = {
                 **self._status,
                 **values,
