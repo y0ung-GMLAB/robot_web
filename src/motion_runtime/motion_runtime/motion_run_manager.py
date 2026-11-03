@@ -30,7 +30,7 @@ from .motion_run_constants import (
     DYNAMIXEL_TARGET_TOLERANCE_DEG,
     TARGET_SETTLE_TIMEOUT_SEC,
 )
-from . import motion_run_rules
+from . import background_pacing, motion_run_rules
 from .group_session import GroupSession
 from .motion_player import MotionPlayer
 from .plan_builder import PlanBuilder
@@ -522,7 +522,11 @@ class MotionRunManager(Node):
             with _LAZY_CACHE_LOCK:
                 executor = getattr(self, '_check_executor', None)
                 if executor is None:
-                    executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix='motion-check')
+                    # 검사 작업 스레드도 GIL 을 나눠 쓴다 · 그룹 예약 확인 · 재생 틱이 굶지 않게 · 수정 목록 171
+                    executor = ThreadPoolExecutor(
+                        max_workers=1, thread_name_prefix='motion-check',
+                        initializer=background_pacing.pace_current_thread,
+                    )
                     self._check_executor = executor
         return executor
 
