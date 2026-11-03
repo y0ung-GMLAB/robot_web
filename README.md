@@ -174,7 +174,7 @@ curl -fsSL https://raw.githubusercontent.com/y0ung-GMLAB/robot_web/humble/script
 
 - sudo 비밀번호 1회 · 시간대 질문 1회(Enter = 현재) · 모터 랜카드는 **IP 없는 유선 포트**를 자동으로 고릅니다(둘 이상이면 묻습니다)
 - 아래 2~8단계를 전부 대신합니다 · 자동 업데이트·절전·화면 잠금 끄기 · 자동 로그인 · 로그아웃해도 유지(linger) ·
-  EtherLab 설치(커널 업데이트 뒤 자동 재빌드) · `/etc/ethercat.conf`(MAC 기준) · 방화벽 같은 망 허용 · 코드 받기 · 빌드 · 서비스 등록
+  EtherLab 설치(커널 업데이트 뒤 자동 재빌드) · `ethercat.conf`(MAC 기준 · ethercat 서비스가 읽는 자리 · 새로 깐 PC 는 `/usr/local/etc/ethercat.conf`) · 방화벽 같은 망 허용 · 코드 받기 · 빌드 · 서비스 등록
 - 첫 설치는 중간에 **재부팅 1회**가 필요합니다 · 15초 뒤 스스로 재부팅하고, 자동 로그인 뒤 **저절로 이어서** 끝냅니다
   (기록 · `~/ros2_ws/log/site_setup/`) · 끝에 자가 점검표가 찍힙니다
 - **수작업으로 남는 것** · 1단계 BIOS(전원 복구 시 켜기) · 웹에서 로봇 팩 업로드 · 모터 관리 → 전체 모터 검색 → 설정 적용

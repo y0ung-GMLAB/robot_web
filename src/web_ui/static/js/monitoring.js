@@ -62,7 +62,9 @@ function statusClass(motor) {
 }
 
 function errorClass(motor) {
-  return Number(motor.errorcode || 0) !== 0 ? 'status-danger' : '';
+  if (Number(motor.errorcode || 0) === 0) return '';
+  // MINAS 경고(A0 과부하 경고 등 · Fault 아님)는 경고 색 · 수정 목록 166
+  return motor.error_kind === 'warning' && !motor.fault ? 'status-warning' : 'status-danger';
 }
 
 function axisText(motor) {

@@ -50,6 +50,30 @@ def test_error_text_says_no_error_only_for_zero():
     assert motor_values.error_text(0x21, '') == 'Error 33.0'
 
 
+@pytest.mark.parametrize(('raw', 'text', 'kind'), [
+    # 실물 2026-11-02 NY · 경고 A0(과부하 경고)이 「Error 160.0」 · Err16 이 「Error 16.0」 으로 보였다 · 수정 목록 166
+    (0xFFA0, '경고 A0 · 과부하 경고', 'warning'),
+    (0xFFA3, '경고 A3 · 팬 경고', 'warning'),
+    (0xFFA6, '경고 A6', 'warning'),                     # 이름 미확인 경고는 번호만
+    (0xFF10, 'Err16 · 과부하·토크 포화', 'alarm'),
+    (0xFF50, 'Err80 · EtherCAT ESM·동기·PDO 오류', 'alarm'),   # 실측 Err80.0 = 0xFF50
+    (0xFF58, 'Err88 · 전원·제어모드·ESM 운전 오류', 'alarm'),
+    (0xFF28, 'Err40 · 절대 엔코더 시스템 다운', 'alarm'),     # minas_absolute.ERR40_CODE
+    (0xFF11, 'Err17', 'alarm'),                         # 표에 없는 알람은 번호만
+    (0, 'No error', ''),
+])
+def test_minas_codes_read_as_alarm_or_warning(raw, text, kind):
+    code = motor_values.normalized_errorcode(raw, {'motor_type': 'minas'})
+    assert motor_values.minas_error_text(code) == text
+    assert motor_values.minas_error_kind(code) == kind
+
+
+def test_minas_code_outside_alarm_and_warning_keeps_the_old_text():
+    code = motor_values.normalized_errorcode(0xFF00, {'motor_type': 'minas'})
+    assert motor_values.minas_error_text(code) == 'Error 65280.0'
+    assert motor_values.minas_error_kind(code) == ''
+
+
 def test_minas_high_byte_marker_is_stripped():
     """MINAS는 상위 바이트에 표식을 얹는다 · 그대로 보이면 없는 코드가 된다."""
     metadata = {'motor_type': 'minas'}

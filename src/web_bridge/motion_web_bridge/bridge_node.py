@@ -697,9 +697,40 @@ class MotionWebBridge(Node):
         with self._lock:
             self._motion_state = payload
             self._motion_state_received_at = time.time()
-        self._motor_event_log.record_motor_error_transitions(payload)
+        self._motor_event_log.record_motor_error_transitions(
+            payload, lambda: self._joint_names_for_motor_events(payload),
+        )
         self._motor_event_log.record_minas_absolute_transition(payload)
         self._motor_event_log.record_mailbox_stuck_transition(payload)   # 멈춘 메일박스 · 139 ③
+
+    def _joint_names_for_motor_events(self, payload: Dict[str, Any]) -> Dict[int, str]:
+        """운영 로그 「0번 모터 · 조인트 이름」 · 적용된 조인트 매핑에서 축 → 조인트 이름 · 수정 목록 167
+
+        운영 로그가 새로 적을 오류가 있을 때만 부른다(`record_motor_error_transitions`) ·
+        매핑은 실행 컨텍스트마다 한 번 읽어 둔 것(`_monitoring_mapping_rows_for_context`) · 못 찾으면 빈 표
+        """
+        motors = payload.get('motors') if isinstance(payload, dict) else None
+        if not isinstance(motors, list):
+            return {}
+        try:
+            rows = self._monitoring_mapping_rows_for_context(
+                self._execution_context.status(validate_files=False),
+                self.project_repository.selected_project_id(),
+            )
+            probe = {'motors': [dict(motor) for motor in motors if isinstance(motor, dict)]}
+            add_monitoring_motion_values(probe, rows, {})
+        except (AttributeError, KeyError, OSError, TypeError, ValueError):
+            return {}
+        names: Dict[int, str] = {}
+        for motor in probe['motors']:
+            joint = str(motor.get('motion_id') or '').strip()
+            try:
+                axis = int(motor.get('controller_index'))
+            except (TypeError, ValueError):
+                continue
+            if joint:
+                names[axis] = joint
+        return names
 
     def _record_upper_service_crash(self) -> None:
         """launch 가 남긴 비정상 종료 표지를 모터 이벤트로 옮긴다 · 수정 목록 72"""

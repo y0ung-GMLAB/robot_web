@@ -8,7 +8,7 @@
 #   SITE_TIMEZONE=Asia/Seoul  시간대 · 없으면 터미널에서 묻고, 물을 수 없으면 현재 값 유지
 #   SITE_ETHERCAT_NIC=enp2s0  EtherCAT 랜카드 지정 · 없으면 자동 감지(IP 없는 유선 포트)
 #   SITE_ETHERCAT_NIC=none    EtherCAT 랜카드 안 씀 (직렬 서보만 쓰는 PC · 라즈베리파이) · 이미 묶였으면 풀어 줌
-#   SITE_RESET_ETHERCAT=1   이미 적힌 /etc/ethercat.conf 를 다시 쓴다
+#   SITE_RESET_ETHERCAT=1   이미 적힌 ethercat.conf(서비스가 읽는 자리 · /usr/local/etc 또는 /etc)를 다시 쓴다
 #   SITE_ETHERLAB_VERSION   EtherLab 태그 (기본 1.6.9 · README 검증 버전)
 #   SITE_SCAN=1             자가 점검에서 모터 스캔 1회 (최대 50초)
 #
@@ -28,13 +28,24 @@ SITE_ETHERLAB_REPO="${SITE_ETHERLAB_REPO:-https://gitlab.com/etherlab.org/etherc
 SITE_STATE_DIR="${SITE_STATE_DIR:-${HOME}/.cache/motion_site}"
 SITE_SETUP_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
+# EtherCAT 설정 파일 · 여기 값은 처음 짐작일 뿐 · 랜카드를 적을 때(site_ethercat_configure) 서비스가
+#   실제로 읽는 자리(ethercatctl 의 ETHERCAT_CONFIG)로 다시 고른다 · 수정 목록 165
+#   (새 PC 는 source 할 때 IgH 가 아직 없어 /etc 로 짐작 → prefix 없이 깐 IgH 는 /usr/local/etc 를 읽음 → 「No network cards」)
+#   밖에서 SITE_ETHERCAT_CONF 를 주면(시험 · 손으로) 그 파일 그대로
+#   (두 번 source 해도 처음 짐작을 「밖에서 준 값」 으로 착각하지 않게 앞 값을 이어 받는다)
+SITE_ETHERCAT_CONF_AUTO="${SITE_ETHERCAT_CONF_AUTO-}"
 if [[ -z "${SITE_ETHERCAT_CONF:-}" ]]; then
   if [[ -f /usr/local/etc/ethercat.conf && ! -f /etc/ethercat.conf ]]; then
     SITE_ETHERCAT_CONF=/usr/local/etc/ethercat.conf
   else
     SITE_ETHERCAT_CONF=/etc/ethercat.conf
   fi
+  SITE_ETHERCAT_CONF_AUTO="${SITE_ETHERCAT_CONF}"
 fi
+# 같은 PC 에 남을 수 있는 다른 ethercat.conf 자리 · 서로 MAC 이 다르면 경고 · 시험용 덮어쓰기
+SITE_ETHERCAT_CONF_CANDIDATES="${SITE_ETHERCAT_CONF_CANDIDATES:-/etc/ethercat.conf /usr/local/etc/ethercat.conf /opt/etherlab/etc/ethercat.conf /usr/local/etherlab/etc/ethercat.conf}"
+# ethercat.service 를 못 읽을 때(유닛 아직 안 읽힘) 볼 ethercatctl 자리 · 시험용 덮어쓰기
+SITE_ETHERCATCTL_CANDIDATES="${SITE_ETHERCATCTL_CANDIDATES:-/usr/local/sbin/ethercatctl /opt/etherlab/sbin/ethercatctl /usr/local/etherlab/sbin/ethercatctl /usr/sbin/ethercatctl}"
 
 site_note() { echo "  · $*"; }
 site_warn() { echo "  !! $*" >&2; }
@@ -452,11 +463,11 @@ site_etherlab_apply_patch() {
   site_note "IgH 패치 적용 · $(basename "${SITE_ETHERLAB_PATCH}") (SDO 사전 자동 읽기 끔 · sdo_dict=0)"
 }
 
-# 돌고 있는(또는 부팅 때 돌) ethercat.service 가 읽는 ethercat.conf · stdout · 못 찾으면 빈 줄
-#   ExecStart 의 `ethercatctl -c 설정` → ethercatctl 안의 ETHERCAT_CONFIG= (configure 의 sysconfdir) →
-#   ethercatctl 옆 ../etc → 아는 자리들
-site_ethercat_active_conf() {
-  local exec_line ctl conf
+# ethercat.service 가 읽을 ethercat.conf 자리 · 파일이 아직 없어도 자리만 · stdout · 못 찾으면 빈 줄 · 165
+#   ExecStart 의 `ethercatctl -c 설정`(파일이 있을 때) → ethercatctl 안의 ETHERCAT_CONFIG= (configure 의 sysconfdir) →
+#   ethercatctl 옆 ../etc · 서비스를 못 읽으면(방금 깔아 유닛이 아직 안 읽힘) 아는 ethercatctl 자리에서
+site_ethercat_service_conf() {
+  local exec_line ctl="" conf candidate
   exec_line="$({ systemctl cat ethercat 2>/dev/null || true; } | sed -n 's/^ExecStart=[-@!+:]*//p' | tail -1)"
   if [[ -n "${exec_line}" ]]; then
     conf="$(printf '%s\n' "${exec_line}" | awk '{ for (i = 1; i < NF; i++) if ($i == "-c") { print $(i + 1); exit } }')"
@@ -465,18 +476,33 @@ site_ethercat_active_conf() {
       return 0
     fi
     ctl="${exec_line%% *}"
-    if [[ -f "${ctl}" ]]; then
-      conf="$(sed -n 's/^[[:space:]]*ETHERCAT_CONFIG="\{0,1\}\([^"$[:space:]]*\)"\{0,1\}[[:space:]]*$/\1/p' "${ctl}" | tail -1)"
-      if [[ -n "${conf}" && -f "${conf}" ]]; then
-        echo "${conf}"
-        return 0
+  fi
+  if [[ -z "${ctl}" || ! -f "${ctl}" ]]; then
+    ctl=""
+    for candidate in ${SITE_ETHERCATCTL_CANDIDATES}; do
+      if [[ -f "${candidate}" ]]; then
+        ctl="${candidate}"
+        break
       fi
-      conf="$(dirname "$(dirname "${ctl}")")/etc/ethercat.conf"
-      if [[ -f "${conf}" ]]; then
-        echo "${conf}"
-        return 0
-      fi
-    fi
+    done
+  fi
+  [[ -n "${ctl}" ]] || return 0
+  conf="$(sed -n 's/^[[:space:]]*ETHERCAT_CONFIG="\{0,1\}\([^"$[:space:]]*\)"\{0,1\}[[:space:]]*$/\1/p' "${ctl}" | tail -1)"
+  if [[ -n "${conf}" ]]; then
+    echo "${conf}"
+    return 0
+  fi
+  echo "$(dirname "$(dirname "${ctl}")")/etc/ethercat.conf"
+}
+
+# 돌고 있는(또는 부팅 때 돌) ethercat.service 가 읽는 ethercat.conf · 있는 파일만 · stdout · 못 찾으면 빈 줄
+#   서비스 자리(site_ethercat_service_conf)에 파일이 없으면 아는 자리들
+site_ethercat_active_conf() {
+  local conf
+  conf="$(site_ethercat_service_conf)"
+  if [[ -n "${conf}" && -f "${conf}" ]]; then
+    echo "${conf}"
+    return 0
   fi
   for conf in "${SITE_ETHERCAT_CONF}" /opt/etherlab/etc/ethercat.conf /usr/local/etherlab/etc/ethercat.conf /etc/ethercat.conf; do
     if [[ -f "${conf}" ]]; then
@@ -668,47 +694,118 @@ CONF
   site_note "EtherCAT 랜카드 안 씀 · 직렬 서보만 · 나중에 쓰려면 bash scripts/ethercat_nic.sh <랜카드 이름>"
 }
 
+# 랜카드를 적을 ethercat.conf · 밖에서 준 SITE_ETHERCAT_CONF 는 그대로 · 아니면 서비스가 읽는 자리 · 165
+#   IgH 를 깐 뒤(site_ethercat_install 다음)에 불러야 맞는 자리가 나온다 · 못 찾으면 처음 짐작(SITE_ETHERCAT_CONF)
+site_ethercat_target_conf() {
+  local conf
+  if [[ "${SITE_ETHERCAT_CONF}" != "${SITE_ETHERCAT_CONF_AUTO}" ]]; then
+    echo "${SITE_ETHERCAT_CONF}"
+    return 0
+  fi
+  conf="$(site_ethercat_service_conf)"
+  echo "${conf:-${SITE_ETHERCAT_CONF}}"
+}
+
+# 파일의 MASTER0_DEVICE 값 · 비었거나 파일이 없으면 빈 줄
+site_ethercat_mac_in() {
+  [[ -f "$1" ]] || return 0
+  sed -n 's/^MASTER0_DEVICE="\([^"]\{1,\}\)".*$/\1/p' "$1" 2>/dev/null | tail -1
+}
+
+# 서비스가 안 읽는 다른 ethercat.conf 에 다른 MAC 이 적혀 있으면 경고만 · 165
+site_ethercat_conf_mismatch_warn() {
+  local target="$1" mine other theirs
+  mine="$(site_ethercat_mac_in "${target}")"
+  for other in ${SITE_ETHERCAT_CONF_CANDIDATES}; do
+    [[ "${other}" == "${target}" ]] && continue
+    theirs="$(site_ethercat_mac_in "${other}")"
+    [[ -z "${theirs}" || "${theirs}" == "${mine}" ]] && continue
+    site_warn "EtherCAT 설정 파일이 둘 · 서비스가 읽는 것 ${target} (MASTER0_DEVICE=\"${mine:-비어 있음}\") · 안 읽히는 것 ${other} (\"${theirs}\") · 헷갈리지 않게 ${other} 정리 · 수정 목록 165"
+  done
+}
+
+# 서비스가 안 읽는 다른 자리에 이미 적힌 것 · stdout "자리 MAC" · 「안 씀」 이면 "자리 none" · 없으면 빈 줄 · 165
+#   예전 설치가 /etc/ethercat.conf 에 적었는데 서비스는 /usr/local/etc/ethercat.conf 를 읽던 PC 를 고칠 때
+site_ethercat_conf_elsewhere() {
+  local target="$1" other mac
+  for other in ${SITE_ETHERCAT_CONF_CANDIDATES}; do
+    [[ "${other}" == "${target}" || ! -f "${other}" ]] && continue
+    if grep -qxF "${SITE_ETHERCAT_NONE_MARK}" "${other}"; then
+      echo "${other} none"
+      return 0
+    fi
+    mac="$(site_ethercat_mac_in "${other}")"
+    if [[ -n "${mac}" ]]; then
+      echo "${other} ${mac}"
+      return 0
+    fi
+  done
+}
+
 site_ethercat_configure() {
+  local conf
+  conf="$(site_ethercat_target_conf)"
+  [[ "${SITE_ETHERCAT_CONF}" == "${SITE_ETHERCAT_CONF_AUTO}" ]] && SITE_ETHERCAT_CONF_AUTO="${conf}"
+  SITE_ETHERCAT_CONF="${conf}"
+  site_note "EtherCAT 설정 파일 · ${conf} (ethercat 서비스가 읽는 자리)"
   if [[ "${SITE_ETHERCAT_NIC:-}" == "none" ]]; then
     site_ethercat_release
     return 0
   fi
-  if [[ -z "${SITE_ETHERCAT_NIC:-}" && "${SITE_RESET_ETHERCAT:-0}" != "1" && -f "${SITE_ETHERCAT_CONF}" ]] \
-     && grep -qxF "${SITE_ETHERCAT_NONE_MARK}" "${SITE_ETHERCAT_CONF}"; then
-    site_note "EtherCAT 랜카드 안 씀 유지 (${SITE_ETHERCAT_CONF}) · 쓰려면 bash scripts/ethercat_nic.sh <랜카드 이름>"
+  if [[ -z "${SITE_ETHERCAT_NIC:-}" && "${SITE_RESET_ETHERCAT:-0}" != "1" && -f "${conf}" ]]      && grep -qxF "${SITE_ETHERCAT_NONE_MARK}" "${conf}"; then
+    site_note "EtherCAT 랜카드 안 씀 유지 (${conf}) · 쓰려면 bash scripts/ethercat_nic.sh <랜카드 이름>"
     return 0
   fi
-  if [[ -f "${SITE_ETHERCAT_CONF}" ]] && grep -q '^MASTER0_DEVICE="[^"]\+"' "${SITE_ETHERCAT_CONF}" \
-     && [[ "${SITE_RESET_ETHERCAT:-0}" != "1" ]]; then
-    site_note "EtherCAT 설정 유지 · $(grep '^MASTER0_DEVICE' "${SITE_ETHERCAT_CONF}") (${SITE_ETHERCAT_CONF}) · 다시 쓰려면 SITE_RESET_ETHERCAT=1"
+  if [[ -n "$(site_ethercat_mac_in "${conf}")" && "${SITE_RESET_ETHERCAT:-0}" != "1" ]]; then
+    site_note "EtherCAT 설정 유지 · $(grep '^MASTER0_DEVICE' "${conf}") (${conf}) · 다시 쓰려면 SITE_RESET_ETHERCAT=1"
   else
-    local nic="${SITE_ETHERCAT_NIC:-}" mac="" picked
-    if [[ -z "${nic}" ]]; then
+    local nic="${SITE_ETHERCAT_NIC:-}" mac="" picked elsewhere=""
+    # 랜카드 지정 없이 다시 돌릴 때 · 다른 자리(서비스가 안 읽던 파일)에 적힌 것을 이어 쓴다 · 165
+    if [[ -z "${nic}" && "${SITE_RESET_ETHERCAT:-0}" != "1" ]]; then
+      elsewhere="$(site_ethercat_conf_elsewhere "${conf}")"
+    fi
+    if [[ "${elsewhere#* }" == "none" ]]; then
+      site_note "EtherCAT 랜카드 안 씀 유지 (${elsewhere%% *} 에 적힘) · 쓰려면 bash scripts/ethercat_nic.sh <랜카드 이름>"
+      return 0
+    fi
+    if [[ -n "${elsewhere}" ]]; then
+      mac="${elsewhere#* }"
+      nic="$(sed -n 's/^UPDOWN_INTERFACES="\{0,1\}\([^" ]*\).*$/\1/p' "${elsewhere%% *}" | tail -1)"
+      if [[ -z "${nic}" ]]; then
+        nic="$({ ip -br link 2>/dev/null || true; } | awk -v mac="${mac}" 'tolower($3) == tolower(mac) { sub(/@.*/, "", $1); print $1; exit }')"
+      fi
+      echo "EtherCAT 랜카드 · ${elsewhere%% *} 에 적힌 것을 서비스가 읽는 ${conf} 로 옮김 · ${nic:-이름 미상} (${mac})"
+    fi
+    if [[ -z "${nic}" && -z "${mac}" ]]; then
       picked="$(site_pick_ethercat_nic_from "$(ip -br link 2>/dev/null || true)" "$(ip -o -4 addr show scope global 2>/dev/null || true)" "$(ip route show default 2>/dev/null | awk '{ for (i = 1; i <= NF; i++) if ($i == "dev") print $(i + 1); exit }')")"
       nic="${picked%% *}"
     fi
-    if [[ -z "${nic}" ]]; then
+    if [[ -z "${nic}" && -z "${mac}" ]]; then
       local candidates
-      candidates="$({ ip -br link 2>/dev/null || true; } | awk '$1 ~ /^(en|eth)/ { sub(/@.*/, "", $1); print $1 }' | tr '\n' ' ')"
+      candidates="$({ ip -br link 2>/dev/null || true; } | awk '$1 ~ /^(en|eth)/ { sub(/@.*/, "", $1); print $1 }' | tr '
+' ' ')"
       nic="$(site_ask "모터(EtherCAT) 랜카드 이름 (후보: ${candidates:-없음} · 다이나믹셀만 쓰면 Enter)" "")"
     fi
-    if [[ -z "${nic}" ]]; then
+    if [[ -z "${nic}" && -z "${mac}" ]]; then
       site_note "EtherCAT 랜카드 없음 · 설정 건너뜀 (다이나믹셀 전용 · 나중에 SITE_ETHERCAT_NIC=이름 으로 다시 실행)"
       return 0
     fi
-    mac="$({ ip -br link show "${nic}" 2>/dev/null || true; } | awk '{ print $3 }')"
+    if [[ -z "${mac}" ]]; then
+      mac="$({ ip -br link show "${nic}" 2>/dev/null || true; } | awk '{ print $3 }')"
+    fi
     if [[ -z "${mac}" && "${SITE_DRY_RUN}" != "1" ]]; then
       site_warn "랜카드 ${nic} 의 MAC 을 읽지 못함 · 설정 건너뜀"
       return 0
     fi
-    echo "EtherCAT 랜카드 · ${nic} (${mac:-MAC 미상}) · 이름이 바뀌어도 MAC 으로 잡는다"
-    site_write_root_file "${SITE_ETHERCAT_CONF}" <<CONF
-# robot_web 설치 스크립트가 적음 · $(date +%F) · 모터 전용 랜카드 ${nic}
+    echo "EtherCAT 랜카드 · ${nic:-이름 미상} (${mac:-MAC 미상}) · 이름이 바뀌어도 MAC 으로 잡는다 · ${conf}"
+    site_write_root_file "${conf}" <<CONF
+# robot_web 설치 스크립트가 적음 · $(date +%F) · 모터 전용 랜카드 ${nic:-이름 미상}
 MASTER0_DEVICE="${mac}"
 DEVICE_MODULES="generic"
 UPDOWN_INTERFACES="${nic}"
 CONF
   fi
+  site_ethercat_conf_mismatch_warn "${conf}"
   site_run sudo systemctl enable --now ethercat || site_warn "ethercat 서비스 시작 실패 · 모터 전원·랜선 확인 후 sudo systemctl restart ethercat"
 }
 
@@ -811,7 +908,15 @@ site_selfcheck() {
   for unit in motion-control motion-motor motion-coordination; do
     site_check_row "$(systemctl --user is-active --quiet "${unit}.service" && echo 1 || echo 0)" "${unit}.service" "$(systemctl --user is-active "${unit}.service" 2>/dev/null || echo unknown)"
   done
-  if [[ -f "${SITE_ETHERCAT_CONF}" ]] && grep -q '^MASTER0_DEVICE="[^"]\+"' "${SITE_ETHERCAT_CONF}"; then
+  # 서비스가 실제로 읽는 설정 파일을 본다 · 다른 자리에만 랜카드가 적혀 있으면 [확인] · 수정 목록 165
+  local ecconf ecother
+  ecconf="$(site_ethercat_target_conf)"
+  ecother="$(site_ethercat_conf_elsewhere "${ecconf}")"
+  if grep -qxsF "${SITE_ETHERCAT_NONE_MARK}" "${ecconf}"; then
+    site_check_row 1 "EtherCAT" "랜카드 안 씀 (직렬 서보 전용 · ${ecconf})"
+  elif [[ -z "$(site_ethercat_mac_in "${ecconf}")" && -n "${ecother}" && "${ecother#* }" != "none" ]]; then
+    site_check_row 0 "EtherCAT 설정 파일" "랜카드가 ${ecother%% *} 에만 적힘 · 서비스는 ${ecconf} 를 읽음 → No network cards · bash scripts/ethercat_nic.sh · 수정 목록 165"
+  elif [[ -n "$(site_ethercat_mac_in "${ecconf}")" ]]; then
     local phase
     phase="$({ ethercat master 2>/dev/null || true; } | awk -F: '/Phase/ { gsub(/^ +/, "", $2); print $2; exit }')"
     site_check_row "$([[ -n "${phase}" ]] && echo 1 || echo 0)" "EtherCAT master" "${phase:-응답 없음 · 모터 전원·랜선·sudo systemctl status ethercat}"
