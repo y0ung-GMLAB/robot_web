@@ -75,6 +75,10 @@ def rate_limit_error(axes, samples, period_sec: float) -> str:
     if len(samples) < 2 or period_sec <= 0:
         return ''
     problems = []
+    # 배열 묶음(`PackedSamples`)이면 사전을 만들지 않고 칸을 바로 본다 · 같은 값 · 수정 목록 170
+    time_column = getattr(samples, 'time_column', None)
+    motion_column = getattr(samples, 'motion_column', None)
+    packed = callable(time_column) and callable(motion_column)
     for axis in axes:
         row = axis.get('row') or {}
         # 상한·재는 값 모두 rad · 글에만 deg · 수정 목록 6
@@ -83,8 +87,12 @@ def rate_limit_error(axes, samples, period_sec: float) -> str:
         if not max_velocity and not max_acceleration:
             continue
         motion_id = str(axis['motion_id'])
-        values = [float(sample['motion_values'][motion_id]) for sample in samples]
-        times = [float(sample['time_sec']) for sample in samples]
+        if packed:
+            values = [float(value) for value in motion_column(motion_id)]
+            times = [float(value) for value in time_column()]
+        else:
+            values = [float(sample['motion_values'][motion_id]) for sample in samples]
+            times = [float(sample['time_sec']) for sample in samples]
         # (속도, 시각, 뒤 표본 번호) · 번호는 범위로 잘린 곳인지 볼 때 · 168
         velocities = []
         for index in range(1, len(values)):

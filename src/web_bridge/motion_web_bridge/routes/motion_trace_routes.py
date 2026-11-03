@@ -1,6 +1,8 @@
 from fastapi import FastAPI
 from fastapi.responses import FileResponse
 
+from motion_web_bridge.json_body import json_response
+
 
 def register_motion_trace_routes(app: FastAPI, bridge, project_call) -> None:
     """회차별 모션 기록 · 목록·그래프·CSV 내려받기 · 디스크 일은 모두 스레드에서."""
@@ -15,7 +17,8 @@ def register_motion_trace_routes(app: FastAPI, bridge, project_call) -> None:
 
     @app.get('/api/motion-trace/trace')
     async def motion_trace(date: str, file: str):
-        return await project_call(bridge.motion_trace.trace, date, file)
+        # 그래프 점 · 글 만들기까지 스레드에서 · 수정 목록 170
+        return await project_call(lambda: json_response(bridge.motion_trace.trace(date, file)))
 
     @app.get('/api/motion-trace/download')
     async def motion_trace_download(date: str, file: str):

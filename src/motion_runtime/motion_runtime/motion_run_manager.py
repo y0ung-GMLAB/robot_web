@@ -13,7 +13,7 @@ import yaml
 from motion_common import paths as common_paths
 from motion_common.execution_context import confirm_context_id
 from motion_common.paths import project_dir_for
-from motion_common import command_router, generation as generation_mod, latest_tap, motion_table, smoothing, topics, wire_units
+from motion_common import command_router, generation as generation_mod, latest_tap, motion_table, motion_tracks, smoothing, topics, wire_units
 from motion_common.values import finite_float, optional_int
 from motion_control_msgs.msg import MotorStatus
 from rclpy.node import Node
@@ -678,7 +678,7 @@ class MotionRunManager(Node):
                         return
                 try:
                     path = self._motion_file_path(name, motion_files_dir)
-                    self._load_motion_records(path, motion_ids=motion_ids)
+                    self._load_motion_tracks(path, motion_ids=motion_ids)
                 except (OSError, ValueError):
                     continue
         except Exception as exc:  # noqa: BLE001 · 미리 읽기는 실패해도 그만이다 · 검사가 다시 읽는다
@@ -1293,7 +1293,12 @@ class MotionRunManager(Node):
     #:
     #: 이 PC 매핑의 조인트만 담는다 · 키에 조인트 묶음이 들어간다 · 수정 목록 164 ·
     #: 920 s × 20 조인트 파일이 레코드 92만 개(수백 MB)였다 · 5 조인트면 그 1/4.
+    #:
+    #: 수정 목록 170 · 레코드를 사전으로 들지 않고 조인트별 배열(`motion_tracks`)로 든다 · 레코드 하나
+    #: 약 380 B → 32 B · 920 s × 5 조인트 파일 하나 88 MB → 7 MB · 바이트 예산도 둔다(아래).
     MOTION_CACHE_SIZE = 4
+    #: 레코드 캐시 바이트 예산 · 920 s × 20 조인트를 다 읽어도(29 MB) 넷이 들어간다 · 넘으면 오래된 것부터
+    MOTION_CACHE_MAX_BYTES = 128 * 1024 * 1024
 
     def _records_cache(self) -> SingleFlightCache:
         """모션 파일 레코드 캐시 · `__new__` 로 만든 시험 객체도 처음 쓸 때 만든다"""
@@ -1302,7 +1307,7 @@ class MotionRunManager(Node):
             with _LAZY_CACHE_LOCK:
                 cache = getattr(self, '_motion_record_cache', None)
                 if cache is None:
-                    cache = SingleFlightCache(self.MOTION_CACHE_SIZE)
+                    cache = SingleFlightCache(self.MOTION_CACHE_SIZE, max_bytes=self.MOTION_CACHE_MAX_BYTES)
                     self._motion_record_cache = cache
         return cache
 
@@ -1321,14 +1326,11 @@ class MotionRunManager(Node):
         ids = None if motion_ids is None else frozenset(str(item) for item in motion_ids)
         return (str(path), stat.st_mtime_ns, stat.st_size, ids)
 
-    def _load_motion_records(self, path: Path, motion_ids: Any = None) -> List[Dict[str, Any]]:
-        """모션 파일을 읽어 행 목록으로 · 같은 파일이면 다시 안 읽는다 · §6-173
+    def _load_motion_tracks(self, path: Path, motion_ids: Any = None) -> motion_tracks.MotionTracks:
+        """모션 파일을 조인트별 배열로 · 같은 파일이면 다시 안 읽는다 · §6-173 · 수정 목록 170
 
-        **돌려주는 목록은 매번 새로 만든다** · 부르는 쪽이 여기에 덧붙이기
-        때문이다 (`plan_builder` 가 초기 이동 대체값을 넣는다) · 같은 목록을
-        돌려주면 그 값이 다음 계획에 쌓인다.
-
-        행 하나하나(`dict`)는 나눠 쓴다 · 읽은 뒤에 그것을 고치는 곳은 없다.
+        **돌려준 것은 캐시 것 그대로다 · 고치지 않는다** · 계획은 조인트 사전(`tracks`)을 얕게
+        복사해서 덧붙인다(초기 이동 대체값).
 
         `motion_ids` · 이 조인트만 남긴다(읽으면서 뺀다) · None 이면 전부 · 수정 목록 164 ·
         여러 스레드가 같은 파일을 같이 찾으면 한 번만 읽는다.
@@ -1340,15 +1342,30 @@ class MotionRunManager(Node):
                 return self._parse_motion_records(path)
             return self._parse_motion_records(path, motion_ids)
 
-        return list(self._records_cache().get_or_compute(key, parse))
+        return self._records_cache().get_or_compute(key, parse)
 
-    def _parse_motion_records(self, path: Path, motion_ids: Any = None) -> List[Dict[str, Any]]:
+    def _load_motion_records(self, path: Path, motion_ids: Any = None) -> List[Dict[str, Any]]:
+        """옛 모양 · 레코드 사전 목록(시각 · 조인트 이름 · 줄 번호 순) · 캐시는 `_load_motion_tracks`
+
+        **돌려주는 목록과 사전은 매번 새로 만든다** · 부르는 쪽이 덧붙여도 캐시에 번지지 않는다.
+        재생 계획은 이것을 쓰지 않는다(배열을 바로 본다) · 시험 · 다른 도구용.
+        """
+        tracks = self._load_motion_tracks(path, motion_ids)
+        return tracks.records() if isinstance(tracks, motion_tracks.MotionTracks) else list(tracks)
+
+    def _parse_motion_records(self, path: Path, motion_ids: Any = None) -> motion_tracks.MotionTracks:
+        """파일 → 조인트별 배열 · 옛 레코드 사전과 같은 값 · 같은 순서 · 수정 목록 170
+
+        JSON Lines(머리 줄 + 프레임마다 한 줄)는 한 줄씩 읽어 바로 배열에 넣는다 · 파일 글 전체도,
+        레코드 사전 목록도 만들지 않는다. 그 밖의 모양(통짜 JSON 등)은 옛 길로 읽어서 옮긴다.
+        """
         keep = None if motion_ids is None else {str(item) for item in motion_ids}
         #: 조인트 매핑에 없어 뺀 것 · 파일에 자료는 있었다는 뜻 · 「쓸 수 있는 줄 없음」 과 가른다
         dropped = 0
         memo: Dict[Any, bool] = {}
         first_line = ''
-        with path.open('r', encoding='utf-8') as handle:
+        # 큰 버퍼 · 기본 8 KB 면 읽는 동안 실행기 스레드가 GIL 을 못 받아 굶는다 · 수정 목록 170
+        with motion_table.open_text(path) as handle:
             for raw_line in handle:
                 line = raw_line.strip()
                 if line and not line.startswith('#'):
@@ -1374,7 +1391,7 @@ class MotionRunManager(Node):
                 # 헤더의 `rotation_unit` · rad 파일을 deg 로 읽던 것을 막는다 · 수정 목록 6-2
                 unit = motion_table.header_rotation_unit(first_payload)
                 pairs_first = keep is not None and motion_table.pair_rows_expandable(headers)
-                records = []
+                tracks: Dict[str, motion_tracks.JointTrack] = {}
                 row_index = 0
                 for raw_line in handle:
                     line = raw_line.strip()
@@ -1390,25 +1407,24 @@ class MotionRunManager(Node):
                         record, _row_error = motion_table.parse_row(row, headers)
                         if record is None:
                             continue
-                        if keep is not None and record['motion_id'] not in keep:
+                        motion_id = record['motion_id']
+                        if keep is not None and motion_id not in keep:
                             dropped += 1
                             continue
-                        record['row_index'] = row_index
+                        track = tracks.get(motion_id)
+                        if track is None:
+                            track = tracks[motion_id] = motion_tracks.JointTrack(motion_id)
+                        track.append(record['frame'], record['time_sec'], record['value'], row_index)
                         row_index += 1
-                        records.append(record)
-                if not records:
+                if not tracks:
                     if dropped:
-                        return []
+                        return motion_tracks.MotionTracks()
                     raise ValueError('motion file has no valid records')
-                motion_table.scale_record_values(records, unit)
-                return sorted(
-                    records,
-                    key=lambda item: (
-                        item['time_sec'],
-                        str(item['motion_id']),
-                        item['row_index'],
-                    ),
-                )
+                # `motion_table.scale_record_values` 와 같은 식(`float(값) * 배율`)
+                scale = motion_table.rotation_unit_scale(unit)
+                for track in tracks.values():
+                    track.scale_values(scale)
+                return motion_tracks.MotionTracks.from_builder(tracks)
 
         content = path.read_text(encoding='utf-8')
         rows, headers = motion_run_rules._extract_motion_rows(content)
@@ -1424,12 +1440,14 @@ class MotionRunManager(Node):
             records.append(record)
         if not records:
             if dropped:
-                return []
+                return motion_tracks.MotionTracks()
             raise ValueError('motion file has no valid records')
         motion_table.scale_record_values(
             records, motion_table.rotation_unit_from_content(content),
         )
-        return sorted(records, key=lambda item: (item['time_sec'], str(item['motion_id']), item['row_index']))
+        return motion_tracks.MotionTracks.from_records(
+            sorted(records, key=lambda item: (item['time_sec'], str(item['motion_id']), item['row_index']))
+        )
 
     def _load_mapping(self, path: Path) -> Dict[str, Any]:
         data = yaml.safe_load(path.read_text(encoding='utf-8')) or {}

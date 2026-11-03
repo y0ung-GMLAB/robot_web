@@ -146,21 +146,7 @@ def slice_records(
         return [], {'source_duration_sec': 0.0, **fields(start_sec, end_sec), 'end_clamped': False}
     first_time = min(float(record['time_sec']) for record in rows)
     last_time = max(float(record['time_sec']) for record in rows)
-    length = max(last_time - first_time, 0.0)
-    start = max(float(start_sec or 0.0), 0.0)
-    requested_end = max(float(end_sec or 0.0), 0.0)
-    if start >= length - _EPS:
-        raise ValueError(
-            f'구간 시작 {format_time(start)} 이 애니메이션 길이 {format_time(length)} 보다 깁니다'
-        )
-    if requested_end > _EPS and requested_end <= start + _EPS:
-        raise ValueError(
-            f'구간 끝 {format_time(requested_end)} 이 구간 시작 {format_time(start)} 보다 뒤여야 합니다'
-        )
-    end_clamped = requested_end > length + _EPS
-    end = length if requested_end <= _EPS or requested_end >= length else requested_end
-    cut_from = first_time + start
-    cut_to = first_time + end
+    cut_from, cut_to, info = cut_bounds(first_time, last_time, start_sec, end_sec)
 
     groups: Dict[str, List[Mapping[str, Any]]] = {}
     for record in rows:
@@ -177,9 +163,37 @@ def slice_records(
         sliced.append({
             **dict(ordered[-1]), 'time_sec': cut_to - cut_from, 'value': _interpolate(ordered, cut_to),
         })
-    return sliced, {
+    return sliced, info
+
+
+def cut_bounds(
+    first_time: float, last_time: float, start_sec: Any, end_sec: Any,
+) -> Tuple[float, float, Dict[str, Any]]:
+    """(자를 파일 시각 시작, 끝, 정보) · 줄 목록(`slice_records`)과 조인트 배열(`motion_tracks`)이 같이 쓴다
+
+    시작이 애니메이션 길이 이상이면 ValueError · 끝이 길이보다 길면 끝까지(정보 `end_clamped`).
+    """
+    length = max(last_time - first_time, 0.0)
+    start = max(float(start_sec or 0.0), 0.0)
+    requested_end = max(float(end_sec or 0.0), 0.0)
+    if start >= length - _EPS:
+        raise ValueError(
+            f'구간 시작 {format_time(start)} 이 애니메이션 길이 {format_time(length)} 보다 깁니다'
+        )
+    if requested_end > _EPS and requested_end <= start + _EPS:
+        raise ValueError(
+            f'구간 끝 {format_time(requested_end)} 이 구간 시작 {format_time(start)} 보다 뒤여야 합니다'
+        )
+    end_clamped = requested_end > length + _EPS
+    end = length if requested_end <= _EPS or requested_end >= length else requested_end
+    return first_time + start, first_time + end, {
         'source_duration_sec': length,
         START_KEY: start,
         END_KEY: end,
         'end_clamped': end_clamped,
     }
+
+
+def inside_cut(at: float, cut_from: float, cut_to: float) -> bool:
+    """구간 안쪽 줄(첫·끝 줄은 따로 보간해 넣는다)"""
+    return cut_from + _EPS < at < cut_to - _EPS

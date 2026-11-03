@@ -157,6 +157,29 @@ export function startFailureView(failure) {
   return { title, detail };
 }
 
+/** 메모리 부족 · 서버 판정(`memory.low`) 그대로 · 글만 · 수정 목록 170
+ *  남은 메모리 < 600 MB · 스왑 ≥ 1 GB · 스왑 읽기 ≥ 1 MB/s 중 하나 (서버 memory_status.py) */
+export function memoryNotice(memory) {
+  if (!memory || !memory.available || !memory.low) return null;
+  const swap = Number(memory.swap_used_mb) || 0;
+  const free = Number(memory.available_mb) || 0;
+  const reasons = Array.isArray(memory.reasons) ? memory.reasons.filter(Boolean) : [];
+  return {
+    title: `메모리 부족 · 스왑 ${swap} MB`,
+    detail: `${reasons.join(' · ') || `남은 메모리 ${free} MB`} · 재생이 끊기거나 웹이 늦어질 수 있습니다. 이 PC 의 브라우저 탭(특히 3D 보기)을 닫고, 그래도 그대로면 재생이 없을 때 프로그램을 다시 시작하세요.`,
+  };
+}
+
+/** PC 현황 표 한 칸 · 옛 버전 PC(칸 없음)는 빈 글 */
+export function memoryCell(memory) {
+  if (!memory || memory.available_mb === undefined || memory.available_mb === null) return { tone: 'muted', text: '-' };
+  const free = Number(memory.available_mb) || 0;
+  const swap = Number(memory.swap_used_mb) || 0;
+  const freeText = free >= 1024 ? `${(free / 1024).toFixed(1)} GB` : `${free} MB`;
+  if (memory.low) return { tone: 'warn', text: `메모리 부족 · 남은 ${freeText} · 스왑 ${swap} MB` };
+  return { tone: 'ok', text: `남은 ${freeText}${swap ? ` · 스왑 ${swap} MB` : ''}` };
+}
+
 export function collectIssues(snap, sched, { connected = true } = {}) {
   const issues = [];
   const bad = (title, detail = '', action = null) => issues.push({ tone: 'bad', title, detail, action });
@@ -245,6 +268,9 @@ export function collectIssues(snap, sched, { connected = true } = {}) {
       : [`스케줄 시작 거부됨 (${failCount}회)`, String(failure.message || '거부 사유가 전달되지 않았습니다')];
     if (failCount >= 3) bad(...entry); else warn(...entry);
   }
+  // 메모리 부족 · 스왑 · 막지 않고 알린다 · 수정 목록 170 (NY 2026-11-03 · 스왑 1.25 GB 에서 실행기가 멈췄다)
+  const memory = memoryNotice(sched?.memory);
+  if (memory) warn(memory.title, memory.detail, { kind: 'open', target: 'tools', label: 'PC 성능 열기' });
   const unreadable = Array.isArray(sched?.unreadable_schedules) ? sched.unreadable_schedules.filter(Boolean) : [];
   if (unreadable.length) {
     warn(`시각을 읽을 수 없는 스케줄 ${unreadable.length}개`, unreadable.join(' · '), { kind: 'open', target: 'schedule', label: '스케줄 수정' });

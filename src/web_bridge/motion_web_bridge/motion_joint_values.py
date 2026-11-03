@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import bisect
 import threading
+from array import array
 from pathlib import Path
 from typing import Any, Dict, List, Tuple
 
@@ -18,6 +19,8 @@ DEFAULT_FPS = 25.0
 _CACHE: Dict[Tuple[str, int, int, float], Dict[str, Any]] = {}
 _LOCK = threading.Lock()
 _CACHE_LIMIT = 6
+#: 캐시 바이트 예산(대략) · 920 s × 20 조인트 25 fps 가 약 15 MB · 둘 넘으면 오래된 것부터 · 수정 목록 170
+_CACHE_MAX_BYTES = 32 * 1024 * 1024
 
 
 def _interp(times: List[float], values: List[float], at: float) -> float:
@@ -54,14 +57,65 @@ def joint_values_from_content(content: str, fps: float = DEFAULT_FPS) -> Dict[st
         groups.setdefault(str(record['motion_id']), []).append((float(record['time_sec']), float(record['value'])))
     for points in groups.values():
         points.sort()
-    start = min(points[0][0] for points in groups.values())
-    end = max(points[-1][0] for points in groups.values())
+    return _resample(
+        {
+            motion_id: ([p[0] for p in points], [p[1] for p in points])
+            for motion_id, points in groups.items()
+        },
+        fps,
+    )
+
+
+def joint_values_from_path(path: Path, fps: float = DEFAULT_FPS) -> Dict[str, Any]:
+    """파일 → `joint_values_from_content(파일 글)` 과 같은 결과 · 수정 목록 170
+
+    머리 줄이 있는 JSON Lines 는 한 줄씩 읽어 조인트별 배열에 담는다 · 글 통째 · 행 목록 · 레코드
+    사전을 만들지 않는다(920 s × 20 조인트에서 약 550 MB → 30 MB). 다른 모양은 옛 길.
+    """
+    header = motion_table.jsonl_motion_header(path)
+    if header is None:
+        return joint_values_from_content(Path(path).read_text(encoding='utf-8'), fps)
+    header_object, headers = header
+    try:
+        unit = motion_table.normalize_rotation_unit(motion_table.header_rotation_unit(header_object))
+    except ValueError as exc:
+        return {'success': False, 'message': str(exc)}
+    tracks: Dict[str, Tuple[array, array]] = {}
+    for row, _skipped in motion_table.iter_jsonl_rows(path, headers):
+        if row is None:
+            continue
+        record, _error = motion_table.parse_row(row, headers)
+        if record is None:
+            continue
+        columns = tracks.get(record['motion_id'])
+        if columns is None:
+            columns = tracks[str(record['motion_id'])] = (array('d'), array('d'))
+        columns[0].append(float(record['time_sec']))
+        columns[1].append(float(record['value']))
+    if not tracks:
+        # 옛 길이 같은 글을 낸다(행 없음 · 경고)
+        return joint_values_from_content(Path(path).read_text(encoding='utf-8'), fps)
+    scale = motion_table.rotation_unit_scale(unit)
+    groups: Dict[str, Tuple[Any, Any]] = {}
+    for motion_id, (times, values) in tracks.items():
+        if scale != 1.0:
+            values = array('d', (float(value) * scale for value in values))
+        if any(times[i - 1] >= times[i] for i in range(1, len(times))):
+            # 옛 길은 (시각, 값) 쌍으로 정렬했다 · 같은 시각이면 값 순 · 그대로
+            points = sorted(zip(times, values))
+            times = array('d', (p[0] for p in points))
+            values = array('d', (p[1] for p in points))
+        groups[motion_id] = (times, values)
+    return _resample(groups, fps)
+
+
+def _resample(groups: Dict[str, Tuple[Any, Any]], fps: float) -> Dict[str, Any]:
+    start = min(times[0] for times, _ in groups.values())
+    end = max(times[-1] for times, _ in groups.values())
     step = 1.0 / max(1.0, float(fps))
     count = int(round((end - start) / step)) + 1 if end > start else 1
     joints: Dict[str, List[float]] = {}
-    for motion_id, points in groups.items():
-        times = [p[0] for p in points]
-        values = [p[1] for p in points]
+    for motion_id, (times, values) in groups.items():
         joints[motion_id] = [round(_interp(times, values, start + i * step), 6) for i in range(count)]
     return {
         'success': True,
@@ -72,6 +126,11 @@ def joint_values_from_content(content: str, fps: float = DEFAULT_FPS) -> Dict[st
         'sample_count': count,
         'joints': joints,
     }
+
+
+def _payload_bytes(payload: Dict[str, Any]) -> int:
+    """대략 · 값 하나 32 B(float + 목록 칸)"""
+    return 1024 + 32 * sum(len(values) for values in (payload.get('joints') or {}).values())
 
 
 def joint_values_payload(path: Path, fps: float = DEFAULT_FPS) -> Dict[str, Any]:
@@ -87,13 +146,17 @@ def joint_values_payload(path: Path, fps: float = DEFAULT_FPS) -> Dict[str, Any]
     if cached is not None:
         return cached
     try:
-        content = path.read_text(encoding='utf-8')
+        # 한 줄씩 · 수정 목록 170
+        payload = {**joint_values_from_path(path, fps), 'file_id': path.name}
     except (OSError, UnicodeDecodeError) as exc:
         return {'success': False, 'message': f'읽기 실패: {exc}'}
-    payload = {**joint_values_from_content(content, fps), 'file_id': path.name}
     if payload.get('success'):
         with _LOCK:
-            if len(_CACHE) >= _CACHE_LIMIT:
-                _CACHE.pop(next(iter(_CACHE)))
             _CACHE[key] = payload
+            # 개수 · 바이트(대략) 둘 다 · 방금 넣은 것은 남긴다 · 수정 목록 170
+            while len(_CACHE) > 1 and (
+                len(_CACHE) > _CACHE_LIMIT
+                or sum(_payload_bytes(item) for item in _CACHE.values()) > _CACHE_MAX_BYTES
+            ):
+                _CACHE.pop(next(iter(_CACHE)))
     return payload

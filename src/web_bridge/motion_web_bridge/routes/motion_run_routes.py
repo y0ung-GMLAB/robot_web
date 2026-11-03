@@ -7,6 +7,7 @@ from pathlib import Path
 
 from motion_common import repeat_policy
 from motion_web_bridge import animation_preview, motion_file_analysis
+from motion_web_bridge.json_body import json_response
 
 
 def register_motion_run_routes(app: FastAPI, bridge, safety_first_stop) -> None:
@@ -106,11 +107,12 @@ def register_motion_run_routes(app: FastAPI, bridge, safety_first_stop) -> None:
     # Blender 뷰 · 애니메이션 json 값 그대로(glb 에 굽지 않음) · 수정 목록 98
     @app.get('/api/motion-files/{file_id}/joint-values')
     async def motion_joint_values(file_id: str):
-        return await asyncio.to_thread(bridge.motion_joint_values, file_id)
+        # 글 만들기까지 스레드에서 · 루프를 막지 않게 · 수정 목록 170
+        return await asyncio.to_thread(lambda: json_response(bridge.motion_joint_values(file_id)))
 
     @app.get('/api/motion-files/{file_id}/preview-frames')
     async def preview_motion_frames(file_id: str):
-        return await asyncio.to_thread(bridge.preview_motion_frames, file_id)
+        return await asyncio.to_thread(lambda: json_response(bridge.preview_motion_frames(file_id)))
 
     @app.post('/api/motion-run/live-override')
     async def set_motion_run_live_override(request: Request):

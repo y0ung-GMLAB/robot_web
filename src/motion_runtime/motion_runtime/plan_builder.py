@@ -17,12 +17,13 @@ import math
 import time
 from typing import Any, Dict, List, Mapping, Optional
 
-from motion_common import joint_mapping, manual_speed, motion_segment, multiturn_clear, rate_check, repeat_policy, units, wire_units
+from motion_common import joint_mapping, manual_speed, motion_segment, motion_tracks, multiturn_clear, rate_check, repeat_policy, units, wire_units
 from motion_common.values import finite_float, optional_int
 
 from . import motion_run_rules
 from .motion_automation_store import REPEAT_MODES
 from .motion_run_constants import CONTINUOUS_LOOP_TOLERANCE_DEG
+from .packed_samples import PackedSamples
 from .plan_cache import SingleFlightCache
 
 #: 안쪽 값은 rad · 글에 넣을 때만 deg · 수정 목록 6
@@ -97,10 +98,14 @@ def _punch_joints(payload: Dict[str, Any], axes: List[Dict[str, Any]]) -> Dict[s
     return joints
 
 
-#: 계획 재료 캐시 크기 · 920 s 애니 샘플 하나가 수십 MB 라 둘만 · 준비 검사 → 그룹 준비가 같은 것을 쓰면 된다
+#: 계획 재료 캐시 크기 · 준비 검사 → 그룹 준비가 같은 것을 쓰면 된다
 SAMPLES_CACHE_SIZE = 2
-#: 조인트별로 나눈 레코드 · 레코드 자체는 모션 파일 캐시와 같이 쓰므로 목록 값만 든다
+#: 조인트별로 나눈 레코드(구간을 잘랐으면 자른 것) · 통째면 모션 파일 캐시와 같은 배열을 같이 쓴다
 RECORDS_STAGE_CACHE_SIZE = 4
+#: 바이트 예산 · 수정 목록 170 · 배열로 들어서 920 s × 5 조인트 샘플이 4.4 MB · 레코드가 7 MB 다 ·
+#: 예산은 훨씬 긴 파일(몇 시간 · 조인트 수십)에서도 캐시가 메모리를 다 먹지 않게 하는 울타리
+SAMPLES_CACHE_MAX_BYTES = 48 * 1024 * 1024
+RECORDS_STAGE_CACHE_MAX_BYTES = 48 * 1024 * 1024
 
 
 class _MotionFileUnreadable(ValueError):
@@ -143,56 +148,53 @@ def _samples_key(records_key: Any, period_sec: float, axes: List[Dict[str, Any]]
 
 def _sample_plan(
     axes: List[Dict[str, Any]],
-    groups: Mapping[str, List[Dict[str, Any]]],
+    groups: Mapping[str, motion_tracks.JointTrack],
     start_time: float,
     end_time: float,
     period_sec: float,
 ) -> tuple:
-    """(샘플 목록, 속도·가속 거절 사유) · 결과는 여러 계획이 같이 쓴다 · 고치지 않는다"""
+    """(샘플, 속도·가속 거절 사유) · 결과는 여러 계획이 같이 쓴다 · 고치지 않는다
+
+    샘플은 배열 묶음(`PackedSamples`) · 꺼내면 옛 사전 모양 · 값은 옛 식 그대로(비트까지 같다) · 수정 목록 170
+    """
     duration = max(end_time - start_time, 0.0)
     sample_count = max(1, int(math.floor(duration / period_sec)) + 1)
     last_time = start_time + ((sample_count - 1) * period_sec)
     if end_time - last_time > 0.001:
         sample_count += 1
-    group_times = {
-        motion_id: [float(record['time_sec']) for record in records]
-        for motion_id, records in groups.items()
-    }
     # 축마다 바뀌지 않는 것은 한 번만 읽는다 · 식은 그대로(`motor_target` · `_clamp_to_motor_limits`)
     prepared = []
     for axis in axes:
         motion_id = str(axis['motion_id'])
         limits = axis.get('motor_for_limits')
+        track = groups[motion_id]
         prepared.append((
-            motion_id,
-            int(axis['motor_axis']),
-            groups[motion_id],
-            group_times[motion_id],
+            track.times,
+            track.values,
             axis.get('motion_limit_lower_rad'),
             axis.get('motion_limit_upper_rad'),
             joint_mapping.motor_target_function(axis['row'], units.RAD),
             bool(limits),
             motion_run_rules._motor_limit_bounds(limits),
         ))
-    samples = []
+    samples = PackedSamples(
+        [int(axis['motor_axis']) for axis in axes],
+        [str(axis['motion_id']) for axis in axes],
+    )
+    interpolated = motion_tracks.interpolated
+    clamp_motion = motion_run_rules._clamp_motion_value
+    clamp_motor = motion_run_rules._clamp_to_motor_bounds
     for index in range(sample_count):
         sample_time = min(start_time + (index * period_sec), end_time)
-        positions = {}
-        motion_values = {}
-        for motion_id, motor_axis, records, times, lower, upper, to_motor, has_limits, bounds in prepared:
-            motion_value = motion_run_rules._interpolated_value(records, times, sample_time)
-            motion_value = motion_run_rules._clamp_motion_value(motion_value, lower, upper)
+        positions = []
+        motion_values = []
+        for times, values, lower, upper, to_motor, has_limits, bounds in prepared:
+            motion_value = interpolated(times, values, sample_time)
+            motion_value = clamp_motion(motion_value, lower, upper)
             target = to_motor(motion_value)
-            positions[motor_axis] = (
-                motion_run_rules._clamp_to_motor_bounds(target, *bounds) if has_limits else target
-            )
-            motion_values[motion_id] = float(motion_value)
-        samples.append({
-            'time_sec': sample_time - start_time,
-            'absolute_time_sec': sample_time,
-            'positions': positions,
-            'motion_values': motion_values,
-        })
+            positions.append(clamp_motor(target, *bounds) if has_limits else target)
+            motion_values.append(float(motion_value))
+        samples.append(sample_time - start_time, sample_time, positions, motion_values)
     return samples, _motion_rate_limit_error(axes, samples, period_sec)
 
 
@@ -203,8 +205,34 @@ class PlanBuilder:
         #:
         #: 계획 **전체**는 담지 않는다 · 모터 상태(알람 · 위치) · 요청 칸(실행 번호 · 회차)은 짓는
         #: 때마다 다시 본다. 무거운 둘만 담는다 · 조인트별로 나눈 레코드와 20 ms 재샘플.
-        self._records_cache = SingleFlightCache(RECORDS_STAGE_CACHE_SIZE)
-        self._samples_cache = SingleFlightCache(SAMPLES_CACHE_SIZE)
+        self._records_cache = SingleFlightCache(
+            RECORDS_STAGE_CACHE_SIZE, max_bytes=RECORDS_STAGE_CACHE_MAX_BYTES,
+        )
+        self._samples_cache = SingleFlightCache(SAMPLES_CACHE_SIZE, max_bytes=SAMPLES_CACHE_MAX_BYTES)
+
+    def _load_tracks(self, motion_file_path: Any, ids: Optional[frozenset]) -> motion_tracks.MotionTracks:
+        """조인트별 배열 · 노드는 캐시에서(`_load_motion_tracks`) · 읽는 함수를 갈아 끼운 시험 대역은
+        그 레코드 사전 목록을 옮겨 담는다(옛 길 · `_motion_groups` 와 같은 묶음)"""
+        manager = self.manager
+        replaced = '_load_motion_records' in getattr(manager, '__dict__', {})
+        loader = getattr(type(manager), '_load_motion_tracks', None)
+        if not replaced and callable(loader):
+            if ids is None:
+                return manager._load_motion_tracks(motion_file_path)
+            return manager._load_motion_tracks(motion_file_path, motion_ids=ids)
+        if ids is None:
+            records = manager._load_motion_records(motion_file_path)
+        else:
+            records = manager._load_motion_records(motion_file_path, motion_ids=ids)
+        if isinstance(records, motion_tracks.MotionTracks):
+            records = records.records()
+        if ids is not None:
+            # 읽는 쪽이 이미 걸렀다 · 갈아 끼운 읽기(시험 대역)도 같은 결과가 되게 한 번 더
+            records = [
+                record for record in records
+                if str(record.get('motion_id') or '') in ids
+            ]
+        return motion_tracks.MotionTracks.from_records(records)
 
     def _records_stage(
         self,
@@ -213,7 +241,7 @@ class PlanBuilder:
         segment_start: float,
         segment_end: float,
     ) -> tuple:
-        """(키, 레코드, 조인트별 레코드, 구간 정보) · 목록 · 사전은 매번 새것(부르는 쪽이 덧붙인다)
+        """(키, 조인트별 배열 사전, 구간 정보) · 사전은 매번 새것(부르는 쪽이 덧붙인다) · 배열은 같이 쓴다
 
         이 PC 의 조인트 매핑에 없는 축은 **읽자마자 버린다** · 알리지 않는다 · §6-106 · N16
 
@@ -233,27 +261,19 @@ class PlanBuilder:
 
         def build() -> tuple:
             try:
-                if ids is None:
-                    records = self.manager._load_motion_records(motion_file_path)
-                else:
-                    records = self.manager._load_motion_records(motion_file_path, motion_ids=ids)
+                tracks = self._load_tracks(motion_file_path, ids)
             except _MotionFileUnreadable:
                 raise
             except ValueError as exc:
                 raise _MotionFileUnreadable(str(exc)) from exc
-            if ids is not None:
-                # 읽는 쪽이 이미 걸렀다 · 갈아 끼운 읽기(시험 대역)도 같은 결과가 되게 한 번 더
-                records = [
-                    record for record in records
-                    if str(record.get('motion_id') or '') in ids
-                ]
             info: Dict[str, Any] = {}
-            if motion_segment.is_active(segment_start, segment_end) and records:
-                records, info = motion_segment.slice_records(records, segment_start, segment_end)
-            return records, motion_run_rules._motion_groups(records), info
+            if motion_segment.is_active(segment_start, segment_end) and tracks:
+                tracks, info = tracks.sliced(segment_start, segment_end)
+            return tracks, info
 
-        records, groups, info = self._records_cache.get_or_compute(key, build)
-        return key, list(records), dict(groups), dict(info)
+        tracks, info = self._records_cache.get_or_compute(key, build)
+        groups = {motion_id: track for motion_id, track in tracks.tracks.items() if len(track)}
+        return key, groups, dict(info)
 
     def _multiturn_clear_state(self) -> Dict[str, Any]:
         """PC 단위 다회전 클리어 표시 · 작업 폴더 `runtime/` · 못 읽으면 빈 표시 · 수정 목록 140 ③"""
@@ -395,15 +415,15 @@ class PlanBuilder:
             if automation_run or studio_request
             else motion_segment.parse(payload)
         )
-        motion_records: List[Dict[str, Any]] = []
-        groups: Dict[str, List[Dict[str, Any]]] = {}
+        #: 조인트 → 시각 순 배열 · 수정 목록 170 · 사전은 이 계획 것 · 배열은 캐시와 같이 쓴다(고치지 않는다)
+        groups: Dict[str, motion_tracks.JointTrack] = {}
         segment_info: Dict[str, Any] = {}
         #: 같은 레코드 · 같은 구간이면 같은 키 · 샘플 캐시가 이것으로 시작한다 · 없으면 캐시 안 씀
         records_key = None
         # 경로를 못 찾았을 때만 건너뛴다 · 경로 값이 None 인 것 자체는 막지 않는다 (옛 계약)
         if motion_file_id and not unusable_motion_file_note:
             try:
-                records_key, motion_records, groups, segment_info = self._records_stage(
+                records_key, groups, segment_info = self._records_stage(
                     motion_file_path, mapping_motion_ids, segment_start, segment_end,
                 )
             except _MotionFileUnreadable as exc:
@@ -414,12 +434,11 @@ class PlanBuilder:
                     f'재생 등록된 애니메이션 {motion_file_id} 에 쓸 수 있는 줄이 없습니다 ({exc}) · '
                     '애니메이션 없이 초기 위치로 이동합니다'
                 )
-                motion_records = []
                 groups = {}
                 segment_info = {}
         # 읽으면서 이 PC 조인트만 남겼다 · 파일에 남의 조인트만 있으면 빈 목록이다 · 그때도 아래
         # 「모션 자료 없음」 길로 가서 결과는 전과 같다(전부 빠져 움직일 조인트 없음 · 초기 이동은 0° 대체)
-        source_motion_data_available = bool(motion_records)
+        source_motion_data_available = bool(groups)
 
         mapping_motion_file_id = str(mapping.get('motion_file_id') or '').strip()
         # 재생 목록 안의 파일이면 된다 · 수정 목록 35 · 목록이 없으면 옛 규칙(등록 파일 하나) ·
@@ -550,15 +569,10 @@ class PlanBuilder:
                     if initial_mode == 'manual'
                     else 0.0
                 )
-                fallback_record = {
-                    'frame': 0,
-                    'time_sec': 0.0,
-                    'motion_id': motion_id,
-                    'value': float(fallback_value),
-                    'row_index': len(motion_records),
-                }
-                motion_records.append(fallback_record)
-                groups[motion_id] = [fallback_record]
+                groups[motion_id] = motion_tracks.JointTrack.single(
+                    motion_id, 0.0, float(fallback_value),
+                    row=sum(len(track) for track in groups.values()),
+                )
                 initialization_fallback_used = True
                 # 「기준점」은 원래 0° 로 간다 · 애니메이션이 없어도 알릴 일이 아니다
                 if initial_mode != 'reference':
@@ -577,7 +591,7 @@ class PlanBuilder:
             if motor_error and not automation_run:
                 errors.append(f'Motion ID {motion_id}: {motor_error}')
 
-            motion_values = [record['value'] for record in groups[motion_id]]
+            motion_values = groups[motion_id].values
             motion_min = min(motion_values)
             motion_max = max(motion_values)
             # 범위 칸이 없으면 자르지 않는다(None) · 옛 동작 그대로
@@ -736,8 +750,9 @@ class PlanBuilder:
         if errors:
             raise ValueError('; '.join(errors[:8]))
 
-        start_time = min(record['time_sec'] for record in motion_records)
-        end_time = max(record['time_sec'] for record in motion_records)
+        # 조인트마다 시각 순이라 첫 줄 · 끝 줄 · 전체 레코드의 최소 · 최대와 같다
+        start_time = min(track.times[0] for track in groups.values())
+        end_time = max(track.times[-1] for track in groups.values())
         duration = max(end_time - start_time, 0.0)
         samples = []
         if not initialization_only:

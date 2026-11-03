@@ -31,6 +31,7 @@ from motion_runtime.deferred_playlist import DeferredPlaylist
 from motion_runtime.group_session import GroupSession
 from motion_runtime.motion_player import MotionPlayer
 from motion_runtime.motion_run_manager import MotionRunManager
+from motion_runtime.packed_samples import PackedSamples
 from motion_runtime.plan_builder import PlanBuilder
 
 ROBOTS = 4
@@ -143,8 +144,14 @@ def _group_payload(name='a.json', **extra):
 
 
 def _strip(plan):
-    """비교용 · 실행마다 다른 칸(요청 출처 등)은 빼지 않는다 · 같은 요청끼리만 견준다"""
-    return json.loads(json.dumps(plan, sort_keys=True, default=str))
+    """비교용 · 실행마다 다른 칸(요청 출처 등)은 빼지 않는다 · 같은 요청끼리만 견준다
+
+    샘플은 배열 묶음(`PackedSamples` · 수정 목록 170)이라 옛 사전 목록으로 펼쳐 견준다
+    """
+    def expand(value):
+        return list(value) if isinstance(value, PackedSamples) else str(value)
+
+    return json.loads(json.dumps(plan, sort_keys=True, default=expand))
 
 
 # --------------------------------------------------------------------------- #

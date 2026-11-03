@@ -657,6 +657,8 @@ class MotionWebBridge(Node):
             log_error=self.get_logger().error,
         )
         self._auto_backup_timer = self.create_timer(60.0, self.auto_backup.tick)
+        # 재생 중이라 미룬 MuJoCo 계산 · 5 초마다 · 수정 목록 170
+        self._precompute_deferred_timer = self.create_timer(5.0, self._precompute_deferred_tick)
 
     def _log_started(self) -> None:
         """무엇을 물고 떴는지 남긴다 · 현장에서 이 줄 하나로 원인을 찾는다."""
@@ -2618,7 +2620,43 @@ class MotionWebBridge(Node):
         motion_path = self.project_repository.export_path(
             project_id, 'motions', file_id,
         )
-        return animation_preview.launch_precompute(self.workspace_root, motion_path)
+        # 재생 · 그룹 재생 중이면 미룬다 · 끝나면 `_precompute_deferred_tick` 이 시작 · 수정 목록 170
+        return animation_preview.launch_precompute(
+            self.workspace_root, motion_path, busy=self._precompute_busy_reason(),
+        )
+
+    def _precompute_busy_reason(self) -> str:
+        """MuJoCo 계산을 지금 시작하면 안 되는 이유 · 이 PC 재생 중 · 그룹 재생 중 · 수정 목록 170"""
+        if blocker_from_run_status(self._cached_motion_run_status()):
+            return '재생 중'
+        coordination = getattr(self, 'coordination', None)
+        try:
+            if coordination is not None and coordination.local_execution_blocker():
+                return '그룹 재생 중'
+        except Exception:  # noqa: BLE001 · 연동 노드를 못 보면 재생 상태만 본다
+            pass
+        return ''
+
+    def _precompute_deferred_tick(self) -> None:
+        """미룬 MuJoCo 계산 · 재생이 끝났으면 하나 시작 · 실행기를 막지 않게 스레드에서"""
+        if not animation_preview.deferred_count():
+            return
+        worker = getattr(self, '_precompute_deferred_worker', None)
+        if worker is not None and worker.is_alive():
+            return
+
+        def work() -> None:
+            try:
+                started = animation_preview.start_deferred(self._precompute_busy_reason)
+                if started:
+                    self.get_logger().info(f'미룬 MuJoCo 계산 시작: {started.get("message", "")}')
+            except Exception as exc:  # noqa: BLE001
+                self.get_logger().warning(f'미룬 MuJoCo 계산 시작 실패: {exc}')
+
+        self._precompute_deferred_worker = threading.Thread(
+            target=work, name='precompute-deferred', daemon=True,
+        )
+        self._precompute_deferred_worker.start()
 
     def set_motion_run_live_override(self, payload: Dict[str, Any]) -> Dict[str, Any]:
         """재생 라이브 오버라이드(조인트 뮤트·좁힌 리밋) · 움직임 명령이
