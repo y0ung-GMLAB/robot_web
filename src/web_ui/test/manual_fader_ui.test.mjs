@@ -53,7 +53,10 @@ test('input streams while held and change releases in place', () => {
 
 test('the joint-to-motor formula matches the server', () => {
   // 서버: reference + (joint + offset) × gain · gain = scale × sign × gear
-  assert.match(serverFormula, /return reference\(row, unit\) \+ \(float\(joint\) \+ offset\) \* gain\(row\)/);
+  // 줄마다 미리 풀어 둔 함수(motor_target_function · 수정 목록 164) · 식은 같다
+  assert.match(serverFormula, /base = reference\(row, unit\)/);
+  assert.match(serverFormula, /factor = gain\(row\)/);
+  assert.match(serverFormula, /return base \+ \(float\(joint\) \+ offset\) \* factor/);
   assert.match(serverFormula, /return scale \* sign \* gear_ratio/);
   // 화면: 같은 식 · `joint_mapping.js` 한 곳 · 페이더는 그걸 부른다 (수정 목록 6)
   assert.match(
