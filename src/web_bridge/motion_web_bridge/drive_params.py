@@ -223,8 +223,9 @@ class DriveParams:
         if blocker:
             return {'success': False, 'message': f'쓰기 불가 · {blocker}'}
         before, _ = self._upload(target, index, sub, data_type)
+        # `--` · 음수 값(-4)을 ethercat 이 옵션으로 읽지 않게(「invalid option -- '4'」)
         command = ['ethercat', 'download', '-m', str(target['master']), '-p', str(target['position']),
-                   '-t', data_type, f'0x{index:04X}', str(sub), str(value)]
+                   '-t', data_type, '--', f'0x{index:04X}', str(sub), str(value)]
         try:
             done = self._runner(command, check=False, capture_output=True, text=True, timeout=self._timeout)
             error = '' if done.returncode == 0 else (done.stderr or done.stdout or '').strip() or f'종료 코드 {done.returncode}'

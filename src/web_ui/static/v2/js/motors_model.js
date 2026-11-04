@@ -105,15 +105,14 @@ export function gainText(gains) {
     '드라이브에 저장된 값(우리 프로그램은 쓰지 않음)',
     gains.error ? `일부 못 읽음 · ${gains.error}` : '',
   ].filter(Boolean).join('\n');
-  return { text: parts.join(' · '), tone: auto === 0 ? 'warn' : 'ok', hint };
+  // 자동조정 꺼짐도 노란색 아님 · 일부러 끄고 쓰는 값 · 사용자 2026-11-04
+  return { text: parts.join(' · '), tone: 'ok', hint };
 }
 
-/** 게인 알림 · 자동조정 꺼진 모터 · 드라이브끼리 강성이 다름 · 막지는 않는다(일부러 끈 것일 수 있음) · 108 (나) */
+/** 게인 알림 · 드라이브끼리 강성 · 지령 필터가 다름 · 막지는 않는다 · 108 (나) · 자동조정 꺼짐은 알리지 않음(사용자 2026-11-04) */
 export function gainWarnings(rows) {
   const ac = rows.filter((r) => r.ac && r.gains);
   const warnings = [];
-  const off = ac.filter((r) => r.gains.auto_tuning === 0).map((r) => `${r.axis}번`);
-  if (off.length) warnings.push(`자동조정 꺼짐 · ${off.join(' · ')} · 부하에 맞춰 게인이 바뀌지 않습니다(벤치에서 끈 값이 남았을 수 있음)`);
   const stiff = [...new Set(ac.map((r) => r.gains.stiffness).filter((v) => v !== null && v !== undefined))];
   if (stiff.length > 1) warnings.push(`드라이브마다 강성이 다릅니다 · ${ac.map((r) => `${r.axis}번 ${r.gains.stiffness ?? '?'}`).join(' · ')}`);
   // 지령 필터가 축마다 다르면 늦게 따라가는 정도가 달라 축끼리 어긋난다 · 2026-10-16

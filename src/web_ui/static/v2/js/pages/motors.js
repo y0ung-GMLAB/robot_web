@@ -20,7 +20,7 @@ import {
 import { referenceRedoView } from '../model.js';
 import { signedDeg } from '../play_model.js';
 import { minasBaseCard } from './minas_base.js';
-import { autoTuneAll, gainField, saveAll } from './drive_gains.js';
+import { gainField, saveAll } from './drive_gains.js';
 import { paramsField } from './drive_params.js';
 
 const ui = { revision: '', saved: null, draft: null, selected: null, job: null, busy: '', error: '', scan: null,
@@ -427,10 +427,8 @@ export function motorsBody(state, changed) {
         h('span', { text: '기구에 걸린 것이 없는지 확인한 뒤 오류를 초기화하고 서보를 켜세요' })),
       h('button', { class: 'btn btn-danger-soft', type: 'button', disabled: Boolean(ui.busy), onclick: () => servo(row, 'reset', state, changed) }, row.ac ? '오류 초기화' : '재부팅'))),
     servoAllBar(rows, state, changed),
-    // 게인 알림 · 막지 않음 · 108 (나) · 자동조정 꺼짐이면 「모두 켜기」 · 108 (다)
-    gainWarnings(rows).map((text) => h('div', { class: 'blocker' }, dot('warn'), h('span', { class: 'grow', text }),
-      text.startsWith('자동조정 꺼짐') ? h('button', { class: 'btn btn-mini', type: 'button', disabled: Boolean(ui.busy),
-        onclick: () => autoTuneAll(rows, changed, () => loadMotors(state, changed, { force: true })) }, '자동조정 켜기') : null)),
+    // 게인 알림 · 막지 않음 · 108 (나) · 자동조정 꺼짐 알림 · 「자동조정 켜기」 는 뺌(사용자 2026-11-04)
+    gainWarnings(rows).map((text) => h('div', { class: 'blocker' }, dot('warn'), h('span', { class: 'grow', text }))),
     h('section', { class: 'card', 'aria-label': '모터' },
       rows.length ? h('div', { class: 'table-wrap' }, h('table', { class: 'table files-table' },
         h('thead', {}, h('tr', {}, ['번호', '이름', '종류 · 모델', '서보', '위치 (모터°)', '과부하율', '앱솔루트', '게인', '통신'].map((text) => h('th', { scope: 'col', text })))),

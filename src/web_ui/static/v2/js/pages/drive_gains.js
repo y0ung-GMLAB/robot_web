@@ -146,35 +146,6 @@ export async function saveAll(axes, changed, reload) {
   }
 }
 
-/** 자동조정이 꺼진 축 모두 켜기 · 강성은 그대로 · 108 (다) 「전체를 자동으로」 */
-export async function autoTuneAll(rows, changed, reload) {
-  const off = rows.filter((r) => r.ac && r.gains && r.gains.auto_tuning === 0);
-  if (!off.length) return;
-  const ok = await confirmBox({
-    title: '자동조정 켜기',
-    body: `${off.map((r) => `${r.axis}번`).join(' · ')} 의 자동조정(Pr0.02)을 1(표준)로 켭니다. 강성은 그대로입니다.\n`
-      + '모터가 움직이지 않을 때만 씁니다. 켠 뒤 몇 분 움직여야 관성비가 맞춰집니다.',
-    confirmLabel: '켜기', tone: 'warning',
-  });
-  if (!ok) return;
-  ui.busy = true;
-  changed();
-  try {
-    const result = await api('POST', '/api/motor-config/drive-gains', {
-      body: { axes: off.map((r) => r.axis), values: { auto_tuning: 1 }, confirmed: true }, timeoutMs: 60000 });
-    toast(result?.message || '켰습니다', result?.success === false ? 'bad' : 'ok');
-    if (result?.success !== false && await confirmBox({
-      title: '드라이브 저장(EEPROM)', body: '전원을 꺼도 남게 드라이브 안(EEPROM)에도 저장할까요? 모터 프로그램이 몇 초 멈췄다 다시 켜집니다.',
-      confirmLabel: '저장', cancelLabel: '나중에', tone: 'warning',
-    })) await saveAll(off.map((r) => r.axis), changed, reload);
-  } catch (error) {
-    toast(error.message || String(error), 'bad');
-  } finally {
-    ui.busy = false;
-    changed();
-  }
-}
-
 /** 모터 상세 칸 · 게인 묶음 */
 export function gainField(row, changed, reload) {
   if (!row.ac) return null;

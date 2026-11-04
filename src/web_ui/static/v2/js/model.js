@@ -213,14 +213,7 @@ export function collectIssues(snap, sched, { connected = true } = {}) {
   for (const box of stuckMailboxes(snap)) {
     bad(box.message, '이 드라이브가 설정 읽기·쓰기(SDO)에 답하지 않습니다. 재생과 위치 명령은 그대로 됩니다. 앱솔루트 설정·게인 읽기 같은 설정 작업은 안 됩니다. 이 드라이브 읽기는 쉬고 30초마다 한 번만 확인합니다.');
   }
-  // 자동조정 꺼진 MINAS 드라이브 · 막지 않음 · 알리기만 · 수정 목록 108 (나)
-  const gainOff = (snap.motion_state?.minas_absolute?.drives || [])
-    .filter((d) => d?.gains && d.gains.auto_tuning === 0)
-    .map((d) => (d.axis === null || d.axis === undefined ? `슬레이브 ${d.slave_position}` : `${d.axis}번`));
-  if (gainOff.length) {
-    warn(`자동조정이 꺼진 드라이브 · ${gainOff.join(' · ')}`, '부하에 맞춰 게인이 바뀌지 않습니다. 벤치에서 꺼 둔 값이 남았을 수 있습니다. 모터 설정에서 확인하세요.',
-      { kind: 'open', target: 'motors', label: '모터 설정 열기' });
-  }
+  // 자동조정 꺼짐(Pr0.02 = 0)은 알리지 않는다 · 일부러 끄고 쓰는 값 · 사용자 2026-11-04 (108 (나) 알림 뺌)
   // 조인트 범위 미확인 · 재생·초기 이동·수동 조작이 막혀 있다 · 판정은 서버 · 수정 목록 97
   const range = String(snap.mapping_range_blocker || '');
   if (range) {

@@ -58,11 +58,18 @@ def test_write_reads_back_and_warns_when_boot_will_overwrite():
     service, calls, records, values = _params({(0x3504, 0): 1}, boot={(0x3437, 0): 150})
     result = service.write({'axis': 1, 'object': 'Pr5.04', 'type': 'int16', 'value': '0', 'confirmed': True})
     assert result['success'] is True and result['after'] == 0
-    assert 'download -m 0 -p 1 -t int16 0x3504 0 0' in calls
+    assert 'download -m 0 -p 1 -t int16 -- 0x3504 0 0' in calls
     assert records[0]['event_type'] == 'minas_param_write' and records[0]['before'] == 1
     values[(0x3437, 0)] = 150
     warned = service.write({'axis': 1, 'object': 'Pr4.37', 'type': 'int16', 'value': '0', 'confirmed': True})
     assert '부팅 때 150' in warned['notes'][0]
+
+
+def test_negative_value_is_passed_after_end_of_options():
+    service, calls, _records, _values = _params({(0x3504, 0): 1})
+    result = service.write({'axis': 1, 'object': 'Pr5.04', 'type': 'int16', 'value': '-4', 'confirmed': True})
+    assert result['success'] is True and result['after'] == -4
+    assert 'download -m 0 -p 1 -t int16 -- 0x3504 0 -4' in calls          # `--` 없으면 「invalid option -- '4'」
 
 
 @pytest.mark.parametrize('obj', ['0x1010:1', 'Pr0.15', '0x60B2', '0x6040', '0x1600', '0x1C12'])
