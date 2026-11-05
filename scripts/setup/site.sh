@@ -15,7 +15,8 @@
 # EtherLab 은 SDO 사전 읽기 끄기 패치(patches/igh-1.6.9-sdo-dict-off.patch)를 넣어 빌드한다 · 수정 목록 139 ·
 # 이미 깔린 PC 는 커널 모듈만 다시 빌드(make install 안 함 · PC 마다 깔린 자리가 다름)
 #
-# 시험용 덮어쓰기 · SITE_GDM_CONF · SITE_ETHERCAT_CONF · SITE_STATE_DIR · SITE_ETHERLAB_PATCH · SITE_SYS_MODULE_DIR
+# 시험용 덮어쓰기 · SITE_GDM_CONF · SITE_ETHERCAT_CONF · SITE_STATE_DIR · SITE_ETHERLAB_PATCH · SITE_SYS_MODULE_DIR ·
+#   SITE_RTW88_MODPROBE_CONF
 #
 # 수작업으로 남는 것 · BIOS 「전원 복구 시 켜기」 1회 · 로봇 팩·모터 설정(웹)
 
@@ -147,6 +148,8 @@ wifi.powersave = 2
 CONF
   fi
   site_wifi_powersave_off
+  # 무선 칩 자체 절전 · 위(NetworkManager)와 별개 · 실패해도 설치는 계속 · 수정 목록 173
+  site_wifi_chip_powersave_off || true
 }
 
 # 지금 있는 무선 연결마다 절전 끔 · 관리자 권한 없이 됨(웹 Wi-Fi 권한 polkit) · 업데이트(--code-only)도 부른다 ·
@@ -168,6 +171,88 @@ site_wifi_powersave_off() {
       site_warn "WiFi 「${name}」 절전을 끄지 못했습니다 · 웹 관리 권한(allow_web_admin.sh) 확인"
     fi
   done < <(nmcli -t -f NAME,TYPE connection show 2>/dev/null || true)
+}
+
+# 무선 칩(rtw88 · Realtek RTL8822CE 등) 절전 끄기 · 수정 목록 173 (2026-11-05)
+#   칩 절전(PCIe ASPM · LPS deep)이 켜져 있으면 EtherCAT 프레임이 버스 통째로 20~35 ms 씩 빠진다
+#   (커널 「Working counter changed to 0/15」) · 실물 NY 그룹 재생 30분 · floating3(켬) 183회 · floating4(끔) 0회 ·
+#   같은 Wi-Fi 부하 · NetworkManager wifi.powersave(위 · 112 차)와 다른 층 · 모듈 옵션이라 재부팅 뒤 적용
+#   rtw88_pci 가 올라간 PC 만 · 다른 칩(인텔 iwlwifi · rtw89 · 유선 전용)은 손대지 않음
+SITE_RTW88_MODPROBE_CONF="${SITE_RTW88_MODPROBE_CONF:-/etc/modprobe.d/rtw88-robot.conf}"
+
+site_rtw88_in_use() { [[ -d "${SITE_SYS_MODULE_DIR:-/sys/module}/rtw88_pci" ]]; }
+
+site_render_rtw88_conf() {
+  cat <<'CONF'
+# robot_web · Wi-Fi 칩 절전 끄기 (rtw88 · EtherCAT 프레임 끊김 · 수정 목록 173) · 재부팅 뒤 적용
+options rtw88_pci disable_aspm=1
+options rtw88_core disable_lps_deep=1
+CONF
+}
+
+# 설정 파일에 두 줄이 다 있나 · 주석·순서는 안 봄(손으로 적은 파일도 인정)
+site_rtw88_conf_ok() {
+  [[ -f "${SITE_RTW88_MODPROBE_CONF}" ]] \
+    && grep -qxE '[[:space:]]*options[[:space:]]+rtw88_pci[[:space:]]+disable_aspm=(1|Y|y)[[:space:]]*' "${SITE_RTW88_MODPROBE_CONF}" \
+    && grep -qxE '[[:space:]]*options[[:space:]]+rtw88_core[[:space:]]+disable_lps_deep=(1|Y|y)[[:space:]]*' "${SITE_RTW88_MODPROBE_CONF}"
+}
+
+# 올라간 모듈의 값 · Y · N · 미상
+site_rtw88_param() {
+  local file="${SITE_SYS_MODULE_DIR:-/sys/module}/$1/parameters/$2"
+  if [[ -r "${file}" ]]; then tr -d '[:space:]' < "${file}"; else echo 미상; fi
+}
+
+# 손으로 할 명령 · 관리자 비밀번호 필요(웹 업데이트는 /etc 를 못 씀)
+site_wifi_chip_powersave_manual() {
+  echo "       printf '%s\\n' 'options rtw88_pci disable_aspm=1' 'options rtw88_core disable_lps_deep=1' | sudo tee ${SITE_RTW88_MODPROBE_CONF}"
+  echo "       sudo reboot"
+}
+
+site_wifi_chip_powersave_off() {
+  echo "Wi-Fi 칩 절전 끄기 (rtw88 · ASPM · LPS deep · 수정 목록 173)"
+  if ! site_rtw88_in_use; then
+    site_note "rtw88 칩 아님 · 건너뜀"
+    return 0
+  fi
+  if site_rtw88_conf_ok; then
+    if [[ "$(site_rtw88_param rtw88_pci disable_aspm)" == "Y" && "$(site_rtw88_param rtw88_core disable_lps_deep)" == "Y" ]]; then
+      site_note "이미 꺼짐 · ${SITE_RTW88_MODPROBE_CONF}"
+    else
+      site_note "이미 적힘 · ${SITE_RTW88_MODPROBE_CONF} · 재부팅 뒤 적용"
+    fi
+    return 0
+  fi
+  if ! site_render_rtw88_conf | site_write_root_file "${SITE_RTW88_MODPROBE_CONF}"; then
+    site_warn "Wi-Fi 칩 절전 설정을 쓰지 못했습니다(관리자 권한 없음 · 웹 업데이트) · 터미널에서 한 번 · 수정 목록 173"
+    site_wifi_chip_powersave_manual >&2
+    return 1
+  fi
+  site_mark_reboot "wifi_chip_powersave"
+  site_note "적음 · ${SITE_RTW88_MODPROBE_CONF} · 재부팅 뒤 적용 · sudo reboot"
+}
+
+# 자가 점검 · 1 = rtw88 아님 또는 두 값 Y · 0 = 아직 켜짐
+site_wifi_chip_powersave_ok() {
+  if ! site_rtw88_in_use; then echo 1; return; fi
+  if [[ "$(site_rtw88_param rtw88_pci disable_aspm)" == "Y" && "$(site_rtw88_param rtw88_core disable_lps_deep)" == "Y" ]]; then
+    echo 1
+  else
+    echo 0
+  fi
+}
+
+site_wifi_chip_powersave_detail() {
+  if ! site_rtw88_in_use; then echo "rtw88 칩 아님 · 해당 없음"; return; fi
+  local now
+  now="disable_aspm=$(site_rtw88_param rtw88_pci disable_aspm) · disable_lps_deep=$(site_rtw88_param rtw88_core disable_lps_deep)"
+  if [[ "$(site_wifi_chip_powersave_ok)" == "1" ]]; then
+    echo "${now}"
+  elif site_rtw88_conf_ok; then
+    echo "${now} · ${SITE_RTW88_MODPROBE_CONF} 있음 · 재부팅 뒤 적용 · sudo reboot · 수정 목록 173"
+  else
+    echo "${now} · printf '%s\\n' 'options rtw88_pci disable_aspm=1' 'options rtw88_core disable_lps_deep=1' | sudo tee ${SITE_RTW88_MODPROBE_CONF} → sudo reboot · 수정 목록 173"
+  fi
 }
 
 # ------------------------------------------------------------------ #
@@ -905,6 +990,8 @@ site_selfcheck() {
   fi
   site_check_row "$(auto_upgrades_off)" "자동 업데이트" "$(systemctl is-enabled unattended-upgrades 2>/dev/null || echo 없음)"
   site_check_row "$(site_wifi_powersave_ok)" "Wi-Fi 절전 꺼짐" "$(iwconfig 2>/dev/null | grep -o 'Power Management:[a-z]*' | head -1 || echo 무선 없음) · 재연결 뒤 적용"
+  # 무선 칩 절전(rtw88) · EtherCAT 프레임 끊김 · 수정 목록 173
+  site_check_row "$(site_wifi_chip_powersave_ok)" "Wi-Fi 칩 절전 꺼짐 (rtw88)" "$(site_wifi_chip_powersave_detail)"
   for unit in motion-control motion-motor motion-coordination; do
     site_check_row "$(systemctl --user is-active --quiet "${unit}.service" && echo 1 || echo 0)" "${unit}.service" "$(systemctl --user is-active "${unit}.service" 2>/dev/null || echo unknown)"
   done

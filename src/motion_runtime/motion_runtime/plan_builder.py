@@ -15,7 +15,7 @@ from __future__ import annotations
 import json
 import math
 import time
-from typing import Any, Dict, List, Mapping, Optional
+from typing import Any, Callable, Dict, List, Mapping, Optional
 
 from motion_common import joint_mapping, manual_speed, motion_segment, motion_tracks, multiturn_clear, rate_check, repeat_policy, units, wire_units
 from motion_common.values import finite_float, optional_int
@@ -108,6 +108,14 @@ SAMPLES_CACHE_MAX_BYTES = 48 * 1024 * 1024
 RECORDS_STAGE_CACHE_MAX_BYTES = 48 * 1024 * 1024
 
 
+#: 재샘플 도중 그만둘지 볼 간격(샘플 수) · 20 ms × 500 = 파일 10 s 분량 · 미니 PC 에서 수십 ms 마다 · 수정 목록 174
+SAMPLE_CANCEL_CHECK_EVERY = 500
+
+
+class SamplingCancelled(RuntimeError):
+    """미리 짓기(수정 목록 174)가 실행이 시작돼 재샘플을 그만뒀다 · 캐시에 안 남는다(실패와 같다)"""
+
+
 class _MotionFileUnreadable(ValueError):
     """모션 파일에 쓸 수 있는 줄이 없다 · 글은 읽기 오류 그대로 · 초기 위치 이동만이면 0° 대체로 간다"""
 
@@ -152,10 +160,12 @@ def _sample_plan(
     start_time: float,
     end_time: float,
     period_sec: float,
+    cancel: Optional[Callable[[], bool]] = None,
 ) -> tuple:
     """(샘플, 속도·가속 거절 사유) · 결과는 여러 계획이 같이 쓴다 · 고치지 않는다
 
     샘플은 배열 묶음(`PackedSamples`) · 꺼내면 옛 사전 모양 · 값은 옛 식 그대로(비트까지 같다) · 수정 목록 170
+    `cancel` · 미리 짓기만 준다 · `SAMPLE_CANCEL_CHECK_EVERY` 샘플마다 보고 참이면 `SamplingCancelled` · 수정 목록 174
     """
     duration = max(end_time - start_time, 0.0)
     sample_count = max(1, int(math.floor(duration / period_sec)) + 1)
@@ -185,6 +195,8 @@ def _sample_plan(
     clamp_motion = motion_run_rules._clamp_motion_value
     clamp_motor = motion_run_rules._clamp_to_motor_bounds
     for index in range(sample_count):
+        if cancel is not None and index % SAMPLE_CANCEL_CHECK_EVERY == 0 and index and cancel():
+            raise SamplingCancelled(f'재샘플 중단 · {index}/{sample_count}')
         sample_time = min(start_time + (index * period_sec), end_time)
         positions = []
         motion_values = []
@@ -291,7 +303,19 @@ class PlanBuilder:
         *,
         initialization_only: bool = False,
         motors_snapshot: Optional[List[Dict[str, Any]]] = None,
+        warm_only: bool = False,
+        cancel: Optional[Callable[[], bool]] = None,
+        timing: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
+        """실행 계획 · 아래 셋은 수정 목록 174
+
+        `warm_only` · 미리 짓기 · 재샘플 캐시만 채우고 `{'samples_key', 'sample_count', 'samples_cached'}` 를 돌려준다 ·
+        모터 준비 상태(알람 · 서보 · 통신)는 보지 않는다(검사 때 다시 본다 · 키에 안 든다) · 속도·가속 거절도 안 올린다(캐시에 같이 담긴다).
+        `cancel` · 재샘플 도중 그만둘지 · 그 키를 다른 스레드가 기다리면 그만두지 않는다.
+        `timing` · 넘긴 사전에 단계별 ms 를 적는다(실패해도 거기까지) · `records_ms` · `samples_ms` · `samples_cached`.
+        """
+        if warm_only and initialization_only:
+            raise ValueError('미리 짓기는 재생 계획만 됩니다')
         run_mode = str(payload.get('run_mode') or 'once').strip().lower()
         if run_mode not in ('once', 'continuous'):
             raise ValueError('run_mode must be once or continuous')
@@ -422,6 +446,7 @@ class PlanBuilder:
         records_key = None
         # 경로를 못 찾았을 때만 건너뛴다 · 경로 값이 None 인 것 자체는 막지 않는다 (옛 계약)
         if motion_file_id and not unusable_motion_file_note:
+            records_started = time.perf_counter()
             try:
                 records_key, groups, segment_info = self._records_stage(
                     motion_file_path, mapping_motion_ids, segment_start, segment_end,
@@ -436,6 +461,9 @@ class PlanBuilder:
                 )
                 groups = {}
                 segment_info = {}
+            finally:
+                if timing is not None:
+                    timing['records_ms'] = round((time.perf_counter() - records_started) * 1000.0, 1)
         # 읽으면서 이 PC 조인트만 남겼다 · 파일에 남의 조인트만 있으면 빈 목록이다 · 그때도 아래
         # 「모션 자료 없음」 길로 가서 결과는 전과 같다(전부 빠져 움직일 조인트 없음 · 초기 이동은 0° 대체)
         source_motion_data_available = bool(groups)
@@ -588,7 +616,8 @@ class PlanBuilder:
                 errors.append(f'Motion ID {motion_id}: Axis {motor_axis} not found')
                 continue
             motor_error = motion_run_rules._motor_ready_error(motor)
-            if motor_error and not automation_run:
+            # 미리 짓기는 모터 준비를 안 본다 · 키에 안 드는 지금 상태라 검사 때 다시 본다 · 수정 목록 174
+            if motor_error and not automation_run and not warm_only:
                 errors.append(f'Motion ID {motion_id}: {motor_error}')
 
             motion_values = groups[motion_id].values
@@ -758,12 +787,36 @@ class PlanBuilder:
         if not initialization_only:
             # 20 ms 재샘플 · 속도·가속 검사 · 긴 애니(920 s)에서 가장 무거운 몫 · 같은 레코드 · 같은
             # 매핑 줄 · 같은 모터 한계면 같은 답이라 한 번만 계산한다 · 수정 목록 164
-            samples, rate_error = self._samples_cache.get_or_compute(
-                _samples_key(records_key, self.manager.period_sec, axes),
-                lambda: _sample_plan(
+            #
+            # 키는 파일 · 매핑 줄 · 모터 번호 · 모터 한계(설정 값)뿐 · 모터 위치 · 알람 · 서보는 안 든다 ·
+            # 그래서 부팅 뒤 미리 지은 것(warm_only)을 준비 검사가 그대로 쓴다 · 수정 목록 174
+            samples_key = _samples_key(records_key, self.manager.period_sec, axes)
+            computed = []
+            should_cancel = None
+            if cancel is not None:
+                # 누가 이 키를 기다리면(준비 검사 · 그룹 준비) 끝까지 · 그만두면 그쪽이 처음부터 다시 한다
+                should_cancel = lambda: bool(cancel()) and not self._samples_cache.waiting(samples_key)  # noqa: E731
+
+            def compute() -> tuple:
+                computed.append(True)
+                return _sample_plan(
                     axes, groups, start_time, end_time, self.manager.period_sec,
-                ),
-            )
+                    cancel=should_cancel,
+                )
+
+            samples_started = time.perf_counter()
+            try:
+                samples, rate_error = self._samples_cache.get_or_compute(samples_key, compute)
+            finally:
+                if timing is not None:
+                    timing['samples_ms'] = round((time.perf_counter() - samples_started) * 1000.0, 1)
+                    timing['samples_cached'] = not computed
+            if warm_only:
+                return {
+                    'samples_key': samples_key,
+                    'sample_count': len(samples),
+                    'samples_cached': not computed,
+                }
         else:
             rate_error = _motion_rate_limit_error(axes, samples, self.manager.period_sec)
         if rate_error:

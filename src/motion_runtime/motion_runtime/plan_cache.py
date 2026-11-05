@@ -10,6 +10,9 @@
 키가 None 이면 담지 않는다(그때마다 계산) · 실패는 담지 않는다.
 **담은 값은 고치지 않는다** · 부르는 쪽이 고칠 것이면 사본을 만든다.
 
+기다리는 스레드 수 · `waiting(키)` · 미리 짓기(수정 목록 174)가 실행이 시작돼 계산을 그만둘지 볼 때 ·
+누가 그 값을 기다리면 그만두지 않는다(그만두면 기다리던 쪽이 처음부터 다시 계산한다).
+
 바이트 제한 · 수정 목록 170 · 값마다 `size_of(값)`(대략 바이트)를 더해 `max_bytes` 를 넘으면
 오래된 것부터 버린다 · 방금 넣은 것 하나는 예산보다 커도 남긴다(바로 쓸 것이라 · 다음에 넣을 때 버려진다).
 """
@@ -44,6 +47,7 @@ class SingleFlightCache:
         self._values: 'OrderedDict[Hashable, Any]' = OrderedDict()
         self._bytes: Dict[Hashable, int] = {}
         self._pending: Dict[Hashable, threading.Event] = {}
+        self._waiters: Dict[Hashable, int] = {}
 
     def get_or_compute(self, key: Optional[Hashable], compute: Callable[[], Any]) -> Any:
         if key is None:
@@ -58,8 +62,18 @@ class SingleFlightCache:
                 if owner:
                     event = threading.Event()
                     self._pending[key] = event
+                else:
+                    self._waiters[key] = self._waiters.get(key, 0) + 1
             if not owner:
-                event.wait()
+                try:
+                    event.wait()
+                finally:
+                    with self._lock:
+                        left = self._waiters.get(key, 0) - 1
+                        if left > 0:
+                            self._waiters[key] = left
+                        else:
+                            self._waiters.pop(key, None)
                 continue
             try:
                 value = compute()
@@ -102,6 +116,13 @@ class SingleFlightCache:
         with self._lock:
             self._values.clear()
             self._bytes.clear()
+
+    def waiting(self, key: Optional[Hashable]) -> int:
+        """그 키의 계산이 끝나기를 기다리는 스레드 수 · 수정 목록 174"""
+        if key is None:
+            return 0
+        with self._lock:
+            return self._waiters.get(key, 0)
 
     def keys(self):
         with self._lock:

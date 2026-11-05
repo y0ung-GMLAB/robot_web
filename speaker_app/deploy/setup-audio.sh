@@ -22,6 +22,15 @@ mkdir -p "$HOME/.config/pulse"
 grep -q '^autospawn' "$HOME/.config/pulse/client.conf" 2>/dev/null \
   || echo 'autospawn = no' >> "$HOME/.config/pulse/client.conf"
 
+# 사운드 카드를 열지 않는 빈 PulseAudio 만 띄운다 · AnyDesk 8.1 은 PulseAudio 서버가 없으면 접속 때
+# 죽는다(desk_rt_ipc_error · 2026-11-04 스피커 PC) · 장치는 그대로 aplay 전용 ·
+# 출력 장치는 plughw:… · hw:… · bluealsa:… 로 (default / pulse 면 소리가 빈 출력으로 간다)
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+mkdir -p "$HOME/.config/systemd/user"
+cp "${SCRIPT_DIR}/pulseaudio-null.service" "$HOME/.config/systemd/user/"
+systemctl --user daemon-reload
+systemctl --user enable --now pulseaudio-null.service
+
 echo
 echo "완료. 이 PC의 사운드 카드 목록:"
 aplay -l | grep '^card' || true

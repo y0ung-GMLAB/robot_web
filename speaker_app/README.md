@@ -103,6 +103,9 @@ pip3 install -r requirements.txt
 `Device or resource busy`로 실패해 **소리가 한 번도 나지 않는다.**
 스크립트가 PulseAudio와 speech-dispatcher를 봉인해 장치를 앱 전용으로 만든다.
 (데스크톱 소리는 나지 않게 된다 — 의도한 동작이다)
+대신 사운드 카드를 열지 않는 빈 PulseAudio(`pulseaudio-null` 사용자 서비스 · 빈 출력 `dummy` 하나)를 띄운다 ·
+AnyDesk 8.1 이 PulseAudio 서버가 없으면 접속 때 죽기 때문(`desk_rt_ipc_error` · 2026-11-04) ·
+그래서 출력 장치는 `plughw:…` · `hw:…` · `bluealsa:…` 로 둔다 (`default` · `pulse` 면 소리가 빈 출력으로 간다)
 
 실행이 끝나면 그 PC의 사운드 카드 목록이 출력된다. **카드 번호는 PC마다 다르다.**
 

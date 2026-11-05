@@ -649,6 +649,9 @@ fi
 # Wi-Fi 절전 끄기 · 관리자 권한 없이 됨(웹 Wi-Fi 권한) · 웹 업데이트에서도 · 실패해도 설치는 계속 · 수정 목록 112 차
 print_step "2-1. Wi-Fi 절전 끄기"
 site_wifi_powersave_off || echo "!! Wi-Fi 절전을 끄지 못했습니다 · 설치는 계속합니다" >&2
+# 무선 칩(rtw88) 절전 · /etc/modprobe.d 에 써야 해서 관리자 권한 · 웹 업데이트(--code-only · sudo -n)는
+# 비밀번호 없이 못 쓰니 손으로 할 명령만 찍고 계속 · 재부팅 뒤 적용 · 수정 목록 173
+site_wifi_chip_powersave_off || echo "!! Wi-Fi 칩 절전을 끄지 못했습니다 · 위 명령을 터미널에서 한 번 · 설치는 계속합니다" >&2
 
 if [[ "${CODE_ONLY}" == true ]]; then
   print_step "3~6. 건너뜀 · 코드만 갱신 (시스템 패키지 · 권한 · rosdep 은 첫 설치 때 끝남)"

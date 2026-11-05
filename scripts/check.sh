@@ -94,6 +94,11 @@ if [[ -n "${wifi_conn}" ]]; then
   wifi_ps="$(nmcli -g 802-11-wireless.powersave connection show "${wifi_conn}" 2>/dev/null || true)"
   row "$([[ "${wifi_ps}" == "2" || "${wifi_ps}" == "disable" ]] && echo 1 || echo 0)" "Wi-Fi 절전 꺼짐" "${wifi_conn} · powersave=${wifi_ps:-미상} (2 = 끔 · 바꾼 뒤 재연결)"
 fi
+# 무선 칩(rtw88) 절전 · 켜져 있으면 EtherCAT 프레임이 통째로 빠짐 · /sys/module/rtw88_pci/parameters/disable_aspm ·
+# /sys/module/rtw88_core/parameters/disable_lps_deep 둘 다 Y · rtw88 아니면 해당 없음 · 수정 목록 173
+# shellcheck disable=SC1091
+source "${SCRIPT_DIR}/setup/site.sh"
+row "$(site_wifi_chip_powersave_ok)" "Wi-Fi 칩 절전 꺼짐 (rtw88)" "$(site_wifi_chip_powersave_detail)"
 info "시간대" "$(timedatectl show -p Timezone --value 2>/dev/null || echo 미상) · $(date '+%H:%M')"
 # 원격 · 애니데스크 · 깔린 PC(마스터)만 본다 · 수정 목록 135
 if command -v anydesk >/dev/null 2>&1; then

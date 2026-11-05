@@ -13,7 +13,7 @@ import yaml
 from motion_common import paths as common_paths
 from motion_common.execution_context import confirm_context_id
 from motion_common.paths import project_dir_for
-from motion_common import command_router, generation as generation_mod, latest_tap, motion_table, motion_tracks, smoothing, topics, wire_units
+from motion_common import check_timing, command_router, generation as generation_mod, latest_tap, motion_table, motion_tracks, smoothing, topics, wire_units
 from motion_common.values import finite_float, optional_int
 from motion_control_msgs.msg import MotorStatus
 from rclpy.node import Node
@@ -33,7 +33,7 @@ from .motion_run_constants import (
 from . import background_pacing, motion_run_rules
 from .group_session import GroupSession
 from .motion_player import MotionPlayer
-from .plan_builder import PlanBuilder
+from .plan_builder import SAMPLES_CACHE_SIZE, PlanBuilder, SamplingCancelled
 from .plan_cache import SingleFlightCache
 from .registered_motion_file import playlist_from_mapping
 from .motion_automation_store import (
@@ -51,6 +51,12 @@ _LAZY_CACHE_LOCK = threading.Lock()
 
 # 프로젝트 폴더는 `motion_common.paths` 하나가 정한다 · 파라미터로 받지 않는다 · 수정 목록 32
 DEFAULT_MOTION_PROJECTS_DIR = common_paths.motion_projects_dir()
+
+
+def check_timing_text(timing: Dict[str, Any]) -> str:
+    """단계별 시간 한 줄 · 「대기 0 · 파일 3200 · 재샘플 1800(새로) · 계획 5050 ms」 · 수정 목록 174"""
+    text = check_timing.stage_text(timing)
+    return f'{text} ms' if text else '단계 기록 없음'
 
 
 def _decode_motor_positions(raw: bytes) -> Dict[int, float]:
@@ -534,15 +540,23 @@ class MotionRunManager(Node):
         # 상태 표 차례를 받을 때 본다 · 검사 도중 실행이 시작됐거나 상태가 바뀌었으면 검사 결과로 덮지 않는다
         status_epoch = self._status_epoch_now()
         self._background_executor().submit(
-            self._run_background, command, request, payload, status_epoch,
+            self._run_background, command, request, payload, status_epoch, time.monotonic(),
         )
 
     def _run_background(
         self, command: str, request: Any, payload: Dict[str, Any], status_epoch: int,
+        submitted_at: Optional[float] = None,
     ) -> None:
+        # 작업 스레드 줄에서 기다린 시간 · 앞 검사가 길었으면 여기서 보인다 · 수정 목록 174
+        queued_ms = (
+            None if submitted_at is None
+            else round((time.monotonic() - submitted_at) * 1000.0, 1)
+        )
         try:
             if command == 'check':
-                response = self._handle_check(payload, status_epoch=status_epoch)
+                response = self._handle_check(
+                    payload, status_epoch=status_epoch, queued_ms=queued_ms,
+                )
             else:
                 response = self._command_router().resolve(command)(payload)
         except Exception as exc:  # noqa: BLE001 · 답은 꼭 보낸다 · 안 보내면 브리지가 시간 초과로만 안다
@@ -635,12 +649,23 @@ class MotionRunManager(Node):
             **self._execution_context,
         }
 
+    #: 미리 짓기가 모터 상태(번호 · 한계)를 기다리는 최대 시간 · 실행 허용은 모터 상태가 선 뒤라 보통 바로 · 수정 목록 174
+    WARM_MOTOR_WAIT_SEC = 30.0
+    WARM_MOTOR_POLL_SEC = 0.5
+
     def _warm_motion_cache(self, context: Dict[str, Any]) -> None:
-        """재생 등록 애니를 미리 읽어 둔다 · 뒤에서 · 실행 중이면 안 한다 · 수정 목록 164
+        """재생 등록 애니를 미리 읽고 재샘플까지 지어 둔다 · 뒤에서 · 실행 중이면 안 한다 · 수정 목록 164 · 174
 
         부팅 뒤 첫 그룹 시작(스케줄)은 준비 검사가 920 s 파일을 처음 읽는다 · 미니 PC 에서 몇 초다 ·
-        준비 확인 예산(6 s) 을 넘기 쉽다. 실행 허용이 서는 때 미리 읽어 두면 검사는 캐시에서 시작한다.
-        이미 읽은 파일은 파일 정보만 보고 끝난다 · 읽기만 한다(계획은 모터 상태가 있어야 짓는다).
+        준비 확인 예산(6 s) 을 넘기 쉽다. 실행 허용이 서는 때 미리 지어 두면 검사는 캐시에서 시작한다.
+
+        164 는 파일 읽기만 했다 · 가장 무거운 20 ms 재샘플 · 속도 검사는 남아 NY 2026-11-05 재부팅 뒤 첫
+        그룹 시작에서 그 PC 가 「로컬 Web Bridge 응답 없음: timed out」 으로 빠졌다(다음 회차 복귀 · 913 s 쉼).
+        이제 재샘플까지 · 키는 준비 검사와 똑같이 짓는다(`PlanBuilder.build(warm_only=True)` · 같은 함수 ·
+        모터 번호 · 한계는 지금 모터 상태 · 위치 · 알람 · 서보는 키에 안 든다).
+
+        실행 컨텍스트가 바뀔 때마다(매핑 · 재생 목록 저장 = 새 context_id → 실행 허용) 다시 · 도는 중이면
+        끝나고 마지막 요청 하나만 이어서 한다.
         """
         project_id = str(context.get('project_id') or '').strip()
         mapping_file_id = str(context.get('mapping_file_id') or '').strip()
@@ -648,23 +673,42 @@ class MotionRunManager(Node):
         if not project_id or not mapping_file_id or getattr(self, 'motion_files_dir', None) is None:
             return
         with self._run_lock:
-            run_thread = self._run_thread
-            if run_thread is not None and run_thread.is_alive():
+            if self._warm_should_yield():
                 return
+            self._warm_request = (project_id, mapping_file_id)
             warm = getattr(self, '_warm_thread', None)
             if warm is not None and warm.is_alive():
                 return
             self._warm_thread = threading.Thread(
-                target=self._warm_motion_cache_now,
-                args=(project_id, mapping_file_id),
+                target=self._warm_worker,
                 name='motion-cache-warm',
                 daemon=True,
             )
             self._warm_thread.start()
 
-    def _warm_motion_cache_now(self, project_id: str, mapping_file_id: str) -> None:
-        # 뒤 작업 · 실행기·재생 틱이 GIL 을 받게 쉬어 가며 읽는다 · 수정 목록 171
+    def _warm_worker(self) -> None:
+        # 뒤 작업 · 실행기·재생 틱이 GIL 을 받게 쉬어 가며 짓는다 · 수정 목록 171
         background_pacing.pace_current_thread()
+        try:
+            while True:
+                with self._run_lock:
+                    request = getattr(self, '_warm_request', None)
+                    self._warm_request = None
+                    if request is None:
+                        self._warm_thread = None
+                        return
+                self._warm_motion_cache_now(*request)
+        finally:
+            with self._run_lock:
+                if getattr(self, '_warm_thread', None) is threading.current_thread():
+                    self._warm_thread = None
+
+    def _warm_should_yield(self) -> bool:
+        """미리 짓기를 그만둘 때 · 실행 스레드(재생 · 초기 위치 이동 · 그룹 준비 · 그룹 실행)가 돌면 · 174"""
+        run_thread = getattr(self, '_run_thread', None)
+        return run_thread is not None and run_thread.is_alive()
+
+    def _warm_motion_cache_now(self, project_id: str, mapping_file_id: str) -> None:
         try:
             _, motion_files_dir, mappings_dir = self._project_asset_dirs({'project_id': project_id})
             mapping = self._load_mapping(self._mapping_file_path(mapping_file_id, mappings_dir))
@@ -678,18 +722,83 @@ class MotionRunManager(Node):
                 if name and name not in names:
                     names.append(name)
             for name in names[:self.MOTION_CACHE_SIZE]:
-                with self._run_lock:
-                    run_thread = self._run_thread
-                    if run_thread is not None and run_thread.is_alive():
-                        return
+                if self._warm_should_yield():
+                    return
                 try:
                     path = self._motion_file_path(name, motion_files_dir)
                     self._load_motion_tracks(path, motion_ids=motion_ids)
                 except (OSError, ValueError):
                     continue
+            self._warm_plan_samples(project_id, mapping_file_id, mapping, names)
         except Exception as exc:  # noqa: BLE001 · 미리 읽기는 실패해도 그만이다 · 검사가 다시 읽는다
             self.get_logger().info(f'motion cache warm-up skipped: {exc}')
 
+    def _warm_motors(self) -> List[Dict[str, Any]]:
+        """미리 짓기에 쓸 모터 상태 · 아직 없으면 잠깐 기다린다 · 실행이 시작되면 빈 목록 · 174"""
+        deadline = time.monotonic() + self.WARM_MOTOR_WAIT_SEC
+        while True:
+            if self._warm_should_yield():
+                return []
+            motors = self._current_motors()
+            if motors or time.monotonic() >= deadline:
+                return motors
+            time.sleep(self.WARM_MOTOR_POLL_SEC)
+
+    def _warm_plan_samples(
+        self, project_id: str, mapping_file_id: str, mapping: Dict[str, Any], names: List[str],
+    ) -> None:
+        """재생 목록 앞쪽을 준비 검사와 같은 요청으로 지어 재샘플 캐시에 둔다 · 수정 목록 174
+
+        준비 검사가 보는 것은 매핑의 `motion_file_id`(재생 목록 1번) 하나 · 그룹 준비도 그것부터 ·
+        2번부터는 1회차 시작 1.5 s 뒤 뒤에서 짓는다(171) · 캐시 칸(`SAMPLES_CACHE_SIZE` = 2 · 48 MB)만큼만 ·
+        1번을 **마지막에** 지어 가장 늦게 버려지게 · 바이트 예산을 넘으면 오래된(2번) 것이 먼저 빠진다.
+        """
+        first = str(mapping.get('motion_file_id') or '').strip() or (names[0] if names else '')
+        if not first:
+            return
+        order = [first] + [name for name in names if name != first]
+        order = order[:SAMPLES_CACHE_SIZE]
+        motors = self._warm_motors()
+        if not motors:
+            if not self._warm_should_yield():
+                self.get_logger().info('[계획 미리 짓기] 건너뜀 · 모터 상태 없음')
+            return
+        for name in reversed(order):
+            if self._warm_should_yield():
+                self.get_logger().info(f'[계획 미리 짓기] {name} · 실행 시작으로 그만둠')
+                return
+            timing: Dict[str, Any] = {}
+            started = time.perf_counter()
+            try:
+                result = self._plan_builder.build(
+                    {
+                        'project_id': project_id,
+                        'motion_file_id': name,
+                        'mapping_file_id': mapping_file_id,
+                        # 준비 검사(`local_motion_readiness`)와 같은 칸 · 구간 없음(0/0) = 통째로
+                        'run_mode': 'once',
+                        'request_source': 'cache_warm',
+                        'initial_move_time_sec': None,
+                    },
+                    warm_only=True,
+                    motors_snapshot=list(motors),
+                    cancel=self._warm_should_yield,
+                    timing=timing,
+                )
+            except SamplingCancelled:
+                self.get_logger().info(f'[계획 미리 짓기] {name} · 실행 시작으로 그만둠')
+                return
+            except (OSError, ValueError) as exc:
+                # 검사에서도 같은 이유로 거절된다 · 미리 지을 것이 없다
+                self.get_logger().info(f'[계획 미리 짓기] {name} · 건너뜀: {str(exc)[:200]}')
+                continue
+            total_ms = (time.perf_counter() - started) * 1000.0
+            cache = getattr(self._plan_builder, '_samples_cache', None)
+            cache_mb = (getattr(cache, 'nbytes', 0) or 0) / 1e6
+            self.get_logger().info(
+                f'[계획 미리 짓기] {name} · {total_ms:.0f} ms · {check_timing_text(timing)} · '
+                f'샘플 {int(result.get("sample_count") or 0)} · 재샘플 캐시 {cache_mb:.1f} MB'
+            )
 
     def _require_execution_context(self, payload: Dict[str, Any]) -> None:
         context_id = str(payload.get('context_id') or '').strip()
@@ -840,15 +949,24 @@ class MotionRunManager(Node):
 
     def _handle_check(
         self, payload: Dict[str, Any], *, status_epoch: Optional[int] = None,
+        queued_ms: Optional[float] = None,
     ) -> Dict[str, Any]:
         """실행 준비 검사 · 계획을 지어 보고 버린다 · 지은 재료는 계획 캐시에 남아 그룹 준비가 다시 쓴다(164)
 
         `status_epoch` · 작업 스레드에서 돌 때 요청을 받은 때의 상태 차례 · 그 사이 상태가 바뀌었으면
         (실행 시작 · 정지 등) 검사 결과로 상태 표를 덮지 않는다 · 답은 그대로 보낸다.
+
+        단계별 시간 · 답의 `timing_ms`(브리지 준비 확인이 제 줄에 싣는다) · 1 s 넘거나 실패면 로그 한 줄 · 수정 목록 174
         """
+        timing: Dict[str, Any] = {}
+        if queued_ms is not None:
+            timing['queued_ms'] = queued_ms
+        started = time.perf_counter()
         try:
-            plan = self._plan_builder.build(payload)
+            plan = self._plan_builder.build(payload, timing=timing)
         except Exception as exc:
+            timing['build_ms'] = round((time.perf_counter() - started) * 1000.0, 1)
+            self._log_check_timing(payload, timing, failure=str(exc) or type(exc).__name__)
             reason = str(exc) or '실행 준비 검사 실패'
             status = motion_run_rules._empty_status()
             status.update({
@@ -867,7 +985,10 @@ class MotionRunManager(Node):
                 'message': reason,
                 'status': self.status(),
                 'summary': {},
+                'timing_ms': timing,
             }
+        timing['build_ms'] = round((time.perf_counter() - started) * 1000.0, 1)
+        self._log_check_timing(payload, timing)
         status = motion_run_rules._status_from_plan('ready', '실행 준비 검사 완료', plan)
         status['phase'] = 'ready'
         status['lifecycle'] = {
@@ -884,7 +1005,34 @@ class MotionRunManager(Node):
             'message': 'motion run check complete',
             'status': self.status(),
             'summary': plan['summary'],
+            'timing_ms': timing,
         }
+
+    #: 준비 검사가 이보다 길면(작업 줄 대기 포함) 단계별 시간을 로그에 · 실패는 늘 · 수정 목록 174
+    CHECK_SLOW_LOG_MS = 1000.0
+
+    def _log_check_timing(
+        self, payload: Dict[str, Any], timing: Dict[str, Any], failure: str = '',
+    ) -> None:
+        """준비 검사 단계별 시간 한 줄 · 느리거나(1 s 이상) 실패일 때만 · 수정 목록 174
+
+        NY 실물 2026-11-05 · 재부팅 뒤 첫 그룹 시작 · 「준비 거절 · 로컬 Web Bridge 응답 없음: timed out」 ·
+        단계 기록이 없어 어디가 느렸는지 미확인 · 다음에는 이 줄로 본다.
+        """
+        total = float(timing.get('build_ms') or 0.0) + float(timing.get('queued_ms') or 0.0)
+        if not failure and total < self.CHECK_SLOW_LOG_MS:
+            return
+        line = check_timing_text(timing)
+        name = str(payload.get('motion_file_id') or '')
+        source = str(payload.get('request_source') or '')
+        try:
+            logger = self.get_logger()
+        except Exception:  # noqa: BLE001 · 노드 없이 만든 시험 객체 · 로그 때문에 검사 답이 안 가면 안 된다
+            return
+        if failure:
+            logger.warning(f'[준비 검사 시간] {name} · {source} · {line} · 실패: {failure[:200]}')
+        else:
+            logger.info(f'[준비 검사 시간] {name} · {source} · {line}')
 
     def _claim_run_slot(self) -> List[Dict[str, Any]]:
         """실행 슬롯을 잡고 모터 스냅샷을 돌려준다 · `_run_lock`을 잡은 채 부른다.
