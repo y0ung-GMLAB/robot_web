@@ -86,6 +86,11 @@ from .servo_alarm_policy import (
 #: 스케줄 노드 상태(1초마다)가 이보다 늙었으면 「구간 안」 을 믿지 않는다 · 수정 목록 131
 SCHEDULE_STATUS_FRESH_SEC = 10.0
 
+#: 그룹 실행 중 연동 노드의 `local-status` 질문이 이만큼 끊기면 이 PC 재생을 세운다(연동 노드가 죽음) ·
+#: 1.0초였다 · 연동 노드 쪽 기준을 1.5초로 늘리면서(수정 목록 172) 그보다 길게 · 웹 서버가 잠깐
+#: 멈칫해 질문이 밀린 것만으로 이 PC 혼자 서지 않게 · 판단은 연동 노드가 먼저 한다
+COORDINATION_POLL_TIMEOUT_SEC = 2.0
+
 
 def _managed_motor_service() -> str:
     """Motor Manager 가 따로 도는 설치인가 · 아니면 빈 글자 (멈출 것이 없다)"""
@@ -1121,7 +1126,7 @@ class MotionWebBridge(Node):
             return
         with self._coordination_poll_lock:
             received = self._coordination_poll_received_monotonic
-        if received and time.monotonic() - received <= 1.0:
+        if received and time.monotonic() - received <= COORDINATION_POLL_TIMEOUT_SEC:
             return
         if self._coordination_watchdog_stop_execution_id == execution_id:
             return
@@ -2768,9 +2773,9 @@ def _safety_first_stop(bridge: MotionWebBridge, method, *args):
 
 #: 이벤트 루프가 이만큼 늦으면 적어 둔다 · §6-153
 #:
-#: 연동 노드는 그룹 실행 중 로컬 상태를 300ms 안에 받아야 하고, 0.5초 못 받으면
-#: **전체를 정지시킨다** · 그 길이 이 루프다 · 루프가 100ms 막혔다면 예산의
-#: 5분의 1을 한 번에 까먹은 것이니 남길 값어치가 있다.
+#: 연동 노드는 그룹 실행 중 로컬 상태를 한 번에 300ms 안에 받아야 하고, 1.5초 못 받으면
+#: **전체를 정지시킨다**(0.5초였다 · 수정 목록 172) · 그 길이 이 루프다 · 루프가 100ms
+#: 막혔다면 시도 한 번의 3분의 1을 까먹은 것이니 남길 값어치가 있다.
 EVENT_LOOP_LAG_WARN_SEC = 0.10
 
 #: 얼마나 자주 재는가 · 재는 일 자체는 거의 공짜다(잠들었다 깨어날 뿐)
@@ -2798,7 +2803,7 @@ async def _watch_event_loop_lag(bridge) -> None:
         worst = max(worst, lag)
         bridge.get_logger().warn(
             f'[루프 지연] {lag * 1000:.0f}ms 막힘 · 이번 기동 최악 '
-            f'{worst * 1000:.0f}ms · 연동 예산은 500ms 입니다'
+            f'{worst * 1000:.0f}ms · 연동 예산은 시도 한 번 300ms · 끊김 1500ms 입니다'
         )
 
 
@@ -2850,7 +2855,8 @@ def create_app(bridge: MotionWebBridge) -> FastAPI:
         하면 그 동안 **웹 서버 전체가 멈춘다** · 화면에서 탭 하나를 눌러
         패널 조회가 몰리면 루프가 막히고, 그 틈에 연동 노드가 50ms 마다 묻는
         `/api/coordination/local-status` 가 0.25초 제한을 넘긴다 · 그게 0.5초
-        이어지면 **그룹 실행이 통째로 정지한다**(`GROUP_PARTICIPANT_FAILURE`).
+        이어지면 **그룹 실행이 통째로 정지한다**(`GROUP_PARTICIPANT_FAILURE`) ·
+        (지금 기준 · 시도 한 번 0.3초 · 끊김 1.5초 · 수정 목록 172).
 
         실제로 그렇게 멈췄다 · 24회차까지 멀쩡히 돌던 3대 연동이, 사람이 웹
         탭을 누른 순간 섰다 · 재보니 평상시 3.8ms 이던 응답이 475ms 로 뛰었다.

@@ -12,7 +12,7 @@ import yaml
 from motion_common import paths as common_paths
 from motion_common.execution_context import confirm_context_id
 from motion_common.paths import project_dir_for
-from motion_common import command_router, generation as generation_mod, latest_tap, motion_table, smoothing, topics, wire_units
+from motion_common import check_timing, command_router, generation as generation_mod, latest_tap, motion_table, smoothing, topics, wire_units
 from motion_common.values import finite_float, optional_int
 from motion_control_msgs.msg import MotorStatus
 from rclpy.node import Node
@@ -44,6 +44,12 @@ from .motion_trace import DEFAULT_MAX_BYTES, DEFAULT_RETENTION_DAYS, MotionTrace
 
 # 프로젝트 폴더는 `motion_common.paths` 하나가 정한다 · 파라미터로 받지 않는다 · 수정 목록 32
 DEFAULT_MOTION_PROJECTS_DIR = common_paths.motion_projects_dir()
+
+
+def check_timing_text(timing: Dict[str, Any]) -> str:
+    """단계별 시간 한 줄 · 「파일 3200 · 재샘플 1800 · 계획 5050 ms」 · 수정 목록 174"""
+    text = check_timing.stage_text(timing)
+    return f'{text} ms' if text else '단계 기록 없음'
 
 
 def _decode_motor_positions(raw: bytes) -> Dict[int, float]:
@@ -712,9 +718,16 @@ class MotionRunManager(Node):
 
 
     def _handle_check(self, payload: Dict[str, Any]) -> Dict[str, Any]:
+        """실행 준비 검사 · 단계별 시간은 답의 `timing_ms`(브리지 준비 확인이 제 줄에 싣는다) ·
+        1 s 넘거나 실패면 로그 한 줄 · 수정 목록 174
+        """
+        timing: Dict[str, Any] = {}
+        started = time.perf_counter()
         try:
-            plan = self._plan_builder.build(payload)
+            plan = self._plan_builder.build(payload, timing=timing)
         except Exception as exc:
+            timing['build_ms'] = round((time.perf_counter() - started) * 1000.0, 1)
+            self._log_check_timing(payload, timing, failure=str(exc) or type(exc).__name__)
             reason = str(exc) or '실행 준비 검사 실패'
             status = motion_run_rules._empty_status()
             status.update({
@@ -733,7 +746,10 @@ class MotionRunManager(Node):
                 'message': reason,
                 'status': self.status(),
                 'summary': {},
+                'timing_ms': timing,
             }
+        timing['build_ms'] = round((time.perf_counter() - started) * 1000.0, 1)
+        self._log_check_timing(payload, timing)
         status = motion_run_rules._status_from_plan('ready', '실행 준비 검사 완료', plan)
         status['phase'] = 'ready'
         status['lifecycle'] = {
@@ -750,7 +766,34 @@ class MotionRunManager(Node):
             'message': 'motion run check complete',
             'status': self.status(),
             'summary': plan['summary'],
+            'timing_ms': timing,
         }
+
+    #: 준비 검사가 이보다 길면 단계별 시간을 로그에 · 실패는 늘 · 수정 목록 174
+    CHECK_SLOW_LOG_MS = 1000.0
+
+    def _log_check_timing(
+        self, payload: Dict[str, Any], timing: Dict[str, Any], failure: str = '',
+    ) -> None:
+        """준비 검사 단계별 시간 한 줄 · 느리거나(1 s 이상) 실패일 때만 · 수정 목록 174
+
+        NY 실물 2026-11-05(humble) · 재부팅 뒤 첫 그룹 시작 · 「준비 거절 · 로컬 Web Bridge 응답 없음: timed out」 ·
+        단계 기록이 없어 어디가 느렸는지 미확인 · 다음에는 이 줄로 본다.
+        """
+        total = float(timing.get('build_ms') or 0.0)
+        if not failure and total < self.CHECK_SLOW_LOG_MS:
+            return
+        line = check_timing_text(timing)
+        name = str(payload.get('motion_file_id') or '')
+        source = str(payload.get('request_source') or '')
+        try:
+            logger = self.get_logger()
+        except Exception:  # noqa: BLE001 · 노드 없이 만든 시험 객체 · 로그 때문에 검사 답이 안 가면 안 된다
+            return
+        if failure:
+            logger.warning(f'[준비 검사 시간] {name} · {source} · {line} · 실패: {failure[:200]}')
+        else:
+            logger.info(f'[준비 검사 시간] {name} · {source} · {line}')
 
     def _claim_run_slot(self) -> List[Dict[str, Any]]:
         """실행 슬롯을 잡고 모터 스냅샷을 돌려준다 · `_run_lock`을 잡은 채 부른다.

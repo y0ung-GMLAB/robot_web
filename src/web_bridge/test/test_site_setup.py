@@ -509,3 +509,125 @@ def test_anydesk_script_parses_and_is_not_run_by_install():
     assert 'anydesk' not in install.lower()        # 깔 PC 에서 손으로
     text = script.read_text(encoding='utf-8')
     assert 'site_wayland_off' in text and 'site_anydesk_install' in text
+
+
+# ------------------------------------------------------------------ #
+# 수정 목록 173 · 무선 칩(rtw88) 절전 끄기 · 켜져 있으면 EtherCAT 프레임이 통째로 빠짐
+#   실물 NY 2026-11-05 · 그룹 재생 30분 · floating3(켬) 183회 · floating4(끔) 0회
+# ------------------------------------------------------------------ #
+
+def _rtw88_env(tmp_path, fake_sudo='exec "$@"', loaded=True, aspm='N', lps='N'):
+    fake = tmp_path / 'bin'
+    fake.mkdir(parents=True, exist_ok=True)
+    _fake(fake, 'sudo', fake_sudo)
+    sys_dir = tmp_path / 'sys'
+    if loaded:
+        (sys_dir / 'rtw88_pci' / 'parameters').mkdir(parents=True, exist_ok=True)
+        (sys_dir / 'rtw88_core' / 'parameters').mkdir(parents=True, exist_ok=True)
+        (sys_dir / 'rtw88_pci' / 'parameters' / 'disable_aspm').write_text(f'{aspm}\n', encoding='utf-8')
+        (sys_dir / 'rtw88_core' / 'parameters' / 'disable_lps_deep').write_text(f'{lps}\n', encoding='utf-8')
+    else:
+        sys_dir.mkdir(exist_ok=True)
+    return {
+        'PATH': f'{fake}{os.pathsep}{os.environ["PATH"]}',
+        'SITE_SYS_MODULE_DIR': str(sys_dir),
+        'SITE_RTW88_MODPROBE_CONF': str(tmp_path / 'rtw88-robot.conf'),
+        'SITE_STATE_DIR': str(tmp_path / 'state'),
+    }
+
+
+@pytest.mark.skipif(not LINUX_SHELL, reason='리눅스 셸에서')
+def test_rtw88_chip_powersave_conf_is_written_once(tmp_path):
+    env = _rtw88_env(tmp_path)
+    conf = tmp_path / 'rtw88-robot.conf'
+    first = _site('site_wifi_chip_powersave_off', env)
+    text = conf.read_text(encoding='utf-8')
+    assert 'options rtw88_pci disable_aspm=1' in text.splitlines()
+    assert 'options rtw88_core disable_lps_deep=1' in text.splitlines()
+    assert text.startswith('#') and '수정 목록 173' in text
+    assert '재부팅 뒤 적용' in first
+    assert (tmp_path / 'state' / 'needs_reboot').read_text(encoding='utf-8').strip() == 'wifi_chip_powersave'
+    # 두 번째 · 그대로 · 재부팅 표시도 더 안 쌓임
+    second = _site('site_wifi_chip_powersave_off', env)
+    assert conf.read_text(encoding='utf-8') == text
+    assert '이미 적힘' in second
+    assert (tmp_path / 'state' / 'needs_reboot').read_text(encoding='utf-8').strip() == 'wifi_chip_powersave'
+    # 재부팅 전 · 점검은 [확인] · 파일 있음 → 재부팅만 안내
+    assert _site('site_wifi_chip_powersave_ok', env).strip() == '0'
+    detail = _site('site_wifi_chip_powersave_detail', env)
+    assert 'disable_aspm=N' in detail and 'sudo reboot' in detail and 'sudo tee' not in detail
+
+
+@pytest.mark.skipif(not LINUX_SHELL, reason='리눅스 셸에서')
+def test_rtw88_conf_written_by_hand_is_accepted(tmp_path):
+    env = _rtw88_env(tmp_path, fake_sudo='exit 1')
+    conf = tmp_path / 'rtw88-robot.conf'
+    # 문서의 손 명령(주석 없이 두 줄)으로 적은 파일
+    conf.write_text('options rtw88_pci disable_aspm=1\noptions rtw88_core disable_lps_deep=1\n', encoding='utf-8')
+    out = _site('site_wifi_chip_powersave_off', env)
+    assert '이미 적힘' in out
+    assert conf.read_text(encoding='utf-8').startswith('options')
+
+
+@pytest.mark.skipif(not LINUX_SHELL, reason='리눅스 셸에서')
+def test_rtw88_dry_run_prints_only(tmp_path):
+    env = {**_rtw88_env(tmp_path), 'SITE_DRY_RUN': '1'}
+    out = _site('site_wifi_chip_powersave_off', env)
+    assert '[dry-run]' in out and 'options rtw88_pci disable_aspm=1' in out
+    assert not (tmp_path / 'rtw88-robot.conf').exists()
+    assert not (tmp_path / 'state').exists()
+
+
+@pytest.mark.skipif(not LINUX_SHELL, reason='리눅스 셸에서')
+def test_non_rtw88_pc_gets_no_file_and_passes_the_check(tmp_path):
+    env = _rtw88_env(tmp_path, loaded=False)
+    out = _site('site_wifi_chip_powersave_off', env)
+    assert 'rtw88 칩 아님' in out
+    assert not (tmp_path / 'rtw88-robot.conf').exists()
+    assert not (tmp_path / 'state').exists()
+    assert _site('site_wifi_chip_powersave_ok', env).strip() == '1'
+    assert '해당 없음' in _site('site_wifi_chip_powersave_detail', env)
+
+
+@pytest.mark.skipif(not LINUX_SHELL, reason='리눅스 셸에서')
+def test_rtw88_check_is_ok_once_both_parameters_read_y(tmp_path):
+    env = _rtw88_env(tmp_path, aspm='Y', lps='Y')
+    assert _site('site_wifi_chip_powersave_ok', env).strip() == '1'
+    env = _rtw88_env(tmp_path / 'half', aspm='Y', lps='N')
+    assert _site('site_wifi_chip_powersave_ok', env).strip() == '0'
+    detail = _site('site_wifi_chip_powersave_detail', env)
+    assert 'disable_lps_deep=N' in detail and 'sudo tee' in detail and 'sudo reboot' in detail
+
+
+@pytest.mark.skipif(not LINUX_SHELL, reason='리눅스 셸에서')
+def test_rtw88_without_sudo_warns_with_the_manual_commands_and_install_goes_on(tmp_path):
+    """웹 「모든 PC 업데이트」(--code-only · sudo -n) · /etc 를 못 씀 · 설치는 멈추지 않고 손 명령만 찍음"""
+    env = _rtw88_env(tmp_path, fake_sudo='echo "sudo: a password is required" >&2; exit 1')
+    # install.sh 와 같은 조건 · set -Eeuo pipefail + ERR 덫 + `|| echo`
+    result = _bash(
+        f'set -Eeuo pipefail; trap \'echo TRAP >&2; exit 9\' ERR; source "{SITE}"; '
+        'sudo() { command sudo -n "$@"; }; '
+        'site_wifi_chip_powersave_off || echo "계속"; echo 끝',
+        env,
+    )
+    assert result.returncode == 0, result.stderr
+    assert 'TRAP' not in result.stderr
+    assert result.stdout.strip().splitlines()[-2:] == ['계속', '끝']
+    assert 'sudo tee' in result.stderr and 'sudo reboot' in result.stderr and 'rtw88-robot.conf' in result.stderr
+    assert not (tmp_path / 'rtw88-robot.conf').exists()
+    assert not (tmp_path / 'state').exists()
+
+
+def test_rtw88_step_is_wired_into_install_site_and_check():
+    install = (SCRIPTS / 'install.sh').read_text(encoding='utf-8')
+    step = install.split('print_step "2-1. Wi-Fi 절전 끄기"', 1)[1].split('print_step', 1)[0]
+    assert 'site_wifi_chip_powersave_off ||' in step, '웹 업데이트에서도 · 실패해도 계속'
+    site = SITE.read_text(encoding='utf-8')
+    interruptions = site.split('site_disable_interruptions() {', 1)[1].split('\n}\n', 1)[0]
+    assert 'site_wifi_chip_powersave_off || true' in interruptions
+    selfcheck = site.split('site_selfcheck() {', 1)[1]
+    assert 'site_wifi_chip_powersave_ok' in selfcheck
+    check = (SCRIPTS / 'check.sh').read_text(encoding='utf-8')
+    assert 'site_wifi_chip_powersave_ok' in check and 'Wi-Fi 칩 절전 꺼짐 (rtw88)' in check
+    assert _bash(f'bash -n "{SCRIPTS / "check.sh"}"').returncode == 0
+    assert 'site_disable_interruptions' in (SCRIPTS / 'install_speaker.sh').read_text(encoding='utf-8')

@@ -238,7 +238,7 @@ def _stale_then_fresh(node, received):
             'status': {'bridge_state': 'ok'},
             'received_monotonic': received[0], 'active_since_monotonic': 0.0,
         },
-        diagnosis=lambda: '마지막 성공 900ms 전 · 연속 실패 10회',
+        diagnosis=lambda: '마지막 성공 2000ms 전 · 연속 실패 10회',
     )
 
 
@@ -251,7 +251,7 @@ def test_a_sudden_bridge_loss_stops_without_a_latch_and_clears_when_it_comes_bac
     node._note_group = lambda execution_id, event_type, message, details: (
         notes.append((event_type, message))
     )
-    received = [time.monotonic() - 1.0]
+    received = [time.monotonic() - 2.0]                  # 기준(1.5 s · 수정 목록 172) 넘김
     _stale_then_fresh(node, received)
 
     node._consume_local_runtime_status()

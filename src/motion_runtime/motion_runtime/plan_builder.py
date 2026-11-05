@@ -115,7 +115,9 @@ class PlanBuilder:
         *,
         initialization_only: bool = False,
         motors_snapshot: Optional[List[Dict[str, Any]]] = None,
+        timing: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
+        """실행 계획 · `timing` · 넘긴 사전에 단계별 ms 를 적는다(실패해도 거기까지) · `records_ms` · `samples_ms` · 수정 목록 174"""
         run_mode = str(payload.get('run_mode') or 'once').strip().lower()
         if run_mode not in ('once', 'continuous'):
             raise ValueError('run_mode must be once or continuous')
@@ -230,6 +232,7 @@ class PlanBuilder:
         motion_records = []
         # 경로를 못 찾았을 때만 건너뛴다 · 경로 값이 None 인 것 자체는 막지 않는다 (옛 계약)
         if motion_file_id and not unusable_motion_file_note:
+            records_started = time.perf_counter()
             try:
                 motion_records = self.manager._load_motion_records(motion_file_path)
             except ValueError as exc:
@@ -240,6 +243,9 @@ class PlanBuilder:
                     '애니메이션 없이 초기 위치로 이동합니다'
                 )
                 motion_records = []
+            finally:
+                if timing is not None:
+                    timing['records_ms'] = round((time.perf_counter() - records_started) * 1000.0, 1)
         source_motion_data_available = bool(motion_records)
         mapping = self.manager._load_mapping(mapping_path)
 
@@ -600,6 +606,8 @@ class PlanBuilder:
         end_time = max(record['time_sec'] for record in motion_records)
         duration = max(end_time - start_time, 0.0)
         samples = []
+        # 20 ms 재샘플 · 속도·가속 검사 · 긴 애니(920 s)에서 무거운 몫 · 걸린 시간을 남긴다 · 수정 목록 174
+        samples_started = time.perf_counter()
         if not initialization_only:
             sample_count = max(1, int(math.floor(duration / self.manager.period_sec)) + 1)
             last_time = start_time + ((sample_count - 1) * self.manager.period_sec)
@@ -638,6 +646,8 @@ class PlanBuilder:
                 })
 
         rate_error = _motion_rate_limit_error(axes, samples, self.manager.period_sec)
+        if timing is not None and not initialization_only:
+            timing['samples_ms'] = round((time.perf_counter() - samples_started) * 1000.0, 1)
         if rate_error:
             raise ValueError(rate_error)
 

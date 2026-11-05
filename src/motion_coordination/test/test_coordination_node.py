@@ -183,12 +183,13 @@ def test_stale_local_runtime_status_stops_only_active_group_execution():
     node._local_runtime_monitor = SimpleNamespace(
         snapshot=lambda: {
             'status': {'bridge_state': 'ok'},
-            'received_monotonic': time.monotonic() - 1.0,
+            # 기준(1.5 s · 수정 목록 172)을 넘긴 끊김
+            'received_monotonic': time.monotonic() - 2.0,
             'error': 'bridge timeout',
         },
         # 터진 순간의 숫자 · §6-153 · 이게 없으면 원인을 못 찾는다
         diagnosis=lambda: (
-            '마지막 성공 1000ms 전 · 연속 실패 4회 · '
+            '마지막 성공 2000ms 전 · 연속 실패 7회 · '
             '최근 응답(ms) 12, 14, 300, 300 · 사유 bridge timeout'
         ),
     )
@@ -203,10 +204,37 @@ def test_stale_local_runtime_status_stops_only_active_group_execution():
     assert said.startswith('pc-a 웹 서비스 끊김으로 그룹 정지 · ')
     assert node._bridge_loss['latched'] is False
     # 「몇 ms 걸렸나 · 몇 번 연속인가 · 직전은 어땠나」가 다 남아야 한다
-    assert '마지막 성공 1000ms 전' in said
-    assert '연속 실패 4회' in said
+    assert '마지막 성공 2000ms 전' in said
+    assert '연속 실패 7회' in said
     assert '최근 응답(ms)' in said
     assert 'bridge timeout' in said
+
+
+def test_one_second_gap_keeps_the_group_running():
+    """1.0 s 끊김(300ms 시도 몇 번 실패)은 버틴다 · 실물 NY 2026-11-04 「502ms 전 · 연속 실패 1회」 로 4대 정지 · 수정 목록 172"""
+    node = _node()
+    node._execution.execution_id = 'exec-a'
+    node._execution.coordinator_id = 'pc-a'
+    node._execution.participants = ('pc-a', 'pc-b')
+    node._execution.state = 'running'
+    node._boot_monotonic = 0.0
+    node._command_pub = _Publisher()
+    node._last_alarm_key = ()
+    node._local_runtime_monitor = SimpleNamespace(
+        snapshot=lambda: {
+            'status': {'bridge_state': 'ok'},
+            'received_monotonic': time.monotonic() - 1.0,
+            'error': 'bridge timeout',
+        },
+        diagnosis=lambda: pytest.fail('기준 안의 끊김은 정지 사유를 만들지 않는다'),
+    )
+    node._stop_for_bridge_loss = lambda _detail: pytest.fail('1.0 s 끊김으로 그룹을 세우면 안 된다')
+    node._stop_for_peer_failure = lambda _reason: pytest.fail('1.0 s 끊김으로 그룹을 세우면 안 된다')
+
+    node._consume_local_runtime_status()
+
+    assert node._execution.execution_id == 'exec-a'
+    assert node._command_pub.messages == []
 
 
 def test_stale_local_runtime_status_does_not_affect_standalone_mode():
@@ -1542,6 +1570,19 @@ def test_one_try_still_fits_in_the_budget():
         coordination_node.LOCAL_RUNTIME_HTTP_TIMEOUT_SEC
         < coordination_node.LOCAL_RUNTIME_ACTIVE_TIMEOUT_SEC
     )
+
+
+def test_one_late_answer_does_not_stop_the_group():
+    """한 번 늦은 응답(301ms)으로 4대가 모두 서면 안 된다 · 실물 NY 2026-11-04 · 수정 목록 172
+
+    0.5초 예산이면 300ms 시도 하나가 늦는 순간 넘는다 · 몇 번은 더 해 볼 여유가 있어야 한다.
+    """
+    assert (
+        coordination_node.LOCAL_RUNTIME_ACTIVE_TIMEOUT_SEC
+        >= 4 * coordination_node.LOCAL_RUNTIME_HTTP_TIMEOUT_SEC
+    )
+    # 진짜 죽은 웹 서버는 오래 두지 않는다
+    assert coordination_node.LOCAL_RUNTIME_ACTIVE_TIMEOUT_SEC <= 2.0
 
 
 def test_the_status_path_uses_the_named_timeout():

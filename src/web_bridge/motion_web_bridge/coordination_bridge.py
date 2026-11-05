@@ -12,7 +12,7 @@ import urllib.request
 from pathlib import Path
 from typing import Any, Callable, Dict, Mapping, Optional
 
-from motion_common import motion_segment, repeat_policy
+from motion_common import check_timing as check_timing_mod, motion_segment, repeat_policy
 
 from motion_web_bridge import run_mode_gate
 from motion_common import run_state
@@ -459,9 +459,72 @@ READINESS_MARGIN_SEC = 1.0
 #: 예산을 못 받았을 때 · 옛 호출과 시험을 위한 값
 DEFAULT_READINESS_BUDGET_SEC = 4.0
 
+#: 준비 확인이 이보다 길면 단계별 시간을 로그에 · 실패는 늘 · 수정 목록 174
+READINESS_SLOW_LOG_MS = 1000.0
+
+#: 준비 확인 단계 · 로그 이름
+_READINESS_STEPS = (
+    ('context_ms', '실행 컨텍스트'),
+    ('selection_ms', '재생 파일'),
+    ('servo_ms', '서보 켜기'),
+    ('check_ms', '실행 준비 검사 왕복'),
+)
+
+
+def readiness_timing_text(
+    total_ms: float, budget_sec: float, steps: Mapping[str, Any], check_timing: Any = None,
+) -> str:
+    """준비 확인 단계별 시간 한 줄 · 「합계 5230 ms(예산 6.0 s) · 실행 컨텍스트 120 · … · 실행 준비 검사 왕복 5100
+    [파일 3200 · 재샘플 1800 · 계획 5050] ms」 · 안 거친 단계는 뺀다 · 수정 목록 174
+    """
+    parts = [f'합계 {total_ms:.0f} ms(예산 {budget_sec:.1f} s)']
+    for key, label in _READINESS_STEPS:
+        if key in steps:
+            parts.append(f'{label} {float(steps[key]):.0f}')
+    line = ' · '.join(parts)
+    # 실행 준비 검사(motion_run_manager) 안쪽 단계 · 답의 `timing_ms`
+    inner = check_timing_mod.stage_text(check_timing)
+    if inner:
+        line += f' [{inner}]'
+    return line + ' ms'
+
 
 def local_motion_readiness(
     bridge: Any, payload: Optional[Mapping[str, Any]] = None,
+) -> Dict[str, Any]:
+    """준비 확인 + 단계별 시간 · 1 s 넘거나 실패면 로그 한 줄 · 1 s 넘은 실패는 거절 사유에도 · 수정 목록 174
+
+    NY 실물 2026-11-05(humble) · 재부팅 뒤 첫 그룹 시작에서 「준비 거절 · 로컬 Web Bridge 응답 없음: timed out」 ·
+    어느 단계가 느렸는지 기록이 없어 원인 미확인 · 부르는 쪽이 먼저 끊으면 답은 못 가도 이 로그는 남는다.
+    """
+    request = payload if isinstance(payload, Mapping) else {}
+    try:
+        budget = float(request.get('budget_sec') or DEFAULT_READINESS_BUDGET_SEC)
+    except (TypeError, ValueError):
+        budget = DEFAULT_READINESS_BUDGET_SEC
+    steps: Dict[str, float] = {}
+    started = time.monotonic()
+    result = _local_motion_readiness(bridge, request, budget, steps)
+    total_ms = (time.monotonic() - started) * 1000.0
+    failed = not (isinstance(result, Mapping) and result.get('success') is not False)
+    if not failed and total_ms < READINESS_SLOW_LOG_MS:
+        return result
+    check_timing = result.get('timing_ms') if isinstance(result, Mapping) else None
+    line = readiness_timing_text(total_ms, budget, steps, check_timing)
+    message = str(result.get('message') or '') if isinstance(result, Mapping) else ''
+    logger_of = getattr(bridge, 'get_logger', None)
+    if callable(logger_of):
+        logger_of().warning(
+            f'[준비 확인 시간] {line}' + (f' · 거절: {message[:200]}' if failed else '')
+        )
+    if failed and total_ms >= READINESS_SLOW_LOG_MS and isinstance(result, Mapping):
+        # 거절 사유에 붙인다 · 진행 PC 의 「준비 거절」 로그 · 그룹 연동 기록에 그대로 보인다
+        result = {**result, 'message': f'{message} · {line}' if message else line}
+    return result
+
+
+def _local_motion_readiness(
+    bridge: Any, request: Mapping[str, Any], budget: float, steps: Dict[str, float],
 ) -> Dict[str, Any]:
     """이 PC 가 지금 그룹 모션을 시작할 수 있는가 · 못 하면 **이유를 적어** 답한다.
 
@@ -474,12 +537,9 @@ def local_motion_readiness(
 
     이제 부르는 쪽이 `budget_sec` 로 자기 예산을 알려 준다 · 여기서는 그보다
     한 칸 짧게 쓴다 · 그래서 **시간이 다 되면 「왜 안 되는지」가 돌아간다**.
+
+    `steps` · 단계마다 걸린 ms 를 적는다(거친 단계만) · 수정 목록 174
     """
-    request = payload if isinstance(payload, Mapping) else {}
-    try:
-        budget = float(request.get('budget_sec') or DEFAULT_READINESS_BUDGET_SEC)
-    except (TypeError, ValueError):
-        budget = DEFAULT_READINESS_BUDGET_SEC
     timeout_sec = max(0.5, budget - READINESS_MARGIN_SEC)
     # 사람이 이 PC 를 만지는 중이면 그룹에 안 들어간다 · 수정 목록 122 (나)
     busy = human_operation_reason(
@@ -493,10 +553,12 @@ def local_motion_readiness(
     reconcile = getattr(
         getattr(bridge, '_execution_context', None), 'reconcile_blocking', None
     )
+    step_started = time.monotonic()
     if callable(reconcile):
         context = reconcile(timeout_sec=timeout_sec)
     else:
         context = bridge._execution_context.reconcile()
+    steps['context_ms'] = (time.monotonic() - step_started) * 1000.0
     if not context.get('ready'):
         return {
             'success': False,
@@ -505,15 +567,20 @@ def local_motion_readiness(
                 + readiness_failure_text(context)
             ),
         }
+    step_started = time.monotonic()
     try:
         selection = _local_motion_selection(bridge)
     except ValueError as exc:
         return {'success': False, 'message': str(exc)}
+    finally:
+        steps['selection_ms'] = (time.monotonic() - step_started) * 1000.0
     # 스케줄 끝에 끈 서보를 켜고 나서 본다 · 안 그러면 「서보가 꺼져 있습니다」 로
     # 이 PC 가 그룹에서 빠진다 · 수정 목록 36
     parked = getattr(bridge, 'schedule_end_start_blocker', None)
     if callable(parked):
+        step_started = time.monotonic()
         reason = parked({})
+        steps['servo_ms'] = (time.monotonic() - step_started) * 1000.0
         if reason:
             return {'success': False, 'message': reason}
     # 구간 재생 · 이 PC 재생 목록 1번이 구간 시작보다 짧으면 여기서 거절 → 진행 PC 가 이 PC 를 빼고 간다 · 2026-10-16
@@ -521,14 +588,18 @@ def local_motion_readiness(
         segment = motion_segment.apply_to_payload(request)
     except ValueError as exc:
         return {'success': False, 'message': str(exc)}
-    return bridge.motion_run_check({
-        **selection,
-        'initial_move_time_sec': None,
-        'run_mode': 'once',
-        'request_source': 'network_readiness',
-        motion_segment.START_KEY: segment[motion_segment.START_KEY],
-        motion_segment.END_KEY: segment[motion_segment.END_KEY],
-    })
+    step_started = time.monotonic()
+    try:
+        return bridge.motion_run_check({
+            **selection,
+            'initial_move_time_sec': None,
+            'run_mode': 'once',
+            'request_source': 'network_readiness',
+            motion_segment.START_KEY: segment[motion_segment.START_KEY],
+            motion_segment.END_KEY: segment[motion_segment.END_KEY],
+        })
+    finally:
+        steps['check_ms'] = (time.monotonic() - step_started) * 1000.0
 
 
 def _group_initial_move_time(payload: Mapping[str, Any]) -> Optional[float]:

@@ -3,6 +3,7 @@ import functools
 import json
 import os
 import subprocess
+import time
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import List
@@ -36,11 +37,22 @@ def _is_not_modified(response_headers, request_headers) -> bool:
 #: 풀이 차서 `/api/status` · 화면 스냅샷이 줄을 선다(실물 10-14 09:29 · 5 s 넘게 무응답 · 추정).
 _COORDINATION_POOL = ThreadPoolExecutor(max_workers=8, thread_name_prefix='coordination-local')
 
+#: 준비 확인이 연동 스레드 줄에서 이만큼 기다리면 기록 · 수정 목록 174
+READINESS_QUEUE_WARN_SEC = 0.5
+
 
 async def _coordination_to_thread(function, *args):
     """`asyncio.to_thread` 와 같다 · 연동 전용 스레드에서"""
     loop = asyncio.get_running_loop()
     return await loop.run_in_executor(_COORDINATION_POOL, functools.partial(function, *args))
+
+
+#: 연동 노드가 50ms 마다 묻는 `local-status` 전용 스레드 · 수정 목록 172
+#:
+#: 공용 풀(`asyncio.to_thread`)은 다른 PC 실행 모드 조회(PC 마다 최대 3 s · Wi-Fi) · 화면 요청이 같이 쓴다 ·
+#: 그게 밀리면 이 짧은 응답도 줄을 서서 300ms 를 넘기고 그룹이 통째로 선다(실물 NY 2026-11-04 · 추정) ·
+#: 다른 일이 아무리 밀려도 이 응답은 기다리지 않게 따로 둔다 · 일 자체는 짧다(메모리의 상태를 읽어 담기).
+_LOCAL_STATUS_POOL = ThreadPoolExecutor(max_workers=2, thread_name_prefix='coordination-status')
 
 
 def register_system_routes(app: FastAPI, bridge, project_call) -> None:
@@ -268,10 +280,18 @@ def register_system_routes(app: FastAPI, bridge, project_call) -> None:
             body = await request.json()
         except Exception:
             body = {}
-        return await _coordination_to_thread(
-            bridge.coordination_local_readiness,
-            body if isinstance(body, dict) else {},
-        )
+        submitted = time.monotonic()
+
+        def readiness():
+            # 연동 전용 스레드가 차서 줄을 선 시간 · 안쪽 단계 기록(`[준비 확인 시간]`)엔 안 잡힌다 · 수정 목록 174
+            waited = time.monotonic() - submitted
+            if waited >= READINESS_QUEUE_WARN_SEC:
+                bridge.get_logger().warning(
+                    f'[준비 확인 대기] 연동 스레드 줄에서 {waited * 1000.0:.0f} ms 기다린 뒤 시작'
+                )
+            return bridge.coordination_local_readiness(body if isinstance(body, dict) else {})
+
+        return await _coordination_to_thread(readiness)
 
     @app.get('/api/coordination/local-status')
     async def coordination_local_status(request: Request):
@@ -280,7 +300,9 @@ def register_system_routes(app: FastAPI, bridge, project_call) -> None:
             raise HTTPException(status_code=403, detail='loopback only')
         # 연동 노드가 50ms 마다 묻는 길 · 이벤트 루프에 두면 다른 요청이
         # 몰릴 때 0.25초 제한을 넘기고 그룹이 통째로 선다 · §6-146
-        return await asyncio.to_thread(bridge.coordination_local_status)
+        # 공용 풀도 줄을 선다 · 전용 스레드에서 · 수정 목록 172
+        loop = asyncio.get_running_loop()
+        return await loop.run_in_executor(_LOCAL_STATUS_POOL, bridge.coordination_local_status)
 
     @app.post('/api/coordination/control')
     async def coordination_control(request: Request):
@@ -336,8 +358,8 @@ def register_system_routes(app: FastAPI, bridge, project_call) -> None:
         루프에서** 하고 있었다 · 화면 탭 하나가 초당 10번 부르니 탭 하나당
         루프를 초당 170ms 씩 막는다 · 탭 두셋이면 루프가 거의 서 있다.
 
-        그동안 연동 노드가 50ms 마다 묻는 `local-status` 가 굶는다 · 0.5초
-        못 받으면 **그룹 실행이 통째로 정지한다**(`GROUP_PARTICIPANT_FAILURE`) ·
+        그동안 연동 노드가 50ms 마다 묻는 `local-status` 가 굶는다 · 0.5초(지금 1.5초 ·
+        수정 목록 172) 못 받으면 **그룹 실행이 통째로 정지한다**(`GROUP_PARTICIPANT_FAILURE`) ·
         실제로 `실시간 모니터링` 탭을 누를 때마다 그렇게 멈췄다.
 
         `@app.get` 들은 스레드로 옮겼는데(§6-146) 여기만 남아 있었다 ·

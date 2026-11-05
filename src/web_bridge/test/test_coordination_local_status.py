@@ -29,7 +29,7 @@ def test_coordination_watchdog_stops_group_run_after_local_poll_disappears():
     bridge = MotionWebBridge.__new__(MotionWebBridge)
     bridge._motion_run_lock = threading.Lock()
     bridge._coordination_poll_lock = threading.Lock()
-    bridge._coordination_poll_received_monotonic = time.monotonic() - 2.0
+    bridge._coordination_poll_received_monotonic = time.monotonic() - 3.0
     bridge._coordination_watchdog_stop_execution_id = ''
     bridge._motion_run_status = {
         'group_execution': True,
@@ -43,6 +43,29 @@ def test_coordination_watchdog_stops_group_run_after_local_poll_disappears():
 
     assert stopped.wait(0.5)
     assert bridge._coordination_watchdog_stop_execution_id == 'exec-a'
+
+
+def test_coordination_watchdog_waits_out_a_short_gap():
+    """질문이 1.2초 밀린 것만으로 이 PC 혼자 서지 않는다 · 연동 노드(1.5초)가 먼저 판단 · 수정 목록 172"""
+    from motion_web_bridge import bridge_node
+    bridge = MotionWebBridge.__new__(MotionWebBridge)
+    bridge._motion_run_lock = threading.Lock()
+    bridge._coordination_poll_lock = threading.Lock()
+    bridge._coordination_poll_received_monotonic = time.monotonic() - 1.2
+    bridge._coordination_watchdog_stop_execution_id = ''
+    bridge._motion_run_status = {
+        'group_execution': True,
+        'execution_id': 'exec-a',
+        'phase': 'running',
+    }
+    bridge.coordination_stop_now = lambda: (_ for _ in ()).throw(
+        AssertionError('a short gap must not stop the run')
+    )
+
+    bridge._coordination_watchdog_callback()
+
+    assert bridge._coordination_watchdog_stop_execution_id == ''
+    assert bridge_node.COORDINATION_POLL_TIMEOUT_SEC > 1.5
 
 
 def test_coordination_watchdog_does_not_affect_standalone_run():
