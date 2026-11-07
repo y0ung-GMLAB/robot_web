@@ -982,11 +982,16 @@ motion-control.service 재시작 완료
   않습니다.
 - 웹은 `0.0.0.0:8000`에 바인딩되므로 신뢰할 수 있는 내부망에서만 사용합니다.
 - 방화벽은 운영 PC가 있는 내부 대역만 허용하고 인터넷에 직접 노출하지 않습니다.
-- 서비스 3개(`motion-control` · `motion-motor` · `motion-coordination`)는 모두
-  `ROS_LOCALHOST_ONLY=0`으로 실행합니다(`MOTION_GROUP_NETWORK=1` 기본 · §6-96).
-  남의 ROS 장비와 섞이지 않는 근거는 PC 이름공간(`/<PC이름>/...`)과 그룹 전용
-  DDS 도메인(기본 21)입니다. 한 PC 안에 가두려면 서비스 환경에
-  `MOTION_GROUP_NETWORK=0`을 주면 `ROS_LOCALHOST_ONLY=1`이 됩니다.
+- 네트워크(Wi-Fi)에 여는 것은 `motion-coordination` 하나입니다(그룹 DDS 도메인 ·
+  기본 21 · `ROS_LOCALHOST_ONLY=0`). `motion-control` · `motion-motor`의 노드(모터 ·
+  모니터 · 실행 · 웹)는 **이 PC 안(루프백)** 에만 열고, 그룹과 다른 로컬 도메인(기본
+  그룹 + 1 = 22 · 설정 `local_dds_domain_id`)을 씁니다(수정 목록 176 · `group_env.py
+  --local`). 연동 노드와 로컬 노드는 `127.0.0.1` HTTP로만 대화하므로, Wi-Fi가 막히거나
+  끊겨도 각 PC의 모터 상태·명령은 그대로 흐릅니다. 되돌리려면 서비스 환경에
+  `MOTION_LOCAL_DDS=0`(옛 방식 · 그룹 도메인 · `MOTION_GROUP_NETWORK`를 따름).
+- 터미널에서 `ros2` 명령으로 이 PC의 노드를 볼 때는 같은 환경을 씁니다.
+  `eval "$(python3 ~/ros2_ws/src/motion_common/motion_common/group_env.py --local)"`
+  (그룹 토픽 `/motion_group/...`을 볼 때는 `--local` 없이 + `export ROS_LOCALHOST_ONLY=0`).
 - PC 간에는 그룹 참가 상태·고수준 실행 트리거·완료·오류만 전송합니다. 프로젝트
   파일, 모션 데이터와 모터 목표값은 전송하지 않습니다.
 - 각 PC 웹의 `장비 연동 상태 → DDS 그룹 연동`에서 서로 다른 `이 PC ID`, 같은

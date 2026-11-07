@@ -382,7 +382,9 @@ class MotionScheduleNode(Node):
         now = datetime.now().astimezone()
 
         # 슬레이브는 아무것도 하지 않는다 · 마스터가 그룹 전체를 몬다 · §6-137
+        # 다만 제 운영시간은 알린다 · 진행 PC 가 안 보일 때 연동 노드가 스스로 이을지 본다 · 수정 목록 178
         if not self._is_master_pc():
+            self._publish_status(now)
             return
 
         # 모드를 처음 읽기 전에는 점검하지 않는다 · 점검 간격도 쓰지 않는다(읽히면 바로 점검) · 수정 목록 148
@@ -746,15 +748,17 @@ class MotionScheduleNode(Node):
 
     def _publish_status(self, now: datetime):
         schedules = self.store.list_schedules()
+        is_master = self._is_master_pc()
+        window_id = getattr(self.engine.active(now, schedules), 'schedule_id', None)
         status = {
-            "is_master": self._is_master_pc(),
+            "is_master": is_master,
             "active_project_id": self.store.current_project_id,
             "current_time": now.isoformat(),
             "schedule_count": len(schedules),
-            "active_schedule_id": getattr(
-                self.engine.active(now, schedules),
-                'schedule_id', None,
-            ),
+            # 마스터만 · 운영 종료 동작(주차 · 131)이 이 값을 본다 · 슬레이브는 전처럼 없음
+            "active_schedule_id": window_id if is_master else None,
+            # 이 PC 스케줄로 지금 운영시간인가 · 슬레이브도 · 연동 노드 스스로 잇기 · 수정 목록 178
+            "window_schedule_id": window_id,
             # 시각을 못 읽어 **영영 안 도는** 스케줄 · 화면이 빨간 줄로 띄운다 ·
             # §6-285 · 전에는 조용히 건너뛰어 「켜 뒀는데 안 돈다」로만 보였다
             "unreadable_schedules": unreadable_schedules(schedules),

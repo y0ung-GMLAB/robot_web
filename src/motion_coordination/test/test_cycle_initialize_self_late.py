@@ -19,7 +19,8 @@ from motion_coordination.group_execution import GroupExecution
 from motion_coordination.schedule_lead import (
     CYCLE_INITIALIZE_LEAD_MIN_SEC, SELF_LATE_WAIT_MAX_SEC,
 )
-from test_coordination_node import _node, _Publisher
+import motion_coordination.coordination_node as coordination_node
+from test_coordination_node import _InlineThread, _node, _Publisher
 
 LATE = '그룹 회차 초기화 트리거가 이미 지났습니다'
 
@@ -91,7 +92,9 @@ def test_deadline_waits_for_the_masters_own_cycle_initialize_answer():
     assert node._execution.execution_id != ''
 
 
-def test_deadline_still_cancels_without_latch_when_the_wait_runs_out():
+def test_deadline_still_drops_the_master_without_latch_when_the_wait_runs_out(monkeypatch):
+    """기다림이 다 지나도 제 답이 없다 · 진행 PC 만 빠지고 나머지는 계속 · 잠그지 않음 · 153 ② → 178"""
+    monkeypatch.setattr(coordination_node.threading, 'Thread', _InlineThread)
     node = _node()
     command, _lead = _between_cycles(node)
     _overdue(node, command)
@@ -103,12 +106,13 @@ def test_deadline_still_cancels_without_latch_when_the_wait_runs_out():
 
     node._enforce_schedule_ack_deadline()
 
-    assert sent == ['group_cancel']
+    assert 'stop_now' in sent and 'group_cancel' not in sent
     assert node._coordination_error == {}
     assert node._last_start_failure['code'] == 'GROUP_SCHEDULE_SELF_LATE'
+    assert node._config.pc_id not in node._execution.participants
 
 
-def test_a_late_peer_between_cycles_still_cancels_as_before():
+def test_a_late_peer_between_cycles_is_dropped_without_latch():
     node = _node()
     command, _lead = _between_cycles(node)
     node._execution.pending_acks = {'pc-a'}
@@ -117,7 +121,8 @@ def test_a_late_peer_between_cycles_still_cancels_as_before():
 
     node._enforce_schedule_ack_deadline()
 
-    assert node._coordination_error['code'] == 'GROUP_SCHEDULE_ACK_TIMEOUT'
+    assert node._coordination_error == {}
+    assert node._execution.participants == ('pc-a',)
 
 
 def _local_replies(node, *replies):

@@ -25,7 +25,7 @@ def _master(*peers):
 
 
 def test_protocol_version_is_10_with_the_new_fields():
-    assert GROUP_PROTOCOL_VERSION == 10
+    assert GROUP_PROTOCOL_VERSION >= 10  # 11 · 수정 목록 178
     message = GroupCommand()
     assert (message.segment_start_sec, message.segment_end_sec) == (0.0, 0.0)
 

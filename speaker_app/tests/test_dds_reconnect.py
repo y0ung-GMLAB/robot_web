@@ -65,7 +65,7 @@ def _fake_ros(monkeypatch, inits):
         setattr(qos, name, types.SimpleNamespace(VOLATILE=0, KEEP_LAST=0, BEST_EFFORT=0))
     qos.QoSProfile = lambda **_k: None
     msgs = types.ModuleType("motion_coordination_interfaces.msg")
-    msgs.GroupCommand = msgs.GroupEvent = object
+    msgs.GroupCommand = msgs.GroupEvent = msgs.GroupHeartbeat = object
     pkg = types.ModuleType("motion_coordination_interfaces")
     pkg.msg = msgs
     for name, module in {"rclpy": rclpy, "rclpy.context": context, "rclpy.executors": executors,

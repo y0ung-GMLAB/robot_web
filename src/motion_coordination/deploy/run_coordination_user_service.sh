@@ -5,9 +5,10 @@ WORKSPACE="${MOTION_WORKSPACE:?MOTION_WORKSPACE is required}"
 export ROS_LOCALHOST_ONLY="${ROS_LOCALHOST_ONLY:-0}"
 # PC 이름공간과 DDS 도메인 · §6-96
 #
-# 조정 노드는 그룹 토픽만 쓰던 동안에는 이름표가 필요 없었다 · 이제 원시 MIDI
-# 중계를 맡아 **이 PC 의** `/xtouch/midi` 를 연다 · 이름표가 없으면 옛 이름
-# (`/xtouch/midi`)을 열어 아무 말 없이 아무것도 안 흐른다.
+# 조정 노드가 ROS 로 여는 것은 그룹 토픽(`/motion_group/...`)뿐이다 · 이 PC 의 노드와는
+# `127.0.0.1` HTTP 로 대화한다 · 그래서 이 서비스만 그룹 도메인 · 네트워크에 남고, 모터 · 웹
+# 서비스는 로컬 도메인 · 루프백(`group_env.py --local` · 수정 목록 176) · 이름표는 기록 · 화면에
+# 같은 PC 이름을 쓰려고 같은 곳에서 받는다(예전 MIDI 중계 설명은 지금 코드에 없음 · X-Touch 는 웹 소켓).
 #
 # 다른 서비스와 **같은 곳에서** 가져온다 · 따로 읽으면 갈린다.
 GROUP_ENV_HELPER="${WORKSPACE}/src/motion_common/motion_common/group_env.py"

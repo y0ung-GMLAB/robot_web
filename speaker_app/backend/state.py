@@ -2,6 +2,7 @@
 import os
 import threading
 import time
+from types import SimpleNamespace
 from collections import deque
 
 import wave
@@ -10,6 +11,7 @@ import audio_prep
 import config
 import sysinfo
 import volume
+from cycle_follow import CycleFollower
 from dds_listener import DdsListener
 from logbuf import LogBuffer
 from player import Player
@@ -60,6 +62,10 @@ class AppState:
         self._lock = threading.Lock()
         self._timer = None
         self._playing_for = None         # 마지막 start_at 의 (실행 번호, 진행 PC) · 정지 사건을 견준다 · 146
+        # 진행 PC 가 안 보이면 회차 눈금대로 소리를 잇는다 · 수정 목록 178
+        self.follower = CycleFollower()
+        self._follow_stop = threading.Event()
+        self._follow_thread = None
 
     # ---- 수명주기 ---------------------------------------------------
     def startup(self):
@@ -67,8 +73,11 @@ class AppState:
         self.log.add("앱 시작")
         if self.cfg["mode"] == MODE_DDS:
             self._start_dds()
+        self._follow_thread = threading.Thread(target=self._follow_loop, name="cycle-follow", daemon=True)
+        self._follow_thread.start()
 
     def shutdown(self):
+        self._follow_stop.set()
         self._cancel_timer()
         self.dds.stop()
         self.standalone.stop()
@@ -282,7 +291,40 @@ class AppState:
         return config.resolve_file(self.cfg)
 
     # ---- 트리거 -----------------------------------------------------
-    def _on_trigger(self, msg):
+    def _follow_loop(self):
+        while not self._follow_stop.wait(0.5):
+            try:
+                self._follow_tick()
+            except Exception as exc:   # 잇기가 앱을 멈추면 안 된다
+                self.log.add("눈금 잇기 점검 오류: %s" % exc)
+
+    def _follow_tick(self, now=None):
+        """진행 PC 가 안 보이고 같은 실행을 도는 로봇이 있으면 눈금 시각에 지난번 음원을 튼다 · 178"""
+        state = self.follower.snapshot()
+        if not state or self.cfg["mode"] != MODE_DDS:
+            return
+        now = time.monotonic() if now is None else now
+        due = self.follower.due(
+            now=now,
+            coordinator_age=self.dds.heartbeat_age(state.get("coordinator_id")),
+            others_running=self.dds.execution_running_elsewhere(
+                state.get("execution_id"), state.get("coordinator_id"),
+            ),
+        )
+        if due is None:
+            return
+        cycle, start, context = due
+        msg = SimpleNamespace(
+            cycle_number=cycle, start_delay_sec=start - now,
+            motion_file_id=context.get("motion_file_id", ""),
+            segment_start_sec=context.get("segment_start_sec", 0.0),
+            segment_end_sec=context.get("segment_end_sec", 0.0),
+            execution_id=state.get("execution_id", ""),
+            coordinator_id=state.get("coordinator_id", ""),
+        )
+        self._on_trigger(msg, autonomous=True, now=now)
+
+    def _on_trigger(self, msg, autonomous=False, now=None):
         cycle = int(msg.cycle_number)
         offset = float(self.cfg["trigger"]["offset_sec"])
         # 로봇 PC 가 「시작까지 남은 초」를 실어 보낸다(약속 번호 5) · 옛 메시지는 0
@@ -308,6 +350,18 @@ class AppState:
                             (name or "음원 없음") + ("" if mapped else " (기본)"))
         if segment:
             what += " · " + segment
+        received = time.monotonic() if now is None else now
+        # 회차 눈금 · 진행 PC 의 시작이면 주기를 배운다 · 스스로 이은 회차는 배우지 않는다(칸 건너뜀) · 178
+        self.follower.record(
+            execution_id=str(getattr(msg, "execution_id", "") or ""),
+            coordinator_id=str(getattr(msg, "coordinator_id", "") or ""),
+            cycle=cycle, start=received + start_delay,
+            context={"motion_file_id": motion, "segment_start_sec": segment_start,
+                     "segment_end_sec": segment_end},
+            learn=not autonomous,
+        )
+        if autonomous:
+            what = "진행 PC 안 보임 · 눈금대로 이어 감 · " + what
         if wanted < -0.05:
             self.log.add("start_at 수신 (cycle %d · %s) → 모션보다 %.1f초 늦게 재생"
                          % (cycle, what, -wanted))
@@ -345,6 +399,7 @@ class AppState:
             if not stop_matches(self._playing_for, msg):
                 return
             self._playing_for = None
+        self.follower.clear()          # 그룹이 섰다 · 눈금도 잊는다 · 178
         pending = self._cancel_timer()
         if self.player.is_active():
             self.player.stop()

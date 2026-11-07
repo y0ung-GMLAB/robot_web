@@ -12,6 +12,8 @@
 """
 
 import time
+import motion_coordination.coordination_node as coordination_node
+from test_coordination_node import _InlineThread
 from types import SimpleNamespace
 
 import pytest
@@ -242,7 +244,9 @@ def _stale_then_fresh(node, received):
     )
 
 
-def test_a_sudden_bridge_loss_stops_without_a_latch_and_clears_when_it_comes_back():
+def test_a_sudden_bridge_loss_drops_only_this_pc_without_a_latch_and_clears_when_it_comes_back(monkeypatch):
+    """갑자기 끊김 · 이 PC(진행 PC)만 빠지고 나머지는 계속 · 145 ② → 178"""
+    monkeypatch.setattr(coordination_node.threading, 'Thread', _InlineThread)
     node = _master(('pc-a', 'pc-b'))
     node._boot_monotonic = 0.0
     node._last_alarm_key = (0, ())
@@ -256,13 +260,14 @@ def test_a_sudden_bridge_loss_stops_without_a_latch_and_clears_when_it_comes_bac
 
     node._consume_local_runtime_status()
 
-    assert node._execution.execution_id == ''
-    assert [m.command for m in node._command_pub.messages] == ['stop_now'], '안전 · 모두 세운다'
+    assert node._execution.execution_id != '', '나머지는 계속 돈다'
+    assert node._execution.participants == ('pc-b',)
+    assert [m.command for m in node._command_pub.messages] == ['update_participants'], '다른 PC 는 세우지 않는다'
     assert node._coordination_error == {}
     loss = node.snapshot()['bridge_loss']
     assert loss['active'] is True and loss['latched'] is False
     assert loss['code'] == BRIDGE_LOST_CODE
-    assert loss['message'].startswith('pc-a 웹 서비스 끊김으로 그룹 정지 · ')
+    assert loss['message'].startswith('pc-a 웹 서비스 끊김 · 이 PC 만 그룹에서 빠짐 · ')
     assert 'lost_monotonic' not in loss
 
     received[0] = time.monotonic() + 1.0                 # 웹이 다시 떴다
@@ -270,4 +275,4 @@ def test_a_sudden_bridge_loss_stops_without_a_latch_and_clears_when_it_comes_bac
 
     assert node.snapshot()['bridge_loss'] == {}
     assert notes and notes[0][0] == 'group_bridge_lost'
-    assert '웹 서비스 끊김으로 그룹 정지' in notes[0][1]
+    assert '이 PC 만 그룹에서 빠짐' in notes[0][1]

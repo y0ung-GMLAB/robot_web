@@ -17,6 +17,7 @@ import sysinfo
 TOPIC = "/motion_group/command"
 EVENT_TOPIC = "/motion_group/event"
 PRESENCE_TOPIC = "/motion_group/presence"
+HEARTBEAT_TOPIC = "/motion_group/heartbeat"
 PRESENCE_INTERVAL_SEC = 2.0
 
 # 이 사건(`GroupEvent.event`)이 오면 재생을 멈출지 본다 · motion_completed(정상 사이클 종료)는 제외한다 ·
@@ -69,6 +70,9 @@ class DdsListener:
         self._bound_iface = ""
         self._started_at = 0.0
         self._presence = None       # 알림 내용을 돌려주는 함수 · 없으면 알리지 않는다
+        # 하트비트 · PC → (받은 시각 monotonic, 실행 번호, 실행 중) · 진행 PC 가 안 보이면 눈금대로 소리를
+        # 잇는다(cycle_follow) · 수정 목록 178
+        self._heartbeats = {}
 
     # ---- 조회 -------------------------------------------------------
     @property
@@ -190,7 +194,7 @@ class DdsListener:
             from rclpy.executors import SingleThreadedExecutor
             from rclpy.qos import (DurabilityPolicy, HistoryPolicy, QoSProfile,
                                    ReliabilityPolicy)
-            from motion_coordination_interfaces.msg import GroupCommand, GroupEvent
+            from motion_coordination_interfaces.msg import GroupCommand, GroupEvent, GroupHeartbeat
 
             rclpy = _rclpy
             ip, iface = self._wait_network(stop_event)
@@ -223,6 +227,8 @@ class DdsListener:
             if self._watch_stop:
                 # event 토픽도 VOLATILE 이라 발행자에게 부담이 없다
                 node.create_subscription(GroupEvent, EVENT_TOPIC, self._on_event, qos)
+            # 하트비트 · 진행 PC 가 살아 있나 · 같은 실행을 도는 PC 가 있나 · BEST_EFFORT 구독 · 수정 목록 178
+            node.create_subscription(GroupHeartbeat, HEARTBEAT_TOPIC, self._on_heartbeat, qos)
 
             presence_pub = self._create_presence_publisher(node, qos)
 
@@ -347,6 +353,30 @@ class DdsListener:
                 callback(msg)
             except Exception as exc:
                 self._log.add("트리거 처리 오류: %s" % exc)
+
+    def _on_heartbeat(self, msg):
+        if msg.group_id != self._group_id:
+            return
+        with self._lock:
+            self._heartbeats[str(msg.pc_id)] = (
+                time.monotonic(), str(msg.execution_id or ""), bool(msg.execution_active),
+            )
+
+    def heartbeat_age(self, pc_id):
+        """그 PC 하트비트 나이(초) · 받은 적 없으면 None"""
+        with self._lock:
+            seen = self._heartbeats.get(str(pc_id or ""))
+        return None if seen is None else time.monotonic() - seen[0]
+
+    def execution_running_elsewhere(self, execution_id, exclude_pc, fresh_sec=3.0):
+        """같은 실행을 도는 다른 PC 가 지금 보이나 · 진행 PC 는 빼고 · 수정 목록 178"""
+        now = time.monotonic()
+        with self._lock:
+            rows = list(self._heartbeats.items())
+        return any(
+            pc_id != exclude_pc and active and running == execution_id and now - seen <= fresh_sec
+            for pc_id, (seen, running, active) in rows
+        )
 
     def _on_event(self, msg):
         """모션 정지/오류 사건 · 사건 이름만 거른다 · 실행 번호 · 보낸 PC 는 받는 쪽(`_on_stop`)이 본다"""

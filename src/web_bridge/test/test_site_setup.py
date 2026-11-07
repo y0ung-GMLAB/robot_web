@@ -631,3 +631,103 @@ def test_rtw88_step_is_wired_into_install_site_and_check():
     assert 'site_wifi_chip_powersave_ok' in check and 'Wi-Fi 칩 절전 꺼짐 (rtw88)' in check
     assert _bash(f'bash -n "{SCRIPTS / "check.sh"}"').returncode == 0
     assert 'site_disable_interruptions' in (SCRIPTS / 'install_speaker.sh').read_text(encoding='utf-8')
+
+
+# ------------------------------------------------------------------ #
+# 수정 목록 177 · EtherCAT 랜카드를 NetworkManager 에서 빼기
+#   실물 NY floating2 2026-11-07 · 「유선 연결 1」 이 EtherCAT 포트 enp1s0 에 45초마다 DHCP · 실패 되풀이
+# ------------------------------------------------------------------ #
+
+ECAT_MAC = '84:47:09:81:DB:23'
+
+
+def _nm_env(tmp_path, fake_sudo='exec "$@"', mac=ECAT_MAC, nm_state='enp1s0:connecting (getting IP configuration)'):
+    fake = tmp_path / 'bin'
+    fake.mkdir(parents=True, exist_ok=True)
+    _fake(fake, 'sudo', fake_sudo)
+    _fake(fake, 'nmcli', f'case "$*" in *"device"*) printf "%s\nwlp3s0:connected\n" "{nm_state}" ;; *) echo "nmcli $*" >> "{tmp_path}/nmcli.log" ;; esac')
+    _fake(fake, 'ip', f'echo "lo UNKNOWN 00:00:00:00:00:00"; echo "enp1s0 UP {mac.lower()} <BROADCAST,MULTICAST,UP>"; echo "wlp3s0 UP 0c:cd:b4:67:6f:39 <BROADCAST>"')
+    conf = tmp_path / 'ethercat.conf'
+    if mac:
+        conf.write_text(f'MASTER0_DEVICE="{mac}"\nDEVICE_MODULES="generic"\n', encoding='utf-8')
+    return {
+        'PATH': f'{fake}{os.pathsep}{os.environ["PATH"]}',
+        'SITE_ETHERCAT_CONF': str(conf),
+        'SITE_NM_ETHERCAT_CONF': str(tmp_path / 'nm-ethercat.conf'),
+        'SITE_STATE_DIR': str(tmp_path / 'state'),
+    }
+
+
+@pytest.mark.skipif(not LINUX_SHELL, reason='리눅스 셸에서')
+def test_ethercat_nic_is_taken_off_networkmanager_once(tmp_path):
+    env = _nm_env(tmp_path)
+    nm = tmp_path / 'nm-ethercat.conf'
+    first = _site('site_ethercat_nm_unmanage', env)
+    text = nm.read_text(encoding='utf-8')
+    assert '[keyfile]' in text.splitlines()
+    assert f'unmanaged-devices=mac:{ECAT_MAC.lower()}' in text.splitlines(), 'MAC 으로 잡아야 이름이 바뀌어도 맞다'
+    assert '수정 목록 177' in text and '적음' in first
+    assert 'general reload conf' in (tmp_path / 'nmcli.log').read_text(encoding='utf-8'), 'Wi-Fi 를 끊지 않고 설정만 다시 읽는다'
+    assert not (tmp_path / 'state').exists(), '재부팅은 필요 없다'
+    second = _site('site_ethercat_nm_unmanage', env)
+    assert nm.read_text(encoding='utf-8') == text and '이미 빠짐' in second
+    # 아직 관리 중으로 보이는 동안 점검은 [확인] · 명령 안내
+    assert _site('site_ethercat_nm_ok', env).strip() == '0'
+    assert 'sudo nmcli general reload conf' in _site('site_ethercat_nm_detail', env)
+
+
+@pytest.mark.skipif(not LINUX_SHELL, reason='리눅스 셸에서')
+def test_ethercat_nm_check_passes_once_the_nic_reads_unmanaged(tmp_path):
+    env = _nm_env(tmp_path, nm_state='enp1s0:unmanaged')
+    assert _site('site_ethercat_nm_ok', env).strip() == '1'
+    assert 'unmanaged' in _site('site_ethercat_nm_detail', env)
+
+
+@pytest.mark.skipif(not LINUX_SHELL, reason='리눅스 셸에서')
+def test_pc_without_ethercat_is_left_alone(tmp_path):
+    env = _nm_env(tmp_path, mac='')
+    out = _site('site_ethercat_nm_unmanage', env)
+    assert '건너뜀' in out and not (tmp_path / 'nm-ethercat.conf').exists()
+    assert _site('site_ethercat_nm_ok', env).strip() == '1'
+    # 직렬 서보 전용 표시(「안 씀」)도 같다
+    (tmp_path / 'ethercat.conf').write_text('# robot_web-ethercat: none\n', encoding='utf-8')
+    out = _site('site_ethercat_nm_unmanage', env)
+    assert '건너뜀' in out and not (tmp_path / 'nm-ethercat.conf').exists()
+
+
+@pytest.mark.skipif(not LINUX_SHELL, reason='리눅스 셸에서')
+def test_ethercat_nm_dry_run_prints_only(tmp_path):
+    env = {**_nm_env(tmp_path), 'SITE_DRY_RUN': '1'}
+    out = _site('site_ethercat_nm_unmanage', env)
+    assert '[dry-run]' in out and 'unmanaged-devices=mac:' in out
+    assert not (tmp_path / 'nm-ethercat.conf').exists()
+    assert not (tmp_path / 'nmcli.log').exists()
+
+
+@pytest.mark.skipif(not LINUX_SHELL, reason='리눅스 셸에서')
+def test_ethercat_nm_without_sudo_warns_and_install_goes_on(tmp_path):
+    """웹 「모든 PC 업데이트」(sudo -n) · /etc 를 못 씀 · 설치는 멈추지 않고 손 명령만 찍음"""
+    env = _nm_env(tmp_path, fake_sudo='echo "sudo: a password is required" >&2; exit 1')
+    result = _bash(
+        f'set -Eeuo pipefail; trap \'echo TRAP >&2; exit 9\' ERR; source "{SITE}"; '
+        'sudo() { command sudo -n "$@"; }; '
+        'site_ethercat_nm_unmanage || echo "계속"; echo 끝',
+        env,
+    )
+    assert result.returncode == 0, result.stderr
+    assert 'TRAP' not in result.stderr
+    assert result.stdout.strip().splitlines()[-2:] == ['계속', '끝']
+    assert 'sudo tee' in result.stderr and 'unmanaged-devices=mac:' in result.stderr
+    assert not (tmp_path / 'nm-ethercat.conf').exists()
+
+
+def test_ethercat_nm_step_is_wired_into_install_site_and_check():
+    install = (SCRIPTS / 'install.sh').read_text(encoding='utf-8')
+    step = install.split('print_step "2-1. Wi-Fi 절전 끄기"', 1)[1].split('print_step', 1)[0]
+    assert 'site_ethercat_nm_unmanage ||' in step, '웹 업데이트에서도 · 실패해도 계속'
+    site = SITE.read_text(encoding='utf-8')
+    configure = site.split('site_ethercat_configure() {', 1)[1].split('\n}\n', 1)[0]
+    assert 'site_ethercat_nm_unmanage || true' in configure, '첫 설치 · 랜카드를 정한 직후'
+    assert 'site_ethercat_nm_ok' in site.split('site_selfcheck() {', 1)[1]
+    check = (SCRIPTS / 'check.sh').read_text(encoding='utf-8')
+    assert 'site_ethercat_nm_ok' in check and 'EtherCAT 랜카드 NM 제외' in check

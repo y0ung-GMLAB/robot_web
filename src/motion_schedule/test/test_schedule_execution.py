@@ -7,6 +7,7 @@
 """
 
 import json
+from datetime import datetime
 from types import SimpleNamespace
 
 import pytest
@@ -171,11 +172,31 @@ def test_a_slave_pc_never_fires_its_own_schedule(tmp_path, monkeypatch):
     node._last_reconcile_monotonic = 0.0
     node._run_mode = 'schedule'
     node._reconcile = lambda _now: pytest.fail('슬레이브는 점검하지 않는다')
-    node._publish_status = lambda _now: pytest.fail('슬레이브는 여기까지 오지 않는다')
+    published = []
+    node._publish_status = published.append
 
     node._on_timer_tick()
 
     assert node.sent == []
+    # 제 운영시간은 알린다 · 진행 PC 가 안 보일 때 연동 노드가 스스로 이을지 본다 · 수정 목록 178
+    assert len(published) == 1
+
+
+def test_a_slave_reports_its_own_window_without_claiming_it(tmp_path):
+    """슬레이브의 `active_schedule_id` 는 비운다(주차 · 131 이 마스터 것만 본다) · 운영시간은 따로 · 178"""
+    node = _node(tmp_path, coordination_enabled=True, is_master=False)
+    node.store.list_schedules = lambda: [_item()]
+    node.engine = SimpleNamespace(active=lambda _now, _schedules: SimpleNamespace(schedule_id='s-1'))
+    node._run_mode = 'schedule'
+    published = []
+    node.status_pub = SimpleNamespace(publish=lambda msg: published.append(msg.data))
+
+    node._publish_status(datetime.now().astimezone())
+
+    status = json.loads(published[0])
+    assert status['is_master'] is False
+    assert status['active_schedule_id'] is None
+    assert status['window_schedule_id'] == 's-1'
 
 
 def test_status_reports_the_master_role_and_count(tmp_path):

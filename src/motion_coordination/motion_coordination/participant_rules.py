@@ -137,3 +137,37 @@ def start_summary(participants, excluded) -> str:
     if rows:
         text += ' · 빠짐 ' + ', '.join(f'{pc}({reason})' for pc, reason in rows)
     return text
+
+
+def spread_outliers(
+    triggered: Mapping[str, Any], *, reference_pc: str = '', tolerance_ms: float = 70.0,
+) -> dict:
+    """시작(또는 초기화) 시각이 어긋난 PC · {PC: 기준에서 벗어난 ms} · 수정 목록 178
+
+    전에는 편차가 허용(70 ms)을 넘으면 그룹 전체를 세우고 잠갔다 · 이제 어긋난 PC 만 뺀다 ·
+    기준은 `reference_pc`(진행 PC 자신 · 참가 중일 때) · 없으면 가운데 값 · 허용의 절반 넘게
+    벗어난 PC 를 고른다(둘 다 그 안이면 둘 사이는 허용 안).
+    """
+    times = {}
+    for pc_id, value in dict(triggered or {}).items():
+        try:
+            times[str(pc_id)] = float(value)
+        except (TypeError, ValueError):
+            continue
+    if len(times) < 2:
+        return {}
+    if reference_pc in times:
+        reference = times[reference_pc]
+    else:
+        ordered = sorted(times.values())
+        middle = len(ordered) // 2
+        reference = (
+            ordered[middle] if len(ordered) % 2
+            else (ordered[middle - 1] + ordered[middle]) / 2.0
+        )
+    limit_sec = max(float(tolerance_ms or 0.0), 0.0) / 2000.0
+    return {
+        pc_id: round((value - reference) * 1000.0, 3)
+        for pc_id, value in sorted(times.items())
+        if abs(value - reference) > limit_sec
+    }
