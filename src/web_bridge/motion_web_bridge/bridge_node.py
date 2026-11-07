@@ -49,6 +49,7 @@ from .motor_runtime_service import MotorRuntimeService
 from .project_service import ProjectService
 from .motor_config_service import MotorConfigService
 from .motor_event_log import MotorEventLog
+from .auto_fault_recovery import AutoFaultRecovery
 from .motion_trace_service import MotionTraceService
 from .scan_orchestrator import ScanOrchestrator
 from .bridge_helpers import (
@@ -664,6 +665,49 @@ class MotionWebBridge(Node):
         self._auto_backup_timer = self.create_timer(60.0, self.auto_backup.tick)
         # 재생 중이라 미룬 MuJoCo 계산 · 5 초마다 · 수정 목록 170
         self._precompute_deferred_timer = self.create_timer(5.0, self._precompute_deferred_tick)
+        # 통신성 드라이브 알람 자동 초기화 · 스케줄 모드 · 축마다 1시간 3번 · 수정 목록 178
+        self._auto_fault_recovery = AutoFaultRecovery()
+        self._auto_fault_timer = self.create_timer(1.0, self._auto_fault_tick)
+
+    def _auto_fault_tick(self) -> None:
+        """통신성 알람(Err80 · 81 · 84 · 85 · 88)이 2 s 넘게 그대로면 초기화하고 서보를 다시 켠다 · 178
+
+        기구 · 부하성 알람은 하지 않는다 · 스케줄 모드에서만(사람 없는 운영) · 한도를 넘으면 운영 로그에
+        한 번 남기고 그 헤드는 정지 그대로 · 그룹 복귀는 연동 노드가 회차 경계에서 한다.
+        """
+        try:
+            motors = self._manual._motion_state_motors()
+            if not any(motor.get('fault') for motor in motors):
+                self._auto_fault_recovery.plan(motors, enabled=False)
+                return
+            enabled = run_mode_gate.current_run_mode(self) == 'schedule'
+            plan = self._auto_fault_recovery.plan(motors, enabled=enabled)
+        except Exception as exc:  # noqa: BLE001 · 자동 복구가 브리지를 멈추면 안 된다
+            self.get_logger().warning(f'자동 오류 초기화 점검 실패 · {exc}')
+            return
+        for item in plan['exhausted']:
+            text = (
+                f'{item["axis"]}번 모터 · Err{item["code"]} · 자동 오류 초기화 한도(1시간 3번) 넘음 · '
+                '이 헤드는 정지 그대로 · 사람 확인 필요'
+            )
+            self.get_logger().error(text)
+            self._motor_event_log.append('error', 'auto_fault_reset_exhausted', f'{item["axis"]}번 모터', text, item)
+        for item in plan['reset']:
+            axis = int(item['axis'])
+            result = self._manual.ac_servo_control('fault_reset', axis, 'selected')
+            text = (
+                f'{axis}번 모터 · Err{item["code"]} · 자동 오류 초기화 {item["attempt"]}/3 · '
+                f'{"성공" if result.get("success") else "실패 · " + str(result.get("message") or "")}'
+            )
+            self.get_logger().warning(text)
+            self._motor_event_log.append('error', 'auto_fault_reset', f'{axis}번 모터', text, item)
+            if result.get('success'):
+                # 초기화는 드라이브를 서보 OFF 로 떨어뜨린다 · 상태가 반영된 뒤 다시 켠다
+                timer = threading.Timer(
+                    1.5, lambda a=axis: self._manual.ac_servo_control('servo_on', a, 'selected'),
+                )
+                timer.daemon = True
+                timer.start()
 
     def _log_started(self) -> None:
         """무엇을 물고 떴는지 남긴다 · 현장에서 이 줄 하나로 원인을 찾는다."""
@@ -872,6 +916,8 @@ class MotionWebBridge(Node):
             'last_failure': dict(payload.get('last_failure') or {}),
             # 지금 돌아야 하는 구간 안인가 · 멈춰도 다시 시작되는지의 근거 · §6-149
             'active_schedule_id': payload.get('active_schedule_id') or '',
+            # 이 PC 스케줄의 운영시간(슬레이브도) · 수정 목록 178
+            'window_schedule_id': payload.get('window_schedule_id') or '',
             'reconcile_interval_sec': payload.get('reconcile_interval_sec'),
         }
 
@@ -889,6 +935,17 @@ class MotionWebBridge(Node):
         if not status.get('received') or age is None or age > SCHEDULE_STATUS_FRESH_SEC:
             return False
         return bool(status.get('active_schedule_id'))
+
+    def _schedule_own_window_open(self) -> bool:
+        """이 PC 스케줄로 지금 운영시간인가 · 마스터 · 슬레이브 모두 · 늙은 값이면 False · 수정 목록 178"""
+        try:
+            status = self.schedule_node_status()
+        except Exception:  # noqa: BLE001 · 못 보면 운영시간 아님(스스로 잇지 않는다)
+            return False
+        age = status.get('age_sec')
+        if not status.get('received') or age is None or age > SCHEDULE_STATUS_FRESH_SEC:
+            return False
+        return bool(status.get('window_schedule_id') or status.get('active_schedule_id'))
 
     def _motion_run_status_callback(self, msg: String) -> None:
         try:
@@ -1103,6 +1160,8 @@ class MotionWebBridge(Node):
             'operation_mode': self._cached_operation_mode(),
             # 실행 준비 안 됨(설정 없음 · 모터 끊김 등) · 하트비트로 · 마스터가 선택 때 미리 뺀다 · 수정 목록 136
             'start_blocker': self._cached_start_blocker(),
+            # 이 PC 스케줄로 지금 운영시간인가 · 진행 PC 가 안 보일 때 스스로 이을지 · 수정 목록 178
+            'schedule_window_open': self._schedule_own_window_open(),
         }
 
     def _cached_start_blocker(self) -> str:

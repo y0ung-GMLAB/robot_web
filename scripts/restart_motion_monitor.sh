@@ -34,6 +34,11 @@ if [[ -z "${ROS_LOCALHOST_ONLY:-}" ]]; then
     export ROS_LOCALHOST_ONLY=1
   fi
 fi
+# 로컬 도메인 + 루프백 · 웹 서비스가 띄우면 이미 정해져 상속된다(`MOTION_LOCAL_DDS` 있음) ·
+# 손으로 실행했을 때만 같은 도우미로 정한다 · 다르면 모터 노드와 갈려 아무것도 안 보인다 · 수정 목록 176
+if [[ -z "${MOTION_LOCAL_DDS:-}" && -f "${WORKSPACE}/src/motion_common/motion_common/group_env.py" ]]; then
+  eval "$(python3 "${WORKSPACE}/src/motion_common/motion_common/group_env.py" --local)"
+fi
 START_MOTOR_MANAGER_MODE="${START_MOTOR_MANAGER:-auto}"
 
 any_running() {
@@ -172,7 +177,7 @@ export MOTOR_START_BLOCK_REASON
 export WORKSPACE
 PROJECT_GENERATION="${MOTION_PROJECT_GENERATION:-0}"
 export PROJECT_GENERATION
-log "ROS DDS isolation: ROS_LOCALHOST_ONLY=${ROS_LOCALHOST_ONLY}"
+log "ROS DDS isolation: ROS_LOCALHOST_ONLY=${ROS_LOCALHOST_ONLY} · ROS_DOMAIN_ID=${ROS_DOMAIN_ID:-0} · MOTION_LOCAL_DDS=${MOTION_LOCAL_DDS:-}"
 # 모터 노드를 같이 띄우면 버스 설정 중 표시 · `run_motor_service.sh` 와 같음 · 수정 목록 125
 BUS_MARKER_HELPER="${WORKSPACE}/src/motion_common/motion_common/ethercat_mailbox.py"
 if [[ "${START_MOTOR_MANAGER}" == "true" ]] && [[ -f "${BUS_MARKER_HELPER}" ]] && command -v python3 >/dev/null 2>&1; then

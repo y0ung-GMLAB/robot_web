@@ -36,7 +36,10 @@ from .participant_rules import STARTED_BY_SCHEDULE, normalize_started_by
 #: 정지 + 2등급으로 갈린다 → 같은 버전끼리만 ·
 #: 10 · 2026-10-16 `GroupCommand.segment_start_sec`·`segment_end_sec` (구간 재생 · 재생 목록 1번을 같은
 #: 시각부터 · 스피커도 그 시각부터 음원) · 메시지 칸이 바뀜 → 로봇 PC · 스피커 모두 같은 버전 · 다시 빌드
-GROUP_PROTOCOL_VERSION = 10
+#: 11 · 2026-11-08 한 PC 의 문제는 그 PC 만 뺀다(전체 정지 · 잠금 없음) · 회차 맞춤 연속은 2회차부터 눈금
+#: (10 s 올림 주기) · 진행 PC 가 안 보이면 참가 PC 가 눈금대로 스스로 잇는다(수정 목록 178) · 메시지 칸은
+#: 그대로지만 옛 PC 와 섞이면 정지 · 복귀 판단이 갈린다 → 로봇 PC 모두 같은 버전
+GROUP_PROTOCOL_VERSION = 11
 
 #: 진행 PC 가 **뺀 PC 하나에만** 보내는 풀기 명령의 번호 앞머리 · 수정 목록 123
 #:

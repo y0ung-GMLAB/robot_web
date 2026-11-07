@@ -155,6 +155,10 @@ if [[ "${ROLE}" == "robot" ]]; then
   else
     row 0 "EtherCAT master" "응답 없음 · Secure Boot · sudo systemctl status ethercat"
   fi
+  # EtherCAT 랜카드에 NetworkManager 가 45초마다 DHCP 를 거는지 · 수정 목록 177
+  if [[ -n "${ecmac}" ]]; then
+    row "$(site_ethercat_nm_ok)" "EtherCAT 랜카드 NM 제외" "$(site_ethercat_nm_detail)"
+  fi
   # IgH SDO 사전 자동 읽기 꺼짐(패치 · sdo_dict=0) · 모듈이 올라가 있을 때만 · 수정 목록 139
   if [[ -d /sys/module/ec_master ]]; then
     if [[ -r /sys/module/ec_master/parameters/sdo_dict ]]; then

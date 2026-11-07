@@ -160,3 +160,79 @@ def test_even_a_hand_written_name_goes_through_the_same_rule():
     갈리지 않아야 한다."""
     lines = exports(RESOLVED, {'MOTION_PC_NAMESPACE': 'pc-a'})
     assert 'export MOTION_PC_NAMESPACE="pc_a"' in lines
+
+
+# --------------------------------------------------------------------- #
+# PC 안쪽 노드 · 로컬 도메인 + 루프백 · 수정 목록 176
+# --------------------------------------------------------------------- #
+
+from motion_common.group_env import local_domain_id, local_exports  # noqa: E402
+
+
+def _value(lines, name):
+    prefix = f'export {name}="'
+    found = [line[len(prefix):-1] for line in lines if line.startswith(prefix)]
+    return found[-1] if found else None
+
+
+def test_local_nodes_never_share_the_group_domain():
+    """같은 도메인이면 그룹 쪽 디스커버리가 모터 · 웹 노드 소켓에도 쏟아진다 · 실물 NY 11-07."""
+    for group in (0, 21, 42, 100, 101):
+        assert local_domain_id(group) != group
+        assert 0 <= local_domain_id(group) <= 101
+
+
+def test_local_domain_is_the_next_number_by_default():
+    assert local_domain_id(21) == 22
+    assert local_domain_id(101) == 100, '끝 번호면 바로 앞'
+
+
+def test_a_configured_local_domain_is_used_unless_it_collides():
+    assert local_domain_id(21, 60) == 60
+    assert local_domain_id(21, '60') == 60
+    assert local_domain_id(21, 21) == 22, '그룹과 같으면 버린다'
+    for broken in ('abc', '', '-1', '999', None):
+        assert local_domain_id(21, broken) == 22, broken
+
+
+def test_the_config_can_name_the_local_domain(tmp_path):
+    resolved = resolve(_config(tmp_path, SAMPLE + 'local_dds_domain_id: 60\n'))
+    assert resolved['local_domain_id'] == 60
+    assert resolve(_config(tmp_path, SAMPLE))['local_domain_id'] == 22
+
+
+def test_local_exports_lock_the_nodes_into_this_pc():
+    lines = local_exports(RESOLVED, {})
+    assert _value(lines, 'MOTION_PC_NAMESPACE') == 'joonhoTest', '이름표는 연동 노드와 같아야 한다'
+    assert _value(lines, 'ROS_DOMAIN_ID') == '22'
+    assert _value(lines, 'ROS_LOCALHOST_ONLY') == '1'
+    assert _value(lines, 'MOTION_LOCAL_DDS') == '1', '손으로 띄우는 스크립트가 상속을 알아본다'
+
+
+def test_an_inherited_group_domain_does_not_pull_local_nodes_back():
+    """서비스 환경에 그룹 도메인이 남아 있어도 로컬 노드는 로컬 도메인 · 조용히 그룹에 다시 붙으면 안 된다."""
+    lines = local_exports(RESOLVED, {'ROS_DOMAIN_ID': '21'})
+    assert _value(lines, 'ROS_DOMAIN_ID') == '22'
+
+
+def test_the_local_domain_can_be_set_by_hand():
+    lines = local_exports(RESOLVED, {'MOTION_LOCAL_DOMAIN_ID': '60'})
+    assert _value(lines, 'ROS_DOMAIN_ID') == '60'
+    lines = local_exports(RESOLVED, {'MOTION_LOCAL_DOMAIN_ID': '21'})
+    assert _value(lines, 'ROS_DOMAIN_ID') == '22', '손으로 넣어도 그룹과 같으면 버린다'
+
+
+def test_local_dds_can_be_turned_back_off():
+    """되돌리기 · `MOTION_LOCAL_DDS=0` → 옛 줄 그대로(그룹 도메인) · 루프백은 스크립트 가지가 정한다."""
+    lines = local_exports(RESOLVED, {'MOTION_LOCAL_DDS': '0'})
+    assert lines[:2] == exports(RESOLVED, {'MOTION_LOCAL_DDS': '0'})
+    assert _value(lines, 'ROS_DOMAIN_ID') == '21'
+    assert _value(lines, 'ROS_LOCALHOST_ONLY') is None
+    assert _value(lines, 'MOTION_LOCAL_DDS') == '0'
+
+
+def test_both_scopes_agree_on_the_name(tmp_path):
+    """연동 노드(그룹)와 로컬 노드가 같은 PC 이름표를 써야 화면 · 기록이 갈리지 않는다."""
+    resolved = resolve(_config(tmp_path, SAMPLE.replace('joonhoTest', 'pc-a')))
+    assert _value(exports(resolved, {}), 'MOTION_PC_NAMESPACE') == \
+        _value(local_exports(resolved, {}), 'MOTION_PC_NAMESPACE') == 'pc_a'

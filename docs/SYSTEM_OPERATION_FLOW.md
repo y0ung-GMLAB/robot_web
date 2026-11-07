@@ -9,12 +9,17 @@
 
 ```text
 브라우저 :8000
-  → Motion Web Bridge (ROS_LOCALHOST_ONLY=0 · PC 이름공간 /<PC이름>/… · 그룹 DDS 도메인)
-      → motion_run_manager → motion_supervisor → motion_system
-      ↕ 127.0.0.1:8011 로컬 고수준 어댑터
-    motion_coordination_node (ROS_LOCALHOST_ONLY=0 · 같은 DDS Domain)
-      ↔ 다른 PC의 motion_coordination_node (typed ROS 2 DDS)
+  → Motion Web Bridge (ROS_LOCALHOST_ONLY=1 · PC 이름공간 /<PC이름>/… · 로컬 DDS 도메인)
+      → motion_run_manager → motion_supervisor → motion_system   (모두 로컬 도메인 · 루프백)
+      ↕ 127.0.0.1:8011 로컬 고수준 어댑터 (HTTP · ROS 아님)
+    motion_coordination_node (ROS_LOCALHOST_ONLY=0 · 그룹 DDS Domain)
+      ↔ 다른 PC의 motion_coordination_node (typed ROS 2 DDS · Wi-Fi)
 ```
+
+- DDS 범위 · 수정 목록 176 (2026-11-07) · 네트워크에 여는 노드는 연동 노드 하나 · 그 밖은 이 PC 안 ·
+  로컬 도메인 = 그룹 + 1(기본 22 · 설정 `local_dds_domain_id`) · Wi-Fi 가 끊겨도 모터 상태·명령은 그대로 ·
+  전(§6-96)에는 모두 그룹 도메인 · Wi-Fi 가 7분 끊긴 PC 가 재부팅 전까지 「연결되지 않은 모터」 에서
+  못 돌아왔다 · 되돌리기 `MOTION_LOCAL_DDS=0`
 
 - PC 간 전송 · `GroupHeartbeat`, `GroupCommand`, `GroupEvent`, `GroupAlarm`, `GroupTimeSync`
 - PC 간 미전송 · 프로젝트 ID·파일명·모션 데이터·모터 목표값
@@ -240,23 +245,24 @@ trigger_report_timeout_sec: 1.0
 
 ## 정지·오류
 
+원칙 · 수정 목록 178 (사용자 결정 2026-11-08) · **한 PC 의 문제는 그 PC 만 정지 · 나머지는 계속 재생 · 그룹 잠금 없음** ·
+Wi-Fi 가 한 번씩 끊겨도 운영 · 재생은 이어진다 · 그룹 전체 정지는 사람이 누른 정지와 설정 오류(PC ID 중복 · 마스터 둘)뿐.
+
 - `현재 회차 후 정지` · 실행 중인 로컬 모션만 완료 · dwell/reinitialize 생략 · 다음 `START_AT` 없음
 - `전체 즉시 정지` · 요청 PC의 `motion_supervisor` 안전 정지 명령·로컬 motion_run 정지 · 모든 참가 PC에 `STOP_NOW`
 - 고정 참가 목록의 어느 PC에서도 두 정지를 요청할 수 있다.
-- 1등급 Servo 오류 · 오류축 차단 · 나머지 현재 회차 완료 · 다음 회차 차단
-- 2등급 Servo 오류 · 전체 즉시 정지
-- 3등급 Servo 오류 · 전체 즉시 정지 · 기존 supervisor의 재시작 전 모터 제어 차단 유지
-- 미분류 Servo 오류 · 기존 supervisor 정책에 따라 2등급
-- 참가 PC 통신 단절·프로그램 재시작 · 로컬 우선 정지 · 남은 고정 참가 PC에 `STOP_NOW`
-- 로컬 Web Bridge 상태 1.5초 중단 · 로컬 우선 정지 시도·전체 `STOP_NOW`·그룹 재실행 차단
+- Servo 알람(1~3등급) · **그 PC 만** · 1등급 그 PC 회차 끝 정지 · 2·3등급 그 PC 즉시 정지 · supervisor 의 축 차단 · 3등급 잠금은 그대로
+- 통신성 드라이브 알람(Err80 · 81 · 84 · 85 · 88) · 스케줄 모드면 2 s 뒤 자동 오류 초기화 + 서보 켜기 · 축마다 1시간 3번 · 넘으면 그 헤드 정지 그대로(운영 로그) · 기구 · 부하성 알람은 자동으로 하지 않음
+- 참가 PC 재생 오류 · 거절 · 혼자 정지 · 시작 보고 없음 · 예약 확인 없음 · 시작 시각 어긋남(진행 PC 기준 35 ms 넘게) · 시계 맞춤 실패 · **그 PC 만 뺌**(`_drop_member_only` → `update_participants` + 그 PC 에만 풀기)
+- 참가 PC 하트비트 3 s 끊김 · 프로그램 재시작 · 진행 PC 가 그 PC 만 뺌 · 다른 참가 PC 는 아무것도 하지 않음
+- 이 PC 의 로컬 Web Bridge 상태 1.5초 중단 · 이 PC 만 빠짐 · 움직이던 중이면 끊김 기록(잠그지 않음)
+- 진행 PC 자신의 문제 · 진행 PC 만 빠지고 진행은 계속 · 정상이 되면 회차 경계에서 스스로 다시 들어감
+- 빠진 PC 복귀 · 정상(온라인 · 알람 없음 · 실행 준비 됨)이 되면 회차 맞춤 연속 재생의 다음 회차 경계에서 다시 넣음(`join` → `join_ready` → 경계에서 합류)
+- 회차 눈금 · 회차 맞춤 연속 재생은 2회차부터 「앞 시작 + 주기」 에 시작 · 주기 = 자연 시작까지 + 2 s 를 10 s 단위로 올림 · 줄이지 않음 · 참가 PC 와 스피커는 시작 둘의 간격으로 주기를 안다
+- 진행 PC 가 안 보임(3 s) · 참가 PC 는 제 회차를 끝까지 · 스케줄 모드이고 **제 스케줄로** 운영시간이면 눈금대로 다음 회차를 스스로(회차 초기화 → 시작) · 진행 PC 가 다시 보이거나 운영시간이 끝나면 회차를 마치고 놓음 → 진행 PC 가 다시 넣음 · 스피커도 같은 눈금으로 소리를 이음(같은 실행을 도는 PC 가 보일 때만)
 - 동일 `pc_id`·다른 `boot_id` · `DUPLICATE_PC_ID`·그룹 참가와 실행 차단
 - `PREPARE` 참가 목록 불일치 · 전체 시작 전 취소
-- 예약 ACK 일부 누락 · 전체 `CANCEL_BEFORE_START`
-- `START_AT` 시각 경과 후 ACK 누락 · 전체 `STOP_NOW`
-- `motion_started` 보고 누락 · 전체 `STOP_NOW`·그룹 재실행 차단
-- DDS 트리거 동기화 불량 · 초기화·시작·다음 회차 차단
 - 동시 그룹 시작 · 가장 낮은 `pc_id` 요청 선택 · 패배 세션·ACK·제한시간 초기화
-- 초기화 또는 모션 시작 트리거 20ms 초과 · 로컬 우선 `STOP_NOW`·오류 공유·사용자 확인 전 그룹 실행 차단
 - 그룹 동기화 오류 · Servo 알람과 분리 · 단독 `1회 모션`·`자동 반복`은 차단하지 않음
 
 ## 검증 상태
@@ -273,7 +279,7 @@ trigger_report_timeout_sec: 1.0
 - 서로 다른 회차 완료시간·전체 barrier·회차당 시작 1회 · 실행 검증 확인됨
 - 실제 콜백 monotonic 기준 20ms 초과·즉시 정지·오류 공유·재실행 차단 · 로컬 실행 검증 확인됨
 - loopback 로컬 API · 실행 검증 확인됨
-- 현재 PC의 systemd unit 환경 · `ROS_LOCALHOST_ONLY=0`·`127.0.0.1:8011`·외부 `8010` 미사용 확인됨
+- 현재 PC의 systemd unit 환경 · 연동 `ROS_LOCALHOST_ONLY=0`(그 밖은 `=1` · 로컬 도메인 · 176)·`127.0.0.1:8011`·외부 `8010` 미사용 확인됨
 - 내부 상태 소유권·명령 직렬화·실행 중 안전 정지 선점·로컬 상태 비동기화·안전 정지 통합 · 코드 검증 확인됨
 - 위 내부 구조 개선 코드의 현재 실행 서비스 반영 · 두 서비스 재시작·로컬 API 응답 확인됨
 - 현재 PC의 version 1 설정 변환 · `pc_id`·`display_name` 보존·version 2 `enabled: false` 확인됨

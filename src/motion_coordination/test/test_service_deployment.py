@@ -183,3 +183,50 @@ def test_opening_the_network_never_lands_on_the_default_domain():
         WORKSPACE / 'src/motion_common/motion_common/group_env.py'
     ).read_text(encoding='utf-8')
     assert 'ROS_DOMAIN_ID' in text, '도메인을 정해 주지 않는다'
+
+
+# --------------------------------------------------------------------- #
+# PC 안쪽 노드는 이 PC 안에만 · 수정 목록 176
+# --------------------------------------------------------------------- #
+
+def test_every_local_service_locks_itself_into_this_pc():
+    """모터 · 웹(모니터 · 실행 포함) 서비스는 로컬 도메인 + 루프백 · Wi-Fi 가 끊겨도 모터 상태는 흐른다."""
+    for relative in MOTION_RUNNERS:
+        text = (WORKSPACE / relative).read_text(encoding='utf-8')
+        assert '"${GROUP_ENV_HELPER}" --local' in text, f'{relative} 가 로컬 범위를 안 쓴다'
+        assert 'MOTION_LOCAL_DDS=0' in text, f'{relative} 에 되돌리는 법이 안 적혔다'
+
+
+def test_the_coordination_service_stays_on_the_group_domain():
+    """연동 노드만 그룹 도메인에 남는다 · 여기마저 잠그면 PC 끼리 못 만난다."""
+    runner = (PACKAGE_ROOT / 'deploy/run_coordination_user_service.sh').read_text(
+        encoding='utf-8'
+    )
+    assert 'eval "$(python3 "${GROUP_ENV_HELPER}")"' in runner, '그룹 범위로 안 읽는다'
+    assert '"${GROUP_ENV_HELPER}" --local' not in runner
+
+
+def test_a_hand_run_restart_picks_the_same_local_domain():
+    """손으로 `restart_motion_monitor.sh` 를 돌려도 서비스와 같은 로컬 도메인 · 다르면 모터 노드와 갈린다."""
+    text = (WORKSPACE / 'scripts/restart_motion_monitor.sh').read_text(encoding='utf-8')
+    assert 'group_env.py" --local' in text
+    assert 'MOTION_LOCAL_DDS:-' in text, '서비스에서 상속된 값을 덮어쓴다'
+
+
+def test_no_local_node_touches_the_group_topics():
+    """로컬 노드를 루프백에 가둘 수 있는 전제 · 그룹 토픽은 연동 노드만 연다 ·
+    누가 그룹 토픽을 열기 시작하면 이 분리가 그 노드를 조용히 끊는다."""
+    offenders = []
+    for path in (WORKSPACE / 'src').rglob('*.py'):
+        relative = path.relative_to(WORKSPACE).as_posix()
+        if (
+            '/test/' in relative
+            or relative.startswith('src/motion_coordination/')
+            or relative.startswith('src/motion_system/')
+            or relative.endswith('motion_common/topics.py')
+        ):
+            continue
+        text = path.read_text(encoding='utf-8', errors='replace')
+        if 'topics.GROUP_' in text or "'/motion_group/" in text:
+            offenders.append(relative)
+    assert offenders == [], offenders

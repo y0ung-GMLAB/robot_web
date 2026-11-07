@@ -11,7 +11,8 @@
 ## 1. 공통 준비
 
 1. 두 PC에 같은 커밋을 배포하고 전체 빌드를 완료한다.
-2. `motion-coordination.service`의 `ROS_LOCALHOST_ONLY=0`을 확인한다.
+2. `motion-coordination.service`의 `ROS_LOCALHOST_ONLY=0`을 확인한다. 모터·웹 서비스 노드는 이 PC 안
+   (로컬 도메인 · 루프백 · 수정 목록 176)이라 다른 PC 에서 `ros2 topic list` 로 보이지 않는 것이 정상이다.
 3. `127.0.0.1:8011`만 로컬 API로 대기하고 외부 구형 연동 포트가 없는지 확인한다.
 4. 방화벽에서 ROS 2 DDS가 사용하는 UDP 통신을 같은 Wi-Fi 구간에 허용한다.
 5. 각 PC 웹 `DDS 그룹 연동`에서 서로 다른 `이 PC ID`, 같은 `그룹 ID`, 같은

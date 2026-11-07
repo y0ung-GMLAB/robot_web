@@ -11,15 +11,14 @@ if [[ -f "${START_LIMIT_HELPER}" ]]; then
     exit 78
   fi
 fi
-# 네트워크를 여는가 · §6-96
+# 이 PC 안(루프백)에만 연다 · 수정 목록 176 (실물 NY 2026-11-07)
 #
-# 전에는 모터 쪽 노드를 이 컴퓨터 안에 가둬 뒀다(`ROS_LOCALHOST_ONLY=1`) ·
-# 그런데 연동된 PC 의 MIDI 로 모터를 움직이려면 열어야 한다.
+# §6-96 에서 연동된 PC 의 MIDI 로 모터를 움직이려고 네트워크에 열었다 · 그러자 Wi-Fi 가
+# 막히거나 끊길 때 **이 PC 안의** 모터 상태까지 끊겼다(floating2 · 재부팅 전까지 못 돌아옴) ·
+# PC 끼리 만나는 일은 연동 노드 하나가 맡는다(그룹 토픽 · 로컬과는 HTTP) · 이 서비스의 노드는
+# 다른 PC 토픽을 쓰지 않는다 · 그래서 그룹과 다른 로컬 도메인 + 루프백(`group_env.py --local`).
 #
-# 열어도 무방한 이유 · 토픽마다 PC 이름표가 붙고(`/joonhoTest/...`), DDS
-# 도메인이 그룹 전용(기본 21)이라 남의 ROS 장비와 섞이지 않는다.
-#
-# 문제가 생기면 `MOTION_GROUP_NETWORK=0` 으로 도로 잠근다.
+# 되돌리기 · `MOTION_LOCAL_DDS=0` → 옛 방식(그룹 도메인 · 아래 `MOTION_GROUP_NETWORK` 가지).
 export MOTION_GROUP_NETWORK="${MOTION_GROUP_NETWORK:-1}"
 if [[ "${MOTION_GROUP_NETWORK}" == "1" ]]; then
   export ROS_LOCALHOST_ONLY=0
@@ -35,7 +34,7 @@ fi
 # 바깥에서 이미 정했으면 그것을 존중한다 · 되돌릴 수 있어야 한다.
 GROUP_ENV_HELPER="${WORKSPACE}/src/motion_common/motion_common/group_env.py"
 if [[ -f "${GROUP_ENV_HELPER}" ]]; then
-  eval "$(python3 "${GROUP_ENV_HELPER}")"
+  eval "$(python3 "${GROUP_ENV_HELPER}" --local)"
 fi
 # 도우미가 없거나 실패해도 서비스는 떠야 한다 · 빈 값이면 예전 이름 그대로다
 export MOTION_PC_NAMESPACE="${MOTION_PC_NAMESPACE:-}"
