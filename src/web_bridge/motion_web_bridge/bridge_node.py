@@ -918,6 +918,8 @@ class MotionWebBridge(Node):
             'active_schedule_id': payload.get('active_schedule_id') or '',
             # 이 PC 스케줄의 운영시간(슬레이브도) · 수정 목록 178
             'window_schedule_id': payload.get('window_schedule_id') or '',
+            # 이어지는 운영시간이 끝나는 시각(유닉스 초) · 0 = 없음 · 수정 목록 182
+            'window_ends_at': float(payload.get('window_ends_at') or 0.0),
             'reconcile_interval_sec': payload.get('reconcile_interval_sec'),
         }
 
@@ -946,6 +948,15 @@ class MotionWebBridge(Node):
         if not status.get('received') or age is None or age > SCHEDULE_STATUS_FRESH_SEC:
             return False
         return bool(status.get('window_schedule_id') or status.get('active_schedule_id'))
+
+    def _schedule_own_window_ends_at(self) -> float:
+        """이 PC 스케줄의 운영시간이 이어서 끝나는 시각(유닉스 초) · 밖이거나 늙은 값이면 0 · 수정 목록 182"""
+        if not self._schedule_own_window_open():
+            return 0.0
+        try:
+            return float(self.schedule_node_status().get('window_ends_at') or 0.0)
+        except Exception:  # noqa: BLE001 · 못 보면 없음
+            return 0.0
 
     def _motion_run_status_callback(self, msg: String) -> None:
         try:
@@ -1162,6 +1173,8 @@ class MotionWebBridge(Node):
             'start_blocker': self._cached_start_blocker(),
             # 이 PC 스케줄로 지금 운영시간인가 · 진행 PC 가 안 보일 때 스스로 이을지 · 수정 목록 178
             'schedule_window_open': self._schedule_own_window_open(),
+            # 그 운영시간이 끝나는 시각 · 진행 PC 가 그룹 명령에 싣는다(참가 PC 는 이 값을 따른다) · 수정 목록 182
+            'schedule_window_ends_at': self._schedule_own_window_ends_at(),
         }
 
     def _cached_start_blocker(self) -> str:

@@ -35,10 +35,10 @@ from motion_common.schedule_store import (
 )
 
 try:
-    from motion_schedule.schedule_engine import ScheduleEngine, unreadable_schedules
+    from motion_schedule.schedule_engine import ScheduleEngine, operating_until, unreadable_schedules
     from motion_schedule import schedule_rules
 except ImportError:
-    from .schedule_engine import ScheduleEngine, unreadable_schedules
+    from .schedule_engine import ScheduleEngine, operating_until, unreadable_schedules
     from . import schedule_rules
 
 PACKAGE_HINT = 'motion_schedule'
@@ -750,6 +750,7 @@ class MotionScheduleNode(Node):
         schedules = self.store.list_schedules()
         is_master = self._is_master_pc()
         window_id = getattr(self.engine.active(now, schedules), 'schedule_id', None)
+        window_end = operating_until(now, schedules)
         status = {
             "is_master": is_master,
             "active_project_id": self.store.current_project_id,
@@ -759,6 +760,8 @@ class MotionScheduleNode(Node):
             "active_schedule_id": window_id if is_master else None,
             # 이 PC 스케줄로 지금 운영시간인가 · 슬레이브도 · 연동 노드 스스로 잇기 · 수정 목록 178
             "window_schedule_id": window_id,
+            # 이어지는 운영시간이 끝나는 시각(유닉스 초) · 진행 PC 가 그룹 명령에 싣는다 · 수정 목록 182
+            "window_ends_at": window_end.timestamp() if window_end is not None else None,
             # 시각을 못 읽어 **영영 안 도는** 스케줄 · 화면이 빨간 줄로 띄운다 ·
             # §6-285 · 전에는 조용히 건너뛰어 「켜 뒀는데 안 돈다」로만 보였다
             "unreadable_schedules": unreadable_schedules(schedules),

@@ -2408,6 +2408,26 @@ def _schedule_initialize(node):
     return command, command.scheduled_monotonic_ns / 1e9 - before
 
 
+def test_first_start_at_of_an_execution_gets_three_seconds_even_after_a_restart():
+    """수정 목록 179 · 재시작 뒤 잰 값이 없어도 1회차 `start_at` 여유 3 s · 회차 사이는 그대로 가볍다"""
+    from motion_coordination.schedule_lead import FIRST_START_LEAD_MIN_SEC
+
+    node = _node()
+    node._execution = GroupExecution()
+    node._execution.begin('pc-a', ('pc-a',))
+    node._execution.mark_ready('pc-a')
+    node._execution.state = 'armed'
+    node._sync_ready = {'pc-a'}
+    node._sync_next_action = 'start'
+    node._command_pub = _Publisher()
+    before = time.monotonic()
+    node._complete_trigger_sync_if_ready()
+    command = node._command_pub.messages[-1]
+    assert command.command == 'start_at' and command.cycle_number == 1
+    assert command.scheduled_monotonic_ns / 1e9 - before == pytest.approx(FIRST_START_LEAD_MIN_SEC, abs=0.05)
+    assert node._lead_planner().snapshot()['last_lead_sec'] == {'first_start': pytest.approx(3.0)}
+
+
 def test_own_ack_is_counted_as_soon_as_the_local_call_returns():
     """사건이 DDS 를 돌아오기 전에 마감 검사가 먼저 돌아도 취소되지 않게"""
     node = _node()
@@ -2427,11 +2447,11 @@ def test_initialize_lead_starts_at_the_floor_and_grows_with_the_masters_latency(
     node = _node()
     command, lead = _schedule_initialize(node)
     assert lead == pytest.approx(INITIALIZE_LEAD_MIN_SEC, abs=0.05)
-    # 이번엔 마스터 자신이 1.2 s 걸렸다(늦음) · 다음 여유는 두 배 + 마감 여백
-    node._schedule_sent[command.command_id] = (time.monotonic() - 1.2, time.monotonic() + 0.3)
+    # 이번엔 마스터 자신이 1.6 s 걸렸다(늦음) · 다음 여유는 두 배 + 마감 여백(바닥 3 s 위 · 179)
+    node._schedule_sent[command.command_id] = (time.monotonic() - 1.6, time.monotonic() + 0.3)
     node._note_own_schedule_latency(command, {'success': True})
     _command, lead = _schedule_initialize(node)
-    assert lead == pytest.approx(2.5, abs=0.05)
+    assert lead == pytest.approx(3.3, abs=0.05)
 
 
 def test_masters_own_timing_rejection_does_not_latch(monkeypatch):

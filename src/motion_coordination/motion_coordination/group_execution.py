@@ -39,7 +39,11 @@ from .participant_rules import STARTED_BY_SCHEDULE, normalize_started_by
 #: 11 · 2026-11-08 한 PC 의 문제는 그 PC 만 뺀다(전체 정지 · 잠금 없음) · 회차 맞춤 연속은 2회차부터 눈금
 #: (10 s 올림 주기) · 진행 PC 가 안 보이면 참가 PC 가 눈금대로 스스로 잇는다(수정 목록 178) · 메시지 칸은
 #: 그대로지만 옛 PC 와 섞이면 정지 · 복귀 판단이 갈린다 → 로봇 PC 모두 같은 버전
-GROUP_PROTOCOL_VERSION = 11
+#: 12 · 2026-11-08 `GroupCommand.operating_until_unix_sec`(진행 PC 의 운영시간 끝 · 참가 PC 는 제 스케줄 대신
+#: 이 값으로 스스로 잇는다 · 수정 목록 182) · 1회차 시작 여유 3 s(179) · 빠졌던 실행의 복귀 권유를 받음(181) ·
+#: 메시지 칸이 바뀜 → 로봇 PC · 스피커 모두 같은 버전 · 다시 빌드 · 같은 업데이트에 하트비트 끊김은 풀기 없이
+#: 「연락 끊김」 · 돌아오면 재생을 세우지 않고 회차 경계에서 다시 합침(수정 목록 183 · 칸은 그대로)
+GROUP_PROTOCOL_VERSION = 12
 
 #: 진행 PC 가 **뺀 PC 하나에만** 보내는 풀기 명령의 번호 앞머리 · 수정 목록 123
 #:
@@ -53,6 +57,11 @@ DROP_RELEASE_PREFIX = 'drop-release-'
 
 def drop_release_command_id() -> str:
     return f'{DROP_RELEASE_PREFIX}{uuid.uuid4().hex}'
+
+
+def is_drop_release(command: str, command_id: str) -> bool:
+    """진행 PC 가 뺀 PC 에 보낸 풀기 명령인가 · 받은 PC 는 그 실행에서 「빠짐」 이지 「정지」 가 아니다 · 수정 목록 181"""
+    return str(command) == 'cancel_before_start' and str(command_id or '').startswith(DROP_RELEASE_PREFIX)
 
 
 def is_own_drop_release(command: str, command_id: str, coordinator_id: str, pc_id: str) -> bool:
@@ -198,6 +207,8 @@ class Member:
     protocol_version: int = 0
     #: 그 PC 가 지금 그룹을 시작할 수 없는 이유(설정 없음 · 모터 끊김 · 사람 조작 중) · 수정 목록 136
     start_blocker: str = ''
+    #: 그 PC 연동 노드가 쥔 그룹 실행 · 하트비트 칸(전부터 있음) · 「연락 끊김」 PC 가 같은 실행을 아직 도는지 · 183
+    execution_id: str = ''
 
 
 class MemberRegistry:
@@ -294,6 +305,8 @@ class GroupExecution:
         #: 구간 재생 · 파일 시각 · 0/0 = 통째로 · PC 마다 제 재생 목록 1번을 같은 시각으로 · 2026-10-16
         self.segment_start_sec = 0.0
         self.segment_end_sec = 0.0
+        #: 진행 PC 의 운영시간이 끝나는 시각(유닉스 초) · 0 = 없음 · 참가 PC 가 스스로 이을 때 본다 · 수정 목록 182
+        self.operating_until = 0.0
         self.target_cycle_count = 0
         self.initialization_only = False
         #: 회차 맞춤(lockstep) / 각자 재생(independent) · 수정 목록 35
@@ -311,6 +324,11 @@ class GroupExecution:
         #: 복귀하는 쪽 PC · 합류 확정을 기다리는 회차(0 = 아님) · 기다리기 시작한 시각
         self.join_cycle = 0
         self.join_started = 0.0
+        #: 진행 PC · 하트비트가 끊겨 뺐지만 풀기를 보내지 않은 PC · {pc_id: 뺀 monotonic} · 재생은 그 PC 가
+        #: 계속한다 · 돌아오면 회차 경계에서 다시 합친다(첫 회차 시작 보고까지 남는다) · 수정 목록 183
+        self.lost: Dict[str, float] = {}
+        #: 참가 PC · 그 실행을 그대로 재생하며 진행 PC 의 합류 확정을 기다린다(돌아온 「연락 끊김」 PC) · 183
+        self.merging = False
         self.last_start_spread_ms: Optional[float] = None
         self.last_initialize_spread_ms: Optional[float] = None
         self.pending_command = ''
@@ -353,6 +371,8 @@ class GroupExecution:
         self.admitted.clear()
         self.join_cycle = 0
         self.join_started = 0.0
+        self.lost.clear()
+        self.merging = False
 
     def admit(self, pc_ids: Iterable[str]) -> tuple[str, ...]:
         """도는 실행에 복귀 PC 를 넣는다 · 다음 회차 초기화부터 같이 · 넣은 PC 목록 · 30-3"""

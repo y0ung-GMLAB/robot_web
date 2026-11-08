@@ -33,8 +33,12 @@ SCHEDULED_COMMANDS: Mapping[str, str] = {
     'start_at': 'schedule',
 }
 #: 초기 위치 이동 예약의 바닥 · 이 PC 들의 `group_prepare` 가 0.4 s 를 넘긴 실물 기록 · 이동이
-#: 5~10 s 라 1.5 s 앞당겨 보내도 쇼에는 안 보인다
-INITIALIZE_LEAD_MIN_SEC = 1.5
+#: 5~10 s 라 앞당겨 보내도 쇼에는 안 보인다 · 1.5 → 3 s(수정 목록 179 · 시작 때 여유를 확 늘림)
+INITIALIZE_LEAD_MIN_SEC = 3.0
+#: 실행 1회차 `start_at` 의 바닥 · 잰 값은 메모리에만 있어 서비스 재시작 · 업데이트 · 재부팅 뒤 첫
+#: `start_at` 이 0.5 s(마감 0.4 s)였다 · 실물 NY 2026-11-07 12:36:28 floating1(마스터) 자기 확인 548 ms →
+#: 1회차 빠짐 · 대가는 초기 위치에서 약 2.5 s 더 서 있는 것 · 수정 목록 179
+FIRST_START_LEAD_MIN_SEC = 3.0
 #: 회차 초기화 예약의 바닥 · 회차 끝 마스터는 제 재생 기록 쓰기와 겹쳐 확인이 튄다(실물 253~363 ms ·
 #: 한 번은 679 ms 안에 못 함) · 뒤는 초기 위치 이동 5~10 s 라 안 보인다 · 수정 목록 153 ①
 CYCLE_INITIALIZE_LEAD_MIN_SEC = 1.5
@@ -42,14 +46,20 @@ CYCLE_INITIALIZE_LEAD_MIN_SEC = 1.5
 LEAD_FLOOR_SEC: Mapping[str, float] = {
     'initialize': INITIALIZE_LEAD_MIN_SEC,
     'cycle_initialize': CYCLE_INITIALIZE_LEAD_MIN_SEC,
+    'first_start': FIRST_START_LEAD_MIN_SEC,
+}
+#: 바닥만 따로이고 잰 값은 다른 종류와 같이 쓰는 종류 · 1회차 `start_at` 도 같은 `start_at` 확인이다
+SAMPLE_KIND: Mapping[str, str] = {
+    'first_start': 'schedule',
 }
 #: 회차 초기화 · 마스터 자신만 늦으면 그룹 취소 대신 제 초기화를 다시 예약하는 횟수 · 넘으면 옛 그대로 취소
 CYCLE_INITIALIZE_SELF_RETRIES = 2
 #: 그 사이 마감 검사가 기다리는 상한(보낸 때부터) · 로컬 호출 4 s × (처음 + 다시 2) + 여유 · DDS 로 제 명령이
 #: 안 돌아와도 끝은 난다
 SELF_LATE_WAIT_MAX_SEC = 15.0
-#: 잰 값이 아무리 커도 이 이상은 기다리지 않는다 · 넘으면 그 PC 가 고장 난 것 · 마감이 잡는다
-LEAD_MAX_SEC = 3.0
+#: 잰 값이 아무리 커도 이 이상은 기다리지 않는다 · 넘으면 그 PC 가 고장 난 것 · 마감이 잡는다 ·
+#: 3 → 6 s · 바닥(3 s)보다 커야 잰 값 × 2 가 먹는다 · 수정 목록 179
+LEAD_MAX_SEC = 6.0
 #: 최악 확인 시간에 곱하는 수 · 한 번 튄 값의 두 배까지는 버틴다
 LATENCY_SAFETY_FACTOR = 2.0
 #: PC · 종류마다 들고 있을 최근 확인 시간 수
@@ -101,7 +111,8 @@ class ScheduleLeadPlanner:
     ) -> float:
         base = max(float(base_lead_sec), float(ack_margin_sec))
         floor = float(LEAD_FLOOR_SEC.get(str(kind), 0.0))
-        measured = self.worst(kind, participants) * LATENCY_SAFETY_FACTOR + float(ack_margin_sec)
+        sample_kind = SAMPLE_KIND.get(str(kind), str(kind))
+        measured = self.worst(sample_kind, participants) * LATENCY_SAFETY_FACTOR + float(ack_margin_sec)
         ceiling = max(LEAD_MAX_SEC, base)
         lead = min(max(base, floor, measured), ceiling)
         self.last_lead[str(kind)] = lead

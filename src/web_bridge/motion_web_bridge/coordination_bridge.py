@@ -649,10 +649,14 @@ def local_motion_control(bridge: Any, payload: Mapping[str, Any]) -> Dict[str, A
         return result
     if command == 'group_join_commit':
         # 도는 그룹에 복귀한 PC · 합류 확정 · 수정 목록 30-3
-        return bridge.motion_group_join_commit({
+        commit = {
             'execution_id': str(payload.get('execution_id') or ''),
             'cycle_number': payload.get('cycle_number'),
-        })
+        }
+        if payload.get('merge') is True:
+            # 그대로 재생하던 PC 를 다시 합침 · 회차 번호만 맞춘다 · 수정 목록 183
+            commit['merge'] = True
+        return bridge.motion_group_join_commit(commit)
     if command == 'group_note':
         # 연동 노드가 남기는 기록 · 지금은 뺀 PC · 수정 목록 30-2
         return bridge.record_coordination_note(

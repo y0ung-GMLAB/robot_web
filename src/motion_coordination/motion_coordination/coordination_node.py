@@ -16,7 +16,7 @@ import urllib.error
 import urllib.request
 import uuid
 from pathlib import Path
-from typing import Any, Dict, Mapping, Optional
+from typing import Any, Dict, Iterable, Mapping, Optional
 
 import rclpy
 from motion_coordination_interfaces.msg import (
@@ -55,6 +55,7 @@ from .group_execution import (
     StaleLeaseWatch,
     bridge_loss_while_moving,
     drop_release_command_id,
+    is_drop_release,
     is_own_drop_release,
     is_own_join,
     late_refusal_reason,
@@ -229,6 +230,8 @@ class MotionCoordinationNode(Node):
         self._seen_commands: Dict[str, float] = {}
         self._system_info_cache: Dict[str, GroupSystemInfo] = {}
         self._cancelled_execution_ids: set[str] = set()
+        # 풀기(drop release)로만 놓은 실행 · 그 실행의 복귀 권유(`join`)는 받는다 · 수정 목록 181
+        self._drop_released_execution_ids: set[str] = set()
         self._coordination_error: Dict[str, Any] = {}
         # 기동 시점의 랜 주소 · `_check_network_drift` 가 견주는 기준점
         self._boot_lan_addresses = net_ready.lan_addresses()
@@ -574,7 +577,9 @@ class MotionCoordinationNode(Node):
         self._enforce_motion_start_report_deadline()
         self._drive_trigger_sync()
         self._manage_rejoiners()
+        self._drive_merge_hold()
         self._enforce_join_wait()
+        self._enforce_barrier_wait()
         self._reap_stale_execution()
         self._prune_seen_commands()
         self._check_multiple_masters()
@@ -657,6 +662,8 @@ class MotionCoordinationNode(Node):
             web_url=str(getattr(message, 'web_url', '') or ''),
             protocol_version=_message_uint32(message, 'protocol_version'),
             start_blocker=str(getattr(message, 'start_blocker', '') or ''),
+            # 그 PC 가 쥔 실행 · 「연락 끊김」 PC 를 세우지 않고 다시 합칠지 본다 · 수정 목록 183
+            execution_id=str(message.execution_id or ''),
         ))
         pending_alarm = self._alarm_registry.member_boot_changed(
             message.pc_id, message.boot_id,
@@ -935,9 +942,14 @@ class MotionCoordinationNode(Node):
         self._trigger_sync_status.update({'trigger_sync_state': 'ready'})
         # 여유는 잰 확인 시간으로 · 진행 PC 자신의 로컬 길도 0.4 s 안이라는 보장이 없다 · 수정 목록 130
         # 회차 초기화는 따로 잰다 · 바닥 1.5 s · 수정 목록 153 ①
-        lead = self._schedule_lead_sec(
-            next_action if next_action in {'initialize', 'cycle_initialize'} else 'schedule'
-        )
+        # 실행의 1회차 시작(아직 armed)은 바닥 3 s · 재시작 뒤 잰 값이 없어도 · 수정 목록 179
+        if next_action in {'initialize', 'cycle_initialize'}:
+            kind = next_action
+        elif self._execution.state == 'armed':
+            kind = 'first_start'
+        else:
+            kind = 'schedule'
+        lead = self._schedule_lead_sec(kind)
         if next_action == 'initialize':
             action = self._execution.initialize_action(now=time.monotonic(), lead_sec=lead)
         elif next_action == 'cycle_initialize':
@@ -1040,6 +1052,11 @@ class MotionCoordinationNode(Node):
             )
             if urgent_stop:
                 self._cancelled_execution_ids.add(message.execution_id)
+                # 뺀 PC 에 보낸 풀기는 「빠짐」 · 진짜 정지가 오면 그때부터 「정지」 · 수정 목록 181
+                if is_drop_release(message.command, message.command_id):
+                    self._drop_released().add(message.execution_id)
+                else:
+                    self._drop_released().discard(message.execution_id)
         if not self._command_dispatcher.submit(
             message, urgent_stop=urgent_stop,
         ):
@@ -1051,6 +1068,24 @@ class MotionCoordinationNode(Node):
             with self._lock:
                 execution_cancelled = (
                     message.execution_id in self._cancelled_execution_ids
+                )
+                # 빠졌던 실행의 복귀 권유 · 「정지된 실행의 지연 명령」 으로 버리면 영영 못 돌아온다 ·
+                # 실물 NY 2026-11-07 15:08 공유기 끊김 뒤 floating2·3·4 · 수정 목록 181
+                if (
+                    execution_cancelled and command == 'join'
+                    and message.execution_id in self._drop_released()
+                ):
+                    self._cancelled_execution_ids.discard(message.execution_id)
+                    self._drop_released().discard(message.execution_id)
+                    execution_cancelled = False
+                    rejoin_after_drop = True
+                else:
+                    rejoin_after_drop = False
+            self._note_operating_until(message)
+            if rejoin_after_drop:
+                self.get_logger().info(
+                    f'빠졌던 그룹 실행으로 복귀 권유 받음 · {message.execution_id} · '
+                    f'{int(message.cycle_number)}회차 경계'
                 )
             if execution_cancelled and command not in {
                 'stop_after_cycle', 'stop_now', 'cancel_before_start'
@@ -1069,14 +1104,19 @@ class MotionCoordinationNode(Node):
                     ):
                         raise ValueError('참가 목록 갱신이 지금 실행과 맞지 않습니다')
                     joining_self = self._execution.join_cycle > 0
+                    merging = bool(getattr(self._execution, 'merging', False))
                 if joining_self:
-                    # 이 PC 가 복귀 대상이다 · 합류 확정 · 다음 회차 초기화부터 같이
-                    committed = self._call_local_control({
+                    # 이 PC 가 복귀 대상이다 · 합류 확정 · 다음 회차 초기화부터 같이 · 그대로 재생하던 PC 는
+                    # 계획을 그대로 쓰고 회차 번호만 진행 PC 것으로 맞춘다(`merge` · 183)
+                    commit = {
                         'command': 'group_join_commit',
                         'execution_id': message.execution_id,
                         'cycle_number': int(message.cycle_number),
                         'network_operation_id': message.command_id,
-                    })
+                    }
+                    if merging:
+                        commit['merge'] = True
+                    committed = self._call_local_control(commit)
                     if not committed.get('success'):
                         raise ValueError(
                             '복귀 합류 확정 실패: '
@@ -1087,6 +1127,15 @@ class MotionCoordinationNode(Node):
                         self._execution.participants = participants
                         self._execution.join_cycle = 0
                         self._execution.join_started = 0.0
+                        if merging and joining_self:
+                            # 다시 진행 PC 를 따른다 · 스스로 잇던 것도 끝 · 183
+                            self._execution.merging = False
+                            self._autonomy = None
+                if merging and joining_self:
+                    self.get_logger().info(
+                        f'그룹 다시 합침 · 재생을 세우지 않음 · {int(message.cycle_number) + 1}회차부터 '
+                        f'진행 PC 를 따름 · {message.execution_id}'
+                    )
                 return
             if command == 'join':
                 self._accept_rejoin(message, participants)
@@ -1247,6 +1296,7 @@ class MotionCoordinationNode(Node):
         self_late_reason = ''
         spread_failure: Optional[Dict[str, Any]] = None
         exclude_reasons: Dict[str, str] = {}
+        keep_playing: tuple = ()
         drop_self = False
         left = False
         with self._lock:
@@ -1277,8 +1327,23 @@ class MotionCoordinationNode(Node):
                 and message.pc_id not in self._execution.participants
             ):
                 # 복귀 준비 중인 PC · 그 PC 의 실패가 도는 그룹을 멈추면 안 된다 · 30-3
+                info = self._execution.joining[message.pc_id]
                 if message.event == 'join_ready' and message.success:
-                    self._execution.joining[message.pc_id]['state'] = 'ready'
+                    info['state'] = 'ready'
+                elif (
+                    message.event == 'join_accepted' and message.success
+                    and str(message.state or '') == 'merging'
+                    and info.get('state') == 'preparing'
+                ):
+                    # 그대로 재생하며 회차 끝을 기다린다 · 회차 하나가 길어도 준비 제한시간(30 s)을 걸지 않는다 ·
+                    # 하트비트가 끊기거나 실행을 놓으면 접는다(풀지 않음) · 183
+                    info.update(state='merging', warm=True)
+                elif (
+                    message.event == 'join_accepted' and message.success and info.get('warm')
+                    and str(message.state or '') != 'merging'
+                ):
+                    # 그 PC 는 이미 재생을 놓아 계획을 새로 짓는다 · 보통 복귀(30-3)로 본다
+                    info['warm'] = False
                 elif message.event == PARTICIPANT_LEFT_EVENT:
                     joiner_drop = f'복귀 중 빠짐 · {message.message or "웹 다시 시작"}'
                 elif message.event in {'rejected', 'error', 'stopped'} or not message.success:
@@ -1303,15 +1368,18 @@ class MotionCoordinationNode(Node):
                 and message.pc_id != self._config.pc_id
                 and self._execution.state in {'motion_completed', 'cycle_initializing'}
             ):
-                # 이번 경계에서 넣은 복귀 PC 가 확정·초기화를 거절했다 · 그 PC 만 뺀다
+                # 이번 경계에서 넣은 복귀 PC 가 확정·초기화를 거절했다 · 그 PC 만 뺀다 · 그대로 재생하던
+                # 「연락 끊김」 PC 면 풀지 않는다(다음 회차를 이미 스스로 잡았을 수 있다 · 다음 경계에 다시) · 183
                 exclude_reasons = {
                     message.pc_id: f'복귀 거절 · {message.message or "로컬 준비 실패"}',
                 }
+                if message.pc_id in self._execution.lost:
+                    keep_playing = (message.pc_id,)
         if joiner_drop:
             self._drop_joiner(message.pc_id, joiner_drop)
             return
         if exclude_reasons:
-            self._exclude_participants(exclude_reasons, left=left)
+            self._exclude_participants(exclude_reasons, left=left, keep_playing=keep_playing)
             return
         with self._lock:
             if (
@@ -1445,6 +1513,8 @@ class MotionCoordinationNode(Node):
                         int(message.cycle_number),
                         int(message.triggered_monotonic_ns) / 1_000_000_000.0,
                     )
+                    # 다시 합친 「연락 끊김」 PC 가 같이 시작했다 · 이제 보통 참가 PC · 183
+                    self._execution.lost.pop(message.pc_id, None)
                     if self._execution.state == 'running':
                         self._execution.motion_start_report_deadline = 0.0
                         self.get_logger().info(
@@ -2168,14 +2238,18 @@ class MotionCoordinationNode(Node):
 
     def _exclude_participants(
         self, reasons: Mapping[str, str], *, allow_coordinator: bool = False,
-        left: bool = False,
+        left: bool = False, keep_playing: Iterable[str] = (),
     ) -> None:
         """준비 중 거절·무응답 PC 를 빼고 나머지에게 새 참가 목록을 알린다 · 수정 목록 30-6
 
         `allow_coordinator` · 진행 PC 자신의 준비 거절 · 진행만 하고 빠진다 · 수정 목록 136 ①
         `left` · 도는 중에 웹 서비스가 내려가 빠진 PC(「이 PC 빠짐」) · 남은 PC 로 계속 · 아무도
         안 남으면 그룹만 세운다 · 잠그지 않는다 · 수정 목록 145 ①
+        `keep_playing` · 「연락 끊김」(하트비트만 끊김) PC · 장벽에서는 빼되 **풀기를 보내지 않는다** ·
+        그 PC 는 제 회차를 계속 돈다 · 돌아오면 회차 경계에서 다시 합친다(`lost`) · 수정 목록 183 ·
+        전에는 풀기가 망이 돌아온 순간 도착해 재생 중인 헤드를 세웠다(실물 NY 2026-11-07 15:08)
         """
+        keep = {str(pc_id) for pc_id in keep_playing or ()}
         stage = '도는 중' if left else '준비 중'
         with self._lock:
             if not self._execution.execution_id:
@@ -2184,7 +2258,14 @@ class MotionCoordinationNode(Node):
             if not dropped:
                 return
             execution_id = self._execution.execution_id
-            # 뺀 PC 에는 따로 풀라고 알린다 · 잡아 둔 실행·계획을 들고 서 있지 않게 · 진행 PC 자신은 빼고
+            now = time.monotonic()
+            for pc_id in dropped:
+                if pc_id in keep and pc_id != self._config.pc_id:
+                    self._execution.lost.setdefault(pc_id, now)
+            if keep and all(pc_id in keep for pc_id in dropped):
+                stage = '연락 끊김'
+            # 뺀 PC 에는 따로 풀라고 알린다 · 잡아 둔 실행·계획을 들고 서 있지 않게 · 진행 PC 자신은 빼고 ·
+            # 「연락 끊김」 PC 는 풀지 않는다(재생 계속 · 183)
             releases = [
                 self._new_command(
                     command='cancel_before_start',
@@ -2193,7 +2274,7 @@ class MotionCoordinationNode(Node):
                     participants=tuple(sorted({self._config.pc_id, pc_id})),
                     command_id=drop_release_command_id(),
                 )
-                for pc_id in dropped if pc_id != self._config.pc_id
+                for pc_id in dropped if pc_id != self._config.pc_id and pc_id not in keep
             ]
             empty_reason = ''
             if not self._execution.participants:
@@ -2527,6 +2608,174 @@ class MotionCoordinationNode(Node):
             and execution.cycle_number >= execution.target_cycle_count
         )
 
+    # ------------------------------------------------------------------ #
+    # 「연락 끊김」 PC 를 세우지 않고 다시 합치기 · 수정 목록 183
+    #
+    # 하트비트만 끊긴 PC 는 풀기 없이 뺀다(`lost`) · 그 PC 는 제 회차를 계속 돈다(진행 PC 가 안 보이면
+    # 눈금대로 스스로 · 178 ④) · 다시 보이고 하트비트의 실행 번호가 같으면 `join` 을 보낸다 · 그 PC 는
+    # 계획을 새로 짓지 않고 그대로 재생하다가(`merging`) 회차 끝 장벽에서 `join_ready` · 진행 PC 는
+    # 회차 경계에서 넣는다(`update_participants` · 그 PC 는 진행 PC 의 회차 번호로 맞춤) · 그 PC 의
+    # 회차 끝이 곧이면 경계를 잠깐 미뤄(`_hold_for_merging`) 다 같이 시작한다 · 풀기를 받은 PC 는
+    # 전처럼 계획을 새로 짓는 복귀(30-3 · 181).
+    # ------------------------------------------------------------------ #
+
+    #: 경계에서 돌아오는 PC 를 기다리는 한도 · 초기 이동 시간(작으면 10 s) + 이만큼
+    MERGE_HOLD_MARGIN_SEC = 5.0
+    #: 참가 PC · 진행 PC 가 보이는데 회차 끝 장벽에서 명령도 합류도 없이 기다리는 최소 한도 · 넘으면 놓는다
+    BARRIER_WAIT_MIN_SEC = 600.0
+    BARRIER_WAIT_MARGIN_SEC = 60.0
+    #: 이 로컬 상태면 그 실행을 「그대로 재생 중」 으로 보지 않는다 · 계획을 새로 짓는 복귀로
+    _MERGE_COLD_STATES = frozenset({
+        '', 'idle', 'stopped', 'error', 'completed', 'preparing', 'join_ready',
+    })
+    #: 회차 끝 장벽(제 회차를 끝내고 다음 회차 명령을 기다림)
+    _BARRIER_PHASES = frozenset({'group_motion_completed', 'group_join_committed'})
+    #: 진행 PC 가 「연락 끊김」 PC 를 다시 합칠 수 있는 실행 단계(1회차 시작 뒤)
+    _MERGE_STATES = frozenset({
+        'running', 'motion_completed', 'cycle_initializing', 'cycle_ready', 'start_scheduled',
+    })
+
+    def _merge_open(self) -> bool:
+        """진행 PC · 「연락 끊김」 PC 를 풀지 않고 다시 합칠 수 있는 실행인가 · 회차 맞춤 연속 · 1회차 뒤 · 183
+
+        복귀(`_rejoin_open`)와 같은 조건에 단계만 넓다(도는 중 · 회차 경계 · 회차 초기화 · 시작 예약).
+        """
+        execution = self._execution
+        if (
+            not execution.execution_id
+            or execution.coordinator_id != self._config.pc_id
+            or not self._config.is_master
+            or execution.sync_mode != GROUP_LOCKSTEP
+            or execution.run_mode != 'continuous'
+            or execution.initialization_only
+            or execution.stop_after_cycle
+            or execution.state not in self._MERGE_STATES
+            or execution.cycle_number < 1
+        ):
+            return False
+        return not (
+            execution.target_cycle_count
+            and execution.cycle_number >= execution.target_cycle_count
+        )
+
+    def _merge_candidate(self, pc_id: str) -> bool:
+        """풀지 않고 뺀 「연락 끊김」 PC 가 하트비트로 지금 실행을 아직 쥐고 있다고 알리나 · 그러면 세우지
+        않고 합친다 · 풀기를 보낸 PC(다른 이유로 뺌)는 아니다 · 183"""
+        member = self._registry.member(pc_id)
+        execution_id = self._execution.execution_id
+        return bool(
+            member is not None and execution_id
+            and pc_id in (getattr(self._execution, 'lost', None) or {})
+            and str(getattr(member, 'execution_id', '') or '') == execution_id
+        )
+
+    def _merge_exclusion_reason(self, pc_id: str) -> str:
+        """그대로 재생 중인 PC 를 다시 합칠 수 없는 이유 · 복귀와 같은 규칙 · 「단독 재생 중」 만 빼고
+
+        하트비트 `motion_phase` 는 그룹 재생 중에도 `running` 이라 단독 재생으로 읽힌다 · 그 PC 는
+        이 실행을 돌고 있다(실행 번호가 같다) · 183
+        """
+        member = self._registry.member(pc_id)
+        if member is not None:
+            member = replace(member, motion_phase='')
+        return exclusion_reason(
+            member, self._registry.status(pc_id),
+            protocol_version=GROUP_PROTOCOL_VERSION,
+            started_by=getattr(self._execution, 'started_by', STARTED_BY_SCHEDULE),
+        )
+
+    def _merge_eta(self, pc_id: str) -> Optional[float]:
+        """돌아오는 PC 가 회차 끝 장벽에 닿기까지 몇 초 · 하트비트로 · 모르면(다음 회차를 이미 잡았음) None"""
+        member = self._registry.member(pc_id)
+        if (
+            member is None
+            or self._registry.status(pc_id) == 'offline'
+            or not self._merge_candidate(pc_id)
+        ):
+            return None
+        phase = str(member.motion_phase or '')
+        if phase in self._BARRIER_PHASES:
+            return 0.0
+        duration = float(member.motion_duration_sec or 0.0)
+        if phase in {'running', 'verifying'} and duration > 0.0:
+            return max(duration - float(member.motion_elapsed_sec or 0.0), 0.0)
+        return None
+
+    def _merge_hold_limit_sec(self) -> float:
+        """경계를 미룰 수 있는 한도 · 초기 이동 시간 하나 + 여유 · 사용자 2026-11-08 「조금 더 기다려도 동시 시작」"""
+        initial = float(getattr(self._execution, 'initial_move_time_sec', 0.0) or 0.0)
+        return max(initial, 10.0) + self.MERGE_HOLD_MARGIN_SEC
+
+    def _merge_pending(self, within_sec: float) -> Dict[str, float]:
+        """아직 장벽에 닿지 않았지만 `within_sec` 안에 닿을 돌아오는 PC · {PC: 남은 초} · 락 안에서"""
+        pending: Dict[str, float] = {}
+        for pc_id, info in self._execution.joining.items():
+            if not info.get('warm') or info.get('state') == 'ready':
+                continue
+            eta = self._merge_eta(pc_id)
+            if eta is not None and eta <= within_sec:
+                pending[pc_id] = eta
+        return pending
+
+    def _hold_for_merging(self) -> bool:
+        """회차 경계 · 돌아오는 PC 의 회차 끝이 곧이면 회차 초기화를 잠깐 미룬다 · 참이면 미룸 · 183
+
+        같이 시작하는 것이 빨리 시작하는 것보다 먼저(사용자 2026-11-08) · 한도는 초기 이동 시간 하나 +
+        여유 · 넘으면 그 PC 없이 가고 다음 경계에 넣는다 · 회차 눈금은 늦어진 만큼 10 s 단위로 늘 수 있다.
+        """
+        with self._lock:
+            execution = self._execution
+            if not execution.execution_id or execution.state != 'motion_completed':
+                return False
+            key = (execution.execution_id, int(execution.cycle_number))
+            hold = getattr(self, '_merge_hold', None) or {}
+            if hold.get('key') == key:
+                return not hold.get('done')
+            limit = self._merge_hold_limit_sec()
+            pending = self._merge_pending(limit)
+            if not pending:
+                self._merge_hold = {'key': key, 'done': True}
+                return False
+            now = time.monotonic()
+            self._merge_hold = {'key': key, 'done': False, 'until': now + limit, 'since': now}
+        self.get_logger().info(
+            f'그룹 회차 경계 · 돌아오는 PC 를 기다림(최대 {limit:.0f} s) · '
+            + ', '.join(f'{pc_id} 회차 끝까지 {eta:.1f} s' for pc_id, eta in sorted(pending.items()))
+        )
+        return True
+
+    def _drive_merge_hold(self) -> None:
+        """미룬 회차 경계 · 돌아오는 PC 가 장벽에 닿았거나 한도가 지나면 이어 간다 · 183"""
+        with self._lock:
+            hold = getattr(self, '_merge_hold', None) or {}
+            if not hold or hold.get('done'):
+                return
+            execution = self._execution
+            key = (execution.execution_id, int(execution.cycle_number))
+            if hold.get('key') != key or execution.state != 'motion_completed':
+                hold['done'] = True
+                return
+            now = time.monotonic()
+            remaining = float(hold.get('until') or now) - now
+            if remaining > 0.0 and self._merge_pending(remaining):
+                return
+            hold['done'] = True
+            waited = now - float(hold.get('since') or now)
+            late = sorted(
+                pc_id for pc_id, info in execution.joining.items()
+                if info.get('warm') and info.get('state') != 'ready'
+            )
+            stop = bool(execution.stop_after_cycle or execution.run_mode == 'once')
+        self.get_logger().info(
+            f'그룹 회차 경계 · {waited:.1f} s 기다림 끝'
+            + (f' · {", ".join(late)} 없이 진행(다음 경계에 합침)' if late else '')
+        )
+        with self._lock:
+            if stop:
+                self._begin_group_release()
+            else:
+                self._publish_next_cycle_initialization()
+
     def _manage_rejoiners(self) -> None:
         """진행 PC · 돌아온 PC 에 복귀를 권하고, 늦거나 끊긴 복귀는 접는다"""
         now = time.monotonic()
@@ -2543,12 +2792,16 @@ class MotionCoordinationNode(Node):
             for pc_id, info in list(self._execution.joining.items()):
                 if pc_id != self._config.pc_id and self._registry.status(pc_id) == 'offline':
                     drops[pc_id] = '복귀 중 통신 단절'
+                elif info.get('warm') and not self._merge_candidate(pc_id):
+                    # 그대로 재생하던 PC 가 실행을 놓았다 · 다음엔 계획을 새로 짓는 복귀로 · 183
+                    drops[pc_id] = '복귀 중 그 PC 가 실행을 놓음'
                 elif (
                     info.get('state') == 'preparing'
                     and now - float(info.get('since') or now) > self.JOIN_PREPARE_TIMEOUT_SEC
                 ):
                     drops[pc_id] = '복귀 준비 응답 없음'
-            if self._rejoin_open():
+            cold_open = self._rejoin_open()
+            if cold_open or self._merge_open():
                 me = self._config.pc_id
                 roster = {
                     str(pc_id) for pc_id in (self._config.required_peers or ())
@@ -2563,7 +2816,8 @@ class MotionCoordinationNode(Node):
                 # 진행 PC 자신이 빠졌다(제 오류 · 알람 · 늦음 · 수정 목록 178) · 정상이 되면 저도 돌아온다 ·
                 # 명령을 DDS 로 보내지 않고 제 로컬 웹에 바로(`_begin_self_rejoin`)
                 self_rejoin = bool(
-                    self._execution.execution_id in self._self_dropped_ids()
+                    cold_open
+                    and self._execution.execution_id in self._self_dropped_ids()
                     and me not in self._execution.participants
                     and me not in self._execution.joining
                     and me not in drops
@@ -2574,9 +2828,20 @@ class MotionCoordinationNode(Node):
                 if self_rejoin:
                     self._execution.joining[me] = {'state': 'preparing', 'since': now}
                 for pc_id in sorted(pool):
-                    if retry.get(pc_id, 0.0) > now or self._member_exclusion_reason(pc_id):
+                    # 그 실행을 아직 쥔 PC(「연락 끊김」 에서 돌아옴) · 재생을 세우지 않고 합친다 · 도는 중이
+                    # 아니어도(회차 경계 · 초기화 · 시작 예약) 권한다 · 183
+                    warm = self._merge_candidate(pc_id)
+                    if not warm and not cold_open:
                         continue
-                    self._execution.joining[pc_id] = {'state': 'preparing', 'since': now}
+                    if retry.get(pc_id, 0.0) > now or (
+                        self._merge_exclusion_reason(pc_id) if warm
+                        else self._member_exclusion_reason(pc_id)
+                    ):
+                        continue
+                    self._execution.joining[pc_id] = (
+                        {'state': 'preparing', 'since': now, 'warm': True} if warm
+                        else {'state': 'preparing', 'since': now}
+                    )
                     invites.append(self._new_command(
                         command='join',
                         execution_id=self._execution.execution_id,
@@ -2645,7 +2910,13 @@ class MotionCoordinationNode(Node):
                 retry = self._join_retry_after = {}
             retry[pc_id] = time.monotonic() + self.JOIN_RETRY_SEC
             self._execution.excluded[pc_id] = reason
-            if pc_id == self._config.pc_id:
+            warm = bool(info.get('warm')) and pc_id != self._config.pc_id
+            if warm:
+                # 그대로 재생하던 PC · 풀기를 보내지 않는다 · 재생 계속 · 다음 기회에 다시 · 183
+                execution_id = self._execution.execution_id
+                participants = tuple(self._execution.participants)
+                message = None
+            elif pc_id == self._config.pc_id:
                 # 진행 PC 자신의 복귀 · 도는 실행을 풀면 안 된다 · 제 로컬 계획만 버린다 · 수정 목록 178
                 execution_id = self._execution.execution_id
                 participants = tuple(self._execution.participants)
@@ -2660,8 +2931,12 @@ class MotionCoordinationNode(Node):
                 )
                 participants = tuple(self._execution.participants)
                 execution_id = self._execution.execution_id
-        self.get_logger().warn(f'그룹 복귀 접음 · {pc_id} · {reason}')
-        if message is None:
+        self.get_logger().warn(
+            f'그룹 복귀 접음 · {pc_id} · {reason}' + (' · 풀지 않음(재생 계속)' if warm else '')
+        )
+        if warm:
+            pass
+        elif message is None:
             threading.Thread(
                 target=self._call_local_control,
                 args=({
@@ -2685,6 +2960,7 @@ class MotionCoordinationNode(Node):
                 and not (
                     self._self_exclusion_reason() or self._local_alarm_grade() > 0
                     if pc_id == self._config.pc_id
+                    else self._merge_exclusion_reason(pc_id) if info.get('warm')
                     else self._member_exclusion_reason(pc_id)
                 )
             ]
@@ -2728,7 +3004,13 @@ class MotionCoordinationNode(Node):
         )
 
     def _accept_rejoin(self, message: GroupCommand, participants: tuple[str, ...]) -> None:
-        """복귀하는 쪽 · 계획만 만들고 서 있는다 · 합류는 진행 PC 가 확정한다"""
+        """복귀하는 쪽 · 계획만 만들고 서 있는다 · 합류는 진행 PC 가 확정한다
+
+        그 실행을 아직 재생 중이면(「연락 끊김」 에서 돌아옴) 계획을 새로 짓지 않고 그대로 재생하다가
+        회차 끝에서 합친다(`_accept_merge` · 183).
+        """
+        if self._accept_merge(message, participants):
+            return
         self._accept_execution_claim(message, participants)
         with self._lock:
             self._execution.repeat_mode = str(message.repeat_mode or 'direct').strip().lower()
@@ -2770,9 +3052,105 @@ class MotionCoordinationNode(Node):
                 self._execution.stop_now()
                 self._clear_active_execution()
 
+    def _merge_possible(self, execution_id: str) -> bool:
+        """참가 PC · 그 실행을 지금 그대로 재생 중인가(연동 노드도 로컬 재생도 그 실행 · 끝나지 않음) · 183"""
+        with self._lock:
+            if not execution_id or self._execution.execution_id != execution_id:
+                return False
+            if self._execution.join_cycle and not getattr(self._execution, 'merging', False):
+                return False      # 계획을 새로 짓는 복귀가 이미 진행 중
+            status = (self._local_status or {}).get('motion_run_status')
+        status = status if isinstance(status, Mapping) else {}
+        return bool(
+            status.get('group_execution')
+            and str(status.get('execution_id') or '') == execution_id
+            and str(status.get('state') or '') not in self._MERGE_COLD_STATES
+        )
+
+    def _accept_merge(self, message: GroupCommand, participants: tuple[str, ...]) -> bool:
+        """그대로 재생하며 합류 · 참이면 받음 · 수정 목록 183
+
+        진행 PC 가 하트비트 끊김으로 이 PC 를 뺐지만 풀지는 않았다 · 이 PC 는 제 회차를 계속 돌았다 ·
+        계획을 새로 짓지 않는다(재생을 세우지 않는다) · 이미 잡아 둔 회차는 마저 돌고 새 회차는 스스로
+        잡지 않는다 · 회차 끝 장벽에서 `join_ready`(`_emit_local_runtime_event`) · 진행 PC 가 경계에서
+        `update_participants` 로 넣으면 회차 번호를 진행 PC 것으로 맞춘다(`group_join_commit` · `merge`).
+        """
+        execution_id = str(message.execution_id or '')
+        if not self._merge_possible(execution_id):
+            return False
+        self._accept_execution_claim(message, participants)
+        with self._lock:
+            if self._execution.execution_id != execution_id:
+                return False
+            self._execution.merging = True
+            self._execution.join_cycle = max(int(message.cycle_number), 1)
+            # 회차 하나가 길다(920 s) · 합류 확정 기다림은 회차 끝 장벽에 닿은 뒤부터 잰다(`_enforce_barrier_wait`)
+            self._execution.join_started = 0.0
+            # 같은 장벽에서 `join_ready` 를 다시 낼 수 있게
+            self._last_local_event_key = ()
+        self._publish_event(
+            message, 'join_accepted', True,
+            '그대로 재생하며 합류 대기 · 회차 끝에 합침', state='merging',
+        )
+        self.get_logger().info(
+            f'그룹 다시 합치기 권유 받음 · 재생을 세우지 않음 · 회차 끝에서 합류 · {execution_id}'
+        )
+        return True
+
+    def _enforce_barrier_wait(self) -> None:
+        """참가 PC · 진행 PC 가 보이는데 회차 끝 장벽에서 명령도 합류도 오래 없으면 놓는다 · 수정 목록 183
+
+        전에는 진행 PC 가 다시 보이면 스스로 잇던 회차를 마치고 바로 놓았다(178 ④) · 이제 놓지 않고 진행 PC
+        의 합류를 기다린다 · 그래도 한도(주기 · 10 분 가운데 큰 값 + 머무름 + 1 분) 안에 아무것도 없으면 옛 길 ·
+        놓고(「빠짐」) 진행 PC 의 복귀 권유를 받는다(풀기로 놓은 것처럼 `join` 을 받는다 · 181).
+        """
+        me = self._config.pc_id
+        with self._lock:
+            execution_id = self._execution.execution_id
+            coordinator = self._execution.coordinator_id
+            holding = bool(
+                execution_id and coordinator != me
+                and (me in self._execution.participants or getattr(self._execution, 'merging', False))
+            )
+            dwell = max(float(self._execution.dwell_sec or 0.0), 0.0)
+            status = (self._local_status or {}).get('motion_run_status')
+            seen = dict(getattr(self, '_grid_seen', None) or {})
+        status = status if isinstance(status, Mapping) else {}
+        phase = str(status.get('phase') or '')
+        if (
+            not holding
+            or not status.get('group_execution')
+            or str(status.get('execution_id') or '') != execution_id
+            or phase not in self._BARRIER_PHASES
+            or self._registry.status(coordinator) == 'offline'
+        ):
+            # 진행 PC 가 안 보이면 스스로 잇기(`_drive_autonomous_cycle`)가 맡는다
+            self._barrier_wait = None
+            return
+        now = time.monotonic()
+        key = (execution_id, int(status.get('current_cycle') or status.get('group_cycle_number') or 0), phase)
+        watch = getattr(self, '_barrier_wait', None)
+        if not watch or watch.get('key') != key:
+            self._barrier_wait = {'key': key, 'since': now}
+            return
+        period = float(seen.get('period') or 0.0) if seen.get('execution_id') == execution_id else 0.0
+        limit = max(period, self.BARRIER_WAIT_MIN_SEC) + dwell + self.BARRIER_WAIT_MARGIN_SEC
+        if now - float(watch.get('since') or now) < limit:
+            return
+        self._barrier_wait = None
+        with self._lock:
+            # 놓은 뒤 진행 PC 의 복귀 권유(`join`)는 받는다 · 181 과 같은 표시
+            self._drop_released().add(execution_id)
+        self._leave_group_execution(
+            f'진행 PC 가 다시 넣지 않음 · 회차 끝에서 {limit:.0f} s 기다림 · 복귀 권유를 기다림'
+        )
+
     def _enforce_join_wait(self) -> None:
         """복귀하는 쪽 · 합류 확정이 너무 오래 안 오면 계획을 버리고 놓는다"""
         with self._lock:
+            if getattr(self._execution, 'merging', False):
+                # 그대로 재생하며 합류 기다림 · 재생 중에는 끊지 않는다 · 장벽에서 `_enforce_barrier_wait` · 183
+                return
             if (
                 not self._execution.join_cycle
                 or not self._execution.join_started
@@ -2818,9 +3196,12 @@ class MotionCoordinationNode(Node):
             participants = self._execution.participants
             cycle_number = self._execution.cycle_number
         if after_cycle:
+            with self._lock:
+                # 「연락 끊김」 으로 그대로 재생하는 PC 도 회차 후 정지를 받는다 · 183
+                reach = tuple(sorted(set(participants) | set(self._lost_ids(execution_id))))
             stop_message = self._new_command(
                 command=command, execution_id=execution_id,
-                cycle_number=cycle_number, participants=participants,
+                cycle_number=cycle_number, participants=reach,
                 stop_reason=reason,
             )
             # 스케줄 끝이면 PC 마다 제 설정대로 기준점 주차 → 서보 OFF · 수정 목록 36
@@ -3013,6 +3394,9 @@ class MotionCoordinationNode(Node):
             schedule()
 
     def _publish_next_cycle_initialization(self) -> None:
+        # 돌아오는 「연락 끊김」 PC 의 회차 끝이 곧이면 잠깐 미뤄 같이 시작 · 183
+        if self._hold_for_merging():
+            return
         self._admit_ready_joiners()
         if not self._drop_unhealthy_members('회차 초기화 전'):
             return
@@ -3389,7 +3773,45 @@ class MotionCoordinationNode(Node):
         # 구간 재생 · 0/0 = 통째로 · 모든 명령에 채운다(빈 칸 없이) · 2026-10-16
         _set_optional_message_field(message, 'segment_start_sec', max(float(segment_start_sec or 0.0), 0.0))
         _set_optional_message_field(message, 'segment_end_sec', max(float(segment_end_sec or 0.0), 0.0))
+        # 진행 PC 의 운영시간 끝 · 모든 명령에 · 참가 PC 는 진행 PC 가 안 보일 때 이 시각까지만 스스로 잇는다 · 182
+        _set_optional_message_field(
+            message, 'operating_until_unix_sec', self._operating_until_to_send(execution_id),
+        )
         return message
+
+    def _operating_until_to_send(self, execution_id: str) -> float:
+        """진행 PC 가 보낼 운영시간 끝(유닉스 초) · 이 PC 스케줄로 지금 운영시간이면 그 끝 · 아니면 0 · 수정 목록 182
+
+        누가 시작했든(사람 · 스케줄) 같다 · 운영시간 안에 사람이 다시 시작해도 「진행 PC 가 꺼져도 계속」 은
+        그대로 · 운영시간 밖(시험 · 사람이 지켜봄)은 0 이라 진행 PC 가 사라지면 참가 PC 는 회차를 마치고 기다린다 ·
+        명령마다 새로 본다(도는 중 스케줄을 고쳐도 다음 명령부터 맞다).
+        """
+        if not execution_id or execution_id != self._execution.execution_id:
+            return 0.0
+        if self._execution.coordinator_id != self._config.pc_id:
+            return 0.0
+        try:
+            ends_at = float((self._local_status or {}).get('schedule_window_ends_at') or 0.0)
+        except (TypeError, ValueError):
+            ends_at = 0.0
+        value = ends_at if ends_at > time.time() else 0.0
+        self._execution.operating_until = value
+        return value
+
+    def _note_operating_until(self, message: GroupCommand) -> None:
+        """참가 PC · 진행 PC 가 실어 보낸 운영시간 끝을 기억한다 · 옛 진행 PC(칸 없음)는 0 · 수정 목록 182"""
+        try:
+            value = float(getattr(message, 'operating_until_unix_sec', 0.0) or 0.0)
+        except (TypeError, ValueError):
+            value = 0.0
+        with self._lock:
+            if (
+                message.execution_id
+                and message.execution_id == self._execution.execution_id
+                and message.coordinator_id == self._execution.coordinator_id
+                and message.coordinator_id != self._config.pc_id
+            ):
+                self._execution.operating_until = max(value, 0.0)
 
     def _publish_event(
         self, command: GroupCommand, event: str, success: bool, message_text: str,
@@ -3469,6 +3891,12 @@ class MotionCoordinationNode(Node):
             elif phase == 'group_motion_completed':
                 event = 'motion_completed'
                 cycle = int(status.get('current_cycle') or cycle)
+                if (
+                    getattr(self._execution, 'merging', False)
+                    and self._execution.coordinator_id != self._config.pc_id
+                ):
+                    # 그대로 재생하며 합류 기다림 · 회차 끝 장벽에 닿았다 · 진행 PC 가 경계에서 넣는다 · 183
+                    event = 'join_ready'
             elif phase == 'group_cycle_initialized':
                 event = 'cycle_initialized'
                 cycle = int(status.get('current_cycle') or cycle)
@@ -3526,7 +3954,8 @@ class MotionCoordinationNode(Node):
         """진행 PC 가 안 보이면 눈금대로 다음 회차를 스스로 · 참가 PC 만 · 수정 목록 178
 
         조건 · 회차 맞춤 연속 재생에 참가 중 · 진행 PC 하트비트 끊김(offline) · 주기를 안다(2회차부터) ·
-        이 PC 가 스케줄 모드 · 이 PC 의 스케줄이 지금 운영시간 · 그러면 제 회차가 끝날 때마다
+        진행 PC 가 명령에 실어 보낸 운영시간 끝이 아직 안 지남(182 · 슬레이브 스케줄 불필요) · 끔 모드 아님 ·
+        그러면 제 회차가 끝날 때마다
         진행 PC 가 했을 일(회차 초기화 → 시작)을 제 로컬 웹에 직접 한다 · 시작 = 마지막 시작 + n × 주기.
         진행 PC 가 다시 보이면 제 회차를 마치고 놓는다 · 진행 PC 가 회차 경계에서 다시 넣는다(복귀) ·
         운영시간이 끝나도 회차를 마치고 놓는다.
@@ -3542,6 +3971,7 @@ class MotionCoordinationNode(Node):
                 and not self._execution.initialization_only
             )
             local = dict(self._local_status or {})
+            operating_until = float(getattr(self._execution, 'operating_until', 0.0) or 0.0)
             seen = dict(getattr(self, '_grid_seen', None) or {})
             state = getattr(self, '_autonomy', None)
             if state is not None and state.get('execution_id') != execution_id:
@@ -3554,32 +3984,45 @@ class MotionCoordinationNode(Node):
             return
         phase = str(status.get('phase') or '')
         master_gone = self._registry.status(coordinator) == 'offline'
+        # 운영시간은 진행 PC 가 실어 보낸 값으로 · 슬레이브에 스케줄이 없어도 된다 · 수정 목록 182
+        # (전에는 이 PC 의 스케줄 모드 + 제 스케줄 운영시간이어야 했다 · 178 ④) · 끔(off) 모드는 잇지 않는다
         operating = (
-            str(local.get('operation_mode') or '') == 'schedule'
-            and bool(local.get('schedule_window_open'))
+            operating_until > time.time()
+            and str(local.get('operation_mode') or '') != 'off'
         )
         if state is None:
-            if not master_gone or phase != 'group_motion_completed':
+            if not master_gone or phase not in self._BARRIER_PHASES:
                 return
             if not operating:
-                self._autonomy_note(execution_id, '진행 PC 안 보임 · 이 PC 가 운영시간 · 스케줄 모드가 아니라 스스로 잇지 않음')
+                self._autonomy_note(execution_id, '진행 PC 안 보임 · 진행 PC 가 알려 준 운영시간이 없거나 끝나 스스로 잇지 않음')
                 return
             if seen.get('execution_id') != execution_id or float(seen.get('period') or 0.0) <= 0.0:
                 self._autonomy_note(execution_id, '진행 PC 안 보임 · 주기를 아직 몰라(2회차 전) 스스로 잇지 않음')
                 return
             state = self._autonomy = {'execution_id': execution_id, 'stage': 'idle'}
             self._warn(f'진행 PC {coordinator} 안 보임 · 눈금대로 스스로 이어 감 · 주기 {seen["period"]:.0f} s')
-        if not master_gone or not operating:
-            # 진행 PC 가 돌아왔다 · 또는 운영시간 끝 · 제 회차를 마치면 놓는다 · 진행 PC 가 다시 넣는다
-            if phase == 'group_motion_completed' and state.get('stage') != 'releasing':
+        if not master_gone:
+            # 진행 PC 가 돌아왔다 · 놓지 않는다 · 이미 잡은 회차(초기화 예약)는 마저 시작하고 새 회차는 잡지
+            # 않는다 · 회차 끝 장벽에서 진행 PC 의 합류(`join` → 경계에서 넣음)를 기다린다 · 전에는 회차를 마치고
+            # 놓아(178 ④) 다시 들어오기까지 1회차 이상 쉬었다 · 수정 목록 183 · 오래 안 오면 `_enforce_barrier_wait`
+            if not (state.get('stage') == 'initializing' and phase == 'group_cycle_initialized'):
+                if phase in self._BARRIER_PHASES:
+                    self._autonomy = None
+                    self._warn(
+                        '스스로 잇기 멈춤 · 진행 PC 다시 보임 · 놓지 않고 회차 끝에서 진행 PC 의 합류를 기다림'
+                    )
+                return
+        elif not operating:
+            # 운영시간 끝 · 제 회차를 마치면 놓는다
+            if phase in self._BARRIER_PHASES and state.get('stage') != 'releasing':
                 state['stage'] = 'releasing'
-                why = '진행 PC 다시 보임' if not master_gone else '운영시간 끝 · 스케줄 모드 아님'
-                self._warn(f'스스로 잇기 끝 · {why} · 회차를 마치고 놓음(다음 경계에 다시 합류)')
+                why = '운영시간 끝(진행 PC 가 알려 준 시각)'
+                self._warn(f'스스로 잇기 끝 · {why} · 회차를 마치고 놓음')
                 self._leave_group_execution(f'스스로 잇기 끝 · {why}')
             return
         stage = state.get('stage')
         now = time.monotonic()
-        if phase == 'group_motion_completed' and stage in {'idle', 'started'}:
+        if phase in self._BARRIER_PHASES and stage in {'idle', 'started'}:
             init_sec = float(self._execution.initial_move_time_sec or 0.0)
             try:
                 steps, start = next_grid_start(
@@ -3638,6 +4081,9 @@ class MotionCoordinationNode(Node):
     def _enforce_execution_membership(self) -> None:
         """하트비트가 끊긴(3 s) 참가 PC 를 뺀다 · 진행 PC 만 · 나머지는 계속 · 수정 목록 178
 
+        회차 맞춤 연속 재생이 1회차를 시작한 뒤면 「연락 끊김」 · 풀기 없이 빼고 기억한다(`lost`) ·
+        그 밖(시작 전 · 한 번 · 각자 재생 · 회차 후 정지 중)은 전처럼 풀기 · 수정 목록 183
+
         전에는 모든 PC 가 이 검사를 해서 누구든 끊긴 PC 를 보면 그룹 전체를 세우고
         GROUP_PARTICIPANT_DISCONNECTED 로 잠갔다(실물 NY 2026-11-07 09:35 · 재부팅 중인 PC 하나로 2번) ·
         참가 PC 는 진행 PC 가 안 보여도 세우지 않는다 · 제 회차는 끝까지 돈다(마스터가 다시 보이면 이어 간다).
@@ -3655,10 +4101,21 @@ class MotionCoordinationNode(Node):
                 if pc_id != self._config.pc_id
                 and self._registry.status(pc_id) == 'offline'
             ]
+            keep = self._merge_open()
         if not missing:
             return
+        timeout = float(self._config.peer_timeout_sec)
+        if keep:
+            # 하트비트만 끊김 · 그 PC 는 제 회차를 계속 돈다 · 장벽에서만 빼고 풀기는 보내지 않는다 ·
+            # 돌아오면 회차 경계에서 다시 합친다(`_manage_rejoiners` · 183) · 전에는 망이 돌아온 순간 도착한
+            # 풀기가 재생 중인 헤드를 세웠다(실물 NY 2026-11-07 15:08 · 공유기 112 s)
+            self._exclude_participants(
+                {pc_id: f'연락 끊김 · 하트비트 {timeout:g}초 넘게 없음 · 재생은 계속' for pc_id in missing},
+                left=True, keep_playing=missing,
+            )
+            return
         self._drop_member_only({
-            pc_id: f'통신 단절 · 하트비트 {float(self._config.peer_timeout_sec):g}초 넘게 없음'
+            pc_id: f'통신 단절 · 하트비트 {timeout:g}초 넘게 없음'
             for pc_id in missing
         })
 
@@ -3698,6 +4155,10 @@ class MotionCoordinationNode(Node):
                 self._execution.coordinator_id = message.coordinator_id
                 self._execution.participants = participants
             if message.coordinator_id != self._config.pc_id:
+                # 진행 PC 의 운영시간 끝 · 이 실행 동안 스스로 잇기의 기준 · 수정 목록 182
+                self._execution.operating_until = max(
+                    float(getattr(message, 'operating_until_unix_sec', 0.0) or 0.0), 0.0,
+                )
                 self._trigger_sync_status = {
                     'trigger_sync_state': 'sync_waiting',
                     'trigger_sync_uncertainty_ms': 0.0,
@@ -3733,6 +4194,13 @@ class MotionCoordinationNode(Node):
             or local_status.get('current_cycle')
             or 0
         )
+
+    def _drop_released(self) -> set[str]:
+        """풀기(drop release)로만 놓은 실행 번호 · 그 실행의 `join` 은 받는다 · 수정 목록 181"""
+        ids = getattr(self, '_drop_released_execution_ids', None)
+        if ids is None:
+            ids = self._drop_released_execution_ids = set()
+        return ids
 
     def _stop_command_matches(
         self, execution_id: str, participants: tuple[str, ...],
@@ -3853,9 +4321,11 @@ class MotionCoordinationNode(Node):
     ) -> SafetyStopOutcome:
         with self._lock:
             self._cancelled_execution_ids.add(str(execution_id))
+            # 「연락 끊김」 으로 그대로 재생하는 PC 도 즉시 정지는 받는다 · 183
+            reach = tuple(sorted(set(participants or ()) | set(self._lost_ids(execution_id))))
         stop_message = self._new_command(
             command='stop_now', execution_id=execution_id,
-            cycle_number=cycle_number, participants=participants,
+            cycle_number=cycle_number, participants=reach or participants,
             command_id=command_id,
         )
 
@@ -3874,6 +4344,15 @@ class MotionCoordinationNode(Node):
             local_stop,
             lambda: self._command_pub.publish(stop_message),
         )
+
+    def _lost_ids(self, execution_id: str) -> tuple:
+        """진행 PC · 그 실행의 「연락 끊김」 PC(풀지 않고 재생 계속) · 정지 명령은 이 PC 들도 받는다 · 183"""
+        if not execution_id or execution_id != self._execution.execution_id:
+            return ()
+        if self._execution.coordinator_id != self._config.pc_id:
+            return ()
+        lost = getattr(self._execution, 'lost', None) or {}
+        return tuple(pc_id for pc_id in lost if pc_id != self._config.pc_id)
 
     def _local_http(
         self, path: str, payload: Optional[Mapping[str, Any]] = None,
@@ -4261,6 +4740,11 @@ class MotionCoordinationNode(Node):
                         pc_id: str(info.get('state') or '')
                         for pc_id, info in self._execution.joining.items()
                     },
+                    # 「연락 끊김」 · 풀지 않고 뺀 PC(그 PC 는 재생 계속) · 뺀 뒤 지난 초 · 수정 목록 183
+                    'lost': {
+                        pc_id: round(now - float(since), 1)
+                        for pc_id, since in self._execution.lost.items()
+                    },
                     'stop_after_cycle': self._execution.stop_after_cycle,
                     'initialize_spread_ms': self._execution.last_initialize_spread_ms,
                     'start_spread_ms': self._execution.last_start_spread_ms,
@@ -4348,6 +4832,7 @@ class MotionCoordinationNode(Node):
             if len(self._cancelled_execution_ids) > 4096:
                 active = self._execution.execution_id
                 self._cancelled_execution_ids = {active} if active else set()
+                self._drop_released().intersection_update(self._cancelled_execution_ids)
 
     def _announce_group_stopped(self) -> None:
         """진행 PC 가 그룹 실행을 놓는다 · 그 실행의 「정지」 사건을 한 번 낸다 · 수정 목록 146 ②
@@ -4375,11 +4860,14 @@ class MotionCoordinationNode(Node):
     def _clear_active_execution(self) -> None:
         self._announce_group_stopped()
         if (
-            self._execution.joining
+            (self._execution.joining or self._execution.lost)
             and self._execution.coordinator_id == self._config.pc_id
         ):
-            # 복귀 준비 중이던 PC 가 계획만 들고 서 있지 않게 · 30-3
-            for pc_id in sorted(self._execution.joining):
+            # 복귀 준비 중이던 PC 가 계획만 들고 서 있지 않게 · 30-3 · 「연락 끊김」 으로 그대로 재생하던
+            # PC 도 실행이 끝나면 놓게(풀기는 실행이 끝날 때만 · 183)
+            for pc_id in sorted(
+                (set(self._execution.joining) | set(self._execution.lost)) - {self._config.pc_id}
+            ):
                 self._command_pub.publish(self._new_command(
                     command='cancel_before_start',
                     execution_id=self._execution.execution_id,
@@ -4421,8 +4909,22 @@ class MotionCoordinationNode(Node):
         return unhealthy
 
     def _drop_unhealthy_members(self, stage: str) -> bool:
-        """상태가 나쁜 PC 만 빼고 계속할지 · 남은 PC 가 있으면 True · 수정 목록 178"""
+        """상태가 나쁜 PC 만 빼고 계속할지 · 남은 PC 가 있으면 True · 수정 목록 178
+
+        회차 경계(회차 초기화 전)의 하트비트 끊김은 「연락 끊김」 · 풀지 않는다(재생 계속 · 183)
+        """
         unhealthy = self._execution_unhealthy_members()
+        with self._lock:
+            lost = (
+                [pc_id for pc_id, reason in unhealthy.items() if reason == '통신 단절']
+                if self._execution.state == 'motion_completed' and self._merge_open() else []
+            )
+        if lost:
+            self._exclude_participants(
+                {pc_id: f'{stage} · 연락 끊김 · 재생은 계속' for pc_id in lost},
+                left=True, keep_playing=lost,
+            )
+            unhealthy = {pc_id: reason for pc_id, reason in unhealthy.items() if pc_id not in lost}
         if unhealthy:
             self._drop_member_only({
                 pc_id: f'{stage} · {reason}' for pc_id, reason in unhealthy.items()

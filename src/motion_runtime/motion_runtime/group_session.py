@@ -210,6 +210,10 @@ class GroupSession:
 
         `cycle_number` = 그룹이 방금 끝낸 회차 · 이 PC 도 그 회차를 끝낸 것처럼
         서서 다음 회차 초기화(`schedule_initialization`)를 같이 받는다.
+
+        `merge` · 「연락 끊김」 동안 이 실행을 그대로 재생한 PC · 회차 끝 장벽(`motion_completed`)에 서
+        있다 · 계획 · 재생 목록은 그대로 쓰고 회차 번호만 진행 PC 것으로 맞춘다 · 스스로 이은 회차는
+        하나씩 셌으므로 진행 PC 와 다를 수 있다 · 수정 목록 183
         """
         execution_id = str(payload.get('execution_id') or '').strip()
         try:
@@ -227,7 +231,11 @@ class GroupSession:
                     'success': True, 'duplicate': True,
                     'message': '이미 확정된 복귀', 'status': self.manager.status(),
                 }
-            if session.get('state') != 'join_ready':
+            merge = payload.get('merge') is True
+            own_cycle = int(session.get('cycle_number') or 0)
+            if merge and session.get('state') != 'motion_completed':
+                raise ValueError('회차 끝 장벽에 서 있지 않아 다시 합칠 수 없습니다 · 다음 회차 끝에 다시')
+            if not merge and session.get('state') != 'join_ready':
                 raise ValueError('복귀 준비가 끝나지 않아 합류를 확정할 수 없습니다')
             # 상태도 여기서 바꾼다 · 바로 뒤따르는 회차 초기화 명령이 작업
             # 스레드가 깨기 전에 와도 받아지게
@@ -237,6 +245,28 @@ class GroupSession:
                 'state': 'motion_completed',
             })
             self.condition.notify_all()
+        if merge:
+            # 화면 · 로컬 상태도 진행 PC 의 회차 번호로 · 단계는 복귀 확정과 같게(회차 끝 사건을 다시 내지 않는다)
+            self.manager._update_status({
+                'state': 'motion_completed',
+                'phase': 'group_join_committed',
+                'message': f'그룹 다시 합침 · {cycle_number + 1}회차부터 같이',
+                'group_execution': True,
+                'execution_id': execution_id,
+                'cycle_count': cycle_number,
+                'current_cycle': cycle_number,
+                'group_cycle_number': cycle_number,
+            })
+            return {
+                'success': True,
+                'message': (
+                    f'다시 합침 · 이 PC {own_cycle}회차 → 그룹 {cycle_number}회차 · '
+                    f'{cycle_number + 1}회차부터 같이'
+                ),
+                'execution_id': execution_id,
+                'cycle_number': cycle_number,
+                'status': self.manager.status(),
+            }
         return {
             'success': True,
             'message': f'복귀 · {cycle_number + 1}회차부터 합류',
@@ -680,22 +710,23 @@ class GroupSession:
         })
         if self.manager._stop_event.is_set() or self.manager.status().get('state') != 'initialized':
             return False
+        # 회차 번호는 예약 명령의 것 · 보통은 끝낸 회차와 같다 · 다시 합친 PC 는 진행 PC 것으로 바뀌었다(183)
         with self.condition:
             self.session.update({
                 'state': 'cycle_ready',
-                'cycle_number': cycle_number,
+                'cycle_number': initialized_cycle,
                 'next_start_at': 0.0,
                 'next_cycle_number': 0,
             })
         self.manager._update_status({
             'state': 'cycle_ready',
             'phase': 'group_cycle_initialized',
-            'message': f'그룹 모션 {cycle_number}회차 후 초기화 완료',
+            'message': f'그룹 모션 {initialized_cycle}회차 후 초기화 완료',
             'group_execution': True,
             'execution_id': execution_id,
-            'cycle_count': cycle_number,
-            'current_cycle': cycle_number,
-            'group_cycle_number': cycle_number,
+            'cycle_count': initialized_cycle,
+            'current_cycle': initialized_cycle,
+            'group_cycle_number': initialized_cycle,
         })
         return True
 

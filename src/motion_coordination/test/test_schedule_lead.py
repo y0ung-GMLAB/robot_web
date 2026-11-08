@@ -17,6 +17,7 @@ from motion_coordination.group_execution import GroupExecution
 from motion_coordination.schedule_lead import (
     CYCLE_INITIALIZE_LEAD_MIN_SEC,
     CYCLE_INITIALIZE_SELF_RETRIES,
+    FIRST_START_LEAD_MIN_SEC,
     INITIALIZE_LEAD_MIN_SEC,
     LATENCY_WINDOW,
     LEAD_MAX_SEC,
@@ -42,13 +43,13 @@ def test_initialize_lead_has_a_floor_before_anything_is_measured():
 
 def test_a_slow_own_ack_grows_the_next_lead():
     planner = ScheduleLeadPlanner()
-    # 마스터 자신이 0.9 s 걸렸다(실물에서 0.4 s 를 넘긴 길) → 다음은 두 배 + 마감 여백
-    planner.record('initialize', 'floating4', 0.9)
-    assert _lead(planner, 'initialize') == pytest.approx(1.9)
+    # 마스터 자신이 1.6 s 걸렸다 → 다음은 두 배 + 마감 여백(바닥 3 s 위)
+    planner.record('initialize', 'floating4', 1.6)
+    assert _lead(planner, 'initialize') == pytest.approx(3.3)
     planner.record('schedule', 'floating4', 0.35)
     assert _lead(planner, 'schedule') == pytest.approx(0.8)
     assert planner.snapshot()['last_lead_sec'] == {
-        'initialize': pytest.approx(1.9), 'schedule': pytest.approx(0.8),
+        'initialize': pytest.approx(3.3), 'schedule': pytest.approx(0.8),
     }
 
 
@@ -136,11 +137,11 @@ def test_cycle_initialize_has_its_own_floor():
 def test_cycle_initialize_samples_do_not_mix_with_initialize():
     planner = ScheduleLeadPlanner()
     # group_prepare 는 무겁다 · 그 값이 회차 사이 여유를 부풀리지 않는다
-    planner.record('initialize', 'floating4', 1.2)
+    planner.record('initialize', 'floating4', 1.6)
     assert _lead(planner, 'cycle_initialize') == pytest.approx(CYCLE_INITIALIZE_LEAD_MIN_SEC)
     planner.record('cycle_initialize', 'floating4', 0.9)
     assert _lead(planner, 'cycle_initialize') == pytest.approx(1.9)
-    assert _lead(planner, 'initialize') == pytest.approx(2.5)
+    assert _lead(planner, 'initialize') == pytest.approx(3.3)
     assert set(planner.snapshot()['recent_ack_ms']) == {'initialize', 'cycle_initialize'}
 
 
@@ -164,3 +165,32 @@ def test_own_cycle_initialize_retry_is_bounded_and_only_for_cycle_initialize():
     assert may_retry_own_cycle_initialize('initialize_at', late, 0) is False
     assert may_retry_own_cycle_initialize('start_at', late, 0) is False
     assert may_retry_own_cycle_initialize('cycle_initialize_at', 'motion_run_manager response timeout', 0) is False
+
+
+# ---------------------------------------------------------------------- #
+# 수정 목록 179 · 재시작 뒤 첫 시작 · 마스터 자신의 `start_at` 확인 늦음으로 1회차 빠짐
+#
+# 실물 NY 2026-11-07 12:36:28 floating1(마스터) · 12:18 업데이트로 서비스 재시작 → 스케줄 첫 시작 ·
+# `initialize_at` 은 바닥 1.5 s 라 통과(530 ms) · `start_at` 은 여유 0.5 s(마감 0.4 s)에 548 ms → 빠짐
+# ---------------------------------------------------------------------- #
+
+def test_first_start_has_a_floor_of_three_seconds_before_anything_is_measured():
+    assert INITIALIZE_LEAD_MIN_SEC == pytest.approx(3.0)
+    assert FIRST_START_LEAD_MIN_SEC == pytest.approx(3.0)
+    planner = ScheduleLeadPlanner()
+    assert _lead(planner, 'initialize') == pytest.approx(3.0)
+    assert _lead(planner, 'first_start') == pytest.approx(3.0)
+    # 회차 사이 시작은 이번 결정 밖 · 그대로 가볍다
+    assert _lead(planner, 'schedule') == pytest.approx(0.5)
+
+
+def test_first_start_uses_the_start_at_samples_and_may_grow_up_to_six_seconds():
+    assert LEAD_MAX_SEC == pytest.approx(6.0)
+    planner = ScheduleLeadPlanner()
+    # 회차 시작 확인이 2 s 걸린 적 있다 → 1회차도 두 배 + 마감 여백(바닥 위)
+    planner.record('schedule', 'floating1', 2.0)
+    assert _lead(planner, 'first_start', ('floating1',)) == pytest.approx(4.1)
+    planner.record('schedule', 'floating1', 5.0)
+    assert _lead(planner, 'first_start', ('floating1',)) == pytest.approx(6.0)
+    # `first_start` 라는 이름으로 따로 쌓이지 않는다
+    assert 'first_start' not in planner.snapshot()['recent_ack_ms']

@@ -28,3 +28,6 @@ float64 initial_move_time_sec
 float64 segment_start_sec
 # 구간 끝(파일 시각 · 초) · 0 이면 끝까지 · 스피커는 (끝 − 시작) 초 뒤 멈춘다
 float64 segment_end_sec
+# 진행 PC 의 운영시간이 끝나는 시각(유닉스 초) · 0 = 운영시간 아님 · 2026-11-08 · 약속 번호 12
+# 진행 PC 가 안 보일 때 참가 PC 는 제 스케줄 대신 이 값으로 스스로 이을지 정한다 · 수정 목록 182
+float64 operating_until_unix_sec

@@ -739,12 +739,18 @@ def test_rtw88_step_is_wired_into_install_site_and_check():
 ECAT_MAC = '84:47:09:81:DB:23'
 
 
-def _nm_env(tmp_path, fake_sudo='exec "$@"', mac=ECAT_MAC, nm_state='enp1s0:connecting (getting IP configuration)'):
+def _nm_env(tmp_path, fake_sudo='exec "$@"', mac=ECAT_MAC, nm_state='enp1s0:connecting (getting IP configuration)',
+            link='<BROADCAST,MULTICAST,UP>', reload_downs_link=True):
+    """가짜 nmcli · ip · ethercat · 실물처럼 `nmcli general reload conf` 가 EtherCAT 링크를 내린다(180)"""
     fake = tmp_path / 'bin'
     fake.mkdir(parents=True, exist_ok=True)
+    flags = tmp_path / 'link_flags'
+    flags.write_text(link, encoding='utf-8')
     _fake(fake, 'sudo', fake_sudo)
-    _fake(fake, 'nmcli', f'case "$*" in *"device"*) printf "%s\nwlp3s0:connected\n" "{nm_state}" ;; *) echo "nmcli $*" >> "{tmp_path}/nmcli.log" ;; esac')
-    _fake(fake, 'ip', f'echo "lo UNKNOWN 00:00:00:00:00:00"; echo "enp1s0 UP {mac.lower()} <BROADCAST,MULTICAST,UP>"; echo "wlp3s0 UP 0c:cd:b4:67:6f:39 <BROADCAST>"')
+    down = f'echo "<BROADCAST,MULTICAST>" > "{flags}"; ' if reload_downs_link else ''
+    _fake(fake, 'nmcli', f'case "$*" in *"device"*) printf "%s\nwlp3s0:connected\n" "{nm_state}" ;; *"reload"*) {down}echo "nmcli $*" >> "{tmp_path}/nmcli.log" ;; *) echo "nmcli $*" >> "{tmp_path}/nmcli.log" ;; esac')
+    _fake(fake, 'ip', f'case "$*" in *" set "*) echo "ip $*" >> "{tmp_path}/ip.log"; echo "<BROADCAST,MULTICAST,UP,LOWER_UP>" > "{flags}" ;; *) echo "lo UNKNOWN 00:00:00:00:00:00 <LOOPBACK,UP>"; echo "enp1s0 UP {mac.lower()} $(cat "{flags}")"; echo "wlp3s0 UP 0c:cd:b4:67:6f:39 <BROADCAST,MULTICAST,UP>" ;; esac')
+    _fake(fake, 'ethercat', 'echo "0  0:0  OP  +  MADLN05BE"')
     conf = tmp_path / 'ethercat.conf'
     if mac:
         conf.write_text(f'MASTER0_DEVICE="{mac}"\nDEVICE_MODULES="generic"\n', encoding='utf-8')
@@ -753,6 +759,7 @@ def _nm_env(tmp_path, fake_sudo='exec "$@"', mac=ECAT_MAC, nm_state='enp1s0:conn
         'SITE_ETHERCAT_CONF': str(conf),
         'SITE_NM_ETHERCAT_CONF': str(tmp_path / 'nm-ethercat.conf'),
         'SITE_STATE_DIR': str(tmp_path / 'state'),
+        'SITE_ETHERCAT_RELINK_WAIT_SEC': '1',
     }
 
 
@@ -817,6 +824,59 @@ def test_ethercat_nm_without_sudo_warns_and_install_goes_on(tmp_path):
     assert result.stdout.strip().splitlines()[-2:] == ['계속', '끝']
     assert 'sudo tee' in result.stderr and 'unmanaged-devices=mac:' in result.stderr
     assert not (tmp_path / 'nm-ethercat.conf').exists()
+
+
+# ------------------------------------------------------------------ #
+# 수정 목록 180 · 177 적용 순간 EtherCAT 링크가 꺼져(DOWN) 4대 모터 전부 끊김
+#   실물 NY 2026-11-07 12:29~30 · NM 이 관리하던 랜카드를 unmanaged 로 놓으며 링크를 내림 · 저절로 안 돌아옴
+# ------------------------------------------------------------------ #
+
+@pytest.mark.skipif(not LINUX_SHELL, reason='리눅스 셸에서')
+def test_link_is_brought_back_up_after_networkmanager_lets_go(tmp_path):
+    env = _nm_env(tmp_path)
+    out = _site('site_ethercat_nm_unmanage', env)
+    assert 'general reload conf' in (tmp_path / 'nmcli.log').read_text(encoding='utf-8')
+    assert (tmp_path / 'ip.log').read_text(encoding='utf-8').strip() == 'ip link set dev enp1s0 up'
+    assert ',UP' in (tmp_path / 'link_flags').read_text(encoding='utf-8')
+    assert '다시 켬' in out and '슬레이브 다시 보임' in out
+
+
+@pytest.mark.skipif(not LINUX_SHELL, reason='리눅스 셸에서')
+def test_already_unmanaged_pc_with_a_down_link_is_fixed_too(tmp_path):
+    """손 명령 둘만 친 PC(실물 4대 그대로) · 다음 업데이트가 링크를 켠다"""
+    env = _nm_env(tmp_path, nm_state='enp1s0:unmanaged', link='<BROADCAST,MULTICAST>')
+    (tmp_path / 'nm-ethercat.conf').write_text(f'[keyfile]\nunmanaged-devices=mac:{ECAT_MAC.lower()}\n', encoding='utf-8')
+    assert _site('site_ethercat_nm_ok', env).strip() == '0', 'unmanaged 여도 링크가 꺼져 있으면 OK 가 아니다'
+    assert 'sudo ip link set dev enp1s0 up' in _site('site_ethercat_nm_detail', env)
+    out = _site('site_ethercat_nm_unmanage', env)
+    assert '이미 빠짐' in out and (tmp_path / 'ip.log').exists()
+    assert _site('site_ethercat_nm_ok', env).strip() == '1'
+
+
+@pytest.mark.skipif(not LINUX_SHELL, reason='리눅스 셸에서')
+def test_link_already_up_is_left_alone(tmp_path):
+    env = _nm_env(tmp_path, reload_downs_link=False)
+    _site('site_ethercat_nm_unmanage', env)
+    assert not (tmp_path / 'ip.log').exists()
+
+
+@pytest.mark.skipif(not LINUX_SHELL, reason='리눅스 셸에서')
+def test_manual_commands_include_the_link_up_line(tmp_path):
+    env = _nm_env(tmp_path)
+    manual = _site(f'site_ethercat_nm_unmanage_manual {ECAT_MAC.lower()}', env)
+    lines = [line.strip() for line in manual.splitlines()]
+    assert lines[1] == 'sudo nmcli general reload conf'
+    assert lines[2] == 'sudo ip link set dev enp1s0 up'
+    assert '알람 해제' in lines[3]
+
+
+@pytest.mark.skipif(not LINUX_SHELL, reason='리눅스 셸에서')
+def test_dry_run_does_not_touch_the_link(tmp_path):
+    env = {**_nm_env(tmp_path, nm_state='enp1s0:unmanaged', link='<BROADCAST,MULTICAST>'), 'SITE_DRY_RUN': '1'}
+    (tmp_path / 'nm-ethercat.conf').write_text(f'[keyfile]\nunmanaged-devices=mac:{ECAT_MAC.lower()}\n', encoding='utf-8')
+    out = _site('site_ethercat_nm_unmanage', env)
+    assert '[dry-run] sudo ip link set dev enp1s0 up' in out
+    assert not (tmp_path / 'ip.log').exists()
 
 
 def test_ethercat_nm_step_is_wired_into_install_site_and_check():
