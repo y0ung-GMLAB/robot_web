@@ -66,3 +66,8 @@ def test_group_join_prepares_without_an_initialize_time(monkeypatch):
     assert local_motion_control(bridge, {'command': 'group_join', 'execution_id': 'x'})['success'] is False
     local_motion_control(bridge, {'command': 'group_join_commit', 'execution_id': 'exec-a', 'cycle_number': 3})
     assert bridge.commits == [{'execution_id': 'exec-a', 'cycle_number': 3}]
+    # 그대로 재생하던 PC 를 다시 합침 · 표시가 재생 관리자까지 간다 · 수정 목록 183
+    local_motion_control(bridge, {
+        'command': 'group_join_commit', 'execution_id': 'exec-a', 'cycle_number': 9, 'merge': True,
+    })
+    assert bridge.commits[-1] == {'execution_id': 'exec-a', 'cycle_number': 9, 'merge': True}

@@ -817,7 +817,10 @@ CONF
 # EtherCAT 랜카드를 NetworkManager 가 건드리지 않게 · 수정 목록 177 (실물 NY 2026-11-07)
 #   우분투 기본 「유선 연결 1」 이 EtherCAT 포트(floating2 enp1s0)에 45초마다 DHCP 를 걸고 실패를 되풀이했다
 #   (부팅 뒤 644회) · 그때마다 DHCP · IPv6 패킷이 모터 선으로 나가고 시스템 전체 네트워크 상태가
-#   「연결 중 ↔ 끊김」 을 오간다 · MAC 으로 잡는다(이름이 바뀌어도) · 끄는 순간 링크는 그대로(IgH 가 쥠)
+#   「연결 중 ↔ 끊김」 을 오간다 · MAC 으로 잡는다(이름이 바뀌어도)
+# 수정 목록 180 · NM 은 관리하던 랜카드를 놓으면서 링크를 내린다(DOWN) · 실물 NY 2026-11-07 12:29~30 4대 모두 ·
+#   그 순간 EtherCAT 슬레이브 0 · 「연결되지 않은 모터 0~4」 · 저절로 안 돌아옴 → 놓은 뒤 링크를 다시 켠다 ·
+#   재부팅 때는 ethercatctl 이 켜서 괜찮다
 SITE_NM_ETHERCAT_CONF="${SITE_NM_ETHERCAT_CONF:-/etc/NetworkManager/conf.d/99-robot-web-ethercat-unmanaged.conf}"
 
 site_render_nm_ethercat_conf() {
@@ -841,10 +844,52 @@ site_nm_ethercat_conf_ok() {
     && grep -qiE "^[[:space:]]*unmanaged-devices[[:space:]]*=.*mac:${mac}" "${SITE_NM_ETHERCAT_CONF}"
 }
 
-# 손으로 할 명령 · 관리자 비밀번호 필요(웹 업데이트는 /etc 를 못 씀)
+# MAC 으로 지금 랜카드 이름 · 없으면 빈 값
+site_ethercat_nic_dev() {
+  { ip -br link 2>/dev/null || true; } | awk -v mac="$1" 'tolower($3) == mac { sub(/@.*/, "", $1); print $1; exit }'
+}
+
+# 그 랜카드가 켜져(UP) 있나 · 0 = 켜짐 또는 랜카드 없음 · 1 = 꺼짐(DOWN)
+site_ethercat_link_is_up() {
+  local dev="$1"
+  [[ -z "${dev}" ]] && return 0
+  { ip -br link 2>/dev/null || true; } \
+    | awk -v dev="${dev}" '$1 == dev && $4 ~ /[<,]UP[,>]/ { found = 1 } END { exit found ? 0 : 1 }'
+}
+
+# 손으로 할 명령 · 관리자 비밀번호 필요(웹 업데이트는 /etc 를 못 씀) · 셋째 줄 링크 다시 켜기(180)
 site_ethercat_nm_unmanage_manual() {
+  local dev
+  dev="$(site_ethercat_nic_dev "$1")"
   echo "       printf '%s\\n' '[keyfile]' 'unmanaged-devices=mac:$1' | sudo tee ${SITE_NM_ETHERCAT_CONF}"
   echo "       sudo nmcli general reload conf"
+  echo "       sudo ip link set dev ${dev:-<EtherCAT 랜카드>} up"
+  echo "       (재생 없을 때 · 잠깐 모터 끊김 · 드라이브 Err80 이 남으면 웹에서 알람 해제 → 서보 ON)"
+}
+
+# NM 이 놓으며 내린 링크를 다시 켠다 · IgH(ec_generic)는 링크가 UP 이어야 슬레이브를 찾는다 · 수정 목록 180
+site_ethercat_link_up() {
+  local mac="$1" dev i
+  dev="$(site_ethercat_nic_dev "${mac}")"
+  if [[ -z "${dev}" ]] || site_ethercat_link_is_up "${dev}"; then
+    return 0
+  fi
+  if ! site_run sudo ip link set dev "${dev}" up; then
+    site_warn "EtherCAT 랜카드 ${dev} 를 다시 켜지 못했습니다 · 모터가 끊긴 상태 · 터미널에서 sudo ip link set dev ${dev} up · 수정 목록 180"
+    return 1
+  fi
+  [[ "${SITE_DRY_RUN}" == "1" ]] && return 0
+  site_note "EtherCAT 랜카드 ${dev} 다시 켬"
+  command -v ethercat >/dev/null 2>&1 || return 0
+  for i in $(seq "${SITE_ETHERCAT_RELINK_WAIT_SEC:-10}"); do
+    if [[ -n "$(ethercat slaves 2>/dev/null || true)" ]]; then
+      site_note "EtherCAT 슬레이브 다시 보임"
+      return 0
+    fi
+    sleep 1
+  done
+  site_warn "EtherCAT 슬레이브가 아직 안 보입니다 · sudo systemctl restart ethercat 또는 재부팅 · 웹에서 알람 해제 → 서보 ON"
+  return 0
 }
 
 site_ethercat_nm_unmanage() {
@@ -858,6 +903,8 @@ site_ethercat_nm_unmanage() {
   fi
   if site_nm_ethercat_conf_ok "${mac}"; then
     site_note "이미 빠짐 · ${SITE_NM_ETHERCAT_CONF}"
+    # 손으로 빼고 링크를 못 켠 PC 도 여기서 켠다 · 수정 목록 180
+    site_ethercat_link_up "${mac}" || return 1
     return 0
   fi
   if ! site_render_nm_ethercat_conf "${mac}" | site_write_root_file "${SITE_NM_ETHERCAT_CONF}"; then
@@ -865,18 +912,20 @@ site_ethercat_nm_unmanage() {
     site_ethercat_nm_unmanage_manual "${mac}" >&2
     return 1
   fi
-  # 설정만 다시 읽힌다 · Wi-Fi 연결은 끊지 않는다
+  # 설정을 다시 읽는다 · Wi-Fi 는 그대로 · EtherCAT 랜카드는 NM 이 놓으며 링크를 내린다 → 바로 다시 켠다(180)
   site_run sudo nmcli general reload conf || site_warn "NetworkManager 설정 다시 읽기 실패 · 재부팅 뒤 적용"
   site_note "적음 · ${SITE_NM_ETHERCAT_CONF} (mac:${mac})"
+  site_ethercat_link_up "${mac}" || return 1
 }
 
-# 자가 점검 · 1 = EtherCAT 없음 또는 그 랜카드가 unmanaged · 0 = NetworkManager 가 아직 관리
+# 자가 점검 · 1 = EtherCAT 없음 또는 그 랜카드가 unmanaged 이고 켜짐 · 0 = NM 이 아직 관리 또는 링크 꺼짐(180)
 site_ethercat_nm_ok() {
   local mac dev
   mac="$(site_ethercat_nic_mac)"
   if [[ -z "${mac}" ]] || ! command -v nmcli >/dev/null 2>&1; then echo 1; return; fi
-  dev="$({ ip -br link 2>/dev/null || true; } | awk -v mac="${mac}" 'tolower($3) == mac { sub(/@.*/, "", $1); print $1; exit }')"
+  dev="$(site_ethercat_nic_dev "${mac}")"
   if [[ -z "${dev}" ]]; then echo 1; return; fi
+  site_ethercat_link_is_up "${dev}" || { echo 0; return; }
   if { nmcli -t -f DEVICE,STATE device 2>/dev/null || true; } | grep -qx "${dev}:unmanaged"; then echo 1; else echo 0; fi
 }
 
@@ -884,7 +933,11 @@ site_ethercat_nm_detail() {
   local mac
   mac="$(site_ethercat_nic_mac)"
   if [[ -z "${mac}" ]]; then echo "EtherCAT 랜카드 없음 · 해당 없음"; return; fi
-  if [[ "$(site_ethercat_nm_ok)" == "1" ]]; then
+  local dev
+  dev="$(site_ethercat_nic_dev "${mac}")"
+  if [[ -n "${dev}" ]] && ! site_ethercat_link_is_up "${dev}"; then
+    echo "링크 꺼짐(DOWN) · 모터 끊김 · sudo ip link set dev ${dev} up → 웹에서 알람 해제 · 서보 ON · 수정 목록 180"
+  elif [[ "$(site_ethercat_nm_ok)" == "1" ]]; then
     echo "unmanaged (mac:${mac})"
   else
     echo "NetworkManager 가 관리 중 · 45초마다 DHCP · $(site_ethercat_nm_unmanage_manual "${mac}" | sed 's/^ *//' | awk 'NR > 1 { printf " → " } { printf "%s", $0 }') · 수정 목록 177"

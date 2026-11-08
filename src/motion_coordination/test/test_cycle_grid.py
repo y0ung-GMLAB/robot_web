@@ -103,9 +103,11 @@ def _participant(*, phase, operating=True, master_offline=True, period=930.0, cy
         'execution_id': 'exec-a', 'period': period, 'cycle': cycle,
         'start': now - 900.0,
     }
+    # 운영시간은 진행 PC 가 명령에 실어 보낸 값 · 이 PC 는 스케줄도 스케줄 모드도 없다 · 수정 목록 182
+    node._execution.operating_until = time.time() + 3600.0 if operating else 0.0
     node._local_status = {
-        'operation_mode': 'schedule' if operating else 'manual',
-        'schedule_window_open': operating,
+        'operation_mode': 'manual',
+        'schedule_window_open': False,
         'motion_run_status': {
             'group_execution': True, 'execution_id': 'exec-a', 'phase': phase,
             'current_cycle': cycle,
@@ -164,13 +166,29 @@ def test_no_autonomy_while_the_master_is_seen_or_outside_operating_hours():
         assert getattr(node, '_autonomy', None) is None
 
 
+def test_no_autonomy_once_the_masters_operating_time_has_passed_or_in_off_mode():
+    """182 · 진행 PC 가 알려 준 운영시간 끝이 지났거나 · 이 PC 가 끔 모드면 잇지 않는다"""
+    node, calls = _participant(phase='group_motion_completed')
+    node._execution.operating_until = time.time() - 1.0
+    node._drive_autonomous_cycle()
+    assert calls == []
+    node, calls = _participant(phase='group_motion_completed')
+    node._local_status['operation_mode'] = 'off'
+    node._drive_autonomous_cycle()
+    assert calls == []
+
+
 def test_no_autonomy_before_the_period_is_known():
     node, calls = _participant(phase='group_motion_completed', period=0.0)
     node._drive_autonomous_cycle()
     assert calls == []
 
 
-def test_when_the_master_returns_the_participant_finishes_and_releases(monkeypatch):
+def test_when_the_master_returns_the_participant_keeps_the_run_and_waits_at_the_barrier(monkeypatch):
+    """183 · 진행 PC 가 다시 보이면 놓지 않는다 · 새 회차는 스스로 잡지 않고 장벽에서 합류를 기다린다
+
+    전에는(178 ④) 회차를 마치고 놓아 다시 들어오기까지 1회차 이상 쉬었다.
+    """
     import motion_coordination.coordination_node as coordination_node
     from test_coordination_node import _InlineThread
     monkeypatch.setattr(coordination_node.threading, 'Thread', _InlineThread)
@@ -182,7 +200,91 @@ def test_when_the_master_returns_the_participant_finishes_and_releases(monkeypat
     assert node._execution.execution_id == 'exec-a', '회차 중에는 그대로'
 
     node._local_status['motion_run_status']['phase'] = 'group_motion_completed'
+    count = len(calls)
     node._drive_autonomous_cycle()
 
-    assert node._execution.execution_id == '', '회차를 마치고 놓는다 · 진행 PC 가 다시 넣는다'
+    assert node._execution.execution_id == 'exec-a', '놓지 않는다 · 진행 PC 가 경계에서 다시 넣는다'
+    assert node._autonomy is None, '새 회차는 스스로 잡지 않는다'
+    assert len(calls) == count, '정지도 회차 초기화도 하지 않는다'
+
+
+def test_an_already_scheduled_cycle_still_starts_when_the_master_returns():
+    """183 · 회차 초기화를 이미 잡았으면 그 회차는 마저 시작한다(초기 자세에 서 있지 않게)"""
+    node, calls = _participant(phase='group_motion_completed')
+    node._drive_autonomous_cycle()
+    node._registry.status = lambda pc_id, **_kwargs: 'online'
+    node._local_status['motion_run_status']['phase'] = 'group_cycle_initialized'
+
+    node._drive_autonomous_cycle()
+
+    assert calls[-1]['command'] == 'group_start_at'
+    assert node._autonomy['stage'] == 'started'
+
+
+def test_after_operating_hours_the_participant_finishes_and_releases(monkeypatch):
+    """운영시간이 끝나면(진행 PC 는 여전히 안 보임) 전처럼 회차를 마치고 놓는다"""
+    import motion_coordination.coordination_node as coordination_node
+    from test_coordination_node import _InlineThread
+    monkeypatch.setattr(coordination_node.threading, 'Thread', _InlineThread)
+    node, calls = _participant(phase='group_motion_completed')
+    node._drive_autonomous_cycle()
+    node._execution.operating_until = time.time() - 1.0
+    node._local_status['motion_run_status']['phase'] = 'group_motion_completed'
+    node._local_status['motion_run_status']['current_cycle'] = 5
+
+    node._drive_autonomous_cycle()
+
+    assert node._execution.execution_id == ''
     assert calls[-1]['command'] == 'stop_now'
+
+
+# --------------------------------------------------------------------------- #
+# 수정 목록 182 · 진행 PC 가 운영시간 끝을 명령에 싣고 · 참가 PC 는 그 값을 기억한다
+# --------------------------------------------------------------------------- #
+
+def _master_with_status(window_ends_at):
+    node = _node()
+    node._execution = GroupExecution()
+    node._execution.begin('pc-a', ('pc-a', 'pc-b'), run_mode='continuous')
+    node._local_status = {'schedule_window_ends_at': window_ends_at}
+    return node
+
+
+def test_the_master_puts_its_operating_end_on_every_command():
+    ends = time.time() + 7200.0
+    node = _master_with_status(ends)
+    command = node._new_command(
+        command='prepare', execution_id=node._execution.execution_id,
+        cycle_number=0, participants=('pc-a', 'pc-b'),
+    )
+    assert command.operating_until_unix_sec == pytest.approx(ends)
+    assert node._execution.operating_until == pytest.approx(ends)
+
+
+def test_outside_operating_hours_the_master_sends_zero():
+    """사람이 운영시간 밖에 시작(시험 · 지켜봄) · 진행 PC 가 사라지면 참가 PC 는 회차를 마치고 기다린다"""
+    for ends in (0.0, time.time() - 5.0):
+        node = _master_with_status(ends)
+        command = node._new_command(
+            command='start_at', execution_id=node._execution.execution_id,
+            cycle_number=1, participants=('pc-a', 'pc-b'),
+        )
+        assert command.operating_until_unix_sec == 0.0
+
+
+def test_a_participant_remembers_the_masters_operating_end():
+    node, _calls = _participant(phase='running', operating=False)
+    ends = time.time() + 600.0
+    node._note_operating_until(GroupCommand(
+        group_id='stage-a', execution_id='exec-a', coordinator_id='pc-a',
+        command='start_at', command_id='cmd-1', participant_ids=['pc-a', 'pc-b'],
+        operating_until_unix_sec=ends,
+    ))
+    assert node._execution.operating_until == pytest.approx(ends)
+    # 다른 실행 · 다른 진행 PC 의 값은 받지 않는다
+    node._note_operating_until(GroupCommand(
+        group_id='stage-a', execution_id='exec-other', coordinator_id='pc-a',
+        command='start_at', command_id='cmd-2', participant_ids=['pc-a', 'pc-b'],
+        operating_until_unix_sec=1.0,
+    ))
+    assert node._execution.operating_until == pytest.approx(ends)

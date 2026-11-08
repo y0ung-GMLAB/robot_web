@@ -139,6 +139,38 @@ def active_schedule(
     return found[0][1]
 
 
+def operating_until(
+    now: datetime, schedules: List[ScheduleItem],
+) -> Optional[datetime]:
+    """지금 운영시간이 이어서 끝나는 시각 · 운영시간 밖이면 None · 수정 목록 182
+
+    겹치거나 맞닿은 구간은 하나로 본다 · 10:00~14:00 과 14:00~18:00 이면 18:00 ·
+    진행 PC 가 이 값을 그룹 명령에 실어 보내고, 진행 PC 가 안 보이는 참가 PC 는 이 시각까지만 스스로 잇는다.
+    """
+    windows = []
+    for item in schedules:
+        if not item.enabled:
+            continue
+        for day in (now - timedelta(days=1), now, now + timedelta(days=1)):
+            if not _day_matches(item, day):
+                continue
+            window = window_of(item, day)
+            if window is not None:
+                windows.append(window)
+    current = [ends_at for starts_at, ends_at in windows if starts_at <= now < ends_at]
+    if not current:
+        return None
+    end = max(current)
+    grown = True
+    while grown:
+        grown = False
+        for starts_at, ends_at in windows:
+            if starts_at <= end < ends_at:
+                end = ends_at
+                grown = True
+    return end
+
+
 class ScheduleEngine:
     """상태를 보는 엔진 · 기억하는 것이 없다.
 

@@ -63,3 +63,51 @@ def test_a_schedule_we_cannot_read_is_named():
     )
 
     assert unreadable_schedules([good, bad, off]) == ['이상한 시각 (09:00:00~25:00:00)']
+
+
+# --------------------------------------------------------------------------- #
+# 수정 목록 182 · 이어지는 운영시간이 끝나는 시각 · 진행 PC 가 그룹 명령에 싣는다
+# --------------------------------------------------------------------------- #
+
+def _daily(schedule_id, start, stop, **kwargs):
+    from motion_common.schedule_models import ScheduleItem
+
+    return ScheduleItem(
+        schedule_id=schedule_id, schedule_name=schedule_id,
+        start_time=start, stop_time=stop, repeat_type='daily', **kwargs,
+    )
+
+
+def test_operating_until_is_the_end_of_the_current_window():
+    from datetime import datetime
+
+    from motion_schedule.schedule_engine import operating_until
+
+    schedules = [_daily('day', '10:00:00', '18:00:00')]
+    assert operating_until(datetime(2026, 11, 8, 12, 0), schedules) == datetime(2026, 11, 8, 18, 0)
+    assert operating_until(datetime(2026, 11, 8, 9, 59), schedules) is None
+    assert operating_until(datetime(2026, 11, 8, 18, 0), schedules) is None
+
+
+def test_back_to_back_and_overlapping_windows_count_as_one():
+    from datetime import datetime
+
+    from motion_schedule.schedule_engine import operating_until
+
+    schedules = [
+        _daily('am', '10:00:00', '14:00:00'),
+        _daily('pm', '14:00:00', '18:00:00'),
+        _daily('late', '17:00:00', '20:00:00'),
+    ]
+    assert operating_until(datetime(2026, 11, 8, 11, 0), schedules) == datetime(2026, 11, 8, 20, 0)
+
+
+def test_operating_until_crosses_midnight_and_ignores_disabled_items():
+    from datetime import datetime
+
+    from motion_schedule.schedule_engine import operating_until
+
+    schedules = [_daily('night', '21:00:00', '01:00:00'), _daily('off', '00:00:00', '23:00:00', enabled=False)]
+    assert operating_until(datetime(2026, 11, 8, 23, 30), schedules) == datetime(2026, 11, 9, 1, 0)
+    assert operating_until(datetime(2026, 11, 9, 0, 30), schedules) == datetime(2026, 11, 9, 1, 0)
+    assert operating_until(datetime(2026, 11, 8, 12, 0), schedules) is None

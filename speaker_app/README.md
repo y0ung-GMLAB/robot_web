@@ -22,7 +22,7 @@ ROS 2 Humble 모션 제어 시스템(robot_web)의 DDS 트리거를 **구독만*
     끝이 있으면(`segment_end_sec`) (끝 − 시작) 초만 튼다 · aplay 는 시작 위치를 못 고르므로 받자마자 그 구간만 담은 wav 를
     `sounds/.segment_cache/` 에 만들어 튼다(마지막 구간 하나만 남김) · 시작 시각 계산(`start_delay_sec` + 오프셋)은 그대로 ·
     음원이 구간 시작보다 짧으면 틀지 않고 로그만 · 로그 · 최근 트리거에 `구간 1:20~1:45`
-  - 메시지 칸이 바뀌었다(약속 번호 10) · 로봇 PC 와 같이 업데이트(「모든 PC 업데이트」 = `install_speaker.sh --code-only` 가 메시지도 다시 빌드 · 안 되면 터미널 `bash ~/robot_web/scripts/install_speaker.sh`) ·
+  - 메시지 칸이 바뀌었다(약속 번호 10 · 12 는 진행 PC 의 운영시간 끝 `operating_until_unix_sec` · 2026-11-08) · 로봇 PC 와 같이 업데이트(「모든 PC 업데이트」 = `install_speaker.sh --code-only` 가 메시지도 다시 빌드 · 안 되면 터미널 `bash ~/robot_web/scripts/install_speaker.sh`) ·
     옛 빌드는 새 칸을 몰라 구간 없이(처음부터) 튼다 · 서로 다른 메시지 정의는 DDS 에서 못 받을 수 있으니 같이 업데이트
   - 모션 정지·오류(그룹 사건 `stopped`/`error`, PC 1대 재생의 `solo_stopped`) → 재생 정지 ·
     **사건 이름**(`event`)으로 판정하고 상태 칸(`state`)은 안 본다 · **지금 소리를 내는 실행**(마지막 `start_at` 의
