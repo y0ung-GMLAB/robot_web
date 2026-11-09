@@ -49,7 +49,7 @@ test('저장 뒤 확인 · 파일 값이 다르면 무엇이 다른지 · 같으
   assert.deepEqual(savedMismatch([server[0], { ...server[1], reference_position_rad: 39.95 * R }], target, patch), []);
   const wrong = savedMismatch(server, target, patch);
   assert.equal(wrong.length, 1);
-  assert.match(wrong[0], /기준점 · 보낸 값 39\.95 · 파일 값 0/);
+  assert.match(wrong[0], /기준점: 보낸 값 39\.95, 저장된 값 0/);
   assert.match(savedMismatch([server[0]], target, patch)[0], /찾지 못했습니다/);
 });
 

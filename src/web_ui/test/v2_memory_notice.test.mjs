@@ -33,6 +33,6 @@ test('PC 현황 칸 · 옛 버전 PC(칸 없음)는 -', () => {
 
 test('PC 현황 운전 모드 표에 메모리 칸', () => {
   const source = readFileSync(new URL('../static/v2/js/pages/store.js', import.meta.url), 'utf8');
-  assert.match(source, /'PC', '지금', '바꾸기', '메모리'/);
+  assert.match(source, /'PC', '지금', '전환', '메모리'/);
   assert.match(source, /memoryTd\(pc\.memory\)/);
 });

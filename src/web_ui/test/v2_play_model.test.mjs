@@ -82,7 +82,7 @@ test('실행 축 · 끔 = 그 자리 · 다시 켬 = 다음 회차부터 · 지�
   assert.deepEqual(rows.map((r) => [r.id, r.state]), [['A', '꺼짐 · 현재 위치에서 정지'], ['B', '다음 회차부터 적용'], ['C', '재생 중']]);
   assert.equal(rows[0].range, '−10.0 ~ +10.0°');
   assert.equal(rows[0].now, '+2.50');
-  assert.equal(rows[2].clamped, '잘라서 재생');
+  assert.equal(rows[2].clamped, '범위 안으로 제한');
 });
 
 test('그룹 PC 줄 · 빠진 PC 는 이유 · 연결 안 됨 · 출발 전 멈춤은 지금 멈춤', () => {
@@ -91,7 +91,7 @@ test('그룹 PC 줄 · 빠진 PC 는 이유 · 연결 안 됨 · 출발 전 멈�
     peers: [{ pc_id: 'f2', motion_cycle_text: '3회차' }, { pc_id: 'f3' }, { pc_id: 'f4', state: 'offline' }],
     execution: { state: 'running', excluded: { f3: '버전 다름' } },
   });
-  assert.deepEqual(groupRows(snap).map((r) => [r.id, r.note]), [['f1', '그룹 대기'], ['f2', '그룹 대기'], ['f3', '제외됨 · 버전 다름'], ['f4', '연결 안 됨']]);
+  assert.deepEqual(groupRows(snap).map((r) => [r.id, r.note]), [['f1', '그룹 대기'], ['f2', '그룹 대기'], ['f3', '제외됨 (버전 다름)'], ['f4', '연결 안 됨']]);
   assert.equal(groupRows(snap)[0].local, true);
   assert.equal(groupStopCommand(snap), 'stop_after_cycle');
   assert.equal(groupStopCommand(group({ execution: { state: 'armed' } })), 'stop_now');
@@ -106,7 +106,7 @@ test('첫 자세 이동 시간 · 매핑 시간이 하나면 그 값이 골라�
   assert.equal(initialMoveChoices([{ initial_move_time_sec: 5 }], 7).selected, 7);
   assert.deepEqual(initialMoveChoices([{ initial_move_time_sec: 8 }], null).options.map(([value]) => value), [5, 7, 8, 10]);
   const mixed = initialMoveChoices([{ initial_move_time_sec: 5 }, { initial_move_time_sec: 10 }], null);
-  assert.deepEqual(mixed.options[0], [null, '조인트마다 다름 (매핑)']);
+  assert.deepEqual(mixed.options[0], [null, '조인트별 매핑 값']);
   assert.equal(mixed.selected, null);
   assert.equal(mixed.pick(5), 5);
 });
@@ -120,7 +120,7 @@ test('그룹 PC 줄 · 모터 설정이 없어 빠진 PC 는 짧게 「모터 �
   const snap = { coordination: { runtime: { joined: true, local: { pc_id: 'f4' }, peers: [{ pc_id: 'f1', state: 'online' }],
     execution: { execution_id: 'e', excluded: { f1: '준비 거절 · 현재 프로젝트의 실행 준비가 끝나지 않았습니다: 모터 설정과 조인트 매핑을 저장해 확정하세요' } } } } };
   const row = groupRows(snap).find((r) => r.id === 'f1');
-  assert.equal(row.note, '제외됨 · 모터 설정 없음(재생할 모터가 없는 PC)');
+  assert.equal(row.note, '제외됨 (재생할 모터 없음)');
 });
 
 test('그룹 전체 N대 · 실제로 들어갈 PC 수 · 빠질 PC 와 이유 · 수정 목록 122 (다)', () => {
@@ -136,7 +136,7 @@ test('그룹 전체 N대 · 실제로 들어갈 PC 수 · 빠질 PC 와 이유 �
   const preview = groupStartPreview(snap);
   assert.equal(preview.count, 3);
   assert.deepEqual(preview.excluded, [{ id: 'floating2', name: '두번째', reason: '끔 모드' }]);
-  assert.equal(excludedText(preview.excluded), '빠짐 · 두번째(끔 모드)');
+  assert.equal(excludedText(preview.excluded), '두번째(끔 모드)');
   assert.equal(excludedText([]), '');
   // 미리 보기가 없으면(슬레이브 · 옛 서버) 모른다 · 화면이 옛 방식으로 센다
   assert.equal(groupStartPreview(group()).count, null);
@@ -153,6 +153,6 @@ test('빠진 이유는 줄에 첫 마디만 · 전체는 detail(마우스 올림
     } },
   };
   const [row] = groupRows(snap);
-  assert.equal(row.note, '제외됨 · 웹 서비스 끊김');
+  assert.equal(row.note, '제외됨 (웹 서비스 끊김)');
   assert.equal(row.detail, long);
 });

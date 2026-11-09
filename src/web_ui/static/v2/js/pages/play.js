@@ -15,6 +15,7 @@ import { api } from '../net.js';
 import * as act from '../actions.js';
 import { playlistCard } from './playlist_card.js';
 import { getViewer3d } from '../viewer3d.js';
+import { tip } from '../tip.js';
 
 /** 이 화면에서 고른 것 · 페이지를 떠나도 남는다(새로고침하면 서버 값으로) */
 const ui = {
@@ -129,7 +130,7 @@ function segmentState(state) {
   const check = segmentCheck({ startText: ui.segStart, endText: ui.segEnd, length: group ? null : length });
   // 그룹 · 이 PC 1번보다 길면 이 PC 만 빠진다 · 막지 않고 알린다
   const localNote = group && check.active && !check.error && length !== null && check.start >= length
-    ? `이 PC 재생 목록 1번(${segmentClock(length)})보다 길어 이 PC는 빠집니다` : '';
+    ? `현재 PC는 재생 목록 1번(${segmentClock(length)})이 구간보다 짧아 제외` : '';
   return { playlist, first, length, check, localNote };
 }
 
@@ -172,10 +173,13 @@ function scopeHeader(state, changed) {
       ui.scope = value;
       changed();
     }),
-    h('p', { class: 'muted small', text: ui.scope === 'group'
-      ? (groupBusy ? '그룹 전체 재생 중입니다. 정지 버튼을 누르면 이번 재생에 참가한 PC가 모두 정지합니다.' : '각 PC는 자기 재생 목록을 재생하고 함께 시작합니다. 수동 모드 PC도 함께 시작하고, 끔 모드 PC는 빠집니다. 회차를 맞출지는 아래 「PC 간 동기화」에서 정합니다.')
-      : (blocker && group.joined ? blocker : '다른 PC와 상관없이 단독으로 재생합니다. 다른 PC는 영향을 받지 않습니다.') }),
-    ui.scope === 'group' && leftOut ? h('p', { class: 'small tone-text-warn', text: `${leftOut} · 시작하면 이 PC들은 빼고 재생합니다` }) : null);
+    ui.scope === 'group'
+      ? tip(['그룹에 참여한 PC가 각자의 재생 목록을 동시에 시작', '수동 모드 PC는 참여, 끔 모드 PC는 제외', '회차를 맞출지는 「반복 → PC 간 동기화」에서 설정', '정지하면 참여한 PC 모두 정지'], '그룹 전체 설명')
+      : tip(['현재 PC만 재생하며 다른 PC에는 영향 없음'], '단독 설명'),
+    // 경고 자리는 늘 둔다(레이아웃 고정) · 그룹 = 빠질 PC · 단독 = 그룹을 못 쓰는 이유
+    h('p', { class: 'small tone-text-warn msg-slot', text: ui.scope === 'group'
+      ? (leftOut ? `시작 시 제외되는 PC: ${leftOut}` : '')
+      : (blocker && group.joined ? blocker : '') }));
 }
 
 /* ---------- 지금 · 버튼 ---------- */
@@ -234,7 +238,7 @@ function nowCard(state, changed, navigate) {
     h('div', { class: 'controls' },
       h('div', { class: 'row' },
         h('button', { class: 'btn', type: 'button', disabled: disabled || running, onclick: initialize,
-          title: seg.check.active ? '재생 목록 1번 애니메이션의 구간 시작 자세로 천천히 이동합니다' : '재생 목록 첫 애니메이션의 초기 위치로 천천히 이동합니다' }, '초기 위치로'),
+          title: seg.check.active ? '재생 목록 1번의 구간 시작 자세로 천천히 이동' : '재생 목록 1번의 초기 위치로 천천히 이동' }, '초기 위치로'),
         h('button', { class: 'btn btn-primary', type: 'button', disabled: disabled || running, onclick: () => start('once') }, '1회 시작'),
         h('button', { class: 'btn btn-primary', type: 'button', disabled: disabled || running, onclick: () => start('continuous') }, '연속 시작')),
       h('span', { class: 'spacer' }),
@@ -244,7 +248,7 @@ function nowCard(state, changed, navigate) {
     segmentRow(seg, group, running, changed),
     blocker && !running ? h('div', { class: 'blocker' },
       dot('warn'),
-      h('span', { class: 'grow', text: `시작할 수 없는 이유: ${blocker.text}` }),
+      h('span', { class: 'grow', text: blocker.text }),
       fixButton(blocker.fix, navigate)) : null);
 }
 
@@ -264,28 +268,28 @@ function segmentRow(seg, group, running, changed) {
   if (check.active && !check.error) {
     const what = segmentLabel(check.start, check.end);
     notes.push(seg.playlist.length > 1
-      ? `재생 목록 1번 ${seg.first.replace(/[.]json$/i, '')}의 ${what}만 재생합니다 · 2번부터는 이번에 재생하지 않습니다`
-      : `${what}만 재생합니다`);
-    if (group) notes.push('모든 PC · 스피커가 같은 시각부터 · PC마다 자기 재생 목록 1번');
+      ? `재생 목록 1번 ${seg.first.replace(/[.]json$/i, '')}의 ${what}만 재생 (2번부터는 재생 안 함)`
+      : `${what}만 재생`);
+    if (group) notes.push('모든 PC와 스피커가 같은 구간 재생');
     if (check.note) notes.push(check.note);
     if (seg.localNote) notes.push(seg.localNote);
   }
   return h('div', { class: 'segment-row', role: 'group', 'aria-label': '구간 재생' },
-    h('span', { class: 'field-label', text: '구간' }),
+    h('span', { class: 'field-label inline' }, '구간', tip(['분:초 형식으로 입력 (예 1:20)', '비워 두면 처음부터 끝까지 재생', '그룹 재생 시 모든 PC와 스피커가 각자 재생 목록 1번의 같은 구간을 재생'], '구간 설명')),
     h('label', { class: 'inline' }, '시작',
       h('input', { class: 'input mono', type: 'text', inputmode: 'decimal', placeholder: '0:00', value: ui.segStart, disabled: running,
         'aria-label': '구간 시작 (분:초)', oninput: typed('segStart') })),
     h('label', { class: 'inline' }, '끝',
       h('input', { class: 'input mono', type: 'text', inputmode: 'decimal', placeholder: '끝까지', value: ui.segEnd, disabled: running,
-        'aria-label': '구간 끝 (분:초 · 비우면 끝까지)', oninput: typed('segEnd') })),
+        'aria-label': '구간 끝 (분:초)', oninput: typed('segEnd') })),
     h('button', { class: 'btn btn-mini', type: 'button', disabled: running || (!ui.segStart && !ui.segEnd), onclick: clear,
-      title: '구간을 비우고 처음부터 끝까지 재생합니다' }, '처음부터'),
+      title: '구간 비우기' }, '처음부터'),
     lastText && !ui.segStart && !ui.segEnd ? h('button', { class: 'btn btn-mini', type: 'button', disabled: running, onclick: restore,
-      title: '이 브라우저에서 마지막으로 보낸 구간을 다시 넣습니다' }, `지난 ${lastText}`) : null,
+      title: '마지막으로 재생한 구간' }, `지난 ${lastText}`) : null,
     seg.length !== null ? h('span', { class: 'muted small mono', text: `1번 길이 ${segmentClock(seg.length)}` }) : null,
     check.error
-      ? h('span', { class: 'segment-note small tone-text-bad', text: `시작할 수 없는 이유: ${check.error}` })
-      : h('span', { class: 'segment-note small muted', text: notes.join(' · ') || '비우면 처음부터 끝까지 재생합니다 (m:ss · 예 1:20)' }));
+      ? h('span', { class: 'segment-note small tone-text-bad', text: check.error })
+      : h('span', { class: 'segment-note small muted', text: notes.join(' · ') }));
 }
 
 /* ---------- PC 별 (매장 전체) ---------- */
@@ -311,7 +315,7 @@ function groupCard(state) {
         h('span', { class: `row-note tone-text-${row.tone}`, text: row.note, title: row.detail }),
         h('span', { class: `mono small clock-cell ${row.clockWarn ? 'tone-text-warn' : 'muted'}`, text: row.clock }),
         row.progress ? h('span', { class: 'mono muted small', text: row.progress }) : null)))
-      : h('p', { class: 'muted', text: '같은 그룹의 다른 PC가 아직 보이지 않습니다' }));
+      : h('p', { class: 'muted', text: '같은 그룹의 다른 PC가 아직 연결되지 않았습니다' }));
 }
 
 /** 그룹 재생 방식 · 회차 간격 · 마스터에서만 바꿈 · 슬레이브는 보기만 · 수정 목록 186 */
@@ -321,22 +325,22 @@ function timetableFields(state) {
   const locked = master ? '' : '마스터 PC에서 변경';
   return [
     h('div', { class: 'field' },
-      h('span', { class: 'field-label', text: '그룹 재생 방식', title: [
-        '신호 재생 · 마스터가 회차마다 시작 신호',
-        '시간표 재생 · 스케줄 운영에만 적용 · 모든 PC가 같은 시간표로 각자 시작',
-        '시간표 재생 · 연결이 끊긴 PC도 재생 유지',
-        '직접 누른 그룹 재생 · 늘 신호 재생',
-        '변경 · 마스터 PC만 · 다음 회차 경계부터 적용',
-      ].join('\n') }),
+      h('span', { class: 'field-label inline' }, '그룹 재생 방식', tip([
+        '신호 재생: 마스터가 회차마다 시작 신호를 보냄',
+        '시간표 재생: 스케줄 운영에만 적용, 모든 PC가 같은 시간표에 맞춰 각자 시작',
+        '시간표 재생에서는 연결이 끊긴 PC도 재생을 이어 감',
+        '직접 누른 그룹 재생은 방식과 관계없이 신호 재생',
+        '마스터 PC에서만 변경, 다음 회차 경계부터 적용',
+      ], '그룹 재생 방식 설명')),
       segmented('그룹 재생 방식', [['lockstep', '신호 재생', locked], ['clock', '시간표 재생', locked]],
         timetable.clock ? 'clock' : 'lockstep', (value) => act.setTimetable({ mode: value }))),
     h('div', { class: 'field' },
       h('label', { class: 'inline' },
-        h('span', { class: 'field-label', text: '회차 간격', title: [
-          '0 · 자동(가장 긴 애니메이션 + 초기 위치 이동)',
-          '자동보다 짧은 값 · 저장 안 됨',
+        h('span', { class: 'field-label inline' }, '회차 간격', tip([
+          '0이면 자동 (가장 긴 애니메이션 + 초기 위치 이동)',
+          '자동보다 짧은 값은 저장되지 않음',
           '시간표 재생(스케줄 운영)에서만 사용',
-        ].join('\n') }),
+        ], '회차 간격 설명')),
         h('input', { class: 'input num-input', type: 'number', min: '0', step: '10', value: String(timetable.period || 0),
           disabled: Boolean(locked) || !timetable.clock, 'aria-label': '회차 간격(초)',
           onchange: (event) => act.setTimetable({ period_sec: Math.max(0, Number(event.target.value) || 0) }) }),
@@ -370,17 +374,16 @@ function repeatCard(state, changed) {
           onchange: (event) => { ui.dwellSec = Math.max(0, Number(event.target.value) || 0); act.saveAutomation({ dwell_sec: ui.dwellSec }); } }),
         '초') : null),
     h('div', { class: 'field' },
-      h('span', { class: 'field-label', text: '초기 위치 이동 시간' }),
-      segmented('초기 위치 이동 시간', moveTime.options, moveTime.selected, (value) => { ui.initialMove = moveTime.pick(value); changed(); }),
-      group ? h('span', { class: 'muted small', text: '그룹 재생에 참가한 모든 PC에 이 이동 시간을 적용합니다' }) : null),
+      h('span', { class: 'field-label inline' }, '초기 위치 이동 시간', group ? tip(['그룹 재생 시 참여한 모든 PC에 같은 시간 적용']) : null),
+      segmented('초기 위치 이동 시간', moveTime.options, moveTime.selected, (value) => { ui.initialMove = moveTime.pick(value); changed(); })),
     h('div', { class: 'field' },
       h('label', { class: 'inline' }, h('span', { class: 'field-label', text: '정지할 회차' }),
         h('input', { class: 'input num-input', type: 'number', min: '0', step: '1', value: String(ui.targetCycles),
           onchange: (event) => { ui.targetCycles = Math.max(0, Math.floor(Number(event.target.value) || 0)); changed(); } }),
         h('span', { class: 'muted small', text: '0 = 계속 반복' }))),
     group ? h('div', { class: 'field' },
-      h('span', { class: 'field-label', text: 'PC 간 동기화' }),
-      segmented('PC 간 동기화', [['lockstep', '회차 맞춤 (먼저 끝난 PC가 기다림)'], ['independent', '각자 재생 (시작만 함께)']], ui.syncMode || 'lockstep', (value) => {
+      h('span', { class: 'field-label inline' }, 'PC 간 동기화', tip(['회차 맞춤: 먼저 끝난 PC는 다른 PC를 기다렸다가 다음 회차를 함께 시작', '각자 재생: 시작만 함께 하고 이후에는 PC별로 반복', '직접 누른 그룹 재생에 적용 (그룹 재생 방식이 시간표 재생이어도)'])),
+      segmented('PC 간 동기화', [['lockstep', '회차 맞춤'], ['independent', '각자 재생']], ui.syncMode || 'lockstep', (value) => {
         ui.syncMode = value;
         changed();
         act.saveAutomation({ group_sync_mode: value });
@@ -394,10 +397,11 @@ function axesCard(state) {
   const rows = axisRows(state.snap, state.play?.mapping);
   return h('section', { class: 'card', 'aria-label': '실행 조인트' },
     h('div', { class: 'card-head' }, h('h2', { text: '실행 조인트' })),
-    h('p', { class: 'muted small', text: '끄면 해당 조인트는 현재 위치에서 정지합니다. 재생 중에 다시 켜면 다음 회차부터 적용됩니다. 이 설정은 저장되지 않으며, 프로그램을 다시 시작하면 모두 켜집니다.' }),
     rows.length
       ? h('div', { class: 'table-wrap' }, h('table', { class: 'table' },
-        h('thead', {}, h('tr', {}, ['사용', '조인트', '모터', '범위', '현재 값', '범위 초과', '상태'].map((text) => h('th', { scope: 'col', text })))),
+        h('thead', {}, h('tr', {},
+          h('th', { scope: 'col' }, '사용', tip(['끄면 해당 모터는 현재 위치에서 정지', '재생 중에 다시 켜면 다음 회차부터 동작', '프로그램을 다시 시작하면 모두 켜짐'], '사용 설명')),
+          ['조인트', '모터', '범위', '현재 값', '범위 초과', '상태'].map((text) => h('th', { scope: 'col', text })))),
         h('tbody', {}, rows.map((row) => h('tr', { class: row.muted ? 'muted-row' : '' },
           h('td', {}, h('label', { class: 'switch' },
             h('input', { type: 'checkbox', role: 'switch', checked: !row.muted, 'aria-label': `${row.id} 사용`,
@@ -424,11 +428,10 @@ function previewCard(state, changed) {
         h('input', { type: 'checkbox', role: 'switch', checked: ui.show3d, 'aria-label': '3D 동시 재생',
           onchange: (event) => { ui.show3d = event.target.checked; writeShow3d(ui.show3d); changed(); } }),
         h('span', { class: 'switch-track', 'aria-hidden': 'true' })),
-      h('h2', { class: 'grow', text: `3D 동시 재생 · ${ui.show3d ? 'ON' : 'OFF'}` }),
+      h('h2', { class: 'grow' }, `3D 동시 재생 · ${ui.show3d ? 'ON' : 'OFF'}`,
+        tip(['켜면 로봇 재생에 맞춰 3D 화면에서 동시 재생', '그래픽 부하가 커서 필요할 때만 사용 권장'], '3D 동시 재생 설명')),
       h('a', { href: '#/pack', text: '로봇 팩·3D' })),
-    ui.show3d
-      ? getViewer3d().update(state, { fileId })
-      : h('p', { class: 'muted small', text: '켜면 로봇 재생에 맞춰 3D 로봇이 함께 움직입니다. 이 화면을 여는 기기의 그래픽을 계속 쓰므로 필요할 때만 켜세요(이 브라우저에 설정이 저장됩니다).' }));
+    ui.show3d ? getViewer3d().update(state, { fileId }) : null);
 }
 
 export function renderPlay(state, { navigate, changed }) {

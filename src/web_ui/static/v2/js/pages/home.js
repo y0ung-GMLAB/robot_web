@@ -23,7 +23,7 @@ function nowCard(state, navigate) {
       h('div', { class: 'progress-fill', style: { width: `${(run.ratio * 100).toFixed(1)}%` } })));
     body.push(h('div', { class: 'now-meta' }, h('span', { class: 'mono', text: run.timeText }), h('span', { text: endHint(state) })));
   } else {
-    body.push(h('p', { class: 'muted', text: endHint(state) || '재생은 재생 화면에서 시작합니다. 스케줄 모드에서는 스케줄이 시작합니다.' }));
+    body.push(h('p', { class: 'muted', text: endHint(state) }));
   }
   body.push(h('div', { class: 'row' },
     h('a', { class: 'btn btn-primary', href: '#/play' }, '재생 화면 열기'),
@@ -35,12 +35,12 @@ function nowCard(state, navigate) {
 function endHint(state) {
   const sched = state.sched;
   if (!sched) return '';
-  if (sched.run_mode !== 'schedule') return sched.run_mode === 'manual' ? '수동 모드입니다. 스케줄이 동작하지 않습니다.' : '끔 모드입니다. 움직임 명령이 차단되어 있습니다.';
+  if (sched.run_mode !== 'schedule') return sched.run_mode === 'manual' ? '수동 모드에서는 스케줄이 동작하지 않습니다' : '끔 모드라 움직임 명령이 차단되어 있습니다';
   const now = new Date();
   const minutes = now.getHours() * 60 + now.getMinutes();
   const windows = todayWindows(state.schedules, now);
   const current = windows.find((w) => w.start <= minutes && minutes < w.end);
-  if (current) return `오늘 ${hhmm(current.end)}에 운영 종료 · 진행 중인 회차가 끝나면 정지합니다`;
+  if (current) return `오늘 ${hhmm(current.end)} 운영 종료 (진행 중인 회차를 마치고 정지)`;
   const next = windows.find((w) => w.start > minutes);
   return next ? `다음 시작 ${hhmm(next.start)}` : '오늘 운영 종료';
 }
@@ -66,7 +66,7 @@ function storeCard(state) {
         dot(row.tone),
         h('span', { class: 'grow' }, row.name, row.local ? h('small', { class: 'muted', text: ' · 현재 접속' }) : null),
         h('span', { class: `note tone-text-${row.tone}`, text: row.note }))))
-      : h('p', { class: 'muted', text: '같은 네트워크의 다른 PC를 기다리는 중' }));
+      : h('p', { class: 'muted', text: '같은 네트워크의 다른 PC가 아직 연결되지 않았습니다' }));
 }
 
 function scheduleCard(state) {

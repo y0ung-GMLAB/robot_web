@@ -27,7 +27,7 @@ test('앱솔루트 · 읽기만 실패(unknown)면 「앱솔루트 설정」 을
   const rows = motorRows({ motors: [motor(0, 'A'), motor(1, 'B')] }, snap);
   assert.equal(rows[0].absolute, '다시 읽는 중');
   assert.deepEqual(absoluteSummary(rows), { total: 2, ok: 1, allOk: false, needsSetup: 0, waiting: 1, unread: 0 });
-  assert.match(absoluteLine(absoluteSummary(rows)), /1대 드라이브 응답을 기다리며 다시 읽는 중/);
+  assert.match(absoluteLine(absoluteSummary(rows)), /1대 다시 읽는 중/);
 });
 
 test('앱솔루트 · 아직 못 읽은 드라이브(검색 직후 · 모터 프로그램 꺼짐)는 「필요 없음」 이라 하지 않는다 (수정 목록 120 (아))', () => {
@@ -36,8 +36,8 @@ test('앱솔루트 · 아직 못 읽은 드라이브(검색 직후 · 모터 프
   assert.deepEqual(abs, { total: 3, ok: 0, allOk: false, needsSetup: 0, waiting: 0, unread: 3 });
   const line = absoluteLine(abs);
   assert.doesNotMatch(line, /필요 없음/);
-  assert.match(line, /3대 아직 못 읽음/);
-  assert.match(line, /인크리멘털이면 「앱솔루트 설정」/);
+  assert.match(line, /3대는 「저장 후 장비에 적용」 후 확인 가능/);
+  assert.match(line, /확인 전까지 모든 모터 동작 차단/);
   // 인크리멘털(Pr0.15 = 1)로 읽히면 설정 필요
   const incremental = motorRows({ motors: [motor(0, 'A')] }, { motion_state: { motors: [{ controller_index: 0, state: 'detected' }],
     minas_absolute: { drives: [{ axis: 0, status: 'not_absolute', absolute_mode: 1 }] } } });
@@ -89,7 +89,7 @@ test('앱솔루트 설정 이어서 하기 · 4/7 에서 실패하면 버튼 · 
   const failed = absoluteResumeView({ state: 'failed', step: 'check_mode', resume });
   assert.equal(failed.label, '이어서 하기 (4/7 부터)');
   assert.equal(failed.inline, true);
-  assert.match(failed.note, /0번 모터, 1번 모터 · 다회전 클리어를 아직 하지 않았습니다/);
+  assert.match(failed.note, /0번 모터, 1번 모터 · 다회전 클리어 전/);
   // 웹을 다시 켠 뒤(idle) · 따로 한 줄에 실패 이유
   const later = absoluteResumeView({ state: 'idle', resume });
   assert.equal(later.inline, false);
@@ -107,18 +107,18 @@ test('앱솔루트 설정 이어서 하기 · 4/7 에서 실패하면 버튼 · 
   assert.equal(box.confirmLabel, '이어서 하기');
   assert.match(box.body, /4\. 앱솔루트 방식 확인\n5\. 다회전 클리어\n6\. 드라이브 전원 껐다 켜기 2\n7\. 최종 확인/);
   // 클리어는 4/7 에서 Err40 인 드라이브만 · 없으면 기준점 그대로 · 수정 목록 140
-  assert.match(box.body, /Err40\(다회전 무효\)인 드라이브만/);
-  assert.match(box.body, /Err40이 없으면 클리어하지 않고 기준점도 그대로/);
+  assert.match(box.body, /Err40\(다회전 무효\)이 발생한 드라이브만/);
+  assert.match(box.body, /Err40이 없으면 클리어하지 않으며 기준점도 유지/);
   assert.match(box.body, /전원을 한 번 더/);
   const after = absoluteResumeConfirm({ from_index: 7, step_count: 7, failed_index: 7, failed_label: '최종 확인', clear_done: true, cleared: [{ label: '0번 모터' }], steps: ['최종 확인'], targets: [] });
-  assert.match(after.body, /다회전 클리어는 이미 했습니다\(0번 모터\).*기준점을 다시 지정해 저장/s);
+  assert.match(after.body, /다회전 클리어로 위치 값이 바뀌었습니다\(0번 모터\).*기준점을 다시 지정해 저장/s);
   assert.doesNotMatch(after.body, /전원을/);
 });
 
 test('EtherCAT 주소 겹침 · 서버 저장 검사와 같은 규칙 · 저장 전에 보이게 (2026-10-12)', () => {
   const ac = (axis, alias, slave) => ({ axis, name: `M${axis}`, motor_type: 'ac_servo', identity: { ethercat_master_index: 0, ethercat_alias: alias, slave_position: slave }, config: {} });
   assert.deepEqual(motorProblems([ac(0, 0, 0), ac(1, 0, 1), ac(2, 0, 2)]), [], 'Alias 0 이어도 Slave 번호가 다르면 된다');
-  assert.match(motorProblems([ac(0, 101, 0), ac(1, 101, 1)])[0], /^1번 · EtherCAT Alias 101가 0번과 같습니다/);
+  assert.match(motorProblems([ac(0, 101, 0), ac(1, 101, 1)])[0], /^1번: EtherCAT Alias 101가 0번과 같습니다/);
   assert.match(motorProblems([ac(0, 0, 0), ac(1, 0, 0)])[0], /Alias 0 · Slave 0이 0번과 같습니다 · |「전체 검색」/);
   assert.deepEqual(motorProblems([ac(0, 101, 0), ac(1, 0, 0)]), [], 'Alias 를 쓰는 드라이브와 Slave 번호로 찾는 드라이브는 겹치지 않는다');
 });
@@ -134,7 +134,7 @@ test('게인 칸 · 드라이브에 저장된 값 그대로 · 강성 다름 알
   const rows = [{ axis: 0, ac: true, gains: on }, { axis: 2, ac: true, gains: off }, { axis: 5, ac: false, gains: null }];
   const warnings = gainWarnings(rows);
   assert.equal(warnings.length, 1);
-  assert.match(warnings[0], /0번 13 · 2번 12/);
+  assert.match(warnings[0], /0번 13, 2번 12/);
   assert.deepEqual(gainWarnings([{ axis: 0, ac: true, gains: on }, { axis: 2, ac: true, gains: { ...off, stiffness: 13 } }]), []);
   assert.deepEqual(gainWarnings([{ axis: 0, ac: true, gains: on }]), []);
 });
@@ -165,11 +165,11 @@ test('지령 필터 · 강성 옆 · 0.1 ms 정수 그대로 · ms 로 같이 �
   assert.equal(gainMs(fir, ''), '');
   const gains = { stiffness: 13, command_smoothing: 92, command_fir: 10 };
   assert.deepEqual(gainChanges(gains, { command_smoothing: '139', command_fir: '10' }).values, { command_smoothing: 139 });   // 입력은 0.1 ms 정수
-  assert.match(gainChanges(gains, { command_fir: '10001' }).problems[0], /0~10000 사이 정수 \(0\.1 ms 단위/);
+  assert.match(gainChanges(gains, { command_fir: '10001' }).problems[0], /0~10000 사이 정수여야 합니다 \(0\.1 ms 단위/);
   assert.equal(gainChanges(gains, { command_smoothing: '9.2' }).problems.length, 1);       // ms 로 적으면 거절(정수만)
   assert.match(gainHint(smoothing, 92), /92 = 9\.2 ms/);
   assert.match(gainHint(smoothing, 92), /강성을 바꾸면 자동조정이 이 값을 다시 쓸 수 있음/);
-  assert.match(gainHint(fir, 10), /멈춰 있을 때만/);
+  assert.match(gainHint(fir, 10), /정지해 있을 때만 변경 가능/);
   assert.ok(fir.stoppedOnly && !smoothing.stoppedOnly);
 });
 
@@ -182,7 +182,7 @@ test('지령 필터 · 표 마우스 글 · 축마다 다르면 알림 (2026-10-
   assert.deepEqual(gainWarnings([{ axis: 0, ac: true, gains: a }, { axis: 1, ac: true, gains: a }]), []);
   const warnings = gainWarnings([{ axis: 0, ac: true, gains: a }, { axis: 1, ac: true, gains: { ...a, command_fir: 50 } }]);
   assert.equal(warnings.length, 1);
-  assert.match(warnings[0], /지령 FIR 필터가 다릅니다.*0번 10 \(1\.0 ms\) · 1번 50 \(5\.0 ms\)/);
+  assert.match(warnings[0], /지령 FIR 필터 값이 달라.*0번 10 \(1\.0 ms\), 1번 50 \(5\.0 ms\)/);
 });
 
 test('파라미터 (고급) · 다름 표시 · 마우스 글 (수정 목록 109 · 114)', async () => {
@@ -200,7 +200,7 @@ test('PREOP 에 멈춘 드라이브는 그 줄 통신 칸에 (수정 목록 125)
     ethercat: { stuck_slaves: [{ slave_position: 1, axis: 1, state: 'PREOP', message: '1번 드라이브가 PREOP 에 멈춤 · …' }] } } };
   const rows = motorRows({ motors: [motor(0, 'A'), motor(1, 'B')] }, snap);
   assert.equal(rows[0].comm, '연결됨');
-  assert.equal(rows[1].comm, 'PREOP 에 멈춤 · 드라이브 제어 전원을 껐다 켜세요');
+  assert.equal(rows[1].comm, 'PREOP 상태에서 멈췄습니다. 드라이브 제어 전원을 껐다 켜세요.');
 });
 
 test('메일박스가 멈춘 드라이브는 그 줄 통신 칸에 (수정 목록 139 ③)', () => {
@@ -208,5 +208,5 @@ test('메일박스가 멈춘 드라이브는 그 줄 통신 칸에 (수정 목�
     minas_absolute: { state: 'ok', drives: [], stuck_mailboxes: [{ slave_position: 1, axis: 1, message: '1번 드라이브 메일박스 응답 없음 · …' }] } } };
   const rows = motorRows({ motors: [motor(0, 'A'), motor(1, 'B')] }, snap);
   assert.equal(rows[0].comm, '연결됨');
-  assert.equal(rows[1].comm, '메일박스 응답 없음 · 드라이브 제어 전원을 껐다 켜세요');
+  assert.equal(rows[1].comm, '메일박스 응답이 없습니다. 드라이브 제어 전원을 껐다 켜세요.');
 });

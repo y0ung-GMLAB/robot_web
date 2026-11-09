@@ -39,13 +39,13 @@ test('검사 · 비우면 통째로 · 끝만 적으면 처음부터 · 틀리�
 
   const late = segmentCheck({ startText: '3:12', length: 160 });
   assert.equal(late.payload, null);
-  assert.equal(late.error, '구간 시작 3:12 이 애니메이션 길이 2:40 보다 깁니다');
+  assert.equal(late.error, '구간 시작이 애니메이션 끝(2:40)보다 뒤입니다');
   assert.equal(segmentCheck({ startText: '2:40', length: 160 }).payload, null, '길이와 같아도 재생할 것이 없다');
 
   const backwards = segmentCheck({ startText: '1:20', endText: '1:10' });
-  assert.equal(backwards.error, '구간 끝 1:10 이 구간 시작 1:20 보다 뒤여야 합니다');
-  assert.match(segmentCheck({ startText: 'x' }).error, /m:ss/);
-  assert.match(segmentCheck({ endText: '1:99' }).error, /끝까지면 비우세요/);
+  assert.equal(backwards.error, '구간 끝은 시작 1:20보다 뒤여야 합니다');
+  assert.match(segmentCheck({ startText: 'x' }).error, /분:초/);
+  assert.match(segmentCheck({ endText: '1:99' }).error, /구간 끝은 분:초 형식/);
 
   const long = segmentCheck({ startText: '1:00', endText: '9:00', length: 160 });
   assert.deepEqual(long.payload, { start_sec: 60, end_sec: 540 }, '끝이 길면 막지 않는다 · 서버가 끝까지');
@@ -100,7 +100,7 @@ test('재생 화면 · 구간 줄 · 단독·그룹 모두 시작 요청에 실�
   assert.match(source, /const start = \(runMode\) => withSegmentNow\(/);
   assert.match(source, /const initialize = \(\) => withSegmentNow\(/);
   assert.match(source, /localPayload\(state, runMode, segment\)/);
-  assert.match(source, /모든 PC · 스피커가 같은 시각부터/);
+  assert.match(source, /모든 PC와 스피커가 같은 구간 재생/);
   assert.match(source, /try \{ localStorage\.setItem\(SEGMENT_KEY/);
   assert.match(source, /segStart: '',/, '화면을 열 때는 비어 있다');
 });

@@ -12,11 +12,12 @@ import * as act from '../actions.js';
 import { loadMotors, motorsActions, motorsBody, motorsDraft, revertMotors, saveMotors } from './motors.js';
 import { isRevisionConflict } from '../mapping_model.js';
 import { loadMapping, mappingActions, mappingBody, mappingDraft, mappingNote, revertMapping, saveMapping } from './mapping.js';
+import { tip } from '../tip.js';
 
-// 화면 위에서부터 · [구획 id, 제목, 설명, 주소] · 2026-10-16 조인트 매핑을 위로 (사용자)
+// 화면 위에서부터 · [구획 id, 제목, 설명 툴팁 줄, 주소] · 2026-10-16 조인트 매핑을 위로 (사용자)
 export const SETUP_PARTS = [
-  ['part-mapping', '① 조인트 매핑', '애니메이션 조인트 값을 모터 값으로 바꾸는 규칙 · 감속·기어비 · 방향 · 기준점 · 범위', 'mapping'],
-  ['part-motors', '② 모터·드라이브', '실제 모터 · 검색 · 이름 · 속도 · 브레이크 · 서보 · 앱솔루트 · 게인', 'motors'],
+  ['part-mapping', '① 조인트 매핑', ['애니메이션의 조인트 값을 현재 PC의 모터 값으로 변환', '모터 = 기준점 + 조인트 × 감속·기어비 × 방향'], 'mapping'],
+  ['part-motors', '② 모터·드라이브', [], 'motors'],
 ];
 const part = (id) => SETUP_PARTS.find(([partId]) => partId === id);
 // 이 주소로 들어오면 그 구획으로 한 번 내려간다 · #/maintain-motors(메뉴)는 페이지 맨 위
@@ -82,14 +83,14 @@ async function saveChanged(state, changed) {
       if (isRevisionConflict(error.message)) {
         // 화면을 연 뒤 파일이 바뀌었다(다른 화면 저장 · 매핑 저장이 운전 한계를 고쳐 씀) · 고친 것을 버리고 다시 받을지 묻는다
         const reload = await confirmBox({
-          title: '모터 설정 파일이 화면을 연 뒤 바뀌었습니다',
-          body: '다른 화면에서 저장했거나, 조인트 매핑 저장으로 운전 한계가 바뀌었습니다.\n「다시 불러오기」를 누르면 최신 파일을 받습니다(이 화면에서 고친 모터 설정은 사라집니다). 다시 불러온 뒤 고쳐서 저장하세요.',
+          title: '화면을 연 뒤 모터 설정 파일이 바뀌었습니다',
+          body: '다시 불러오면 현재 화면에서 수정한 모터 설정이 사라집니다.\n다른 화면에서 저장했거나, 조인트 매핑 저장으로 운전 한계가 바뀐 경우입니다.\n다시 불러온 뒤 수정해서 저장하세요.',
           confirmLabel: '다시 불러오기', tone: 'warning',
         });
         if (reload) await loadMotors(state, changed, { force: true });
         return null;
       }
-      toast(`모터 설정 저장 실패 · ${error.message || error}`, 'bad');
+      toast(`모터 설정을 저장하지 못했습니다: ${error.message || error}`, 'bad');
       return null;
     }
   }
@@ -111,7 +112,7 @@ async function save(state, changed, { apply = false } = {}) {
   const dirty = motorsDraft().changes.length + mappingDraft().changes.length > 0;
   if (!apply && !dirty) { toast('저장할 변경이 없습니다', 'warn'); return; }
   if (apply && !(await act.confirmApplyMotorConfig(dirty
-    ? '바꾼 모터 설정과 조인트 매핑을 저장한 뒤 바로 장비에 적용합니다. 운전 한계(소프트 리밋)도 조인트 매핑 범위로 바뀝니다.'
+    ? '변경한 모터 설정과 조인트 매핑을 저장한 뒤 장비에 적용합니다.\n운전 한계(소프트 리밋)도 조인트 매핑 범위에 맞춰 바뀝니다.'
     : '저장된 모터 설정과 조인트 매핑을 장비에 적용합니다.'))) return;
   ui.busy = true;
   changed();
@@ -131,19 +132,20 @@ async function save(state, changed, { apply = false } = {}) {
 
 /** 아래 저장 칸 버튼 툴팁 · 막혔으면 먼저 걸리는 이유 · 아니면 하는 일 · 수정 목록 118 */
 export function blockReason({ busy, dirty, problems }, ok) {
-  if (busy) return '저장·적용하는 중입니다';
-  if (problems.length) return `막힘 · ${problems[0]}`;
-  if (!dirty) return '바꾼 내용이 없습니다';
+  if (busy) return '저장하고 적용하는 중입니다';
+  if (problems.length) return `저장 불가: ${problems[0]}`;
+  if (!dirty) return '변경한 내용이 없습니다';
   return ok;
 }
 
 function partHead([id, label, hint], status, actions, note) {
   return [
     h('div', { class: 'part-head' },
-      h('h2', {}, label, status.note ? h('small', { class: `part-note${status.done ? ' ok' : ''}`, text: ` · ${status.note}` }) : null),
+      h('h2', {}, label, status.note ? h('small', { class: `part-note${status.done ? ' ok' : ''}`, text: ` · ${status.note}` }) : null,
+        hint.length ? tip(hint, `${label} 설명`) : null),
       h('span', { class: 'spacer' }),
       actions),
-    note || h('p', { class: 'muted small', text: hint }),
+    note || null,
   ];
 }
 
@@ -185,11 +187,11 @@ export function renderSetup(state, { changed }) {
         h('span', { text: pendingText(motors.changes, mapping.changes) }),
         problems.length ? h('p', { class: 'tone-text-warn small', text: problems[0] }) : null),
       // 막힌 버튼마다 이유를 툴팁으로 · 수정 목록 118
-      h('button', { class: 'btn', type: 'button', disabled: busy || !dirty, title: blockReason({ busy, dirty, problems: [] }, '저장하지 않은 변경을 버립니다'),
+      h('button', { class: 'btn', type: 'button', disabled: busy || !dirty, title: blockReason({ busy, dirty, problems: [] }, '저장하지 않은 변경 내용을 취소합니다'),
         onclick: () => { revertMotors(); revertMapping(); changed(); } }, '되돌리기'),
-      h('button', { class: 'btn btn-primary', type: 'button', disabled: busy || !dirty || Boolean(problems.length), title: blockReason({ busy, dirty, problems }, '파일에만 저장합니다(드라이브에는 「저장 후 장비에 적용」 뒤 반영)'),
-        onclick: () => save(state, changed) }, busy ? '저장 중…' : '저장'),
-      h('button', { class: 'btn btn-warn', type: 'button', disabled: busy || Boolean(problems.length), title: blockReason({ busy, dirty: true, problems }, '저장한 뒤 장비에 적용하고 모터 프로그램을 다시 시작합니다'),
+      h('button', { class: 'btn btn-primary', type: 'button', disabled: busy || !dirty || Boolean(problems.length), title: blockReason({ busy, dirty, problems }, '파일에만 저장 (드라이브에는 「저장 후 장비에 적용」 시 반영)'),
+        onclick: () => save(state, changed) }, busy ? '저장 중' : '저장'),
+      h('button', { class: 'btn btn-warn', type: 'button', disabled: busy || Boolean(problems.length), title: blockReason({ busy, dirty: true, problems }, '저장 → 장비에 적용 → 모터 프로그램 다시 시작'),
         onclick: () => save(state, changed, { apply: true }) }, '저장 후 장비에 적용')),
   ];
 }

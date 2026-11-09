@@ -34,7 +34,7 @@ export function initialMoveChoices(mappings, picked) {
   const common = times.length === 1 ? times[0] : null;
   const values = [...new Set([...INITIAL_MOVE_OPTIONS, ...(common === null ? [] : [common])])].sort((a, b) => a - b);
   const options = values.map((value) => [value, `${value}초`]);
-  if (times.length > 1) options.unshift([null, '조인트마다 다름 (매핑)']);
+  if (times.length > 1) options.unshift([null, '조인트별 매핑 값']);
   const selected = picked ?? common;
   return {
     options,
@@ -84,10 +84,10 @@ export function groupStartPreview(snap) {
   return { count: participants ? participants.length : null, excluded };
 }
 
-/** 빠질 PC 한 줄 · 「빠짐 · floating1(끔 모드) · floating2(단독 재생 중)」 · 없으면 빈 글 */
+/** 빠질 PC 한 줄 · 「floating1(끔 모드), floating2(단독 재생 중)」 · 없으면 빈 글 */
 export function excludedText(excluded) {
   const rows = Array.isArray(excluded) ? excluded : [];
-  return rows.length ? `빠짐 · ${rows.map((row) => `${row.name}(${row.reason})`).join(' · ')}` : '';
+  return rows.length ? rows.map((row) => `${row.name}(${row.reason})`).join(', ') : '';
 }
 
 /** 범위 고르기 · 기본은 단독(이 PC 만) · 수정 목록 120 (나) (실물 2026-10-13 S-9)
@@ -108,8 +108,8 @@ export function repeatChoice(saved) {
 /** 매장 전체를 못 고르는 이유 · 빈 글이면 고를 수 있다 */
 export function groupScopeBlocker(snap) {
   const group = groupRuntime(snap);
-  if (!group.joined) return '그룹에 참여하지 않은 상태입니다';
-  if (!group.master) return '그룹 재생은 마스터 PC에서만 시작할 수 있습니다. 각 PC는 자기 재생 목록을 재생합니다.';
+  if (!group.joined) return '그룹에 참여하지 않았습니다. PC 현황에서 「그룹 참여」를 켜세요.';
+  if (!group.master) return '그룹 재생은 마스터 PC에서만 시작할 수 있습니다';
   return '';
 }
 
@@ -184,9 +184,9 @@ export function startBlocker(snap, sched, { scope, playlist, mappingId }) {
   const status = runStatus(snap);
   const safety = snap?.safety_status || {};
   const mode = sched?.run_mode;
-  if (safety.emergency_latched) return { text: '긴급 정지 상태입니다. 프로그램을 다시 시작해야 해제됩니다.', fix: 'restart-program' };
-  if (mode === 'off') return { text: '끔 모드라서 움직임 명령이 차단되어 있습니다', fix: 'mode-manual' };
-  if (mode === 'schedule') return { text: '스케줄 모드에서는 스케줄이 재생을 관리합니다. 지금 정지해도 스케줄이 곧 다시 시작합니다. 직접 재생하려면 수동 모드로 전환하세요.', fix: 'mode-manual' };
+  if (safety.emergency_latched) return { text: '긴급 정지 상태입니다. 프로그램을 다시 시작하면 해제됩니다.', fix: 'restart-program' };
+  if (mode === 'off') return { text: '끔 모드에서는 움직임 명령이 차단됩니다', fix: 'mode-manual' };
+  if (mode === 'schedule') return { text: '스케줄 모드에서는 스케줄이 재생을 시작합니다. 직접 재생하려면 수동 모드로 전환하세요.', fix: 'mode-manual' };
   if (scope === 'group') {
     const blocker = groupScopeBlocker(snap);
     if (blocker) return { text: blocker };
@@ -307,7 +307,7 @@ export function groupRows(snap) {
       // 모터 설정이 없는 PC(모터 없이 둔 PC)는 고장이 아니라 빠진 것 · 서버 긴 문구 대신 짧게 (2026-10-12 실물)
       const reason = String(excluded[id]);
       note = /실행 준비가 끝나지 않았습니다|모터 설정과 조인트 매핑을 저장/.test(reason)
-        ? '제외됨 · 모터 설정 없음(재생할 모터가 없는 PC)' : `제외됨 · ${shortReason(reason)}`;
+        ? '제외됨 (재생할 모터 없음)' : `제외됨 (${shortReason(reason)})`;
       detail = reason;
       tone = 'warn';
     }
@@ -387,7 +387,7 @@ export function axisRows(snap, mapping) {
       motorType: String(row.motor_type || plan.motor_type || motor.motor_type || '') === 'dynamixel' ? 'DXL' : 'AC',
       range: lower === null || upper === null ? '-' : `${signedDeg(lower)} ~ ${signedDeg(upper)}°`,
       now: signedDeg(deg(motor.motion_actual_rad), 2),
-      clamped: plan.motion_clamped === true ? '잘라서 재생' : plan.motion_id ? '없음' : '-',
+      clamped: plan.motion_clamped === true ? '범위 안으로 제한' : plan.motion_id ? '없음' : '-',
       muted,
       state,
       tone,

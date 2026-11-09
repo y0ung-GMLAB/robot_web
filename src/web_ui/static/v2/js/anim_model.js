@@ -119,10 +119,10 @@ export function graphSeriesView(analysis, expanded = false) {
   const extra = Array.isArray(analysis?.graph_series_extra) ? analysis.graph_series_extra : [];
   const total = Math.max(Number(analysis?.graph_series_total) || 0, shown.length + extra.length);
   if (total <= shown.length) return { series: shown, note: '', toggle: '' };
-  if (!extra.length) return { series: shown, note: `${total} 개 중 ${shown.length} 개`, toggle: '' };
+  if (!extra.length) return { series: shown, note: `${total}개 중 ${shown.length}개`, toggle: '' };
   return expanded
-    ? { series: [...shown, ...extra], note: `${total} 개 모두`, toggle: '접기' }
-    : { series: shown, note: `${total} 개 중 ${shown.length} 개`, toggle: '나머지 보기' };
+    ? { series: [...shown, ...extra], note: `${total}개 모두`, toggle: '접기' }
+    : { series: shown, note: `${total}개 중 ${shown.length}개`, toggle: '나머지 보기' };
 }
 
 /**

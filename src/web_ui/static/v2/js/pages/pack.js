@@ -4,6 +4,7 @@
  * 팩의 조인트 값은 기본값일 뿐 · 실제 값은 이 PC 조인트 매핑이 정한다(여기서는 비교만).
  */
 import { h, dot } from '../dom.js';
+import { tip } from '../tip.js';
 import { api } from '../net.js';
 import { confirmBox, toast } from '../dialog.js';
 import { filesFromDrop, zipFiles } from '../zip_store.js';
@@ -38,16 +39,16 @@ async function upload(blob, label) {
   const { state, changed } = current;
   const limit = Number(state.packPage?.pack?.limits?.max_zip_bytes || 52428800);
   if (blob.size > limit) {
-    toast(`팩이 너무 큽니다 · ${(blob.size / 1e6).toFixed(1)} MB (최대 ${(limit / 1e6).toFixed(0)} MB)`, 'bad');
+    toast(`팩이 너무 큽니다 (${(blob.size / 1e6).toFixed(1)} MB, 최대 ${(limit / 1e6).toFixed(0)} MB)`, 'bad');
     return;
   }
   if (ui.busy) return;
-  ui.busy = `검사 중 · ${label} (${(blob.size / 1e6).toFixed(1)} MB) · 모델 불러오기 검사까지 수십 초 걸릴 수 있습니다`;
+  ui.busy = `${label} (${(blob.size / 1e6).toFixed(1)} MB) 검사 중 (수십 초 걸릴 수 있음)`;
   ui.result = null;
   changed();
   try {
     const result = await api('PUT', '/api/robot-pack', { raw: blob, contentType: 'application/zip', timeoutMs: 240000 });
-    ui.result = { ok: true, message: result?.message || '로봇 팩을 바꿨습니다', items: (result?.warnings || []).map((w) => `경고 · ${w}`) };
+    ui.result = { ok: true, message: result?.message || '로봇 팩을 교체했습니다', items: (result?.warnings || []).map((w) => `경고 · ${w}`) };
   } catch (error) {
     ui.result = { ok: false, message: error.message || String(error), items: [...(error.data?.errors || []), ...(error.data?.warnings || []).map((w) => `경고 · ${w}`)] };
   } finally {
@@ -58,7 +59,7 @@ async function upload(blob, label) {
 
 async function uploadFolder(items, label) {
   try {
-    ui.busy = `압축하는 중 · ${label}`;
+    ui.busy = `${label} 압축 중`;
     current.changed();
     const blob = await zipFiles(items);
     ui.busy = '';
@@ -84,7 +85,7 @@ function onDrag(event) {
   } else if (file && /\.zip$/i.test(file.name)) {
     upload(file, file.name);
   } else {
-    toast('로봇 팩은 .zip 파일이나 팩 폴더를 끌어다 놓으세요', 'warn');
+    toast('로봇 팩은 .zip 파일이나 팩 폴더만 놓을 수 있습니다', 'warn');
   }
 }
 ['dragenter', 'dragover', 'dragleave', 'drop'].forEach((kind) => document.addEventListener(kind, onDrag));
@@ -104,7 +105,7 @@ function packCard(state, changed) {
       uploadFolder(items, `${items[0].path.split('/')[0]}/`);
     } });
   const rollback = async () => {
-    const ok = await confirmBox({ title: '이전 팩으로 되돌리기', body: `이전 로봇 팩(${previous?.name || ''} ${previous?.version || ''})으로 되돌립니다. 현재 팩은 이전 팩으로 보관됩니다.\n애니메이션 3D 계산을 다시 해야 합니다.`, confirmLabel: '되돌리기', tone: 'warning' });
+    const ok = await confirmBox({ title: '이전 팩으로 되돌리기', body: `이전 로봇 팩(${previous?.name || ''} ${previous?.version || ''})으로 되돌립니다.\n애니메이션 3D 계산을 다시 해야 합니다.\n현재 팩은 이전 팩으로 보관합니다.`, confirmLabel: '되돌리기', tone: 'warning' });
     if (!ok) return;
     ui.busy = '되돌리는 중';
     changed();
@@ -122,11 +123,10 @@ function packCard(state, changed) {
         h('span', { class: 'muted small', text: ` · ${when(pack.uploaded_at)} 업로드` })),
       h('p', { class: 'muted small', text: `Blender 장면 ${blender.available ? `있음${(blender.animations || []).length ? ` (${blender.animations.join(', ')})` : ''}` : '없음'}` }),
       (pack.warnings || []).length ? h('ul', { class: 'list small' }, pack.warnings.map((w) => h('li', { class: 'tone-text-warn', text: `경고 · ${w}` }))) : null,
-    ] : h('p', { class: 'muted', text: '로봇 팩이 없습니다. 3D 보기와 3D 계산을 사용할 수 없습니다.' }),
+    ] : h('p', { class: 'muted', text: '로봇 팩이 없어 3D 동시 재생과 3D 계산을 할 수 없습니다' }),
     previous ? h('div', { class: 'row' }, h('button', { class: 'btn', type: 'button', disabled: Boolean(ui.busy), onclick: rollback }, `이전 팩(${previous.version || previous.name})으로 되돌리기`)) : null,
     h('div', { class: 'drop-zone' },
-      h('strong', { text: '새 팩 업로드' }),
-      h('span', { class: 'muted small', text: 'zip 파일이나 팩 폴더를 이 화면에 끌어다 놓으세요. 폴더는 브라우저에서 압축해 업로드합니다.' }),
+      h('strong', {}, '새 팩 업로드', tip(['zip 파일이나 팩 폴더를 화면에 끌어다 놓아도 업로드 가능', '폴더는 브라우저에서 zip으로 압축한 뒤 업로드'], '새 팩 업로드 설명')),
       h('div', { class: 'row' },
         h('button', { class: 'btn btn-primary', type: 'button', disabled: Boolean(ui.busy), onclick: () => zipPicker.click() }, 'zip 파일 선택'),
         h('button', { class: 'btn', type: 'button', disabled: Boolean(ui.busy), onclick: () => dirPicker.click() }, '폴더 선택'),
@@ -142,8 +142,9 @@ function diffCard(state) {
   const rows = (diff?.rows || []).filter((row) => (row.differences || []).length);
   const fmtRange = (range) => (Array.isArray(range) ? `${Number(range[0]).toFixed(1)} ~ ${Number(range[1]).toFixed(1)}°` : '-');
   return h('section', { class: 'card', 'aria-label': '매핑과 다른 항목' },
-    h('div', { class: 'card-head' }, h('h2', { text: `조인트 매핑과 다른 항목 · ${rows.length}` }), h('a', { href: '#/mapping', text: '조인트 매핑' })),
-    h('p', { class: 'muted small', text: '팩의 값은 기본값이고, 실제 값은 조인트 매핑을 따릅니다. 값이 다르면 의도적으로 바꾼 것인지 확인하세요.' }),
+    h('div', { class: 'card-head' },
+      h('h2', {}, `조인트 매핑과 다른 항목 · ${rows.length}`, tip(['로봇 팩 값은 기본값이고, 실제로 적용되는 값은 조인트 매핑 값', '값이 다르면 의도한 변경인지 확인'], '다른 항목 설명')),
+      h('a', { href: '#/mapping', text: '조인트 매핑' })),
     !diff || diff.available === false ? h('p', { class: 'muted', text: diff?.message || '비교할 팩이나 매핑이 없습니다' })
       : rows.length ? h('div', { class: 'table-wrap' }, h('table', { class: 'table' },
         h('thead', {}, h('tr', {}, ['조인트', '다른 항목', '팩', '매핑'].map((text) => h('th', { scope: 'col', text })))),
@@ -155,7 +156,7 @@ function diffCard(state) {
         : h('p', { class: 'muted', text: '다른 항목 없음' }));
 }
 
-const SCENE_TEXT = { ready: ['준비됨', 'ok'], computing: ['만드는 중', 'info'], failed: ['실패', 'bad'], missing: ['아직 없음', 'idle'], unavailable: ['팩 없음', 'idle'] };
+const SCENE_TEXT = { ready: ['준비됨', 'ok'], computing: ['생성 중', 'info'], failed: ['실패', 'bad'], missing: ['아직 없음', 'idle'], unavailable: ['팩 없음', 'idle'] };
 
 function sceneCard(state, changed) {
   const page = state.packPage || {};
@@ -169,19 +170,20 @@ function sceneCard(state, changed) {
   const rebuild = async () => {
     try {
       const result = await api('POST', '/api/preview/scene/export');
-      toast(result?.message || '3D 장면을 다시 만듭니다. 몇 초 걸립니다.', 'ok');
+      toast(result?.message || '3D 장면을 다시 만듭니다', 'ok');
     } catch (error) { toast(error.message || String(error), 'bad'); }
     await loadPack(state, changed);
   };
   return h('section', { class: 'card', 'aria-label': '3D' },
     h('div', { class: 'card-head' }, h('h2', { text: '3D' })),
-    h('div', { class: 'list-row' }, h('span', { class: 'grow', text: '3D 장면' }), h('span', { class: `chip chip-${tone}`, text: text }),
+    h('div', { class: 'list-row' }, h('span', { class: 'grow' }, '3D 장면', tip(['로봇 팩을 교체한 뒤 3D 화면을 처음 열 때 자동 생성 (몇 초 걸림)'], '3D 장면 설명')), h('span', { class: `chip chip-${tone}`, text: text }),
       h('button', { class: 'btn btn-mini', type: 'button', disabled: scene.state === 'computing' || scene.state === 'unavailable', onclick: rebuild }, '다시 만들기')),
-    scene.message ? h('p', { class: 'muted small', text: scene.message }) : h('p', { class: 'muted small', text: '팩을 바꾸면 처음 볼 때 자동으로 다시 만듭니다(몇 초)' }),
-    h('div', { class: 'list-row' }, h('span', { class: 'grow', text: `애니메이션 3D 계산 · ${(page.files || []).length}` }),
+    // 자리는 늘 둔다(레이아웃 고정)
+    h('p', { class: 'muted small msg-slot', text: scene.message || '' }),
+    h('div', { class: 'list-row' }, h('span', { class: 'grow' }, `애니메이션 3D 계산 · ${(page.files || []).length}`,
+      tip(['3D 계산은 별도로 실행되어 프로그램을 다시 시작해도 계속 진행'], '3D 계산 설명')),
       h('span', { class: 'muted small', text: Object.entries(counts).map(([k, v]) => `${k} ${v}`).join(' · ') || '-' }),
-      h('a', { href: '#/animations', text: '애니메이션에서 보기 ›' })),
-    h('p', { class: 'muted small', text: '계산은 프로그램과 별도로 실행되므로, 프로그램을 다시 시작해도 계속됩니다.' }));
+      h('a', { href: '#/animations', text: '애니메이션에서 보기 ›' })));
 }
 
 export function renderPack(state, { changed }) {
@@ -189,7 +191,7 @@ export function renderPack(state, { changed }) {
   return [
     h('div', { class: 'page-head' },
       h('h1', { text: '로봇 팩·3D' }),
-      h('p', { class: 'muted small', text: '로봇 모양(MuJoCo 모델 · 메쉬) · 조인트 기본값 · Blender 장면' })),
+      tip(['로봇 팩 구성: 로봇 모델(MuJoCo 모델, 메쉬), 조인트 기본값, Blender 장면'], '로봇 팩 설명')),
     h('div', { class: 'grid-2' }, packCard(state, changed), h('div', { class: 'stack' }, sceneCard(state, changed), diffCard(state))),
   ];
 }

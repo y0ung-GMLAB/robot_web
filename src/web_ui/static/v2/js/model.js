@@ -10,9 +10,16 @@ export const RUN_MODE_LABEL = { schedule: '스케줄', manual: '수동', off: '�
 
 /** 운전 모드 뜻 = 누가 시작하나 · 위 막대 버튼 설명 · 수정 목록 122 (사용자 결정 2026-10-13) */
 export const RUN_MODE_HINT = {
-  schedule: '스케줄 · 정한 시간에 맞춰 저절로 시작하고 정지합니다. 스케줄이 켜는 그룹 재생에는 스케줄 모드 PC만 들어갑니다.',
-  manual: '수동 · 사람이 시작합니다. 단독 재생과 그룹 재생 모두 됩니다. 사람이 누른 그룹 재생에는 수동 모드 PC도 들어갑니다.',
-  off: '끔 · 움직이지 않습니다. 그룹 재생에서도 빠집니다. 서보는 켠 채 제자리를 유지합니다.',
+  schedule: '스케줄\n운영 시간에 맞춰 자동으로 시작하고 정지\n스케줄로 시작한 그룹 재생에는 스케줄 모드 PC만 참여',
+  manual: '수동\n사람이 직접 시작 (단독 재생, 그룹 재생 모두 가능)\n직접 시작한 그룹 재생에는 수동 모드 PC도 참여',
+  off: '끔\n움직이지 않으며 그룹 재생에서도 제외\n서보 토크는 유지',
+};
+
+/** 운전 모드 전환 확인 창 본문 · 위 막대(actions.js)와 PC 현황(store.js)이 같은 글을 쓴다 · 2026-11-09 */
+export const RUN_MODE_EFFECT = {
+  schedule: '운영 시간에 맞춰 재생을 자동으로 시작하고 정지합니다.\n지금이 운영 시간이면 곧 재생을 시작합니다.',
+  manual: '스케줄이 재생을 시작하거나 정지하지 않습니다.\n직접 시작한 재생은 운영 시간이 지나도 계속됩니다.',
+  off: '모든 움직임 명령을 차단합니다.\n진행 중인 재생은 이번 회차가 끝나면 정지합니다.\n서보 토크는 유지됩니다.',
 };
 
 const RUNNING_STATES = new Set(['running', 'verifying', 'waiting']);
@@ -81,8 +88,8 @@ export function bootParamsNotice(snap) {
   const boot = snap?.boot_params;
   if (!boot || boot.state !== 'stale') return null;
   return {
-    title: String(boot.message || '설정 적용 필요 · 지금 드라이브는 옛 부팅 값'),
-    detail: `${boot.detail ? `${boot.detail} · ` : ''}「장비에 적용」 을 누르면 새 값으로 모터 프로그램을 다시 켭니다.`,
+    title: String(boot.message || '드라이브가 이전 부팅 값으로 동작 중입니다'),
+    detail: `${boot.detail ? `${boot.detail} ` : ''}「장비에 적용」을 누르면 새 값이 반영됩니다.`,
   };
 }
 
@@ -102,7 +109,7 @@ export function referenceRedoView(snap) {
   if (!axes.length) return null;
   return {
     axes,
-    title: String(info.prompt || `다회전 클리어한 ${axes.map((a) => `${a}번`).join(' · ')} 모터 · 몸을 정면·수평에 맞추고 기준점을 다시 지정해 저장하세요`),
+    title: String(info.prompt || `${axes.map((a) => `${a}번`).join(', ')} 모터를 다회전 클리어했습니다. 로봇을 정면·수평 자세로 맞추고 기준점을 다시 지정해 저장하세요.`),
     detail: String(info.message || ''),
     target: `manual?axis=${axes[0]}`,
     label: '기준점 지정 열기',
@@ -166,7 +173,7 @@ export function memoryNotice(memory) {
   const reasons = Array.isArray(memory.reasons) ? memory.reasons.filter(Boolean) : [];
   return {
     title: `메모리 부족 · 스왑 ${swap} MB`,
-    detail: `${reasons.join(' · ') || `남은 메모리 ${free} MB`} · 재생이 끊기거나 웹이 늦어질 수 있습니다. 이 PC 의 브라우저 탭(특히 3D 보기)을 닫고, 그래도 그대로면 재생이 없을 때 프로그램을 다시 시작하세요.`,
+    detail: `${reasons.join(' · ') || `남은 메모리 ${free} MB`}. 재생이 끊길 수 있으니 현재 PC에서 열어 둔 브라우저 탭(특히 3D 화면)을 닫거나, 재생하지 않을 때 프로그램을 다시 시작하세요.`,
   };
 }
 
@@ -185,13 +192,13 @@ export function collectIssues(snap, sched, { connected = true } = {}) {
   const bad = (title, detail = '', action = null) => issues.push({ tone: 'bad', title, detail, action });
   const warn = (title, detail = '', action = null) => issues.push({ tone: 'warn', title, detail, action });
   if (!connected) {
-    bad('서버와 연결이 끊겼습니다', '프로그램이 다시 시작되는 중일 수 있습니다. 잠시 후 자동으로 다시 연결됩니다.');
+    bad('서버와 연결이 끊겼습니다', '프로그램이 다시 시작되는 중이면 잠시 후 자동으로 연결됩니다.');
     return issues;
   }
   if (!snap) return issues;
   const safety = snap.safety_status || {};
   if (safety.emergency_latched) {
-    bad('긴급 정지 상태입니다', '모든 모터 명령이 차단되었습니다. 프로그램을 다시 시작해야 해제됩니다.',
+    bad('긴급 정지 상태입니다', '모든 모터 명령이 차단되었습니다. 프로그램을 다시 시작하면 해제됩니다.',
       { kind: 'restart-program', label: '프로그램 다시 시작' });
   }
   const watchdog = String(snap.supervisor_watchdog?.message || '');
@@ -204,20 +211,20 @@ export function collectIssues(snap, sched, { connected = true } = {}) {
   // 다회전 클리어 뒤 기준점 다시 지정 전 · 재생·초기 이동·스케줄·그룹 참가 막힘 · 수동 조그는 됨 · 수정 목록 140
   // 웹을 다시 켜거나 페이지를 닫아도 PC 단위 표시가 남아 여기 남는다 · 버튼은 그 축 기준점 지정 화면
   const redo = referenceRedoView(snap);
-  if (redo) bad(redo.title, `${redo.detail} · 그 전까지 재생·초기 위치 이동·스케줄·그룹 참가가 막힙니다(수동 조작은 됩니다)`, { kind: 'open', target: redo.target, label: redo.label });
+  if (redo) bad(redo.title, [redo.detail, '기준점을 다시 지정하기 전까지 재생, 스케줄, 그룹 참여가 차단됩니다. 수동 조작은 가능합니다.'].filter(Boolean).join(' '), { kind: 'open', target: redo.target, label: redo.label });
   // OP 로 못 올라가고 멈춘 드라이브 · 시작 스크립트의 오류 플래그 해제로도 안 풀림 · 글은 서버 · 수정 목록 125
   for (const slave of stuckSlaves(snap)) {
-    bad(slave.message, '모터 프로그램이 이 드라이브 설정을 마치지 못했습니다. 제어 전원을 껐다 켜면 다시 설정합니다. 그래도 그대로면 모터 프로그램을 다시 시작하세요.');
+    bad(slave.message, '모터 프로그램이 해당 드라이브 설정을 마치지 못했습니다. 드라이브 제어 전원을 껐다 켜고, 그래도 같으면 모터 프로그램을 다시 시작하세요.');
   }
   // 메일박스(SDO)만 멈춘 드라이브 · 재생 · PDO 는 그대로 · 제어 전원 재투입으로만 풀린다 · 글은 서버 · 수정 목록 139 ③
   for (const box of stuckMailboxes(snap)) {
-    bad(box.message, '이 드라이브가 설정 읽기·쓰기(SDO)에 답하지 않습니다. 재생과 위치 명령은 그대로 됩니다. 앱솔루트 설정·게인 읽기 같은 설정 작업은 안 됩니다. 이 드라이브 읽기는 쉬고 30초마다 한 번만 확인합니다.');
+    bad(box.message, '해당 드라이브가 설정 읽기·쓰기(SDO)에 응답하지 않습니다. 재생은 정상이지만 앱솔루트 설정과 게인 읽기는 할 수 없습니다.');
   }
   // 자동조정 꺼짐(Pr0.02 = 0)은 알리지 않는다 · 일부러 끄고 쓰는 값 · 사용자 2026-11-04 (108 (나) 알림 뺌)
   // 조인트 범위 미확인 · 재생·초기 이동·수동 조작이 막혀 있다 · 판정은 서버 · 수정 목록 97
   const range = String(snap.mapping_range_blocker || '');
   if (range) {
-    bad('조인트 범위가 확인되지 않아 재생과 수동 조작이 차단되어 있습니다', range,
+    bad('조인트 범위를 확인하지 않아 재생과 수동 조작이 차단되어 있습니다', range,
       { kind: 'open', target: 'mapping', label: '조인트 매핑 열기' });
   }
   // 지금 도는 모터 프로그램의 부팅 값이 지금 설정과 다르다 · 업데이트만 하고 적용 안 한 PC · 수정 목록 116
@@ -225,7 +232,7 @@ export function collectIssues(snap, sched, { connected = true } = {}) {
   if (boot) warn(boot.title, boot.detail, { kind: 'apply-motor-config', label: '장비에 적용' });
   // 조그 · 목표 이동을 끝내며 supervisor 가 남긴 알림 · 목표 근처 출렁임 등 · 5 분 · 실물 R-11
   for (const notice of manualNotices(snap)) {
-    warn(notice.message, '조작은 끝냈습니다. 다음 조작은 됩니다.', { kind: 'open', target: 'motors', label: '모터 설정 열기' });
+    warn(notice.message, '해당 조작은 끝났으며 다음 조작에는 영향이 없습니다.', { kind: 'open', target: 'motors', label: '모터 설정 열기' });
   }
   const motors = Array.isArray(snap.motion_state?.motors) ? snap.motion_state.motors : [];
   const faulted = motors.filter((m) => m && m.fault);
@@ -236,7 +243,7 @@ export function collectIssues(snap, sched, { connected = true } = {}) {
   }
   const run = snap.motion_run_status || {};
   if (String(run.state || '') === 'error') {
-    bad('재생이 오류로 멈췄습니다', String(run.message || ''));
+    bad('재생이 오류로 정지했습니다', String(run.message || ''));
   }
   const group = snap.coordination?.runtime?.coordination_error || {};
   if (group.active) {
@@ -257,8 +264,8 @@ export function collectIssues(snap, sched, { connected = true } = {}) {
   if (failCount > 0) {
     // 준비 대기(부팅 직후 앱솔루트 확인 등)는 거부가 아니다 · 같은 횟수 기준으로 색만 · 수정 목록 124
     const entry = failure.deferred
-      ? [`스케줄 시작 대기 중 (${failCount}회)`, `준비가 끝나면 스스로 시작합니다 · ${String(failure.message || '')}`]
-      : [`스케줄 시작 거부됨 (${failCount}회)`, String(failure.message || '거부 사유가 전달되지 않았습니다')];
+      ? [`스케줄 시작 대기 중 (${failCount}회)`, `준비가 끝나면 자동으로 시작합니다. ${String(failure.message || '')}`]
+      : [`스케줄 시작 거부됨 (${failCount}회)`, String(failure.message || '거부 사유를 받지 못했습니다')];
     if (failCount >= 3) bad(...entry); else warn(...entry);
   }
   // 메모리 부족 · 스왑 · 막지 않고 알린다 · 수정 목록 170 (NY 2026-11-03 · 스왑 1.25 GB 에서 실행기가 멈췄다)
@@ -276,16 +283,16 @@ export function collectIssues(snap, sched, { connected = true } = {}) {
   const mismatched = others.filter((pc) => pc.protocol_mismatch);
   const differing = others.filter((pc) => !pc.protocol_mismatch && pc.version_differs);
   if (mismatched.length) {
-    warn(`${mismatched.map(pcName).join(' · ')} 연동 버전이 다릅니다`, '그룹 재생에서 빠집니다. 모든 PC를 같은 버전으로 업데이트하세요.',
+    warn(`${mismatched.map(pcName).join(' · ')} 연동 버전이 다릅니다`, '그룹 재생에서 제외됩니다. 모든 PC를 업데이트하세요.',
       { kind: 'update-all', label: '모든 PC 업데이트' });
   }
   if (differing.length) {
-    warn(`${differing.map(pcName).join(' · ')} 버전이 다릅니다`, '그룹 재생은 되지만 같은 버전으로 맞추세요',
+    warn(`${differing.map(pcName).join(' · ')} 버전이 다릅니다`, '그룹 재생은 가능하지만 모든 PC를 같은 버전으로 업데이트하세요.',
       { kind: 'update-all', label: '모든 PC 업데이트' });
   }
   const offline = pcs.filter((pc) => !pc.is_local && pc.online === false);
   if (offline.length) {
-    warn(`${offline.map(pcName).join(' · ')} 연결 안 됨`, 'PC가 꺼져 있거나 Wi-Fi 연결이 끊겼을 수 있습니다');
+    warn(`${offline.map(pcName).join(' · ')} 연결 안 됨`, 'PC 전원과 Wi-Fi 연결을 확인하세요.');
   }
   return issues.sort((a, b) => (a.tone === b.tone ? 0 : a.tone === 'bad' ? -1 : 1));
 }

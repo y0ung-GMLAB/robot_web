@@ -2396,7 +2396,7 @@ class MotionWebBridge(Node):
         return multiturn_clear.block_reason(state, self._active_mapping_rows())
 
     def multiturn_clear_status(self) -> Dict[str, Any]:
-        """웹 상태 · 「확인할 일」 · 기준점 지정 화면의 「클리어 뒤 아직 안 맞춤」"""
+        """웹 상태 · 「확인할 일」 · 기준점 지정 화면의 「기준점 재지정 필요」"""
         state = self.multiturn_clear_state()
         if not state.get('axes'):
             return {'blocked_axes': [], 'pending_axes': [], 'stale_axes': [], 'message': '', 'prompt': ''}

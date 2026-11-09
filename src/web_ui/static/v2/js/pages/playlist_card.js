@@ -8,6 +8,7 @@ import {
   PLAYLIST_MAX, fileInfo, formatDuration, isRunning, playlistAdd, playlistMove, playlistRemove, registeredPlaylist, runStatus,
 } from '../play_model.js';
 import * as act from '../actions.js';
+import { tip } from '../tip.js';
 
 const ui = { busy: false, addPick: '' };
 
@@ -45,7 +46,8 @@ export function playlistCard(state, changed, { link = null, adding = true, onPic
     h('div', { class: 'card-head' },
       h('h2', { text: `재생 목록 · ${list.length}` }),
       link ? h('a', { href: link[0], text: link[1] }) : null),
-    h('p', { class: 'muted small', text: `전체 ${formatDuration(total || null)} · 순서대로 재생합니다. 연속 재생이면 마지막 애니메이션 뒤에 1번부터 다시 재생합니다. 애니메이션 사이에는 다음 애니메이션의 초기 위치로 천천히 이동합니다.` }),
+    h('p', { class: 'muted small' }, `전체 ${formatDuration(total || null)}`,
+      tip(['목록 순서대로 재생', '연속 재생 시 마지막 애니메이션 다음에 1번부터 다시 재생', '애니메이션 사이에는 다음 애니메이션의 초기 위치로 천천히 이동'], '재생 목록 설명')),
     play.error ? h('p', { class: 'tone-text-bad', text: play.error }) : null,
     list.length
       ? h('ol', { class: 'playlist' }, list.map((id, index) => {
@@ -71,5 +73,6 @@ export function playlistCard(state, changed, { link = null, adding = true, onPic
       choices.map((file) => h('option', { value: file.id, selected: file.id === ui.addPick }, `${file.name} · ${formatDuration(file.duration)}`))),
       h('button', { class: 'btn', type: 'button', disabled: locked || !ui.addPick || list.length >= PLAYLIST_MAX,
         onclick: () => save(playlistAdd(list, ui.addPick)) }, '추가')) : null,
-    running ? h('p', { class: 'muted small', text: '재생 중에는 목록을 바꿀 수 없습니다. 재생을 정지한 뒤 바꾸세요.' }) : null);
+    // 자리는 늘 둔다(레이아웃 고정)
+    h('p', { class: 'muted small msg-slot', text: running ? '재생 중에는 목록을 변경할 수 없습니다' : '' }));
 }

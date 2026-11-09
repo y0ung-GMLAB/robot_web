@@ -4,6 +4,7 @@
  * 범위 넘음은 이 PC 조인트 매핑과 비교 · 재생은 범위로 잘라서 돈다.
  */
 import { h, dot } from '../dom.js';
+import { tip } from '../tip.js';
 import { checkState, factLine, fileRows, graphSeriesView, mappedCount, mujocoState, rangeIssues, seriesGeometry } from '../anim_model.js';
 import { PLAYLIST_MAX, isRunning, playlistAdd, registeredPlaylist, runStatus, signedDeg } from '../play_model.js';
 import { loadPlay } from './play.js';
@@ -58,26 +59,26 @@ async function upload(fileList) {
     const projectId = state.play?.projectId;
     if (!projectId) throw new Error('선택된 프로젝트가 없습니다');
     for (const [index, file] of picked.entries()) {
-      ui.upload = `업로드 중 ${index + 1}/${picked.length} · ${file.name} (${(file.size / 1e6).toFixed(1)} MB) · 서버에서 검사하는 중`;
+      ui.upload = `업로드 중 ${index + 1}/${picked.length} · ${file.name} (${(file.size / 1e6).toFixed(1)} MB) · 검사 중`;
       changed();
       try {
         await act.uploadAnimation(projectId, file.name, await file.text());
         done.push(file.name);
       } catch (error) {
         // 하나 실패하면 멈춘다 · 이유(이름 겹침 · 매핑 없음 · 형식)가 다음 성공에 덮이지 않게
-        toast(`${file.name} 업로드 실패 · ${error.message || error}${done.length ? ` · 앞의 ${done.length}개는 업로드됨` : ''}`, 'bad');
+        toast(`${file.name} 업로드 실패: ${error.message || error}${done.length ? ` (앞의 ${done.length}개는 업로드 완료)` : ''}`, 'bad');
         break;
       }
     }
     if (done.length) {
-      ui.upload = `${done.length}개 업로드 완료 · 목록을 새로 고치는 중`;
+      ui.upload = `${done.length}개 업로드 완료 · 목록 갱신 중`;
       changed();
       await loadPlay(state, changed);
       const toCompute = (state.play?.files || []).filter((file) => done.includes(String(file.id)) && mujocoState(file).state === 'missing');
       for (const file of toCompute) {
         await api('POST', `/api/motion-files/${encodeURIComponent(file.id)}/preview-precompute`).catch(() => null);
       }
-      toast(`${done.length}개 업로드 완료${toCompute.length ? ` · 3D 계산 ${toCompute.length}개 시작` : ''}`, 'ok');
+      toast(`${done.length}개 업로드 완료${toCompute.length ? `, 3D 계산 ${toCompute.length}개 시작` : ''}`, 'ok');
       ui.selected = done[done.length - 1];
       ui.detail = null;
       await loadAnimations(state, changed);
@@ -114,10 +115,10 @@ function listCard(state, changed) {
     onchange: (event) => upload(event.target.files) });
   return h('section', { class: 'card', 'aria-label': '애니메이션 목록' },
     h('div', { class: 'card-head' },
-      h('h2', { text: `업로드된 애니메이션 · ${rows.length}개` }),
+      h('h2', {}, `업로드된 애니메이션 · ${rows.length}개`,
+        tip(['.json 파일을 화면에 끌어다 놓아도 업로드 가능', '업로드하면 검사와 3D 계산이 자동으로 시작'], '업로드 설명')),
       h('button', { class: 'btn btn-primary', type: 'button', disabled: Boolean(ui.busy), onclick: () => picker.click() }, '업로드'),
       picker),
-    h('p', { class: 'muted small', text: '여기에 .json 파일을 끌어다 놓아도 업로드됩니다. 업로드하면 검사 후 3D 계산을 시작합니다.' }),
     ui.upload ? h('div', { class: 'busy-line', role: 'status' }, h('span', { class: 'spinner', 'aria-hidden': 'true' }), ui.upload) : null,
     play.error ? h('p', { class: 'tone-text-bad', text: play.error }) : null,
     rows.length ? h('div', { class: 'table-wrap' }, h('table', { class: 'table files-table' },
@@ -188,7 +189,7 @@ function detailCard(state, changed, navigate) {
   const addToPlaylist = async () => {
     if (await act.savePlaylist(play.mappingId, playlistAdd(playlist, ui.selected))) {
       await loadPlay(state, changed);
-      toast('재생 목록 끝에 추가했습니다. 순서는 재생 화면에서 바꿀 수 있습니다.', 'ok');
+      toast('재생 목록 끝에 추가했습니다', 'ok');
     }
   };
   return h('section', { class: 'card detail-card', 'aria-label': '애니메이션 상세' },
@@ -197,9 +198,9 @@ function detailCard(state, changed, navigate) {
       factLine(analysis),
       ` · 조인트 ${counts.total}개 · 매핑에 있음 ${counts.mapped}개`,
       analysis.value_unit ? ` · 단위 ${analysis.value_unit}` : ''),
-    check.tone === 'bad' ? h('div', { class: 'blocker bad' }, dot('bad'), h('span', { class: 'grow', text: `${check.text} · 이 파일은 재생할 수 없습니다. Blender에서 다시 내보내세요.` })) : null,
+    check.tone === 'bad' ? h('div', { class: 'blocker bad' }, dot('bad'), h('span', { class: 'grow', text: `재생할 수 없습니다 (${check.text}). Blender에서 다시 내보내세요.` })) : null,
     issues.length ? h('div', { class: 'blocker' }, dot('warn'),
-      h('span', { class: 'grow', text: `범위 초과 조인트 ${issues.length}개 · ${issues.slice(0, 3).map((i) => `${i.id} ${signedDeg(i.min)} ~ ${signedDeg(i.max)}° (범위 ${signedDeg(i.lower)} ~ ${signedDeg(i.upper)}°)`).join(' · ')} · 범위를 넘는 값은 잘라서 재생합니다 · 고치려면 Blender에서 다시 내보내세요` })) : null,
+      h('span', { class: 'grow', text: `범위를 벗어난 조인트 ${issues.length}개: ${issues.slice(0, 3).map((i) => `${i.id} ${signedDeg(i.min)} ~ ${signedDeg(i.max)}° (범위 ${signedDeg(i.lower)} ~ ${signedDeg(i.upper)}°)`).join(', ')}. 범위 밖 값은 잘라서 재생합니다. 고치려면 Blender에서 다시 내보내세요.` })) : null,
     detail?.error ? h('p', { class: 'tone-text-bad small', text: detail.error }) : null,
     series.length
       ? h('div', { class: 'charts' }, series.map((item) => chart(item, rows.get(String(item.motion_id)))))
@@ -211,7 +212,7 @@ function detailCard(state, changed, navigate) {
     h('div', { class: 'row' },
       h('button', { class: 'btn btn-primary', type: 'button',
         disabled: running || check.tone === 'bad' || !play.mappingId || playlist.length >= PLAYLIST_MAX,
-        title: running ? '재생 중에는 목록을 바꿀 수 없습니다' : '', onclick: addToPlaylist }, inPlaylist ? '재생 목록에 한 번 더 추가' : '재생 목록에 추가'),
+        title: running ? '재생 중에는 재생 목록을 변경할 수 없습니다' : '', onclick: addToPlaylist }, inPlaylist ? '재생 목록에 한 번 더 추가' : '재생 목록에 추가'),
       ['missing', 'stale', 'failed'].includes(mujoco.state)
         ? h('button', { class: 'btn', type: 'button', onclick: async () => { await act.precompute(ui.selected); await loadPlay(state, changed); } },
           mujoco.state === 'missing' ? '3D 계산 시작' : '3D 다시 계산')
@@ -219,7 +220,7 @@ function detailCard(state, changed, navigate) {
       downloadUrl ? h('a', { class: 'btn', href: downloadUrl, download: ui.selected }, '다운로드') : null,
       h('span', { class: 'spacer' }),
       h('button', { class: 'btn', type: 'button', disabled: inPlaylist || running,
-        title: inPlaylist ? '재생 목록에 들어 있습니다. 먼저 재생 목록에서 빼세요.' : '',
+        title: inPlaylist ? '재생 목록에 있는 애니메이션은 삭제할 수 없습니다' : '',
         onclick: async () => {
           if (await act.deleteAnimation(ui.selected)) {
             ui.selected = '';
@@ -227,7 +228,8 @@ function detailCard(state, changed, navigate) {
             await loadAnimations(state, changed);
           }
         } }, '삭제')),
-    inPlaylist ? h('p', { class: 'muted small', text: '재생 목록에 들어 있어 삭제할 수 없습니다. 먼저 재생 목록에서 빼세요.' }) : null);
+    // 자리는 늘 둔다(레이아웃 고정)
+    h('p', { class: 'muted small msg-slot', text: inPlaylist ? '재생 목록에 들어 있어 삭제할 수 없습니다. 재생 목록에서 먼저 제외하세요.' : '' }));
 }
 
 export function renderAnimations(state, { navigate, changed }) {

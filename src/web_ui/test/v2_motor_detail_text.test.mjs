@@ -14,7 +14,7 @@ test('내부 ID 는 카드 머리에 없고 「원본」 안에', () => {
   const head = source.slice(source.indexOf("h('div', { class: 'card-head' }, h('h2', { text: `${row.axis}번 · ${row.name"));
   assert.doesNotMatch(head.split('\n')[0], /row\.id/);
   const raw = source.slice(source.indexOf("'원본 (드라이브 정보)'"));
-  assert.match(raw.split('\n').slice(0, 3).join('\n'), /내부 ID · .*text: row\.id/);
+  assert.match(raw.split('\n').slice(0, 3).join('\n'), /내부 ID: .*text: row\.id/);
 });
 
 test('「운영 시간이 끝나면 서보 끄기」 · 안 적었으면 켬으로 보인다 · 서버 기본과 같게', () => {

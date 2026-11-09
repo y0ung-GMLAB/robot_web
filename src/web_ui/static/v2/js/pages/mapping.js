@@ -17,9 +17,11 @@ import { signedDeg } from '../play_model.js';
 import { motorsDraft } from './motors.js';
 import { threeWayMerge } from '../merge_model.js';
 import { confirmConflicts } from '../conflict_dialog.js';
+import { tip } from '../tip.js';
 
 /** 「범위 확인」 칸 안내 · 칸 옆 글씨 없이 마우스를 올리면만 (사용자 2026-10-14 · 「노란 글씨조차 없애자 · 툴팁처럼」) */
-export const RANGE_HINT = '최소·최대가 실제 기계 범위인지 확인한 뒤 직접 체크 · 숫자 입력만으로는 안 켜짐 · 저장 전에는 재생·수동 조작 막힘';
+export const RANGE_LINES = ['최소 · 최대 값이 실제 기계 범위와 맞는지 확인한 뒤 직접 체크', '숫자만 입력해서는 체크되지 않음', '체크 후 저장하기 전까지 재생과 수동 조작 차단'];
+export const RANGE_HINT = RANGE_LINES.join('\n');
 
 const ui = { fileId: '', revision: '', name: '', saved: [], rows: null, selected: '', validation: null, busy: '', loadError: '', content: '' };
 let keySeq = 0;
@@ -98,7 +100,7 @@ export async function saveMapping(state, changed, { retried = false } = {}) {
     const checked = await api('POST', '/api/motion-mappings/validate', { body: payload() }).catch((error) => ({ success: false, message: error.message, validation: error.data?.validation }));
     if (checked?.validation) ui.validation = checked.validation;
     if (checked?.success === false && checked?.validation?.valid === false) {
-      toast(`조인트 매핑 검사 실패 · ${(checked.validation.errors || [])[0] || checked.message}`, 'bad');
+      toast(`조인트 매핑 검사 실패: ${(checked.validation.errors || [])[0] || checked.message}`, 'bad');
       return null;
     }
     const result = await api('POST', '/api/motion-mappings', { body: payload(), timeoutMs: 20000 });
@@ -189,7 +191,14 @@ function table(state, changed) {
     ];
   };
   return h('div', { class: 'table-wrap' }, h('table', { class: 'table mapping-table' },
-    h('thead', {}, h('tr', {}, ['사용', '조인트', '모터', '감속·기어비', '방향 반전', '기준점 (모터°)', '범위 (조인트°)', '범위 확인', '최대 속도 · 가속', 'X-Touch 페이더', '초기 위치', '상태', ''].map((text) => h('th', { scope: 'col', text })))),
+    h('thead', {}, h('tr', {},
+      ['사용', '조인트', '모터'].map((text) => h('th', { scope: 'col', text })),
+      h('th', { scope: 'col' }, '감속·기어비', tip(['모터 = 기준점 + 조인트 × 감속·기어비 × 방향', '링크 비율이 있으면 함께 곱해서 입력'], '감속·기어비 설명')),
+      ['방향 반전', '기준점 (모터°)', '범위 (조인트°)'].map((text) => h('th', { scope: 'col', text })),
+      h('th', { scope: 'col' }, '범위 확인', tip(RANGE_LINES, '범위 확인 설명')),
+      h('th', { scope: 'col', text: '최대 속도 · 가속' }),
+      h('th', { scope: 'col' }, 'X-Touch 페이더', tip(['X-Touch 화면에서 해당 조인트를 조종하고 녹화할 페이더 번호', '최대 속도와 최대 가속이 입력되어 있어야 사용 가능'], 'X-Touch 페이더 설명')),
+      ['초기 위치', '상태', ''].map((text) => h('th', { scope: 'col', text })))),
     h('tbody', {}, ui.rows.map((row, index) => {
       const status = rowStatus(row);
       const motor = motorForRow(row, motors);
@@ -216,15 +225,15 @@ function table(state, changed) {
         numberInput(row, 'reference_position_deg', changed, { label: '기준점 모터 deg' }),
         // 다회전 클리어 뒤 아직 다시 지정 안 한 축 · 수정 목록 140
         (state.snap?.multiturn_clear?.blocked_axes || []).map(Number).includes(Number(row.motor_axis))
-          ? h('span', { class: 'chip chip-warn', title: String(state.snap.multiturn_clear.prompt || ''), text: '클리어 뒤 아직 안 맞춤' }) : null,
+          ? h('span', { class: 'chip chip-warn', title: String(state.snap.multiturn_clear.prompt || ''), text: '기준점 재지정 필요' }) : null,
         h('button', { class: 'btn btn-mini', type: 'button', disabled: !canCapture || !motor || motor.positionDeg === null,
           // 막힌 이유를 그대로 · 전에는 늘 「장비에 적용」 이라고만 해서 모터를 못 찾은 경우와 갈리지 않았다 (2026-10-12)
           title: !canCapture ? (motorsDraft().problems[0]
-            ? `모터 설정을 저장할 수 없어 장비에 적용되지 않았습니다 · ${motorsDraft().problems[0]}`
+            ? `모터 설정을 저장할 수 없어 장비에 적용되지 않았습니다: ${motorsDraft().problems[0]}`
             : '모터 설정이 아직 장비에 적용되지 않았습니다. 「저장 후 장비에 적용」을 먼저 하세요.')
-            : !motor ? '이 줄에 연결된 모터를 찾지 못했습니다. 「모터」 칸을 확인하세요.'
-              : motor.positionDeg === null ? '이 모터의 현재 위치를 아직 받지 못했습니다.'
-                : '현재 모터 위치를 기준점(조인트 0°)으로 설정합니다. 저장해야 반영됩니다.',
+            : !motor ? '해당 줄에 지정된 모터를 찾지 못했습니다. 「모터」 칸을 확인하세요.'
+              : motor.positionDeg === null ? '해당 모터의 현재 위치를 아직 받지 못했습니다.'
+                : '현재 모터 위치를 기준점(조인트 0°)으로 지정 (저장해야 반영)',
           // reference_captured · 값이 그대로여도 「지금 지정함」 · 저장하면 서버가 지정 시각을 적는다 · 수정 목록 140
           onclick: () => { row.reference_position_deg = Math.round(motor.positionDeg * 1e4) / 1e4; row.reference_enabled = true; row.reference_captured = true; changed(); } }, '캡처'))),
       h('td', {}, h('div', { class: 'cell-row' },
@@ -240,7 +249,6 @@ function table(state, changed) {
         numberInput(row, 'max_acceleration_deg_s2', changed, { label: '최대 가속 deg/s²', placeholder: '없음' }))),
       // X-Touch 페이더 번호 · 수정 목록 156 · 조종·녹화는 최대 속도·가속도가 있어야 한다
       h('td', {}, h('select', { class: 'select select-sm', 'aria-label': `${index + 1}번 줄 X-Touch 페이더`,
-        title: 'X-Touch 페이더 번호 · X-Touch 화면에서 이 조인트를 그 페이더로 움직이고 녹화합니다 · 최대 속도·가속도가 있어야 합니다',
         onchange: (e) => { row.xtouch_fader = e.target.value === '' ? null : Number(e.target.value); changed(); } },
         h('option', { value: '', selected: row.xtouch_fader === null || row.xtouch_fader === undefined }, '없음'),
         [1, 2, 3, 4, 5, 6, 7, 8].map((n) => h('option', { value: String(n), selected: row.xtouch_fader === n }, String(n))))),
@@ -268,8 +276,8 @@ function previewCard() {
   return h('section', { class: 'card', 'aria-label': '미리보기' },
     h('div', { class: 'card-head' }, h('h2', { text: `${row.motion_id || '(이름 없음)'} · 미리보기` })),
     h('p', { class: 'mono' }, `조인트 +1° → 모터 ${signedDeg(view.perDegree, 2)}°${row.invert ? ' (반대)' : ''}`),
-    h('p', { class: 'mono' }, `범위 ${signedDeg(Number(row.motion_lower_deg))} ~ ${signedDeg(Number(row.motion_upper_deg))}° → 모터 한계 ${signedDeg(view.motorMin)} ~ ${signedDeg(view.motorMax)}°`),
-    h('p', { class: 'muted small', text: '저장한 뒤 장비에 적용하면 드라이브 소프트 리밋으로 설정됩니다' }),
+    h('p', { class: 'mono' }, `범위 ${signedDeg(Number(row.motion_lower_deg))} ~ ${signedDeg(Number(row.motion_upper_deg))}° → 모터 한계 ${signedDeg(view.motorMin)} ~ ${signedDeg(view.motorMax)}°`,
+      tip(['장비에 적용하면 드라이브 소프트 리밋으로 설정됨'], '모터 한계 설명')),
     validation ? h('div', { class: 'field' },
       h('span', { class: 'field-label', text: '검사' }),
       (validation.errors || []).length
@@ -284,12 +292,12 @@ function previewCard() {
  * 줄은 지금 돌고 있는 모터 프로그램이 알려 준 모터로 만든다(고유 이름이 실제 드라이브와 맞게) · 그래서 모터 프로그램이 돌아야 한다
  */
 export function autoBuildReason(state, motorCount) {
-  if (motorCount > 0) return `지금 인식된 모터 ${motorCount}대마다 한 줄씩 만듭니다(이미 줄이 있는 모터는 건너뜀)`;
+  if (motorCount > 0) return `인식된 모터 ${motorCount}대에 한 줄씩 추가 (이미 줄이 있는 모터는 제외)`;
   const scope = state.snap?.project_scope || {};
   if (!scope.runtime_matches_selected) {
-    return '인식된 모터가 없습니다 · 모터 프로그램이 이 프로젝트 설정으로 돌고 있지 않습니다. ② 모터·드라이브에서 「저장 후 장비에 적용」을 먼저 누르세요(조인트 없이도 됩니다).';
+    return '인식된 모터가 없습니다. 현재 프로젝트 설정이 장비에 적용되지 않았습니다. 「저장 후 장비에 적용」을 먼저 누르세요(조인트가 없어도 적용 가능).';
   }
-  return '인식된 모터가 없습니다 · 모터 프로그램이 모터 상태를 아직 보내지 않았습니다. 잠시 기다리거나 ② 모터·드라이브에서 통신 상태를 확인하세요.';
+  return '인식된 모터가 없습니다. 모터 상태를 아직 받지 못했습니다. 잠시 기다리거나 ② 모터·드라이브에서 통신 상태를 확인하세요.';
 }
 
 /** ① 구획 머리 오른쪽 · 모터로 자동 생성 · 조인트 더하기 */
@@ -304,7 +312,7 @@ export function mappingActions(state, changed) {
       ui.rows.push({ ...newRow(motor.axis, ''), motor_ref: motor.ref, _key: `k${keySeq += 1}` });
       added += 1;
     }
-    toast(added ? `매핑 줄 ${added}개를 추가했습니다(모터마다 한 줄). 조인트 이름(Blender 본 이름)을 입력하세요.` : '모든 모터에 이미 매핑 줄이 있습니다', added ? 'ok' : 'warn');
+    toast(added ? `매핑 줄 ${added}개를 추가했습니다. 조인트 이름(Blender 본 이름)을 입력하세요.` : '모든 모터에 이미 매핑 줄이 있습니다', added ? 'ok' : 'warn');
     changed();
   };
   return [
@@ -319,9 +327,9 @@ export function mappingActions(state, changed) {
   ];
 }
 
-/** ① 구획 설명 · 공식과 파일 이름 */
+/** ① 구획 머리 아래 · 파일 이름 · 팩 비교 (공식은 제목 툴팁) */
 export function mappingNote() {
-  return h('p', { class: 'muted small' }, '애니메이션 조인트 값을 모터 값으로 바꿉니다. 모터 = 기준점 + 조인트 × 감속·기어비 × 방향 · 파일 ',
+  return h('p', { class: 'muted small' }, '파일 ',
     h('span', { class: 'mono', text: ui.fileId || '(새 파일)' }), ' · ', h('a', { href: '#/pack', text: '로봇 팩과 비교' }));
 }
 
@@ -329,11 +337,11 @@ export function mappingNote() {
 export function mappingBody(state, changed) {
   if (!ui.rows) return h('p', { class: ui.loadError ? 'tone-text-bad' : 'muted', text: ui.loadError || '불러오는 중…' });
   return [
-    ui.loadError ? h('div', { class: 'blocker' }, dot('warn'), h('span', { class: 'grow', text: `다시 불러오기 실패 · ${ui.loadError} · 수정 중인 내용은 그대로 남아 있습니다` })) : null,
+    ui.loadError ? h('div', { class: 'blocker' }, dot('warn'), h('span', { class: 'grow', text: `다시 불러오지 못했습니다: ${ui.loadError}. 수정 중인 내용은 그대로 있습니다.` })) : null,
     unconfirmedRows(ui.rows).length ? h('div', { class: 'blocker bad' }, dot('bad'),
-      h('span', { class: 'grow', text: `범위 미확인 · ${unconfirmedRows(ui.rows).map((r) => r.motion_id).join(', ')} · 「범위 확인」 체크 후 저장 · 그 전엔 재생·수동 조작 막힘`, title: RANGE_HINT })) : null,
+      h('span', { class: 'grow', text: `범위 미확인: ${unconfirmedRows(ui.rows).map((r) => r.motion_id).join(', ')}. 「범위 확인」을 체크하고 저장하기 전까지 재생과 수동 조작이 차단됩니다.`, title: RANGE_HINT })) : null,
     state.snap?.mapping_range_blocker && !unconfirmedRows(ui.rows).length && changeSummary(ui.saved, ui.rows).length
-      ? h('p', { class: 'muted small', text: '체크함 · 저장하면 풀림' }) : null,
+      ? h('p', { class: 'muted small', text: '체크됨. 저장하면 차단이 해제됩니다.' }) : null,
     h('section', { class: 'card', 'aria-label': '조인트' },
       ui.rows.length ? table(state, changed) : h('p', { class: 'muted', text: motorList(state).length
         ? '조인트가 없습니다. 「인식 모터 자동 생성」을 누르세요.'

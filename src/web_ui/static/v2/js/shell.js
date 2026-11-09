@@ -56,8 +56,8 @@ export function createShell(root, { navigate }) {
   const modeButtons = Object.entries({ schedule: '스케줄', manual: '수동', off: '끔' }).map(([mode, label]) =>
     h('button', { class: 'seg', type: 'button', 'data-mode': mode, 'aria-pressed': 'false', onclick: () => act.setRunMode(mode) }, label));
   const modeGroup = h('div', { class: 'segmented', role: 'group', 'aria-label': '운전 모드' }, modeButtons);
-  const stopButton = h('button', { class: 'btn btn-stop', type: 'button', title: '모든 움직임을 정지합니다. 서보 토크는 유지됩니다.', onclick: act.stopAll }, '정지');
-  const estopButton = h('button', { class: 'btn btn-estop', type: 'button', title: '서보를 끄고 잠급니다. 프로그램을 다시 시작해야 해제됩니다.', onclick: act.emergencyStop }, '긴급 정지');
+  const stopButton = h('button', { class: 'btn btn-stop', type: 'button', title: '모든 움직임을 정지하고 서보 토크는 유지', onclick: act.stopAll }, '정지');
+  const estopButton = h('button', { class: 'btn btn-estop', type: 'button', title: '서보를 끄고 모든 명령을 차단 (프로그램을 다시 시작하면 해제)', onclick: act.emergencyStop }, '긴급 정지');
   const drawer = h('section', { id: 'issues-drawer', class: 'issues-drawer', hidden: true, 'aria-label': '확인할 일' });
   const menuButton = h('button', { class: 'btn btn-icon menu-toggle', type: 'button', 'aria-label': '메뉴', 'aria-expanded': 'false' }, '≡');
 
@@ -81,7 +81,7 @@ export function createShell(root, { navigate }) {
       }),
     ]),
     // 기존 화면은 / 에 그대로 · 같은 서버 · 같은 설정 · 익숙한 화면으로 돌아갈 때
-    h('a', { href: '/', class: 'nav-link nav-old', title: '이전 UI · 같은 서버를 쓰므로 어느 쪽에서 바꿔도 똑같이 반영됩니다' }, '이전 UI ↗'));
+    h('a', { href: '/', class: 'nav-link nav-old', title: '이전 UI 열기 (설정은 두 화면이 같이 씀)' }, '이전 UI ↗'));
   const main = h('main', { class: 'main', id: 'main', tabindex: '-1' });
   root.replaceChildren(topbar, drawer, h('div', { class: 'body' }, nav, main));
 
@@ -133,7 +133,7 @@ export function createShell(root, { navigate }) {
       const active = button.dataset.mode === mode;
       button.setAttribute('aria-pressed', String(active));
       button.disabled = !sched || Boolean(slave);
-      button.title = slave ? '슬레이브 PC는 마스터 설정을 따릅니다. 마스터 화면에서 바꾸세요.' : (RUN_MODE_HINT[button.dataset.mode] || '');
+      button.title = slave ? '슬레이브 PC는 마스터 화면에서 전환하세요' : (RUN_MODE_HINT[button.dataset.mode] || '');
     }
   }
 

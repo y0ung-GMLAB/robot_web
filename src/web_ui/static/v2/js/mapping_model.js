@@ -176,22 +176,22 @@ export function draftProblems(rows) {
   rows.forEach((row, index) => {
     const at = `${index + 1}번 줄`;
     const name = String(row.motion_id || '').trim();
-    if (!name) problems.push(`${at} · 조인트 이름이 비어 있습니다${row.motor_axis !== null ? ` (${row.motor_axis}번 모터)` : ''}`);
-    else if (names.has(name)) problems.push(`${at} · 「${name}」 이름이 ${names.get(name) + 1}번 줄과 중복됩니다`);
+    if (!name) problems.push(`${at}: 조인트 이름이 비어 있습니다${row.motor_axis !== null ? ` (${row.motor_axis}번 모터)` : ''}`);
+    else if (names.has(name)) problems.push(`${at}: 「${name}」 이름이 ${names.get(name) + 1}번 줄과 중복됩니다`);
     else names.set(name, index);
-    if (!(Number(row.gear_ratio) > 0)) problems.push(`${at} · 감속·기어비는 0보다 커야 합니다`);
-    if (!Number(row.scale)) problems.push(`${at} · 배율(scale)이 0입니다 · 매핑 파일을 확인하세요`);
+    if (!(Number(row.gear_ratio) > 0)) problems.push(`${at}: 감속·기어비는 0보다 커야 합니다`);
+    if (!Number(row.scale)) problems.push(`${at}: 배율(scale)이 0입니다. 매핑 파일을 확인하세요`);
     const lower = Number(row.motion_lower_deg);
     const upper = Number(row.motion_upper_deg);
-    if (!Number.isFinite(lower) || !Number.isFinite(upper)) problems.push(`${at} · 범위를 입력하세요`);
-    else if (lower > upper) problems.push(`${at} · 범위 최소가 최대보다 큽니다`);
+    if (!Number.isFinite(lower) || !Number.isFinite(upper)) problems.push(`${at}: 범위를 입력하세요`);
+    else if (lower > upper) problems.push(`${at}: 범위 최소가 최대보다 큽니다`);
     if (row.enabled) {
       const target = rowTarget(row);
-      if (!target) problems.push(`${at} · 「사용」이 켜진 줄에 모터가 지정되지 않았습니다`);
-      else if (targets.has(target)) problems.push(`${at} · ${targets.get(target) + 1}번 줄과 같은 모터를 사용합니다`);
+      if (!target) problems.push(`${at}: 「사용」이 켜진 줄에 모터가 지정되지 않았습니다`);
+      else if (targets.has(target)) problems.push(`${at}: ${targets.get(target) + 1}번 줄과 같은 모터를 사용합니다`);
       else targets.set(target, index);
       const fader = faderNumber(row.xtouch_fader);
-      if (fader !== null && faders.has(fader)) problems.push(`${at} · X-Touch 페이더 ${fader} 번을 ${faders.get(fader) + 1}번 줄도 씁니다`);
+      if (fader !== null && faders.has(fader)) problems.push(`${at}: X-Touch 페이더 ${fader}번이 ${faders.get(fader) + 1}번 줄과 중복됩니다`);
       else if (fader !== null) faders.set(fader, index);
     }
   });
@@ -307,7 +307,7 @@ export function savedMismatch(serverRows, target, patch) {
   for (const [field, want] of Object.entries(patch)) {
     if (!(field in LABELS)) continue;
     const ok = typeof want === 'number' ? Math.abs(Number(saved[field]) - want) < 1e-4 : same(saved[field], want);
-    if (!ok) out.push(`${LABELS[field]} · 보낸 값 ${fmt(want)} · 파일 값 ${fmt(saved[field])}`);
+    if (!ok) out.push(`${LABELS[field]}: 보낸 값 ${fmt(want)}, 저장된 값 ${fmt(saved[field])}`);
   }
   return out;
 }

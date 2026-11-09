@@ -166,9 +166,28 @@ p { margin: 0; }
 .timeline-now { position: absolute; top: 0; bottom: 0; width: 2px; background: var(--ink); }
 .timeline-scale { display: flex; justify-content: space-between; font-size: 12px; color: var(--muted); }
 
+/* ---------- 설명 툴팁(ⓘ) · tip.js · 겹쳐 띄움(다른 칸을 밀지 않음) ---------- */
+/* 보이는 원은 18px · 누르는 자리는 음수 여백으로 넓혀 줄 높이는 그대로 */
+.tip {
+  display: inline-flex; align-items: center; justify-content: center; flex: 0 0 auto;
+  width: 18px; height: 18px; padding: 0; margin: 0 4px; vertical-align: middle;
+  border-radius: 50%; border: 1px solid var(--line-strong); background: transparent;
+  color: var(--muted); font: italic 700 11px/1 var(--font); cursor: help; position: relative;
+}
+.tip::before { content: ""; position: absolute; inset: -12px; }
+.tip:hover, .tip[aria-describedby] { color: var(--blue-ink); border-color: var(--blue); }
+.tip-bubble {
+  position: fixed; z-index: 1000; max-width: min(360px, calc(100vw - 16px));
+  padding: 10px 12px; border-radius: 10px; background: #262D37; border: 1px solid var(--line-strong);
+  color: var(--ink); font-size: 13px; line-height: 1.55; white-space: pre-line; box-shadow: 0 6px 24px rgba(0, 0, 0, 0.45);
+}
+.tip-bubble[hidden] { display: none; }
+
 /* ---------- 공용 · 입력 · 표 · 칩 ---------- */
 .page-head { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 16px; }
 .page-head p { flex: 1 1 100%; }
+/* 머리 줄 경고 자리 · 같은 줄 남은 폭에(빈 줄을 따로 만들지 않게) */
+.page-head p.msg-slot { flex: 1 1 240px; margin: 0; }
 .grid-2 { display: grid; grid-template-columns: repeat(auto-fit, minmax(420px, 1fr)); gap: 16px; align-items: start; }
 .btn-mini { min-height: 36px; min-width: 40px; padding: 0 10px; font-weight: 500; font-size: 14px; }
 .select, .input {

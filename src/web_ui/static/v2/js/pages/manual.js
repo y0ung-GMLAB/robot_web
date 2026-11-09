@@ -10,6 +10,7 @@
  */
 import { h, dot } from '../dom.js';
 import { api } from '../net.js';
+import { tip } from '../tip.js';
 import { confirmBox, toast } from '../dialog.js';
 import * as act from '../actions.js';
 import {
@@ -73,7 +74,7 @@ function setGoal(item, source, motorDeg, jointDeg = null) {
 function conflictText(axis, source) {
   const goal = ui.goals.get(axis);
   if (!goal || goal.source === source) return '';
-  return `${axis}번 모터 이동 중(${SOURCE_LABEL[goal.source] || goal.source}) · 도착하거나 「동작 취소」 뒤에 조작하세요`;
+  return `${axis}번 모터가 ${SOURCE_LABEL[goal.source] || goal.source}로 이동 중입니다. 도착하거나 「동작 취소」를 누른 뒤 조작하세요.`;
 }
 
 /** 놓았고 도착했거나 시간이 지난 목표는 지운다 */
@@ -162,14 +163,14 @@ export function manualBlocker(state, item) {
   const runState = String(snap.motion_run_status?.state || '');
   if (runState === 'initialized') return { text: '초기 위치에서 대기 중입니다. 「정지」를 누른 뒤 수동 조작을 하세요.', fix: 'stop' };
   if (runState && !RUN_IDLE.has(runState)) return { text: '재생 중입니다. 「정지」를 누른 뒤 수동 조작을 하세요.', fix: 'stop' };
-  if (snap.mapping_range_blocker) return { text: `수동 조작 불가 · ${snap.mapping_range_blocker}`, fix: 'open-mapping' };
+  if (snap.mapping_range_blocker) return { text: `수동 조작을 할 수 없습니다. ${snap.mapping_range_blocker}`, fix: 'open-mapping' };
   if (snap.minas_absolute_blocker) return { text: String(snap.minas_absolute_blocker), fix: 'open-motors' };
   if (snap.motor_action_blocker) return { text: String(snap.motor_action_blocker) };
   if (!item) return { text: '모터를 선택하세요' };
-  if (!item.detected) return { text: `${item.axis}번 모터 통신 없음` };
-  if (item.fault) return { text: `${item.axis}번 모터 알람 · 오류를 초기화한 뒤 서보를 켜세요`, fix: 'reset' };
+  if (!item.detected) return { text: `${item.axis}번 모터와 통신이 되지 않습니다` };
+  if (item.fault) return { text: `${item.axis}번 모터에 알람이 있습니다. 오류를 초기화한 뒤 서보를 켜세요.`, fix: 'reset' };
   if (item.ac && !item.servoOn) return { text: `${item.axis}번 서보가 꺼져 있습니다`, fix: 'servo-on' };
-  if (!item.row) return { text: `조인트 매핑에 ${item.axis}번 모터를 쓰는 줄이 없거나 「사용」이 꺼져 있습니다. 매핑에 없는 모터는 수동 조작할 수 없습니다.`, fix: 'open-mapping' };
+  if (!item.row) return { text: `조인트 매핑에 ${item.axis}번 모터 줄이 없거나 「사용」이 꺼져 있습니다`, fix: 'open-mapping' };
   return null;
 }
 
@@ -256,7 +257,7 @@ function pendingText(item) {
   const target = joint ? goalJoint(item) : goal.motor;
   const left = joint ? (target ?? 0) - (item.joint ?? 0) : goal.motor - item.position;
   const hit = ui.session?.axis === item.axis && ui.session.hitLimit ? ` · ${ui.session.hitLimit} 도달` : '';
-  return `목표 ${signedDeg(target, 2)}° · 남은 이동 ${signedDeg(left, 2)}° · 천천히(조인트 ${MANUAL_JOINT_SPEED_DEG_S} °/s)${hit}`;
+  return `목표 ${signedDeg(target, 2)}° · 남은 이동 ${signedDeg(left, 2)}°${hit}`;
 }
 
 /** 실시간 칸만 바꾼다 · data-live="joint|motor|pending|slider|fader-*|range-*" data-axis */
@@ -307,7 +308,7 @@ async function dialInput(item, steps, fine = false) {
   const busy = conflictText(item.axis, 'dial');
   if (busy) { ui.message = busy; ctx.changed(); return; }
   const stepDeg = Number(ui.step);
-  if (!(stepDeg > 0 && stepDeg <= 360)) { ui.message = '한 칸 값은 0.001 ~ 360° 사이여야 합니다'; ctx.changed(); return; }
+  if (!(stepDeg > 0 && stepDeg <= 360)) { ui.message = '한 칸 값은 0.001~360° 사이로 입력하세요'; ctx.changed(); return; }
   const motorDelta = steps * stepDeg * (fine ? FINE_FACTOR : 1) * (ui.unit === 'joint' && item.row ? gain(item) : 1);
   const now = performance.now();
   if (!ui.session || ui.session.axis !== item.axis) {
@@ -368,7 +369,7 @@ async function moveTo(item, changed) {
   const motorDeg = ui.unit === 'joint' && item.row ? jointToMotor(item.row, value) : value;
   const limits = motorLimits(item);
   if (motorDeg < limits.lower - 1e-6 || motorDeg > limits.upper + 1e-6) {
-    toast(`범위를 벗어났습니다 · 모터 ${signedDeg(limits.lower, 1)} ~ ${signedDeg(limits.upper, 1)}°`, 'bad');
+    toast(`범위를 벗어났습니다 (모터 ${signedDeg(limits.lower, 1)} ~ ${signedDeg(limits.upper, 1)}°)`, 'bad');
     return;
   }
   if (item.position !== null && Math.abs(motorDeg - item.position) < 1e-4) { toast('이미 목표 위치에 있습니다', 'ok'); return; }
@@ -377,7 +378,7 @@ async function moveTo(item, changed) {
   changed();
   try {
     const result = await api('POST', path, { body: { axis: item.axis, target_rad: motorDeg * RAD }, timeoutMs: 15000 });
-    toast(result?.message || '천천히 이동합니다', 'ok');
+    toast(result?.message || '목표 위치로 천천히 이동합니다', 'ok');
   } catch (error) {
     toast(error.message || String(error), 'bad');
   } finally {
@@ -388,18 +389,18 @@ async function moveTo(item, changed) {
 
 async function recoverRange(item, changed) {
   const bound = item.position < item.lower ? item.lower : item.upper;
-  const ok = await confirmBox({ title: '범위 안으로 복귀', body: `${item.axis}번 모터가 운전 한계를 벗어나 있습니다(현재 모터 ${signedDeg(item.position, 2)}°).\n가장 가까운 한계(${signedDeg(bound, 2)}°)까지 천천히(조인트 ${MANUAL_JOINT_SPEED_DEG_S} °/s) 이동합니다. 주변에 사람이나 물건이 없는지 확인하세요.`, confirmLabel: '복귀', tone: 'warning' });
+  const ok = await confirmBox({ title: '범위 안으로 복귀', body: `주변에 사람이나 물건이 없는지 확인하세요.\n${item.axis}번 모터가 운전 한계를 벗어나 있습니다 (현재 모터 ${signedDeg(item.position, 2)}°).\n가장 가까운 한계(${signedDeg(bound, 2)}°)까지 조인트 기준 ${MANUAL_JOINT_SPEED_DEG_S} °/s로 천천히 이동합니다.`, confirmLabel: '복귀', tone: 'warning' });
   if (!ok) return;
   try {
     const result = await api('POST', item.ac ? '/api/motion-test/ac-servo/action' : '/api/motion-test/dynamixel/action',
       { body: { axis: item.axis, target_rad: bound * RAD, range_recovery: true }, timeoutMs: 15000 });
-    toast(result?.message || '복귀합니다', 'ok');
+    toast(result?.message || '운전 한계 안으로 복귀합니다', 'ok');
   } catch (error) { toast(error.message || String(error), 'bad'); }
   changed();
 }
 
 /** 기준점 지정 화면 · 다회전 클리어 뒤 아직 다시 지정 안 한 축 · 서버 `multiturn_clear.NOT_ALIGNED_LABEL` 과 같다 · 수정 목록 140 */
-const NOT_ALIGNED_LABEL = '클리어 뒤 아직 안 맞춤';
+const NOT_ALIGNED_LABEL = '기준점 재지정 필요';
 
 /* ---------- 여기를 하한 · 기준점 · 상한으로 ---------- */
 
@@ -429,17 +430,17 @@ async function capture(item, kind, changed) {
   if (!item.row || item.position === null) return;
   const scope = ctx.state.snap?.project_scope || {};
   if (!(scope.runtime_matches_selected && scope.motor_config_applied)) {
-    toast('이 프로젝트의 모터 설정을 장비에 적용해야 캡처할 수 있습니다', 'warn');
+    toast('지정하려면 먼저 「모터 설정」에서 「저장 후 장비에 적용」을 누르세요', 'warn');
     return;
   }
   const plan = capturePatch(item.row, kind, item.position);
   if (plan.error) { toast(plan.error, 'bad'); return; }
   if (!plan.patch) return;
-  const ok = await confirmBox({ title: '조인트 매핑에 저장', body: `${plan.text} 저장합니다.\n\n저장한 뒤 운전 한계(소프트 리밋)도 새 값으로 바꿀지 이어서 확인합니다(장비에 적용 및 모터 재시작).`, confirmLabel: '저장' });
+  const ok = await confirmBox({ title: '조인트 매핑에 저장', body: `${plan.text} 저장합니다.`, confirmLabel: '저장' });
   if (!ok) return;
   // 줄은 이름 + 모터로 다시 찾는다 · 창이 떠 있는 사이(또는 그 전에) 매핑을 다시 불러오면 item.row 는 옛 객체 · 수정 목록 117
   const next = patchRow(ui.mapping || [], item.row, plan.patch);
-  if (!next) { toast(`「${item.row.motion_id}」 줄을 지금 매핑에서 찾지 못했습니다. 화면을 새로 고친 뒤 다시 하세요.`, 'bad'); return; }
+  if (!next) { toast(`「${item.row.motion_id}」 줄을 매핑에서 찾지 못했습니다. 화면을 새로 고친 뒤 다시 시도하세요.`, 'bad'); return; }
   if (plan.kind !== 'reference') {
     // 범위 확인은 바꾸지 않는다 · 사람이 조인트 매핑에서 직접 체크 (사용자 2026-10-13)
     if (Number(next.row.motion_lower_deg) > Number(next.row.motion_upper_deg)) { toast('하한이 상한보다 커집니다. 위치를 확인하세요.', 'bad'); return; }
@@ -455,11 +456,11 @@ async function capture(item, kind, changed) {
     const wrong = savedMismatch(saved?.mapping?.mappings, next.row, plan.patch);
     await loadManual(ctx.state, changed);
     if (wrong.length) {
-      toast(`저장 실패 · 서버는 받았지만 매핑 파일 값이 다릅니다 · ${wrong.join(' · ')}`, 'bad');
+      toast(`저장에 실패했습니다. 서버 응답과 매핑 파일 값이 다릅니다 (${wrong.join(', ')})`, 'bad');
       return;
     }
-    toast(`${plan.label} 저장 확인 · ${item.row.motion_id}`, 'ok');
-    if (await act.confirmApplyMotorConfig('운전 한계(소프트 리밋)도 새 기준으로 바꾸려면 장비에 적용하고 모터를 재시작해야 합니다.')) await act.applyMotorConfig();
+    toast(`${item.row.motion_id} ${plan.label}을 저장했습니다`, 'ok');
+    if (await act.confirmApplyMotorConfig('운전 한계(소프트 리밋)에도 반영하려면 장비에 적용하고 모터를 재시작해야 합니다.')) await act.applyMotorConfig();
     else toast('운전 한계가 아직 적용되지 않았습니다. 「모터 설정」에서 「저장 후 장비에 적용」을 누르세요.', 'warn');
   } catch (error) {
     toast(error.message || String(error), 'bad');
@@ -520,7 +521,7 @@ function axisPanel(state, changed, item) {
       const dir = { ArrowRight: 1, ArrowUp: 1, ArrowLeft: -1, ArrowDown: -1 }[e.key];
       if (dir) { e.preventDefault(); if (ui.dialOn && !disabled) spinDial(dir * PX_PER_STEP); dialInput(item, dir, e.shiftKey); }
     },
-  }, h('span', { class: 'dial-ticks', 'aria-hidden': 'true', style: { backgroundPositionX: `${ui.dialOffset}px` } }), h('span', { class: 'dial-hint', text: ui.dialOn ? (disabled ? '조작 불가' : '드래그 · 휠 · ← → 키 (Shift: 1/10 단위)') : '다이얼이 꺼져 있습니다. 위 스위치로 켜세요.' }));
+  }, h('span', { class: 'dial-ticks', 'aria-hidden': 'true', style: { backgroundPositionX: `${ui.dialOffset}px` } }), h('span', { class: 'dial-hint', text: ui.dialOn ? (disabled ? '조작 불가' : '드래그 · 휠 · ← → 키 (Shift: 1/10 단위)') : '다이얼 스위치를 켜세요' }));
   const hold = (dir) => {
     let timer = null;
     const stop = () => { clearTimeout(timer); clearInterval(timer); timer = null; };
@@ -545,16 +546,17 @@ function axisPanel(state, changed, item) {
       h('span', { class: 'mono muted', 'data-live': 'motor', 'data-axis': String(item.axis), text: item.position === null ? '-' : `모터 ${signedDeg(item.position, 1)}°` })),
     rangeBar(item),
     notAlignedAxes(state.snap).has(item.axis) ? h('div', { class: 'blocker' }, dot('warn'),
-      h('span', { class: 'grow', text: `${NOT_ALIGNED_LABEL} · 다회전 클리어로 위치 값이 바뀌었습니다. 몸을 정면·수평에 맞추고 「기준점 지정」을 누르세요` })) : null,
+      h('span', { class: 'grow', text: '다회전 클리어로 위치 값이 바뀌었습니다. 로봇을 정면·수평에 맞춘 뒤 「기준점 지정」을 누르세요.' })) : null,
     h('div', { class: 'row' },
       ['lower', 'reference', 'upper'].map((kind) => h('button', { class: 'btn btn-mini', type: 'button', disabled: !canCapture,
-        title: canCapture ? { lower: '현재 위치를 하한점으로 지정합니다', reference: '현재 위치를 기준점(조인트 0°)으로 지정합니다', upper: '현재 위치를 상한점으로 지정합니다' }[kind] : '조인트 매핑 줄이 있고 모터 설정이 장비에 적용된 상태에서, 다이얼 이동이 끝나 있을 때 사용할 수 있습니다.',
-        onclick: () => capture(item, kind, changed) }, { lower: '하한점 지정', reference: '기준점 지정', upper: '상한점 지정' }[kind]))),
-    h('p', { class: 'muted small', text: '변경하면 조인트 매핑에 저장되고, 이어서 장비에 적용(모터 재시작)할지 확인합니다.' }),
-    outside ? h('div', { class: 'blocker bad' }, dot('bad'), h('span', { class: 'grow', text: '운전 한계를 벗어나 있습니다. 다이얼과 목표 위치 이동을 사용할 수 없습니다.' }),
+        title: canCapture ? { lower: '현재 위치를 하한점으로 지정', reference: '현재 위치를 기준점(조인트 0°)으로 지정', upper: '현재 위치를 상한점으로 지정' }[kind] : '조인트 매핑에 해당 모터가 있고, 모터 설정이 장비에 적용되어 있고, 다이얼 이동이 끝난 상태에서 사용할 수 있습니다',
+        onclick: () => capture(item, kind, changed) }, { lower: '하한점 지정', reference: '기준점 지정', upper: '상한점 지정' }[kind])),
+      tip(['지정한 값은 조인트 매핑에 저장', '저장 후 장비에 적용(모터 재시작)할지 이어서 확인'], '지정 설명')),
+    outside ? h('div', { class: 'blocker bad' }, dot('bad'), h('span', { class: 'grow', text: '운전 한계를 벗어났습니다. 「범위 안으로 복귀」로 되돌리세요.' }),
       h('button', { class: 'btn btn-warn', type: 'button', onclick: () => recoverRange(item, changed) }, '범위 안으로 복귀')) : null,
     h('div', { class: 'field' },
-      h('div', { class: 'row' }, h('strong', { text: '움직이기' }),
+      h('div', { class: 'row' }, h('strong', { class: 'inline' }, '움직이기',
+        tip([`한 칸 값과 관계없이 조인트 기준 ${MANUAL_JOINT_SPEED_DEG_S} °/s로 천천히 이동`, '파란 표시는 목표, 회색 표시는 현재 위치', '다이얼은 드래그, 휠, ← → 키로 조작 (Shift를 누르면 1/10칸씩)', '멈추려면 「동작 취소」'], '움직이기 설명')),
         h('label', { class: `switch${ui.dialOn ? ' on' : ''}` },
           h('input', { type: 'checkbox', role: 'switch', checked: ui.dialOn, 'aria-label': '다이얼',
             onchange: (e) => { ui.dialOn = e.target.checked; if (!ui.dialOn) endSession(true); changed(); } }),
@@ -568,14 +570,14 @@ function axisPanel(state, changed, item) {
         h('label', { class: 'inline' }, '한 칸', h('input', { class: 'input num-input mono', type: 'number', min: '0.001', max: '360', step: 'any', value: String(ui.step),
           oninput: (e) => { ui.step = Number(e.target.value); }, onchange: () => { endSession(true); changed(); } }), jointUnit ? '조인트 °' : '모터 °'),
         h('span', { class: 'mono muted small grow', 'data-live': 'pending', 'data-axis': String(item.axis), text: pendingText(item) })),
-      h('p', { class: 'muted small', text: `한 칸 값을 크게 해도 한 번에 가지 않고 조인트 ${MANUAL_JOINT_SPEED_DEG_S} °/s 로 천천히 갑니다. 파랑 = 목표 · 회색 = 지금 위치.` })),
+    ),
     h('div', { class: 'field' },
       h('span', { class: 'field-label', text: `목표 위치로 이동 (${jointUnit ? '조인트' : '모터'} °)` }),
       h('div', { class: 'row' },
         h('input', { class: 'input mono num-input wide', type: 'number', step: 'any', value: ui.goal, 'aria-label': '목표 위치',
           oninput: (e) => { ui.goal = e.target.value; }, onchange: () => changed() }),
         h('button', { class: 'btn btn-primary', type: 'button', disabled: disabled || ui.busy === 'move' || Boolean(ui.session) || ui.goals.has(item.axis), onclick: () => moveTo(item, changed) }, '천천히 이동'),
-        h('button', { class: 'btn btn-danger', type: 'button', title: '다이얼 · 목표 위치 이동을 모두 멈춥니다', onclick: cancelMotion }, '동작 취소'))),
+        h('button', { class: 'btn btn-danger', type: 'button', title: '다이얼과 목표 위치 이동을 모두 정지', onclick: cancelMotion }, '동작 취소'))),
     h('div', { class: 'field servo-box' },
       h('span', { class: 'field-label', text: `서보 · ${item.label}` }),
       h('div', { class: 'row' },
@@ -584,7 +586,7 @@ function axisPanel(state, changed, item) {
         item.servoOn
           ? h('button', { class: 'btn btn-mini', type: 'button', onclick: async () => { endSession(true); await act.servoControl(item, 'off'); changed(); } }, item.ac ? '서보 끄기' : '토크 끄기')
           : h('button', { class: 'btn btn-mini', type: 'button', disabled: item.fault || !item.detected, onclick: async () => { await act.servoControl(item, 'on'); changed(); } }, item.ac ? '서보 켜기' : '토크 켜기'),
-        h('button', { class: 'btn btn-mini', type: 'button', onclick: async () => { await act.servoControl(item, 'reset'); changed(); } }, item.ac ? `오류 초기화${item.fault ? '' : ' (알람 없음)'}` : '재부팅'))),
+        h('button', { class: 'btn btn-mini', type: 'button', onclick: async () => { await act.servoControl(item, 'reset'); changed(); } }, item.ac ? '오류 초기화' : '재부팅'))),
     ui.message ? h('p', { class: 'tone-text-warn small', text: ui.message }) : null);
 }
 
@@ -618,8 +620,9 @@ function faderView(state, changed, list) {
   return h('section', { class: 'card', 'aria-label': '전체 페이더' },
     blocker && blocker.fix !== 'servo-on' && blocker.fix !== 'reset' ? h('div', { class: 'blocker' }, dot('warn'), h('span', { class: 'grow', text: blocker.text }), fixButton(blocker, null, changed)) : null,
     h('div', { class: 'row' },
-      h('p', { class: 'muted small grow', text: `페이더를 움직이면 모터가 조인트 ${MANUAL_JOINT_SPEED_DEG_S} °/s 로 천천히 따라옵니다. 파란 손잡이 = 목표 · 회색 표시 = 지금 위치. 손을 떼거나 잘못 찍어도 목표까지 천천히 갑니다. 멈추려면 「동작 취소」. 범위는 조인트 매핑의 최소·최대입니다.` }),
-      h('button', { class: 'btn btn-danger', type: 'button', title: '페이더 · 다이얼 · 목표 위치 이동을 모두 그 자리에서 멈춥니다', onclick: cancelMotion }, '동작 취소')),
+      h('p', { class: 'muted small grow' }, `조인트 기준 ${MANUAL_JOINT_SPEED_DEG_S} °/s로 천천히 따라갑니다`,
+        tip(['파란 손잡이는 목표, 회색 표시는 현재 위치', '손을 떼거나 잘못 눌러도 목표 위치까지 이동', '멈추려면 「동작 취소」', '페이더 범위는 조인트 매핑의 최소~최대'], '페이더 설명')),
+      h('button', { class: 'btn btn-danger', type: 'button', title: '페이더, 다이얼, 목표 위치 이동을 모두 현재 위치에서 정지', onclick: cancelMotion }, '동작 취소')),
     usable.length ? h('ul', { class: 'list fader-list' }, usable.map((item) => {
       const own = manualBlocker(state, item);
       const target = goalJoint(item);
@@ -638,7 +641,7 @@ function faderView(state, changed, list) {
         h('span', { class: 'mono muted small', text: `${signedDeg(Number(item.row.motion_upper_deg), 1)}°` }),
         h('span', { class: 'mono fader-value', ...live('fader-value'), text: item.joint === null ? '-' : target === null ? `${signedDeg(item.joint, 2)}°` : `목표 ${signedDeg(target, 1)}° · 현재 ${signedDeg(item.joint, 1)}°` }),
         own ? h('span', { class: 'chip chip-warn', title: own.text, text: '조작 불가' }) : null);
-    })) : h('p', { class: 'muted', text: '「사용」이 켜진 조인트 매핑 줄에 연결된 모터가 없습니다' }),
+    })) : h('p', { class: 'muted', text: '모터가 연결된 조인트가 없습니다. 조인트 매핑의 「모터」와 「사용」을 확인하세요.' }),
     ui.message ? h('p', { class: 'tone-text-warn small', text: ui.message }) : null);
 }
 
@@ -689,7 +692,7 @@ export function renderManual(state, { changed }) {
       h('button', { class: 'btn', type: 'button', disabled: initDisabled || Boolean(redo), title: redo ? redo.detail : initDisabled && pcBlocker ? pcBlocker.text : '',
         onclick: initialize }, '초기 위치로')),
     // 다회전 클리어 뒤 · 조그로 몸을 정면·수평에 맞추고 「기준점 지정」 · 수동 조작은 막지 않는다 · 수정 목록 140
-    redo ? h('div', { class: 'blocker' }, dot('warn'), h('span', { class: 'grow', text: `${redo.title} · 그 전까지 재생·초기 위치 이동·스케줄·그룹 참가가 막힙니다` })) : null,
+    redo ? h('div', { class: 'blocker' }, dot('warn'), h('span', { class: 'grow', text: `${String(redo.title).replace(/[.]\s*$/, '')}. 완료 전까지 재생, 초기 위치 이동, 스케줄, 그룹 참여를 할 수 없습니다.` })) : null,
     !list.length ? h('section', { class: 'card' }, h('p', { class: 'muted', text: '인식된 모터가 없습니다' })) : [
       // 한 페이지에 두 구획(사용자 2026-10-12 · 모터 설정과 같게) · 한쪽을 잡으면 다른 쪽 세션은 놓는다
       h('section', { class: 'setup-part', id: 'part-faders', 'aria-label': '전체 페이더' },
@@ -697,7 +700,6 @@ export function renderManual(state, { changed }) {
         faderView(state, changed, list)),
       h('section', { class: 'setup-part', id: 'part-axis', 'aria-label': '모터 개별' },
         h('div', { class: 'part-head' }, h('h2', { text: '② 모터 개별' })),
-        h('p', { class: 'muted small', text: '모터 하나를 골라 다이얼 · 목표 위치로 움직입니다.' }),
         h('div', { class: 'manual-grid' },
           h('section', { class: 'card axis-list', 'aria-label': '모터' },
             h('ul', { class: 'list' }, list.map((a) => h('li', {},

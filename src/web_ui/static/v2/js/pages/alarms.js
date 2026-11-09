@@ -4,6 +4,7 @@
  * 바꾼 것이 없어도 저장할 수 있다 · 적용이 안 맞을 때 다시 밀어 넣는 길 (§6-203).
  */
 import { h, dot } from '../dom.js';
+import { tip } from '../tip.js';
 import { api } from '../net.js';
 import * as act from '../actions.js';
 
@@ -35,9 +36,9 @@ function isDirty(data) {
 }
 
 const GRADE_TEXT = {
-  1: '해당 모터만 정지 · 나머지는 계속 동작',
-  2: '재생 전체 정지 · 오류 초기화 후 다시 시작',
-  3: '모든 모터 명령 차단 · 프로그램 재시작 필요',
+  1: '해당 모터만 정지하고 나머지는 계속 동작',
+  2: '재생 전체를 정지하고 오류 초기화 후 다시 시작',
+  3: '모든 모터 명령을 차단하고 프로그램을 다시 시작해야 해제',
 };
 
 function gradeChip(grade) {
@@ -77,10 +78,10 @@ export function renderAlarms(state, { changed }) {
   return [
     h('div', { class: 'page-head' },
       h('h1', { text: '드라이브 알람' }),
-      h('p', { class: 'muted small', text: '드라이브 알람이 발생했을 때 어디까지 정지할지 등급으로 정합니다. 이 프로젝트에만 적용됩니다. 현재 발생한 알람은 상단 상태 표시와 「모터 설정」 화면에서 확인하세요.' })),
+      tip(['드라이브 알람이 발생했을 때 어디까지 정지할지 등급으로 지정', '현재 프로젝트에만 적용', '현재 발생한 알람은 상단 상태 표시와 「모터 설정」 화면에서 확인'], '드라이브 알람 설명')),
     page.error ? h('p', { class: 'tone-text-bad', text: page.error }) : null,
     notApplied ? h('div', { class: 'blocker' }, dot('warn'),
-      h('span', { class: 'grow', text: '저장된 알람 등급과 현재 적용된 등급이 다릅니다. 「저장」을 한 번 더 누르면 다시 적용합니다.' })) : null,
+      h('span', { class: 'grow', text: '저장한 등급이 아직 적용되지 않았습니다. 「저장」을 다시 누르세요.' })) : null,
     h('section', { class: 'card', 'aria-label': '등급' },
       h('ul', { class: 'list grade-list' }, [1, 2, 3].map((grade) => h('li', { class: 'list-row' },
         gradeChip(grade), h('strong', { text: `${grade}등급` }), h('span', { class: 'muted', text: GRADE_TEXT[grade] }))))),

@@ -123,7 +123,7 @@ test('잡기 전 · 페이더가 축 값과 멀면 안 보낸다 · 지나가는
 test('막힘 · 연결 없음 · 상한 없음 · 수동 모드 아님 → 선택 안 됨 + 이유', () => {
   const { s, ctx } = session();
   assert.match(s.handle({ kind: 'button', group: 'select', channel: 1, down: true }, ctx())[0].text, /연결된 조인트가 없습니다/);
-  assert.match(s.handle({ kind: 'button', group: 'select', channel: 2, down: true }, ctx())[0].text, /속도·가속도 상한을 먼저 채우세요/);
+  assert.match(s.handle({ kind: 'button', group: 'select', channel: 2, down: true }, ctx())[0].text, /최대 속도·최대 가속을 조인트 매핑에 먼저 입력하세요/);
   assert.match(s.handle({ kind: 'button', group: 'select', channel: 0, down: true }, ctx({ blocked: '스케줄 모드' }))[0].text, /스케줄/);
   assert.equal(s.channels[0].selected, false);
   // 조종 중에 막히면 페이더 값을 안 보낸다

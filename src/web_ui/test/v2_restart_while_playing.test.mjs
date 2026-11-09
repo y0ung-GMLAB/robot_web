@@ -43,7 +43,7 @@ test('재생 중 · 두 번째 확인 · 정지하고 다시 시작(stop_first)'
   const h = harness({ answers: [true, true], replies: [NEEDS_STOP(), { success: true, stopped_playback: true }] });
   assert.deepEqual(await h.run(), { success: true, stopped_playback: true });
   assert.equal(h.asked.length, 2);
-  assert.equal(h.asked[1].body, '재생을 멈추고 다시 시작합니다 · 서보 토크는 유지됩니다');
+  assert.equal(h.asked[1].body, '재생을 정지한 뒤 프로그램을 다시 시작합니다.\n서보 토크는 유지됩니다.');
   assert.equal(h.asked[1].tone, 'warning');
   assert.deepEqual(h.sent, [{}, { stop_first: true }]);
 });

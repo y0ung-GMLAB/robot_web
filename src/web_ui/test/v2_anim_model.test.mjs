@@ -61,12 +61,12 @@ test('그래프 12 개 넘음 · 「20 개 중 12 개」 + 「나머지 보기�
 
   const closed = graphSeriesView(narration, false);
   assert.equal(closed.series.length, 12);
-  assert.equal(closed.note, '20 개 중 12 개');
+  assert.equal(closed.note, '20개 중 12개');
   assert.equal(closed.toggle, '나머지 보기');
 
   const open = graphSeriesView(narration, true);
   assert.deepEqual(open.series.map((s) => s.motion_id), ids, '나머지 8 개가 뒤에 · 이름 순 그대로');
-  assert.equal(open.note, '20 개 모두');
+  assert.equal(open.note, '20개 모두');
   assert.equal(open.toggle, '접기');
 
   // 12 개 이하 · 줄 자체가 없다
@@ -75,7 +75,7 @@ test('그래프 12 개 넘음 · 「20 개 중 12 개」 + 「나머지 보기�
   assert.deepEqual(graphSeriesView(null), { series: [], note: '', toggle: '' });
   // 개수만 알고 나머지가 안 왔으면 안내만 · 누를 버튼은 없다
   assert.deepEqual(graphSeriesView({ graph_series: narration.graph_series, graph_series_total: 20 }, true),
-    { series: narration.graph_series, note: '20 개 중 12 개', toggle: '' });
+    { series: narration.graph_series, note: '20개 중 12개', toggle: '' });
 });
 
 test('애니메이션 화면 · 펼침은 파일마다 ui 에 기억 · 버튼이 그것을 뒤집는다 (0.5 초 다시 그리기에도 유지)', () => {

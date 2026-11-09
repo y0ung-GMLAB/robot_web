@@ -8,24 +8,29 @@
 import { h } from '../dom.js';
 import { api } from '../net.js';
 import { confirmBox, toast } from '../dialog.js';
+import { tip } from '../tip.js';
 
 export const GAIN_FIELDS = [
   { key: 'auto_tuning', label: '자동조정', number: 'Pr0.02', min: 0, max: 4,
-    meanings: { 0: '끔 · 게인이 그대로 고정', 1: '표준 · 보통은 이것', 2: '위치결정 · 짧게 자주 서는 축', 3: '수직축 · 중력이 늘 걸리는 축', 4: '마찰 보상' } },
+    meanings: { 0: '끔 (게인 고정)', 1: '표준 (일반 축)', 2: '위치결정 (짧게 이동하고 자주 정지하는 축)', 3: '수직축 (중력 부하가 걸리는 축)', 4: '마찰 보상' } },
   { key: 'stiffness', label: '강성', number: 'Pr0.03', min: 0, max: 31,
-    meanings: null, note: '높을수록 단단하게 따라감 · 너무 높으면 떨림·소리 · 낮은 값부터 한 칸씩 · 팩토리값 13' },
+    meanings: null, note: '높을수록 지령을 강하게 따라가지만, 너무 높으면 진동과 소음 발생\n낮은 값부터 한 칸씩 올려서 조정\n팩토리값 13' },
   // 지령 필터 · 입력은 드라이브 값 그대로(0.1 ms 정수 · 92 = 9.2 ms) · 옆에 ms 로 바꿔 보여 줌 · 2026-10-16 (사용자 요청)
   { key: 'command_smoothing', label: '지령 스무딩 필터', number: 'Pr2.22', min: 0, max: 10000, msPerUnit: 0.1,
-    meanings: null, note: '위치 지령을 부드럽게(1차 지연) · 시작·정지가 부드러워지지만 그만큼 늦게 따라감'
-      + ' · 단위 0.1 ms(92 = 9.2 ms) · 팩토리값 92(A~C 프레임) · 139(D~H 프레임)'
-      + ' · 2 자유도 제어(Pr6.47 bit0 = 1)면 최대 2000(200.0 ms)'
-      + ' · 강성을 바꾸면 자동조정이 이 값을 다시 쓸 수 있음 · 한 로봇의 모든 모터를 같은 값으로' },
+    meanings: null, note: '위치 지령 1차 지연 필터 (시작·정지는 부드러워지고 그만큼 추종이 늦어짐)'
+      + '\n단위 0.1 ms (92 = 9.2 ms)'
+      + '\n팩토리값 92(A~C 프레임), 139(D~H 프레임)'
+      + '\n2자유도 제어(Pr6.47 bit0 = 1)일 때 최대 2000(200.0 ms)'
+      + '\n강성을 바꾸면 자동조정이 이 값을 다시 쓸 수 있음'
+      + '\n한 로봇의 모든 모터를 같은 값으로 설정' },
   { key: 'command_fir', label: '지령 FIR 필터', number: 'Pr2.23', min: 0, max: 10000, msPerUnit: 0.1, stoppedOnly: true,
-    meanings: null, note: '위치 지령을 이 시간만큼 이동 평균 · 그 길이만큼 늦게 따라감'
-      + ' · 단위 0.1 ms(10 = 1.0 ms) · 팩토리값 10'
-      + ' · 모터가 모두 멈춰 있을 때만 바꿀 수 있음(움직이는 중이면 거절) · 한 로봇의 모든 모터를 같은 값으로' },
+    meanings: null, note: '위치 지령 이동 평균 필터 (설정 시간만큼 추종이 늦어짐)'
+      + '\n단위 0.1 ms (10 = 1.0 ms)'
+      + '\n팩토리값 10'
+      + '\n모든 모터가 정지해 있을 때만 변경 가능 (동작 중에는 거절)'
+      + '\n한 로봇의 모든 모터를 같은 값으로 설정' },
   { key: 'estimation_speed', label: '관성비 추정 속도', number: 'Pr6.31', min: 0, max: 3,
-    meanings: { 0: '멈춤 · 관성비 고정', 1: '분 단위 · 천천히(팩토리값)', 2: '초 단위', 3: '급변 · 부하가 갑자기 바뀌는 축' } },
+    meanings: { 0: '추정 안 함 (관성비 고정)', 1: '분 단위로 천천히 (팩토리값)', 2: '초 단위', 3: '최대한 빠르게 (부하가 급변하는 축)' } },
 ];
 
 const ui = { unlockedAxis: null, draft: {}, busy: false };
@@ -52,7 +57,7 @@ export function gainHint(field, value) {
     return `${field.number} ${field.label}${meaning ? ` · ${value} = ${meaning}` : ''}\n${all}`;
   }
   const ms = gainMs(field, value);
-  return `${field.number} ${field.label}${ms ? ` · 지금 ${value} = ${ms}` : ''} · ${field.note || ''}`;
+  return `${field.number} ${field.label}${ms ? ` · 현재 ${value} = ${ms}` : ''}${field.note ? `\n${field.note}` : ''}`;
 }
 
 /** 바뀐 칸만 · 숫자 · 범위 밖이면 문제 글 */
@@ -65,7 +70,7 @@ export function gainChanges(gains, draft) {
     if (text === '') continue;
     const value = Number(text);
     if (!Number.isInteger(value) || value < field.min || value > field.max) {
-      problems.push(`${field.label}(${field.number}) 는 ${field.min}~${field.max} 사이 정수${field.msPerUnit ? ' (0.1 ms 단위 · 92 = 9.2 ms)' : ''}`);
+      problems.push(`${field.label}(${field.number})는 ${field.min}~${field.max} 사이 정수여야 합니다${field.msPerUnit ? ' (0.1 ms 단위, 92 = 9.2 ms)' : ''}`);
       continue;
     }
     if (gains && gains[field.key] === value) continue;
@@ -77,9 +82,9 @@ export function gainChanges(gains, draft) {
 async function unlock(row, changed) {
   const ok = await confirmBox({
     title: `${row.axis}번 게인 잠금 해제`,
-    body: '드라이브 게인을 바꿉니다. 모터 프로그램을 멈추지 않고 바로 적용됩니다(전원을 끄면 사라짐).\n'
-      + '강성을 너무 높이면 떨리거나 소리가 납니다. 한 번에 한두 칸씩 바꾸고, 주변에 사람이 없는지 확인하세요.\n'
-      + '지령 필터(스무딩 · FIR)는 키울수록 부드럽지만 그만큼 늦게 따라갑니다. 한 로봇의 모든 모터를 같은 값으로 두세요.',
+    body: '강성을 너무 높이면 진동이나 소음이 발생합니다. 한 번에 한두 칸씩 바꾸고, 주변에 사람이 없는지 확인하세요.\n'
+      + '모터 프로그램 정지 없이 바로 적용되며, 전원을 끄면 원래 값으로 돌아갑니다.\n'
+      + '지령 필터(스무딩, FIR)는 값을 키울수록 부드러워지지만 그만큼 추종이 늦어집니다. 한 로봇의 모든 모터를 같은 값으로 설정하세요.',
     confirmLabel: '잠금 해제', tone: 'warning',
   });
   if (!ok) return;
@@ -102,9 +107,9 @@ async function write(row, changed, reload) {
   const stoppedOnly = GAIN_FIELDS.filter((f) => f.stoppedOnly && values[f.key] !== undefined).map((f) => f.label);
   const ok = await confirmBox({
     title: `${row.axis}번 게인 쓰기`,
-    body: `${lines.join('\n')}\n\n${jump ? '강성을 한 번에 2칸 넘게 바꿉니다. 떨림이 생기면 바로 「정지」 후 되돌리세요.\n' : ''}`
-      + (stoppedOnly.length ? `${stoppedOnly.join(' · ')}는 모든 모터가 멈춰 있을 때만 바뀝니다(움직이는 중이면 거절).\n` : '')
-      + '모터가 움직이지 않을 때만 씁니다. 지금부터 적용되고, 전원을 끄면 사라집니다.',
+    body: `${lines.join('\n')}\n\n${jump ? '강성을 한 번에 2칸 넘게 바꿉니다. 진동이 생기면 바로 「정지」를 누르고 값을 되돌리세요.\n' : ''}`
+      + (stoppedOnly.length ? `${stoppedOnly.join(', ')}는 모든 모터가 정지해 있을 때만 바뀝니다(동작 중에는 거절).\n` : '')
+      + '모터가 정지해 있을 때만 씁니다. 바로 적용되며, 전원을 끄면 원래 값으로 돌아갑니다.',
     confirmLabel: '쓰기', tone: jump ? 'danger' : 'warning',
   });
   if (!ok) return;
@@ -118,7 +123,7 @@ async function write(row, changed, reload) {
     ui.draft = {};
     const keep = await confirmBox({
       title: '드라이브 저장(EEPROM)',
-      body: '지금 값은 전원을 끄면 사라집니다. 드라이브 안(EEPROM)에도 저장할까요?\n모터 프로그램이 몇 초 멈췄다 다시 켜지고, 그동안 서보 토크가 풀립니다. 브레이크가 없는 모터는 처질 수 있습니다.\n(값을 더 맞춰 볼 거면 나중에 저장해도 됩니다. 표의 게인 칸은 1분 안에 새 값으로 바뀝니다.)',
+      body: '현재 값은 전원을 끄면 원래 값으로 돌아갑니다. 드라이브 EEPROM에도 저장할까요?\n저장하면 모터 프로그램이 몇 초 정지했다가 다시 시작되고, 그동안 서보 토크가 해제됩니다. 브레이크 없는 모터는 처질 수 있습니다.\n값을 더 조정할 예정이면 「나중에」를 누르세요. 표의 게인 칸은 1분 안에 갱신됩니다.',
       confirmLabel: '저장', cancelLabel: '나중에', tone: 'warning',
     });
     if (keep) await saveAll([row.axis], changed, reload);
@@ -170,16 +175,20 @@ export function gainField(row, changed, reload) {
     return h('label', { class: 'field' }, h('span', { class: 'field-label', text: `${field.label} ` }, h('span', { class: 'muted small mono', text: field.number })), control, unit);
   });
   return h('div', { class: 'field' },
-    h('div', { class: 'group-title', text: '게인' }),
-    h('span', { class: 'muted small', text: `드라이브에 저장된 값${gains?.inertia_ratio !== undefined && gains?.inertia_ratio !== null ? ` · 관성비 ${gains.inertia_ratio} %(자동조정이 정함)` : ''}` }),
+    h('div', { class: 'group-title' }, '게인', tip([
+      '자동조정이 켜져 있으면 관성비와 위치·속도 게인은 드라이브가 정하고, 사람은 강성만 조정',
+      '지령 필터(스무딩, FIR)는 0.1 ms 단위 정수로 입력 (92 = 9.2 ms)',
+      '지령 필터는 클수록 부드럽지만 추종이 늦어짐',
+      '지령 필터는 모든 모터를 같은 값으로 설정하고, FIR은 정지 상태에서만 변경 가능',
+      '드라이브에 쓰면 바로 적용되지만 전원을 끄면 원래 값으로 돌아감',
+      '값을 유지하려면 「드라이브 저장(EEPROM)」',
+    ], '게인 설명')),
+    h('span', { class: 'muted small', text: `드라이브에 저장된 값${gains?.inertia_ratio !== undefined && gains?.inertia_ratio !== null ? ` · 관성비 ${gains.inertia_ratio} % (자동조정 값)` : ''}` }),
     h('div', { class: 'row form-row' }, cells),
     h('div', { class: 'row' },
       unlocked
         ? [h('button', { class: 'btn btn-mini btn-primary', type: 'button', disabled: ui.busy, onclick: () => write(row, changed, reload) }, ui.busy ? '쓰는 중' : '드라이브에 쓰기'),
           h('button', { class: 'btn btn-mini', type: 'button', disabled: ui.busy, onclick: () => { ui.unlockedAxis = null; ui.draft = {}; changed(); } }, '취소')]
         : h('button', { class: 'btn btn-mini', type: 'button', disabled: ui.busy || !gains, title: gains ? '' : '아직 드라이브에서 읽지 못했습니다',
-          onclick: () => unlock(row, changed) }, '잠금 해제')),
-    h('p', { class: 'muted small', text: '자동조정이 켜져 있으면 관성비와 위치·속도 게인은 드라이브가 정합니다. 사람이 맞추는 것은 강성입니다. '
-      + '지령 필터(스무딩 · FIR)는 0.1 ms 단위 정수(92 = 9.2 ms)로 적고, 키울수록 부드럽지만 그만큼 늦게 따라갑니다(모든 모터를 같은 값으로 · FIR 은 멈췄을 때만). '
-      + '쓰면 바로 적용되고 전원을 끄면 사라집니다(남기려면 「드라이브 저장(EEPROM)」).' }));
+          onclick: () => unlock(row, changed) }, '잠금 해제')));
 }

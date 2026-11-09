@@ -5,6 +5,7 @@
  */
 import { h, dot } from '../dom.js';
 import { RUN_MODE_LABEL } from '../model.js';
+import { tip } from '../tip.js';
 import {
   WEEK, draftFrom, draftPayload, draftProblem, masterLink, repeatText, timeText, timezoneDrift, weekRows,
 } from '../schedule_model.js';
@@ -50,7 +51,7 @@ function clockLine(sched) {
   return h('p', { class: 'muted small' },
     'PC 시각 ', h('span', { class: 'mono', text: time || '-' }),
     ` · ${clock.timezone || '시간대 알 수 없음'}`,
-    synced === true ? ' · 시계 동기화됨' : synced === false ? h('span', { class: 'tone-text-warn', text: ' · 시계 동기화 안 됨(인터넷 시간 서버에 연결되지 않음)' }) : null);
+    synced === true ? ' · 시계 동기화됨' : synced === false ? h('span', { class: 'tone-text-warn', text: ' · 시계 동기화 안 됨 (시간 서버에 연결되지 않음)' }) : null);
 }
 
 /* ---------- 이번 주 ---------- */
@@ -98,10 +99,10 @@ function listCard(state, changed, canEdit) {
             h('span', { class: 'muted small' },
               h('span', { class: 'mono', text: timeText(item) }), ` · ${repeatText(item)}`,
               id === active ? h('span', { class: 'tone-text-ok', text: ' · 운영 중' }) : null,
-              unreadable.has(id) ? h('span', { class: 'tone-text-bad', text: ' · 시각을 읽을 수 없어 실행되지 않습니다' }) : null,
+              unreadable.has(id) ? h('span', { class: 'tone-text-bad', text: ' · 시각 오류로 실행되지 않음' }) : null,
               !on ? ' · 꺼짐' : null)),
           canEdit ? h('span', { class: 'row-actions' },
-            h('label', { class: 'switch', title: on ? '끄기 (삭제하지 않고 잠시 중지)' : '켜기' },
+            h('label', { class: 'switch', title: on ? '끄기' : '켜기' },
               h('input', { type: 'checkbox', role: 'switch', checked: on, 'aria-label': `${name} 켜기`, disabled: ui.busy,
                 onchange: (event) => busy(() => act.setScheduleEnabled(id, event.target.checked), state, changed) }),
               h('span', { class: 'switch-track', 'aria-hidden': 'true' })),
@@ -119,7 +120,7 @@ function endActionBlock(state, changed, canEdit) {
   const current = page.endAction || 'park_servo_off';
   const options = [
     ['park_servo_off', '회차가 끝나면 기준점으로 이동 후 서보 끄기'],
-    ['hold', '회차가 끝난 자세 유지 (서보 켜짐)'],
+    ['hold', '마지막 회차가 끝난 자세에서 정지 (서보 토크 유지)'],
   ];
   return h('div', { class: 'field end-action' },
     h('span', { class: 'field-label', text: '운영 시간이 끝나면' }),
@@ -151,9 +152,8 @@ function editCard(state, changed) {
     h('div', { class: 'row' },
       h('label', { class: 'field' }, h('span', { class: 'field-label', text: '시작' }),
         h('input', { class: 'input mono', type: 'time', value: draft.start, oninput: set('start'), onchange: () => changed() })),
-      h('label', { class: 'field' }, h('span', { class: 'field-label', text: '종료' }),
+      h('label', { class: 'field' }, h('span', { class: 'field-label inline' }, '종료', tip(['종료 시각이 시작 시각보다 이르면 다음 날 해당 시각까지 운영 (예 22:00 – 02:00)'])),
         h('input', { class: 'input mono', type: 'time', value: draft.stop, oninput: set('stop'), onchange: () => changed() }))),
-    h('p', { class: 'muted small', text: '종료 시각이 시작보다 이르면 다음 날 그 시각까지 운영합니다 (예: 22:00 – 02:00)' }),
     h('div', { class: 'field' },
       h('span', { class: 'field-label', text: '반복' }),
       h('div', { class: 'segmented', role: 'group', 'aria-label': '반복' },
@@ -181,15 +181,16 @@ export function renderSchedule(state, { changed }) {
   return [
     h('div', { class: 'page-head' },
       h('h1', { text: '스케줄' }),
-      h('span', { class: 'spacer' }),
-      canEdit ? h('button', { class: 'btn btn-primary', type: 'button', disabled: ui.busy, onclick: () => { ui.draft = draftFrom(null); changed(); } }, '+ 새 스케줄') : null,
-      h('p', { class: 'muted small', text: `스케줄 모드에서는 이 시간에 맞춰 ${sched.coordination_joined ? '그룹 전체' : '로봇'} 재생을 시작하고 정지합니다.${mode && mode !== 'schedule' ? ` 지금은 ${RUN_MODE_LABEL[mode] || '-'} 모드라 스케줄이 실행되지 않습니다.` : ''}` })),
+      tip([`스케줄 모드에서는 아래 운영 시간에 맞춰 ${sched.coordination_joined ? '그룹 전체' : '로봇'} 재생을 자동으로 시작하고 정지`], '스케줄 설명'),
+      // 경고 자리는 늘 둔다(레이아웃 고정)
+      h('p', { class: 'small tone-text-warn msg-slot', text: mode && mode !== 'schedule' ? `${RUN_MODE_LABEL[mode] || '-'} 모드에서는 스케줄이 실행되지 않습니다` : '' }),
+      canEdit ? h('button', { class: 'btn btn-primary', type: 'button', disabled: ui.busy, onclick: () => { ui.draft = draftFrom(null); changed(); } }, '+ 새 스케줄') : null),
     !canEdit ? h('div', { class: 'blocker' }, dot('info'),
-      h('span', { class: 'grow', text: `슬레이브 PC라서 마스터${master ? `(${master.name})` : ''} 스케줄을 따릅니다. 여기서는 볼 수만 있습니다.` }),
+      h('span', { class: 'grow', text: `슬레이브 PC는 마스터${master ? `(${master.name})` : ''}의 스케줄을 따릅니다. 수정은 마스터 화면에서 하세요.` }),
       master?.url ? h('a', { class: 'btn', href: master.url, target: '_blank', rel: 'noopener' }, '마스터 화면 열기') : null) : null,
     drift ? h('div', { class: 'blocker' }, dot('warn'), h('span', { class: 'grow', text: drift })) : null,
     sched.last_failure?.message ? h('div', { class: 'blocker' }, dot('warn'),
-      h('span', { class: 'grow', text: `스케줄 시작 거부${sched.last_failure.count ? ` ${sched.last_failure.count}회` : ''} · ${sched.last_failure.message}` })) : null,
+      h('span', { class: 'grow', text: `스케줄 시작이 거부되었습니다${sched.last_failure.count ? ` (${sched.last_failure.count}회)` : ''}: ${sched.last_failure.message}` })) : null,
     // 구간 끝 주차 실패 · 그 자리에서 서보 끔 · 이 PC 것 · 수정 목록 131
     sched.schedule_end_notice?.title ? h('div', { class: 'blocker' }, dot(sched.schedule_end_notice.tone === 'bad' ? 'bad' : 'warn'),
       h('span', { class: 'grow', text: `${sched.schedule_end_notice.title} · ${sched.schedule_end_notice.detail || ''}` })) : null,
