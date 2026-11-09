@@ -31,6 +31,8 @@ private:
 
     void timer_callback();
 
+    void cycle_loss_callback();
+
     rclcpp::Subscription<MotorStatus>::SharedPtr motor_command_subscriber_;
 
     rclcpp::Subscription<Int8MultiArray>::SharedPtr request_subscriber_;
@@ -38,6 +40,9 @@ private:
     rclcpp::Publisher<MotorStatus>::SharedPtr motor_status_publisher_;
 
     rclcpp::TimerBase::SharedPtr motor_status_timer_;
+
+    // robot_web fix-list 190: EtherCAT cycle-loss summary
+    rclcpp::TimerBase::SharedPtr cycle_loss_timer_;
 
     std::string config_file_;
 

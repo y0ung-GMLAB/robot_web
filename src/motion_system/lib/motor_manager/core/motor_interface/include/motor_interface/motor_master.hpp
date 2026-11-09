@@ -48,6 +48,11 @@ public:
 
     virtual bool safe_state_reached() { return true; }
 
+    // robot_web fix-list 190: did the last receive() bring back a complete process-data
+    // frame (EtherCAT: domain working counter complete)? Read in the cycle right after
+    // receive(). Default: always complete (CAN, serial).
+    virtual bool cycle_complete() const { return true; }
+
     uint8_t id() const { return id_; }
 
     uint8_t number_of_slaves() const { return number_of_slaves_; }

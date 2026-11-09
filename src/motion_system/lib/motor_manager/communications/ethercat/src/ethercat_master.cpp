@@ -41,6 +41,12 @@ void ethercat::EthercatMaster::receive()
     if (ecrt_master_receive(master_)) throw std::runtime_error("Failed to receive frames.");
 
     if (ecrt_domain_process(domain_)) throw std::runtime_error("Failed to determine the states of the domain.");
+
+    // robot_web fix-list 190: a late frame shows up as an incomplete working counter
+    // (kernel log "Working counter changed to 0/15"); the application never looked.
+    ec_domain_state_t state{};
+    ecrt_domain_state(domain_, &state);
+    cycle_complete_ = state.wc_state == EC_WC_COMPLETE;
 }
 
 void ethercat::EthercatMaster::apply_application_time(const timespec& time)
