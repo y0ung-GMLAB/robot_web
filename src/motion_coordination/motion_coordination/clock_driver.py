@@ -36,6 +36,10 @@ _BUSY_STATES = frozenset({
     'preparing', 'initializing', 'initialized', 'armed', 'running', 'start_scheduled', 'cycle_ready',
     'motion_completed', 'cycle_initialize_scheduled', 'join_ready', 'join_preparing', 'stopping',
 })
+#: 끝난 로컬 실행 · 실행 번호가 남아 있어도 쥔 것으로 보지 않는다 · 수정 목록 188
+#: 실제 재생 관리자는 정지 · 완료 뒤에도 `group_execution` 과 그 번호를 남긴다 · 전에는 그것을 「다른 재생 중」 으로 보고
+#: 회차마다 쉬었다(실물 NY 2026-11-09 03:49 · 신호 재생 그룹을 즉시 정지하고 시간표 재생으로 바꾼 뒤 4대 모두 7회차 쉼)
+_FINISHED_STATES = frozenset({'', 'idle', 'ready', 'stopped', 'completed'})
 
 
 class ClockDriver:
@@ -100,10 +104,12 @@ class ClockDriver:
         held = str(status.get('execution_id') or '') if status.get('group_execution') else ''
         phase = str(status.get('phase') or '')
         state = str(status.get('state') or '')
+        # 끝난 실행의 번호는 이어받지도 · 「다른 재생 중」 으로 보지도 않는다 · 수정 목록 188
+        live = held if state not in _FINISHED_STATES else ''
 
-        if run is None and held.startswith(PLAN_PREFIX):
+        if run is None and live.startswith(PLAN_PREFIX):
             # 이 노드가 다시 떴다(워치독 · 업데이트) · 로컬 재생 관리자는 시간표 실행을 계속 돌고 있다 · 이어받는다
-            run = self._adopt(held, phase, state, status, timeline, now_m)
+            run = self._adopt(live, phase, state, status, timeline, now_m)
             if run is None:
                 return
         if run is not None and held != run['plan_id']:
@@ -131,7 +137,7 @@ class ClockDriver:
         if run is not None:
             self._advance(run, timeline, choice, phase, state, status, now_w, now_m, view)
             return
-        self._maybe_enter(timeline, choice, view, status, held, state, now_w, now_m)
+        self._maybe_enter(timeline, choice, view, status, live, state, now_w, now_m)
 
     # ------------------------------------------------------------------ #
 

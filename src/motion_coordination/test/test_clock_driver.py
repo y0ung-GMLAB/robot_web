@@ -235,3 +235,36 @@ def test_switching_the_master_to_manual_stops_without_parking():
     _run(driver, runtime, clock, _always(Choice(reason='마스터 스케줄 꺼짐')), 100.0)
     assert [cycle for cycle, _ in runtime.starts] == [1]
     assert finished == [(TIMELINE.plan_id, False)], '도는 회차 끝까지 · 그 자리 정지'
+
+
+# ---------------------------------------------------------------------- #
+# 수정 목록 188 · 실제 재생 관리자는 정지 뒤에도 실행 번호를 남긴다 · 끝난 실행 때문에 쉬지 않는다
+# ---------------------------------------------------------------------- #
+
+def test_a_stopped_signal_run_left_in_the_runtime_does_not_block_the_timetable():
+    """실물 NY 2026-11-09 03:49 · 신호 재생 그룹을 즉시 정지 → 시간표 재생 · 4대 모두 「다른 재생 중 · 이 회차 쉼」"""
+    clock, runtime, driver, _, notes = _pc(100_000.0)
+    runtime.status = {'group_execution': True, 'execution_id': 'exec-old', 'state': 'stopped', 'phase': 'stopped'}
+    _run(driver, runtime, clock, _always(Choice(timeline=TIMELINE)), 200.0)
+    assert runtime.starts and runtime.starts[0] == (1, 100_060.0)
+    assert not any('다른 재생 중' in note for note in notes)
+
+
+def test_a_stopped_timetable_run_is_not_adopted_again_and_again():
+    """시간표 실행을 세운 뒤 남은 `tt-` 번호 · 틱마다 이어받기 → 취소를 되풀이하지 않는다"""
+    clock, runtime, driver, _, _ = _pc(100_000.0)
+    runtime.status = {
+        'group_execution': True, 'execution_id': TIMELINE.plan_id, 'state': 'stopped', 'phase': 'stopped',
+        'group_cycle_number': 1,
+    }
+    _run(driver, runtime, clock, _always(Choice(reason='정지됨', stopped_plan_id=TIMELINE.plan_id)), 5.0)
+    assert runtime.calls.count('group_cancel') == 0
+
+
+def test_a_live_other_run_still_makes_the_pc_skip():
+    clock, runtime, driver, _, notes = _pc(100_000.0)
+    runtime.status = {'group_execution': True, 'execution_id': 'exec-other', 'state': 'running', 'phase': 'running'}
+    runtime.busy = True
+    _run(driver, runtime, clock, _always(Choice(timeline=TIMELINE)), 3.0)   # 1회차 들어갈 때(준비 52 s 전)
+    assert runtime.starts == [] and 'group_prepare' not in runtime.calls
+    assert driver.report()['note'] == '다른 재생 중 · 이 회차 쉼'
