@@ -106,6 +106,8 @@ private:
 
     void refreshDisabled();
 
+    bool controllersDisabled(const std::vector<uint8_t>& controller_indices) const;
+
 
     // Serial
     void startSerial();

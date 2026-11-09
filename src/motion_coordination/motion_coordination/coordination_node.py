@@ -1424,6 +1424,8 @@ class MotionCoordinationNode(Node):
                 }
                 if message.pc_id in self._execution.lost:
                     keep_playing = (message.pc_id,)
+                # 같은 PC 에 바로 다시 권하지 않는다 · 거듭되면 더 늦게 · 187
+                self._note_join_failure(message.pc_id)
         if joiner_drop:
             self._drop_joiner(message.pc_id, joiner_drop)
             return
@@ -2761,7 +2763,16 @@ class MotionCoordinationNode(Node):
 
     JOIN_PREPARE_TIMEOUT_SEC = 30.0
     JOIN_RETRY_SEC = 30.0
+    #: 같은 실행에서 같은 PC 의 복귀가 거듭 실패하면 다음 권유를 두 배씩 미룬다(30 · 60 · 120 … 이 값까지) ·
+    #: 「복귀 거절 → 다시 권유 → 또 포기」 를 회차마다 되풀이하지 않게 · 1 시간 조용하면 처음부터 · 수정 목록 187
+    JOIN_RETRY_MAX_SEC = 600.0
+    JOIN_FAILURE_FORGET_SEC = 3600.0
+    #: 복귀하는 쪽 · 합류 확정을 기다리는 한도 = 주기 + 머무름 + 초기 이동 + 여유(장벽 기다림과 같은 셈) ·
+    #: 이보다 짧지 않게 · 주기를 모르면(웹 재시작 뒤) 가장 긴 회차(`ALIGN_START_MAX_SEC`)로 · 이 PC 애니메이션이
+    #: 그룹에서 가장 긴 것보다 짧을 수 있어 제 계획 길이로는 모자람 · 오래 기다려 잃는 것은 없음 · 전에는 600 s 고정이라
+    #: 회차가 920 s 면 경계 전에 포기하고 경계에서 「복귀 거절」 → 다시 권유를 운영 끝까지 되풀이했다 · 수정 목록 187
     JOINER_WAIT_LIMIT_SEC = 600.0
+    JOINER_WAIT_MARGIN_SEC = 60.0
 
     def _member_exclusion_reason(self, pc_id: str) -> str:
         """그룹 실행에 넣을 수 없는 이유 · 비면 넣어도 된다 · 시작과 복귀가 같은 규칙
@@ -3086,16 +3097,32 @@ class MotionCoordinationNode(Node):
             return
         self._drop_joiner(me, f'복귀 준비 실패 · {result.get("message") or "로컬 준비 실패"}')
 
+    def _note_join_failure(self, pc_id: str) -> float:
+        """진행 PC · 그 PC 의 복귀 실패를 센다 · 다음 권유까지 기다릴 시간(30 s 에서 두 배씩) · 잠금 안에서 · 187"""
+        now = time.monotonic()
+        execution_id = self._execution.execution_id
+        failures = getattr(self, '_join_failures', None)
+        if failures is None:
+            failures = self._join_failures = {}
+        count, last = failures.get((execution_id, pc_id), (0, 0.0))
+        if now - last > self.JOIN_FAILURE_FORGET_SEC:
+            count = 0
+        count += 1
+        failures[(execution_id, pc_id)] = (count, now)
+        delay = min(self.JOIN_RETRY_SEC * (2 ** (count - 1)), self.JOIN_RETRY_MAX_SEC)
+        retry = getattr(self, '_join_retry_after', None)
+        if retry is None:
+            retry = self._join_retry_after = {}
+        retry[pc_id] = now + delay
+        return delay
+
     def _drop_joiner(self, pc_id: str, reason: str) -> None:
         """복귀를 접는다 · 그 PC 는 계획을 버리고 다음 기회(30초 뒤)를 기다린다"""
         with self._lock:
             info = self._execution.joining.pop(pc_id, None)
             if info is None or not self._execution.execution_id:
                 return
-            retry = getattr(self, '_join_retry_after', None)
-            if retry is None:
-                retry = self._join_retry_after = {}
-            retry[pc_id] = time.monotonic() + self.JOIN_RETRY_SEC
+            delay = self._note_join_failure(pc_id)
             self._execution.excluded[pc_id] = reason
             warm = bool(info.get('warm')) and pc_id != self._config.pc_id
             if warm:
@@ -3120,6 +3147,7 @@ class MotionCoordinationNode(Node):
                 execution_id = self._execution.execution_id
         self.get_logger().warn(
             f'그룹 복귀 접음 · {pc_id} · {reason}' + (' · 풀지 않음(재생 계속)' if warm else '')
+            + f' · 다음 권유 {delay:.0f} s 뒤'
         )
         if warm:
             pass
@@ -3334,20 +3362,37 @@ class MotionCoordinationNode(Node):
             rejoinable=True,
         )
 
+    def _joiner_wait_limit(self) -> float:
+        """복귀하는 쪽 · 합류 확정을 기다리는 한도 · 지금 회차가 막 시작했어도 그 끝 경계까지 · 수정 목록 187"""
+        execution = self._execution
+        seen = dict(getattr(self, '_grid_seen', None) or {})
+        period = float(seen.get('period') or 0.0) if seen.get('execution_id') == execution.execution_id else 0.0
+        if period <= 0.0:
+            # 주기를 모름 · 이 PC 계획 길이와 가장 긴 회차 가운데 큰 값(진행 PC 가 주기를 실어 보내지 않음 · 약속 번호 그대로)
+            status = (self._local_status or {}).get('motion_run_status')
+            summary = status.get('summary') if isinstance(status, Mapping) else None
+            try:
+                own = float((summary or {}).get('duration_sec') or 0.0)
+            except (AttributeError, TypeError, ValueError):
+                own = 0.0
+            period = max(own, self.ALIGN_START_MAX_SEC)
+        dwell = max(float(execution.dwell_sec or 0.0), 0.0)
+        init = max(float(getattr(execution, 'initial_move_time_sec', 0.0) or 0.0), self.AUTONOMY_INIT_FALLBACK_SEC)
+        return max(self.JOINER_WAIT_LIMIT_SEC, period + dwell + init + self.JOINER_WAIT_MARGIN_SEC)
+
     def _enforce_join_wait(self) -> None:
         """복귀하는 쪽 · 합류 확정이 너무 오래 안 오면 계획을 버리고 놓는다"""
         with self._lock:
             if getattr(self._execution, 'merging', False):
                 # 그대로 재생하며 합류 기다림 · 재생 중에는 끊지 않는다 · 장벽에서 `_enforce_barrier_wait` · 183
                 return
-            if (
-                not self._execution.join_cycle
-                or not self._execution.join_started
-                or time.monotonic() - self._execution.join_started < self.JOINER_WAIT_LIMIT_SEC
-            ):
+            if not self._execution.join_cycle or not self._execution.join_started:
+                return
+            limit = self._joiner_wait_limit()
+            if time.monotonic() - self._execution.join_started < limit:
                 return
             execution_id = self._execution.execution_id
-        self.get_logger().warn('그룹 복귀 · 합류 확정이 오지 않아 놓음')
+        self.get_logger().warn(f'그룹 복귀 · 합류 확정이 {limit:.0f} s 오지 않아 놓음')
         self._call_local_control({
             'command': 'group_cancel',
             'execution_id': execution_id,
