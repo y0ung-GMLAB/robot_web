@@ -139,7 +139,9 @@ def running_cycle(timeline: Optional[Timeline], now_unix: float) -> int:
     if timeline is None or float(timeline.period_sec) <= 0.0:
         return 0
     if float(now_unix) < float(timeline.anchor_unix):
-        return 0
+        # 운영 중 설정 변경 · 새 기준(다음 경계) 전 · 그 앞 회차(옛 눈금)가 아직 도는 중 · 전에는 0 이라 화면 · 실행 표시 ·
+        # 스케줄 노드가 「도는 것 없음」 으로 봤다(NY 2026-11-09 06:12 스케줄 끝을 바꾼 뒤 06:26:40 까지) · 수정 목록 188
+        return int(timeline.first_cycle) - 1 if int(timeline.first_cycle) > 1 else 0
     cycle = int((float(now_unix) - float(timeline.anchor_unix)) // float(timeline.period_sec)) + int(timeline.first_cycle)
     while cycle >= int(timeline.first_cycle) and not timeline.has_cycle(cycle):
         cycle -= 1

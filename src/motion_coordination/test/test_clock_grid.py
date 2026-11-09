@@ -144,3 +144,12 @@ def test_every_pc_gets_the_same_answer_for_the_same_clock(now):
     first = next_slot(timeline, now, prep_sec=45.0, playlist_length=2)
     again = next_slot(Timeline('tt-s1', anchor_unix=1000.0, period_sec=930.0), now, prep_sec=45.0, playlist_length=2)
     assert first == again
+
+
+def test_between_a_mid_operation_change_and_its_boundary_the_previous_cycle_is_still_running():
+    """운영 중 스케줄 · 간격을 바꾸면 새 기준은 다음 경계 · 그 사이에도 도는 회차가 있다 · 수정 목록 188"""
+    rebased = Timeline('tt-s1', anchor_unix=20_000.0, period_sec=940.0, end_unix=40_000.0, first_cycle=17)
+    assert running_cycle(rebased, 19_500.0) == 16, '경계 전 · 16회차(옛 눈금)가 도는 중'
+    assert running_cycle(rebased, 20_000.0) == 17
+    fresh = Timeline('tt-s1', anchor_unix=20_000.0, period_sec=940.0, end_unix=40_000.0)
+    assert running_cycle(fresh, 19_500.0) == 0, '첫 회차 전은 그대로 0'
