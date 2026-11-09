@@ -41,6 +41,13 @@ public:
 
     virtual void save_clock() = 0;
 
+    // robot_web fix-list 188: before deactivate, ask the slaves to leave OP while the
+    // PDO cycle is still running, so no slave sees the cycle stop while its SM2
+    // watchdog is armed. Default: nothing to do (CAN, serial).
+    virtual void request_safe_state() {}
+
+    virtual bool safe_state_reached() { return true; }
+
     uint8_t id() const { return id_; }
 
     uint8_t number_of_slaves() const { return number_of_slaves_; }

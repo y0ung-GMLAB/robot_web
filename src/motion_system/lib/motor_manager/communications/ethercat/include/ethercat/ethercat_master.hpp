@@ -29,6 +29,12 @@ public:
 
     virtual void save_clock() override;
 
+    // fix-list 188: `ethercat states -m N PREOP` on a helper thread (never blocks the cycle)
+    virtual void request_safe_state() override;
+
+    // fix-list 188: every responding slave is in PREOP (or lower) · read in the cycle
+    virtual bool safe_state_reached() override;
+
     ec_master_t* master() const { return master_; }
 
     ec_domain_t* domain() const { return domain_; }
