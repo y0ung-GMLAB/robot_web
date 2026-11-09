@@ -237,3 +237,16 @@ def test_a_timetable_run_keeps_the_local_status_read_fast(tmp_path):
         'group_execution': True, 'execution_id': 'exec-a', 'state': 'running', 'phase': 'running',
     }}
     assert node._timetable_run_live() is False, '신호 재생은 실행이 있어 따로 빨리 읽는다'
+
+
+def test_the_pc_rows_show_the_real_step_while_the_timetable_runs(tmp_path):
+    """시간표 재생 중 「PC별 재생 상태」 가 모두 「그룹 대기」 로 보였다(NY 2026-11-09 04:21) · 수정 목록 188"""
+    node = _tt_node(tmp_path)
+    node._local_status['motion_run_status'] = {
+        'group_execution': True, 'execution_id': 'tt-s1', 'state': 'running', 'phase': 'running',
+        'display_step': '모션 실행 중', 'display_cycle': 9,
+    }
+    node._timetable_execution_view = lambda: {}
+    assert node.snapshot()['local']['motion_step'] == '그룹 대기', '시간표도 신호 재생도 없으면 전처럼'
+    node._timetable_execution_view = lambda: {'execution_id': 'tt-s1', 'state': 'running'}
+    assert node.snapshot()['local']['motion_step'] == '모션 실행 중'
