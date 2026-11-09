@@ -151,10 +151,17 @@ def test_parse_slaves_reads_state_and_error_flag():
 # -- watch · 설정이 끝나면 표시를 지운다 ------------------------------------- #
 
 class Bus:
-    def __init__(self, frames):
+    def __init__(self, frames, *, recover=None):
         self.frames = list(frames)
+        self.sent = []
+        self.recover = recover      # `states` 요청을 받으면 바꿀 화면들
 
     def __call__(self, command, **_kwargs):
+        if command[1] != 'slaves':
+            self.sent.append(list(command))
+            if self.recover is not None:
+                self.frames = list(self.recover)
+            return subprocess.CompletedProcess(command, 0, stdout='', stderr='')
         text = self.frames.pop(0) if len(self.frames) > 1 else self.frames[0]
         return subprocess.CompletedProcess(command, 0, stdout=text, stderr='')
 
@@ -176,11 +183,11 @@ OP = '0  0:0  OP  +  a\n1  0:1  OP  +  b\n'
 STUCK = '0  0:0  OP  +  a\n1  0:1  PREOP  E  b\n'
 
 
-def _watch(frames, *, alive=lambda _pid: True, timeout=em.CONFIGURE_TIMEOUT_SEC):
+def _watch(frames, *, alive=lambda _pid: True, timeout=em.CONFIGURE_TIMEOUT_SEC, bus=None):
     clock = Clock()
     logs = []
     reason = em.watch(
-        os.getpid(), timeout_sec=timeout, runner=Bus(frames), clock=clock, sleep=clock.sleep,
+        os.getpid(), timeout_sec=timeout, runner=bus or Bus(frames), clock=clock, sleep=clock.sleep,
         alive=alive, log=logs.append,
     )
     return reason, clock, logs
@@ -196,9 +203,23 @@ def test_watch_clears_the_marker_once_all_slaves_are_op():
 
 def test_watch_gives_up_on_a_slave_stuck_in_error():
     em.begin(os.getpid())
-    reason, _clock, logs = _watch([PRE, STUCK])
+    bus = Bus([PRE, STUCK])
+    reason, _clock, logs = _watch(None, bus=bus)
     assert reason == 'error' and not em.configuring()
-    assert '1:PREOP+E' in logs[0] and '제어 전원' in logs[0]
+    # 다시 설정을 OP 로 3번 요청(PREOP 아님) · 그래도 E 면 제어 전원 안내 · 수정 목록 187
+    assert bus.sent == [['ethercat', 'states', '-m', '0', '-p', '1', 'OP']] * em.RECOVER_TRIES
+    assert f'EtherCAT 1번 오류 → OP 다시 요청 ({em.RECOVER_TRIES}/{em.RECOVER_TRIES})' in logs[-2]
+    assert '1:PREOP+E' in logs[-1] and '제어 전원' in logs[-1]
+
+
+def test_watch_recovers_a_slave_in_error_by_requesting_op():
+    """한 번 실패한 드라이브는 마스터가 다시 설정하지 않는다 · OP 요청으로 다시 설정하면 살아난다 · 187"""
+    em.begin(os.getpid())
+    bus = Bus([PRE, STUCK], recover=[SAFE, OP])
+    reason, _clock, logs = _watch(None, bus=bus)
+    assert reason == 'all_op' and not em.configuring()
+    assert bus.sent == [['ethercat', 'states', '-m', '0', '-p', '1', 'OP']]
+    assert '다시 설정으로 OP' in logs[-1]
 
 
 def test_watch_stops_when_the_motor_program_ends_or_time_runs_out():

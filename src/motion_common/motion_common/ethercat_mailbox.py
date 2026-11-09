@@ -76,8 +76,16 @@ BUSY_MESSAGE = '다른 SDO 요청이 끝나지 않았습니다 · 잠시 뒤 다
 CONFIGURE_TIMEOUT_SEC = 90.0
 #: 모든 슬레이브가 OP 로 이만큼 그대로면 설정 끝
 OP_HOLD_SEC = 2.0
-#: 오류(E) 슬레이브가 있고 상태가 이만큼 그대로면 설정 실패로 끝 · 마스터는 E 인 슬레이브를 다시 설정하지 않는다
+#: 오류(E) 슬레이브가 있고 상태가 이만큼 그대로면 설정 실패로 봄 · 마스터는 E 인 슬레이브를 스스로 다시 설정하지 않는다
 ERROR_HOLD_SEC = 10.0
+#: 설정 실패(E)면 `ethercat states -m M -p N OP` 로 다시 설정을 요청하는 횟수 · 요청 상태가 OP 라야 IgH 가
+#: INIT 부터 다시 설정하며 오류를 처리 확인한다(1.6.9 `fsm_master.c` · E 인 슬레이브는 스스로 다시 설정 안 함) ·
+#: PREOP 요청은 E 만 지우고 OP 로 안 올라간다(실물 2026-11-08 21:49) · 그래도 E 면 제어 전원 안내 · 수정 목록 187
+RECOVER_TRIES = 3
+#: 다시 요청한 뒤 다음 판단까지 · 상태가 이만큼 그대로면 다시 본다
+RECOVER_HOLD_SEC = 3.0
+#: `ethercat -m` · 우리 PC 는 마스터 하나(0)
+MASTER_INDEX = 0
 POLL_SEC = 0.5
 SLAVES_TIMEOUT_SEC = 3.0
 
@@ -387,6 +395,7 @@ def watch(
     last: Optional[Tuple[Tuple[int, str, bool], ...]] = None
     since = started
     reason = ''
+    tries = 0
     while True:
         marker = read_marker()
         if not marker or marker.get('owner_pid') != int(owner):
@@ -411,17 +420,33 @@ def watch(
             if slaves and all(state == 'OP' for _p, state, _e in slaves) and held >= OP_HOLD_SEC:
                 reason = 'all_op'
                 break
-            if any(error for _p, _s, error in slaves) and held >= ERROR_HOLD_SEC:
-                reason = 'error'
-                break
+            if any(error for _p, _s, error in slaves) and held >= (RECOVER_HOLD_SEC if tries else ERROR_HOLD_SEC):
+                if tries >= RECOVER_TRIES:
+                    reason = 'error'
+                    break
+                tries += 1
+                stuck = [p for p, _s, e in slaves if e]
+                for position in stuck:
+                    try:
+                        call(['ethercat', 'states', '-m', str(MASTER_INDEX), '-p', str(position), 'OP'],
+                             check=False, capture_output=True, text=True, timeout=SLAVES_TIMEOUT_SEC)
+                    except (OSError, subprocess.TimeoutExpired):
+                        pass
+                    log(f'EtherCAT {position}번 오류 → OP 다시 요청 ({tries}/{RECOVER_TRIES}) '
+                        f'({now - started:.1f} s)')
+                # 다시 설정하는 동안 표시를 둔다 · 다음 판단은 상태가 다시 이만큼 그대로일 때
+                last, since = None, now
+                deadline = max(deadline, now + ERROR_HOLD_SEC + 5.0)
         sleep(POLL_SEC)
     finish(owner)
     elapsed = clock() - started
     if reason == 'all_op':
-        log(f'EtherCAT 버스 설정 끝 · 슬레이브 {len(last or ())}대 OP ({elapsed:.1f} s)')
+        again = f' · 다시 설정으로 OP ({tries}번 요청)' if tries else ''
+        log(f'EtherCAT 버스 설정 끝 · 슬레이브 {len(last or ())}대 OP{again} ({elapsed:.1f} s)')
     elif reason == 'error':
         stuck = ', '.join(f'{p}:{s}+E' for p, s, e in last or () if e)
-        log(f'EtherCAT 버스 설정 실패로 봄 · {stuck} · 그 드라이브 제어 전원을 껐다 켜세요 ({elapsed:.1f} s)')
+        log(f'EtherCAT 버스 설정 실패로 봄 · {stuck} · 다시 설정 {tries}번도 안 됨 · '
+            f'그 드라이브 제어 전원을 껐다 켜세요 ({elapsed:.1f} s)')
     elif reason == 'timeout':
         log(f'EtherCAT 버스 설정 표시 시간 초과 ({timeout_sec:.0f} s) · 지금 상태 '
             + (', '.join(f'{p}:{s}{"+E" if e else ""}' for p, s, e in last or ()) or '슬레이브 없음'))

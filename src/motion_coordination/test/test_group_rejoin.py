@@ -294,3 +294,78 @@ def test_a_stop_without_a_finish_time_is_still_reported():
     node._emit_local_runtime_event()
     [event] = node._event_pub.messages
     assert event.event == 'stopped'
+
+
+# --------------------------------------------------------------------------- #
+# 회차가 길어도 복귀하는 PC 가 경계까지 기다린다 · 거듭 실패하면 권유를 미룬다 · 수정 목록 187
+# --------------------------------------------------------------------------- #
+
+def test_a_joiner_waits_for_the_boundary_of_a_long_cycle():
+    """회차 920 s · 막 시작한 회차에 권유를 받아도 600 s 에 포기하지 않는다(전에는 운영 끝까지 서 있었다)"""
+    node = _joiner()
+    calls = []
+    node._call_local_control = lambda payload, **_kwargs: calls.append(dict(payload)) or {'success': True}
+    node._process_group_command(_join_command())
+    node._grid_seen = {'execution_id': 'exec-a', 'period': 930.0}
+    node._execution.initial_move_time_sec = 5.0
+
+    assert node._joiner_wait_limit() == 930.0 + 10.0 + node.JOINER_WAIT_MARGIN_SEC
+    node._execution.join_started = time.monotonic() - 700.0
+    node._enforce_join_wait()
+    assert node._execution.execution_id == 'exec-a', '경계 전에는 놓지 않는다'
+
+    node._execution.join_started = time.monotonic() - 1100.0
+    node._enforce_join_wait()
+    assert calls[-1]['command'] == 'group_cancel'
+    assert node._execution.execution_id == ''
+
+
+def test_a_joiner_that_does_not_know_the_period_waits_the_longest_cycle():
+    """웹 재시작 뒤엔 주기를 모름 · 이 PC 애니메이션(300 s)이 그룹의 가장 긴 것(920 s)보다 짧아도 경계까지"""
+    node = _joiner()
+    node._call_local_control = lambda payload, **_kwargs: {'success': True}
+    node._process_group_command(_join_command())
+    longest = node.ALIGN_START_MAX_SEC + 10.0 + node.JOINER_WAIT_MARGIN_SEC
+
+    assert node._joiner_wait_limit() == longest
+    node._local_status = {'motion_run_status': {'summary': {'duration_sec': 300.0}}}
+    assert node._joiner_wait_limit() == longest
+    node._local_status = {'motion_run_status': {'summary': {'duration_sec': 1500.0}}}
+    assert node._joiner_wait_limit() == 1500.0 + 10.0 + node.JOINER_WAIT_MARGIN_SEC
+    # 짧은 회차(60 s)는 전과 같다 · 600 s
+    node._grid_seen = {'execution_id': 'exec-a', 'period': 60.0}
+    assert node._joiner_wait_limit() == node.JOINER_WAIT_LIMIT_SEC
+
+
+def test_repeated_rejoin_failures_back_off():
+    """「복귀 거절 → 다시 권유 → 또 포기」 를 30 s 마다 되풀이하지 않는다 · 30 · 60 · 120 … 600 s"""
+    node = _running_master()
+    node._note_excluded = lambda *args, **kwargs: None
+    delays = []
+    for _ in range(7):
+        with node._lock:
+            delays.append(node._note_join_failure('pc-c'))
+    assert delays == [30.0, 60.0, 120.0, 240.0, 480.0, 600.0, 600.0]
+    # 오래 조용하면 처음부터
+    key = (node._execution.execution_id, 'pc-c')
+    count, last = node._join_failures[key]
+    node._join_failures[key] = (count, last - node.JOIN_FAILURE_FORGET_SEC - 1.0)
+    with node._lock:
+        assert node._note_join_failure('pc-c') == 30.0
+
+
+def test_a_joiner_refusing_at_the_boundary_is_not_invited_again_right_away():
+    node = _running_master(participants=('pc-a', 'pc-b', 'pc-c'))
+    node._execution.admitted = {'pc-c'}
+    node._execution.state = 'cycle_initializing'
+    node._execution.cycle_initialized = {'pc-a', 'pc-b'}
+    node._note_excluded = lambda *args, **kwargs: None
+    node._publish_next_start = lambda: None
+    node._registry.update(_member('pc-c'))
+
+    _event(node, 'pc-c', 'rejected', success=False, message='참가 목록 갱신이 지금 실행과 맞지 않습니다')
+    node._execution.state = 'running'
+    node._manage_rejoiners()
+
+    assert _commands(node, 'join') == []
+    assert node._join_retry_after['pc-c'] > time.monotonic() + 20.0

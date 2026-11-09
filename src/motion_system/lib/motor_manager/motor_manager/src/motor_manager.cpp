@@ -39,6 +39,13 @@ void stack_prefault()
     std::memset(dummy, 0, sizeof(dummy));
 }
 
+// robot_web fix-list 187 (3): on a normal exit, servo off first, keep the PDO
+// cycle running a little, then deactivate. Deactivating with the servo still
+// on dropped the drives out of OP while enabled (SM2 watchdog), so a service
+// restart stopped them through the communication-error path.
+constexpr uint64_t kStopTailAfterOffNs = 100000000ULL;   // PDO kept after all are off
+constexpr uint64_t kStopTailMaxNs = 500000000ULL;        // give up waiting for servo off
+
 } // namespace
 
 motor_manager::MotorManager::MotorManager(const std::string& config_file)
@@ -467,6 +474,15 @@ void motor_manager::MotorManager::applyControllerRequests(const std::vector<uint
     refreshDisabled();
 }
 
+bool motor_manager::MotorManager::controllersDisabled(const std::vector<uint8_t>& controller_indices) const
+{
+    for (uint8_t i : controller_indices) {
+        if (i >= motor_interface::MAX_CONTROLLER_SIZE || !controllers_[i]) continue;
+        if (!controller_disabled_[i].load(std::memory_order_acquire)) return false;
+    }
+    return true;
+}
+
 void motor_manager::MotorManager::refreshEnabled()
 {
     bool all_enabled = true;
@@ -627,7 +643,27 @@ void motor_manager::MotorManager::run()
             throw std::runtime_error("clock_gettime failed.");
         }
 
-        while (running_.load(std::memory_order_acquire)) {
+        const uint64_t tail_max_cycles = std::max<uint64_t>(1, kStopTailMaxNs / period_);
+        const uint64_t tail_off_cycles = std::max<uint64_t>(1, kStopTailAfterOffNs / period_);
+        bool stopping = false;
+        uint64_t tail_cycles = 0;
+        uint64_t off_cycles = 0;
+
+        while (true) {
+            if (!running_.load(std::memory_order_acquire)) {
+                if (!stopping) {
+                    // A drive may be part-way through servo-on with the cached flag still
+                    // "disabled"; clear it so disable() really writes the controlword.
+                    for (uint8_t i : controller_indices_) {
+                        if (i < motor_interface::MAX_CONTROLLER_SIZE) {
+                            controller_disabled_[i].store(false, std::memory_order_release);
+                        }
+                    }
+                }
+                stopping = true;
+                if (tail_cycles >= tail_max_cycles || off_cycles >= tail_off_cycles) break;
+            }
+
             wakeup_time.tv_nsec += cycle_time.tv_nsec;
             while (wakeup_time.tv_nsec >= NSEC_PER_SEC) {
                 wakeup_time.tv_sec++;
@@ -653,9 +689,15 @@ void motor_manager::MotorManager::run()
                 m_iter.second->receive();
             }
 
-            rethrowSerialExceptionIfAny();
-
-            applyControllerRequests(controller_indices_);
+            if (!stopping) {
+                rethrowSerialExceptionIfAny();
+                applyControllerRequests(controller_indices_);
+            } else {
+                // Servo off regardless of pending enable requests (fix-list 187 (3)).
+                for (uint8_t i : controller_indices_) disableController(i);
+                ++tail_cycles;
+                if (controllersDisabled(controller_indices_)) ++off_cycles;
+            }
 
             for (auto& m_iter : masters_) {
                 m_iter.second->save_clock();
