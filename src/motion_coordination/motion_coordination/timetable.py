@@ -76,6 +76,10 @@ class TimetableConfig:
     rebase_cycle: int = 0
     #: 사람 정지 · plan_id · mode(now · after_cycle) · last_cycle · 빈 것 = 없음
     stop: Mapping[str, Any] = field(default_factory=dict)
+    #: 마지막 즉시 정지 · plan_id · at_unix · 스케줄이 다시 시작해(`stop` 을 지워도) 남긴다 · 수정 목록 188
+    #: 그때 끊겨 있던 PC 는 다시 붙어 최신 버전만 받는다 · 정지가 지워진 버전이라 그 회차를 계속 돌았다
+    #: (실물 NY 2026-11-09 05:48 시험 4 · 버전 15 정지 → 18 s 뒤 16 스케줄 시작 · floating2 는 16 만 받음)
+    halt: Mapping[str, Any] = field(default_factory=dict)
     #: 마스터 재생 목록(파일 이름) · 스피커 음원 고르기 · 표시
     playlist: Tuple[str, ...] = ()
     #: 초기 위치 이동 시간 · 0 = PC 마다 조인트 매핑 값
@@ -98,6 +102,7 @@ def to_body(config: TimetableConfig) -> Dict[str, Any]:
     body['format'] = FORMAT
     body['schedules'] = [dict(item) for item in config.schedules]
     body['stop'] = dict(config.stop)
+    body['halt'] = dict(config.halt)
     body['playlist'] = list(config.playlist)
     body['windows'] = [list(pair) for pair in config.windows]
     return body
@@ -115,6 +120,7 @@ def from_body(body: Any) -> TimetableConfig:
     mode = str(body.get('mode') or MODE_SIGNAL)
     schedules = body.get('schedules') or ()
     stop = body.get('stop') or {}
+    halt = body.get('halt') or {}
     playlist = body.get('playlist') or ()
     windows = []
     for pair in body.get('windows') or ():
@@ -139,6 +145,7 @@ def from_body(body: Any) -> TimetableConfig:
         rebase_unix=max(_float(body.get('rebase_unix')), 0.0),
         rebase_cycle=max(_int(body.get('rebase_cycle')), 0),
         stop=dict(stop) if isinstance(stop, Mapping) else {},
+        halt=dict(halt) if isinstance(halt, Mapping) else {},
         playlist=tuple(str(name) for name in playlist if str(name).strip()) if isinstance(playlist, (list, tuple)) else (),
         initial_move_time_sec=max(_float(body.get('initial_move_time_sec')), 0.0),
     )
@@ -228,9 +235,22 @@ class Choice:
     stopped_plan_id: str = ''
     #: 사람이 「회차 후 정지」 한 시간표 · 끝이 운영시간 끝이 아니라 정지라서 주차하지 않는다
     stop_after: bool = False
+    #: 마지막 즉시 정지 · 그 시각 전에 잡은 그 시간표 실행은 세운다(정지를 못 받은 PC) · 수정 목록 188
+    halt_plan_id: str = ''
+    halt_at_unix: float = 0.0
 
 
 def choose(config: TimetableConfig, now_unix: float, *, operation_mode: str) -> Choice:
+    """`_choose` + 마지막 즉시 정지(지워지지 않는 기록) · 수정 목록 188"""
+    choice = _choose(config, now_unix, operation_mode=operation_mode)
+    halt = dict(config.halt or {})
+    plan_id = str(halt.get('plan_id') or '')
+    if not plan_id:
+        return choice
+    return replace(choice, halt_plan_id=plan_id, halt_at_unix=_float(halt.get('at_unix')))
+
+
+def _choose(config: TimetableConfig, now_unix: float, *, operation_mode: str) -> Choice:
     """지금 따를 시간표 · 마스터 스케줄의 운영시간 · 사람이 누른 그룹 재생은 신호 재생이라 여기 없다
 
     - 오프 · 수동 모드 PC · 아무것도 안 따른다
@@ -314,13 +334,16 @@ def stop_plan(
     if timeline is None:
         if held_plan_id and not after_cycle:
             stop = {'plan_id': str(held_plan_id), 'mode': STOP_NOW}
-            return issue(current, issuer=issuer, now_unix=now, stop=stop), str(held_plan_id)
+            halt = {'plan_id': str(held_plan_id), 'at_unix': now}
+            return issue(current, issuer=issuer, now_unix=now, stop=stop, halt=halt), str(held_plan_id)
         return current, ''
     if after_cycle:
         last = clock_grid.running_cycle(timeline, now)
         stop = {'plan_id': timeline.plan_id, 'mode': STOP_AFTER_CYCLE, 'last_cycle': last or (timeline.first_cycle - 1)}
     else:
         stop = {'plan_id': timeline.plan_id, 'mode': STOP_NOW}
+        halt = {'plan_id': timeline.plan_id, 'at_unix': now}
+        return issue(current, issuer=issuer, now_unix=now, stop=stop, halt=halt), timeline.plan_id
     return issue(current, issuer=issuer, now_unix=now, stop=stop), timeline.plan_id
 
 

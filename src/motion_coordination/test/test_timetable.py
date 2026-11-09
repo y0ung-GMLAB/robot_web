@@ -154,3 +154,21 @@ def test_schedule_windows_follow_the_schedule_rules():
     windows = timetable.schedule_windows([DAILY, {**DAILY, 'schedule_id': 's2', 'enabled': False}], now)
     assert (_ts('2026-11-09 10:00:00'), _ts('2026-11-09 18:00:00')) in windows
     assert len(windows) == 3, '어제 · 오늘 · 내일'
+
+
+# --------------------------------------------------------------------------- #
+# 수정 목록 188 · 마지막 즉시 정지는 스케줄이 다시 시작해도 남는다 · 끊겨서 정지를 못 받은 PC 가 세울 수 있게
+# --------------------------------------------------------------------------- #
+
+def test_the_last_stop_now_survives_the_schedule_resume_and_a_reboot(tmp_path):
+    now = _ts('2026-11-09 13:00:00')
+    stopped, plan_id = stop_plan(_clock(), issuer='floating1', after_cycle=False, now_unix=now)
+    assert stopped.halt == {'plan_id': plan_id, 'at_unix': now}
+    resumed = resume_schedule(stopped, issuer='floating1', now_unix=now + 18.0)
+    assert resumed.stop == {} and resumed.halt == stopped.halt, '정지는 지워도 기록은 남김'
+    choice = choose(resumed, now + 60.0, operation_mode='schedule')
+    assert choice.timeline is not None
+    assert (choice.halt_plan_id, choice.halt_at_unix) == (plan_id, now)
+    assert timetable.from_body(timetable.to_body(resumed)).halt == stopped.halt
+    after, _ = stop_plan(_clock(), issuer='floating1', after_cycle=True, now_unix=now)
+    assert after.halt == {}, '회차 후 정지는 도는 회차를 세우지 않는다'
