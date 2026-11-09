@@ -3287,6 +3287,11 @@ class MotionCoordinationNode(TimetableMixin, Node):
             ) = _message_segment(message)
             self._execution.join_cycle = int(message.cycle_number)
             self._execution.join_started = time.monotonic()
+            # 새 복귀 · 같은 실행 · 같은 회차의 「준비 끝」 을 다시 낼 수 있게 · 수정 목록 188
+            # 전에는 접힌 복귀에서 낸 사건과 열쇠가 같아 다시 안 냈다 · 진행 PC 는 30 s 뒤 「복귀 준비 응답 없음」 ·
+            # 그 회차가 끝날 때까지 권유마다 되풀이(실물 NY 11-07 23:22 floating3 · 11-08 19:31 floating4 ·
+            # 11-09 00:51 · 00:54 · 00:58 floating3) · 그대로 재생하며 합류(`_accept_merge`)는 이미 지운다
+            self._last_local_event_key = ()
         result = self._local_readiness()
         if result.get('success'):
             result = self._call_local_control({
@@ -3437,7 +3442,14 @@ class MotionCoordinationNode(TimetableMixin, Node):
             if time.monotonic() - self._execution.join_started < limit:
                 return
             execution_id = self._execution.execution_id
+            join_cycle = int(self._execution.join_cycle)
         self.get_logger().warn(f'그룹 복귀 · 합류 확정이 {limit:.0f} s 오지 않아 놓음')
+        # 진행 PC 에 알린다 · 모르면 그 PC 를 「준비 끝」 으로 쥔 채 경계에서 넣었다가 「참가 목록 갱신이 지금
+        # 실행과 맞지 않습니다」 로 한 회차를 버렸다(실물 NY 11-08 22:16 놓음 → 22:20 floating2) · 수정 목록 188
+        self._publish_runtime_event(
+            'rejected', execution_id, join_cycle, success=False,
+            message_text=f'합류 확정이 {limit:.0f} s 오지 않아 놓음',
+        )
         self._call_local_control({
             'command': 'group_cancel',
             'execution_id': execution_id,
@@ -4884,6 +4896,8 @@ class MotionCoordinationNode(TimetableMixin, Node):
         ):
             if self._stalled_not_bridge(sample, now):
                 return
+            if self._ride_out_slow_bridge(received_monotonic, now):
+                return
             # 숫자를 같이 남긴다 · §6-153
             #
             # 전에는 `timed out` 한 마디가 전부였다 · 브리지가 느렸는지 죽었는지,
@@ -4925,6 +4939,50 @@ class MotionCoordinationNode(TimetableMixin, Node):
         with self._lock:
             self._local_status = dict(result)
         self._publish_local_alarm_if_changed()
+
+    #: 웹이 느려도 재생 중인 회차는 끝까지 · 마지막으로 본 남은 시간에 더하는 여유 · 수정 목록 188
+    BRIDGE_SLOW_RIDE_MARGIN_SEC = 5.0
+
+    def _ride_out_slow_bridge(self, received_monotonic: float, now: float) -> bool:
+        """웹이 느리다 · 이 PC 가 회차를 재생 중이면 빠지지도 서지도 않고 그 회차 끝까지 · 수정 목록 188
+
+        모터는 재생 관리자가 돌린다 · 지금 회차에 웹은 필요 없다 · 웹은 다음 회차 · 정지 명령의 길일 뿐이다.
+        전에는 1.5 s 못 받으면 빠지고 제 재생을 세웠다 · 실물에서는 모두 웹이 0.3~0.5 s 씩 느렸을 뿐이었다
+        (NY 2026-11-09 00:48:26 floating1 · 00:50:12 floating3 · 그 「정지」 는 같은 웹으로 바로 들어갔다).
+        마지막으로 받은 진행(경과 · 길이)으로 회차 끝을 잡고 여유를 더한다 · 그때까지 웹이 안 돌아오면 전처럼 빠진다
+        (그때는 회차가 끝나 세울 것도 없다). 회차 사이(초기 이동 · 대기)는 전과 같다.
+        """
+        with self._lock:
+            execution_id = self._execution.execution_id
+            participating = self._config.pc_id in self._execution.participants
+            status = (self._local_status or {}).get('motion_run_status')
+        status = status if isinstance(status, Mapping) else {}
+        if not (participating and status.get('group_execution')):
+            return False
+        if str(status.get('execution_id') or execution_id) != execution_id:
+            return False
+        if str(status.get('phase') or '') != 'running':
+            return False
+        progress = status.get('progress')
+        progress = progress if isinstance(progress, Mapping) else {}
+        try:
+            duration = float(progress.get('duration_sec') or 0.0)
+            elapsed = float(progress.get('elapsed_sec') or 0.0)
+        except (TypeError, ValueError):
+            return False
+        if duration <= 0.0 or not received_monotonic:
+            return False
+        until = received_monotonic + max(duration - elapsed, 0.0) + self.BRIDGE_SLOW_RIDE_MARGIN_SEC
+        if now >= until:
+            return False
+        key = (execution_id, round(received_monotonic, 3))
+        if getattr(self, '_bridge_slow_ride_key', None) != key:
+            self._bridge_slow_ride_key = key
+            self._warn(
+                f'[로컬 상태 지연] 웹 응답 없음 · 이 회차 끝까지 재생 계속 · 남은 약 {until - now:.0f} s · '
+                f'그 안에 돌아오면 그대로 · {self._local_runtime_monitor.diagnosis()}'
+            )
+        return True
 
     def _stalled_not_bridge(self, sample: Mapping[str, Any], now: float) -> bool:
         """로컬 상태가 늦은 게 웹이 아니라 이 노드가 멈췄던 탓인가 · 그러면 빠지지 않는다 · 끊김 시험 B

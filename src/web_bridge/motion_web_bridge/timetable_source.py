@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import json
 import os
+import threading
 import time
 from pathlib import Path
 from typing import Any, Dict, List, Optional
@@ -110,17 +111,30 @@ class TimetableSource:
         self._bridge = bridge
         self._cache: Optional[tuple] = None
         self._durations: Dict[str, tuple] = {}
+        # 한 번에 하나만 다시 읽는다 · 읽는 동안 다른 요청은 지난 값 · 수정 목록 188
+        self._refresh_lock = threading.Lock()
 
     def fields(self) -> Dict[str, Any]:
-        now = time.monotonic()
-        if self._cache is not None and now - self._cache[0] < REFRESH_SEC:
-            return self._cache[1]
+        """로컬 상태(50 ms · 제한 300 ms)에 섞는다 · 이 함수는 기다리지 않는다 · 수정 목록 188
+
+        전에는 2 s 마다 부른 요청이 그 자리에서 다 읽었다(get_project · 약 0.5 s) · 웹 일꾼 2개가
+        같이 읽어 2 s 마다 시간 초과 2번 · 디스크가 느린 순간 4번이 되어 1.5 s 판정을 넘고
+        PC 가 그룹에서 빠졌다(NY 2026-11-09 00:48:26 floating1 · 00:50:12 floating3).
+        """
+        cache = self._cache
+        if cache is not None and time.monotonic() - cache[0] < REFRESH_SEC:
+            return cache[1]
+        if not self._refresh_lock.acquire(blocking=False):
+            return cache[1] if cache is not None else {}
         try:
-            value = self._read()
-        except Exception:  # noqa: BLE001 · 못 읽으면 칸을 빼고 보낸다 · 연동 노드는 지난 값을 쓴다
-            value = {}
-        self._cache = (now, value)
-        return value
+            try:
+                value = self._read()
+            except Exception:  # noqa: BLE001 · 못 읽으면 칸을 빼고 보낸다 · 연동 노드는 지난 값을 쓴다
+                value = {}
+            self._cache = (time.monotonic(), value)
+            return value
+        finally:
+            self._refresh_lock.release()
 
     def _read(self) -> Dict[str, Any]:
         bridge = self._bridge
@@ -133,8 +147,8 @@ class TimetableSource:
         from motion_common.schedule_store import ScheduleStore
         store = ScheduleStore(projects_dir=str(workspace / 'motion_projects'), current_project_id=project_id)
         fields['schedule_items'] = [item.to_dict() for item in store.list_schedules()]
-        project = repository.get_project(project_id).get('project') or {}
-        mapping_id = str((project.get('active_files') or {}).get('motion_axis_matching') or '').strip()
+        # 등록된 매핑 이름만 · get_project 는 화면용(트리 · 파일 해시 · YAML)이라 0.5 s · 수정 목록 188
+        mapping_id = str(repository.active_file_name(project_id, 'motion_axis_matching') or '').strip()
         if not mapping_id:
             return fields
         mapping_path = repository.export_path(project_id, 'motion_axis_matching', mapping_id)
