@@ -852,21 +852,30 @@ class ScheduleEndService:
         dxl_axes = record.get('dynamixel') or []
         if not ac_axes and not dxl_axes:
             return ''
+
+        def already_on() -> set:
+            return {
+                int(motor['controller_index']) for motor in self._detected_motors()
+                if motor.get('controller_index') is not None and motor.get('servo_on') is True
+            }
+
+        # 이미 켜진 축은 건너뛴다 · 서보 ON 순서(0x06 → 0x07 → 0x0F)의 0x06 이 켜진 축을 잠깐 내려
+        # 약 100 ms 토크가 빠졌다(실물 NY 2026-11-09 08:49:31) · 수정 목록 189 ⑤
+        on_now = already_on()
         for axis in ac_axes:
+            if axis in on_now:
+                continue
             reply = self._ac_servo_control('servo_on', axis, 'selected')
             if reply.get('success') is False:
                 return f'운영 종료 때 끈 {axis}번 모터의 서보를 켜지 못했습니다 · {reply.get("message") or ""}'
-        if dxl_axes:
-            reply = self._dynamixel_torque_control('torque_on', dxl_axes)
+        dxl_off = [axis for axis in dxl_axes if axis not in on_now]
+        if dxl_off:
+            reply = self._dynamixel_torque_control('torque_on', dxl_off)
             if reply.get('success') is False:
                 return f'운영 종료 때 끈 다이나믹셀 토크를 켜지 못했습니다 · {reply.get("message") or ""}'
 
         def servos_on() -> bool:
-            by_axis = {
-                int(motor['controller_index']): motor for motor in self._detected_motors()
-                if motor.get('controller_index') is not None
-            }
-            return all(bool((by_axis.get(axis) or {}).get('servo_on')) for axis in ac_axes)
+            return set(ac_axes) <= already_on()
 
         if not self._wait(servos_on, SERVO_ON_WAIT_SEC):
             return '운영 종료 때 끈 서보가 켜지지 않았습니다. 모터 상태를 확인하세요'

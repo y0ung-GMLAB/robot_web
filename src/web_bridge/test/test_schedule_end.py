@@ -257,6 +257,25 @@ def test_next_start_turns_on_only_what_schedule_end_turned_off(tmp_path):
     assert service.start_blocker() == '' and len(calls) == 2
 
 
+def test_axes_already_on_are_not_sent_servo_on_again(tmp_path):
+    """이미 켜진 축에 서보 ON 순서를 다시 보내 0x06 으로 약 100 ms 토크가 빠졌다(NY 2026-11-09 08:49:31) · 수정 목록 189 ⑤"""
+    motors = [
+        {'controller_index': 0, 'state': 'detected', 'motor_type': 'ac_servo', 'servo_on': True},
+        {'controller_index': 1, 'state': 'detected', 'motor_type': 'ac_servo', 'servo_on': False},
+        {'controller_index': 2, 'state': 'detected', 'motor_type': 'dynamixel', 'servo_on': True},
+    ]
+    bridge, calls, runtime = _bridge(tmp_path, states=['idle'], motors=motors)
+    (runtime / 'schedule_end_state.json').write_text(
+        json.dumps({'ac_servo': [0, 1], 'dynamixel': [2]}), encoding='utf-8',
+    )
+    service = _service(bridge)
+
+    assert service.start_blocker() == ''
+
+    assert calls == [('ac', 'servo_on', 1)], '켜진 0번 · 다이나믹셀 2번은 건너뜀'
+    assert not (runtime / 'schedule_end_state.json').exists()
+
+
 def test_start_is_refused_while_parking(tmp_path):
     bridge, _calls, _runtime = _bridge(tmp_path, states=['running'])
     service = _service(bridge)

@@ -52,7 +52,7 @@ def _published_positions(supervisor):
 
 def test_motion_stop_holds_the_rad_state_position():
     supervisor = _supervisor([
-        {'controller_index': 0, 'state': 'detected', 'motor_type': 'ac_servo', 'position_rad': R(1234.5)},
+        {'controller_index': 0, 'state': 'detected', 'motor_type': 'ac_servo', 'servo_on': True, 'position_rad': R(1234.5)},
     ])
     success, _ = supervisor._handle_safety_stop(False)
     assert success is True

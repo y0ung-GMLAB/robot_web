@@ -116,14 +116,21 @@ export function groupScopeBlocker(snap) {
 /** 단계 셋 · 초기 위치 → 재생 → 도착 확인 · 다음 회차 기다림은 재생 뒤로 친다 */
 export function phaseSteps(status) {
   const state = String(status?.state || '');
+  const phase = String(status?.phase || '');
   const order = { initializing: 0, countdown: 0, running: 1, verifying: 2, waiting: 2, recovering: 2 };
-  const at = order[state];
+  // 그룹 · 초기 위치 이동 예약(1회차 전) · 회차 시작 예약(초기 위치 끝)도 state 는 waiting · 「다음 회차 대기」 가 아니다 · 수정 목록 189 ⑦
+  const before = state === 'waiting' && (phase === 'group_initialize_scheduled' || phase === 'group_start_scheduled');
   const summary = status?.summary || {};
   const labels = [
     `초기 위치${summary.initialization_duration_sec ? ` · ${Number(summary.initialization_duration_sec).toFixed(1)} s` : ''}`,
     '재생',
-    state === 'waiting' ? '다음 회차 대기' : '도착 확인',
+    state === 'waiting' && !before ? '다음 회차 대기' : '도착 확인',
   ];
+  if (before) {
+    const done = phase === 'group_start_scheduled' ? 1 : 0;
+    return labels.map((label, index) => ({ label, state: index < done ? 'done' : 'todo' }));
+  }
+  const at = order[state];
   return labels.map((label, index) => ({
     label,
     state: at === undefined ? 'todo' : index < at ? 'done' : index === at ? 'now' : 'todo',

@@ -2771,6 +2771,7 @@ class MotionSupervisor(Node):
             }
             command = self._empty_motor_command(motors)
             affected_axes = []
+            servo_off_axes = []
             for motor in motors:
                 if str(motor.get('state') or '') != 'detected':
                     continue
@@ -2792,6 +2793,11 @@ class MotionSupervisor(Node):
                     continue
                 if axis not in current_axes:
                     # Never command a stale position merely to make a software stop.
+                    continue
+                if motor.get('servo_on') is not True:
+                    # 꺼진 서보 · 토크는 그대로 둔다 · 0x003F(또는 토크 ON)를 보내면 꺼진 축이 켜졌다 · 수정 목록 189 ④
+                    # (실물 NY 2026-11-09 08:39 · 운영 종료로 끈 4대가 「정지」 한 번에 켜짐 · 이 길은 앱솔루트 · 알람 관문도 건너뜀)
+                    servo_off_axes.append(axis)
                     continue
                 if position is None:
                     continue
@@ -2822,6 +2828,9 @@ class MotionSupervisor(Node):
         self._publish_safety_status()
         mode = 'Emergency stop latched' if emergency else 'Motion stopped; servo remains enabled'
         axes_text = self._axis_list_text(sorted(set(affected_axes))) or 'none'
+        if servo_off_axes:
+            off_text = self._axis_list_text(sorted(set(servo_off_axes)))
+            return True, f'{mode}: axes {axes_text}; servo off, left off: axes {off_text}'
         return True, f'{mode}: axes {axes_text}'
 
     def _publish_safety_status(self) -> None:
