@@ -245,3 +245,46 @@ def test_dry_run_scenario_prints_plan_without_root_or_web(monkeypatch, capsys):
 def test_mode_all_needs_explicit_remote_cut_confirmation(capsys):
     assert netfault.main(['cut', '--mode', 'all', '--dry-run']) == 2
     assert 'AnyDesk' in capsys.readouterr().err
+
+
+# --------------------------------------------------------------------------- #
+# 시간표 재생 · 수정 목록 186 · 끊긴 PC 도 계속 재생 · 회차를 쉰 PC 가 없어야
+# --------------------------------------------------------------------------- #
+
+def _clock_samples(standing=None, note=None):
+    samples = []
+    for step in range(0, 200, 5):
+        pcs = {}
+        for pc_id in PCS:
+            stand = standing and pc_id == standing[0] and standing[1] <= step <= standing[2]
+            pcs[pc_id] = {
+                'phase': 'idle' if stand else 'running', 'execution_id': '' if stand else 'tt-s100',
+                'sync_mode': 'clock', 'tt_note': note[1] if note and pc_id == note[0] else '',
+            }
+        samples.append({'t': float(step), 'pcs': pcs})
+    return samples
+
+
+def test_clock_mode_is_detected_and_the_cut_pc_must_keep_playing_too():
+    verdict = netfault.judge(netfault.SCENARIOS['3b'], _clock_samples(), PCS, 'f3',
+                             fault_start=10.0, fault_end=30.0, end=190.0, log_text='시간표 재생 · tt-s100 · 4회차 준비 · 시작까지 40 s')
+    assert verdict.ok, verdict.reasons
+    assert '재생 방식 · 시간표 재생' in verdict.notes
+    stood = netfault.judge(netfault.SCENARIOS['3b'], _clock_samples(standing=('f3', 40, 120)), PCS, 'f3',
+                           fault_start=10.0, fault_end=30.0, end=190.0)
+    assert not stood.ok and any('f3' in reason for reason in stood.reasons), '시간표 재생은 끊긴 PC 도 서면 안 됨'
+
+
+def test_clock_mode_fails_on_a_skipped_cycle():
+    log = '[WARN] 시간표 재생 · 5회차 초기 이동 시각을 놓침 · 다음 경계\n[INFO] 시간표 재생 · tt-s100 · 5회차 준비'
+    verdict = netfault.judge(netfault.SCENARIOS['2b'], _clock_samples(note=('f2', '5회차 쉼 · 다른 재생 중')), PCS, 'f1',
+                             fault_start=10.0, fault_end=160.0, end=190.0, log_text=log)
+    assert not verdict.ok
+    assert any('놓침' in reason for reason in verdict.reasons)
+    assert any('f2' in reason for reason in verdict.reasons)
+
+
+def test_summarize_reads_the_timetable_mode():
+    row = netfault.summarize({'runtime': {'local': {'pc_id': 'f1'}, 'timetable': {'mode': 'clock', 'local': {'note': 'x'}}}})
+    assert row['sync_mode'] == 'clock' and row['tt_note'] == 'x'
+    assert netfault.summarize({'runtime': {}})['sync_mode'] == 'lockstep', '옛 서버 · 칸 없음'

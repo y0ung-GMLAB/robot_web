@@ -16,6 +16,7 @@ from dds_listener import DdsListener
 from logbuf import LogBuffer
 from player import Player
 from standalone import Standalone
+from timetable_follow import TimetableFollower
 
 MODE_DDS = "dds"
 MODE_STANDALONE = "standalone"
@@ -64,6 +65,8 @@ class AppState:
         self._playing_for = None         # 마지막 start_at 의 (실행 번호, 진행 PC) · 정지 사건을 견준다 · 146
         # 진행 PC 가 안 보이면 회차 눈금대로 소리를 잇는다 · 수정 목록 178
         self.follower = CycleFollower()
+        # 시간표 재생 · 마스터가 보낸 시간표대로 회차 시각에 음원 · 받은 묶음은 파일에 · 수정 목록 186
+        self.timetable = TimetableFollower(os.path.join(config.APP_DIR, "config", "timetable.local.json"))
         self._follow_stop = threading.Event()
         self._follow_thread = None
 
@@ -298,8 +301,48 @@ class AppState:
             except Exception as exc:   # 잇기가 앱을 멈추면 안 된다
                 self.log.add("눈금 잇기 점검 오류: %s" % exc)
 
+    def _timetable_tick(self, wall=None):
+        """시간표 재생 · 회차 시각이 다가오면 그 회차 음원 예약 · 즉시 정지면 지금 소리 끔 · 186 · 따르는 시간표가 있으면 True
+
+        시간표 재생 방식이어도 사람이 누른 그룹 재생은 신호 재생 · 그때는 False 라 눈금 잇기(178)가 그대로 돈다.
+        """
+        if self.cfg["mode"] != MODE_DDS or not self.timetable.clock():
+            return False
+        wall = time.time() if wall is None else wall
+        stopped = self.timetable.stopped_plan(wall)
+        with self._lock:
+            playing = self._playing_for
+            if stopped and playing and playing[0] == stopped:
+                self._playing_for = None
+            else:
+                stopped = ""
+        if stopped:
+            pending = self._cancel_timer()
+            if self.player.is_active():
+                self.player.stop()
+                self.log.add("시간표 즉시 정지 → 재생 정지")
+            elif pending:
+                self.log.add("시간표 즉시 정지 → 재생 예약 취소")
+        due = self.timetable.due(wall)
+        if due is not None:
+            plan_id, cycle, start, motion = due
+            self._on_trigger(SimpleNamespace(
+                cycle_number=cycle, start_delay_sec=start - wall, motion_file_id=motion,
+                segment_start_sec=0.0, segment_end_sec=0.0, execution_id=plan_id, coordinator_id="",
+                timetable=True,
+            ))
+        return self.timetable.active(wall)
+
+    def _on_timetable(self, msg):
+        if self.timetable.update(int(msg.version), str(msg.body), str(msg.pc_id)):
+            body = self.timetable.snapshot()
+            self.log.add("시간표 설정 버전 %d · %s" % (
+                int(body.get("version") or 0), "시간표 재생" if body.get("mode") == "clock" else "신호 재생"))
+
     def _follow_tick(self, now=None):
         """진행 PC 가 안 보이고 같은 실행을 도는 로봇이 있으면 눈금 시각에 지난번 음원을 튼다 · 178"""
+        if self._timetable_tick():
+            return
         state = self.follower.snapshot()
         if not state or self.cfg["mode"] != MODE_DDS:
             return
@@ -351,15 +394,19 @@ class AppState:
         if segment:
             what += " · " + segment
         received = time.monotonic() if now is None else now
-        # 회차 눈금 · 진행 PC 의 시작이면 주기를 배운다 · 스스로 이은 회차는 배우지 않는다(칸 건너뜀) · 178
-        self.follower.record(
-            execution_id=str(getattr(msg, "execution_id", "") or ""),
-            coordinator_id=str(getattr(msg, "coordinator_id", "") or ""),
-            cycle=cycle, start=received + start_delay,
-            context={"motion_file_id": motion, "segment_start_sec": segment_start,
-                     "segment_end_sec": segment_end},
-            learn=not autonomous,
-        )
+        # 회차 눈금 · 진행 PC 의 시작이면 주기를 배운다 · 스스로 이은 회차는 배우지 않는다(칸 건너뜀) · 178 ·
+        # 시간표 재생의 회차는 시간표가 이미 안다 · 눈금 잇기에 넣지 않는다 · 186
+        if not getattr(msg, "timetable", False):
+            self.follower.record(
+                execution_id=str(getattr(msg, "execution_id", "") or ""),
+                coordinator_id=str(getattr(msg, "coordinator_id", "") or ""),
+                cycle=cycle, start=received + start_delay,
+                context={"motion_file_id": motion, "segment_start_sec": segment_start,
+                         "segment_end_sec": segment_end},
+                learn=not autonomous,
+            )
+        else:
+            what = "시간표 · " + what
         if autonomous:
             what = "진행 PC 안 보임 · 눈금대로 이어 감 · " + what
         if wanted < -0.05:
@@ -434,6 +481,7 @@ class AppState:
             on_stop=self._on_stop,
             watch_stop=self.cfg["trigger"]["stop_on_motion_stop"],
             presence=self._presence_info,
+            on_timetable=self._on_timetable,
         )
 
     def _presence_info(self):

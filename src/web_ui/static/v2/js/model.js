@@ -263,6 +263,8 @@ export function collectIssues(snap, sched, { connected = true } = {}) {
   if (unreadable.length) {
     warn(`시각을 읽을 수 없는 스케줄 ${unreadable.length}개`, unreadable.join(' · '), { kind: 'open', target: 'schedule', label: '스케줄 수정' });
   }
+  // 시간표 재생 · 시계 차이 100 ms 초과 · 시간대 다름 · 재생은 그대로 · 표시만 · 수정 목록 186
+  for (const notice of timetableNotices(snap)) warn(notice.title, notice.detail);
   const pcs = networkPcs(snap);
   // 연동 약속 번호가 다르면 그룹에서 빠진다 · 커밋만 다르면 빠지지 않는다 · 2026-10-13
   const others = pcs.filter((pc) => !pc.is_local && pc.role !== 'speaker');
@@ -281,6 +283,32 @@ export function collectIssues(snap, sched, { connected = true } = {}) {
     warn(`${offline.map(pcName).join(' · ')} 연결 안 됨`, 'PC 전원과 Wi-Fi 연결을 확인하세요.');
   }
   return issues.sort((a, b) => (a.tone === b.tone ? 0 : a.tone === 'bad' ? -1 : 1));
+}
+
+/**
+ * 시간표 재생 확인할 일 · 시계 차이 100 ms 초과 PC · 마스터와 시간대가 다른 PC(이 PC 포함) · 수정 목록 186
+ * 서버 `runtime.timetable` · 시간표 재생이 아니면 없음
+ */
+export function timetableNotices(snap) {
+  const runtime = snap?.coordination?.runtime || {};
+  const tt = runtime.timetable || {};
+  if (tt.mode !== 'clock') return [];
+  const names = new Map([...(Array.isArray(runtime.peers) ? runtime.peers : []), ...(runtime.local ? [runtime.local] : [])]
+    .map((peer) => [String(peer.pc_id || ''), pcName(peer)]));
+  const name = (id) => names.get(String(id)) || String(id);
+  const notices = [];
+  const clock = Array.isArray(tt.clock_warnings) ? tt.clock_warnings : [];
+  if (clock.length) {
+    notices.push({ title: `${clock.map(name).join(' · ')} 시계 차이 ${Number(tt.clock_warn_ms) || 100} ms 초과`,
+      detail: '재생 유지 · 다음 회차에서 맞춰짐 · 그 PC 시계 맞춤(chrony) 확인' });
+  }
+  const zones = Array.isArray(tt.timezone_mismatches) ? [...tt.timezone_mismatches] : [];
+  if (tt.local_timezone_mismatch === true && runtime.local) zones.unshift(runtime.local.pc_id);
+  if (zones.length) {
+    notices.push({ title: `${zones.map(name).join(' · ')} 시간대가 마스터와 다름`,
+      detail: `마스터 ${String(tt.master_timezone || '-')} · 운영시간이 어긋남 · 재생 유지 · 설정 → 네트워크·시간·그룹에서 시간대 변경` });
+  }
+  return notices;
 }
 
 /** 상단 가운데 한 문장 · tone = ok | warn | bad | info */

@@ -70,6 +70,16 @@ FAIL_PHRASES = (
     '스스로 잇기 실패',
     '트리거가 이미 지났습니다',
 )
+# 시간표 재생(clock) · 이 PC 시간표 구동(`clock_driver.py`)의 실제 문구 · 그 PC 가 회차를 쉬었다 · 수정 목록 186
+# 「시간표 재생 · 」 로 시작하는 줄 = 쉼 · 놓침 · 늦음 · 예약 실패 · 로컬 실행 끝남 · 아래 정상 문구가 든 줄은 뺀다
+CLOCK_OK_PHRASES = (
+    '회차 준비',
+    '남아 있던 실행 이어받음',
+    '운영시간 끝',
+    '즉시 정지',
+    '회차 후 정지',
+    '버전 ',                   # 재생 방식 바뀜 · 설정 버전 알림
+)
 INFO_PHRASES = (
     '눈금대로 스스로 이어 감',
     '빠졌던 그룹 실행으로 복귀 권유 받음',
@@ -78,6 +88,8 @@ INFO_PHRASES = (
     '연락 끊김',
     '자체 멈춤',
     '정지된 그룹 실행의 지연 명령을 폐기했습니다',
+    '시간표 설정 버전',
+    '남아 있던 실행 이어받음',
 )
 
 
@@ -361,6 +373,8 @@ def summarize(snapshot: Mapping[str, Any]) -> Dict[str, Any]:
     local = runtime.get('local') if isinstance(runtime.get('local'), Mapping) else {}
     execution = runtime.get('execution') if isinstance(runtime.get('execution'), Mapping) else {}
     failure = runtime.get('last_start_failure') if isinstance(runtime.get('last_start_failure'), Mapping) else {}
+    timetable = runtime.get('timetable') if isinstance(runtime.get('timetable'), Mapping) else {}
+    local_tt = timetable.get('local') if isinstance(timetable.get('local'), Mapping) else {}
     config = runtime.get('config') if isinstance(runtime.get('config'), Mapping) else {}
     return {
         'pc_id': str(local.get('pc_id') or config.get('pc_id') or ''),
@@ -377,6 +391,9 @@ def summarize(snapshot: Mapping[str, Any]) -> Dict[str, Any]:
         'start_failure_at': float(failure.get('at') or 0.0),
         'start_failure': str(failure.get('message') or ''),
         'domain': int(config.get('dds_domain_id') or 0),
+        # 재생 방식 · 시간표 재생이면 판정이 다르다(끊긴 PC 도 계속 재생) · 옛 서버는 칸 없음 = 신호 재생 · 186
+        'sync_mode': 'clock' if timetable.get('mode') == 'clock' else 'lockstep',
+        'tt_note': str(local_tt.get('note') or ''),
     }
 
 
@@ -498,6 +515,39 @@ def _common_checks(
             verdict.notes.append(f'로그 「{phrase.strip(" ·")}」 {count}번')
 
 
+def clock_failures(log_text: str) -> Dict[str, int]:
+    """시간표 재생 로그에서 「쉼」 쪽 줄만 · 정상 문구(준비 · 이어받음 · 운영 끝 · 정지)는 뺀다"""
+    found: Dict[str, int] = {}
+    for line in log_text.splitlines():
+        if '시간표 재생 · ' not in line or any(ok in line for ok in CLOCK_OK_PHRASES):
+            continue
+        text = line.split('시간표 재생 · ', 1)[1].strip()[:60]
+        found[text] = found.get(text, 0) + 1
+    return found
+
+
+def held_notes(samples: Sequence[Mapping[str, Any]], pcs: Sequence[str], t0: float) -> Dict[str, str]:
+    """시간표 재생 · 시험 중 PC 가 화면에 낸 쉬는 이유(`tt_note`) · PC → 마지막 이유"""
+    found: Dict[str, str] = {}
+    for sample in samples:
+        if float(sample['t']) < t0:
+            continue
+        for pc_id, row in (sample.get('pcs') or {}).items():
+            note = str((row or {}).get('tt_note') or '')
+            if pc_id in pcs and note and note not in {'정지됨', '시간표 끝'}:
+                found[pc_id] = note
+    return found
+
+
+def detect_mode(samples: Sequence[Mapping[str, Any]]) -> str:
+    """재생 방식 · 표본에 시간표 재생 PC 가 하나라도 있으면 clock"""
+    for sample in samples:
+        for row in (sample.get('pcs') or {}).values():
+            if (row or {}).get('sync_mode') == 'clock':
+                return 'clock'
+    return 'lockstep'
+
+
 def _same_execution_at_end(verdict: Verdict, samples: Sequence[Mapping[str, Any]], pcs: Sequence[str]) -> None:
     ids = {}
     for pc_id in pcs:
@@ -517,6 +567,20 @@ def judge(
 ) -> Verdict:
     verdict = Verdict(ok=True)
     others = [pc for pc in pcs if pc != me]
+    mode = detect_mode(samples)
+    verdict.notes.append('재생 방식 · ' + ('시간표 재생' if mode == 'clock' else '신호 재생'))
+    if mode == 'clock' and scenario.key != '4':
+        # 시간표 재생 · 끊긴 PC 를 포함해 모두 계속 재생 · 회차를 쉰 PC 가 없어야 · 끝에 같은 시간표
+        _common_checks(verdict, samples, pcs, fault_start, end, keep_playing=pcs, log_text=log_text,
+                       fail_phrases=())
+        for text, count in clock_failures(log_text).items():
+            verdict.ok = False
+            verdict.reasons.append(f'이 PC 로그 「{text}」 {count}번')
+        for pc_id, note in held_notes(samples, pcs, fault_start).items():
+            verdict.ok = False
+            verdict.reasons.append(f'{pc_id} 「{note}」')
+        _same_execution_at_end(verdict, samples, pcs)
+        return verdict
     if scenario.key == '4':
         if stop_sent_at is None:
             return Verdict(False, ['마스터에 즉시 정지를 못 보냄'])
@@ -534,7 +598,7 @@ def judge(
         else:
             verdict.notes.append(f'{me} 다시 붙고 {at - fault_end:.1f} s 뒤 섬')
         _common_checks(verdict, samples, pcs, fault_start, end, keep_playing=(), log_text=log_text,
-                       fail_phrases=scenario.fail_phrases)
+                       fail_phrases=() if mode == 'clock' else scenario.fail_phrases)
         return verdict
     keep = pcs if scenario.key in ('2b', 'lag') else others
     _common_checks(verdict, samples, pcs, fault_start, end, keep_playing=keep, log_text=log_text,

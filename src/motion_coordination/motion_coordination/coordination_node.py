@@ -81,6 +81,7 @@ from .local_runtime_monitor import LocalRuntimeMonitor
 from .safety_stop import SafetyStopController, SafetyStopOutcome
 from .stall_watch import StallWatch, default_stall_log_path, stall_watch_enabled
 from .systemd_notify import SystemdWatchdog, configured_watchdog_sec
+from .timetable_node import TIMETABLE_STOP_COMMAND, TimetableMixin
 from .schedule_lead import (
     SELF_LATE_WAIT_MAX_SEC, ScheduleLeadPlanner, command_kind, is_not_accepted_rejection,
     is_timing_rejection, may_retry_own_cycle_initialize, only_self_late,
@@ -188,7 +189,7 @@ def _set_optional_message_field(message: Any, field_name: str, value: Any) -> No
         setattr(message, field_name, value)
 
 
-class MotionCoordinationNode(Node):
+class MotionCoordinationNode(TimetableMixin, Node):
     def __init__(self, config: Optional[GroupConfig] = None) -> None:
         super().__init__('motion_group_coordinator')
         workspace = Path(os.environ.get('MOTION_WORKSPACE') or Path.cwd()).resolve()
@@ -343,6 +344,8 @@ class MotionCoordinationNode(Node):
             GroupTimeSync, topics.GROUP_TIME_PROBE,
             self._time_sync_callback, probe_qos,
         )
+        # 시간표 재생 · 그룹 설정 묶음 · 이 PC 시간표 구동 · 수정 목록 186
+        self._init_timetable(workspace)
         # 같은 망 PC 표 · 그룹과 상관없이 · 핵심 요구 4
         self._presence: Dict[tuple, Dict[str, Any]] = {}
         self._presence_lock = threading.Lock()
@@ -493,6 +496,10 @@ class MotionCoordinationNode(Node):
             _set_optional_message_field(
                 message, 'start_blocker', local_start_blocker(self._local_status),
             )
+        # 시간표 재생 · 가진 설정 버전 · 필요 시간(자동 회차 간격) · 제 시간표 상태 · 수정 목록 186
+        timetable_version, timetable_report = self._timetable_heartbeat()
+        _set_optional_message_field(message, 'timetable_version', timetable_version)
+        _set_optional_message_field(message, 'timetable_report', timetable_report)
         self._heartbeat_pub.publish(message)
 
     def _web_url(self) -> str:
@@ -602,6 +609,8 @@ class MotionCoordinationNode(Node):
         self._enforce_execution_membership()
         self._drive_autonomous_cycle()
         self._drive_aligned_start()
+        # 시간표 재생 · 이 PC 시간표 구동 · 마스터면 설정 유지 · 수정 목록 186
+        self._drive_timetable()
         self._enforce_schedule_ack_deadline()
         self._enforce_motion_start_report_deadline()
         self._drive_trigger_sync()
@@ -702,6 +711,8 @@ class MotionCoordinationNode(Node):
             self._alarm_callback(pending_alarm)
         if message.execution_id:
             self._resend_stop_if_still_held(message.pc_id, str(message.execution_id))
+        # 시간표 재생 · 그 PC 상태 · 시계 차이 · 수정 목록 186
+        self._note_timetable_heartbeat(message)
         if restarted and message.pc_id in self._execution.participants:
             # 다시 뜬 PC 는 실행을 잃었다 · 그 PC 만 뺀다(진행 PC 가) · 정상이 되면 회차 경계에서 다시 ·
             # 전에는 모든 PC 가 그룹 전체를 세우고 잠갔다 · 수정 목록 178
@@ -1078,6 +1089,10 @@ class MotionCoordinationNode(Node):
 
     def _command_callback(self, message: GroupCommand) -> None:
         if message.group_id != self._config.group_id or not self._joined:
+            return
+        if message.command == TIMETABLE_STOP_COMMAND:
+            # 시간표 재생 · 슬레이브의 정지 요청 · 마스터만 처리 · 수정 목록 186
+            self._timetable_remote_stop(message)
             return
         if self._config.pc_id not in set(message.participant_ids):
             return
@@ -2055,16 +2070,35 @@ class MotionCoordinationNode(Node):
                 result = {'success': True, 'message': 'DDS 그룹 참가'}
             elif command == 'leave':
                 result = self._leave_group()
+            elif (
+                command in {'start_group', 'synchronized_run'} and self._timetable_clock()
+                and normalize_started_by(request.get('started_by')) == STARTED_BY_SCHEDULE
+            ):
+                # 시간표 재생은 스케줄에만 · 각 PC 가 스케줄 시간표로 · 수정 목록 186
+                result = self._timetable_start(request)
             elif command in {'start_group', 'synchronized_run'}:
+                # 사람이 누른 그룹 재생 · 재생 방식과 상관없이 신호 재생 · 시간표 회차가 남았으면 거절 · 186
+                blocker = self._timetable_human_start_blocker() if self._timetable_clock() else ''
+                if blocker:
+                    raise ValueError(blocker)
                 result = self._start_group_execution(request=request)
+            elif command == 'timetable_set':
+                result = self._timetable_set(request)
             elif command == 'initialize_group':
+                blocker = self._timetable_human_start_blocker() if self._timetable_clock() else ''
+                if blocker:
+                    raise ValueError(blocker)
                 result = self._start_group_execution(
                     request=request, initialization_only=True,
                 )
+            elif command == 'stop_after_cycle' and self._timetable_routes_stop(str(request.get('reason') or '')):
+                result = self._timetable_stop(after_cycle=True, reason=str(request.get('reason') or ''))
             elif command == 'stop_after_cycle':
                 result = self._request_group_stop(
                     after_cycle=True, reason=str(request.get('reason') or ''),
                 )
+            elif command in {'stop_now', 'stop_motion'} and self._timetable_routes_stop(''):
+                result = self._timetable_stop(after_cycle=False)
             elif command in {'stop_now', 'stop_motion'}:
                 result = self._request_group_stop(after_cycle=False)
             elif command == 'acknowledge_group_error':
@@ -2080,6 +2114,17 @@ class MotionCoordinationNode(Node):
         except Exception as exc:
             result = {'success': False, 'message': str(exc)}
         return result
+
+    def _timetable_routes_stop(self, reason: str) -> bool:
+        """정지를 시간표로 보낼까 · 시간표 재생 · 신호 재생 실행 없음 · 운영시간 끝 주차(도는 시간표 없음)는 신호 길 그대로"""
+        if not self._timetable_clock():
+            return False
+        with self._lock:
+            if self._execution.execution_id:
+                return False
+        if reason == SCHEDULE_END_REASON and not self._timetable_execution_view():
+            return False
+        return True
 
     def _start_group_execution(
         self,
@@ -5042,6 +5087,17 @@ class MotionCoordinationNode(Node):
             })
 
     def snapshot(self) -> Dict[str, Any]:
+        result = self._signal_snapshot()
+        # 시간표 재생 · 설정 · 다음 회차 · PC 별 상태 · 시계 차이 · 수정 목록 186
+        result['timetable'] = self._timetable_snapshot()
+        execution = result.get('execution') or {}
+        view = self._timetable_execution_view()
+        if view and not execution.get('execution_id'):
+            # 신호 재생 실행이 없고 시간표가 도는 중 · 스케줄 노드가 「도는 중」 으로 보게(다시 시작을 보내지 않게)
+            result['execution'] = {**execution, **view, 'participants': [], 'excluded': {}, 'joining': {}, 'lost': {}}
+        return result
+
+    def _signal_snapshot(self) -> Dict[str, Any]:
         now = time.monotonic()
         with self._lock:
             execution_id = self._execution.execution_id

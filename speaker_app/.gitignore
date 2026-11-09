@@ -17,3 +17,5 @@ sounds/.stereo_cache/
 # 런타임 산출물
 *.log
 config/speaker.local.yaml
+# 시간표 재생 · 마스터에게 받은 그룹 설정 묶음 · 수정 목록 186
+config/timetable.local.json

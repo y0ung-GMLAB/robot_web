@@ -18,6 +18,8 @@ TOPIC = "/motion_group/command"
 EVENT_TOPIC = "/motion_group/event"
 PRESENCE_TOPIC = "/motion_group/presence"
 HEARTBEAT_TOPIC = "/motion_group/heartbeat"
+# 시간표 재생 · 그룹 설정 묶음 · 마스터가 바뀔 때 + 2 s 마다 · 수정 목록 186
+TIMETABLE_TOPIC = "/motion_group/timetable"
 PRESENCE_INTERVAL_SEC = 2.0
 
 # 이 사건(`GroupEvent.event`)이 오면 재생을 멈출지 본다 · motion_completed(정상 사이클 종료)는 제외한다 ·
@@ -58,6 +60,7 @@ class DdsListener:
         self._error = ""
         self._on_trigger = None
         self._on_stop = None
+        self._on_timetable = None
         self._watch_stop = False
         self._group_id = ""
         self._domain_id = 0
@@ -115,9 +118,11 @@ class DdsListener:
         self._log.add("DDS 시작 실패: %s" % message)
 
     # ---- 제어 -------------------------------------------------------
-    def start(self, domain_id, group_id, on_trigger, on_stop=None, watch_stop=False, presence=None):
+    def start(self, domain_id, group_id, on_trigger, on_stop=None, watch_stop=False, presence=None,
+              on_timetable=None):
         self.stop()
         self._presence = presence
+        self._on_timetable = on_timetable
         self._domain_id = int(domain_id)
         self._group_id = str(group_id)
         self._on_trigger = on_trigger
@@ -229,6 +234,14 @@ class DdsListener:
                 node.create_subscription(GroupEvent, EVENT_TOPIC, self._on_event, qos)
             # 하트비트 · 진행 PC 가 살아 있나 · 같은 실행을 도는 PC 가 있나 · BEST_EFFORT 구독 · 수정 목록 178
             node.create_subscription(GroupHeartbeat, HEARTBEAT_TOPIC, self._on_heartbeat, qos)
+            # 시간표 재생 · 옛 빌드(메시지 없음)면 건너뛴다 · 신호 재생은 그대로 · 수정 목록 186
+            try:
+                from motion_coordination_interfaces.msg import GroupTimetable
+            except ImportError:
+                GroupTimetable = None
+                self._log.add("시간표 재생 수신 꺼짐 — 메시지 빌드가 옛것입니다 (robot_web 에서 다시 빌드)")
+            if GroupTimetable is not None:
+                node.create_subscription(GroupTimetable, TIMETABLE_TOPIC, self._on_timetable_message, qos)
 
             presence_pub = self._create_presence_publisher(node, qos)
 
@@ -353,6 +366,16 @@ class DdsListener:
                 callback(msg)
             except Exception as exc:
                 self._log.add("트리거 처리 오류: %s" % exc)
+
+    def _on_timetable_message(self, msg):
+        if msg.group_id != self._group_id:
+            return
+        callback = self._on_timetable
+        if callback is not None:
+            try:
+                callback(msg)
+            except Exception as exc:
+                self._log.add("시간표 처리 오류: %s" % exc)
 
     def _on_heartbeat(self, msg):
         if msg.group_id != self._group_id:
