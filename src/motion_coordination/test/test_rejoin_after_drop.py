@@ -90,3 +90,101 @@ def test_the_loop_of_release_then_invite_now_ends_at_the_first_invite():
         node._command_callback(join)
         node._process_group_command(join)
     assert rejoins == ['cmd-join-loop-0', 'cmd-join-loop-1', 'cmd-join-loop-2']
+
+
+# --------------------------------------------------------------------------- #
+# 끊김 시험 C (2026-11-08) · 스스로 잇기 실패로 혼자 빠진 PC 도 같은 실행으로 돌아온다
+#
+# 실물 · floating3 이 회차 끝 직후 다시 붙음 → 진행 PC 가 아직 안 보여 스스로 잇다가 A 로 빠짐 · 진행 PC 가
+# 30 s 마다 보낸 `join` 을 「정지된 그룹 실행의 지연 명령」 으로 버려 그 실행이 끝날 때까지 서 있었다.
+# --------------------------------------------------------------------------- #
+
+def _left(node, monkeypatch, reason, **kwargs):
+    import motion_coordination.coordination_node as coordination_node
+    from test_coordination_node import _InlineThread
+    monkeypatch.setattr(coordination_node.threading, 'Thread', _InlineThread)
+    node._call_local_control = lambda payload, **_kwargs: {'success': True}
+    node._leave_group_execution(reason, **kwargs)
+    assert node._execution.execution_id == ''
+    assert 'exec-a' in node._cancelled_execution_ids
+
+
+def test_a_pc_that_left_because_its_own_continuation_failed_accepts_the_join(monkeypatch):
+    node, rejoins = _slave()
+    _left(node, monkeypatch, '스스로 잇기 · 시작 예약 실패 · 그룹 모션 시작 트리거가 이미 지났습니다', rejoinable=True)
+
+    join = _command('join', 'cmd-join-autonomy', cycle=12)
+    node._command_callback(join)
+    node._process_group_command(join)
+
+    assert rejoins == ['cmd-join-autonomy']
+    assert 'exec-a' not in node._cancelled_execution_ids
+
+
+def test_a_pc_that_was_taken_out_for_other_reasons_still_refuses_the_join(monkeypatch):
+    """사람이 뺌 · 웹 재시작 · 모터 문제로 빠진 것은 지금처럼 다시 안 들어온다"""
+    node, rejoins = _slave()
+    _left(node, monkeypatch, '모터 상태에 없음')
+
+    join = _command('join', 'cmd-join-motor', cycle=12)
+    node._process_group_command(join)
+
+    assert rejoins == []
+    assert 'exec-a' in node._cancelled_execution_ids
+
+
+def test_a_pc_removed_by_a_person_still_refuses_the_join():
+    node, rejoins = _slave()
+    node._command_callback(_command('cancel_before_start', 'cmd-remove-by-person'))
+
+    join = _command('join', 'cmd-join-person', cycle=12)
+    node._process_group_command(join)
+
+    assert rejoins == []
+    assert 'exec-a' in node._cancelled_execution_ids
+
+
+def test_a_real_stop_after_an_autonomy_drop_refuses_the_join(monkeypatch):
+    node, rejoins = _slave()
+    _left(node, monkeypatch, '스스로 잇기 실패 · 주기를 모릅니다', rejoinable=True)
+    node._command_callback(_command('stop_now', 'cmd-stop-after'))
+
+    node._process_group_command(_command('join', 'cmd-join-after-stop', cycle=12))
+
+    assert rejoins == []
+
+
+# --------------------------------------------------------------------------- #
+# 끊김 시험 Q (실물 NY 2026-11-08 19:30 floating4) · 웹 끊김으로 스스로 빠진 PC 도 같은 실행으로 돌아온다
+# --------------------------------------------------------------------------- #
+
+def _bridge_lost(node, monkeypatch):
+    import motion_coordination.coordination_node as coordination_node
+    from test_coordination_node import _InlineThread
+    monkeypatch.setattr(coordination_node.threading, 'Thread', _InlineThread)
+    node._call_local_control = lambda payload, **_kwargs: {'success': True}
+    node._drop_self_for_bridge_loss('마지막 성공 2839ms 전 · 연속 실패 3회', moving=True)
+    assert node._execution.execution_id == ''
+    assert 'exec-a' in node._cancelled_execution_ids
+
+
+def test_a_pc_that_left_because_its_web_was_lost_accepts_the_join(monkeypatch):
+    node, rejoins = _slave()
+    _bridge_lost(node, monkeypatch)
+
+    join = _command('join', 'cmd-join-bridge', cycle=12)
+    node._command_callback(join)
+    node._process_group_command(join)
+
+    assert rejoins == ['cmd-join-bridge']
+    assert 'exec-a' not in node._cancelled_execution_ids
+
+
+def test_a_real_stop_after_a_web_loss_refuses_the_join(monkeypatch):
+    node, rejoins = _slave()
+    _bridge_lost(node, monkeypatch)
+    node._command_callback(_command('stop_now', 'cmd-stop-after-bridge'))
+
+    node._process_group_command(_command('join', 'cmd-join-after-bridge-stop', cycle=12))
+
+    assert rejoins == []

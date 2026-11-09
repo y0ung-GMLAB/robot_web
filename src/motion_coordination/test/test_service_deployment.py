@@ -230,3 +230,14 @@ def test_no_local_node_touches_the_group_topics():
         if 'topics.GROUP_' in text or "'/motion_group/" in text:
             offenders.append(relative)
     assert offenders == [], offenders
+
+
+def test_a_hung_coordination_node_is_restarted_by_systemd():
+    """끊김 시험 G · 멈춘(행) 연동 노드를 아무도 다시 띄우지 않았다 · 감시 + 실행 스크립트 exec"""
+    unit = (PACKAGE_ROOT / 'deploy/motion-coordination.service.in').read_text(encoding='utf-8')
+    runner = (PACKAGE_ROOT / 'deploy/run_coordination_user_service.sh').read_text(encoding='utf-8')
+
+    assert 'NotifyAccess=main' in unit
+    assert 'WatchdogSec=90' in unit, '랜 대기(최대 60 s) 동안 죽이지 않게 넉넉히 · 노드가 15 s 로 좁힌다'
+    assert 'Restart=on-failure' in unit
+    assert 'exec "${EXECUTABLE}"' in runner, 'MainPID 가 노드여야 NotifyAccess=main 이 받는다'

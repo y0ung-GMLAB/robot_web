@@ -131,6 +131,9 @@ class ScheduleService:
             'clock': local_clock.snapshot(),
             # 지금 시작하면 안 되는 이유 · 스케줄 노드가 비어 있을 때만 시작한다 · 수정 목록 124
             'start_blocker': self._start_blocker(),
+            # 그 이유가 이 PC 모터 쪽(서보 에러 · 긴급정지 잠김 · 모터 연결)인가 · 마스터면 그룹은 시작하고
+            # 저만 빠진다 · 실행 설정 같은 공통 이유는 `setup` · 끊김 시험 H
+            'start_blocker_kind': self._start_blocker_kind(),
             # 구간 끝 주차 실패 · 그 자리에서 서보 끔 · 이 PC 것 · 풀릴 때까지 · 수정 목록 131
             'schedule_end_notice': self._schedule_end_notice(),
             # 이 PC 메모리 · 스왑 · 「메모리 부족」 알림 · 「PC 현황」 이 다른 PC 것도 이 주소로 받는다 · 수정 목록 170
@@ -163,6 +166,21 @@ class ScheduleService:
         except Exception:  # 상태 조회 실패가 스케줄을 막지 않는다
             logger.debug('시작 가능 여부 조회 실패', exc_info=True)
             return ''
+
+    def _start_blocker_kind(self) -> str:
+        """`start_blocker` 의 갈래 · `motor` 이 PC 모터 쪽 · `setup` 실행 설정 등 공통 · 빈 값 막는 것 없음
+
+        판단은 `motor_action_blocker` 와 같은 순서 · 실행 설정이 준비 안 됐으면 `setup` (그룹도 같은
+        설정으로 돌므로 미룬다) · 그 밖(긴급정지 잠김 · 서보 에러 · 모터 연결 · 다회전 클리어 뒤)은 이 PC 만의 일.
+        """
+        if not self._start_blocker():
+            return ''
+        context = getattr(self.bridge, '_execution_context', None)
+        try:
+            ready = bool(context.status(validate_files=False).get('ready')) if context is not None else True
+        except Exception:  # 못 읽으면 공통 이유로 · 예전처럼 미룬다
+            return 'setup'
+        return 'motor' if ready else 'setup'
 
     def _coordination_session(self) -> Dict[str, Any]:
         """연동을 쓰는가 · 지금 그룹에 들어가 있는가 · §6-133

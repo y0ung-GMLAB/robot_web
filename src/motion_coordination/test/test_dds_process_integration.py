@@ -423,7 +423,7 @@ def test_two_processes_complete_two_barrier_cycles_over_typed_dds(tmp_path):
             bridge.close()
 
 
-def test_trigger_spread_stops_once_and_blocks(tmp_path):
+def test_trigger_spread_is_recorded_without_stopping(tmp_path):
     executable = Path(
         os.environ.get('MOTION_COORDINATION_EXECUTABLE')
         or Path.cwd()
@@ -473,23 +473,11 @@ def test_trigger_spread_stops_once_and_blocks(tmp_path):
         for port in ports:
             _wait(lambda port=port: _one_peer_snapshot(port))
         assert _post(ports[0], 'start_group')['success'] is True
-        _wait(lambda: bridges[0].calls('stop_now'), timeout=10.0)
-        _wait(lambda: bridges[1].calls('stop_now'), timeout=10.0)
-        failed = _wait(
-            lambda: (
-                _get(ports[0])
-                if _get(ports[0]).get('coordination_error', {}).get('active')
-                else None
-            ),
-            timeout=10.0,
-        )
-        assert failed['coordination_error']['code'] == (
-            'GROUP_TRIGGER_SPREAD_EXCEEDED'
-        )
-        assert len(bridges[0].calls('group_prepare')) == 1
-        assert len(bridges[1].calls('group_start_at')) == 1
-        assert _post(ports[0], 'start_group')['success'] is False
-        assert _post(ports[0], 'acknowledge_group_error')['success'] is True
+        # 끊김 시험 F · 40 ms 어긋남은 기록만 · 그룹을 세우거나 잠그지 않는다
+        _wait(lambda: bridges[1].calls('group_start_at'), timeout=10.0)
+        time.sleep(1.0)
+        assert bridges[0].calls('stop_now') == [] and bridges[1].calls('stop_now') == []
+        assert not _get(ports[0]).get('coordination_error', {}).get('active')
     finally:
         for process in processes:
             process.terminate()

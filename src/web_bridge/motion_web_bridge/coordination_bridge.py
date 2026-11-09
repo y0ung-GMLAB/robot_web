@@ -303,6 +303,9 @@ class CoordinationWebBridge:
                     motion_segment.START_KEY: segment[motion_segment.START_KEY],
                     motion_segment.END_KEY: segment[motion_segment.END_KEY],
                 })
+                if group_start_origin(payload) == 'schedule' and payload.get('coordinator_sits_out'):
+                    # 마스터 자기 모터 문제 · 스케줄이 알려 준 이유 · 진행만 하고 빠진다 · 끊김 시험 H
+                    request['coordinator_sits_out'] = str(payload.get('coordinator_sits_out'))[:200]
             result = self._local_api('/control', request)
         except (OSError, ValueError) as exc:
             result = {'success': False, 'message': str(exc)}

@@ -72,6 +72,21 @@ def start_blocker(schedule_status: Optional[Mapping[str, Any]]) -> Optional[str]
     return str(schedule_status.get('start_blocker') or '').strip()
 
 
+def start_blocker_kind(schedule_status: Optional[Mapping[str, Any]]) -> Optional[str]:
+    """`start_blocker` 의 갈래 · `motor` · `setup` · 빈 값 · 못 읽었으면 None · 옛 브리지는 칸이 없다 · 끊김 시험 H"""
+    if not isinstance(schedule_status, Mapping) or 'start_blocker_kind' not in schedule_status:
+        return None
+    return str(schedule_status.get('start_blocker_kind') or '').strip()
+
+
+def master_sits_out(*, kind: str, coordination: bool, master: bool) -> bool:
+    """마스터 자기 모터 문제 · 그룹 시작은 보내고 마스터만 빠지나 · 끊김 시험 H (사용자 2026-11-08 「그렇게 해」)
+
+    연동을 쓰는 마스터에서 이유가 이 PC 모터 쪽일 때만 · 공통 이유(실행 설정)와 단독 PC 는 지금처럼 미룬다.
+    """
+    return bool(coordination and master and str(kind or '') == 'motor')
+
+
 def start_failure_message(
     coordination_runtime: Optional[Mapping[str, Any]],
     local_status: Optional[Mapping[str, Any]],

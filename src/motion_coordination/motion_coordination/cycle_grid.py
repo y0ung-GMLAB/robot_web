@@ -49,3 +49,18 @@ def next_grid_start(*, last_start: float, period: float, earliest: float) -> Tup
         raise ValueError('주기를 모릅니다')
     steps = max(int(math.ceil((float(earliest) - float(last_start)) / period - 1e-9)), 1)
     return steps, float(last_start) + steps * period
+
+
+#: 잰 간격을 눈금으로 붙이는 한도 · 시계 맞춤 오차(수십 ms)는 붙이고 · 그보다 크면 잰 값 그대로
+SNAP_TOLERANCE_SEC = 1.0
+
+
+def snap_period(measured: float, *, step: float = GRID_STEP_SEC, tolerance: float = SNAP_TOLERANCE_SEC) -> float:
+    """참가 PC 가 잰 주기 · 진행 PC 의 주기는 늘 `step` 의 배수다 · 가까운 배수로 붙인다 · 끊김 시험 L
+
+    두 회차 시작의 이 PC 시각 차이에는 시계 맞춤 오차(± 수십 ms)가 들어 있다 · 그대로 쓰면 스스로 잇는
+    회차마다 그 오차가 쌓인다(n 회차 뒤 n 배) · 배수에서 `tolerance` 넘게 벗어나면(옛 진행 PC 등) 잰 값.
+    """
+    measured = float(measured)
+    snapped = max(round(measured / float(step)), 1) * float(step)
+    return snapped if abs(snapped - measured) <= float(tolerance) else measured

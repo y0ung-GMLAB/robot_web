@@ -13,7 +13,7 @@ import itertools
 import time
 from types import SimpleNamespace
 
-from motion_coordination_interfaces.msg import GroupCommand, GroupEvent
+from motion_coordination_interfaces.msg import GroupCommand, GroupEvent, GroupHeartbeat
 
 import motion_coordination.coordination_node as coordination_node
 from motion_coordination.group_execution import GroupExecution, MemberRegistry, drop_release_command_id
@@ -428,3 +428,98 @@ def test_a_drop_release_id_is_still_a_release_for_181():
 
     assert 'exec-a' in node._cancelled_execution_ids
     assert 'exec-a' in node._drop_released()
+
+
+# --------------------------------------------------------------------------- #
+# 끊김 시험 D (2026-11-08) · 끊긴 동안 누른 「전체 즉시 정지」 를 다시 붙은 PC 에 다시 보낸다
+#
+# 실물 · floating2 가 끊긴 상태에서 마스터에 stop_now · 나머지 3대는 바로 섬 · 명령 토픽은 VOLATILE 이라
+# floating2 는 못 받았고 다시 붙은 뒤에도 옛 실행을 약 11분 혼자 재생했다.
+# --------------------------------------------------------------------------- #
+
+def _stopped_while_lost():
+    node = _lost_master()
+    node._enforce_execution_membership()
+    node._safety_stop = SimpleNamespace(
+        stop_now=lambda local, publish: (publish(), SimpleNamespace(local_result={'success': True}))[1],
+    )
+    stopped = node._execution.execution_id
+    node._issue_stop_now(
+        execution_id=stopped, participants=node._execution.participants, cycle_number=3,
+    )
+    node._execution = GroupExecution()          # 진행 PC 는 그 실행을 놓았다
+    node._command_pub.messages.clear()
+    return node, stopped
+
+
+def _heartbeat(node, execution_id, pc_id='pc-c'):
+    node._system_info_cache = getattr(node, '_system_info_cache', None) or {}
+    node._heartbeat_callback(GroupHeartbeat(
+        group_id='stage-a', pc_id=pc_id, boot_id=f'boot-{pc_id}', joined=True,
+        sequence=next(_SEQUENCE), execution_id=execution_id,
+        protocol_version=coordination_node.GROUP_PROTOCOL_VERSION,
+    ))
+
+
+def test_a_pc_still_holding_a_stopped_run_gets_the_stop_again():
+    node, stopped = _stopped_while_lost()
+
+    _heartbeat(node, stopped)
+
+    [again] = _commands(node, 'stop_now')
+    assert again.execution_id == stopped
+    assert again.participant_ids == ['pc-a', 'pc-b', 'pc-c'], '처음 보낸 목록 그대로'
+    assert again.cycle_number == 3
+
+
+def test_the_stop_is_resent_at_most_every_two_seconds():
+    node, stopped = _stopped_while_lost()
+    _heartbeat(node, stopped)
+    _heartbeat(node, stopped)
+    assert len(_commands(node, 'stop_now')) == 1
+
+    node._stopped_recently()[stopped]['sent']['pc-c'] -= 2.5
+    _heartbeat(node, stopped)
+    assert len(_commands(node, 'stop_now')) == 2
+
+
+def test_other_execution_ids_are_left_alone():
+    node, stopped = _stopped_while_lost()
+
+    _heartbeat(node, 'exec-new')
+    _heartbeat(node, '')
+
+    assert _commands(node, 'stop_now') == []
+
+
+def test_no_resend_while_the_master_still_holds_that_run():
+    node = _lost_master()
+    node._enforce_execution_membership()
+    node._stopped_recently()[node._execution.execution_id] = {
+        'participants': ('pc-a', 'pc-b', 'pc-c'), 'cycle': 3,
+        'until': time.monotonic() + 60.0, 'sent': {},
+    }
+
+    _heartbeat(node, node._execution.execution_id)
+
+    assert _commands(node, 'stop_now') == []
+
+
+def test_a_pc_left_out_of_the_stop_list_is_added_on_resend():
+    node, stopped = _stopped_while_lost()
+    node._stopped_recently()[stopped]['participants'] = ('pc-a', 'pc-b')
+
+    _heartbeat(node, stopped)
+
+    [again] = _commands(node, 'stop_now')
+    assert again.participant_ids == ['pc-a', 'pc-b', 'pc-c']
+
+
+def test_stops_are_forgotten_after_thirty_minutes():
+    node, stopped = _stopped_while_lost()
+    node._stopped_recently()[stopped]['until'] = time.monotonic() - 1.0
+
+    _heartbeat(node, stopped)
+
+    assert _commands(node, 'stop_now') == []
+    assert stopped not in node._stopped_recently()

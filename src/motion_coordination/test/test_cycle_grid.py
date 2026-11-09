@@ -235,7 +235,9 @@ def test_after_operating_hours_the_participant_finishes_and_releases(monkeypatch
     node._drive_autonomous_cycle()
 
     assert node._execution.execution_id == ''
-    assert calls[-1]['command'] == 'stop_now'
+    # 끊김 시험 P · 세운 뒤 평소 운영 종료처럼 기준점 주차 → 서보 OFF(진행 PC 없이도)
+    assert [call['command'] for call in calls[-2:]] == ['stop_now', 'stop_after_cycle']
+    assert calls[-1]['reason'] == 'schedule_end' and calls[-1]['execution_id'] == ''
 
 
 # --------------------------------------------------------------------------- #
@@ -288,3 +290,228 @@ def test_a_participant_remembers_the_masters_operating_end():
         operating_until_unix_sec=1.0,
     ))
     assert node._execution.operating_until == pytest.approx(ends)
+
+
+# --------------------------------------------------------------------------- #
+# 끊김 시험 A (2026-11-08) · 스케줄 시작은 초기 이동 시간을 0(= PC마다 매핑 값)으로 보낸다
+#
+# 실물 · 마스터 Wi-Fi 150 s 끊음 · 참가 PC 3대가 스스로 잇다가 초기 이동(5 s)을 시작 2 s 전에 걸어
+# 3 s 늦게 준비 · 「트리거가 이미 지났습니다」 → 3대 모두 빠지고 섬.
+# --------------------------------------------------------------------------- #
+
+def _late_start_reply(payload):
+    if payload['command'] == 'group_start_at':
+        return {'success': False, 'message': '그룹 모션 시작 트리거가 이미 지났습니다'}
+    return {'success': True}
+
+
+def test_zero_initial_move_time_uses_this_pcs_actual_initialization_time():
+    node, calls = _participant(phase='group_motion_completed')
+    node._execution.initial_move_time_sec = 0.0
+    node._local_status['motion_run_status']['summary'] = {'initialization_duration_sec': 5.0}
+    started = node._grid_seen['start']
+
+    node._drive_autonomous_cycle()
+
+    [init] = calls
+    start = node._autonomy['start']
+    assert start == pytest.approx(started + 930.0, abs=0.01)
+    assert init['initialize_monotonic'] <= start - 7.0 + 0.01, '초기 이동 5 s + 여유 2 s 전에 출발'
+
+
+def test_zero_initial_move_time_without_a_local_value_falls_back_to_ten_seconds():
+    node, calls = _participant(phase='group_motion_completed')
+    node._execution.initial_move_time_sec = 0.0
+
+    node._drive_autonomous_cycle()
+
+    [init] = calls
+    assert init['initialize_monotonic'] == pytest.approx(node._autonomy['start'] - 10.0 - 2.0, abs=0.01)
+
+
+def test_a_missed_start_is_moved_to_the_next_grid_slot_once():
+    node, calls = _participant(phase='group_motion_completed')
+    node._drive_autonomous_cycle()
+    # 초기화가 늦게 끝났다 · 잡은 시작이 1 s 전에 지났다
+    node._grid_seen['start'] = time.monotonic() - 931.0
+    first = node._autonomy['start'] = node._grid_seen['start'] + 930.0
+    replies = [
+        {'success': False, 'message': '그룹 모션 시작 트리거가 이미 지났습니다'},
+        {'success': True},
+    ]
+    node._call_local_control = lambda payload, **_kwargs: calls.append(dict(payload)) or replies.pop(0)
+    node._local_status['motion_run_status']['phase'] = 'group_cycle_initialized'
+
+    node._drive_autonomous_cycle()
+
+    retry = calls[-1]
+    assert [call['command'] for call in calls[-2:]] == ['group_start_at', 'group_start_at']
+    assert retry['start_monotonic'] > first, '다음 눈금으로'
+    assert retry['cycle_number'] == calls[-2]['cycle_number'], '회차 번호는 그대로'
+    assert node._execution.execution_id == 'exec-a', '빠지지 않는다'
+    assert node._autonomy['stage'] == 'started'
+    assert node._autonomy['start'] == pytest.approx(retry['start_monotonic'])
+
+
+def test_a_second_missed_start_leaves_but_accepts_the_masters_invite(monkeypatch):
+    """다음 눈금도 못 잡으면 전처럼 빠진다 · 그 실행의 복귀 권유는 받는다(끊김 시험 C)"""
+    import motion_coordination.coordination_node as coordination_node
+    from test_coordination_node import _InlineThread
+    monkeypatch.setattr(coordination_node.threading, 'Thread', _InlineThread)
+    node, calls = _participant(phase='group_motion_completed')
+    node._drive_autonomous_cycle()
+    node._grid_seen['start'] = time.monotonic() - 931.0
+    node._autonomy['start'] = node._grid_seen['start'] + 930.0
+    node._call_local_control = lambda payload, **_kwargs: calls.append(dict(payload)) or _late_start_reply(payload)
+    node._local_status['motion_run_status']['phase'] = 'group_cycle_initialized'
+
+    node._drive_autonomous_cycle()
+
+    assert [call['command'] for call in calls[-3:]] == ['group_start_at', 'group_start_at', 'stop_now']
+    assert node._execution.execution_id == ''
+    assert 'exec-a' in node._cancelled_execution_ids
+    assert 'exec-a' in node._drop_released(), '복귀 권유(join)는 받는다'
+
+
+def test_other_start_refusals_are_not_retried(monkeypatch):
+    import motion_coordination.coordination_node as coordination_node
+    from test_coordination_node import _InlineThread
+    monkeypatch.setattr(coordination_node.threading, 'Thread', _InlineThread)
+    node, calls = _participant(phase='group_motion_completed')
+    node._drive_autonomous_cycle()
+    node._call_local_control = lambda payload, **_kwargs: calls.append(dict(payload)) or (
+        {'success': False, 'message': '활성 그룹 실행 세션이 일치하지 않습니다'}
+        if payload['command'] == 'group_start_at' else {'success': True}
+    )
+    node._local_status['motion_run_status']['phase'] = 'group_cycle_initialized'
+
+    node._drive_autonomous_cycle()
+
+    assert [call['command'] for call in calls].count('group_start_at') == 1
+    assert node._execution.execution_id == ''
+
+
+# --------------------------------------------------------------------------- #
+# 끊김 시험 I (2026-11-08 · 사용자 「마스터 재시작돼도 슬레이브는 계속 재생」)
+# --------------------------------------------------------------------------- #
+
+def _master_restarted(node, held=''):
+    from test_coordination_node import _member
+    node._registry.update(_member('pc-a', is_master=True, boot_id='boot-a-new', execution_id=held))
+
+
+def test_a_restarted_master_without_the_run_lets_the_participant_continue():
+    node, calls = _participant(phase='group_motion_completed', master_offline=False)
+    _master_restarted(node)
+
+    node._drive_autonomous_cycle()
+    assert calls == [], '5 s 는 지켜본다'
+    node._lost_run_watch['since'] -= 6.0
+    node._drive_autonomous_cycle()
+
+    [init] = calls
+    assert init['command'] == 'group_initialize_at'
+    assert node._autonomy['stage'] == 'initializing'
+
+
+def test_a_master_that_already_started_a_new_run_is_waited_for():
+    node, calls = _participant(phase='group_motion_completed', master_offline=False)
+    _master_restarted(node, held='exec-new')
+
+    node._drive_autonomous_cycle()
+    node._lost_run_watch = {'key': ('pc-a', 'exec-a'), 'since': time.monotonic() - 60.0}
+    node._drive_autonomous_cycle()
+
+    assert calls == [], '새 실행이 경계에서 이 PC 를 넣는다'
+
+
+def test_a_master_still_holding_the_run_is_followed_as_before():
+    node, calls = _participant(phase='group_motion_completed', master_offline=False)
+    _master_restarted(node, held='exec-a')
+
+    node._drive_autonomous_cycle()
+
+    assert calls == []
+
+
+def _new_master_with_an_old_runner(*, remaining=40.0):
+    from test_coordination_node import _member, _node, _Publisher
+    node = _node()
+    node._joined = True
+    node._command_pub = _Publisher()
+    node._event_pub = _Publisher()
+    node._registry.update(_member('pc-b'))
+    node._registry.update(_member(
+        'pc-c', execution_id='exec-old', motion_phase='running',
+        motion_duration_sec=900.0, motion_elapsed_sec=900.0 - remaining,
+    ))
+    node._local_alarm_grade = lambda: 0
+    node._self_exclusion_reason = lambda: ''
+    node._call_local_control = lambda payload, **_kwargs: {'success': True}
+    node._begin_trigger_sync = lambda _action: None
+    node._local_readiness = lambda: {'success': True}
+    return node
+
+
+def test_a_new_master_waits_for_the_old_runs_cycle_end_instead_of_leaving_it_out():
+    node = _new_master_with_an_old_runner()
+
+    result = node._start_group_execution(request={'started_by': 'schedule'})
+
+    assert result['deferred'] is True and result['holders'] == ['pc-c']
+    assert node._execution.execution_id == '', '아직 시작하지 않는다 · 마스터만 기다린다'
+    assert node.snapshot()['aligned_start']['holders'] == ('pc-c',)
+    again = node._start_group_execution(request={'started_by': 'schedule'})
+    assert again['deferred'] is True, '스케줄이 다시 보내도 같은 답'
+
+
+def test_the_aligned_start_goes_when_the_old_run_reaches_its_cycle_end(monkeypatch):
+    import motion_coordination.coordination_node as coordination_node
+    from test_coordination_node import _InlineThread, _member
+    monkeypatch.setattr(coordination_node.threading, 'Thread', _InlineThread)
+    node = _new_master_with_an_old_runner()
+    node._start_group_execution(request={'started_by': 'schedule'})
+
+    node._drive_aligned_start()
+    assert node._execution.execution_id == ''
+
+    node._registry.update(_member(
+        'pc-c', sequence=5, execution_id='exec-old', motion_phase='group_motion_completed',
+        motion_duration_sec=900.0, motion_elapsed_sec=900.0,
+    ))
+    node._drive_aligned_start()
+
+    assert node._execution.execution_id, '회차 끝 · 다 같이 시작'
+    assert 'pc-c' in node._execution.participants
+    assert node._aligned_start is None
+
+
+def test_a_far_away_cycle_end_is_not_waited_for():
+    node = _new_master_with_an_old_runner(remaining=5000.0)
+
+    result = node._start_group_execution(request={'started_by': 'schedule'})
+
+    assert not result.get('deferred')
+    assert result['excluded']['pc-c'] == '단독 재생 중'
+
+
+# --------------------------------------------------------------------------- #
+# 끊김 시험 L · 잰 주기의 시계 오차가 스스로 잇는 회차마다 쌓이지 않게 · 10 s 배수로 붙인다
+# --------------------------------------------------------------------------- #
+
+def test_a_measured_period_snaps_to_the_ten_second_grid():
+    from motion_coordination.cycle_grid import snap_period
+
+    assert snap_period(930.037) == 930.0
+    assert snap_period(929.96) == 930.0
+    assert snap_period(933.0) == 933.0, '배수에서 1 s 넘게 벗어나면 잰 값 그대로'
+
+
+def test_the_participant_learns_a_snapped_period():
+    node, _calls = _participant(phase='running')
+    start = node._grid_seen['start']
+    node._grid_seen['cycle'] = 4
+
+    node._observe_group_start('exec-a', 5, start + 930.042)
+
+    assert node._grid_seen['period'] == 930.0
