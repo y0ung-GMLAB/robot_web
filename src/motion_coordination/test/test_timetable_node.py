@@ -250,3 +250,18 @@ def test_the_pc_rows_show_the_real_step_while_the_timetable_runs(tmp_path):
     assert node.snapshot()['local']['motion_step'] == '그룹 대기', '시간표도 신호 재생도 없으면 전처럼'
     node._timetable_execution_view = lambda: {'execution_id': 'tt-s1', 'state': 'running'}
     assert node.snapshot()['local']['motion_step'] == '모션 실행 중'
+
+
+def test_after_a_stop_now_the_human_start_is_no_longer_blocked(tmp_path):
+    """즉시 정지 뒤 「재생」 이 「시간표 재생 회차가 아직 도는 중 · floating1」 로 막혔다(NY 2026-11-09 06:44) · 수정 목록 188"""
+    node = _tt_node(tmp_path, config=TimetableConfig(mode=timetable.MODE_CLOCK, auto_period_sec=940.0))
+    node._local_status['operation_mode'] = 'manual'
+    node._local_status['motion_run_status'] = {
+        'group_execution': True, 'execution_id': 'tt-s1', 'state': 'running', 'phase': 'running',
+    }
+    assert node._timetable_held() == {'pc-a': 'tt-s1'}, '도는 중에는 막는다'
+    node._local_status['motion_run_status'] = {
+        'group_execution': True, 'execution_id': 'tt-s1', 'state': 'stopped', 'phase': 'stopped',
+    }
+    assert node._timetable_held() == {}
+    assert node._timetable_human_start_blocker() == ''

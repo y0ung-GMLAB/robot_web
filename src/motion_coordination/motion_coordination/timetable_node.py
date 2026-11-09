@@ -350,8 +350,11 @@ class TimetableMixin:
         driver = getattr(self, '_clock_driver', None)
         status = (self._local_status or {}).get('motion_run_status')
         status = status if isinstance(status, Mapping) else {}
+        # 로컬 재생 관리자는 정지 · 완료 뒤에도 실행 번호를 남긴다 · 끝난 것은 쥔 것이 아니다 · 전에는 즉시 정지 뒤에도
+        # 마스터가 저를 「회차 도는 중」 으로 세어 사람이 누른 「재생」 이 막혔다(NY 2026-11-09 06:44) · 수정 목록 188
         own = (driver.holding if driver is not None else '') or (
-            str(status.get('execution_id') or '') if status.get('group_execution') else ''
+            str(status.get('execution_id') or '')
+            if status.get('group_execution') and str(status.get('state') or '') not in _FINISHED_STATES else ''
         )
         if own.startswith(PLAN_PREFIX):
             held[self._config.pc_id] = own
