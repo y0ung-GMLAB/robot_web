@@ -1325,7 +1325,8 @@ def test_missing_sync_responses_drop_only_that_pc_before_initialization():
     assert 'initialize_at' in _dds(node)
 
 
-def test_trigger_spread_excess_stops_once_and_blocks_group():
+def test_trigger_spread_excess_is_recorded_without_stopping_the_group():
+    """끊김 시험 F · 2대가 24 ms 어긋남 · 전에는 그룹 전체 정지 + 잠금(자동 해제 없음) · 이제 기록만"""
     node = _node()
     node._execution = GroupExecution()
     execution_id = node._execution.begin('pc-a', ('pc-a', 'pc-b'))
@@ -1343,22 +1344,20 @@ def test_trigger_spread_excess_stops_once_and_blocks_group():
         'triggered': {'pc-a': 1.0, 'pc-b': 1.024},
     })
 
-    assert node._command_pub.messages[-1].command == 'stop_now'
-    assert node._execution.execution_id == ''
-    assert node._coordination_error['code'] == 'GROUP_TRIGGER_SPREAD_EXCEEDED'
+    assert node._command_pub.messages == []
+    assert node._execution.execution_id == execution_id
+    assert node._coordination_error == {}
 
 
-def test_initialize_spread_excess_stops_once_and_blocks_group():
+def test_initialize_spread_excess_continues_to_the_start():
+    """끊김 시험 F · 초기 위치 시각 어긋남도 기록만 · 멈춰 둔 시작 예약을 잇는다"""
     node = _node()
     node._execution = GroupExecution()
     execution_id = node._execution.begin('pc-a', ('pc-a', 'pc-b'))
-    node._execution.execution_id = execution_id
-    node._execution.coordinator_id = 'pc-a'
-    node._execution.participants = ('pc-a', 'pc-b')
+    node._execution.state = 'armed'
     node._command_pub = _Publisher()
-    node._call_local_control = lambda payload, **_kwargs: {
-        'success': True, 'message': payload['command'],
-    }
+    started = []
+    node._publish_next_start = lambda: started.append(True)
 
     node._handle_trigger_spread_exceeded({
         'stage': 'initialize',
@@ -1369,11 +1368,9 @@ def test_initialize_spread_excess_stops_once_and_blocks_group():
         'triggered': {'pc-a': 1.0, 'pc-b': 1.024},
     })
 
-    assert node._command_pub.messages[-1].command == 'stop_now'
-    assert node._execution.execution_id == ''
-    assert node._coordination_error['code'] == (
-        'GROUP_INITIALIZE_TRIGGER_SPREAD_EXCEEDED'
-    )
+    assert started == [True]
+    assert node._execution.execution_id == execution_id
+    assert node._coordination_error == {}
 
 
 def test_missing_motion_started_report_drops_only_that_pc():

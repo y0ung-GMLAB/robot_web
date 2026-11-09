@@ -114,3 +114,136 @@ def test_never_receiving_anything_says_so():
     monitor = LocalRuntimeMonitor(lambda: (_ for _ in ()).throw(OSError('연결 거부')))
     monitor.poll_once()
     assert '한 번도 못 받음' in monitor.diagnosis()
+
+
+# --------------------------------------------------------------------------- #
+# 끊김 시험 B (2026-11-08) · 연동 노드 자체가 멈춘 것을 「웹 끊김」 으로 착각하지 않는다
+#
+# 실물 · 마스터가 다시 붙은 직후 연동 노드가 통째로 약 2.7 s 멈춤 · 깨어나 「로컬 상태 2.7 s 못 받음」 으로
+# 저를 뺐다 · 그때 「연속 실패 0회」(요청이 실패한 적 없이 시간만 지남).
+# --------------------------------------------------------------------------- #
+
+def _master_after_a_stall(answers):
+    import pytest
+
+    from test_coordination_node import _node, _Publisher
+
+    def fetch():
+        value = answers.pop(0)
+        if isinstance(value, Exception):
+            raise value
+        return value
+
+    node = _node()
+    node._execution.execution_id = 'exec-a'
+    node._execution.coordinator_id = 'pc-a'
+    node._execution.participants = ('pc-a', 'pc-b')
+    node._execution.state = 'running'
+    node._boot_monotonic = 0.0
+    node._command_pub = _Publisher()
+    node._last_alarm_key = ()
+    warned = []
+    node._warn = warned.append
+    monitor = LocalRuntimeMonitor(fetch)
+    monitor.poll_once()
+    with monitor._lock:
+        monitor._received_monotonic = time.monotonic() - 2.7     # 2.7 s 동안 아무 요청도 못 보냈다
+    node._local_runtime_monitor = monitor
+    dropped = []
+    node._drop_self_for_bridge_loss = lambda detail, moving: dropped.append(detail)
+    node._stop_for_peer_failure = lambda _reason: pytest.fail('그룹 전체를 세우지 않는다')
+    return node, dropped, warned
+
+
+def test_a_stall_of_this_node_with_no_failed_request_does_not_drop_it():
+    ok = {'bridge_state': 'ok', 'motion_run_status': {'phase': 'running'}}
+    node, dropped, warned = _master_after_a_stall([ok, ok])
+    assert node._local_runtime_monitor.snapshot()['consecutive_failures'] == 0
+
+    node._consume_local_runtime_status()
+
+    assert dropped == [], '웹은 정상 · 빠지지 않는다'
+    assert node._execution.participants == ('pc-a', 'pc-b')
+    assert any('연동 노드 자체 멈춤 2.7 s' in text for text in warned)
+    assert time.monotonic() - node._local_runtime_monitor.snapshot()['received_monotonic'] < 1.0
+
+
+def test_a_stall_where_the_web_really_is_gone_still_drops():
+    ok = {'bridge_state': 'ok'}
+    node, dropped, _warned = _master_after_a_stall([ok, OSError('connection refused')])
+
+    node._consume_local_runtime_status()
+
+    assert len(dropped) == 1, '즉시 물어봐도 실패 · 지금처럼 빠진다'
+
+
+def test_failed_requests_are_not_mistaken_for_a_stall():
+    ok = {'bridge_state': 'ok'}
+    node, dropped, _warned = _master_after_a_stall([ok, OSError('timed out'), ok])
+    node._local_runtime_monitor.poll_once()                       # 실패 1회 · 웹이 느렸다
+    with node._local_runtime_monitor._lock:
+        node._local_runtime_monitor._received_monotonic = time.monotonic() - 2.7
+
+    node._consume_local_runtime_status()
+
+    assert len(dropped) == 1, '요청이 실패하고 있었다 · 웹 쪽 문제 · 지금처럼 빠진다'
+
+
+# --------------------------------------------------------------------------- #
+# 끊김 시험 B · 원인 잡기 · 멈춘 순간의 스택을 파일로
+# --------------------------------------------------------------------------- #
+
+def test_the_stall_watch_dumps_every_thread_when_it_cannot_rearm(tmp_path):
+    from motion_coordination.stall_watch import StallWatch
+
+    warned = []
+    watch = StallWatch(tmp_path / 'stall.log', warned.append, interval_sec=0.02, threshold_sec=0.1)
+    watch._open()
+    try:
+        before = watch._size()
+        wake = time.monotonic()
+        watch._arm()
+        time.sleep(0.4)                                            # 다시 걸지 못함 = 멈춤
+        _now, after = watch.check_once(wake, before)
+    finally:
+        watch.close()
+
+    text = (tmp_path / 'stall.log').read_text(encoding='utf-8')
+    assert after > before
+    assert 'Thread' in text and 'test_the_stall_watch_dumps_every_thread' in text
+    assert any('모든 스레드 스택을 남김' in line for line in warned)
+
+
+def test_the_stall_watch_stays_quiet_while_it_keeps_rearming(tmp_path):
+    from motion_coordination.stall_watch import StallWatch
+
+    warned = []
+    watch = StallWatch(tmp_path / 'stall.log', warned.append, interval_sec=0.02, threshold_sec=0.2)
+    assert watch.start()
+    time.sleep(0.5)
+    watch.close()
+
+    assert warned == []
+    assert (tmp_path / 'stall.log').read_text(encoding='utf-8') == ''
+
+
+def test_the_stall_log_is_rotated_when_too_big(tmp_path):
+    from motion_coordination.stall_watch import StallWatch
+
+    path = tmp_path / 'stall.log'
+    path.write_text('x' * 10000, encoding='utf-8')
+    watch = StallWatch(path, lambda _text: None, max_bytes=4096)
+    watch._open()
+    watch.close()
+
+    assert path.with_name('stall.log.1').stat().st_size == 10000
+    assert path.stat().st_size == 0
+
+
+def test_the_stall_watch_can_be_switched_off(monkeypatch):
+    from motion_coordination.stall_watch import stall_watch_enabled
+
+    monkeypatch.setenv('MOTION_COORDINATION_STALL_WATCH', '0')
+    assert stall_watch_enabled() is False
+    monkeypatch.delenv('MOTION_COORDINATION_STALL_WATCH')
+    assert stall_watch_enabled() is True

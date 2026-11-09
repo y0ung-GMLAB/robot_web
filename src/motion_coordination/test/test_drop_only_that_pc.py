@@ -21,43 +21,97 @@ from test_group_rejoin import _commands, _running_master
 # 시작 어긋남 · 어긋난 PC 만
 # --------------------------------------------------------------------------- #
 
-def test_the_masters_own_time_is_the_reference_when_it_plays():
-    triggered = {'pc-a': 10.000, 'pc-b': 10.010, 'pc-c': 10.120}
-    assert spread_outliers(triggered, reference_pc='pc-a', tolerance_ms=70.0) == {'pc-c': 120.0}
+def test_the_middle_time_is_the_reference_even_when_the_master_plays():
+    """끊김 시험 F · 기준은 늘 가운데 값 · 진행 PC 한 대가 늦어도 나머지가 빠지지 않는다"""
+    triggered = {'pc-a': 10.080, 'pc-b': 10.000, 'pc-c': 10.005, 'pc-d': 10.010}
+    assert spread_outliers(triggered) == {}
 
 
-def test_without_the_master_the_middle_time_is_the_reference():
-    triggered = {'pc-b': 10.000, 'pc-c': 10.010, 'pc-d': 10.200}
-    assert spread_outliers(triggered, reference_pc='pc-a', tolerance_ms=70.0) == {'pc-d': 190.0}
-
-
-def test_within_half_the_tolerance_nobody_is_picked():
-    triggered = {'pc-a': 10.000, 'pc-b': 10.034}
-    assert spread_outliers(triggered, reference_pc='pc-a', tolerance_ms=70.0) == {}
+def test_only_more_than_250ms_from_the_middle_is_picked():
+    triggered = {'pc-b': 10.000, 'pc-c': 10.010, 'pc-d': 10.300}
+    assert spread_outliers(triggered) == {'pc-d': 290.0}
+    assert spread_outliers({'pc-b': 10.000, 'pc-c': 10.010, 'pc-d': 10.200}) == {}
 
 
 def test_one_report_or_bad_values_pick_nobody():
-    assert spread_outliers({'pc-a': 1.0}, reference_pc='pc-a') == {}
-    assert spread_outliers({'pc-a': 'x', 'pc-b': None}, reference_pc='pc-a') == {}
+    assert spread_outliers({'pc-a': 1.0}) == {}
+    assert spread_outliers({'pc-a': 'x', 'pc-b': None}) == {}
 
 
-def test_a_late_starter_is_dropped_and_the_rest_keep_playing():
-    node = _running_master(participants=('pc-a', 'pc-b', 'pc-c'))
+def _start_cycle(node, times):
     node._execution.state = 'start_scheduled'
-    errors = []
-    node._publish_coordination_error = lambda **kwargs: errors.append(kwargs)
     starting = node._execution.cycle_number + 1
-    for pc_id, at in (('pc-a', 20.000), ('pc-b', 20.005), ('pc-c', 20.150)):
+    for pc_id, at in times:
         node._event_callback(GroupEvent(
             group_id='stage-a', execution_id=node._execution.execution_id, pc_id=pc_id,
             event='motion_started', success=True, cycle_number=starting,
             triggered_monotonic_ns=int(at * 1_000_000_000),
         ))
 
+
+def test_a_master_80ms_late_releases_nobody():
+    """끊김 시험 F · 전에는 진행 PC 기준 35 ms 를 넘은 참가 PC 3대가 모두 빠졌다"""
+    node = _running_master(participants=('pc-a', 'pc-b', 'pc-c', 'pc-d'))
+    errors = []
+    node._publish_coordination_error = lambda **kwargs: errors.append(kwargs)
+
+    _start_cycle(node, (('pc-a', 20.080), ('pc-b', 20.000), ('pc-c', 20.005), ('pc-d', 20.010)))
+
+    assert node._execution.participants == ('pc-a', 'pc-b', 'pc-c', 'pc-d')
+    assert _commands(node, 'cancel_before_start') == [] and _commands(node, 'stop_now') == []
+    assert errors == []
+
+
+def test_a_far_late_starter_keeps_playing_and_merges_at_the_boundary():
+    """250 ms 넘게 어긋난 PC · 연속 재생이면 풀지 않는다(연락 끊김과 같이) · 경계에서 다시 맞춘다 · 끊김 시험 J"""
+    node = _running_master(participants=('pc-a', 'pc-b', 'pc-c'))
+    errors = []
+    node._publish_coordination_error = lambda **kwargs: errors.append(kwargs)
+
+    _start_cycle(node, (('pc-a', 20.000), ('pc-b', 20.005), ('pc-c', 20.400)))
+
     assert node._execution.participants == ('pc-a', 'pc-b')
     assert '시각 어긋남' in node._execution.excluded['pc-c']
-    assert _commands(node, 'stop_now') == []
+    assert 'pc-c' in node._execution.lost
+    assert _commands(node, 'stop_now') == [] and _commands(node, 'cancel_before_start') == []
     assert errors == []
+
+
+def test_a_far_late_master_is_only_recorded():
+    node = _running_master(participants=('pc-a', 'pc-b', 'pc-c'))
+
+    _start_cycle(node, (('pc-a', 20.400), ('pc-b', 20.000), ('pc-c', 20.005)))
+
+    assert node._execution.participants == ('pc-a', 'pc-b', 'pc-c')
+    assert _commands(node, 'cancel_before_start') == []
+
+
+def test_a_far_late_starter_in_a_once_run_is_dropped():
+    node = _running_master(participants=('pc-a', 'pc-b', 'pc-c'), run_mode='once')
+
+    _start_cycle(node, (('pc-a', 20.000), ('pc-b', 20.005), ('pc-c', 20.400)))
+
+    assert node._execution.participants == ('pc-a', 'pc-b')
+    assert 'pc-c' not in node._execution.lost
+    [release] = _commands(node, 'cancel_before_start')
+    assert release.participant_ids == ['pc-a', 'pc-c']
+
+
+def test_the_spread_of_an_earlier_cycle_is_not_handled_again():
+    node = _running_master(participants=('pc-a', 'pc-b', 'pc-c'))
+    _start_cycle(node, (('pc-a', 20.000), ('pc-b', 20.005), ('pc-c', 20.100)))
+    handled = []
+    node._handle_trigger_spread_exceeded = handled.append
+    node._execution.state = 'start_scheduled'
+    node._execution.triggered.clear()
+
+    node._event_callback(GroupEvent(
+        group_id='stage-a', execution_id=node._execution.execution_id, pc_id='pc-a',
+        event='motion_started', success=True, cycle_number=node._execution.cycle_number + 1,
+        triggered_monotonic_ns=int(30.0 * 1_000_000_000),
+    ))
+
+    assert handled == [], '이 회차를 다 받기 전에는 앞 회차 편차로 다시 잡지 않는다'
 
 
 # --------------------------------------------------------------------------- #
@@ -151,3 +205,161 @@ def test_a_participant_only_reports_its_own_problem(monkeypatch):
     node._drop_member_only({'pc-c': '통신 단절'})
 
     assert published == []
+
+
+# --------------------------------------------------------------------------- #
+# 끊김 시험 H · 마스터 자기 모터 문제 · 그룹은 시작하고 마스터만 빠진다
+# --------------------------------------------------------------------------- #
+
+def _idle_master():
+    from test_coordination_node import _member, _node, _Publisher
+    node = _node()
+    node._joined = True
+    node._command_pub = _Publisher()
+    node._event_pub = _Publisher()
+    node._registry.update(_member('pc-b'))
+    node._registry.update(_member('pc-c'))
+    node._call_local_control = lambda payload, **_kwargs: {'success': True}
+    node._begin_trigger_sync = lambda _action: None
+    node._local_readiness = lambda: {'success': True}
+    return node
+
+
+def test_a_master_servo_alarm_no_longer_blocks_the_group_start():
+    node = _idle_master()
+    node._local_alarm_grade = lambda: 2
+
+    result = node._start_group_execution(request={'started_by': 'schedule'})
+
+    assert result['participants'] == ['pc-b', 'pc-c']
+    assert 'Servo 알람 2등급' in result['excluded']['pc-a']
+    assert node._execution.execution_id in node._self_dropped_ids(), '나으면 경계에서 스스로 들어간다'
+
+
+def test_the_schedule_can_tell_the_master_to_sit_out():
+    node = _idle_master()
+    node._local_alarm_grade = lambda: 0
+
+    result = node._start_group_execution(request={
+        'started_by': 'schedule', 'coordinator_sits_out': '긴급정지 잠김 상태입니다.',
+    })
+
+    assert result['participants'] == ['pc-b', 'pc-c']
+    assert result['excluded']['pc-a'] == '긴급정지 잠김 상태입니다.'
+
+
+# --------------------------------------------------------------------------- #
+# 끊김 시험 J · 모터가 멀쩡한 이유로 빠지면 그 회차를 끝까지 재생 · 모터 문제면 지금처럼 바로
+# --------------------------------------------------------------------------- #
+
+def _keeps_playing(node, pc_id='pc-c'):
+    return pc_id in node._execution.lost and _commands(node, 'cancel_before_start') == []
+
+
+def _stopped_now(node, pc_id='pc-c'):
+    return any(pc_id in release.participant_ids for release in _commands(node, 'cancel_before_start'))
+
+
+def _reason_late_start(node):
+    _start_cycle(node, (('pc-a', 20.000), ('pc-b', 20.005), ('pc-c', 20.400)))
+
+
+def _reason_missing_start_report(node):
+    import time as _time
+    node._execution.state = 'start_scheduled'
+    node._execution.triggered = {'pc-a': 1.0, 'pc-b': 1.0}
+    node._execution.motion_start_report_deadline = _time.monotonic() - 0.1
+    node._enforce_motion_start_report_deadline()
+
+
+def _reason_motor_error(node):
+    node._event_callback(GroupEvent(
+        group_id='stage-a', execution_id=node._execution.execution_id, pc_id='pc-c',
+        event='error', success=False, message='모터 상태에 없음', cycle_number=node._execution.cycle_number,
+    ))
+
+
+def _reason_servo_alarm_stop(node):
+    node._event_callback(GroupEvent(
+        group_id='stage-a', execution_id=node._execution.execution_id, pc_id='pc-c',
+        event='stopped', success=True, message='Servo 알람', cycle_number=node._execution.cycle_number,
+    ))
+
+
+@pytest.mark.parametrize('cause, keeps', [
+    (_reason_late_start, True),               # 시작 시각 어긋남 (F)
+    (_reason_missing_start_report, True),     # 시작 보고만 못 받음 (망)
+    (_reason_motor_error, False),             # 모터 상태 끊김 · 오류
+    (_reason_servo_alarm_stop, False),        # 그 PC 가 먼저 섬(알람 · 과부하 · 긴급정지)
+])
+def test_which_reasons_keep_the_clip_playing(monkeypatch, cause, keeps):
+    monkeypatch.setattr(coordination_node.threading, 'Thread', _InlineThread)
+    node = _running_master(participants=('pc-a', 'pc-b', 'pc-c'))
+
+    cause(node)
+
+    assert 'pc-c' not in node._execution.participants
+    assert _keeps_playing(node) is keeps
+    assert _stopped_now(node) is (not keeps)
+
+
+# --------------------------------------------------------------------------- #
+# 끊김 시험 M · 다중 마스터 · 중복 PC ID 는 재생을 세우지 않는다 · 표시만 · 문제 PC 만 빠진다
+# --------------------------------------------------------------------------- #
+
+def test_a_second_master_does_not_stop_the_running_group():
+    from test_coordination_node import _member
+    node = _running_master(participants=('pc-a', 'pc-b', 'pc-c'))
+    node._alarm_pub = type(node._command_pub)()
+    node._registry.update(_member('pc-z', is_master=True))
+    execution_id = node._execution.execution_id
+
+    node._check_multiple_masters()
+
+    assert node._execution.execution_id == execution_id
+    assert _commands(node, 'stop_now') == []
+    assert node._coordination_error['code'] == 'MULTIPLE_MASTERS'
+
+
+def test_only_the_lower_numbered_master_starts_and_the_display_clears_itself():
+    from test_coordination_node import _member
+    node = _idle_master()
+    node._alarm_pub = type(node._command_pub)()
+    node._local_alarm_grade = lambda: 0
+    node._registry.update(_member('pc-0', is_master=True))
+    node._check_multiple_masters()
+
+    with pytest.raises(ValueError, match='번호가 낮은 pc-0'):
+        node._start_group_execution(request={'started_by': 'schedule'})
+
+    node._registry._members.pop('pc-0')
+    node._check_multiple_masters()
+    assert node._coordination_error == {}
+    assert node._start_group_execution(request={'started_by': 'schedule'})['success'] is True
+
+
+def test_the_lower_numbered_master_keeps_starting_while_shown():
+    from test_coordination_node import _member
+    node = _idle_master()
+    node._alarm_pub = type(node._command_pub)()
+    node._local_alarm_grade = lambda: 0
+    node._registry.update(_member('pc-z', is_master=True))
+    node._check_multiple_masters()
+
+    assert node._start_group_execution(request={'started_by': 'schedule'})['success'] is True
+    assert node._coordination_error['code'] == 'MULTIPLE_MASTERS', '원인이 풀릴 때까지 표시'
+
+
+def test_a_duplicate_pc_id_takes_only_this_pc_out(monkeypatch):
+    monkeypatch.setattr(coordination_node.threading, 'Thread', _InlineThread)
+    node = _running_master(participants=('pc-a', 'pc-b', 'pc-c'))
+    node._alarm_pub = type(node._command_pub)()
+    node._self_exclusion_reason = lambda: ''
+    execution_id = node._execution.execution_id
+
+    node._handle_duplicate_pc_id('boot-other')
+
+    assert node._execution.execution_id == execution_id, '나머지는 계속'
+    assert 'pc-a' not in node._execution.participants
+    assert _commands(node, 'stop_now') == []
+    assert node._coordination_error['code'] == 'DUPLICATE_PC_ID'

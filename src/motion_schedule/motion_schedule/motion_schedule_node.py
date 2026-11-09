@@ -93,6 +93,8 @@ class MotionScheduleNode(Node):
         self._read_failures: Dict[str, int] = {}
         #: 브리지가 말하는 「지금 시작하면 안 되는 이유」 · 부팅 직후 앱솔루트 확인 등 · 수정 목록 124
         self._start_blocker = ''
+        #: 그 이유의 갈래 · `motor` 면 연동 마스터는 그룹을 시작하고 저만 빠진다 · 끊김 시험 H
+        self._start_blocker_kind = ''
         #: 시작을 보냈고 받아들여졌다 · 다음 점검에 안 돌고 있으면 실패로 센다 · 수정 목록 123·124
         self._start_pending = False
 
@@ -337,6 +339,7 @@ class MotionScheduleNode(Node):
         """지금 살아 있는 그룹 실행 · 없으면 빈 것."""
         payload = self._read_json('/api/coordination')
         runtime = (payload or {}).get('runtime') if isinstance(payload, dict) else None
+        self._last_coordination_runtime = runtime if isinstance(runtime, dict) else {}
         execution = (runtime or {}).get('execution') if isinstance(runtime, dict) else None
         return execution if isinstance(execution, dict) else {}
 
@@ -352,7 +355,12 @@ class MotionScheduleNode(Node):
         """
         if is_running(self._local_run_state()):
             return True
-        return group_is_active(self._group_execution())
+        if group_is_active(self._group_execution()):
+            return True
+        # 옛 실행을 재생 중인 PC 의 회차 끝에 맞춰 미룬 그룹 시작 · 다시 보내지 않는다 · 끊김 시험 I
+        runtime = getattr(self, '_last_coordination_runtime', None)
+        aligned = runtime.get('aligned_start') if isinstance(runtime, dict) else None
+        return bool(isinstance(aligned, dict) and aligned.get('holders'))
 
     def _on_timer_tick(self):
         # 0. 활성 프로젝트를 브리지에 맞춘다
@@ -373,6 +381,8 @@ class MotionScheduleNode(Node):
         blocker = schedule_rules.start_blocker(data)
         if blocker is not None:
             self._start_blocker = blocker
+            kind = schedule_rules.start_blocker_kind(data)
+            self._start_blocker_kind = kind if kind is not None else ''
 
         if not self.store.current_project_id:
             self._load_active_project_from_file()
@@ -527,7 +537,12 @@ class MotionScheduleNode(Node):
             # 그룹 시작은 받아들여진 뒤 준비 단계에서 실패한다 · 전에는 그 실패가 아무 데도 안
             # 세어져 1분마다 「받아들여졌다」 만 찍히고 화면은 초록이었다(실물 S-11).
             self._note_start_went_nowhere()
-            if self._auto_recovery_hold():
+            # 연동 마스터 자기 모터 문제면 그룹은 시작하고 저만 빠진다 · 다른 PC 는 돈다 · 끊김 시험 H
+            group_master = self._coordination_enabled() and self._coordination_joined()
+            sit_out = ''
+            if self._recovery_exhausted() and group_master:
+                sit_out = '자동 복구 한도 초과'
+            elif self._auto_recovery_hold():
                 return
             self._auto_recovery_hold_logged = False
             # 부팅 직후 · 앱솔루트 확인 · 모터 상태가 준비될 때까지 미룬다 · 수정 목록 124
@@ -536,13 +551,21 @@ class MotionScheduleNode(Node):
             # 거절당했고, 그 거절이 그룹 오류 2등급으로 잠겨 준비가 끝난 뒤에도 사람이 풀 때까지
             # 안 돌았다(실물 S-12 · 15:34) · 잠그지 않고 다음 점검(1분)에 다시 본다.
             blocker = getattr(self, '_start_blocker', '')
-            if blocker:
+            if blocker and schedule_rules.master_sits_out(
+                kind=getattr(self, '_start_blocker_kind', ''), coordination=group_master, master=True,
+            ):
+                sit_out = blocker
+            elif blocker:
                 self._defer_start(wanted, blocker)
                 return
+            if sit_out:
+                self.get_logger().warning(
+                    f"[점검] 구간 안 · 마스터 모터 문제 · 그룹은 시작하고 마스터만 빠짐 · {sit_out}"
+                )
             self.get_logger().info(
                 f"[점검] 구간 안인데 멈춰 있다 · 시작 · {wanted.schedule_name}"
             )
-            self._execute_start(wanted)
+            self._execute_start(wanted, sit_out=sit_out)
 
     def _defer_start(self, item: ScheduleItem, reason: str) -> None:
         """준비가 덜 됐다 · 시작을 미루고 화면에 「대기」 로 남긴다 · 이유가 바뀔 때만 로그"""
@@ -647,7 +670,7 @@ class MotionScheduleNode(Node):
         elif previous:
             self.get_logger().info('[점검] 시각을 못 읽던 스케줄이 정상으로 돌아왔다')
 
-    def _execute_start(self, item: ScheduleItem):
+    def _execute_start(self, item: ScheduleItem, sit_out: str = ''):
         self.get_logger().info(f"[SCHEDULE TRIGGER] START -> {item.schedule_name} ({item.schedule_id})")
         self._schedule_started = True   # 구간이 끝나면 이 재생은 스케줄이 멈춘다 · 수정 목록 106
         
@@ -682,6 +705,9 @@ class MotionScheduleNode(Node):
                 "target_cycle_count": 0,
                 "schedule_id": item.schedule_id,
             }
+            if sit_out:
+                # 마스터 자기 모터 문제 · 진행만 하고 빠진다 · 끊김 시험 H
+                payload["coordinator_sits_out"] = str(sit_out)[:200]
         else:
             # 단독 · 모션·매핑 파일은 브리지가 프로젝트의 활성 파일로 채운다
             endpoint = "/api/motion-run/start"

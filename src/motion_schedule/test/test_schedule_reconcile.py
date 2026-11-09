@@ -465,3 +465,69 @@ def test_window_end_while_running_parks_through_the_stop_only(tmp_path):
     node._local_run_status = lambda: {'state': 'stopped'}
     node._reconcile(DAY.replace(hour=20, minute=1))
     assert [payload.get('reason') for _endpoint, payload in node.sent] == ['schedule_end']
+
+
+# --------------------------------------------------------------------------- #
+# 끊김 시험 H (2026-11-08 · 사용자 「그렇게 해」) · 마스터 자기 모터 문제가 그룹 시작을 막지 않는다
+# --------------------------------------------------------------------------- #
+
+def _group_master(tmp_path, *, blocker, kind):
+    node = _node(tmp_path, run_state='stopped', schedules=[_day_schedule()])
+    node._coordination_enabled = lambda: True
+    node._coordination_joined = lambda: True
+    node._last_failure = {}
+    node._start_blocker = blocker
+    node._start_blocker_kind = kind
+    return node
+
+
+def test_a_master_motor_problem_still_starts_the_group_and_the_master_sits_out(tmp_path):
+    node = _group_master(tmp_path, blocker='서보 에러로 모터 동작이 제한된 상태입니다.', kind='motor')
+
+    node._reconcile(DAY.replace(hour=13))
+
+    endpoint, payload = node.sent[0]
+    assert endpoint == '/api/coordination/control'
+    assert payload['command'] == 'start_group'
+    assert payload['coordinator_sits_out'] == '서보 에러로 모터 동작이 제한된 상태입니다.'
+
+
+def test_a_common_setup_problem_still_defers_the_group(tmp_path):
+    node = _group_master(tmp_path, blocker='현재 프로젝트 실행 설정 적용 대기 중입니다.', kind='setup')
+
+    node._reconcile(DAY.replace(hour=13))
+
+    assert node.sent == []
+    assert node._last_failure['deferred'] is True
+
+
+def test_a_standalone_pc_with_a_motor_problem_still_defers(tmp_path):
+    node = _node(tmp_path, run_state='stopped', schedules=[_day_schedule()])
+    node._last_failure = {}
+    node._start_blocker = '서보 에러로 모터 동작이 제한된 상태입니다.'
+    node._start_blocker_kind = 'motor'
+
+    node._reconcile(DAY.replace(hour=13))
+
+    assert node.sent == []
+
+
+def test_a_master_whose_auto_recovery_ran_out_still_starts_the_group(tmp_path):
+    node = _group_master(tmp_path, blocker='', kind='')
+    node._local_run_state = lambda: 'error'
+    node._local_run_status = lambda: {'state': 'error', 'auto_recovery_exhausted': True}
+
+    node._reconcile(DAY.replace(hour=13))
+
+    [(_endpoint, payload)] = node.sent
+    assert payload['coordinator_sits_out'] == '자동 복구 한도 초과'
+
+
+def test_the_blocker_kind_is_read_and_unknown_keeps_the_old_way():
+    from motion_schedule import schedule_rules
+
+    assert schedule_rules.start_blocker_kind({'start_blocker': 'x', 'start_blocker_kind': 'motor'}) == 'motor'
+    assert schedule_rules.start_blocker_kind({'start_blocker': 'x'}) is None, '옛 브리지'
+    assert schedule_rules.master_sits_out(kind='motor', coordination=True, master=True) is True
+    assert schedule_rules.master_sits_out(kind='setup', coordination=True, master=True) is False
+    assert schedule_rules.master_sits_out(kind='motor', coordination=False, master=True) is False

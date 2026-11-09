@@ -247,3 +247,50 @@ def test_joiner_reports_join_ready_when_its_plan_is_built():
 
     [event] = node._event_pub.messages
     assert event.event == 'join_ready' and event.success is True
+
+
+# --------------------------------------------------------------------------- #
+# 끊김 시험 R (실물 NY 2026-11-08 19:32 floating4) · 복귀를 받은 직후 로컬에 남은 옛 「정지 · 그룹 실행 취소」
+# 를 내서 진행 PC 가 「복귀 실패」 로 접었다 · 받기 전에 끝난 정지 · 오류는 내지 않는다
+# --------------------------------------------------------------------------- #
+
+def _joined_with_local(phase, finished_at):
+    node = _joiner()
+    node._call_local_control = lambda payload, **_kwargs: {'success': True}
+    node._process_group_command(_join_command())
+    node._event_pub.messages.clear()
+    node._last_local_event_key = None
+    node._local_status = {'motion_run_status': {
+        'group_execution': True, 'execution_id': 'exec-a',
+        'phase': phase, 'message': '그룹 실행 취소', 'phase_finished_at': finished_at,
+    }}
+    return node
+
+
+def test_a_stop_that_ended_before_the_join_is_not_reported():
+    import time
+    node = _joined_with_local('stopped', time.time() - 90.0)
+    node._emit_local_runtime_event()
+    assert node._event_pub.messages == []
+
+
+def test_an_error_that_ended_before_the_join_is_not_reported():
+    import time
+    node = _joined_with_local('error', time.time() - 90.0)
+    node._emit_local_runtime_event()
+    assert node._event_pub.messages == []
+
+
+def test_a_stop_after_the_join_is_still_reported():
+    import time
+    node = _joined_with_local('stopped', time.time() + 1.0)
+    node._emit_local_runtime_event()
+    [event] = node._event_pub.messages
+    assert event.event == 'stopped'
+
+
+def test_a_stop_without_a_finish_time_is_still_reported():
+    node = _joined_with_local('stopped', None)
+    node._emit_local_runtime_event()
+    [event] = node._event_pub.messages
+    assert event.event == 'stopped'

@@ -163,3 +163,68 @@ def test_local_status_start_blocker_is_empty_when_ready_and_read_once_a_second()
         assert bridge.coordination_local_status()['start_blocker'] == ''
 
     assert calls == ['context', 'motor']
+
+
+# --------------------------------------------------------------------------- #
+# 끊김 시험 E (2026-11-08) · 연동 노드가 살아 있으면(잠깐 멈춤) 10 s 까지 기다린다 · 죽었으면 2 s
+# --------------------------------------------------------------------------- #
+
+def _watched_bridge(quiet_sec, *, alive, monkeypatch):
+    from motion_web_bridge import bridge_node
+    monkeypatch.setattr(bridge_node.process_alive, 'coordination_alive', lambda *_args, **_kwargs: alive)
+    bridge = MotionWebBridge.__new__(MotionWebBridge)
+    bridge._motion_run_lock = threading.Lock()
+    bridge._coordination_poll_lock = threading.Lock()
+    bridge._coordination_poll_received_monotonic = time.monotonic() - quiet_sec
+    bridge._coordination_watchdog_stop_execution_id = ''
+    bridge._motion_run_status = {'group_execution': True, 'execution_id': 'exec-a', 'phase': 'running'}
+    stopped = threading.Event()
+    bridge.coordination_stop_now = lambda: stopped.set() or {'success': True}
+    return bridge, stopped
+
+
+def test_a_live_but_stalled_coordination_node_does_not_stop_the_run(monkeypatch):
+    bridge, stopped = _watched_bridge(2.7, alive=True, monkeypatch=monkeypatch)
+
+    bridge._coordination_watchdog_callback()
+
+    assert not stopped.wait(0.2)
+    assert bridge._coordination_watchdog_stop_execution_id == ''
+
+
+def test_a_dead_coordination_node_still_stops_after_two_seconds(monkeypatch):
+    bridge, stopped = _watched_bridge(2.1, alive=False, monkeypatch=monkeypatch)
+
+    bridge._coordination_watchdog_callback()
+
+    assert stopped.wait(0.5)
+
+
+def test_a_live_coordination_node_silent_too_long_stops(monkeypatch):
+    from motion_web_bridge import bridge_node
+    bridge, stopped = _watched_bridge(
+        bridge_node.COORDINATION_SLOW_TIMEOUT_SEC + 0.5, alive=True, monkeypatch=monkeypatch,
+    )
+
+    bridge._coordination_watchdog_callback()
+
+    assert stopped.wait(0.5)
+    assert bridge_node.COORDINATION_SLOW_TIMEOUT_SEC < 15.0, 'systemd 감시(WatchdogSec 15)보다 짧게'
+
+
+def test_the_pid_file_tells_alive_from_dead(tmp_path):
+    from motion_common import process_alive
+
+    path = process_alive.coordination_pid_path(tmp_path)
+    assert process_alive.coordination_alive(path) is False, '파일 없음 = 모름 = 죽음'
+    assert process_alive.write_pid_file(path, 4321)
+    proc = tmp_path / 'proc' / '4321'
+    proc.mkdir(parents=True)
+    (proc / 'cmdline').write_bytes(b'/usr/bin/python3\0/ws/install/motion_coordination/lib/motion_coordination_node\0')
+    (proc / 'stat').write_text('4321 (motion_coordin) S 1 2 3', encoding='utf-8')
+    assert process_alive.coordination_alive(path, proc_root=tmp_path / 'proc') is True
+    (proc / 'stat').write_text('4321 (motion_coordin) Z 1 2 3', encoding='utf-8')
+    assert process_alive.coordination_alive(path, proc_root=tmp_path / 'proc') is False, '좀비'
+    (proc / 'stat').write_text('4321 (bash) S 1 2 3', encoding='utf-8')
+    (proc / 'cmdline').write_bytes(b'bash\0')
+    assert process_alive.coordination_alive(path, proc_root=tmp_path / 'proc') is False, 'PID 재사용'

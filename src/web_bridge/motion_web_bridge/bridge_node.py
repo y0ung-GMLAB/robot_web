@@ -14,7 +14,7 @@ import rclpy
 import uvicorn
 import yaml
 from fastapi import FastAPI, HTTPException, Request
-from motion_common import generation, joint_mapping, minas_absolute, motion_segment, multiturn_clear, rpc, topics, upper_restart
+from motion_common import generation, joint_mapping, minas_absolute, motion_segment, multiturn_clear, process_alive, rpc, topics, upper_restart
 from motion_common import paths as common_paths
 from motion_common import motor_ref as motor_ref_rules
 from fastapi.responses import JSONResponse
@@ -91,6 +91,10 @@ SCHEDULE_STATUS_FRESH_SEC = 10.0
 #: 1.0초였다 · 연동 노드 쪽 기준을 1.5초로 늘리면서(수정 목록 172) 그보다 길게 · 웹 서버가 잠깐
 #: 멈칫해 질문이 밀린 것만으로 이 PC 혼자 서지 않게 · 판단은 연동 노드가 먼저 한다
 COORDINATION_POLL_TIMEOUT_SEC = 2.0
+#: 연동 노드 프로세스가 **살아 있는데** 질문이 끊겼을 때 기다리는 한도 · 끊김 시험 E (2026-11-08) ·
+#: 연동 노드가 통째로 2~3 s 멈췄다 깨어나는 일이 실물에 있었다(B) · 그것만으로 이 PC 가 서지 않게 ·
+#: 정말 멈춰 버린 연동 노드는 systemd 감시(WatchdogSec 15 s · G)가 다시 띄운다 · 그보다 짧게
+COORDINATION_SLOW_TIMEOUT_SEC = 10.0
 
 
 def _managed_motor_service() -> str:
@@ -1198,16 +1202,42 @@ class MotionWebBridge(Node):
             return
         with self._coordination_poll_lock:
             received = self._coordination_poll_received_monotonic
-        if received and time.monotonic() - received <= COORDINATION_POLL_TIMEOUT_SEC:
+        quiet = time.monotonic() - received if received else None
+        if quiet is not None and quiet <= COORDINATION_POLL_TIMEOUT_SEC:
+            self._coordination_watchdog_slow_noted = ''
             return
         if self._coordination_watchdog_stop_execution_id == execution_id:
             return
+        # 죽었나 · 느린가 · 살아 있으면 10 s 까지 기다린다 · 끊김 시험 E
+        alive = process_alive.coordination_alive(
+            process_alive.coordination_pid_path(getattr(self, 'workspace_root', None)),
+        )
+        if alive and quiet is not None and quiet <= COORDINATION_SLOW_TIMEOUT_SEC:
+            if getattr(self, '_coordination_watchdog_slow_noted', '') != execution_id:
+                self._coordination_watchdog_slow_noted = execution_id
+                self._watchdog_log(
+                    f'[연동 역감시] 연동 노드 질문 {quiet:.1f} s 끊김 · 프로세스는 살아 있음 · '
+                    f'{COORDINATION_SLOW_TIMEOUT_SEC:.0f} s 까지 기다림 · 재생 계속'
+                )
+            return
+        self._watchdog_log(
+            '[연동 역감시] '
+            + (f'연동 노드 질문 {quiet:.1f} s 끊김 · ' if quiet is not None else '연동 노드 질문 없음 · ')
+            + ('살아 있지만 너무 오래 조용함' if alive else '연동 노드 프로세스 없음')
+            + ' · 이 PC 재생 정지'
+        )
         self._coordination_watchdog_stop_execution_id = execution_id
         threading.Thread(
             target=self.coordination_stop_now,
             name='coordination-watchdog-stop',
             daemon=True,
         ).start()
+
+    def _watchdog_log(self, text: str) -> None:
+        try:
+            self.get_logger().warn(text)
+        except Exception:  # noqa: BLE001 · 로그 실패로 정지 판단을 막지 않는다
+            pass
 
     def coordination_local_control(self, payload: Dict[str, Any]) -> Dict[str, Any]:
         """Execute a validated loopback request through motion_run_manager."""

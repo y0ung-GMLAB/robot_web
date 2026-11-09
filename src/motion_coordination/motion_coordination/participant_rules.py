@@ -139,14 +139,17 @@ def start_summary(participants, excluded) -> str:
     return text
 
 
-def spread_outliers(
-    triggered: Mapping[str, Any], *, reference_pc: str = '', tolerance_ms: float = 70.0,
-) -> dict:
-    """시작(또는 초기화) 시각이 어긋난 PC · {PC: 기준에서 벗어난 ms} · 수정 목록 178
+#: 시작(초기화) 시각이 가운데 값에서 이만큼 넘게 벗어난 PC 만 그룹에서 다룬다 · 그 아래는 기록만 ·
+#: 끊김 시험 F (2026-11-08) · 전에는 진행 PC 자신의 시각을 기준으로 허용(70 ms)의 절반을 넘으면 뺐다 ·
+#: 진행 PC 가 71 ms 늦으면 참가 PC 가 전부 빠지고 · 전부 어긋나면 그룹 전체가 섰다
+SPREAD_DROP_MS = 250.0
 
-    전에는 편차가 허용(70 ms)을 넘으면 그룹 전체를 세우고 잠갔다 · 이제 어긋난 PC 만 뺀다 ·
-    기준은 `reference_pc`(진행 PC 자신 · 참가 중일 때) · 없으면 가운데 값 · 허용의 절반 넘게
-    벗어난 PC 를 고른다(둘 다 그 안이면 둘 사이는 허용 안).
+
+def spread_outliers(triggered: Mapping[str, Any], *, limit_ms: float = SPREAD_DROP_MS) -> dict:
+    """시작(또는 초기화) 시각이 어긋난 PC · {PC: 가운데 값에서 벗어난 ms} · 수정 목록 178 · 끊김 시험 F
+
+    기준은 늘 참가 PC 시각의 가운데 값(median) · 진행 PC 한 대가 늦어도 나머지가 빠지지 않는다 ·
+    `limit_ms` 넘게 벗어난 PC 만 고른다.
     """
     times = {}
     for pc_id, value in dict(triggered or {}).items():
@@ -156,16 +159,13 @@ def spread_outliers(
             continue
     if len(times) < 2:
         return {}
-    if reference_pc in times:
-        reference = times[reference_pc]
-    else:
-        ordered = sorted(times.values())
-        middle = len(ordered) // 2
-        reference = (
-            ordered[middle] if len(ordered) % 2
-            else (ordered[middle - 1] + ordered[middle]) / 2.0
-        )
-    limit_sec = max(float(tolerance_ms or 0.0), 0.0) / 2000.0
+    ordered = sorted(times.values())
+    middle = len(ordered) // 2
+    reference = (
+        ordered[middle] if len(ordered) % 2
+        else (ordered[middle - 1] + ordered[middle]) / 2.0
+    )
+    limit_sec = max(float(limit_ms or 0.0), 0.0) / 1000.0
     return {
         pc_id: round((value - reference) * 1000.0, 3)
         for pc_id, value in sorted(times.items())
