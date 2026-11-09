@@ -224,6 +224,8 @@ p { margin: 0; }
 .pc-cell { flex: 0 0 150px; min-width: 0; }
 .cycle-cell { flex: 0 0 56px; }
 /* 시간표 재생 · PC 시계 차이 · 칸 너비 고정(신호 재생에서는 빈 칸) · 수정 목록 186 */
+/* PC별 재생 상태 · 상태 글은 한 줄 · 넘치면 … · 칸 너비가 글 길이로 바뀌지 않게 */
+.list-row .row-note { flex: 1 1 0; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .clock-cell { flex: 0 0 96px; text-align: right; font-variant-numeric: tabular-nums; }
 .playlist { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
 .playlist-row { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 12px; padding: 8px 10px; border-radius: 10px; background: var(--panel-2); }

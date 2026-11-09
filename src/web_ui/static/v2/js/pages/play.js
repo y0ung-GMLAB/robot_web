@@ -308,7 +308,7 @@ function groupCard(state) {
         dot(row.tone),
         h('span', { class: 'pc-cell' }, row.name, row.local ? h('small', { class: 'muted', text: ' · 현재 접속' }) : null),
         h('span', { class: 'mono muted cycle-cell', text: row.cycle }),
-        h('span', { class: `grow tone-text-${row.tone}`, text: row.note }),
+        h('span', { class: `row-note tone-text-${row.tone}`, text: row.note, title: row.detail }),
         h('span', { class: `mono small clock-cell ${row.clockWarn ? 'tone-text-warn' : 'muted'}`, text: row.clock }),
         row.progress ? h('span', { class: 'mono muted small', text: row.progress }) : null)))
       : h('p', { class: 'muted', text: '같은 그룹의 다른 PC가 아직 보이지 않습니다' }));
