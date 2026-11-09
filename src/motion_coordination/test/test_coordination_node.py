@@ -2520,3 +2520,58 @@ def test_restart_after_a_completed_run_with_refusing_pcs_dropped():
         # 1회 끝 · 정리 · 바로 다음 시작
         node._execution.stop_now()
         node._clear_active_execution()
+
+
+# ---------------------------------------------------------------------- #
+# 수정 목록 188 · 웹이 느려도 재생 중인 회차는 끝까지 · 회차 끝까지 안 돌아오면 그때 빠진다
+# 실물 NY 2026-11-09 00:48:26 floating1 · 00:50:12 floating3 · 웹이 0.3~0.5 s 씩 느렸을 뿐인데 빠지고 섰다
+# ---------------------------------------------------------------------- #
+
+def _slow_bridge_node(*, received_ago, elapsed, duration=920.0, phase='running'):
+    node = _node()
+    node._execution = GroupExecution()
+    node._execution.activate_claim('exec-a', 'pc-b', ('pc-a', 'pc-b'))
+    node._local_status = {'motion_run_status': {
+        'group_execution': True, 'execution_id': 'exec-a', 'state': 'running', 'phase': phase,
+        'progress': {'elapsed_sec': elapsed, 'duration_sec': duration},
+    }}
+    node._boot_monotonic = 0.0
+    lost = []
+    node._drop_self_for_bridge_loss = lambda detail, moving: lost.append((detail, moving))
+    node._stop_for_peer_failure = lambda _reason: pytest.fail('전체를 세우지 않는다')
+    node._local_runtime_monitor = SimpleNamespace(
+        snapshot=lambda: {
+            'status': {}, 'received_monotonic': time.monotonic() - received_ago,
+            'active_since_monotonic': 0.0, 'consecutive_failures': 4,
+        },
+        diagnosis=lambda: '마지막 성공 1524ms 전 · 연속 실패 4회',
+    )
+    return node, lost
+
+
+def test_a_slow_web_while_playing_a_cycle_keeps_playing_to_the_end():
+    node, lost = _slow_bridge_node(received_ago=1.6, elapsed=38.0)
+    node._consume_local_runtime_status()
+    assert lost == [], '빠지지도 서지도 않는다'
+    assert node._execution.execution_id == 'exec-a'
+    assert node._execution.participants == ('pc-a', 'pc-b')
+
+
+def test_a_web_that_stays_gone_past_the_cycle_end_still_drops():
+    node, lost = _slow_bridge_node(received_ago=30.0, elapsed=900.0)
+    node._consume_local_runtime_status()
+    assert [moving for _detail, moving in lost] == [True]
+
+
+def test_a_slow_web_between_cycles_drops_as_before():
+    node, lost = _slow_bridge_node(received_ago=1.6, elapsed=0.0, phase='group_cycle_initializing')
+    node._consume_local_runtime_status()
+    assert len(lost) == 1
+
+
+def test_the_master_playing_a_cycle_keeps_playing_on_a_slow_web():
+    node, lost = _slow_bridge_node(received_ago=1.6, elapsed=38.0)
+    node._execution.coordinator_id = 'pc-b'
+    node._config.pc_id = 'pc-b'
+    node._consume_local_runtime_status()
+    assert lost == []

@@ -369,3 +369,63 @@ def test_a_joiner_refusing_at_the_boundary_is_not_invited_again_right_away():
 
     assert _commands(node, 'join') == []
     assert node._join_retry_after['pc-c'] > time.monotonic() + 20.0
+
+
+# --------------------------------------------------------------------------- #
+# 수정 목록 188 · 같은 회차에 다시 받은 복귀도 「준비 끝」 을 낸다 · 놓으면 진행 PC 에 알린다
+# --------------------------------------------------------------------------- #
+
+def _join_ready_status():
+    return {'motion_run_status': {
+        'group_execution': True, 'execution_id': 'exec-a',
+        'phase': 'group_join_ready', 'group_cycle_number': 3,
+    }}
+
+
+def test_a_second_rejoin_in_the_same_cycle_reports_join_ready_again():
+    """실물 NY 2026-11-09 00:51 floating3 · 첫 복귀가 접히고 같은 회차에 다시 권유 · 「준비 끝」 을 안 내 30 s 뒤 접힘 되풀이"""
+    node = _joiner()
+    node._call_local_control = lambda payload, **_kwargs: {'success': True}
+    node._process_group_command(_join_command())
+    node._local_status = _join_ready_status()
+    node._emit_local_runtime_event()
+    assert [m.event for m in node._event_pub.messages][-1] == 'join_ready'
+
+    # 진행 PC 가 접고(풀기) 같은 회차 경계로 다시 권유
+    with node._lock:
+        node._execution.stop_now()
+        node._clear_active_execution()
+    node._event_pub.messages.clear()
+    node._process_group_command(_join_command())
+    node._local_status = _join_ready_status()
+    node._emit_local_runtime_event()
+
+    events = [m.event for m in node._event_pub.messages]
+    assert events == ['join_accepted', 'join_ready']
+
+
+def test_a_joiner_that_gives_up_tells_the_coordinator():
+    """실물 NY 2026-11-08 22:16 floating2 · 말없이 놓아 진행 PC 가 경계에서 넣고 「참가 목록 갱신이 맞지 않음」"""
+    node = _joiner()
+    node._call_local_control = lambda payload, **_kwargs: {'success': True}
+    node._process_group_command(_join_command())
+    node._event_pub.messages.clear()
+    node._execution.join_started = time.monotonic() - 10_000.0
+
+    node._enforce_join_wait()
+
+    [event] = node._event_pub.messages
+    assert (event.event, event.success, event.execution_id) == ('rejected', False, 'exec-a')
+    assert int(event.cycle_number) == 3
+    assert node._execution.execution_id == ''
+
+
+def test_the_coordinator_folds_a_joiner_that_gave_up():
+    node = _running_master()
+    node._execution.joining['pc-c'] = {'state': 'ready', 'since': time.monotonic(), 'cycle': 3}
+    node._registry.update(_member('pc-c'))
+
+    _event(node, 'pc-c', 'rejected', success=False, message='합류 확정이 945 s 오지 않아 놓음')
+
+    assert 'pc-c' not in node._execution.joining
+    assert 'pc-c' not in node._execution.participants

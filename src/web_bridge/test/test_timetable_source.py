@@ -1,6 +1,7 @@
 """시간표 재생 · 연동 노드에 줄 이 PC 의 칸 · 수정 목록 186 (2026-11-09)"""
 
 import json
+import time
 from pathlib import Path
 
 import yaml
@@ -44,8 +45,11 @@ class _Repository:
     def selected_project_id(self):
         return 'p1'
 
+    def active_file_name(self, project_id, category):
+        return 'm.yaml' if category == 'motion_axis_matching' else ''
+
     def get_project(self, project_id):
-        return {'project': {'active_files': {'motion_axis_matching': 'm.yaml'}}}
+        raise AssertionError('get_project 는 화면용 · 0.5 s · 로컬 상태에서 부르지 않는다(수정 목록 188)')
 
     def export_path(self, project_id, kind, name):
         return self.root / kind / name
@@ -84,3 +88,31 @@ def test_the_timezone_name_comes_from_etc(tmp_path):
     (zone / 'Seoul').write_text('', encoding='utf-8')
     (tmp_path / 'localtime').symlink_to(zone / 'Seoul')
     assert local_timezone_name(tmp_path) == 'Asia/Seoul'
+
+
+def test_a_refresh_in_progress_does_not_block_other_callers():
+    """다시 읽는 중에 들어온 요청은 기다리지 않고 지난 값 · 수정 목록 188"""
+    import threading
+    entered = threading.Event()
+    release = threading.Event()
+    reads = []
+
+    class Slow(TimetableSource):
+        def _read(self):
+            reads.append(1)
+            entered.set()
+            release.wait(5)
+            return {'timezone': 'X'}
+
+    source = Slow(type('B', (), {})())
+    source._cache = (-1e9, {'timezone': 'old'})
+    worker = threading.Thread(target=source.fields)
+    worker.start()
+    assert entered.wait(5)
+    started = time.monotonic()
+    assert source.fields() == {'timezone': 'old'}
+    assert time.monotonic() - started < 0.05
+    release.set()
+    worker.join(5)
+    assert len(reads) == 1, '한 번에 하나만 읽는다'
+    assert source.fields() == {'timezone': 'X'}
