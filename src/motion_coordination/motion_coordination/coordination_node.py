@@ -5163,6 +5163,9 @@ class MotionCoordinationNode(TimetableMixin, Node):
         with self._lock:
             execution_id = self._execution.execution_id
         execution_active = bool(execution_id)
+        # PC 별 줄 · 시간표 재생은 신호 재생 실행 없이 각 PC 가 돈다 · 전에는 실행이 없으면 모두 「그룹 대기」 로 덮어
+        # 재생 중에도 그렇게 보였다(NY 2026-11-09 04:21) · 시간표가 도는 동안은 각 PC 가 보낸 단계를 그대로 · 수정 목록 188
+        rows_active = execution_active or bool(self._timetable_execution_view())
         peers = []
         for pc_id in self._registry.joined():
             member = self._registry.member(pc_id)
@@ -5196,7 +5199,7 @@ class MotionCoordinationNode(TimetableMixin, Node):
                 'protocol_mismatch': member.protocol_version != GROUP_PROTOCOL_VERSION,
                 # 그룹을 시작 못 하는 이유 · 선택 때 이것으로 뺀다 · 수정 목록 136 ⑤
                 'start_blocker': getattr(member, 'start_blocker', ''),
-            }, execution_active=execution_active))
+            }, execution_active=rows_active))
         # 사람이 지금 「그룹 전체」 를 누르면 들어갈 PC 와 빠질 PC · 재생 화면 「그룹 전체 · N대」 의 N ·
         # 시작과 같은 규칙(사람이 시작) · 마스터만 · 수정 목록 122 (다)
         start_preview: Dict[str, Any] = {}
@@ -5256,7 +5259,7 @@ class MotionCoordinationNode(TimetableMixin, Node):
                 'current_cycle': motion_cycle,
                 'display_cycle': motion_cycle,
                 'display_step': str(local_status.get('display_step') or ''),
-            }, execution_active=execution_active)
+            }, execution_active=rows_active)
             if local_peer.get('motion_cycle'):
                 cycle_number = int(local_peer['motion_cycle'])
             return {
