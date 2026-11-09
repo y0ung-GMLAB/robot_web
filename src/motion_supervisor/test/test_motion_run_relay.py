@@ -734,12 +734,14 @@ def safety_supervisor():
             'state': 'detected',
             'motor_type': 'ac_servo',
             'position_deg': 15.0,
+            'servo_on': True,
         },
         {
             'controller_index': 1,
             'state': 'detected',
             'motor_type': 'dynamixel',
             'position_deg': -8.0,
+            'servo_on': True,
         },
     ]
     return supervisor
@@ -1196,3 +1198,26 @@ def test_dynamixel_playback_target_is_clamped_to_motor_limits():
     ]
     _relay_with_position(supervisor, [0], {0}, {0: 200.0})
     assert _targets_by_axis(supervisor._command_pub.messages[0]) == pytest.approx({0: 180.0})
+
+
+def test_motion_stop_leaves_servo_off_axes_off():
+    """꺼진 서보에 소프트 정지 · 0x003F / 토크 ON 을 보내지 않는다(NY 2026-11-09 08:39) · 수정 목록 189 ④"""
+    supervisor = safety_supervisor()
+    supervisor._command_arbiter = CommandArbiter()
+    motors = [dict(motor, servo_on=False) for motor in supervisor._current_motors()]
+    supervisor._current_motors = lambda: motors
+    success, message = supervisor._handle_safety_stop(False)
+    assert success is True
+    assert supervisor._command_pub.messages == [], '꺼진 축만 있으면 아무것도 안 보냄'
+    assert 'left off' in message
+
+
+def test_motion_stop_holds_only_the_axes_that_are_on():
+    supervisor = safety_supervisor()
+    supervisor._command_arbiter = CommandArbiter()
+    motors = supervisor._current_motors()
+    motors[1]['servo_on'] = False
+    supervisor._current_motors = lambda: motors
+    supervisor._handle_safety_stop(False)
+    command = supervisor._command_pub.messages[-1]
+    assert list(command.number_of_target_interfaces) == [2, 0]

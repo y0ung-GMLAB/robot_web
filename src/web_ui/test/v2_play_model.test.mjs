@@ -156,3 +156,15 @@ test('빠진 이유는 줄에 첫 마디만 · 전체는 detail(마우스 올림
   assert.equal(row.note, '제외됨 · 웹 서비스 끊김');
   assert.equal(row.detail, long);
 });
+
+test('단계 · 1회차 전 초기 이동 예약 · 회차 시작 예약은 「다음 회차 대기」 가 아니다 (수정 목록 189 ⑦)', () => {
+  const steps = (status) => phaseSteps(status).map((s) => s.state);
+  const labels = (status) => phaseSteps(status).map((s) => s.label);
+  const scheduled = { state: 'waiting', phase: 'group_initialize_scheduled', group_cycle_number: 0 };
+  assert.deepEqual(steps(scheduled), ['todo', 'todo', 'todo']);
+  assert.equal(labels(scheduled)[2], '도착 확인');
+  assert.deepEqual(steps({ state: 'waiting', phase: 'group_start_scheduled', group_cycle_number: 1 }), ['done', 'todo', 'todo']);
+  const between = { state: 'waiting', phase: 'group_cycle_initialize_scheduled', group_cycle_number: 3 };
+  assert.deepEqual(steps(between), ['done', 'done', 'now']);
+  assert.equal(labels(between)[2], '다음 회차 대기', '회차 사이는 전처럼');
+});

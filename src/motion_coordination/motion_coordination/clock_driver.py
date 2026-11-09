@@ -31,31 +31,29 @@ PLAN_PREFIX = 'tt-'
 SCHEDULE_PREFIX = 'tt-s'
 #: 회차 끝 장벽 단계 · 로컬 재생 관리자 · 연동 노드 `_BARRIER_PHASES` 와 같다
 BARRIER_PHASES = frozenset({'group_motion_completed', 'group_join_committed'})
-#: 이 PC 가 다른 것(단독 재생 · 조그 · 다른 그룹 실행)을 하고 있는 상태
-_BUSY_STATES = frozenset({
-    'preparing', 'initializing', 'initialized', 'armed', 'running', 'start_scheduled', 'cycle_ready',
-    'motion_completed', 'cycle_initialize_scheduled', 'join_ready', 'join_preparing', 'stopping',
-})
 #: 끝난 로컬 실행 · 실행 번호가 남아 있어도 쥔 것으로 보지 않는다 · 수정 목록 188
 #: 실제 재생 관리자는 정지 · 완료 뒤에도 `group_execution` 과 그 번호를 남긴다 · 전에는 그것을 「다른 재생 중」 으로 보고
 #: 회차마다 쉬었다(실물 NY 2026-11-09 03:49 · 신호 재생 그룹을 즉시 정지하고 시간표 재생으로 바꾼 뒤 4대 모두 7회차 쉼)
 _FINISHED_STATES = frozenset({'', 'idle', 'ready', 'stopped', 'completed'})
 
 
+#: 그룹 실행이 아닌 로컬 재생이 「돌고 있는」 상태 · 연동 노드 `_SOLO_BUSY_STATES` + 준비 · 예약 · 정지 중 · 수정 목록 189
+_SOLO_BUSY_STATES = frozenset({
+    'preparing', 'initializing', 'running', 'verifying', 'waiting', 'recovering', 'stopping', 'armed', 'start_scheduled',
+})
+
+
 def _occupied(held: str, state: str, status: Mapping[str, Any]) -> bool:
     """이 PC 가 다른 실행을 하고 있는가 · 시간표 회차에 못 들어간다
 
-    그룹 실행이 아닌 「초기 위치 이동 완료」(`initialized`)는 끝난 단독 초기화다 · 아무것도 돌지 않는다 · 수정 목록 189
-    운영 종료(schedule_end)가 기준점 이동 → 서보 OFF 를 한 뒤 4대 모두 그 상태로 남아 다음 날 1회차부터 매 회차
-    「다른 재생 중」 으로 쉬었다 · 서보 복구도 준비 길 안에만 있어 서보 OFF 그대로(실물 NY 2026-11-09 08:31).
+    그룹 실행은 실행 번호(`held` · 끝난 것은 빈 값)로 · 단독 재생은 도는 상태로만 본다. 끝난 단독 초기화
+    (`initialized`) 는 아무것도 돌지 않는다 · 운영 종료(schedule_end)가 기준점 이동 → 서보 OFF 를 한 뒤 4대 모두
+    그 상태로 남아 다음 운영 1회차부터 매 회차 「다른 재생 중」 으로 쉬었다 · 서보 복구도 준비 길 안에만 있어
+    서보 OFF 그대로(실물 NY 2026-11-09 08:31) · 수정 목록 189
     """
     if held:
         return True
-    if state not in _BUSY_STATES:
-        return False
-    if state == 'initialized' and not status.get('group_execution'):
-        return False
-    return True
+    return not status.get('group_execution') and state in _SOLO_BUSY_STATES
 
 
 class ClockDriver:
