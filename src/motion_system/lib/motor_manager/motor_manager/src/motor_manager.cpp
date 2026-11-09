@@ -606,6 +606,18 @@ void motor_manager::MotorManager::rethrowSerialExceptionIfAny()
     if (exception) std::rethrow_exception(exception);
 }
 
+motor_manager::MotorManager::CycleLossStats motor_manager::MotorManager::take_cycle_loss_stats()
+{
+    CycleLossStats stats;
+    stats.events = loss_events_.exchange(0, std::memory_order_relaxed);
+    stats.lost_cycles = loss_cycles_.exchange(0, std::memory_order_relaxed);
+    // a run still going counts with its length so far
+    stats.longest_cycles = std::max(
+        loss_longest_.exchange(0, std::memory_order_relaxed),
+        loss_streak_.load(std::memory_order_relaxed));
+    return stats;
+}
+
 void motor_manager::MotorManager::run()
 {
     running_.store(true, std::memory_order_release);
@@ -654,6 +666,7 @@ void motor_manager::MotorManager::run()
         uint64_t off_cycles = 0;
         bool preop_requested = false;
         uint64_t preop_cycles = 0;
+        bool seen_complete = false;
 
         while (true) {
             if (!running_.load(std::memory_order_acquire)) {
@@ -704,6 +717,26 @@ void motor_manager::MotorManager::run()
 
             for (auto& m_iter : masters_) {
                 m_iter.second->receive();
+            }
+
+            // robot_web fix-list 190: count incomplete process-data cycles. Only once every
+            // master has completed a cycle (start-up before OP is not a loss) and not while
+            // stopping (the slaves are being taken down on purpose). Atomics only, no I/O.
+            if (!stopping) {
+                bool complete = true;
+                for (auto& m_iter : masters_) complete = complete && m_iter.second->cycle_complete();
+                if (complete) {
+                    seen_complete = true;
+                    loss_streak_.store(0, std::memory_order_relaxed);
+                } else if (seen_complete) {
+                    const uint32_t streak = loss_streak_.load(std::memory_order_relaxed) + 1;
+                    loss_streak_.store(streak, std::memory_order_relaxed);
+                    if (streak == 1) loss_events_.fetch_add(1, std::memory_order_relaxed);
+                    loss_cycles_.fetch_add(1, std::memory_order_relaxed);
+                    if (streak > loss_longest_.load(std::memory_order_relaxed)) {
+                        loss_longest_.store(streak, std::memory_order_relaxed);
+                    }
+                }
             }
 
             if (!stopping) {

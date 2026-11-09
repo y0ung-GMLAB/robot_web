@@ -35,6 +35,9 @@ public:
     // fix-list 188: every responding slave is in PREOP (or lower) · read in the cycle
     virtual bool safe_state_reached() override;
 
+    // fix-list 190: domain working counter of the last receive() was complete
+    virtual bool cycle_complete() const override { return cycle_complete_; }
+
     ec_master_t* master() const { return master_; }
 
     ec_domain_t* domain() const { return domain_; }
@@ -51,6 +54,8 @@ private:
     uint8_t* domain_pd_{nullptr};
 
     const unsigned int master_index_{0};
+
+    bool cycle_complete_{true};
 };
 
 } // namespace ethercat

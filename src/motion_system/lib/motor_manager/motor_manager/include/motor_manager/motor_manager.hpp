@@ -75,6 +75,17 @@ public:
 
     bool is_enabled() const { return is_enabled_.load(std::memory_order_acquire); }
 
+    // robot_web fix-list 190: process-data cycles that came back incomplete
+    // (EtherCAT working counter), counted in run() and read by the node.
+    struct CycleLossStats {
+        uint32_t events{0};          // separate losses (runs of lost cycles)
+        uint32_t lost_cycles{0};     // lost cycles in total
+        uint32_t longest_cycles{0};  // longest run of consecutive lost cycles
+    };
+
+    // Counts since the last call, then starts over. Safe from any thread.
+    CycleLossStats take_cycle_loss_stats();
+
 private:
     void loadConfigurations(const std::string& config_file);
 
@@ -144,6 +155,15 @@ private:
     std::atomic<bool> controller_enable_requested_[motor_interface::MAX_CONTROLLER_SIZE]{};
 
     std::atomic<bool> running_{true};
+
+    // fix-list 190 · written by run() only, taken by take_cycle_loss_stats()
+    std::atomic<uint32_t> loss_events_{0};
+
+    std::atomic<uint32_t> loss_cycles_{0};
+
+    std::atomic<uint32_t> loss_longest_{0};
+
+    std::atomic<uint32_t> loss_streak_{0};
 
     std::mutex frame_mutex_;
 

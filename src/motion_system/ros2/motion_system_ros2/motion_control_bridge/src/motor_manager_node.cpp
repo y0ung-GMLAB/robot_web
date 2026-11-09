@@ -16,6 +16,11 @@ constexpr double kPi = 3.14159265358979323846;
 constexpr double kDegPerRad = 180.0 / kPi;
 constexpr double kRadPerDeg = kPi / 180.0;
 
+// robot_web fix-list 190: EtherCAT 프레임 손실 요약 주기 · 이만큼 연속 손실이면 경고 대신 오류
+// (드라이브 SM2 워치독 약 100 ms 의 1/5)
+constexpr int kCycleLossReportSec = 10;
+constexpr uint64_t kCycleLossSevereNs = 20000000ULL;
+
 }  // namespace
 
 MotorManagerNode::MotorManagerNode(const rclcpp::NodeOptions& options)
@@ -54,6 +59,13 @@ MotorManagerNode::MotorManagerNode(const rclcpp::NodeOptions& options)
     }
 
     motor_manager_ = std::make_unique<motor_manager::MotorManager>(config_file_);
+
+    cycle_loss_timer_ = this->create_wall_timer(
+        std::chrono::seconds(kCycleLossReportSec),
+        [this]() {
+            cycle_loss_callback();
+        }
+    );
 
     manager_run_thread_ = std::thread([this]() {
         try {
@@ -156,6 +168,31 @@ void MotorManagerNode::timer_callback()
     }
 
     motor_status_publisher_->publish(msg);
+}
+
+void MotorManagerNode::cycle_loss_callback()
+{
+    // robot_web fix-list 190 (NY 2026-11-09): the kernel logged "Working counter changed
+    // to 0/15" daily but nothing in the application saw it, so nobody knew how long the
+    // longest gap was. Summarise every 10 s, only when something was lost.
+    const auto stats = motor_manager_->take_cycle_loss_stats();
+    if (stats.events == 0) {
+        return;
+    }
+    const double period_ms = static_cast<double>(motor_manager_->period()) / 1e6;
+    const uint64_t longest_ns = static_cast<uint64_t>(stats.longest_cycles) * motor_manager_->period();
+    if (longest_ns >= kCycleLossSevereNs) {
+        RCLCPP_ERROR(get_logger(),
+            "[EtherCAT 프레임 손실] 지난 %d s · %u번 · 모두 %u주기 · 가장 긴 연속 %u주기(%.0f ms) · "
+            "드라이브 워치독(약 100 ms)에 가까워짐",
+            kCycleLossReportSec, stats.events, stats.lost_cycles, stats.longest_cycles,
+            stats.longest_cycles * period_ms);
+    } else {
+        RCLCPP_WARN(get_logger(),
+            "[EtherCAT 프레임 손실] 지난 %d s · %u번 · 모두 %u주기 · 가장 긴 연속 %u주기(%.0f ms)",
+            kCycleLossReportSec, stats.events, stats.lost_cycles, stats.longest_cycles,
+            stats.longest_cycles * period_ms);
+    }
 }
 
 int main(int argc, char* argv[])
