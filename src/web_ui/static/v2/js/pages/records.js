@@ -63,7 +63,7 @@ function runsView(state, changed) {
   const pickDay = (day) => { ui.day = day; ui.run = ''; ui.trace = null; ui.traceFor = ''; loadRecords(state, changed); };
   const pickRun = (file) => { ui.run = file; ui.trace = null; changed(); loadTrace(changed); };
   const removeDay = async () => {
-    const ok = await confirmBox({ title: `${ui.day} 재생 기록 삭제`, body: '이날의 회차별 CSV 기록을 모두 삭제합니다. 되돌릴 수 없습니다.', confirmLabel: '삭제', tone: 'danger' });
+    const ok = await confirmBox({ title: `${ui.day} 재생 기록 삭제`, body: '해당 날짜의 회차별 기록(CSV)이 모두 삭제되며 되돌릴 수 없습니다.', confirmLabel: '삭제', tone: 'danger' });
     if (!ok) return;
     try {
       await api('DELETE', `/api/motion-trace/days/${encodeURIComponent(ui.day)}`);
@@ -91,7 +91,7 @@ function runsView(state, changed) {
           h('td', { class: 'wrap', text: row.motion }),
           h('td', {}, h('span', { class: `chip chip-${row.tone}`, title: row.message, text: row.result })),
           h('td', { class: 'mono', text: row.worst }))))))
-        : h('p', { class: 'muted', text: page.days?.length ? '이날 기록 없음' : '아직 재생 기록이 없습니다. 재생하면 회차마다 기록이 남습니다.' })),
+        : h('p', { class: 'muted', text: page.days?.length ? '선택한 날짜의 기록이 없습니다' : '아직 재생 기록이 없습니다' })),
     run ? h('section', { class: 'card', 'aria-label': '목표와 실제' },
       h('div', { class: 'card-head' },
         h('h2', { text: `${run.cycle}회차 · 목표와 실제` }),
@@ -122,7 +122,7 @@ function eventsView(state, changed) {
   const files = Array.isArray(data.files) ? data.files : [];
   const reload = () => loadRecords(state, changed);
   const clear = async () => {
-    const ok = await confirmBox({ title: '운영 로그 삭제', body: '이 프로젝트의 운영 로그를 모두 삭제합니다. 되돌릴 수 없습니다.', confirmLabel: '삭제', tone: 'danger' });
+    const ok = await confirmBox({ title: '운영 로그 삭제', body: '현재 프로젝트의 운영 로그가 모두 삭제되며 되돌릴 수 없습니다.', confirmLabel: '삭제', tone: 'danger' });
     if (!ok) return;
     try { await api('DELETE', '/api/motor-events'); toast('삭제했습니다', 'ok'); } catch (error) { toast(error.message || String(error), 'bad'); }
     reload();

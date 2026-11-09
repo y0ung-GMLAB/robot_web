@@ -65,7 +65,7 @@ export function threeWayMerge(base, draft, latest, keyOf) {
     if (!l) continue;
     // 내가 지웠는데 다른 곳이 고쳤다
     if (same(strip(l), strip(b))) result.delete(key);
-    else conflicts.push({ key, path: ['(삭제)'], mine: '삭제', theirs: '다른 곳에서 고침' });
+    else conflicts.push({ key, path: ['(삭제)'], mine: '삭제', theirs: '다른 곳에서 수정' });
   }
   for (const [key, d] of D) {
     const b = B.get(key);
@@ -78,7 +78,7 @@ export function threeWayMerge(base, draft, latest, keyOf) {
     const sub = [];
     if (!l) {
       if (!same(strip(b), strip(d))) {
-        conflicts.push({ key, path: ['(다른 곳에서 삭제)'], mine: '고침', theirs: '삭제' });
+        conflicts.push({ key, path: ['(다른 곳에서 삭제)'], mine: '수정', theirs: '삭제' });
         result.set(key, d);
       }
       continue;

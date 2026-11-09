@@ -46,7 +46,7 @@ REFERENCE_CAPTURED_FIELD = 'reference_captured'
 #: 사람이 읽는 글 · 끝말 · 「N번 모터 다회전 클리어 뒤 기준점 다시 지정 필요」
 BLOCK_SUFFIX = '모터 다회전 클리어 뒤 기준점 다시 지정 필요'
 #: 기준점 지정 화면 · 축 표시
-NOT_ALIGNED_LABEL = '클리어 뒤 아직 안 맞춤'
+NOT_ALIGNED_LABEL = '기준점 재지정 필요'
 
 PathLike = Union[str, Path]
 

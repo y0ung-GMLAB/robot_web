@@ -48,7 +48,7 @@ test('나쁜 문제가 있으면 그 문제가 한 문장 · 주의만 있으면
 test('조인트 범위 미확인 · 빨간 문제 · 조인트 매핑 열기 (수정 목록 97)', () => {
   const line = headline({ ...pcs(), mapping_range_blocker: '조인트 범위 미확인 · Neck_Pitch · …' }, { run_mode: 'manual' });
   assert.equal(line.tone, 'bad');
-  assert.deepEqual([line.issues[0].title, line.issues[0].action.target], ['조인트 범위가 확인되지 않아 재생과 수동 조작이 차단되어 있습니다', 'mapping']);
+  assert.deepEqual([line.issues[0].title, line.issues[0].action.target], ['조인트 범위를 확인하지 않아 재생과 수동 조작이 차단되어 있습니다', 'mapping']);
 });
 
 test('문제마다 해결 버튼 · 긴급 정지 · 알람 · 그룹 오류 · 스케줄 거부 · 연결 끊김', () => {
@@ -70,7 +70,7 @@ test('스케줄 시작 대기 · 잠그지 않은 그룹 시작 실패 · 수정
   const waiting = collectIssues({}, { last_failure: { count: 1, deferred: true, message: '앱솔루트 미확인' } });
   assert.equal(waiting[0].title, '스케줄 시작 대기 중 (1회)');
   assert.equal(waiting[0].tone, 'warn');
-  assert.match(waiting[0].detail, /스스로 시작/);
+  assert.match(waiting[0].detail, /자동으로 시작/);
   assert.equal(collectIssues({}, { last_failure: { count: 3, deferred: true, message: 'x' } })[0].tone, 'bad');
   // 진행 PC 준비 안 됨 · 그룹 오류로 잠그지 않지만 이유는 보인다 · 그룹이 돌면 안 보인다
   const failed = { coordination: { runtime: { last_start_failure: { message: 'floating4 실행 준비 안 됨: 앱솔루트 미확인' }, execution: {} } } };
@@ -119,10 +119,10 @@ test('그룹 시작 실패 노란 줄 · 제목을 code 로 나눔 · 수정 목
 test('운전 모드 버튼 설명 · 누가 시작하나 · 수정 목록 122', () => {
   const shell = readFileSync(new URL('../static/v2/js/shell.js', import.meta.url), 'utf8');
   assert.match(shell, /RUN_MODE_HINT\[button\.dataset\.mode\]/);
-  assert.match(RUN_MODE_HINT.manual, /사람이 시작/);
+  assert.match(RUN_MODE_HINT.manual, /사람이 직접 시작/);
   assert.match(RUN_MODE_HINT.manual, /그룹 재생/);
-  assert.match(RUN_MODE_HINT.schedule, /저절로/);
-  assert.match(RUN_MODE_HINT.off, /움직이지 않/);
+  assert.match(RUN_MODE_HINT.schedule, /자동으로 시작/);
+  assert.match(RUN_MODE_HINT.off, /움직이지 않으며/);
 });
 
 test('지금 카드 · 재생 중이면 파일 · 회차 · 진행 · 매장 전체', () => {

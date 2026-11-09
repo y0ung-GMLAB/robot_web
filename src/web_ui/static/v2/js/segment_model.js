@@ -46,16 +46,16 @@ export function segmentCheck({ startText = '', endText = '', length = null } = {
   const start = parseClock(startText);
   const end = parseClock(endText);
   const idle = { active: false, start: 0, end: 0, payload: null, error: '', note: '' };
-  if (Number.isNaN(start)) return { ...idle, error: '구간 시작을 m:ss 모양으로 적으세요 (예 1:20)' };
-  if (Number.isNaN(end)) return { ...idle, error: '구간 끝을 m:ss 모양으로 적으세요 (예 1:45) · 끝까지면 비우세요' };
+  if (Number.isNaN(start)) return { ...idle, error: '구간 시작은 분:초 형식으로 입력하세요 (예 1:20)' };
+  if (Number.isNaN(end)) return { ...idle, error: '구간 끝은 분:초 형식으로 입력하세요 (예 1:45)' };
   const s = start ?? 0;
   const e = end ?? 0;
   if (s <= 0 && e <= 0) return idle;
   const known = Number.isFinite(Number(length)) && Number(length) > 0 ? Number(length) : null;
   const base = { active: true, start: s, end: e, payload: { start_sec: s, end_sec: e }, error: '', note: '' };
-  if (e > 0 && e <= s) return { ...base, payload: null, error: `구간 끝 ${segmentClock(e)} 이 구간 시작 ${segmentClock(s)} 보다 뒤여야 합니다` };
-  if (known !== null && s >= known) return { ...base, payload: null, error: `구간 시작 ${segmentClock(s)} 이 애니메이션 길이 ${segmentClock(known)} 보다 깁니다` };
-  if (known !== null && e > known) return { ...base, note: `끝 ${segmentClock(e)} 이 길이 ${segmentClock(known)} 보다 길어 끝까지 재생합니다` };
+  if (e > 0 && e <= s) return { ...base, payload: null, error: `구간 끝은 시작 ${segmentClock(s)}보다 뒤여야 합니다` };
+  if (known !== null && s >= known) return { ...base, payload: null, error: `구간 시작이 애니메이션 끝(${segmentClock(known)})보다 뒤입니다` };
+  if (known !== null && e > known) return { ...base, note: `구간 끝이 애니메이션 끝(${segmentClock(known)})보다 뒤라서 끝까지 재생` };
   return base;
 }
 

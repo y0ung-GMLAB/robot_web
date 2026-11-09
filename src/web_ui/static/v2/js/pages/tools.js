@@ -4,6 +4,7 @@
  * 탭은 칸 숨김만 바꾼다 · 주소는 처음 볼 때 넣는다(안 보는 쪽은 연결도 안 한다).
  */
 import { h } from '../dom.js';
+import { tip } from '../tip.js';
 
 const TOOLS = [
   { key: 'terminal', label: '터미널', port: 8081 },
@@ -18,8 +19,8 @@ export function renderTools() {
     const tab = h('button', { class: 'seg', type: 'button', 'aria-pressed': 'false', onclick: () => show(tool.key) }, tool.label);
     const section = h('section', { class: 'card tool-card', 'aria-label': tool.label, hidden: true },
       tool.key === 'terminal' ? [
-        h('p', { class: 'small' }, h('strong', { text: '코드 받기 + 다시 빌드' }),
-          ' · 아래 명령을 그대로 입력하세요(몇 분 걸립니다). 빌드하는 동안 웹 화면은 잠시 끊기지만 터미널은 끊기지 않습니다. 끝나면 「설치 완료」가 표시됩니다.'),
+        h('p', { class: 'small' }, h('strong', { text: '코드 받기 · 다시 빌드' }),
+          tip(['아래 명령을 그대로 입력 (몇 분 걸림)', '빌드 중에는 웹 화면이 잠시 끊기고 터미널은 유지', '끝나면 「설치 완료」 표시'], '다시 빌드 설명')),
         h('pre', { class: 'doc-code' }, h('code', { text: 'bash scripts/install.sh' })),
       ] : null,
       frame);

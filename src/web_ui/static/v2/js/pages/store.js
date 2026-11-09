@@ -5,6 +5,8 @@
 import { h, dot } from '../dom.js';
 import { rosterCandidates, storeRows, updateRows, versionSummary } from '../store_model.js';
 import { api } from '../net.js';
+import { RUN_MODE_EFFECT } from '../model.js';
+import { tip } from '../tip.js';
 import { confirmBox, toast } from '../dialog.js';
 import * as act from '../actions.js';
 
@@ -36,23 +38,19 @@ async function loadModes(state, changed) {
 }
 
 const MODE_NAMES = { schedule: '스케줄', manual: '수동', off: '끔' };
-const MODE_WARN = {
-  schedule: '운영 시간에 맞춰 재생을 시작하고 멈춥니다. 지금이 운영 시간이면 곧 재생을 시작합니다(마스터 PC 가 그룹을 시작).',
-  manual: '스케줄이 손대지 않습니다. 사람이 켠 재생은 운영 시간 밖이어도 계속 돕니다.',
-  off: '모든 움직임 명령을 막습니다. 진행 중인 재생은 이번 회차가 끝나면 멈춥니다.',
-};
+
 
 async function setModes(pcIds, mode, state, changed) {
   const ok = await confirmBox({
     title: `${pcIds.join(' · ')} → ${MODE_NAMES[mode]} 모드`,
-    body: `${MODE_WARN[mode]}\n그 PC 에 사람이 붙어 일하고 있지 않은지 확인하세요.`,
-    confirmLabel: '바꾸기', tone: 'warning',
+    body: `해당 PC에서 작업 중인 사람이 없는지 확인하세요.\n${RUN_MODE_EFFECT[mode]}`,
+    confirmLabel: '전환', tone: 'warning',
   });
   if (!ok) return;
   await busy(async () => {
     try {
       const result = await api('PUT', '/api/remote/run-mode', { body: { pc_ids: pcIds, run_mode: mode }, timeoutMs: 30000 });
-      toast(result?.message || '바꿨습니다', result?.success === false ? 'bad' : 'ok');
+      toast(result?.message || '전환했습니다', result?.success === false ? 'bad' : 'ok');
     } catch (error) {
       toast(error.message || String(error), 'bad');
     }
@@ -70,16 +68,16 @@ function modeCard(state, changed) {
       h('button', { class: 'btn btn-mini', type: 'button', disabled: ui.busy, onclick: () => loadModes(state, changed) }, '다시 읽기')),
     page.modesError ? h('p', { class: 'tone-text-bad', text: page.modesError }) : null,
     !page.modes ? h('p', { class: 'muted', text: '불러오는 중…' }) : h('div', { class: 'table-wrap' }, h('table', { class: 'table' },
-      h('thead', {}, h('tr', {}, ['PC', '지금', '바꾸기'].map((text) => h('th', { scope: 'col', text })))),
+      h('thead', {}, h('tr', {}, ['PC', '지금', '전환'].map((text) => h('th', { scope: 'col', text })))),
       h('tbody', {}, pcs.map((pc) => h('tr', {},
-        h('td', {}, h('strong', { text: pc.display_name || pc.pc_id }), pc.is_local ? h('span', { class: 'muted small', text: ' · 이 PC' }) : null),
+        h('td', {}, h('strong', { text: pc.display_name || pc.pc_id }), pc.is_local ? h('span', { class: 'muted small', text: ' · 현재 접속' }) : null),
         h('td', {}, pc.error ? h('span', { class: 'muted small', text: pc.error })
           : h('span', { class: `chip chip-${pc.run_mode === 'schedule' ? 'ok' : pc.run_mode === 'off' ? 'warn' : 'info'}`, text: MODE_NAMES[pc.run_mode] || pc.run_mode || '-' })),
         h('td', {}, h('div', { class: 'segmented', role: 'group', 'aria-label': `${pc.pc_id} 운전 모드` },
           ['schedule', 'manual', 'off'].map((mode) => h('button', { class: 'seg', 'aria-pressed': String(pc.run_mode === mode), type: 'button',
             disabled: ui.busy || Boolean(pc.error) || pc.run_mode === mode, onclick: () => setModes([pc.pc_id], mode, state, changed) }, MODE_NAMES[mode]))))))))),
     reachable.length > 1 ? h('div', { class: 'row' },
-      h('span', { class: 'muted small', text: `연결된 ${reachable.length}대 한 번에` }),
+      h('span', { class: 'muted small', text: `연결된 ${reachable.length}대 일괄` }),
       ['schedule', 'manual'].map((mode) => h('button', { class: 'btn btn-mini', type: 'button', disabled: ui.busy,
         onclick: () => setModes(reachable, mode, state, changed) }, `모두 ${MODE_NAMES[mode]}`))) : null);
 }
@@ -112,12 +110,12 @@ function joinCard(state, changed) {
           } }),
         h('span', { class: 'switch-track', 'aria-hidden': 'true' })),
       h('div', { class: 'grow' },
-        h('strong', { text: `그룹 참여 · ${joined ? 'ON' : 'OFF'}` }),
-        h('p', { class: 'muted small', text: joined
-          ? '같은 그룹의 PC와 함께 재생합니다. 끄면 스케줄을 포함해 단독으로 재생합니다.'
-          : '단독으로 재생합니다. 켜면 같은 그룹의 PC와 함께 재생합니다.' }),
-        joined && groupActive ? h('p', { class: 'tone-text-warn small', text: '그룹 재생 중에는 끌 수 없습니다. 재생을 정지한 뒤 끄세요.' }) : null)),
-    coord.node_connected === false ? h('p', { class: 'tone-text-warn small', text: '연동 서비스가 응답하지 않습니다. 프로그램을 다시 시작해 보세요.' }) : null);
+        h('strong', {}, `그룹 참여 · ${joined ? 'ON' : 'OFF'}`,
+          tip(['켜면 같은 그룹의 PC와 함께 재생', '끄면 스케줄 재생을 포함해 현재 PC만 단독 재생'], '그룹 참여 설명')),
+        // 경고 자리는 늘 둔다(레이아웃 고정)
+        h('p', { class: 'tone-text-warn small msg-slot', text: coord.node_connected === false
+          ? '연동 서비스가 응답하지 않습니다. 프로그램을 다시 시작하세요.'
+          : joined && groupActive ? '그룹 재생 중에는 끌 수 없습니다' : '' }))));
 }
 
 function pcCard(row) {
@@ -144,13 +142,12 @@ function updateCard(state, changed) {
   const running = rows.some((row) => row.tone === 'info');
   return h('section', { class: 'card', 'aria-label': '업데이트' },
     h('div', { class: 'card-head' },
-      h('h2', { text: '업데이트' }),
+      h('h2', {}, '업데이트', tip(['PC마다 코드를 받아 빌드한 뒤 다시 시작 (몇 분 소요)', '재생 중인 PC는 업데이트하지 않음', '실패한 PC는 이전 버전으로 복구되어 계속 동작', '운영 시간 외에 진행 권장'], '업데이트 설명')),
       h('button', { class: `btn ${summary.differ ? 'btn-warn' : ''}`, type: 'button', disabled: ui.busy || running,
         onclick: () => busy(async () => { if (await act.updateAll()) await loadStore(state, changed); }, state, changed) }, '모든 PC 업데이트')),
     h('p', { class: summary.differ ? 'tone-text-warn' : 'muted', text: summary.differ
       ? `${summary.total}대 중 ${summary.differ}대 버전이 다릅니다`
       : `${summary.total}대 모두 같은 버전입니다` }),
-    h('p', { class: 'muted small', text: 'PC마다 코드 받기 → 빌드 → 다시 시작 순서로 진행합니다(몇 분). 재생 중인 PC는 업데이트하지 않으며, 실패한 PC는 이전 버전으로 되돌아가 계속 동작합니다. 운영 시간이 아닐 때 진행하세요.' }),
     page.error ? h('p', { class: 'tone-text-bad small', text: page.error }) : null,
     rows.length ? h('div', { class: 'table-wrap' }, h('table', { class: 'table' },
       h('thead', {}, h('tr', {}, ['PC', '지난 업데이트', '버전', '메모'].map((text) => h('th', { scope: 'col', text })))),
@@ -167,12 +164,11 @@ function rosterCard(state, changed) {
   const candidates = rosterCandidates(state.snap);
   const same = roster.length === candidates.length && roster.every((id) => candidates.includes(id));
   return h('section', { class: 'card', 'aria-label': '필수 명단' },
-    h('div', { class: 'card-head' }, h('h2', { text: `필수 명단 · ${roster.length}대` })),
-    h('p', { class: roster.length ? 'mono' : 'muted', text: roster.length ? roster.join(' · ') : '없음 · 그룹을 시작할 때 연결된 PC로 시작합니다' }),
-    h('p', { class: 'muted small', text: '그룹을 시작할 때 이 중 빠진 PC는 「미접속」으로 기록하고 나머지 PC로 시작합니다' }),
+    h('div', { class: 'card-head' }, h('h2', {}, `필수 명단 · ${roster.length}대`, tip(['그룹 시작 시 명단에서 빠진 PC는 「미접속」으로 기록하고 나머지 PC로 시작'], '필수 명단 설명'))),
+    h('p', { class: roster.length ? 'mono' : 'muted', text: roster.length ? roster.join(' · ') : '지정된 명단 없음 (그룹 시작 시 연결된 PC로 시작)' }),
     config.is_master ? h('div', { class: 'row' },
       h('button', { class: 'btn', type: 'button', disabled: ui.busy || !candidates.length || same,
-        title: same ? '현재 연결된 PC와 같습니다' : '',
+        title: same ? '현재 연결된 PC와 명단이 같습니다' : '',
         onclick: () => busy(() => act.saveRoster(candidates), state, changed) }, `현재 연결된 ${candidates.length}대로 다시 지정`)) : h('p', { class: 'muted small', text: '필수 명단은 마스터 PC에서 지정합니다' }));
 }
 
@@ -186,7 +182,7 @@ export function renderStore(state, { changed }) {
     joinCard(state, changed),
     rows.length
       ? h('ul', { class: 'pc-grid', 'aria-label': 'PC 목록' }, rows.map(pcCard))
-      : h('section', { class: 'card' }, h('p', { class: 'muted', text: '같은 네트워크의 다른 PC를 기다리는 중입니다. Wi-Fi와 그룹 ID를 확인하세요.' })),
+      : h('section', { class: 'card' }, h('p', { class: 'muted', text: '같은 네트워크의 다른 PC가 보이지 않습니다. Wi-Fi와 그룹 ID를 확인하세요.' })),
     // PC 별 운전 모드 · 그 PC 화면에 들어가지 않고 · 2026-10-13
     modeCard(state, changed),
     updateCard(state, changed),

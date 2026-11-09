@@ -137,9 +137,9 @@ test('모터 검색 · 「직렬 서보 검색」 하나 · 다이나믹셀 + Fe
   assert.match(page, /serial: \{ label: '직렬 서보', path: '\/api\/motors\/scan\/dynamixel' \}/);
   assert.doesNotMatch(page, /scan\/feetech|label: 'Feetech'|label: '다이나믹셀'/);
   assert.match(page, /`\$\{spec\.label\} 검색`/);
-  assert.match(scanConfirmText('serial', {}), /^직렬 서보\(다이나믹셀 · Feetech\) 모터를 검색합니다/);
-  assert.match(scanConfirmText('all', {}), /^AC 서보 · 다이나믹셀 · Feetech 모터를 검색합니다/);
-  assert.match(scanConfirmText('ac', {}), /^AC 서보\(EtherCAT\) 모터를 검색합니다/);
+  assert.match(scanConfirmText('serial', {}), /^직렬 서보\(다이나믹셀 · Feetech\) 모터를 검색합니다/m);
+  assert.match(scanConfirmText('all', {}), /^AC 서보 · 다이나믹셀 · Feetech 모터를 검색합니다/m);
+  assert.match(scanConfirmText('ac', {}), /^AC 서보\(EtherCAT\) 모터를 검색합니다/m);
 });
 
 test('오류 글 · 0xFFFE 설정 대기(직렬 서보) · Feetech 상태 비트 · AC 는 그대로', () => {

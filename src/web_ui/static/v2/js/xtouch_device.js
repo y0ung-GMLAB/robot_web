@@ -34,9 +34,9 @@ export const MIDI_FLAG_URL = 'chrome://flags/#unsafely-treat-insecure-origin-as-
 export function midiUnavailableReason(win = globalThis) {
   if (typeof win.navigator?.requestMIDIAccess === 'function') return '';
   if (win.isSecureContext === false) {
-    return `이 주소(${win.location?.origin || ''})는 http 라 브라우저가 MIDI 를 막습니다. 크롬에서 ${MIDI_FLAG_URL} 를 열고 이 주소를 추가한 뒤 크롬을 다시 시작하세요.`;
+    return `http 주소(${win.location?.origin || ''})라 브라우저가 MIDI를 차단합니다. 크롬에서 ${MIDI_FLAG_URL} 를 열어 현재 주소를 추가한 뒤 크롬을 다시 시작하세요.`;
   }
-  return '이 브라우저는 Web MIDI 를 지원하지 않습니다. 크롬이나 엣지에서 여세요.';
+  return 'Web MIDI를 지원하지 않는 브라우저입니다. 크롬이나 엣지를 사용하세요.';
 }
 
 export class XTouchDevice {
@@ -76,7 +76,7 @@ export class XTouchDevice {
     this.claims.onmessage = (event) => {
       const claim = event?.data || {};
       if (claim.tab !== this.tab && this.input && claim.id === this.input.id) {
-        this.disconnect('같은 로봇의 다른 탭(창)이 이 X-Touch 를 가져갔습니다 · 여기서는 놓았습니다');
+        this.disconnect('같은 로봇의 다른 탭(창)에서 X-Touch를 사용 중이라 현재 탭의 연결을 해제했습니다');
       }
     };
   }
@@ -101,7 +101,7 @@ export class XTouchDevice {
         this.sysex = false;
       }
     } catch (error) {
-      this.setState({ status: 'denied', message: `MIDI 권한이 거절되었습니다 · 주소창 왼쪽 자물쇠에서 MIDI 를 허용하세요 (${error?.message || error})` });
+      this.setState({ status: 'denied', message: `MIDI 권한이 거부되었습니다. 주소창 왼쪽 자물쇠 아이콘에서 MIDI를 허용하세요. (${error?.message || error})` });
       return false;
     }
     // 뽑힘 · 꽂힘만 · 여는 중에도 statechange(connection) 가 오므로 연결 상태(state)가 바뀐 X-Touch 포트만 본다
@@ -161,7 +161,7 @@ export class XTouchDevice {
       await input.open();
       if (output) await output.open();
     } catch (error) {
-      this.setState({ status: 'busy', name: input.name, message: `X-Touch 를 다른 곳에서 쓰는 중입니다 · 다른 탭이나 프로그램(DAW 등)을 닫고 다시 연결하세요 (${error?.name || error})` });
+      this.setState({ status: 'busy', name: input.name, message: `X-Touch를 다른 곳에서 사용 중입니다. 다른 탭이나 프로그램(DAW 등)을 닫고 다시 연결하세요. (${error?.name || error})` });
       return false;
     }
     this.input = input;
@@ -172,7 +172,7 @@ export class XTouchDevice {
       this.onRaw(Array.from(message.data || []), event);
       if (event) this.onEvent(event);
     };
-    this.setState({ status: 'ready', name: input.name, message: output ? '' : '보낼 포트가 없어 페이더 모터·불빛이 움직이지 않습니다' });
+    this.setState({ status: 'ready', name: input.name, message: output ? '' : '출력 포트가 없어 페이더 모터와 불빛이 동작하지 않습니다' });
     // 같은 로봇의 다른 탭에 알림 · 그 탭은 놓는다
     try { this.claims?.postMessage({ tab: this.tab, id: input.id }); } catch { /* 알림 못 해도 연결은 됨 */ }
     return true;

@@ -122,16 +122,16 @@ export function looksLikeXTouch(portName) {
  */
 export function pickPort(ports, preferred) {
   const list = Array.isArray(ports) ? ports : [];
-  if (!list.length) return { port: null, status: 'none', message: 'X-Touch 를 찾지 못했습니다 · USB 를 확인하세요' };
+  if (!list.length) return { port: null, status: 'none', message: 'X-Touch를 찾지 못했습니다. USB 연결을 확인하세요.' };
   if (preferred?.id || preferred?.name) {
     const byId = list.find((port) => preferred.id && port.id === preferred.id);
     if (byId) return { port: byId, status: 'ok', message: '' };
     const byName = list.filter((port) => preferred.name && port.name === preferred.name);
     if (byName.length === 1) return { port: byName[0], status: 'ok', message: '' };
-    return { port: null, status: 'missing', message: `이 로봇에 고른 X-Touch(${preferred.name || preferred.id})가 없습니다 · 꽂혀 있는지 보고 다시 고르세요` };
+    return { port: null, status: 'missing', message: `선택해 둔 X-Touch(${preferred.name || preferred.id})가 연결되어 있지 않습니다. USB 연결을 확인하고 다시 선택하세요.` };
   }
   if (list.length === 1) return { port: list[0], status: 'ok', message: '' };
-  return { port: null, status: 'choose', message: `X-Touch 가 ${list.length}대 꽂혀 있습니다 · 이 로봇에 쓸 것을 고르세요` };
+  return { port: null, status: 'choose', message: `X-Touch가 ${list.length}대 연결되어 있습니다. 사용할 장치를 선택하세요.` };
 }
 
 /** 입력 포트와 같은 장치의 출력 · 이름이 똑같은 것 먼저 · 없으면 같은 순번 · Windows 는 둘째 대가 「2- X-Touch-Ext」 */
@@ -268,9 +268,9 @@ export class XTouchSession {
     const state = this.channels[channel];
     if (state.selected) return this.deselect(channel);
     const item = this.config[channel];
-    if (!item) return [{ type: 'message', text: `페이더 ${channel + 1} 에 연결된 조인트가 없습니다 · 조인트 매핑에서 「X-Touch 페이더」 칸을 채우세요` }];
-    if (!Number.isInteger(item.axis)) return [{ type: 'message', text: `${item.motionId} · 연결된 모터가 없습니다` }];
-    if (!item.ratesSet) return [{ type: 'message', text: `축 ${item.axis} (${item.motionId}) 속도·가속도 상한을 먼저 채우세요 · 조인트 매핑의 최대 속도·가속도` }];
+    if (!item) return [{ type: 'message', text: `페이더 ${channel + 1}에 연결된 조인트가 없습니다. 조인트 매핑의 「X-Touch 페이더」 칸에 페이더 번호를 입력하세요.` }];
+    if (!Number.isInteger(item.axis)) return [{ type: 'message', text: `${item.motionId}에 연결된 모터가 없습니다` }];
+    if (!item.ratesSet) return [{ type: 'message', text: `${item.motionId}(${item.axis}번 모터)의 최대 속도·최대 가속을 조인트 매핑에 먼저 입력하세요` }];
     if (ctx?.blocked) return [{ type: 'message', text: ctx.blocked }];
     Object.assign(state, blankChannel(), { selected: true, phase: 'ready' });
     const actions = [{ type: 'led', group: 'select', channel, state: 'on' }];

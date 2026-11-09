@@ -5,6 +5,7 @@
  * 그룹 설정 · 처음 한 번 · 켜고 끄기는 「매장 PC」 · 보이는 칸만 보낸다(§6-283) · 마스터 둘이면 묻는다(§6-70).
  */
 import { h, dot } from '../dom.js';
+import { tip } from '../tip.js';
 import { api } from '../net.js';
 import { confirmBox, toast } from '../dialog.js';
 import * as act from '../actions.js';
@@ -30,7 +31,7 @@ export async function loadNetwork(state, changed) {
   if (wifi.status === 'fulfilled') page.wifi = wifi.value;
   if (time.status === 'fulfilled') page.time = time.value;
   if (version.status === 'fulfilled') page.version = version.value;
-  page.error = wifi.status === 'rejected' ? `Wi-Fi 상태를 읽지 못함 · ${wifi.reason?.message || ''}` : '';
+  page.error = wifi.status === 'rejected' ? `Wi-Fi 상태를 읽지 못했습니다 (${wifi.reason?.message || ''})` : '';
   if (!ui.zone && page.time?.clock?.timezone) ui.zone = page.time.clock.timezone;
   watchPending(state, changed);
   changed();
@@ -100,7 +101,7 @@ function wifiCard(state, changed) {
   const connect = async () => {
     const ok = await confirmBox({
       title: 'Wi-Fi 변경',
-      body: `「${ui.pick}」 Wi-Fi에 연결합니다.\n연결이 바뀌면 이 화면이 잠시 끊길 수 있습니다. 새 주소로 다시 접속해 60초 안에 「유지」를 누르세요.\n누르지 않으면(연결이 끊겨 누르지 못한 경우 포함) 60초 뒤 원래 Wi-Fi로 돌아갑니다.${ui.useStatic ? '\n\n고정 IP가 필요하면 공유기에서 「DHCP 예약」을 쓰는 것이 더 안전합니다(주소가 겹치지 않습니다).' : ''}`,
+      body: `「${ui.pick}」 Wi-Fi에 연결합니다.\n연결 중 화면이 끊길 수 있습니다. 새 주소로 다시 접속해 60초 안에 「유지」를 누르세요.\n「유지」를 누르지 않으면 60초 뒤 원래 Wi-Fi로 돌아갑니다.${ui.useStatic ? '\n고정 IP보다는 공유기의 「DHCP 예약」을 권장합니다 (주소 충돌 방지).' : ''}`,
       confirmLabel: '연결', tone: 'warning',
     });
     if (!ok) return;
@@ -116,7 +117,7 @@ function wifiCard(state, changed) {
       ui.password = '';
     } catch (error) {
       toast(error.status === 0
-        ? '응답이 없습니다. 연결이 바뀌어 이 화면이 끊겼을 수 있습니다. 60초 안에 새 주소로 접속해 「유지」를 누르세요.'
+        ? '응답이 없습니다. 60초 안에 새 주소로 접속해 「유지」를 누르세요.'
         : (error.message || String(error)), 'bad');
     } finally {
       ui.wifiBusy = false;
@@ -128,7 +129,7 @@ function wifiCard(state, changed) {
     changed();
     try {
       const result = await api('POST', `/api/system/wifi/${keep ? 'confirm' : 'rollback'}`, { timeoutMs: 60000 });
-      toast(result?.message || (keep ? '이 Wi-Fi 연결을 유지합니다' : '원래 Wi-Fi로 되돌렸습니다'), 'ok');
+      toast(result?.message || (keep ? '새 Wi-Fi 연결을 유지합니다' : '원래 Wi-Fi로 되돌렸습니다'), 'ok');
     } catch (error) {
       toast(error.message || String(error), 'bad');
     } finally {
@@ -137,7 +138,8 @@ function wifiCard(state, changed) {
     }
   };
   return h('section', { class: 'card', 'aria-label': 'Wi-Fi' },
-    h('div', { class: 'card-head' }, h('h2', { text: 'Wi-Fi' }),
+    h('div', { class: 'card-head' }, h('h2', {}, 'Wi-Fi',
+      tip(['Wi-Fi를 변경하다 연결이 끊겨도 60초 뒤 원래 Wi-Fi로 복귀', '비밀번호가 틀리면 바로 원래 Wi-Fi로 복귀', '회사 인증(802.1X) Wi-Fi는 우분투 설정에서 연결', '재생 중에는 변경 불가'], 'Wi-Fi 설명')),
       h('button', { class: 'btn btn-mini', type: 'button', disabled: ui.scanning || Boolean(pending), onclick: scan }, ui.scanning ? '검색 중…' : '주변 Wi-Fi 검색')),
     wifi ? h('p', { class: 'mono small' },
       `${wifi.ssid || '연결 안 됨'}${wifi.signal != null ? ` · 신호 ${wifi.signal}` : ''}${wifi.address ? ` · ${wifi.address}` : ''} · `,
@@ -145,7 +147,7 @@ function wifiCard(state, changed) {
       wifi.powersave ? ` · 절전 ${wifi.powersave}` : '') : h('p', { class: 'muted', text: page.error || '불러오는 중…' }),
     pending ? h('div', { class: 'blocker' }, dot('warn'),
       h('span', { class: 'grow', text: page.wifiLost
-        ? `응답이 없습니다. 연결이 바뀌어 끊겼을 수 있습니다. 새 주소로 접속해 「유지」를 누르세요. 누르지 않으면 원래 Wi-Fi로 돌아갑니다.`
+        ? '응답이 없습니다. 새 주소로 접속해 「유지」를 누르지 않으면 원래 Wi-Fi로 돌아갑니다.'
         : `「${pending.ssid}」에 연결됨 · ${Math.max(0, Math.round(Number(pending.seconds_left ?? 0)))}초 안에 「유지」를 누르세요` }),
       h('button', { class: 'btn btn-primary', type: 'button', disabled: ui.wifiBusy, onclick: () => decide(true) }, '유지'),
       h('button', { class: 'btn', type: 'button', disabled: ui.wifiBusy, onclick: () => decide(false) }, '되돌리기')) : null,
@@ -164,12 +166,11 @@ function wifiCard(state, changed) {
           h('input', { class: 'input mono', placeholder: '192.168.0.24/24', value: ui.address, oninput: (e) => { ui.address = e.target.value; }, onchange: () => changed() })),
         h('label', { class: 'field grow' }, h('span', { class: 'field-label', text: '게이트웨이' }),
           h('input', { class: 'input mono', placeholder: '192.168.0.1', value: ui.gateway, oninput: (e) => { ui.gateway = e.target.value; }, onchange: () => changed() })),
-        h('label', { class: 'field grow' }, h('span', { class: 'field-label', text: 'DNS (비워 두면 게이트웨이 사용)' }),
-          h('input', { class: 'input mono', value: ui.dns, oninput: (e) => { ui.dns = e.target.value; }, onchange: () => changed() }))) : null,
+        h('label', { class: 'field grow' }, h('span', { class: 'field-label', text: 'DNS' }),
+          h('input', { class: 'input mono', placeholder: '비우면 게이트웨이', value: ui.dns, oninput: (e) => { ui.dns = e.target.value; }, onchange: () => changed() }))) : null,
       problem ? h('p', { class: 'tone-text-warn small', text: problem }) : null,
-      h('div', { class: 'row' }, h('button', { class: 'btn btn-warn', type: 'button', disabled: Boolean(problem) || ui.wifiBusy || Boolean(pending), onclick: connect }, '이 Wi-Fi에 연결')),
-    ] : null,
-    h('p', { class: 'muted small', text: '원격으로 변경하다가 연결이 끊겨도 60초 뒤 원래 Wi-Fi로 돌아갑니다. 비밀번호가 틀리면 바로 되돌립니다. 회사 인증(802.1X) Wi-Fi는 우분투 설정에서 연결하세요. 재생 중에는 변경할 수 없습니다.' }));
+      h('div', { class: 'row' }, h('button', { class: 'btn btn-warn', type: 'button', disabled: Boolean(problem) || ui.wifiBusy || Boolean(pending), onclick: connect }, '선택한 Wi-Fi에 연결')),
+    ] : null);
 }
 
 /* ---------- 시간대 ---------- */
@@ -182,7 +183,7 @@ function timeCard(state, changed) {
   const apply = async (all) => {
     const ok = await confirmBox({
       title: all ? '모든 PC 시간대 변경' : `${localName(state)} 시간대 변경`,
-      body: `${all ? '모든 PC(스피커 포함)' : localName(state)}의 시간대를 「${ui.zone}」에 맞춥니다.\n스케줄은 바뀐 시각을 기준으로 동작합니다. 시간대를 바꾼 PC는 2초 뒤 프로그램을 다시 시작합니다(재생 중인 PC는 변경하지 않습니다).`,
+      body: `${all ? '모든 PC(스피커 포함)' : localName(state)}의 시간대를 「${ui.zone}」에 맞춥니다.\n변경한 PC는 2초 뒤 프로그램을 다시 시작합니다.\n재생 중인 PC는 변경하지 않습니다.\n스케줄은 바뀐 시간대 기준으로 동작합니다.`,
       confirmLabel: '변경', tone: 'warning',
     });
     if (!ok) return;
@@ -204,7 +205,7 @@ function timeCard(state, changed) {
     h('p', {}, h('strong', { text: clock.timezone || '-' }), ' · ', h('span', { class: 'mono', text: String(clock.local_time || '').slice(11, 19) || '-' }),
       clock.ntp_synced === true ? ' · 시계 동기화됨' : clock.ntp_synced === false ? h('span', { class: 'tone-text-warn', text: ' · 시계 동기화 안 됨' }) : null),
     browserZone && clock.timezone && browserZone !== clock.timezone
-      ? h('p', { class: 'tone-text-warn small', text: `이 브라우저는 ${browserZone}, PC는 ${clock.timezone}입니다. 해외에 설치했다면 PC 시간대를 바꾸세요.` }) : null,
+      ? h('p', { class: 'tone-text-warn small', text: `브라우저(${browserZone})와 PC(${clock.timezone})의 시간대가 다릅니다. 해외에 설치한 PC라면 PC 시간대를 변경하세요.` }) : null,
     h('div', { class: 'row' },
       zones.length
         ? h('select', { class: 'select grow', 'aria-label': '시간대', onchange: (e) => { ui.zone = e.target.value; changed(); } },
@@ -242,7 +243,7 @@ function pcCard(state) {
 
 export function groupProblem(form) {
   if (!form) return '';
-  if (form.group_id && !ID_PATTERN.test(form.group_id)) return '그룹 ID는 영문 또는 숫자로 시작해야 하며, 영문·숫자·_ . : - 만 쓸 수 있습니다';
+  if (form.group_id && !ID_PATTERN.test(form.group_id)) return '그룹 ID는 영문·숫자로 시작하고 영문·숫자·_ . : - 만 사용할 수 있습니다';
   const domain = Number(form.dds_domain_id);
   if (!Number.isInteger(domain) || domain < 0 || domain > 101) return 'DDS Domain은 0~101 사이여야 합니다';
   if (form.display_name && form.display_name.length > 128) return '표시 이름은 128자까지 입력할 수 있습니다';
@@ -272,12 +273,12 @@ function groupCard(state, changed) {
       const name = otherMaster.display_name || otherMaster.pc_id;
       const go = await confirmBox({
         title: '마스터가 이미 있습니다',
-        body: `그룹에 이미 마스터가 있습니다: ${name}\n마스터가 둘이면 그룹 오류로 재생이 정지됩니다.\n계속하려면 먼저 ${name}의 마스터 설정을 해제하세요.`,
+        body: `기존 마스터: ${name}\n마스터가 둘이면 그룹 오류로 재생이 정지됩니다.\n먼저 ${name}에서 마스터 설정을 해제하세요.`,
         confirmLabel: '그래도 저장', tone: 'danger',
       });
       if (!go) return;
     } else {
-      const go = await confirmBox({ title: '그룹 설정 저장', body: '저장하면 연동 서비스가 한 번 다시 시작됩니다(몇 초). 그룹 재생 중에는 저장할 수 없습니다.', confirmLabel: '저장' });
+      const go = await confirmBox({ title: '그룹 설정 저장', body: '저장하면 연동 서비스가 몇 초 동안 다시 시작됩니다.\n그룹 재생 중에는 저장할 수 없습니다.', confirmLabel: '저장' });
       if (!go) return;
     }
     ui.groupBusy = true;
@@ -298,8 +299,8 @@ function groupCard(state, changed) {
   const field = (key, label, attrs = {}) => h('label', { class: 'field' }, h('span', { class: 'field-label', text: label }),
     h('input', { class: 'input mono', value: String(form[key] ?? ''), ...attrs, oninput: (e) => { form[key] = e.target.value; }, onchange: () => changed() }));
   return h('section', { class: 'card', 'aria-label': '그룹 설정' },
-    h('div', { class: 'card-head' }, h('h2', { text: '그룹 설정 (처음 한 번만)' })),
-    h('p', { class: 'muted small', text: '그룹 ID와 Domain이 같은 PC끼리 묶입니다. 그룹 참여를 켜고 끄는 것은 「PC 현황」 화면에서 합니다.' }),
+    h('div', { class: 'card-head' }, h('h2', {}, '그룹 설정 (처음 한 번만)',
+      tip(['그룹 ID와 Domain이 같은 PC끼리 한 그룹으로 동작', '그룹 참여 켜기·끄기는 「PC 현황」 화면에서 설정'], '그룹 설정 설명'))),
     h('div', { class: 'field' }, h('span', { class: 'field-label', text: '역할' }),
       h('div', { class: 'segmented', role: 'group', 'aria-label': '역할' },
         [[true, '마스터'], [false, '슬레이브']].map(([value, label]) => h('button', {
@@ -308,7 +309,7 @@ function groupCard(state, changed) {
     h('div', { class: 'row form-row' },
       field('group_id', '그룹 ID', { placeholder: 'stage-a' }),
       field('dds_domain_id', 'DDS Domain', { type: 'number', min: '0', max: '101' }),
-      field('display_name', '표시 이름 (비워 두면 PC ID 사용)'),
+      field('display_name', '표시 이름', { placeholder: '비우면 PC ID' }),
       h('label', { class: 'field' }, h('span', { class: 'field-label', text: 'PC ID (바꿀 수 없음)' }),
         h('input', { class: 'input mono', value: config.pc_id || '-', disabled: true }))),
     problem ? h('p', { class: 'tone-text-warn small', text: problem }) : null,

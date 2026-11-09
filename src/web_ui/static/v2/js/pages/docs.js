@@ -75,7 +75,7 @@ export function renderDocs(state, { changed }) {
           onclick: () => { ui.query = ''; openDoc(state, changed, d.id); },
         }, d.title))),
       h('span', { class: 'spacer' }),
-      h('button', { class: 'btn', type: 'button', disabled: !page.active, title: '업데이트로 문서가 바뀌었다면 다시 불러옵니다',
+      h('button', { class: 'btn', type: 'button', disabled: !page.active, title: '문서 다시 불러오기',
         onclick: () => openDoc(state, changed, page.active, true) }, '새로 고침')),
     page.error ? h('p', { class: 'tone-text-bad', text: page.error }) : null,
     h('div', { class: 'docs-layout' },

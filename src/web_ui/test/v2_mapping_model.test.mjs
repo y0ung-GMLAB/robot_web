@@ -30,7 +30,7 @@ test('rad → deg → rad · 같은 값으로 돌아온다 · 빈 최대 속도�
 test('막는 것 · 빈 이름(줄 번호) · 겹친 이름 · 같은 모터 · 모터 없음 · 범위 거꾸로 · 감속비 0', () => {
   const a = rowToDraft(serverRow);
   assert.deepEqual(draftProblems([a]), []);
-  assert.match(draftProblems([a, { ...newRow(1, ''), enabled: true }])[0], /2번 줄 · 조인트 이름이 비어 있습니다 \(1번 모터\)/);
+  assert.match(draftProblems([a, { ...newRow(1, ''), enabled: true }])[0], /2번 줄: 조인트 이름이 비어 있습니다 \(1번 모터\)/);
   assert.match(draftProblems([a, { ...a }]).join(), /중복됩니다/);
   assert.match(draftProblems([a, { ...a, motion_id: 'B' }]).join(), /같은 모터/);
   assert.match(draftProblems([{ ...a, motor_ref: '', motor_axis: null }]).join(), /모터가 지정되지 않았습니다/);
@@ -105,7 +105,7 @@ test('「범위 확인」 칸 옆 주의 · 최소·최대 입력에 저절로 �
   const page = await readFile(new URL('../static/v2/js/pages/mapping.js', import.meta.url), 'utf8');
   const manual = await readFile(new URL('../static/v2/js/pages/manual.js', import.meta.url), 'utf8');
   assert.doesNotMatch(page, /RANGE_NOTE|range-note/, '칸 옆 노란 글씨 없음(사용자 2026-10-14)');
-  assert.match(page, /RANGE_HINT = '[^']*직접 체크/, '안내는 마우스를 올리면');
+  assert.match(page, /RANGE_LINES = \['[^']*직접 체크/, '안내는 툴팁(ⓘ)');
   assert.doesNotMatch(page, /autoConfirmRange|range_confirmed = true/);
   assert.doesNotMatch(manual, /autoConfirmRange|range_confirmed/);
   assert.doesNotMatch(page, /입력하거나 「범위 확인」/, '숫자 입력만으로 풀린다는 안내 없음');

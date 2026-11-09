@@ -50,7 +50,7 @@ test('막는 순서 · 긴급 정지 > 모드 > 범위 미확인 > 앱솔루트 
   assert.equal(manualBlocker({ snap: {}, sched: manual }, { ...item, servoOn: false }).fix, 'servo-on');
   assert.equal(manualBlocker({ snap: {}, sched: manual }, { ...item, ac: false, servoOn: false }), null, 'DXL 은 서보 검사 안 함');
   assert.match(manualBlocker({ snap: {}, sched: manual }, { ...item, row: null }).text, /「사용」이 꺼져 있습니다/);
-  assert.match(manualBlocker({ snap: {}, sched: manual }, { ...item, detected: false }).text, /통신 없음/);
+  assert.match(manualBlocker({ snap: {}, sched: manual }, { ...item, detected: false }).text, /통신이 되지 않습니다/);
 });
 
 test('초기 위치에서 대기 중 · 재생 중이면 「정지」 뒤에만 · 서버와 같은 문구 (2026-10-12)', () => {

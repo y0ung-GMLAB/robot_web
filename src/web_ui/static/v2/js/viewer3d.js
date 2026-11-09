@@ -190,7 +190,7 @@ function createViewer3d() {
       frames = null;
       framesFor = fileId;
       framesFailedAt = Date.now();
-      say(`${fileId} · MuJoCo 계산 결과가 없습니다. 애니메이션 화면에서 「3D 계산 시작」을 누르세요 (${error.message})`);
+      say(`${fileId}: MuJoCo 계산 결과가 없습니다. 애니메이션 화면에서 「3D 계산 시작」을 누르세요. (${error.message})`);
     } finally {
       framesLoading = '';
     }
@@ -255,7 +255,7 @@ function createViewer3d() {
     } catch (error) {
       values = null;
       valuesFor = fileId;
-      say(`${fileId} · 값을 받지 못함 · ${error.message}`);
+      say(`${fileId}: 값을 받지 못했습니다 (${error.message})`);
     } finally {
       valuesLoading = '';
     }
@@ -289,9 +289,9 @@ function createViewer3d() {
   function blenderBlockedReason() {
     const info = sceneInfo?.blender;
     if (!info?.available) return '로봇 팩에 Blender 장면(scene.glb)이 없습니다';
-    if (!latest.fileId) return '보여 줄 애니메이션이 없습니다';
+    if (!latest.fileId) return '표시할 애니메이션이 없습니다';
     if (blenderAllowed()) return '';
-    return '로봇 팩에 조인트(scene_glb.joints)도 파생 관절 표(scene_glb.derived)도 없어 Blender 로 움직일 수 없습니다 · 지금은 MuJoCo';
+    return '로봇 팩에 조인트(scene_glb.joints)와 파생 관절 표(scene_glb.derived)가 없어 Blender 장면을 움직일 수 없습니다. 현재 MuJoCo로 표시 중입니다.';
   }
 
   function setView(next) {
@@ -307,7 +307,7 @@ function createViewer3d() {
     // 장면은 있는데 이 애니메이션이 없으면 흐리게 · 눌러도 고장처럼 보이지 않게 이유는 상태 줄에 (104)
     viewButtons.blender.setAttribute('aria-disabled', String(Boolean(sceneInfo?.blender?.available) && !allowed));
     viewButtons.blender.title = !sceneInfo?.blender?.available ? '로봇 팩에 Blender 장면(scene.glb)이 없습니다'
-      : allowed ? '' : '이 팩의 Blender 장면에 이 애니메이션이 없습니다';
+      : allowed ? '' : '로봇 팩의 Blender 장면에 해당 애니메이션이 없습니다';
     const shown = view === 'blender' && allowed ? 'blender' : 'mujoco';
     viewButtons.mujoco.setAttribute('aria-pressed', String(shown === 'mujoco'));
     viewButtons.blender.setAttribute('aria-pressed', String(shown === 'blender'));
@@ -331,9 +331,9 @@ function createViewer3d() {
       } else if (sceneInfo.state === 'missing' && !exportAsked) {
         exportAsked = true;
         await api('POST', '/api/preview/scene/export').catch(() => null);
-        say('3D 장면을 처음 만드는 중 · 몇 초 걸립니다');
+        say('3D 장면 생성 중 (몇 초 걸림)');
       } else if (sceneInfo.state !== 'ready') {
-        say(sceneInfo.message || (sceneInfo.state === 'unavailable' ? '로봇 팩이 없어 3D를 표시할 수 없습니다' : `3D 장면 · ${sceneInfo.state}`));
+        say(sceneInfo.message || (sceneInfo.state === 'unavailable' ? '로봇 팩이 없어 3D 화면을 표시할 수 없습니다' : `3D 장면 · ${sceneInfo.state}`));
       }
     } catch (error) {
       say(`3D 준비 실패 · ${error.message || error}`);

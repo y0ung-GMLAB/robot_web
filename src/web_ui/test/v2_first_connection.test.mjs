@@ -17,9 +17,9 @@ test('조인트 0개 · 매핑을 안 고쳤으면 매핑 검사로 모터 저�
 });
 
 test('막힌 저장 버튼마다 이유 툴팁 · 먼저 걸리는 것 하나', () => {
-  assert.equal(blockReason({ busy: true, dirty: true, problems: ['x'] }, 'ok'), '저장·적용하는 중입니다');
-  assert.equal(blockReason({ busy: false, dirty: true, problems: ['조인트가 하나도 없습니다'] }, 'ok'), '막힘 · 조인트가 하나도 없습니다');
-  assert.equal(blockReason({ busy: false, dirty: false, problems: [] }, 'ok'), '바꾼 내용이 없습니다');
+  assert.equal(blockReason({ busy: true, dirty: true, problems: ['x'] }, 'ok'), '저장하고 적용하는 중입니다');
+  assert.equal(blockReason({ busy: false, dirty: true, problems: ['조인트가 하나도 없습니다'] }, 'ok'), '저장 불가: 조인트가 하나도 없습니다');
+  assert.equal(blockReason({ busy: false, dirty: false, problems: [] }, 'ok'), '변경한 내용이 없습니다');
   assert.equal(blockReason({ busy: false, dirty: true, problems: [] }, 'ok'), 'ok');
   const bar = SETUP_SRC.slice(SETUP_SRC.indexOf("h('div', { class: 'apply-bar' }"));
   assert.equal((bar.match(/title: blockReason\(/g) || []).length, 3, '되돌리기 · 저장 · 저장 후 장비에 적용');
@@ -28,24 +28,24 @@ test('막힌 저장 버튼마다 이유 툴팁 · 먼저 걸리는 것 하나', 
 test('「인식 모터 자동 생성」 · 막혔으면 이유(다른 프로젝트로 돎 → 먼저 장비에 적용) · 버튼에 title', () => {
   const other = { snap: { project_scope: { runtime_matches_selected: false, runtime_project_id: 'floating4' } } };
   assert.match(autoBuildReason(other, 0), /「저장 후 장비에 적용」을 먼저/);
-  assert.match(autoBuildReason(other, 0), /조인트 없이도 됩니다/);
+  assert.match(autoBuildReason(other, 0), /조인트가 없어도 적용 가능/);
   const same = { snap: { project_scope: { runtime_matches_selected: true } } };
-  assert.match(autoBuildReason(same, 0), /모터 상태를 아직 보내지 않았습니다/);
-  assert.match(autoBuildReason(same, 3), /3대마다 한 줄씩/);
+  assert.match(autoBuildReason(same, 0), /모터 상태를 아직 받지 못했습니다/);
+  assert.match(autoBuildReason(same, 3), /3대에 한 줄씩/);
   assert.match(MAPPING_SRC, /title: autoBuildReason\(state, motors\.length\)/);
 });
 
 test('검색 확인 창 · 다른 프로젝트로 돌던 모터 프로그램은 검색 뒤 다시 켜지 않는다고 말한다(서버 scan_orchestrator 와 같음)', () => {
   const other = scanConfirmText('all', { runtime_matches_selected: false, runtime_project_id: 'floating4' });
-  assert.doesNotMatch(other, /다시 시작됩니다/);
+  assert.doesNotMatch(other, /정지했다가 다시 시작됩니다/);
   assert.match(other, /다른 프로젝트\(floating4\)/);
-  assert.match(other, /검색 뒤에는 다시 켜지 않습니다/);
+  assert.match(other, /「저장 후 장비에 적용」을 눌러야 다시 시작됩니다/);
   const same = scanConfirmText('ac', { runtime_matches_selected: true });
-  assert.match(same, /잠시 정지했다가 다시 시작됩니다/);
-  assert.match(same, /검색하지 않은 종류의 모터는 그대로 둡니다/);
+  assert.match(same, /정지했다가 다시 시작됩니다/);
+  assert.match(same, /검색하지 않은 종류의 모터 설정은 바뀌지 않습니다/);
   const none = scanConfirmText('serial', {}, { dirty: true });
-  assert.doesNotMatch(none, /다시 시작됩니다/);
-  assert.match(none, /저장하지 않은 변경 내용은 검색 결과로 대체됩니다/);
+  assert.doesNotMatch(none, /정지했다가 다시 시작됩니다/);
+  assert.match(none, /저장하지 않은 변경 내용은 검색 결과로 바뀝니다/);
   assert.match(MOTORS_SRC, /body: scanConfirmText\(kind, state\.snap\?\.project_scope/);
 });
 
