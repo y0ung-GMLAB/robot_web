@@ -58,6 +58,9 @@ void logSerialPort(const std::string& port, const std::string& message)
 // restart stopped them through the communication-error path.
 constexpr uint64_t kStopTailAfterOffNs = 100000000ULL;   // PDO kept after all are off
 constexpr uint64_t kStopTailMaxNs = 500000000ULL;        // give up waiting for servo off
+// robot_web fix-list 188: then ask the slaves for PREOP while the PDO cycle keeps going,
+// and deactivate only when none is left in SAFEOP/OP (or after this long).
+constexpr uint64_t kStopPreopMaxNs = 1500000000ULL;
 
 } // namespace
 
@@ -729,9 +732,12 @@ void motor_manager::MotorManager::run()
 
         const uint64_t tail_max_cycles = std::max<uint64_t>(1, kStopTailMaxNs / period_);
         const uint64_t tail_off_cycles = std::max<uint64_t>(1, kStopTailAfterOffNs / period_);
+        const uint64_t preop_max_cycles = std::max<uint64_t>(1, kStopPreopMaxNs / period_);
         bool stopping = false;
         uint64_t tail_cycles = 0;
         uint64_t off_cycles = 0;
+        bool preop_requested = false;
+        uint64_t preop_cycles = 0;
 
         while (true) {
             if (!running_.load(std::memory_order_acquire)) {
@@ -745,7 +751,18 @@ void motor_manager::MotorManager::run()
                     }
                 }
                 stopping = true;
-                if (tail_cycles >= tail_max_cycles || off_cycles >= tail_off_cycles) break;
+                if (tail_cycles >= tail_max_cycles || off_cycles >= tail_off_cycles) {
+                    // Servo is off (or gave up). Before deactivate, bring the slaves to PREOP
+                    // with the PDO cycle still running (fix-list 188).
+                    if (!preop_requested) {
+                        for (auto& m_iter : masters_) m_iter.second->request_safe_state();
+                        preop_requested = true;
+                    }
+                    bool all_safe = true;
+                    for (auto& m_iter : masters_) all_safe = all_safe && m_iter.second->safe_state_reached();
+                    if (all_safe || preop_cycles >= preop_max_cycles) break;
+                    ++preop_cycles;
+                }
             }
 
             wakeup_time.tv_nsec += cycle_time.tv_nsec;

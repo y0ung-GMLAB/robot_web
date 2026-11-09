@@ -1,4 +1,10 @@
+#include <spawn.h>
 #include <stdexcept>
+#include <string>
+#include <sys/wait.h>
+#include <thread>
+
+extern char** environ;
 
 #include "ethercat/ethercat_master.hpp"
 
@@ -47,4 +53,37 @@ void ethercat::EthercatMaster::apply_application_time(const timespec& time)
 void ethercat::EthercatMaster::save_clock()
 {
     ecrt_master_sync_slave_clocks(master_);
+}
+
+void ethercat::EthercatMaster::request_safe_state()
+{
+    // robot_web fix-list 188 (NY 2026-11-09): deactivating straight from OP stopped the
+    // PDO cycle while every slave still had its SM2 watchdog armed; the master's state
+    // machine then walked them down one by one, and the last ones hit the watchdog first
+    // (AL 0x001B "Sync manager watchdog", SAFEOP + ERROR) on every service stop, which
+    // then often came back as PREOP + ERROR on the next start. Ask for PREOP while the
+    // application keeps cycling. Same CLI the start-up retry already uses (fix-list 187).
+    const std::string index = std::to_string(master_index_);
+    std::thread([index]() {
+        char arg0[] = "ethercat";
+        char arg1[] = "states";
+        char arg2[] = "-m";
+        std::string m = index;
+        char arg4[] = "PREOP";
+        char* argv[] = {arg0, arg1, arg2, m.data(), arg4, nullptr};
+        pid_t pid = 0;
+        if (posix_spawnp(&pid, "ethercat", nullptr, nullptr, argv, environ) == 0) {
+            int status = 0;
+            (void)waitpid(pid, &status, 0);
+        }
+    }).detach();
+}
+
+bool ethercat::EthercatMaster::safe_state_reached()
+{
+    ec_master_state_t state{};
+    if (ecrt_master_state(master_, &state) != 0) return true;   // cannot tell · do not hold the stop
+    if (state.slaves_responding == 0) return true;
+    // al_states is the OR of all slaves' states · only INIT/PREOP bits left = nobody in SAFEOP/OP
+    return (state.al_states & (EC_AL_STATE_SAFEOP | EC_AL_STATE_OP)) == 0;
 }
