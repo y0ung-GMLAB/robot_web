@@ -336,3 +336,50 @@ def test_after_a_stop_now_is_lifted_by_the_schedule_the_pc_comes_back_at_the_nex
     started = [cycle for cycle, _ in runtime.starts]
     assert started[0] == 1 and started[1:] and started[1] == 3, '2회차는 준비 시간이 모자라 쉬고 3회차부터'
     assert all(at == 100_060.0 + (k - 1) * 100.0 for k, at in runtime.starts)
+
+
+# ---------------------------------------------------------------------- #
+# 수정 목록 189 · 운영 종료 주차 뒤 남은 「초기 위치 이동 완료」 · 다음 운영 1회차부터 매 회차 조용히 쉬었다
+# 실물 NY 2026-11-09 08:31 · 4대 서보 OFF 그대로 · 재생 0 · 로그 0줄
+# ---------------------------------------------------------------------- #
+
+PARKED = {
+    'group_execution': False, 'execution_id': '', 'state': 'initialized', 'phase': 'initialized',
+    'request_source': 'schedule_end', 'message': '초기 위치 이동 완료',
+}
+
+
+def test_the_first_cycle_after_a_schedule_end_park_prepares_and_plays():
+    clock, runtime, driver, _, notes = _pc(100_000.0)
+    runtime.status = dict(PARKED)
+    _run(driver, runtime, clock, _always(Choice(timeline=TIMELINE)), 200.0)
+    assert runtime.calls[0] == 'group_prepare', '준비 길 · 서보 복구도 여기서'
+    assert [cycle for cycle, _ in runtime.starts] == [1, 2]
+    assert not any('쉼' in note for note in notes)
+
+
+def test_a_group_initialized_state_still_counts_as_busy():
+    clock, runtime, driver, _, _ = _pc(100_000.0)
+    runtime.status = {'group_execution': True, 'execution_id': 'exec-other', 'state': 'initialized', 'phase': 'group_armed'}
+    runtime.busy = True
+    _run(driver, runtime, clock, _always(Choice(timeline=TIMELINE)), 3.0)
+    assert 'group_prepare' not in runtime.calls
+
+
+def test_a_skipped_cycle_is_logged_once_per_cycle_and_stays_on_screen_until_the_next_try():
+    clock, runtime, driver, _, notes = _pc(100_000.0)
+    runtime.status = {'group_execution': True, 'execution_id': 'exec-other', 'state': 'running', 'phase': 'running'}
+    runtime.busy = True
+    _run(driver, runtime, clock, _always(Choice(timeline=TIMELINE)), 120.0)
+    skipped = [note for note in notes if '회차 쉼' in note]
+    assert skipped == [
+        '시간표 재생 · 1회차 쉼 · 다른 재생 중(exec-other)',
+        '시간표 재생 · 2회차 쉼 · 다른 재생 중(exec-other)',
+    ], '회차마다 한 줄 · 틱마다 되풀이하지 않는다'
+    assert driver.report()['note'] == '다른 재생 중 · 이 회차 쉼', '다음 회차 들어갈 때 전까지 남는다'
+
+
+def test_the_start_blocker_is_logged_when_a_cycle_is_skipped_for_it():
+    clock, runtime, driver, _, notes = _pc(100_000.0)
+    _run(driver, runtime, clock, _always(Choice(timeline=TIMELINE)), 30.0, view={'start_blocker': '실행 준비 안 됨 · 모터 끊김'})
+    assert notes == ['시간표 재생 · 1회차 쉼 · 실행 준비 안 됨 · 모터 끊김']

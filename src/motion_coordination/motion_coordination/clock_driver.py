@@ -42,6 +42,22 @@ _BUSY_STATES = frozenset({
 _FINISHED_STATES = frozenset({'', 'idle', 'ready', 'stopped', 'completed'})
 
 
+def _occupied(held: str, state: str, status: Mapping[str, Any]) -> bool:
+    """이 PC 가 다른 실행을 하고 있는가 · 시간표 회차에 못 들어간다
+
+    그룹 실행이 아닌 「초기 위치 이동 완료」(`initialized`)는 끝난 단독 초기화다 · 아무것도 돌지 않는다 · 수정 목록 189
+    운영 종료(schedule_end)가 기준점 이동 → 서보 OFF 를 한 뒤 4대 모두 그 상태로 남아 다음 날 1회차부터 매 회차
+    「다른 재생 중」 으로 쉬었다 · 서보 복구도 준비 길 안에만 있어 서보 OFF 그대로(실물 NY 2026-11-09 08:31).
+    """
+    if held:
+        return True
+    if state not in _BUSY_STATES:
+        return False
+    if state == 'initialized' and not status.get('group_execution'):
+        return False
+    return True
+
+
 class ClockDriver:
     """시간표 하나를 이 PC 에서 돌린다 · 연동 노드가 0.1 s 마다 `tick`"""
 
@@ -78,6 +94,10 @@ class ClockDriver:
         #: 이 시간표의 이 회차까지는 다시 잡지 않는다(실패 · 쉼) · (plan_id, 회차)
         self._skip: tuple = ('', 0)
         self._note = ''
+        #: 회차를 쉬며 띄운 이유 · 다음 들어갈 때까지 화면에 남긴다 · 수정 목록 189
+        self._skip_note = ''
+        #: 마지막으로 경고 로그를 남긴 쉼 · (plan_id, 회차, 이유) · 같은 회차는 한 줄 · 수정 목록 189
+        self._skip_logged: tuple = ('', 0, '')
         self._next_start_unix = 0.0
 
     # ------------------------------------------------------------------ #
@@ -206,15 +226,24 @@ class ClockDriver:
         if skip_plan == timeline.plan_id and slot.cycle <= skip_cycle:
             return
         blocker = str(view.get('start_blocker') or '')
+        early = slot.start_unix - now_w > prep + self.ENTER_WINDOW_SEC
         if blocker:
-            # 모터 · 설정 문제 · 풀리면 다음 경계 · 화면에 늘 보인다
-            self._set_note(blocker)
+            # 모터 · 설정 문제 · 풀리면 다음 경계 · 화면에 늘 보인다 · 들어갈 때면 회차마다 경고 한 줄(189)
+            if early:
+                self._set_note(blocker)
+            else:
+                self._skip_cycle(timeline.plan_id, slot.cycle, blocker, blocker)
             return
-        if slot.start_unix - now_w > prep + self.ENTER_WINDOW_SEC:
-            self._set_note('')
+        if early:
+            # 앞 회차를 쉰 이유는 다음 들어갈 때까지 남긴다 · 전에는 바로 지워져 흔적이 없었다(189)
+            if not self._skip_note or self._note != self._skip_note:
+                self._set_note('')
             return
-        if held or state in _BUSY_STATES:
-            self._set_note('다른 재생 중 · 이 회차 쉼')
+        if _occupied(held, state, status):
+            detail = held or ' · '.join(
+                part for part in (state, str(status.get('request_source') or '')) if part
+            )
+            self._skip_cycle(timeline.plan_id, slot.cycle, f'다른 재생 중({detail})', '다른 재생 중 · 이 회차 쉼')
             return
         common = {
             'execution_id': timeline.plan_id,
@@ -244,6 +273,7 @@ class ClockDriver:
             'sent_m': now_m, 'initial_move_time_sec': float(view.get('initial_move_time_sec') or 0.0),
             'entered_unix': now_w,
         }
+        self._skip_note = ''
         self._set_note('')
         self._info(
             f'시간표 재생 · {timeline.plan_id} · {slot.cycle}회차 준비 · 시작까지 {slot.start_unix - now_w:.0f} s'
@@ -369,6 +399,19 @@ class ClockDriver:
         self._skip = (str(run.get('plan_id') or ''), int(run.get('cycle') or 0))
         self._run = None
         self._set_note(why, warn=True)
+
+    def _skip_cycle(self, plan_id: str, cycle: int, why: str, note: str) -> None:
+        """들어갈 때인데 못 들어감 · 화면 이유 + 회차마다 경고 로그 한 줄 · 수정 목록 189
+
+        전에는 「다른 재생 중 · 이 회차 쉼」 이 로그 없이 화면에만 떴다가 다음 틱에 지워져 1회차부터 조용히
+        안 돌았다(실물 NY 2026-11-09 08:31 · 로그 0줄).
+        """
+        self._skip_note = note
+        self._set_note(note)
+        key = (plan_id, int(cycle), why)
+        if key != self._skip_logged:
+            self._skip_logged = key
+            self._warn(f'시간표 재생 · {cycle}회차 쉼 · {why}')
 
     def _set_note(self, text: str, *, warn: bool = False) -> None:
         if text == self._note:

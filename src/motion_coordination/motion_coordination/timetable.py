@@ -311,10 +311,16 @@ def issue(current: TimetableConfig, *, issuer: str, now_unix: Optional[float] = 
     timing_fields = ('mode', 'period_sec', 'auto_period_sec', 'start_lead_sec', 'schedules', 'schedule_enabled')
     if current.clock and updated.clock and any(getattr(updated, name) != getattr(current, name) for name in timing_fields):
         before = choose(current, now, operation_mode=SCHEDULE_MODE).timeline
-        if before is not None:
+        # 첫 회차 전(아무 회차도 안 돎)이면 새 설정 그대로 · 기준을 묶지 않는다 · 수정 목록 189
+        # 전에는 운영 시작 전에 바꾼 스케줄 시작도 지금 시간표의 기준(1회차 시각)에 묶여 시작을 당겨도 안 당겨졌고,
+        # 늦게 바꾸면 다음 경계로 묶여 1회차가 아니라 2회차 복귀 길로 들어갔다(실물 NY 2026-11-09 08:39 · 08:41)
+        if before is not None and clock_grid.running_cycle(before, now) > 0:
             point, cycle = clock_grid.rebase_point(before, now)
             if point:
                 updated = replace(updated, rebase_unix=point, rebase_cycle=cycle)
+        elif updated.rebase_unix:
+            # 첫 회차 전에 앞서 바꾸며 남은 기준도 지운다 · 남겨 두면 새 운영시간 안이라 그 시각에 묶인다(08:41 · 189)
+            updated = replace(updated, rebase_unix=0.0, rebase_cycle=0)
     return replace(updated, version=current.version + 1, issued_by=str(issuer), issued_at_unix=now)
 
 
