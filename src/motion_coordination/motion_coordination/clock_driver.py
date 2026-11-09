@@ -55,6 +55,8 @@ class ClockDriver:
     STATUS_GRACE_SEC = 3.0
     #: 초기 이동을 모를 때 · 신호 재생 스스로 잇기(끊김 시험 A)와 같은 10 s
     INIT_FALLBACK_SEC = 10.0
+    #: 즉시 정지한 시간표 · 정지가 풀릴 때까지 건너뜀 · 수정 목록 188
+    _STOPPED_SKIP = 10 ** 9
 
     def __init__(
         self,
@@ -106,6 +108,13 @@ class ClockDriver:
         state = str(status.get('state') or '')
         # 끝난 실행의 번호는 이어받지도 · 「다른 재생 중」 으로 보지도 않는다 · 수정 목록 188
         live = held if state not in _FINISHED_STATES else ''
+        skip_plan, skip_cycle = self._skip
+        if skip_plan and skip_cycle >= self._STOPPED_SKIP and choice.stopped_plan_id != skip_plan:
+            # 즉시 정지가 풀렸다(스케줄이 다시 시작) · 다음 경계부터 다시 들어간다 · 전에는 그 시간표를 그날 끝까지
+            # 건너뛰어 정지한 PC 들만 서 있었다(실물 NY 2026-11-09 05:55 · 시험 4 뒤 floating1 · 3 · 4) · 수정 목록 188
+            self._skip = ('', 0)
+            if self._note == '정지됨':
+                self._note = ''
 
         if run is None and live.startswith(PLAN_PREFIX):
             # 이 노드가 다시 떴다(워치독 · 업데이트) · 로컬 재생 관리자는 시간표 실행을 계속 돌고 있다 · 이어받는다
@@ -120,6 +129,23 @@ class ClockDriver:
         if run is not None and state == 'error':
             self._cancel(run, f'{run["cycle"]}회차 오류 · {status.get("message") or ""}')
             return
+        if (
+            run is not None and choice.halt_plan_id and choice.halt_plan_id == run['plan_id']
+            and float(run.get('entered_unix') or 0.0) < float(choice.halt_at_unix or 0.0)
+            and not (choice.stopped_plan_id and choice.stopped_plan_id == run['plan_id'])
+        ):
+            # 이 실행을 잡은 뒤 즉시 정지가 있었다 · 정지는 이미 지워졌다(스케줄이 다시 시작) · 끊겨서 못 받은 것 ·
+            # 다른 PC 는 이미 섰다 · 바로 세우고 다음 경계에 같이 들어간다 · 수정 목록 188
+            result = self._control({
+                'command': 'stop_now',
+                'execution_id': run['plan_id'],
+                'network_operation_id': f'tt-halt-{uuid.uuid4().hex}',
+            })
+            self._info(f'시간표 재생 · 놓친 즉시 정지 · {run["plan_id"]} · {result.get("message") or ""}')
+            self._skip = (run['plan_id'], int(run.get('cycle') or 0))
+            self._run = None
+            self._set_note('놓친 즉시 정지 · 다음 경계', warn=True)
+            return
         if run is not None and choice.stopped_plan_id and choice.stopped_plan_id == run['plan_id']:
             result = self._control({
                 'command': 'stop_now',
@@ -127,7 +153,7 @@ class ClockDriver:
                 'network_operation_id': f'tt-stop-{uuid.uuid4().hex}',
             })
             self._info(f'시간표 재생 · 즉시 정지 · {run["plan_id"]} · {result.get("message") or ""}')
-            self._skip = (run['plan_id'], 10 ** 9)
+            self._skip = (run['plan_id'], self._STOPPED_SKIP)
             self._run = None
             self._note = '정지됨'
             return
@@ -145,7 +171,8 @@ class ClockDriver:
         """로컬에 남은 시간표 실행을 이어받는다 · 재생 중 · 회차 끝이면 그대로 · 그 밖(준비 · 초기 이동)은 놓고 다음 경계"""
         cycle = int(status.get('group_cycle_number') or status.get('current_cycle') or 0)
         start = timeline.start_of(cycle) if timeline is not None and timeline.plan_id == held and cycle else 0.0
-        self._run = {'plan_id': held, 'stage': 'scheduled', 'cycle': cycle, 'start_unix': start, 'sent_m': now_m}
+        self._run = {'plan_id': held, 'stage': 'scheduled', 'cycle': cycle, 'start_unix': start, 'sent_m': now_m,
+                     'entered_unix': self._wall()}
         if state in {'running', 'start_scheduled'} or phase in BARRIER_PHASES:
             self._info(f'시간표 재생 · 남아 있던 실행 이어받음 · {held} · {cycle}회차')
             return self._run
@@ -215,6 +242,7 @@ class ClockDriver:
         self._run = {
             'plan_id': timeline.plan_id, 'stage': stage, 'cycle': slot.cycle, 'start_unix': slot.start_unix,
             'sent_m': now_m, 'initial_move_time_sec': float(view.get('initial_move_time_sec') or 0.0),
+            'entered_unix': now_w,
         }
         self._set_note('')
         self._info(

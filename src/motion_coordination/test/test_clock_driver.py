@@ -296,3 +296,43 @@ def test_every_cycle_starts_on_time_when_the_initial_move_runs_long_and_is_seen_
     assert [cycle for cycle, _ in runtime.starts] == [1, 2, 3, 4, 5], notes
     assert all(at == 100_060.0 + (k - 1) * period for k, at in runtime.starts)
     assert not any('놓침' in note or '지났' in note for note in notes)
+
+
+# ---------------------------------------------------------------------- #
+# 수정 목록 188 · 끊긴 동안 즉시 정지가 있었고 다시 붙었을 때는 스케줄이 이미 다시 시작(정지 지워짐)
+# 실물 NY 2026-11-09 05:48 시험 4 · floating2 가 다시 붙은 뒤에도 그 회차를 계속 돌았다
+# ---------------------------------------------------------------------- #
+
+def test_a_pc_that_missed_a_stop_now_stops_on_reconnect_and_rejoins_at_the_next_boundary():
+    clock, runtime, driver, _, notes = _pc(100_000.0)
+    _run(driver, runtime, clock, _always(Choice(timeline=TIMELINE)), 120.0)   # 1회차 도는 중(끊김)
+    assert runtime.status['state'] == 'running'
+    halt_at = clock.wall() - 40.0                                             # 끊긴 동안 다른 PC 들은 섰다
+    missed = Choice(timeline=TIMELINE, halt_plan_id=TIMELINE.plan_id, halt_at_unix=halt_at)
+    _run(driver, runtime, clock, _always(missed), 1.0)                        # 다시 붙음 · 받은 것은 정지가 지워진 버전
+    assert runtime.calls[-1] == 'stop_now' and runtime.status['state'] == 'stopped'
+    assert any('놓친 즉시 정지' in note for note in notes)
+    _run(driver, runtime, clock, _always(missed), 200.0)
+    assert [cycle for cycle, _ in runtime.starts][1:] == [3], '쉬던 회차 다음 경계부터 다른 PC 와 같이'
+
+
+def test_a_run_entered_after_the_stop_is_not_stopped_again():
+    clock, runtime, driver, _, _ = _pc(100_000.0)
+    earlier = Choice(timeline=TIMELINE, halt_plan_id=TIMELINE.plan_id, halt_at_unix=99_000.0)
+    _run(driver, runtime, clock, _always(earlier), 200.0)
+    assert [cycle for cycle, _ in runtime.starts] == [1, 2]
+    assert 'stop_now' not in runtime.calls
+
+
+def test_after_a_stop_now_is_lifted_by_the_schedule_the_pc_comes_back_at_the_next_boundary():
+    """즉시 정지 → 스케줄이 다시 시작(정지 지움) · 전에는 그날 끝까지 「정지됨」 (NY 2026-11-09 05:55) · 수정 목록 188"""
+    clock, runtime, driver, _, _ = _pc(100_000.0)
+    _run(driver, runtime, clock, _always(Choice(timeline=TIMELINE)), 120.0)
+    stopped = Choice(reason='정지됨', stopped_plan_id=TIMELINE.plan_id)
+    _run(driver, runtime, clock, _always(stopped), 18.0)
+    assert runtime.status['state'] == 'stopped' and driver.report()['note'] == '정지됨'
+    resumed = Choice(timeline=TIMELINE, halt_plan_id=TIMELINE.plan_id, halt_at_unix=100_120.0)
+    _run(driver, runtime, clock, _always(resumed), 300.0)
+    started = [cycle for cycle, _ in runtime.starts]
+    assert started[0] == 1 and started[1:] and started[1] == 3, '2회차는 준비 시간이 모자라 쉬고 3회차부터'
+    assert all(at == 100_060.0 + (k - 1) * 100.0 for k, at in runtime.starts)
