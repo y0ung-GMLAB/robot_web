@@ -327,8 +327,7 @@ function timetableFields(state) {
         '시간표 재생 · 연결이 끊긴 PC도 재생 유지',
         '직접 누른 그룹 재생 · 늘 신호 재생',
         '변경 · 마스터 PC만 · 다음 회차 경계부터 적용',
-      ].join('
-') }),
+      ].join(' · ') }),
       segmented('그룹 재생 방식', [['lockstep', '신호 재생', locked], ['clock', '시간표 재생', locked]],
         timetable.clock ? 'clock' : 'lockstep', (value) => act.setTimetable({ mode: value }))),
     h('div', { class: 'field' },
@@ -337,8 +336,7 @@ function timetableFields(state) {
           '0 · 자동(가장 긴 애니메이션 + 초기 위치 이동)',
           '자동보다 짧은 값 · 저장 안 됨',
           '시간표 재생(스케줄 운영)에서만 사용',
-        ].join('
-') }),
+        ].join(' · ') }),
         h('input', { class: 'input num-input', type: 'number', min: '0', step: '10', value: String(timetable.period || 0),
           disabled: Boolean(locked) || !timetable.clock, 'aria-label': '회차 간격(초)',
           onchange: (event) => act.setTimetable({ period_sec: Math.max(0, Number(event.target.value) || 0) }) }),
