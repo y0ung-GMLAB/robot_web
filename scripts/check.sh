@@ -100,6 +100,24 @@ fi
 source "${SCRIPT_DIR}/setup/site.sh"
 row "$(site_wifi_chip_powersave_ok)" "Wi-Fi 칩 절전 꺼짐 (rtw88)" "$(site_wifi_chip_powersave_detail)"
 info "시간대" "$(timedatectl show -p Timezone --value 2>/dev/null || echo 미상) · $(date '+%H:%M')"
+# 시간대 · 마스터와 같아야 함 · 시간표 재생은 운영시간을 이 PC 시간대로 읽는다 · 그룹 설정 묶음의 마스터 시간대 · 수정 목록 186
+this_zone="$(timedatectl show -p Timezone --value 2>/dev/null || cat /etc/timezone 2>/dev/null || true)"
+master_zone="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1])).get("timezone") or "")' "${WORKSPACE_DIR}/config/group_timetable.json" 2>/dev/null || true)"
+if [[ -n "${master_zone}" ]]; then
+  row "$([[ "${this_zone}" == "${master_zone}" ]] && echo 1 || echo 0)" "시간대 · 마스터와 같음" "이 PC ${this_zone:-미상} · 마스터 ${master_zone}"
+else
+  info "시간대 · 마스터" "그룹 설정 묶음 없음(시간표 재생 전) · 이 PC ${this_zone:-미상}"
+fi
+# 시계 맞춤(chrony) · 시간표 재생은 PC 시계가 기준 · 역할 설정 scripts/chrony_role.sh · 수정 목록 186
+if command -v chronyc >/dev/null 2>&1; then
+  chrony_tracking="$(chronyc tracking 2>/dev/null || true)"
+  chrony_leap="$(printf '%s\n' "${chrony_tracking}" | sed -n 's/^Leap status *: *//p')"
+  chrony_offset="$(printf '%s\n' "${chrony_tracking}" | sed -n 's/^System time *: *\([0-9.]*\) seconds \(fast\|slow\).*/\1 s \2/p')"
+  chrony_role="$(sed -n 's/^# robot_web 시간표 재생 · \([^·]*\).*/\1/p' /etc/chrony/conf.d/robot-web.conf 2>/dev/null | head -1)"
+  row "$([[ "${chrony_leap}" == "Normal" ]] && echo 1 || echo 0)" "시계 맞춤 (chrony)" "${chrony_leap:-응답 없음} · ${chrony_offset:-오차 미상} · 역할 ${chrony_role:-미설정 · scripts/chrony_role.sh}"
+else
+  row 0 "시계 맞춤 (chrony)" "없음 · sudo apt install chrony"
+fi
 # 원격 · 애니데스크 · 깔린 PC(마스터)만 본다 · 수정 목록 135
 if command -v anydesk >/dev/null 2>&1; then
   row "$(systemctl is-active --quiet anydesk 2>/dev/null && echo 1 || echo 0)" "애니데스크 켜짐" "$(systemctl is-active anydesk 2>/dev/null || echo 미상) · 부팅 때 자동"

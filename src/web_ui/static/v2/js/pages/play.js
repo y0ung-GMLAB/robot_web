@@ -8,7 +8,7 @@ import { runSummary } from '../model.js';
 import {
   initialMoveChoices, REPEAT_MODES,
   axisRows, defaultScope, excludedText, fileInfo, groupRows, groupRuntime, groupScopeBlocker, groupStartPreview, groupStopCommand,
-  isRunning, phaseSteps, playHeadline, registeredPlaylist, repeatChoice, runStatus, startBlocker,
+  isRunning, phaseSteps, playHeadline, registeredPlaylist, repeatChoice, runStatus, startBlocker, timetableView,
 } from '../play_model.js';
 import { segmentCheck, segmentClock, segmentLabel } from '../segment_model.js';
 import { api } from '../net.js';
@@ -293,18 +293,58 @@ function segmentRow(seg, group, running, changed) {
 function groupCard(state) {
   const rows = groupRows(state.snap);
   const execution = groupRuntime(state.snap).execution;
+  const timetable = timetableView(state.snap);
   const spread = Number(execution.start_spread_ms);
+  // 머리 오른쪽 · 신호 재생 = 시작 편차 · 시간표 재생 = 다음 회차 시각(없으면 이유) · 자리는 늘 둔다 ·
+  // 시간표 방식이어도 사람이 누른 그룹 재생(신호 재생)이 도는 중이면 시작 편차
+  const headText = timetable.clock && !timetable.signalRun
+    ? (timetable.nextText || timetable.reason)
+    : (Number.isFinite(spread) && execution.execution_id ? `시작 편차 ${spread.toFixed(0)} ms` : '');
   return h('section', { class: 'card', 'aria-label': 'PC별 재생 상태' },
     h('div', { class: 'card-head' }, h('h2', { text: 'PC별 재생 상태' }),
-      Number.isFinite(spread) && execution.execution_id ? h('span', { class: 'muted small mono', text: `시작 편차 ${spread.toFixed(0)} ms` }) : null),
+      h('span', { class: 'muted small mono msg-slot', text: headText })),
     rows.length
       ? h('ul', { class: 'list' }, rows.map((row) => h('li', { class: 'list-row' },
         dot(row.tone),
         h('span', { class: 'pc-cell' }, row.name, row.local ? h('small', { class: 'muted', text: ' · 현재 접속' }) : null),
         h('span', { class: 'mono muted cycle-cell', text: row.cycle }),
         h('span', { class: `grow tone-text-${row.tone}`, text: row.note }),
+        h('span', { class: `mono small clock-cell ${row.clockWarn ? 'tone-text-warn' : 'muted'}`, text: row.clock }),
         row.progress ? h('span', { class: 'mono muted small', text: row.progress }) : null)))
       : h('p', { class: 'muted', text: '같은 그룹의 다른 PC가 아직 보이지 않습니다' }));
+}
+
+/** 그룹 재생 방식 · 회차 간격 · 마스터에서만 바꿈 · 슬레이브는 보기만 · 수정 목록 186 */
+function timetableFields(state) {
+  const timetable = timetableView(state.snap);
+  const master = groupRuntime(state.snap).master;
+  const locked = master ? '' : '마스터 PC에서 변경';
+  return [
+    h('div', { class: 'field' },
+      h('span', { class: 'field-label', text: '그룹 재생 방식', title: [
+        '신호 재생 · 마스터가 회차마다 시작 신호',
+        '시간표 재생 · 스케줄 운영에만 적용 · 모든 PC가 같은 시간표로 각자 시작',
+        '시간표 재생 · 연결이 끊긴 PC도 재생 유지',
+        '직접 누른 그룹 재생 · 늘 신호 재생',
+        '변경 · 마스터 PC만 · 다음 회차 경계부터 적용',
+      ].join('
+') }),
+      segmented('그룹 재생 방식', [['lockstep', '신호 재생', locked], ['clock', '시간표 재생', locked]],
+        timetable.clock ? 'clock' : 'lockstep', (value) => act.setTimetable({ mode: value }))),
+    h('div', { class: 'field' },
+      h('label', { class: 'inline' },
+        h('span', { class: 'field-label', text: '회차 간격', title: [
+          '0 · 자동(가장 긴 애니메이션 + 초기 위치 이동)',
+          '자동보다 짧은 값 · 저장 안 됨',
+          '시간표 재생(스케줄 운영)에서만 사용',
+        ].join('
+') }),
+        h('input', { class: 'input num-input', type: 'number', min: '0', step: '10', value: String(timetable.period || 0),
+          disabled: Boolean(locked) || !timetable.clock, 'aria-label': '회차 간격(초)',
+          onchange: (event) => act.setTimetable({ period_sec: Math.max(0, Number(event.target.value) || 0) }) }),
+        's',
+        h('span', { class: 'muted small mono', text: timetable.autoText }))),
+  ];
 }
 
 /* ---------- 재생 목록 ---------- */
@@ -346,7 +386,8 @@ function repeatCard(state, changed) {
         ui.syncMode = value;
         changed();
         act.saveAutomation({ group_sync_mode: value });
-      })) : null);
+      })) : null,
+    ...(group ? timetableFields(state) : []));
 }
 
 /* ---------- 실행 축 ---------- */

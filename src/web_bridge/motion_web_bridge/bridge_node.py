@@ -1179,7 +1179,16 @@ class MotionWebBridge(Node):
             'schedule_window_open': self._schedule_own_window_open(),
             # 그 운영시간이 끝나는 시각 · 진행 PC 가 그룹 명령에 싣는다(참가 PC 는 이 값을 따른다) · 수정 목록 182
             'schedule_window_ends_at': self._schedule_own_window_ends_at(),
+            # 시간표 재생 · 스케줄 항목 · 재생 목록 · 필요 시간(가장 긴 애니 + 초기 이동) · 2 s 에 한 번 읽음 · 186
+            **self._timetable_fields(),
         }
+
+    def _timetable_fields(self) -> Dict[str, Any]:
+        source = getattr(self, '_timetable_source', None)
+        if source is None:
+            from .timetable_source import TimetableSource
+            source = self._timetable_source = TimetableSource(self)
+        return source.fields()
 
     def _cached_start_blocker(self) -> str:
         """50ms 마다 불린다 · 1초에 한 번만 본다 · 사람 조작(조그 · 단독 재생)은 연동 노드가 따로 본다

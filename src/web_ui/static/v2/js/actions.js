@@ -128,6 +128,11 @@ export function startGroup(settings) {
     (r) => r?.message || '그룹 전체 재생을 시작합니다. PC마다 초기 위치로 이동한 뒤 함께 시작합니다.');
 }
 
+/** 그룹 재생 방식 · 회차 간격 · 마스터만 · 보낸 칸만 바뀐다 · 수정 목록 186 */
+export function setTimetable(partial) {
+  return attempt(() => control({ command: 'timetable_set', ...partial }), '저장했습니다');
+}
+
 export function initializeGroup(settings = {}) {
   return attempt(() => control({ command: 'initialize_group', ...settings }), (r) => r?.message || '그룹 전체를 초기 위치로 이동합니다');
 }

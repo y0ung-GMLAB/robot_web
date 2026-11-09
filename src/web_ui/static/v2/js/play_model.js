@@ -241,8 +241,51 @@ export function playHeadline(snap) {
 }
 
 /** 그룹 PC 줄 · 이번 실행에서 뺀 PC 는 이유 · 돌아오는 PC 는 「다음 회차부터」 */
+/**
+ * 시간표 재생 · 마스터가 정한 재생 방식 · 회차 간격 · 다음 회차 · PC 별 시계 차이 · 수정 목록 186
+ * 서버(연동 노드) `runtime.timetable` · 없으면(옛 서버) known = false
+ * 시간표는 스케줄에만 · 사람이 누른 그룹 재생은 신호 재생 · 그 실행이 도는 동안은 시간표 표시를 쉰다(signalRun)
+ */
+export function timetableView(snap) {
+  const tt = snap?.coordination?.runtime?.timetable || {};
+  const clock = tt.mode === 'clock';
+  const next = Number(tt.next_start_unix) || 0;
+  const auto = Number(tt.auto_period_sec) || 0;
+  const executionId = String(snap?.coordination?.runtime?.execution?.execution_id || '');
+  return {
+    known: Boolean(tt.mode),
+    clock,
+    signalRun: Boolean(executionId) && !executionId.startsWith('tt-'),
+    period: Number(tt.period_sec) || 0,
+    auto,
+    autoText: auto ? `자동 ${auto.toFixed(0)} s` : '자동 · 애니메이션 길이 확인 중',
+    nextText: clock && next ? `다음 ${Number(tt.next_cycle) || ''}회차 · ${clockText(next)}` : '',
+    reason: clock && !next ? String(tt.reason || '') : '',
+    peers: tt.peers && typeof tt.peers === 'object' ? tt.peers : {},
+    localNote: String(tt.local?.note || ''),
+    masterTimezone: String(tt.master_timezone || ''),
+    localTimezone: String(tt.local_timezone || ''),
+    localTimezoneMismatch: tt.local_timezone_mismatch === true,
+  };
+}
+
+/** 유닉스 초 → 이 브라우저 시각 HH:MM:SS */
+export function clockText(unixSec) {
+  const date = new Date(Number(unixSec) * 1000);
+  const pad = (value) => String(value).padStart(2, '0');
+  return `${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())}`;
+}
+
+/** PC 시계 차이 · + = 그 PC 시계가 빠름 · 모르면 빈 글자 */
+export function clockOffsetText(ms) {
+  if (ms === null || ms === undefined || !Number.isFinite(Number(ms))) return '';
+  const value = Math.round(Number(ms));
+  return `시계 ${value >= 0 ? '+' : ''}${value} ms`;
+}
+
 export function groupRows(snap) {
   const group = groupRuntime(snap);
+  const timetable = timetableView(snap);
   const excluded = group.execution.excluded || {};
   const joining = group.execution.joining || {};
   const peers = [...group.peers];
@@ -261,8 +304,16 @@ export function groupRows(snap) {
       tone = 'warn';
     }
     else if (joining[id]) { note = joining[id] === 'ready' ? '다음 회차부터 참여' : '참여 준비 중'; tone = 'info'; }
+    const tt = timetable.clock ? (timetable.peers[id] || null) : null;
+    const ttNote = timetable.clock && !timetable.signalRun ? String((tt?.run?.note) ?? (id === group.local?.pc_id ? timetable.localNote : '')) : '';
+    if (ttNote && !excluded[id]) { note = ttNote; tone = 'warn'; }
     if (alarm) { note = `알람 · ${note}`; tone = 'bad'; }
     if (offline) { note = '연결 안 됨'; tone = 'bad'; }
+    const isLocal = peer.is_local === true || (group.local && id === group.local.pc_id);
+    // 시간대 · 마스터와 다르면 노랑 · 운영시간을 그 PC 시간대로 읽어 회차가 어긋남 · 재생은 그대로
+    const zoneWarn = timetable.clock && (isLocal ? timetable.localTimezoneMismatch : tt?.timezone_mismatch === true);
+    const clockWarn = Boolean(tt?.clock_warning) || zoneWarn;
+    if (clockWarn && tone === 'ok') tone = 'warn';
     return {
       id,
       name: pcName(peer),
@@ -271,6 +322,9 @@ export function groupRows(snap) {
       progress: String(peer.motion_progress || ''),
       note,
       tone,
+      // 시간표 재생 · 이 PC 기준 시계 차이 · 100 ms 넘으면 노랑 · 다음 회차에서 맞춰짐(Q5)
+      clock: zoneWarn ? '시간대 다름' : (timetable.clock && tt ? clockOffsetText(tt.clock_offset_ms) : ''),
+      clockWarn,
     };
   });
 }

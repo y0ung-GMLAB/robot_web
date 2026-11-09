@@ -223,6 +223,8 @@ p { margin: 0; }
 .blocker { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; padding: 12px 14px; border-radius: 10px; background: var(--warn-soft); border: 1px solid var(--warn-line); color: var(--warn-ink); }
 .pc-cell { flex: 0 0 150px; min-width: 0; }
 .cycle-cell { flex: 0 0 56px; }
+/* 시간표 재생 · PC 시계 차이 · 칸 너비 고정(신호 재생에서는 빈 칸) · 수정 목록 186 */
+.clock-cell { flex: 0 0 96px; text-align: right; font-variant-numeric: tabular-nums; }
 .playlist { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
 .playlist-row { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 12px; padding: 8px 10px; border-radius: 10px; background: var(--panel-2); }
 .playlist-row.playing { outline: 1px solid var(--ok); }

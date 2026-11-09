@@ -256,6 +256,8 @@ class CoordinationWebBridge:
         allowed = {
             'join', 'leave', 'start_group', 'stop_after_cycle', 'stop_now',
             'acknowledge_group_error', 'initialize_group',
+            # 시간표 재생 · 재생 방식 · 회차 간격 · 마스터 그룹 화면 · 수정 목록 186
+            'timetable_set',
         }
         if command not in allowed:
             raise ValueError('지원하지 않는 DDS 그룹 실행 요청입니다')
@@ -283,6 +285,11 @@ class CoordinationWebBridge:
             if command == 'stop_after_cycle':
                 # 스케줄 끝이면 PC 마다 기준점 주차 → 서보 OFF · 수정 목록 36
                 request['reason'] = str(payload.get('reason') or '')
+            if command == 'timetable_set':
+                # 보낸 칸만 · 연동 노드가 검사(마스터만 · 자동보다 짧은 간격 거부)
+                for key in ('mode', 'period_sec', 'initial_move_time_sec'):
+                    if key in payload:
+                        request[key] = payload.get(key)
             if command in {'start_group', 'initialize_group'}:
                 request.update({
                     'run_mode': payload.get('run_mode', 'continuous'),

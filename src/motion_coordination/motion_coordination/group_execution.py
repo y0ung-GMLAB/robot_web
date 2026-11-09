@@ -43,7 +43,9 @@ from .participant_rules import STARTED_BY_SCHEDULE, normalize_started_by
 #: 이 값으로 스스로 잇는다 · 수정 목록 182) · 1회차 시작 여유 3 s(179) · 빠졌던 실행의 복귀 권유를 받음(181) ·
 #: 메시지 칸이 바뀜 → 로봇 PC · 스피커 모두 같은 버전 · 다시 빌드 · 같은 업데이트에 하트비트 끊김은 풀기 없이
 #: 「연락 끊김」 · 돌아오면 재생을 세우지 않고 회차 경계에서 다시 합침(수정 목록 183 · 칸은 그대로)
-GROUP_PROTOCOL_VERSION = 12
+#: 13 · 2026-11-09 시간표 재생(`GroupTimetable` 묶음 · `GroupHeartbeat.timetable_version` · `timetable_report`) ·
+#: 모든 PC 가 같은 시간표로 스스로 재생(수정 목록 186) · 메시지가 바뀜 → 로봇 PC · 스피커 모두 같은 버전 · 다시 빌드
+GROUP_PROTOCOL_VERSION = 13
 
 #: 진행 PC 가 **뺀 PC 하나에만** 보내는 풀기 명령의 번호 앞머리 · 수정 목록 123
 #:
