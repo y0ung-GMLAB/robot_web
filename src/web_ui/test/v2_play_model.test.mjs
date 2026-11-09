@@ -2,7 +2,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
-  axisRows, defaultScope, excludedText, fileInfo, groupRows, groupStartPreview, groupStopCommand, initialMoveChoices, phaseSteps, playHeadline, REPEAT_MODES,
+  axisRows, defaultScope, excludedText, fileInfo, groupRows, shortReason, groupStartPreview, groupStopCommand, initialMoveChoices, phaseSteps, playHeadline, REPEAT_MODES,
   playlistAdd, playlistMove, playlistRemove, registeredPlaylist, repeatChoice, startBlocker,
 } from '../static/v2/js/play_model.js';
 
@@ -140,4 +140,19 @@ test('그룹 전체 N대 · 실제로 들어갈 PC 수 · 빠질 PC 와 이유 �
   assert.equal(excludedText([]), '');
   // 미리 보기가 없으면(슬레이브 · 옛 서버) 모른다 · 화면이 옛 방식으로 센다
   assert.equal(groupStartPreview(group()).count, null);
+});
+
+test('빠진 이유는 줄에 첫 마디만 · 전체는 detail(마우스 올림)', () => {
+  const long = '웹 서비스 끊김 · 마지막 성공 1524ms 전 · 연속 실패 4회 · 최근 응답(ms) 4, 4, 35, 301, 303 · 사유 로컬 Web Bridge 응답 없음: timed out';
+  assert.equal(shortReason(long), '웹 서비스 끊김');
+  assert.equal(shortReason('가'.repeat(50)).length, 32);
+  const snap = {
+    coordination: { joined: true, runtime: {
+      local: { pc_id: 'f1', state: 'online' }, peers: [],
+      execution: { execution_id: 'e1', excluded: { f1: long } },
+    } },
+  };
+  const [row] = groupRows(snap);
+  assert.equal(row.note, '제외됨 · 웹 서비스 끊김');
+  assert.equal(row.detail, long);
 });

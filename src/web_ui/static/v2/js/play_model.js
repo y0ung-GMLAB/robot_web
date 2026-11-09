@@ -284,6 +284,12 @@ export function clockOffsetText(ms) {
   return `시계 ${value >= 0 ? '+' : ''}${value} ms`;
 }
 
+/** 빠진 이유 · 줄에는 첫 마디만(「웹 서비스 끊김」) · 전체는 마우스를 올리면(title) · 줄이 길어져 칸이 밀리지 않게 */
+export function shortReason(reason, max = 32) {
+  const head = String(reason || '').split(' · ')[0].trim();
+  return head.length > max ? `${head.slice(0, max - 1)}…` : head;
+}
+
 export function groupRows(snap) {
   const group = groupRuntime(snap);
   const timetable = timetableView(snap);
@@ -296,12 +302,14 @@ export function groupRows(snap) {
     const offline = peer.state && peer.state !== 'online';
     const alarm = Number(peer.servo_alarm_grade || 0) > 0;
     let note = String(peer.motion_step || '그룹 대기');
+    let detail = '';
     let tone = 'ok';
     if (excluded[id]) {
       // 모터 설정이 없는 PC(모터 없이 둔 PC)는 고장이 아니라 빠진 것 · 서버 긴 문구 대신 짧게 (2026-10-12 실물)
       const reason = String(excluded[id]);
       note = /실행 준비가 끝나지 않았습니다|모터 설정과 조인트 매핑을 저장/.test(reason)
-        ? '제외됨 (재생할 모터 없음)' : `제외됨 (${reason})`;
+        ? '제외됨 (재생할 모터 없음)' : `제외됨 (${shortReason(reason)})`;
+      detail = reason;
       tone = 'warn';
     }
     else if (joining[id]) { note = joining[id] === 'ready' ? '다음 회차부터 참여' : '참여 준비 중'; tone = 'info'; }
@@ -322,6 +330,7 @@ export function groupRows(snap) {
       cycle: String(peer.motion_cycle_text || '-'),
       progress: String(peer.motion_progress || ''),
       note,
+      detail: detail || note,
       tone,
       // 시간표 재생 · 이 PC 기준 시계 차이 · 100 ms 넘으면 노랑 · 다음 회차에서 맞춰짐(Q5)
       clock: zoneWarn ? '시간대 다름' : (timetable.clock && tt ? clockOffsetText(tt.clock_offset_ms) : ''),
