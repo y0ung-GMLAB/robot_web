@@ -172,3 +172,25 @@ def test_the_last_stop_now_survives_the_schedule_resume_and_a_reboot(tmp_path):
     assert timetable.from_body(timetable.to_body(resumed)).halt == stopped.halt
     after, _ = stop_plan(_clock(), issuer='floating1', after_cycle=True, now_unix=now)
     assert after.halt == {}, '회차 후 정지는 도는 회차를 세우지 않는다'
+
+
+# --------------------------------------------------------------------------- #
+# 수정 목록 189 · 첫 회차 전에 바꾼 스케줄은 기준에 묶지 않는다 · 실물 NY 2026-11-09 08:39 · 08:41
+# --------------------------------------------------------------------------- #
+
+def test_a_schedule_change_before_the_first_cycle_is_not_rebased():
+    now = _ts('2026-11-09 09:50:00')
+    stale = _clock(rebase_unix=_ts('2026-11-09 10:21:00'), rebase_cycle=1)   # 앞서 바꾸며 남은 기준
+    earlier = {**DAILY, 'start_time': '09:55:00'}
+    changed = issue(stale, issuer='floating1', now_unix=now, schedules=(earlier,))
+    assert (changed.rebase_unix, changed.rebase_cycle) == (0.0, 0)
+    timeline = choose(changed, now, operation_mode='schedule').timeline
+    assert timeline.first_cycle == 1
+    assert timeline.anchor_unix == _ts('2026-11-09 09:55:00') + 60.0, '당긴 시작이 그대로 · 1회차 준비 길'
+
+
+def test_a_schedule_change_after_the_first_cycle_still_waits_for_the_boundary():
+    now = _ts('2026-11-09 10:05:00')
+    config = _clock()
+    changed = issue(config, issuer='floating1', now_unix=now, schedules=({**DAILY, 'start_time': '09:30:00'},))
+    assert changed.rebase_unix > now and changed.rebase_cycle == 2, '1회차가 도는 중 · 다음 경계부터'
