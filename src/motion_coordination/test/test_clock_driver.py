@@ -265,6 +265,34 @@ def test_a_live_other_run_still_makes_the_pc_skip():
     clock, runtime, driver, _, notes = _pc(100_000.0)
     runtime.status = {'group_execution': True, 'execution_id': 'exec-other', 'state': 'running', 'phase': 'running'}
     runtime.busy = True
-    _run(driver, runtime, clock, _always(Choice(timeline=TIMELINE)), 3.0)   # 1회차 들어갈 때(준비 52 s 전)
+    _run(driver, runtime, clock, _always(Choice(timeline=TIMELINE)), 3.0)   # 1회차 들어갈 때(준비 54 s 전)
     assert runtime.starts == [] and 'group_prepare' not in runtime.calls
     assert driver.report()['note'] == '다른 재생 중 · 이 회차 쉼'
+
+
+
+# ---------------------------------------------------------------------- #
+# 수정 목록 188 · 시간 예산 · 실측(NY 2026-11-09 04:04) 조건에서도 매 회차 시간표 시각에 시작
+# 초기 이동이 예정보다 늦게 끝나고(최대 0.8 s) · 그것을 늦게 본다(0.5 s 마다 읽음 + 왕복) · 전에는 3대가 놓쳤다
+# ---------------------------------------------------------------------- #
+
+def _run_seen_late(driver, runtime, clock, choice_of, seconds, *, late, init_sec):
+    """로컬 상태를 `late` 초 늦게 본다 · 연동 노드가 읽는 간격 + 웹 · ROS 왕복"""
+    history = []
+    for _ in range(int(seconds / 0.1)):
+        clock.advance(0.1)
+        runtime.step()
+        history.append((clock.mono(), dict(runtime.status)))
+        seen = next((status for at, status in reversed(history) if at <= clock.mono() - late), {})
+        driver.tick(choice_of(clock.wall()), {'status': seen, 'init_sec': init_sec})
+
+
+def test_every_cycle_starts_on_time_when_the_initial_move_runs_long_and_is_seen_late():
+    from motion_coordination.clock_grid import auto_period
+    period = auto_period([80.0 + 5.0])                         # 클립 80 + 초기 이동 5 → 회차 사이 포함
+    timeline = Timeline('tt-s100000', anchor_unix=100_060.0, period_sec=period, end_unix=100_060.0 + period * 5)
+    clock, runtime, driver, _, notes = _pc(100_000.0, clip=80.0, init=6.5)   # 초기 이동이 1.5 s 길다
+    _run_seen_late(driver, runtime, clock, _always(Choice(timeline=timeline)), period * 5, late=0.6, init_sec=5.0)
+    assert [cycle for cycle, _ in runtime.starts] == [1, 2, 3, 4, 5], notes
+    assert all(at == 100_060.0 + (k - 1) * period for k, at in runtime.starts)
+    assert not any('놓침' in note or '지났' in note for note in notes)

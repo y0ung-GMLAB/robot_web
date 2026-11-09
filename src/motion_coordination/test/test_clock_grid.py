@@ -22,10 +22,10 @@ def _ts(text: str) -> float:
 # 주기
 # --------------------------------------------------------------------------- #
 
-def test_the_auto_period_is_the_longest_need_plus_two_seconds_rounded_up_to_ten():
-    # 920 s 애니 + 초기 이동 5 s → 925 + 2 → 930
-    assert auto_period([925.0, 400.0, 0.0]) == 930.0
-    assert auto_period([928.5]) == 940.0
+def test_the_auto_period_is_the_longest_need_plus_the_gap_between_cycles_rounded_up_to_ten():
+    # 920 s 애니 + 초기 이동 5 s → 925 + 회차 사이(장벽 2 + 시작 여유 4) + 2 → 933 → 940 · 수정 목록 188(전에는 930)
+    assert auto_period([925.0, 400.0, 0.0]) == 940.0
+    assert auto_period([932.5]) == 950.0
     assert auto_period([]) == 0.0, '아무도 모르면 0 · 시간표 없음'
 
 

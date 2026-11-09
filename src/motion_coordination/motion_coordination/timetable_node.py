@@ -29,7 +29,7 @@ from rclpy.qos import DurabilityPolicy, QoSProfile, ReliabilityPolicy
 from motion_common import topics
 
 from . import clock_grid, timetable
-from .clock_driver import PLAN_PREFIX, ClockDriver
+from .clock_driver import _FINISHED_STATES, PLAN_PREFIX, ClockDriver
 from .group_execution import GROUP_PROTOCOL_VERSION
 from .participant_rules import SCHEDULE_END_REASON, STARTED_BY_SCHEDULE
 from .timetable import TimetableConfig
@@ -245,6 +245,19 @@ class TimetableMixin:
     # ------------------------------------------------------------------ #
     # 이 PC 시간표 구동
     # ------------------------------------------------------------------ #
+
+    def _timetable_run_live(self) -> bool:
+        """이 PC 가 시간표 실행을 쥐고 도는 중인가 · 그동안 로컬 상태를 50 ms 로 읽는다 · 수정 목록 188"""
+        driver = getattr(self, '_clock_driver', None)
+        if driver is not None and driver.holding:
+            return True
+        status = (getattr(self, '_local_status', None) or {}).get('motion_run_status')
+        if not isinstance(status, Mapping) or not status.get('group_execution'):
+            return False
+        return (
+            str(status.get('execution_id') or '').startswith(PLAN_PREFIX)
+            and str(status.get('state') or '') not in _FINISHED_STATES
+        )
 
     def _drive_timetable(self) -> None:
         driver = getattr(self, '_clock_driver', None)

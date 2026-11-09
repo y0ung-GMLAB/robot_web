@@ -602,7 +602,10 @@ class MotionCoordinationNode(TimetableMixin, Node):
         with self._lock:
             execution_active = bool(self._execution.execution_id)
         # PC 1대 재생 중에도 빨리 읽는다 · 스피커 알림이 늦지 않게 · 수정 목록 38
-        self._local_runtime_monitor.set_active(execution_active or self._local_motion_busy())
+        # 시간표 재생 실행도 · 전에는 0.5 s 마다 읽어 초기 이동 끝을 늦게 보고 시작 예약을 놓쳤다 · 수정 목록 188
+        self._local_runtime_monitor.set_active(
+            execution_active or self._local_motion_busy() or self._timetable_run_live()
+        )
         self._consume_local_runtime_status()
         self._emit_local_runtime_event()
         self._announce_solo_motion()

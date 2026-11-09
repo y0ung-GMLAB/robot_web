@@ -285,6 +285,10 @@ def test_clock_mode_fails_on_a_skipped_cycle():
 
 
 def test_summarize_reads_the_timetable_mode():
-    row = netfault.summarize({'runtime': {'local': {'pc_id': 'f1'}, 'timetable': {'mode': 'clock', 'local': {'note': 'x'}}}})
+    row = netfault.summarize({'runtime': {'local': {'pc_id': 'f1'}, 'timetable': {
+        'mode': 'clock', 'local': {'note': 'x', 'plan_id': 'tt-s1'}}}})
     assert row['sync_mode'] == 'clock' and row['tt_note'] == 'x'
+    signal = netfault.summarize({'runtime': {'local': {'pc_id': 'f1'}, 'timetable': {
+        'mode': 'clock', 'local': {'note': '마스터 스케줄 꺼짐', 'plan_id': ''}}}})
+    assert signal['sync_mode'] == 'lockstep', '시간표 설정이어도 사람이 누른 그룹(신호 재생)은 신호 재생 기준 · 188'
     assert netfault.summarize({'runtime': {}})['sync_mode'] == 'lockstep', '옛 서버 · 칸 없음'
