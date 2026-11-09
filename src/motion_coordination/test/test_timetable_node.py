@@ -54,7 +54,7 @@ def test_the_master_builds_and_sends_the_bundle(tmp_path):
     config = node._timetable
     assert config.version == 1 and config.issued_by == 'pc-a'
     assert config.schedule_enabled and config.schedules == (DAILY_ALL_DAY,)
-    assert config.auto_period_sec == 940.0, '가장 긴 PC(935) + 2 → 10 s 올림'
+    assert config.auto_period_sec == 950.0, '가장 긴 PC(935) + 회차 사이 6 + 2 → 10 s 올림(188)'
     assert config.playlist == ('a.json',)
     assert timetable.load(node._timetable_path) == config, '마스터도 디스크에'
     assert node._timetable_pub.messages and node._timetable_pub.messages[-1].version == 1
@@ -220,3 +220,20 @@ def test_a_pc_in_another_timezone_is_shown_but_keeps_playing(tmp_path):
     assert snapshot['local_timezone_mismatch'] is False
     node._local_status['timezone'] = 'Europe/Berlin'
     assert node._timetable_snapshot()['local_timezone_mismatch'] is True
+
+
+def test_a_timetable_run_keeps_the_local_status_read_fast(tmp_path):
+    """시간표 실행 중에는 50 ms 로 읽는다 · 전에는 0.5 s 라 초기 이동 끝을 늦게 봤다 · 수정 목록 188"""
+    node = _tt_node(tmp_path)
+    node._local_status = {'motion_run_status': {
+        'group_execution': True, 'execution_id': 'tt-s1', 'state': 'cycle_ready', 'phase': 'group_cycle_initialized',
+    }}
+    assert node._timetable_run_live() is True
+    node._local_status = {'motion_run_status': {
+        'group_execution': True, 'execution_id': 'tt-s1', 'state': 'stopped', 'phase': 'stopped',
+    }}
+    assert node._timetable_run_live() is False, '끝난 시간표 실행은 빨리 읽을 까닭이 없다'
+    node._local_status = {'motion_run_status': {
+        'group_execution': True, 'execution_id': 'exec-a', 'state': 'running', 'phase': 'running',
+    }}
+    assert node._timetable_run_live() is False, '신호 재생은 실행이 있어 따로 빨리 읽는다'

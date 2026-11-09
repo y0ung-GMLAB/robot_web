@@ -7,7 +7,7 @@
 - 기준 시각 · 그날 운영시간 시작 + 시작 여유 · 스케줄에만(사람이 누른 그룹 재생은 신호 재생) ·
   운영 중 설정 변경 = 다음 회차 경계(새 기준 시각 · Q7) · 회차 번호는 이어서 센다(그 경계 = 첫 회차) ·
   그래서 그룹 실행 번호 · 재생 목록 순서 · 각 PC 의 로컬 회차 번호가 끊기지 않는다
-- 주기 · 자동 = 모든 PC 의 (가장 긴 클립 + 초기 이동) + 여유 2 s 를 10 s 단위로 올림 · 사람이 마스터에서
+- 주기 · 자동 = 모든 PC 의 (가장 긴 클립 + 초기 이동) + 회차 사이 6 s + 여유 2 s 를 10 s 단위로 올림(188) · 사람이 마스터에서
   더 길게 입력 가능 · 자동보다 짧으면 거부(Q2)
 - 재생 목록 · 회차 k → 항목 (k − 1) mod n · 각 PC 제 목록(파일은 PC 마다 · Q3-2)
 - 운영시간 끝 · 끝 시각 이후 **시작**하는 회차는 없음 · 진행 중 회차는 끝까지(Q6)
@@ -26,6 +26,12 @@ from .cycle_grid import GRID_MARGIN_SEC, GRID_STEP_SEC, round_up_period
 
 #: 운영시간 시작 뒤 1회차까지 · 서비스 기동 · 계획 짓기 · 초기 이동 시간 확보
 DEFAULT_START_LEAD_SEC = 60.0
+#: 초기 이동 예정 끝 → 회차 시작 · 이 안에 「초기 이동 끝」 확인 → 시작 예약 → 재생 관리자 도착 · 수정 목록 188
+#: 실측 NY 2026-11-09 04:04 · 초기 이동이 예정(5 s)보다 0.2~0.8 s 늦게 끝남 + 확인 → 예약 도착 최대 1.4 s ·
+#: 전에는 2 s 라 4대 중 3대가 「그룹 모션 시작 트리거가 이미 지났습니다」 로 회차를 쉬었다 · 4 s 면 남는다
+CYCLE_START_LEAD_SEC = 4.0
+#: 클립 끝 → 회차 끝 장벽(검증) · 그것을 이 PC 가 보기까지 · 실측 약 1 s · 수정 목록 188
+CYCLE_BARRIER_SEC = 2.0
 #: 운영 중 설정 변경 · 새 기준 시각(다음 경계)까지 최소 · 끊기지 않은 PC 가 받을 시간
 REBASE_MIN_LEAD_SEC = 30.0
 #: 주기 상한 · 잘못 넣은 값(초 대신 밀리초 등) 막기 · 하루
@@ -65,11 +71,16 @@ class Slot:
 
 
 def auto_period(needs_sec: Iterable[float]) -> float:
-    """자동 주기 · PC 마다 잰 (가장 긴 클립 + 초기 이동) 중 최댓값 + 여유 → 10 s 올림 · 모르면 0"""
+    """자동 주기 · PC 마다 잰 (가장 긴 클립 + 초기 이동) 중 최댓값 + 회차 사이 시간 + 여유 → 10 s 올림 · 모르면 0
+
+    회차 사이 시간 = 클립 끝 → 장벽(`CYCLE_BARRIER_SEC`) + 초기 이동 끝 → 시작(`CYCLE_START_LEAD_SEC`) · 수정 목록 188 ·
+    전에는 빠져 있어 920 s 클립이면 930 s · 회차 사이가 3 s 뿐이라 시작 여유를 늘릴 수 없었다(지금 940 s).
+    """
     values = [float(value) for value in needs_sec if value and float(value) > 0.0]
     if not values:
         return 0.0
-    return round_up_period(max(values), step=GRID_STEP_SEC, margin=GRID_MARGIN_SEC)
+    span = max(values) + CYCLE_BARRIER_SEC + CYCLE_START_LEAD_SEC
+    return round_up_period(span, step=GRID_STEP_SEC, margin=GRID_MARGIN_SEC)
 
 
 def period_error(period_sec: float, auto_sec: float) -> str:

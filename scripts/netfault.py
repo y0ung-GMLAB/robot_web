@@ -392,7 +392,9 @@ def summarize(snapshot: Mapping[str, Any]) -> Dict[str, Any]:
         'start_failure': str(failure.get('message') or ''),
         'domain': int(config.get('dds_domain_id') or 0),
         # 재생 방식 · 시간표 재생이면 판정이 다르다(끊긴 PC 도 계속 재생) · 옛 서버는 칸 없음 = 신호 재생 · 186
-        'sync_mode': 'clock' if timetable.get('mode') == 'clock' else 'lockstep',
+        # 설정(마스터 화면)이 아니라 이 PC 가 지금 시간표 실행을 쥐었는가로 · 시간표 설정이어도 사람이 누른 그룹은
+        # 신호 재생이다 · 전에는 설정만 봐서 신호 재생 시험을 시간표 기준으로 판정했다(NY 2026-11-09 01:40 2b) · 188
+        'sync_mode': 'clock' if str(local_tt.get('plan_id') or '').startswith('tt-') else 'lockstep',
         'tt_note': str(local_tt.get('note') or ''),
     }
 
