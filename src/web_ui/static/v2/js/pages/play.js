@@ -325,22 +325,22 @@ function timetableFields(state) {
   const locked = master ? '' : '마스터 PC에서 변경';
   return [
     h('div', { class: 'field' },
-      h('span', { class: 'field-label', text: '그룹 재생 방식', title: [
-        '신호 재생 · 마스터가 회차마다 시작 신호',
-        '시간표 재생 · 스케줄 운영에만 적용 · 모든 PC가 같은 시간표로 각자 시작',
-        '시간표 재생 · 연결이 끊긴 PC도 재생 유지',
-        '직접 누른 그룹 재생 · 늘 신호 재생',
-        '변경 · 마스터 PC만 · 다음 회차 경계부터 적용',
-      ].join('\n') }),
+      h('span', { class: 'field-label inline' }, '그룹 재생 방식', tip([
+        '신호 재생: 마스터가 회차마다 시작 신호를 보냄',
+        '시간표 재생: 스케줄 운영에만 적용, 모든 PC가 같은 시간표에 맞춰 각자 시작',
+        '시간표 재생에서는 연결이 끊긴 PC도 재생을 이어 감',
+        '직접 누른 그룹 재생은 방식과 관계없이 신호 재생',
+        '마스터 PC에서만 변경, 다음 회차 경계부터 적용',
+      ], '그룹 재생 방식 설명')),
       segmented('그룹 재생 방식', [['lockstep', '신호 재생', locked], ['clock', '시간표 재생', locked]],
         timetable.clock ? 'clock' : 'lockstep', (value) => act.setTimetable({ mode: value }))),
     h('div', { class: 'field' },
       h('label', { class: 'inline' },
-        h('span', { class: 'field-label', text: '회차 간격', title: [
-          '0 · 자동(가장 긴 애니메이션 + 초기 위치 이동)',
-          '자동보다 짧은 값 · 저장 안 됨',
+        h('span', { class: 'field-label inline' }, '회차 간격', tip([
+          '0이면 자동 (가장 긴 애니메이션 + 초기 위치 이동)',
+          '자동보다 짧은 값은 저장되지 않음',
           '시간표 재생(스케줄 운영)에서만 사용',
-        ].join('\n') }),
+        ], '회차 간격 설명')),
         h('input', { class: 'input num-input', type: 'number', min: '0', step: '10', value: String(timetable.period || 0),
           disabled: Boolean(locked) || !timetable.clock, 'aria-label': '회차 간격(초)',
           onchange: (event) => act.setTimetable({ period_sec: Math.max(0, Number(event.target.value) || 0) }) }),
@@ -382,7 +382,7 @@ function repeatCard(state, changed) {
           onchange: (event) => { ui.targetCycles = Math.max(0, Math.floor(Number(event.target.value) || 0)); changed(); } }),
         h('span', { class: 'muted small', text: '0 = 계속 반복' }))),
     group ? h('div', { class: 'field' },
-      h('span', { class: 'field-label inline' }, 'PC 간 동기화', tip(['회차 맞춤: 먼저 끝난 PC는 다른 PC를 기다렸다가 다음 회차를 함께 시작', '각자 재생: 시작만 함께 하고 이후에는 PC별로 반복'])),
+      h('span', { class: 'field-label inline' }, 'PC 간 동기화', tip(['회차 맞춤: 먼저 끝난 PC는 다른 PC를 기다렸다가 다음 회차를 함께 시작', '각자 재생: 시작만 함께 하고 이후에는 PC별로 반복', '직접 누른 그룹 재생에 적용 (그룹 재생 방식이 시간표 재생이어도)'])),
       segmented('PC 간 동기화', [['lockstep', '회차 맞춤'], ['independent', '각자 재생']], ui.syncMode || 'lockstep', (value) => {
         ui.syncMode = value;
         changed();

@@ -153,7 +153,7 @@ test('빠진 이유는 줄에 첫 마디만 · 전체는 detail(마우스 올림
     } },
   };
   const [row] = groupRows(snap);
-  assert.equal(row.note, '제외됨 · 웹 서비스 끊김');
+  assert.equal(row.note, '제외됨 (웹 서비스 끊김)');
   assert.equal(row.detail, long);
 });
 
