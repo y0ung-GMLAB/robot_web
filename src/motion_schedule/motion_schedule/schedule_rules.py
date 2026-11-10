@@ -17,6 +17,36 @@ LOCAL_ROUTE = 'local'
 START_WENT_NOWHERE = '시작을 보냈지만 재생이 시작되지 않았습니다'
 
 
+#: 시간표 재생(연동 노드 clock_driver) 실행 이름 앞 글자 · 동기 방식 · `motion_coordination.clock_driver.PLAN_PREFIX` ·
+#: `timetable.MODE_CLOCK` 과 같은 글자(스케줄 패키지는 연동 패키지를 가져오지 않는다)
+TIMETABLE_PLAN_PREFIX = 'tt-'
+TIMETABLE_SYNC_MODE = 'clock'
+_LOCAL_FINISHED_STATES = frozenset({'', 'idle', 'ready', 'stopped', 'completed'})
+
+
+def timetable_owns(
+    local_status: Optional[Mapping[str, Any]], group_execution: Optional[Mapping[str, Any]],
+) -> bool:
+    """지금 「도는」 것이 시간표 재생인가 · 창 시작 · 끝은 연동 노드(clock_driver)가 맡는다 · 수정 목록 191
+
+    시간표는 운영시간 시작 24~29 s 전부터 준비(로컬 `waiting`)에 들어가고, 창이 끝나면 도는 회차를 마친 뒤 PC 마다
+    스스로 주차한다 · 스케줄 노드의 「구간 밖인데 돌고 있다 → 회차 후 정지」 가 그 위에 끼어들어 마스터에게만 단독
+    정지를 보냈다 · 창 시작 전이면 마스터만 주차 → 서보 OFF → 1회차 빠짐(실물 NY 2026-11-09 21:44 · 22:54 · A) ·
+    마지막 창 끝이면 마스터 로컬이 `stopped` 로 실행을 쥔 채 남아 4대 주차 교착(23:27 · B).
+
+    로컬 상태가 시간표 실행(`tt-` · 그룹 실행 · 끝나지 않음)이거나, 연동 상태의 실행 보기가 시간표(`clock`)면 참.
+    """
+    status = dict(local_status or {})
+    if (
+        status.get('group_execution')
+        and str(status.get('execution_id') or '').startswith(TIMETABLE_PLAN_PREFIX)
+        and str(status.get('state') or '').strip() not in _LOCAL_FINISHED_STATES
+    ):
+        return True
+    execution = dict(group_execution or {})
+    return group_is_active(execution) and str(execution.get('sync_mode') or '') == TIMETABLE_SYNC_MODE
+
+
 def stop_route(group_execution: Optional[Mapping[str, Any]], *, joined: bool) -> str:
     """구간 밖 「회차 후 정지」 를 어느 길로 보내나 · 수정 목록 115
 

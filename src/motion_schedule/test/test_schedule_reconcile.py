@@ -531,3 +531,48 @@ def test_the_blocker_kind_is_read_and_unknown_keeps_the_old_way():
     assert schedule_rules.master_sits_out(kind='motor', coordination=True, master=True) is True
     assert schedule_rules.master_sits_out(kind='setup', coordination=True, master=True) is False
     assert schedule_rules.master_sits_out(kind='motor', coordination=False, master=True) is False
+
+
+# ---------------------------------------------------------------------- #
+# 수정 목록 191 · 시간표 재생은 창 시작 · 끝을 연동 노드가 맡는다 · 스케줄 노드는 정지를 보내지 않는다
+# ---------------------------------------------------------------------- #
+
+def test_a_timetable_preparing_before_the_window_is_not_stopped(tmp_path):
+    """실물 NY 2026-11-09 21:44 · 22:54 · 창 시작 24~29 s 전 준비(waiting) · 마스터만 주차돼 1회차 빠짐(A)"""
+    node = _node(
+        tmp_path, run_state='waiting', schedules=[_day_schedule()],
+        local={'group_execution': True, 'execution_id': 'tt-s1794278700'},
+    )
+    node._reconcile(DAY.replace(hour=8, minute=59, second=40))
+    assert node.sent == []
+
+
+def test_a_timetable_cycle_after_the_window_is_not_stopped(tmp_path):
+    """창 끝 뒤 도는 회차 · 각 PC 연동 노드가 회차를 마치고 주차 · 마스터에게 단독 정지 → 4대 주차 교착(B)"""
+    node = _node(
+        tmp_path, run_state='running', schedules=[_day_schedule()],
+        local={'group_execution': True, 'execution_id': 'tt-s1794278700'},
+    )
+    node._reconcile(DAY.replace(hour=18, minute=5))
+    assert node.sent == []
+
+
+def test_a_timetable_view_with_a_stopped_local_run_is_not_stopped(tmp_path):
+    """마스터 로컬은 멈췄지만 연동 상태가 시간표 실행을 「도는 중」 으로 보여 준다 · 그것도 시간표 몫"""
+    node = _node(
+        tmp_path, run_state='stopped', schedules=[_day_schedule()],
+        group={'execution_id': 'tt-s1', 'state': 'running', 'sync_mode': 'clock', 'started_by': 'schedule'},
+    )
+    node._reconcile(DAY.replace(hour=20))
+    assert node.sent == []
+
+
+def test_a_signal_group_outside_the_window_is_still_stopped(tmp_path):
+    """신호 재생(사람 · 스케줄이 켠 그룹)은 전처럼 회차 후 정지"""
+    node = _node(
+        tmp_path, run_state='running', schedules=[_day_schedule()],
+        local={'group_execution': True, 'execution_id': 'exec-1'},
+        group={'execution_id': 'exec-1', 'state': 'running', 'sync_mode': 'lockstep', 'started_by': 'schedule'},
+    )
+    node._reconcile(DAY.replace(hour=20))
+    assert [endpoint for endpoint, _ in node.sent] == ['/api/motion-run/stop-after-cycle']
