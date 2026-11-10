@@ -144,8 +144,26 @@ if [[ "${ROLE}" == "robot" ]]; then
     [[ "${unit}" == "motion-motor" && "${state}" != "active" ]] && detail="${detail} · 모터 설정 적용 전이면 정상(웹 모터 관리 → 저장 → 장비에 적용)"
     row "$([[ "${state}" == "active" ]] && echo 1 || echo 0)" "${unit}" "${detail}"
   done
+  # ethercat 서비스가 실제로 읽는 설정 파일 · prefix 없이 깐 IgH 는 /usr/local/etc/ethercat.conf · 수정 목록 165
+  # shellcheck disable=SC1091
+  source "${SCRIPT_DIR}/setup/site.sh"
+  ecconf="$(site_ethercat_target_conf)"
+  ecother="$(site_ethercat_conf_elsewhere "${ecconf}")"
+  ecmac="$(site_ethercat_mac_in "${ecconf}")"
+  info "EtherCAT 설정 파일" "${ecconf}"
+  if [[ -n "${ecmac}" ]]; then
+    for other in ${SITE_ETHERCAT_CONF_CANDIDATES}; do
+      [[ "${other}" == "${ecconf}" ]] && continue
+      othermac="$(site_ethercat_mac_in "${other}")"
+      if [[ -n "${othermac}" && "${othermac}" != "${ecmac}" ]]; then
+        row 0 "EtherCAT 설정 파일 하나" "${other} 의 MAC(${othermac})이 서비스가 읽는 ${ecconf}(${ecmac})와 다름 · 안 읽히는 쪽 정리 · 수정 목록 165"
+      fi
+    done
+  fi
   # 랜카드를 안 묶은 PC(직렬 서보 전용 · SITE_ETHERCAT_NIC=none)는 EtherCAT 이 없는 게 정상 · 2026-10-27
-  if ! grep -qs '^MASTER0_DEVICE="[^"]\+"' /etc/ethercat.conf; then
+  if [[ -z "${ecmac}" && -n "${ecother}" && "${ecother#* }" != "none" ]] && ! grep -qxsF "${SITE_ETHERCAT_NONE_MARK}" "${ecconf}"; then
+    row 0 "EtherCAT 설정 파일" "랜카드가 ${ecother%% *} 에만 적힘 · 서비스는 ${ecconf} 를 읽음 → No network cards · bash scripts/ethercat_nic.sh · 수정 목록 165"
+  elif [[ -z "${ecmac}" ]]; then
     row 1 "EtherCAT" "랜카드 안 씀 (직렬 서보 전용) · 쓰려면 bash scripts/ethercat_nic.sh <랜카드>"
   elif ethercat master >/dev/null 2>&1; then
     phase="$(ethercat master 2>/dev/null | awk -F: '/Phase/ { gsub(/^ +/, "", $2); print $2; exit }')"
@@ -156,7 +174,7 @@ if [[ "${ROLE}" == "robot" ]]; then
     row 0 "EtherCAT master" "응답 없음 · Secure Boot · sudo systemctl status ethercat"
   fi
   # EtherCAT 랜카드에 NetworkManager 가 45초마다 DHCP 를 거는지 · 수정 목록 177
-  if [[ -n "$(site_ethercat_nic_mac)" ]]; then
+  if [[ -n "${ecmac}" ]]; then
     row "$(site_ethercat_nm_ok)" "EtherCAT 랜카드 NM 제외" "$(site_ethercat_nm_detail)"
   fi
   # IgH SDO 사전 자동 읽기 꺼짐(패치 · sdo_dict=0) · 모듈이 올라가 있을 때만 · 수정 목록 139

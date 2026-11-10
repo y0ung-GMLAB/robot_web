@@ -37,6 +37,8 @@ from .motor_values import (
     error_text,
     feetech_error_text,
     serial_config_pending_text,
+    minas_error_kind,
+    minas_error_text,
     hex16,
     motor_type_label,
     normalized_errorcode,
@@ -223,6 +225,8 @@ class StatePublisher:
             error_message = feetech_error_text(errorcode)
         elif is_dynamixel:
             error_message = dynamixel_error_text(errorcode)
+        elif motor_type == 'minas':
+            error_message = minas_error_text(errorcode)
         else:
             error_message = error_text(errorcode, '')
         return {
@@ -243,6 +247,12 @@ class StatePublisher:
             'errorcode_raw': raw_errorcode,
             'errorcode_hex': hex16(raw_errorcode),
             'error_text': error_message,
+            # 'alarm' · 'warning'(MINAS 경고 A0 등 · 드라이브는 계속 돔) · '' · 화면 색 · 수정 목록 166
+            'error_kind': (
+                minas_error_kind(errorcode)
+                if motor_type == 'minas' and not communication_unavailable
+                else ('alarm' if errorcode and not communication_unavailable else '')
+            ),
             # 직렬 서보 설정 대기 · 화면 · 수동 명령 차단 사유 · 직렬 서보에만 붙는다(AC 축 모양 그대로) · 수정 목록 158
             **({'config_pending': config_pending} if is_dynamixel else {}),
             'station_alias_register': None,
@@ -438,6 +448,7 @@ class StatePublisher:
             'errorcode_raw': 0,
             'errorcode_hex': hex16(0),
             'error_text': 'No error',
+            'error_kind': '',
             'station_alias_register': None,
             'position_rad': None,
             'velocity_rad_s': None,

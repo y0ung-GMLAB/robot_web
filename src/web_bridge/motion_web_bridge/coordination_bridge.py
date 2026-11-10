@@ -480,12 +480,11 @@ _READINESS_STEPS = (
     ('check_ms', '실행 준비 검사 왕복'),
 )
 
-
 def readiness_timing_text(
     total_ms: float, budget_sec: float, steps: Mapping[str, Any], check_timing: Any = None,
 ) -> str:
     """준비 확인 단계별 시간 한 줄 · 「합계 5230 ms(예산 6.0 s) · 실행 컨텍스트 120 · … · 실행 준비 검사 왕복 5100
-    [파일 3200 · 재샘플 1800 · 계획 5050] ms」 · 안 거친 단계는 뺀다 · 수정 목록 174
+    [대기 0 · 파일 3200 · 재샘플 1800(새로) · 계획 5050] ms」 · 안 거친 단계는 뺀다 · 수정 목록 174
     """
     parts = [f'합계 {total_ms:.0f} ms(예산 {budget_sec:.1f} s)']
     for key, label in _READINESS_STEPS:
@@ -504,7 +503,7 @@ def local_motion_readiness(
 ) -> Dict[str, Any]:
     """준비 확인 + 단계별 시간 · 1 s 넘거나 실패면 로그 한 줄 · 1 s 넘은 실패는 거절 사유에도 · 수정 목록 174
 
-    NY 실물 2026-11-05(humble) · 재부팅 뒤 첫 그룹 시작에서 「준비 거절 · 로컬 Web Bridge 응답 없음: timed out」 ·
+    NY 실물 2026-11-05 · 재부팅 뒤 첫 그룹 시작에서 「준비 거절 · 로컬 Web Bridge 응답 없음: timed out」 ·
     어느 단계가 느렸는지 기록이 없어 원인 미확인 · 부르는 쪽이 먼저 끊으면 답은 못 가도 이 로그는 남는다.
     """
     request = payload if isinstance(payload, Mapping) else {}
@@ -551,6 +550,8 @@ def _local_motion_readiness(
     `steps` · 단계마다 걸린 ms 를 적는다(거친 단계만) · 수정 목록 174
     """
     timeout_sec = max(0.5, budget - READINESS_MARGIN_SEC)
+    # 안쪽 일 전부(실행 컨텍스트 맞추기 + 실행 준비 검사)가 이 마감 안에 · 수정 목록 164
+    deadline = time.monotonic() + timeout_sec
     # 사람이 이 PC 를 만지는 중이면 그룹에 안 들어간다 · 수정 목록 122 (나)
     busy = human_operation_reason(
         _locked_copy(bridge, '_motion_run_status', '_motion_run_lock'),
@@ -598,6 +599,8 @@ def _local_motion_readiness(
         segment = motion_segment.apply_to_payload(request)
     except ValueError as exc:
         return {'success': False, 'message': str(exc)}
+    # 검사는 남은 예산을 다 쓴다 · 전에는 3 s 고정이라 예산(6 s − 여백 1 s)이 남아도 긴 애니(920 s ×
+    # 20 조인트)의 첫 검사가 「motion_run_manager response timeout」 으로 끝났다 · 수정 목록 164
     step_started = time.monotonic()
     try:
         return bridge.motion_run_check({
@@ -607,7 +610,7 @@ def _local_motion_readiness(
             'request_source': 'network_readiness',
             motion_segment.START_KEY: segment[motion_segment.START_KEY],
             motion_segment.END_KEY: segment[motion_segment.END_KEY],
-        })
+        }, timeout_sec=max(0.5, deadline - time.monotonic()))
     finally:
         steps['check_ms'] = (time.monotonic() - step_started) * 1000.0
 

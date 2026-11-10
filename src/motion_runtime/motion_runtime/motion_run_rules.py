@@ -282,8 +282,18 @@ def _clamp_to_motor_limits(target: float, motor: Optional[Dict[str, Any]]) -> fl
     """반올림 차이만큼 넘은 목표를 모터 한계로 · 드라이브 소프트 리밋을 넘는 명령은 안 보낸다 (93-72)"""
     if not motor:
         return target
-    lower = wire_units.motor_limit(motor, 'lower')
-    upper = wire_units.motor_limit(motor, 'upper')
+    return _clamp_to_motor_bounds(target, *_motor_limit_bounds(motor))
+
+
+def _motor_limit_bounds(motor: Optional[Dict[str, Any]]) -> tuple:
+    """(하한, 상한) rad · 없으면 None · 계획이 샘플마다 다시 읽지 않게 한 번만 · 수정 목록 164"""
+    if not motor:
+        return None, None
+    return wire_units.motor_limit(motor, 'lower'), wire_units.motor_limit(motor, 'upper')
+
+
+def _clamp_to_motor_bounds(target: float, lower: Optional[float], upper: Optional[float]) -> float:
+    """`_clamp_to_motor_limits` 의 본문 · 한계를 미리 읽어 둔 쪽이 부른다"""
     if lower is not None and lower - MOTOR_LIMIT_ROUNDING_RAD <= target < lower:
         return float(lower)
     if upper is not None and upper < target <= upper + MOTOR_LIMIT_ROUNDING_RAD:

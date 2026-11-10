@@ -6,7 +6,7 @@
 import { h, dot } from '../dom.js';
 import { api } from '../net.js';
 import { confirmBox, toast } from '../dialog.js';
-import { CATEGORY_LABELS, eventTime, runRows, traceGeometry } from '../records_model.js';
+import { CATEGORY_LABELS, eventTarget, eventTime, eventTone, runRows, traceGeometry } from '../records_model.js';
 
 const ui = { tab: 'runs', day: '', run: '', trace: null, traceFor: '', category: 'all', file: 'all', busy: false };
 
@@ -140,9 +140,10 @@ function eventsView(state, changed) {
       h('button', { class: 'btn btn-mini', type: 'button', onclick: clear }, '삭제')),
     h('section', { class: 'card', 'aria-label': '운영 로그' },
       events.length ? h('ul', { class: 'list event-list' }, events.map((event) => h('li', { class: 'list-row' },
-        dot(event.category === 'error' ? 'bad' : event.category === 'coordination' ? 'info' : 'ok'),
+        dot(eventTone(event)),
         h('span', { class: 'mono muted time', text: `${String(event.timestamp_text || '').slice(5, 10)} ${eventTime(event)}` }),
         h('span', { class: 'chip', text: CATEGORY_LABELS[event.category] || event.category || '-' }),
+        eventTarget(event) ? h('span', { class: 'mono', text: eventTarget(event) }) : null,
         h('span', { class: 'grow wrap-text', text: String(event.content || event.event_type || '') }))))
         : h('p', { class: 'muted', text: data.events ? '기록 없음' : '불러오는 중…' })),
   ];

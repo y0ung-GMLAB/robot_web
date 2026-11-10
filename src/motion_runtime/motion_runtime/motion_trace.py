@@ -52,6 +52,8 @@ PRUNE_INTERVAL_SEC = 60.0
 WRITE_DELAY_SEC = 3.0
 
 Decoder = Callable[[Any], Dict[int, float]]
+#: 위치를 안 든 줄 · 고치지 않는다
+_NO_POSITIONS: Dict[int, float] = {}
 
 
 def joint_from_motor(row: Mapping[str, Any], motor_rad: float) -> Optional[float]:
@@ -85,10 +87,16 @@ class CycleTrace:
 
     def add(self, sample: Mapping[str, Any]) -> None:
         raw, raw_at = self.status_source()
+        motion_values = sample.get('motion_values') or {}
+        positions = sample.get('positions') or {}
+        # 쓰기 스레드는 조인트 값이 없을 때만 위치를 본다 · 다 있으면 위치 사전은 들지 않는다 ·
+        # 샘플을 꺼낼 때마다 새 사전이라(배열 계획 · 수정 목록 170) 920 s 회차면 46000 개를 들게 된다
+        if self.axes and all(finite_float(motion_values.get(axis.motion_id)) is not None for axis in self.axes):
+            positions = _NO_POSITIONS
         self.rows.append((
             float(sample.get('time_sec') or 0.0),
-            sample.get('positions') or {},
-            sample.get('motion_values') or {},
+            positions,
+            motion_values,
             raw,
             raw_at,
             time.monotonic(),

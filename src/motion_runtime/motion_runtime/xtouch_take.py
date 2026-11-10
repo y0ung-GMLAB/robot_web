@@ -32,8 +32,12 @@ class TakePlayback:
             if motion_id in self.axes
         }
         samples = plan.get('samples') or []
+        column = getattr(samples, 'motion_column', None)
         self.series = {
-            motion_id: [float(sample['motion_values'][motion_id]) for sample in samples]
+            motion_id: (
+                [float(value) for value in column(motion_id)] if callable(column)
+                else [float(sample['motion_values'][motion_id]) for sample in samples]
+            )
             for motion_id in joints
         }
         self.controller = punch.PunchController(joints, float(manager.period_sec)) if joints else None

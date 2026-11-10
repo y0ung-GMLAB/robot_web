@@ -388,6 +388,119 @@ def test_active_ethercat_conf_follows_the_service(tmp_path):
     assert _site('site_ethercat_active_conf', env).strip() == str(other)
 
 
+# -- 수정 목록 165 · 랜카드는 서비스가 실제로 읽는 ethercat.conf 에 적는다 -------------------------- #
+#   새 PC · prefix 없이 깐 IgH 는 /usr/local/sbin/ethercatctl → /usr/local/etc/ethercat.conf 를 읽는데
+#   설치가 /etc/ethercat.conf 에 MAC 을 적어 「No network cards」 (NY 현장 2026-11-02)
+
+def _fresh_pc(tmp_path, *, systemd_knows_unit=True):
+    """IgH 를 막 깐 PC 흉내 · ethercatctl 은 ETHERCAT_CONFIG=…/usr_local_etc/ethercat.conf · /etc 쪽은 다른 파일"""
+    fake = tmp_path / 'bin'
+    fake.mkdir()
+    sbin = tmp_path / 'sbin'
+    sbin.mkdir()
+    local_etc = tmp_path / 'usr_local_etc'
+    local_etc.mkdir()
+    service_conf = local_etc / 'ethercat.conf'
+    etc_conf = tmp_path / 'etc_ethercat.conf'
+    ctl = sbin / 'ethercatctl'
+    ctl.write_text('#!/bin/sh\nif [ "$1" = "-c" ]; then\n    ETHERCAT_CONFIG="$2"\nelse\n'
+                   f'    ETHERCAT_CONFIG="{service_conf}"\nfi\n', encoding='utf-8', newline='\n')
+    calls = tmp_path / 'calls'
+    unit = f'printf "[Service]\\nExecStart={ctl} start\\n"' if systemd_knows_unit else 'exit 1'
+    _fake(fake, 'systemctl', f'echo "systemctl $*" >> "{calls}"\n[ "$1" = "cat" ] && {{ {unit}; }}\nexit 0')
+    _fake(fake, 'sudo', 'exec "$@"')
+    _fake(fake, 'ip', 'case "$*" in\n'
+                      '  "-br link") printf "lo UNKNOWN 00:00:00:00:00:00 <LOOPBACK>\\n'
+                      'enp1s0 UP aa:bb:cc:dd:ee:01 <UP>\\nenp2s0 UP aa:bb:cc:dd:ee:02 <UP>\\n" ;;\n'
+                      '  "-br link show enp2s0") echo "enp2s0 UP aa:bb:cc:dd:ee:02 <UP>" ;;\n'
+                      '  "-o -4 addr show scope global") echo "2: enp1s0 inet 192.168.0.23/24 scope global enp1s0" ;;\n'
+                      '  "route show default") echo "default via 192.168.0.1 dev enp1s0" ;;\n'
+                      'esac\nexit 0')
+    env = {
+        'PATH': f'{fake}{os.pathsep}{os.environ["PATH"]}',
+        'SITE_ETHERCAT_CONF_CANDIDATES': f'{etc_conf} {service_conf}',
+        'SITE_ETHERCATCTL_CANDIDATES': str(ctl),
+        'SITE_STATE_DIR': str(tmp_path / 'state'),
+    }
+    return env, service_conf, etc_conf, calls
+
+
+IGH_TEMPLATE = 'MASTER0_DEVICE=""\nMASTER0_BACKUP=""\nDEVICE_MODULES=""\n'
+
+
+@pytest.mark.skipif(not LINUX_SHELL, reason='리눅스 셸에서')
+@pytest.mark.parametrize('systemd_knows_unit', [True, False])
+def test_fresh_pc_writes_the_nic_into_the_conf_the_service_reads(tmp_path, systemd_knows_unit):
+    env, service_conf, etc_conf, calls = _fresh_pc(tmp_path, systemd_knows_unit=systemd_knows_unit)
+    service_conf.write_text(IGH_TEMPLATE, encoding='utf-8', newline='\n')   # make install 이 깐 빈 틀
+    result = _bash(f'set -Eeuo pipefail; source "{SITE}"; site_ethercat_configure; echo "CONF=$SITE_ETHERCAT_CONF"', env)
+    assert result.returncode == 0, result.stdout + result.stderr
+    text = service_conf.read_text(encoding='utf-8')
+    assert 'MASTER0_DEVICE="aa:bb:cc:dd:ee:02"' in text and 'UPDOWN_INTERFACES="enp2s0"' in text
+    assert not etc_conf.exists(), '/etc 쪽에 적지 않음'
+    assert f'CONF={service_conf}' in result.stdout, 'ethercat_nic.sh 가 찍는 자리도 같은 파일'
+    assert 'systemctl enable --now ethercat' in calls.read_text(encoding='utf-8')
+    # 다시 돌려도 그대로(멱등) · 서비스 자리 기준으로 「유지」
+    again = _bash(f'set -Eeuo pipefail; source "{SITE}"; site_ethercat_configure', env)
+    assert again.returncode == 0 and 'EtherCAT 설정 유지' in again.stdout and str(service_conf) in again.stdout
+
+
+@pytest.mark.skipif(not LINUX_SHELL, reason='리눅스 셸에서')
+def test_a_pc_set_up_by_the_old_installer_gets_its_mac_moved_to_the_service_conf(tmp_path):
+    """옛 설치가 /etc 에만 적은 PC · 랜카드 지정 없이 다시 돌리면 그 MAC 을 서비스 자리로 옮긴다(자동 감지 안 함)"""
+    env, service_conf, etc_conf, _ = _fresh_pc(tmp_path)
+    service_conf.write_text(IGH_TEMPLATE, encoding='utf-8', newline='\n')
+    etc_conf.write_text('MASTER0_DEVICE="aa:bb:cc:dd:ee:09"\nDEVICE_MODULES="generic"\nUPDOWN_INTERFACES="enp9s0"\n',
+                        encoding='utf-8', newline='\n')
+    # 자가 점검이 먼저 잡는다
+    check = _bash(f'source "{SITE}"; site_check_row() {{ echo "ROW $1 $2 · $3"; }}; '
+                  'ecconf="$(site_ethercat_target_conf)"; ecother="$(site_ethercat_conf_elsewhere "$ecconf")"; '
+                  'echo "$ecconf|$ecother"', env)
+    assert check.stdout.strip() == f'{service_conf}|{etc_conf} aa:bb:cc:dd:ee:09'
+    result = _bash(f'set -Eeuo pipefail; source "{SITE}"; site_ethercat_configure', env)
+    assert result.returncode == 0, result.stdout + result.stderr
+    text = service_conf.read_text(encoding='utf-8')
+    assert 'MASTER0_DEVICE="aa:bb:cc:dd:ee:09"' in text and 'UPDOWN_INTERFACES="enp9s0"' in text
+    assert '옮김' in result.stdout
+    assert '파일이 둘' not in result.stderr, '같은 MAC 이면 경고 없음'
+
+
+@pytest.mark.skipif(not LINUX_SHELL, reason='리눅스 셸에서')
+def test_two_confs_with_different_macs_keep_the_service_one_and_warn(tmp_path):
+    env, service_conf, etc_conf, _ = _fresh_pc(tmp_path)
+    service_conf.write_text('MASTER0_DEVICE="aa:bb:cc:dd:ee:02"\nDEVICE_MODULES="generic"\n', encoding='utf-8', newline='\n')
+    etc_conf.write_text('MASTER0_DEVICE="aa:bb:cc:dd:ee:09"\n', encoding='utf-8', newline='\n')
+    result = _bash(f'set -Eeuo pipefail; source "{SITE}"; site_ethercat_configure', env)
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert 'EtherCAT 설정 유지' in result.stdout
+    assert '파일이 둘' in result.stderr and str(etc_conf) in result.stderr and 'aa:bb:cc:dd:ee:09' in result.stderr
+    assert 'aa:bb:cc:dd:ee:02' in service_conf.read_text(encoding='utf-8')
+    # SITE_RESET_ETHERCAT=1 이면 자동 감지로 다시 씀(다른 파일 MAC 을 이어 쓰지 않음)
+    service_conf.write_text('MASTER0_DEVICE="aa:bb:cc:dd:ee:07"\n', encoding='utf-8', newline='\n')
+    reset = _bash(f'set -Eeuo pipefail; source "{SITE}"; site_ethercat_configure', {**env, 'SITE_RESET_ETHERCAT': '1'})
+    assert reset.returncode == 0, reset.stderr
+    assert 'MASTER0_DEVICE="aa:bb:cc:dd:ee:02"' in service_conf.read_text(encoding='utf-8')
+
+
+@pytest.mark.skipif(not LINUX_SHELL, reason='리눅스 셸에서')
+def test_an_explicit_conf_wins_and_none_elsewhere_is_kept(tmp_path):
+    env, service_conf, etc_conf, _ = _fresh_pc(tmp_path)
+    given = tmp_path / 'given.conf'
+    assert _site('site_ethercat_target_conf', {**env, 'SITE_ETHERCAT_CONF': str(given)}).strip() == str(given)
+    assert _site('site_ethercat_target_conf', env).strip() == str(service_conf)
+    # 「안 씀」 이 옛 자리에만 적혀 있어도 자동 감지로 묶지 않는다
+    etc_conf.write_text('# robot_web-ethercat: none\nMASTER0_DEVICE=""\n', encoding='utf-8', newline='\n')
+    result = _bash(f'set -Eeuo pipefail; source "{SITE}"; site_ethercat_configure', env)
+    assert result.returncode == 0, result.stderr
+    assert '안 씀 유지' in result.stdout and not service_conf.exists()
+
+
+def test_check_script_reads_the_conf_the_service_reads():
+    check = (SCRIPTS / 'check.sh').read_text(encoding='utf-8')
+    assert 'site_ethercat_target_conf' in check
+    assert "grep -qs '^MASTER0_DEVICE=\"[^\"]\\+\"' /etc/ethercat.conf" not in check
+
+
 def test_device_modules_are_read_without_running_the_conf(tmp_path):
     conf = tmp_path / 'ethercat.conf'
     cases = {

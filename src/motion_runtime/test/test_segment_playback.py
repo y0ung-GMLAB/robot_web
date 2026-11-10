@@ -72,7 +72,7 @@ def _manager(mapping, records_by_file):
     manager._mapping_file_path = lambda _file_id: None
     manager._load_mapping = lambda _path: mapping
     manager._motion_file_path = lambda file_id: file_id
-    manager._load_motion_records = lambda path: [dict(r) for r in records_by_file[path]]
+    manager._load_motion_records = lambda path, **_kw: [dict(r) for r in records_by_file[path]]
     refs = [row['motor_ref'] for row in mapping['mappings']]
     manager._current_motors = lambda: [
         {'axis': index, 'controller_index': index, 'motor_ref': ref} for index, ref in enumerate(refs)

@@ -5,7 +5,7 @@
 import { h, dot } from '../dom.js';
 import { rosterCandidates, storeRows, updateRows, versionSummary } from '../store_model.js';
 import { api } from '../net.js';
-import { RUN_MODE_EFFECT } from '../model.js';
+import { memoryCell, RUN_MODE_EFFECT } from '../model.js';
 import { tip } from '../tip.js';
 import { confirmBox, toast } from '../dialog.js';
 import * as act from '../actions.js';
@@ -58,6 +58,14 @@ async function setModes(pcIds, mode, state, changed) {
   }, state, changed);
 }
 
+/** PC 마다 메모리 · 그 PC 웹이 스케줄 상태에 실어 보낸다 · 수정 목록 170 */
+function memoryTd(memory) {
+  const cell = memoryCell(memory);
+  return h('td', {}, cell.tone === 'muted'
+    ? h('span', { class: 'muted small', text: cell.text })
+    : h('span', { class: `chip chip-${cell.tone}`, text: cell.text }));
+}
+
 function modeCard(state, changed) {
   const page = state.storePage || {};
   const pcs = page.modes || [];
@@ -68,14 +76,15 @@ function modeCard(state, changed) {
       h('button', { class: 'btn btn-mini', type: 'button', disabled: ui.busy, onclick: () => loadModes(state, changed) }, '다시 읽기')),
     page.modesError ? h('p', { class: 'tone-text-bad', text: page.modesError }) : null,
     !page.modes ? h('p', { class: 'muted', text: '불러오는 중…' }) : h('div', { class: 'table-wrap' }, h('table', { class: 'table' },
-      h('thead', {}, h('tr', {}, ['PC', '지금', '전환'].map((text) => h('th', { scope: 'col', text })))),
+      h('thead', {}, h('tr', {}, ['PC', '지금', '전환', '메모리'].map((text) => h('th', { scope: 'col', text })))),
       h('tbody', {}, pcs.map((pc) => h('tr', {},
         h('td', {}, h('strong', { text: pc.display_name || pc.pc_id }), pc.is_local ? h('span', { class: 'muted small', text: ' · 현재 접속' }) : null),
         h('td', {}, pc.error ? h('span', { class: 'muted small', text: pc.error })
           : h('span', { class: `chip chip-${pc.run_mode === 'schedule' ? 'ok' : pc.run_mode === 'off' ? 'warn' : 'info'}`, text: MODE_NAMES[pc.run_mode] || pc.run_mode || '-' })),
         h('td', {}, h('div', { class: 'segmented', role: 'group', 'aria-label': `${pc.pc_id} 운전 모드` },
           ['schedule', 'manual', 'off'].map((mode) => h('button', { class: 'seg', 'aria-pressed': String(pc.run_mode === mode), type: 'button',
-            disabled: ui.busy || Boolean(pc.error) || pc.run_mode === mode, onclick: () => setModes([pc.pc_id], mode, state, changed) }, MODE_NAMES[mode]))))))))),
+            disabled: ui.busy || Boolean(pc.error) || pc.run_mode === mode, onclick: () => setModes([pc.pc_id], mode, state, changed) }, MODE_NAMES[mode])))),
+        memoryTd(pc.memory)))))),
     reachable.length > 1 ? h('div', { class: 'row' },
       h('span', { class: 'muted small', text: `연결된 ${reachable.length}대 일괄` }),
       ['schedule', 'manual'].map((mode) => h('button', { class: 'btn btn-mini', type: 'button', disabled: ui.busy,

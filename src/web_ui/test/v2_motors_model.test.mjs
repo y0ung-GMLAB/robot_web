@@ -220,7 +220,7 @@ test('직렬 서보 속도·가속 0 = 서보 최대 · 칸 아래 안내 · 더
     assert.equal(fieldNote(field(key), null, false), '', key);
     assert.equal(fieldNote(field(key), 0, true), '', `${key} · AC`);
     assert.match(fieldPlaceholder(field(key), false), /0 = 서보 최대/);
-    assert.equal(fieldPlaceholder(field(key), true), '비워 두면 드라이브 값 유지');
+    assert.equal(fieldPlaceholder(field(key), true), '드라이브 값 유지');
   }
   assert.equal(fieldPlaceholder(field('brake_delay_stop_ms'), true), '공통 설정 (기본값 150)');
   assert.equal(fieldPlaceholder(field('name'), false), '');

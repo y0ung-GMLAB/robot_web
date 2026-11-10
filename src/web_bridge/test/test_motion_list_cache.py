@@ -12,10 +12,11 @@ def test_unchanged_files_are_not_parsed_again(tmp_path, monkeypatch):
     path = tmp_path / 'a.json'
     path.write_text(CONTENT, encoding='utf-8')
     calls = []
-    real = motion_file_analysis.analyze_motion_json
+    # 파일 → 분석 한 번 · JSON Lines 는 한 줄씩 읽는 길(수정 목록 170)이라 그 문을 센다
+    real = motion_file_analysis.analyze_motion_path
     monkeypatch.setattr(
-        motion_file_analysis, 'analyze_motion_json',
-        lambda content, *, include_records: calls.append(include_records) or real(content, include_records=include_records),
+        motion_file_analysis, 'analyze_motion_path',
+        lambda path, *, include_records: calls.append(include_records) or real(path, include_records=include_records),
     )
 
     first = motion_file_analysis.motion_file_entry(path, include_detail=False)
@@ -38,10 +39,11 @@ def test_a_changed_file_is_read_again(tmp_path, monkeypatch):
     path = tmp_path / 'a.json'
     path.write_text(CONTENT, encoding='utf-8')
     calls = []
-    real = motion_file_analysis.analyze_motion_json
+    # 파일 → 분석 한 번 · JSON Lines 는 한 줄씩 읽는 길(수정 목록 170)이라 그 문을 센다
+    real = motion_file_analysis.analyze_motion_path
     monkeypatch.setattr(
-        motion_file_analysis, 'analyze_motion_json',
-        lambda content, *, include_records: calls.append(include_records) or real(content, include_records=include_records),
+        motion_file_analysis, 'analyze_motion_path',
+        lambda path, *, include_records: calls.append(include_records) or real(path, include_records=include_records),
     )
 
     motion_file_analysis.motion_file_entry(path, include_detail=False)

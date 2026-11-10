@@ -12,7 +12,7 @@ from __future__ import annotations
 import ast
 import json
 import math
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, Iterator, List, Optional, Tuple
 
 from . import values
 
@@ -311,6 +311,44 @@ def expand_pair_rows(rows: List[Any], headers: Any = None) -> List[Any]:
     return expanded if changed else rows
 
 
+def pair_rows_expandable(headers: Any = None) -> bool:
+    """`expand_pair_rows` 가 짝 줄을 펼치는 헤더인가 · 헤더 없음 또는 frame, time, id, value 순서"""
+    mapping = header_map(headers)
+    return not mapping or (
+        mapping.get('frame') == 0
+        and mapping.get('time') == 1
+        and mapping.get('motion_id') == 2
+        and mapping.get('value') == 3
+    )
+
+
+def keep_pairs(row: Any, keep: Any, memo: Optional[Dict[Any, bool]] = None) -> Tuple[Any, int]:
+    """펼치기 전 짝 줄에서 `keep` 에 없는 조인트 쌍을 뺀다 · (줄, 뺀 쌍 수) · 수정 목록 164
+
+    한 파일에 여러 로봇의 조인트가 들어 있어도(4대 × 5 = 20) 이 PC 는 제 매핑의 조인트만 쓴다(N16) ·
+    펼치고 레코드를 만든 뒤 버리던 것을 펼치기 전에 뺀다 · 남는 레코드는 그대로 같다.
+    짝 줄(`[frame, time, id1, v1, ...]` · 4칸 초과 · 짝 맞음)이 아니면 손대지 않는다(뒤에서 거른다).
+    `memo` · 글자 조인트 이름 → 남길지 · 줄마다 같은 이름이 되풀이되므로.
+    """
+    if not isinstance(row, list) or len(row) <= 4 or (len(row) - 2) % 2 != 0:
+        return row, 0
+    kept = row[:2]
+    dropped = 0
+    for index in range(2, len(row), 2):
+        raw = row[index]
+        keep_it = memo.get(raw) if memo is not None and isinstance(raw, str) else None
+        if keep_it is None:
+            keep_it = motion_id_text(raw) in keep
+            if memo is not None and isinstance(raw, str):
+                memo[raw] = keep_it
+        if keep_it:
+            kept.append(raw)
+            kept.append(row[index + 1])
+        else:
+            dropped += 1
+    return kept, dropped
+
+
 # --------------------------------------------------------------------------- #
 # 행 추출
 # --------------------------------------------------------------------------- #
@@ -481,17 +519,127 @@ def validate_motion_content(content: str) -> int:
     if not text.strip():
         raise ValueError('빈 파일입니다')
     normalize_rotation_unit(rotation_unit_from_content(text))
-    rows, headers, _source, warning = extract_rows_from_content(text)
-    if not rows:
-        raise ValueError(f'애니메이션 행을 찾지 못했습니다{f" · {warning}" if warning else ""}')
+    try:
+        json.loads(text)
+    except (json.JSONDecodeError, ValueError):
+        # 헤더+행 글(JSON Lines 등) · 행을 목록으로 모으지 않고 한 줄씩 · 920 s × 20 조인트면
+        # 펼친 행 92만 개를 들 뻔했다 · 행 · 경고는 `extract_rows_from_text` 와 같다 · 수정 목록 170
+        headers, rows, warning = _lazy_text_rows(text)
+    else:
+        rows, headers, _source, warning = extract_rows_from_content(text)
     first_error = ''
     count = 0
+    seen = False
     for row in rows:
+        seen = True
         record, error = parse_row(row, headers)
         if record is None:
             first_error = first_error or error
             continue
         count += 1
+    if not seen:
+        raise ValueError(f'애니메이션 행을 찾지 못했습니다{f" · {warning}" if warning else ""}')
     if count == 0:
         raise ValueError(f'재생할 수 있는 행이 없습니다 · {first_error or "형식 확인"}')
     return count
+
+
+def _lazy_text_rows(content: str) -> Tuple[List[str], Iterator[Any], str]:
+    """`extract_rows_from_text` 의 행을 하나씩 · (헤더, 행 반복자, 행이 없을 때 경고)"""
+    lines = [
+        line.strip()
+        for line in content.splitlines()
+        if line.strip() and not line.strip().startswith('#')
+    ]
+    if not lines:
+        return [], iter(()), 'text format requires at least one data row'
+    candidate = parse_header_line(lines[0])
+    if header_has_required(candidate):
+        headers, data_lines = candidate, lines[1:]
+    else:
+        headers, data_lines = [], lines
+
+    def rows() -> Iterator[Any]:
+        for line in data_lines:
+            row = parse_text_row(line)
+            if row is not None:
+                yield from expand_pair_rows([row], headers)
+
+    return headers, rows(), 'bracket data rows not found'
+
+
+
+# --------------------------------------------------------------------------- #
+# JSON Lines 파일을 한 줄씩 · 수정 목록 170 (2026-11-03)
+# --------------------------------------------------------------------------- #
+#
+# 920 s × 20 조인트 파일(25 MB)을 글 통째로 읽고 행 92만 개를 목록으로 들면 웹 브리지가 한 번에
+# 600 MB 를 썼다(파이썬 사전·목록) · 메모리 4.7 GB PC 에서 스왑으로 넘어갔다. 머리 줄이 있는
+# JSON Lines(Blender 내보내기 · 웹 녹화)는 아래 둘로 한 줄씩 읽는다 · 같은 행이 나온다
+# (`extract_rows_from_text` 와 같은 거르기 · 펼치기). 다른 모양은 부르는 쪽이 옛 길로 간다.
+#
+# 읽기 버퍼는 1 MB · 기본(8 KB)이면 0.4 ms 마다 읽기 시스템 호출로 GIL 을 놓았다 다시 잡는다 ·
+# 파이썬 3.10 GIL 은 기다리는 스레드가 5 ms 동안 「바뀜」 을 못 봐야 양보를 요청하므로 그동안 이벤트
+# 루프 · 실행기 스레드가 **1 초 넘게** 굶었다(WSL 측정 · 920 s 파일 · 옛 런타임 줄 읽기도 같았다).
+READ_BUFFER_BYTES = 1 << 20
+
+
+def open_text(path: Any, **kwargs: Any):
+    """큰 덩어리로 읽는 UTF-8 글 · 줄 단위로 오래 읽는 곳은 이것으로
+
+    `buffering` 만 키우면 소용이 없다 · 글 래퍼가 `read1(8192)` 로 묻고 버퍼가 비면 그만큼만 읽는다 ·
+    래퍼의 덩어리 크기(`_CHUNK_SIZE` · 공개 속성)를 같이 키운다.
+    """
+    handle = open(path, 'r', encoding='utf-8', buffering=READ_BUFFER_BYTES, **kwargs)
+    try:
+        handle._CHUNK_SIZE = READ_BUFFER_BYTES
+    except (AttributeError, ValueError):
+        pass
+    return handle
+
+
+def jsonl_motion_header(path: Any) -> Optional[Tuple[Dict[str, Any], List[str]]]:
+    """첫 줄(빈 줄 · # 줄 빼고)이 `{"type": "motion_header", fields…}` 이면 (머리 객체, 칸 이름) · 아니면 None
+
+    BOM 이 붙은 파일 · 필수 칸이 없는 머리는 None(옛 길) · 파일을 못 읽으면 OSError.
+    """
+    with open_text(path) as handle:
+        for raw_line in handle:
+            text = raw_line.strip()
+            if not text or text.startswith('#'):
+                continue
+            if text.startswith('\ufeff'):
+                return None
+            try:
+                first = json.loads(text)
+            except (json.JSONDecodeError, ValueError):
+                return None
+            if not isinstance(first, dict) or str(first.get('type') or '') != 'motion_header':
+                return None
+            headers = parse_header_line(text)
+            if not header_has_required(headers):
+                return None
+            return first, headers
+    return None
+
+
+def iter_jsonl_rows(path: Any, headers: Any) -> Iterator[Tuple[Optional[List[Any]], int]]:
+    """머리 줄 뒤 데이터 줄을 한 줄씩 · (펼친 행, 0) 또는 못 읽은 줄이면 (None, 1)
+
+    행은 `extract_rows_from_text` 가 내는 것과 같다(`parse_text_row` · `expand_pair_rows(…, headers)`).
+    """
+    with open_text(path) as handle:
+        header_seen = False
+        for raw_line in handle:
+            text = raw_line.strip()
+            if not text or text.startswith('#'):
+                continue
+            if not header_seen:
+                header_seen = True
+                continue
+            row = parse_text_row(text)
+            if row is None:
+                yield None, 1
+                continue
+            for expanded in expand_pair_rows([row], headers):
+                yield expanded, 0

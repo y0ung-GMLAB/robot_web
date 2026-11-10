@@ -14,6 +14,7 @@ from __future__ import annotations
 import math
 from typing import Any, Dict, List, Optional
 
+from motion_common import minas_alarms
 from motion_common.values import optional_int as parse_int
 
 MOTOR_TYPE_LABELS = {
@@ -48,6 +49,8 @@ __all__ = [
     'serial_config_pending_text',
     'SERIAL_CONFIG_PENDING_ERROR',
     'error_text',
+    'minas_error_text',
+    'minas_error_kind',
     'normalized_errorcode',
     'hex16',
     'motor_type_label',
@@ -107,6 +110,20 @@ def error_text(errorcode: int, alarm_text: str) -> str:
     if errorcode == 0:
         return 'No error'
     return f'Error {float(errorcode):.1f}'
+
+def minas_error_text(errorcode: int) -> str:
+    """MINAS 정규화 코드(`normalized_errorcode`) → 글 · 수정 목록 166
+
+    경고 A0(0xFFA0) 「Error 160.0」 → 「경고 A0 · 과부하 경고」 · Err16(0xFF10) 「Error 16.0」 →
+    「Err16 · 과부하·토크 포화」 · 0 은 그대로 'No error'(화면이 이 글로 비교) · 범위 밖은 옛 글
+    """
+    if errorcode == 0:
+        return 'No error'
+    return minas_alarms.code_text(errorcode) or error_text(errorcode, '')
+
+def minas_error_kind(errorcode: int) -> str:
+    """'alarm' · 'warning' · '' · 경고는 드라이브가 계속 돈다 · 화면 색을 나눈다 · 166"""
+    return minas_alarms.code_kind(errorcode)
 
 #: Dynamixel X 시리즈 Hardware Error Status(addr 70) 비트 · 2026-10-04
 #: bit1 · bit6 · bit7 은 정의 없음 → `Unknown bit`

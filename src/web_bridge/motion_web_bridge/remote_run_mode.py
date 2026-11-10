@@ -32,7 +32,20 @@ def robots(network_pcs: Any) -> List[Mapping[str, Any]]:
     return [pc for pc in (network_pcs or []) if isinstance(pc, Mapping) and str(pc.get('role') or 'robot') != 'speaker']
 
 
-def run_modes(network_pcs: Any, local_mode: Callable[[], str], http: Callable[..., Dict[str, Any]] = _http) -> Dict[str, Any]:
+def _memory_view(memory: Any) -> Dict[str, Any]:
+    """화면에 쓰는 칸만 · 수정 목록 170"""
+    if not isinstance(memory, dict) or not memory.get('available'):
+        return {}
+    return {
+        key: memory.get(key)
+        for key in ('low', 'reasons', 'available_mb', 'total_mb', 'swap_used_mb', 'swap_total_mb')
+    }
+
+
+def run_modes(
+    network_pcs: Any, local_mode: Callable[[], str], http: Callable[..., Dict[str, Any]] = _http,
+    local_memory: Optional[Callable[[], Dict[str, Any]]] = None,
+) -> Dict[str, Any]:
     """PC 마다 지금 운전 모드 · 못 읽은 PC 는 이유"""
     rows = []
     for pc in robots(network_pcs):
@@ -40,11 +53,17 @@ def run_modes(network_pcs: Any, local_mode: Callable[[], str], http: Callable[..
                'is_local': bool(pc.get('is_local')), 'online': pc.get('online', True) is not False, 'run_mode': '', 'error': ''}
         if row['is_local']:
             row['run_mode'] = local_mode()
+            if local_memory is not None:
+                row['memory'] = _memory_view(local_memory())
         elif not row['online'] or not pc.get('web_url'):
             row['error'] = '연결 안 됨'
         else:
             try:
-                row['run_mode'] = str(http(f"{pc['web_url']}/api/schedule/status", timeout=STATUS_TIMEOUT_SEC).get('run_mode') or '')
+                answer = http(f"{pc['web_url']}/api/schedule/status", timeout=STATUS_TIMEOUT_SEC)
+                row['run_mode'] = str(answer.get('run_mode') or '')
+                # 그 PC 메모리 · 같은 답에 실려 온다 · 옛 버전 PC 는 없다(칸 없음) · 수정 목록 170
+                if isinstance(answer.get('memory'), dict):
+                    row['memory'] = _memory_view(answer['memory'])
             except (OSError, urllib.error.URLError, ValueError) as exc:
                 row['error'] = f'읽지 못함 · {exc}'
         rows.append(row)

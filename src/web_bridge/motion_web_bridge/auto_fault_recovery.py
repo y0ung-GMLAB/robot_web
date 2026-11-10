@@ -19,18 +19,7 @@ import time
 from collections import deque
 from typing import Any, Callable, Deque, Dict, Iterable, List, Mapping, Optional
 
-from .servo_alarm_policy import SERVO_ALARM_CATALOG
-
-#: jazzy 에는 `motion_common.minas_alarms`(166)가 없다 · 알람 번호 범위만 같게 본다(1~99 · 경고는 그 밖)
-KIND_ALARM = 'alarm'
-
-
-def code_kind(code: Any) -> str:
-    try:
-        value = int(code)
-    except (TypeError, ValueError):
-        return ''
-    return KIND_ALARM if 1 <= value <= 99 else ''
+from motion_common.minas_alarms import KIND_ALARM, SERVO_ALARM_CATALOG, code_kind
 
 #: 자동으로 초기화하는 알람 · 카탈로그의 EtherCAT 표시 · 기구 · 부하성은 넣지 않는다
 AUTO_RESET_CODES = frozenset(

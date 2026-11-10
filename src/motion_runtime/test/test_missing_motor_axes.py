@@ -83,7 +83,7 @@ def _manager(mapping, present_motors):
         '_motors_for_ref',
         lambda ref, motors: [m for m in motors if m.get('motor_ref') == ref],
     )
-    manager._load_motion_records = lambda _path: [
+    manager._load_motion_records = lambda _path, **_kw: [
         {'motion_id': motion_id, 'time_sec': time_sec, 'value': 0.0}
         for time_sec in (0.02, 0.04)
         for motion_id in ('1-1', '1-2', '1-3')
@@ -194,7 +194,7 @@ def test_a_loop_value_gap_does_not_block_continuous_play():
     manager = _manager(ALL_THREE, [
         'ac_servo:master:0:alias:103', 'dynamixel:id:3', 'dynamixel:id:5',
     ])
-    manager._load_motion_records = lambda _path: [
+    manager._load_motion_records = lambda _path, **_kw: [
         {'motion_id': motion_id, 'time_sec': time_sec, 'value': value}
         for time_sec, value in ((0.02, 0.0), (0.04, 30.0))
         for motion_id in ('1-1', '1-2', '1-3')

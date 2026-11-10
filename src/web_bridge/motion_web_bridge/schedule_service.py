@@ -32,6 +32,7 @@ from motion_common.coordination import resolve_master_role
 from motion_common.paths import motion_projects_dir
 from motion_common.schedule_models import ScheduleItem
 from motion_common.schedule_store import ScheduleStore, normalize_run_mode
+from motion_web_bridge import memory_status
 
 logger = logging.getLogger('bridge.schedule')
 
@@ -135,6 +136,8 @@ class ScheduleService:
             'start_blocker_kind': self._start_blocker_kind(),
             # 구간 끝 주차 실패 · 그 자리에서 서보 끔 · 이 PC 것 · 풀릴 때까지 · 수정 목록 131
             'schedule_end_notice': self._schedule_end_notice(),
+            # 이 PC 메모리 · 스왑 · 「메모리 부족」 알림 · 「PC 현황」 이 다른 PC 것도 이 주소로 받는다 · 수정 목록 170
+            'memory': memory_status.snapshot(),
         }
 
     def _schedule_end_notice(self) -> Dict[str, Any]:

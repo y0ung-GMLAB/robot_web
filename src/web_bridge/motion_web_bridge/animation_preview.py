@@ -48,7 +48,7 @@ import time
 import subprocess
 import threading
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional, Tuple
 
 import yaml
 
@@ -70,6 +70,25 @@ _LAST_RC: Dict[str, int] = {}
 #: 도는 계산이 시작될 때의 팩 · 성공으로 끝나야 meta 로 남긴다
 _PENDING_META: Dict[str, Dict[str, Any]] = {}
 _LOCK = threading.Lock()
+#: 재생 중이라 미룬 계산 · {결과 경로: (워크스페이스, 애니 경로)} · 재생이 끝나면 하나씩 · 수정 목록 170
+_DEFERRED: Dict[str, Tuple[Path, Path]] = {}
+
+#: 계산 작업은 재생 · 웹보다 뒤로 · 수정 목록 170 (NY 2026-11-03 · 920 s 애니 MuJoCo 를 켠 직후 마스터 웹이
+#: 0.3 s 넘게 답을 못 해 그룹이 섰다) · systemd 249(우분투 22.04)에 있는 속성만 · 사용자 서비스에 cgroup
+#: 컨트롤러가 위임되지 않았으면(cpu) 그 줄만 효과가 없고 실행은 된다.
+#:   Nice=19 · IOSchedulingClass=idle   CPU · 디스크 차례를 맨 뒤로
+#:   CPUWeight=1                         cgroup CPU 몫 최소('idle' 값은 systemd 250 부터라 1)
+#:   MemoryHigh=640M                     넘으면 이 작업만 회수 압박(느려짐)
+#:   MemoryMax=1G · MemorySwapMax=0      넘으면 이 작업만 OOM 으로 끝남 · 스왑으로 다른 프로그램을 밀어내지 않는다
+#: 920 s 애니 계산 추정 · 모션 읽기 최대 약 150 MB + 기록(100 Hz qpos · 20 ms 행) 약 70 MB + MuJoCo
+JOB_PROPERTIES = (
+    'Nice=19',
+    'IOSchedulingClass=idle',
+    'CPUWeight=1',
+    'MemoryHigh=640M',
+    'MemoryMax=1G',
+    'MemorySwapMax=0',
+)
 #: 계산 출력 기록 폴더 (워크스페이스 기준 · `log/` 는 커밋하지 않는다)
 LOG_DIR_NAME = 'animation_preview'
 
@@ -292,6 +311,7 @@ def spawn_detached(args: List[str], *, cwd: str, log_path: Path, result: Path,
     )
     command = [
         'systemd-run', '--user', '--unit', unit, '--collect', '--quiet',
+        *(item for prop in JOB_PROPERTIES for item in ('-p', prop)),
         f'--working-directory={cwd}', '/bin/bash', '-c', inner,
     ]
     completed = run(command, capture_output=True, text=True, timeout=15)
@@ -463,6 +483,40 @@ def annotate_files(workspace_root: Path, files_dir: Path, payload: Dict[str, Any
     return payload
 
 
+def _lower_priority() -> None:
+    """자식으로 띄울 때(systemd 없음) · CPU 차례를 맨 뒤로 · 실패해도 그대로 돈다"""
+    try:
+        os.nice(19)
+    except OSError:
+        pass
+    try:
+        os.sched_setscheduler(0, os.SCHED_IDLE, os.sched_param(0))
+    except (AttributeError, OSError):
+        pass
+
+
+def deferred_count() -> int:
+    with _LOCK:
+        return len(_DEFERRED)
+
+
+def start_deferred(busy: Callable[[], str], *, spawn=None, detach: Optional[bool] = None,
+                   run=subprocess.run) -> Optional[Dict[str, Any]]:
+    """미룬 계산 하나를 시작한다 · 재생 중이거나 다른 계산이 돌면 그대로 둔다 · 시작했으면 그 결과"""
+    _reap()
+    with _LOCK:
+        if not _DEFERRED or _RUNNING:
+            return None
+    if busy():
+        return None
+    with _LOCK:
+        if not _DEFERRED:
+            return None
+        key = next(iter(_DEFERRED))
+        workspace_root, motion_path = _DEFERRED.pop(key)
+    return launch_precompute(workspace_root, motion_path, spawn=spawn, detach=detach, run=run)
+
+
 def launch_precompute(
     workspace_root: Path,
     motion_path: Path,
@@ -470,16 +524,23 @@ def launch_precompute(
     spawn=None,
     detach: Optional[bool] = None,
     run=subprocess.run,
+    busy: str = '',
 ) -> Dict[str, Any]:
     """무거운 계산을 시작한다 · 이미 돌고 있으면 그대로 둔다.
 
     리눅스(systemd 사용자 세션)면 웹 서비스 밖 작업으로 띄운다(93-86) · `spawn` 을 주면(시험)
-    예전처럼 자식으로.
+    예전처럼 자식으로. 둘 다 낮은 우선순위(`JOB_PROPERTIES` · `_lower_priority`).
+
+    `busy` · 재생 중인 사유 · 있으면 시작하지 않고 미룬다 · 재생이 끝나면 `start_deferred` 가 시작한다
+    (수정 목록 170). 이미 도는 계산은 그대로 둔다(우선순위가 낮고 메모리 상한이 있다).
     """
     if detach is None:
         detach = spawn is None and detach_available()
+    spawn_kwargs: Dict[str, Any] = {}
     if spawn is None:
         spawn = subprocess.Popen
+        if os.name == 'posix':
+            spawn_kwargs['preexec_fn'] = _lower_priority
     config = preview_config(Path(workspace_root))
     if config is None:
         return {'success': False, 'message': NOT_CONFIGURED_MESSAGE}
@@ -495,6 +556,16 @@ def launch_precompute(
     with _LOCK:
         if key in _RUNNING:
             return {'success': True, 'message': f'이미 계산 중입니다: {motion_path.name}'}
+        if busy:
+            _DEFERRED[key] = (Path(workspace_root), motion_path)
+    if busy:
+        return {
+            'success': True,
+            'deferred': True,
+            'message': f'재생 중이라 MuJoCo 계산을 미뤘습니다 · 재생이 끝나면 시작합니다: {motion_path.name} ({busy})',
+        }
+    with _LOCK:
+        _DEFERRED.pop(key, None)
     args = _fill(config['precompute']['command'], motion_path, result=key, config=config)
     cwd = str(config.get('cwd') or workspace_root)
     stamp = _pack_stamp(Path(workspace_root))
@@ -510,7 +581,7 @@ def launch_precompute(
     else:
         log = _open_log(workspace_root, motion_path, 'precompute')
         try:
-            handle = spawn(args, cwd=cwd, stdout=log, stderr=log, shell=False)
+            handle = spawn(args, cwd=cwd, stdout=log, stderr=log, shell=False, **spawn_kwargs)
         except OSError as exc:
             _close_log(log)
             return {'success': False, 'message': f'계산 시작 실패: {exc}'}

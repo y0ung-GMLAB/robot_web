@@ -10,7 +10,7 @@ import asyncio
 
 from fastapi import FastAPI, HTTPException, Request
 
-from motion_web_bridge import remote_run_mode
+from motion_web_bridge import memory_status, remote_run_mode
 from motion_web_bridge.schedule_service import (
     ScheduleNotFound,
     ScheduleOwnershipError,
@@ -48,7 +48,9 @@ def register_schedule_routes(app: FastAPI, bridge, project_call) -> None:
 
     @app.get('/api/remote/run-modes')
     async def remote_run_modes():
-        return await asyncio.to_thread(lambda: remote_run_mode.run_modes(_network_pcs(), _local_mode))
+        return await asyncio.to_thread(lambda: remote_run_mode.run_modes(
+            _network_pcs(), _local_mode, local_memory=memory_status.snapshot,
+        ))
 
     @app.put('/api/remote/run-mode')
     async def set_remote_run_mode(request: Request):

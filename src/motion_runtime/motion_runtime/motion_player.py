@@ -16,7 +16,7 @@ import json
 import math
 import time
 import traceback
-from typing import Any, Dict, List, Mapping, Optional
+from typing import Any, Callable, Dict, List, Mapping, Optional
 
 from motion_common import axis_ownership
 
@@ -266,27 +266,10 @@ class MotionPlayer:
                 str(status['message']) if exhausted == 'exhausted' else str(exc)
             )
 
-    def _build_playlist_entries(
-        self,
-        payload: Dict[str, Any],
-        plan: Dict[str, Any],
-        initialization_plan: Dict[str, Any],
-        motors_snapshot: List[Dict[str, Any]],
-        *,
-        require_continuous: bool = True,
-    ) -> List[tuple]:
-        """재생 목록 · 수정 목록 35 · 항목마다 (재생 계획, 초기 위치 계획)
-
-        연속 재생이고 매핑 파일에 두 개 이상 등록됐을 때만 · 아니면 빈 목록
-        (옛 길 그대로). 시작 때 **모두** 만든다 · 셋째 파일이 깨져 있으면 한참
-        돌다 멈추는 대신 시작부터 거절하고 그 파일 이름을 알린다.
-
-        항목 순서는 목록 그대로 · 같은 파일이 두 번 있어도 된다 (계산은 한 번).
-        재시작은 늘 1번부터 · 등록이 첫 항목을 `motion_file_id` 로 두므로
-        요청 파일이 곧 1번이다.
-
-        구간 재생이면 목록을 쓰지 않는다 · 1번의 그 구간만 (연속이면 그 구간을 되풀이) · 2026-10-16
-        """
+    def _playlist_names(
+        self, plan: Dict[str, Any], *, require_continuous: bool = True,
+    ) -> List[str]:
+        """재생 목록을 쓰는가 · 쓰면 파일 이름들 · 아니면 빈 목록 · 아래 `_build_playlist_entries` 의 조건"""
         names = [str(name) for name in (plan.get('motion_playlist') or [])]
         if (
             len(names) <= 1
@@ -302,9 +285,48 @@ class MotionPlayer:
             or str(plan.get('motion_file_id') or '') != names[0]
         ):
             return []
+        return names
+
+    @staticmethod
+    def _playlist_marks(index: int, names: List[str]) -> Dict[str, Any]:
+        """목록 항목 표시 · 몇 번째 · 몇 개 중 · 목록"""
+        return {
+            'playlist_index': index,
+            'playlist_length': len(names),
+            'motion_playlist': list(names),
+        }
+
+    def _build_playlist_entries(
+        self,
+        payload: Dict[str, Any],
+        plan: Dict[str, Any],
+        initialization_plan: Dict[str, Any],
+        motors_snapshot: List[Dict[str, Any]],
+        *,
+        require_continuous: bool = True,
+        should_stop: Optional[Callable[[], bool]] = None,
+    ) -> List[tuple]:
+        """재생 목록 · 수정 목록 35 · 항목마다 (재생 계획, 초기 위치 계획)
+
+        연속 재생이고 매핑 파일에 두 개 이상 등록됐을 때만 · 아니면 빈 목록
+        (옛 길 그대로). 시작 때 **모두** 만든다 · 셋째 파일이 깨져 있으면 한참
+        돌다 멈추는 대신 시작부터 거절하고 그 파일 이름을 알린다.
+
+        항목 순서는 목록 그대로 · 같은 파일이 두 번 있어도 된다 (계산은 한 번).
+        재시작은 늘 1번부터 · 등록이 첫 항목을 `motion_file_id` 로 두므로
+        요청 파일이 곧 1번이다.
+
+        구간 재생이면 목록을 쓰지 않는다 · 1번의 그 구간만 (연속이면 그 구간을 되풀이) · 2026-10-16
+        """
+        names = self._playlist_names(plan, require_continuous=require_continuous)
+        if not names:
+            return []
         built: Dict[str, tuple] = {names[0]: (plan, initialization_plan)}
         entries: List[tuple] = []
         for index, name in enumerate(names):
+            # 뒤에서 짓는 그룹 재생 목록 · 정지가 오면 남은 파일은 안 짓는다 · 수정 목록 164
+            if should_stop is not None and should_stop():
+                raise InterruptedError()
             if name not in built:
                 item_payload = {**payload, 'motion_file_id': name}
                 try:
@@ -323,11 +345,7 @@ class MotionPlayer:
                         f'재생 목록 {index + 1}번 {name}: {exc}'
                     ) from exc
             item_plan, item_init = built[name]
-            marks = {
-                'playlist_index': index,
-                'playlist_length': len(names),
-                'motion_playlist': list(names),
-            }
+            marks = self._playlist_marks(index, names)
             # 얕은 사본 · 샘플은 같이 쓰고 목록 위치만 따로 · 같은 파일 두 번이어도 번호가 맞게
             entries.append(({**item_plan, **marks}, {**item_init, **marks}))
         return entries

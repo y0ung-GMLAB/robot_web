@@ -14,9 +14,12 @@ import csv
 import json
 import re
 import shutil
+import threading
+from collections import OrderedDict
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
+from motion_common.motion_table import open_text
 from motion_common.paths import NO_PROJECT_SELECTED
 
 TRACE_DIRNAME = 'motion_trace'
@@ -25,6 +28,10 @@ _DATE = re.compile(r'^\d{4}-\d{2}-\d{2}$')
 _FILE = re.compile(r'^[0-9A-Za-z가-힣._-]+\.csv$')
 #: 그래프에 보낼 최대 점 수 · 넘으면 고르게 솎는다 (CSV 내려받기는 원본 그대로)
 MAX_CHART_POINTS = 3000
+#: 그래프 결과 캐시 · 파일(경로 · 수정 시각 · 크기)마다 · 하나 약 0.5 MB · 수정 목록 170
+TRACE_CACHE_SIZE = 6
+_TRACE_CACHE: 'OrderedDict[tuple, Dict[str, Any]]' = OrderedDict()
+_TRACE_CACHE_LOCK = threading.Lock()
 
 
 class MotionTraceService:
@@ -115,14 +122,46 @@ class MotionTraceService:
         return {'success': True, 'project_id': project_id, 'date': day.name, 'runs': records}
 
     def trace(self, date: Any, file_name: Any) -> Dict[str, Any]:
-        """그래프용 · 축마다 target/actual 열 · 많으면 솎아 낸다."""
+        """그래프용 · 축마다 target/actual 열 · 많으면 솎아 낸다.
+
+        수정 목록 170 · 920 s 회차 CSV(46000 줄 × 16 칸)를 통째로 목록에 담으면 약 50 MB · 0.3 s ·
+        「기록」 탭 여러 개가 회차 끝마다 같은 파일을 불렀다 · 두 번 훑어(줄 수 → 고른 줄만) 담고 ·
+        결과는 파일(크기 · 수정 시각)마다 캐시한다.
+        """
         path = self.file_path(date, file_name)
-        with path.open(encoding='utf-8', newline='') as handle:
-            rows = list(csv.reader(handle))
-        if not rows:
+        stat = path.stat()
+        key = (str(path), stat.st_mtime_ns, stat.st_size)
+        with _TRACE_CACHE_LOCK:
+            cached = _TRACE_CACHE.get(key)
+            if cached is not None:
+                _TRACE_CACHE.move_to_end(key)
+        if cached is None:
+            cached = self._read_trace(path)
+            with _TRACE_CACHE_LOCK:
+                _TRACE_CACHE[key] = cached
+                while len(_TRACE_CACHE) > TRACE_CACHE_SIZE:
+                    _TRACE_CACHE.popitem(last=False)
+        record = next(
+            (r for r in self._records(path.parent) if r.get('file') == path.name),
+            None,
+        )
+        return {
+            'success': True,
+            'date': path.parent.name,
+            'file': path.name,
+            **cached,
+            'record': record,
+        }
+
+    @staticmethod
+    def _read_trace(path: Path) -> Dict[str, Any]:
+        with open_text(path, newline='') as handle:
+            reader = csv.reader(handle)
+            header = next(reader, None)
+            count = sum(1 for _ in reader)
+        if header is None:
             raise ValueError('빈 기록 파일입니다')
-        header, data = rows[0], rows[1:]
-        step = max(1, -(-len(data) // MAX_CHART_POINTS))
+        step = max(1, -(-count // MAX_CHART_POINTS))
 
         def number(text: str) -> Optional[float]:
             try:
@@ -130,9 +169,16 @@ class MotionTraceService:
             except ValueError:
                 return None
 
-        picked = data[::step]
-        if data and picked[-1] is not data[-1]:
-            picked.append(data[-1])
+        # data[::step] + 마지막 줄(솎아서 빠졌으면) · 옛 길과 같은 줄
+        picked: List[List[str]] = []
+        with open_text(path, newline='') as handle:
+            reader = csv.reader(handle)
+            next(reader, None)
+            for index, row in enumerate(reader):
+                if index >= count:
+                    break
+                if index % step == 0 or index == count - 1:
+                    picked.append(row)
         columns = {name: [number(row[i]) if i < len(row) else None for row in picked] for i, name in enumerate(header)}
         axes = []
         for name in header:
@@ -144,19 +190,11 @@ class MotionTraceService:
                     'actual': columns.get(f'{motion_id}_actual_deg', []),
                     'error': columns.get(f'{motion_id}_error_deg', []),
                 })
-        record = next(
-            (r for r in self._records(path.parent) if r.get('file') == path.name),
-            None,
-        )
         return {
-            'success': True,
-            'date': path.parent.name,
-            'file': path.name,
-            'sample_count': len(data),
+            'sample_count': count,
             'decimation': step,
             'time': columns.get('time_sec', []),
             'axes': axes,
-            'record': record,
         }
 
     def delete_day(self, date: Any) -> Dict[str, Any]:

@@ -33,7 +33,7 @@ export function fieldNote(field, value, ac) {
 export function fieldPlaceholder(field, ac) {
   if (field?.top) return '';
   if (!ac && field?.serialMax) return `0 = ${SERIAL_MAX_TEXT} · 비워 두면 저장된 값 유지`;
-  return field?.blank || '비워 두면 드라이브 값 유지';
+  return field?.blank || '드라이브 값 유지';
 }
 
 export function getField(motor, key) {

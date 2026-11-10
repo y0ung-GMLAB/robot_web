@@ -667,6 +667,8 @@ class MotionWebBridge(Node):
             log_error=self.get_logger().error,
         )
         self._auto_backup_timer = self.create_timer(60.0, self.auto_backup.tick)
+        # 재생 중이라 미룬 MuJoCo 계산 · 5 초마다 · 수정 목록 170
+        self._precompute_deferred_timer = self.create_timer(5.0, self._precompute_deferred_tick)
         # 통신성 드라이브 알람 자동 초기화 · 스케줄 모드 · 축마다 1시간 3번 · 수정 목록 178
         self._auto_fault_recovery = AutoFaultRecovery()
         self._auto_fault_timer = self.create_timer(1.0, self._auto_fault_tick)
@@ -750,9 +752,40 @@ class MotionWebBridge(Node):
         with self._lock:
             self._motion_state = payload
             self._motion_state_received_at = time.time()
-        self._motor_event_log.record_motor_error_transitions(payload)
+        self._motor_event_log.record_motor_error_transitions(
+            payload, lambda: self._joint_names_for_motor_events(payload),
+        )
         self._motor_event_log.record_minas_absolute_transition(payload)
         self._motor_event_log.record_mailbox_stuck_transition(payload)   # 멈춘 메일박스 · 139 ③
+
+    def _joint_names_for_motor_events(self, payload: Dict[str, Any]) -> Dict[int, str]:
+        """운영 로그 「0번 모터 · 조인트 이름」 · 적용된 조인트 매핑에서 축 → 조인트 이름 · 수정 목록 167
+
+        운영 로그가 새로 적을 오류가 있을 때만 부른다(`record_motor_error_transitions`) ·
+        매핑은 실행 컨텍스트마다 한 번 읽어 둔 것(`_monitoring_mapping_rows_for_context`) · 못 찾으면 빈 표
+        """
+        motors = payload.get('motors') if isinstance(payload, dict) else None
+        if not isinstance(motors, list):
+            return {}
+        try:
+            rows = self._monitoring_mapping_rows_for_context(
+                self._execution_context.status(validate_files=False),
+                self.project_repository.selected_project_id(),
+            )
+            probe = {'motors': [dict(motor) for motor in motors if isinstance(motor, dict)]}
+            add_monitoring_motion_values(probe, rows, {})
+        except (AttributeError, KeyError, OSError, TypeError, ValueError):
+            return {}
+        names: Dict[int, str] = {}
+        for motor in probe['motors']:
+            joint = str(motor.get('motion_id') or '').strip()
+            try:
+                axis = int(motor.get('controller_index'))
+            except (TypeError, ValueError):
+                continue
+            if joint:
+                names[axis] = joint
+        return names
 
     def _record_upper_service_crash(self) -> None:
         """launch 가 남긴 비정상 종료 표지를 모터 이벤트로 옮긴다 · 수정 목록 72"""
@@ -2320,7 +2353,8 @@ class MotionWebBridge(Node):
             return ''
         return end.start_blocker()
 
-    def motion_run_check(self, payload: Dict[str, Any]) -> Dict[str, Any]:
+    def motion_run_check(self, payload: Dict[str, Any], timeout_sec: float = 3.0) -> Dict[str, Any]:
+        """실행 준비 검사 · `timeout_sec` · 그룹 참가 준비는 남은 준비 예산을 넘긴다 · 수정 목록 164"""
         # 검사·그룹 참가 준비(`local_motion_readiness`)도 앱솔루트 확인 뒤에만 · 수정 목록 62
         absolute = self.minas_absolute_blocker()
         if absolute:
@@ -2328,7 +2362,7 @@ class MotionWebBridge(Node):
         cleared = self.multiturn_clear_blocker()
         if cleared:
             return {'success': False, 'message': f'실행 준비 검사 실패: {cleared}'}
-        return self._request_motion_run('check', payload, timeout_sec=3.0)
+        return self._request_motion_run('check', payload, timeout_sec=max(float(timeout_sec), 0.5))
 
     # -- 다회전 클리어 뒤 기준점 보호 · 수정 목록 140 ③ ------------------------------------ #
 
@@ -2706,7 +2740,43 @@ class MotionWebBridge(Node):
         motion_path = self.project_repository.export_path(
             project_id, 'motions', file_id,
         )
-        return animation_preview.launch_precompute(self.workspace_root, motion_path)
+        # 재생 · 그룹 재생 중이면 미룬다 · 끝나면 `_precompute_deferred_tick` 이 시작 · 수정 목록 170
+        return animation_preview.launch_precompute(
+            self.workspace_root, motion_path, busy=self._precompute_busy_reason(),
+        )
+
+    def _precompute_busy_reason(self) -> str:
+        """MuJoCo 계산을 지금 시작하면 안 되는 이유 · 이 PC 재생 중 · 그룹 재생 중 · 수정 목록 170"""
+        if blocker_from_run_status(self._cached_motion_run_status()):
+            return '재생 중'
+        coordination = getattr(self, 'coordination', None)
+        try:
+            if coordination is not None and coordination.local_execution_blocker():
+                return '그룹 재생 중'
+        except Exception:  # noqa: BLE001 · 연동 노드를 못 보면 재생 상태만 본다
+            pass
+        return ''
+
+    def _precompute_deferred_tick(self) -> None:
+        """미룬 MuJoCo 계산 · 재생이 끝났으면 하나 시작 · 실행기를 막지 않게 스레드에서"""
+        if not animation_preview.deferred_count():
+            return
+        worker = getattr(self, '_precompute_deferred_worker', None)
+        if worker is not None and worker.is_alive():
+            return
+
+        def work() -> None:
+            try:
+                started = animation_preview.start_deferred(self._precompute_busy_reason)
+                if started:
+                    self.get_logger().info(f'미룬 MuJoCo 계산 시작: {started.get("message", "")}')
+            except Exception as exc:  # noqa: BLE001
+                self.get_logger().warning(f'미룬 MuJoCo 계산 시작 실패: {exc}')
+
+        self._precompute_deferred_worker = threading.Thread(
+            target=work, name='precompute-deferred', daemon=True,
+        )
+        self._precompute_deferred_worker.start()
 
     def set_motion_run_live_override(self, payload: Dict[str, Any]) -> Dict[str, Any]:
         """재생 라이브 오버라이드(조인트 뮤트·좁힌 리밋) · 움직임 명령이
