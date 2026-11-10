@@ -405,7 +405,6 @@ function tempCell(row, temps) {
   const tone = t?.tone === 'bad' ? ' btn-danger-soft' : t?.tone === 'warn' ? ' btn-warn' : '';
   return h('td', {}, h('button', {
     class: `btn btn-mini mono temp-cell-btn${tone}`, type: 'button',
-    title: t?.limit !== null && t?.limit !== undefined ? `한계 ${t.limitText} · 누르면 온도 창` : '누르면 온도 창',
     onclick: (event) => { event.stopPropagation(); openTemperatureDialog(); },
   }, t?.tempText || '-'));
 }
