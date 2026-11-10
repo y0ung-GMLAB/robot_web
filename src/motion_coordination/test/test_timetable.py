@@ -194,3 +194,36 @@ def test_a_schedule_change_after_the_first_cycle_still_waits_for_the_boundary():
     config = _clock()
     changed = issue(config, issuer='floating1', now_unix=now, schedules=({**DAILY, 'start_time': '09:30:00'},))
     assert changed.rebase_unix > now and changed.rebase_cycle == 2, '1회차가 도는 중 · 다음 경계부터'
+
+
+# --------------------------------------------------------------------------- #
+# 수정 목록 192 · 운영시간 밖 즉시 정지는 다음 창에 남지 않는다 · 실물 NY 2026-11-10 01:26 → 08:30 창
+# --------------------------------------------------------------------------- #
+
+def test_a_stop_outside_the_window_is_not_written_onto_the_next_window():
+    night = _ts('2026-11-09 20:00:00')
+    config = _clock()
+    assert stop_plan(config, issuer='floating1', after_cycle=False, now_unix=night) == (config, ''), '도는 PC 없음'
+    assert stop_plan(config, issuer='floating1', after_cycle=True, now_unix=night) == (config, '')
+    stopped, plan_id = stop_plan(config, issuer='floating1', after_cycle=False, now_unix=night, held_plan_id='tt-s5')
+    assert plan_id == 'tt-s5', '창 끝을 넘겨 도는 회차만 세운다'
+    nxt = choose(stopped, _ts('2026-11-10 09:59:40'), operation_mode='schedule')
+    assert nxt.timeline is not None and nxt.timeline.anchor_unix == _ts('2026-11-10 10:01:00')
+
+
+def test_a_stop_just_before_the_window_still_stops_it():
+    """1회차 준비는 창 시작 약 30 s 전에 들어간다 · 그때 누른 정지는 그 창을 세운다"""
+    now = _ts('2026-11-10 09:59:30')
+    stopped, plan_id = stop_plan(_clock(), issuer='floating1', after_cycle=False, now_unix=now)
+    assert plan_id and choose(stopped, now + 120.0, operation_mode='schedule').reason == '정지됨'
+
+
+def test_a_stale_stop_left_by_an_older_master_is_ignored():
+    """191 까지의 마스터가 남긴 것 · 01:26 에 08:30 창 이름으로 적힌 즉시 정지"""
+    window_plan = choose(_clock(), _ts('2026-11-10 09:00:00'), operation_mode='schedule').timeline.plan_id
+    stale = _clock(stop={'plan_id': window_plan, 'mode': 'now'}, halt={'plan_id': window_plan, 'at_unix': _ts('2026-11-10 01:26:03')})
+    choice = choose(stale, _ts('2026-11-10 09:59:40'), operation_mode='schedule')
+    assert choice.timeline is not None and choice.timeline.plan_id == window_plan, '창 시작 전 준비'
+    assert (choice.halt_plan_id, choice.halt_at_unix) == (window_plan, _ts('2026-11-10 01:26:03')), '기록은 남음 · 그 전 실행만 세움'
+    inside = replace(stale, halt={'plan_id': window_plan, 'at_unix': _ts('2026-11-10 13:00:00')})
+    assert choose(inside, _ts('2026-11-10 13:00:10'), operation_mode='schedule').reason == '정지됨', '창 안 정지는 그대로'
