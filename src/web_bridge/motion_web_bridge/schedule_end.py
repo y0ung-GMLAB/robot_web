@@ -45,6 +45,12 @@ PARK_MOVE_SEC = 10.0
 PARK_WAIT_SEC = PARK_MOVE_SEC + 40.0
 SERVO_ON_WAIT_SEC = 5.0
 POLL_SEC = 0.5
+#: 기준점 이동이 「정지 처리 중」 으로 거절됐을 때 · 감독의 정지 정리(ACTION_RESULT_SETTLE_SEC 2 s)가 끝나길 기다려
+#: 이만큼 간격으로 몇 번 더 · 전에는 회차 끝 정지 0.5 s 뒤 주차가 거절돼 1분 뒤에야 다시 했다(실물 NY 2026-11-09
+#: 22:48 · floating2 · 3 · C) · 수정 목록 191
+STOP_SETTLE_RETRY_SEC = 1.0
+STOP_SETTLE_RETRIES = 4
+STOP_SETTLE_TEXT = '정지 처리 중'
 
 #: 회차를 끝내고 멈춘 상태 · 여기서 주차를 시작한다
 FINISHED_STATES = {'idle', 'ready', 'stopped', 'completed', 'motion_completed', 'initialized'}
@@ -479,13 +485,14 @@ class ScheduleEndService:
             return False
 
     def _running(self) -> bool:
-        """사람이나 그룹이 로봇을 쓰는 중인가 · 로컬 재생 + 그룹 실행"""
-        if run_state.is_running(self._motion_state()):
-            return True
-        try:
-            return bool(self.bridge.coordination_execution_blocker())
-        except Exception:  # noqa: BLE001
-            return False
+        """사람이나 그룹이 로봇을 쓰는 중인가 · **이 PC 의 로컬 재생만** · 수정 목록 191
+
+        그룹 실행이 안 풀린 것은 「누가 로봇을 맡음」 이 아니라 주차 실패(`그룹 재생이 해제되지 않음`)로 센다 · 세 번
+        실패하면 그 자리 서보 OFF 까지 간다 · 전에는 그룹 실행 보기도 「돌고 있음」 으로 봐서, 안 풀리는 그룹(가짜 시간표
+        실행 보기)에 다시 시도를 그만두고 4대가 서보 켠 채 밤을 샜다(실물 NY 2026-11-09 23:33 · B). 새 그룹 시작이
+        오면 이 PC 로컬이 준비 · 대기로 바뀌거나 시작 요청이 먼저 온다.
+        """
+        return run_state.is_running(self._motion_state())
 
     def _skip(self) -> Optional[Tuple[str, str]]:
         """주차하지 않을 이유 · 도는 중이면 옛 동작(회차 끝을 기다림) · 멈춰 있으면 지금 볼 수 있는 것을 본다"""
@@ -699,6 +706,14 @@ class ScheduleEndService:
         })
         sent_at = time.time()
         result = self.bridge.motion_run_initialize(payload)
+        for _ in range(STOP_SETTLE_RETRIES):
+            # 회차 끝 정지 직후 · 감독이 아직 정지를 정리하는 중 · 몇 초 안에 풀린다 · 1분 기다리지 않는다 · 수정 목록 191
+            if not (isinstance(result, dict) and result.get('success') is False
+                    and STOP_SETTLE_TEXT in str(result.get('message') or '')):
+                break
+            self._sleep(STOP_SETTLE_RETRY_SEC)
+            sent_at = time.time()
+            result = self.bridge.motion_run_initialize(payload)
         if not isinstance(result, dict) or result.get('success') is False:
             # 거절 · 예 「실행 컨텍스트 적용 대기」(실물 V-19) · 부른 쪽이 기록하고 1분 뒤 다시 · 수정 목록 131
             message = result.get('message') if isinstance(result, dict) else ''

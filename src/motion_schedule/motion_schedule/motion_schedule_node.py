@@ -427,6 +427,8 @@ class MotionScheduleNode(Node):
         schedules = self.store.list_schedules()
         wanted = self.engine.active(now, schedules)
         running = self._motion_is_running()
+        if not running:
+            self._timetable_out_noted = False
         self._warn_about_unreadable(schedules)
         if not running and not self._last_read_failed('/api/coordination'):
             # 멈춰 있는 것을 봤다 · 다음에 도는 것은 스케줄이 켰거나(`_execute_start`) 사람이 켠 것이다 ·
@@ -477,6 +479,14 @@ class MotionScheduleNode(Node):
                 # 그 가드가 수동 모드 안에만 있어 스케줄 모드(재시작 직후 기본값)에서는 못 읽은 상태
                 # (`''` = 도는 중)로 그룹 정지를 보냈다(실물 2026-10-15 W-A10 ② · 148).
                 return
+            if schedule_rules.timetable_owns(self._local_run_status(), self._group_execution()):
+                # 시간표 재생 · 창 시작 전 준비 · 창 끝 뒤 도는 회차 · 주차는 PC 마다 연동 노드가 · 여기서 정지를 보내면
+                # 마스터만 단독 정지 → 마스터만 주차(1회차 빠짐) · 마지막 창 끝이면 4대 주차 교착 · 수정 목록 191
+                if not getattr(self, '_timetable_out_noted', False):
+                    self._timetable_out_noted = True
+                    self.get_logger().info("[점검] 구간 밖 · 시간표 재생 · 창 시작 · 끝은 연동 노드가 맡음 · 정지 안 보냄")
+                return
+            self._timetable_out_noted = False
             if self._run_mode not in (SCHEDULE_MODE, OFF_MODE):
                 started = self._started_by_schedule()
                 if started is False:

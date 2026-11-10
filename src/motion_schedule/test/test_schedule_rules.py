@@ -87,3 +87,17 @@ def test_starting_outside_the_window_does_not_park():
 def test_each_window_end_parks_again():
     steps = _walk([(True, False), (False, False), (True, True), (False, True), (True, False), (False, False)])
     assert steps.count(IDLE_PARK) == 2
+
+
+def test_timetable_owns_a_live_local_timetable_run_or_a_clock_view():
+    """수정 목록 191"""
+    from motion_schedule.schedule_rules import timetable_owns
+    tt = {'group_execution': True, 'execution_id': 'tt-s1'}
+    assert timetable_owns({**tt, 'state': 'waiting'}, {})
+    assert timetable_owns({**tt, 'state': 'running'}, {})
+    assert not timetable_owns({**tt, 'state': 'stopped'}, {}), '끝난 로컬은 아님'
+    assert not timetable_owns({'group_execution': True, 'execution_id': 'exec-1', 'state': 'running'}, {})
+    assert not timetable_owns({'execution_id': 'tt-s1', 'state': 'running'}, {}), '그룹 실행이 아니면 아님'
+    assert timetable_owns({'state': 'stopped'}, {'execution_id': 'tt-s1', 'state': 'running', 'sync_mode': 'clock'})
+    assert not timetable_owns({'state': 'stopped'}, {'execution_id': 'e', 'state': 'running', 'sync_mode': 'lockstep'})
+    assert not timetable_owns(None, None)

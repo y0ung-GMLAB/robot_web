@@ -265,3 +265,26 @@ def test_after_a_stop_now_the_human_start_is_no_longer_blocked(tmp_path):
     }
     assert node._timetable_held() == {}
     assert node._timetable_human_start_blocker() == ''
+
+
+
+def test_a_driver_run_whose_local_ended_is_not_held_and_no_fake_running_view(tmp_path):
+    """연동이 아직 놓기 전이라도 로컬이 끝난 실행은 쥔 것이 아니다 · 가짜 「도는 중」 이 4대에 퍼져 주차 교착(B) · 수정 목록 191"""
+    node = _tt_node(tmp_path, config=TimetableConfig(mode=timetable.MODE_CLOCK, auto_period_sec=940.0))
+    node._clock_driver._run = {'plan_id': 'tt-s1', 'stage': 'scheduled', 'cycle': 1}
+    node._local_status['motion_run_status'] = {
+        'group_execution': True, 'execution_id': 'tt-s1', 'state': 'running', 'phase': 'running',
+    }
+    assert node._timetable_held() == {'pc-a': 'tt-s1'}
+    node._local_status['motion_run_status'] = {
+        'group_execution': True, 'execution_id': 'tt-s1', 'state': 'waiting', 'phase': 'group_motion_completed',
+    }
+    assert node._timetable_held() == {'pc-a': 'tt-s1'}, '회차 끝 장벽은 아직 쥔 것'
+    node._local_status['motion_run_status'] = {
+        'group_execution': True, 'execution_id': 'tt-s1', 'state': 'stopped', 'phase': 'stopped',
+    }
+    assert node._timetable_held() == {}
+    node._local_status['motion_run_status'] = {
+        'group_execution': True, 'execution_id': 'tt-s0', 'state': 'stopped', 'phase': 'stopped',
+    }
+    assert node._timetable_held() == {'pc-a': 'tt-s1'}, '새 실행을 막 보냈다 · 로컬은 아직 옛 번호'

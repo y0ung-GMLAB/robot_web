@@ -410,3 +410,38 @@ def test_give_up_notice_survives_restart_and_a_later_quiet_window_end(tmp_path):
     service.start_blocker()
     assert not service.status().get('notice')
     assert robot.retry_record() is None
+
+
+# ---------------------------------------------------------------------- #
+# 수정 목록 191
+# ---------------------------------------------------------------------- #
+
+def test_a_group_that_never_releases_counts_as_failures_and_ends_with_servo_off_in_place(tmp_path):
+    """실물 NY 2026-11-09 23:33 · 가짜 시간표 실행 보기가 안 풀림 → 「재생이 돌고 있음」 으로 그만둬 4대 서보 켠 채 밤샘(B)"""
+    robot = _Robot(tmp_path)
+    robot.state = 'stopped'
+    robot.bridge.coordination_execution_blocker = lambda: '시간표 재생 중'
+    service = _service(robot)
+
+    service.begin()
+
+    assert robot.event_types() == ['schedule_end_park_failed'] * 3 + ['schedule_end_servo_off_in_place']
+    assert '그룹 재생이 해제되지 않음' in robot.events[0][1]
+    assert [call for call in robot.calls if call[0] == 'initialize'] == [], '주차 이동은 안 함'
+    assert ('ac', 'servo_off', 0) in robot.calls and ('ac', 'servo_off', 1) in robot.calls
+    assert service.status()['state'] == 'gave_up'
+
+
+def test_a_park_refused_while_the_stop_settles_is_retried_within_seconds(tmp_path):
+    """실물 NY 2026-11-09 22:48 · 회차 끝 정지 0.5 s 뒤 「전체 동작 정지 처리 중」 거절 → 1분 뒤에야 주차(C)"""
+    robot = _Robot(tmp_path, replies=[{'success': False, 'message': '전체 동작 정지 처리 중'}] * 2)
+    robot.state = 'completed'
+    service = _service(robot)
+
+    service.begin()
+
+    inits = [call for call in robot.calls if call[0] == 'initialize']
+    assert len(inits) == 3
+    assert inits[-1][1] - inits[0][1] <= 3.0, '몇 초 안에 다시'
+    assert robot.events == [], '실패로 세지 않는다'
+    assert service.status()['state'] == 'done'

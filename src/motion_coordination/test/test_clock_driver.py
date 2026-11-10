@@ -383,3 +383,36 @@ def test_the_start_blocker_is_logged_when_a_cycle_is_skipped_for_it():
     clock, runtime, driver, _, notes = _pc(100_000.0)
     _run(driver, runtime, clock, _always(Choice(timeline=TIMELINE)), 30.0, view={'start_blocker': '실행 준비 안 됨 · 모터 끊김'})
     assert notes == ['시간표 재생 · 1회차 쉼 · 실행 준비 안 됨 · 모터 끊김']
+
+
+# ---------------------------------------------------------------------- #
+# 수정 목록 191 · 로컬이 끝난 시간표 실행은 장벽을 기다리지 않고 놓는다 · 회차 버림도 「N회차 쉼」 으로
+# ---------------------------------------------------------------------- #
+
+def test_a_run_whose_local_ended_stopped_is_let_go_and_parked_at_the_last_window_end():
+    """실물 NY 2026-11-09 23:27 · 마스터만 단독 회차 후 정지로 `stopped` · 다음 24 h 창 없음 → 영영 쥐어 4대 주차 교착(B)"""
+    clock, runtime, driver, finished, _ = _pc(100_000.0)
+    _run(driver, runtime, clock, _always(Choice(timeline=TIMELINE)), 100.0)
+    assert runtime.starts == [(1, 100_060.0)] and driver.holding == TIMELINE.plan_id
+    # 회차가 끝나며 장벽이 아니라 그 자리 정지로 끝남 · 같은 실행 번호가 남는다
+    runtime.session = {}
+    runtime.status = {
+        'group_execution': True, 'execution_id': TIMELINE.plan_id, 'state': 'stopped', 'phase': 'stopped',
+        'group_cycle_number': 1,
+    }
+    _run(driver, runtime, clock, _always(Choice(reason='운영시간 아님')), 2.0)
+    assert driver.holding == ''
+    assert finished == [(TIMELINE.plan_id, True)], '운영시간 끝 · 주차'
+
+
+def test_a_dropped_cycle_is_logged_as_a_skipped_cycle():
+    """실물 NY 2026-11-09 · 「1회차 로컬 실행이 끝남」 이 「회차 쉼」 으로 안 찾아졌다(D)"""
+    clock, runtime, driver, _, notes = _pc(100_000.0)
+    _run(driver, runtime, clock, _always(Choice(timeline=TIMELINE)), 40.0)
+    assert driver.holding == TIMELINE.plan_id
+    runtime.session = {}
+    runtime.status = {'state': 'initialized', 'phase': 'initialized'}
+    _run(driver, runtime, clock, _always(Choice(timeline=TIMELINE)), 5.0)
+    skipped = [note for note in notes if '회차 쉼' in note]
+    assert skipped and skipped[0].startswith('시간표 재생 · 1회차 쉼 · 로컬 실행이 끝남')
+    assert len(skipped) == 1

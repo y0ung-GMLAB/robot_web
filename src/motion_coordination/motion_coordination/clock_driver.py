@@ -176,7 +176,7 @@ class ClockDriver:
             self._note = '정지됨'
             return
         if run is not None and (timeline is None or timeline.plan_id != run['plan_id']):
-            self._leave_when_safe(run, phase, choice)
+            self._leave_when_safe(run, phase, state, choice)
             return
         if run is not None:
             self._advance(run, timeline, choice, phase, state, status, now_w, now_m, view)
@@ -356,9 +356,14 @@ class ClockDriver:
             return
         run.update(stage='scheduled', sent_m=now_m)
 
-    def _leave_when_safe(self, run, phase: str, choice: Choice) -> None:
-        """따를 시간표가 바뀌었다(운영시간 끝 · 신호 재생 · 다른 시간표) · 도는 회차는 끝까지 · 장벽에서 놓는다"""
-        if run['stage'] == 'scheduled' and phase not in BARRIER_PHASES:
+    def _leave_when_safe(self, run, phase: str, state: str, choice: Choice) -> None:
+        """따를 시간표가 바뀌었다(운영시간 끝 · 신호 재생 · 다른 시간표) · 도는 회차는 끝까지 · 장벽에서 놓는다
+
+        로컬 실행이 이미 끝났으면(정지 · 완료 · 같은 실행 번호) 장벽을 기다리지 않고 바로 놓는다 · 전에는 `stopped` 가
+        장벽 단계가 아니라 영영 쥐고 있었다 · 마지막 창 끝에 마스터만 단독 회차 후 정지로 `stopped` 가 되자 그 실행을
+        하트비트로 4대에 「도는 중」 으로 퍼뜨려 4대 주차가 교착(실물 NY 2026-11-09 23:27 · B) · 수정 목록 191
+        """
+        if run['stage'] == 'scheduled' and phase not in BARRIER_PHASES and state not in _FINISHED_STATES:
             return
         # 운영시간 끝 · 끝난 뒤에는 다음 운영시간(내일) 시간표가 골라지거나 없다 · 그때만 주차 → 서보 OFF ·
         # 마스터를 수동 모드로 바꾼 것 · 신호 재생으로 바꾼 것은 그 자리 정지(사람이 만지려는 것)
@@ -393,10 +398,24 @@ class ClockDriver:
         self._drop(why)
 
     def _drop(self, why: str) -> None:
+        """이 회차를 버린다 · 경고 로그는 「N회차 쉼」 글로 · 수정 목록 191
+
+        전에는 「시간표 재생 · N회차 로컬 실행이 끝남」 처럼 이유만 남아 「회차 쉼」 으로 찾으면 안 걸렸다(실물 NY
+        2026-11-09 · D) · 같은 이유는 같은 회차에 한 줄.
+        """
         run = self._run or {}
-        self._skip = (str(run.get('plan_id') or ''), int(run.get('cycle') or 0))
+        plan_id, cycle = str(run.get('plan_id') or ''), int(run.get('cycle') or 0)
+        self._skip = (plan_id, cycle)
         self._run = None
-        self._set_note(why, warn=True)
+        if not why or why == self._note:
+            return
+        self._note = why
+        prefix = f'{cycle}회차 '
+        reason = why[len(prefix):] if why.startswith(prefix) else why
+        key = (plan_id, cycle, reason)
+        if key != self._skip_logged:
+            self._skip_logged = key
+            self._warn(f'시간표 재생 · {cycle}회차 쉼 · {reason}' if cycle else f'시간표 재생 · {reason}')
 
     def _skip_cycle(self, plan_id: str, cycle: int, why: str, note: str) -> None:
         """들어갈 때인데 못 들어감 · 화면 이유 + 회차마다 경고 로그 한 줄 · 수정 목록 189

@@ -29,7 +29,7 @@ from rclpy.qos import DurabilityPolicy, QoSProfile, ReliabilityPolicy
 from motion_common import topics
 
 from . import clock_grid, timetable
-from .clock_driver import _FINISHED_STATES, PLAN_PREFIX, ClockDriver
+from .clock_driver import _FINISHED_STATES, BARRIER_PHASES, PLAN_PREFIX, ClockDriver
 from .group_execution import GROUP_PROTOCOL_VERSION
 from .participant_rules import SCHEDULE_END_REASON, STARTED_BY_SCHEDULE
 from .timetable import TimetableConfig
@@ -352,10 +352,18 @@ class TimetableMixin:
         status = status if isinstance(status, Mapping) else {}
         # 로컬 재생 관리자는 정지 · 완료 뒤에도 실행 번호를 남긴다 · 끝난 것은 쥔 것이 아니다 · 전에는 즉시 정지 뒤에도
         # 마스터가 저를 「회차 도는 중」 으로 세어 사람이 누른 「재생」 이 막혔다(NY 2026-11-09 06:44) · 수정 목록 188
-        own = (driver.holding if driver is not None else '') or (
-            str(status.get('execution_id') or '')
-            if status.get('group_execution') and str(status.get('state') or '') not in _FINISHED_STATES else ''
+        local_id = str(status.get('execution_id') or '') if status.get('group_execution') else ''
+        local_done = (
+            str(status.get('state') or '') in _FINISHED_STATES
+            and str(status.get('phase') or '') not in BARRIER_PHASES
         )
+        own = driver.holding if driver is not None else ''
+        if own and own == local_id and local_done:
+            # 연동이 아직 놓기 전이라도 그 실행은 로컬에서 끝났다 · 쥔 것으로 세지 않는다 · 전에는 이걸로 가짜
+            # 「도는 중」 실행 보기가 4대에 퍼져 운영 종료 주차가 교착(실물 NY 2026-11-09 23:27 · B) · 수정 목록 191
+            own = ''
+        if not own and not local_done:
+            own = local_id
         if own.startswith(PLAN_PREFIX):
             held[self._config.pc_id] = own
         registry = getattr(self, '_registry', None)
