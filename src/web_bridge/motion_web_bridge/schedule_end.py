@@ -45,9 +45,9 @@ PARK_MOVE_SEC = 10.0
 PARK_WAIT_SEC = PARK_MOVE_SEC + 40.0
 SERVO_ON_WAIT_SEC = 5.0
 POLL_SEC = 0.5
-#: 기준점 이동이 「정지 처리 중」 으로 거절됐을 때 · 감독의 정지 정리(ACTION_RESULT_SETTLE_SEC 2 s)가 끝나길 기다려
-#: 이만큼 간격으로 몇 번 더 · 전에는 회차 끝 정지 0.5 s 뒤 주차가 거절돼 1분 뒤에야 다시 했다(실물 NY 2026-11-09
-#: 22:48 · floating2 · 3 · C) · 수정 목록 191
+#: 기준점 이동이 「정지 처리 중」 으로 거절됐을 때 · 감독은 일반 정지 뒤 0.5 s 차단하고, 차단 여부는 0.5 s 마다 오는
+#: safety 상태의 마지막 값으로 판정한다(정지 뒤 0.5~1.0 s 는 위상 따라) · 이만큼 간격으로 몇 번 더 · 전에는 회차 끝
+#: 정지 약 0.5 s 뒤 주차가 반반으로 거절돼 1분 뒤에야 다시 했다(실물 NY 2026-11-09 22:48 · floating2 · 3 · C) · 수정 목록 191
 STOP_SETTLE_RETRY_SEC = 1.0
 STOP_SETTLE_RETRIES = 4
 STOP_SETTLE_TEXT = '정지 처리 중'
