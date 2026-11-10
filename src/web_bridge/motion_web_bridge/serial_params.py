@@ -19,6 +19,7 @@ MINAS 의 `minas_params` 와 같은 방식 · 저장 때 드라이버마다 제 
 from __future__ import annotations
 
 import copy
+import re
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -32,6 +33,9 @@ TEMPLATE_DIR = Path('config') / 'serial_servo'
 
 #: 모델을 모를 때 · 전과 같은 제어표 (`dynamixel_param_file_for_model` 의 기본)
 DYNAMIXEL_FALLBACK_MODEL = 'XM540-W270-R'
+
+#: 생성 파일 머리줄의 모델 번호 · `param_text` 가 적는 꼴 · 「적용」 때 다시 만들기에 쓴다 · 수정 목록 192
+_HEADER_MODEL_NUMBER = re.compile(r'\(모델 번호 (\d+)\)')
 
 #: 전류 칸 · 전류 없는 모델에서 optional
 _CURRENT_INTERFACES = ('Goal Current', 'Present Current')
@@ -124,10 +128,22 @@ def write_param_file(
     model_number: Any = None,
 ) -> str:
     """이 드라이버만의 param yaml 을 만들고 **절대경로**를 돌려준다."""
-    document, info = build_document(workspace_root, kind, driver_model, model_number)
+    text = param_text(workspace_root, kind, driver_model, model_number)
     out_dir = output_root(workspace_root)
     out_dir.mkdir(parents=True, exist_ok=True)
     out_path = out_dir / f'driver_{driver_id}.yaml'
+    out_path.write_text(text, encoding='utf-8')
+    return str(out_path)
+
+
+def param_text(
+    workspace_root: Path,
+    kind: str,
+    driver_model: Any = '',
+    model_number: Any = None,
+) -> str:
+    """param 파일 내용 · 저장 때(`write_param_file`)와 「적용」 때(`refresh_param_file`)가 같은 글을 쓴다."""
+    document, info = build_document(workspace_root, kind, driver_model, model_number)
     lines = [
         '# 이 파일은 저장할 때마다 다시 만들어진다 · 손으로 고치지 말 것',
         f'# (모터 관리 저장 → config/serial_params/) · 수정 목록 158 · {kind} '
@@ -137,11 +153,48 @@ def write_param_file(
         lines.append(f'# {info["model_warning"]}')
     elif info.get('confirm') and info.get('reason'):
         lines.append(f'# {info["reason"]}')
-    out_path.write_text(
-        '\n'.join(lines) + '\n' + yaml.safe_dump(document, allow_unicode=True, sort_keys=False),
-        encoding='utf-8',
-    )
-    return str(out_path)
+    return '\n'.join(lines) + '\n' + yaml.safe_dump(document, allow_unicode=True, sort_keys=False)
+
+
+def refresh_param_file(
+    workspace_root: Path,
+    path: Any,
+    kind: str,
+    driver_model: Any = '',
+    model_number: Any = None,
+) -> bool:
+    """「적용」 때 · 이 모듈이 만든 param 파일이 지금 기본 파일 · 제어표와 다르면 **같은 경로에** 다시 쓴다 · 수정 목록 192
+
+    업데이트로 기본 파일(`config/serial_servo/*.yaml`)이 바뀌어도 바꾼 것이 없으면 「저장 후 장비에 적용」 은
+    저장을 건너뛰어 옛 param 이 남았다(chicken2 2026-11-10 · 온도 칸 없음) · 경로가 그대로라 모터 설정 파일은
+    안 바뀐다 · 손으로 쓴 파일(생성 폴더 밖)은 건드리지 않는다 · 같으면 안 쓴다 · 바꿨으면 True
+
+    모델 번호는 모터 설정 파일에 남지 않는다(저장 때 화면 목록에만) · 그래서 지금 파일 머리줄
+    `(모델 번호 N)` 에서 읽는다 · 이름만으로 고르면 XM430-W350-T 가 옛 기본(XM540-W270)으로 바뀌었다(시험) ·
+    다시 만든 제어표(`model_file`)가 지금 파일과 다르면 **쓰지 않는다** · 적용은 기본 칸만 새로 하고 모델은 안 바꾼다
+    """
+    if not is_generated_path(workspace_root, path):
+        return False
+    target = Path(str(path))
+    try:
+        current = target.read_text(encoding='utf-8')
+    except OSError:
+        return False
+    number = optional_int(model_number, None)
+    if number is None:
+        match = _HEADER_MODEL_NUMBER.search(current)
+        number = int(match.group(1)) if match else None
+    text = param_text(workspace_root, kind, driver_model, number)
+    if current == text:
+        return False
+    try:
+        current_table = Path(str((yaml.safe_load(current) or {}).get('model_file') or '')).name
+    except yaml.YAMLError:
+        return False
+    if not current_table or Path(str((yaml.safe_load(text) or {}).get('model_file') or '')).name != current_table:
+        return False
+    target.write_text(text, encoding='utf-8')
+    return True
 
 
 def port_kind_conflicts(masters: List[Dict[str, Any]], drivers: List[Dict[str, Any]]) -> List[str]:

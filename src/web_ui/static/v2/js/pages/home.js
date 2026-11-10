@@ -1,7 +1,6 @@
 /** UI v2 · 홈 · 운영자 첫 화면 · 「지금 무엇이 · 무엇을 확인할지 · 매장 PC · 오늘 · 모터 · 최근 일」 */
 import { h, dot } from '../dom.js';
-import { headline, motorChips, motorTemperatures, pcRows, runSummary, todayWindows } from '../model.js';
-import { openTemperatureDialog } from '../temperature_dialog.js';
+import { headline, motorChips, pcRows, runSummary, todayWindows } from '../model.js';
 import { eventTarget } from '../records_model.js';
 import { issueRow } from '../shell.js';
 import * as act from '../actions.js';
@@ -89,14 +88,7 @@ function scheduleCard(state) {
 
 function motorCard(state) {
   const chips = motorChips(state.snap);
-  // 온도 · 누를 때만 창 · 온도를 읽는 모터(직렬 서보)가 있는 PC 만 · 수정 목록 191
-  const temps = motorTemperatures(state.snap);
-  const hot = temps.find((t) => t.tone === 'bad') || temps.find((t) => t.tone === 'warn');
-  const tempButton = temps.length
-    ? h('button', { class: `btn btn-mini${hot ? ` btn-${hot.tone === 'bad' ? 'danger-soft' : 'warn'}` : ''}`, type: 'button', onclick: openTemperatureDialog }, '온도')
-    : null;
-  return card('모터', [h('h2', { text: `모터 ${chips.length || ''}`.trim() }),
-    h('span', { class: 'row card-head-actions' }, tempButton, h('a', { href: '#/maintain-motors', text: '모터 설정' }))],
+  return card('모터', [h('h2', { text: `모터 ${chips.length || ''}`.trim() }), h('a', { href: '#/maintain-motors', text: '모터 설정' })],
     chips.length
       ? h('ul', { class: 'list' }, chips.map((chip) => h('li', { class: 'list-row' },
         dot(chip.tone),

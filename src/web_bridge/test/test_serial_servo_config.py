@@ -309,3 +309,84 @@ def test_missing_control_table_refuses_the_save(monkeypatch):
     monkeypatch.setattr(serial_params, 'model_info', without_table)
     with pytest.raises(ValueError, match='제어표'):
         serial_params.build_document(WORKSPACE, 'feetech', 'STS3215', 777)
+
+
+# -- 「장비에 적용」 이 옛 직렬 param 을 새 기본으로 다시 만든다 · 수정 목록 192 -- #
+
+def _apply_service(tmp_path, config):
+    from motion_web_bridge.motor_config_service import MotorConfigService
+
+    config_file = tmp_path / 'project' / 'motor.yaml'
+    config_file.parent.mkdir(parents=True, exist_ok=True)
+    config_file.write_text(yaml.safe_dump(config, sort_keys=False, allow_unicode=True), encoding='utf-8')
+    registry = motor_config_rules.registry_from_motor_config(motor_config_rules.expand_shared_driver_profiles(config))
+    service = MotorConfigService.__new__(MotorConfigService)
+    service.workspace_root = WORKSPACE
+    service.load = lambda: {'success': True, 'registry': registry, 'config_file': str(config_file)}
+
+    def no_write(*_args, **_kwargs):
+        raise AssertionError('모터 설정 파일은 그대로 · param 파일만 같은 경로에')
+
+    service._write = no_write
+    return service, config_file
+
+
+def test_apply_rewrites_an_old_serial_param_file_in_place(tmp_path):
+    """chicken2 2026-11-10 · 업데이트 뒤 바꾼 게 없어 저장을 건너뛰고 적용만 → 온도 칸 없는 옛 param 이 남았다"""
+    config = _build([
+        _serial(0, 'dynamixel', 'XM430-W350-T', 1, model_number=1020),
+        _serial(4, 'feetech', 'STS3215', 1, port=U2D2_B, model_number=777),
+    ])
+    service, config_file = _apply_service(tmp_path, config)
+    config_text = config_file.read_text(encoding='utf-8')
+    dxl_driver, _, _ = _param(config, 0)
+    ft_driver, _, _ = _param(config, 4)
+
+    # 저장한 그대로면 아무것도 안 쓴다
+    stamps = {p: Path(p).stat().st_mtime_ns for p in (dxl_driver['param_file'], ft_driver['param_file'])}
+    assert service._refresh_serial_param_files() == ''
+    assert {p: Path(p).stat().st_mtime_ns for p in stamps} == stamps
+
+    # 191 전 파일(온도 칸 없음) · 같은 경로에 새로 · 모터 설정 파일은 그대로
+    old = Path(ft_driver['param_file'])
+    old.write_text(''.join(line for line in old.read_text(encoding='utf-8').splitlines(True)
+                           if 'emperature' not in line), encoding='utf-8')
+    assert 'Present Temperature' not in old.read_text(encoding='utf-8')
+    assert service._refresh_serial_param_files() == '4번'
+    document = yaml.safe_load(old.read_text(encoding='utf-8'))
+    assert any(i.get('name') == 'Present Temperature' for i in document['interfaces'])
+    assert document['temperature_limit']['name'] == 'Temperature Limit'
+    assert config_file.read_text(encoding='utf-8') == config_text
+
+
+def test_apply_leaves_a_hand_written_serial_param_file_alone(tmp_path):
+    config = _build([_serial(0, 'dynamixel', 'XM430-W350-T', 1, model_number=1020)])
+    hand = tmp_path / 'hand.yaml'
+    hand.write_text('# 손으로 쓴 파일\n', encoding='utf-8')
+    config['drivers'][0]['param_file'] = str(hand)
+    service, _ = _apply_service(tmp_path, config)
+    assert service._refresh_serial_param_files() == ''
+    assert hand.read_text(encoding='utf-8') == '# 손으로 쓴 파일\n'
+
+
+def test_apply_refreshes_serial_params_before_preparing_the_session():
+    from motion_web_bridge import motor_config_service
+
+    body = Path(motor_config_service.__file__).read_text(encoding='utf-8').split('    def apply(self)', 1)[1]
+    assert body.index('self._refresh_serial_param_files()') < body.index('prepare_runtime_motor_config(')
+
+
+
+def test_apply_never_changes_the_control_table(tmp_path):
+    """모델 번호는 모터 설정 파일에 없다 · 머리줄에서 읽는다 · 그것도 없으면 이름만으론 옛 기본(XM540)이 나와 · 쓰지 않는다"""
+    config = _build([_serial(0, 'dynamixel', 'XM430-W350-T', 1, model_number=1020)])
+    service, _ = _apply_service(tmp_path, config)
+    param = Path(config['drivers'][0]['param_file'])
+    lines = [line for line in param.read_text(encoding='utf-8').splitlines(True) if 'emperature' not in line]
+    param.write_text(''.join(lines), encoding='utf-8')
+    assert service._refresh_serial_param_files() == '0번'                 # 머리줄 번호(1020) · XM430 그대로
+    assert param.read_text(encoding='utf-8').count('xm430_w350.model') == 1
+    old = ''.join(line.replace('(모델 번호 1020)', '') for line in lines)
+    param.write_text(old, encoding='utf-8')
+    assert service._refresh_serial_param_files() == ''                  # 번호를 모르면 · 제어표가 바뀌니 안 씀
+    assert param.read_text(encoding='utf-8') == old

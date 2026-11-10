@@ -473,7 +473,8 @@ dialog.temp-dialog { max-width: 560px; }
 .temp-table td.temp-name { overflow: hidden; text-overflow: ellipsis; }
 .temp-sub { margin: 18px 0 6px; font-size: 15px; }
 .temp-downloads { max-height: 220px; overflow-y: auto; }
-.card-head-actions { gap: 12px; align-items: baseline; }
+/* 모터 설정 표 「온도」 칸 · 값 길이가 바뀌어도 칸이 안 움직이게 · 수정 목록 192 */
+.temp-cell-btn { min-width: 72px; justify-content: flex-end; font-variant-numeric: tabular-nums; }
 .confirm h2 { margin-bottom: 10px; }
 .confirm-body { color: var(--ink-2); white-space: pre-line; line-height: 1.6; }
 .confirm-actions { display: flex; justify-content: flex-end; gap: 10px; margin-top: 20px; }

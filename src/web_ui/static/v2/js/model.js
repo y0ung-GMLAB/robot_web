@@ -76,7 +76,8 @@ export const TEMP_BAD_MARGIN_C = 3;
 export function motorTemperatures(snap) {
   const motors = Array.isArray(snap?.motion_state?.motors) ? snap.motion_state.motors : [];
   const num = (v) => (v === null || v === undefined || !Number.isFinite(Number(v)) ? null : Number(v));
-  return motors.filter((m) => m && (num(m.temperature_c) !== null || num(m.temperature_limit_c) !== null)).map((m) => {
+  // 직렬 서보는 값이 없어도 줄을 둔다(「-」) · 온도가 안 들어오는 것도 보이게 · chicken2 2026-11-10 · 수정 목록 192
+  return motors.filter((m) => m && (isSerialServo(motorKind(m)) || num(m.temperature_c) !== null || num(m.temperature_limit_c) !== null)).map((m) => {
     const temp = num(m.temperature_c);
     const limit = num(m.temperature_limit_c);
     const margin = temp !== null && limit !== null ? limit - temp : null;

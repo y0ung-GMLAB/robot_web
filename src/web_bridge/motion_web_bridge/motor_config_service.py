@@ -504,6 +504,8 @@ class MotorConfigService:
             )
             # 부팅 목록(param 파일)이 지금 공통 설정 · 모터 칸과 다르면 먼저 다시 만든다 · 수정 목록 116
             boot_refresh = self._refresh_boot_param_files()
+            # 직렬 서보 param 도 · 업데이트로 기본 파일이 바뀌면(191 온도 칸) 저장 없이 「적용」 만으로 들어가게 · 192
+            serial_refresh = self._refresh_serial_param_files()
             prepared = self.repository.prepare_runtime_motor_config(project_id)
             runtime_file = self.repository.runtime.mark_runtime_motor_config_applied(
                 project_id
@@ -587,6 +589,7 @@ class MotorConfigService:
             'message': (
                 '프로젝트 설정 적용을 시작했습니다. 잠시 후 화면이 다시 연결됩니다'
                 + (f' · 부팅 값을 새 설정으로 다시 만들었습니다({boot_refresh})' if boot_refresh else '')
+                + (f' · 직렬 서보 설정 파일을 새 기본으로 다시 만들었습니다({serial_refresh})' if serial_refresh else '')
             ),
             'restart_script': str(self.restart_script),
             'restart_mode': restart_mode,
@@ -648,6 +651,45 @@ class MotorConfigService:
         if left:
             raise ValueError(f'부팅 값을 새 설정으로 다시 만들지 못했습니다 · {boot_params.describe(left)}')
         return boot_params.describe(rows)
+
+    def _refresh_serial_param_files(self) -> str:
+        """저장된 모터 설정의 직렬 서보 param 파일을 지금 기본 파일 · 제어표로 다시 만든다 · 수정 목록 192
+
+        저장 때와 같은 규칙(`serial_params.param_text`) · 같은 경로에 쓰므로 모터 설정 파일은 그대로 ·
+        생성 폴더 밖 파일(손으로 쓴 옛 param)은 그대로 · 바꾼 축 한 줄을 돌려준다 · 실패는 ValueError
+        """
+        loaded = self.load()
+        motors = ((loaded.get('registry') or {}).get('motors') or []) if loaded.get('success') else []
+        config_file = Path(str(loaded.get('config_file') or ''))
+        if not config_file.is_file():
+            return ''
+        try:
+            config = yaml.safe_load(config_file.read_text(encoding='utf-8')) or {}
+        except (OSError, yaml.YAMLError) as exc:
+            raise ValueError(f'직렬 서보 설정 파일을 다시 만들지 못했습니다 · 모터 설정을 못 읽음 · {exc}') from exc
+        by_axis = {
+            optional_int(motor.get('axis')): motor
+            for motor in motors
+            if isinstance(motor, dict) and optional_int(motor.get('axis')) is not None
+        }
+        axis_of_driver: Dict[Any, Any] = {}
+        for master in config.get('masters') or []:
+            for slave in (master.get('slaves') or []) if isinstance(master, dict) else []:
+                if isinstance(slave, dict):
+                    axis_of_driver.setdefault(optional_int(slave.get('driver_id')), optional_int(slave.get('controller_index')))
+        changed = []
+        for driver in config.get('drivers') or []:
+            kind = str(driver.get('type') or '') if isinstance(driver, dict) else ''
+            if kind not in motor_config_build.SERIAL_SERVO_DRIVER_TYPES:
+                continue
+            axis = axis_of_driver.get(optional_int(driver.get('id')))
+            if serial_params.refresh_param_file(
+                self.workspace_root, driver.get('param_file'), kind,
+                str(driver.get('driver_model') or ''),
+                serial_params.identity_model_number(by_axis.get(axis)),
+            ):
+                changed.append(f'{axis}번' if axis is not None else f'드라이버 {driver.get("id")}')
+        return ' · '.join(changed)
 
     #: 실행 적용을 해제했을 때 「정지 중」에 붙는 마무리 문구 · 한 곳에서 쓴다
     RELEASE_SETTLED_MESSAGE = '실행 적용을 해제해 정지를 마무리했습니다'

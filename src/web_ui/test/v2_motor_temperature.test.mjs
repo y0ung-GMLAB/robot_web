@@ -35,3 +35,8 @@ test('확인할 일 · 한계 가까울 때만 · 버튼은 온도 창', () => {
   const [hot] = collectIssues(snapWith([ft(68)]), {}).filter((i) => i.title.includes('온도'));
   assert.equal(hot.tone, 'bad');
 });
+
+test('직렬 서보는 온도가 안 들어와도 줄이 있다(「-」) · AC 는 없다 · 수정 목록 192', () => {
+  const rows = motorTemperatures(snapWith([ac, { controller_index: 3, motor_type: 'dynamixel', motion_id: 'crank_r' }]));
+  assert.deepEqual(rows.map((r) => [r.index, r.tempText, r.limitText, r.tone]), [[3, '-', '-', 'muted']]);
+});

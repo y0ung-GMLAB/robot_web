@@ -17,9 +17,10 @@ import {
   EDIT_FIELDS, fieldNote, fieldPlaceholder, absoluteClearRule, absoluteJobText, absoluteLine, absoluteResumeConfirm, absoluteResumeView, absoluteSummary, gainText, gainWarnings, getField, motorChanges, motorProblems, motorRows, scanConfirmText,
   setField,
 } from '../motors_model.js';
-import { referenceRedoView } from '../model.js';
+import { motorTemperatures, referenceRedoView } from '../model.js';
+import { openTemperatureDialog } from '../temperature_dialog.js';
 import { signedDeg } from '../play_model.js';
-import { kindSpec } from '../motor_kinds.js';
+import { isSerialServo, kindSpec } from '../motor_kinds.js';
 import { minasBaseCard } from './minas_base.js';
 import { gainField, saveAll } from './drive_gains.js';
 import { paramsField } from './drive_params.js';
@@ -397,6 +398,18 @@ function detailCard(state, changed, row) {
       h('pre', { class: 'doc-code small' }, h('code', { text: JSON.stringify({ identity: motor.identity, profile: motor.profile, config: motor.config }, null, 2) }))));
 }
 
+/** 「온도」 칸 · 직렬 서보만 · 누르면 온도 창(모든 축 · 기록 내려받기) · 값이 안 들어오면 「-」 · 수정 목록 191 · 192 */
+function tempCell(row, temps) {
+  if (!isSerialServo(row.kindKey)) return h('td', { class: 'muted', text: '-' });
+  const t = temps.get(row.axis);
+  const tone = t?.tone === 'bad' ? ' btn-danger-soft' : t?.tone === 'warn' ? ' btn-warn' : '';
+  return h('td', {}, h('button', {
+    class: `btn btn-mini mono temp-cell-btn${tone}`, type: 'button',
+    title: t?.limit !== null && t?.limit !== undefined ? `한계 ${t.limitText} · 누르면 온도 창` : '누르면 온도 창',
+    onclick: (event) => { event.stopPropagation(); openTemperatureDialog(); },
+  }, t?.tempText || '-'));
+}
+
 /** ② 구획 머리 오른쪽 · 다시 검색 */
 export function motorsActions(state, changed) {
   return h('div', { class: 'segmented', role: 'group', 'aria-label': '모터 검색' },
@@ -411,6 +424,7 @@ export function motorsBody(state, changed) {
   const abs = absoluteSummary(rows);
   const faults = rows.filter((r) => r.fault);
   const selected = rows.find((r) => r.axis === ui.selected) || rows[0];
+  const temps = new Map(motorTemperatures(state.snap).map((t) => [t.index, t]));
   const jobText = absoluteJobText(ui.job);
   const resume = absoluteResumeView(ui.job);
   const runtime = state.snap?.service_management?.runtime || {};
@@ -448,7 +462,7 @@ export function motorsBody(state, changed) {
     gainWarnings(rows).map((text) => h('div', { class: 'blocker' }, dot('warn'), h('span', { class: 'grow', text }))),
     h('section', { class: 'card', 'aria-label': '모터' },
       rows.length ? h('div', { class: 'table-wrap' }, h('table', { class: 'table files-table' },
-        h('thead', {}, h('tr', {}, ['번호', '이름', '종류 · 모델', '서보', '위치 (모터°)', '과부하율', '앱솔루트', '게인', '통신'].map((text) => h('th', { scope: 'col', text })))),
+        h('thead', {}, h('tr', {}, ['번호', '이름', '종류 · 모델', '서보', '위치 (모터°)', '과부하율', '온도', '앱솔루트', '게인', '통신'].map((text) => h('th', { scope: 'col', text })))),
         // 줄 어디를 눌러도 그 모터 설정이 아래에 열린다 · 「⋯」 만으로는 무엇을 하는지 안 보였다 (2026-10-12)
         h('tbody', {}, rows.map((row) => h('tr', { class: `pick-row${row.axis === selected?.axis ? ' selected' : ''}`, onclick: () => openDetail(row.axis, changed) },
           h('td', { class: 'mono', text: String(row.axis) }),
@@ -457,6 +471,7 @@ export function motorsBody(state, changed) {
           h('td', {}, h('span', { class: `chip chip-${row.servoTone}`, text: row.servo })),
           h('td', { class: 'mono', text: row.position === null ? '-' : signedDeg(row.position, 2) }),
           h('td', { class: `mono ${row.load !== null && row.load >= 100 ? 'tone-text-bad' : ''}`, text: row.load === null ? '-' : `${Math.round(row.load)}%` }),
+          tempCell(row, temps),
           h('td', {}, h('span', { class: `chip chip-${row.absoluteTone}`, title: row.absoluteProblem, text: row.absolute })),
           // 드라이브에 저장된 게인 · 마우스를 올리면 매뉴얼 번호와 값 · 108
           (() => { const g = row.ac ? gainText(row.gains) : null; return h('td', { class: 'small', title: g?.hint || '' },
