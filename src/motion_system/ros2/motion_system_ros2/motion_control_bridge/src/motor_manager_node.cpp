@@ -155,6 +155,8 @@ void MotorManagerNode::timer_callback()
     msg.velocity.resize(n);
     msg.effort.resize(n);
     msg.overload_ratio.resize(n);
+    msg.temperature.resize(n);
+    msg.temperature_limit.resize(n);
 
     for (uint8_t i = 0; i < n; i++) {
         msg.controller_index[i] = status[i].controller_index;
@@ -165,6 +167,8 @@ void MotorManagerNode::timer_callback()
         msg.velocity[i] = status[i].velocity * kRadPerDeg;
         msg.effort[i] = status[i].effort;
         msg.overload_ratio[i] = status[i].overload_ratio;   // 음수 = 읽지 않음
+        msg.temperature[i] = status[i].temperature;         // NaN = 읽지 않음 · 수정 목록 191
+        msg.temperature_limit[i] = status[i].temperature_limit;
     }
 
     motor_status_publisher_->publish(msg);

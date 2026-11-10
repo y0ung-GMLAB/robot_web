@@ -51,6 +51,7 @@ from .motor_config_service import MotorConfigService
 from .motor_event_log import MotorEventLog
 from .auto_fault_recovery import AutoFaultRecovery
 from .motion_trace_service import MotionTraceService
+from .motor_temperature_log import MotorTemperatureLog
 from .scan_orchestrator import ScanOrchestrator
 from .bridge_helpers import (
     add_monitoring_motion_values,
@@ -323,6 +324,12 @@ class MotionWebBridge(Node):
         self._record_upper_service_crash()
         # 회차별 모션 기록 조회 · 쓰는 쪽은 motion_runtime.motion_trace
         self.motion_trace = MotionTraceService(self.project_repository)
+        # 직렬 서보 온도 · 1분 요약 CSV · 7일 · 한계 가까움 1건 · 화면과 무관하게 늘 적음 · 수정 목록 191
+        self.motor_temperature = MotorTemperatureLog(
+            Path(self.workspace_root) / common_paths.LOG_DIRNAME / 'motor_temperature',
+            on_warning=self._record_motor_temperature_warning,
+            logger=self.get_logger,
+        )
         self.web_publish_hz = float(self.declare_parameter('web_publish_hz', 10.0).value)
         self._web_access = self._build_web_access_info()
 
@@ -757,6 +764,23 @@ class MotionWebBridge(Node):
         )
         self._motor_event_log.record_minas_absolute_transition(payload)
         self._motor_event_log.record_mailbox_stuck_transition(payload)   # 멈춘 메일박스 · 139 ③
+        # 직렬 서보 온도 기록 · 조인트 이름은 1분에 한 번 · 수정 목록 191
+        self.motor_temperature.observe(payload, lambda: self._joint_names_for_motor_events(payload))
+
+    def _record_motor_temperature_warning(self, warning: Dict[str, Any]) -> None:
+        """온도가 서보 한계 10 °C 안으로 · 운영 로그 1건 · 수정 목록 191"""
+        axis = warning.get('axis')
+        joint = str(warning.get('joint') or '')
+        target = f'{axis}번 모터 · {joint}' if joint else f'{axis}번 모터'
+        temp = warning.get('temperature_c')
+        limit = warning.get('limit_c')
+        self._motor_event_log.append(
+            category='error',
+            event_type='motor_temperature_high',
+            target=target,
+            content=f'온도 {temp:g} °C · 서보 한계 {limit:g} °C 까지 {limit - temp:g} °C · 한계를 넘으면 서보가 토크를 끕니다',
+            details=dict(warning),
+        )
 
     def _joint_names_for_motor_events(self, payload: Dict[str, Any]) -> Dict[int, str]:
         """운영 로그 「0번 모터 · 조인트 이름」 · 적용된 조인트 매핑에서 축 → 조인트 이름 · 수정 목록 167

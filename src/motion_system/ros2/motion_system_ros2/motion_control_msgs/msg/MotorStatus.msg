@@ -8,3 +8,5 @@ float64[] position
 float64[] velocity
 float64[] effort
 float64[] overload_ratio   # overload ratio [%] of motor rating (MINAS 4D29h); negative = not read; empty in commands
+float64[] temperature      # servo temperature [degC] (serial servos); NaN = not read; empty in commands
+float64[] temperature_limit  # servo's own shutdown temperature [degC], read once at boot; NaN = unknown; empty in commands

@@ -44,6 +44,7 @@ from .motor_values import (
     normalized_errorcode,
     overload_ratio_pct,
     statusword_text,
+    temperature_c,
     transport_label,
 )
 
@@ -262,6 +263,9 @@ class StatePublisher:
             'current': effort if is_dynamixel else None,
             # 과부하율 % · 모터별 선택 매핑(MINAS 4D29h) · 안 읽는 축은 None
             'overload_ratio_pct': overload_ratio_pct(msg, index),
+            # 직렬 서보 온도 °C · 서보 온도 한계 °C · 안 읽는 축 · 통신 끊김은 None · 수정 목록 191
+            'temperature_c': None if communication_unavailable else temperature_c(msg, index),
+            'temperature_limit_c': temperature_c(msg, index, 'temperature_limit'),
             'position_raw': position_raw,
             'velocity_raw': None,
             'torque_raw': None,
@@ -455,6 +459,8 @@ class StatePublisher:
             'torque': None,
             'current': None,
             'overload_ratio_pct': None,
+            'temperature_c': None,
+            'temperature_limit_c': None,
             'position_raw': None,
             'velocity_raw': None,
             'torque_raw': None,

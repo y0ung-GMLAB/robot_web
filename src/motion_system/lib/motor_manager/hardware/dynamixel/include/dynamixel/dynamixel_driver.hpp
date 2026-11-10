@@ -46,6 +46,8 @@ public:
 
     uint64_t decodeUnsigned(const motor_interface::entry_table_t& entry) const override;
 
+    bool temperatureLimitEntry(motor_interface::entry_table_t& out) const override;
+
 private:
     struct model_entry_t {
         uint16_t address{0};
@@ -100,6 +102,11 @@ private:
 
     // interfaces[].sign_bit by interface id · -1 = two's complement
     std::array<int8_t, 256> sign_bits_{};
+
+    // param yaml `temperature_limit` · read once at boot · fix-list 191
+    bool has_temperature_limit_{false};
+
+    motor_interface::entry_table_t temperature_limit_entry_{};
 };
 
 } // namespace dynamixel

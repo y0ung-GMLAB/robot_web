@@ -32,3 +32,8 @@ interfaces:
   - { id: 6, name: "Present Position", type: s32 }
   - { id: 7, name: "Present Velocity", type: s32 }
   - { id: 8, name: "Present Current", type: s16 }
+  # 온도 °C · 매 주기 · 제어표에 없으면 건너뜀 · 수정 목록 191
+  - { id: 11, name: "Present Temperature", type: u8, optional: true }
+
+# 서보 온도 한계 °C · 부팅 때 한 번 읽음(쓰지 않음) · 화면 경고 기준 · 수정 목록 191
+temperature_limit: { id: 13, name: "Temperature Limit", type: u8, optional: true }

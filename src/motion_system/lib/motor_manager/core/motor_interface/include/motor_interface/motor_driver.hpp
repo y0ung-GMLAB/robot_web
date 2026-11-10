@@ -52,6 +52,8 @@ inline constexpr uint8_t ID_CURRENT_TEMPERATURE = 11;
 // MINAS 4D29h 과부하율 (모터 정격 대비 · 0.1% 단위 U16) · robot_web 2026-10-02
 // 드라이브 Ver1.03 이상만 지원 · 매핑은 모터별 선택 (robot_web minas_params)
 inline constexpr uint8_t ID_OVERLOAD_RATIO = 12;
+// 직렬 서보 온도 한계 (Feetech 13 · Dynamixel X 31) · 매 주기 읽지 않고 부팅 때 한 번 · robot_web 수정 목록 191
+inline constexpr uint8_t ID_TEMPERATURE_LIMIT = 13;
 
 inline constexpr uint8_t ID_OPERATING_MODE = 30;
 

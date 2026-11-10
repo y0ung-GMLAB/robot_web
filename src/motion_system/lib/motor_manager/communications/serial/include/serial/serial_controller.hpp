@@ -2,6 +2,7 @@
 #define SERIAL_SERIAL_CONTROLLER_HPP_
 
 #include <chrono>
+#include <limits>
 #include <string>
 
 #include "motor_interface/motor_controller.hpp"
@@ -59,6 +60,8 @@ private:
 
     bool retryConfig(bool allow_torque_off);
 
+    void readTemperatureLimit();
+
     void log(const std::string& message) const;
 
     void addBulkEntries();
@@ -102,6 +105,10 @@ private:
     std::chrono::steady_clock::time_point next_config_retry_{};
 
     uint32_t master_generation_{0};
+
+    // Servo's own temperature limit °C · read once after the boot items (and again
+    // after a reconnect) · NaN = unknown · fix-list 191
+    double temperature_limit_{std::numeric_limits<double>::quiet_NaN()};
 
     // Last write/command problem logged · the same one is not repeated every cycle
     std::string last_write_error_;

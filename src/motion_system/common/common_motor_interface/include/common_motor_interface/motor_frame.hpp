@@ -2,6 +2,7 @@
 #define COMMON_MOTOR_INTERFACE_MOTOR_FRAME_HPP_
 
 #include <cstdint>
+#include <limits>
 
 namespace motor_interface {
 
@@ -20,6 +21,10 @@ struct motor_frame_t {
     double effort{};
     // 과부하율 % (모터 정격 대비) · 음수 = 읽지 않음 (PDO 미매핑·미지원 드라이버)
     double overload_ratio{-1.0};
+    // 직렬 서보 온도 °C · 서보가 재는 값 · NaN = 읽지 않음 (AC · 제어표에 없음) · robot_web 수정 목록 191
+    double temperature{std::numeric_limits<double>::quiet_NaN()};
+    // 서보에 설정된 온도 한계 °C (넘으면 서보가 스스로 토크를 끔) · 부팅 때 한 번 읽음 · NaN = 모름
+    double temperature_limit{std::numeric_limits<double>::quiet_NaN()};
 };
 
 }  // namespace motor_interface

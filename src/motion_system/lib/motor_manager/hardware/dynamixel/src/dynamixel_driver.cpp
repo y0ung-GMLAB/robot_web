@@ -275,6 +275,26 @@ void dynamixel::DynamixelDriver::loadParameters(const std::string& param_file)
     number_of_interfaces_ = a_idx;
     number_of_rx_interfaces_ = r_idx;
     number_of_tx_interfaces_ = t_idx;
+
+    // Temperature limit · not part of the per-cycle read (it sits far from the
+    // present values and never changes while running) · read once after the boot
+    // items · a control table without it leaves it unknown · fix-list 191
+    has_temperature_limit_ = false;
+    temperature_limit_entry_ = motor_interface::entry_table_t{};
+    if (root["temperature_limit"]) {
+        motor_interface::entry_table_t e_cfg{};
+        if (loadEntry(root["temperature_limit"], e_cfg, false)) {
+            temperature_limit_entry_ = e_cfg;
+            has_temperature_limit_ = true;
+        }
+    }
+}
+
+bool dynamixel::DynamixelDriver::temperatureLimitEntry(motor_interface::entry_table_t& out) const
+{
+    if (!has_temperature_limit_) return false;
+    out = temperature_limit_entry_;
+    return true;
 }
 
 bool dynamixel::DynamixelDriver::isEnabled(

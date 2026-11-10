@@ -23,3 +23,8 @@ interfaces:
   - { id: 6, name: "Present Position", type: s16, sign_bit: 15 }
   - { id: 7, name: "Present Velocity", type: s16, sign_bit: 15 }
   - { id: 8, name: "Present Current", type: s16, optional: true }
+  # 온도 °C · 매 주기 · 같은 읽기 구간(56~70) 안이라 통신량 그대로 · 수정 목록 191
+  - { id: 11, name: "Present Temperature", type: u8, optional: true }
+
+# 서보 온도 한계 °C(주소 13) · 부팅 때 한 번 읽음(쓰지 않음) · 화면 경고 기준 · 수정 목록 191
+temperature_limit: { id: 13, name: "Temperature Limit", type: u8, optional: true }

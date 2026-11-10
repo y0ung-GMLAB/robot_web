@@ -8,6 +8,7 @@ import { installOverflowTitles } from './overflow_title.js';
 import { installTips } from './tip.js';
 import { api, poll, StatusStream } from './net.js';
 import { createShell, routeLabel } from './shell.js';
+import { bindTemperatureSource } from './temperature_dialog.js';
 import { renderHome } from './pages/home.js';
 import { loadPlay, renderPlay } from './pages/play.js';
 import { loadSchedule, renderSchedule } from './pages/schedule.js';
@@ -129,6 +130,8 @@ window.addEventListener('hashchange', () => {
   renderPage();
   shell.main.focus({ preventScroll: true });
 });
+
+bindTemperatureSource(() => state.snap);   // 모터 온도 창 · 열려 있는 동안 지금 값 · 수정 목록 191
 
 new StatusStream(
   (snap) => { state.snap = snap; changed(); },

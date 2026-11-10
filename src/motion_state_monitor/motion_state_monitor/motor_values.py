@@ -217,6 +217,17 @@ def overload_ratio_pct(msg: Any, index: int) -> Optional[float]:
     return round(value, 1)
 
 
+def temperature_c(msg: Any, index: int, field: str = 'temperature') -> Optional[float]:
+    """직렬 서보 온도 °C · `temperature_limit` 은 서보에 설정된 한계 · 안 읽는 축은 None · 수정 목록 191
+
+    motor_manager 는 안 읽는 축(AC · 제어표에 없음)에 NaN 을 싣는다 · 옛 메시지(칸 없음)도 None.
+    """
+    value = unchecked_float(array_value(msg, field, index, None))
+    if value is None or not math.isfinite(value):
+        return None
+    return round(value, 1)
+
+
 def dynamixel_position_raw(
     position_deg: float,
     metadata: Dict[str, Any],

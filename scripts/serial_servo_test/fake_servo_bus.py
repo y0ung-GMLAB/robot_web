@@ -58,12 +58,16 @@ class Servo:
             self.table[0:2] = DXL_MODEL.to_bytes(2, 'little')
             self.table[7] = sid
             self.table[11] = 3  # Operating Mode · Position (the boot item must make it 4)
+            self.table[31] = 80  # Temperature Limit °C · read once at boot (fix-list 191)
+            self.table[146] = 40 + sid  # Present Temperature °C
             self.torque_addr, self.goal_addr, self.present_addr, self.goal_size = 64, 116, 132, 4
             self.set_present(2048 + 100 * sid)
         else:
             self.table[3:5] = (777).to_bytes(2, 'little')
             self.table[5] = sid
             self.table[33] = 0
+            self.table[13] = 70  # Temperature Limit °C · read once at boot (fix-list 191)
+            self.table[63] = 35 + sid  # Present Temperature °C
             self.torque_addr, self.goal_addr, self.present_addr, self.goal_size = 40, 42, 56, 2
             self.set_present(2048 + 100 * sid)
         self.writes = []

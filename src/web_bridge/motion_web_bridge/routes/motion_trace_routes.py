@@ -26,6 +26,16 @@ def register_motion_trace_routes(app: FastAPI, bridge, project_call) -> None:
         path = await project_call(bridge.motion_trace.file_path, date, file)
         return FileResponse(path, media_type='text/csv; charset=utf-8', filename=path.name)
 
+    # 직렬 서보 온도 · 1분 요약 CSV · 7일 · 수정 목록 191
+    @app.get('/api/motor-temperature/days')
+    async def motor_temperature_days():
+        return await project_call(bridge.motor_temperature.days)
+
+    @app.get('/api/motor-temperature/download')
+    async def motor_temperature_download(date: str):
+        path = await project_call(bridge.motor_temperature.file_path, date)
+        return FileResponse(path, media_type='text/csv; charset=utf-8', filename=f'motor_temperature_{path.name}')
+
     @app.delete('/api/motion-trace/days/{date}')
     async def delete_motion_trace_day(date: str):
         return await project_call(bridge.motion_trace.delete_day, date)

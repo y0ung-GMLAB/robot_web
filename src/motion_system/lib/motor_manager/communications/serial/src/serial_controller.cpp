@@ -3,6 +3,7 @@
 #include <cstdio>
 #include <cstring>
 #include <iomanip>
+#include <limits>
 #include <sstream>
 #include <stdexcept>
 
@@ -308,9 +309,12 @@ void serial::SerialController::read(motor_interface::motor_frame_t& status)
             status.velocity = driver_->velocity(static_cast<int32_t>(readSignedValue(e)));
         } else if (e.id == motor_interface::ID_CURRENT_EFFORT) {
             status.effort = driver_->effort(static_cast<int16_t>(readSignedValue(e)));
+        } else if (e.id == motor_interface::ID_CURRENT_TEMPERATURE) {
+            // °C · 1 per raw on Dynamixel and Feetech · fix-list 191
+            status.temperature = static_cast<double>(readUnsignedValue(e));
         }
-        // Other ids (temperature …) are read but have no field here yet
     }
+    status.temperature_limit = temperature_limit_;
 
     status.controller_index = index_;
 
@@ -320,6 +324,8 @@ void serial::SerialController::read(motor_interface::motor_frame_t& status)
         (node_ && node_->missed_responses >= DXL_COMMUNICATION_LOSS_MISSES))
     {
         status.errorcode = COMMUNICATION_UNAVAILABLE_ERROR;
+        // last bytes are stale (or never read) · don't report them as a temperature
+        status.temperature = std::numeric_limits<double>::quiet_NaN();
     } else if (config_pending_) {
         status.errorcode = CONFIGURATION_PENDING_ERROR;
     }
@@ -378,6 +384,7 @@ bool serial::SerialController::retryConfig(bool allow_torque_off)
         if (!config_error_.empty()) log("boot items written");
         config_pending_ = false;
         config_error_.clear();
+        readTemperatureLimit();
         return true;
     }
 
@@ -388,6 +395,21 @@ bool serial::SerialController::retryConfig(bool allow_torque_off)
         config_error_ = error;
     }
     return false;
+}
+
+void serial::SerialController::readTemperatureLimit()
+{
+    // Display and warning only · a failed read leaves it unknown and changes nothing
+    // else (no retry, no error state) · fix-list 191
+    temperature_limit_ = std::numeric_limits<double>::quiet_NaN();
+    motor_interface::entry_table_t entry{};
+    if (!serial_driver_ || !serial_driver_->temperatureLimitEntry(entry)) return;
+    try {
+        if (!master_->readRegister(bus_id_, entry.index, entry.data, entry.size)) return;
+    } catch (const std::exception&) {
+        return;
+    }
+    temperature_limit_ = static_cast<double>(readUnsignedValue(entry));
 }
 
 void serial::SerialController::noteReconnect()

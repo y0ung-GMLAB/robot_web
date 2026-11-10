@@ -5,6 +5,7 @@
 import { h, dot, replace } from './dom.js';
 import { headline, pcRole as pcRoleOf, runMode, RUN_MODE_HINT } from './model.js';
 import * as act from './actions.js';
+import { openTemperatureDialog } from './temperature_dialog.js';
 
 export const NAV = [
   { label: '운영', items: [['home', '홈'], ['play', '재생'], ['schedule', '스케줄'], ['store', 'PC 현황']] },
@@ -34,6 +35,7 @@ export function issueAction(issue, navigate) {
     'ack-group-error': act.ackGroupError,
     'apply-motor-config': act.applyBootParams,
     open: () => navigate(action.target),
+    'open-temperature': openTemperatureDialog,
   }[action.kind];
   if (!run) return null;
   return h('button', { class: `btn btn-${issue.tone === 'bad' ? 'danger-soft' : 'warn'}`, type: 'button', onclick: run }, action.label);

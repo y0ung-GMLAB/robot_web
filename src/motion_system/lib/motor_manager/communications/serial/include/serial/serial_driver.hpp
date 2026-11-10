@@ -47,6 +47,14 @@ public:
 
     virtual uint64_t decodeUnsigned(const motor_interface::entry_table_t& entry) const;
 
+    // Temperature limit register read once at boot (param yaml `temperature_limit`) ·
+    // false = none · robot_web fix-list 191
+    virtual bool temperatureLimitEntry(motor_interface::entry_table_t& out) const
+    {
+        (void)out;
+        return false;
+    }
+
 protected:
     serial_protocol_config_t serial_protocol_{};
 };

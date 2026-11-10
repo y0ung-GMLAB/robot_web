@@ -69,6 +69,33 @@ export function motorLoad(motor) {
   return value === null || value === undefined || !Number.isFinite(Number(value)) ? null : Number(value);
 }
 
+/** 직렬 서보 온도 · 서버 칸 temperature_c · temperature_limit_c(서보에 설정된 한계) · 수정 목록 191
+ *  한계 10 °C 안 = warn · 3 °C 안 = bad · 온도를 읽는 축만(AC 는 빠짐) */
+export const TEMP_WARN_MARGIN_C = 10;
+export const TEMP_BAD_MARGIN_C = 3;
+export function motorTemperatures(snap) {
+  const motors = Array.isArray(snap?.motion_state?.motors) ? snap.motion_state.motors : [];
+  const num = (v) => (v === null || v === undefined || !Number.isFinite(Number(v)) ? null : Number(v));
+  return motors.filter((m) => m && (num(m.temperature_c) !== null || num(m.temperature_limit_c) !== null)).map((m) => {
+    const temp = num(m.temperature_c);
+    const limit = num(m.temperature_limit_c);
+    const margin = temp !== null && limit !== null ? limit - temp : null;
+    let tone = 'ok';
+    if (temp === null) tone = 'muted';
+    else if (margin !== null && margin <= TEMP_BAD_MARGIN_C) tone = 'bad';
+    else if (margin !== null && margin <= TEMP_WARN_MARGIN_C) tone = 'warn';
+    return {
+      index: m.controller_index,
+      name: String(m.motion_id || m.name || m.display_name || `${m.controller_index}번 모터`),
+      kind: String(m.motor_type_label || m.motor_type || ''),
+      temp, limit, margin, tone,
+      tempText: temp === null ? '-' : `${Math.round(temp)} °C`,
+      limitText: limit === null ? '-' : `${Math.round(limit)} °C`,
+      marginText: margin === null ? '-' : `${Math.round(margin)} °C`,
+    };
+  });
+}
+
 export function networkPcs(snap) {
   const list = snap?.coordination?.runtime?.network_pcs;
   return Array.isArray(list) ? list : [];
@@ -254,6 +281,14 @@ export function collectIssues(snap, sched, { connected = true } = {}) {
     const names = faulted.map((m) => `${m.controller_index}번${motorErrorText(m) ? ` (${motorErrorText(m)})` : ''}`).join(' · ');
     bad(`모터 알람 · ${names}`, '기구에 걸린 것이 없는지 확인한 뒤 오류를 초기화하세요',
       { kind: 'fault-reset', label: '오류 초기화' });
+  }
+  // 서보 온도가 한계 10 °C 안 · 넘으면 서보가 스스로 토크를 끈다 · 수정 목록 191
+  const hot = motorTemperatures(snap).filter((t) => t.tone === 'warn' || t.tone === 'bad');
+  if (hot.length) {
+    const names = hot.map((t) => `${t.index}번 ${t.name} ${t.tempText} (한계 ${t.limitText})`).join(' · ');
+    (hot.some((t) => t.tone === 'bad') ? bad : warn)(`모터 온도가 높습니다 · ${names}`,
+      '한계 온도를 넘으면 서보가 스스로 토크를 꺼서 관절이 처질 수 있습니다. 재생을 멈추고 식히세요.',
+      { kind: 'open-temperature', label: '온도 보기' });
   }
   const run = snap.motion_run_status || {};
   if (String(run.state || '') === 'error') {

@@ -74,7 +74,8 @@ def test_p_series_xl330_and_sts3215_param_files():
 
     _driver, xl430, _ = _param(config, 2)
     optional = {e['name'] for e in xl430['interfaces'] if e.get('optional')}
-    assert optional == {'Goal Current', 'Present Current'}   # 전류 없는 모델
+    # 전류 없는 모델 · 온도는 모든 모델에서 optional(제어표에 없으면 건너뜀 · 수정 목록 191)
+    assert optional == {'Goal Current', 'Present Current', 'Present Temperature'}
 
     driver, sts, master = _param(config, 3)
     assert driver['type'] == 'feetech' and driver['profile_position_value'] == 0

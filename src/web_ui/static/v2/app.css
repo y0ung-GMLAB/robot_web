@@ -467,6 +467,13 @@ details.raw pre { margin-top: 8px; max-height: 260px; overflow: auto; }
 /* 확인 창 · 알림 */
 dialog.confirm { max-width: 480px; width: calc(100% - 32px); padding: 24px; border: 1px solid var(--line); border-radius: 14px; background: var(--panel); color: var(--ink); }
 dialog.confirm::backdrop { background: rgb(0 0 0 / 60%); }
+/* 모터 온도 창 · 칸 너비 고정 · 수정 목록 191 */
+dialog.temp-dialog { max-width: 560px; }
+.temp-table { table-layout: fixed; }
+.temp-table td.temp-name { overflow: hidden; text-overflow: ellipsis; }
+.temp-sub { margin: 18px 0 6px; font-size: 15px; }
+.temp-downloads { max-height: 220px; overflow-y: auto; }
+.card-head-actions { gap: 12px; align-items: baseline; }
 .confirm h2 { margin-bottom: 10px; }
 .confirm-body { color: var(--ink-2); white-space: pre-line; line-height: 1.6; }
 .confirm-actions { display: flex; justify-content: flex-end; gap: 10px; margin-top: 20px; }

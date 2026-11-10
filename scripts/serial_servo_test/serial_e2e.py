@@ -196,7 +196,11 @@ class Client(Node):
 def row(msg, index):
     for k, ci in enumerate(msg.controller_index):
         if ci == index:
-            return {'err': msg.errorcode[k], 'sw': msg.statusword[k], 'pos': msg.position[k]}
+            temps = list(getattr(msg, 'temperature', []) or [])
+            limits = list(getattr(msg, 'temperature_limit', []) or [])
+            return {'err': msg.errorcode[k], 'sw': msg.statusword[k], 'pos': msg.position[k],
+                    'temp': temps[k] if k < len(temps) else None,
+                    'tlim': limits[k] if k < len(limits) else None}
     return None
 
 
@@ -255,6 +259,12 @@ def main():
         exp_ft = 100 * 2 * math.pi / 4096
         check('A5 DXL id1 position 2148 raw', abs(row(m, 0)['pos'] - exp_dxl) < 1e-4, f"{row(m, 0)['pos']:.5f} vs {exp_dxl:.5f}")
         check('A6 FT id1 position 2148 raw', abs(row(m, 2)['pos'] - exp_ft) < 1e-4, f"{row(m, 2)['pos']:.5f} vs {exp_ft:.5f}")
+        # 온도 · 매 주기 · 한계 · 부팅 때 한 번 · 수정 목록 191 · 손으로 쓴 Feetech param 에는 온도 칸이 없다 → NaN
+        temps = [(row(m, i)['temp'], row(m, i)['tlim']) for i in range(3)]
+        ft_has = os.environ.get('E2E_PARAMS') == 'generated'
+        ft_ok = temps[2] == (36.0, 70.0) if ft_has else all(math.isnan(v) for v in temps[2])
+        check('A7 temperature · DXL 41/42 °C limit 80 · FT ' + ('36 °C limit 70' if ft_has else 'not read (NaN)'),
+              temps[0] == (41.0, 80.0) and temps[1] == (42.0, 80.0) and ft_ok, str(temps))
 
         # --- B. commands ---
         client.send(0, [1], position=0.5)
