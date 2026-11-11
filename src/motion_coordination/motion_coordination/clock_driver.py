@@ -198,6 +198,15 @@ class ClockDriver:
         if run is not None and (timeline is None or timeline.plan_id != run['plan_id']):
             self._leave_when_safe(run, phase, state, choice)
             return
+        if (
+            run is not None and state in _FINISHED_STATES and phase not in BARRIER_PHASES
+            and now_m - float(run.get('sent_m') or 0.0) > self.STATUS_GRACE_SEC
+        ):
+            # 로컬 실행이 같은 번호로 끝났다(사람이 이 PC 만 정지 · `stopped`) · 번호가 남아 위(162)의 「사라짐」 에
+            # 안 걸리고 회차 끝 장벽도 아니라 매 틱 그대로 쥐고 있었다 → 그 운영시간 끝까지 안 돌아옴(실물 NY
+            # 2026-11-11 00:02 · f2 A2) · 놓고 다음 경계 복귀 길 · 정상 회차 중에는 끝난 상태가 오지 않는다 · 수정 목록 194
+            self._cancel(run, f'{run["cycle"]}회차 로컬 실행이 끝남 · {status.get("message") or state or "상태 없음"}')
+            return
         if run is not None:
             self._advance(run, timeline, choice, phase, state, status, now_w, now_m, view)
             return
@@ -279,7 +288,8 @@ class ClockDriver:
         slot = clock_grid.next_slot(timeline, now_w, prep_sec=prep)
         if slot is None:
             self._next_start_unix = 0.0
-            self._set_note('시간표 끝')
+            # 회차 후 정지로 남은 회차가 없음 · 그 운영시간 끝까지 유지(193) · 「시간표 끝」 은 틀린 말 · 수정 목록 194
+            self._set_note('그룹 정지 유지 · 운영시간 끝까지' if choice.stop_after else '시간표 끝')
             return
         self._next_start_unix = slot.start_unix
         skip_plan, skip_cycle = self._skip
@@ -478,6 +488,10 @@ class ClockDriver:
         plan_id, cycle = str(run.get('plan_id') or ''), int(run.get('cycle') or 0)
         self._skip = (plan_id, cycle)
         self._run = None
+        if why:
+            # 쉰 이유는 다음 들어갈 때까지 화면에 남긴다(189 규칙) · 전에는 `_note` 만 바꿔 다음 틱에 지워졌다(실물
+            # NY 2026-11-11 00:48 · f4 재시작 뒤 로그에만 있고 화면 note 는 빈 값) · 수정 목록 194
+            self._skip_note = why
         if not why or why == self._note:
             return
         self._note = why

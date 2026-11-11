@@ -137,13 +137,21 @@ class CoordinationWebBridge:
             'node_connected': bool(snapshot.get('node_connected')),
         }
 
-    def local_execution_blocker(self) -> str:
-        """Return why a local motion action conflicts with upper ownership."""
+    def local_execution_blocker(self, *, timetable_ok: bool = False) -> str:
+        """Return why a local motion action conflicts with upper ownership.
+
+        `timetable_ok` · 수동 모드 PC 의 단독 재생 · 초기 위치 이동 · 그룹이 시간표 재생이면 막지 않는다 · 수정 목록 194
+        (사용자 2026-11-11) · 시간표 재생은 각 PC 가 제 시계로 돌고 연동 노드는 그 모습을 실행처럼(`tt-` ·
+        참가 PC 없음) 보여 줄 뿐이라 수동으로 빠진 PC 까지 「그룹 재생 중」 이 됐다(실물 NY 2026-11-11 00:33 · f2) ·
+        이 PC 가 아직 회차를 돌고 있으면 로컬 재생 관리자가 실행 자리가 차 있다고 거부한다.
+        """
         runtime = self.snapshot().get('runtime') or {}
         execution = runtime.get('execution') if isinstance(runtime, Mapping) else {}
         connected = self._status_received_at and time.time() - self._status_received_at <= 3.0
         # 「그룹 실행 중」 판단의 주인은 `motion_common.run_state` 다 · §6-145
         if connected and run_state.group_is_active(dict(execution or {})):
+            if timetable_ok and str((execution or {}).get('execution_id') or '').startswith('tt-'):
+                return ''
             return '그룹 재생 중이라 단독 재생을 할 수 없습니다'
         return ''
 

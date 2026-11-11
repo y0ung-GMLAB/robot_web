@@ -2487,6 +2487,17 @@ class MotionWebBridge(Node):
         service = getattr(self, '_coordination_web_bridge', None)
         return service.local_execution_blocker() if service is not None else ''
 
+    def solo_start_group_blocker(self) -> str:
+        """사람이 누른 단독 재생 · 초기 위치 이동 · 시간표 재생 중이어도 이 PC 가 수동 모드면 막지 않는다 · 수정 목록 194"""
+        service = getattr(self, '_coordination_web_bridge', None)
+        if service is None:
+            return ''
+        try:
+            manual = run_mode_gate.current_run_mode(self) == 'manual'
+        except Exception:  # noqa: BLE001 · 모드를 못 읽으면 예전처럼 막는다
+            manual = False
+        return service.local_execution_blocker(timetable_ok=manual)
+
     @staticmethod
     def _with_motion_segment(payload: Dict[str, Any]) -> Dict[str, Any]:
         """구간 재생 칸 정리 · 화면 `segment` → `segment_start_sec` · `segment_end_sec` · 2026-10-16
@@ -2504,7 +2515,7 @@ class MotionWebBridge(Node):
         if human:
             return {'success': False, 'message': f'초기 위치 이동 불가: {human}'}
         if str(payload.get('request_source') or '') != 'network_control':
-            conflict = self.coordination_execution_blocker()
+            conflict = self.solo_start_group_blocker()
             if conflict:
                 return {'success': False, 'message': f'초기 위치 이동 불가: {conflict}'}
         blocker = self.multiturn_clear_blocker() or self.motor_runtime_control_blocker()
@@ -2571,7 +2582,7 @@ class MotionWebBridge(Node):
             self.get_logger().warn(f'스케줄 시작 거절 · {manual}')
             return {'success': False, 'message': f'모션 실행 불가: {manual}'}
         if str(payload.get('request_source') or '') != 'network_control':
-            conflict = self.coordination_execution_blocker()
+            conflict = self.solo_start_group_blocker()
             if conflict:
                 return {'success': False, 'message': f'모션 실행 불가: {conflict}'}
         blocker = self.multiturn_clear_blocker() or self.motor_runtime_control_blocker()

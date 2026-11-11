@@ -216,6 +216,36 @@ def test_active_dds_execution_blocks_local_start(tmp_path):
     assert '그룹 재생 중이라 단독 재생을' in service.local_execution_blocker()
 
 
+def test_a_manual_pc_may_play_solo_while_the_others_run_the_timetable(tmp_path):
+    """실물 NY 2026-11-11 00:33 · 수동 모드 f2 단독 재생이 시간표 재생(`tt-` · 참가 PC 없음) 때문에 거부 · 수정 목록 194"""
+    node = _Node()
+    service = CoordinationWebBridge(node, tmp_path, lambda: node.generation[0])
+    service._local_api = lambda *_args, **_kwargs: {
+        'execution': {'state': 'running', 'execution_id': 'tt-s1794373200', 'participants': []},
+    }
+    assert service.local_execution_blocker(timetable_ok=True) == ''
+    assert '그룹 재생 중' in service.local_execution_blocker(), '다른 쓰임(설정 저장 · 정지 전파 등)은 그대로'
+    service._local_api = lambda *_args, **_kwargs: {
+        'execution': {'state': 'running', 'execution_id': 'exec-a'},
+    }
+    assert '그룹 재생 중' in service.local_execution_blocker(timetable_ok=True), '신호 재생 그룹은 그대로 막는다'
+
+
+def test_the_solo_start_gate_lets_only_a_manual_pc_through_a_timetable_run(monkeypatch):
+    from motion_web_bridge.bridge_node import MotionWebBridge
+
+    seen = []
+    bridge = SimpleNamespace(
+        _coordination_web_bridge=SimpleNamespace(
+            local_execution_blocker=lambda *, timetable_ok=False: seen.append(timetable_ok) or '',
+        ),
+    )
+    for mode, expected in (('manual', True), ('schedule', False), ('off', False)):
+        monkeypatch.setattr(run_mode_gate, 'current_run_mode', lambda _node, mode=mode: mode)
+        MotionWebBridge.solo_start_group_blocker(bridge)
+        assert seen[-1] is expected, mode
+
+
 @pytest.mark.parametrize('state', ['motion_completed', 'cycle_initializing', 'completed', 'initialized'])
 def test_the_lockstep_barrier_is_still_a_group_run(tmp_path, state):
     """회차 맞춤 장벽 · 슬레이브 실행 상태 = 런타임 상태 · 전에는 「그룹 끝」 으로 읽어 구간 끝 주차가 거절됐다 · 155"""
