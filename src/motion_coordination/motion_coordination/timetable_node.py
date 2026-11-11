@@ -44,6 +44,8 @@ CLOCK_WARN_MS = 100.0
 CLOCK_SAMPLES = 40
 #: 슬레이브가 마스터에 정지를 요청하는 그룹 명령 · 마스터만 처리
 TIMETABLE_STOP_COMMAND = 'timetable_stop'
+#: 스케줄이 시작을 원하지만 사람 그룹 정지가 그 운영시간 끝까지 유지 · 수정 목록 193
+STOP_HELD_MESSAGE = '그룹 정지 유지 · 이 운영시간은 재생하지 않음 · 다시 돌리려면 마스터를 수동 → 스케줄'
 
 TIMETABLE_QOS = QoSProfile(
     depth=1, reliability=ReliabilityPolicy.RELIABLE, durability=DurabilityPolicy.TRANSIENT_LOCAL,
@@ -214,14 +216,23 @@ class TimetableMixin:
         mode = str(local.get('operation_mode') or '')
         if mode:
             changes['schedule_enabled'] = mode == timetable.SCHEDULE_MODE
+            if (
+                changes['schedule_enabled'] and not current.schedule_enabled
+                and str((current.stop or {}).get('plan_id') or '').startswith('tt-s')
+            ):
+                # 마스터를 수동 → 스케줄 · 사람이 다시 돌린다 · 그 운영시간의 그룹 정지를 지운다 · 다음 경계부터 ·
+                # 사용자 2026-11-11 · 수정 목록 193 (스케줄 점검은 더 이상 정지를 지우지 않는다)
+                changes['stop'] = {}
+        if local.get('timezone'):
+            changes['timezone'] = str(local['timezone'])
         if isinstance(local.get('schedule_items'), list):
             changes['schedules'] = tuple(dict(item) for item in local['schedule_items'] if isinstance(item, Mapping))
             # 스피커용 · 운영시간을 미리 계산해 싣는다(날짜가 바뀌면 하루 한 번 버전이 오른다)
-            changes['windows'] = tuple(timetable.schedule_windows(changes['schedules'], time.time()))
+            changes['windows'] = tuple(timetable.schedule_windows(
+                changes['schedules'], time.time(), changes.get('timezone') or current.timezone,
+            ))
         if isinstance(local.get('motion_playlist'), list):
             changes['playlist'] = tuple(str(name) for name in local['motion_playlist'])
-        if local.get('timezone'):
-            changes['timezone'] = str(local['timezone'])
         needs = [self._own_cycle_need()]
         for pc_id in self._registry.joined():
             if self._registry.status(pc_id) == 'offline':
@@ -338,6 +349,9 @@ class TimetableMixin:
         if not self._config.is_master:
             raise ValueError('이 PC 는 연동 슬레이브라 그룹 실행을 시작할 수 없습니다 · 마스터 PC 에서 시작하세요')
         current = self._tt()
+        if timetable.stop_holds(current, time.time()):
+            # 사람 그룹 정지 · 그 운영시간 끝까지 · 스케줄 점검(1분)이 지우지 않는다 · 수정 목록 193
+            return {'success': False, 'held': True, 'message': STOP_HELD_MESSAGE}
         updated = timetable.resume_schedule(current, issuer=self._config.pc_id)
         if updated is not current:
             self._store_timetable(updated, '스케줄 시작')
@@ -514,6 +528,8 @@ class TimetableMixin:
             # 시간표 회차를 아직 쥔 PC · 사람 시작(신호 재생)은 이게 빌 때까지 막힌다
             'held': self._timetable_held(),
             'stop': dict(config.stop or {}),
+            # 사람 그룹 정지가 이 운영시간 끝까지 유지 중 · 스케줄 노드가 시작을 보내지 않는다 · 수정 목록 193
+            'stop_holds': timetable.stop_holds(config, now),
             'plan_id': timeline.plan_id if timeline is not None else '',
             'plan_kind': timeline.kind if timeline is not None else '',
             'reason': choice.reason,

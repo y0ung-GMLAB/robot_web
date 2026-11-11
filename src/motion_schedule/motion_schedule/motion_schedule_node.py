@@ -218,6 +218,10 @@ class MotionScheduleNode(Node):
         # 전에는 여기서 바로 `success` 라고 찍고 True 를 돌려줬다 · 그래서
         # 로그에 `success: {'success': False, ...}` 같은 자기모순이 남았고,
         # 거부가 실패로 세어지지 않아 알람도 화면 표시도 생기지 않았다.
+        if isinstance(result, dict) and result.get('success') is False and result.get('held'):
+            # 사람 그룹 정지가 그 운영시간 끝까지 유지 중 · 거부가 아니다 · 실패로 세지 않는다 · 수정 목록 193
+            self.get_logger().info(f"[점검] {endpoint} · {result.get('message') or '그룹 정지 유지'}")
+            return False
         if isinstance(result, dict) and result.get('success') is False:
             message = str(result.get('message') or '이유를 알려주지 않았습니다')
             self._remember_failure(endpoint, message)
@@ -541,6 +545,18 @@ class MotionScheduleNode(Node):
             # "사람이 모션을 정지했습니다" 가 떴다 · 추측을 없앴다.
             return
 
+        if wanted is not None and not running and self._timetable_stop_holds():
+            # 시간표 재생 · 사람이 그룹 정지 · 그 운영시간 끝까지 유지 · 시작을 보내지 않는다 · 사용자 2026-11-11 ·
+            # 수정 목록 193 · 전에는 여기서 시작(= 정지 지우기)을 보내 한 회차만 쉬었다 · 다시 돌리려면 마스터 수동 → 스케줄
+            self._start_pending = False
+            if not getattr(self, '_stop_hold_noted', False):
+                self._stop_hold_noted = True
+                self.get_logger().info(
+                    "[점검] 구간 안 · 그룹 정지 유지 · 이 운영시간은 시작 안 함 · 다시 돌리려면 마스터 수동 → 스케줄"
+                )
+            return
+        self._stop_hold_noted = False
+
         if wanted is not None and not running:
             # 지난 점검에 보낸 시작이 받아들여졌는데 아직 안 돈다 · 거부로 센다 · 수정 목록 123·124
             #
@@ -576,6 +592,18 @@ class MotionScheduleNode(Node):
                 f"[점검] 구간 안인데 멈춰 있다 · 시작 · {wanted.schedule_name}"
             )
             self._execute_start(wanted, sit_out=sit_out)
+
+    def _timetable_stop_holds(self) -> bool:
+        """시간표 재생의 사람 그룹 정지가 이 운영시간 끝까지 유지 중인가 · 수정 목록 193
+
+        이번 점검에 `_motion_is_running` → `_group_execution` 이 읽어 둔 연동 상태를 쓴다(멈춤일 때 늘 읽힌다) ·
+        못 읽었으면 False(전처럼 시작을 보내고 연동 노드가 `held` 로 답한다).
+        """
+        if not (self._coordination_enabled() and self._coordination_joined()):
+            return False
+        runtime = getattr(self, '_last_coordination_runtime', None)
+        timetable = runtime.get('timetable') if isinstance(runtime, dict) else None
+        return bool(isinstance(timetable, dict) and timetable.get('stop_holds'))
 
     def _defer_start(self, item: ScheduleItem, reason: str) -> None:
         """준비가 덜 됐다 · 시작을 미루고 화면에 「대기」 로 남긴다 · 이유가 바뀔 때만 로그"""
