@@ -400,3 +400,29 @@ def test_operating_hours_start_also_restores_what_schedule_end_turned_off(tmp_pa
     assert service.start_blocker(wake_all=True) == ''
     assert calls == [('ac', 'servo_on', 0), ('ac', 'servo_on', 1)]
     assert not (runtime / 'schedule_end_state.json').exists()
+
+
+def test_operating_hours_start_logs_the_servo_on_even_when_the_axes_are_in_the_schedule_end_record(tmp_path):
+    """실물 NY 2026-11-11 A · 운영 종료 주차(0 · 1 OFF 기록) → 사람 ON → 사람 OFF · 기록에 있다고 이벤트 0건이었다 · 수정 목록 194"""
+    bridge, calls, runtime = _human_off(tmp_path)
+    (runtime / 'schedule_end_state.json').write_text(json.dumps({'ac_servo': [0], 'dynamixel': []}), encoding='utf-8')
+    events = []
+    service = _service(bridge, run_mode=lambda: 'schedule')
+    service._record_event = lambda kind, text, details: events.append((kind, text, details))
+    assert service.start_blocker(wake_all=True) == ''
+    assert calls == [('ac', 'servo_on', 0), ('ac', 'servo_on', 1)]
+    assert len(events) == 1 and events[0][0] == 'schedule_start_servo_on'
+    details = events[0][2]
+    assert details['turned_on']['ac_servo'] == [0, 1]
+    assert details['by_schedule_end']['ac_servo'] == [0] and details['woken']['ac_servo'] == [1]
+    assert '운영 종료 때 끈 축 AC 0번' in events[0][1] and 'AC 1번' in events[0][1]
+
+
+def test_a_rejoin_restoring_only_the_schedule_end_record_logs_no_operating_hours_event(tmp_path):
+    bridge, calls, runtime = _human_off(tmp_path)
+    (runtime / 'schedule_end_state.json').write_text(json.dumps({'ac_servo': [0], 'dynamixel': []}), encoding='utf-8')
+    events = []
+    service = _service(bridge, run_mode=lambda: 'schedule')
+    service._record_event = lambda kind, text, details: events.append((kind, text, details))
+    assert service.start_blocker() == '' and calls == [('ac', 'servo_on', 0)]
+    assert events == [], '운영시간 시작(wake_all)이 아니면 예전처럼'

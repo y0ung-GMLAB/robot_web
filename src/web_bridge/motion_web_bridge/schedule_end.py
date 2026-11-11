@@ -895,10 +895,11 @@ class ScheduleEndService:
         record = self._read_powered_off()
         ac_axes = list(record.get('ac_servo') or [])
         dxl_axes = list(record.get('dynamixel') or [])
-        woken: Dict[str, List[int]] = {'ac_servo': [], 'dynamixel': []}
+        recorded = {'ac_servo': set(ac_axes), 'dynamixel': set(dxl_axes)}
+        woke_all = False
         if wake_all and self._run_mode() in (None, 'schedule'):
+            woke_all = True
             extra_ac, extra_dxl, alarmed = self._off_axes_to_wake()
-            woken = {'ac_servo': sorted(set(extra_ac) - set(ac_axes)), 'dynamixel': sorted(set(extra_dxl) - set(dxl_axes))}
             ac_axes = sorted(set(ac_axes) | set(extra_ac))
             dxl_axes = sorted(set(dxl_axes) | set(extra_dxl))
             if alarmed:
@@ -933,13 +934,27 @@ class ScheduleEndService:
         if not self._wait(servos_on, SERVO_ON_WAIT_SEC):
             return '운영 종료 때 끈 서보가 켜지지 않았습니다. 모터 상태를 확인하세요'
         self._write_powered_off(None)
-        if woken['ac_servo'] or woken['dynamixel']:
-            text = '운영시간 시작 · 꺼져 있던 서보를 켰습니다(사람이 끈 것 포함)'
-            self._event('schedule_start_servo_on', text + _axes_text('AC', woken['ac_servo']) + _axes_text('다이나믹셀', woken['dynamixel']),
-                        {'woken': woken})
+        turned_on = {'ac_servo': sorted(set(ac_axes) - on_now), 'dynamixel': sorted(dxl_off)}
+        if woke_all and (turned_on['ac_servo'] or turned_on['dynamixel']):
+            # 실제로 켠 축이 있으면 기록 출처와 상관없이 1건 · 전에는 운영 종료 기록에 있던 축을 빼고 남은 것만 적어
+            # 운영 종료 주차(서보 OFF) → 사람 ON → 사람 OFF 인 축이 「운영 종료 때 끈 축」 으로 잡혀 이벤트가 0건이었다
+            # (실물 NY 2026-11-11 00:00 · f2 A) · 수정 목록 194
+            by_end = {key: [axis for axis in axes if axis in recorded[key]] for key, axes in turned_on.items()}
+            woken = {key: [axis for axis in axes if axis not in recorded[key]] for key, axes in turned_on.items()}
+            text = (
+                '운영시간 시작 · 꺼져 있던 서보를 켰습니다'
+                + _group_text('운영 종료 때 끈 축', by_end) + _group_text('그 밖(사람이 끈 축 등)', woken)
+            )
+            self._event('schedule_start_servo_on', text, {'woken': woken, 'by_schedule_end': by_end, 'turned_on': turned_on})
         self._set('idle', '운영 종료 때 끈 서보를 다시 켰습니다', restored={'ac_servo': ac_axes, 'dynamixel': dxl_axes})
         return ''
 
 
 def _axes_text(label: str, axes: List[int]) -> str:
     return f' · {label} {", ".join(map(str, axes))}번' if axes else ''
+
+
+def _group_text(title: str, axes: Dict[str, List[int]]) -> str:
+    """「 · 운영 종료 때 끈 축 AC 0, 1번 · 다이나믹셀 3번」 · 빈 묶음은 빈 글"""
+    parts = _axes_text('AC', axes.get('ac_servo') or []) + _axes_text('다이나믹셀', axes.get('dynamixel') or [])
+    return f' · {title} {parts[3:]}' if parts else ''
