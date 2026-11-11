@@ -531,6 +531,8 @@ class MotionWebBridge(Node):
                 category='system', event_type=event_type, target='스케줄 끝',
                 content=content, details=details,
             ),
+            # 운영시간 시작에 꺼진 서보를 켤 때 긴급 정지 잠김이면 켜지 않는다 · 수정 목록 193
+            emergency_latched=lambda: bool((self._safety_status or {}).get('emergency_latched')),
         )
         self._resume_schedule_end()
         self._manual_stream_request_publisher = self.create_publisher(
@@ -2371,11 +2373,19 @@ class MotionWebBridge(Node):
         )
 
     def schedule_end_start_blocker(self, payload: Dict[str, Any]) -> str:
-        """스케줄 끝에 끈 서보를 켠다 · 주차 중이면 막는다 · 수정 목록 36"""
+        """스케줄 끝에 끈 서보를 켠다 · 주차 중이면 막는다 · 수정 목록 36
+
+        스케줄 시간표의 첫 회차 준비(`group_prepare` · 실행 번호 `tt-s…` · 복귀 회차 없음) = 운영시간 시작 ·
+        꺼진 서보를 모두 켠다(사람이 끈 것 포함 · 긴급 정지 · 알람 제외) · 사용자 2026-11-11 · 수정 목록 193
+        """
         end = getattr(self, 'schedule_end', None)
         if end is None or str(payload.get('request_source') or '') == 'schedule_end':
             return ''
-        return end.start_blocker()
+        wake_all = (
+            str(payload.get('execution_id') or '').startswith('tt-s')
+            and not int(payload.get('join_cycle_number') or 0)
+        )
+        return end.start_blocker(wake_all=wake_all) if wake_all else end.start_blocker()
 
     def motion_run_check(self, payload: Dict[str, Any], timeout_sec: float = 3.0) -> Dict[str, Any]:
         """실행 준비 검사 · `timeout_sec` · 그룹 참가 준비는 남은 준비 예산을 넘긴다 · 수정 목록 164"""

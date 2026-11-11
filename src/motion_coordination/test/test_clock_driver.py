@@ -358,12 +358,30 @@ def test_the_first_cycle_after_a_schedule_end_park_prepares_and_plays():
     assert not any('쉼' in note for note in notes)
 
 
-def test_a_group_initialized_state_still_counts_as_busy():
-    clock, runtime, driver, _, _ = _pc(100_000.0)
+def test_a_stale_group_initialized_execution_is_cancelled_once_and_the_cycle_is_entered():
+    """수정 목록 193 ④ (사용자 2026-11-11) · 끝내기를 놓친 옛 그룹 실행(시작 전 · 연동 노드엔 없음)은 정리하고 들어간다
+
+    189 때는 바쁜 것으로 보고 회차마다 쉬었다 · 그룹 초기 위치 뒤 cancel_before_start 를 놓친 PC 가 운영시간 내내 쉬었다
+    (NY 엣지 ④ · WSL 재현) · 시간표 구동부는 연동 노드에 도는 신호 재생 실행이 있으면 돌지 않으므로 여기 온 것은 옛 실행.
+    """
+    clock, runtime, driver, _, notes = _pc(100_000.0)
     runtime.status = {'group_execution': True, 'execution_id': 'exec-other', 'state': 'initialized', 'phase': 'group_armed'}
-    runtime.busy = True
-    _run(driver, runtime, clock, _always(Choice(timeline=TIMELINE)), 3.0)
-    assert 'group_prepare' not in runtime.calls
+    _run(driver, runtime, clock, _always(Choice(timeline=TIMELINE)), 200.0)
+    assert runtime.calls[:2] == ['group_cancel', 'group_prepare']
+    assert runtime.calls.count('group_cancel') == 1
+    assert [cycle for cycle, _ in runtime.starts] == [1, 2]
+    assert any('끝내기를 놓친 옛 그룹 실행(exec-other' in note for note in notes)
+
+
+def test_a_running_group_execution_of_another_kind_is_not_touched():
+    """도는 재생(`running`)은 옛 실행이 아니다 · 손대지 않고 회차를 쉰다"""
+    clock, runtime, driver, _, notes = _pc(100_000.0)
+    status = {'group_execution': True, 'execution_id': 'exec-other', 'state': 'running', 'phase': 'group_running'}
+    for _ in range(300):
+        clock.advance(0.1)
+        driver.tick(Choice(timeline=TIMELINE), {'status': status, 'init_sec': runtime.init})
+    assert runtime.calls == []
+    assert any('다른 재생 중(exec-other)' in note for note in notes)
 
 
 def test_a_skipped_cycle_is_logged_once_per_cycle_and_stays_on_screen_until_the_next_try():
@@ -416,3 +434,51 @@ def test_a_dropped_cycle_is_logged_as_a_skipped_cycle():
     skipped = [note for note in notes if '회차 쉼' in note]
     assert skipped and skipped[0].startswith('시간표 재생 · 1회차 쉼 · 로컬 실행이 끝남')
     assert len(skipped) == 1
+
+
+# ---------------------------------------------------------------------- #
+# 수정 목록 193 (사용자 2026-11-11) · 그룹 정지로 선 PC 도 운영시간 끝에 주차 → 서보 OFF
+# ---------------------------------------------------------------------- #
+
+def _ticks(driver, clock, choice, seconds):
+    for _ in range(int(seconds / 0.1)):
+        clock.advance(0.1)
+        driver.tick(choice, {'status': {'state': 'stopped', 'phase': 'stopped'}, 'init_sec': 5.0})
+
+
+def test_a_pc_standing_by_a_group_stop_parks_once_when_the_operating_hours_end():
+    clock, runtime, driver, finished, notes = _pc(100_000.0)
+    _ticks(driver, clock, Choice(reason='정지됨', stopped_plan_id='tt-s100000'), 60.0)
+    assert finished == []
+    _ticks(driver, clock, Choice(reason='운영시간 아님'), 5.0)
+    assert finished == [('tt-s100000', True)]
+
+
+def test_a_stop_after_cycle_cut_timeline_parks_at_the_end_too():
+    clock, runtime, driver, finished, notes = _pc(100_000.0)
+    cut = Timeline('tt-s100000', anchor_unix=99_000.0, period_sec=100.0, end_unix=99_500.0)
+    _ticks(driver, clock, Choice(timeline=cut, stop_after=True), 30.0)
+    tomorrow = Timeline('tt-s186400', anchor_unix=186_460.0, period_sec=100.0, end_unix=190_000.0)
+    _ticks(driver, clock, Choice(timeline=tomorrow), 1.0)
+    assert finished == [('tt-s100000', True)]
+
+
+def test_no_park_if_the_stop_was_lifted_or_not_seen_for_a_while():
+    clock, runtime, driver, finished, notes = _pc(100_000.0)
+    _ticks(driver, clock, Choice(reason='정지됨', stopped_plan_id='tt-s100000'), 5.0)
+    _ticks(driver, clock, Choice(reason='마스터 스케줄 꺼짐'), 200.0)      # 마스터 수동으로 오래
+    _ticks(driver, clock, Choice(reason='운영시간 아님'), 5.0)
+    assert finished == [], '사람이 만지는 중 · 주차 안 함'
+    clock, runtime, driver, finished, notes = _pc(100_000.0)
+    _ticks(driver, clock, Choice(reason='정지됨', stopped_plan_id='tt-s100000'), 5.0)
+    _ticks(driver, clock, Choice(reason='수동 모드', stopped_plan_id='tt-s100000'), 5.0)
+    assert driver._stopped_window == 'tt-s100000'
+    _ticks(driver, clock, Choice(timeline=TIMELINE), 0.2)                  # 수동 → 스케줄 · 다시 돎
+    assert driver._stopped_window == ''
+
+
+def test_a_manual_pc_never_remembers_a_group_stop():
+    clock, runtime, driver, finished, notes = _pc(100_000.0)
+    _ticks(driver, clock, Choice(reason='수동 모드', stopped_plan_id='tt-s100000'), 5.0)
+    _ticks(driver, clock, Choice(reason='운영시간 아님'), 5.0)
+    assert finished == []

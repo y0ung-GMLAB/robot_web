@@ -288,3 +288,46 @@ def test_a_driver_run_whose_local_ended_is_not_held_and_no_fake_running_view(tmp
         'group_execution': True, 'execution_id': 'tt-s0', 'state': 'stopped', 'phase': 'stopped',
     }
     assert node._timetable_held() == {'pc-a': 'tt-s1'}, '새 실행을 막 보냈다 · 로컬은 아직 옛 번호'
+
+
+# --------------------------------------------------------------------------- #
+# 수정 목록 193 (사용자 2026-11-11) · 그룹 정지 유지 · 수동 → 스케줄이면 풂
+# --------------------------------------------------------------------------- #
+
+def _stopped_tt_node(tmp_path):
+    config = TimetableConfig(
+        version=1, issued_by='pc-a', mode=MODE_CLOCK, auto_period_sec=600.0, schedule_enabled=True,
+        schedules=(DAILY_ALL_DAY,), start_lead_sec=0.0,
+    )
+    node = _tt_node(tmp_path, config=config)
+    node._timetable_upkeep()
+    node._handle_local_request({'command': 'stop_after_cycle'})
+    assert timetable.stop_holds(node._timetable, time.time())
+    return node
+
+
+def test_the_schedule_start_does_not_clear_a_held_group_stop(tmp_path):
+    node = _stopped_tt_node(tmp_path)
+    result = node._timetable_start({'command': 'start_group', 'started_by': 'schedule'})
+    assert result['success'] is False and result['held'] is True
+    assert timetable.stop_holds(node._timetable, time.time()), '스케줄 점검이 지우지 않는다'
+    assert node._timetable_snapshot()['stop_holds'] is True
+
+
+def test_master_manual_then_schedule_clears_the_group_stop(tmp_path):
+    node = _stopped_tt_node(tmp_path)
+    node._local_status['operation_mode'] = 'manual'
+    node._timetable_upkeep_at = 0.0
+    node._timetable_upkeep()
+    assert node._timetable.stop, '수동으로만 바꾸면 그대로'
+    node._local_status['operation_mode'] = 'schedule'
+    node._timetable_upkeep_at = 0.0
+    node._timetable_upkeep()
+    assert node._timetable.stop == {} and not timetable.stop_holds(node._timetable, time.time())
+
+
+def test_the_bundle_carries_the_master_timezone_into_the_windows(tmp_path):
+    node = _tt_node(tmp_path)
+    node._local_status['timezone'] = 'America/New_York'
+    node._timetable_upkeep()
+    assert node._timetable.timezone == 'America/New_York'

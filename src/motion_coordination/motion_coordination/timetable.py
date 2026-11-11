@@ -11,7 +11,7 @@
 - 사람 정지(즉시 정지 · 회차 후 정지)도 이 묶음의 한 칸 · 끊긴 PC 는 다시 붙어 새 버전을 받는
   순간 따른다(따로 다시 보내기 없음)
 - 운영시간 · 마스터 스케줄 항목을 그대로 싣는다 · 각 PC 가 `schedule_engine` 과 같은 규칙으로 구간을 계산 ·
-  시각은 그 PC 의 시간대로 읽는다(모든 PC 시간대가 같아야 한다 · 다르면 표시)
+  시각은 마스터 시간대로 읽는다(묶음의 `timezone` · 못 읽으면 그 PC 시간대 · PC 시간대가 다르면 표시) · 수정 목록 193
 
 ROS 를 모른다 · 계산 · 파일만.
 """
@@ -199,15 +199,30 @@ def accept(current: TimetableConfig, incoming: TimetableConfig) -> bool:
 # 운영시간
 # --------------------------------------------------------------------------- #
 
-def schedule_windows(schedules, now_unix: float) -> List[Tuple[float, float]]:
-    """스케줄 항목 → 어제 · 오늘 · 내일 시작하는 운영시간들(유닉스 초) · 이 PC 시간대로 읽는다
+def _zone(name: str):
+    """시간대 이름 → tzinfo · 못 읽으면 None(이 PC 시간대) · IANA 이름(`America/New_York`)만"""
+    name = str(name or '').strip()
+    if not name:
+        return None
+    try:
+        from zoneinfo import ZoneInfo
+        return ZoneInfo(name)
+    except Exception:  # noqa: BLE001 · 약어(KST) · 모르는 이름 · 깨진 tzdata → 이 PC 시간대
+        return None
+
+
+def schedule_windows(schedules, now_unix: float, timezone: str = '') -> List[Tuple[float, float]]:
+    """스케줄 항목 → 어제 · 오늘 · 내일 시작하는 운영시간들(유닉스 초) · `timezone`(마스터) 으로 읽는다
 
     규칙은 `motion_common.schedule_window`(스케줄 노드 `schedule_engine` 과 같은 곳) · 스케줄 노드와 같은 답.
+    시간대가 마스터와 다른 PC 가 제 시간대로 읽어 엉뚱한 시각(NY 22:30 대신 KST 22:30)에 혼자 돌던 것을 막는다 ·
+    시간대 이름을 못 읽으면 전처럼 이 PC 시간대 · 사용자 2026-11-11 · 수정 목록 193
     """
     from motion_common.schedule_models import ScheduleItem
     from motion_common.schedule_window import day_matches as _day_matches, window_of
 
-    now = datetime.fromtimestamp(float(now_unix))
+    zone = _zone(timezone)
+    now = datetime.fromtimestamp(float(now_unix), zone) if zone is not None else datetime.fromtimestamp(float(now_unix))
     windows: List[Tuple[float, float]] = []
     for raw in schedules or ():
         try:
@@ -364,7 +379,27 @@ def stop_plan(
 
 def _window(config: TimetableConfig, now_unix: float) -> Optional[Tuple[float, float]]:
     """지금 운영시간 · 없으면 하루 안의 다음 운영시간 · `choose` 와 `stop_plan` 이 같은 창을 본다"""
-    return clock_grid.pick_window(schedule_windows(config.schedules, now_unix), now_unix)
+    return clock_grid.pick_window(schedule_windows(config.schedules, now_unix, config.timezone), now_unix)
+
+
+def stop_holds(config: TimetableConfig, now_unix: float) -> bool:
+    """사람 그룹 정지가 지금(또는 곧 시작할) 운영시간에 걸려 있나 · 그 운영시간 끝까지 유지 · 수정 목록 193
+
+    사용자 2026-11-11 · 스케줄 모드에서 마스터로 그룹 정지(회차 후 · 즉시)를 누르면 그 운영시간은 더 안 돈다 ·
+    다음 운영시간은 정시 · 같은 운영시간에 다시 돌리려면 마스터를 수동 → 스케줄(`TimetableNode` 설정 유지가
+    정지를 지운다). 전에는 마스터 스케줄 점검(1분)이 「구간 안인데 멈춤」 으로 보고 `resume_schedule` 로 지워
+    한 회차만 쉬었다(NY 엣지 시험 ③ · WSL 재현).
+    """
+    if not config.clock:
+        return False
+    stop = dict(config.stop or {})
+    plan_id = str(stop.get('plan_id') or '')
+    if not plan_id.startswith('tt-s') or stop.get('mode') not in {STOP_NOW, STOP_AFTER_CYCLE}:
+        return False
+    window = _window(config, now_unix)
+    if window is None or plan_id != clock_grid.schedule_plan_id(window[0]):
+        return False
+    return not _stale_stop(config, window)
 
 
 def _stale_stop(config: TimetableConfig, window: Tuple[float, float]) -> bool:

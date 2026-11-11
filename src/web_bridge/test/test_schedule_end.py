@@ -347,3 +347,56 @@ def test_a_stopped_robot_that_cannot_park_is_left_alone(tmp_path, kwargs, run_mo
 def test_a_running_robot_keeps_the_old_path_even_with_the_mode_reader(tmp_path):
     bridge, _calls, _runtime = _bridge(tmp_path, states=['running'], motors=[_on(0, servo_on=False)])
     assert _service(bridge, run_mode=lambda: 'schedule')._skip() is None, '도는 중 · 회차 끝을 기다린다'
+
+
+# --------------------------------------------------------------------------- #
+# 수정 목록 193 (사용자 2026-11-11) · 운영시간 시작 · 사람이 끈 서보도 켠다 · 긴급 정지 · 알람은 그대로
+# --------------------------------------------------------------------------- #
+
+def _human_off(tmp_path, motors=None):
+    """운영 종료 기록 없음 · 사람이 0 · 1번 서보를 끔"""
+    bridge, calls, runtime = _bridge(tmp_path, states=['idle'], motors=motors)
+    return bridge, calls, runtime
+
+
+def test_operating_hours_start_turns_on_servos_a_person_turned_off(tmp_path):
+    bridge, calls, runtime = _human_off(tmp_path)
+    events = []
+    service = _service(bridge)
+    service._record_event = lambda kind, text, details: events.append((kind, text, details))
+    assert service.start_blocker() == '' and calls == [], '복귀 회차 · 사람 조작 시작 · 사람이 끈 것은 그대로'
+    assert service.start_blocker(wake_all=True) == ''
+    assert calls == [('ac', 'servo_on', 0), ('ac', 'servo_on', 1)]
+    assert events and events[0][0] == 'schedule_start_servo_on' and events[0][2]['woken']['ac_servo'] == [0, 1]
+
+
+def test_operating_hours_start_skips_alarm_axes_and_an_emergency_latch(tmp_path):
+    motors = [
+        {'controller_index': 0, 'state': 'detected', 'motor_type': 'ac_servo', 'servo_on': False, 'errorcode': 0x1600},
+        {'controller_index': 1, 'state': 'detected', 'motor_type': 'ac_servo', 'servo_on': False},
+    ]
+    bridge, calls, runtime = _human_off(tmp_path, motors=motors)
+    service = _service(bridge)
+    assert service.start_blocker(wake_all=True) == ''
+    assert calls == [('ac', 'servo_on', 1)], '알람 축(0번)은 켜지 않음 · 준비 검사가 알람 이유를 띄운다'
+
+    motors[1]['servo_on'] = False
+    calls.clear()
+    service._emergency_latched = lambda: True
+    assert service.start_blocker(wake_all=True) == ''
+    assert calls == [], '긴급 정지 잠김 · 아무것도 켜지 않음'
+
+
+def test_operating_hours_start_wakes_only_in_schedule_mode(tmp_path):
+    bridge, calls, runtime = _human_off(tmp_path)
+    service = _service(bridge, run_mode=lambda: 'manual')
+    assert service.start_blocker(wake_all=True) == '' and calls == []
+
+
+def test_operating_hours_start_also_restores_what_schedule_end_turned_off(tmp_path):
+    bridge, calls, runtime = _human_off(tmp_path)
+    (runtime / 'schedule_end_state.json').write_text(json.dumps({'ac_servo': [0], 'dynamixel': []}), encoding='utf-8')
+    service = _service(bridge, run_mode=lambda: 'schedule')
+    assert service.start_blocker(wake_all=True) == ''
+    assert calls == [('ac', 'servo_on', 0), ('ac', 'servo_on', 1)]
+    assert not (runtime / 'schedule_end_state.json').exists()

@@ -576,3 +576,31 @@ def test_a_signal_group_outside_the_window_is_still_stopped(tmp_path):
     )
     node._reconcile(DAY.replace(hour=20))
     assert [endpoint for endpoint, _ in node.sent] == ['/api/motion-run/stop-after-cycle']
+
+
+# --------------------------------------------------------------------------- #
+# 수정 목록 193 (사용자 2026-11-11) · 시간표 재생 · 사람 그룹 정지는 그 운영시간 끝까지 · 스케줄이 다시 시작 안 함
+# --------------------------------------------------------------------------- #
+
+def _clock_master(tmp_path, *, holds):
+    node = _node(tmp_path, run_state='stopped', schedules=[_day_schedule()])
+    node._coordination_enabled = lambda: True
+    node._coordination_joined = lambda: True
+    node._last_failure = {}
+    node._last_coordination_runtime = {'timetable': {'stop_holds': holds}}
+    return node
+
+
+def test_a_held_group_stop_is_not_restarted_by_the_schedule(tmp_path):
+    node = _clock_master(tmp_path, holds=True)
+    node._reconcile(DAY.replace(hour=13))
+    node._reconcile(DAY.replace(hour=13, minute=1))
+    assert node.sent == [], '정지 유지 · 시작(= 정지 지우기)을 보내지 않음'
+    assert node._last_failure == {}, '거부 · 대기로 세지 않음'
+
+
+def test_without_a_held_stop_the_schedule_starts_as_before(tmp_path):
+    node = _clock_master(tmp_path, holds=False)
+    node._reconcile(DAY.replace(hour=13))
+    endpoint, payload = node.sent[0]
+    assert endpoint == '/api/coordination/control' and payload['command'] == 'start_group'

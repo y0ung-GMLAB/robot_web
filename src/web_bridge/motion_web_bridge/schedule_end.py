@@ -276,6 +276,7 @@ class ScheduleEndService:
         run_mode: Optional[Callable[[], str]] = None,
         in_window: Optional[Callable[[], bool]] = None,
         record_event: Optional[Callable[[str, str, Dict[str, Any]], Any]] = None,
+        emergency_latched: Optional[Callable[[], bool]] = None,
         sleep: Callable[[float], None] = time.sleep,
         monotonic: Callable[[], float] = time.monotonic,
     ) -> None:
@@ -291,6 +292,8 @@ class ScheduleEndService:
         # 슬레이브는 마스터의 그룹 시작이 `start_blocker` 로 다시 시도를 끊는다
         self._in_window_reader = in_window
         self._record_event = record_event
+        # 긴급 정지 잠김 · 운영시간 시작에 사람이 끈 서보까지 켤 때 잠겨 있으면 아무것도 켜지 않는다 · 수정 목록 193
+        self._emergency_latched = emergency_latched or (lambda: False)
         self._sleep = sleep
         self._monotonic = monotonic
         self._lock = threading.Lock()
@@ -857,14 +860,49 @@ class ScheduleEndService:
             self._write_retry(None)
             self._set('idle', '운영 종료 · 시작 요청이 들어와 주차 다시 시도 · 알림을 거둠')
 
-    def start_blocker(self) -> str:
-        """시작 전에 부른다 · 주차 중이면 막고 · 여기서 끈 모터는 켜고 확인한다."""
+    def _off_axes_to_wake(self) -> tuple[List[int], List[int], List[int]]:
+        """운영시간 시작 · 꺼진 서보 전부(사람이 끈 것 포함) · (AC, 다이나믹셀, 알람이라 건너뛴 축) · 수정 목록 193
+
+        사용자 2026-11-11 · 사람이 끈 서보도 쉬려고 끈 것 · 스케줄이면 운영시간 시작에 켠다 · 긴급 정지 잠김 ·
+        드라이브 알람으로 꺼진 축은 켜지 않는다(사람이 보고 풀어야 한다 · 알람 축은 준비 검사가 이유를 띄운다).
+        """
+        from . import motor_config_rules
+
+        if self._emergency_latched():
+            return [], [], []
+        ac_axes, dxl_axes, alarmed = [], [], []
+        for motor in self._detected_motors():
+            axis = motor.get('controller_index')
+            if axis is None or motor.get('servo_on') is not False:
+                continue
+            if int(motor.get('errorcode') or 0) or motor.get('fault'):
+                alarmed.append(int(axis))
+            elif motor_config_rules.is_ac_servo_motor(motor):
+                ac_axes.append(int(axis))
+            elif motor_config_rules.is_dynamixel_motor(motor):
+                dxl_axes.append(int(axis))
+        return sorted(ac_axes), sorted(dxl_axes), sorted(alarmed)
+
+    def start_blocker(self, *, wake_all: bool = False) -> str:
+        """시작 전에 부른다 · 주차 중이면 막고 · 여기서 끈 모터는 켜고 확인한다.
+
+        `wake_all` · 스케줄 운영시간 첫 회차 준비 · 운영 종료가 끈 축뿐 아니라 꺼진 서보를 모두 켠다(긴급 정지 ·
+        알람 제외) · 운영 중 사람이 끈 서보는 켜지 않는다(복귀 회차 `group_join` 은 여기 오지 않음) · 수정 목록 193
+        """
         if self.active():
             return '운영 종료 동작(기준점 이동 → 서보 OFF)이 진행 중입니다. 끝난 뒤 다시 시도하세요'
         self._take_over()
         record = self._read_powered_off()
-        ac_axes = record.get('ac_servo') or []
-        dxl_axes = record.get('dynamixel') or []
+        ac_axes = list(record.get('ac_servo') or [])
+        dxl_axes = list(record.get('dynamixel') or [])
+        woken: Dict[str, List[int]] = {'ac_servo': [], 'dynamixel': []}
+        if wake_all and self._run_mode() in (None, 'schedule'):
+            extra_ac, extra_dxl, alarmed = self._off_axes_to_wake()
+            woken = {'ac_servo': sorted(set(extra_ac) - set(ac_axes)), 'dynamixel': sorted(set(extra_dxl) - set(dxl_axes))}
+            ac_axes = sorted(set(ac_axes) | set(extra_ac))
+            dxl_axes = sorted(set(dxl_axes) | set(extra_dxl))
+            if alarmed:
+                self._set('idle', f'운영시간 시작 · 알람 축은 서보를 켜지 않음{_axes_text("모터", alarmed)}')
         if not ac_axes and not dxl_axes:
             return ''
 
@@ -895,6 +933,10 @@ class ScheduleEndService:
         if not self._wait(servos_on, SERVO_ON_WAIT_SEC):
             return '운영 종료 때 끈 서보가 켜지지 않았습니다. 모터 상태를 확인하세요'
         self._write_powered_off(None)
+        if woken['ac_servo'] or woken['dynamixel']:
+            text = '운영시간 시작 · 꺼져 있던 서보를 켰습니다(사람이 끈 것 포함)'
+            self._event('schedule_start_servo_on', text + _axes_text('AC', woken['ac_servo']) + _axes_text('다이나믹셀', woken['dynamixel']),
+                        {'woken': woken})
         self._set('idle', '운영 종료 때 끈 서보를 다시 켰습니다', restored={'ac_servo': ac_axes, 'dynamixel': dxl_axes})
         return ''
 

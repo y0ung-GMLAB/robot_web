@@ -43,6 +43,19 @@ _SOLO_BUSY_STATES = frozenset({
 })
 
 
+#: 시작 전에 멈춘 옛 그룹 실행(신호 재생) · 연동 노드에 그 실행이 없는데 로컬만 쥐고 있으면 끝내기(취소)를 놓친 것 ·
+#: 시간표 준비 때 정리하고 들어간다 · 도는 재생(`running` · 회차 사이 `waiting`)은 손대지 않는다 · 수정 목록 193 ④
+_STALE_GROUP_STATES = frozenset({'preparing', 'armed', 'initialized', 'start_scheduled'})
+
+
+def _stale_group(held: str, state: str, status: Mapping[str, Any]) -> bool:
+    """끝내기를 놓친 옛 그룹 실행인가 · 시간표 실행(`tt-`)이 아니고 시작 전 상태"""
+    return bool(
+        held and not held.startswith(PLAN_PREFIX) and status.get('group_execution')
+        and state in _STALE_GROUP_STATES
+    )
+
+
 def _occupied(held: str, state: str, status: Mapping[str, Any]) -> bool:
     """이 PC 가 다른 실행을 하고 있는가 · 시간표 회차에 못 들어간다
 
@@ -69,6 +82,8 @@ class ClockDriver:
     STATUS_GRACE_SEC = 3.0
     #: 초기 이동을 모를 때 · 신호 재생 스스로 잇기(끊김 시험 A)와 같은 10 s
     INIT_FALLBACK_SEC = 10.0
+    #: 그룹 정지를 이만큼 못 보면(마스터 수동 · 끊김) 운영시간 끝 주차 기억을 버린다 · 수정 목록 193
+    STOPPED_FORGET_SEC = 120.0
     #: 즉시 정지한 시간표 · 정지가 풀릴 때까지 건너뜀 · 수정 목록 188
     _STOPPED_SKIP = 10 ** 9
 
@@ -97,6 +112,11 @@ class ClockDriver:
         #: 마지막으로 경고 로그를 남긴 쉼 · (plan_id, 회차, 이유) · 같은 회차는 한 줄 · 수정 목록 189
         self._skip_logged: tuple = ('', 0, '')
         self._next_start_unix = 0.0
+        #: 사람 그룹 정지로 선 스케줄 시간표 · 그 운영시간이 끝나면 주차 → 서보 OFF 한 번 · 수정 목록 193
+        self._stopped_window = ''
+        self._stopped_seen_m = 0.0
+        #: 옛 그룹 실행을 정리한 번호 · 같은 실행은 한 번만 보낸다 · 수정 목록 193 ④
+        self._stale_cancelled = ''
 
     # ------------------------------------------------------------------ #
 
@@ -181,7 +201,49 @@ class ClockDriver:
         if run is not None:
             self._advance(run, timeline, choice, phase, state, status, now_w, now_m, view)
             return
+        if self._park_stopped_window(choice):
+            return
         self._maybe_enter(timeline, choice, view, status, live, state, now_w, now_m)
+
+    def _park_stopped_window(self, choice: Choice) -> bool:
+        """사람 그룹 정지로 선 운영시간 · 끝나면 이 PC 도 주차 → 서보 OFF · 수정 목록 193
+
+        정지가 운영시간 끝까지 유지된다(사용자 2026-11-11) · 회차를 쥔 PC 만 운영시간 끝에 주차하므로 정지로 선
+        PC 는 서보를 켠 채 밤을 샜다 · 정지를 본 시간표를 기억해 두고 운영시간이 끝나면(다음 날 시간표가 골라지거나
+        「운영시간 아님」) 한 번 주차한다 · 수동 · 끔 · 마스터 스케줄 꺼짐이면 기억만 두고 아무것도 안 한다(사람이 만짐) ·
+        같은 시간표가 다시 돌면(마스터 수동 → 스케줄) 기억을 지운다.
+        """
+        timeline = choice.timeline
+        stopped = ''
+        if choice.reason == '정지됨' and choice.stopped_plan_id.startswith(SCHEDULE_PREFIX):
+            stopped = choice.stopped_plan_id
+        elif choice.stop_after and timeline is not None and timeline.kind == 'schedule':
+            stopped = timeline.plan_id
+        if stopped:
+            self._stopped_window = stopped
+            self._stopped_seen_m = self._mono()
+            return False
+        plan_id = self._stopped_window
+        if not plan_id:
+            return False
+        if self._mono() - self._stopped_seen_m > self.STOPPED_FORGET_SEC:
+            # 정지를 한동안 못 봤다(마스터 수동 · 이 PC 수동) · 사람이 만지는 중 · 주차하지 않는다
+            self._stopped_window = ''
+            return False
+        if timeline is not None and timeline.plan_id == plan_id:
+            self._stopped_window = ''   # 다시 돈다
+            return False
+        ended = (
+            (timeline is not None and timeline.kind == 'schedule')
+            or (timeline is None and choice.reason == '운영시간 아님')
+        )
+        if not ended:
+            return False
+        self._stopped_window = ''
+        if self._finish is not None:
+            self._finish(plan_id, True, '운영시간 끝 · 그룹 정지로 서 있던 PC')
+        self._info(f'시간표 재생 · {plan_id} · 운영시간 끝 · 그룹 정지로 서 있던 PC · 기준점 주차 → 서보 OFF')
+        return True
 
     # ------------------------------------------------------------------ #
 
@@ -236,6 +298,15 @@ class ClockDriver:
             # 앞 회차를 쉰 이유는 다음 들어갈 때까지 남긴다 · 전에는 바로 지워져 흔적이 없었다(189)
             if not self._skip_note or self._note != self._skip_note:
                 self._set_note('')
+            return
+        if _stale_group(held, state, status) and held != self._stale_cancelled:
+            # 끝내기를 놓친 옛 그룹 실행 · 정리하고 다음 틱에 들어간다 · 같은 회차 안 · 수정 목록 193 ④
+            self._stale_cancelled = held
+            result = self._control({
+                'command': 'group_cancel', 'execution_id': held,
+                'network_operation_id': f'tt-stale-{uuid.uuid4().hex}',
+            })
+            self._warn(f'시간표 재생 · 끝내기를 놓친 옛 그룹 실행({held} · {state}) 정리 · {result.get("message") or ""}')
             return
         if _occupied(held, state, status):
             detail = held or ' · '.join(

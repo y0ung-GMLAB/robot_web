@@ -227,3 +227,55 @@ def test_a_stale_stop_left_by_an_older_master_is_ignored():
     assert (choice.halt_plan_id, choice.halt_at_unix) == (window_plan, _ts('2026-11-10 01:26:03')), '기록은 남음 · 그 전 실행만 세움'
     inside = replace(stale, halt={'plan_id': window_plan, 'at_unix': _ts('2026-11-10 13:00:00')})
     assert choose(inside, _ts('2026-11-10 13:00:10'), operation_mode='schedule').reason == '정지됨', '창 안 정지는 그대로'
+
+
+# --------------------------------------------------------------------------- #
+# 수정 목록 193 (사용자 2026-11-11) · 그룹 정지는 그 운영시간 끝까지 · 운영시간은 마스터 시간대로
+# --------------------------------------------------------------------------- #
+
+def test_a_group_stop_holds_until_the_end_of_that_operating_hours_and_not_the_next():
+    now = _ts('2026-11-10 12:05:00')
+    for after_cycle in (True, False):
+        stopped, plan_id = stop_plan(_clock(), issuer='floating1', after_cycle=after_cycle, now_unix=now)
+        assert plan_id.startswith('tt-s')
+        assert timetable.stop_holds(stopped, now)
+        assert timetable.stop_holds(stopped, _ts('2026-11-10 17:59:00'))
+        assert not timetable.stop_holds(stopped, _ts('2026-11-11 09:59:30')), '다음 운영시간은 정시'
+        assert choose(stopped, _ts('2026-11-11 10:30:00'), operation_mode='schedule').timeline is not None
+
+
+def test_a_stop_pressed_during_cycle_1_prep_holds_that_operating_hours():
+    """1회차 준비 중(창 시작 −60 s 이후) 정지 · 그 운영시간 전체 · 192 규칙(그 전 정지는 안 걸림)은 그대로"""
+    before = _ts('2026-11-10 09:59:30')
+    stopped, _ = stop_plan(_clock(), issuer='floating1', after_cycle=False, now_unix=before)
+    assert timetable.stop_holds(stopped, _ts('2026-11-10 10:30:00'))
+    early = _ts('2026-11-10 09:50:00')
+    stale, _ = stop_plan(_clock(), issuer='floating1', after_cycle=False, now_unix=early)
+    assert not timetable.stop_holds(stale, _ts('2026-11-10 10:30:00'))
+
+
+def test_no_stop_or_a_signal_mode_bundle_never_holds():
+    now = _ts('2026-11-10 12:05:00')
+    assert not timetable.stop_holds(_clock(), now)
+    stopped, _ = stop_plan(_clock(), issuer='floating1', after_cycle=True, now_unix=now)
+    assert not timetable.stop_holds(replace(stopped, mode='lockstep'), now)
+
+
+def test_operating_hours_are_read_in_the_master_timezone(monkeypatch):
+    """마스터 NY · 이 PC 가 KST 여도 NY 22:30 운영시간을 같은 순간으로 고른다 · 이름을 못 읽으면 이 PC 시간대"""
+    import time as _time
+    item = dict(DAILY, start_time='22:30:00', stop_time='23:30:00')
+    config = _clock(schedules=(item,), timezone='America/New_York')
+    picks = {}
+    for zone in ('America/New_York', 'Asia/Seoul'):
+        monkeypatch.setenv('TZ', zone)
+        _time.tzset()
+        now = 1794367740.0      # 2026-11-10 22:29 NY
+        picks[zone] = choose(config, now, operation_mode='schedule').timeline.plan_id
+    monkeypatch.setenv('TZ', 'Asia/Seoul')
+    _time.tzset()
+    assert picks['America/New_York'] == picks['Asia/Seoul'] == 'tt-s1794367800'
+    unknown = replace(config, timezone='KST')
+    assert choose(unknown, 1794367740.0, operation_mode='schedule').timeline.plan_id != 'tt-s1794367800'
+    monkeypatch.delenv('TZ')
+    _time.tzset()
