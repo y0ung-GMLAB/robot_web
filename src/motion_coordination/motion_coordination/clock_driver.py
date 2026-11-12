@@ -80,6 +80,8 @@ class ClockDriver:
     ENTER_WINDOW_SEC = 30.0
     #: 명령을 보낸 뒤 로컬 상태가 따라올 때까지 기다리는 시간 · 그 안에 사라져 보여도 끝난 것으로 보지 않는다
     STATUS_GRACE_SEC = 3.0
+    #: 같은 번호로 끝난 로컬 실행 · 이만큼 이어서 끝남이어야 놓는다 · 회차 끝 장벽 직전의 잠깐 `completed` 를 거른다 · 수정 목록 195
+    ENDED_CONFIRM_SEC = 5.0
     #: 초기 이동을 모를 때 · 신호 재생 스스로 잇기(끊김 시험 A)와 같은 10 s
     INIT_FALLBACK_SEC = 10.0
     #: 그룹 정지를 이만큼 못 보면(마스터 수동 · 끊김) 운영시간 끝 주차 기억을 버린다 · 수정 목록 193
@@ -117,6 +119,8 @@ class ClockDriver:
         self._stopped_seen_m = 0.0
         #: 옛 그룹 실행을 정리한 번호 · 같은 실행은 한 번만 보낸다 · 수정 목록 193 ④
         self._stale_cancelled = ''
+        #: 쥔 실행의 로컬이 끝남으로 보이기 시작한 때(mono) · 0 = 안 보임 · 수정 목록 195
+        self._ended_since_m = 0.0
 
     # ------------------------------------------------------------------ #
 
@@ -198,13 +202,22 @@ class ClockDriver:
         if run is not None and (timeline is None or timeline.plan_id != run['plan_id']):
             self._leave_when_safe(run, phase, state, choice)
             return
+        ended = run is not None and state in _FINISHED_STATES and phase not in BARRIER_PHASES
+        if not ended:
+            self._ended_since_m = 0.0
+        elif not self._ended_since_m:
+            self._ended_since_m = now_m
         if (
-            run is not None and state in _FINISHED_STATES and phase not in BARRIER_PHASES
-            and now_m - float(run.get('sent_m') or 0.0) > self.STATUS_GRACE_SEC
+            ended and now_m - float(run.get('sent_m') or 0.0) > self.STATUS_GRACE_SEC
+            and now_m - self._ended_since_m >= self.ENDED_CONFIRM_SEC
         ):
             # 로컬 실행이 같은 번호로 끝났다(사람이 이 PC 만 정지 · `stopped`) · 번호가 남아 위(162)의 「사라짐」 에
             # 안 걸리고 회차 끝 장벽도 아니라 매 틱 그대로 쥐고 있었다 → 그 운영시간 끝까지 안 돌아옴(실물 NY
-            # 2026-11-11 00:02 · f2 A2) · 놓고 다음 경계 복귀 길 · 정상 회차 중에는 끝난 상태가 오지 않는다 · 수정 목록 194
+            # 2026-11-11 00:02 · f2 A2) · 놓고 다음 경계 복귀 길 · 수정 목록 194
+            # 끝남이 이어서 보일 때만 · 정상 회차 끝에도 플레이어가 장벽(`motion_completed`) 전에 잠깐 `completed`
+            # (「모션 실행 완료」 · motion_player)를 낸다 · 그 틈을 정지로 읽어 다음 회차를 쉬었다(실물 NY 2026-11-11
+            # 14:31 · f2 23회차 끝 0.68 s 뒤 · 24회차 쉼) · 수정 목록 195
+            self._ended_since_m = 0.0
             self._cancel(run, f'{run["cycle"]}회차 로컬 실행이 끝남 · {status.get("message") or state or "상태 없음"}')
             return
         if run is not None:
