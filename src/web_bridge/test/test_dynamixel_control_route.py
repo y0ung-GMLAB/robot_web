@@ -42,3 +42,34 @@ def test_without_an_axis_nothing_is_sent():
 
     assert response.json() == {'success': False, 'message': 'axis is required'}
     assert calls == []
+
+
+def _servo_client(success=True):
+    """사람이 서보 · 토크를 켜면 운영 종료가 끈 축 기록에서 뺀다 · 수정 목록 198"""
+    forgot = []
+
+    def control(*args, **_kwargs):
+        return {'success': success}
+
+    bridge = SimpleNamespace(
+        manual=SimpleNamespace(ac_servo_control=control, dynamixel_torque_control=control),
+        schedule_end=SimpleNamespace(forget_powered_off=lambda kind, axes: forgot.append((kind, axes))),
+    )
+    app = FastAPI()
+    register_motor_routes(app, bridge, project_call=lambda *args, **kwargs: None)
+    return TestClient(app), forgot
+
+
+def test_a_person_turning_a_servo_on_clears_it_from_the_schedule_end_record():
+    client, forgot = _servo_client()
+    client.post('/api/motion-test/ac-servo/control', json={'action': 'servo_on', 'axis': 2})
+    client.post('/api/motion-test/ac-servo/control', json={'action': 'servo_on', 'scope': 'all'})
+    client.post('/api/motion-test/ac-servo/control', json={'action': 'servo_off', 'axis': 2})
+    client.post('/api/motion-test/dynamixel/control', json={'action': 'torque_on', 'axis': 5})
+    assert forgot == [('ac_servo', [2]), ('ac_servo', None), ('dynamixel', [5])], '끄기는 기록을 건드리지 않는다'
+
+
+def test_a_failed_servo_on_keeps_the_schedule_end_record():
+    client, forgot = _servo_client(success=False)
+    client.post('/api/motion-test/ac-servo/control', json={'action': 'servo_on', 'axis': 2})
+    assert forgot == []

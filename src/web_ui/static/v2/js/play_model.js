@@ -258,6 +258,9 @@ export function timetableView(snap) {
   const clock = tt.mode === 'clock';
   const next = Number(tt.next_start_unix) || 0;
   const auto = Number(tt.auto_period_sec) || 0;
+  // 지금 잰 자동 간격이 저장된 값보다 작음 · 운영시간 밖에서 내려간다 · 수정 목록 196
+  const measured = tt.measured_complete === true ? Number(tt.measured_auto_period_sec) || 0 : 0;
+  const lower = measured > 0 && measured < auto;
   const executionId = String(snap?.coordination?.runtime?.execution?.execution_id || '');
   return {
     known: Boolean(tt.mode),
@@ -265,7 +268,9 @@ export function timetableView(snap) {
     signalRun: Boolean(executionId) && !executionId.startsWith('tt-'),
     period: Number(tt.period_sec) || 0,
     auto,
-    autoText: auto ? `자동 ${auto.toFixed(0)} s` : '자동 · 애니메이션 길이 확인 중',
+    autoText: !auto ? '자동 · 애니메이션 길이 확인 중'
+      : lower ? `자동 ${auto.toFixed(0)} s → ${measured.toFixed(0)} s (운영시간 끝나면)`
+        : `자동 ${auto.toFixed(0)} s`,
     nextText: clock && next ? `다음 ${Number(tt.next_cycle) || ''}회차 · ${clockText(next)}` : '',
     reason: clock && !next ? String(tt.reason || '') : '',
     peers: tt.peers && typeof tt.peers === 'object' ? tt.peers : {},

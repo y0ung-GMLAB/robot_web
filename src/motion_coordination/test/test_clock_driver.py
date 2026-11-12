@@ -589,3 +589,48 @@ def test_the_brief_completed_before_the_cycle_barrier_is_not_a_stop():
     _run(driver, runtime, clock, _always(Choice(timeline=TIMELINE)), 500.0)
     assert [cycle for cycle, _ in runtime.starts] == [1, 2, 3, 4, 5]
     assert not any('회차 쉼' in note for note in notes)
+
+
+SERVO_OFF_MESSAGE = (
+    '그룹 모션 실행 실패: Motion ID f2_neck_pitch: 0번 모터 서보가 꺼져 있습니다; '
+    'Motion ID f2_neck_yaw: 1번 모터 서보가 꺼져 있습니다; Motion ID f2_eye_pitch: 2번 모터 서보가 꺼져 있습니다; '
+    'Motion ID f2_eye_yaw_r: 3번 모터 서보가 꺼져 있습니다; Motion ID f2_eye_yaw_l: 4번 모터 서보가 꺼져 있습니다'
+)
+
+
+def test_the_servo_off_reason_is_short_and_only_for_servo_off():
+    from motion_coordination.clock_driver import servo_off_reason
+
+    assert servo_off_reason(SERVO_OFF_MESSAGE) == '서보가 꺼져 있습니다(0~4번 모터)'
+    assert servo_off_reason('Motion ID a: 0번 모터 서보가 꺼져 있습니다; Motion ID b: 3번 모터 서보가 꺼져 있습니다') \
+        == '서보가 꺼져 있습니다(0, 3번 모터)'
+    mixed = 'Motion ID a: 0번 모터 서보가 꺼져 있습니다; Motion ID b: 1번 모터에 에러가 있습니다'
+    assert servo_off_reason(mixed) == '', '다른 이유가 섞이면 오류 그대로'
+    assert servo_off_reason('') == ''
+
+
+def test_a_servo_off_pc_that_was_let_in_rests_instead_of_erroring():
+    """NY 2026-11-12 00:32 · f2 정지 → 서보 OFF · 들어가기는 받아지고 로컬 검사에서 error · note 가 「오류」 였다 · 수정 목록 197"""
+    clock, runtime, driver, _, notes = _pc(100_000.0)
+    _run(driver, runtime, clock, _always(Choice(timeline=TIMELINE)), 100.0)
+    _human_stop(runtime, TIMELINE.plan_id)
+    real = runtime.control
+
+    def servo_off_control(payload):
+        result = real(payload)
+        if payload['command'] in {'group_join', 'group_prepare'} and result.get('success'):
+            runtime.session = {}
+            runtime.status = {
+                'group_execution': True, 'execution_id': payload['execution_id'], 'state': 'error',
+                'phase': 'error', 'message': SERVO_OFF_MESSAGE,
+            }
+        return result
+
+    runtime.control = servo_off_control
+    driver._control = servo_off_control
+    _run(driver, runtime, clock, _always(Choice(timeline=TIMELINE)), 100.0)
+    assert '시간표 재생 · 2회차 쉼 · 서보가 꺼져 있습니다(0~4번 모터)' in notes
+    assert not any('회차 오류' in note for note in notes)
+    note = driver.report()['note']
+    assert note.endswith('회차 쉼 · 서보가 꺼져 있습니다(0~4번 모터)'), note
+    assert [cycle for cycle, _ in runtime.starts] == [1]

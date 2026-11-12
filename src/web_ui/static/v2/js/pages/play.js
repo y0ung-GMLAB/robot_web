@@ -338,7 +338,9 @@ function timetableFields(state) {
       h('label', { class: 'inline' },
         h('span', { class: 'field-label inline' }, '회차 간격', tip([
           '0이면 자동 (가장 긴 애니메이션 + 초기 위치 이동)',
-          '자동보다 짧은 값은 저장되지 않음',
+          '지금 애니메이션으로 잰 자동값보다 짧은 값은 저장되지 않음',
+          '애니메이션을 짧게 바꾸면 자동값은 운영시간이 끝난 뒤 줄어듦',
+          '운영 중에 바로 줄이려면 회차 간격을 저장 (다음 회차부터 적용)',
           '시간표 재생(스케줄 운영)에서만 사용',
         ], '회차 간격 설명')),
         h('input', { class: 'input num-input', type: 'number', min: '0', step: '10', value: String(timetable.period || 0),
