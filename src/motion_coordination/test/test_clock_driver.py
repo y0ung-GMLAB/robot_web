@@ -504,6 +504,8 @@ def test_a_pc_stopped_by_a_person_lets_go_and_rejoins_at_the_next_boundary():
     assert runtime.starts == [(1, 100_060.0)]
     _human_stop(runtime, TIMELINE.plan_id)
     _run(driver, runtime, clock, _always(Choice(timeline=TIMELINE)), 4.0)
+    assert 'group_cancel' not in runtime.calls, '끝남이 5 s 이어져야 놓는다(195)'
+    _run(driver, runtime, clock, _always(Choice(timeline=TIMELINE)), 3.0)
     cancel = runtime.calls.index('group_cancel')
     assert 'group_join' in runtime.calls[cancel:], '놓고 바로 다음 경계(2회차) 복귀 길'
     assert any(note.startswith('시간표 재생 · 1회차 쉼 · 로컬 실행이 끝남 · 즉시 정지') for note in notes)
@@ -554,3 +556,36 @@ def test_a_held_group_stop_says_so_instead_of_timetable_end():
     cut = Timeline(TIMELINE.plan_id, TIMELINE.anchor_unix, 100.0, end_unix=TIMELINE.start_of(2) - 1e-3)
     _ticks(driver, clock, Choice(timeline=cut, stop_after=True), 5.0)
     assert driver.report()['note'] == '그룹 정지 유지 · 운영시간 끝까지'
+
+
+class _BlinkRuntime(FakeRuntime):
+    """실제 플레이어처럼 회차 끝에 장벽 전 잠깐 {completed · completed}(「모션 실행 완료」)"""
+
+    BLINK_SEC = 1.0
+
+    def step(self) -> None:
+        s = self.session
+        now = self.clock.mono()
+        if s and s['state'] == 'running' and now >= s['ends']:
+            s['state'] = 'blink'
+            s['blink_until'] = now + self.BLINK_SEC
+            self.status = {**self.status, 'state': 'completed', 'phase': 'completed', 'message': '모션 실행 완료'}
+            return
+        if s and s['state'] == 'blink':
+            if now >= s['blink_until']:
+                s['state'] = 'motion_completed'
+                self._show(phase='group_motion_completed')
+            return
+        super().step()
+
+
+def test_the_brief_completed_before_the_cycle_barrier_is_not_a_stop():
+    """실물 NY 2026-11-11 14:31 · f2 23회차 끝 0.68 s 뒤 「23회차 쉼 · 로컬 실행이 끝남 · 모션 실행 완료」 → 24회차 쉼 · 수정 목록 195"""
+    clock = Clock(100_000.0)
+    runtime = _BlinkRuntime(clock, clip=80.0, init=5.0)
+    notes = []
+    driver = ClockDriver(runtime.control, info=notes.append, warn=notes.append, wall=clock.wall, mono=clock.mono,
+                         finish=lambda plan, park, why: runtime.control({'command': 'group_cancel'}))
+    _run(driver, runtime, clock, _always(Choice(timeline=TIMELINE)), 500.0)
+    assert [cycle for cycle, _ in runtime.starts] == [1, 2, 3, 4, 5]
+    assert not any('회차 쉼' in note for note in notes)
