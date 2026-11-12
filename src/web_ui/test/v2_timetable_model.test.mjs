@@ -83,3 +83,12 @@ test('시간표 방식이어도 직접 누른 그룹 재생(신호 재생)이 �
   assert.equal(timetableView(held).signalRun, false, '시간표 실행은 신호 재생이 아님');
   assert.equal(groupRows(held).find((row) => row.id === 'f2').note, '마스터 스케줄 꺼짐');
 });
+
+test('지금 잰 자동 간격이 저장된 값보다 작으면 함께 보인다 · 다 잰 때만 (수정 목록 196)', () => {
+  const lower = timetableView(snap({ mode: 'clock', auto_period_sec: 940, measured_auto_period_sec: 80, measured_complete: true }));
+  assert.equal(lower.autoText, '자동 940 s → 80 s (운영시간 끝나면)');
+  const partial = timetableView(snap({ mode: 'clock', auto_period_sec: 940, measured_auto_period_sec: 80, measured_complete: false }));
+  assert.equal(partial.autoText, '자동 940 s', '끊긴 PC 가 있으면 잰 값을 믿지 않는다');
+  const same = timetableView(snap({ mode: 'clock', auto_period_sec: 940, measured_auto_period_sec: 940, measured_complete: true }));
+  assert.equal(same.autoText, '자동 940 s');
+});

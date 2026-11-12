@@ -393,6 +393,26 @@ class ScheduleEndService:
     def _write_powered_off(self, record: Optional[Dict[str, Any]]) -> None:
         self._write_json_file(STATE_FILE, record)
 
+    def forget_powered_off(self, kind: str, axes: Optional[List[int]] = None) -> None:
+        """사람이 서보(토크)를 켰다 · 그 축은 더 이상 「운영 종료 때 끈 축」 이 아니다 · 기록에서 뺀다 · 수정 목록 198
+
+        `axes` = None 이면 그 종류 전부(AC 「모두 켜기」). 전에는 운영 종료 OFF → 사람 ON → 사람 OFF 인 축이 다음 운영시간
+        시작 알림에 「운영 종료 때 끈 축」 으로 나왔다(NY 2026-11-11 21:00 → 22:09 f2).
+        """
+        if kind not in ('ac_servo', 'dynamixel'):
+            return
+        record = self._read_json_file(STATE_FILE)
+        if not record or not record.get(kind):
+            return
+        before = [int(axis) for axis in record.get(kind) or []]
+        after = [] if axes is None else [axis for axis in before if axis not in {int(item) for item in axes}]
+        if after == before:
+            return
+        record = {**record, kind: after}
+        if not any(record.get(name) for name in ('ac_servo', 'dynamixel')):
+            record = None
+        self._write_powered_off(record)
+
     def _write_retry(self, record: Optional[Dict[str, Any]]) -> None:
         self._write_json_file(RETRY_FILE, record)
 

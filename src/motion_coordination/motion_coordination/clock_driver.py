@@ -17,6 +17,7 @@
 
 from __future__ import annotations
 
+import re
 import time
 import uuid
 from typing import Any, Callable, Dict, Mapping, Optional
@@ -67,6 +68,38 @@ def _occupied(held: str, state: str, status: Mapping[str, Any]) -> bool:
     if held:
         return True
     return not status.get('group_execution') and state in _SOLO_BUSY_STATES
+
+
+_SERVO_OFF = re.compile(r'(\d+)번 모터 서보가 꺼져 있습니다')
+
+
+def servo_off_reason(message: str) -> str:
+    """로컬 준비 검사 실패가 서보 꺼짐뿐이면 짧은 이유 · 「서보가 꺼져 있습니다(0~4번 모터)」 · 아니면 '' · 수정 목록 197
+
+    재생 관리자 글 · 「그룹 모션 실행 실패: Motion ID f2_neck_pitch: 0번 모터 서보가 꺼져 있습니다; …」 · 조인트마다
+    `;` 로 이어진다 · 알람 · 감지 안 됨 같은 다른 이유가 하나라도 섞이면 오류 그대로 둔다.
+    """
+    parts = [part.strip() for part in str(message or '').split(';') if part.strip()]
+    if not parts:
+        return ''
+    axes = set()
+    for part in parts:
+        found = _SERVO_OFF.findall(part)
+        if not found:
+            return ''
+        axes.update(int(axis) for axis in found)
+    return f'서보가 꺼져 있습니다({_axis_ranges(sorted(axes))}번 모터)'
+
+
+def _axis_ranges(axes) -> str:
+    """[0, 1, 2, 4] → 「0~2, 4」"""
+    runs = []
+    for axis in axes:
+        if runs and axis == runs[-1][1] + 1:
+            runs[-1][1] = axis
+        else:
+            runs.append([axis, axis])
+    return ', '.join(str(a) if a == b else f'{a}~{b}' for a, b in runs)
 
 
 class ClockDriver:
@@ -169,7 +202,14 @@ class ClockDriver:
                 self._drop(f'{run["cycle"]}회차 로컬 실행이 끝남 · {status.get("message") or state or "상태 없음"}')
             return
         if run is not None and state == 'error':
-            self._cancel(run, f'{run["cycle"]}회차 오류 · {status.get("message") or ""}')
+            servo_off = servo_off_reason(str(status.get('message') or ''))
+            if servo_off:
+                # 사람이 세우고 서보를 끈 PC · 들어가기는 받아졌다가 로컬 준비 검사에서 걸림 · 쉰 것이지 오류가 아니다 ·
+                # 전에는 「N회차 오류 · 그룹 모션 실행 실패: Motion ID …」 로 축마다 긴 글이 남았다(NY 2026-11-12 00:32) ·
+                # 수정 목록 197
+                self._cancel(run, f'{run["cycle"]}회차 쉼 · {servo_off}')
+            else:
+                self._cancel(run, f'{run["cycle"]}회차 오류 · {status.get("message") or ""}')
             return
         if (
             run is not None and choice.halt_plan_id and choice.halt_plan_id == run['plan_id']
@@ -510,6 +550,7 @@ class ClockDriver:
         self._note = why
         prefix = f'{cycle}회차 '
         reason = why[len(prefix):] if why.startswith(prefix) else why
+        reason = reason[len('쉼 · '):] if reason.startswith('쉼 · ') else reason
         key = (plan_id, cycle, reason)
         if key != self._skip_logged:
             self._skip_logged = key

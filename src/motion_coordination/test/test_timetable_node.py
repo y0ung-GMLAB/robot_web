@@ -80,7 +80,7 @@ def test_only_the_master_changes_the_mode_and_a_short_period_is_refused(tmp_path
     result = node._handle_local_request({'command': 'timetable_set', 'mode': MODE_CLOCK, 'period_sec': 1000})
     assert result['success'] and node._timetable.clock and node._timetable.period_sec == 1000.0
     refused = node._handle_local_request({'command': 'timetable_set', 'period_sec': 900})
-    assert not refused['success'] and '최소 930' in refused['message']
+    assert not refused['success'] and '최소 940' in refused['message'], '하한 = 지금 잰 값(925 → 940) · 저장된 930 아님(196)'
     slave = _tt_node(tmp_path, master=False)
     assert not slave._handle_local_request({'command': 'timetable_set', 'mode': MODE_CLOCK})['success']
 
@@ -331,3 +331,80 @@ def test_the_bundle_carries_the_master_timezone_into_the_windows(tmp_path):
     node._local_status['timezone'] = 'America/New_York'
     node._timetable_upkeep()
     assert node._timetable.timezone == 'America/New_York'
+
+
+# --------------------------------------------------------------------------- #
+# 자동 회차 간격 줄이기 · 수정 목록 196 (NY 2026-11-12 · 60 s 클립인데 940 s 그대로)
+# --------------------------------------------------------------------------- #
+
+def _short_clip_node(tmp_path, *, schedules=(), **config):
+    """마스터 · 저장된 자동 940 · 지금은 4대 모두 60 s 클립(+ 초기 이동 5) · 운영시간 없음(기본)"""
+    node = _tt_node(tmp_path, config=TimetableConfig(
+        version=3, issued_by='pc-a', mode=MODE_CLOCK, auto_period_sec=940.0, schedule_enabled=True,
+        schedules=tuple(schedules), **config,
+    ))
+    node._local_status['cycle_need_sec'] = 65.0
+    node._local_status['schedule_items'] = list(schedules)
+    for pc_id in ('pc-b', 'pc-c', 'pc-d'):
+        node._registry.update(_member(pc_id))
+        node._timetable_peers[pc_id] = {'report': {'need': 65.0}, 'delays': []}
+    return node
+
+
+def test_the_auto_period_shrinks_outside_the_operating_hours_when_every_pc_reported(tmp_path):
+    node = _short_clip_node(tmp_path)
+    assert node._measured_auto_period() == (80.0, True), '65 + 6 + 2 → 80'
+    node._timetable_upkeep()
+    assert node._timetable.auto_period_sec == 80.0 and node._timetable.period() == 80.0
+    assert node._timetable_snapshot()['measured_auto_period_sec'] == 80.0
+
+
+def test_the_auto_period_grows_back_when_the_long_clip_returns(tmp_path):
+    node = _short_clip_node(tmp_path)
+    node._timetable_upkeep()
+    node._local_status['cycle_need_sec'] = 925.0
+    node._timetable_upkeep_at = 0.0
+    node._timetable_upkeep()
+    assert node._timetable.auto_period_sec == 940.0
+
+
+def test_the_auto_period_does_not_shrink_while_a_pc_is_missing_or_has_not_reported(tmp_path):
+    node = _short_clip_node(tmp_path)
+    node._registry._members['pc-d'] = _member('pc-d', received_monotonic=time.monotonic() - 3600.0)
+    assert node._measured_auto_period() == (80.0, False), '끊긴 PC 의 클립 길이를 모른다'
+    node._timetable_upkeep()
+    assert node._timetable.auto_period_sec == 940.0
+    quiet = _short_clip_node(tmp_path)
+    quiet._timetable_peers['pc-c'] = {'report': {}, 'delays': []}
+    quiet._timetable_upkeep()
+    assert quiet._timetable.auto_period_sec == 940.0, '아직 필요 시간을 보고 안 한 PC'
+
+
+def test_the_auto_period_does_not_shrink_while_a_cycle_runs(tmp_path, monkeypatch):
+    node = _short_clip_node(tmp_path, schedules=[DAILY_ALL_DAY])
+    monkeypatch.setattr(node, '_timetable_held', lambda: {'pc-b': 'tt-s1'})
+    node._timetable_upkeep()
+    assert node._timetable.auto_period_sec == 940.0, '회차를 도는 PC 가 있으면 운영시간 끝까지 그대로'
+    running = _short_clip_node(tmp_path, schedules=[DAILY_ALL_DAY])
+    window = timetable._window(running._timetable, time.time())
+    noon = window[0] + 3600.0   # 운영시간 안 · 1회차 지남
+    monkeypatch.setattr(time, 'time', lambda: noon)
+    running._timetable_upkeep()
+    assert running._timetable.auto_period_sec == 940.0
+
+
+def test_a_human_period_below_the_stored_auto_is_taken_when_the_clips_are_short(tmp_path):
+    node = _short_clip_node(tmp_path)
+    refused = node._handle_local_request({'command': 'timetable_set', 'period_sec': 70})
+    assert not refused['success'] and '최소 80' in refused['message']
+    result = node._handle_local_request({'command': 'timetable_set', 'period_sec': 120})
+    assert result['success'], result
+    assert node._timetable.period_sec == 120.0 and node._timetable.auto_period_sec == 80.0
+    assert node._timetable.period() == 120.0
+
+
+def test_a_human_period_keeps_the_stored_floor_while_a_pc_is_missing(tmp_path):
+    node = _short_clip_node(tmp_path)
+    node._registry._members['pc-d'] = _member('pc-d', received_monotonic=time.monotonic() - 3600.0)
+    refused = node._handle_local_request({'command': 'timetable_set', 'period_sec': 120})
+    assert not refused['success'] and '최소 940' in refused['message']

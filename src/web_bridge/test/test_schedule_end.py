@@ -426,3 +426,30 @@ def test_a_rejoin_restoring_only_the_schedule_end_record_logs_no_operating_hours
     service._record_event = lambda kind, text, details: events.append((kind, text, details))
     assert service.start_blocker() == '' and calls == [('ac', 'servo_on', 0)]
     assert events == [], '운영시간 시작(wake_all)이 아니면 예전처럼'
+
+
+def test_a_servo_a_person_turned_on_and_off_again_is_not_called_schedule_end_off(tmp_path):
+    """NY 2026-11-11 21:00 운영 종료 OFF → 사람 ON → 사람 OFF → 22:09 창 시작 · 「운영 종료 때 끈 축」 으로 나왔다 · 수정 목록 198"""
+    bridge, calls, runtime = _human_off(tmp_path)
+    state = runtime / 'schedule_end_state.json'
+    state.write_text(json.dumps({'ac_servo': [0, 1], 'dynamixel': [], 'at': 1.0}), encoding='utf-8')
+    events = []
+    service = _service(bridge, run_mode=lambda: 'schedule')
+    service._record_event = lambda kind, text, details: events.append((kind, text, details))
+    service.forget_powered_off('ac_servo', [0])   # 사람이 0번만 켬(그 뒤 다시 끔)
+    assert json.loads(state.read_text(encoding='utf-8'))['ac_servo'] == [1]
+    assert service.start_blocker(wake_all=True) == ''
+    details = events[0][2]
+    assert details['by_schedule_end']['ac_servo'] == [1] and details['woken']['ac_servo'] == [0]
+    assert '운영 종료 때 끈 축 AC 1번' in events[0][1] and '그 밖(사람이 끈 축 등) AC 0번' in events[0][1]
+
+
+def test_turning_every_servo_on_by_hand_clears_the_schedule_end_record(tmp_path):
+    bridge, calls, runtime = _human_off(tmp_path)
+    state = runtime / 'schedule_end_state.json'
+    state.write_text(json.dumps({'ac_servo': [0, 1], 'dynamixel': []}), encoding='utf-8')
+    service = _service(bridge)
+    service.forget_powered_off('ac_servo', None)
+    assert not state.exists()
+    service.forget_powered_off('ac_servo', [3])   # 기록 없음 · 아무 일 없음
+    assert not state.exists()

@@ -233,25 +233,67 @@ class TimetableMixin:
             ))
         if isinstance(local.get('motion_playlist'), list):
             changes['playlist'] = tuple(str(name) for name in local['motion_playlist'])
-        needs = [self._own_cycle_need()]
-        for pc_id in self._registry.joined():
-            if self._registry.status(pc_id) == 'offline':
-                continue
-            entry = (getattr(self, '_timetable_peers', None) or {}).get(pc_id) or {}
-            try:
-                needs.append(float((entry.get('report') or {}).get('need') or 0.0))
-            except (TypeError, ValueError):
-                pass
-        auto = clock_grid.auto_period(needs)
-        if auto > 0.0:
-            # 자동 간격은 늘리기만 · 다시 붙은 PC 하나 빠졌다고 줄이면 회차 시각이 흔들린다 · 줄이려면 사람이 입력
-            changes['auto_period_sec'] = max(auto, current.auto_period_sec) if current.version else auto
+        auto, complete = self._measured_auto_period()
+        stored = float(current.auto_period_sec) if current.version else 0.0
+        if auto > stored:
+            # 늘리는 쪽은 바로(운영 중이면 다음 경계 · `timetable.issue`)
+            changes['auto_period_sec'] = auto
+        elif 0.0 < auto < stored and complete and self._timetable_idle(current):
+            # 줄이는 쪽 · 붙은 PC 가 모두 보고했고 회차를 도는 중이 아닐 때만(운영시간 밖 · 1회차 전) · 수정 목록 196
+            # 전에는 늘리기만 해서 60 s 클립으로 바꿔도 940 s 그대로였다(NY 2026-11-11 22:10~03:00) · PC 하나 빠졌다고
+            # 줄이면 회차 시각이 흔들리므로 끊긴 PC · 아직 보고 안 한 PC 가 있으면 그대로 둔다
+            changes['auto_period_sec'] = auto
         updated = timetable.issue(current, issuer=self._config.pc_id, **changes)
         if updated is not current:
             self._store_timetable(updated, '마스터 설정 바뀜')
             self._publish_timetable(force=True)
         else:
             self._publish_timetable()
+
+    def _measured_auto_period(self) -> tuple:
+        """지금 잰 자동 회차 간격 · (값, 다 잼) · 수정 목록 196
+
+        값 = 이 PC + 끊기지 않은 참가 PC 의 필요 시간(가장 긴 클립 + 초기 이동)으로 `clock_grid.auto_period` ·
+        다 잼 = 이 PC 와 참가 PC 모두 끊기지 않았고 모두 필요 시간을 보고함 · 이때만 저장된 값보다 줄일 수 있다.
+        """
+        own = self._own_cycle_need()
+        needs = [own]
+        complete = own > 0.0
+        peers = getattr(self, '_timetable_peers', None) or {}
+        for pc_id in self._registry.joined():
+            if pc_id == self._config.pc_id:
+                continue
+            if self._registry.status(pc_id) == 'offline':
+                complete = False
+                continue
+            entry = peers.get(pc_id) or {}
+            try:
+                need = float((entry.get('report') or {}).get('need') or 0.0)
+            except (TypeError, ValueError):
+                need = 0.0
+            if need <= 0.0:
+                complete = False
+            needs.append(need)
+        return clock_grid.auto_period(needs), complete
+
+    def _timetable_idle(self, config: TimetableConfig) -> bool:
+        """시간표 회차를 도는 중이 아님 · 운영시간 밖 · 첫 회차 전이면서 아무 PC 도 회차를 쥐지 않음"""
+        if self._timetable_held():
+            return False
+        now = time.time()
+        timeline = timetable.choose(config, now, operation_mode=timetable.SCHEDULE_MODE).timeline
+        return timeline is None or clock_grid.running_cycle(timeline, now) == 0
+
+    def _period_floor(self, config: TimetableConfig) -> tuple:
+        """사람이 넣는 회차 간격의 하한 · (하한, 지금 잰 값, 다 잼)
+
+        다 쟀으면 지금 잰 값(애니메이션을 짧게 바꾸면 바로 줄어든다) · 아니면 저장된 값과 큰 쪽(끊긴 PC 의 긴
+        클립을 모른 채 줄이지 않게).
+        """
+        measured, complete = self._measured_auto_period()
+        if complete and measured > 0.0:
+            return measured, measured, True
+        return max(measured, float(config.auto_period_sec)), measured, False
 
     # ------------------------------------------------------------------ #
     # 이 PC 시간표 구동
@@ -326,10 +368,15 @@ class TimetableMixin:
                 period = float(request.get('period_sec') or 0.0)
             except (TypeError, ValueError) as exc:
                 raise ValueError('회차 간격이 숫자가 아닙니다') from exc
-            error = clock_grid.period_error(period, current.auto_period_sec)
+            floor, measured, complete = self._period_floor(current)
+            error = clock_grid.period_error(period, floor)
             if error:
                 raise ValueError(error)
             changes['period_sec'] = period
+            if complete and 0.0 < measured < float(current.auto_period_sec):
+                # 사람이 회차 간격을 저장 · 지금 잰 값으로 자동 간격도 내린다 · 운영 중이면 다음 경계부터(`issue`) ·
+                # 전에는 저장된 자동값(940)과 비교해 60 s 클립에 120 을 넣어도 거절됐다(NY 2026-11-12) · 수정 목록 196
+                changes['auto_period_sec'] = measured
         if 'initial_move_time_sec' in request:
             changes['initial_move_time_sec'] = max(float(request.get('initial_move_time_sec') or 0.0), 0.0)
         with self._lock:
@@ -504,6 +551,10 @@ class TimetableMixin:
         upcoming = clock_grid.next_slot(timeline, now, prep_sec=0.0) if timeline is not None else None
         driver = getattr(self, '_clock_driver', None)
         offsets = self._peer_clock_offsets_ms()
+        try:
+            measured_auto, measured_complete = self._measured_auto_period()
+        except AttributeError:   # 옛 시험 노드(`__new__`) · 레지스트리 없음
+            measured_auto, measured_complete = 0.0, False
         peers = {}
         for pc_id, entry in (getattr(self, '_timetable_peers', None) or {}).items():
             report = entry.get('report') or {}
@@ -524,6 +575,10 @@ class TimetableMixin:
             'period_sec': float(config.period_sec),
             'auto_period_sec': float(config.auto_period_sec),
             'effective_period_sec': float(config.period()),
+            # 지금 잰 자동 간격 · 저장된 값보다 작으면 운영시간 밖에서 내려간다(또는 사람이 회차 간격 저장) · 수정 목록 196
+            # 마스터만 모든 PC 값을 안다 · 슬레이브는 제 값과 받은 하트비트만이라 참고용
+            'measured_auto_period_sec': measured_auto,
+            'measured_complete': measured_complete,
             'schedule_enabled': bool(config.schedule_enabled),
             # 시간표 회차를 아직 쥔 PC · 사람 시작(신호 재생)은 이게 빌 때까지 막힌다
             'held': self._timetable_held(),

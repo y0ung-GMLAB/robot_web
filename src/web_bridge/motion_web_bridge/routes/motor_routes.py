@@ -5,6 +5,17 @@ from fastapi import FastAPI, HTTPException, Request
 from motion_common import motor_kinds
 
 
+def _forget_schedule_end_off(bridge, kind: str, axes) -> None:
+    """사람이 서보 · 토크를 켬 · 운영 종료가 끈 축 기록에서 뺀다 · 다음 운영시간 시작 알림 글이 맞게 · 수정 목록 198"""
+    end = getattr(bridge, 'schedule_end', None)
+    if end is None or not hasattr(end, 'forget_powered_off'):
+        return
+    try:
+        end.forget_powered_off(kind, axes)
+    except Exception:  # noqa: BLE001 · 기록 정리 실패가 서보 응답을 막지 않게
+        pass
+
+
 def register_motor_routes(app: FastAPI, bridge, project_call) -> None:
     @app.post('/api/motors/scan')
     async def scan_motors():
@@ -212,18 +223,30 @@ def register_motor_routes(app: FastAPI, bridge, project_call) -> None:
             axis = int(body.get('axis'))
         except (TypeError, ValueError):
             return {'success': False, 'message': 'axis is required'}
-        return await asyncio.to_thread(
+        result = await asyncio.to_thread(
             bridge.manual.dynamixel_torque_control,
             body.get('action'),
             [axis],
         )
+        if str(body.get('action') or '') == 'torque_on' and result.get('success'):
+            _forget_schedule_end_off(bridge, 'dynamixel', [axis])
+        return result
 
     @app.post('/api/motion-test/ac-servo/control')
     async def ac_servo_control(request: Request):
         body = await request.json()
-        return await asyncio.to_thread(
+        result = await asyncio.to_thread(
             bridge.manual.ac_servo_control,
             body.get('action'),
             body.get('axis'),
             body.get('scope', 'selected'),
         )
+        if str(body.get('action') or '').strip().lower().replace('-', '_') == 'servo_on' and result.get('success'):
+            if str(body.get('scope') or 'selected').strip().lower() == 'all':
+                _forget_schedule_end_off(bridge, 'ac_servo', None)
+            else:
+                try:
+                    _forget_schedule_end_off(bridge, 'ac_servo', [int(body.get('axis'))])
+                except (TypeError, ValueError):
+                    pass
+        return result
