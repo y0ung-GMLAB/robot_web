@@ -453,3 +453,73 @@ def test_turning_every_servo_on_by_hand_clears_the_schedule_end_record(tmp_path)
     assert not state.exists()
     service.forget_powered_off('ac_servo', [3])   # 기록 없음 · 아무 일 없음
     assert not state.exists()
+
+
+# --------------------------------------------------------------------------- #
+# 수정 목록 217 (NY 2026-11-16) · 연동 노드 길(wait=False) · 서보 켜기를 기다리지 않고 「켜는 중」 으로 바로 답
+# 전에는 다 켜질 때까지(최대 5 s) HTTP 를 쥐어 연동 노드 실행기가 2~4 s 섰다(살아 있음 알림 끊김 경고)
+# --------------------------------------------------------------------------- #
+
+def test_operating_hours_start_from_the_coordination_node_answers_at_once_while_servos_turn_on(tmp_path):
+    import threading
+    from motion_web_bridge.schedule_end import WAKING_MESSAGE
+
+    bridge, calls, _runtime = _human_off(tmp_path)
+    service = _service(bridge, run_mode=lambda: 'schedule')
+    gate = threading.Event()
+    real_wait = service._wait
+    service._wait = lambda predicate, timeout: gate.wait(5) and real_wait(predicate, timeout)
+
+    assert service.start_blocker(wake_all=True, wait=False) == WAKING_MESSAGE, '켜기는 따로 스레드 · 바로 답'
+    assert service.start_blocker(wake_all=True, wait=False) == WAKING_MESSAGE, '켜는 중에 다시 물어도 같은 답'
+    gate.set()
+    service._wake_thread.join(5)
+    assert calls == [('ac', 'servo_on', 0), ('ac', 'servo_on', 1)], '한 번만 켬'
+    assert service.start_blocker(wake_all=True, wait=False) == '', '다 켜졌으면 바로 진행'
+    assert calls == [('ac', 'servo_on', 0), ('ac', 'servo_on', 1)]
+
+
+def test_a_failed_background_servo_on_is_reported_once_then_tried_again(tmp_path):
+    from motion_web_bridge.schedule_end import WAKING_MESSAGE
+
+    bridge, calls, _runtime = _human_off(tmp_path)
+    service = _service(bridge, run_mode=lambda: 'schedule')
+    # 명령은 받았는데 끝내 안 켜짐(드라이브가 안 따라옴)
+    service._ac_servo_control = lambda action, axis, mode: (calls.append(('ac', action, axis)), {'success': True})[1]
+    service._wait = lambda predicate, timeout: False
+
+    assert service.start_blocker(wake_all=True, wait=False) == WAKING_MESSAGE
+    service._wake_thread.join(5)
+    reason = service.start_blocker(wake_all=True, wait=False)
+    assert reason and reason != WAKING_MESSAGE and '켜지지 않았습니다' in reason, '실패 이유 · 연동 노드는 그 회차를 쉰다'
+    assert service.start_blocker(wake_all=True, wait=False) == WAKING_MESSAGE, '이유는 한 번만 · 다음 물음은 다시 켜기'
+    service._wake_thread.join(5)
+
+
+def test_operating_hours_start_with_every_servo_already_on_needs_no_thread(tmp_path):
+    bridge, calls, runtime = _bridge(tmp_path, states=['idle'], motors=[_on(0), _on(1)])
+    (runtime / 'schedule_end_state.json').write_text(json.dumps({'ac_servo': [0], 'dynamixel': []}), encoding='utf-8')
+    service = _service(bridge, run_mode=lambda: 'schedule')
+    assert service.start_blocker(wake_all=True, wait=False) == '' and calls == []
+    assert service._wake_thread is None
+    assert not (runtime / 'schedule_end_state.json').exists(), '기록 정리만 바로'
+
+
+def test_group_prepare_from_the_coordination_node_answers_pending_while_servos_turn_on():
+    """웹 `motion_group_prepare` · 연동 노드 길은 기다리지 않고(wait=False) 「켜는 중」 이면 `pending` 으로 바로 답 · 수정 목록 217"""
+    from motion_web_bridge import bridge_node
+    from motion_web_bridge.schedule_end import WAKING_MESSAGE
+
+    seen = {}
+
+    def blocker(payload, wait=True):
+        seen['wait'] = wait
+        return WAKING_MESSAGE
+
+    def no_forward(*_args, **_kwargs):
+        raise AssertionError('켜는 중에는 재생 관리자에 넘기지 않는다')
+
+    fake = SimpleNamespace(group_prepare_gate=lambda: '', schedule_end_start_blocker=blocker, _request_motion_run=no_forward)
+    result = bridge_node.MotionWebBridge.motion_group_prepare(fake, {'execution_id': 'tt-s1', 'command': 'group_prepare'})
+    assert result == {'success': False, 'pending': 'servo_wake', 'message': WAKING_MESSAGE}
+    assert seen['wait'] is False

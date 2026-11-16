@@ -35,7 +35,7 @@ from .coordination_bridge import (
 from . import after_response, motion_file_analysis, motion_joint_values, motor_config_rules, run_mode_gate
 from .execution_context_service import ExecutionContextService
 from .manual_motor_commands import ManualMotorCommandService
-from .schedule_end import ScheduleEndService
+from .schedule_end import WAKING_MESSAGE, ScheduleEndService
 from .supervisor_watchdog import SupervisorWatchdog
 from .startup_ready import StartupReadiness
 from .auto_backup import AutoBackupService
@@ -2422,11 +2422,12 @@ class MotionWebBridge(Node):
             details=entry,
         )
 
-    def schedule_end_start_blocker(self, payload: Dict[str, Any]) -> str:
+    def schedule_end_start_blocker(self, payload: Dict[str, Any], *, wait: bool = True) -> str:
         """스케줄 끝에 끈 서보를 켠다 · 주차 중이면 막는다 · 수정 목록 36
 
         스케줄 시간표의 첫 회차 준비(`group_prepare` · 실행 번호 `tt-s…` · 복귀 회차 없음) = 운영시간 시작 ·
-        꺼진 서보를 모두 켠다(사람이 끈 것 포함 · 긴급 정지 · 알람 제외) · 사용자 2026-11-11 · 수정 목록 193
+        꺼진 서보를 모두 켠다(사람이 끈 것 포함 · 긴급 정지 · 알람 제외) · 사용자 2026-11-11 · 수정 목록 193 ·
+        `wait=False` 면 그 켜기를 기다리지 않고 켜는 중이면 `schedule_end.WAKING_MESSAGE` · 수정 목록 217
         """
         end = getattr(self, 'schedule_end', None)
         if end is None or str(payload.get('request_source') or '') == 'schedule_end':
@@ -2435,7 +2436,7 @@ class MotionWebBridge(Node):
             str(payload.get('execution_id') or '').startswith('tt-s')
             and not int(payload.get('join_cycle_number') or 0)
         )
-        return end.start_blocker(wake_all=wake_all) if wake_all else end.start_blocker()
+        return end.start_blocker(wake_all=True, wait=wait) if wake_all else end.start_blocker()
 
     def motion_run_check(self, payload: Dict[str, Any], timeout_sec: float = 3.0) -> Dict[str, Any]:
         """실행 준비 검사 · `timeout_sec` · 그룹 참가 준비는 남은 준비 예산을 넘긴다 · 수정 목록 164"""
@@ -2927,7 +2928,11 @@ class MotionWebBridge(Node):
         blocked = self.group_prepare_gate()
         if blocked:
             return {'success': False, 'message': blocked}
-        parked = self.schedule_end_start_blocker(payload)
+        # 연동 노드가 HTTP 로 기다리는 길 · 운영시간 첫 회차의 서보 켜기는 기다리지 않고 「켜는 중」 으로 바로 답한다 ·
+        # 연동 노드가 잠시 뒤 다시 묻는다 · 수정 목록 217
+        parked = self.schedule_end_start_blocker(payload, wait=False)
+        if parked == WAKING_MESSAGE:
+            return {'success': False, 'pending': 'servo_wake', 'message': parked}
         if parked:
             return {'success': False, 'message': f'그룹 실행 준비 불가: {parked}'}
         return self._request_motion_run('group_prepare', payload, timeout_sec=2.0)
