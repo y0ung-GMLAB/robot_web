@@ -106,6 +106,9 @@ if [[ $orphan -gt 0 ]]; then
 
   systemctl --user stop motion-control motion-coordination motion-motor
   rm -f /dev/shm/fastrtps_*
-  systemctl --user start motion-motor motion-coordination motion-control
+  systemctl --user start --no-block motion-motor motion-coordination motion-control
+
+  (--no-block · 연동 서비스는 「준비 끝」 까지 기다리는 Type=notify 라 없으면 이 줄에서 최대 600 s 선다 ·
+   뜬 것은 `systemctl --user is-active motion-coordination` 으로 본다)
 MSG
 fi

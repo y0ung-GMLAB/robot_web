@@ -8,6 +8,7 @@ rclpy 없이 돈다.
 """
 
 import threading
+import time
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -162,6 +163,55 @@ def test_the_wait_for_the_stop_is_bounded(monkeypatch):
 
     assert result['success'] is True
     assert bridge.events[-1] == BOTH, '정지를 확인 못 해도 다시 시작은 간다'
+    assert '0.2 s 안에 정지 확인 못 함(running)' in result['message']
+
+
+def test_the_restart_waits_for_the_supervisors_stop_settled_not_the_run_cache(monkeypatch):
+    """수정 목록 200 · 정지 결과의 표지로 감독의 「정지 정리 끝」 을 기다린다 · 확인이 오면 바로 다시 시작
+
+    재생 상태 캐시는 늦을 수 있다(여기서는 끝까지 `running`) · 전에는 그 캐시를 0.1 s 마다 보며 상한(5 s)을
+    다 쓰고 「정지 확인 못 함」 을 붙였다.
+    """
+    bridge = _Bridge('running', stops=False)
+    waited = []
+
+    def request_safety_stop(emergency):
+        bridge.events.append(('safety_stop', emergency))
+        return {'success': True, 'supervisor_result': {'stop_boot': 'b', 'stop_epoch': 4}}
+
+    def wait_for_stop_settled(marker, timeout_sec):
+        waited.append((marker, timeout_sec))
+        return True
+
+    bridge.request_safety_stop = request_safety_stop
+    bridge.wait_for_stop_settled = wait_for_stop_settled
+    service = _service(monkeypatch, bridge)
+    service.RESTART_STOP_WAIT_SEC = 0.5
+
+    started = time.monotonic()
+    result = service.restart_managed_program({'stop_first': True})
+
+    assert time.monotonic() - started < 0.4, '캐시를 보며 상한까지 기다렸다'
+    assert waited == [(('b', 4), 0.5)]
+    assert result['success'] is True and bridge.events[-1] == BOTH
+    assert '정지 확인 못 함' not in result['message']
+
+
+def test_the_settle_wait_is_only_a_failure_detector(monkeypatch):
+    """확인이 상한 안에 안 온다(재생 노드가 멈춤) · 그래도 다시 시작은 간다 · 이유는 남긴다"""
+    bridge = _Bridge('running', stops=False)
+    bridge.request_safety_stop = lambda _e: {
+        'success': True, 'supervisor_result': {'stop_boot': 'b', 'stop_epoch': 4},
+    }
+    asked = []
+    bridge.wait_for_stop_settled = lambda marker, timeout: asked.append((marker, timeout)) and False
+    service = _service(monkeypatch, bridge)
+    service.RESTART_STOP_WAIT_SEC = 0.2
+
+    result = service.restart_managed_program({'stop_first': True})
+
+    assert asked == [(('b', 4), 0.2)], '상한은 「정지 정리 끝」 을 기다리는 데만 쓴다'
+    assert result['success'] is True and bridge.events[-1] == BOTH
     assert '0.2 s 안에 정지 확인 못 함(running)' in result['message']
 
 

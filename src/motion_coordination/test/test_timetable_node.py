@@ -54,7 +54,7 @@ def test_the_master_builds_and_sends_the_bundle(tmp_path):
     config = node._timetable
     assert config.version == 1 and config.issued_by == 'pc-a'
     assert config.schedule_enabled and config.schedules == (DAILY_ALL_DAY,)
-    assert config.auto_period_sec == 950.0, '가장 긴 PC(935) + 회차 사이 6 + 2 → 10 s 올림(188)'
+    assert config.auto_period_sec == 940.0, '가장 긴 PC(935) + 회차 사이 1.5 = 936.5 → 10 s 올림(206 · 188 은 6 + 2 라 950)'
     assert config.playlist == ('a.json',)
     assert timetable.load(node._timetable_path) == config, '마스터도 디스크에'
     assert node._timetable_pub.messages and node._timetable_pub.messages[-1].version == 1
@@ -76,11 +76,12 @@ def test_a_slave_keeps_the_highest_version_on_disk(tmp_path):
 
 
 def test_only_the_master_changes_the_mode_and_a_short_period_is_refused(tmp_path):
-    node = _tt_node(tmp_path, config=TimetableConfig(version=1, issued_by='pc-a', auto_period_sec=930.0))
+    node = _tt_node(tmp_path, config=TimetableConfig(version=1, issued_by='pc-a', auto_period_sec=920.0))
     result = node._handle_local_request({'command': 'timetable_set', 'mode': MODE_CLOCK, 'period_sec': 1000})
     assert result['success'] and node._timetable.clock and node._timetable.period_sec == 1000.0
     refused = node._handle_local_request({'command': 'timetable_set', 'period_sec': 900})
-    assert not refused['success'] and '최소 940' in refused['message'], '하한 = 지금 잰 값(925 → 940) · 저장된 930 아님(196)'
+    # 206 · 회차 사이 6 → 1.5 s · 올림 전 여유 없음 · 지금 잰 값 925 → 930 · 그것과 갈리게 저장된 값은 920
+    assert not refused['success'] and '최소 930' in refused['message'], '하한 = 지금 잰 값(925 → 930) · 저장된 920 아님(196)'
     slave = _tt_node(tmp_path, master=False)
     assert not slave._handle_local_request({'command': 'timetable_set', 'mode': MODE_CLOCK})['success']
 
@@ -353,10 +354,10 @@ def _short_clip_node(tmp_path, *, schedules=(), **config):
 
 def test_the_auto_period_shrinks_outside_the_operating_hours_when_every_pc_reported(tmp_path):
     node = _short_clip_node(tmp_path)
-    assert node._measured_auto_period() == (80.0, True), '65 + 6 + 2 → 80'
+    assert node._measured_auto_period() == (70.0, True), '65 + 1.5 = 66.5 → 70(206 · 188 은 65 + 6 + 2 = 73 → 80)'
     node._timetable_upkeep()
-    assert node._timetable.auto_period_sec == 80.0 and node._timetable.period() == 80.0
-    assert node._timetable_snapshot()['measured_auto_period_sec'] == 80.0
+    assert node._timetable.auto_period_sec == 70.0 and node._timetable.period() == 70.0
+    assert node._timetable_snapshot()['measured_auto_period_sec'] == 70.0
 
 
 def test_the_auto_period_grows_back_when_the_long_clip_returns(tmp_path):
@@ -365,13 +366,13 @@ def test_the_auto_period_grows_back_when_the_long_clip_returns(tmp_path):
     node._local_status['cycle_need_sec'] = 925.0
     node._timetable_upkeep_at = 0.0
     node._timetable_upkeep()
-    assert node._timetable.auto_period_sec == 940.0
+    assert node._timetable.auto_period_sec == 930.0, '925 + 1.5 = 926.5 → 930(206 · 188 은 940)'
 
 
 def test_the_auto_period_does_not_shrink_while_a_pc_is_missing_or_has_not_reported(tmp_path):
     node = _short_clip_node(tmp_path)
     node._registry._members['pc-d'] = _member('pc-d', received_monotonic=time.monotonic() - 3600.0)
-    assert node._measured_auto_period() == (80.0, False), '끊긴 PC 의 클립 길이를 모른다'
+    assert node._measured_auto_period() == (70.0, False), '끊긴 PC 의 클립 길이를 모른다'
     node._timetable_upkeep()
     assert node._timetable.auto_period_sec == 940.0
     quiet = _short_clip_node(tmp_path)
@@ -395,11 +396,11 @@ def test_the_auto_period_does_not_shrink_while_a_cycle_runs(tmp_path, monkeypatc
 
 def test_a_human_period_below_the_stored_auto_is_taken_when_the_clips_are_short(tmp_path):
     node = _short_clip_node(tmp_path)
-    refused = node._handle_local_request({'command': 'timetable_set', 'period_sec': 70})
-    assert not refused['success'] and '최소 80' in refused['message']
+    refused = node._handle_local_request({'command': 'timetable_set', 'period_sec': 60})
+    assert not refused['success'] and '최소 70' in refused['message']
     result = node._handle_local_request({'command': 'timetable_set', 'period_sec': 120})
     assert result['success'], result
-    assert node._timetable.period_sec == 120.0 and node._timetable.auto_period_sec == 80.0
+    assert node._timetable.period_sec == 120.0 and node._timetable.auto_period_sec == 70.0
     assert node._timetable.period() == 120.0
 
 
@@ -408,3 +409,69 @@ def test_a_human_period_keeps_the_stored_floor_while_a_pc_is_missing(tmp_path):
     node._registry._members['pc-d'] = _member('pc-d', received_monotonic=time.monotonic() - 3600.0)
     refused = node._handle_local_request({'command': 'timetable_set', 'period_sec': 120})
     assert not refused['success'] and '최소 940' in refused['message']
+
+
+# --------------------------------------------------------------------------- #
+# 수정 목록 199 · 201 · 205 · 시간 짐작 대신 상태
+# --------------------------------------------------------------------------- #
+
+class _RecordingDriver(ClockDriver):
+    def __init__(self):
+        super().__init__(lambda _payload: {'success': True}, info=lambda _t: None, warn=lambda _t: None)
+        self.views = []
+        self.released = []
+
+    def tick(self, choice, view):
+        self.views.append(dict(view))
+
+    def release_stopped_window(self, why):
+        self.released.append(why)
+        super().release_stopped_window(why)
+
+
+def _clock_tt_node(tmp_path):
+    return _tt_node(tmp_path, config=TimetableConfig(
+        version=1, issued_by='pc-a', mode=MODE_CLOCK, auto_period_sec=600.0, schedule_enabled=True,
+        schedules=(DAILY_ALL_DAY,),
+    ))
+
+
+def test_the_timetable_uses_this_pcs_mapping_initial_move_not_an_old_plan_summary(tmp_path):
+    """웹이 조인트 매핑에서 읽은 값(`initial_move_sec`)을 쓴다 · 지난 재생 계획 요약(단독 재생에서 고른 5 s)은 안 본다 · 수정 목록 205"""
+    node = _clock_tt_node(tmp_path)
+    node._timetable_upkeep_at = time.monotonic()
+    node._clock_driver = driver = _RecordingDriver()
+    node._local_status['initial_move_sec'] = 7.0
+    node._local_status['motion_run_status'] = {'state': 'stopped', 'summary': {'initialization_duration_sec': 5.0}}
+    node._drive_timetable()
+    assert driver.views[-1]['init_sec'] == 7.0
+    assert driver.views[-1]['operation_mode'] == 'schedule'
+    del node._local_status['initial_move_sec']
+    node._drive_timetable()
+    assert driver.views[-1]['init_sec'] == 0.0, '모르면 0 · 시간표 구동부가 가장 긴 선택지(10 s)'
+    assert driver._init_sec(driver.views[-1]) == 10.0
+
+
+def test_a_human_signal_run_releases_the_group_stop_park_memory(tmp_path):
+    """사람이 신호 재생 그룹을 돌리면 시간표 구동부는 손대지 않고 그룹 정지 운영시간 끝 주차 기억도 버린다 · 수정 목록 201"""
+    node = _clock_tt_node(tmp_path)
+    node._timetable_upkeep_at = time.monotonic()
+    node._clock_driver = driver = _RecordingDriver()
+    driver._stopped_window = 'tt-s1'
+    node._execution.execution_id = 'exec-human'
+    node._drive_timetable()
+    assert driver.views == [] and driver.released and driver._stopped_window == ''
+
+
+def test_a_just_reentered_run_is_still_held_while_the_local_status_is_from_before(tmp_path):
+    """다시 들어간 직후 앞 시도의 끝난 상태(같은 번호)가 아직 보인다 · 쥔 것으로 센다 · 그 앞 상태로 사람 시작을 열지 않는다 · 수정 목록 199"""
+    node = _tt_node(tmp_path, config=TimetableConfig(mode=timetable.MODE_CLOCK, auto_period_sec=940.0))
+    node._clock_driver._run = {'plan_id': 'tt-s1', 'stage': 'joining', 'cycle': 2, 'ack': 10.0}
+    node._local_status['motion_run_status'] = {
+        'group_execution': True, 'execution_id': 'tt-s1', 'state': 'stopped', 'phase': 'stopped', 'status_stamp': 9.0,
+    }
+    assert node._timetable_held() == {'pc-a': 'tt-s1'}
+    node._local_status['motion_run_status'] = {
+        'group_execution': True, 'execution_id': 'tt-s1', 'state': 'stopped', 'phase': 'stopped', 'status_stamp': 11.0,
+    }
+    assert node._timetable_held() == {}, '명령 뒤의 끝난 상태 · 끝난 것'

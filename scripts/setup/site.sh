@@ -16,7 +16,8 @@
 # 이미 깔린 PC 는 커널 모듈만 다시 빌드(make install 안 함 · PC 마다 깔린 자리가 다름)
 #
 # 시험용 덮어쓰기 · SITE_GDM_CONF · SITE_ETHERCAT_CONF · SITE_STATE_DIR · SITE_ETHERLAB_PATCH · SITE_SYS_MODULE_DIR ·
-#   SITE_RTW88_MODPROBE_CONF
+#   SITE_RTW88_MODPROBE_CONF · SITE_FWUPD_UNITS · SITE_SYSTEM_HELPER · SITE_SUDOERS_DIR · SITE_SYSTEM_SUDOERS ·
+#   SITE_SYSTEM_CONF · SITE_ROOT_OWNER
 #
 # 수작업으로 남는 것 · BIOS 「전원 복구 시 켜기」 1회 · 로봇 팩·모터 설정(웹)
 
@@ -124,6 +125,8 @@ CONF
   if [[ -f /etc/update-manager/release-upgrades ]]; then
     site_run sudo sed -i 's/^Prompt=.*/Prompt=never/' /etc/update-manager/release-upgrades
   fi
+  # 펌웨어 업데이트(fwupd) · 로봇 PC · 스피커 PC 둘 다 · 실패해도 설치는 계속 · 수정 목록 210
+  site_fwupd_off || true
   echo "화면 꺼짐·잠금·절전 끄기"
   site_gsettings org.gnome.desktop.session idle-delay 0
   site_gsettings org.gnome.desktop.screensaver lock-enabled false
@@ -252,6 +255,87 @@ site_wifi_chip_powersave_detail() {
     echo "${now} · ${SITE_RTW88_MODPROBE_CONF} 있음 · 재부팅 뒤 적용 · sudo reboot · 수정 목록 173"
   else
     echo "${now} · printf '%s\\n' 'options rtw88_pci disable_aspm=1' 'options rtw88_core disable_lps_deep=1' | sudo tee ${SITE_RTW88_MODPROBE_CONF} → sudo reboot · 수정 목록 173"
+  fi
+}
+
+# 펌웨어 업데이트 데몬(fwupd) 끄기 · 수정 목록 210 (실물 NY floating3 2026-11-10)
+#   14:05:52~54 · fwupd-refresh.timer 가 fwupd 를 깨운 그 2초 동안 EtherCAT 프레임이 빠짐(최장 30 ms · 10초에 464주기) ·
+#   fwupd 가 PCI · USB · UEFI 를 훑는 시간 · 이 PC 들은 지원 장치 0 개 · 올릴 펌웨어가 없다 ·
+#   자동 업데이트(unattended-upgrades · 112 사)와 같은 결 → 로봇 PC · 스피커 PC 둘 다(site_disable_interruptions)
+#   mask(--now) · 깔려 있지 않으면 건너뜀 · 다시 켜기 · sudo systemctl unmask fwupd.service fwupd-refresh.timer
+#   고정 도우미(robot-web-system-apply.sh)에 같은 판정이 따로 있다 · 고치면 둘 다
+SITE_FWUPD_UNITS="${SITE_FWUPD_UNITS:-fwupd.service fwupd-refresh.timer}"
+
+# 유닛 상태 · masked · enabled · static … · 없으면 빈 값 (새 systemd 는 not-found 를 찍는다)
+site_fwupd_unit_state() {
+  local state
+  state="$(systemctl is-enabled "$1" 2>/dev/null || true)"
+  state="${state%%$'\n'*}"
+  [[ "${state}" == "not-found" ]] && state=""
+  printf '%s' "${state}"
+}
+
+# 깔려 있고 아직 mask 안 된 유닛 · 한 줄에 하나
+site_fwupd_pending() {
+  local unit state
+  for unit in ${SITE_FWUPD_UNITS}; do
+    state="$(site_fwupd_unit_state "${unit}")"
+    if [[ -n "${state}" && "${state}" != "masked" ]]; then
+      echo "${unit}"
+    fi
+  done
+  return 0
+}
+
+site_fwupd_installed() {
+  local unit
+  for unit in ${SITE_FWUPD_UNITS}; do
+    [[ -n "$(site_fwupd_unit_state "${unit}")" ]] && return 0
+  done
+  return 1
+}
+
+site_fwupd_off() {
+  echo "펌웨어 업데이트(fwupd) 끄기 (수정 목록 210)"
+  if ! site_fwupd_installed; then
+    site_note "fwupd 없음 · 건너뜀"
+    return 0
+  fi
+  local pending
+  pending="$(site_fwupd_pending | tr '\n' ' ')"
+  pending="${pending% }"
+  if [[ -z "${pending}" ]]; then
+    site_note "이미 꺼짐 · ${SITE_FWUPD_UNITS} (masked)"
+    return 0
+  fi
+  # shellcheck disable=SC2086
+  if ! site_run sudo systemctl mask --now ${pending}; then
+    site_warn "fwupd 를 끄지 못했습니다(관리자 권한 없음 · 웹 업데이트) · 터미널에서 한 번 · 수정 목록 210"
+    echo "       sudo systemctl mask --now ${pending}" >&2
+    return 1
+  fi
+  [[ "${SITE_DRY_RUN}" == "1" ]] && return 0
+  site_note "끔 · ${pending} (masked · 다시 켜기 sudo systemctl unmask ${pending})"
+}
+
+# 자가 점검 · 1 = fwupd 없음 또는 전부 masked · 0 = 아직 살아 있음
+site_fwupd_off_ok() {
+  if [[ -z "$(site_fwupd_pending)" ]]; then echo 1; else echo 0; fi
+}
+
+site_fwupd_detail() {
+  if ! site_fwupd_installed; then echo "fwupd 없음 · 해당 없음"; return; fi
+  local unit state now="" pending
+  for unit in ${SITE_FWUPD_UNITS}; do
+    state="$(site_fwupd_unit_state "${unit}")"
+    now+="${now:+ · }${unit} ${state:-없음}"
+  done
+  pending="$(site_fwupd_pending | tr '\n' ' ')"
+  pending="${pending% }"
+  if [[ -z "${pending}" ]]; then
+    echo "${now}"
+  else
+    echo "${now} · sudo systemctl mask --now ${pending} · 수정 목록 210"
   fi
 }
 
@@ -1043,6 +1127,221 @@ site_ethercat_nm_detail() {
 }
 
 # ------------------------------------------------------------------ #
+# 웹 업데이트용 시스템 설정 고정 도우미 · 수정 목록 211 (2026-11-16 · 사용자 결정)
+#
+# 웹 「모든 PC 업데이트」(install.sh --code-only)는 sudo -n(비밀번호 없음)이라 /etc 를 못 쓴다 ·
+#   그래서 위 시스템 설정(Wi-Fi 칩 절전 173 · EtherCAT 랜카드 NM 제외 177·180 · fwupd 210 · IgH 모듈 139)은
+#   이미 설치된 PC 마다 사람이 터미널에서 sudo 명령을 쳤다
+# → 첫 설치(관리자 비밀번호 있음) 때 root 것인 고정 스크립트 하나 + 그 명령 하나만 비밀번호 없이 허용하는 sudoers 한 줄
+#   /usr/local/sbin/robot-web-system-apply  · scripts/setup/robot-web-system-apply.sh 의 **복사본** · root:root 0755
+#   /etc/sudoers.d/robot-web-system-apply   · `<계정> ALL=(root) NOPASSWD: /usr/local/sbin/robot-web-system-apply ""`
+#                                             (「""」 = 인자 없이만) · visudo -cf 로 확인한 뒤 · root 0440
+#   /etc/robot-web/system-apply.conf        · EtherCAT 랜카드 MAC(도우미는 저장소를 못 읽으니 여기서 적어 둔다)
+# 보안 · 도우미는 저장소 · 작업공간(이 계정이 고칠 수 있는 곳)의 것을 source 하거나 실행하지 않는다 ·
+#   그랬다면 이 계정이 저장소 파일을 고쳐 root 로 아무것이나 돌릴 수 있다 · 하는 일은 도우미 안에 고정
+# 지우기 · sudo rm /usr/local/sbin/robot-web-system-apply /etc/sudoers.d/robot-web-system-apply
+# ------------------------------------------------------------------ #
+SITE_SYSTEM_HELPER_VERSION=1        # robot-web-system-apply.sh 의 HELPER_VERSION 과 같게(시험이 본다) · 도우미를 고치면 둘 다 올림
+SITE_SYSTEM_HELPER_SRC="${SITE_SETUP_DIR}/robot-web-system-apply.sh"
+SITE_SYSTEM_HELPER="${SITE_SYSTEM_HELPER:-/usr/local/sbin/robot-web-system-apply}"
+SITE_SUDOERS_DIR="${SITE_SUDOERS_DIR:-/etc/sudoers.d}"
+SITE_SYSTEM_SUDOERS="${SITE_SYSTEM_SUDOERS:-${SITE_SUDOERS_DIR}/robot-web-system-apply}"
+SITE_SYSTEM_CONF="${SITE_SYSTEM_CONF:-/etc/robot-web/system-apply.conf}"
+SITE_ROOT_OWNER="${SITE_ROOT_OWNER:-root:root}"
+# 이미 설치된 PC 에서 도우미를 깔거나 새 버전으로 바꾸는 명령 (관리자 비밀번호 한 번)
+SITE_SYSTEM_ALLOW_SCRIPT="$(dirname "${SITE_SETUP_DIR}")/allow_system_apply.sh"
+
+site_render_system_sudoers() {
+  local user="$1"
+  cat <<SUDOERS
+# robot_web · 웹 「모든 PC 업데이트」 가 고정 도우미 하나만 root 로 · 비밀번호 없이 · 인자 없이 (수정 목록 211)
+# 지우기 · sudo rm ${SITE_SYSTEM_SUDOERS} ${SITE_SYSTEM_HELPER}
+${user} ALL=(root) NOPASSWD: ${SITE_SYSTEM_HELPER} ""
+SUDOERS
+}
+
+site_render_system_conf() {
+  cat <<CONF
+# robot_web · robot-web-system-apply(웹 업데이트용 시스템 설정 도우미)가 읽음 · 설치(scripts/setup/site.sh)가 적음 · 수정 목록 211
+# EtherCAT(모터) 랜카드 MAC · none = 안 씀(직렬 서보 전용 · 스피커 PC) · 랜카드를 바꾸면 scripts/ethercat_nic.sh 가 다시 적음
+ETHERCAT_MAC=$1
+CONF
+}
+
+# sudoers 에 그대로 들어가는 계정 이름 · 우분투 기본 규칙 안의 것만 · root 는 안 됨
+site_valid_user_name() {
+  [[ "$1" =~ ^[a-z_][a-z0-9_-]{0,31}$ && "$1" != "root" ]]
+}
+
+# 깔린 도우미 버전 · 없으면 빈 값 · 도우미는 누구나 읽을 수 있다(0755)
+site_system_helper_installed_version() {
+  [[ -r "${SITE_SYSTEM_HELPER}" ]] || return 0
+  sed -n '/^HELPER_VERSION=[0-9]\{1,\}$/{s/^HELPER_VERSION=//p;q;}' "${SITE_SYSTEM_HELPER}" 2>/dev/null || true
+}
+
+site_system_helper_perm() { stat -c '%U:%G %a' "${SITE_SYSTEM_HELPER}" 2>/dev/null || true; }
+
+# 깔린 것이 저장소 것과 같고 root:root 0755 인가
+site_system_helper_current() {
+  [[ -f "${SITE_SYSTEM_HELPER}" ]] && cmp -s "${SITE_SYSTEM_HELPER_SRC}" "${SITE_SYSTEM_HELPER}" \
+    && [[ "$(site_system_helper_perm)" == "${SITE_ROOT_OWNER} 755" ]]
+}
+
+# 비밀번호 없이 그 명령을 돌릴 수 있나 · sudo -l (명령) · 우리 줄이 NOPASSWD 라 -l 도 비밀번호 없이 된다(listpw=any) ·
+#   -k = 방금 친 비밀번호(sudo 시간)는 안 본다 · 허용 줄 없이 「됨」 으로 보이지 않게(지우지는 않음)
+site_system_helper_allowed() {
+  sudo -n -k -l "${SITE_SYSTEM_HELPER}" >/dev/null 2>&1
+}
+
+# EtherCAT 랜카드 MAC 을 도우미 설정에 적기 · 바뀐 것만 · 「안 씀」 · 랜카드 없음(스피커)은 none
+site_system_record_nic() {
+  local mac content
+  mac="$(site_ethercat_nic_mac)"
+  if [[ -n "${mac}" && ! "${mac}" =~ ^([0-9a-f]{2}:){5}[0-9a-f]{2}$ ]]; then
+    site_warn "EtherCAT 랜카드 MAC 을 읽지 못함(${mac}) · 도우미에는 「안 씀」 으로 적음 · bash scripts/ethercat_nic.sh · 수정 목록 211"
+    mac=""
+  fi
+  content="$(site_render_system_conf "${mac:-none}")"
+  if [[ -f "${SITE_SYSTEM_CONF}" && "$(cat "${SITE_SYSTEM_CONF}" 2>/dev/null)" == "${content}" ]]; then
+    site_note "랜카드 기록 그대로 · ETHERCAT_MAC=${mac:-none} (${SITE_SYSTEM_CONF})"
+    return 0
+  fi
+  site_run sudo mkdir -p "$(dirname "${SITE_SYSTEM_CONF}")" || return 1
+  printf '%s\n' "${content}" | site_write_root_file "${SITE_SYSTEM_CONF}" || return 1
+  # 도우미는 root 것이고 다른 사람이 못 고치는 설정만 믿는다
+  site_run sudo chown "${SITE_ROOT_OWNER}" "${SITE_SYSTEM_CONF}" || return 1
+  site_run sudo chmod 0644 "${SITE_SYSTEM_CONF}" || return 1
+  [[ "${SITE_DRY_RUN}" == "1" ]] && return 0
+  site_note "랜카드 기록 · ETHERCAT_MAC=${mac:-none} (${SITE_SYSTEM_CONF})"
+}
+
+# sudoers 한 줄 · 바뀐 것만 · 「.」 이 든 이름(sudo 가 안 읽음)으로 먼저 쓰고 visudo -cf 통과하면 바꿔 넣는다
+site_system_sudoers_install() {
+  local user="$1" content stage
+  content="$(site_render_system_sudoers "${user}")"
+  if [[ "${SITE_DRY_RUN}" == "1" ]]; then
+    echo "  [dry-run] ${SITE_SYSTEM_SUDOERS} ← (visudo -cf 로 확인한 뒤 · ${SITE_ROOT_OWNER} 0440)"
+    echo "${content}" | sed 's/^/      /'
+    return 0
+  fi
+  # /etc/sudoers.d 는 이 계정이 못 읽는다(0750) · sudo 로 비교
+  if printf '%s\n' "${content}" | sudo cmp -s - "${SITE_SYSTEM_SUDOERS}" 2>/dev/null; then
+    site_note "sudo 허용 그대로 · ${SITE_SYSTEM_SUDOERS}"
+    return 0
+  fi
+  stage="${SITE_SUDOERS_DIR}/.robot-web-system-apply.new"
+  if ! { printf '%s\n' "${content}" | sudo tee "${stage}" >/dev/null \
+         && sudo chown "${SITE_ROOT_OWNER}" "${stage}" \
+         && sudo chmod 0440 "${stage}"; }; then
+    sudo rm -f "${stage}" 2>/dev/null || true
+    site_warn "sudo 허용 파일을 쓰지 못했습니다 · ${SITE_SYSTEM_SUDOERS} · 수정 목록 211"
+    return 1
+  fi
+  if ! sudo visudo -cf "${stage}" >/dev/null; then
+    sudo rm -f "${stage}" 2>/dev/null || true
+    site_warn "sudo 허용 줄이 visudo 확인을 통과하지 못함 · 깔지 않음 · 수정 목록 211"
+    return 1
+  fi
+  sudo mv -f "${stage}" "${SITE_SYSTEM_SUDOERS}" || return 1
+  site_note "sudo 허용 · ${user} → ${SITE_SYSTEM_HELPER} (인자 없이 · 비밀번호 없이) · ${SITE_SYSTEM_SUDOERS}"
+}
+
+# 도우미 깔기 · 갱신 · 멱등 · 관리자 권한 필요(첫 설치 · 터미널 설치 · allow_system_apply.sh)
+#   순서 · 도우미 → 랜카드 기록 → sudoers (허용 줄이 없는 파일을 가리키는 때가 없게)
+site_system_helper_install() {
+  local user="${1:-$(id -un)}"
+  echo "웹 업데이트용 시스템 설정 도우미 (${SITE_SYSTEM_HELPER} · v${SITE_SYSTEM_HELPER_VERSION} · 수정 목록 211)"
+  if ! site_valid_user_name "${user}"; then
+    site_warn "계정 이름(${user})은 sudo 허용에 넣지 않음 · 늘 쓰는 일반 계정으로 실행 · 수정 목록 211"
+    return 1
+  fi
+  if site_system_helper_current; then
+    site_note "도우미 이미 최신 · v$(site_system_helper_installed_version) · ${SITE_ROOT_OWNER} 0755"
+  elif [[ "${SITE_DRY_RUN}" == "1" ]]; then
+    echo "  [dry-run] sudo install -o ${SITE_ROOT_OWNER%%:*} -g ${SITE_ROOT_OWNER##*:} -m 0755 ${SITE_SYSTEM_HELPER_SRC} ${SITE_SYSTEM_HELPER} (복사본)"
+  elif sudo install -D -o "${SITE_ROOT_OWNER%%:*}" -g "${SITE_ROOT_OWNER##*:}" -m 0755 \
+         "${SITE_SYSTEM_HELPER_SRC}" "${SITE_SYSTEM_HELPER}.robot-web-new" \
+       && sudo mv -f "${SITE_SYSTEM_HELPER}.robot-web-new" "${SITE_SYSTEM_HELPER}"; then
+    site_note "도우미 깔음 · ${SITE_SYSTEM_HELPER} (v${SITE_SYSTEM_HELPER_VERSION} · ${SITE_ROOT_OWNER} 0755 · 저장소 파일의 복사본)"
+  else
+    sudo rm -f "${SITE_SYSTEM_HELPER}.robot-web-new" 2>/dev/null || true
+    site_warn "도우미를 깔지 못했습니다 · ${SITE_SYSTEM_HELPER} · 수정 목록 211"
+    return 1
+  fi
+  site_system_record_nic || { site_warn "랜카드 기록을 쓰지 못했습니다 · ${SITE_SYSTEM_CONF} · 수정 목록 211"; return 1; }
+  site_system_sudoers_install "${user}"
+}
+
+# 이미 설치된 PC · 도우미를 깔거나 바꾸는 명령 한 줄
+site_system_helper_install_hint() {
+  echo "       bash ${SITE_SYSTEM_ALLOW_SCRIPT}"
+}
+
+# 웹 업데이트(--code-only · sudo -n) · 깔린 도우미를 비밀번호 없이 돌린다 · 수정 목록 211
+#   없거나 옛 버전이면 · 비밀번호 없이 sudo 가 되는 계정은 그 자리에서 깔고 · 아니면 까는 명령 한 줄만 찍는다
+#   (옛 버전은 그것으로라도 돌린다) · 끝난 값 1 = 못 했거나 일부 실패 · 부르는 쪽은 `|| echo` 로 계속
+site_system_apply_code_only() {
+  local installed rc=0
+  echo "시스템 설정 (Wi-Fi 칩 절전 · EtherCAT 랜카드 · fwupd · IgH 모듈 · 고정 도우미 · 수정 목록 211)"
+  if [[ "${SITE_DRY_RUN}" == "1" ]]; then
+    echo "  [dry-run] sudo -n ${SITE_SYSTEM_HELPER}"
+    return 0
+  fi
+  installed="$(site_system_helper_installed_version)"
+  if [[ -z "${installed}" || "${installed}" -lt "${SITE_SYSTEM_HELPER_VERSION}" ]] && sudo -n true 2>/dev/null; then
+    site_system_helper_install "$(id -un)" && installed="$(site_system_helper_installed_version)"
+  fi
+  if [[ -z "${installed}" ]]; then
+    site_warn "웹 업데이트용 시스템 설정 도우미가 없습니다 · Wi-Fi 칩 절전 · EtherCAT 랜카드 · fwupd · IgH 모듈은 이번에 못 바꿈 · 이 PC 터미널에서 한 번(관리자 비밀번호) · 다음 웹 업데이트부터 저절로 · 수정 목록 211"
+    site_system_helper_install_hint >&2
+    return 1
+  fi
+  if ! site_system_helper_allowed; then
+    site_warn "도우미(v${installed})는 있는데 비밀번호 없이 돌릴 허용(${SITE_SYSTEM_SUDOERS})이 없습니다 · 이 PC 터미널에서 한 번 · 수정 목록 211"
+    site_system_helper_install_hint >&2
+    return 1
+  fi
+  sudo -n "${SITE_SYSTEM_HELPER}" || rc=1
+  if [[ "${installed}" -lt "${SITE_SYSTEM_HELPER_VERSION}" ]]; then
+    site_warn "도우미가 옛 버전(v${installed} · 저장소 v${SITE_SYSTEM_HELPER_VERSION}) · 이번에는 옛 것으로 함 · 새 버전은 이 PC 터미널에서 한 번 · 수정 목록 211"
+    site_system_helper_install_hint >&2
+    rc=1
+  fi
+  return "${rc}"
+}
+
+# 자가 점검 · 1 = 깔림 · 저장소 버전 이상 · root:root 0755 · 비밀번호 없이 허용됨
+site_system_helper_ok() {
+  local installed
+  installed="$(site_system_helper_installed_version)"
+  if [[ -n "${installed}" && "${installed}" -ge "${SITE_SYSTEM_HELPER_VERSION}" \
+        && "$(site_system_helper_perm)" == "${SITE_ROOT_OWNER} 755" ]] && site_system_helper_allowed; then
+    echo 1
+  else
+    echo 0
+  fi
+}
+
+site_system_helper_detail() {
+  local installed perm
+  installed="$(site_system_helper_installed_version)"
+  if [[ -z "${installed}" ]]; then
+    echo "없음 · 웹 업데이트가 Wi-Fi 칩 절전 · EtherCAT 랜카드 · fwupd · IgH 모듈을 못 바꿈 · bash ${SITE_SYSTEM_ALLOW_SCRIPT} (관리자 비밀번호 한 번) · 수정 목록 211"
+    return
+  fi
+  perm="$(site_system_helper_perm)"
+  if [[ "${installed}" -lt "${SITE_SYSTEM_HELPER_VERSION}" ]]; then
+    echo "v${installed} · 옛 버전(저장소 v${SITE_SYSTEM_HELPER_VERSION}) · bash ${SITE_SYSTEM_ALLOW_SCRIPT} · 수정 목록 211"
+  elif [[ "${perm}" != "${SITE_ROOT_OWNER} 755" ]]; then
+    echo "v${installed} · ${perm:-미상} · ${SITE_ROOT_OWNER} 755 가 아님 · bash ${SITE_SYSTEM_ALLOW_SCRIPT} · 수정 목록 211"
+  elif ! site_system_helper_allowed; then
+    echo "v${installed} · 비밀번호 없이 돌릴 허용 없음(${SITE_SYSTEM_SUDOERS}) · bash ${SITE_SYSTEM_ALLOW_SCRIPT} · 수정 목록 211"
+  else
+    echo "v${installed} · ${perm} · 웹 업데이트가 비밀번호 없이 돌림"
+  fi
+}
+
+# ------------------------------------------------------------------ #
 # 재부팅 뒤 이어가기 · 자동 로그인 → 사용자 systemd 가 install.sh --resume 를 한 번 돌린다
 # ------------------------------------------------------------------ #
 
@@ -1140,6 +1439,10 @@ site_selfcheck() {
   site_check_row "$(site_wifi_powersave_ok)" "Wi-Fi 절전 꺼짐" "$(iwconfig 2>/dev/null | grep -o 'Power Management:[a-z]*' | head -1 || echo 무선 없음) · 재연결 뒤 적용"
   # 무선 칩 절전(rtw88) · EtherCAT 프레임 끊김 · 수정 목록 173
   site_check_row "$(site_wifi_chip_powersave_ok)" "Wi-Fi 칩 절전 꺼짐 (rtw88)" "$(site_wifi_chip_powersave_detail)"
+  # 펌웨어 업데이트(fwupd) 꺼짐 · 깨어나 PCI·USB·UEFI 를 훑는 동안 EtherCAT 프레임이 빠짐 · 수정 목록 210
+  site_check_row "$(site_fwupd_off_ok)" "fwupd 꺼짐" "$(site_fwupd_detail)"
+  # 웹 업데이트가 위 시스템 설정을 비밀번호 없이 하는 고정 도우미 · 수정 목록 211
+  site_check_row "$(site_system_helper_ok)" "시스템 설정 도우미 (웹 업데이트)" "$(site_system_helper_detail)"
   for unit in motion-control motion-motor motion-coordination; do
     site_check_row "$(systemctl --user is-active --quiet "${unit}.service" && echo 1 || echo 0)" "${unit}.service" "$(systemctl --user is-active "${unit}.service" 2>/dev/null || echo unknown)"
   done

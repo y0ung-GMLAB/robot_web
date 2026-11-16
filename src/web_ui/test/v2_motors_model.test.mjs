@@ -133,8 +133,7 @@ test('게인 칸 · 드라이브에 저장된 값 그대로 · 강성 다름 알
   assert.equal(gainText(null).text, '-');
   const rows = [{ axis: 0, ac: true, gains: on }, { axis: 2, ac: true, gains: off }, { axis: 5, ac: false, gains: null }];
   const warnings = gainWarnings(rows);
-  assert.equal(warnings.length, 1);
-  assert.match(warnings[0], /0번 13, 2번 12/);
+  assert.deepEqual(warnings, ['드라이브마다 강성이 다릅니다']);   // 한 줄만 · 값은 표 칸에 (2026-11-16)
   assert.deepEqual(gainWarnings([{ axis: 0, ac: true, gains: on }, { axis: 2, ac: true, gains: { ...off, stiffness: 13 } }]), []);
   assert.deepEqual(gainWarnings([{ axis: 0, ac: true, gains: on }]), []);
 });
@@ -180,9 +179,14 @@ test('지령 필터 · 표 마우스 글 · 축마다 다르면 알림 (2026-10-
   assert.match(gainText(a).hint, /지령 FIR\(Pr2\.23\) 10 \(1\.0 ms\)/);
   assert.match(gainText({ ...a, command_fir: null }).hint, /지령 FIR\(Pr2\.23\) \?/);
   assert.deepEqual(gainWarnings([{ axis: 0, ac: true, gains: a }, { axis: 1, ac: true, gains: a }]), []);
-  const warnings = gainWarnings([{ axis: 0, ac: true, gains: a }, { axis: 1, ac: true, gains: { ...a, command_fir: 50 } }]);
-  assert.equal(warnings.length, 1);
-  assert.match(warnings[0], /지령 FIR 필터 값이 달라.*0번 10 \(1\.0 ms\), 1번 50 \(5\.0 ms\)/);
+  assert.deepEqual(gainWarnings([{ axis: 0, ac: true, gains: a }, { axis: 1, ac: true, gains: { ...a, command_fir: 50 } }]), ['드라이브마다 지령 필터가 다릅니다']);
+  // NY floating 처럼 강성 · 스무딩 · FIR 이 모두 달라도 한 줄 (사용자 2026-11-16)
+  const neck = { ...a, stiffness: 19, command_smoothing: 5000, command_fir: 5000 };
+  const eye = { ...a, stiffness: 13, command_smoothing: 92, command_fir: 10 };
+  assert.deepEqual(
+    gainWarnings([{ axis: 0, ac: true, gains: neck }, { axis: 1, ac: true, gains: { ...neck, command_smoothing: 10000, command_fir: 10000 } }, { axis: 2, ac: true, gains: eye }]),
+    ['드라이브마다 강성 · 지령 필터가 다릅니다'],
+  );
 });
 
 test('파라미터 (고급) · 다름 표시 · 마우스 글 (수정 목록 109 · 114)', async () => {

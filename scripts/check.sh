@@ -99,6 +99,11 @@ fi
 # shellcheck disable=SC1091
 source "${SCRIPT_DIR}/setup/site.sh"
 row "$(site_wifi_chip_powersave_ok)" "Wi-Fi 칩 절전 꺼짐 (rtw88)" "$(site_wifi_chip_powersave_detail)"
+# 펌웨어 업데이트(fwupd) 꺼짐(mask) · 깨어나 PCI·USB·UEFI 를 훑는 2초 동안 EtherCAT 프레임이 빠짐 · 깔려 있지 않으면 해당 없음 · 수정 목록 210
+row "$(site_fwupd_off_ok)" "fwupd 꺼짐" "$(site_fwupd_detail)"
+# 웹 업데이트용 시스템 설정 도우미 · /usr/local/sbin/robot-web-system-apply 버전 · root:root 0755 · 비밀번호 없이 허용(sudo -l) ·
+# 있으면 웹 「모든 PC 업데이트」 가 위 설정(칩 절전 · fwupd · EtherCAT 랜카드 · IgH 모듈)을 함께 함 · 수정 목록 211
+row "$(site_system_helper_ok)" "시스템 설정 도우미 (웹 업데이트)" "$(site_system_helper_detail)"
 info "시간대" "$(timedatectl show -p Timezone --value 2>/dev/null || echo 미상) · $(date '+%H:%M')"
 # 시간대 · 마스터와 같아야 함 · 시간표 재생은 운영시간을 이 PC 시간대로 읽는다 · 그룹 설정 묶음의 마스터 시간대 · 수정 목록 186
 this_zone="$(timedatectl show -p Timezone --value 2>/dev/null || cat /etc/timezone 2>/dev/null || true)"

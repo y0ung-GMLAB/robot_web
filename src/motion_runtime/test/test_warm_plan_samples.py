@@ -7,12 +7,15 @@ NY 실물 2026-11-05 · PC 재부팅 뒤 첫 그룹 시작에서 그 PC 가 빠�
 
 여기서 지키는 것:
 
-    실행 허용(부팅 · 매핑 저장)이 서면 재생 목록 1번의 재샘플을 뒤에서 짓는다 · 준비 검사 · 그룹 준비는 캐시
+    실행 허용(부팅 · 매핑 저장)이 서면 재생 목록의 재샘플을 뒤에서 짓는다 · 준비 검사 · 그룹 준비는 캐시
     키는 모터 번호 · 한계(설정)만 본다 · 알람 · 서보 · 위치가 그때와 달라도 같은 키
-    재생 목록은 캐시 칸만큼 · 1번이 가장 최근(가장 늦게 버려짐)
-    실행 스레드가 돌면 안 짓는다 · 짓는 도중 시작되면 그만둔다 · 누가 그 값을 기다리면 끝까지
+    실행 스레드가 돌면 안 짓는다 · 도중 시작되면 애니 사이에서 그만둔다
     도는 중에 새 실행 허용이 오면 끝나고 마지막 것을 다시
     준비 검사가 느리거나(1 s) 실패하면 단계별 시간 한 줄 · 답에 `timing_ms`
+
+수정 목록 208 · 미리 지은 것은 디스크 변환본(`plan_artifact`) · 재생 목록 전부 · 서비스가 다시 떠도 남는다 ·
+모터 한계가 바뀌면(모터 상태) 다시 · 파일 변환은 모터 상태를 기다리지 않는다 · 174 의 도중 그만두기는 뺐다
+(변환은 자식 프로세스 · 여기서는 재샘플 횟수를 세려고 이 프로세스에서 변환한다).
 """
 
 import json
@@ -25,17 +28,26 @@ import pytest
 import yaml
 
 from motion_common import units
-from motion_runtime import motion_run_rules, plan_builder as plan_builder_mod
+from motion_runtime import motion_run_rules, plan_artifact, plan_builder as plan_builder_mod
 from motion_runtime.group_session import GroupSession
 from motion_runtime.motion_player import MotionPlayer
 from motion_runtime.motion_run_manager import MotionRunManager
 from motion_runtime.plan_builder import PlanBuilder
-from motion_runtime.plan_cache import SingleFlightCache
 
 PROJECT = 'proj'
 JOINTS = ('neck_pitch', 'neck_yaw', 'eye_pitch', 'eye_yaw_r', 'eye_yaw_l')
 MINE = tuple(f'f1_{joint}' for joint in JOINTS)
 ROBOTS = 4
+
+
+@pytest.fixture(autouse=True)
+def _compile_here(monkeypatch):
+    """재샘플 횟수를 이 프로세스에서 센다 · 자식 프로세스 변환은 `test_plan_artifact` 가 본다 · 208"""
+    monkeypatch.setattr(plan_artifact, 'COMPILE_IN_SUBPROCESS', False)
+
+
+def _no_parse(self, path, *rest):
+    raise AssertionError(f'파일을 다시 읽었습니다: {path}')
 
 
 @pytest.fixture(autouse=True)
@@ -108,8 +120,8 @@ def _manager(tmp_path, mapping, frames=300, names=('a.json',)):
     """실제 프로젝트 폴더 · 실제 경로 함수 · 실제 매핑 읽기 · 노드 없이"""
     projects = tmp_path / 'motion_projects'
     project_dir = projects / PROJECT
-    (project_dir / 'motions').mkdir(parents=True)
-    (project_dir / 'motion_axis_matching').mkdir()
+    (project_dir / 'motions').mkdir(parents=True, exist_ok=True)
+    (project_dir / 'motion_axis_matching').mkdir(exist_ok=True)
     (project_dir / 'project.json').write_text('{}', encoding='utf-8')
     for index, name in enumerate(names):
         _write_motion(project_dir / 'motions' / name, frames, phase=index)
@@ -229,22 +241,30 @@ def test_changed_motor_limits_are_not_hidden_by_the_warm_up(tmp_path, monkeypatc
     assert response['timing_ms']['samples_cached'] is False
 
 
-def test_playlist_warm_up_keeps_the_first_entry_newest(tmp_path, monkeypatch):
+def test_registration_converts_every_playlist_item_and_a_restart_reads_them(tmp_path, monkeypatch):
+    """등록(실행 허용) 때 재생 목록 전부를 변환본으로 · 서비스가 다시 떠도(새 관리자) 파일을 다시 안 읽는다 · 208
+
+    174 는 메모리 칸(2)만큼만 지었고 서비스가 다시 뜨면 비었다.
+    """
     monkeypatch.setattr(motion_run_rules, '_motor_ready_error', _motor_ready_error)
     names = ('a.json', 'b.json', 'c.json')
     manager = _manager(tmp_path, _mapping(names), names=names)
     samplings = _count_sampling(monkeypatch)
 
     manager._warm_motion_cache_now(PROJECT, 'map.yaml')
-    cache = manager._plan_builder._samples_cache
-    assert len(samplings) == plan_builder_mod.SAMPLES_CACHE_SIZE == 2
-    assert len(cache) == 2
-    # 마지막에 넣은 것(가장 늦게 버려짐) = 1번
-    assert cache.keys()[-1][0][0][0].endswith('a.json')
+    assert len(samplings) == 3, '재생 목록 전부를 변환하지 않았습니다'
+    # 1번을 마지막에 · 메모리 칸에도 남는다
+    assert manager._plan_builder._samples_cache.keys()[-1][0][0][0].endswith('a.json')
 
-    assert manager._handle_check(_readiness_payload('a.json'))['success'] is True
-    assert manager._handle_check(_readiness_payload('b.json'))['success'] is True
-    assert len(samplings) == 2, '재생 목록 1 · 2번이 캐시에 없었습니다'
+    restarted = _manager(tmp_path, _mapping(names), names=())
+    monkeypatch.setattr(MotionRunManager, '_parse_motion_records', _no_parse)
+    for name in names:
+        response = restarted._handle_check(_readiness_payload(name))
+        assert response['success'] is True, response['message']
+        assert response['timing_ms']['records_from'] == 'artifact'
+        assert response['timing_ms']['samples_from'] == 'artifact'
+        assert response['timing_ms']['samples_cached'] is True
+    assert len(samplings) == 3
 
 
 def test_confirming_the_context_warms_in_the_background(tmp_path, monkeypatch):
@@ -274,8 +294,55 @@ def test_warm_up_waits_for_the_first_motor_state(tmp_path, monkeypatch):
     assert len(samplings) == 1
 
 
+def test_file_conversion_does_not_wait_for_the_motor_state(tmp_path, monkeypatch):
+    """파일 → 조인트별 배열(가장 무거운 몫)은 모터 상태 없이 먼저 · 재샘플만 모터 상태를 기다린다 · 208"""
+    monkeypatch.setattr(motion_run_rules, '_motor_ready_error', _motor_ready_error)
+    manager = _manager(tmp_path, _mapping())
+    manager.motors = []
+    manager.WARM_MOTOR_WAIT_SEC = 0.05
+    samplings = _count_sampling(monkeypatch)
+
+    manager._warm_motion_cache_now(PROJECT, 'map.yaml')
+
+    assert samplings == []
+    artifacts = tmp_path / 'motion_projects' / PROJECT / 'runtime' / 'plan_artifacts' / 'a.json'
+    assert [path.name.split('-')[0] for path in artifacts.glob('*.rwplan')] == ['tracks']
+
+
+def test_changed_motor_limits_convert_again_in_the_background(tmp_path, monkeypatch):
+    """장비에 적용으로 모터 한계가 바뀌면(모터 상태) 새 실행 컨텍스트(매핑 저장) 없이도 다시 변환해 둔다 · 208"""
+    monkeypatch.setattr(motion_run_rules, '_motor_ready_error', _motor_ready_error)
+    manager = _manager(tmp_path, _mapping())
+    manager._execution_context = {'project_id': PROJECT, 'mapping_file_id': 'map.yaml', 'context_id': 'ctx-1'}
+    manager._execution_context_ready = True
+    samplings = _count_sampling(monkeypatch)
+
+    def state_arrives():
+        manager._warm_on_motor_limits_change({'motors': manager.motors})
+        thread = getattr(manager, '_warm_thread', None)
+        if thread is not None:
+            thread.join(10.0)
+
+    state_arrives()
+    assert len(samplings) == 1
+    state_arrives()
+    assert len(samplings) == 1, '같은 한계로 다시 변환했습니다'
+    for motor in manager.motors:
+        motor['upper_rad'] = units.deg_to_rad(700.0)
+    state_arrives()
+    assert len(samplings) == 2, '바뀐 모터 한계로 다시 변환하지 않았습니다'
+    response = manager._handle_check(_readiness_payload())
+    assert response['timing_ms']['samples_cached'] is True
+    # 위치 · 알람만 바뀐 상태는 다시 변환하지 않는다
+    manager.motors = _motors(position_deg=17.0, alarm=True)
+    for motor in manager.motors:
+        motor['upper_rad'] = units.deg_to_rad(700.0)
+    state_arrives()
+    assert len(samplings) == 2
+
+
 # --------------------------------------------------------------------------- #
-# 실행 중에는 안 짓는다 · 시작되면 그만둔다
+# 실행 중에는 안 짓는다 · 시작되면 애니 사이에서 그만둔다
 # --------------------------------------------------------------------------- #
 
 def test_no_warm_up_while_a_run_thread_is_alive(tmp_path, monkeypatch):
@@ -292,74 +359,31 @@ def test_no_warm_up_while_a_run_thread_is_alive(tmp_path, monkeypatch):
     assert len(manager._plan_builder._samples_cache) == 0
 
 
-def test_a_run_starting_mid_sampling_cancels_the_warm_up(tmp_path, monkeypatch):
+def test_a_run_starting_mid_warm_up_stops_between_animations(tmp_path, monkeypatch):
+    """하던 애니는 끝까지(변환본으로 남는다 · 174 처럼 버리지 않는다) · 남은 애니는 안 한다 · 208"""
     monkeypatch.setattr(motion_run_rules, '_motor_ready_error', _motor_ready_error)
-    monkeypatch.setattr(plan_builder_mod, 'SAMPLE_CANCEL_CHECK_EVERY', 50)
-    manager = _manager(tmp_path, _mapping(), frames=2000)
-    samplings = _count_sampling(monkeypatch)
-    started = []
+    names = ('a.json', 'b.json', 'c.json')
+    manager = _manager(tmp_path, _mapping(names), names=names)
     release = threading.Event()
-    real_alive = manager._warm_should_yield
+    real = plan_builder_mod._sample_plan
+    samplings = []
 
-    def run_starts_during_sampling():
-        # 재샘플이 시작된 뒤 실행 스레드가 선다(그룹 준비 등)
-        if samplings and not started:
-            started.append(True)
+    def run_starts_during_sampling(*args, **kwargs):
+        samplings.append(1)
+        if len(samplings) == 1:
             manager._run_thread = threading.Thread(target=release.wait, args=(5.0,), daemon=True)
             manager._run_thread.start()
-        return real_alive()
+        return real(*args, **kwargs)
 
-    manager._warm_should_yield = run_starts_during_sampling
+    monkeypatch.setattr(plan_builder_mod, '_sample_plan', run_starts_during_sampling)
     try:
         manager._warm_motion_cache_now(PROJECT, 'map.yaml')
     finally:
         release.set()
     assert len(samplings) == 1
-    assert len(manager._plan_builder._samples_cache) == 0, '그만둔 재샘플이 캐시에 남았습니다'
+    assert len(manager._plan_builder._samples_cache) == 1, '하던 변환을 버렸습니다'
     lines = [str(call.args[0]) for call in manager.logger.info.call_args_list]
     assert any('그만둠' in line for line in lines), lines
-
-
-def test_a_waiting_check_keeps_the_warm_up_going(tmp_path, monkeypatch):
-    """실행이 시작돼도 그 값을 기다리는 스레드가 있으면 끝까지 · 그만두면 그쪽이 처음부터 다시 한다"""
-    monkeypatch.setattr(motion_run_rules, '_motor_ready_error', _motor_ready_error)
-    monkeypatch.setattr(plan_builder_mod, 'SAMPLE_CANCEL_CHECK_EVERY', 50)
-    manager = _manager(tmp_path, _mapping(), frames=2000)
-    samplings = _count_sampling(monkeypatch)
-    monkeypatch.setattr(SingleFlightCache, 'waiting', lambda self, key: 1)
-
-    payload = {k: v for k, v in _readiness_payload().items() if k not in ('context_id',)}
-    result = manager._plan_builder.build(
-        payload, warm_only=True, motors_snapshot=manager.motors, cancel=lambda: True,
-    )
-    assert result['sample_count'] == 2000
-    assert len(samplings) == 1
-    assert manager._handle_check(_readiness_payload())['timing_ms']['samples_cached'] is True
-
-
-def test_single_flight_cache_counts_waiters():
-    cache = SingleFlightCache(2)
-    gate = threading.Event()
-    entered = threading.Event()
-
-    def slow():
-        entered.set()
-        gate.wait(5.0)
-        return 'value'
-
-    owner = threading.Thread(target=lambda: cache.get_or_compute('k', slow))
-    owner.start()
-    entered.wait(5.0)
-    waiter = threading.Thread(target=lambda: cache.get_or_compute('k', lambda: 'other'))
-    waiter.start()
-    deadline = time.monotonic() + 5.0
-    while cache.waiting('k') < 1 and time.monotonic() < deadline:
-        time.sleep(0.005)
-    assert cache.waiting('k') == 1 and cache.waiting('x') == 0 and cache.waiting(None) == 0
-    gate.set()
-    owner.join(5.0)
-    waiter.join(5.0)
-    assert cache.waiting('k') == 0
 
 
 def test_a_new_context_during_warm_up_is_warmed_after_it(tmp_path):

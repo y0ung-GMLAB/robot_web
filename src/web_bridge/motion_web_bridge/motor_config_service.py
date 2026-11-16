@@ -29,7 +29,7 @@ from motion_common.paths import NO_PROJECT_SELECTED
 
 import yaml
 
-from motion_common import run_state, store
+from motion_common import run_state, stop_fence, store
 from motion_common.values import optional_int
 
 from motion_web_bridge.motor_runtime_store import MOTOR_BUSY_MESSAGE
@@ -703,7 +703,8 @@ class MotorConfigService:
         """
         self.bridge.settle_stopping_run_state(self.RELEASE_SETTLED_MESSAGE)
 
-    #: 재생 중 「프로그램 다시 시작」 · 정지가 듣기를 기다리는 최대 시간 · 수정 목록 144
+    #: 재생 중 「프로그램 다시 시작」 · 「정지 정리 끝」 을 기다리는 상한 · 수정 목록 144 · 200 ·
+    #: **고장 감지만**(재생 노드가 멈춰 확인을 못 보냄) · 정상이면 확인이 오는 즉시 다시 시작한다
     RESTART_STOP_WAIT_SEC = 5.0
     RESTART_NEEDS_STOP_MESSAGE = '재생 중입니다 · 정지하고 다시 시작하려면 확인하세요'
     RESTART_MOTOR_JOB_MESSAGE = (
@@ -845,10 +846,15 @@ class MotorConfigService:
     def _stop_playback_before_restart(self) -> str:
         """「정지」 버튼과 같은 정지 · 최종 출력 정지 → 재생 정지 · 그 자리 · 서보 유지 · 수정 목록 144
 
-        멈출 때까지 최대 `RESTART_STOP_WAIT_SEC` 기다린다 · 넘기면 그대로 다시 시작한다(재생 노드가
-        재시작으로 내려가고 Motor Manager 는 마지막 목표에 선다) · 돌려주는 값은 응답에 붙일 한 줄.
+        **감독의 「정지 정리 끝」 을 기다린다** · 수정 목록 200 · 정지 결과에 실린 표지로 safety 상태의
+        `stop_settled` 를 본다 · 재생 노드가 정지를 보고 정지 전 재생을 닫았다는 확인이다 · 전에는 재생 상태
+        캐시를 0.1 s 마다 보며 「도는 중」 이 아닐 때까지 기다렸다(캐시가 늦으면 5 s 를 다 썼다).
+
+        `RESTART_STOP_WAIT_SEC` 는 고장 감지 상한뿐 · 재생 노드가 멈춰 확인이 안 오면 그대로 다시 시작한다
+        (재생 노드가 재시작으로 내려가고 Motor Manager 는 마지막 목표에 선다) · 돌려주는 값은 응답에 붙일 한 줄.
         """
         failures = []
+        marker = None
         for label, call in (
             ('최종 출력 정지', lambda: self.bridge.request_safety_stop(False)),
             ('재생 정지', self.bridge.motion_run_stop),
@@ -859,10 +865,19 @@ class MotorConfigService:
                 result = {'success': False, 'message': str(exc)}
             if isinstance(result, dict) and result.get('success') is False:
                 failures.append(f'{label} 확인 실패: {result.get("message") or "응답 없음"}')
-        deadline = time.monotonic() + float(self.RESTART_STOP_WAIT_SEC)
-        while self._local_run_state() and time.monotonic() < deadline:
-            time.sleep(0.1)
-        remaining = self._local_run_state()
+            if label == '최종 출력 정지' and isinstance(result, dict):
+                marker = stop_fence.marker(result.get('supervisor_result'))
+        wait_settled = getattr(self.bridge, 'wait_for_stop_settled', None)
+        if marker is not None and callable(wait_settled):
+            if wait_settled(marker, float(self.RESTART_STOP_WAIT_SEC)):
+                return ' · '.join(['재생을 정지했습니다', *failures])
+            remaining = self._local_run_state() or '정지 정리 확인 없음'
+        else:
+            # 표지를 모른다(옛 감독 · 응답 없음) · 재생 상태로 본다
+            deadline = time.monotonic() + float(self.RESTART_STOP_WAIT_SEC)
+            while self._local_run_state() and time.monotonic() < deadline:
+                time.sleep(0.1)
+            remaining = self._local_run_state()
         if remaining:
             failures.append(
                 f'{self.RESTART_STOP_WAIT_SEC:g} s 안에 정지 확인 못 함({remaining}) · 그대로 다시 시작'

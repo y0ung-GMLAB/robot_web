@@ -30,7 +30,8 @@ def test_user_service_installer_registers_coordination_service():
         'motion-coordination.service'
     )
     assert expected in installer
-    assert 'start motion-coordination.service' in installer
+    # Type=notify · 「준비 끝」 을 기다리지 않는다 · 수정 목록 202
+    assert 'start --no-block motion-coordination.service' in installer
 
 
 def test_example_configuration_contains_only_dds_v2_fields():
@@ -238,6 +239,57 @@ def test_a_hung_coordination_node_is_restarted_by_systemd():
     runner = (PACKAGE_ROOT / 'deploy/run_coordination_user_service.sh').read_text(encoding='utf-8')
 
     assert 'NotifyAccess=main' in unit
-    assert 'WatchdogSec=90' in unit, '랜 대기(최대 60 s) 동안 죽이지 않게 넉넉히 · 노드가 15 s 로 좁힌다'
     assert 'Restart=on-failure' in unit
     assert 'exec "${EXECUTABLE}"' in runner, 'MainPID 가 노드여야 NotifyAccess=main 이 받는다'
+
+
+def _unit_values(unit: str, key: str) -> list:
+    return [
+        line.split('=', 1)[1].strip()
+        for line in unit.splitlines()
+        if line.strip().startswith(f'{key}=')
+    ]
+
+
+def test_the_watchdog_starts_only_when_the_node_says_ready():
+    """수정 목록 202 · 감시는 「준비 끝」(READY=1) 뒤부터 · 기동은 짐작(전 WatchdogSec=90)이 아니라 긴 실패 한도
+
+    Type=simple 은 실행 스크립트를 띄운 순간이 기동 끝이라 감시가 랜 대기(최대 60 s) · ROS setup · import 동안에도
+    돌았다 · 느린 PC 가 90 s 를 넘기면 뜨는 중인 노드를 죽였다.
+    """
+    from motion_common import net_ready
+    from motion_coordination import systemd_notify
+
+    unit = (PACKAGE_ROOT / 'deploy/motion-coordination.service.in').read_text(encoding='utf-8')
+
+    assert _unit_values(unit, 'Type') == ['notify']
+    assert _unit_values(unit, 'NotifyAccess') == ['main']
+    # 유닛 감시 = 노드가 READY 와 함께 보내는 값 · 두 곳이 갈리면 안 된다
+    assert [float(value) for value in _unit_values(unit, 'WatchdogSec')] == [systemd_notify.WATCHDOG_SEC]
+    # 사용자 유닛 기본 기동 한도(90 s)를 쓰지 않는다 · 랜 대기보다 훨씬 길게
+    [timeout] = [float(value) for value in _unit_values(unit, 'TimeoutStartSec')]
+    assert timeout >= 5 * net_ready.DEFAULT_TIMEOUT_SEC
+
+
+def test_starting_the_coordination_service_never_waits_for_ready():
+    """Type=notify 의 start · restart 는 READY 까지 막힌다 · 설치 · 되돌리기 · 업데이트가 그 시간(최대
+    TimeoutStartSec)만큼 멈추거나 그 실패로 업데이트를 되돌리지 않게 · 부르는 곳은 모두 `--no-block` · 수정 목록 202
+    (웹 「프로그램 다시 시작」 · 감시 재시작 · 연동 설정 저장은 전부터 `--no-block`)"""
+    import re
+
+    for relative in ('scripts/install.sh', 'src/web_bridge/deploy/install_user_service.sh'):
+        text = (WORKSPACE / relative).read_text(encoding='utf-8')
+        calls = [
+            line for line in text.splitlines()
+            if re.search(r'systemctl --user (start|restart)\b', line) and 'motion-coordination' in line
+        ]
+        assert calls, relative
+        for line in calls:
+            assert '--no-block' in line, f'{relative} · {line.strip()}'
+    for relative in (
+        'src/web_bridge/motion_web_bridge/motor_config_rules.py',
+        'src/web_bridge/motion_web_bridge/coordination_bridge.py',
+    ):
+        text = (WORKSPACE / relative).read_text(encoding='utf-8')
+        restarts = re.findall(r"'restart',\s*('[^']*')", text)
+        assert restarts and set(restarts) == {"'--no-block'"}, relative

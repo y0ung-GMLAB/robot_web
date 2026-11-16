@@ -45,7 +45,8 @@ recover_code_only_failure() {
     git -C "${WORKSPACE_DIR}" reset -q --hard "${BEFORE_HEAD}" && echo "   코드도 업데이트 전(${BEFORE_HEAD:0:7})으로 되돌림" >&2
   fi
   if [[ "${SERVICES_STOPPED}" == true ]]; then
-    systemctl --user start motion-motor.service motion-control.service motion-coordination.service \
+    # 연동 서비스 Type=notify · 「준비 끝」 을 기다리며 되돌리기가 멈추지 않게 · 수정 목록 202
+    systemctl --user start --no-block motion-motor.service motion-control.service motion-coordination.service \
       && echo "   서비스를 다시 켰습니다 · 로봇은 업데이트 전 버전으로 돕니다" >&2
   fi
 }
@@ -98,7 +99,8 @@ trap 'report_failure "$?" "${LINENO}" "${BASH_COMMAND}"' ERR
 #   --dry-run    바꾸지 않고 할 일만 찍는다 (빌드·설치는 건너뜀)
 #   --no-reboot  재부팅이 필요해도 스스로 재부팅하지 않는다
 #   --code-only  관리자 비밀번호 없이 · 코드 받기 → 빌드 → 서비스 재시작만 (웹 「모든 PC 업데이트」 가 쓴다 ·
-#                이미 한 번 설치된 PC 전용 · 새 시스템 패키지가 필요하면 멈추고 터미널 설치를 안내)
+#                이미 한 번 설치된 PC 전용 · 새 시스템 패키지가 필요하면 멈추고 터미널 설치를 안내 ·
+#                시스템 설정은 첫 설치 때 깐 고정 도우미로 · 없으면 까는 명령 한 줄 · 수정 목록 211)
 # 옵션 없이 치면 전과 같다 · 이미 설치된 PC 의 코드 갱신 (현장 준비는 손대지 않는다)
 SITE_MODE=false
 RESUME_MODE=false
@@ -196,6 +198,9 @@ prepare_site() {
   site_ethercat_install
   echo "-- EtherCAT 랜카드"
   site_ethercat_configure
+  # 랜카드를 정한 뒤 · 도우미가 그 MAC 을 적어 둔다 · 실패해도 설치는 계속 · 수정 목록 211
+  echo "-- 웹 업데이트용 시스템 설정 도우미"
+  site_system_helper_install "$(id -un)" || site_warn "시스템 설정 도우미를 깔지 못했습니다 · 설치는 계속합니다 · 나중에 bash ${SITE_SYSTEM_ALLOW_SCRIPT}"
 }
 
 ensure_ros_apt_source() {
@@ -507,7 +512,8 @@ install_user_services() {
 restart_user_services() {
   systemctl --user daemon-reload
   systemctl --user restart motion-control.service || true
-  systemctl --user restart motion-coordination.service || true
+  # Type=notify · 「준비 끝」 까지 기다리지 않는다(설치 끝이 랜 대기만큼 늦거나 멈추지 않게) · 수정 목록 202
+  systemctl --user restart --no-block motion-coordination.service || true
 }
 
 # IgH EtherCAT 이 **어디에 깔렸든** 찾아서 빌드·실행에 넘긴다 · §6-102
@@ -636,7 +642,7 @@ fi
 
 if [[ "${DRY_RUN}" == true ]]; then
   print_step "dry-run 끝"
-  echo "실제 실행 때는 이어서 · 2 Git 수신 · 3 ROS 2 저장소 · 4 필수 프로그램 · 4-1 uv·MuJoCo · 5 권한·언어 · 6 rosdep · 7 EtherCAT 경로 · 8 전체 빌드 · 9 서비스 등록 · 10 적용 · 자가 점검"
+  echo "실제 실행 때는 이어서 · 2 Git 수신 · 2-1 시스템 설정 · 3 ROS 2 저장소 · 4 필수 프로그램 · 4-1 uv·MuJoCo · 5 권한·언어 · 6 rosdep · 7 EtherCAT 경로 · 8 전체 빌드 · 9 서비스 등록 · 10 적용 · 자가 점검"
   exit 0
 fi
 
@@ -649,13 +655,21 @@ if [[ "$(script_fingerprint)" != "${SCRIPT_FINGERPRINT_BEFORE}" && "${MOTION_INS
 fi
 
 # Wi-Fi 절전 끄기 · 관리자 권한 없이 됨(웹 Wi-Fi 권한) · 웹 업데이트에서도 · 실패해도 설치는 계속 · 수정 목록 112 차
-print_step "2-1. Wi-Fi 절전 끄기"
+print_step "2-1. 시스템 설정 (Wi-Fi 절전 · Wi-Fi 칩 절전 · EtherCAT 랜카드 · fwupd)"
 site_wifi_powersave_off || echo "!! Wi-Fi 절전을 끄지 못했습니다 · 설치는 계속합니다" >&2
-# 무선 칩(rtw88) 절전 · /etc/modprobe.d 에 써야 해서 관리자 권한 · 웹 업데이트(--code-only · sudo -n)는
-# 비밀번호 없이 못 쓰니 손으로 할 명령만 찍고 계속 · 재부팅 뒤 적용 · 수정 목록 173
-site_wifi_chip_powersave_off || echo "!! Wi-Fi 칩 절전을 끄지 못했습니다 · 위 명령을 터미널에서 한 번 · 설치는 계속합니다" >&2
-# EtherCAT 랜카드를 NetworkManager 에서 빼기 · /etc 라 관리자 권한 · 웹 업데이트는 명령만 찍고 계속 · 수정 목록 177
-site_ethercat_nm_unmanage || echo "!! EtherCAT 랜카드를 NetworkManager 에서 빼지 못했습니다 · 위 명령을 터미널에서 한 번 · 설치는 계속합니다" >&2
+if [[ "${CODE_ONLY}" == true ]]; then
+  # 웹 업데이트(sudo -n)는 /etc 를 못 쓴다 · 아래 것들은 빌드 뒤 8-1 에서 고정 도우미로 (서비스가 꺼진 동안) · 수정 목록 211
+  echo "Wi-Fi 칩 절전 · EtherCAT 랜카드 · fwupd · IgH 모듈 · 빌드 뒤 8-1 에서 (고정 도우미 · 서비스가 꺼진 동안)"
+else
+  # 무선 칩(rtw88) 절전 · /etc/modprobe.d · 관리자 권한 · 재부팅 뒤 적용 · 수정 목록 173
+  site_wifi_chip_powersave_off || echo "!! Wi-Fi 칩 절전을 끄지 못했습니다 · 위 명령을 터미널에서 한 번 · 설치는 계속합니다" >&2
+  # EtherCAT 랜카드를 NetworkManager 에서 빼기 · /etc · 관리자 권한 · 수정 목록 177
+  site_ethercat_nm_unmanage || echo "!! EtherCAT 랜카드를 NetworkManager 에서 빼지 못했습니다 · 위 명령을 터미널에서 한 번 · 설치는 계속합니다" >&2
+  # 펌웨어 업데이트(fwupd) 끄기 · 수정 목록 210
+  site_fwupd_off || echo "!! fwupd 를 끄지 못했습니다 · 위 명령을 터미널에서 한 번 · 설치는 계속합니다" >&2
+  # 다음 웹 업데이트부터 위 설정을 비밀번호 없이 · 고정 도우미 깔기·갱신 · 수정 목록 211
+  site_system_helper_install "$(id -un)" || echo "!! 시스템 설정 도우미를 깔지 못했습니다 · 설치는 계속합니다" >&2
+fi
 
 if [[ "${CODE_ONLY}" == true ]]; then
   print_step "3~6. 건너뜀 · 코드만 갱신 (시스템 패키지 · 권한 · rosdep 은 첫 설치 때 끝남)"
@@ -687,6 +701,14 @@ fi
 print_step "8. 전체 빌드"
 cd "${WORKSPACE_DIR}"
 build_workspace
+
+if [[ "${CODE_ONLY}" == true ]]; then
+  # 웹 업데이트 · 시스템 설정을 고정 도우미로 (sudo -n · 인자 없이) · 수정 목록 211
+  # 서비스가 꺼진 지금 · EtherCAT 랜카드를 NM 에서 뺄 때 링크가 잠깐 내려가도(180) 모터 프로그램이 안 붙어 있다
+  # 도우미가 없거나 옛 버전이면 까는 명령 한 줄만 찍고 업데이트는 계속
+  print_step "8-1. 시스템 설정 (고정 도우미 · 서비스가 꺼진 동안)"
+  site_system_apply_code_only || echo "!! 시스템 설정 일부를 못 했습니다 · 위 줄의 안내대로 · 업데이트는 계속합니다" >&2
+fi
 
 print_step "9. 자동실행 서비스 등록"
 # 첫 설치에서는 실시간 권한 파일을 쓰고 78 로 끝난다(재부팅 필요) · 현장 준비 모드면 여기서

@@ -43,7 +43,8 @@ MAX_DOMAIN_ID = 101
 # (Fast DDS 는 참가자를 만든 순간의 랜카드만 본다 · net_ready.py) · 4대가 같은 몇 초 동안
 # 재생 루프가 밀린 것도 같은 때다.
 #
-# PC 끼리 만나는 일은 연동 노드 하나가 맡는다(그룹 토픽만 · 로컬과는 HTTP) · 그 밖의 노드는
+# PC 끼리 만나는 일은 연동 노드 하나가 맡는다(그룹 토픽 · 이 PC 재생 관리자 · 감독과는 로컬 도메인 두 번째
+# 컨텍스트 · 수정 목록 209 · 웹과는 HTTP) · 그 밖의 노드는
 # 다른 PC 토픽을 쓰지 않는다 · 그래서 이 PC 안(루프백)에만, 그룹과 **다른 도메인**에 둔다 ·
 # 같은 도메인에 두면 그룹 쪽 디스커버리가 이 노드들 소켓에도 쏟아진다.
 #
@@ -129,6 +130,26 @@ def exports(resolved: dict, environ) -> list:
     ]
 
 
+def local_target(resolved: dict, environ) -> tuple:
+    """PC 안쪽 노드가 쓰는 (도메인, 루프백만) · `local_exports` 와 연동 노드의 로컬 연결이 같은 값 · 수정 목록 209
+
+    연동 노드는 그룹 도메인에서 뜨지만 재생 관리자 · 감독과는 이 도메인으로 직접 말한다(`local_link.py`) ·
+    따로 셈하면 갈려서 아무 말 없이 서로 못 본다 · 그래서 같은 함수 하나.
+
+    `MOTION_LOCAL_DDS=0`(되돌리기 · 옛 방식) · 안쪽 노드가 그룹 도메인에 있다 · 루프백 여부는 웹 · 모터 실행
+    스크립트의 `MOTION_GROUP_NETWORK` 가지(1 = 네트워크 · 그 밖 = 루프백)를 따른다.
+    """
+    group_domain = int(resolved['domain_id'])
+    if str(environ.get(LOCAL_DDS_ENV, '1')).strip() == '0':
+        network = str(environ.get('MOTION_GROUP_NETWORK', '1')).strip() == '1'
+        return group_domain, not network
+    local = local_domain_id(
+        group_domain,
+        environ.get(LOCAL_DOMAIN_ENV) or resolved.get('local_domain_id'),
+    )
+    return local, True
+
+
 def local_exports(resolved: dict, environ) -> list:
     """PC 안쪽 노드(모터 · 모니터 · 실행 · 웹)의 줄 · 수정 목록 176
 
@@ -142,11 +163,7 @@ def local_exports(resolved: dict, environ) -> list:
     if str(environ.get(LOCAL_DDS_ENV, '1')).strip() == '0':
         return exports(resolved, environ) + [f'export {LOCAL_DDS_ENV}="0"']
     namespace_line = exports(resolved, environ)[0]
-    group_domain = int(resolved['domain_id'])
-    local = local_domain_id(
-        group_domain,
-        environ.get(LOCAL_DOMAIN_ENV) or resolved.get('local_domain_id'),
-    )
+    local, _loopback = local_target(resolved, environ)
     return [
         namespace_line,
         f'export ROS_DOMAIN_ID="{local}"',

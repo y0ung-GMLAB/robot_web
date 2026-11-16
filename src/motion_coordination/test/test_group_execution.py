@@ -190,3 +190,19 @@ def test_leaving_during_release_finishes_the_release():
     execution.pending_acks = {'a', 'c'}
     execution.exclude({'b': '웹 다시 시작'})
     assert execution.settle_after_exclude() == 'released'
+
+
+def test_clear_active_keeps_final_state_but_drops_excluded():
+    """끝난 실행 · 마지막 상태 · 회차는 남기고 「제외」 는 지운다 · 수정 목록 216 (NY 2026-11-16)
+
+    00:29 에 끝난 사람 시작 그룹 실행의 floating3 「제외」 가 03:30 에도 PC 줄에 보였다(시간표 구간 밖에서만).
+    """
+    execution = GroupExecution(start_lead_sec=0.3)
+    execution.begin('floating1', ['floating1', 'floating2', 'floating3'])
+    execution.state = 'stopped'
+    execution.cycle_number = 2
+    execution.excluded['floating3'] = '사람이 정지'
+    execution.clear_active()
+    assert execution.execution_id == ''
+    assert execution.excluded == {}
+    assert (execution.state, execution.cycle_number) == ('stopped', 2)

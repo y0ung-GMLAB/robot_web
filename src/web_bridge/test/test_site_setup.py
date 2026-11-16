@@ -33,7 +33,8 @@ def _site(fn_call, env=None):
 
 
 def test_every_script_parses():
-    for path in [SCRIPTS / 'bootstrap.sh', SCRIPTS / 'install.sh', SITE, SCRIPTS / 'setup' / 'ethercat-rebuild.sh']:
+    for path in [SCRIPTS / 'bootstrap.sh', SCRIPTS / 'install.sh', SITE, SCRIPTS / 'setup' / 'ethercat-rebuild.sh',
+                 SCRIPTS / 'setup' / 'robot-web-system-apply.sh', SCRIPTS / 'allow_system_apply.sh']:
         result = _bash(f'bash -n "{path}"')
         assert result.returncode == 0, f'{path.name}: {result.stderr}'
     for unit in ['ethercat-rebuild.service', 'motion-site-resume.service.in']:
@@ -117,7 +118,9 @@ def test_dry_run_site_install_changes_nothing_and_lists_every_step(tmp_path):
                     '99-robot-serial.rules',
                     'ethercat-rebuild.service', 'UPDOWN_INTERFACES="eth9"', 'systemctl enable --now ethercat',
                     # SDO 사전 읽기 끄기 패치 · 빌드 전에 · 재빌드 훅이 읽을 고정 자리 · 수정 목록 139
-                    'igh-1.6.9-sdo-dict-off.patch', '/usr/local/share/robot_web/igh-sdo-dict-off.patch']:
+                    'igh-1.6.9-sdo-dict-off.patch', '/usr/local/share/robot_web/igh-sdo-dict-off.patch',
+                    # 웹 업데이트용 시스템 설정 도우미 · sudoers 한 줄 · 수정 목록 211
+                    '/usr/local/sbin/robot-web-system-apply ""', 'visudo -cf']:
         assert command in out, command
     assert out.index(' apply ') < out.index('./bootstrap')
     # 바꾼 것이 없다
@@ -733,8 +736,9 @@ def test_rtw88_without_sudo_warns_with_the_manual_commands_and_install_goes_on(t
 
 def test_rtw88_step_is_wired_into_install_site_and_check():
     install = (SCRIPTS / 'install.sh').read_text(encoding='utf-8')
-    step = install.split('print_step "2-1. Wi-Fi 절전 끄기"', 1)[1].split('print_step', 1)[0]
-    assert 'site_wifi_chip_powersave_off ||' in step, '웹 업데이트에서도 · 실패해도 계속'
+    step = install.split('print_step "2-1. 시스템 설정', 1)[1].split('print_step', 1)[0]
+    # 터미널 설치는 바로 · 웹 업데이트(--code-only)는 빌드 뒤 고정 도우미로(수정 목록 211) · 실패해도 계속
+    assert 'site_wifi_chip_powersave_off ||' in step.split('else', 1)[1]
     site = SITE.read_text(encoding='utf-8')
     interruptions = site.split('site_disable_interruptions() {', 1)[1].split('\n}\n', 1)[0]
     assert 'site_wifi_chip_powersave_off || true' in interruptions
@@ -896,8 +900,9 @@ def test_dry_run_does_not_touch_the_link(tmp_path):
 
 def test_ethercat_nm_step_is_wired_into_install_site_and_check():
     install = (SCRIPTS / 'install.sh').read_text(encoding='utf-8')
-    step = install.split('print_step "2-1. Wi-Fi 절전 끄기"', 1)[1].split('print_step', 1)[0]
-    assert 'site_ethercat_nm_unmanage ||' in step, '웹 업데이트에서도 · 실패해도 계속'
+    step = install.split('print_step "2-1. 시스템 설정', 1)[1].split('print_step', 1)[0]
+    # 터미널 설치는 바로 · 웹 업데이트(--code-only)는 빌드 뒤 고정 도우미로(수정 목록 211) · 실패해도 계속
+    assert 'site_ethercat_nm_unmanage ||' in step.split('else', 1)[1]
     site = SITE.read_text(encoding='utf-8')
     configure = site.split('site_ethercat_configure() {', 1)[1].split('\n}\n', 1)[0]
     assert 'site_ethercat_nm_unmanage || true' in configure, '첫 설치 · 랜카드를 정한 직후'

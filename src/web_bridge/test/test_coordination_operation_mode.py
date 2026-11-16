@@ -12,7 +12,7 @@ from motion_web_bridge.bridge_node import MotionWebBridge
 
 def _bridge():
     bridge = MotionWebBridge.__new__(MotionWebBridge)
-    bridge._coordination_poll_lock = threading.Lock()
+    bridge._coordination_alive_lock = threading.Lock()
     bridge._motion_run_lock = threading.Lock()
     bridge._safety_status_lock = threading.Lock()
     bridge._motion_run_status = {}

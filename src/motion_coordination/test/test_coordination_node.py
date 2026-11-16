@@ -9,7 +9,9 @@ from motion_coordination_interfaces.msg import (
 
 import motion_coordination.coordination_node as coordination_node
 from motion_coordination.alarm_registry import AlarmRegistry
-from motion_coordination.group_execution import GroupExecution, Member, MemberRegistry
+from motion_coordination.group_execution import (
+    BRIDGE_STARTUP_NOTICE_SEC, GroupExecution, Member, MemberRegistry,
+)
 from motion_coordination.safety_stop import SafetyStopController
 
 
@@ -187,16 +189,17 @@ def test_state_tick_consumes_background_runtime_sample_before_event_check():
     assert published[0][1]['triggered_at'] == 123.0
 
 
-def test_a_stalled_web_on_the_master_drops_only_the_master(monkeypatch):
-    """움직이는 중 진행 PC 의 웹이 끊김 · 진행 PC 만 빠지고 나머지는 계속 · 잠그지 않음 · 숫자를 남김 · 수정 목록 178"""
+def test_a_stalled_web_on_the_master_no_longer_drops_it(monkeypatch):
+    """움직이는 중 진행 PC 의 웹이 2 s 멈춤 · 전에는 진행 PC 만 빠지고 제 모터를 세웠다(178) · 이제 웹은 그룹
+    판단에 안 쓴다 · 재생 · 안전 상태는 재생 관리자 · 감독에서 로컬 DDS 로 직접 · 수정 목록 209"""
     monkeypatch.setattr(coordination_node.threading, 'Thread', _InlineThread)
     node = _node()
     node._execution.execution_id = 'exec-a'
     node._execution.coordinator_id = 'pc-a'
     node._execution.participants = ('pc-a', 'pc-b')
     node._execution.state = 'running'
-    node._boot_monotonic = 0.0
     node._command_pub = _Publisher()
+    node._last_alarm_key = ()
     local = []
     node._call_local_control = lambda payload, **_kwargs: local.append(payload['command']) or {'success': True}
     node._local_runtime_monitor = SimpleNamespace(
@@ -205,25 +208,17 @@ def test_a_stalled_web_on_the_master_drops_only_the_master(monkeypatch):
             'received_monotonic': time.monotonic() - 2.0,
             'error': 'bridge timeout',
         },
-        diagnosis=lambda: (
-            '마지막 성공 2000ms 전 · 연속 실패 7회 · '
-            '최근 응답(ms) 12, 14, 300, 300 · 사유 bridge timeout'
-        ),
+        diagnosis=lambda: '마지막 성공 2000ms 전 · 연속 실패 7회',
     )
     node._stop_for_peer_failure = lambda _reason: pytest.fail('그룹 전체를 세우지 않는다 · 178')
 
     node._consume_local_runtime_status()
 
-    assert node._execution.execution_id == 'exec-a', '나머지는 계속 돈다'
-    assert node._execution.participants == ('pc-b',)
-    assert _dds(node) == ['update_participants'], 'stop_now · cancel 을 모두에게 보내지 않는다'
-    assert 'stop_now' in local, '제 모터만 세운다'
+    assert node._execution.participants == ('pc-a', 'pc-b'), '빠지지 않는다'
+    assert node._command_pub.messages == []
+    assert local == [], '제 모터도 세우지 않는다'
     assert node._coordination_error == {}
-    said = node._bridge_loss['message']
-    assert said.startswith('pc-a 웹 서비스 끊김 · 이 PC 만 그룹에서 빠짐 · ')
-    assert node._bridge_loss['latched'] is False
-    assert '마지막 성공 2000ms 전' in said and '연속 실패 7회' in said
-    assert '최근 응답(ms)' in said and 'bridge timeout' in said
+    assert node.snapshot()['runtime_loss'] == {}
 
 
 def test_one_second_gap_keeps_the_group_running():
@@ -233,7 +228,6 @@ def test_one_second_gap_keeps_the_group_running():
     node._execution.coordinator_id = 'pc-a'
     node._execution.participants = ('pc-a', 'pc-b')
     node._execution.state = 'running'
-    node._boot_monotonic = 0.0
     node._command_pub = _Publisher()
     node._last_alarm_key = ()
     node._local_runtime_monitor = SimpleNamespace(
@@ -262,25 +256,6 @@ def test_stale_local_runtime_status_does_not_affect_standalone_mode():
     )
     node._stop_for_peer_failure = lambda _reason: pytest.fail(
         'standalone mode must not be stopped by coordination status'
-    )
-
-    node._consume_local_runtime_status()
-
-
-def test_activation_boundary_waits_for_first_active_runtime_sample():
-    node = _node()
-    node._execution.execution_id = 'exec-a'
-    activated = time.monotonic()
-    node._local_runtime_monitor = SimpleNamespace(
-        snapshot=lambda: {
-            'status': {'bridge_state': 'ok'},
-            'received_monotonic': activated - 0.6,
-            'active_since_monotonic': activated,
-            'error': '',
-        },
-    )
-    node._stop_for_peer_failure = lambda _reason: pytest.fail(
-        'activation grace must wait for a fresh active sample'
     )
 
     node._consume_local_runtime_status()
@@ -1607,39 +1582,28 @@ def test_the_tolerance_is_not_twenty():
 # 8대까지 늘어나면 각 PC 의 일이 늘고 로컬 응답도 느려진다 · 250ms 일 때는
 # 262ms 에 돌아온 응답이 **성공인데도 제한시간에 걸려 버려졌다**(§6-146).
 
-def test_a_slow_but_real_answer_is_not_thrown_away():
-    """실측 262ms 짜리 응답이 살아남아야 한다 · 버리면 안전 타이머가 굶는다."""
-    assert coordination_node.LOCAL_RUNTIME_HTTP_TIMEOUT_SEC >= 0.30
+def test_the_web_fields_poll_is_slow_and_patient():
+    """웹 쪽 칸(운전 모드 · 시간표 칸)은 0.5 s 마다 · 늦어도 지난 값 · 그룹 판단에 안 쓴다 · 수정 목록 209
 
-
-def test_one_try_still_fits_in_the_budget():
-    """한 번도 못 해보고 전체 정지가 나면 안 된다 · 제한시간이 예산을 넘으면 그렇게 된다."""
-    assert (
-        coordination_node.LOCAL_RUNTIME_HTTP_TIMEOUT_SEC
-        < coordination_node.LOCAL_RUNTIME_ACTIVE_TIMEOUT_SEC
-    )
-
-
-def test_one_late_answer_does_not_stop_the_group():
-    """한 번 늦은 응답(301ms)으로 4대가 모두 서면 안 된다 · 실물 NY 2026-11-04 · 수정 목록 172
-
-    0.5초 예산이면 300ms 시도 하나가 늦는 순간 넘는다 · 몇 번은 더 해 볼 여유가 있어야 한다.
+    전에는 50 ms 마다 0.3 s 제한으로 물어 1.5 s 못 받으면 빠졌다(151 · 172).
     """
-    assert (
-        coordination_node.LOCAL_RUNTIME_ACTIVE_TIMEOUT_SEC
-        >= 4 * coordination_node.LOCAL_RUNTIME_HTTP_TIMEOUT_SEC
-    )
-    # 진짜 죽은 웹 서버는 오래 두지 않는다
-    assert coordination_node.LOCAL_RUNTIME_ACTIVE_TIMEOUT_SEC <= 2.0
+    assert coordination_node.BRIDGE_FIELDS_INTERVAL_SEC >= 0.5
+    assert coordination_node.BRIDGE_FIELDS_HTTP_TIMEOUT_SEC >= 1.0
 
 
-def test_the_status_path_uses_the_named_timeout():
+def test_the_runtime_silence_limit_is_a_failure_detector_not_a_tuning_knob():
+    """재생 관리자는 0.5 s 마다(+ 바뀔 때) 상태를 낸다 · 열 번 연속 못 받아야 「끊김」 · systemd 감시(15 s)보다 짧게"""
+    assert coordination_node.RUNTIME_SILENT_SEC >= 10 * 0.5
+    assert coordination_node.RUNTIME_SILENT_SEC < 15.0
+
+
+def test_the_web_fields_path_uses_the_named_timeout():
     """숫자를 코드 속에 박아 두면 늘려도 여기만 안 늘어난다."""
     from pathlib import Path
     source = Path(coordination_node.__file__).read_text(encoding='utf-8')
-    start = source.index('def _fetch_local_runtime_status(')
+    start = source.index('def _fetch_bridge_fields(')
     body = source[start:source.index('\n    def ', start)]
-    assert 'LOCAL_RUNTIME_HTTP_TIMEOUT_SEC' in body
+    assert 'BRIDGE_FIELDS_HTTP_TIMEOUT_SEC' in body
     assert 'timeout_sec=0.' not in body, '숫자를 다시 박았다'
 
 
@@ -2273,50 +2237,146 @@ def test_a_planned_restart_takes_only_this_pc_out():
     assert node._execution.execution_id == execution_id
     assert node._execution.participants == ('pc-b',)
     assert node._coordination_error == {}
-    assert node._planned_restart_until > time.monotonic()
+    # 새 웹이 「준비 끝」 을 알릴 때까지 다시 뜨는 중 · 전에는 120 s 시간(`_planned_restart_until`) · 수정 목록 202
+    assert node._bridge_readiness.phase == 'restarting'
 
 
-def test_losing_the_bridge_after_a_planned_restart_does_not_latch(monkeypatch):
+def test_a_silent_web_after_a_restart_notice_takes_nobody_out(monkeypatch):
+    """다시 시작 「알림」 은 이 PC 를 뺀다(`planned_restart` · `bridge_leaving` · 145 ①) · 알림 없이 웹이 조용한 것만으로는
+    아무도 빼지 않는다 · 전에는 웹 끊김을 보고 진행 PC 를 뺐다(178 · 202) · 수정 목록 209"""
     monkeypatch.setattr(coordination_node.threading, 'Thread', _InlineThread)
     node = _node()
     node._execution = GroupExecution()
     execution_id = node._execution.begin('pc-a', ('pc-a', 'pc-b'))
     node._execution.state = 'running'
-    node._planned_restart_until = time.monotonic() + 60.0
-    node._boot_monotonic = 0.0
     node._call_local_control = lambda payload, **_kwargs: {'success': True}
     node._command_pub = _Publisher()
     node._local_runtime_monitor = SimpleNamespace(
         snapshot=lambda: {'status': {}, 'received_monotonic': 1.0, 'active_since_monotonic': 0.0},
         diagnosis=lambda: '검사용',
     )
+    node._bridge_ready_tracker().observe(_web('web-1'), 1.0)
+    node._bridge_ready_tracker().leaving(time.monotonic())
 
     node._consume_local_runtime_status()
 
-    assert node._execution.execution_id == execution_id, '진행 PC 만 빠지고 나머지는 계속 · 178'
-    assert node._execution.participants == ('pc-b',)
+    assert node._execution.execution_id == execution_id
+    assert node._execution.participants == ('pc-a', 'pc-b')
+    assert node._coordination_error == {}
+    assert node.snapshot()['runtime_loss'] == {}
+    assert node.snapshot()['last_start_failure'] == {}
+
+
+# ---------------------------------------------------------------------- #
+# 수정 목록 202 · 웹 「준비 끝」 · 기동 뒤 90 s · 다시 시작 뒤 120 s 시간 짐작 대신
+#
+# 느린 PC(NY floating4 · RAM 4.7 GB · 스왑)는 기동이 90 s 를 넘어 정상 기동이 「움직이던 중 끊김」 으로 기록됐고 ·
+# 90 s 안의 진짜 끊김은 조용히 묻혔다 · 아래 `_boot_monotonic` · `_planned_restart_until` 은 옛 코드의 시간 ·
+# 지금 코드는 읽지 않는다(시간과 상관없음을 보이려고 둔다)
+# ---------------------------------------------------------------------- #
+
+def _web(instance, ready=True):
+    return {'bridge_state': 'ok', 'bridge_instance_id': instance, 'ready': ready}
+
+
+def _losing_master(monkeypatch, status, *, received_ago=5.0):
+    monkeypatch.setattr(coordination_node.threading, 'Thread', _InlineThread)
+    node = _node()
+    node._execution = GroupExecution()
+    node._execution.begin('pc-a', ('pc-a', 'pc-b'))
+    node._execution.state = 'running'
+    node._call_local_control = lambda payload, **_kwargs: {'success': True}
+    node._command_pub = _Publisher()
+    received = time.monotonic() - received_ago
+    node._local_runtime_monitor = SimpleNamespace(
+        snapshot=lambda: {
+            'status': dict(status), 'received_monotonic': received,
+            'active_since_monotonic': 0.0, 'consecutive_failures': 9,
+        },
+        diagnosis=lambda: '마지막 성공 5000ms 전 · 연속 실패 9회',
+    )
+    node._stop_for_peer_failure = lambda _reason: pytest.fail('전체를 세우지 않는다')
+    node._last_alarm_key = ()
+    return node
+
+
+def test_a_slow_boot_is_shown_as_starting_and_takes_nobody_out(monkeypatch):
+    """웹이 아직 준비 전(supervisor · 재생 관리자 대기) · 기동 200 s 째 조용함 · 화면 칸만 · 그룹은 그대로 · 수정 목록 209
+
+    전에는 이 PC 를 빼고(202 · 기록 없이) 그 전에는 「움직이던 중 끊김」 으로 기록했다(145 ②).
+    """
+    node = _losing_master(monkeypatch, _web('web-1', ready=False))
+    node._boot_monotonic = time.monotonic() - 200.0          # 옛 90 s 를 넘김
+
+    node._consume_local_runtime_status()
+
+    assert node._execution.participants == ('pc-a', 'pc-b')
+    assert node.snapshot()['runtime_loss'] == {}
+    assert node.snapshot()['last_start_failure'] == {}
+    assert node._coordination_error == {}
+    assert node.snapshot()['local_runtime']['bridge_ready']['phase'] == 'starting'
+
+
+def test_a_web_lost_after_it_said_ready_takes_nobody_out(monkeypatch):
+    """준비 끝을 알린 웹이 기동 10 s 째 · 다시 시작 뒤 새 웹이 준비 끝 · 그 뒤 끊김 · 전에는 기록 + 빠짐(202) · 209"""
+    node = _losing_master(monkeypatch, _web('web-2'))
+    node._bridge_ready_tracker().observe(_web('web-1'), time.monotonic() - 30.0)
+    node._bridge_ready_tracker().leaving(time.monotonic() - 20.0)
+
+    node._consume_local_runtime_status()
+
+    assert node._bridge_ready_tracker().phase == 'ready'
+    assert node._execution.participants == ('pc-a', 'pc-b')
+    assert node.snapshot()['runtime_loss'] == {}
+
+
+def test_a_web_that_never_gets_ready_is_logged_once_without_a_lock(monkeypatch):
+    errors = []
+    node = _losing_master(monkeypatch, _web('web-1', ready=False))
+    node._execution = GroupExecution()
+    node.get_logger = lambda: SimpleNamespace(error=errors.append, warn=lambda _m: None, info=lambda _m: None)
+    tracker = node._bridge_ready_tracker()
+    tracker._waiting_since = time.monotonic() - BRIDGE_STARTUP_NOTICE_SEC - 1.0
+
+    node._consume_local_runtime_status()
+    node._consume_local_runtime_status()
+
+    assert len(errors) == 1 and '「준비 끝」 없음' in errors[0]
+    assert node.snapshot()['local_runtime']['bridge_ready']['overdue'] is True
     assert node._coordination_error == {}
 
 
-def test_a_slave_losing_its_bridge_while_running_drops_only_itself():
-    """슬레이브 실행 상태는 preparing 에 머문다 · 움직이는지는 로컬 상태로 본다 · 갑자기 끊기면
-    이 PC 만 빠진다(움직이던 중 · 끊김 기록) · 2등급으로 잠그지 않는다 · 수정 목록 145 ② → 178"""
+def test_a_slave_whose_runtime_goes_silent_drops_only_itself(monkeypatch):
+    """슬레이브 · 재생 관리자 상태가 한도 넘게 끊김(고장 검출기) · 이 PC 만 빠진다 · 진행 PC 에 「빠짐」 · 잠그지 않음 · 209
+
+    전에는 웹 상태가 1.5 s 끊기면 이렇게 했다(145 ② → 178) · 이제 웹은 상관없다 · 재생 관리자가 죽었을 때만.
+    """
+    from local_link_fakes import fake_link
+
+    monkeypatch.setattr(coordination_node.threading, 'Thread', _InlineThread)
     node = _node()
+    node._joined = True
+    node._event_pub = _Publisher()
     node._execution = GroupExecution()
     node._execution.activate_claim('exec-a', 'pc-b', ('pc-a', 'pc-b'))
-    node._local_status = {'motion_run_status': {'group_execution': True, 'state': 'running'}}
-    node._boot_monotonic = 0.0
-    lost = []
-    node._drop_self_for_bridge_loss = lambda detail, moving: lost.append((detail, moving))
+    node._local_link = fake_link(
+        runtime={'group_execution': True, 'execution_id': 'exec-a', 'state': 'running'},
+        runtime_ago=coordination_node.RUNTIME_SILENT_SEC + 0.5,
+    )
+    node._call_local_control = lambda payload, **_kwargs: {'success': True}
+    node._last_alarm_key = ()
     node._stop_for_peer_failure = lambda _reason: pytest.fail('2등급으로 잠그지 않는다')
     node._local_runtime_monitor = SimpleNamespace(
-        snapshot=lambda: {'status': {}, 'received_monotonic': 1.0, 'active_since_monotonic': 0.0},
+        snapshot=lambda: {'status': {'bridge_state': 'ok'}, 'received_monotonic': time.monotonic()},
         diagnosis=lambda: '검사용',
     )
 
     node._consume_local_runtime_status()
 
-    assert lost == [('검사용', True)]
+    assert [m.event for m in node._event_pub.messages] == ['participant_left']
+    assert node._execution.execution_id == ''
+    assert 'exec-a' in node._drop_released(), '같은 실행의 복귀 권유는 받는다'
+    assert node.snapshot()['runtime_loss']['latched'] is False
 
 
 # ---------------------------------------------------------------------- #
@@ -2346,21 +2406,20 @@ def _pending_schedule(node, participants, *, acked=(), command='initialize_at'):
 
 
 def test_only_the_masters_own_late_initialize_ack_ends_quietly(monkeypatch):
-    """진행 PC 혼자 · 제 확인이 늦음 · 빠지면 남은 PC 가 없어 조용히 선다 · 잠그지 않음 · 130 → 178"""
+    """진행 PC 혼자 · 제 확인이 없음 · 아무도 답이 없는 것과 같다 · 시작 전 취소 · 잠그지 않음 · 130 → 178 → 207
+
+    207 전에는 「자신의 예약 확인 늦음」(GROUP_SCHEDULE_SELF_LATE)으로 따로 다뤘다 · 이제 제 예약도 다른 PC 와 같은 판정.
+    """
     monkeypatch.setattr(coordination_node.threading, 'Thread', _InlineThread)
     node = _node()
     sent = _pending_schedule(node, ('pc-a',))
-    execution_id = node._execution.execution_id
 
     node._enforce_schedule_ack_deadline()
 
-    assert ('local', 'stop_now') in sent
+    assert ('local', 'group_cancel') in sent
     assert node._execution.execution_id == ''
-    assert node._execution.state == 'stopped'
     assert node._coordination_error == {}, '그룹 오류(2등급)로 잠그지 않는다'
-    assert node._last_start_failure['code'] == 'GROUP_SCHEDULE_SELF_LATE'
-    # 아직 끝나지 않은 제 로컬 호출이 뒤늦게 성공해도 그 세션은 세운다
-    assert execution_id in node._self_dropped_ids()
+    assert node._last_start_failure['code'] == 'GROUP_SCHEDULE_ACK_TIMEOUT'
 
 
 def test_masters_own_late_ack_with_peers_drops_only_the_master(monkeypatch):
@@ -2405,10 +2464,7 @@ def _schedule_initialize(node):
     return command, command.scheduled_monotonic_ns / 1e9 - before
 
 
-def test_first_start_at_of_an_execution_gets_three_seconds_even_after_a_restart():
-    """수정 목록 179 · 재시작 뒤 잰 값이 없어도 1회차 `start_at` 여유 3 s · 회차 사이는 그대로 가볍다"""
-    from motion_coordination.schedule_lead import FIRST_START_LEAD_MIN_SEC
-
+def _first_start_lead(initialize_ack_sec):
     node = _node()
     node._execution = GroupExecution()
     node._execution.begin('pc-a', ('pc-a',))
@@ -2417,12 +2473,25 @@ def test_first_start_at_of_an_execution_gets_three_seconds_even_after_a_restart(
     node._sync_ready = {'pc-a'}
     node._sync_next_action = 'start'
     node._command_pub = _Publisher()
+    node._lead_planner().record('initialize', 'pc-a', initialize_ack_sec)
     before = time.monotonic()
     node._complete_trigger_sync_if_ready()
     command = node._command_pub.messages[-1]
     assert command.command == 'start_at' and command.cycle_number == 1
-    assert command.scheduled_monotonic_ns / 1e9 - before == pytest.approx(FIRST_START_LEAD_MIN_SEC, abs=0.05)
+    return node, command.scheduled_monotonic_ns / 1e9 - before
+
+
+def test_first_start_at_after_a_restart_keeps_the_three_second_default():
+    """수정 목록 179 · 재시작 뒤 1회차 `start_at` · 다른 PC 들의 Wi-Fi 왕복을 잰 값이 없을 때의 기본값 3 s ·
+    207 이 진행 PC 자신의 예약을 프로세스 안으로 옮긴 뒤에도 남긴다(사용자 결정 179) · 방금 잰 `initialize_at`
+    확인(`SAMPLE_FALLBACK`)이 크면 그 값 × 2 + 마감 여백"""
+    from motion_coordination.schedule_lead import FIRST_START_LEAD_MIN_SEC
+
+    node, lead = _first_start_lead(0.3)
+    assert lead == pytest.approx(FIRST_START_LEAD_MIN_SEC, abs=0.05)
     assert node._lead_planner().snapshot()['last_lead_sec'] == {'first_start': pytest.approx(3.0)}
+    _node2, lead = _first_start_lead(2.0)
+    assert lead == pytest.approx(4.1, abs=0.05)
 
 
 def test_own_ack_is_counted_as_soon_as_the_local_call_returns():
@@ -2451,10 +2520,15 @@ def test_initialize_lead_starts_at_the_floor_and_grows_with_the_masters_latency(
     assert lead == pytest.approx(3.3, abs=0.05)
 
 
-def test_masters_own_timing_rejection_does_not_latch(monkeypatch):
+def test_masters_own_rejection_is_handled_like_any_other_pc(monkeypatch):
+    """진행 PC 자신의 예약 거절 · 다른 PC 와 같은 판정(빠짐 · 아무도 안 남으면 조용히 섬) · 잠그지 않음 · 207
+
+    207 전에는 「시간 때문에 거절」 을 「자신의 예약 확인 늦음」(GROUP_SCHEDULE_SELF_LATE)으로 따로 다뤘다.
+    """
     monkeypatch.setattr(coordination_node.threading, 'Thread', _InlineThread)
     node = _node()
     _pending_schedule(node, ('pc-a',))
+    node._note_excluded = lambda *_args, **_kwargs: None
     node._event_callback(GroupEvent(
         group_id='stage-a',
         execution_id=node._execution.execution_id,
@@ -2467,7 +2541,7 @@ def test_masters_own_timing_rejection_does_not_latch(monkeypatch):
 
     assert node._execution.execution_id == ''
     assert node._coordination_error == {}
-    assert node._last_start_failure['code'] == 'GROUP_SCHEDULE_SELF_LATE'
+    assert node._last_start_failure['code'] == 'GROUP_PARTICIPANT_LEFT'
 
 
 def test_restart_after_a_completed_run_with_refusing_pcs_dropped():
@@ -2535,9 +2609,8 @@ def _slow_bridge_node(*, received_ago, elapsed, duration=920.0, phase='running')
         'group_execution': True, 'execution_id': 'exec-a', 'state': 'running', 'phase': phase,
         'progress': {'elapsed_sec': elapsed, 'duration_sec': duration},
     }}
-    node._boot_monotonic = 0.0
     lost = []
-    node._drop_self_for_bridge_loss = lambda detail, moving: lost.append((detail, moving))
+    node._drop_member_only = lambda reasons, **_kwargs: lost.append(dict(reasons))
     node._stop_for_peer_failure = lambda _reason: pytest.fail('전체를 세우지 않는다')
     node._local_runtime_monitor = SimpleNamespace(
         snapshot=lambda: {
@@ -2549,24 +2622,19 @@ def _slow_bridge_node(*, received_ago, elapsed, duration=920.0, phase='running')
     return node, lost
 
 
-def test_a_slow_web_while_playing_a_cycle_keeps_playing_to_the_end():
-    node, lost = _slow_bridge_node(received_ago=1.6, elapsed=38.0)
-    node._consume_local_runtime_status()
-    assert lost == [], '빠지지도 서지도 않는다'
-    assert node._execution.execution_id == 'exec-a'
-    assert node._execution.participants == ('pc-a', 'pc-b')
+def test_a_slow_web_never_drops_a_pc_during_or_between_cycles():
+    """웹이 느리다 · 회차 재생 중이든 회차 사이든 · 회차 끝을 한참 넘겨도 · 빠지지 않는다 · 수정 목록 209
 
-
-def test_a_web_that_stays_gone_past_the_cycle_end_still_drops():
-    node, lost = _slow_bridge_node(received_ago=30.0, elapsed=900.0)
-    node._consume_local_runtime_status()
-    assert [moving for _detail, moving in lost] == [True]
-
-
-def test_a_slow_web_between_cycles_drops_as_before():
-    node, lost = _slow_bridge_node(received_ago=1.6, elapsed=0.0, phase='group_cycle_initializing')
-    node._consume_local_runtime_status()
-    assert len(lost) == 1
+    전에는 1.5 s 넘게 못 받으면 빠졌고(172) 재생 중만 회차 끝 + 5 s 까지 버텼다(188 ④).
+    """
+    for received_ago, elapsed, phase in (
+        (1.6, 38.0, 'running'), (30.0, 900.0, 'running'), (1.6, 0.0, 'group_cycle_initializing'),
+    ):
+        node, lost = _slow_bridge_node(received_ago=received_ago, elapsed=elapsed, phase=phase)
+        node._consume_local_runtime_status()
+        assert lost == [], (received_ago, phase)
+        assert node._execution.execution_id == 'exec-a'
+        assert node._execution.participants == ('pc-a', 'pc-b')
 
 
 def test_the_master_playing_a_cycle_keeps_playing_on_a_slow_web():

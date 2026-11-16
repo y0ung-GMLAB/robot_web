@@ -12,7 +12,7 @@ import urllib.request
 from pathlib import Path
 from typing import Any, Callable, Dict, Mapping, Optional
 
-from motion_common import check_timing as check_timing_mod, motion_segment, repeat_policy
+from motion_common import check_timing as check_timing_mod, group_run_request, motion_segment, repeat_policy
 
 from motion_web_bridge import run_mode_gate
 from motion_common import run_state
@@ -442,20 +442,14 @@ def stop_now_not_ours(bridge: Any, execution_id: str) -> str:
     """그룹 즉시 정지가 이 PC 가 돌지 않는 실행 것인가 · 그러면 이유 · 수정 목록 136
 
     전에는 실행 ID 를 안 보고 무조건 세웠다 · 그룹에 안 들어간 PC(단독 재생 중이라 빠진 마스터 ·
-    조그 중인 PC)에 그 그룹의 정지가 닿으면 단독 재생 · 조그가 멈췄다(실물 V-4 · V-5) ·
-    **이 PC 가 단독 재생 · 사람 조작 중이고 그 실행을 돌지 않을 때만** 무시한다 · 쉬는 중이거나
-    그룹 세션이 있으면(다른 번호여도 · 준비가 막 끝나 상태가 늦게 온 경우) 전처럼 세운다.
+    조그 중인 PC)에 그 그룹의 정지가 닿으면 단독 재생 · 조그가 멈췄다(실물 V-4 · V-5) · 판정은
+    `run_state.group_stop_skip_reason` 하나 · 연동 노드가 재생 관리자에 직접 보낼 때도 같은 것(수정 목록 209).
     """
-    execution_id = str(execution_id or '')
-    if not execution_id:
-        return ''
-    run = _locked_copy(bridge, '_motion_run_status', '_motion_run_lock')
-    if run.get('group_execution'):
-        return ''
-    busy = human_operation_reason(run, _locked_copy(bridge, '_safety_status', '_safety_status_lock'))
-    if not busy:
-        return ''
-    return f'이 PC 는 그룹 실행 {execution_id} 에 없음 · {busy} · 정지하지 않음'
+    return run_state.group_stop_skip_reason(
+        _locked_copy(bridge, '_motion_run_status', '_motion_run_lock'),
+        _locked_copy(bridge, '_safety_status', '_safety_status_lock'),
+        execution_id,
+    )
 
 
 def _locked_copy(bridge: Any, value_name: str, lock_name: str) -> Dict[str, Any]:
@@ -560,6 +554,11 @@ def _local_motion_readiness(
     timeout_sec = max(0.5, budget - READINESS_MARGIN_SEC)
     # 안쪽 일 전부(실행 컨텍스트 맞추기 + 실행 준비 검사)가 이 마감 안에 · 수정 목록 164
     deadline = time.monotonic() + timeout_sec
+    # 아직 안 뜸(supervisor · 재생 관리자 첫 상태 전) · 검사 시간 초과를 기다리지 않고 이유를 바로 · 수정 목록 202
+    startup = getattr(bridge, '_startup', None)
+    starting = startup.blocker() if startup is not None else ''
+    if starting:
+        return {'success': False, 'message': starting}
     # 사람이 이 PC 를 만지는 중이면 그룹에 안 들어간다 · 수정 목록 122 (나)
     busy = human_operation_reason(
         _locked_copy(bridge, '_motion_run_status', '_motion_run_lock'),
@@ -567,6 +566,13 @@ def _local_motion_readiness(
     )
     if busy:
         return {'success': False, 'message': busy}
+    # 오프 모드 · 모터 문제 · 전에는 `initialize_at`(그룹 초기 위치 예약) 때 웹이 `group_prepare` 안에서 봤다 ·
+    # 이제 그 예약은 연동 노드가 재생 관리자에 바로 보낸다(수정 목록 209 · 207) · 같은 관문을 준비에서 미리 본다 ·
+    # 걸리면 시작 전에 이 PC 만 빠진다(전에는 초기 위치 예약 거절로 빠졌다)
+    gate = getattr(bridge, 'group_prepare_gate', None)
+    blocked = gate() if callable(gate) else ''
+    if blocked:
+        return {'success': False, 'message': blocked}
     # A group prepare must not race the periodic project-context reconciler.
     # Apply and verify the context synchronously before reporting this PC ready.
     reconcile = getattr(
@@ -611,7 +617,7 @@ def _local_motion_readiness(
     # 20 조인트)의 첫 검사가 「motion_run_manager response timeout」 으로 끝났다 · 수정 목록 164
     step_started = time.monotonic()
     try:
-        return bridge.motion_run_check({
+        result = bridge.motion_run_check({
             **selection,
             'initial_move_time_sec': None,
             'run_mode': 'once',
@@ -619,29 +625,21 @@ def _local_motion_readiness(
             motion_segment.START_KEY: segment[motion_segment.START_KEY],
             motion_segment.END_KEY: segment[motion_segment.END_KEY],
         }, timeout_sec=max(0.5, deadline - time.monotonic()))
+        if isinstance(result, Mapping) and result.get('success') is not False:
+            stamp = run_request_stamp(bridge, selection)
+            if stamp:
+                result = {**result, 'run_request': stamp}
+        return result
     finally:
         steps['check_ms'] = (time.monotonic() - step_started) * 1000.0
 
 
-def _group_initial_move_time(payload: Mapping[str, Any]) -> Optional[float]:
-    try:
-        value = float(payload.get('initial_move_time_sec') or 0.0)
-    except (TypeError, ValueError):
-        return None
-    return value if value > 0.0 else None
-
-
-def _group_segment(payload: Mapping[str, Any]) -> Dict[str, float]:
-    """연동 노드가 넘긴 구간 · 틀린 값(옛 · 깨진 명령)은 통째로 · 검사는 진행 PC 에서 이미 했다"""
-    try:
-        start, end = motion_segment.parse(payload)
-    except ValueError:
-        start, end = 0.0, 0.0
-    return motion_segment.fields(start, end)
-
-
 def local_motion_control(bridge: Any, payload: Mapping[str, Any]) -> Dict[str, Any]:
-    """Execute one loopback-only high-level command through motion_run_manager."""
+    """Execute one loopback-only high-level command through motion_run_manager.
+
+    재생 관리자 요청 본문은 `motion_common.group_run_request` 하나 · 연동 노드가 로컬 DDS 로 바로 보낼 때와
+    같은 본문 · 이 길은 웹만 아는 일(준비 · 주차 · 운영 로그)과 연동 노드의 로컬 연결이 없을 때 · 수정 목록 209
+    """
     command = str(payload.get('command') or '')
     if command in {'stop_motion', 'stop_initialize', 'stop_now'}:
         # 그 실행을 돌지 않는 PC 의 단독 재생 · 조그는 그대로 둔다 · 수정 목록 136
@@ -650,31 +648,12 @@ def local_motion_control(bridge: Any, payload: Mapping[str, Any]) -> Dict[str, A
             return {'success': True, 'ignored': True, 'message': ignored}
         return bridge.coordination_stop_now()
     if command in {'cancel_before_start', 'group_cancel'}:
-        result = bridge.motion_group_cancel({
+        return group_run_request.cancel_result(bridge.motion_group_cancel({
             'execution_id': str(payload.get('execution_id') or ''),
-        })
-        if (
-            result.get('success') is False
-            and '그룹 실행 세션이 일치하지 않습니다' in str(
-                result.get('message') or ''
-            )
-        ):
-            return {
-                'success': True,
-                'already_released': True,
-                'message': '이미 정리된 그룹 실행 세션입니다',
-            }
-        return result
+        }))
     if command == 'group_join_commit':
         # 도는 그룹에 복귀한 PC · 합류 확정 · 수정 목록 30-3
-        commit = {
-            'execution_id': str(payload.get('execution_id') or ''),
-            'cycle_number': payload.get('cycle_number'),
-        }
-        if payload.get('merge') is True:
-            # 그대로 재생하던 PC 를 다시 합침 · 회차 번호만 맞춘다 · 수정 목록 183
-            commit['merge'] = True
-        return bridge.motion_group_join_commit(commit)
+        return bridge.motion_group_join_commit(group_run_request.join_commit_request(payload))
     if command == 'group_note':
         # 연동 노드가 남기는 기록 · 지금은 뺀 PC · 수정 목록 30-2
         return bridge.record_coordination_note(
@@ -687,92 +666,68 @@ def local_motion_control(bridge: Any, payload: Mapping[str, Any]) -> Dict[str, A
             },
         )
     if command == 'stop_after_cycle':
-        result = bridge.motion_run_stop_after_cycle({
+        # 웹 단의 회차 후 정지 · 운영 종료(`schedule_end`)면 회차 뒤 기준점 주차까지 웹이 한다 · 수정 목록 36 · 141 · 154
+        return group_run_request.stop_after_cycle_result(bridge.motion_run_stop_after_cycle({
             'reason': payload.get('reason') or '',
-            # 그룹 전체 회차 후 정지 · 회차 맞춤은 장벽에서 풀기를 기다린다 · 수정 목록 154
             'group_wide': payload.get('group_wide') is True,
-        })
-        if (
-            result.get('success') is False
-            and '활성 그룹 실행이 없습니다' in str(result.get('message') or '')
-        ):
-            return {
-                'success': True,
-                'already_completed': True,
-                'message': '현재 그룹 회차가 이미 완료되어 다음 회차를 시작하지 않습니다',
-            }
-        return result
+        }))
+    if command == 'group_cycle_at':
+        # 시간표 재생 회차 명령 · 「k 회차를 S 에 시작 · 다음 회차 N」 · 초기 이동 시각은 재생 관리자가 정한다 · 수정 목록 206 ·
+        # 이미 서 있는 그룹 세션에 보낸다 · 매핑 · 애니 선택은 필요 없다(아래 `_local_motion_selection` 의 프로젝트 읽기를 건너뜀) ·
+        # 본문은 연동 노드의 로컬 직접 길(209)과 같은 `group_run_request.cycle_request` · 이 길은 그 연결이 없을 때
+        return bridge.motion_group_cycle_at(group_run_request.cycle_request(payload))
     try:
         selection = _local_motion_selection(bridge)
     except ValueError as exc:
         return {'success': False, 'message': str(exc)}
-    request = {
-        **selection,
-        'initial_move_time_sec': None,
-        'run_mode': 'once',
-        'request_source': 'network_control',
-        'network_operation_id': str(payload.get('network_operation_id') or ''),
-    }
     if command in {'group_prepare', 'group_join'}:
-        repeat_mode = str(payload.get('repeat_mode') or '').strip()
-        dwell_sec = payload.get('dwell_sec')
-        initialization_only = bool(payload.get('initialization_only'))
-        run_mode = str(payload.get('run_mode') or 'once').strip().lower()
-        if not repeat_mode:
+        def automation() -> Mapping[str, Any]:
             run_status = bridge.motion_run_status()
-            automation = (
+            current = (
                 (run_status.get('status') or {}).get('automation')
                 if isinstance(run_status, Mapping) else {}
             )
-            automation = automation if isinstance(automation, Mapping) else {}
-            repeat_mode = repeat_policy.normalize_repeat_mode(
-                automation.get('repeat_mode')
+            return current if isinstance(current, Mapping) else {}
+
+        try:
+            request = group_run_request.prepare_request(
+                command, payload, selection, automation=automation,
             )
-            dwell_sec = float(automation.get('dwell_sec') or 0.0)
-        request.update({
-            'execution_id': str(payload.get('execution_id') or ''),
-            'initialize_monotonic': payload.get('initialize_monotonic'),
-            'group_execution': True,
-            'initialization_only': initialization_only,
-            'repeat_mode': repeat_mode,
-            'dwell_sec': float(dwell_sec or 0.0),
-            'sync_mode': repeat_policy.normalize_group_sync_mode(
-                payload.get('sync_mode'),
-            ),
-            'target_cycle_count': int(payload.get('target_cycle_count') or 0),
-            # 마스터 재생 화면에서 고른 이동 시간 · 0 이면 None(조인트 매핑 값) · 2026-10-12
-            'initial_move_time_sec': _group_initial_move_time(payload),
-            # 구간 재생 · 이 PC 재생 목록 1번을 같은 시각으로 자른다 · 0/0 = 통째로 · 2026-10-16
-            **_group_segment(payload),
-            # Direct repetition must use the same continuity validation as a
-            # local continuous run. Reinitializing policies deliberately
-            # bypass that check because every cycle returns to the start pose.
-            'run_mode': 'once' if initialization_only else run_mode,
-        })
-        if command == 'group_join':
-            # 도는 그룹에 복귀 · 계획만 만들고 서 있다가 합류 확정을 기다린다 · 30-3
-            request.pop('initialize_monotonic', None)
-            request['join_cycle_number'] = int(payload.get('join_cycle_number') or 0)
-            if request['join_cycle_number'] < 1:
-                return {'success': False, 'message': '복귀 회차 번호가 필요합니다'}
+        except ValueError as exc:
+            return {'success': False, 'message': str(exc)}
         return bridge.motion_group_prepare(request)
     if command == 'group_start_at':
-        request.update({
-            'execution_id': str(payload.get('execution_id') or ''),
-            'cycle_number': payload.get('cycle_number'),
-            'start_monotonic': payload.get('start_monotonic'),
-            'group_execution': True,
-        })
-        return bridge.motion_group_start_at(request)
+        return bridge.motion_group_start_at(
+            group_run_request.schedule_request(command, payload, selection),
+        )
     if command == 'group_initialize_at':
-        request.update({
-            'execution_id': str(payload.get('execution_id') or ''),
-            'cycle_number': payload.get('cycle_number'),
-            'initialize_monotonic': payload.get('initialize_monotonic'),
-            'group_execution': True,
-        })
-        return bridge.motion_group_initialize_at(request)
+        return bridge.motion_group_initialize_at(
+            group_run_request.schedule_request(command, payload, selection),
+        )
     return {'success': False, 'message': '지원하지 않는 로컬 연동 실행 명령입니다'}
+
+
+def run_request_stamp(bridge: Any, selection: Mapping[str, Any]) -> Dict[str, Any]:
+    """준비가 끝난 이 실행의 「무엇을 · 어느 설정으로」 · 연동 노드가 초기 위치 예약을 재생 관리자에 바로 보낼 때 쓴다 · 209 · 207
+
+    재생 파일(매핑 · 애니) · 프로젝트 · 세대 · 실행 컨텍스트 · 방금 실행 준비 검사가 이 값으로 통과했다 ·
+    전에는 `initialize_at` 마다 웹이 프로젝트 · 매핑 YAML 을 디스크에서 다시 읽었다(153 ②) · 그 사이 프로젝트가
+    바뀌면 재생 관리자가 세대 · 컨텍스트가 다르다고 거절한다(옛 길과 같은 보호) · 하나라도 모르면 빈 값(웹 길 그대로).
+    """
+    try:
+        project_id = str(bridge.project_repository.selected_project_id() or '')
+        generation = int(bridge.current_project_generation())
+        context_id = str(bridge._execution_context.context_id() or '')
+    except (AttributeError, TypeError, ValueError):
+        return {}
+    if not project_id or generation < 1 or not context_id:
+        return {}
+    return {
+        **{key: str(value) for key, value in dict(selection or {}).items()},
+        'project_id': project_id,
+        'project_generation': generation,
+        'context_id': context_id,
+    }
 
 
 def _local_motion_selection(bridge: Any) -> Dict[str, str]:

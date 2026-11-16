@@ -322,21 +322,30 @@ class TimetableMixin:
         status = local.get('motion_run_status') if isinstance(local.get('motion_run_status'), Mapping) else {}
         holding = driver.holding or str(status.get('execution_id') or '').startswith(PLAN_PREFIX)
         if not config.clock and not holding:
+            # 마스터가 신호 재생으로 바꿨다 · 사람이 그룹을 맡는다 · 그룹 정지 운영시간 끝 주차 기억도 버린다 · 수정 목록 201
+            driver.release_stopped_window('신호 재생으로 바뀜')
             return
         with self._lock:
-            if self._execution.execution_id:
-                # 신호 재생 실행(초기 위치 이동 등)이 도는 중 · 손대지 않는다
-                return
+            signal_running = bool(self._execution.execution_id)
+        if signal_running:
+            # 신호 재생 실행(사람이 누른 그룹 재생 · 초기 위치 이동)이 도는 중 · 손대지 않는다 · 사람이 그룹을 맡았다 ·
+            # 그 재생이 끝난 뒤(운영시간 끝 뒤) 갑자기 주차하지 않게 기억을 버린다 · 수정 목록 201
+            driver.release_stopped_window('사람이 그룹 재생을 시작함')
+            return
         if not (self._config.configured and self._joined):
             choice = timetable.Choice(reason='그룹 미참가')
         else:
             choice = timetable.choose(config, time.time(), operation_mode=str(local.get('operation_mode') or ''))
-        summary = status.get('summary') if isinstance(status.get('summary'), Mapping) else {}
         driver.tick(choice, {
             'status': status,
-            'init_sec': float(summary.get('initialization_duration_sec') or local.get('initial_move_sec') or 0.0),
+            # 이 PC 조인트 매핑의 초기 이동 시간(웹이 매핑에서 읽어 로컬 상태에) · 없으면 시간표 구동부가 가장 긴 선택지 ·
+            # 전에는 지난 재생 계획 요약(`initialization_duration_sec`)을 먼저 봤다 · 단독 재생에서 고른 짧은 이동 시간이
+            # 남아 있으면 시간표 초기 이동이 늦게 출발했다 · 수정 목록 205
+            'init_sec': float(local.get('initial_move_sec') or 0.0),
             'initial_move_time_sec': float(config.initial_move_time_sec or 0.0),
             'start_blocker': str(local.get('start_blocker') or ''),
+            # 그룹 정지 운영시간 끝 · 이 PC 가 수동 · 오프면 주차하지 않는다 · 수정 목록 201
+            'operation_mode': str(local.get('operation_mode') or ''),
         })
 
     def _timetable_finish(self, plan_id: str, park: bool, why: str) -> None:
@@ -419,9 +428,10 @@ class TimetableMixin:
             and str(status.get('phase') or '') not in BARRIER_PHASES
         )
         own = driver.holding if driver is not None else ''
-        if own and own == local_id and local_done:
+        if own and own == local_id and local_done and driver.belongs(status):
             # 연동이 아직 놓기 전이라도 그 실행은 로컬에서 끝났다 · 쥔 것으로 세지 않는다 · 전에는 이걸로 가짜
             # 「도는 중」 실행 보기가 4대에 퍼져 운영 종료 주차가 교착(실물 NY 2026-11-09 23:27 · B) · 수정 목록 191
+            # 방금 다시 들어간 실행에 앞 시도의 끝난 상태(같은 번호)가 아직 보이는 것은 끝난 것이 아니다 · 수정 목록 199
             own = ''
         if not own and not local_done:
             own = local_id

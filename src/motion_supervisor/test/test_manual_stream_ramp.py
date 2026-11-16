@@ -43,7 +43,6 @@ def _supervisor(axes=(0,), position_deg=0.0):
     supervisor._active_jogs = {}
     supervisor._active_actions = {}
     supervisor._emergency_latched = False
-    supervisor._motion_stop_block_until = 0.0
     supervisor._command_lock = threading.RLock()
     supervisor._command_pub = CapturePublisher()
     supervisor._manual_stream_result_pub = CapturePublisher()

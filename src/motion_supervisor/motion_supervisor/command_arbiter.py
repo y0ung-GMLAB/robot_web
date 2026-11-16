@@ -124,6 +124,23 @@ class CommandArbiter:
                 self._claims.pop(key, None)
             return bool(targets)
 
+    def release_except(self, owner: CommandOwner, keep_axes: Iterable[int]) -> list:
+        """이 주인이 쥔 축 가운데 `keep_axes` 밖의 것을 놓는다 · 놓은 축 목록 · 수정 목록 203
+
+        재생이 이번 프레임에서 빼 버린 축(오버더빙 구간 끝 · 뮤트)은 그 순간 놓는다 · 전에는 임대
+        0.15 s 가 지나야 풀려 MIDI 가 그만큼 늦게 들어왔다 · 전체(`_ALL`) 쥠은 건드리지 않는다.
+        """
+        keep = {int(axis) for axis in keep_axes}
+        with self._lock:
+            self._expire_locked(self._clock())
+            targets = [
+                key for key, claim in self._claims.items()
+                if claim.owner is owner and key is not _ALL and int(key) not in keep
+            ]
+            for key in targets:
+                self._claims.pop(key, None)
+            return sorted(int(key) for key in targets)
+
     def revoke_all(self) -> CommandOwner:
         """Revoke every owner for motion-stop or emergency-stop."""
         with self._lock:

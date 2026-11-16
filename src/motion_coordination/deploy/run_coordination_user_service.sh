@@ -5,10 +5,10 @@ WORKSPACE="${MOTION_WORKSPACE:?MOTION_WORKSPACE is required}"
 export ROS_LOCALHOST_ONLY="${ROS_LOCALHOST_ONLY:-0}"
 # PC 이름공간과 DDS 도메인 · §6-96
 #
-# 조정 노드가 ROS 로 여는 것은 그룹 토픽(`/motion_group/...`)뿐이다 · 이 PC 의 노드와는
-# `127.0.0.1` HTTP 로 대화한다 · 그래서 이 서비스만 그룹 도메인 · 네트워크에 남고, 모터 · 웹
-# 서비스는 로컬 도메인 · 루프백(`group_env.py --local` · 수정 목록 176) · 이름표는 기록 · 화면에
-# 같은 PC 이름을 쓰려고 같은 곳에서 받는다(예전 MIDI 중계 설명은 지금 코드에 없음 · X-Touch 는 웹 소켓).
+# 조정 노드는 그룹 토픽(`/motion_group/...`)을 그룹 도메인 · 네트워크에서 연다 · 이 PC 의 재생 관리자 · 감독과는
+# 노드 안의 두 번째 ROS 컨텍스트로 로컬 도메인 · 루프백에서 직접 말한다(`group_env.local_target` · 모터 · 웹 서비스와
+# 같은 값 · 수정 목록 209) · 웹과는 `127.0.0.1` HTTP(준비 검사 · 웹 쪽 칸 · 운영 로그) · 모터 · 웹 서비스는 로컬 도메인 ·
+# 루프백(`group_env.py --local` · 수정 목록 176) · 이름표는 같은 곳에서 받는다(로컬 토픽 이름에도 쓰인다).
 #
 # 다른 서비스와 **같은 곳에서** 가져온다 · 따로 읽으면 갈린다.
 GROUP_ENV_HELPER="${WORKSPACE}/src/motion_common/motion_common/group_env.py"

@@ -401,11 +401,18 @@ def test_group_motion_commands_include_execution_context_id(monkeypatch):
         'cycle_number': 1,
         'initialize_monotonic': 100.0,
     })['success']
+    # 시간표 재생 회차 명령 · 모터를 움직이므로 같은 실행 컨텍스트 검사 · 수정 목록 206
+    assert bridge.motion_group_cycle_at({
+        'execution_id': 'exec-a',
+        'cycle_number': 2,
+        'start_monotonic': 200.0,
+    })['success']
     payloads = [message['payload'] for message in published]
     assert [message['command'] for message in published] == [
         'group_prepare',
         'group_start_at',
         'group_initialize_at',
+        'group_cycle_at',
     ]
     assert all(payload.get('context_id') == 'context-sha' for payload in payloads)
 

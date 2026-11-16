@@ -91,12 +91,20 @@ def test_every_motion_command_entry_point_is_gated():
             f'{entry} 에 오프 게이트가 없다'
         )
 
-    for entry in ('def motion_group_prepare',):
-        start = bridge.index(entry)
-        body = bridge[start:start + 500]
-        assert 'run_mode_gate.motion_command_block_reason' in body, (
-            f'{entry} 에 오프 게이트가 없다 · 원격 그룹 시작이 뚫린다'
-        )
+    # 그룹 준비 관문 하나 · `group_prepare`(웹 길)와 준비 검사(연동 노드가 초기 위치를 바로 보내기 전)가 같이 본다 · 209
+    start = bridge.index('def group_prepare_gate')
+    assert 'run_mode_gate.motion_command_block_reason' in bridge[start:start + 900], (
+        'group_prepare_gate 에 오프 게이트가 없다 · 원격 그룹 시작이 뚫린다'
+    )
+    start = bridge.index('def motion_group_prepare')
+    assert 'self.group_prepare_gate()' in bridge[start:start + 300], (
+        'motion_group_prepare 가 관문을 안 지난다 · 원격 그룹 시작이 뚫린다'
+    )
+    readiness = _source('coordination_bridge.py')
+    start = readiness.index('def _local_motion_readiness(')
+    assert "getattr(bridge, 'group_prepare_gate', None)" in readiness[start:start + 3000], (
+        '준비 검사가 관문을 안 지난다 · 초기 위치 예약은 연동 노드가 재생 관리자에 바로 보낸다(209)'
+    )
 
     coordination = _source('coordination_bridge.py')
     start = coordination.index("if command in {'start_group', 'initialize_group'}:")

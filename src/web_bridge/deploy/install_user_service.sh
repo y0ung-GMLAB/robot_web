@@ -54,7 +54,8 @@ restore_previous_install_on_error() {
       systemctl --user start motion-control.service 2>/dev/null || true
     fi
     if [[ "${COORDINATION_WAS_ACTIVE}" == true ]]; then
-      systemctl --user start motion-coordination.service 2>/dev/null || true
+      # Type=notify · 「준비 끝」 까지 기다리지 않는다 · 수정 목록 202
+      systemctl --user start --no-block motion-coordination.service 2>/dev/null || true
     fi
   fi
   cleanup_install_tmp
@@ -221,7 +222,9 @@ else
   echo "검증된 모터 실행 설정 없음 · motion-motor.service 시작 보류"
 fi
 systemctl --user start motion-control.service
-systemctl --user start motion-coordination.service
+# 연동 서비스는 Type=notify · 노드가 다 떠야(랜 대기 최대 60 s + ROS setup) 「준비 끝」 · 설치가 그것을 기다리며
+# 멈추거나(최대 TimeoutStartSec) 그 실패로 업데이트를 되돌리지 않게 · 전처럼 띄우기만 · 수정 목록 202
+systemctl --user start --no-block motion-coordination.service
 INSTALL_COMPLETE=true
 cleanup_install_tmp
 trap - EXIT

@@ -2,10 +2,11 @@
 
 from __future__ import annotations
 
+import threading
 import time
 import uuid
 from dataclasses import dataclass, field
-from typing import Dict, Iterable, Optional
+from typing import Dict, Iterable, Mapping, Optional
 
 from motion_common.repeat_policy import (
     GROUP_INDEPENDENT,
@@ -149,36 +150,117 @@ class StaleLeaseWatch:
 #: 이 값을 모르는 옛 진행 PC 는 무시하고 전처럼(갑자기 끊김) 처리한다 · 동작이 갈리지 않고 옛 길로 돌아간다.
 PARTICIPANT_LEFT_EVENT = 'participant_left'
 
-#: 이 PC 의 웹 서비스가 갑자기 끊겨 그룹을 세웠다 · 잠그지 않는 기록 · 웹이 다시 뜨면 지운다 · 수정 목록 145 ②
-BRIDGE_LOST_CODE = 'GROUP_LOCAL_BRIDGE_LOST'
-
-#: 기동 뒤 이 시간 안에 로컬 Web Bridge 상태가 끊기는 것은 고장으로 잠그지 않는다 · 수정 목록 123·124
-#:
-#: 「프로그램 다시 시작」 은 웹 서비스와 연동 서비스를 같이 다시 띄운다 · 연동이 먼저 뜨고
-#: 스케줄이 첫 점검에서 그룹 시작을 보내면, 아직 덜 뜬 브리지 상태가 끊겨
-#: GROUP_PARTICIPANT_FAILURE 2등급으로 잠겼다(실물 S-11 다시 · 15:26) · 사람이 한 재시작이다.
-BOOT_GRACE_SEC = 90.0
-#: 「프로그램 다시 시작」 을 누른 뒤 브리지가 사라져도 잠그지 않는 시간
-PLANNED_RESTART_GRACE_SEC = 120.0
-#: 아직 아무것도 움직이지 않은 단계 · 여기서 브리지가 끊기면 취소만 한다(잠그지 않는다)
-PRE_MOTION_STATES = frozenset({'idle', 'ready', 'preparing', 'stopped', 'error'})
+#: 로컬 웹이 「준비 끝」 을 이만큼 안 알리면 기록 한 줄(오류 로그 · 상태 칸) · 그룹은 잠그지 않는다 · 수정 목록 202 ·
+#: 기동 판정에는 안 쓴다(그때까지도 「아직 안 뜸」) · 느린 PC(NY floating4 · RAM 4.7 GB · 스왑)도 넘지 않을 만큼 길게
+BRIDGE_STARTUP_NOTICE_SEC = 300.0
+#: 「내려간다」 알린 웹이 이만큼 지나도 같은 인스턴스로 답하면 내려가지 않은 것(다시 시작 요청 실패 등) ·
+#: 다시 시작 지연 2 s(`MANAGED_RESTART_DELAY_SEC`) + 유닛 `TimeoutStopSec=8` 보다 넉넉히 · 수정 목록 202
+BRIDGE_LEAVE_SETTLE_SEC = 30.0
 
 
-def bridge_loss_while_moving(
-    *, state: str, now: float, boot_monotonic: float, planned_restart_until: float,
-) -> bool:
-    """로컬 Web Bridge 상태가 끊겼을 때 「움직이던 중 끊김」 으로 볼 것인가
+class LocalBridgeReadiness:
+    """로컬 웹 서비스의 「준비 끝」 · 기동 · 다시 시작을 시간으로 짐작하지 않는다 · 수정 목록 202
 
-    참이면 모두 세우고 「웹 서비스 끊김으로 그룹 정지」 를 남긴다 · 거짓이면 조용히 정리만 한다 ·
-    **어느 쪽도 그룹 오류(2등급)로 잠그지 않는다** · 수정 목록 145 ② · 전에는 참이면 잠갔다
-    (`systemctl --user restart motion-control` 한 번에 「그룹 오류 해제」 를 눌러야 했다 · 실물 V-28 ④) ·
-    사람이 누른 다시 시작 · 기동 직후 · 움직이기 전 단계는 정리만 한다 · 스케줄이 다음 점검에 다시 시작한다.
+    전에는 연동 노드 기동 뒤 90 s(`BOOT_GRACE_SEC`) · 「프로그램 다시 시작」 뒤 120 s
+    (`PLANNED_RESTART_GRACE_SEC`) 안의 웹 끊김을 「움직이던 중 끊김」 으로 안 봤다(수정 목록 123·124) ·
+    느린 PC 는 기동이 90 s 를 넘어 정상 기동이 끊김 기록으로 남고 · 그 안의 진짜 끊김은 조용히 묻혔다.
+
+    이제 웹이 `/api/coordination/local-status` 에 `ready`(supervisor · 재생 관리자 첫 상태까지 받음) ·
+    `bridge_instance_id`(웹 프로세스마다 새 값)를 싣는다 · 판정은 그것만 본다.
+
+    - 이 연동 노드가 뜬 뒤 · 「내려간다」 알림 뒤 준비 끝을 한 번도 못 받음 · 「아직 안 뜸」 · 끊겨도 고장 아님
+    - 준비 끝을 받은 뒤 끊김 · 진짜 끊김(움직이던 중이면 끊김 기록)
+    - 다른 인스턴스가 준비 전으로 답함 · 알림 없이 다시 떴다 · 다시 「아직 안 뜸」
+    - `ready` 칸이 없는 답(옛 웹) · 답한 것을 준비 끝으로 본다
+
+    새로 받은 답만 본다(`received_monotonic` 이 늘 때) · 같은 마지막 답을 여러 번 봐도 한 번.
     """
-    if planned_restart_until and now < planned_restart_until:
-        return False
-    if boot_monotonic and now - boot_monotonic < BOOT_GRACE_SEC:
-        return False
-    return str(state or '') not in PRE_MOTION_STATES
+
+    def __init__(self, now: float) -> None:
+        self._lock = threading.Lock()
+        #: 준비 끝을 알린 인스턴스 · None = 아직 · 빈 글자 = 칸 없는 옛 웹
+        self._ready_id: Optional[str] = None
+        self._last_id = ''
+        self._last_received = 0.0
+        #: 「내려간다」 알린 인스턴스 · 새 인스턴스가 준비 끝을 알릴 때까지 「다시 뜨는 중」
+        self._leaving_id: Optional[str] = None
+        self._leaving_at = 0.0
+        self._waiting_since = float(now)
+        self._noticed = False
+
+    @property
+    def ready(self) -> bool:
+        with self._lock:
+            return self._ready_id is not None
+
+    @property
+    def phase(self) -> str:
+        """ready · starting(기동 중) · restarting(「내려간다」 알림 뒤)"""
+        with self._lock:
+            return self._phase()
+
+    def _phase(self) -> str:
+        if self._ready_id is not None:
+            return 'ready'
+        return 'restarting' if self._leaving_id is not None else 'starting'
+
+    def observe(self, status: Optional[Mapping], received_monotonic: float) -> None:
+        received = float(received_monotonic or 0.0)
+        status = status if isinstance(status, Mapping) else {}
+        instance = str(status.get('bridge_instance_id') or '')
+        ready = bool(status.get('ready', True))
+        with self._lock:
+            if received <= self._last_received:
+                return
+            self._last_received = received
+            self._last_id = instance
+            if self._leaving_id is not None:
+                if (
+                    instance and instance == self._leaving_id
+                    and received - self._leaving_at < BRIDGE_LEAVE_SETTLE_SEC
+                ):
+                    return   # 내려가는 중인 옛 웹의 마지막 답
+                self._leaving_id = None
+            if ready:
+                self._ready_id = instance
+                self._noticed = False
+                return
+            if self._ready_id is not None and instance != self._ready_id:
+                # 알림 없이 다시 뜬 새 웹 · 아직 준비 전
+                self._ready_id = None
+                self._waiting_since = received
+                self._noticed = False
+
+    def leaving(self, now: float) -> None:
+        """웹이 「내려간다」(「프로그램 다시 시작」 · SIGTERM) · 새 인스턴스가 준비 끝을 알릴 때까지 기다린다"""
+        with self._lock:
+            self._leaving_id = self._ready_id if self._ready_id is not None else self._last_id
+            self._leaving_at = float(now)
+            self._ready_id = None
+            self._waiting_since = float(now)
+            self._noticed = False
+
+    def _waited(self, now: float) -> float:
+        return 0.0 if self._ready_id is not None else max(float(now) - self._waiting_since, 0.0)
+
+    def overdue_once(self, now: float) -> float:
+        """준비 끝을 `BRIDGE_STARTUP_NOTICE_SEC` 넘게 못 받았다 · 그 기다린 시간을 한 번만 · 아니면 0"""
+        with self._lock:
+            waited = self._waited(now)
+            if self._ready_id is not None or self._noticed or waited < BRIDGE_STARTUP_NOTICE_SEC:
+                return 0.0
+            self._noticed = True
+            return waited
+
+    def snapshot(self, now: float) -> Dict[str, object]:
+        with self._lock:
+            waited = self._waited(now)
+            return {
+                'phase': self._phase(),
+                'bridge_instance_id': self._ready_id or self._last_id,
+                'waited_sec': round(waited, 1),
+                'overdue': self._ready_id is None and waited >= BRIDGE_STARTUP_NOTICE_SEC,
+            }
 
 
 @dataclass
@@ -357,7 +439,12 @@ class GroupExecution:
         self.state = 'preparing'
 
     def clear_active(self) -> None:
-        """Release the active lease while keeping its final display state."""
+        """Release the active lease while keeping its final display state (state · cycle number).
+
+        「제외」 는 도는 실행의 것이라 같이 지운다 · 남기면 끝난 실행의 제외가 몇 시간 뒤에도 PC 줄에 「제외」 로
+        보였다(NY 2026-11-16 · 00:29 끝난 실행의 floating3 가 03:30 에도) · 기록은 이벤트 로그(`group_excluded`) · 수정 목록 216
+        """
+        self.excluded.clear()
         self.execution_id = ''
         self.coordinator_id = ''
         self.participants = ()

@@ -4,8 +4,11 @@
 실행기 타이머(`_state_tick`)가 1 s 마다 `WATCHDOG=1` 을 보낸다 · 실행기가 `WATCHDOG_SEC` 넘게 멈추면
 systemd 가 SIGABRT 로 끝내고(그때 스택이 `log/motion_coordination_stall.log` 에) 다시 띄운다.
 
-유닛의 `WatchdogSec` 은 넉넉히(90 s) · 실행 스크립트가 랜을 최대 60 s 기다린 뒤 노드를 띄우므로 ·
-노드가 뜬 뒤 `WATCHDOG_USEC=` 로 15 s 로 좁힌다(systemd 236 이상 · 우분투 22.04 = 249).
+노드가 다 뜬 순간 `READY=1` 과 감시 시간(`WATCHDOG_USEC=`)을 한 번에 보낸다 · 유닛이 `Type=notify` 라
+systemd 감시는 READY 뒤부터 켜진다 · 기동(랜 대기 최대 60 s + ROS setup + import)은 유닛 `TimeoutStartSec` 이
+「영영 안 뜸」 만 잡는다 · 수정 목록 202 · 전에는 Type=simple 이라 감시가 실행 스크립트를 띄운 순간부터 ·
+유닛 90 s 로 기동을 짐작해 덮고 노드가 뜬 뒤 15 s 로 좁혔다(느린 PC 는 90 s 를 넘겨 기동 중에 죽을 수 있었다).
+옛 유닛(Type=simple)에서도 READY 는 해가 없다 · 감시는 전처럼 좁혀진다.
 
 `python3-systemd` 없이 `NOTIFY_SOCKET` 에 직접 쓴다 · 그 값이 없으면(서비스 밖 · 시험) 아무것도 안 한다.
 """
@@ -17,8 +20,12 @@ import socket
 import time
 from typing import Mapping, Optional
 
-#: 노드가 뜬 뒤 좁히는 감시 시간 · 웹 역감시(살아 있으면 10 s · E)보다 길게 · 끄기 0
+#: 감시 시간 · 웹 역감시(살아 있으면 10 s · E)보다 길게 · 유닛 `WatchdogSec` 과 같은 값 · 끄기 0
 WATCHDOG_SEC = 15.0
+#: 끄기(0) 때 보내는 감시 시간 · 30일 · 유닛에 `WatchdogSec` 이 있어 READY 뒤 감시가 켜지므로 끄려면 덮어야 한다 ·
+#: 0 은 systemd 판마다 뜻이 갈릴 수 있어(바로 만료로 읽히면 즉시 종료) 아주 긴 값을 쓴다 · 수정 목록 202 ·
+#: 전에는 0 이면 아무것도 안 보내 유닛 감시(90 s)에 죽었다
+OFF_USEC = 30 * 24 * 3600 * 1_000_000
 WATCHDOG_ENV = 'MOTION_COORDINATION_WATCHDOG_SEC'
 #: 알림 간격
 PING_INTERVAL_SEC = 1.0
@@ -54,13 +61,18 @@ class SystemdWatchdog:
         self._environ = environ
         self._last_ping = 0.0
         self._started = False
+        #: READY=1 을 보냈나 · 서비스 밖(시험 · 손으로 띄움)이면 False
+        self.ready_sent = False
 
     def start(self) -> bool:
-        """감시 시간을 좁히고 첫 알림 · 서비스 밖이면 False"""
+        """「준비 끝」(READY=1) + 감시 시간 · 한 데이터그램 · 감시를 쓰면(알림을 보내야 하면) True
+
+        끄기(0)여도 READY 는 보낸다(안 보내면 `TimeoutStartSec` 뒤 기동 실패) · 감시 시간은 아주 길게(`OFF_USEC`).
+        """
         seconds = configured_watchdog_sec(self._environ)
-        if seconds <= 0.0:
-            return False
-        self._started = notify(f'WATCHDOG_USEC={int(seconds * 1_000_000)}', self._environ)
+        usec = int(seconds * 1_000_000) if seconds > 0.0 else OFF_USEC
+        self.ready_sent = notify(f'READY=1\nWATCHDOG_USEC={usec}', self._environ)
+        self._started = self.ready_sent and seconds > 0.0
         if self._started:
             self.ping(force=True)
         return self._started

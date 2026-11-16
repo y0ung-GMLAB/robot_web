@@ -129,6 +129,31 @@ def group_is_active(execution) -> bool:
     return str(execution.get('state') or '').strip().lower() in GROUP_ACTIVE_STATES
 
 
+#: 회차 맞춤 그룹 · 회차 애니가 끝났고 장벽 보고(`group_motion_completed`) 전 · 상태는 `motion_completed`(끝 아님) ·
+#: 그룹 세션이 다음 재생 목록 항목을 다 지은 뒤 장벽을 낸다(164) · 진행 PC 에 알리는 사건은 없다 ·
+#: 전에는 이 틈에 `completed` 를 내 시간표 구동부가 사람 정지로 읽고 다음 회차를 쉬었다(NY 2026-11-11 14:31) · 수정 목록 199
+GROUP_CYCLE_FINISHING_PHASE = 'group_motion_finishing'
+
+#: 시간표 재생 · 재생 관리자가 그 회차를 쉬었다 · 초기 이동이 너무 늦어 돌면 다음 회차 준비를 먹음 · 상태는 장벽과 같은
+#: `motion_completed`(그 회차를 끝낸 것처럼 서서 다음 회차 명령을 기다림) · 이유는 `cycle_skip_reason` · 수정 목록 206
+GROUP_CYCLE_SKIPPED_PHASE = 'group_cycle_skipped'
+
+#: 재생 관리자 상태 표시 · 상태가 바뀔 때마다 그 PC 단조 시계(초) · 명령 응답에도 실린다 ·
+#: 명령을 보낸 쪽은 「응답의 표시 이상인 상태」 만 그 명령 뒤의 상태로 읽는다 · 수정 목록 199
+STATUS_STAMP_KEY = 'status_stamp'
+
+
+def status_stamp(status) -> float:
+    """재생 관리자 상태의 표시 · 없으면 0(옛 상태 · 못 읽음)"""
+    if not isinstance(status, Mapping):
+        return 0.0
+    try:
+        value = float(status.get(STATUS_STAMP_KEY) or 0.0)
+    except (TypeError, ValueError):
+        return 0.0
+    return value if value == value else 0.0
+
+
 def solo_running(motion_run_status) -> bool:
     """그룹이 아닌 제 재생(초기 이동 포함)이 도는 중인가 · 수정 목록 136"""
     run = motion_run_status if isinstance(motion_run_status, Mapping) else {}
@@ -158,3 +183,22 @@ def human_operation_reason(motion_run_status, safety_status) -> str:
     if str(safety.get('command_owner') or '') == 'stream':
         return '사람 조작 중 · 페이더'
     return ''
+
+
+def group_stop_skip_reason(motion_run_status, safety_status, execution_id) -> str:
+    """그룹 즉시 정지가 이 PC 가 돌지 않는 실행 것인가 · 그러면 이유(세우지 않음) · 수정 목록 136 · 209
+
+    **이 PC 가 단독 재생 · 사람 조작 중이고 그 실행을 돌지 않을 때만** 무시한다 · 쉬는 중이거나 그룹 세션이
+    있으면(다른 번호여도 · 준비가 막 끝나 상태가 늦게 온 경우) 세운다 · 전에는 브리지(`stop_now_not_ours`)에만
+    있었다 · 연동 노드가 재생 관리자에 직접 정지를 보내게 되어(209) 같은 판정을 여기 하나에 둔다.
+    """
+    execution_id = str(execution_id or '')
+    if not execution_id:
+        return ''
+    run = motion_run_status if isinstance(motion_run_status, Mapping) else {}
+    if run.get('group_execution'):
+        return ''
+    busy = human_operation_reason(run, safety_status)
+    if not busy:
+        return ''
+    return f'이 PC 는 그룹 실행 {execution_id} 에 없음 · {busy} · 정지하지 않음'

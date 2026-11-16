@@ -112,6 +112,18 @@ def log_dir(package_hint: Optional[str] = None) -> Path:
     return workspace_root(package_hint) / LOG_DIRNAME
 
 
+#: 애니 변환본 폴더 이름 · `<프로젝트>/runtime/plan_artifacts/<애니 파일 이름>/` · 수정 목록 208
+PLAN_ARTIFACTS_DIRNAME = 'plan_artifacts'
+
+
+def plan_artifacts_dir(project_dir: Path) -> Path:
+    """그 프로젝트의 애니 변환본 뿌리 · 쓰는 쪽(motion_run_manager)과 지우는 쪽(브리지 · 애니 · 프로젝트 삭제)이 같이 본다
+
+    `runtime/` 아래라 프로젝트 백업(zip)에 안 든다 · 다시 만들 수 있는 것.
+    """
+    return Path(project_dir) / 'runtime' / PLAN_ARTIFACTS_DIRNAME
+
+
 #: 프로젝트 ID 가 이름 하나가 아닐 때 · `../` 같은 것이 들어온 경우다
 INVALID_PROJECT_ID = '유효한 통합 프로젝트 ID가 필요합니다'
 

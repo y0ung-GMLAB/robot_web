@@ -8,18 +8,30 @@ Description=Motion DDS Group Coordination Service
 # 사람이 또 속으므로 지웠다 · 실제 대기는 `motion_common/net_ready.py` 가 한다.
 
 [Service]
-Type=simple
+# 「준비 끝」 을 노드가 알린다(READY=1) · 수정 목록 202
+#
+# 전에는 Type=simple + WatchdogSec=90 · simple 은 실행 스크립트를 띄운 순간이 「기동 끝」 이라 감시도 그때부터 ·
+# 그래서 랜 대기(최대 60 s) + ROS setup + import 를 90 s 로 짐작해 덮었다 · 느린 PC(RAM 4.7 GB · 스왑 · 찬
+# 디스크 캐시)는 넘길 수 있고, 넘기면 멀쩡히 뜨는 중인 노드를 SIGABRT 로 죽였다(끊김 시험 G 의 남은 구멍) ·
+# notify 는 노드가 실제로 다 뜬 순간(`systemd_notify.py` · 첫 감시 알림과 같은 자리) READY=1 을 보내고,
+# systemd 감시는 그 뒤부터 켜진다(systemd.service · WatchdogSec) · 그래서 감시는 처음부터 15 s.
+Type=notify
 WorkingDirectory=@WORKSPACE@
 Environment="MOTION_WORKSPACE=@WORKSPACE@"
 Environment="ROS_LOCALHOST_ONLY=0"
 ExecStart=/bin/bash @COORDINATION_SERVICE_RUNNER@
 Restart=on-failure
 RestartSec=3
-# 멈춘(행) 연동 노드를 다시 띄운다 · 끊김 시험 G · 실행 스크립트가 `exec` 로 노드를 띄워 MainPID = 노드 ·
-# 노드가 1 s 마다 「살아 있음」 · 넉넉한 90 s 는 실행 스크립트의 랜 대기(최대 60 s) 동안 ·
-# 노드가 뜨면 스스로 15 s 로 좁힌다(`systemd_notify.py`) · 끝낼 때 SIGABRT → 스택이 log/motion_coordination_stall.log
+# 실행 스크립트가 `exec` 로 노드를 띄워 MainPID = 노드 · READY · 감시 알림은 그 프로세스에서만 받는다
 NotifyAccess=main
-WatchdogSec=90
+# 멈춘(행) 노드를 다시 띄운다 · 끊김 시험 G · 노드가 1 s 마다 「살아 있음」 · 끝낼 때 SIGABRT → 스택이
+# log/motion_coordination_stall.log · 노드도 READY 와 함께 같은 값(`systemd_notify.WATCHDOG_SEC`)을 다시 보낸다 ·
+# 바꾸기 · 끄기는 환경 변수 `MOTION_COORDINATION_WATCHDOG_SEC`(0 = 끔 · 노드가 아주 긴 값을 보냄)
+WatchdogSec=15
+# 기동 한도 · 짐작이 아니라 「영영 안 뜸」 검출 · 랜 대기(`MOTION_NET_WAIT_SEC` · 기본 60 s) + ROS setup + import 가
+# 아무리 느려도 넘지 않을 만큼 길게 · 넘으면 실패 → Restart=on-failure · 사용자 유닛 기본 90 s 를 쓰지 않게 꼭 적는다 ·
+# 랜 대기를 늘리면 이 값도 늘린다 · 시작 · 다시 시작을 부르는 쪽(install.sh · 웹)은 READY 를 기다리지 않는다(`--no-block`)
+TimeoutStartSec=600
 KillMode=control-group
 KillSignal=SIGINT
 TimeoutStopSec=8

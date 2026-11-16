@@ -89,12 +89,22 @@ test('그룹 PC 줄 · 빠진 PC 는 이유 · 연결 안 됨 · 출발 전 멈�
   const snap = group({
     local: { pc_id: 'f1' },
     peers: [{ pc_id: 'f2', motion_cycle_text: '3회차' }, { pc_id: 'f3' }, { pc_id: 'f4', state: 'offline' }],
-    execution: { state: 'running', excluded: { f3: '버전 다름' } },
+    execution: { execution_id: 'e1', state: 'running', excluded: { f3: '버전 다름' } },
   });
   assert.deepEqual(groupRows(snap).map((r) => [r.id, r.note]), [['f1', '그룹 대기'], ['f2', '그룹 대기'], ['f3', '제외됨 (버전 다름)'], ['f4', '연결 안 됨']]);
   assert.equal(groupRows(snap)[0].local, true);
   assert.equal(groupStopCommand(snap), 'stop_after_cycle');
   assert.equal(groupStopCommand(group({ execution: { state: 'armed' } })), 'stop_now');
+});
+
+test('끝난 그룹 실행의 「제외」 · 「복귀」 는 PC 줄에 안 그림 · 수정 목록 216 (NY 2026-11-16)', () => {
+  // 00:29 에 끝난 실행의 floating3 「제외」 가 03:30 에도 보였다 · 끝난 실행 = 번호 없음 · 마지막 상태만 남음
+  const snap = group({
+    local: { pc_id: 'floating1' },
+    peers: [{ pc_id: 'floating3', motion_step: '준비 중' }],
+    execution: { execution_id: '', state: 'stopped', cycle_number: 2, excluded: { floating3: '사람이 정지' }, joining: { floating3: 'ready' } },
+  });
+  assert.deepEqual(groupRows(snap).map((r) => [r.id, r.note, r.tone]), [['floating1', '그룹 대기', 'ok'], ['floating3', '준비 중', 'ok']]);
 });
 
 test('첫 자세 이동 시간 · 매핑 시간이 하나면 그 값이 골라져 있고 중복 칸 없음 · 다를 때만 「조인트마다 다름」', () => {

@@ -133,18 +133,20 @@ export function gainText(gains) {
   return { text: parts.join(' · '), tone: 'ok', hint };
 }
 
-/** 게인 알림 · 드라이브끼리 강성 · 지령 필터가 다름 · 막지는 않는다 · 108 (나) · 자동조정 꺼짐은 알리지 않음(사용자 2026-11-04) */
+/** 게인 알림 · 드라이브끼리 강성 · 지령 필터가 다름 · 막지는 않는다 · 108 (나) · 자동조정 꺼짐은 알리지 않음(사용자 2026-11-04)
+ *
+ * 한 줄만 · 드라이브별 값은 표의 게인 칸(마우스 글)에 이미 있다 · 사용자 2026-11-16 「딱 하나만 · 드라이브마다 강성이 다릅니다 정도만」
+ * 지령 필터가 축마다 다르면 늦게 따라가는 정도가 달라 축끼리 어긋난다(2026-10-16) · 목 · 눈처럼 일부러 다르게 둔 PC 도 있어 막지는 않는다
+ */
 export function gainWarnings(rows) {
   const ac = rows.filter((r) => r.ac && r.gains);
-  const warnings = [];
-  const stiff = [...new Set(ac.map((r) => r.gains.stiffness).filter((v) => v !== null && v !== undefined))];
-  if (stiff.length > 1) warnings.push(`드라이브마다 강성이 다릅니다: ${ac.map((r) => `${r.axis}번 ${r.gains.stiffness ?? '?'}`).join(', ')}`);
-  // 지령 필터가 축마다 다르면 늦게 따라가는 정도가 달라 축끼리 어긋난다 · 2026-10-16
-  for (const [key, label] of [['command_smoothing', '지령 스무딩 필터'], ['command_fir', '지령 FIR 필터']]) {
-    const seen = [...new Set(ac.map((r) => r.gains[key]).filter((v) => v !== null && v !== undefined))];
-    if (seen.length > 1) warnings.push(`드라이브마다 ${label} 값이 달라 축 사이 추종 시간이 어긋납니다: ${ac.map((r) => `${r.axis}번 ${filterText(r.gains[key])}`).join(', ')}`);
-  }
-  return warnings;
+  const differs = (key) => new Set(ac.map((r) => r.gains[key]).filter((v) => v !== null && v !== undefined)).size > 1;
+  const items = [];
+  if (differs('stiffness')) items.push('강성');
+  if (differs('command_smoothing') || differs('command_fir')) items.push('지령 필터');
+  if (!items.length) return [];
+  const particle = items[items.length - 1] === '강성' ? '이' : '가';
+  return [`드라이브마다 ${items.join(' · ')}${particle} 다릅니다`];
 }
 
 /** 앱솔루트 한 줄 · 「3/3 정상」 */

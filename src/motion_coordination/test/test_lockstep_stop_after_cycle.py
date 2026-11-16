@@ -6,15 +6,18 @@
 
 - 회차 맞춤 PC 런타임은 그룹 전체 회차 후 정지면 제 회차 뒤 장벽(`motion_completed`)에 머문다 ·
   진행 PC 는 그 보고를 장벽에 적고 **모든** PC 가 끝났을 때만 푼다
-- 진짜 정지(사람 · 오류 · 회차 사이에 받아 바로 선 것)는 회차 후 정지 중에도 바로 푼다
+- 회차 사이에 받아 바로 선 것(그룹 정지 그 자체)은 바로 푼다
+- 수정 목록 212 · 회차 재생 중 한 PC 가 제 사정(사람 정지 · 감독 정지 · 프로젝트 경계 · 「장비에 적용」 · 오류)으로
+  섰으면 그 PC 만 뺀다 · 다른 PC 의 마지막 회차를 자르지 않는다 · 전에는 그 `stopped` 로 그룹 전체를 바로 풀었다
 - 각자 재생은 그대로 · 모두 제 회차를 끝내고 멈춰야 푼다
 - 연동 노드는 런타임에 「그룹 전체」 를 알린다(`group_wide`) · 슬레이브 혼자 1등급 알람은 옛 그대로
 """
 
 from motion_coordination_interfaces.msg import GroupCommand, GroupEvent
 
-from motion_coordination.group_execution import GroupExecution
-from test_coordination_node import _node, _peer_release_ack, _Publisher
+import motion_coordination.coordination_node as coordination_node
+from motion_coordination.group_execution import GroupExecution, is_drop_release
+from test_coordination_node import _InlineThread, _node, _peer_release_ack, _Publisher
 
 
 def _master(*, sync_mode='lockstep'):
@@ -44,7 +47,11 @@ def _event(node, pc_id, event, *, cycle=3, message=''):
 
 
 def _released(node):
-    return [m for m in node._command_pub.messages if m.command == 'cancel_before_start']
+    """그룹 전체 풀기 · 뺀 PC 하나에 보낸 풀기(`drop release`)는 빼고"""
+    return [
+        m for m in node._command_pub.messages
+        if m.command == 'cancel_before_start' and not is_drop_release(m.command, m.command_id)
+    ]
 
 
 def test_the_short_pc_finishing_does_not_cut_the_long_pc():
@@ -76,8 +83,10 @@ def test_the_master_tells_its_runtime_the_stop_is_group_wide():
     assert published.stop_reason == 'schedule_end'
 
 
-def test_a_real_stop_during_stop_after_cycle_still_releases_at_once():
-    """회차 후 정지를 기다리는 중 · 긴 PC 가 사람 정지 · 오류로 섰다 · 바로 푼다"""
+def test_the_last_pc_stopping_on_its_own_ends_the_wait_without_cutting_anyone(monkeypatch):
+    """회차 후 정지를 기다리는 중 · 짧은 PC 는 장벽에 섰고 긴 PC 가 제 사정으로 섰다 · 그 PC 만 빠지고 남은 PC 는 모두
+    회차를 끝냈으니 그 자리에서 푼다 · 수정 목록 212(전에는 「진짜 정지 → 바로 전체 풀기」 · 결과는 같다)"""
+    monkeypatch.setattr(coordination_node.threading, 'Thread', _InlineThread)
     node = _master()
     node._request_group_stop(after_cycle=True, reason='schedule_end')
     _event(node, 'pc-b', 'motion_completed')
@@ -85,7 +94,47 @@ def test_a_real_stop_during_stop_after_cycle_still_releases_at_once():
 
     _event(node, 'pc-a', 'stopped', message='그룹 실행 정지')
 
+    assert node._execution.participants == ('pc-b',)
     assert node._execution.state == 'releasing'
+    assert len(_released(node)) == 1
+
+
+def test_a_pc_stopping_on_its_own_during_stop_after_cycle_drops_only_that_pc(monkeypatch):
+    """수정 목록 212 · 짧은 PC 가 회차 재생 중 제 사정으로 섰다(200 뒤로 감독 정지 · 프로젝트 경계 · 「장비에 적용」 도
+    `stopped`) · 그 PC 만 뺀다 · 긴 PC 는 마지막 회차를 끝까지 · 그 뒤에 푼다
+
+    전에는 회차 후 정지 중의 `stopped` 를 모두 「그룹이 끝나는 길」 로 읽어 바로 전체를 풀었다 · 긴 PC 의 마지막
+    회차가 잘렸다(`error` 는 그 PC 만 빼는데 `stopped` 만 달랐다).
+    """
+    monkeypatch.setattr(coordination_node.threading, 'Thread', _InlineThread)
+    node = _master()
+    node._request_group_stop(after_cycle=True, reason='schedule_end')
+
+    _event(node, 'pc-b', 'stopped', message='정지 요청')
+
+    assert _released(node) == [], '긴 PC 재생 중에는 풀지 않는다'
+    assert node._execution.participants == ('pc-a',)
+    assert node._execution.state == 'running'
+    assert node._execution.stop_after_cycle is True
+
+    released = []
+    node._release_local_worker = lambda execution_id, **_kwargs: released.append(execution_id) or {'success': True}
+    _event(node, 'pc-a', 'motion_completed')
+
+    # 남은 PC(진행 PC 자신)가 회차를 끝냈다 · 그때 푼다 · 남은 것이 저뿐이라 풀기 확인 없이 바로 끝
+    assert released and node._execution.execution_id == ''
+
+
+def test_the_group_stop_itself_between_cycles_still_releases_everyone():
+    """회차 사이(다음 회차 초기 위치로 가는 중)에 받은 회차 후 정지 · PC 들이 바로 선다 · 그룹 정지 그 자체 · 바로 푼다"""
+    node = _master()
+    node._execution.state = 'cycle_initializing'
+    node._request_group_stop(after_cycle=True)
+
+    _event(node, 'pc-b', 'stopped', message='현재 그룹 모션 회차 완료 후 정지')
+
+    assert node._execution.state == 'releasing'
+    assert node._execution.participants == ('pc-a', 'pc-b')
     assert len(_released(node)) == 1
 
 

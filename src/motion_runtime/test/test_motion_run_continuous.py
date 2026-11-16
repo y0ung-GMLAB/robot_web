@@ -1424,37 +1424,54 @@ class SimpleNamespaceManager:
 
 
 class _StopManager:
-    def __init__(self, safety, stop_after=None):
+    """재생기가 보는 관리자 껍데기 · 이 실행의 정지 표지와 감독 safety 상태만 · 수정 목록 200"""
+
+    def __init__(self, safety, run_marker=('boot', 1), error=''):
         self._stop_event = threading.Event()
         self._safety_status_lock = threading.Lock()
         self._latest_safety_status = dict(safety)
-        self._error = '전체 동작 정지 처리 중'
-        if stop_after is not None:
-            threading.Timer(stop_after, self._stop_event.set).start()
+        self._run_stop_marker = run_marker
+        self._error = error
 
     def _playback_ownership_error(self, axes=None):
         return self._error
 
 
-def test_stop_settling_then_stop_request_is_a_stop_not_an_error():
-    """수정 목록 112 다 · 화면 「정지」 = 감독 정지 → 재생 정지 · 그 사이 재생 검사가 「정지 처리 중」 을 봄"""
-    manager = _StopManager({'motion_stop_settling': True, 'commands_blocked': True}, stop_after=0.1)
+def test_a_supervisor_stop_after_the_run_started_is_a_stop_right_away():
+    """수정 목록 112 다 · 200 · 화면 「정지」 = 감독 정지 → 재생 정지 · 재생기가 그 사이를 먼저 봐도 「정지」
+
+    전에는 「정지 처리 중」(0.5 s)을 보고 재생 정지 요청을 최대 1 s 기다렸다 · 이제는 표지가 바뀐 것만으로
+    바로 정지다 · 기다리지 않는다 · 정지 표시도 세워 바깥 고리(자동 복구 · 그룹)가 「정지」 로 읽는다.
+    """
+    manager = _StopManager({'stop_boot': 'boot', 'stop_epoch': 2, 'stop_settled': False})
     player = MotionPlayer(manager)
+    started = time.monotonic()
     with pytest.raises(InterruptedError):
         player._require_playback_command_allowed()
+    assert time.monotonic() - started < 0.05, '정지 요청을 기다리지 않는다'
+    assert manager._stop_event.is_set()
+
+
+def test_a_supervisor_restart_also_ends_the_run():
+    """감독이 다시 켜졌다(boot 다름) · 그 앞에 잡은 실행은 끝 · 감독은 옛 표지의 세션을 받지 않는다"""
+    manager = _StopManager({'stop_boot': 'new', 'stop_epoch': 0, 'stop_settled': True})
+    with pytest.raises(InterruptedError):
+        MotionPlayer(manager)._require_playback_command_allowed()
 
 
 def test_real_block_is_still_an_error():
-    manager = _StopManager({'motion_stop_settling': True, 'emergency_latched': True})
-    manager._error = '긴급정지 잠김 상태입니다'
+    manager = _StopManager({'emergency_latched': True}, error='긴급정지 잠김 상태입니다')
     player = MotionPlayer(manager)
     with pytest.raises(RuntimeError):
         player._require_playback_command_allowed()
 
 
-def test_settling_without_a_stop_request_is_an_error_after_the_grace(monkeypatch):
-    manager = _StopManager({'motion_stop_settling': True})
-    player = MotionPlayer(manager)
-    monkeypatch.setattr(MotionPlayer, 'STOP_REQUEST_GRACE_SEC', 0.05)
-    with pytest.raises(RuntimeError):
-        player._require_playback_command_allowed()
+def test_a_stop_that_came_with_an_alarm_is_an_error_not_a_stop():
+    """알람으로 선 재생은 이유가 남아야 한다 · 표지가 바뀌어도 「정지」 로 덮지 않는다"""
+    manager = _StopManager({
+        'stop_boot': 'boot', 'stop_epoch': 2, 'stop_settled': False,
+        'servo_alarm_grade': 2, 'message': '2등급 서보 에러 · 전체 모터 동작 차단',
+    })
+    with pytest.raises(RuntimeError, match='2등급'):
+        MotionPlayer(manager)._require_playback_command_allowed()
+    assert not manager._stop_event.is_set()

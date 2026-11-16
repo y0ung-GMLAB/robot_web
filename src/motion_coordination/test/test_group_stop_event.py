@@ -111,11 +111,12 @@ def test_stop_after_cycle_announces_when_the_release_completes():
     node._request_group_stop(after_cycle=True)
     assert _group_stops(node) == [], '회차가 끝나기 전에는 내지 않는다'
 
-    # 회차 끝 · 참가 PC 의 런타임 정지 → 풀기 → 모두 답함
-    node._event_callback(GroupEvent(
-        group_id='stage-a', execution_id=execution_id, pc_id='pc-b', event='stopped',
-        command_id='runtime-stopped-3', success=True, cycle_number=3,
-    ))
+    # 회차 끝 · 모두 장벽(`motion_completed` · 154) → 풀기 → 모두 답함 · 회차 재생 중의 `stopped` 는 그 PC 만 뺀다(212)
+    for pc_id in ('pc-a', 'pc-b'):
+        node._event_callback(GroupEvent(
+            group_id='stage-a', execution_id=execution_id, pc_id=pc_id, event='motion_completed',
+            command_id='runtime-motion_completed-3', success=True, cycle_number=3,
+        ))
     assert node._execution.state == 'releasing'
     assert _group_stops(node) == []
     node._execution.pending_acks.add('pc-a')

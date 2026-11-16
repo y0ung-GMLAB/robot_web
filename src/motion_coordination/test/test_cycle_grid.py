@@ -329,6 +329,18 @@ def test_zero_initial_move_time_without_a_local_value_falls_back_to_ten_seconds(
     assert init['initialize_monotonic'] == pytest.approx(node._autonomy['start'] - 10.0 - 2.0, abs=0.01)
 
 
+def test_zero_initial_move_time_without_a_plan_value_uses_the_mapping_value_from_the_web():
+    """계획 요약이 없으면 웹이 조인트 매핑에서 읽어 로컬 상태에 싣는 값 · 둘 다 없을 때만 가장 긴 선택지(10 s) · 수정 목록 205"""
+    node, calls = _participant(phase='group_motion_completed')
+    node._execution.initial_move_time_sec = 0.0
+    node._local_status['initial_move_sec'] = 7.0
+
+    node._drive_autonomous_cycle()
+
+    [init] = calls
+    assert init['initialize_monotonic'] == pytest.approx(node._autonomy['start'] - 7.0 - 2.0, abs=0.01)
+
+
 def test_a_missed_start_is_moved_to_the_next_grid_slot_once():
     node, calls = _participant(phase='group_motion_completed')
     node._drive_autonomous_cycle()

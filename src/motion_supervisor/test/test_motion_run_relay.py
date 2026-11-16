@@ -256,7 +256,6 @@ def test_midi_batch_publishes_multiple_axes_in_one_motor_status():
     supervisor._active_jogs = {}
     supervisor._active_actions = {}
     supervisor._emergency_latched = False
-    supervisor._motion_stop_block_until = 0.0
     supervisor._command_lock = threading.RLock()
     supervisor._command_pub = CapturePublisher()
     motors = [
@@ -299,7 +298,6 @@ def test_linked_midi_group_blocks_every_axis_when_one_target_is_invalid():
     supervisor._active_jogs = {}
     supervisor._active_actions = {}
     supervisor._emergency_latched = False
-    supervisor._motion_stop_block_until = 0.0
     supervisor._command_lock = threading.RLock()
     supervisor._command_pub = CapturePublisher()
     supervisor._current_motors = lambda: [{
@@ -331,7 +329,6 @@ def test_midi_select_off_holds_linked_axes_at_their_current_positions():
     supervisor._active_jogs = {}
     supervisor._active_actions = {}
     supervisor._emergency_latched = False
-    supervisor._motion_stop_block_until = 0.0
     supervisor._command_lock = threading.RLock()
     supervisor._command_pub = CapturePublisher()
     motors = [
@@ -373,7 +370,6 @@ def test_normal_midi_position_keeps_short_command_ownership():
     supervisor._active_jogs = {}
     supervisor._active_actions = {}
     supervisor._emergency_latched = False
-    supervisor._motion_stop_block_until = 0.0
     supervisor._command_lock = threading.RLock()
     supervisor._command_pub = CapturePublisher()
     supervisor._current_motors = lambda: [{
@@ -400,7 +396,6 @@ def test_midi_blocks_every_ac_axis_with_live_internal_limit_status():
     supervisor._active_jogs = {}
     supervisor._active_actions = {}
     supervisor._emergency_latched = False
-    supervisor._motion_stop_block_until = 0.0
     supervisor._command_lock = threading.RLock()
     supervisor._command_pub = CapturePublisher()
     supervisor._current_motors = lambda: [{
@@ -430,7 +425,6 @@ def test_playback_owner_blocks_midi_even_without_legacy_grace_flag():
     supervisor._active_jogs = {}
     supervisor._active_actions = {}
     supervisor._emergency_latched = False
-    supervisor._motion_stop_block_until = 0.0
     supervisor._command_lock = threading.RLock()
     supervisor._command_arbiter = CommandArbiter()
     supervisor._project_generation = 1
@@ -458,7 +452,6 @@ def test_playback_owner_blocks_midi_even_without_legacy_grace_flag():
 def test_busy_playback_owner_rejects_manual_jog_before_handler_runs():
     supervisor = MotionSupervisor.__new__(MotionSupervisor)
     supervisor._emergency_latched = False
-    supervisor._motion_stop_block_until = 0.0
     supervisor._active_jogs = {}
     supervisor._active_actions = {}
     supervisor._command_arbiter = CommandArbiter()
@@ -489,7 +482,6 @@ def test_runtime_callback_acquires_playback_owner_before_final_publish():
     supervisor._active_actions = {}
     supervisor._last_motion_run_command_at = 0.0
     supervisor._emergency_latched = False
-    supervisor._motion_stop_block_until = 0.0
     supervisor._command_lock = threading.RLock()
     supervisor._command_arbiter = CommandArbiter()
     supervisor._project_generation = 1
@@ -552,7 +544,6 @@ def test_grade1_playback_filter_uses_controller_index_not_array_slot(
         axis_value=MotionSupervisor._optional_int,
         playback_active=False,
     )
-    supervisor._motion_stop_block_until = 0.0
     supervisor._command_lock = threading.RLock()
     supervisor._command_arbiter = CommandArbiter()
     supervisor._project_generation = 1
@@ -588,7 +579,6 @@ def test_grade1_playback_filter_uses_controller_index_not_array_slot(
 def test_failed_manual_request_releases_ownership():
     supervisor = MotionSupervisor.__new__(MotionSupervisor)
     supervisor._emergency_latched = False
-    supervisor._motion_stop_block_until = 0.0
     supervisor._active_jogs = {}
     supervisor._active_actions = {}
     supervisor._command_arbiter = CommandArbiter()
@@ -606,7 +596,6 @@ def test_failed_manual_request_releases_ownership():
 def test_servo_control_does_not_release_an_active_manual_trajectory_owner():
     supervisor = MotionSupervisor.__new__(MotionSupervisor)
     supervisor._emergency_latched = False
-    supervisor._motion_stop_block_until = 0.0
     supervisor._active_jogs = {0: {'target_position': 10.0}}
     supervisor._active_actions = {}
     supervisor._command_arbiter = CommandArbiter()
@@ -638,7 +627,6 @@ def test_project_boundary_rejects_old_commands_and_cancels_current_generation():
     supervisor = MotionSupervisor.__new__(MotionSupervisor)
     supervisor._project_generation = 4
     supervisor._emergency_latched = False
-    supervisor._motion_stop_block_until = 0.0
     supervisor._active_jogs = {0: {'target_position': 1.0}}
     supervisor._active_actions = {}
     supervisor._last_motion_run_command_at = 1.0
@@ -668,7 +656,6 @@ def test_ac_servo_on_off_commands_never_include_target_position():
     supervisor._command_lock = threading.RLock()
     supervisor._command_pub = CapturePublisher()
     supervisor._emergency_latched = False
-    supervisor._motion_stop_block_until = 0.0
     motors = [{
         'controller_index': 0,
         'state': 'detected',
@@ -724,7 +711,6 @@ def safety_supervisor():
     supervisor._action_threads = {}
     supervisor._last_motion_run_command_at = 1.0
     supervisor._emergency_latched = False
-    supervisor._motion_stop_block_until = 0.0
     supervisor._command_lock = threading.RLock()
     supervisor._command_pub = CapturePublisher()
     supervisor._safety_status_pub = CapturePublisher()
@@ -801,8 +787,8 @@ def test_motion_stop_cannot_bypass_emergency_latch():
 def test_dedicated_safety_callback_latches_emergency_and_reports_result():
     supervisor = safety_supervisor()
     results = []
-    supervisor._publish_result = lambda request_id, success, message: results.append(
-        (request_id, success, message)
+    supervisor._publish_result = lambda request_id, success, message, extra=None: results.append(
+        (request_id, success, message, extra)
     )
 
     supervisor._safety_request_callback(String(data=json.dumps({
@@ -813,6 +799,8 @@ def test_dedicated_safety_callback_latches_emergency_and_reports_result():
     assert supervisor._emergency_latched is True
     assert results[0][0] == 'emergency-1'
     assert results[0][1] is True
+    # 정지 결과에 그 정지의 표지 · 브리지가 이 표지의 「정리 끝」 을 기다린다 · 수정 목록 200
+    assert results[0][3]['stop_epoch'] == supervisor._stop_epoch == 1
 
 
 def servo_alarm_supervisor():
@@ -964,7 +952,6 @@ def _relay_supervisor(controller_indexes):
     supervisor._active_actions = {}
     supervisor._last_motion_run_command_at = 0.0
     supervisor._emergency_latched = False
-    supervisor._motion_stop_block_until = 0.0
     supervisor._command_lock = threading.RLock()
     supervisor._command_arbiter = CommandArbiter()
     supervisor._project_generation = 1
@@ -1041,7 +1028,6 @@ def _midi_supervisor(controller_indexes):
     supervisor._active_jogs = {}
     supervisor._active_actions = {}
     supervisor._emergency_latched = False
-    supervisor._motion_stop_block_until = 0.0
     supervisor._command_lock = threading.RLock()
     supervisor._command_pub = CapturePublisher()
     supervisor._current_motors = lambda: [

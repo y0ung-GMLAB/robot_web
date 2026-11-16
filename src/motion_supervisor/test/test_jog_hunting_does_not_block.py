@@ -41,7 +41,6 @@ def _supervisor(position_deg, velocity_deg_s, axis=2):
     supervisor._jog_threads = {}
     supervisor._manual_notices = {}
     supervisor._emergency_latched = False
-    supervisor._motion_stop_block_until = 0.0
     supervisor._command_lock = threading.RLock()
     supervisor._command_arbiter = CommandArbiter()
     supervisor.state_timeout_sec = 1.0

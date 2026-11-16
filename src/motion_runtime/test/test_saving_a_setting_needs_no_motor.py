@@ -23,7 +23,8 @@ def test_saving_the_repeat_setting_is_not_gated():
 
 
 def test_the_commands_that_move_motors_are_still_gated():
-    for command in ('initialize', 'start', 'group_start_at', 'group_initialize_at'):
+    # 시간표 회차 명령도 모터를 움직인다(초기 이동 → 시작) · 수정 목록 206
+    for command in ('initialize', 'start', 'group_start_at', 'group_initialize_at', 'group_cycle_at'):
         assert command in GATED, command
 
 
@@ -40,4 +41,5 @@ def test_nothing_else_slipped_in():
         'group_prepare',
         'group_start_at',
         'group_initialize_at',
+        'group_cycle_at',
     })

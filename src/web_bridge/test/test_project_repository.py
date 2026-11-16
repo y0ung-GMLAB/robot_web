@@ -1810,7 +1810,7 @@ def test_motion_web_install_script_runs_full_first_install_flow():
     assert 'web_bridge/deploy/install_user_service.sh' in installer
     assert 'restart_user_services' in installer
     assert 'systemctl --user restart motion-control.service' in installer
-    assert 'systemctl --user restart motion-coordination.service' in installer
+    assert 'systemctl --user restart --no-block motion-coordination.service' in installer  # 202
     assert 'sudo reboot' in installer
     assert 'exec bash "${SCRIPT_DIR}/install.sh" "$@"' in updater
 
@@ -2347,11 +2347,9 @@ def test_web_apply_requests_managed_service_restart_without_second_launch(
 
     assert result['success'] is True
     assert result['restart_mode'] == 'split_managed_services'
-    assert commands[0][0][:4] == [
-        '/bin/bash', '-c', 'sleep 2; exec "$@"',
-        'motion-control-delayed-restart',
-    ]
-    assert commands[0][0][4:] == [
+    # 지연 셸(`sleep 2`) 없이 systemctl 을 바로 · HTTP 요청 안이면 응답 뒤로 미뤄진다 · 수정 목록 204
+    # (여기는 요청 밖이라 그 자리에서 건다 · 미루는 쪽은 test_after_response.py)
+    assert commands[0][0] == [
         '/usr/bin/systemctl', '--user', 'restart', '--no-block',
         'motion-motor.service', 'motion-control.service',
     ]

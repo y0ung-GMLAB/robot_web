@@ -1,4 +1,4 @@
-"""배열로 든 레코드 · 샘플이 옛 사전 길과 비트까지 같고 · 캐시가 바이트로 묶인다 · 수정 목록 170
+"""배열로 든 레코드 · 샘플이 옛 사전 길과 비트까지 같고 · 캐시는 개수로 묶인다 · 수정 목록 170 · 208
 
 NY 실물 2026-11-03 · 920 s × 20 조인트 애니를 재생 목록에 두고 3D 화면까지 켜자 floating4(4.7 GB)가
 스왑으로 넘어가 motion_run_manager 가 답을 멈췄다 · 레코드(사전) 캐시만 파일 하나 88 MB 였다.
@@ -9,7 +9,7 @@ NY 실물 2026-11-03 · 920 s × 20 조인트 애니를 재생 목록에 두고 
     구간 자르기 · 옛 `slice_records` + `_motion_groups` 와 같다
     20 ms 재샘플 · 옛 사전 샘플(옛 식 그대로 옮긴 참조 구현)과 모든 칸이 비트까지 같다
     레코드 하나 32 B · 샘플 하나 (2 + 축 × 2) × 8 B
-    캐시 · 바이트 예산을 넘으면 오래된 것부터 버린다 · 방금 넣은 것은 남긴다
+    캐시 · 개수를 넘으면 오래된 것부터 버린다 · 바이트 예산(170)은 208 에서 뺐다(무거운 재료는 디스크 변환본)
 """
 
 import json
@@ -220,19 +220,6 @@ def test_compact_sizes(tmp_path):
 class _Blob:
     def __init__(self, nbytes):
         self.nbytes = nbytes
-
-
-def test_cache_drops_the_oldest_over_the_byte_budget():
-    cache = SingleFlightCache(10, max_bytes=100)
-    for key in 'abc':
-        cache.get_or_compute(key, lambda: _Blob(40))
-    assert cache.keys() == ['b', 'c'] and cache.nbytes == 80
-    # 예산보다 큰 것 하나는 남긴다 · 바로 쓸 것이라
-    big = cache.get_or_compute('d', lambda: _Blob(500))
-    assert cache.keys() == ['d'] and big.nbytes == 500
-    # 튜플 값은 칸마다 더한다(레코드 단계 캐시 · (배열, 정보))
-    cache.get_or_compute('e', lambda: (_Blob(30), {'x': 1}))
-    assert cache.keys() == ['e'] and cache.nbytes == 30
 
 
 def test_count_bound_still_holds_without_a_byte_budget():

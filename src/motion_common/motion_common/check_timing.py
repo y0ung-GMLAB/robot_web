@@ -7,6 +7,9 @@
     samples_ms      20 ms 재샘플 · 속도·가속 검사(다른 스레드가 짓는 중이면 기다린 시간 포함)
     samples_cached  재샘플을 이 검사가 새로 계산하지 않았다(캐시 · 미리 짓기 · 다른 스레드)
     build_ms        계획 짓기 전체
+    records_from    파일 단계 출처 · 수정 목록 208 · memory(메모리) · artifact(변환본 · 디스크) ·
+                    compiled(자식 프로세스가 변환) · parsed(이 프로세스에서 읽음) · file(변환본 자리 없음)
+    samples_from    재샘플 단계 출처 · memory · artifact · compiled · computed(이 프로세스에서 계산)
 """
 
 from __future__ import annotations
@@ -19,6 +22,11 @@ STAGES = (
     ('samples_ms', '재샘플'),
     ('build_ms', '계획'),
 )
+
+
+#: 출처 글자 · 수정 목록 208 · 「파일 3(변환본) · 재샘플 2(변환본)」 · 출처가 없으면 옛 글자 그대로
+RECORDS_SOURCE_LABELS = {'memory': '캐시', 'artifact': '변환본', 'compiled': '변환', 'parsed': '읽기'}
+SAMPLES_SOURCE_LABELS = {'memory': '캐시', 'artifact': '변환본', 'compiled': '새로', 'computed': '새로'}
 
 
 def stage_text(timing: Any) -> str:
@@ -34,7 +42,11 @@ def stage_text(timing: Any) -> str:
             text = f'{label} {float(value):.0f}'
         except (TypeError, ValueError):
             continue
-        if key == 'samples_ms' and 'samples_cached' in timing:
+        if key == 'records_ms' and timing.get('records_from') in RECORDS_SOURCE_LABELS:
+            text += f'({RECORDS_SOURCE_LABELS[timing["records_from"]]})'
+        if key == 'samples_ms' and timing.get('samples_from') in SAMPLES_SOURCE_LABELS:
+            text += f'({SAMPLES_SOURCE_LABELS[timing["samples_from"]]})'
+        elif key == 'samples_ms' and 'samples_cached' in timing:
             text += '(캐시)' if timing.get('samples_cached') else '(새로)'
         parts.append(text)
     return ' · '.join(parts)

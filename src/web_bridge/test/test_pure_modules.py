@@ -14,6 +14,7 @@ from pathlib import Path
 import pytest
 
 from motion_web_bridge import (
+    after_response,
     desktop_shortcut,
     ethercat_project_compat,
     minas_params,
@@ -27,6 +28,7 @@ from motion_web_bridge import (
 
 #: 검사 대상 순수 모듈 · 분해가 진행되면 여기에 추가한다
 PURE_MODULES = [
+    after_response,        # 응답 뒤 할 일 · motor_config_rules 가 쓴다 · 표준 라이브러리만 (204)
     motor_identity,
     motor_config_rules,
     motor_config_build,

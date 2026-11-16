@@ -4,11 +4,25 @@
 늦게 켠 PC 는 다음 경계 · 문제는 그 PC 만 · 운영시간 끝은 주차 · 정지는 바로.
 """
 
-from typing import Any, Dict, List, Mapping
+from typing import Any, Dict, List, Mapping, Optional
 
+import pytest
+
+from motion_common import timed_cycle
+from motion_common.run_state import GROUP_CYCLE_SKIPPED_PHASE
 from motion_coordination.clock_driver import ClockDriver
 from motion_coordination.clock_grid import Timeline
 from motion_coordination.timetable import Choice
+
+#: 실제 계획 짓기 여유(10 s · NY 실측 2026-11-16) · 아래 시나리오 시각은 45 s 일 때 짰다
+REAL_BUILD_SEC = ClockDriver.BUILD_SEC
+
+
+@pytest.fixture(autouse=True)
+def _scenario_build_sec(monkeypatch):
+    """시나리오 시각(들어가는 틱 · 쉬는 회차)을 45 s 로 짰다 · 규칙 시험이라 값과 상관없음 · 실제 값은
+    `test_a_pc_that_boots_mid_window_joins_an_earlier_boundary_with_the_real_build_sec` 가 본다"""
+    monkeypatch.setattr(ClockDriver, 'BUILD_SEC', 45.0)
 
 
 class Clock:
@@ -28,17 +42,44 @@ class Clock:
 
 
 class FakeRuntime:
-    """`group_session` 의 순서 규칙만 · 초기 이동 `init` 초 · 클립 `clip` 초"""
+    """`group_session` 의 순서 규칙만 · 초기 이동 실제 `init` 초 · 클립 `clip` 초
 
-    def __init__(self, clock: Clock, *, init: float = 5.0, clip: float = 80.0) -> None:
+    실제 재생 관리자처럼 상태가 바뀔 때마다 표시(`status_stamp` · 단조)를 달고 명령 응답에 그 상태를 싣는다 · 수정 목록 199
+
+    수정 목록 206 · 시간표 회차 명령(`group_cycle_at` · 「k 회차를 S 에 · 다음 회차 N」)을 받아 초기 이동 시작을 제 계획
+    시간(`plan_init` · 기본 `init` · 조인트 매핑 값)에서 거꾸로 세고 · 늦게 시작 · 쉼은 재생 관리자와 같은 규칙
+    (`motion_common.timed_cycle`)으로 정한다 · `late` = 회차별로 초기 이동이 계획보다 더 걸리는 초 {회차: 초}.
+    복귀(`group_join`)는 회차 명령이 합류 확정을 겸한다 · 옛 길(`group_initialize_at` · `group_start_at`)은 이제 안 쓴다.
+    """
+
+    def __init__(
+        self, clock: Clock, *, init: float = 5.0, clip: float = 80.0,
+        plan_init: Optional[float] = None, late: Optional[Mapping[int, float]] = None,
+    ) -> None:
         self.clock = clock
         self.init = init
         self.clip = clip
-        self.status: Dict[str, Any] = {'state': 'stopped', 'phase': 'stopped'}
+        self.plan_init = float(init if plan_init is None else plan_init)
+        self.late = dict(late or {})
+        self._seq = 0
+        self.status: Dict[str, Any] = {'state': 'stopped', 'phase': 'stopped', 'status_stamp': self.stamp()}
         self.session: Dict[str, Any] = {}
         self.starts: List[tuple] = []
+        self.skips: List[tuple] = []
         self.calls: List[str] = []
         self.busy = False
+
+    def stamp(self) -> float:
+        """재생 관리자 `status_stamp` · 같은 틱 안에서도 늘어난다"""
+        self._seq += 1
+        return self.clock.mono() + self._seq * 1e-6
+
+    def set_status(self, **fields: Any) -> None:
+        """실제 재생 관리자가 새 상태를 낸 것 · 표시를 단다"""
+        self.status = {**fields, 'status_stamp': self.stamp()}
+
+    def _ok(self, **extra: Any) -> Dict[str, Any]:
+        return {'success': True, 'status': dict(self.status), **extra}
 
     def control(self, payload: Mapping[str, Any]) -> Dict[str, Any]:
         command = payload['command']
@@ -51,63 +92,113 @@ class FakeRuntime:
             join = int(payload.get('join_cycle_number') or 0)
             if command == 'group_prepare' and float(payload['initialize_monotonic']) <= now:
                 return {'success': False, 'message': '그룹 초기 위치 이동 예약 트리거가 이미 지났습니다'}
-            self.session = {'id': payload['execution_id'], 'cycle': join, 'state': 'join_ready' if join else 'preparing',
-                            'init_at': None if join else float(payload['initialize_monotonic'])}
-            self._show()
-            return {'success': True}
-        if command == 'group_join_commit':
-            if s.get('state') != 'join_ready':
-                return {'success': False, 'message': '복귀 준비 안 됨'}
-            s.update(state='motion_completed', cycle=int(payload['cycle_number']))
-            self._show(phase='group_join_committed')
-            return {'success': True}
-        if command == 'group_initialize_at':
-            if s.get('state') != 'motion_completed' or int(payload['cycle_number']) != s['cycle']:
-                return {'success': False, 'message': '회차 초기화 번호가 일치하지 않습니다'}
-            if float(payload['initialize_monotonic']) <= now:
-                return {'success': False, 'message': '트리거가 이미 지났습니다'}
-            s.update(state='cycle_initialize_scheduled', init_at=float(payload['initialize_monotonic']))
-            self._show()
-            return {'success': True}
-        if command == 'group_start_at':
-            if s.get('state') not in {'armed', 'cycle_ready'} or int(payload['cycle_number']) != s['cycle'] + 1:
-                return {'success': False, 'message': '시작 예약 불가'}
-            if float(payload['start_monotonic']) <= now:
-                return {'success': False, 'message': '그룹 모션 시작 트리거가 이미 지났습니다'}
-            s.update(state='start_scheduled', start_at=float(payload['start_monotonic']), next=int(payload['cycle_number']))
-            self._show()
-            return {'success': True}
+            self.session = {'id': payload['execution_id'], 'cycle': join, 'join': join, 'timed': None,
+                            'state': 'join_ready' if join else 'preparing'}
+            self._show(state='join_ready' if join else 'preparing',
+                       phase='group_join_ready' if join else 'group_preparing')
+            return self._ok()
+        if command == 'group_cycle_at':
+            if not s or s['id'] != payload['execution_id']:
+                return {'success': False, 'message': '활성 그룹 실행 세션이 일치하지 않습니다'}
+            cycle = int(payload['cycle_number'])
+            if s['timed'] and s['timed']['cycle'] == cycle:
+                return self._ok(duplicate=True)
+            if s['state'] == 'join_ready':
+                expected = s['join'] + 1
+            elif s['state'] == 'preparing' and s['cycle'] == 0:
+                expected = 1
+            elif s['state'] == 'motion_completed':
+                expected = s['cycle'] + 1
+            else:
+                return {'success': False, 'message': '그룹 회차 명령을 받을 수 있는 상태가 아닙니다'}
+            if cycle != expected:
+                return {'success': False, 'message': f'그룹 모션 회차가 일치하지 않습니다: 예상 {expected}'}
+            start = float(payload['start_monotonic'])
+            following = float(payload.get('next_start_monotonic') or 0.0)
+            s['timed'] = {'cycle': cycle, 'start': start, 'next': following if following > start else 0.0}
+            if s['state'] == 'join_ready':
+                s.update(state='motion_completed', cycle=s['join'])     # 합류 확정을 겸함
+                self._show(state='motion_completed', phase='group_join_committed')
+            else:
+                self.set_status(**{**self.status, 'timed_cycle': cycle})
+            return self._ok()
         if command in {'group_cancel', 'stop_now'}:
             self.session = {}
-            self.status = {'state': 'stopped', 'phase': 'stopped'}
-            return {'success': True}
+            self.set_status(state='stopped', phase='stopped')
+            return self._ok()
         return {'success': False, 'message': f'모르는 명령 {command}'}
 
+    def _latest(self, timed: Mapping[str, Any]) -> float:
+        return timed_cycle.latest_start(timed['start'], timed['next'], self.clip, self.plan_init)
+
+    def _skipped(self, timed: Mapping[str, Any], ready: float, *, moved: bool) -> bool:
+        s = self.session
+        decision = timed_cycle.decide(
+            cycle=timed['cycle'], start=timed['start'], ready_at=ready, latest=self._latest(timed), moved=moved,
+        )
+        if not decision.skip:
+            return False
+        s.update(state='motion_completed', cycle=timed['cycle'])
+        self.skips.append((timed['cycle'], decision.skip))
+        self._show(state='motion_completed', phase=GROUP_CYCLE_SKIPPED_PHASE, cycle_skip_reason=decision.skip,
+                   timed_cycle=timed['cycle'])
+        return True
+
     def step(self) -> None:
+        """한 틱 · 같은 순간에 이어지는 일은 한 번에(초기 이동이 늦게 끝나면 그 자리에서 시작 · 실제 재생 관리자와 같음)"""
+        for _ in range(4):
+            if not self._step_once():
+                return
+
+    def _step_once(self) -> bool:
         s = self.session
         now = self.clock.mono()
         if not s:
-            return
-        if s['state'] == 'preparing' and now >= s['init_at'] + self.init:
-            s['state'] = 'armed'
-            self._show(phase='group_armed')
-        elif s['state'] == 'cycle_initialize_scheduled' and now >= s['init_at'] + self.init:
-            s['state'] = 'cycle_ready'
-            self._show(phase='group_cycle_initialized')
-        elif s['state'] == 'start_scheduled' and now >= s['start_at']:
-            s.update(state='running', cycle=s['next'], ends=now + self.clip)
+            return False
+
+        def due(at: float) -> bool:
+            # 시험 시계는 0.1 s 를 더해 가며 흘러 부동소수 오차가 쌓인다(유닉스 초 크기면 수 ms) · 반 틱 안은 그 틱으로 본다
+            return now + 0.05 >= at
+
+        timed = s.get('timed')
+        if s['state'] in {'preparing', 'motion_completed'} and timed and timed['cycle'] == s['cycle'] + 1:
+            init_at = timed_cycle.initialize_at(timed['start'], self.plan_init)
+            if self._skipped(timed, max(now, init_at) + self.plan_init, moved=False):
+                return True
+            s.update(state='init_wait', init_at=init_at)
+            self._show(state='waiting', phase='group_cycle_initialize_scheduled', timed_cycle=timed['cycle'])
+            return True
+        if s['state'] == 'init_wait' and due(s['init_at']):
+            began = max(now, s['init_at'])
+            s.update(state='initializing', init_end=began + self.init + self.late.get(timed['cycle'], 0.0))
+            self._show(state='initializing', phase='initializing', timed_cycle=timed['cycle'])
+            return True
+        if s['state'] == 'initializing' and due(s['init_end']):
+            ended = max(now, s['init_end'])
+            if self._skipped(timed, ended, moved=True):
+                return True
+            s.update(state='start_wait', start_at=max(timed['start'], ended),
+                     late_sec=max(ended - timed['start'], 0.0))
+            self._show(state='waiting', phase='group_start_scheduled', timed_cycle=timed['cycle'])
+            return True
+        if s['state'] == 'start_wait' and due(s['start_at']):
+            s.update(state='running', cycle=timed['cycle'], ends=max(now, s['start_at']) + self.clip)
             self.starts.append((s['cycle'], round(self.clock.wall(), 3)))
-            self._show(phase='group_running')
-        elif s['state'] == 'running' and now >= s['ends']:
+            self._show(state='running', phase='group_running', timed_cycle=timed['cycle'],
+                       cycle_start_late_sec=round(s['late_sec'], 3))
+            return True
+        if s['state'] == 'running' and now >= s['ends']:   # `_BlinkRuntime` 과 같은 잣대(그쪽이 먼저 가로챈다)
             s['state'] = 'motion_completed'
             self._show(phase='group_motion_completed')
+            return True
+        return False
 
-    def _show(self, phase: str = '') -> None:
+    def _show(self, phase: str = '', *, state: str = '', **extra: Any) -> None:
         s = self.session
-        self.status = {
-            'group_execution': True, 'execution_id': s['id'], 'state': s['state'],
-            'phase': phase or f'group_{s["state"]}', 'current_cycle': s['cycle'], 'group_cycle_number': s['cycle'],
-        }
+        self.set_status(
+            group_execution=True, execution_id=s['id'], state=state or s['state'],
+            phase=phase or f'group_{s["state"]}', current_cycle=s['cycle'], group_cycle_number=s['cycle'], **extra,
+        )
 
 
 def _run(driver: ClockDriver, runtime: FakeRuntime, clock: Clock, choice_of, seconds: float, *, view=None) -> None:
@@ -118,9 +209,9 @@ def _run(driver: ClockDriver, runtime: FakeRuntime, clock: Clock, choice_of, sec
         driver.tick(choice_of(clock.wall()), {'status': runtime.status, 'init_sec': runtime.init, **(view or {})})
 
 
-def _pc(wall: float, *, clip: float = 80.0, init: float = 5.0):
+def _pc(wall: float, *, clip: float = 80.0, init: float = 5.0, plan_init: Optional[float] = None, late=None):
     clock = Clock(wall)
-    runtime = FakeRuntime(clock, clip=clip, init=init)
+    runtime = FakeRuntime(clock, clip=clip, init=init, plan_init=plan_init, late=late)
     finished: List[tuple] = []
     notes: List[str] = []
     driver = ClockDriver(
@@ -147,18 +238,33 @@ def test_every_pc_starts_every_cycle_at_the_timetable_time():
 def test_a_pc_that_boots_mid_window_joins_at_a_boundary_with_the_right_cycle_number():
     clock, runtime, driver, _, _ = _pc(100_215.0)
     _run(driver, runtime, clock, _always(Choice(timeline=TIMELINE)), 400.0)
-    # 100215 + 준비(45 + 5 + 2) → 4회차(100360)부터 · 로컬 회차 번호 = 시간표 회차 번호(재생 목록 순서)
+    # 100215 + 준비(45 + 5 + 1) → 4회차(100360)부터 · 로컬 회차 번호 = 시간표 회차 번호(재생 목록 순서)
     assert runtime.starts[0] == (4, 100_360.0)
-    assert runtime.calls[:3] == ['group_join', 'group_join_commit', 'group_initialize_at']
+    # 복귀 길 · 회차 명령 하나가 합류 확정을 겸하고 같은 틱에 · 초기 이동 · 시작 예약을 따로 보내지 않는다 · 수정 목록 206
+    assert runtime.calls[:2] == ['group_join', 'group_cycle_at']
+    assert 'group_join_commit' not in runtime.calls and 'group_start_at' not in runtime.calls
+
+
+def test_a_pc_that_boots_mid_window_joins_an_earlier_boundary_with_the_real_build_sec(monkeypatch):
+    """BUILD_SEC 45 → 10 s(NY 실측 첫 변환 최대 1.4 s · 사용자 2026-11-16) · 같은 PC 가 한 회차 일찍 들어온다"""
+    monkeypatch.setattr(ClockDriver, 'BUILD_SEC', REAL_BUILD_SEC)
+    assert REAL_BUILD_SEC == 10.0
+    clock, runtime, driver, _, _ = _pc(100_215.0)
+    _run(driver, runtime, clock, _always(Choice(timeline=TIMELINE)), 400.0)
+    # 100215 + 준비(10 + 5 + 1) = 100231 → 3회차(100260)부터 · 45 s 였으면 4회차(100360)
+    assert runtime.starts[0] == (3, 100_260.0)
+    assert runtime.calls[:2] == ['group_join', 'group_cycle_at']
 
 
 def test_a_clip_longer_than_the_period_makes_only_this_pc_skip_and_come_back():
     clock, runtime, driver, _, notes = _pc(100_000.0, clip=97.0)
     _run(driver, runtime, clock, _always(Choice(timeline=TIMELINE)), 560.0)
     started = [cycle for cycle, _ in runtime.starts]
-    assert started[0] == 1 and 2 not in started, '1회차 끝이 2회차 초기 이동 시각을 넘김 · 2회차 쉼'
+    assert started[0] == 1 and 2 not in started, '1회차 끝이 2회차 초기 이동 시각을 넘김 · 2회차를 돌면 3회차 준비도 먹음 · 쉼'
     assert all(at == 100_060.0 + (k - 1) * 100.0 for k, at in runtime.starts), '돌아와도 시간표 시각'
-    assert any('놓침' in note for note in notes)
+    # 쉼은 재생 관리자가 정해 알린다 · 실행은 놓지 않고 다음 회차 명령을 이어서(전에는 놓고 다음 경계 복귀 길) · 수정 목록 206
+    assert any(note.startswith('시간표 재생 · 2회차 쉼 · 지금 초기 이동을 시작해도') for note in notes), notes
+    assert runtime.calls.count('group_prepare') == 1 and 'group_join' not in runtime.calls
 
 
 def test_stop_now_stops_right_away_and_does_not_come_back():
@@ -288,14 +394,21 @@ def _run_seen_late(driver, runtime, clock, choice_of, seconds, *, late, init_sec
 
 
 def test_every_cycle_starts_on_time_when_the_initial_move_runs_long_and_is_seen_late():
+    """수정 목록 206 · 초기 이동이 실측 최대(0.8 s)만큼 길고 로컬 상태를 0.6 s 늦게 봐도 매 회차 시간표 시각에
+
+    시작은 재생 관리자가 제 시계로 하므로 늦게 보는 것은 시작과 상관없다(전에는 그 왕복 때문에 여유 4 s) · 남은 여유는
+    초기 이동이 늦게 끝나는 몫(`timed_cycle.INITIAL_MOVE_SETTLE_SEC`) 하나.
+    """
     from motion_coordination.clock_grid import auto_period
     period = auto_period([80.0 + 5.0])                         # 클립 80 + 초기 이동 5 → 회차 사이 포함
+    assert period == 90.0, '85 + 회차 끝 0.5 + 시작 여유 1 = 86.5 → 90(188 은 85 + 2 + 4 + 2 = 93 → 100)'
     timeline = Timeline('tt-s100000', anchor_unix=100_060.0, period_sec=period, end_unix=100_060.0 + period * 5)
-    clock, runtime, driver, _, notes = _pc(100_000.0, clip=80.0, init=6.5)   # 초기 이동이 1.5 s 길다
+    clock, runtime, driver, _, notes = _pc(100_000.0, clip=80.0, init=5.8, plan_init=5.0)   # 초기 이동이 0.8 s 길다
     _run_seen_late(driver, runtime, clock, _always(Choice(timeline=timeline)), period * 5, late=0.6, init_sec=5.0)
     assert [cycle for cycle, _ in runtime.starts] == [1, 2, 3, 4, 5], notes
     assert all(at == 100_060.0 + (k - 1) * period for k, at in runtime.starts)
-    assert not any('놓침' in note or '지났' in note for note in notes)
+    assert not any('쉼' in note or '늦게 시작' in note for note in notes), notes
+    assert 'group_start_at' not in runtime.calls and 'group_initialize_at' not in runtime.calls
 
 
 # ---------------------------------------------------------------------- #
@@ -414,10 +527,9 @@ def test_a_run_whose_local_ended_stopped_is_let_go_and_parked_at_the_last_window
     assert runtime.starts == [(1, 100_060.0)] and driver.holding == TIMELINE.plan_id
     # 회차가 끝나며 장벽이 아니라 그 자리 정지로 끝남 · 같은 실행 번호가 남는다
     runtime.session = {}
-    runtime.status = {
-        'group_execution': True, 'execution_id': TIMELINE.plan_id, 'state': 'stopped', 'phase': 'stopped',
-        'group_cycle_number': 1,
-    }
+    runtime.set_status(
+        group_execution=True, execution_id=TIMELINE.plan_id, state='stopped', phase='stopped', group_cycle_number=1,
+    )
     _run(driver, runtime, clock, _always(Choice(reason='운영시간 아님')), 2.0)
     assert driver.holding == ''
     assert finished == [(TIMELINE.plan_id, True)], '운영시간 끝 · 주차'
@@ -429,7 +541,7 @@ def test_a_dropped_cycle_is_logged_as_a_skipped_cycle():
     _run(driver, runtime, clock, _always(Choice(timeline=TIMELINE)), 40.0)
     assert driver.holding == TIMELINE.plan_id
     runtime.session = {}
-    runtime.status = {'state': 'initialized', 'phase': 'initialized'}
+    runtime.set_status(state='initialized', phase='initialized')
     _run(driver, runtime, clock, _always(Choice(timeline=TIMELINE)), 5.0)
     skipped = [note for note in notes if '회차 쉼' in note]
     assert skipped and skipped[0].startswith('시간표 재생 · 1회차 쉼 · 로컬 실행이 끝남')
@@ -440,10 +552,10 @@ def test_a_dropped_cycle_is_logged_as_a_skipped_cycle():
 # 수정 목록 193 (사용자 2026-11-11) · 그룹 정지로 선 PC 도 운영시간 끝에 주차 → 서보 OFF
 # ---------------------------------------------------------------------- #
 
-def _ticks(driver, clock, choice, seconds):
+def _ticks(driver, clock, choice, seconds, *, mode=''):
     for _ in range(int(seconds / 0.1)):
         clock.advance(0.1)
-        driver.tick(choice, {'status': {'state': 'stopped', 'phase': 'stopped'}, 'init_sec': 5.0})
+        driver.tick(choice, {'status': {'state': 'stopped', 'phase': 'stopped'}, 'init_sec': 5.0, 'operation_mode': mode})
 
 
 def test_a_pc_standing_by_a_group_stop_parks_once_when_the_operating_hours_end():
@@ -463,12 +575,9 @@ def test_a_stop_after_cycle_cut_timeline_parks_at_the_end_too():
     assert finished == [('tt-s100000', True)]
 
 
-def test_no_park_if_the_stop_was_lifted_or_not_seen_for_a_while():
-    clock, runtime, driver, finished, notes = _pc(100_000.0)
-    _ticks(driver, clock, Choice(reason='정지됨', stopped_plan_id='tt-s100000'), 5.0)
-    _ticks(driver, clock, Choice(reason='마스터 스케줄 꺼짐'), 200.0)      # 마스터 수동으로 오래
-    _ticks(driver, clock, Choice(reason='운영시간 아님'), 5.0)
-    assert finished == [], '사람이 만지는 중 · 주차 안 함'
+def test_no_park_if_the_stop_was_lifted():
+    """수정 목록 201 · 옛 시험의 앞 절반(마스터 수동으로 정지를 2분 넘게 못 봄 → 주차 안 함)은 사용자 결정으로 뒤집혔다 ·
+    `test_a_group_stop_parks_at_its_window_end_even_when_the_stop_is_not_seen` 으로 · 여기는 정지가 풀린 경우만"""
     clock, runtime, driver, finished, notes = _pc(100_000.0)
     _ticks(driver, clock, Choice(reason='정지됨', stopped_plan_id='tt-s100000'), 5.0)
     _ticks(driver, clock, Choice(reason='수동 모드', stopped_plan_id='tt-s100000'), 5.0)
@@ -491,21 +600,25 @@ def test_a_manual_pc_never_remembers_a_group_stop():
 def _human_stop(runtime, plan_id):
     """사람이 이 PC 만 정지(`/api/motion-run/stop`) · 실제 재생 관리자는 같은 실행 번호를 남긴 채 `stopped`"""
     runtime.session = {}
-    runtime.status = {
-        'group_execution': True, 'execution_id': plan_id, 'state': 'stopped', 'phase': 'stopped',
-        'group_cycle_number': 1, 'message': '즉시 정지',
-    }
+    runtime.set_status(
+        group_execution=True, execution_id=plan_id, state='stopped', phase='stopped',
+        group_cycle_number=1, message='즉시 정지',
+    )
 
 
 def test_a_pc_stopped_by_a_person_lets_go_and_rejoins_at_the_next_boundary():
-    """A2 · 정지 뒤 {stopped · 같은 번호} 를 매 틱 쥐고 있어 그 운영시간 끝까지 안 돌아왔다(f2 00:02)"""
+    """A2 · 정지 뒤 {stopped · 같은 번호} 를 매 틱 쥐고 있어 그 운영시간 끝까지 안 돌아왔다(f2 00:02)
+
+    수정 목록 199 · 정상 회차 끝에 끝난 상태가 안 나오므로 사람 정지는 다음 틱에 놓는다(195 의 5 s 확인 없음) ·
+    고치기 전에는 그 뒤 몇 초 동안 쥐고 있어 이 시험이 실패한다.
+    """
     clock, runtime, driver, finished, notes = _pc(100_000.0)
     _run(driver, runtime, clock, _always(Choice(timeline=TIMELINE)), 100.0)
     assert runtime.starts == [(1, 100_060.0)]
     _human_stop(runtime, TIMELINE.plan_id)
-    _run(driver, runtime, clock, _always(Choice(timeline=TIMELINE)), 4.0)
-    assert 'group_cancel' not in runtime.calls, '끝남이 5 s 이어져야 놓는다(195)'
-    _run(driver, runtime, clock, _always(Choice(timeline=TIMELINE)), 3.0)
+    _run(driver, runtime, clock, _always(Choice(timeline=TIMELINE)), 0.1)
+    assert driver.holding == '' and 'group_cancel' in runtime.calls, '다음 틱에 놓는다 · 시간 기다림 없음'
+    _run(driver, runtime, clock, _always(Choice(timeline=TIMELINE)), 7.0)
     cancel = runtime.calls.index('group_cancel')
     assert 'group_join' in runtime.calls[cancel:], '놓고 바로 다음 경계(2회차) 복귀 길'
     assert any(note.startswith('시간표 재생 · 1회차 쉼 · 로컬 실행이 끝남 · 즉시 정지') for note in notes)
@@ -535,17 +648,21 @@ def test_the_normal_cycle_barrier_is_not_mistaken_for_a_finished_run():
 
 
 def test_a_dropped_cycle_reason_stays_on_screen_until_the_next_try():
-    """C · 웹 서비스 재시작으로 로컬 상태가 사라짐 · 로그에만 있고 화면 note 는 다음 틱에 빈 값이었다(f4 00:48)"""
+    """C · 웹 서비스 재시작으로 로컬 실행이 사라짐 · 로그에만 있고 화면 note 는 다음 틱에 빈 값이었다(f4 00:48)
+
+    수정 목록 199 · 다시 뜬 재생 관리자가 새 상태(빈 실행 · 새 표시)를 내면 바로 놓는다 · 고치기 전 시험은 빈 상태({})를
+    3 s 뒤 「끝남」 으로 봤다 · 빈 상태는 「못 읽음」 이라 이제 그것만으로는 놓지 않는다(`test_a_status_that_never_follows…`)
+    """
     clock, runtime, driver, _, notes = _pc(100_000.0)
     _run(driver, runtime, clock, _always(Choice(timeline=TIMELINE)), 65.0)
     assert driver.holding == TIMELINE.plan_id
     runtime.session = {}
-    runtime.status = {}
-    _run(driver, runtime, clock, _always(Choice(timeline=TIMELINE)), 4.0)
+    runtime.set_status(state='idle', phase='idle', message='', group_execution=False, execution_id='')
+    _run(driver, runtime, clock, _always(Choice(timeline=TIMELINE)), 0.2)
     assert driver.holding == ''
-    assert driver.report()['note'] == '1회차 로컬 실행이 끝남 · 상태 없음'
-    _run(driver, runtime, clock, _always(Choice(timeline=TIMELINE)), 3.0)
-    assert driver.report()['note'] == '1회차 로컬 실행이 끝남 · 상태 없음', '다음 회차 들어갈 때까지 남는다'
+    assert driver.report()['note'] == '1회차 로컬 실행이 끝남 · idle'
+    _run(driver, runtime, clock, _always(Choice(timeline=TIMELINE)), 7.0)
+    assert driver.report()['note'] == '1회차 로컬 실행이 끝남 · idle', '다음 회차 들어갈 때까지 남는다'
     _run(driver, runtime, clock, _always(Choice(timeline=TIMELINE)), 100.0)
     assert driver.report()['note'] == '' and [cycle for cycle, _ in runtime.starts] == [1, 2]
 
@@ -559,7 +676,10 @@ def test_a_held_group_stop_says_so_instead_of_timetable_end():
 
 
 class _BlinkRuntime(FakeRuntime):
-    """실제 플레이어처럼 회차 끝에 장벽 전 잠깐 {completed · completed}(「모션 실행 완료」)"""
+    """실제 플레이어처럼 회차 끝에 장벽 전 틈 · 수정 목록 199 부터 {motion_completed · group_motion_finishing}
+
+    그룹 세션이 다음 재생 목록 항목을 짓는 동안(164) · 920 s 목록이면 몇 초 · 여기서는 `BLINK_SEC`.
+    """
 
     BLINK_SEC = 1.0
 
@@ -569,7 +689,10 @@ class _BlinkRuntime(FakeRuntime):
         if s and s['state'] == 'running' and now >= s['ends']:
             s['state'] = 'blink'
             s['blink_until'] = now + self.BLINK_SEC
-            self.status = {**self.status, 'state': 'completed', 'phase': 'completed', 'message': '모션 실행 완료'}
+            self.set_status(**{
+                **self.status, 'state': 'motion_completed', 'phase': 'group_motion_finishing',
+                'message': f'그룹 모션 {s["cycle"]}회차 재생 끝 · 회차 끝 알림 준비',
+            })
             return
         if s and s['state'] == 'blink':
             if now >= s['blink_until']:
@@ -580,9 +703,13 @@ class _BlinkRuntime(FakeRuntime):
 
 
 def test_the_brief_completed_before_the_cycle_barrier_is_not_a_stop():
-    """실물 NY 2026-11-11 14:31 · f2 23회차 끝 0.68 s 뒤 「23회차 쉼 · 로컬 실행이 끝남 · 모션 실행 완료」 → 24회차 쉼 · 수정 목록 195"""
+    """실물 NY 2026-11-11 14:31 · f2 23회차 끝 0.68 s 뒤 「23회차 쉼 · 로컬 실행이 끝남 · 모션 실행 완료」 → 24회차 쉼 · 수정 목록 195
+
+    199 · 그 틈은 이제 끝난 상태가 아니다 · 틈이 길어도(다음 항목 짓기 8 s) 쉼 없음 · 기다림 시간 기준 없음.
+    """
     clock = Clock(100_000.0)
     runtime = _BlinkRuntime(clock, clip=80.0, init=5.0)
+    runtime.BLINK_SEC = 8.0
     notes = []
     driver = ClockDriver(runtime.control, info=notes.append, warn=notes.append, wall=clock.wall, mono=clock.mono,
                          finish=lambda plan, park, why: runtime.control({'command': 'group_cancel'}))
@@ -620,10 +747,10 @@ def test_a_servo_off_pc_that_was_let_in_rests_instead_of_erroring():
         result = real(payload)
         if payload['command'] in {'group_join', 'group_prepare'} and result.get('success'):
             runtime.session = {}
-            runtime.status = {
-                'group_execution': True, 'execution_id': payload['execution_id'], 'state': 'error',
-                'phase': 'error', 'message': SERVO_OFF_MESSAGE,
-            }
+            runtime.set_status(
+                group_execution=True, execution_id=payload['execution_id'], state='error',
+                phase='error', message=SERVO_OFF_MESSAGE,
+            )
         return result
 
     runtime.control = servo_off_control
@@ -634,3 +761,166 @@ def test_a_servo_off_pc_that_was_let_in_rests_instead_of_erroring():
     note = driver.report()['note']
     assert note.endswith('회차 쉼 · 서보가 꺼져 있습니다(0~4번 모터)'), note
     assert [cycle for cycle, _ in runtime.starts] == [1]
+
+
+# ---------------------------------------------------------------------- #
+# 수정 목록 199 · 로컬 상태는 보낸 명령의 응답 표시 이상일 때만 그 명령 뒤의 것 · 시간으로 짐작하지 않는다
+# ---------------------------------------------------------------------- #
+
+def test_a_local_status_seen_late_right_after_entering_does_not_end_the_run():
+    """명령 뒤 3.2 s 동안 그 앞 상태(실행 없음)가 보인다 · 전에는 3 s(`STATUS_GRACE_SEC`) 뒤 「로컬 실행이 끝남」 으로 1회차를 쉼"""
+    clock, runtime, driver, _, notes = _pc(100_000.0)
+    _run_seen_late(driver, runtime, clock, _always(Choice(timeline=TIMELINE)), 250.0, late=3.2, init_sec=5.0)
+    assert [cycle for cycle, _ in runtime.starts] == [1, 2], notes
+    assert all(at == 100_060.0 + (k - 1) * 100.0 for k, at in runtime.starts)
+    assert not any('쉼' in note for note in notes), notes
+
+
+def test_a_status_that_never_follows_the_command_is_a_failure_only_after_the_echo_timeout():
+    """응답은 받았는데 로컬 상태가 그 뒤로 안 바뀐다(웹 · 재생 관리자 멈춤) · 실패 감지 한도 전에는 아무것도 정하지 않는다"""
+    clock, runtime, driver, _, notes = _pc(100_000.0)
+    frozen = dict(runtime.status)                                   # 명령 앞 상태 · 끝까지 이것만 보인다
+
+    def tick(seconds):
+        for _ in range(int(round(seconds / 0.1))):
+            clock.advance(0.1)
+            runtime.step()
+            driver.tick(Choice(timeline=TIMELINE), {'status': frozen, 'init_sec': 5.0})
+
+    tick(0.1)
+    # 들어가기 + 그 회차 명령(같은 틱 · 수정 목록 206)
+    assert runtime.calls == ['group_prepare', 'group_cycle_at'] and driver.holding == TIMELINE.plan_id
+    tick(5.0)
+    assert driver.holding == TIMELINE.plan_id, '옛 코드는 3 s 뒤 「로컬 실행이 끝남」 으로 놓았다'
+    assert runtime.calls == ['group_prepare', 'group_cycle_at']
+    tick(ClockDriver.ECHO_TIMEOUT_SEC - 5.0 + 0.2)
+    assert driver.holding == '' and runtime.calls[-1] == 'group_cancel'
+    assert any('로컬 상태가 명령 뒤로 바뀌지 않음' in note for note in notes), notes
+
+
+def test_an_error_left_by_the_previous_try_does_not_fold_the_new_try():
+    """앞 시도(서보 꺼짐)의 오류 상태가 다시 들어간 직후 아직 보인다 · 그것으로 새 시도를 접지 않는다 · 새 상태의 오류만 본다
+
+    전에는 오류는 기다림 없이 바로 봐 다시 들어가자마자 「N회차 쉼 · 서보가 꺼져 있습니다」 로 또 쉬었다.
+    """
+    clock, runtime, driver, _, notes = _pc(100_000.0)
+    runtime.set_status(
+        group_execution=True, execution_id=TIMELINE.plan_id, state='error', phase='error',
+        message=SERVO_OFF_MESSAGE,
+    )
+    old_error = dict(runtime.status)
+    # 앞 시도는 이미 놓았다 · 들어갈 때 보인 상태는 그 앞(정지) · 들어간 뒤 늦게 읽은 것이 앞 시도의 오류
+    runtime.status = {'state': 'stopped', 'phase': 'stopped', 'status_stamp': old_error['status_stamp'] - 1.0}
+    clock.advance(0.1)
+    driver.tick(Choice(timeline=TIMELINE), {'status': runtime.status, 'init_sec': 5.0})
+    assert runtime.calls == ['group_prepare', 'group_cycle_at'] and driver.holding == TIMELINE.plan_id
+    for _ in range(3):                           # 늦게 읽은 로컬 상태 · 앞 시도의 오류
+        clock.advance(0.1)
+        driver.tick(Choice(timeline=TIMELINE), {'status': old_error, 'init_sec': 5.0})
+    assert driver.holding == TIMELINE.plan_id and 'group_cancel' not in runtime.calls, notes
+    runtime.set_status(**{**old_error, 'message': SERVO_OFF_MESSAGE})   # 새 시도의 진짜 오류(새 표시)
+    clock.advance(0.1)
+    driver.tick(Choice(timeline=TIMELINE), {'status': runtime.status, 'init_sec': 5.0})
+    assert driver.holding == '' and runtime.calls[-1] == 'group_cancel'
+
+
+def test_a_restarted_node_in_the_gap_before_the_cycle_barrier_takes_the_cycle_over():
+    """장벽 전 틈({motion_completed · group_motion_finishing})에 연동 노드가 다시 떴다 · 도는 회차다 · 이어받는다
+
+    전에는 「준비 단계」 로 보고 놓아(`group_cancel`) 그 PC 만 다음 회차를 쉬었다 · 수정 목록 199
+    """
+    clock = Clock(100_000.0)
+    runtime = _BlinkRuntime(clock, clip=80.0, init=5.0)
+    runtime.BLINK_SEC = 8.0
+    first = ClockDriver(runtime.control, info=lambda _: None, warn=lambda _: None, wall=clock.wall, mono=clock.mono)
+    _run(first, runtime, clock, _always(Choice(timeline=TIMELINE)), 142.0)     # 1회차 끝 100140 · 틈 100148 까지
+    assert runtime.status['phase'] == 'group_motion_finishing'
+    calls = len(runtime.calls)
+    fresh = ClockDriver(runtime.control, info=lambda _: None, warn=lambda _: None, wall=clock.wall, mono=clock.mono)
+    _run(fresh, runtime, clock, _always(Choice(timeline=TIMELINE)), 120.0)
+    assert 'group_cancel' not in runtime.calls[calls:]
+    assert [cycle for cycle, _ in runtime.starts] == [1, 2, 3]
+
+
+def test_a_run_just_cancelled_is_not_taken_over_again_from_the_status_before_the_cancel():
+    """놓은 직후 그 앞 상태(같은 실행 · 오류)가 한 번 더 보인다 · 다시 이어받아 두 번 취소하며 쉰 이유를 덮지 않는다 · 수정 목록 199"""
+    clock, runtime, driver, _, notes = _pc(100_000.0)
+    _run(driver, runtime, clock, _always(Choice(timeline=TIMELINE)), 40.0)
+    assert driver.holding == TIMELINE.plan_id
+    runtime.set_status(**{**runtime.status, 'state': 'error', 'phase': 'error', 'message': SERVO_OFF_MESSAGE})
+    before_cancel = dict(runtime.status)
+    clock.advance(0.1)
+    driver.tick(Choice(timeline=TIMELINE), {'status': before_cancel, 'init_sec': 5.0})
+    assert driver.holding == '' and runtime.calls.count('group_cancel') == 1
+    for _ in range(3):                                   # 늦게 읽은 로컬 상태 · 취소 앞
+        clock.advance(0.1)
+        driver.tick(Choice(timeline=TIMELINE), {'status': before_cancel, 'init_sec': 5.0})
+    assert runtime.calls.count('group_cancel') == 1, runtime.calls
+    assert driver.report()['note'] == '1회차 쉼 · 서보가 꺼져 있습니다(0~4번 모터)'
+
+
+def test_the_driver_says_whether_a_status_belongs_to_its_last_command():
+    clock, runtime, driver, _, _ = _pc(100_000.0)
+    assert driver.belongs({}) is True, '쥔 실행이 없으면 거르지 않는다'
+    _run(driver, runtime, clock, _always(Choice(timeline=TIMELINE)), 0.1)
+    assert driver.belongs(runtime.status) is True
+    assert driver.belongs({**runtime.status, 'status_stamp': runtime.status['status_stamp'] - 1.0}) is False
+    assert driver.belongs({}) is False, '빈 상태 = 못 읽음'
+
+
+# ---------------------------------------------------------------------- #
+# 수정 목록 201 · 그룹 정지로 선 PC 는 그 운영시간 끝에 주차 · 정지가 안 보여도(마스터 수동 · 끊김)
+# ---------------------------------------------------------------------- #
+
+WINDOW_END = 100_600.0
+
+
+def test_a_group_stop_parks_at_its_window_end_even_when_the_stop_is_not_seen():
+    """사용자 결정 「끊겨도 운영시간 끝에 스스로 선다」 · 전에는 정지를 2분 못 보면 기억을 버려 서보를 켠 채 밤을 샜다"""
+    clock, runtime, driver, finished, notes = _pc(100_000.0)
+    stopped = Choice(reason='정지됨', stopped_plan_id='tt-s100000', window_end_unix=WINDOW_END)
+    _ticks(driver, clock, stopped, 5.0)
+    _ticks(driver, clock, Choice(reason='마스터 스케줄 꺼짐'), 300.0)     # 정지가 안 보임 · 2분 훨씬 넘게
+    assert finished == [] and clock.wall() < WINDOW_END, '운영시간 안 · 아직'
+    _ticks(driver, clock, Choice(reason='마스터 스케줄 꺼짐'), WINDOW_END - clock.wall() + 0.2)
+    assert finished == [('tt-s100000', True)], '그 운영시간 끝 시각에 한 번'
+    _ticks(driver, clock, Choice(reason='마스터 스케줄 꺼짐'), 30.0)
+    assert len(finished) == 1
+
+
+def test_a_group_stop_unseen_for_minutes_is_still_parked_when_the_hours_end():
+    """정지를 2분 넘게 못 봤다고 기억을 버리지 않는다(옛 `STOPPED_FORGET_SEC`) · 운영시간 끝 시각 없이 본 정지여도
+    운영시간이 끝났다고 보이면(「운영시간 아님」) 주차 · 고치기 전에는 이 시험이 실패한다(옛 시험은 그 반대를 확인)"""
+    clock, runtime, driver, finished, notes = _pc(100_000.0)
+    _ticks(driver, clock, Choice(reason='정지됨', stopped_plan_id='tt-s100000'), 5.0)
+    _ticks(driver, clock, Choice(reason='마스터 스케줄 꺼짐'), 300.0)
+    _ticks(driver, clock, Choice(reason='운영시간 아님'), 1.0)
+    assert finished == [('tt-s100000', True)]
+
+
+def test_a_group_stop_does_not_park_a_pc_left_in_manual_at_the_window_end():
+    clock, runtime, driver, finished, notes = _pc(100_000.0)
+    stopped = Choice(reason='정지됨', stopped_plan_id='tt-s100000', window_end_unix=WINDOW_END)
+    _ticks(driver, clock, stopped, 5.0)
+    _ticks(driver, clock, Choice(reason='수동 모드', stopped_plan_id='tt-s100000'), WINDOW_END - clock.wall() + 1.0,
+           mode='manual')
+    assert finished == [] and driver._stopped_window == '', '사람이 이 PC 를 맡음 · 기억만 버린다'
+    # 수동이었다가 끝나기 전에 스케줄로 돌아오면 그대로 주차
+    clock, runtime, driver, finished, notes = _pc(100_000.0)
+    _ticks(driver, clock, stopped, 5.0)
+    _ticks(driver, clock, Choice(reason='수동 모드', stopped_plan_id='tt-s100000'), 100.0, mode='manual')
+    _ticks(driver, clock, stopped, WINDOW_END - clock.wall() - 1.0, mode='schedule')
+    assert finished == []
+    _ticks(driver, clock, Choice(reason='운영시간 아님'), 2.0, mode='schedule')
+    assert finished == [('tt-s100000', True)]
+
+
+def test_a_human_group_run_releases_the_window_end_park():
+    """사람이 그룹 재생을 돌렸다 · 그 재생이 끝난 직후(운영시간 끝 뒤) 갑자기 주차하지 않는다"""
+    clock, runtime, driver, finished, notes = _pc(100_000.0)
+    _ticks(driver, clock, Choice(reason='정지됨', stopped_plan_id='tt-s100000', window_end_unix=WINDOW_END), 5.0)
+    driver.release_stopped_window('사람이 그룹 재생을 시작함')
+    clock.advance(WINDOW_END - clock.wall() + 600.0)
+    _ticks(driver, clock, Choice(reason='마스터 스케줄 꺼짐'), 1.0)
+    assert finished == []
+    assert any('주차 기억 버림' in note for note in notes)

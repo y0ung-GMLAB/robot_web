@@ -2,15 +2,28 @@
 
 사용자 결정(설계 2-3 · 7장) · 마스터 신호 없이 각 PC 가 시간표의 회차 시각에 스스로 초기 이동 → 재생.
 
-- 회차 하나 · 시작 T 를 정한다 → T − 초기 이동 − 2 s 에 초기 이동 → T 에 재생 · 로컬 재생 관리자의 그룹 실행
-  (`group_prepare` · `group_initialize_at` · `group_start_at`)을 그대로 쓴다 · 실행 번호 = 시간표 이름(모든 PC 같음)
+- 회차 하나 = 시각이 박힌 명령 하나(`group_cycle_at` · 「k 회차를 T 에 시작 · 다음 회차 N」) · 초기 이동 시작
+  (T − 이 PC 실제 초기 이동 − 여유 `timed_cycle.INITIAL_MOVE_SETTLE_SEC`)과 시작을 로컬 재생 관리자가 제 시계로 ·
+  여기는 보내고 결과만 본다 · 수정 목록 206 · 실행 번호 = 시간표 이름(모든 PC 같음)
+  전에는 초기 이동 예약(`group_initialize_at`)을 보내고 로컬 상태로 끝을 본 뒤 시작 예약(`group_start_at`)을 따로
+  보냈다 · 그 왕복이 시작 여유를 먹어 188 ⑥ 이 여유를 2 → 4 s 로 늘렸다
+- 초기 이동이 늦게 끝나면 그 PC 만 끝나는 대로 늦게 시작(쉼 아님 · 늦음 기록 · 다음 회차는 다시 시간표대로) ·
+  너무 늦어 다음 회차 준비를 먹을 때만 재생 관리자가 그 회차를 쉰다(`group_cycle_skipped` · 이유 기록) ·
+  사용자 결정 2026-11-16 · 다른 PC · 스피커는 기다리지 않는다
 - 1회차는 처음 준비(`group_prepare`) · 2회차부터 들어가는 PC(재부팅 · 늦게 켬 · 쉬었다 옴)는 복귀 길
-  (`group_join` → `group_join_commit`)로 「앞 회차를 끝낸 것처럼」 서서 그 회차 초기 위치로 간다 · 그래서 로컬
-  회차 번호 · 재생 목록 순서가 시간표와 같다
+  (`group_join` · 회차 명령이 합류 확정을 겸함)로 「앞 회차를 끝낸 것처럼」 서서 그 회차 초기 위치로 간다 · 그래서
+  로컬 회차 번호 · 재생 목록 순서가 시간표와 같다 · 들어가는 명령과 첫 회차 명령은 같은 틱에
 - 회차 중간 합류 없음 · 준비가 늦으면 그 회차는 쉬고 다음 경계 · **이 PC 만**(다른 PC 는 그대로)
-- 회차 끝 · 다음 회차가 시간표에 있으면 그 초기 이동을 예약 · 없으면(운영시간 끝 · 회차 후 정지) 놓는다 ·
+- 회차 끝(장벽) · 다음 회차가 시간표에 있으면 그 회차 명령 · 없으면(운영시간 끝 · 회차 후 정지) 놓는다 ·
   운영시간 끝이면 기준점 주차 → 서보 OFF(평소 운영 종료와 같음)
 - 사람의 즉시 정지 · 이 PC 가 그 시간표를 쥐고 있으면 바로 정지
+
+판단에 시간 짐작을 쓰지 않는다 · 수정 목록 199 · 201 · 205
+- 로컬 상태는 보낸 명령의 응답 표시(`status_stamp`) 이상일 때만 그 명령 뒤의 상태로 읽는다 · 그 앞 상태로는 아무것도
+  정하지 않는다(옛 3 s 기다림 `STATUS_GRACE_SEC`) · 회차 끝 장벽 전 틈도 끝난 상태가 아니다(옛 5 s 확인 `ENDED_CONFIRM_SEC`)
+- 그룹 정지로 선 PC 의 주차는 그 운영시간 끝 시각에(옛 「2분 못 보면 잊음」 `STOPPED_FORGET_SEC`)
+- 초기 이동 시간은 묶음에 정한 값 → 이 PC 조인트 매핑 값 → 모르면 가장 긴 선택지(`motion_common.timing`)
+- 남은 시간 기준 · 응답 표시가 끝내 안 오는 것(`ECHO_TIMEOUT_SEC`)은 실패 감지만 · 회차 시각 · 운영시간 끝은 시간표 자체
 
 로컬 웹 호출(`control`)만 한다 · ROS 를 모른다 · 시험은 가짜 재생 관리자로.
 """
@@ -23,15 +36,26 @@ import uuid
 from typing import Any, Callable, Dict, Mapping, Optional
 
 from motion_common.repeat_policy import GROUP_LOCKSTEP
+from motion_common.run_state import GROUP_CYCLE_FINISHING_PHASE, GROUP_CYCLE_SKIPPED_PHASE, status_stamp
+from motion_common.timing import initial_move_sec
 
 from . import clock_grid
-from .timetable import Choice
+from .timetable import MANUAL_MODE, OFF_MODE, Choice
 
 #: 시간표 실행 번호 머리 · `clock_grid.schedule_plan_id`
 PLAN_PREFIX = 'tt-'
 SCHEDULE_PREFIX = 'tt-s'
-#: 회차 끝 장벽 단계 · 로컬 재생 관리자 · 연동 노드 `_BARRIER_PHASES` 와 같다
-BARRIER_PHASES = frozenset({'group_motion_completed', 'group_join_committed'})
+#: 회차 끝 장벽 단계 · 로컬 재생 관리자 · 연동 노드 `_BARRIER_PHASES`(신호 재생) + 재생 관리자가 쉰 회차(시간표만 ·
+#: 그 회차를 끝낸 것처럼 서서 다음 회차 명령을 기다림 · 수정 목록 206)
+BARRIER_PHASES = frozenset({'group_motion_completed', 'group_join_committed', GROUP_CYCLE_SKIPPED_PHASE})
+#: 노드가 다시 떴을 때 이어받는 로컬 단계 · 회차 재생 중 · 회차 끝(장벽 전 틈 · 장벽) · 수정 목록 199 ·
+#: 회차 명령(`timed_cycle`)을 쥔 재생 관리자는 어느 단계든(초기 이동 · 시작 대기) · 206
+_ADOPT_STATES = frozenset({'running', 'verifying', 'start_scheduled'})
+_ADOPT_PHASES = BARRIER_PHASES | {GROUP_CYCLE_FINISHING_PHASE}
+#: 회차가 시작된(시작 시각을 기다리는 중 포함) 로컬 단계 · 따를 시간표가 바뀌어도 이 회차는 끝까지 · 그 전(준비 · 초기
+#: 이동)이면 바로 놓는다 · 전에는 시작 예약을 보낸 뒤(`stage == 'scheduled'`)로 갈랐다 · 수정 목록 206
+_CYCLE_BEGUN_STATES = frozenset({'running', 'verifying', 'start_scheduled'})
+_CYCLE_BEGUN_PHASES = frozenset({'group_start_scheduled', GROUP_CYCLE_FINISHING_PHASE})
 #: 끝난 로컬 실행 · 실행 번호가 남아 있어도 쥔 것으로 보지 않는다 · 수정 목록 188
 #: 실제 재생 관리자는 정지 · 완료 뒤에도 `group_execution` 과 그 번호를 남긴다 · 전에는 그것을 「다른 재생 중」 으로 보고
 #: 회차마다 쉬었다(실물 NY 2026-11-09 03:49 · 신호 재생 그룹을 즉시 정지하고 시간표 재생으로 바꾼 뒤 4대 모두 7회차 쉼)
@@ -105,20 +129,19 @@ def _axis_ranges(axes) -> str:
 class ClockDriver:
     """시간표 하나를 이 PC 에서 돌린다 · 연동 노드가 0.1 s 마다 `tick`"""
 
-    #: 계획 짓기 여유 · 재생 목록 전부(920 s × 20 조인트 파일 하나 3 s 남짓 · 목록 여럿이면 더)
-    BUILD_SEC = 45.0
-    #: 초기 이동 끝 → 재생 시작 사이 · 자동 주기에도 들어간다(`clock_grid.auto_period`) · 2 s → 4 s · 수정 목록 188
+    #: 계획 짓기 여유 · 재생 목록 전부 · 들어가기 → 초기 이동 시작 · 쉬던 PC 가 다음 회차에 들어갈 수 있는지 가른다
+    #: NY 실측 2026-11-16(test/root-fix) · 920 s × 20 조인트 첫 변환 최대 1.4 s(재샘플 1.0 s) · 변환본이 있으면 17~27 ms
+    #: (208) · 45 → 10 s(사용자 2026-11-16) · 920 s 짜리 목록 7개까지 첫 변환이 들어감(복귀 길은 목록 전부를 짓고
+    #: 「복귀 준비」) · 모자라도 회차를 쉬지 않고 늦게 시작(재생 관리자가 정함 · 206) · 너무 늦을 때만 쉼
+    BUILD_SEC = 10.0
+    #: 초기 이동 끝 → 재생 시작 사이 · 자동 주기에도 들어간다(`clock_grid.auto_period`) · 2 → 4 → 1 s · 수정 목록 188 · 206 ·
+    #: 여기서는 들어갈 때 필요한 시간(`prep`)과 1회차 준비의 초기 이동 짐작에만 쓴다 · 실제 초기 이동 시각은 재생 관리자가 셈
     MARGIN_SEC = clock_grid.CYCLE_START_LEAD_SEC
     #: 실행을 잡는 시점 · 준비 시간 + 이만큼 전부터 · 그 전에는 로컬 실행을 잡지 않는다(사람 조작 가능)
     ENTER_WINDOW_SEC = 30.0
-    #: 명령을 보낸 뒤 로컬 상태가 따라올 때까지 기다리는 시간 · 그 안에 사라져 보여도 끝난 것으로 보지 않는다
-    STATUS_GRACE_SEC = 3.0
-    #: 같은 번호로 끝난 로컬 실행 · 이만큼 이어서 끝남이어야 놓는다 · 회차 끝 장벽 직전의 잠깐 `completed` 를 거른다 · 수정 목록 195
-    ENDED_CONFIRM_SEC = 5.0
-    #: 초기 이동을 모를 때 · 신호 재생 스스로 잇기(끊김 시험 A)와 같은 10 s
-    INIT_FALLBACK_SEC = 10.0
-    #: 그룹 정지를 이만큼 못 보면(마스터 수동 · 끊김) 운영시간 끝 주차 기억을 버린다 · 수정 목록 193
-    STOPPED_FORGET_SEC = 120.0
+    #: 실패 감지만 · 보낸 명령 뒤의 로컬 상태(응답 표시 이상)가 이만큼 안 오면 재생 관리자 · 웹이 멈춘 것 · 회차를 놓는다 ·
+    #: 재생 관리자는 상태를 0.5 s 마다 내고 웹은 응답의 상태를 바로 들고 있으므로 정상이면 다음 틱에 온다 · 수정 목록 199
+    ECHO_TIMEOUT_SEC = 10.0
     #: 즉시 정지한 시간표 · 정지가 풀릴 때까지 건너뜀 · 수정 목록 188
     _STOPPED_SKIP = 10 ** 9
 
@@ -149,11 +172,16 @@ class ClockDriver:
         self._next_start_unix = 0.0
         #: 사람 그룹 정지로 선 스케줄 시간표 · 그 운영시간이 끝나면 주차 → 서보 OFF 한 번 · 수정 목록 193
         self._stopped_window = ''
-        self._stopped_seen_m = 0.0
+        #: 그 운영시간 끝(유닉스 초) · 정지가 안 보여도(마스터 수동 · 끊김) 이 시각에 주차 · 0 = 모름 · 수정 목록 201
+        self._stopped_until = 0.0
         #: 옛 그룹 실행을 정리한 번호 · 같은 실행은 한 번만 보낸다 · 수정 목록 193 ④
         self._stale_cancelled = ''
-        #: 쥔 실행의 로컬이 끝남으로 보이기 시작한 때(mono) · 0 = 안 보임 · 수정 목록 195
-        self._ended_since_m = 0.0
+        #: 마지막으로 놓은(취소 · 정지) 명령 응답의 상태 표시 · 그보다 앞 상태로는 이어받거나 들어가지 않는다 · 수정 목록 199
+        self._released_ack = 0.0
+        #: 재생 관리자가 알린 회차 결과(늦게 시작) 를 기록한 회차 · (plan_id, 회차) · 회차마다 한 줄 · 수정 목록 206
+        self._late_logged: tuple = ('', 0)
+        #: 그 결과로 띄운 화면 글 · 다음 회차가 제때 시작하면 지운다
+        self._result_note = ''
 
     # ------------------------------------------------------------------ #
 
@@ -172,8 +200,36 @@ class ClockDriver:
     def holding(self) -> str:
         return str((self._run or {}).get('plan_id') or '')
 
+    def belongs(self, status: Mapping[str, Any]) -> bool:
+        """이 로컬 상태가 쥔 실행에 보낸 마지막 명령 뒤의 것인가 · 쥔 실행이 없으면 참 · 수정 목록 199"""
+        run = self._run
+        return run is None or self._belongs(run, status)
+
+    @staticmethod
+    def _belongs(run: Mapping[str, Any], status: Mapping[str, Any]) -> bool:
+        """재생 관리자 상태 표시(바뀔 때마다 · 단조 시계) ≥ 명령 응답의 표시 · 응답에 표시가 없으면(옛 재생 관리자) 거르지 않는다
+
+        로컬 상태는 50 ms 마다 웹을 거쳐 읽는다 · 웹은 응답의 상태를 바로 들지만 그 앞에 나간 상태 토픽이 뒤늦게 덮을 수
+        있다 · 그래서 명령 바로 뒤 몇 틱은 그 앞 상태(다른 실행 · 앞 시도의 정지 · 오류)가 보인다 · 전에는 3 s 동안 봐주고
+        그 뒤에는 그대로 믿었다 · 오류는 봐주지도 않아 앞 시도의 오류로 새 시도를 바로 접을 수 있었다.
+        """
+        ack = float(run.get('ack') or 0.0)
+        return ack <= 0.0 or status_stamp(status) >= ack
+
+    def _note_ack(self, run: Dict[str, Any], result: Mapping[str, Any], now_m: float) -> None:
+        """명령이 받아졌다 · 그 응답의 상태 표시를 「이 뒤의 상태만 읽는다」 기준으로 · 응답 기다림 시작(실패 감지)"""
+        stamp = status_stamp(result.get('status') if isinstance(result, Mapping) else None)
+        run['ack'] = max(float(run.get('ack') or 0.0), stamp)
+        run['sent_m'] = now_m
+
+    def _note_release(self, result: Any) -> None:
+        """쥔 실행을 놓는 명령(취소 · 정지)의 응답 표시 · 그 앞 상태에 남은 같은 실행을 다시 이어받지 않게 · 수정 목록 199"""
+        stamp = status_stamp(result.get('status') if isinstance(result, Mapping) else None)
+        self._released_ack = max(self._released_ack, stamp)
+
     def tick(self, choice: Choice, view: Mapping[str, Any]) -> None:
-        """`view` · status(로컬 재생 상태) · init_sec(이 PC 초기 이동) · start_blocker · initial_move_time_sec"""
+        """`view` · status(로컬 재생 상태) · init_sec(이 PC 조인트 매핑 초기 이동 · 로컬 상태 `initial_move_sec`) ·
+        start_blocker · initial_move_time_sec(묶음에 정한 값 · 0 = PC 마다) · operation_mode(이 PC 운전 모드)"""
         status = view.get('status') if isinstance(view.get('status'), Mapping) else {}
         timeline = choice.timeline
         run = self._run
@@ -191,28 +247,27 @@ class ClockDriver:
             if self._note == '정지됨':
                 self._note = ''
 
+        if run is None and status_stamp(status) < self._released_ack:
+            # 방금 놓은(취소 · 정지) 실행의 그 앞 상태가 아직 보인다 · 그것으로 이어받거나 「다른 재생 중」 으로 보지 않는다 ·
+            # 전에는 다음 틱에 그 실행을 「남아 있던 실행」 으로 다시 잡고 한 번 더 취소하며 쉰 이유를 덮었다 · 수정 목록 199
+            return
         if run is None and live.startswith(PLAN_PREFIX):
             # 이 노드가 다시 떴다(워치독 · 업데이트) · 로컬 재생 관리자는 시간표 실행을 계속 돌고 있다 · 이어받는다
             run = self._adopt(live, phase, state, status, timeline, now_m)
             if run is None:
                 return
-        if run is not None and held != run['plan_id']:
-            if now_m - float(run.get('sent_m') or 0.0) > self.STATUS_GRACE_SEC:
-                # 로컬 실행이 사라졌다(오류 · 누가 세움 · 웹 서비스 재시작) · 이 회차는 쉬고 다음 경계
-                self._drop(f'{run["cycle"]}회차 로컬 실행이 끝남 · {status.get("message") or state or "상태 없음"}')
+        if run is not None:
+            self._drive_run(run, choice, status, held, phase, state, now_w, now_m, view)
             return
-        if run is not None and state == 'error':
-            servo_off = servo_off_reason(str(status.get('message') or ''))
-            if servo_off:
-                # 사람이 세우고 서보를 끈 PC · 들어가기는 받아졌다가 로컬 준비 검사에서 걸림 · 쉰 것이지 오류가 아니다 ·
-                # 전에는 「N회차 오류 · 그룹 모션 실행 실패: Motion ID …」 로 축마다 긴 글이 남았다(NY 2026-11-12 00:32) ·
-                # 수정 목록 197
-                self._cancel(run, f'{run["cycle"]}회차 쉼 · {servo_off}')
-            else:
-                self._cancel(run, f'{run["cycle"]}회차 오류 · {status.get("message") or ""}')
+        if self._park_stopped_window(choice, view, now_w):
             return
+        self._maybe_enter(timeline, choice, view, status, live, state, now_w, now_m)
+
+    def _drive_run(self, run, choice: Choice, status, held: str, phase: str, state: str, now_w: float, now_m: float, view) -> None:
+        """쥔 실행 하나 · 사람 정지(로컬 상태와 상관없이 바로) → 내 명령 뒤의 로컬 상태로만 나머지 판단"""
+        timeline = choice.timeline
         if (
-            run is not None and choice.halt_plan_id and choice.halt_plan_id == run['plan_id']
+            choice.halt_plan_id and choice.halt_plan_id == run['plan_id']
             and float(run.get('entered_unix') or 0.0) < float(choice.halt_at_unix or 0.0)
             and not (choice.stopped_plan_id and choice.stopped_plan_id == run['plan_id'])
         ):
@@ -223,57 +278,89 @@ class ClockDriver:
                 'execution_id': run['plan_id'],
                 'network_operation_id': f'tt-halt-{uuid.uuid4().hex}',
             })
+            self._note_release(result)
             self._info(f'시간표 재생 · 놓친 즉시 정지 · {run["plan_id"]} · {result.get("message") or ""}')
             self._skip = (run['plan_id'], int(run.get('cycle') or 0))
             self._run = None
             self._set_note('놓친 즉시 정지 · 다음 경계', warn=True)
             return
-        if run is not None and choice.stopped_plan_id and choice.stopped_plan_id == run['plan_id']:
+        if choice.stopped_plan_id and choice.stopped_plan_id == run['plan_id']:
             result = self._control({
                 'command': 'stop_now',
                 'execution_id': run['plan_id'],
                 'network_operation_id': f'tt-stop-{uuid.uuid4().hex}',
             })
+            self._note_release(result)
             self._info(f'시간표 재생 · 즉시 정지 · {run["plan_id"]} · {result.get("message") or ""}')
             self._skip = (run['plan_id'], self._STOPPED_SKIP)
             self._run = None
             self._note = '정지됨'
             return
-        if run is not None and (timeline is None or timeline.plan_id != run['plan_id']):
+        if not self._belongs(run, status):
+            # 보낸 명령이 아직 로컬 상태에 안 보인다 · 그 앞 상태(다른 실행 · 앞 시도의 정지 · 오류)로는 아무것도 정하지
+            # 않는다 · 전에는 3 s(`STATUS_GRACE_SEC` · 162) 동안만 봐주고 그 뒤에는 그 앞 상태로 「끝남」 을 정했다 · 수정 목록 199
+            if now_m - float(run.get('sent_m') or 0.0) > self.ECHO_TIMEOUT_SEC:
+                # 실패 감지만 · 재생 관리자 · 웹이 멈췄다(정상이면 다음 틱에 온다)
+                self._cancel(
+                    run,
+                    f'{run["cycle"]}회차 쉼 · 로컬 상태가 명령 뒤로 바뀌지 않음'
+                    f'({self.ECHO_TIMEOUT_SEC:.0f} s · 웹 · 재생 관리자 응답 없음)',
+                )
+            return
+        if held != run['plan_id']:
+            # 로컬 실행이 사라졌다(오류 · 누가 세움 · 재생 관리자 재시작) · 이 회차는 쉬고 다음 경계
+            self._drop(f'{run["cycle"]}회차 로컬 실행이 끝남 · {status.get("message") or state or "상태 없음"}')
+            return
+        if state == 'error':
+            servo_off = servo_off_reason(str(status.get('message') or ''))
+            if servo_off:
+                # 사람이 세우고 서보를 끈 PC · 들어가기는 받아졌다가 로컬 준비 검사에서 걸림 · 쉰 것이지 오류가 아니다 ·
+                # 전에는 「N회차 오류 · 그룹 모션 실행 실패: Motion ID …」 로 축마다 긴 글이 남았다(NY 2026-11-12 00:32) ·
+                # 수정 목록 197
+                self._cancel(run, f'{run["cycle"]}회차 쉼 · {servo_off}')
+            else:
+                self._cancel(run, f'{run["cycle"]}회차 오류 · {status.get("message") or ""}')
+            return
+        if run.get('cycle_failed'):
+            # 회차 명령이 거절됐고 로컬 상태도 오류가 아니다 · 이 회차를 놓고 다음 경계 · 수정 목록 206
+            self._cancel(run, str(run['cycle_failed']))
+            return
+        if timeline is None or timeline.plan_id != run['plan_id']:
             self._leave_when_safe(run, phase, state, choice)
             return
-        ended = run is not None and state in _FINISHED_STATES and phase not in BARRIER_PHASES
-        if not ended:
-            self._ended_since_m = 0.0
-        elif not self._ended_since_m:
-            self._ended_since_m = now_m
-        if (
-            ended and now_m - float(run.get('sent_m') or 0.0) > self.STATUS_GRACE_SEC
-            and now_m - self._ended_since_m >= self.ENDED_CONFIRM_SEC
-        ):
-            # 로컬 실행이 같은 번호로 끝났다(사람이 이 PC 만 정지 · `stopped`) · 번호가 남아 위(162)의 「사라짐」 에
-            # 안 걸리고 회차 끝 장벽도 아니라 매 틱 그대로 쥐고 있었다 → 그 운영시간 끝까지 안 돌아옴(실물 NY
-            # 2026-11-11 00:02 · f2 A2) · 놓고 다음 경계 복귀 길 · 수정 목록 194
-            # 끝남이 이어서 보일 때만 · 정상 회차 끝에도 플레이어가 장벽(`motion_completed`) 전에 잠깐 `completed`
-            # (「모션 실행 완료」 · motion_player)를 낸다 · 그 틈을 정지로 읽어 다음 회차를 쉬었다(실물 NY 2026-11-11
-            # 14:31 · f2 23회차 끝 0.68 s 뒤 · 24회차 쉼) · 수정 목록 195
-            self._ended_since_m = 0.0
+        if state in _FINISHED_STATES and phase not in BARRIER_PHASES:
+            # 로컬 실행이 같은 번호로 끝났다(사람이 이 PC 만 정지 · `stopped`) · 번호가 남아 위의 「사라짐」 에 안 걸리고
+            # 회차 끝 장벽도 아니라 매 틱 그대로 쥐고 있었다 → 그 운영시간 끝까지 안 돌아옴(실물 NY 2026-11-11 00:02 ·
+            # f2 A2) · 놓고 다음 경계 복귀 길 · 수정 목록 194
+            # 정상 회차 끝은 여기 오지 않는다 · 회차 맞춤 회차의 끝은 장벽 전 틈부터 `motion_completed`(끝 아님) · 전에는
+            # 그 틈이 `completed` 라 5 s 이어질 때만 놓았다(`ENDED_CONFIRM_SEC` · 195) · 이제 사람 정지는 바로 놓는다 · 199
             self._cancel(run, f'{run["cycle"]}회차 로컬 실행이 끝남 · {status.get("message") or state or "상태 없음"}')
             return
-        if run is not None:
-            self._advance(run, timeline, choice, phase, state, status, now_w, now_m, view)
-            return
-        if self._park_stopped_window(choice):
-            return
-        self._maybe_enter(timeline, choice, view, status, live, state, now_w, now_m)
+        self._advance(run, timeline, choice, phase, state, status, now_w, now_m, view)
 
-    def _park_stopped_window(self, choice: Choice) -> bool:
-        """사람 그룹 정지로 선 운영시간 · 끝나면 이 PC 도 주차 → 서보 OFF · 수정 목록 193
+    def release_stopped_window(self, why: str) -> None:
+        """사람이 그룹을 맡았다(신호 재생 실행 · 시간표 재생 끔) · 그룹 정지 운영시간 끝 주차 기억을 버린다 · 수정 목록 201
+
+        그 운영시간 끝에 주차하는 것은 사람이 손대지 않고 정지로 서 있던 PC 다 · 사람이 그룹 재생을 돌렸으면 그 끝도
+        사람이 정한다 · 남겨 두면 그 재생이 끝난 직후(운영시간 끝 뒤) 갑자기 주차 → 서보 OFF 했다.
+        """
+        if self._stopped_window:
+            self._info(f'시간표 재생 · {self._stopped_window} · 운영시간 끝 주차 기억 버림 · {why}')
+        self._stopped_window = ''
+        self._stopped_until = 0.0
+
+    def _park_stopped_window(self, choice: Choice, view: Mapping[str, Any], now_w: float) -> bool:
+        """사람 그룹 정지로 선 운영시간 · 끝나면 이 PC 도 주차 → 서보 OFF · 수정 목록 193 · 201
 
         정지가 운영시간 끝까지 유지된다(사용자 2026-11-11) · 회차를 쥔 PC 만 운영시간 끝에 주차하므로 정지로 선
-        PC 는 서보를 켠 채 밤을 샜다 · 정지를 본 시간표를 기억해 두고 운영시간이 끝나면(다음 날 시간표가 골라지거나
-        「운영시간 아님」) 한 번 주차한다 · 수동 · 끔 · 마스터 스케줄 꺼짐이면 기억만 두고 아무것도 안 한다(사람이 만짐) ·
-        같은 시간표가 다시 돌면(마스터 수동 → 스케줄) 기억을 지운다.
+        PC 는 서보를 켠 채 밤을 샜다 · 정지를 본 시간표(운영시간 이름)와 그 운영시간 끝 시각을 기억해 두고 그 시각이
+        지나면(또는 다음 운영시간 시간표가 골라지거나 「운영시간 아님」) 한 번 주차한다.
+
+        - 정지가 안 보여도(마스터 수동 · 끊김) 기억은 그 운영시간 끝까지 · 사용자 결정 「끊겨도 운영시간 끝에 스스로 선다」 ·
+          전에는 정지를 2분 못 보면 기억을 버려(`STOPPED_FORGET_SEC`) 그 PC 가 서보를 켠 채 밤을 샜다 · 수정 목록 201
+        - 같은 시간표가 다시 돌면(마스터 수동 → 스케줄) 기억을 지운다
+        - 그 끝에 이 PC 가 수동 · 오프 모드면 주차하지 않는다(사람이 이 PC 를 만짐 · 운영 종료 규칙과 같음)
+        - 사람이 그룹을 맡으면 연동 노드가 `release_stopped_window` 로 버린다
         """
         timeline = choice.timeline
         stopped = ''
@@ -282,26 +369,30 @@ class ClockDriver:
         elif choice.stop_after and timeline is not None and timeline.kind == 'schedule':
             stopped = timeline.plan_id
         if stopped:
+            if stopped != self._stopped_window:
+                self._stopped_until = 0.0
             self._stopped_window = stopped
-            self._stopped_seen_m = self._mono()
+            if float(choice.window_end_unix or 0.0) > 0.0:
+                self._stopped_until = float(choice.window_end_unix)
             return False
         plan_id = self._stopped_window
         if not plan_id:
             return False
-        if self._mono() - self._stopped_seen_m > self.STOPPED_FORGET_SEC:
-            # 정지를 한동안 못 봤다(마스터 수동 · 이 PC 수동) · 사람이 만지는 중 · 주차하지 않는다
-            self._stopped_window = ''
-            return False
         if timeline is not None and timeline.plan_id == plan_id:
-            self._stopped_window = ''   # 다시 돈다
+            self._stopped_window, self._stopped_until = '', 0.0   # 다시 돈다
             return False
         ended = (
-            (timeline is not None and timeline.kind == 'schedule')
+            (self._stopped_until > 0.0 and now_w >= self._stopped_until)
+            or (timeline is not None and timeline.kind == 'schedule')
             or (timeline is None and choice.reason == '운영시간 아님')
         )
         if not ended:
             return False
-        self._stopped_window = ''
+        self._stopped_window, self._stopped_until = '', 0.0
+        mode = str(view.get('operation_mode') or '')
+        if mode in {MANUAL_MODE, OFF_MODE}:
+            self._info(f'시간표 재생 · {plan_id} · 운영시간 끝 · 이 PC 가 {mode} 모드 · 사람이 맡음 · 주차 안 함')
+            return False
         if self._finish is not None:
             self._finish(plan_id, True, '운영시간 끝 · 그룹 정지로 서 있던 PC')
         self._info(f'시간표 재생 · {plan_id} · 운영시간 끝 · 그룹 정지로 서 있던 PC · 기준점 주차 → 서보 OFF')
@@ -310,23 +401,35 @@ class ClockDriver:
     # ------------------------------------------------------------------ #
 
     def _adopt(self, held: str, phase: str, state: str, status, timeline, now_m: float) -> Optional[Dict[str, Any]]:
-        """로컬에 남은 시간표 실행을 이어받는다 · 재생 중 · 회차 끝이면 그대로 · 그 밖(준비 · 초기 이동)은 놓고 다음 경계"""
+        """로컬에 남은 시간표 실행을 이어받는다 · 재생 중 · 회차 끝이면 그대로 · 그 밖(준비 · 초기 이동)은 놓고 다음 경계
+
+        회차 끝 장벽 전 틈(`GROUP_CYCLE_FINISHING_PHASE`) · 최종 위치 확인(`verifying`)도 도는 회차다 · 전에는 그때
+        다시 뜨면 「준비 단계」 로 보고 놓았다 · 수정 목록 199
+
+        회차 명령을 쥔 재생 관리자(`timed_cycle`)는 초기 이동 · 시작을 스스로 한다 · 어느 단계든 이어받아 그 회차 끝(장벽)만
+        기다린다 · 회차 번호는 쥔 명령의 것(장벽에서 다음 회차 명령을 이미 받았으면 그 회차) · 수정 목록 206
+        """
         cycle = int(status.get('group_cycle_number') or status.get('current_cycle') or 0)
+        timed = int(status.get('timed_cycle') or 0)
+        cycle = max(cycle, timed)
         start = timeline.start_of(cycle) if timeline is not None and timeline.plan_id == held and cycle else 0.0
         self._run = {'plan_id': held, 'stage': 'scheduled', 'cycle': cycle, 'start_unix': start, 'sent_m': now_m,
-                     'entered_unix': self._wall()}
-        if state in {'running', 'start_scheduled'} or phase in BARRIER_PHASES:
+                     'entered_unix': self._wall(), 'ack': status_stamp(status)}
+        if (
+            state in _ADOPT_STATES or phase in _ADOPT_PHASES
+            or (timed and state not in _FINISHED_STATES and state != 'error')
+        ):
             self._info(f'시간표 재생 · 남아 있던 실행 이어받음 · {held} · {cycle}회차')
             return self._run
         self._cancel(self._run, f'남아 있던 실행({held}) · 준비 단계라 놓고 다음 경계')
         return None
 
     def _init_sec(self, view: Mapping[str, Any], run: Optional[Mapping[str, Any]] = None) -> float:
-        planned = float((run or {}).get('initial_move_time_sec') or view.get('initial_move_time_sec') or 0.0)
-        if planned > 0.0:
-            return planned
-        local = float(view.get('init_sec') or 0.0)
-        return local if local > 0.0 else self.INIT_FALLBACK_SEC
+        """이 PC 초기 이동 시간 · 묶음에 정한 값(마스터 · 0 = PC 마다) → 이 PC 조인트 매핑 값(로컬 상태 `initial_move_sec`) →
+        아무도 안 알려 주면 선택지 중 가장 긴 값 · 수정 목록 205(전에는 따로 짐작한 10 s · 웹은 5 s)"""
+        return initial_move_sec(
+            (run or {}).get('initial_move_time_sec'), view.get('initial_move_time_sec'), view.get('init_sec'),
+        )
 
     def _mono_of(self, wall_target: float) -> float:
         return self._mono() + (float(wall_target) - self._wall())
@@ -369,6 +472,8 @@ class ClockDriver:
                 'command': 'group_cancel', 'execution_id': held,
                 'network_operation_id': f'tt-stale-{uuid.uuid4().hex}',
             })
+            # 정리한 뒤의 상태를 보고 들어간다 · 그 앞 상태로 「다른 재생 중」 이라 이 회차를 쉬지 않게 · 수정 목록 199
+            self._note_release(result)
             self._warn(f'시간표 재생 · 끝내기를 놓친 옛 그룹 실행({held} · {state}) 정리 · {result.get("message") or ""}')
             return
         if _occupied(held, state, status):
@@ -389,6 +494,8 @@ class ClockDriver:
             'initial_move_time_sec': float(view.get('initial_move_time_sec') or 0.0),
         }
         if slot.cycle == 1:
+            # 준비 명령은 초기 이동 예약 시각을 꼭 싣는다(신호 재생과 같은 명령) · 여기 값은 짐작(조인트 매핑 값) ·
+            # 바로 뒤 회차 명령을 받으면 재생 관리자가 제 초기 이동 시간(첫 프레임 잇기 포함)으로 다시 센다 · 수정 목록 206
             initialize_at = slot.start_unix - init - self.MARGIN_SEC
             payload = {**common, 'command': 'group_prepare', 'initialize_monotonic': self._mono_of(initialize_at)}
             stage = 'preparing'
@@ -405,90 +512,100 @@ class ClockDriver:
             'sent_m': now_m, 'initial_move_time_sec': float(view.get('initial_move_time_sec') or 0.0),
             'entered_unix': now_w,
         }
+        # 이 응답 뒤의 로컬 상태만 이 실행의 것으로 읽는다(앞 시도의 정지 · 오류 · 다른 실행을 거름) · 수정 목록 199
+        self._note_ack(self._run, result, now_m)
         self._skip_note = ''
         self._set_note('')
         self._info(
             f'시간표 재생 · {timeline.plan_id} · {slot.cycle}회차 준비 · 시작까지 {slot.start_unix - now_w:.0f} s'
             + (' · 복귀 길' if stage == 'joining' else '')
         )
+        # 그 회차 명령을 같은 틱에 · 준비가 받아졌으면 세션이 서 있다 · 복귀 길은 이것이 합류 확정을 겸한다 · 수정 목록 206 ·
+        # 전에는 「복귀 준비」 · 「초기 이동 끝」 을 로컬 상태로 본 뒤에 다음 명령을 보냈다
+        self._send_cycle(self._run, timeline, slot.cycle, now_m)
 
     def _advance(self, run, timeline, choice: Choice, phase: str, state: str, status, now_w: float, now_m: float, view) -> None:
-        stage = run['stage']
-        init = self._init_sec(view, run)
-        start = float(run['start_unix'])
-        initialize_at = start - init - self.MARGIN_SEC
-        if stage == 'joining':
-            if phase == 'group_join_ready':
-                if initialize_at <= now_w + 0.3:
-                    self._cancel(run, f'{run["cycle"]}회차 준비가 늦음 · 다음 경계')
-                    return
-                commit = self._control({
-                    'command': 'group_join_commit', 'execution_id': run['plan_id'],
-                    'cycle_number': int(run['cycle']) - 1,
-                    'network_operation_id': f'tt-commit-{uuid.uuid4().hex}',
-                })
-                if not commit.get('success'):
-                    self._cancel(run, f'{run["cycle"]}회차 복귀 확정 실패 · {commit.get("message") or ""}')
-                    return
-                self._schedule_initialize(run, int(run['cycle']) - 1, initialize_at, now_m)
-            elif now_w > initialize_at - 0.3:
-                self._cancel(run, f'{run["cycle"]}회차 계획 짓기가 늦음 · 다음 경계')
-            return
-        if stage == 'preparing':
-            if state == 'armed' or phase == 'group_armed':
-                self._schedule_start(run, now_m)
-            elif now_w > start + 1.0:
-                self._cancel(run, f'{run["cycle"]}회차 초기 이동이 늦음 · 다음 경계')
-            return
-        if stage == 'initializing':
-            if phase == 'group_cycle_initialized':
-                self._schedule_start(run, now_m)
-            elif now_w > start + 1.0:
-                self._cancel(run, f'{run["cycle"]}회차 초기 이동이 늦음 · 다음 경계')
-            return
-        if stage == 'scheduled' and phase in BARRIER_PHASES:
-            done = int(status.get('current_cycle') or status.get('group_cycle_number') or 0)
-            if done != int(run['cycle']):
-                return
-            following = done + 1
-            if not timeline.has_cycle(following):
-                self._finish_run(run, park=timeline.kind == 'schedule' and not choice.stop_after,
-                                 why='운영시간 끝' if not choice.stop_after else '회차 후 정지')
-                return
-            next_start = timeline.start_of(following)
-            next_initialize = next_start - init - self.MARGIN_SEC
-            if next_initialize <= now_w + 0.3:
-                # 클립이 길었거나(주기보다) 늦었다 · 이 PC 만 쉬고 다음 경계에 다시 들어온다
-                self._cancel(run, f'{following}회차 초기 이동 시각을 놓침 · 다음 경계')
-                return
-            run.update(cycle=following, start_unix=next_start)
-            self._schedule_initialize(run, done, next_initialize, now_m)
+        """쥔 회차 · 그 사이는 결과만 본다(늦게 시작 · 쉼 기록) · 회차 끝(장벽)이면 다음 회차 명령 하나 · 수정 목록 206
 
-    def _schedule_initialize(self, run, cycle_done: int, initialize_at_wall: float, now_m: float) -> None:
-        result = self._control({
-            'command': 'group_initialize_at', 'execution_id': run['plan_id'], 'cycle_number': int(cycle_done),
-            'initialize_monotonic': self._mono_of(initialize_at_wall),
-            'network_operation_id': f'tt-init-{uuid.uuid4().hex}',
-        })
-        if not result.get('success'):
-            self._cancel(run, f'{run["cycle"]}회차 초기 이동 예약 실패 · {result.get("message") or ""}')
+        전에는 단계마다 로컬 상태를 보고 다음 명령(초기 이동 예약 → 시작 예약)을 보냈고 · 시각을 지났으면 「늦음 · 다음 경계」
+        로 이 PC 회차를 버렸다(`now_w > start + 1` · `next_initialize <= now + 0.3`) · 이제 늦음 · 쉼은 재생 관리자가
+        제 시계로 정한다 · 다음 회차 시각이 이미 지났어도 명령은 보낸다(그 회차를 늦게라도 돌지 · 쉴지 재생 관리자가 정함).
+        """
+        self._note_cycle_result(run, status, phase, state)
+        if phase not in BARRIER_PHASES:
             return
-        run.update(stage='initializing', sent_m=now_m)
+        done = int(status.get('current_cycle') or status.get('group_cycle_number') or 0)
+        if done != int(run['cycle']):
+            return
+        following = done + 1
+        if not timeline.has_cycle(following):
+            self._finish_run(run, park=timeline.kind == 'schedule' and not choice.stop_after,
+                             why='운영시간 끝' if not choice.stop_after else '회차 후 정지')
+            return
+        self._send_cycle(run, timeline, following, now_m)
 
-    def _schedule_start(self, run, now_m: float) -> None:
-        start = float(run['start_unix'])
-        if start <= self._wall() + 0.1:
-            self._cancel(run, f'{run["cycle"]}회차 시작 시각을 놓침 · 다음 경계')
-            return
+    def _send_cycle(self, run, timeline, cycle: int, now_m: float) -> bool:
+        """회차 명령 하나 · 「k 회차를 T 에 시작 · 다음 회차 N」 · 초기 이동 → 시작은 재생 관리자가 제 시계로 · 수정 목록 206
+
+        다음 회차 시각(N)은 재생 관리자가 「너무 늦어 쉼」 을 가르는 데만 쓴다(그 회차를 돌면 다음 회차 준비를 먹는가) ·
+        운영시간 마지막 회차면 0(한도 없음).
+        """
+        start = timeline.start_of(cycle)
+        following = int(cycle) + 1
+        next_start = timeline.start_of(following) if timeline.has_cycle(following) else 0.0
+        run.update(cycle=int(cycle), start_unix=start)
         result = self._control({
-            'command': 'group_start_at', 'execution_id': run['plan_id'], 'cycle_number': int(run['cycle']),
+            'command': 'group_cycle_at', 'execution_id': run['plan_id'], 'cycle_number': int(cycle),
             'start_monotonic': self._mono_of(start),
-            'network_operation_id': f'tt-start-{uuid.uuid4().hex}',
+            'next_start_monotonic': self._mono_of(next_start) if next_start else 0.0,
+            'network_operation_id': f'tt-cycle-{uuid.uuid4().hex}',
         })
         if not result.get('success'):
-            self._cancel(run, f'{run["cycle"]}회차 시작 예약 실패 · {result.get("message") or ""}')
+            # 바로 놓지 않고 다음 틱의 로컬 상태로 가른다 · 들어간 직후 로컬 준비 검사가 실패해(서보 꺼짐 등) 세션이 이미
+            # 닫혔으면 이 명령은 「세션이 일치하지 않음」 으로 거절된다 · 그때는 오류 상태의 이유(197)를 남긴다 · 수정 목록 206
+            run['cycle_failed'] = f'{cycle}회차 시각 예약 실패 · {result.get("message") or "응답 없음"}'
+            return False
+        run['stage'] = 'scheduled'
+        self._note_ack(run, result, now_m)
+        return True
+
+    def _note_cycle_result(self, run, status: Mapping[str, Any], phase: str, state: str) -> None:
+        """재생 관리자가 알린 쥔 회차의 결과 · 회차마다 한 번 기록 + 화면 글 · 수정 목록 206
+
+        - 쉼(`group_cycle_skipped`) · 「N회차 쉼 · 이유」(191 글 꼴) · 실행은 놓지 않는다(다음 회차 명령을 이어서)
+        - 늦게 시작(`cycle_start_late_sec`) · 쉼이 아니다 · 다음 회차가 제때 시작하면 화면 글을 지운다
+        """
+        cycle = int(status.get('group_cycle_number') or status.get('current_cycle') or 0)
+        if not cycle or cycle != int(run.get('cycle') or 0):
             return
-        run.update(stage='scheduled', sent_m=now_m)
+        plan_id = str(run.get('plan_id') or '')
+        if phase == GROUP_CYCLE_SKIPPED_PHASE:
+            reason = str(status.get('cycle_skip_reason') or '') or '초기 이동이 너무 늦음'
+            key = (plan_id, cycle, reason)
+            if key != self._skip_logged:
+                self._skip_logged = key
+                self._warn(f'시간표 재생 · {cycle}회차 쉼 · {reason}')
+            self._result_note = f'{cycle}회차 쉼 · {reason}'
+            self._set_note(self._result_note)
+            return
+        if state not in {'running', 'verifying'}:
+            return
+        try:
+            late = float(status.get('cycle_start_late_sec') or 0.0)
+        except (TypeError, ValueError):
+            late = 0.0
+        if late > 0.0:
+            if (plan_id, cycle) != self._late_logged:
+                self._late_logged = (plan_id, cycle)
+                self._warn(
+                    f'시간표 재생 · {cycle}회차 {late:.1f} s 늦게 시작 · 초기 이동이 늦게 끝남 · 쉼 아님 · '
+                    '다음 회차는 다시 시간표 시각'
+                )
+                self._result_note = f'{cycle}회차 {late:.1f} s 늦게 시작 · 다음 회차는 시간표대로'
+                self._set_note(self._result_note)
+        elif self._result_note and self._note == self._result_note:
+            self._result_note = ''
+            self._set_note('')
 
     def _leave_when_safe(self, run, phase: str, state: str, choice: Choice) -> None:
         """따를 시간표가 바뀌었다(운영시간 끝 · 신호 재생 · 다른 시간표) · 도는 회차는 끝까지 · 장벽에서 놓는다
@@ -497,7 +614,8 @@ class ClockDriver:
         장벽 단계가 아니라 영영 쥐고 있었다 · 마지막 창 끝에 마스터만 단독 회차 후 정지로 `stopped` 가 되자 그 실행을
         하트비트로 4대에 「도는 중」 으로 퍼뜨려 4대 주차가 교착(실물 NY 2026-11-09 23:27 · B) · 수정 목록 191
         """
-        if run['stage'] == 'scheduled' and phase not in BARRIER_PHASES and state not in _FINISHED_STATES:
+        begun = state in _CYCLE_BEGUN_STATES or phase in _CYCLE_BEGUN_PHASES
+        if begun and phase not in BARRIER_PHASES and state not in _FINISHED_STATES:
             return
         # 운영시간 끝 · 끝난 뒤에는 다음 운영시간(내일) 시간표가 골라지거나 없다 · 그때만 주차 → 서보 OFF ·
         # 마스터를 수동 모드로 바꾼 것 · 신호 재생으로 바꾼 것은 그 자리 정지(사람이 만지려는 것)
@@ -525,10 +643,11 @@ class ClockDriver:
         self._run = None
 
     def _cancel(self, run, why: str) -> None:
-        self._control({
+        result = self._control({
             'command': 'group_cancel', 'execution_id': run['plan_id'],
             'network_operation_id': f'tt-cancel-{uuid.uuid4().hex}',
         })
+        self._note_release(result)
         self._drop(why)
 
     def _drop(self, why: str) -> None:

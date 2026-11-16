@@ -10,7 +10,9 @@ from typing import Any, Callable
 class CommandDispatcher:
     """Serialize normal commands while safety commands use a dedicated lane."""
 
-    def __init__(self, handler: Callable[[Any], None]) -> None:
+    def __init__(
+        self, handler: Callable[[Any], None], *, name: str = 'motion-coordination-command-dispatcher',
+    ) -> None:
         self._handler = handler
         self._queue: queue.Queue[Any] = queue.Queue()
         self._closed = threading.Event()
@@ -18,13 +20,14 @@ class CommandDispatcher:
         self._thread = threading.Thread(
             target=self._run,
             args=(self._queue,),
-            name='motion-coordination-command-dispatcher',
+            name=name,
             daemon=True,
         )
         self._urgent_thread = threading.Thread(
             target=self._run,
             args=(self._urgent_queue,),
-            name='motion-coordination-safety-dispatcher',
+            name=f'{name}-urgent' if name != 'motion-coordination-command-dispatcher'
+            else 'motion-coordination-safety-dispatcher',
             daemon=True,
         )
 
