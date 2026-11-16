@@ -155,7 +155,10 @@ def test_a_real_stop_after_an_autonomy_drop_refuses_the_join(monkeypatch):
 
 
 # --------------------------------------------------------------------------- #
-# 끊김 시험 Q (실물 NY 2026-11-08 19:30 floating4) · 웹 끊김으로 스스로 빠진 PC 도 같은 실행으로 돌아온다
+# 끊김 시험 Q (실물 NY 2026-11-08 19:30 floating4) · 로컬 상태 끊김으로 스스로 빠진 PC 도 같은 실행으로 돌아온다
+#
+# 그때는 웹 끊김이었다 · 수정 목록 209 뒤로 웹 끊김은 빠짐 사유가 아니다 · 같은 길(`rejoinable`)을 이제 재생 관리자
+# 상태 끊김(고장 검출기)이 쓴다
 # --------------------------------------------------------------------------- #
 
 def _bridge_lost(node, monkeypatch):
@@ -163,7 +166,7 @@ def _bridge_lost(node, monkeypatch):
     from test_coordination_node import _InlineThread
     monkeypatch.setattr(coordination_node.threading, 'Thread', _InlineThread)
     node._call_local_control = lambda payload, **_kwargs: {'success': True}
-    node._drop_self_for_bridge_loss('마지막 성공 2839ms 전 · 연속 실패 3회', moving=True)
+    node._drop_self_for_runtime_loss('재생 관리자 상태 6.0 s 못 받음')
     assert node._execution.execution_id == ''
     assert 'exec-a' in node._cancelled_execution_ids
 

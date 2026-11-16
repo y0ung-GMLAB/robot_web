@@ -8,6 +8,11 @@
 
 예약 여유는 늘 0.5 s(확인 마감 0.4 s)였고 진행 PC 자신도 그 안에 HTTP · ROS 로 답해야 했다.
 
+수정 목록 207 · 진행 PC 자신의 예약은 이 프로세스 안에서 재생 관리자에 바로 간다 · 그 길 때문에 덧댄 회차
+초기화 바닥과 회차 초기화 다시 예약(153 ②)을 없앴다 · 초기 위치 바닥(3 s)은 남김(모든 PC 가 확인 뒤 재생 계획을
+짓는다 · 164) · 1회차 시작 바닥(3 s)도 남김(잰 값이 없을 때의 기본값 · 사용자 결정 179) · 재시작 뒤 그 종류를 잰
+값이 없으면 같은 PC 의 다른 예약 종류에서 방금 잰 값.
+
 여기는 rclpy 없이 도는 규칙만 · 노드에 붙인 시험은 `test_coordination_node.py` (미니 PC).
 """
 
@@ -15,8 +20,6 @@ import pytest
 
 from motion_coordination.group_execution import GroupExecution
 from motion_coordination.schedule_lead import (
-    CYCLE_INITIALIZE_LEAD_MIN_SEC,
-    CYCLE_INITIALIZE_SELF_RETRIES,
     FIRST_START_LEAD_MIN_SEC,
     INITIALIZE_LEAD_MIN_SEC,
     LATENCY_WINDOW,
@@ -24,9 +27,6 @@ from motion_coordination.schedule_lead import (
     ScheduleLeadPlanner,
     command_kind,
     is_not_accepted_rejection,
-    is_timing_rejection,
-    may_retry_own_cycle_initialize,
-    only_self_late,
 )
 
 
@@ -78,27 +78,11 @@ def test_bad_samples_are_ignored():
     assert planner.worst('schedule', ('floating4',)) == 0.0
 
 
-def test_only_the_masters_own_late_ack_is_not_a_group_fault():
-    assert only_self_late(['floating4'], 'floating4', 'initialize_at') is True
-    assert only_self_late(['floating4'], 'floating4', 'cycle_initialize_at') is True
-    assert only_self_late(['floating4'], 'floating4', 'start_at') is True
-    # 다른 PC 가 늦으면 옛 그대로(망 · 상대 고장일 수 있다)
-    assert only_self_late(['floating2'], 'floating4', 'initialize_at') is False
-    assert only_self_late(['floating2', 'floating4'], 'floating4', 'initialize_at') is False
-    # 준비 확인은 124 가 따로 본다
-    assert only_self_late(['floating4'], 'floating4', 'prepare') is False
-
-
-def test_command_kinds_and_timing_rejections():
+def test_command_kinds():
     assert command_kind('initialize_at') == 'initialize'
     assert command_kind('start_at') == 'schedule'
     assert command_kind('cycle_initialize_at') == 'cycle_initialize'
     assert command_kind('prepare') == ''
-    assert is_timing_rejection('그룹 예약 트리거의 준비 여유가 부족합니다') is True
-    assert is_timing_rejection('그룹 초기 위치 이동 예약 트리거가 이미 지났습니다') is True
-    assert is_timing_rejection('motion_run_manager response timeout') is True
-    assert is_timing_rejection('현재 프로젝트의 실행 준비가 끝나지 않았습니다') is False
-    assert is_timing_rejection('') is False
 
 
 def test_group_execution_uses_the_given_lead_but_never_less_than_the_setting():
@@ -123,29 +107,29 @@ def test_group_execution_uses_the_given_lead_but_never_less_than_the_setting():
 # 그때 여유 0.83 s(`schedule` 종류 · 바닥 0 · 자기 확인 253~363 ms)
 # ---------------------------------------------------------------------- #
 
-def test_cycle_initialize_has_its_own_floor():
+def test_cycle_initialize_has_no_floor_anymore():
+    """바닥 1.5 s 는 진행 PC 자신의 길(DDS → HTTP → 웹) 탓이었다 · 207 뒤로 잰 값 · 설정값만"""
     planner = ScheduleLeadPlanner()
-    assert CYCLE_INITIALIZE_LEAD_MIN_SEC == pytest.approx(1.5)
-    assert _lead(planner, 'cycle_initialize') == pytest.approx(CYCLE_INITIALIZE_LEAD_MIN_SEC)
-    # 실물 값 · 363 ms 를 재도 바닥이 먼저 · 전에는 0.83 s
+    assert _lead(planner, 'cycle_initialize') == pytest.approx(0.5)
+    # 실물 값 · 363 ms 를 재면 두 배 + 마감 여백
     planner.record('cycle_initialize', 'floating4', 0.363)
-    assert _lead(planner, 'cycle_initialize') == pytest.approx(1.5)
-    # 시작 예약은 그대로 가볍다
-    assert _lead(planner, 'schedule') == pytest.approx(0.5)
+    assert _lead(planner, 'cycle_initialize') == pytest.approx(0.826)
+    assert _lead(planner, 'schedule') == pytest.approx(0.826), '안 잰 종류는 같은 PC 의 다른 예약 값'
 
 
-def test_cycle_initialize_samples_do_not_mix_with_initialize():
+def test_a_measured_kind_uses_only_its_own_samples():
+    """잰 종류는 제 값만 · 안 잰 종류만 같은 PC 의 다른 예약 값(재시작 직후) · 207"""
     planner = ScheduleLeadPlanner()
-    # group_prepare 는 무겁다 · 그 값이 회차 사이 여유를 부풀리지 않는다
     planner.record('initialize', 'floating4', 1.6)
-    assert _lead(planner, 'cycle_initialize') == pytest.approx(CYCLE_INITIALIZE_LEAD_MIN_SEC)
-    planner.record('cycle_initialize', 'floating4', 0.9)
-    assert _lead(planner, 'cycle_initialize') == pytest.approx(1.9)
+    assert _lead(planner, 'cycle_initialize') == pytest.approx(3.3)
+    planner.record('cycle_initialize', 'floating4', 0.2)
+    assert _lead(planner, 'cycle_initialize') == pytest.approx(0.5)
     assert _lead(planner, 'initialize') == pytest.approx(3.3)
     assert set(planner.snapshot()['recent_ack_ms']) == {'initialize', 'cycle_initialize'}
 
 
 def test_only_rejections_that_surely_did_not_book_are_retried():
+    """스스로 잇기(178 · 끊김 시험 A)가 다음 눈금으로 한 번 더 잡을지"""
     assert is_not_accepted_rejection('그룹 예약 트리거의 준비 여유가 부족합니다') is True
     assert is_not_accepted_rejection('그룹 회차 초기화 트리거가 이미 지났습니다') is True
     # 받았는지 모른다 · 다시 예약하면 두 번 잡힐 수 있다
@@ -155,18 +139,6 @@ def test_only_rejections_that_surely_did_not_book_are_retried():
     assert is_not_accepted_rejection('') is False
 
 
-def test_own_cycle_initialize_retry_is_bounded_and_only_for_cycle_initialize():
-    late = '그룹 회차 초기화 트리거가 이미 지났습니다'
-    assert CYCLE_INITIALIZE_SELF_RETRIES == 2
-    assert may_retry_own_cycle_initialize('cycle_initialize_at', late, 0) is True
-    assert may_retry_own_cycle_initialize('cycle_initialize_at', late, 1) is True
-    assert may_retry_own_cycle_initialize('cycle_initialize_at', late, 2) is False
-    # 첫 초기 위치 · 시작은 다른 PC 와 같은 시각이어야 한다 · 옛 그대로 취소
-    assert may_retry_own_cycle_initialize('initialize_at', late, 0) is False
-    assert may_retry_own_cycle_initialize('start_at', late, 0) is False
-    assert may_retry_own_cycle_initialize('cycle_initialize_at', 'motion_run_manager response timeout', 0) is False
-
-
 # ---------------------------------------------------------------------- #
 # 수정 목록 179 · 재시작 뒤 첫 시작 · 마스터 자신의 `start_at` 확인 늦음으로 1회차 빠짐
 #
@@ -174,14 +146,22 @@ def test_own_cycle_initialize_retry_is_bounded_and_only_for_cycle_initialize():
 # `initialize_at` 은 바닥 1.5 s 라 통과(530 ms) · `start_at` 은 여유 0.5 s(마감 0.4 s)에 548 ms → 빠짐
 # ---------------------------------------------------------------------- #
 
-def test_first_start_has_a_floor_of_three_seconds_before_anything_is_measured():
+def test_first_start_keeps_its_floor_as_the_default_without_measurements():
+    """재시작 뒤 첫 시작 · 다른 PC 들의 Wi-Fi 왕복을 잰 값이 없다 · 1회차 시작은 3 s 아래로 내리지 않는다 · 사용자 결정 179
+
+    207 은 진행 PC 자신의 예약을 프로세스 안으로 옮기면서 이 바닥을 뺐다(방금 잰 `initialize_at` 값으로 버팀) ·
+    바닥은 진행 PC 의 길 때문이 아니라 「잰 값이 없을 때의 기본값」 이다 · 잰 값이 작아도 바닥 · 크면 잰 값.
+    """
     assert INITIALIZE_LEAD_MIN_SEC == pytest.approx(3.0)
     assert FIRST_START_LEAD_MIN_SEC == pytest.approx(3.0)
     planner = ScheduleLeadPlanner()
     assert _lead(planner, 'initialize') == pytest.approx(3.0)
-    assert _lead(planner, 'first_start') == pytest.approx(3.0)
-    # 회차 사이 시작은 이번 결정 밖 · 그대로 가볍다
-    assert _lead(planner, 'schedule') == pytest.approx(0.5)
+    assert _lead(planner, 'first_start') == pytest.approx(FIRST_START_LEAD_MIN_SEC)
+    # 방금 잰 초기 위치 확인(같은 PC · `SAMPLE_FALLBACK`)이 작아도 바닥
+    planner.record('initialize', 'floating1', 0.3)
+    assert _lead(planner, 'first_start', ('floating1', 'floating4')) == pytest.approx(FIRST_START_LEAD_MIN_SEC)
+    # 2회차부터는 바닥 없음 · 잰 값만
+    assert _lead(planner, 'schedule', ('floating1', 'floating4')) == pytest.approx(0.7)
 
 
 def test_first_start_uses_the_start_at_samples_and_may_grow_up_to_six_seconds():

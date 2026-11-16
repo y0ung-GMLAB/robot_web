@@ -43,10 +43,6 @@ FORMAT = 1
 STOP_NOW = 'now'
 STOP_AFTER_CYCLE = 'after_cycle'
 
-#: 운영시간 시작 몇 초 전부터 그 창의 시간표가 「도는 중」 인가 · 1회차 준비는 창 시작 약 30 s 전에 들어간다
-#: 이보다 이른 사람 정지는 다음 창에 적지 않는다 · 수정 목록 192(NY 2026-11-10 01:26 · 08:30 창에 정지가 남음)
-STOP_ACTIVE_LEAD_SEC = 60.0
-
 #: 운전 모드 · `schedule_store` 와 같은 글자
 SCHEDULE_MODE = 'schedule'
 MANUAL_MODE = 'manual'
@@ -257,6 +253,9 @@ class Choice:
     #: 마지막 즉시 정지 · 그 시각 전에 잡은 그 시간표 실행은 세운다(정지를 못 받은 PC) · 수정 목록 188
     halt_plan_id: str = ''
     halt_at_unix: float = 0.0
+    #: 고른 운영시간(지금 · 또는 곧 시작할)의 끝 · 유닉스 초 · 0 = 운영시간을 고르지 않음 · 그룹 정지로 선 PC 가 그 운영시간
+    #: 끝에 주차할 시각(끊겨도 · 정지가 안 보여도) · 수정 목록 201
+    window_end_unix: float = 0.0
 
 
 def choose(config: TimetableConfig, now_unix: float, *, operation_mode: str) -> Choice:
@@ -299,18 +298,21 @@ def _choose(config: TimetableConfig, now_unix: float, *, operation_mode: str) ->
     )
     if timeline is None:
         return Choice(reason='운영시간 아님', stopped_plan_id=halted)
-    if stop.get('plan_id') and str(stop['plan_id']) == timeline.plan_id and not _stale_stop(config, window):
+    ends_at = float(window[1])
+    # 정지는 그 운영시간 이름(`tt-s<시작>`)에만 걸린다 · 다음 운영시간은 이름이 달라 정지가 넘어가지 않는다 · 운영시간 밖
+    # 정지를 다음 운영시간 이름으로 적지 않는 것은 적는 쪽(`stop_plan`)이 맡는다 · 수정 목록 192 · 201
+    if stop.get('plan_id') and str(stop['plan_id']) == timeline.plan_id:
         if stop.get('mode') == STOP_NOW:
-            return Choice(reason='정지됨', stopped_plan_id=timeline.plan_id)
+            return Choice(reason='정지됨', stopped_plan_id=timeline.plan_id, window_end_unix=ends_at)
         if stop.get('mode') == STOP_AFTER_CYCLE:
             last = _int(stop.get('last_cycle'))
             if last < timeline.first_cycle:
-                return Choice(reason='정지됨', stopped_plan_id=timeline.plan_id)
+                return Choice(reason='정지됨', stopped_plan_id=timeline.plan_id, window_end_unix=ends_at)
             # 그 회차 다음 경계부터 시작 없음 · 도는 회차는 끝까지
             cut = timeline.start_of(last + 1) - 1e-3
             timeline = replace(timeline, end_unix=min(timeline.end_unix, cut) if timeline.end_unix else cut)
-            return Choice(timeline=timeline, stop_after=True)
-    return Choice(timeline=timeline)
+            return Choice(timeline=timeline, stop_after=True, window_end_unix=ends_at)
+    return Choice(timeline=timeline, window_end_unix=ends_at)
 
 
 # --------------------------------------------------------------------------- #
@@ -350,16 +352,24 @@ def stop_plan(
     """사람 정지 · 지금 시간표에 정지를 적는다 · (새 묶음, 그 시간표 이름) · 따르는 시간표가 없으면 그대로
 
     회차 후 정지 = 지금 도는 회차(시간표상)까지 · 즉시 정지 = 바로.
-    `held_plan_id` · 따를 시간표는 없는데(마스터를 수동으로 바꿈) 아직 그 회차를 도는 PC 가 있다 · 즉시 정지만
-    적는다(회차 후 정지는 할 일 없음 · 그 PC 들은 회차를 마치고 스스로 놓는다).
+    `held_plan_id` · 시간표 회차를 쥔 PC 의 시간표 이름(`_held_plan_id`) · 따를 시간표는 없는데(마스터를 수동으로 바꿈)
+    아직 그 회차를 도는 PC 가 있으면 즉시 정지만 적는다(회차 후 정지는 할 일 없음 · 그 PC 들은 회차를 마치고 스스로
+    놓는다) · 운영시간 시작 전이면 그 운영시간 1회차 준비에 들어간 PC 가 있는지도 이것으로 본다.
+
+    정지가 걸리는 운영시간 · 지금 운영시간 · 또는 시작 전이지만 그 운영시간 회차를 이미 쥔 PC 가 있는(1회차 준비 중)
+    운영시간 · 아니면 다음 운영시간에 적지 않는다 · 전에는 「시작 60 s 전」(`STOP_ACTIVE_LEAD_SEC`)으로 짐작했다 ·
+    그 안이면 아무 PC 도 준비에 안 들어갔어도 그 운영시간 전체가 섰다 · 수정 목록 192 · 201
     """
     now = time.time() if now_unix is None else float(now_unix)
     choice = choose(current, now, operation_mode=SCHEDULE_MODE)
     timeline = choice.timeline
     window = _window(current, now)
-    if timeline is not None and window is not None and now < window[0] - STOP_ACTIVE_LEAD_SEC:
-        # 운영시간 밖 · 고른 시간표는 다음 창 · 거기 정지를 적으면 그 창이 「정지됨」 으로 시작 전 준비를 건너뛴다(192)
-        # 지금 세울 것은 아직 회차를 도는 PC 뿐 · 아래 쥔 실행 길
+    if (
+        timeline is not None and window is not None and now < window[0]
+        and str(held_plan_id or '') != timeline.plan_id
+    ):
+        # 운영시간 밖 · 고른 시간표는 다음 운영시간 · 그 회차를 쥔 PC 가 없다 · 거기 정지를 적으면 그 운영시간이
+        # 「정지됨」 으로 시작 전 준비를 건너뛴다(192) · 지금 세울 것은 아직 회차를 도는 PC 뿐 · 아래 쥔 실행 길
         timeline = None
     if timeline is None:
         if held_plan_id and not after_cycle:
@@ -397,23 +407,8 @@ def stop_holds(config: TimetableConfig, now_unix: float) -> bool:
     if not plan_id.startswith('tt-s') or stop.get('mode') not in {STOP_NOW, STOP_AFTER_CYCLE}:
         return False
     window = _window(config, now_unix)
-    if window is None or plan_id != clock_grid.schedule_plan_id(window[0]):
-        return False
-    return not _stale_stop(config, window)
-
-
-def _stale_stop(config: TimetableConfig, window: Tuple[float, float]) -> bool:
-    """그 창이 오기 전에 적힌 즉시 정지 · 그 창에는 안 쓴다 · 수정 목록 192
-
-    전에는 운영시간 밖 즉시 정지를 다음 창 이름으로 적었다(NY 2026-11-10 01:26 → 08:30 창 「정지됨」) · 이미 적힌 것도 가린다.
-    즉시 정지는 늘 같은 이름으로 `halt`(시각)도 남기니 그 시각으로 가린다 · 시각이 없으면(회차 후 정지) 그대로 따른다.
-    """
-    stop = dict(config.stop or {})
-    halt = dict(config.halt or {})
-    if stop.get('mode') != STOP_NOW or str(halt.get('plan_id') or '') != str(stop.get('plan_id') or ''):
-        return False
-    at = _float(halt.get('at_unix'))
-    return 0.0 < at < float(window[0]) - STOP_ACTIVE_LEAD_SEC
+    # 정지는 적힌 운영시간(이름)에만 · 운영시간 밖 정지는 적을 때 다음 운영시간에 안 적는다(`stop_plan`) · 수정 목록 201
+    return window is not None and plan_id == clock_grid.schedule_plan_id(window[0])
 
 
 def resume_schedule(current: TimetableConfig, *, issuer: str, now_unix: Optional[float] = None) -> TimetableConfig:

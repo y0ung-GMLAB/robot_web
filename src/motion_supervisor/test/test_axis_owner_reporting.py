@@ -25,7 +25,6 @@ def _bare_node() -> MotionSupervisor:
     node = MotionSupervisor.__new__(MotionSupervisor)
     node._command_arbiter = CommandArbiter()
     node._emergency_latched = False
-    node._motion_stop_block_until = 0.0
     node._active_jogs = {}
     node._active_actions = {}
     node._safety_status_pub = FakePublisher()

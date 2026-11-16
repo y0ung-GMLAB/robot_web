@@ -22,12 +22,14 @@ def test_nothing_happens_outside_systemd():
     assert watchdog.ping(force=True) is False
 
 
-def test_start_narrows_the_timeout_and_pings(tmp_path):
+def test_start_says_ready_with_the_timeout_then_pings(tmp_path):
+    """유닛 Type=notify · READY=1 이 와야 기동 끝 · 감시는 그 뒤부터 · 한 데이터그램에 감시 시간도 · 수정 목록 202"""
     sock, environ = _listener(tmp_path)
     try:
         watchdog = SystemdWatchdog(environ)
         assert watchdog.start() is True
-        assert sock.recv(256) == b'WATCHDOG_USEC=15000000'
+        assert watchdog.ready_sent is True
+        assert sock.recv(256).splitlines() == [b'READY=1', b'WATCHDOG_USEC=15000000']
         assert sock.recv(256) == b'WATCHDOG=1'
     finally:
         sock.close()
@@ -52,7 +54,16 @@ def test_the_timeout_can_be_changed_or_switched_off(tmp_path):
     sock, environ = _listener(tmp_path)
     try:
         environ['MOTION_COORDINATION_WATCHDOG_SEC'] = '0'
-        assert SystemdWatchdog(environ).start() is False
+        watchdog = SystemdWatchdog(environ)
+        assert watchdog.start() is False, '끄면 알림(WATCHDOG=1)은 안 보낸다'
+        # 끄기여도 「준비 끝」 은 보낸다 · 안 보내면 Type=notify 기동이 TimeoutStartSec 뒤 실패 ·
+        # 유닛 감시는 아주 긴 값으로 덮는다 · 전에는 아무것도 안 보내 유닛 감시(90 s)에 죽었다 · 수정 목록 202
+        assert watchdog.ready_sent is True
+        assert sock.recv(256).splitlines() == [
+            b'READY=1', f'WATCHDOG_USEC={systemd_notify.OFF_USEC}'.encode(),
+        ]
+        assert systemd_notify.OFF_USEC >= 7 * 24 * 3600 * 1_000_000
+        assert watchdog.ping(force=True) is False
     finally:
         sock.close()
 

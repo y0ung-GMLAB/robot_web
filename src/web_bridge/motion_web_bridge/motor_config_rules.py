@@ -21,6 +21,7 @@ from typing import Any, Dict, List
 from motion_common import store
 from motion_common.values import optional_float, optional_int
 
+from motion_web_bridge import after_response
 from motion_web_bridge.motor_identity import driver_model_from, model_is_unknown
 
 
@@ -758,18 +759,15 @@ def wait_for_ethercat_release(timeout_sec: float) -> None:
     )
 
 
-#: 서비스 재시작을 거는 지연 · 응답이 먼저 나가게 · 수정 목록 132
-MANAGED_RESTART_DELAY_SEC = 2.0
-
-
 def schedule_managed_service_restart(*managed_services: str) -> None:
-    """Return the HTTP response before stopping the process serving it.
+    """서비스 재시작은 **응답을 다 보낸 뒤에** 건다 · 수정 목록 204
 
-    Starting systemctl immediately races the API response against
-    Uvicorn shutdown.  A detached, fixed-command shell gives the response
-    a short window to leave the socket, then asks systemd to restart the
-    validated service.  Positional arguments keep the service name out of
-    shell parsing.
+    이 웹 서버가 든 서비스를 다시 띄우는 일이라, 응답보다 먼저 걸면 응답이 못 나간다 · 전에는
+    `sleep 0.5`(132 뒤 2 s) 뒤에 걸어 「그 사이 나가겠지」 였고, 재시작 요청 뒤 작업 기록 갱신이 더 걸린 날
+    적용은 성공했는데 화면은 HTTP 500 이었다(132 · 실물 2026-10-13) · 이제는 `after_response.defer` 로
+    응답 본문의 마지막 조각을 보낸 뒤에 systemctl 을 부른다 · 기다리는 시간이 없다.
+
+    요청 밖(감시 타이머 등)에서 부르면 응답이 없으니 바로 건다 · 서비스 이름은 허용 목록으로만.
     """
     allowed_services = {
         'motion-control.service',
@@ -781,24 +779,23 @@ def schedule_managed_service_restart(*managed_services: str) -> None:
         or any(service not in allowed_services for service in managed_services)
     ):
         raise ValueError('허용되지 않은 자동실행 서비스 이름입니다')
-    # 0.5 s 는 짧았다 · 재시작 요청 뒤에도 작업 기록 갱신 등이 0.5 s 넘게 걸려 응답 전에 브리지가 내려가
-    # 적용은 성공했는데 화면은 HTTP 500 · 수정 목록 132 (실물 2026-10-13) · 시간대 바꾸기(2 s)와 같게
-    subprocess.Popen(
-        [
-            '/bin/bash',
-            '-c',
-            f'sleep {MANAGED_RESTART_DELAY_SEC:g}; exec "$@"',
-            'motion-control-delayed-restart',
-            '/usr/bin/systemctl',
-            '--user',
-            'restart',
-            '--no-block',
-            *managed_services,
-        ],
-        start_new_session=True,
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
-    )
+    command = [
+        '/usr/bin/systemctl',
+        '--user',
+        'restart',
+        '--no-block',
+        *managed_services,
+    ]
+
+    def restart() -> None:
+        subprocess.Popen(
+            command,
+            start_new_session=True,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+
+    after_response.defer(restart)
 
 
 # --------------------------------------------------------------------------- #

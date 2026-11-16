@@ -15,14 +15,15 @@ from __future__ import annotations
 import json
 import math
 import time
-from typing import Any, Callable, Dict, List, Mapping, Optional
+from typing import Any, Dict, List, Mapping, Optional
 
 from motion_common import joint_mapping, manual_speed, motion_segment, motion_tracks, multiturn_clear, rate_check, repeat_policy, units, wire_units
 from motion_common.values import finite_float, optional_int
 
-from . import motion_run_rules
+from . import motion_run_rules, plan_artifact
 from .motion_automation_store import REPEAT_MODES
 from .motion_run_constants import CONTINUOUS_LOOP_TOLERANCE_DEG
+from .motion_file_reader import parse_motion_tracks
 from .packed_samples import PackedSamples
 from .plan_cache import SingleFlightCache
 
@@ -98,22 +99,13 @@ def _punch_joints(payload: Dict[str, Any], axes: List[Dict[str, Any]]) -> Dict[s
     return joints
 
 
-#: 계획 재료 캐시 크기 · 준비 검사 → 그룹 준비가 같은 것을 쓰면 된다
+#: 계획 재료 캐시 크기 · 준비 검사 → 그룹 준비 → 재생 목록이 같은 것을 쓰면 된다
+#:
+#: 수정 목록 208 · 재료는 디스크 변환본(`plan_artifact`)에서 ms 안에 읽는다 · 메모리 칸은 바로 앞에 쓴
+#: 것 둘만(920 s × 5 조인트 · 샘플 4.4 MB · 배열 7.4 MB) · 바이트 예산(170)은 뺐다
 SAMPLES_CACHE_SIZE = 2
-#: 조인트별로 나눈 레코드(구간을 잘랐으면 자른 것) · 통째면 모션 파일 캐시와 같은 배열을 같이 쓴다
-RECORDS_STAGE_CACHE_SIZE = 4
-#: 바이트 예산 · 수정 목록 170 · 배열로 들어서 920 s × 5 조인트 샘플이 4.4 MB · 레코드가 7 MB 다 ·
-#: 예산은 훨씬 긴 파일(몇 시간 · 조인트 수십)에서도 캐시가 메모리를 다 먹지 않게 하는 울타리
-SAMPLES_CACHE_MAX_BYTES = 48 * 1024 * 1024
-RECORDS_STAGE_CACHE_MAX_BYTES = 48 * 1024 * 1024
-
-
-#: 재샘플 도중 그만둘지 볼 간격(샘플 수) · 20 ms × 500 = 파일 10 s 분량 · 미니 PC 에서 수십 ms 마다 · 수정 목록 174
-SAMPLE_CANCEL_CHECK_EVERY = 500
-
-
-class SamplingCancelled(RuntimeError):
-    """미리 짓기(수정 목록 174)가 실행이 시작돼 재샘플을 그만뒀다 · 캐시에 안 남는다(실패와 같다)"""
+#: 조인트별로 나눈 레코드(구간을 잘랐으면 자른 것)
+RECORDS_STAGE_CACHE_SIZE = 2
 
 
 class _MotionFileUnreadable(ValueError):
@@ -160,12 +152,11 @@ def _sample_plan(
     start_time: float,
     end_time: float,
     period_sec: float,
-    cancel: Optional[Callable[[], bool]] = None,
 ) -> tuple:
     """(샘플, 속도·가속 거절 사유) · 결과는 여러 계획이 같이 쓴다 · 고치지 않는다
 
     샘플은 배열 묶음(`PackedSamples`) · 꺼내면 옛 사전 모양 · 값은 옛 식 그대로(비트까지 같다) · 수정 목록 170
-    `cancel` · 미리 짓기만 준다 · `SAMPLE_CANCEL_CHECK_EVERY` 샘플마다 보고 참이면 `SamplingCancelled` · 수정 목록 174
+    애니 변환 자식 프로세스(`plan_artifact`)도 이 함수를 같은 인자로 부른다 · 수정 목록 208
     """
     duration = max(end_time - start_time, 0.0)
     sample_count = max(1, int(math.floor(duration / period_sec)) + 1)
@@ -195,8 +186,6 @@ def _sample_plan(
     clamp_motion = motion_run_rules._clamp_motion_value
     clamp_motor = motion_run_rules._clamp_to_motor_bounds
     for index in range(sample_count):
-        if cancel is not None and index % SAMPLE_CANCEL_CHECK_EVERY == 0 and index and cancel():
-            raise SamplingCancelled(f'재샘플 중단 · {index}/{sample_count}')
         sample_time = min(start_time + (index * period_sec), end_time)
         positions = []
         motion_values = []
@@ -217,10 +206,27 @@ class PlanBuilder:
         #:
         #: 계획 **전체**는 담지 않는다 · 모터 상태(알람 · 위치) · 요청 칸(실행 번호 · 회차)은 짓는
         #: 때마다 다시 본다. 무거운 둘만 담는다 · 조인트별로 나눈 레코드와 20 ms 재샘플.
-        self._records_cache = SingleFlightCache(
-            RECORDS_STAGE_CACHE_SIZE, max_bytes=RECORDS_STAGE_CACHE_MAX_BYTES,
-        )
-        self._samples_cache = SingleFlightCache(SAMPLES_CACHE_SIZE, max_bytes=SAMPLES_CACHE_MAX_BYTES)
+        #:
+        #: 수정 목록 208 · 둘 다 디스크 변환본이 원본이다(재부팅 · 서비스 재시작 뒤에도 남음) · 여기는 같은
+        #: 키를 두 스레드가 동시에 변환하지 않게 하는 자리 + 바로 앞에 읽은 것
+        self._records_cache = SingleFlightCache(RECORDS_STAGE_CACHE_SIZE)
+        self._samples_cache = SingleFlightCache(SAMPLES_CACHE_SIZE)
+
+    def _warn(self, message: str) -> None:
+        """변환 경고 한 줄 · 노드 없이 만든 시험 객체면 조용히"""
+        try:
+            self.manager.get_logger().warning(message)
+        except Exception:  # noqa: BLE001 · 로그 때문에 계획이 실패하면 안 된다
+            return
+
+    def _parse_here(self, motion_file_path: Any, ids: Optional[frozenset]) -> motion_tracks.MotionTracks:
+        """이 프로세스에서 파일 읽기 · 변환 자식 프로세스가 안 될 때 · 노드의 읽기 함수(시험이 갈아 끼움)를 쓴다"""
+        parse = getattr(self.manager, '_parse_motion_records', None)
+        if not callable(parse):
+            return parse_motion_tracks(motion_file_path, ids)
+        if ids is None:
+            return parse(motion_file_path)
+        return parse(motion_file_path, ids)
 
     def _load_tracks(self, motion_file_path: Any, ids: Optional[frozenset]) -> motion_tracks.MotionTracks:
         """조인트별 배열 · 노드는 캐시에서(`_load_motion_tracks`) · 읽는 함수를 갈아 끼운 시험 대역은
@@ -265,19 +271,31 @@ class PlanBuilder:
         보고 정해진다. 파일 자체는 건드리지 않으므로 버려진 축은 그 PC 에서 자고 있을 뿐이다.
 
         이제 파일을 **읽으면서** 버린다 · 4대 × 5 조인트 파일이면 레코드가 1/4 · 수정 목록 164
+
+        수정 목록 208 · 프로젝트 애니면 디스크 변환본(`plan_artifact` · tracks)에서 읽는다 · 없거나 키가 다르면
+        자식 프로세스가 변환해 둔다 · 돌려주는 네 번째 칸 = 출처(memory · artifact · compiled · parsed · file)
         """
         ids = mapping_motion_ids or None
         token_of = getattr(self.manager, '_motion_records_token', None)
         token = token_of(motion_file_path, ids) if callable(token_of) else None
         key = None if token is None else (token, float(segment_start), float(segment_end))
+        store = plan_artifact.store_for(motion_file_path) if token is not None else None
+        sources: List[str] = []
 
         def build() -> tuple:
             try:
-                tracks = self._load_tracks(motion_file_path, ids)
+                if store is not None:
+                    tracks, source = plan_artifact.load_or_compile_tracks(
+                        store, token, motion_file_path, ids,
+                        lambda: self._parse_here(motion_file_path, ids), self._warn,
+                    )
+                else:
+                    tracks, source = self._load_tracks(motion_file_path, ids), 'file'
             except _MotionFileUnreadable:
                 raise
             except ValueError as exc:
                 raise _MotionFileUnreadable(str(exc)) from exc
+            sources.append(source)
             info: Dict[str, Any] = {}
             if motion_segment.is_active(segment_start, segment_end) and tracks:
                 tracks, info = tracks.sliced(segment_start, segment_end)
@@ -285,7 +303,14 @@ class PlanBuilder:
 
         tracks, info = self._records_cache.get_or_compute(key, build)
         groups = {motion_id: track for motion_id, track in tracks.tracks.items() if len(track)}
-        return key, groups, dict(info)
+        return key, groups, dict(info), (sources[0] if sources else 'memory')
+
+    def warm_records(self, motion_file_path: Any, mapping: Mapping[str, Any]) -> str:
+        """그 애니의 조인트별 배열을 디스크 변환본으로 · 모터 상태 없이 된다 · 출처를 돌려준다 · 수정 목록 208
+
+        준비 검사와 같은 키(같은 조인트 묶음 · 구간 없음) · 등록(실행 허용) 때 미리 부른다.
+        """
+        return self._records_stage(motion_file_path, _mapping_motion_ids(mapping), 0.0, 0.0)[3]
 
     def _multiturn_clear_state(self) -> Dict[str, Any]:
         """PC 단위 다회전 클리어 표시 · 작업 폴더 `runtime/` · 못 읽으면 빈 표시 · 수정 목록 140 ③"""
@@ -304,15 +329,15 @@ class PlanBuilder:
         initialization_only: bool = False,
         motors_snapshot: Optional[List[Dict[str, Any]]] = None,
         warm_only: bool = False,
-        cancel: Optional[Callable[[], bool]] = None,
         timing: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
-        """실행 계획 · 아래 셋은 수정 목록 174
+        """실행 계획 · 아래 둘은 수정 목록 174
 
-        `warm_only` · 미리 짓기 · 재샘플 캐시만 채우고 `{'samples_key', 'sample_count', 'samples_cached'}` 를 돌려준다 ·
-        모터 준비 상태(알람 · 서보 · 통신)는 보지 않는다(검사 때 다시 본다 · 키에 안 든다) · 속도·가속 거절도 안 올린다(캐시에 같이 담긴다).
-        `cancel` · 재샘플 도중 그만둘지 · 그 키를 다른 스레드가 기다리면 그만두지 않는다.
-        `timing` · 넘긴 사전에 단계별 ms 를 적는다(실패해도 거기까지) · `records_ms` · `samples_ms` · `samples_cached`.
+        `warm_only` · 미리 짓기 · 재샘플 변환본 · 캐시만 채우고 `{'samples_key', 'sample_count', 'samples_cached',
+        'samples_from'}` 를 돌려준다 · 모터 준비 상태(알람 · 서보 · 통신)는 보지 않는다(검사 때 다시 본다 · 키에 안 든다) ·
+        속도·가속 거절도 안 올린다(변환본에 같이 담긴다).
+        `timing` · 넘긴 사전에 단계별 ms 를 적는다(실패해도 거기까지) · `records_ms` · `records_from` · `samples_ms` ·
+        `samples_cached` · `samples_from`(208 · memory · artifact · compiled · computed).
         """
         if warm_only and initialization_only:
             raise ValueError('미리 짓기는 재생 계획만 됩니다')
@@ -448,9 +473,11 @@ class PlanBuilder:
         if motion_file_id and not unusable_motion_file_note:
             records_started = time.perf_counter()
             try:
-                records_key, groups, segment_info = self._records_stage(
+                records_key, groups, segment_info, records_from = self._records_stage(
                     motion_file_path, mapping_motion_ids, segment_start, segment_end,
                 )
+                if timing is not None:
+                    timing['records_from'] = records_from
             except _MotionFileUnreadable as exc:
                 # 파일 읽기 실패만 · 구간이 파일보다 긴 것 같은 요청 오류는 초기 위치 이동도 막는다(옛 그대로)
                 if not initialization_only:
@@ -790,19 +817,35 @@ class PlanBuilder:
             #
             # 키는 파일 · 매핑 줄 · 모터 번호 · 모터 한계(설정 값)뿐 · 모터 위치 · 알람 · 서보는 안 든다 ·
             # 그래서 부팅 뒤 미리 지은 것(warm_only)을 준비 검사가 그대로 쓴다 · 수정 목록 174
+            #
+            # 수정 목록 208 · 프로젝트 애니면 디스크 변환본(samples) · 없으면 자식 프로세스가 같은 함수로
+            # 계산해 둔다 · 재부팅 · 서비스 재시작 뒤에도 그대로 · 이 프로세스는 읽기만(ms)
             samples_key = _samples_key(records_key, self.manager.period_sec, axes)
+            store = plan_artifact.store_for(motion_file_path) if samples_key is not None else None
             computed = []
-            should_cancel = None
-            if cancel is not None:
-                # 누가 이 키를 기다리면(준비 검사 · 그룹 준비) 끝까지 · 그만두면 그쪽이 처음부터 다시 한다
-                should_cancel = lambda: bool(cancel()) and not self._samples_cache.waiting(samples_key)  # noqa: E731
+            samples_from = []
+            period_sec = self.manager.period_sec
+
+            def compute_here() -> tuple:
+                computed.append(True)
+                return _sample_plan(axes, groups, start_time, end_time, period_sec)
 
             def compute() -> tuple:
-                computed.append(True)
-                return _sample_plan(
-                    axes, groups, start_time, end_time, self.manager.period_sec,
-                    cancel=should_cancel,
+                if store is None:
+                    samples_from.append('computed')
+                    return compute_here()
+                result, source = plan_artifact.load_or_compile_samples(
+                    store, samples_key, motion_segment.is_active(segment_start, segment_end),
+                    {
+                        'axes': axes, 'groups': groups,
+                        'start_time': start_time, 'end_time': end_time, 'period_sec': period_sec,
+                    },
+                    compute_here, self._warn,
                 )
+                samples_from.append(source)
+                if source == 'compiled':
+                    computed.append(True)
+                return result
 
             samples_started = time.perf_counter()
             try:
@@ -811,11 +854,13 @@ class PlanBuilder:
                 if timing is not None:
                     timing['samples_ms'] = round((time.perf_counter() - samples_started) * 1000.0, 1)
                     timing['samples_cached'] = not computed
+                    timing['samples_from'] = samples_from[0] if samples_from else 'memory'
             if warm_only:
                 return {
                     'samples_key': samples_key,
                     'sample_count': len(samples),
                     'samples_cached': not computed,
+                    'samples_from': samples_from[0] if samples_from else 'memory',
                 }
         else:
             rate_error = _motion_rate_limit_error(axes, samples, self.manager.period_sec)

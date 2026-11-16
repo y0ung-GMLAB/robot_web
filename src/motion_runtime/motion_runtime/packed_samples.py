@@ -35,6 +35,45 @@ class PackedSamples(Sequence):
         self._positions = tuple(array(_REAL) for _ in motor_axes)
         self._values = tuple(array(_REAL) for _ in motion_ids)
 
+    @classmethod
+    def from_columns(
+        cls,
+        motor_axes: List[int],
+        motion_ids: List[str],
+        times: array,
+        absolute: array,
+        positions: List[array],
+        values: List[array],
+    ) -> 'PackedSamples':
+        """이미 다 쌓은 칸 그대로 · 애니 변환본(디스크)에서 읽은 것 · 길이가 하나라도 다르면 ValueError · 수정 목록 208"""
+        samples = cls(motor_axes, motion_ids)
+        positions = tuple(positions)
+        values = tuple(values)
+        count = len(times)
+        if (
+            len(positions) != len(samples._motor_axes) or len(values) != len(samples._motion_ids)
+            or len(absolute) != count or any(len(column) != count for column in (*positions, *values))
+            or any(column.typecode != _REAL for column in (times, absolute, *positions, *values))
+        ):
+            raise ValueError('샘플 칸 길이 · 종류가 맞지 않습니다')
+        samples._times = times
+        samples._absolute = absolute
+        samples._positions = positions
+        samples._values = values
+        return samples
+
+    def columns(self) -> tuple:
+        """(시각, 절대 시각, 축마다 모터 위치, 축마다 조인트 값) · 변환본 저장용 · 고치지 말 것"""
+        return self._times, self._absolute, self._positions, self._values
+
+    @property
+    def motor_axes(self) -> tuple:
+        return self._motor_axes
+
+    @property
+    def motion_ids(self) -> tuple:
+        return self._motion_ids
+
     # ------------------------------------------------------------------ 쌓기 (계획 만들 때만)
 
     def append(self, time_sec: float, absolute_time_sec: float, positions: List[float], values: List[float]) -> None:

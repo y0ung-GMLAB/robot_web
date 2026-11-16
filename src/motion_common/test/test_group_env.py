@@ -236,3 +236,24 @@ def test_both_scopes_agree_on_the_name(tmp_path):
     resolved = resolve(_config(tmp_path, SAMPLE.replace('joonhoTest', 'pc-a')))
     assert _value(exports(resolved, {}), 'MOTION_PC_NAMESPACE') == \
         _value(local_exports(resolved, {}), 'MOTION_PC_NAMESPACE') == 'pc_a'
+
+
+# --------------------------------------------------------------------- #
+# 연동 노드의 로컬 연결 · 모터 · 웹 서비스와 같은 도메인 · 수정 목록 209
+# --------------------------------------------------------------------- #
+
+from motion_common.group_env import local_target  # noqa: E402
+
+
+def test_the_coordination_link_lands_where_the_local_services_are():
+    """연동 노드가 재생 관리자 · 감독과 직접 말하는 도메인 · 실행 스크립트(`--local`)와 같은 셈 · 갈리면 아무 말 없이 못 본다"""
+    for environ in ({}, {'MOTION_LOCAL_DOMAIN_ID': '60'}, {'MOTION_LOCAL_DOMAIN_ID': '21'}, {'ROS_DOMAIN_ID': '21'}):
+        domain, loopback = local_target(RESOLVED, environ)
+        assert str(domain) == _value(local_exports(RESOLVED, environ), 'ROS_DOMAIN_ID'), environ
+        assert loopback is True
+
+
+def test_the_coordination_link_follows_the_rollback_too():
+    """되돌리기(`MOTION_LOCAL_DDS=0`) · 안쪽 노드는 그룹 도메인 · 루프백 여부는 `MOTION_GROUP_NETWORK`"""
+    assert local_target(RESOLVED, {'MOTION_LOCAL_DDS': '0'}) == (21, False)
+    assert local_target(RESOLVED, {'MOTION_LOCAL_DDS': '0', 'MOTION_GROUP_NETWORK': '0'}) == (21, True)

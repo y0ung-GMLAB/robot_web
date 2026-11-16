@@ -20,7 +20,7 @@ from motion_common import repeat_policy
 from motion_control_msgs.msg import MotorStatus
 from std_msgs.msg import Int8MultiArray
 
-from motion_common import joint_mapping, motion_table, motor_readiness, units, wire_units
+from motion_common import joint_mapping, motion_table, motor_readiness, run_state, units, wire_units
 from motion_common.values import finite_float, optional_int
 
 from .motion_run_constants import DEFAULT_INITIAL_MODE, INITIAL_MOVE_TIME_OPTIONS_SEC
@@ -58,6 +58,9 @@ def _status_from_plan(state: str, message: str, plan: Dict[str, Any]) -> Dict[st
         'group_execution': bool(plan.get('group_execution')),
         'execution_id': str(plan.get('execution_id') or ''),
         'group_cycle_number': int(plan.get('group_cycle_number') or 0),
+        # 시간표 재생 · 이 PC 가 쥔 회차 명령의 회차 · 그 회차를 시간표 시각보다 늦게 시작한 만큼 · 수정 목록 206
+        'timed_cycle': int(plan.get('timed_cycle') or 0),
+        'cycle_start_late_sec': float(plan.get('cycle_start_late_sec') or 0.0),
         'motion_playlist': list(plan.get('motion_playlist') or []),
         'playlist_index': int(plan.get('playlist_index') or 0),
         'playlist_length': int(plan.get('playlist_length') or 0),
@@ -100,6 +103,32 @@ def _status_from_plan(state: str, message: str, plan: Dict[str, Any]) -> Dict[st
         'updated_at': time.time(),
     }
 
+
+def _lockstep_group_cycle(plan: Mapping[str, Any]) -> bool:
+    """회차 맞춤 그룹의 한 회차인가 · 각자 재생(`independent_group`)은 이 PC 가 혼자 잇는 로컬 연속 재생과 같다"""
+    return bool(plan.get('group_execution')) and not plan.get('independent_group')
+
+
+def _cycle_end_status(plan: Dict[str, Any]) -> Dict[str, Any]:
+    """재생 루프가 끝난 뒤 상태 · 보통은 {completed · completed} · 수정 목록 199
+
+    회차 맞춤 그룹 회차는 끝이 아니다 · 그룹 세션이 다음 재생 목록 항목을 기다렸다가 장벽(`group_motion_completed`)을
+    낸다(164) · 그 틈에 `completed` 를 내면 시간표 구동부가 사람 정지로 읽고 다음 회차를 쉬었다(NY 2026-11-11 14:31 ·
+    195 는 5 s 기다림으로 덮었다) · 그래서 상태는 장벽과 같은 `motion_completed` · 단계는 장벽 전
+    (`GROUP_CYCLE_FINISHING_PHASE`) · 진행 PC 에 가는 회차 끝 사건은 장벽 단계에서만 나간다.
+    """
+    if _lockstep_group_cycle(plan):
+        cycle = int(plan.get('group_cycle_number') or 0)
+        status = _status_from_plan(
+            'motion_completed', f'그룹 모션 {cycle}회차 재생 끝 · 회차 끝 알림 준비', plan,
+        )
+        status['phase'] = run_state.GROUP_CYCLE_FINISHING_PHASE
+        return status
+    status = _status_from_plan('completed', '모션 실행 완료', plan)
+    status['phase'] = 'completed'
+    return status
+
+
 def _empty_status() -> Dict[str, Any]:
     return {
         'state': 'idle',
@@ -119,6 +148,9 @@ def _empty_status() -> Dict[str, Any]:
         'group_execution': False,
         'execution_id': '',
         'group_cycle_number': 0,
+        # 시간표 재생 · 회차 명령(`group_cycle_at`)의 회차 · 0 = 없음(신호 재생 · 단독) · 늦게 시작한 만큼 · 수정 목록 206
+        'timed_cycle': 0,
+        'cycle_start_late_sec': 0.0,
         # 재생 목록 · 수정 목록 35 · 길이 0 = 목록 없이 파일 하나
         'motion_playlist': [],
         'playlist_index': 0,

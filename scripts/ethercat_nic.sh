@@ -13,4 +13,8 @@ source "${SCRIPT_DIR}/setup/site.sh"
 export SITE_ETHERCAT_NIC="${1:-}"
 export SITE_RESET_ETHERCAT=1
 site_ethercat_configure
+# 웹 업데이트용 시스템 설정 도우미가 깔린 PC · 도우미가 읽는 랜카드 기록도 새 것으로 · 수정 목록 211
+if [[ -n "$(site_system_helper_installed_version)" ]]; then
+  site_system_record_nic || site_warn "도우미 랜카드 기록(${SITE_SYSTEM_CONF})을 바꾸지 못했습니다 · bash ${SITE_SYSTEM_ALLOW_SCRIPT}"
+fi
 echo "완료 · 지금 설정 · $(grep '^MASTER0_DEVICE' "${SITE_ETHERCAT_CONF}" 2>/dev/null || echo '없음')"

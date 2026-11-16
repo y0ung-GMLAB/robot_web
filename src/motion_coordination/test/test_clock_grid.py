@@ -23,10 +23,27 @@ def _ts(text: str) -> float:
 # --------------------------------------------------------------------------- #
 
 def test_the_auto_period_is_the_longest_need_plus_the_gap_between_cycles_rounded_up_to_ten():
-    # 920 s 애니 + 초기 이동 5 s → 925 + 회차 사이(장벽 2 + 시작 여유 4) + 2 → 933 → 940 · 수정 목록 188(전에는 930)
-    assert auto_period([925.0, 400.0, 0.0]) == 940.0
-    assert auto_period([932.5]) == 950.0
+    # 수정 목록 206 · 회차 사이 = 회차 끝 0.5 + 시작 여유 1 · 올림 전 여유 없음(188 은 장벽 2 + 시작 여유 4 + 여유 2)
+    # 920 s 애니 + 초기 이동 5 s → 925 + 1.5 = 926.5 → 930(188 은 933 → 940)
+    assert auto_period([925.0, 400.0, 0.0]) == 930.0
+    # 920 s 애니 + 초기 이동 10 s → 930 + 1.5 = 931.5 → 940(188 은 938 → 940 · 10 s 올림) · 남는 8.5 s 가 늦은 시작 한도
+    assert auto_period([930.0]) == 940.0
+    assert auto_period([932.5]) == 940.0, '932.5 + 1.5 = 934 → 940(188 은 950)'
+    assert auto_period([938.5]) == 940.0, '올림 전 여유가 없다 · 938.5 + 1.5 = 940 딱(188 은 950)'
     assert auto_period([]) == 0.0, '아무도 모르면 0 · 시간표 없음'
+
+
+def test_the_gap_between_cycles_is_the_runtime_rule():
+    """자동 회차 간격의 회차 사이 시간은 재생 관리자가 늦음을 가르는 값과 하나(`motion_common.timed_cycle`) · 수정 목록 206"""
+    from motion_common import timed_cycle
+
+    assert clock_grid.CYCLE_START_LEAD_SEC == timed_cycle.INITIAL_MOVE_SETTLE_SEC == 1.0
+    assert clock_grid.CYCLE_BARRIER_SEC == timed_cycle.CYCLE_END_SEC == 0.5
+    period = auto_period([930.0])
+    # 자동 간격이면 늦은 시작 한도 = 간격 − (클립 + 초기 이동 + 여유 + 회차 끝) · 920 s · 10 s → 8.5 s
+    start = 1000.0
+    latest = timed_cycle.latest_start(start, start + period, 920.0, 10.0)
+    assert latest - start == period - (920.0 + 10.0 + 1.0 + 0.5) == 8.5
 
 
 def test_a_period_shorter_than_the_animation_is_refused():

@@ -128,6 +128,35 @@ def test_local_readiness_uses_only_local_active_files(tmp_path):
     assert bridge.payload['request_source'] == 'network_readiness'
 
 
+def test_readiness_hands_back_what_it_approved_for_the_direct_reservation(tmp_path):
+    """수정 목록 209 · 207 · 준비가 통과한 재생 파일 · 실행 설정 · 연동 노드가 초기 위치 예약을 재생 관리자에 바로 보낸다
+    (전에는 `initialize_at` 마다 웹이 프로젝트 · 매핑 YAML 을 다시 읽었다)"""
+    _assets(tmp_path)
+    bridge = _Bridge(_Repository(tmp_path))
+    bridge.current_project_generation = lambda: 7
+    bridge._execution_context.context_id = lambda: 'ctx-7'
+
+    result = local_motion_readiness(bridge)
+
+    assert result['success'] is True
+    assert result['run_request'] == {
+        'motion_file_id': 'local-motion.jsonl', 'mapping_file_id': 'mapping.yaml',
+        'project_id': 'project-a', 'project_generation': 7, 'context_id': 'ctx-7',
+    }
+
+
+def test_readiness_refuses_what_group_prepare_would_refuse(tmp_path):
+    """오프 모드 · 모터 문제 · 전에는 `initialize_at` 의 `group_prepare` 에서야 봤다 · 이제 준비에서 · 시작 전에 이 PC 만 빠진다"""
+    _assets(tmp_path)
+    bridge = _Bridge(_Repository(tmp_path))
+    bridge.group_prepare_gate = lambda: '그룹 실행 준비 불가: 오프 모드'
+
+    result = local_motion_readiness(bridge)
+
+    assert result == {'success': False, 'message': '그룹 실행 준비 불가: 오프 모드'}
+    assert bridge.payload is None, '검사까지 가지 않는다'
+
+
 def test_group_prepare_preserves_local_between_cycle_setting_without_auto_repeat(tmp_path):
     _assets(tmp_path)
     bridge = _Bridge(_Repository(tmp_path))
@@ -170,6 +199,26 @@ def test_group_initialize_at_targets_the_existing_group_session(tmp_path):
     assert bridge.payload['execution_id'] == 'exec-a'
     assert bridge.payload['cycle_number'] == 3
     assert bridge.payload['initialize_monotonic'] == 100.0
+
+
+def test_group_cycle_at_forwards_the_timed_cycle_without_reading_the_project(tmp_path):
+    """시간표 재생 회차 명령 · 서 있는 그룹 세션에 그대로 · 매핑 · 애니 고르기(프로젝트 읽기 약 0.5 s)는 안 한다 · 수정 목록 206"""
+
+    class _NoProjectRead(_Repository):
+        def get_project(self, _project_id):
+            raise AssertionError('회차 명령은 프로젝트를 읽지 않는다')
+
+    bridge = _Bridge(_NoProjectRead(tmp_path))
+    bridge.motion_group_cycle_at = lambda payload: setattr(bridge, 'payload', payload) or {'success': True}
+    result = local_motion_control(bridge, {
+        'command': 'group_cycle_at', 'execution_id': 'tt-s1', 'cycle_number': 4,
+        'start_monotonic': 1234.5, 'next_start_monotonic': 2174.5, 'network_operation_id': 'tt-cycle-a',
+    })
+    assert result['success'] is True
+    assert bridge.payload == {
+        'execution_id': 'tt-s1', 'cycle_number': 4, 'start_monotonic': 1234.5,
+        'next_start_monotonic': 2174.5, 'network_operation_id': 'tt-cycle-a', 'group_execution': True,
+    }
 
 
 def test_stop_now_uses_coordination_safety_stop_path(tmp_path):

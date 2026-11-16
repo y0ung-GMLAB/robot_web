@@ -5,8 +5,8 @@
 #   갱신    · bash ~/robot_web/scripts/install_speaker.sh      (같은 명령 · 몇 번 쳐도 같은 결과)
 #
 # 하는 일 · ROS 2(기본만) · 그룹 메시지 빌드(모터 쪽 빌드 안 함) · 사운드 장치 독점 · 사운드 카드 자동 선택 ·
-#           speaker-app 서비스 등록(전원만 켜면 뜸) · 자동 업데이트·절전 끄기 · 방화벽 같은 망 허용 ·
-#           옛 ~/speaker_app 에서 음원·설정 옮기기
+#           speaker-app 서비스 등록(전원만 켜면 뜸) · 자동 업데이트·절전·fwupd 끄기 · 방화벽 같은 망 허용 ·
+#           웹 업데이트용 시스템 설정 도우미(수정 목록 211) · 옛 ~/speaker_app 에서 음원·설정 옮기기
 # 로봇 PC 서비스(모터·웹 :8000·연동)는 깔지 않는다 · 이 PC 는 스피커만 한다
 #
 #   --dry-run   바꾸지 않고 할 일만 찍는다
@@ -65,9 +65,13 @@ if [[ "${DRY_RUN}" != true && "${CODE_ONLY}" != true ]] && ! sudo -n true 2>/dev
 fi
 
 if [[ "${CODE_ONLY}" == true ]]; then
-  step "1. 건너뜀 · 코드만 갱신 (현장 준비는 첫 설치 때 끝남)"
+  # 현장 준비는 첫 설치 때 끝남 · 시스템 설정(Wi-Fi 칩 절전 · fwupd)만 고정 도우미로(sudo -n · 인자 없이) ·
+  # 도우미가 없거나 옛 버전이면 까는 명령 한 줄만 찍고 계속 · 수정 목록 211
+  step "1. 코드만 갱신 · 시스템 설정은 고정 도우미로 (현장 준비는 첫 설치 때 끝남)"
+  site_system_apply_code_only || echo "  !! 시스템 설정 일부를 못 했습니다 · 위 줄의 안내대로 · 업데이트는 계속합니다" >&2
 else
-step "1. 자동 업데이트·절전 끄기 · 로그아웃해도 유지 · 방화벽 같은 망 허용 · 시간대 · 웹 관리 권한"
+step "1. 자동 업데이트·절전·fwupd 끄기 · 로그아웃해도 유지 · 방화벽 같은 망 허용 · 시간대 · 웹 관리 권한"
+# fwupd 끄기(수정 목록 210)도 여기 · 스피커는 EtherCAT 이 없지만 자동 업데이트와 같은 결(전시 PC 가 혼자 펌웨어를 보지 않게)
 site_disable_interruptions
 if loginctl show-user "$(id -un)" 2>/dev/null | grep -q '^Linger=yes'; then
   site_note "linger 이미 켜짐"
@@ -78,6 +82,8 @@ site_firewall
 # 로봇 PC 와 같은 것 · 2026-10-09 (사용자 · 수정 목록 89) · 시간대 · 웹에서 Wi-Fi·시간대 바꾸기 허용
 site_timezone
 site_web_admin_permissions "$(id -un)"
+# 웹 업데이트용 시스템 설정 도우미 · 로봇 PC 와 같은 것 · 다음 웹 업데이트부터 칩 절전 · fwupd 를 비밀번호 없이 · 수정 목록 211
+site_system_helper_install "$(id -un)" || echo "  !! 시스템 설정 도우미를 깔지 못했습니다 · 설치는 계속 · 나중에 bash ${SITE_SYSTEM_ALLOW_SCRIPT}" >&2
 fi
 
 # main → humble 전환 · 2026-10-27 (브랜치를 ROS 버전 이름 humble · jazzy 로 나눔)

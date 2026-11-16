@@ -6,11 +6,17 @@
 1분마다 시작 실패만 했다 · 사람이 눈으로 볼 때까지 아무도 몰랐다.
 
 supervisor 는 0.5초마다 `safety_status` 를 보낸다 · 여기서 그 나이를 잰다.
+아래는 첫 상태(= supervisor 「준비 끝」)를 받은 **뒤**의 생존 감시다 · 0.5 s 마다 오던 것이 끊긴 것.
 
     2초 넘게 안 옴         「supervisor 응답 없음」 · 시작 막음 · 화면 표시
     10초 넘게 안 옴        상위 서비스 재시작 (Motor Manager 는 따로라 홀드 유지)
     재생 중인데 5초 넘게    「재생 명령 수신 정지」 · 스레드 덤프 신호 → 재시작
     재생 명령을 못 받음
+
+첫 상태 전은 「아직 안 뜸」 · 고장이 아니다 · 시작 막음은 `StartupReadiness`(「프로그램 시작 중」) ·
+`STARTUP_FAILURE_SEC` 넘게 한 번도 안 오면 「supervisor 시작 안 됨」 · 화면 표시 + 재시작 한 번 ·
+전에는 기동 뒤 20 s(`BOOT_GRACE_SEC`) 만 기다리고 곧바로 「응답 없음」 + 재시작 · 느린 PC 의 정상 기동을
+끊고 처음부터 다시 띄웠다 · 수정 목록 202.
 
 재시작은 5분에 한 번까지 · 기록은 `log/supervisor_watchdog.jsonl` (원격 확인용).
 """
@@ -22,12 +28,14 @@ import time
 from pathlib import Path
 from typing import Any, Callable, Dict, Optional
 
+#: 아래 셋은 첫 상태를 받은 뒤의 생존 감시 · supervisor 는 0.5 s 마다 보낸다
 LIVENESS_SEC = 2.0
 RESTART_AFTER_SEC = 10.0
 RECEPTION_STOP_SEC = 5.0
 RESTART_COOLDOWN_SEC = 300.0
-#: 막 떴을 때 · supervisor 가 아직 안 떴을 수 있다
-BOOT_GRACE_SEC = 20.0
+#: 기동 뒤 첫 상태를 이만큼 한 번도 못 받으면 「supervisor 시작 안 됨」 · 그 전은 「아직 안 뜸」(고장 아님) ·
+#: 느린 PC 도 넘지 않을 만큼 길게 · 전 `BOOT_GRACE_SEC` 20 s · 수정 목록 202
+STARTUP_FAILURE_SEC = 300.0
 
 LOG_NAME = 'supervisor_watchdog.jsonl'
 
@@ -63,11 +71,18 @@ class SupervisorWatchdog:
     def silence_sec(self) -> float:
         return self._monotonic() - (self._safety_at if self._safety_at is not None else self._started)
 
+    @property
+    def ready(self) -> bool:
+        """첫 상태를 받았나 · supervisor 「준비 끝」 · 수정 목록 202"""
+        return self._safety_at is not None
+
     def unresponsive_reason(self) -> str:
-        """시작을 막을 사유 · 막 떴을 때는 기다린다."""
-        if self._safety_at is None and self.silence_sec() < BOOT_GRACE_SEC:
-            return ''
+        """고장으로 볼 사유(화면 빨간 줄 · 시작 막음) · 아직 안 뜬 것은 고장이 아니다 · 수정 목록 202"""
         silence = self.silence_sec()
+        if self._safety_at is None:
+            if silence < STARTUP_FAILURE_SEC:
+                return ''
+            return f'supervisor 시작 안 됨 · {silence:.0f}초 동안 상태를 한 번도 받지 못함'
         if silence <= LIVENESS_SEC:
             return ''
         return f'supervisor 응답 없음 · {silence:.0f}초째 상태 수신 없음'
@@ -93,9 +108,12 @@ class SupervisorWatchdog:
     def tick(self, run_state: str) -> str:
         """재시작했으면 그 사유 · 아니면 빈 글자."""
         silence = self.silence_sec()
-        if self._safety_at is None and silence < BOOT_GRACE_SEC:
-            return ''
-        if silence >= RESTART_AFTER_SEC:
+        if self._safety_at is None:
+            # 아직 안 뜸 · 오래 안 뜨면 그때 한 번 · 수정 목록 202
+            if silence < STARTUP_FAILURE_SEC:
+                return ''
+            reason = f'supervisor 시작 안 됨 {silence:.0f}초 · 자동 재시작'
+        elif silence >= RESTART_AFTER_SEC:
             reason = f'supervisor 응답 없음 {silence:.0f}초 · 자동 재시작'
         elif self._safety_at is not None and silence <= LIVENESS_SEC and self._reception_stopped(
             str(run_state or '').strip().lower(),
@@ -149,6 +167,8 @@ class SupervisorWatchdog:
         return {
             'ok': not self.unresponsive_reason(),
             'message': self.unresponsive_reason(),
+            # 첫 상태를 받았나 · 전이면 「아직 안 뜸」 · 수정 목록 202
+            'ready': self.ready,
             'silence_sec': round(self.silence_sec(), 1),
             'restart_count': len(rows),
             'last_restart': rows[-1] if rows else None,

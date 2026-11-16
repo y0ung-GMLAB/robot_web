@@ -203,6 +203,12 @@ export function collectIssues(snap, sched, { connected = true } = {}) {
   }
   const watchdog = String(snap.supervisor_watchdog?.message || '');
   if (watchdog) bad('모터 제어가 응답하지 않습니다', watchdog);
+  // 프로그램 시작이 오래 안 끝남(supervisor · 재생 관리자 첫 상태 없음) · 판정은 서버 · supervisor 쪽은 위 줄이 이미 말한다 · 수정 목록 202
+  const startup = snap.startup || {};
+  if (startup.overdue && !watchdog) {
+    bad('프로그램 시작이 끝나지 않았습니다', String(startup.message || ''),
+      { kind: 'restart-program', label: '프로그램 다시 시작' });
+  }
   const absolute = String(snap.minas_absolute_blocker || '');
   if (absolute) {
     bad('앱솔루트 방식이 확인되지 않아 모터를 움직일 수 없습니다', absolute,

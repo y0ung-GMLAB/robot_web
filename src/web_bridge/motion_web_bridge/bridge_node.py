@@ -17,6 +17,7 @@ from fastapi import FastAPI, HTTPException, Request
 from motion_common import generation, joint_mapping, minas_absolute, motion_segment, multiturn_clear, process_alive, rpc, topics, upper_restart
 from motion_common import paths as common_paths
 from motion_common import motor_ref as motor_ref_rules
+from motion_common import stop_fence
 from fastapi.responses import JSONResponse
 from rclpy.node import Node
 from rclpy.qos import DurabilityPolicy, QoSProfile, ReliabilityPolicy
@@ -31,11 +32,12 @@ from .ethercat_alias_manager import EthercatAliasError, EthercatAliasManager
 from .coordination_bridge import (
     CoordinationWebBridge, LeaveNotice, local_motion_control, local_motion_readiness,
 )
-from . import motion_file_analysis, motion_joint_values, motor_config_rules, run_mode_gate
+from . import after_response, motion_file_analysis, motion_joint_values, motor_config_rules, run_mode_gate
 from .execution_context_service import ExecutionContextService
 from .manual_motor_commands import ManualMotorCommandService
 from .schedule_end import ScheduleEndService
 from .supervisor_watchdog import SupervisorWatchdog
+from .startup_ready import StartupReadiness
 from .auto_backup import AutoBackupService
 from .absolute_setup import AbsoluteSetup, reference_prompt
 from .drive_maintenance import DriveMaintenance
@@ -87,12 +89,13 @@ from .servo_alarm_policy import (
 #: 스케줄 노드 상태(1초마다)가 이보다 늙었으면 「구간 안」 을 믿지 않는다 · 수정 목록 131
 SCHEDULE_STATUS_FRESH_SEC = 10.0
 
-#: 그룹 실행 중 연동 노드의 `local-status` 질문이 이만큼 끊기면 이 PC 재생을 세운다(연동 노드가 죽음) ·
-#: 1.0초였다 · 연동 노드 쪽 기준을 1.5초로 늘리면서(수정 목록 172) 그보다 길게 · 웹 서버가 잠깐
-#: 멈칫해 질문이 밀린 것만으로 이 PC 혼자 서지 않게 · 판단은 연동 노드가 먼저 한다
-COORDINATION_POLL_TIMEOUT_SEC = 2.0
-#: 연동 노드 프로세스가 **살아 있는데** 질문이 끊겼을 때 기다리는 한도 · 끊김 시험 E (2026-11-08) ·
-#: 연동 노드가 통째로 2~3 s 멈췄다 깨어나는 일이 실물에 있었다(B) · 그것만으로 이 PC 가 서지 않게 ·
+#: 웹 역감시 · **고장 검출기** · 그룹 실행 중 연동 노드의 「살아 있음」(`topics.COORDINATION_ALIVE` · 0.5 s 마다)이
+#: 이만큼 끊기고 프로세스도 없으면 이 PC 재생을 세운다(연동 노드가 죽음 · 이 PC 는 그룹 명령을 더 못 받는다) ·
+#: 전에는 「연동 노드가 웹 `local-status` 를 50 ms 마다 물었나」 를 봤다 · 웹이 바쁘면 그 질문이 밀려 살아 있는 연동
+#: 노드를 죽은 것으로 볼 수 있었다 · 이제 연동 노드가 로컬 DDS 로 직접 알린다 · 수정 목록 209 (전 172 · 184 E)
+COORDINATION_ALIVE_TIMEOUT_SEC = 2.0
+#: 연동 노드 프로세스가 **살아 있는데** 알림이 끊겼을 때 기다리는 한도 · **고장 검출기** · 끊김 시험 E (2026-11-08) ·
+#: 연동 노드 실행기가 통째로 2~3 s 멈췄다 깨어나는 일이 실물에 있었다(B) · 그것만으로 이 PC 가 서지 않게 ·
 #: 정말 멈춰 버린 연동 노드는 systemd 감시(WatchdogSec 15 s · G)가 다시 띄운다 · 그보다 짧게
 COORDINATION_SLOW_TIMEOUT_SEC = 10.0
 
@@ -345,17 +348,22 @@ class MotionWebBridge(Node):
         self._schedule_status_lock = threading.Lock()
         self._schedule_status: Dict[str, Any] = {}
         self._schedule_status_monotonic = 0.0
-        self._coordination_poll_lock = threading.Lock()
-        self._coordination_poll_received_monotonic = 0.0
+        # 연동 노드 「살아 있음」 받은 때 · 웹 역감시 · 수정 목록 209
+        self._coordination_alive_lock = threading.Lock()
+        self._coordination_alive_monotonic = 0.0
         self._coordination_watchdog_stop_execution_id = ''
         self._safety_status_lock = threading.Lock()
         self._safety_status: Dict[str, Any] = {}
+        # safety 상태가 올 때마다 깨운다 · 「정지 정리 끝」 을 시간이 아니라 상태로 기다린다 · 수정 목록 200
+        self._safety_status_changed = threading.Condition(self._safety_status_lock)
         # supervisor 생존·수신 감시 · 수정 목록 29 + 14 · 상태 콜백보다 먼저 만든다
         self.supervisor_watchdog = SupervisorWatchdog(
             log_dir=Path(self.workspace_root) / 'log',
             restart=self._restart_upper_services_for_watchdog,
             dump_threads=self._dump_supervisor_threads,
         )
+        # 「준비 끝」 · supervisor · 재생 관리자 첫 상태 · 연동 노드 · 시작 판정이 시간 대신 본다 · 수정 목록 202
+        self._startup = StartupReadiness()
         self._monitoring_motion_mapping_lock = threading.Lock()
         self._monitoring_motion_mapping_context_id = ''
         self._monitoring_motion_mapping_rows: List[Dict[str, Any]] = []
@@ -629,6 +637,13 @@ class MotionWebBridge(Node):
             String,
             self.safety_status_topic,
             self._safety_status_callback,
+            10,
+        )
+        # 연동 노드 「살아 있음」 · 웹 역감시의 근거 · 연동 노드가 로컬 도메인에 직접 낸다 · 수정 목록 209
+        self._coordination_alive_subscription = self.create_subscription(
+            String,
+            topics.COORDINATION_ALIVE,
+            self._coordination_alive_callback,
             10,
         )
         self._coordination_web_bridge = CoordinationWebBridge(
@@ -972,6 +987,10 @@ class MotionWebBridge(Node):
             return
         if not isinstance(payload, dict):
             return
+        # 재생 관리자가 떴다 · 프로젝트 거름 앞 · 프로젝트가 없어도 「떴다」 는 맞다 · 수정 목록 202
+        startup = getattr(self, '_startup', None)
+        if startup is not None:
+            startup.mark('motion_run_manager')
         if not self._project.payload_matches_selected(payload):
             return
         with self._motion_run_lock:
@@ -987,9 +1006,34 @@ class MotionWebBridge(Node):
         if isinstance(payload, dict):
             with self._safety_status_lock:
                 self._safety_status = payload
+                changed = getattr(self, '_safety_status_changed', None)
+                if changed is not None:
+                    changed.notify_all()
             watchdog = getattr(self, 'supervisor_watchdog', None)
             if watchdog is not None:
                 watchdog.safety_received(payload)
+            # supervisor 가 떴다 · 수정 목록 202
+            startup = getattr(self, '_startup', None)
+            if startup is not None:
+                startup.mark('supervisor')
+
+    def wait_for_stop_settled(self, marker, timeout_sec: float) -> bool:
+        """이 정지(표지)의 「정지 정리 끝」 을 기다린다 · safety 상태가 올 때마다 깨어 본다 · 수정 목록 200
+
+        감독은 재생 노드가 정지 표지를 보고 정지 전 재생 세션을 닫았다고 알려 올 때 `stop_settled` 를
+        세운다 · 상한(`timeout_sec`)은 고장 감지뿐(재생 노드가 멈춰 알리지 못함) · 넘기면 거짓.
+        """
+        changed = getattr(self, '_safety_status_changed', None)
+        if changed is None or marker is None:
+            return False
+        deadline = time.monotonic() + max(float(timeout_sec), 0.0)
+        with changed:
+            while not stop_fence.settled_for(self._safety_status, marker):
+                remaining = deadline - time.monotonic()
+                if remaining <= 0.0:
+                    return False
+                changed.wait(remaining)
+            return True
 
     def _wait_for_motion_mapping_result(
         self,
@@ -1071,10 +1115,13 @@ class MotionWebBridge(Node):
             motion_state['project_generation'] = current_generation
 
         watchdog = getattr(self, 'supervisor_watchdog', None)
+        startup = getattr(self, '_startup', None)
         return {
             'bridge_state': 'ok',
             # supervisor 살아 있나 · 자동 재시작 횟수 · 수정 목록 29
             'supervisor_watchdog': watchdog.snapshot() if watchdog is not None else {},
+            # 프로그램 「준비 끝」 · 오래 안 끝나면 `overdue` → 확인할 일 · 수정 목록 202
+            'startup': startup.status() if startup is not None else {},
             'bridge_instance_id': str(getattr(self, '_bridge_instance_id', '')),
             'bridge_started_at': getattr(self, '_bridge_started_at', None),
             'project_generation': self.current_project_generation(),
@@ -1156,10 +1203,19 @@ class MotionWebBridge(Node):
         )
         return {'success': True}
 
-    def coordination_local_status(self) -> Dict[str, Any]:
-        """Return only the runtime fields needed by the loopback DDS adapter."""
-        with self._coordination_poll_lock:
-            self._coordination_poll_received_monotonic = time.monotonic()
+    def coordination_local_status(self, *, link_down: bool = False) -> Dict[str, Any]:
+        """연동 노드에 주는 웹 쪽 칸 · 0.5 s 마다 · 못 받아도 그룹에서 빠지지 않는다 · 수정 목록 209
+
+        재생 상태 · 안전 상태는 연동 노드가 재생 관리자 · 감독에서 로컬 DDS 로 직접 받는다(`local_link.py`) ·
+        여기 실린 같은 칸은 그 연결이 없을 때(되돌리기)만 쓴다 · 이 질문은 더 이상 연동 노드 생사의 근거가
+        아니다(웹 역감시는 `topics.COORDINATION_ALIVE`).
+
+        `link_down` · 연동 노드가 로컬 연결을 못 열어 웹 길로 되돌린 동안만 · 그때는 「살아 있음」 토픽을 낼 길이 없다 ·
+        이 질문을 「살아 있음」 으로 센다(209 전과 같은 근거) · 안 세면 그 PC 의 그룹 재생을 역감시가 바로 세웠다 · 206 · 209 잇기
+        """
+        if link_down:
+            with self._coordination_alive_lock:
+                self._coordination_alive_monotonic = time.monotonic()
         with self._motion_run_lock:
             motion_run_status = (
                 dict(self._motion_run_status) if self._motion_run_status else {}
@@ -1168,9 +1224,14 @@ class MotionWebBridge(Node):
             safety_status = (
                 dict(self._safety_status) if self._safety_status else {}
             )
+        startup = getattr(self, '_startup', None)
         return {
             'bridge_state': 'ok',
             'sampled_monotonic': time.monotonic(),
+            # 「준비 끝」 · 이 웹 프로세스 번호(다시 뜨면 바뀜) · 연동 노드가 기동 · 다시 시작을 시간 대신
+            # 이것으로 가른다(전 90 s · 120 s) · 칸이 없는 옛 웹은 답한 것을 준비 끝으로 본다 · 수정 목록 202
+            'ready': startup.ready if startup is not None else True,
+            'bridge_instance_id': str(getattr(self, '_bridge_instance_id', '')),
             'motion_run_status': motion_run_status,
             'safety_status': safety_status,
             # 운전 모드 · 하트비트로 마스터에게 · 오프·수동 PC 는 그룹 시작에서 뺀다 · 수정 목록 30-6
@@ -1230,6 +1291,11 @@ class MotionWebBridge(Node):
         self._operation_mode_cache = (now, str(mode or ''))
         return self._operation_mode_cache[1]
 
+    def _coordination_alive_callback(self, msg: String) -> None:
+        """연동 노드 「살아 있음」 · 내용은 진단용 · 받은 때만 본다 · 수정 목록 209"""
+        with self._coordination_alive_lock:
+            self._coordination_alive_monotonic = time.monotonic()
+
     def _coordination_watchdog_callback(self) -> None:
         """Stop a local group run if its coordination process disappears."""
         with self._motion_run_lock:
@@ -1244,10 +1310,10 @@ class MotionWebBridge(Node):
         if not active:
             self._coordination_watchdog_stop_execution_id = ''
             return
-        with self._coordination_poll_lock:
-            received = self._coordination_poll_received_monotonic
+        with self._coordination_alive_lock:
+            received = self._coordination_alive_monotonic
         quiet = time.monotonic() - received if received else None
-        if quiet is not None and quiet <= COORDINATION_POLL_TIMEOUT_SEC:
+        if quiet is not None and quiet <= COORDINATION_ALIVE_TIMEOUT_SEC:
             self._coordination_watchdog_slow_noted = ''
             return
         if self._coordination_watchdog_stop_execution_id == execution_id:
@@ -1260,13 +1326,16 @@ class MotionWebBridge(Node):
             if getattr(self, '_coordination_watchdog_slow_noted', '') != execution_id:
                 self._coordination_watchdog_slow_noted = execution_id
                 self._watchdog_log(
-                    f'[연동 역감시] 연동 노드 질문 {quiet:.1f} s 끊김 · 프로세스는 살아 있음 · '
+                    f'[연동 역감시] 연동 노드 살아 있음 알림 {quiet:.1f} s 끊김 · 프로세스는 살아 있음 · '
                     f'{COORDINATION_SLOW_TIMEOUT_SEC:.0f} s 까지 기다림 · 재생 계속'
                 )
             return
         self._watchdog_log(
             '[연동 역감시] '
-            + (f'연동 노드 질문 {quiet:.1f} s 끊김 · ' if quiet is not None else '연동 노드 질문 없음 · ')
+            + (
+                f'연동 노드 살아 있음 알림 {quiet:.1f} s 끊김 · ' if quiet is not None
+                else '연동 노드 살아 있음 알림 없음 · '
+            )
             + ('살아 있지만 너무 오래 조용함' if alive else '연동 노드 프로세스 없음')
             + ' · 이 PC 재생 정지'
         )
@@ -1464,6 +1533,11 @@ class MotionWebBridge(Node):
         silent = watchdog.unresponsive_reason() if watchdog is not None else ''
         if silent:
             return silent
+        # 아직 안 뜸(supervisor · 재생 관리자 첫 상태 전) · 고장 글이 아니라 「시작 중」 · 수정 목록 202
+        startup = getattr(self, '_startup', None)
+        starting = startup.blocker() if startup is not None else ''
+        if starting:
+            return starting
         lock = getattr(self, '_lock', None)
         if lock is None:
             motion_state = copy.deepcopy(getattr(self, '_motion_state', None))
@@ -2833,15 +2907,26 @@ class MotionWebBridge(Node):
                           'stop_message': result.get('message') or ''}
         return result
 
-    def motion_group_prepare(self, payload: Dict[str, Any]) -> Dict[str, Any]:
+    def group_prepare_gate(self) -> str:
+        """그룹 실행 준비 관문 · 오프 모드 · 모터 문제 · 막혔으면 사유 · 수정 목록 209 · 207
+
+        `group_prepare`(이 웹 길)와 준비 검사(`local-readiness`)가 같이 본다 · 연동 노드는 준비가 끝난 뒤
+        그룹 초기 위치 예약을 재생 관리자에 바로 보낸다 · 그래서 같은 관문을 준비 때 미리 본다.
+        """
         # 오프 모드 · 원격 그룹 시작도 이 PC 에서는 받지 않는다 (준비 거절 →
-        # 코디네이터가 전체 시작을 취소한다) · 정지·취소 명령은 계속 받는다
+        # 코디네이터가 이 PC 를 뺀다) · 정지·취소 명령은 계속 받는다
         off = run_mode_gate.motion_command_block_reason(self)
         if off:
-            return {'success': False, 'message': f'그룹 실행 준비 불가: {off}'}
+            return f'그룹 실행 준비 불가: {off}'
         blocker = self.motor_runtime_control_blocker()
         if blocker:
-            return {'success': False, 'message': f'그룹 실행 준비 불가: {blocker}'}
+            return f'그룹 실행 준비 불가: {blocker}'
+        return ''
+
+    def motion_group_prepare(self, payload: Dict[str, Any]) -> Dict[str, Any]:
+        blocked = self.group_prepare_gate()
+        if blocked:
+            return {'success': False, 'message': blocked}
         parked = self.schedule_end_start_blocker(payload)
         if parked:
             return {'success': False, 'message': f'그룹 실행 준비 불가: {parked}'}
@@ -2852,6 +2937,10 @@ class MotionWebBridge(Node):
 
     def motion_group_initialize_at(self, payload: Dict[str, Any]) -> Dict[str, Any]:
         return self._request_motion_run('group_initialize_at', payload, timeout_sec=2.0)
+
+    def motion_group_cycle_at(self, payload: Dict[str, Any]) -> Dict[str, Any]:
+        """시간표 재생 회차 명령 · 초기 이동 → 시작을 재생 관리자가 제 시계로 · 수정 목록 206"""
+        return self._request_motion_run('group_cycle_at', payload, timeout_sec=2.0)
 
     def motion_group_join_commit(self, payload: Dict[str, Any]) -> Dict[str, Any]:
         """도는 그룹에 복귀 · 진행 PC 가 합류를 확정했다 · 수정 목록 30-3"""
@@ -2879,6 +2968,7 @@ class MotionWebBridge(Node):
             'group_prepare',
             'group_start_at',
             'group_initialize_at',
+            'group_cycle_at',
             'automation_configure',
             'automation_start',
             'automation_disable',
@@ -3074,6 +3164,8 @@ def create_app(bridge: MotionWebBridge) -> FastAPI:
     register_stream_routes(app, bridge)
     register_robot_pack_routes(app, bridge)
 
+    # 맨 바깥 · 「장비에 적용」 · 「프로그램 다시 시작」 의 서비스 재시작은 응답을 다 보낸 뒤에 · 수정 목록 204
+    after_response.wrap(app)
     return app
 
 

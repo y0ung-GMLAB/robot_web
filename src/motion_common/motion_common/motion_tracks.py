@@ -51,6 +51,16 @@ class JointTrack:
         self.rows = array(_INT)
 
     @classmethod
+    def from_arrays(cls, motion_id: str, frames: array, times: array, values: array, rows: array) -> 'JointTrack':
+        """이미 시각 순인 배열 넷 그대로 · 애니 변환본(디스크)에서 읽은 것 · 수정 목록 208"""
+        track = cls(motion_id)
+        track.frames = frames
+        track.times = times
+        track.values = values
+        track.rows = rows
+        return track
+
+    @classmethod
     def single(cls, motion_id: str, time_sec: float, value: float, *, frame: int = 0, row: int = 0) -> 'JointTrack':
         """한 점짜리 · 초기 위치 대체값(애니에 이 조인트가 없을 때)"""
         track = cls(motion_id)

@@ -30,17 +30,48 @@ def _watchdog(tmp_path):
     return dog, clock, calls
 
 
-def test_boot_grace_then_silence_blocks_starts(tmp_path):
+def test_silence_after_the_first_status_blocks_starts(tmp_path):
+    """첫 상태를 받은 뒤의 생존 감시 · 2 s 안 오면 막음 · 수정 목록 29 (전 시험의 기동 20 s 부분은 아래 202 로)"""
     dog, clock, calls = _watchdog(tmp_path)
-    assert dog.unresponsive_reason() == ''          # 막 떴다 · supervisor 를 기다린다
-    clock.advance(wd.BOOT_GRACE_SEC + 1)
-    assert 'supervisor 응답 없음' in dog.unresponsive_reason()
-
     dog.safety_received({})
-    assert dog.unresponsive_reason() == ''
+    assert dog.unresponsive_reason() == '' and dog.ready is True
     clock.advance(wd.LIVENESS_SEC + 0.5)
     assert 'supervisor 응답 없음' in dog.unresponsive_reason()
     assert calls == []
+
+
+def test_a_slow_supervisor_start_is_not_a_failure(tmp_path):
+    """느린 PC · supervisor 첫 상태가 2분 뒤 · 「아직 안 뜸」 · 재시작 · 빨간 줄 없음 · 수정 목록 202
+
+    전에는 기동 20 s 뒤 「응답 없음」 + 상위 서비스 재시작 · 정상 기동을 끊고 처음부터 다시 띄웠다.
+    """
+    dog, clock, calls = _watchdog(tmp_path)
+    for _ in range(120):
+        clock.advance(1.0)
+        assert dog.tick('idle') == ''
+        assert dog.unresponsive_reason() == ''
+    assert calls == []
+    assert dog.snapshot()['ready'] is False and dog.snapshot()['ok'] is True
+
+    dog.safety_received({})
+    assert dog.ready is True
+    clock.advance(wd.RESTART_AFTER_SEC + 1)
+    assert '응답 없음' in dog.tick('idle'), '첫 상태 뒤 끊김은 진짜 · 10 s 뒤 재시작'
+    assert calls == ['restart']
+
+
+def test_a_supervisor_that_never_starts_is_reported_and_restarted_once(tmp_path):
+    dog, clock, calls = _watchdog(tmp_path)
+    clock.advance(wd.STARTUP_FAILURE_SEC - 1)
+    assert dog.tick('idle') == '' and dog.unresponsive_reason() == ''
+    clock.advance(2)
+    assert 'supervisor 시작 안 됨' in dog.unresponsive_reason()
+    assert 'supervisor 시작 안 됨' in dog.tick('idle')
+    assert calls == ['restart']
+    clock.advance(30)
+    assert dog.tick('idle') == '', '5분에 한 번까지'
+    assert calls == ['restart']
+    assert 'supervisor 시작 안 됨' in dog.snapshot()['message']
 
 
 def test_ten_seconds_of_silence_restarts_once_then_cools_down(tmp_path):

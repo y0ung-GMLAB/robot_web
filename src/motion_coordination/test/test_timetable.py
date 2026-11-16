@@ -211,22 +211,38 @@ def test_a_stop_outside_the_window_is_not_written_onto_the_next_window():
     assert nxt.timeline is not None and nxt.timeline.anchor_unix == _ts('2026-11-10 10:01:00')
 
 
-def test_a_stop_just_before_the_window_still_stops_it():
-    """1회차 준비는 창 시작 약 30 s 전에 들어간다 · 그때 누른 정지는 그 창을 세운다"""
-    now = _ts('2026-11-10 09:59:30')
-    stopped, plan_id = stop_plan(_clock(), issuer='floating1', after_cycle=False, now_unix=now)
-    assert plan_id and choose(stopped, now + 120.0, operation_mode='schedule').reason == '정지됨'
+def test_a_stop_before_the_window_stops_it_only_once_a_pc_holds_its_first_cycle():
+    """운영시간 시작 전 정지 · 그 운영시간 1회차 준비에 들어간 PC 가 있을 때만(쥔 실행 = 그 운영시간 이름) 그 운영시간을 세운다
 
-
-def test_a_stale_stop_left_by_an_older_master_is_ignored():
-    """191 까지의 마스터가 남긴 것 · 01:26 에 08:30 창 이름으로 적힌 즉시 정지"""
+    수정 목록 201 · 전에는 「시작 60 s 전부터」(`STOP_ACTIVE_LEAD_SEC`)로 짐작했다 · 그 안이면 아무 PC 도 준비에 안 들어갔어도
+    그 운영시간이 통째로 섰고(이 시험 첫 줄이 옛 코드에서 실패) · 그 밖이면 준비에 들어간 PC 가 있어도 안 섰다(둘째 줄).
+    """
     window_plan = choose(_clock(), _ts('2026-11-10 09:00:00'), operation_mode='schedule').timeline.plan_id
-    stale = _clock(stop={'plan_id': window_plan, 'mode': 'now'}, halt={'plan_id': window_plan, 'at_unix': _ts('2026-11-10 01:26:03')})
-    choice = choose(stale, _ts('2026-11-10 09:59:40'), operation_mode='schedule')
-    assert choice.timeline is not None and choice.timeline.plan_id == window_plan, '창 시작 전 준비'
-    assert (choice.halt_plan_id, choice.halt_at_unix) == (window_plan, _ts('2026-11-10 01:26:03')), '기록은 남음 · 그 전 실행만 세움'
-    inside = replace(stale, halt={'plan_id': window_plan, 'at_unix': _ts('2026-11-10 13:00:00')})
-    assert choose(inside, _ts('2026-11-10 13:00:10'), operation_mode='schedule').reason == '정지됨', '창 안 정지는 그대로'
+    config = _clock()
+    now = _ts('2026-11-10 09:59:30')
+    assert stop_plan(config, issuer='floating1', after_cycle=False, now_unix=now) == (config, ''), '준비 든 PC 없음 · 그대로'
+    early = _ts('2026-11-10 09:58:00')
+    stopped, plan_id = stop_plan(config, issuer='floating1', after_cycle=False, now_unix=early, held_plan_id=window_plan)
+    assert plan_id == window_plan
+    assert choose(stopped, early + 300.0, operation_mode='schedule').reason == '정지됨'
+    other = stop_plan(config, issuer='floating1', after_cycle=False, now_unix=now, held_plan_id='tt-s5')
+    assert other[1] == 'tt-s5', '다른(지난) 운영시간 회차를 쥔 PC 만 세운다 · 다음 운영시간은 그대로'
+    assert choose(other[0], now + 120.0, operation_mode='schedule').timeline is not None
+
+
+def test_a_stop_names_one_operating_hours_and_never_the_next():
+    """정지는 그 운영시간 이름에만 · 다음 운영시간(다른 이름)은 정시 · 지난 운영시간 이름의 기록은 아무것도 세우지 않는다
+
+    192 의 「창 시작 60 s 전보다 이른 정지 기록은 가림」(`_stale_stop`)은 없앴다 · 적는 쪽(`stop_plan`)이 운영시간 밖
+    정지를 다음 운영시간 이름으로 적지 않는다 · 수정 목록 201
+    """
+    window_plan = choose(_clock(), _ts('2026-11-10 09:00:00'), operation_mode='schedule').timeline.plan_id
+    inside = _clock(stop={'plan_id': window_plan, 'mode': 'now'}, halt={'plan_id': window_plan, 'at_unix': _ts('2026-11-10 13:00:00')})
+    assert choose(inside, _ts('2026-11-10 13:00:10'), operation_mode='schedule').reason == '정지됨', '그 운영시간 안 정지'
+    assert choose(inside, _ts('2026-11-10 17:59:00'), operation_mode='schedule').reason == '정지됨', '끝까지'
+    tomorrow = choose(inside, _ts('2026-11-11 09:59:40'), operation_mode='schedule')
+    assert tomorrow.timeline is not None and tomorrow.timeline.plan_id != window_plan, '다음 운영시간은 정시'
+    assert choose(inside, _ts('2026-11-10 13:00:10'), operation_mode='schedule').window_end_unix == _ts('2026-11-10 18:00:00')
 
 
 # --------------------------------------------------------------------------- #
@@ -245,13 +261,22 @@ def test_a_group_stop_holds_until_the_end_of_that_operating_hours_and_not_the_ne
 
 
 def test_a_stop_pressed_during_cycle_1_prep_holds_that_operating_hours():
-    """1회차 준비 중(창 시작 −60 s 이후) 정지 · 그 운영시간 전체 · 192 규칙(그 전 정지는 안 걸림)은 그대로"""
-    before = _ts('2026-11-10 09:59:30')
-    stopped, _ = stop_plan(_clock(), issuer='floating1', after_cycle=False, now_unix=before)
-    assert timetable.stop_holds(stopped, _ts('2026-11-10 10:30:00'))
-    early = _ts('2026-11-10 09:50:00')
-    stale, _ = stop_plan(_clock(), issuer='floating1', after_cycle=False, now_unix=early)
-    assert not timetable.stop_holds(stale, _ts('2026-11-10 10:30:00'))
+    """1회차 준비 중(그 운영시간 회차를 쥔 PC 가 있음) 정지 · 그 운영시간 전체 · 192 규칙(준비 전 정지는 안 걸림)은 그대로
+
+    수정 목록 201 · 「준비 중」 을 시각(창 시작 −60 s)이 아니라 쥔 실행으로 본다 · 의도는 같고 판정만 바뀐 시험.
+    """
+    window_plan = choose(_clock(), _ts('2026-11-10 09:00:00'), operation_mode='schedule').timeline.plan_id
+    for after_cycle in (False, True):
+        before = _ts('2026-11-10 09:59:30')
+        stopped, _ = stop_plan(
+            _clock(), issuer='floating1', after_cycle=after_cycle, now_unix=before, held_plan_id=window_plan,
+        )
+        assert timetable.stop_holds(stopped, _ts('2026-11-10 10:30:00'))
+        early = _ts('2026-11-10 09:50:00')
+        stale, _ = stop_plan(_clock(), issuer='floating1', after_cycle=after_cycle, now_unix=early)
+        assert not timetable.stop_holds(stale, _ts('2026-11-10 10:30:00'))
+    unheld, _ = stop_plan(_clock(), issuer='floating1', after_cycle=False, now_unix=_ts('2026-11-10 09:59:30'))
+    assert not timetable.stop_holds(unheld, _ts('2026-11-10 10:30:00')), '준비 든 PC 없음 · 시작 30 s 전이어도 안 걸림'
 
 
 def test_no_stop_or_a_signal_mode_bundle_never_holds():

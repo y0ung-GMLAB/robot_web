@@ -6,7 +6,8 @@
 
 - ① 정상 종료(「프로그램 다시 시작」 · SIGTERM · systemd 다시 시작) · 웹이 먼저 「이 PC 빠짐」 을 알린다 ·
   그 PC 만 빠지고 나머지는 계속 · 마지막 PC 면 그룹만 세운다 · 진행 PC 자신이면 진행만 계속
-- ② 갑자기 끊김 · 전처럼 모두 세운다 · 잠그지 않는다 · 웹 상태가 다시 오면 기록을 지운다
+- ② 갑자기 끊김 · 전에는 이 PC 만 빠졌다(178) · 수정 목록 209 뒤로 웹 끊김은 그룹과 상관없다(재생 상태는
+  재생 관리자에서 로컬 DDS 로 직접) · 「이 PC 빠짐」 은 웹이 내려가며 알릴 때(①)와 재생 관리자가 끊길 때만
 
 규칙만 보는 시험(장벽 넘기기)은 `test_group_execution.py`.
 """
@@ -20,7 +21,6 @@ import pytest
 from motion_coordination_interfaces.msg import GroupEvent
 
 from motion_coordination.group_execution import (
-    BRIDGE_LOST_CODE,
     PARTICIPANT_LEFT_EVENT,
     GroupExecution,
 )
@@ -129,8 +129,8 @@ def test_a_master_that_only_coordinates_ignores_its_own_web_going_away():
     """빠진 뒤 제 웹이 내려간 동안 「상태 수신 중단」 이 나머지 PC 를 세우지 않는다"""
     node = _master(('pc-a', 'pc-b'))
     node._handle_local_request({'command': 'planned_restart'})
-    node._planned_restart_until = 0.0
-    node._boot_monotonic = 0.0
+    # 「다시 뜨는 중」 덕이 아님을 보인다 · 새 추적기는 아래 답을 준비 끝으로 본다(전 `_planned_restart_until = 0`) · 수정 목록 202
+    node._bridge_readiness = None
     node._stop_for_bridge_loss = lambda detail: pytest.fail(f'진행만 하는 PC 는 세우지 않음 · {detail}')
     node._release_without_latch = lambda reason: pytest.fail(f'진행만 하는 PC 는 풀지 않음 · {reason}')
     _no_latch(node)
@@ -209,13 +209,15 @@ def test_a_leaving_pc_that_held_the_last_report_lets_the_cycle_move_on():
     assert advanced == ['next_cycle']
 
 
-def test_a_rejoining_pc_losing_its_web_only_takes_itself_out():
-    """복귀 준비 중(아직 참가자 아님) · 남의 그룹을 세우지 않는다 · 진행 PC 에 빠짐만 알린다"""
+def test_a_rejoining_pc_with_a_silent_web_keeps_its_rejoin():
+    """복귀 준비 중(아직 참가자 아님) · 웹이 조용하다 · 남의 그룹을 세우지 않고 제 복귀도 놓지 않는다 · 수정 목록 209
+
+    전에는 웹 끊김을 보고 진행 PC 에 「빠짐」 을 알리고 놓았다(145) · 이제 웹은 그룹 판단에 안 쓴다.
+    """
     node = _node()
     node._joined = True
     node._event_pub = _Publisher()
     node._command_pub = _Publisher()
-    node._boot_monotonic = 0.0
     node._execution = GroupExecution()
     node._execution.activate_claim('exec-a', 'pc-b', ('pc-b', 'pc-c'))
     node._execution.join_cycle = 3
@@ -227,52 +229,30 @@ def test_a_rejoining_pc_losing_its_web_only_takes_itself_out():
 
     node._consume_local_runtime_status()
 
-    assert [m.event for m in node._event_pub.messages] == [PARTICIPANT_LEFT_EVENT]
+    assert node._event_pub.messages == []
     assert node._command_pub.messages == []
-    assert node._execution.execution_id == ''
+    assert node._execution.execution_id == 'exec-a'
 
 
-# ② 갑자기 끊김 · 세우되 잠그지 않는다 · 돌아오면 지운다 ---------------------------------------- #
+# ② 갑자기 끊김 · 웹은 그룹과 상관없다 · 수정 목록 209 -------------------------------------------- #
 
-def _stale_then_fresh(node, received):
+def test_a_sudden_web_loss_takes_nobody_out_and_records_nothing(monkeypatch):
+    """알림 없이 웹이 사라졌다 · 전에는 이 PC(진행 PC)만 빠지고 기록(145 ② → 178) · 이제 아무도 안 빠진다"""
+    monkeypatch.setattr(coordination_node.threading, 'Thread', _InlineThread)
+    node = _master(('pc-a', 'pc-b'))
+    node._last_alarm_key = (0, ())
+    _no_latch(node)
     node._local_runtime_monitor = SimpleNamespace(
         snapshot=lambda: {
             'status': {'bridge_state': 'ok'},
-            'received_monotonic': received[0], 'active_since_monotonic': 0.0,
+            'received_monotonic': time.monotonic() - 30.0, 'active_since_monotonic': 0.0,
         },
-        diagnosis=lambda: '마지막 성공 2000ms 전 · 연속 실패 10회',
+        diagnosis=lambda: '마지막 성공 30000ms 전 · 연속 실패 60회',
     )
-
-
-def test_a_sudden_bridge_loss_drops_only_this_pc_without_a_latch_and_clears_when_it_comes_back(monkeypatch):
-    """갑자기 끊김 · 이 PC(진행 PC)만 빠지고 나머지는 계속 · 145 ② → 178"""
-    monkeypatch.setattr(coordination_node.threading, 'Thread', _InlineThread)
-    node = _master(('pc-a', 'pc-b'))
-    node._boot_monotonic = 0.0
-    node._last_alarm_key = (0, ())
-    _no_latch(node)
-    notes = []
-    node._note_group = lambda execution_id, event_type, message, details: (
-        notes.append((event_type, message))
-    )
-    received = [time.monotonic() - 2.0]                  # 기준(1.5 s · 수정 목록 172) 넘김
-    _stale_then_fresh(node, received)
 
     node._consume_local_runtime_status()
 
-    assert node._execution.execution_id != '', '나머지는 계속 돈다'
-    assert node._execution.participants == ('pc-b',)
-    assert [m.command for m in node._command_pub.messages] == ['update_participants'], '다른 PC 는 세우지 않는다'
+    assert node._execution.participants == ('pc-a', 'pc-b')
+    assert node._command_pub.messages == []
     assert node._coordination_error == {}
-    loss = node.snapshot()['bridge_loss']
-    assert loss['active'] is True and loss['latched'] is False
-    assert loss['code'] == BRIDGE_LOST_CODE
-    assert loss['message'].startswith('pc-a 웹 서비스 끊김 · 이 PC 만 그룹에서 빠짐 · ')
-    assert 'lost_monotonic' not in loss
-
-    received[0] = time.monotonic() + 1.0                 # 웹이 다시 떴다
-    node._consume_local_runtime_status()
-
-    assert node.snapshot()['bridge_loss'] == {}
-    assert notes and notes[0][0] == 'group_bridge_lost'
-    assert '이 PC 만 그룹에서 빠짐' in notes[0][1]
+    assert node.snapshot()['runtime_loss'] == {}

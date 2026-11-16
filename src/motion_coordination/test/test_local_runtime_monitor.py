@@ -120,7 +120,8 @@ def test_never_receiving_anything_says_so():
 # 끊김 시험 B (2026-11-08) · 연동 노드 자체가 멈춘 것을 「웹 끊김」 으로 착각하지 않는다
 #
 # 실물 · 마스터가 다시 붙은 직후 연동 노드가 통째로 약 2.7 s 멈춤 · 깨어나 「로컬 상태 2.7 s 못 받음」 으로
-# 저를 뺐다 · 그때 「연속 실패 0회」(요청이 실패한 적 없이 시간만 지남).
+# 저를 뺐다 · 그때 「연속 실패 0회」(요청이 실패한 적 없이 시간만 지남) · 그래서 한 번 더 물어보는 특례(184 B)를
+# 덧댔다 · 수정 목록 209 · 웹 질문은 이제 그룹 판단에 안 쓴다 · 멈춤이든 웹이 정말 죽었든 빠지지 않는다
 # --------------------------------------------------------------------------- #
 
 def _master_after_a_stall(answers):
@@ -139,54 +140,26 @@ def _master_after_a_stall(answers):
     node._execution.coordinator_id = 'pc-a'
     node._execution.participants = ('pc-a', 'pc-b')
     node._execution.state = 'running'
-    node._boot_monotonic = 0.0
     node._command_pub = _Publisher()
     node._last_alarm_key = ()
-    warned = []
-    node._warn = warned.append
     monitor = LocalRuntimeMonitor(fetch)
     monitor.poll_once()
     with monitor._lock:
         monitor._received_monotonic = time.monotonic() - 2.7     # 2.7 s 동안 아무 요청도 못 보냈다
     node._local_runtime_monitor = monitor
-    dropped = []
-    node._drop_self_for_bridge_loss = lambda detail, moving: dropped.append(detail)
+    node._drop_member_only = lambda reasons, **_kwargs: pytest.fail(f'빠지지 않는다 · {reasons}')
     node._stop_for_peer_failure = lambda _reason: pytest.fail('그룹 전체를 세우지 않는다')
-    return node, dropped, warned
+    return node
 
 
-def test_a_stall_of_this_node_with_no_failed_request_does_not_drop_it():
+def test_a_stall_or_a_dead_web_never_drops_this_pc():
     ok = {'bridge_state': 'ok', 'motion_run_status': {'phase': 'running'}}
-    node, dropped, warned = _master_after_a_stall([ok, ok])
-    assert node._local_runtime_monitor.snapshot()['consecutive_failures'] == 0
+    for answers in ([ok, ok], [ok, OSError('connection refused')], [ok, OSError('timed out'), ok]):
+        node = _master_after_a_stall(list(answers))
 
-    node._consume_local_runtime_status()
+        node._consume_local_runtime_status()
 
-    assert dropped == [], '웹은 정상 · 빠지지 않는다'
-    assert node._execution.participants == ('pc-a', 'pc-b')
-    assert any('연동 노드 자체 멈춤 2.7 s' in text for text in warned)
-    assert time.monotonic() - node._local_runtime_monitor.snapshot()['received_monotonic'] < 1.0
-
-
-def test_a_stall_where_the_web_really_is_gone_still_drops():
-    ok = {'bridge_state': 'ok'}
-    node, dropped, _warned = _master_after_a_stall([ok, OSError('connection refused')])
-
-    node._consume_local_runtime_status()
-
-    assert len(dropped) == 1, '즉시 물어봐도 실패 · 지금처럼 빠진다'
-
-
-def test_failed_requests_are_not_mistaken_for_a_stall():
-    ok = {'bridge_state': 'ok'}
-    node, dropped, _warned = _master_after_a_stall([ok, OSError('timed out'), ok])
-    node._local_runtime_monitor.poll_once()                       # 실패 1회 · 웹이 느렸다
-    with node._local_runtime_monitor._lock:
-        node._local_runtime_monitor._received_monotonic = time.monotonic() - 2.7
-
-    node._consume_local_runtime_status()
-
-    assert len(dropped) == 1, '요청이 실패하고 있었다 · 웹 쪽 문제 · 지금처럼 빠진다'
+        assert node._execution.participants == ('pc-a', 'pc-b')
 
 
 # --------------------------------------------------------------------------- #

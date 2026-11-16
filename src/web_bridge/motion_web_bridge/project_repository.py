@@ -17,7 +17,7 @@ from typing import Any, Dict, List
 import yaml
 
 from motion_common import motion_table, schedule_store, store
-from motion_common.paths import NO_PROJECT_SELECTED
+from motion_common.paths import NO_PROJECT_SELECTED, plan_artifacts_dir
 
 from . import project_backup
 from .motor_runtime_store import MotorRuntimeStore
@@ -558,6 +558,8 @@ class ProjectRepository:
                 except FileNotFoundError:
                     pass
             raise
+        # 휴지통에는 사람이 만든 것만 · 애니 변환본은 되살리면 다시 만든다 · 수정 목록 208
+        self._remove_plan_artifacts(trash_path, 'motions')
         project_backup.prune_trash(self.root)
         return {
             **self.list_projects(),
@@ -727,6 +729,7 @@ class ProjectRepository:
             raise ValueError(f'파일이 {label} 제한을 초과합니다')
         self._validate_content(safe_category, path.name, text)
         self._atomic_write(path, text if text.endswith('\n') else text + '\n')
+        self._remove_plan_artifacts(project_dir, safe_category, path.name)
         manifest = self._read_manifest(project_dir)
         if not manifest['active_files'].get(safe_category):
             manifest['active_files'][safe_category] = path.name
@@ -744,6 +747,7 @@ class ProjectRepository:
         if target.exists():
             raise ValueError(f'같은 이름의 파일이 이미 있습니다: {target_name}')
         source.rename(target)
+        self._remove_plan_artifacts(project_dir, safe_category, source.name)
         manifest = self._read_manifest(project_dir)
         if manifest['active_files'].get(safe_category) == source.name:
             manifest['active_files'][safe_category] = target.name
@@ -758,6 +762,7 @@ class ProjectRepository:
         was_active = manifest['active_files'].get(safe_category) == source.name
         target = self._trash_target(project_dir, safe_category, source.name)
         source.rename(target)
+        self._remove_plan_artifacts(project_dir, safe_category, source.name)
         replacement = ''
         if was_active:
             remaining = sorted(
@@ -777,6 +782,21 @@ class ProjectRepository:
             'trash_path': str(target),
         })
         return result
+
+    @staticmethod
+    def _remove_plan_artifacts(project_dir: Path, category: str, file_name: str = '') -> None:
+        """애니 변환본 지우기 · 애니 삭제 · 이름 바꾸기 · 내용 저장 · 프로젝트 삭제 · 수정 목록 208
+
+        변환본(`<프로젝트>/runtime/plan_artifacts/<애니>/`)은 모션 실행 노드가 재생 등록 때 만든다 ·
+        키(파일 크기 · 수정 시각)가 달라 옛 것을 쓸 일은 없지만 디스크에 남는다 · 실패는 그냥 둔다.
+        `file_name` 이 비면 프로젝트 것 전부.
+        """
+        if category != 'motions':
+            return
+        if file_name and (file_name != Path(file_name).name or file_name in ('.', '..')):
+            return
+        root = plan_artifacts_dir(project_dir)
+        shutil.rmtree(root / file_name if file_name else root, ignore_errors=True)
 
     def copy_to_trash(self, project_id: Any, category: Any, file_name: Any) -> Path:
         """덮어쓰기 전 사본을 프로젝트 휴지통에 · 원본은 그대로 · 휴지통에서 되살릴 수 있다 · 수정 목록 156"""

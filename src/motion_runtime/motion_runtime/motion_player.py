@@ -778,8 +778,8 @@ class MotionPlayer:
                 if not reached:
                     raise RuntimeError(cycle_failure.tagged(f'모션 최종 위치 도달 확인 실패: {message}'))
             motion_finished_at = time.time()
-            status = motion_run_rules._status_from_plan('completed', '모션 실행 완료', plan)
-            status['phase'] = 'completed'
+            # 회차 맞춤 그룹 회차면 {completed} 가 아니라 장벽 전 단계 · 시간표 구동부가 사람 정지로 읽었다 · 수정 목록 199
+            status = motion_run_rules._cycle_end_status(plan)
             status['phase_started_at'] = motion_started_at
             status['phase_finished_at'] = motion_finished_at
             status['lifecycle'] = {
@@ -1229,32 +1229,33 @@ class MotionPlayer:
                 return []
             time.sleep(min(max(self.manager.period_sec, 0.01), 0.05, remaining))
 
-    #: 감독이 정지 처리 중일 때 재생 정지 요청을 기다리는 최대 시간 · 수정 목록 112 다
-    STOP_REQUEST_GRACE_SEC = 1.0
+    def _stopped_by_supervisor(self) -> bool:
+        """이 실행을 잡은 뒤 감독 정지가 있었나 · 있으면 「정지」 로 끝낼지 「오류」 로 끝낼지 정한다 · 수정 목록 200
 
-    def _waits_for_stop_request(self) -> bool:
-        """막힌 이유가 「정지 처리 중」 뿐이면 재생 정지 요청을 잠깐 기다린다 · 오면 참
+        전에는 감독이 정지 뒤 0.5 s 동안 낸 「정지 처리 중」 을 보고, 재생 정지 요청을 최대 1 s
+        (`STOP_REQUEST_GRACE_SEC`) 기다려 오면 「정지」 · 안 오면 「오류」 였다(112 다) · 화면이 감독 정지와
+        재생 정지를 차례로 보내는 그 틈을 시간으로 덮은 것 · 이제는 safety 상태의 정지 표지가 이 실행의
+        표지와 다르면 **감독 정지가 있었다는 사실 그 자체**로 판단한다 · 기다리지 않는다.
 
-        알람 · 긴급 정지 · 앱솔루트 같은 진짜 차단이면 기다리지 않는다(오류로 남아야 한다).
+        사람 정지(정지 · 전체 동작 정지 · 프로젝트 경계)면 참 · 정지 요청이 이미 왔어도 참 ·
+        알람 · 긴급 · 앱솔루트와 함께 온 정지는 오류로 남아야 해서 RuntimeError 를 올린다.
         """
+        # 여기서 가져온다 · 다른 수정과 파일 머리(가져오기 줄)가 겹치지 않게
+        from motion_common import stop_fence
+
         stop_event = getattr(self.manager, '_stop_event', None)
-        if stop_event is None:
+        if stop_event is not None and stop_event.is_set():
+            return True
+        safety = self._latest_safety_status()
+        if not stop_fence.stopped_since(getattr(self.manager, '_run_stop_marker', None), safety):
             return False
-        deadline = time.monotonic() + self.STOP_REQUEST_GRACE_SEC
-        while True:
-            if stop_event.is_set():
-                return True
-            safety = self._latest_safety_status()
-            settling_only = (
-                bool(safety.get('motion_stop_settling'))
-                and not safety.get('emergency_latched')
-                and not safety.get('minas_absolute_blocked')
-                and int(safety.get('servo_alarm_grade') or 0) < 2
-                and not safety.get('servo_alarm_grade3_latched')
-            )
-            if not settling_only or time.monotonic() >= deadline:
-                return stop_event.is_set()
-            time.sleep(0.02)
+        hard = stop_fence.hard_block_reason(safety)
+        if hard:
+            raise RuntimeError(hard)
+        if stop_event is not None:
+            # safety 상태 콜백(`stop_for_supervisor`)이 「정지」 길로 세우기 전에 재생기가 먼저 봤다 · 같은 표시를 세운다
+            stop_event.set()
+        return True
 
     def _latest_safety_status(self) -> Dict[str, Any]:
         lock = getattr(self.manager, '_safety_status_lock', None)
@@ -1664,12 +1665,12 @@ class MotionPlayer:
         axis_numbers = None if axes is None else [
             int(axis_plan['motor_axis']) for axis_plan in axes
         ]
+        # 감독 정지가 있었으면 그 자리에서 · 화면은 감독 정지를 먼저 보내고 재생 정지를 뒤에 보낸다 ·
+        # 그 사이 이 검사가 먼저 봐도 「정지」 다(112 다) · 표지로 판단하니 기다리지 않는다 · 수정 목록 200
+        if self._stopped_by_supervisor():
+            raise InterruptedError()
         error = self.manager._playback_ownership_error(axes=axis_numbers)
         if error:
-            if self._waits_for_stop_request():
-                # 사람이 누른 정지 · 화면은 감독에게 먼저 정지를 보내고 그 다음 재생에 정지를 보낸다 ·
-                # 그 사이에 이 검사가 「전체 동작 정지 처리 중」 을 먼저 봐서 오류로 끝났다 · 수정 목록 112 다
-                raise InterruptedError()
             raise RuntimeError(error)
         # 내 축 가운데 통신이 끊긴 축이 있으면 멈춘다 · 재생 기록에는 오류로 남는다 ·
         # 수정 목록 3-1

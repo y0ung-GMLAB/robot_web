@@ -10,6 +10,10 @@ _GROUP_STEP_BY_PHASE = {
     'group_armed': '시작 대기',
     'group_start_scheduled': '시작 예약',
     'group_motion_completed': '회차 완료',
+    # 회차 애니 끝 · 장벽 보고 전(다음 재생 목록 항목 짓는 중) · 수정 목록 199
+    'group_motion_finishing': '회차 완료',
+    # 시간표 재생 · 초기 이동이 너무 늦어 그 회차를 쉼 · 다음 회차 명령 대기 · 수정 목록 206
+    'group_cycle_skipped': '회차 쉼',
     'group_cycle_initialize_scheduled': '회차 초기화 예약',
     'group_cycle_initialized': '다음 회차 준비',
     'initializing': '초기위치 이동',

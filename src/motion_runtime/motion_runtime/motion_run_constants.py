@@ -8,6 +8,8 @@
 from __future__ import annotations
 
 from motion_common.timing import CONTROL_PERIOD_SEC
+# 초기 위치 이동 시간 후보 · `motion_common.timing` 한 곳(연동 노드 · 브리지도 본다) · 이 이름으로 그대로 내보냄 · 수정 목록 205
+from motion_common.timing import INITIAL_MOVE_TIME_OPTIONS_SEC  # noqa: F401
 
 #: 모터 명령의 필드 식별자 · `motion_supervisor`와 맞춘 값
 ID_CONTROLWORD = 0
@@ -33,8 +35,6 @@ DYNAMIXEL_TARGET_TOLERANCE_DEG = 1.0
 TARGET_SETTLE_TIMEOUT_SEC = 3.0
 #: 연속 재생 이음매 허용 오차
 CONTINUOUS_LOOP_TOLERANCE_DEG = 5.0
-#: 초기 위치 이동 시간 후보
-INITIAL_MOVE_TIME_OPTIONS_SEC = (5.0, 7.0, 10.0)
 #: 초기 위치 기본값 · 칸이 없는 매핑 줄과 화면 「줄 추가」가 같은 값을 쓴다 · 기준점(모션 0°)
 #: 2026-10-03 사용자 결정 (수정 목록 13-3) · 전에는 서버 first_frame · 화면 manual 로 갈라져 있었다
 DEFAULT_INITIAL_MODE = 'reference'

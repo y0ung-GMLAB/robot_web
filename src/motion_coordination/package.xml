@@ -9,6 +9,8 @@
   <depend>motion_common</depend>
   <depend>rclpy</depend>
   <depend>motion_coordination_interfaces</depend>
+  <!-- 로컬 도메인 직접 연결 · 재생 관리자 · 감독 String JSON · 수정 목록 209 -->
+  <depend>std_msgs</depend>
   <exec_depend>python3-yaml</exec_depend>
   <test_depend>ament_lint_auto</test_depend>
   <test_depend>ament_lint_common</test_depend>

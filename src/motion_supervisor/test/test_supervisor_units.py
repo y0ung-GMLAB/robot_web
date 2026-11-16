@@ -30,7 +30,6 @@ def _supervisor(motors):
     supervisor._action_threads = {}
     supervisor._last_motion_run_command_at = 0.0
     supervisor._emergency_latched = False
-    supervisor._motion_stop_block_until = 0.0
     supervisor._command_lock = threading.RLock()
     supervisor._command_arbiter = CommandArbiter()
     supervisor._project_generation = 1

@@ -6,14 +6,16 @@ import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional
 
 import rclpy
 import yaml
 from motion_common import paths as common_paths
 from motion_common.execution_context import confirm_context_id
 from motion_common.paths import project_dir_for
-from motion_common import check_timing, command_router, generation as generation_mod, latest_tap, motion_table, motion_tracks, smoothing, topics, wire_units
+from motion_common import check_timing, command_router, generation as generation_mod, latest_tap, motion_tracks, smoothing, topics, wire_units
+from motion_common import run_state
+from motion_common import stop_fence
 from motion_common.values import finite_float, optional_int
 from motion_control_msgs.msg import MotorStatus
 from rclpy.node import Node
@@ -30,10 +32,11 @@ from .motion_run_constants import (
     DYNAMIXEL_TARGET_TOLERANCE_DEG,
     TARGET_SETTLE_TIMEOUT_SEC,
 )
-from . import background_pacing, motion_run_rules
+from . import motion_run_rules
 from .group_session import GroupSession
+from .motion_file_reader import parse_motion_tracks
 from .motion_player import MotionPlayer
-from .plan_builder import SAMPLES_CACHE_SIZE, PlanBuilder, SamplingCancelled
+from .plan_builder import PlanBuilder
 from .plan_cache import SingleFlightCache
 from .registered_motion_file import playlist_from_mapping
 from .motion_automation_store import (
@@ -173,6 +176,15 @@ class MotionRunManager(Node):
         self._run_thread: Optional[threading.Thread] = None
         self._stop_event = threading.Event()
         self._graceful_stop_event = threading.Event()
+        # 정지 표지 · 재생 세션 · 수정 목록 200 · 203 (`motion_common.stop_fence`)
+        #: 감독 safety 상태에서 마지막으로 본 표지 · 상태에 실어 「봤다」 를 알린다
+        self._seen_stop_marker: Optional[stop_fence.Marker] = None
+        #: 지금 실행을 잡을 때의 표지 · 이것과 다르면 그 뒤에 감독 정지가 있었다
+        self._run_stop_marker: Optional[stop_fence.Marker] = None
+        #: 실행 스레드가 할 일을 다 했다(곧 끝난다) · 세션을 닫는 표시 · 단독 실행만 적는다
+        self._run_task_done = True
+        #: 이 표지의 정지로 이미 세운 실행 · 같은 정지로 두 번 세우지 않게
+        self._supervisor_stopped_marker: Optional[stop_fence.Marker] = None
         # 그룹 세션은 별도 객체가 갖는다 · 조건변수는 실행 락 위에 선다 (§6-29)
         self._plan_builder = PlanBuilder(self)
         self._player = MotionPlayer(self)
@@ -339,6 +351,42 @@ class MotionRunManager(Node):
         with self._state_lock:
             self._latest_state = payload if isinstance(payload, dict) else None
             self._latest_state_at = time.time()
+        self._warm_on_motor_limits_change(payload)
+
+    @staticmethod
+    def _motor_limits_signature(motors: Any) -> Optional[tuple]:
+        """재샘플 변환본 키에 드는 모터 값(번호 · 하한 · 상한) · 모터가 없으면 None · 수정 목록 208"""
+        if not isinstance(motors, list):
+            return None
+        signature = tuple(
+            (
+                optional_int(motor.get('controller_index')),
+                wire_units.motor_limit(motor, 'lower'),
+                wire_units.motor_limit(motor, 'upper'),
+            )
+            for motor in motors
+            if isinstance(motor, dict)
+        )
+        return signature or None
+
+    def _warm_on_motor_limits_change(self, state: Any) -> None:
+        """모터 한계가 바뀌면(장비에 적용 · 모터 재시작) 재생 등록 애니를 다시 변환해 둔다 · 수정 목록 208
+
+        한계는 재샘플 키에 든다 · 매핑 저장(새 실행 컨텍스트)은 모터 재시작보다 먼저 와서 그때 변환본은 옛
+        한계로 지어진다 · 여기서 새 한계를 보면 다시 · 실행 중이면 끝난 뒤 다음 상태에서.
+        """
+        signature = self._motor_limits_signature(state.get('motors') if isinstance(state, dict) else None)
+        if signature is None or signature == getattr(self, '_warm_limits_signature', None):
+            return
+        if getattr(self, '_run_lock', None) is None or self._warm_should_yield():
+            return
+        # 실행 락 없이 읽는다 · 상태 콜백(10 Hz)이 계획 짓는 쪽을 기다리지 않게 · 컨텍스트는 통째로 바꿔 끼운다
+        context = getattr(self, '_execution_context', None) or {}
+        if not getattr(self, '_execution_context_ready', False) or not context:
+            return
+        context = dict(context)
+        self._warm_limits_signature = signature
+        self._warm_motion_cache(context)
 
     def _safety_status_callback(self, msg: String) -> None:
         try:
@@ -351,6 +399,100 @@ class MotionRunManager(Node):
         with self._safety_status_lock:
             self._latest_safety_status = payload
             self._latest_safety_status_at = time.monotonic()
+        self._on_stop_marker(payload)
+
+    # ------------------------------------------------------------------ #
+    # 정지 표지 · 재생 세션 · 수정 목록 200 · 203
+    #
+    # 감독 정지 = 이 PC 재생 정지 · 전에는 재생기가 safety 상태의 「정지 처리 중」(0.5 s)을 프레임
+    # 틱에서 보고서야 섰고, 그 0.5 s 안에 정지 요청이 안 오면 오류로 끝났다(112 다 · 1 s 기다림) ·
+    # 이제는 표지가 바뀌는 그 순간 「정지」 와 같은 길로 세우고, 표지를 봤다고 상태로 알린다.
+    # ------------------------------------------------------------------ #
+
+    def _on_stop_marker(self, safety: Dict[str, Any]) -> None:
+        marker = stop_fence.marker(safety)
+        if marker is None:
+            return
+        with self._run_lock:
+            if marker == getattr(self, '_seen_stop_marker', None):
+                return
+            self._seen_stop_marker = marker
+        if not stop_fence.hard_block_reason(safety):
+            # 알람 · 긴급 · 앱솔루트와 함께 온 정지는 재생기가 오류로 끝낸다(이유가 남아야 한다)
+            self.stop_for_supervisor(marker)
+        # 표지를 봤다 · 감독이 「정지 정리 끝」 을 판단한다 · 세운 실행은 끝날 때 다시 알린다
+        self._announce_playback_session()
+
+    def stop_for_supervisor(self, marker: stop_fence.Marker) -> bool:
+        """이 표지 **앞에** 잡은 실행이 돌면 「정지」 버튼과 같은 길로 세운다 · 세웠으면 참"""
+        with self._run_lock:
+            if not self._run_session_alive():
+                return False
+            if getattr(self, '_run_stop_marker', None) == marker:
+                return False   # 이 정지 뒤에 잡은 실행
+            if getattr(self, '_supervisor_stopped_marker', None) == marker:
+                return True
+            self._supervisor_stopped_marker = marker
+        try:
+            self.get_logger().info('[정지 표지] 감독 정지 · 이 PC 재생을 「정지」 와 같은 길로 세웁니다')
+        except Exception:  # noqa: BLE001 · 로그 실패로 정지를 막지 않는다
+            pass
+        self._handle_stop()
+        return True
+
+    def _run_session_alive(self) -> bool:
+        """실행 스레드가 아직 할 일이 남았나 · `_run_lock` 안에서 부른다"""
+        thread = getattr(self, '_run_thread', None)
+        return bool(
+            thread is not None and thread.is_alive()
+            and not getattr(self, '_run_task_done', False)
+        )
+
+    def _playback_session(self) -> Dict[str, Any]:
+        """상태에 싣는 재생 세션 · 감독은 지금 표지로 열린 세션의 프레임만 받는다 · `_run_lock` 안에서"""
+        stop_event = getattr(self, '_stop_event', None)
+        state = str((getattr(self, '_status', None) or {}).get('state') or '').strip().lower()
+        active = (
+            self._run_session_alive()
+            and not (stop_event is not None and stop_event.is_set())
+            and state not in stop_fence.SESSION_ENDED_STATES
+        )
+        return stop_fence.session_payload(
+            active=active,
+            streaming=state in stop_fence.STREAMING_STATES,
+            run_marker=getattr(self, '_run_stop_marker', None),
+            seen_marker=getattr(self, '_seen_stop_marker', None),
+        )
+
+    def _run_task(self, mode: str, payload: Dict[str, Any], motors_snapshot: List[Dict[str, Any]]) -> None:
+        """단독 실행 스레드 · 끝나면 세션을 닫았다고 바로 알린다 · 수정 목록 203
+
+        감독은 이 알림에서 재생이 쥔 축을 놓는다 · 전에는 마지막 프레임 뒤 0.15 s 임대가 끝나야 놓였다.
+        """
+        try:
+            self._player._prepare_and_run(mode, payload, motors_snapshot)
+        finally:
+            self._close_run_session()
+
+    def _close_run_session(self) -> None:
+        """실행 스레드가 할 일을 다 했다 · 세션을 닫고 바로 알린다 · 단독(`_run_task`) · 그룹(`GroupSession._run`)
+        실행 스레드가 끝에서 부른다 · 수정 목록 203
+
+        부른 스레드가 지금 실행 스레드일 때만 닫는다(늦게 끝난 옛 스레드가 새 실행의 세션을 닫지 않게) ·
+        전에는 그룹 실행 스레드가 정상으로 끝나면(`completed`) 다음 0.5 s 상태 틱에야 세션이 닫혀 감독이 축을 늦게 놓았다.
+        """
+        lock = getattr(self, '_run_lock', None)
+        if lock is not None:
+            with lock:
+                if getattr(self, '_run_thread', None) is threading.current_thread():
+                    self._run_task_done = True
+        self._announce_playback_session()
+
+    def _announce_playback_session(self) -> None:
+        """재생 세션이 바뀌었다(표지를 봤다 · 실행이 끝났다) · 상태를 바로 낸다 · 노드 없는 시험 관리자는 건너뛴다"""
+        if getattr(self, '_status_pub', None) is None:
+            return
+        self._publish_status()
 
     def _action_result_callback(self, msg: String) -> None:
         """Action 결과를 60초 창으로 모아둔다.
@@ -403,6 +545,8 @@ class MotionRunManager(Node):
         'group_prepare',
         'group_start_at',
         'group_initialize_at',
+        # 시간표 재생 회차 명령 · 초기 이동 → 시작을 이 PC 가 한다 · 수정 목록 206
+        'group_cycle_at',
     })
 
     def _command_router(self) -> command_router.CommandRouter:
@@ -433,6 +577,8 @@ class MotionRunManager(Node):
         router.register('group_prepare', self._group.prepare)
         router.register('group_start_at', self._group.schedule_cycle)
         router.register('group_initialize_at', self._group.schedule_initialization)
+        # 시간표 재생 · 회차 하나 = 시작 시각이 박힌 명령 하나 · 수정 목록 206
+        router.register('group_cycle_at', self._group.schedule_timed_cycle)
         router.register('group_cancel', self._group.cancel)
         # 도는 그룹에 복귀 · 합류 확정 · 수정 목록 30-3
         router.register('group_join_commit', self._group.commit_join)
@@ -520,6 +666,9 @@ class MotionRunManager(Node):
     #:
     #: 이제 검사는 작업 스레드 하나가 차례로 처리한다 · 실행기는 정지 · 상태 · 그룹 명령에 바로 답한다.
     #: 실행 슬롯은 잡지 않는다 · 검사는 아무것도 움직이지 않는다.
+    #:
+    #: 수정 목록 208 · 검사는 디스크 변환본을 읽는다(ms) · 변환본이 없으면 자식 프로세스가 변환하는 동안
+    #: 이 스레드는 기다리기만 한다(GIL 을 안 쥔다) · 그래서 쉬어 가기(171 `background_pacing`)는 뺐다.
     BACKGROUND_COMMANDS = frozenset({'check'})
 
     def _background_executor(self) -> ThreadPoolExecutor:
@@ -528,11 +677,7 @@ class MotionRunManager(Node):
             with _LAZY_CACHE_LOCK:
                 executor = getattr(self, '_check_executor', None)
                 if executor is None:
-                    # 검사 작업 스레드도 GIL 을 나눠 쓴다 · 그룹 예약 확인 · 재생 틱이 굶지 않게 · 수정 목록 171
-                    executor = ThreadPoolExecutor(
-                        max_workers=1, thread_name_prefix='motion-check',
-                        initializer=background_pacing.pace_current_thread,
-                    )
+                    executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix='motion-check')
                     self._check_executor = executor
         return executor
 
@@ -650,22 +795,19 @@ class MotionRunManager(Node):
         }
 
     #: 미리 짓기가 모터 상태(번호 · 한계)를 기다리는 최대 시간 · 실행 허용은 모터 상태가 선 뒤라 보통 바로 · 수정 목록 174
+    #: 수정 목록 208 · 아직 필요하다 · 재샘플 변환본 키에 모터 번호 · 한계가 든다(파일 변환은 기다리지 않고 먼저)
     WARM_MOTOR_WAIT_SEC = 30.0
     WARM_MOTOR_POLL_SEC = 0.5
 
     def _warm_motion_cache(self, context: Dict[str, Any]) -> None:
-        """재생 등록 애니를 미리 읽고 재샘플까지 지어 둔다 · 뒤에서 · 실행 중이면 안 한다 · 수정 목록 164 · 174
+        """재생 등록 애니를 변환본(디스크)으로 만들어 둔다 · 뒤에서 · 실행 중이면 안 한다 · 수정 목록 164 · 174 · 208
 
-        부팅 뒤 첫 그룹 시작(스케줄)은 준비 검사가 920 s 파일을 처음 읽는다 · 미니 PC 에서 몇 초다 ·
-        준비 확인 예산(6 s) 을 넘기 쉽다. 실행 허용이 서는 때 미리 지어 두면 검사는 캐시에서 시작한다.
+        등록(매핑 · 재생 목록 저장 = 새 context_id → 실행 허용) · 부팅 · 모터 한계 바뀜 때 부른다.
+        변환본이 이미 맞으면 읽기만 하고 끝난다(ms) · 없거나 키가 다르면 자식 프로세스가 변환한다 ·
+        재생 목록 **전부**(디스크라 칸 제한 없음) · 키는 준비 검사와 똑같이 짓는다(`PlanBuilder.build(warm_only=True)`).
 
-        164 는 파일 읽기만 했다 · 가장 무거운 20 ms 재샘플 · 속도 검사는 남아 NY 2026-11-05 재부팅 뒤 첫
-        그룹 시작에서 그 PC 가 「로컬 Web Bridge 응답 없음: timed out」 으로 빠졌다(다음 회차 복귀 · 913 s 쉼).
-        이제 재샘플까지 · 키는 준비 검사와 똑같이 짓는다(`PlanBuilder.build(warm_only=True)` · 같은 함수 ·
-        모터 번호 · 한계는 지금 모터 상태 · 위치 · 알람 · 서보는 키에 안 든다).
-
-        실행 컨텍스트가 바뀔 때마다(매핑 · 재생 목록 저장 = 새 context_id → 실행 허용) 다시 · 도는 중이면
-        끝나고 마지막 요청 하나만 이어서 한다.
+        174 까지는 메모리 캐시에 지어 두어 서비스가 다시 뜰 때마다(재부팅) 다시 지었다 · 이제는 등록 때 한 번.
+        도는 중에 새 요청이 오면 끝나고 마지막 요청 하나만 이어서 한다.
         """
         project_id = str(context.get('project_id') or '').strip()
         mapping_file_id = str(context.get('mapping_file_id') or '').strip()
@@ -687,8 +829,7 @@ class MotionRunManager(Node):
             self._warm_thread.start()
 
     def _warm_worker(self) -> None:
-        # 뒤 작업 · 실행기·재생 틱이 GIL 을 받게 쉬어 가며 짓는다 · 수정 목록 171
-        background_pacing.pace_current_thread()
+        # 무거운 변환은 자식 프로세스 · 이 스레드는 기다리고 읽기만 한다 · 쉬어 가기(171)는 뺐다 · 수정 목록 208
         try:
             while True:
                 with self._run_lock:
@@ -704,7 +845,11 @@ class MotionRunManager(Node):
                     self._warm_thread = None
 
     def _warm_should_yield(self) -> bool:
-        """미리 짓기를 그만둘 때 · 실행 스레드(재생 · 초기 위치 이동 · 그룹 준비 · 그룹 실행)가 돌면 · 174"""
+        """미리 짓기를 시작하지 않을 때 · 애니 사이에서 그만둘 때 · 실행 스레드가 돌면 · 174
+
+        수정 목록 208 · 변환 도중에는 그만두지 않는다(자식 프로세스라 재생과 GIL 을 안 나눈다 · 그 결과를
+        준비 검사 · 재생 목록이 곧 쓴다) · 애니와 애니 사이에서만 본다.
+        """
         run_thread = getattr(self, '_run_thread', None)
         return run_thread is not None and run_thread.is_alive()
 
@@ -712,25 +857,12 @@ class MotionRunManager(Node):
         try:
             _, motion_files_dir, mappings_dir = self._project_asset_dirs({'project_id': project_id})
             mapping = self._load_mapping(self._mapping_file_path(mapping_file_id, mappings_dir))
-            motion_ids = frozenset(
-                str(row.get('motion_id') or '').strip()
-                for row in (mapping.get('mappings') or [])
-                if isinstance(row, dict)
-            ) or None
             names = []
             for name in playlist_from_mapping(mapping):
                 if name and name not in names:
                     names.append(name)
-            for name in names[:self.MOTION_CACHE_SIZE]:
-                if self._warm_should_yield():
-                    return
-                try:
-                    path = self._motion_file_path(name, motion_files_dir)
-                    self._load_motion_tracks(path, motion_ids=motion_ids)
-                except (OSError, ValueError):
-                    continue
-            self._warm_plan_samples(project_id, mapping_file_id, mapping, names)
-        except Exception as exc:  # noqa: BLE001 · 미리 읽기는 실패해도 그만이다 · 검사가 다시 읽는다
+            self._warm_plan_samples(project_id, mapping_file_id, mapping, names, motion_files_dir)
+        except Exception as exc:  # noqa: BLE001 · 미리 변환은 실패해도 그만이다 · 검사가 다시 한다
             self.get_logger().info(f'motion cache warm-up skipped: {exc}')
 
     def _warm_motors(self) -> List[Dict[str, Any]]:
@@ -746,22 +878,42 @@ class MotionRunManager(Node):
 
     def _warm_plan_samples(
         self, project_id: str, mapping_file_id: str, mapping: Dict[str, Any], names: List[str],
+        motion_files_dir: Optional[Path] = None,
     ) -> None:
-        """재생 목록 앞쪽을 준비 검사와 같은 요청으로 지어 재샘플 캐시에 둔다 · 수정 목록 174
+        """재생 목록 전부를 준비 검사와 같은 요청으로 변환해 둔다 · 수정 목록 174 · 208
 
-        준비 검사가 보는 것은 매핑의 `motion_file_id`(재생 목록 1번) 하나 · 그룹 준비도 그것부터 ·
-        2번부터는 1회차 시작 1.5 s 뒤 뒤에서 짓는다(171) · 캐시 칸(`SAMPLES_CACHE_SIZE` = 2 · 48 MB)만큼만 ·
-        1번을 **마지막에** 지어 가장 늦게 버려지게 · 바이트 예산을 넘으면 오래된(2번) 것이 먼저 빠진다.
+        ① 파일 → 조인트별 배열(tracks 변환본) · 모터 상태 없이 · 가장 무거운 몫(파일 읽기)
+        ② 20 ms 재샘플 · 속도 검사(samples 변환본) · 모터 번호 · 한계가 키에 들어 모터 상태를 기다린다
+        1번을 **마지막에** 지어 메모리 칸(2)에도 남게 · 곧 올 준비 검사가 디스크도 안 읽는다.
         """
         first = str(mapping.get('motion_file_id') or '').strip() or (names[0] if names else '')
         if not first:
             return
         order = [first] + [name for name in names if name != first]
-        order = order[:SAMPLES_CACHE_SIZE]
+        if motion_files_dir is not None:
+            for name in order:
+                if self._warm_should_yield():
+                    self.get_logger().info(f'[계획 미리 짓기] {name} · 실행 시작으로 그만둠')
+                    return
+                started = time.perf_counter()
+                try:
+                    source = self._plan_builder.warm_records(
+                        self._motion_file_path(name, motion_files_dir), mapping,
+                    )
+                except (OSError, ValueError) as exc:
+                    self.get_logger().info(f'[계획 미리 짓기] {name} · 파일 건너뜀: {str(exc)[:200]}')
+                    continue
+                if source not in ('memory', 'artifact'):
+                    self.get_logger().info(
+                        f'[계획 미리 짓기] {name} · 파일 변환 {(time.perf_counter() - started) * 1000.0:.0f} ms '
+                        f'({source})'
+                    )
         motors = self._warm_motors()
-        if not motors:
+        if motors:
+            self._warm_limits_signature = self._motor_limits_signature(motors)
+        else:
             if not self._warm_should_yield():
-                self.get_logger().info('[계획 미리 짓기] 건너뜀 · 모터 상태 없음')
+                self.get_logger().info('[계획 미리 짓기] 재샘플 건너뜀 · 모터 상태 없음')
             return
         for name in reversed(order):
             if self._warm_should_yield():
@@ -782,22 +934,16 @@ class MotionRunManager(Node):
                     },
                     warm_only=True,
                     motors_snapshot=list(motors),
-                    cancel=self._warm_should_yield,
                     timing=timing,
                 )
-            except SamplingCancelled:
-                self.get_logger().info(f'[계획 미리 짓기] {name} · 실행 시작으로 그만둠')
-                return
             except (OSError, ValueError) as exc:
                 # 검사에서도 같은 이유로 거절된다 · 미리 지을 것이 없다
                 self.get_logger().info(f'[계획 미리 짓기] {name} · 건너뜀: {str(exc)[:200]}')
                 continue
             total_ms = (time.perf_counter() - started) * 1000.0
-            cache = getattr(self._plan_builder, '_samples_cache', None)
-            cache_mb = (getattr(cache, 'nbytes', 0) or 0) / 1e6
             self.get_logger().info(
                 f'[계획 미리 짓기] {name} · {total_ms:.0f} ms · {check_timing_text(timing)} · '
-                f'샘플 {int(result.get("sample_count") or 0)} · 재샘플 캐시 {cache_mb:.1f} MB'
+                f'샘플 {int(result.get("sample_count") or 0)}'
             )
 
     def _require_execution_context(self, payload: Dict[str, Any]) -> None:
@@ -1059,6 +1205,16 @@ class MotionRunManager(Node):
         self._status_epoch = int(getattr(self, '_status_epoch', 0)) + 1
         self._stop_event.clear()
         self._graceful_stop_event.clear()
+        # 이 실행의 정지 표지 · 감독은 이 표지로 연 세션의 프레임만 받고, 이 뒤 감독 정지가 오면
+        # 표지가 달라져 이 실행은 선다 · 정지 직후의 주차 · 초기 이동도 거절 없이 여기서 바로 잡힌다 · 200
+        lock = getattr(self, '_safety_status_lock', None)
+        if lock is not None:
+            with lock:
+                self._run_stop_marker = stop_fence.marker(getattr(self, '_latest_safety_status', None))
+        self._run_task_done = False
+        # 실행 번호 · 상태에 실려 「**이번** 실행의 상태인가」 를 시각 비교 없이 가린다 ·
+        # 구간 끝 주차가 옛 상태(1 s 안의 멈춤)를 이번 이동의 끝으로 읽던 것 · 수정 목록 36 · 200
+        self._run_seq = int(getattr(self, '_run_seq', 0) or 0) + 1
         return motors_snapshot
 
     def _start_thread(self, mode: str, payload: Dict[str, Any]) -> Dict[str, Any]:
@@ -1121,7 +1277,7 @@ class MotionRunManager(Node):
             })
             self._set_status(preparing_status)
             self._run_thread = threading.Thread(
-                target=self._player._prepare_and_run,
+                target=self._run_task,
                 args=(mode, dict(payload), list(motors_snapshot)),
                 daemon=True,
             )
@@ -1146,9 +1302,18 @@ class MotionRunManager(Node):
         message: str,
         execution_id: str,
         cycle_number: int = 0,
+        refresh: Optional[Callable[[], Optional[float]]] = None,
+        late_ok: bool = False,
     ) -> None:
+        """그룹 예약 시각까지 기다린다 · 지났으면 「놓쳤습니다」 오류(신호 재생 · 진행 PC 가 정한 시각)
+
+        수정 목록 206 · 시간표 재생 회차 명령(`group_cycle_at`)은 이 PC 가 시각을 정한다 ·
+        `late_ok` · 지났으면 기다리지 않고 바로(늦음은 부르는 쪽이 정함 · 사용자 2026-11-16 「늦어도 끝나는 대로 시작」) ·
+        `refresh` · 기다리는 동안 시각이 바뀔 수 있다(1회차 준비 뒤 회차 명령이 오면 그 시작에서 거꾸로 센 초기 이동 시각) ·
+        새 시각 또는 None(그대로)
+        """
         remaining = float(scheduled_monotonic) - time.monotonic()
-        if remaining < -self.period_sec:
+        if remaining < -self.period_sec and not late_ok:
             raise RuntimeError('그룹 예약 시작시각을 놓쳤습니다')
         deadline = float(scheduled_monotonic)
         self._update_status({
@@ -1164,6 +1329,11 @@ class MotionRunManager(Node):
         while time.monotonic() < deadline:
             if self._stop_event.is_set():
                 raise InterruptedError()
+            updated = refresh() if refresh is not None else None
+            if updated is not None and float(updated) != deadline:
+                deadline = float(updated)
+                self._update_status({'scheduled_start_monotonic': deadline})
+                continue
             # 시계를 두 번 본다 · 위의 `while` 에서 한 번, 여기서 또 한 번.
             # 그 사이에 마감이 지나가면 남은 시간이 음수가 되고
             # `time.sleep()` 이 터진다 · 기다림의 **마지막 한 바퀴**는 늘
@@ -1449,10 +1619,11 @@ class MotionRunManager(Node):
     #: 920 s × 20 조인트 파일이 레코드 92만 개(수백 MB)였다 · 5 조인트면 그 1/4.
     #:
     #: 수정 목록 170 · 레코드를 사전으로 들지 않고 조인트별 배열(`motion_tracks`)로 든다 · 레코드 하나
-    #: 약 380 B → 32 B · 920 s × 5 조인트 파일 하나 88 MB → 7 MB · 바이트 예산도 둔다(아래).
-    MOTION_CACHE_SIZE = 4
-    #: 레코드 캐시 바이트 예산 · 920 s × 20 조인트를 다 읽어도(29 MB) 넷이 들어간다 · 넘으면 오래된 것부터
-    MOTION_CACHE_MAX_BYTES = 128 * 1024 * 1024
+    #: 약 380 B → 32 B · 920 s × 5 조인트 파일 하나 88 MB → 7 MB.
+    #:
+    #: 수정 목록 208 · 프로젝트 애니의 재생 계획은 이 캐시를 안 거친다 · 디스크 변환본(`plan_artifact`)에서
+    #: 읽는다 · 여기는 변환본 자리가 없는 파일(스튜디오 임시 · 시험)만 · 그래서 칸 2 · 바이트 예산(170)은 뺐다.
+    MOTION_CACHE_SIZE = 2
 
     def _records_cache(self) -> SingleFlightCache:
         """모션 파일 레코드 캐시 · `__new__` 로 만든 시험 객체도 처음 쓸 때 만든다"""
@@ -1461,7 +1632,7 @@ class MotionRunManager(Node):
             with _LAZY_CACHE_LOCK:
                 cache = getattr(self, '_motion_record_cache', None)
                 if cache is None:
-                    cache = SingleFlightCache(self.MOTION_CACHE_SIZE, max_bytes=self.MOTION_CACHE_MAX_BYTES)
+                    cache = SingleFlightCache(self.MOTION_CACHE_SIZE)
                     self._motion_record_cache = cache
         return cache
 
@@ -1510,98 +1681,9 @@ class MotionRunManager(Node):
     def _parse_motion_records(self, path: Path, motion_ids: Any = None) -> motion_tracks.MotionTracks:
         """파일 → 조인트별 배열 · 옛 레코드 사전과 같은 값 · 같은 순서 · 수정 목록 170
 
-        JSON Lines(머리 줄 + 프레임마다 한 줄)는 한 줄씩 읽어 바로 배열에 넣는다 · 파일 글 전체도,
-        레코드 사전 목록도 만들지 않는다. 그 밖의 모양(통짜 JSON 등)은 옛 길로 읽어서 옮긴다.
+        본문은 `motion_file_reader.parse_motion_tracks` · 애니 변환 자식 프로세스가 같은 함수를 쓴다 · 수정 목록 208
         """
-        keep = None if motion_ids is None else {str(item) for item in motion_ids}
-        #: 조인트 매핑에 없어 뺀 것 · 파일에 자료는 있었다는 뜻 · 「쓸 수 있는 줄 없음」 과 가른다
-        dropped = 0
-        memo: Dict[Any, bool] = {}
-        first_line = ''
-        # 큰 버퍼 · 기본 8 KB 면 읽는 동안 실행기 스레드가 GIL 을 못 받아 굶는다 · 수정 목록 170
-        with motion_table.open_text(path) as handle:
-            for raw_line in handle:
-                line = raw_line.strip()
-                if line and not line.startswith('#'):
-                    first_line = line
-                    break
-            try:
-                first_payload = json.loads(first_line)
-            except json.JSONDecodeError:
-                first_payload = None
-            if (
-                isinstance(first_payload, dict)
-                and first_payload.get('type') == 'motion_header'
-            ):
-                headers = first_payload.get(
-                    'fields',
-                    first_payload.get('headers', first_payload.get('columns', [])),
-                )
-                headers = (
-                    [str(item) for item in headers]
-                    if isinstance(headers, list)
-                    else []
-                )
-                # 헤더의 `rotation_unit` · rad 파일을 deg 로 읽던 것을 막는다 · 수정 목록 6-2
-                unit = motion_table.header_rotation_unit(first_payload)
-                pairs_first = keep is not None and motion_table.pair_rows_expandable(headers)
-                tracks: Dict[str, motion_tracks.JointTrack] = {}
-                row_index = 0
-                for raw_line in handle:
-                    line = raw_line.strip()
-                    if not line or line.startswith('#'):
-                        continue
-                    parsed = motion_table.parse_text_row(line)
-                    if parsed is None:
-                        continue
-                    if pairs_first:
-                        parsed, skipped = motion_table.keep_pairs(parsed, keep, memo)
-                        dropped += skipped
-                    for row in motion_table.expand_pair_rows([parsed]):
-                        record, _row_error = motion_table.parse_row(row, headers)
-                        if record is None:
-                            continue
-                        motion_id = record['motion_id']
-                        if keep is not None and motion_id not in keep:
-                            dropped += 1
-                            continue
-                        track = tracks.get(motion_id)
-                        if track is None:
-                            track = tracks[motion_id] = motion_tracks.JointTrack(motion_id)
-                        track.append(record['frame'], record['time_sec'], record['value'], row_index)
-                        row_index += 1
-                if not tracks:
-                    if dropped:
-                        return motion_tracks.MotionTracks()
-                    raise ValueError('motion file has no valid records')
-                # `motion_table.scale_record_values` 와 같은 식(`float(값) * 배율`)
-                scale = motion_table.rotation_unit_scale(unit)
-                for track in tracks.values():
-                    track.scale_values(scale)
-                return motion_tracks.MotionTracks.from_builder(tracks)
-
-        content = path.read_text(encoding='utf-8')
-        rows, headers = motion_run_rules._extract_motion_rows(content)
-        records = []
-        for index, row in enumerate(rows):
-            record, _row_error = motion_table.parse_row(row, headers)
-            if record is None:
-                continue
-            if keep is not None and record['motion_id'] not in keep:
-                dropped += 1
-                continue
-            record['row_index'] = index
-            records.append(record)
-        if not records:
-            if dropped:
-                return motion_tracks.MotionTracks()
-            raise ValueError('motion file has no valid records')
-        motion_table.scale_record_values(
-            records, motion_table.rotation_unit_from_content(content),
-        )
-        return motion_tracks.MotionTracks.from_records(
-            sorted(records, key=lambda item: (item['time_sec'], str(item['motion_id']), item['row_index']))
-        )
+        return parse_motion_tracks(path, motion_ids)
 
     def _load_mapping(self, path: Path) -> Dict[str, Any]:
         data = yaml.safe_load(path.read_text(encoding='utf-8')) or {}
@@ -1640,6 +1722,8 @@ class MotionRunManager(Node):
 
     def _set_status(self, status: Dict[str, Any]) -> None:
         with self._run_lock:
+            # 상태 표시 · `_update_status` 참고 · 수정 목록 199
+            status[run_state.STATUS_STAMP_KEY] = time.monotonic()
             self._status = status
             self._status_epoch = int(getattr(self, '_status_epoch', 0)) + 1
         self._publish_status()
@@ -1660,6 +1744,7 @@ class MotionRunManager(Node):
             run_thread = getattr(self, '_run_thread', None)
             if run_thread is not None and run_thread.is_alive():
                 return False
+            status[run_state.STATUS_STAMP_KEY] = time.monotonic()
             self._status = status
             self._status_epoch = int(status_epoch) + 1
         self._publish_status()
@@ -1672,6 +1757,9 @@ class MotionRunManager(Node):
                 **self._status,
                 **values,
                 'updated_at': time.time(),
+                # 상태 표시 · 상태가 바뀔 때마다 · 명령 응답에도 실린다 · 연동 노드(시간표 구동부)가 「내 명령 뒤의
+                # 상태인가」 를 시간으로 짐작하지 않고 이것으로 가린다(옛 3 s 기다림) · 진행만 바뀌는 것은 안 올림 · 수정 목록 199
+                run_state.STATUS_STAMP_KEY: time.monotonic(),
             }
         self._publish_status()
 
@@ -1720,6 +1808,13 @@ class MotionRunManager(Node):
                 'ready': self._execution_context_ready,
             }
             result['automation'] = self._automation_snapshot()
+            # 재생 세션 · 감독이 이것으로 프레임을 받고 축을 놓는다 · 수정 목록 200 · 203
+            result['playback_session'] = self._playback_session()
+            # 실행 스레드가 아직 있나 · 상태가 「끝」 이어도 스레드가 살아 있으면 새 실행은
+            # 「previous motion run task is still running」 으로 거절된다 · 기다리는 쪽(구간 끝 주차)이 본다 · 155
+            thread = getattr(self, '_run_thread', None)
+            result['run_task_active'] = bool(thread is not None and thread.is_alive())
+            result['run_id'] = int(getattr(self, '_run_seq', 0) or 0)
         result['live_overrides'] = self.live_override_snapshot()
         # 다시 체크했지만 다음 회차를 기다리는 조인트 · 95
         player = getattr(self, '_player', None)

@@ -45,12 +45,9 @@ PARK_MOVE_SEC = 10.0
 PARK_WAIT_SEC = PARK_MOVE_SEC + 40.0
 SERVO_ON_WAIT_SEC = 5.0
 POLL_SEC = 0.5
-#: 기준점 이동이 「정지 처리 중」 으로 거절됐을 때 · 감독은 일반 정지 뒤 0.5 s 차단하고, 차단 여부는 0.5 s 마다 오는
-#: safety 상태의 마지막 값으로 판정한다(정지 뒤 0.5~1.0 s 는 위상 따라) · 이만큼 간격으로 몇 번 더 · 전에는 회차 끝
-#: 정지 약 0.5 s 뒤 주차가 반반으로 거절돼 1분 뒤에야 다시 했다(실물 NY 2026-11-09 22:48 · floating2 · 3 · C) · 수정 목록 191
-STOP_SETTLE_RETRY_SEC = 1.0
-STOP_SETTLE_RETRIES = 4
-STOP_SETTLE_TEXT = '정지 처리 중'
+# 191 ⑤ 의 「정지 처리 중」 거절 → 1 s 간격 4번 다시(`STOP_SETTLE_RETRY_SEC` · `STOP_SETTLE_RETRIES`)는 없앴다 ·
+# 감독이 정지 뒤 0.5 s 동안 모든 명령을 막던 것을 정지 표지로 바꿨다 · 정지 직후의 기준점 이동은 새 표지로
+# 바로 잡히고 감독은 그 세션의 프레임을 받는다 · 다시 보낼 일이 없다 · 수정 목록 200
 
 #: 회차를 끝내고 멈춘 상태 · 여기서 주차를 시작한다
 FINISHED_STATES = {'idle', 'ready', 'stopped', 'completed', 'motion_completed', 'initialized'}
@@ -71,6 +68,17 @@ def cycle_finished(status: Dict[str, Any]) -> bool:
     if state not in FINISHED_STATES:
         return False
     return not (status.get('group_execution') and state in GROUP_BARRIER_STATES)
+
+
+def run_task_ended(status: Dict[str, Any]) -> bool:
+    """앞 실행의 스레드가 끝났나 · 끝나야 기준점 이동이 「previous motion run task is still running」 없이 잡힌다
+
+    상태가 「끝」(`stopped` · `completed` …)이어도 스레드는 아직 있을 수 있다 · 「정지」 는 스레드가 알아채기
+    전에 상태부터 바꾸고, 그룹은 풀린 뒤 스레드가 정리한다 · 그 틈에 보낸 주차가 거절돼 1분 뒤 다시 했다 ·
+    시간을 두고 다시 보내지 않고 런타임이 알리는 `run_task_active` 를 기다린다 · 칸이 없으면(옛 런타임) 참 ·
+    수정 목록 200 · 155
+    """
+    return status.get('run_task_active') is not True
 
 STATE_FILE = 'schedule_end_state.json'
 
@@ -715,7 +723,16 @@ class ScheduleEndService:
         # 그룹 장벽 · 진행 PC 가 모든 PC 회차 끝을 보고 풀 때까지 · 실행 상태 목록 `run_state.GROUP_ACTIVE_STATES` · 155
         if not self._wait(lambda: not self.bridge.coordination_execution_blocker(), GROUP_RELEASE_WAIT_SEC):
             return '그룹 재생이 해제되지 않음'
-        if self._motion_state() == 'error':
+        # 앞 실행 스레드가 끝날 때까지 · 상한은 고장 감지(스레드가 안 끝남)일 뿐 · 보통 바로 끝난다 · 200
+        last: Dict[str, Any] = {}
+
+        def task_ended() -> bool:
+            last['status'] = self._motion_status()
+            return run_task_ended(last['status'])
+
+        if not self._wait(task_ended, GROUP_RELEASE_WAIT_SEC):
+            return '앞 재생 실행이 끝나지 않음'
+        if str(last['status'].get('state') or '').strip().lower() == 'error':
             return '재생이 오류로 끝남'
         if self._alarm_grade() > 0:
             return f'서보 알람 {self._alarm_grade()}등급'
@@ -728,31 +745,31 @@ class ScheduleEndService:
             'request_source': 'schedule_end',
         })
         sent_at = time.time()
+        # 회차 끝 정지 직후여도 한 번에 간다 · 감독이 「정지 처리 중」 으로 막지 않는다(정지 표지 · 200)
         result = self.bridge.motion_run_initialize(payload)
-        for _ in range(STOP_SETTLE_RETRIES):
-            # 회차 끝 정지 직후 · 감독이 아직 정지를 정리하는 중 · 몇 초 안에 풀린다 · 1분 기다리지 않는다 · 수정 목록 191
-            if not (isinstance(result, dict) and result.get('success') is False
-                    and STOP_SETTLE_TEXT in str(result.get('message') or '')):
-                break
-            self._sleep(STOP_SETTLE_RETRY_SEC)
-            sent_at = time.time()
-            result = self.bridge.motion_run_initialize(payload)
         if not isinstance(result, dict) or result.get('success') is False:
             # 거절 · 예 「실행 컨텍스트 적용 대기」(실물 V-19) · 부른 쪽이 기록하고 1분 뒤 다시 · 수정 목록 131
             message = result.get('message') if isinstance(result, dict) else ''
             return f'기준점 이동 거절 · {message or "응답 없음"}'
         seen: List[str] = []
+        accepted = result.get('status') if isinstance(result.get('status'), dict) else {}
+        park_run_id = accepted.get('run_id')
 
         def parked() -> bool:
             # 보낸 직후에는 옛 상태(멈춤·초기 위치 완료)가 남아 있다 · **이번** 이동이
-            # 끝난 것만 센다 · 단계 시작 시각이 보낸 뒤인가로 가린다
+            # 끝난 것만 센다 · 런타임이 받을 때 돌려준 실행 번호(`run_id`)로 가린다 · 전에는 단계 시각이
+            # 「보낸 시각 − 1 s」 뒤인가로 가려, 보내기 1 s 안에 멈춘 앞 실행의 `stopped` 를 이번 이동의 끝으로
+            # 읽을 수 있었다 · 수정 목록 36 · 200 · 번호가 없으면(옛 런타임) 지금까지대로 시각으로
             status = self._motion_status()
             state = str(status.get('state') or '').strip().lower()
-            started = max(
-                float(status.get('phase_started_at') or 0.0),
-                float(status.get('phase_finished_at') or 0.0),   # 오류는 끝난 시각만 있다
-            )
-            fresh = started >= sent_at - 1.0
+            if park_run_id is not None:
+                fresh = status.get('run_id') == park_run_id
+            else:
+                started = max(
+                    float(status.get('phase_started_at') or 0.0),
+                    float(status.get('phase_finished_at') or 0.0),   # 오류는 끝난 시각만 있다
+                )
+                fresh = started >= sent_at - 1.0
             seen.append(state if fresh else '')
             return fresh and state in {'initialized', 'error', 'stopped'}
 

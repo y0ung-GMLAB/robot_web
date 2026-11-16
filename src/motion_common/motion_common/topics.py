@@ -202,6 +202,12 @@ MANUAL_STREAM_SAMPLES = scoped('/manual/stream_samples')
 SAFETY_REQUEST = scoped('/safety/request')
 SAFETY_STATUS = scoped('/safety/status')
 
+#: 연동 노드 「살아 있음」 · 로컬 도메인(이 PC 안)에만 · 웹 역감시가 듣는다 · 수정 목록 209
+#:
+#: 전에는 웹이 「연동 노드가 50 ms 마다 내 HTTP 를 물었나」 로 연동 노드 생사를 봤다 · 이제 연동 노드는
+#: 재생 관리자와 로컬 DDS 로 직접 말해서 웹을 묻지 않는다 · 생사는 연동 노드가 직접 알린다(String JSON)
+COORDINATION_ALIVE = scoped('/motion_coordination/alive')
+
 # --------------------------------------------------------------------------- #
 # /motion_group · 다중 PC 연동 (DDS 별도 도메인)
 # --------------------------------------------------------------------------- #

@@ -13,9 +13,9 @@ from __future__ import annotations
 import threading
 import time
 import traceback
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Mapping, Optional
 
-from motion_common import repeat_policy
+from motion_common import repeat_policy, run_state, timed_cycle
 from motion_common.values import finite_float
 
 from . import motion_run_rules
@@ -27,14 +27,11 @@ SCHEDULE_END_REASON = 'schedule_end'
 SCHEDULE_END_STOP_MESSAGE = '구간 끝 · 회차 후 정지'
 #: 사람이 누른 「현재 회차 후 정지」
 GROUP_AFTER_CYCLE_STOP_MESSAGE = '현재 그룹 모션 회차 완료 후 정지'
-#: 재생 목록 2번부터 짓기 시작 · 1회차 시작 시각 + 이만큼 · 수정 목록 171
-#:
-#: 그룹 시작은 「준비 → 초기 위치 이동 예약 확인 → 이동 → 모션 시작 대기 → `start_at` 확인 → 시작 →
-#: 시작 보고(진행 PC 가 1 s 안에 받아야 함 · `trigger_report_timeout_sec`)」 가 모두 마감이 있다 ·
-#: 짓기가 이 사이에 돌면 GIL 을 두고 다퉈 확인이 늦었다(NY 실물 2026-11-03 · 진행 PC 제 `start_at`
-#: 확인 0.4 s 넘김 · 그룹 취소) · 그래서 시작 보고까지 지나고 짓는다 · 2번은 1회차가 끝나야 쓴다.
-#: 1회차가 이보다 짧으면 쓸 때(회차 끝) 바로 짓는다.
-DEFERRED_BUILD_DELAY_SEC = 1.5
+# 재생 목록 2번부터 짓기 · 1회차 시작에 바로 · 수정 목록 208
+#
+# 171 은 1회차 시작 1.5 s 뒤로 미뤘다(`DEFERRED_BUILD_DELAY_SEC`) · 짓기(파일 읽기 · 재샘플)가 GIL 을
+# 쥐어 진행 PC 의 `start_at` 확인 · 시작 보고가 늦었다(NY 실물 2026-11-03). 이제 짓기는 디스크 변환본
+# 읽기(ms) · 변환본이 없으면 자식 프로세스(`plan_artifact`)가 변환하고 이 프로세스는 기다리기만 한다.
 
 
 class GroupSession:
@@ -92,7 +89,8 @@ class GroupSession:
             if reason or not self.session.get('stop_reason'):
                 self.session['stop_reason'] = str(reason or '')
             self.manager._graceful_stop_event.set()
-            # `completed` · 회차 애니가 막 끝나 장벽 표시 직전 · 여기서 끊으면 회차 끝이 「정지」 로 나간다 · 154
+            # 회차 애니가 막 끝나 장벽 표시 직전 · 여기서 끊으면 회차 끝이 「정지」 로 나간다 · 154 · 그 틈은 이제
+            # `motion_completed`(장벽 전 단계 · 199) · `completed` 는 각자 재생 · 단독 길의 끝
             finishing = {'running', 'verifying', 'completed', 'motion_completed'}
             if self.session.get('independent'):
                 # 각자 재생 · 회차 사이(초기 위치 이동·대기)도 재생 루프 안이다 ·
@@ -371,6 +369,78 @@ class GroupSession:
             'status': self.manager.status(),
         }
 
+    def schedule_timed_cycle(self, payload: Dict[str, Any]) -> Dict[str, Any]:
+        """시간표 재생 · 회차 하나 = 시각이 박힌 명령 하나 · 「k 회차를 S 에 시작 · 다음 회차는 N」 · 수정 목록 206
+
+        초기 이동 시작은 이 PC 가 정한다(`_run` · 이 회차 초기 이동 계획 시간에서 거꾸로 · `timed_cycle`) · 시작도 제
+        단조 시계로 · 늦게 끝나면 끝나는 대로 시작(쉼 아님) · 너무 늦어 다음 회차 준비를 먹으면 그 회차만 쉼(이유 기록).
+        전에는 연동 노드가 초기 이동 예약(`group_initialize_at`) → 끝 확인 → 시작 예약(`group_start_at`)을 따로 보내 그
+        왕복이 시작 여유를 먹었다(188 ⑥ · 「트리거가 이미 지났습니다」).
+
+        받는 때 · 1회차 준비(`group_prepare`) 뒤 · 복귀(`group_join`) 준비 중 · 회차 끝 장벽(앞 회차 끝 · 쉰 회차 뒤) ·
+        복귀에서는 이 명령이 합류 확정(`group_join_commit`)을 겸한다 · 시작 시각이 지났어도 받는다(늦음은 `_run` 이 정함).
+        같은 회차를 다시 받으면 처음 것 그대로(이미 출발했을 수 있다 · 연동 노드가 다시 뜬 경우).
+        신호 재생(진행 PC 가 회차마다 시각을 보냄)은 이 명령을 쓰지 않는다 · 그 길은 그대로.
+        """
+        execution_id = str(payload.get('execution_id') or '').strip()
+        try:
+            cycle_number = int(payload.get('cycle_number'))
+        except (TypeError, ValueError) as exc:
+            raise ValueError('그룹 회차 번호가 필요합니다') from exc
+        start_monotonic = finite_float(payload.get('start_monotonic'))
+        next_start = finite_float(payload.get('next_start_monotonic')) or 0.0
+        if cycle_number < 1:
+            raise ValueError('그룹 회차 번호가 올바르지 않습니다')
+        if start_monotonic is None or start_monotonic <= 0.0:
+            raise ValueError('그룹 회차 시작 시각이 필요합니다')
+        with self.condition:
+            session = self.session
+            if not session.get('active') or session.get('execution_id') != execution_id:
+                raise ValueError('활성 그룹 실행 세션이 일치하지 않습니다')
+            held = dict(session.get('timed') or {})
+            if int(held.get('cycle') or 0) == cycle_number:
+                return {
+                    'success': True, 'duplicate': True,
+                    'message': f'이미 받은 그룹 모션 {cycle_number}회차 명령',
+                    'status': self.manager.status(),
+                }
+            state = str(session.get('state') or '')
+            done = int(session.get('cycle_number') or 0)
+            # 회차 끝(장벽) → 이 명령까지 · 자동 회차 간격의 회차 끝 몫(`timed_cycle.CYCLE_END_SEC`)을 실물로 보는 기록
+            barrier_at = float(session.get('barrier_at') or 0.0) if state == 'motion_completed' else 0.0
+            if state in {'join_preparing', 'join_ready'}:
+                expected = int(session.get('join_cycle_number') or 0) + 1
+            elif state in {'preparing', 'armed'} and done == 0:
+                expected = 1
+            elif state == 'motion_completed':
+                expected = done + 1
+            else:
+                raise ValueError('그룹 회차 명령을 받을 수 있는 상태가 아닙니다')
+            if cycle_number != expected:
+                raise ValueError(f'그룹 모션 회차가 일치하지 않습니다: 예상 {expected}')
+            session['timed'] = {
+                'cycle': cycle_number,
+                'start': float(start_monotonic),
+                'next_start': float(next_start) if next_start > start_monotonic else 0.0,
+            }
+            self.condition.notify_all()
+        if barrier_at > 0.0:
+            self._log_info(
+                f'시간표 재생 · {cycle_number}회차 명령 받음 · 회차 끝 뒤 {(time.monotonic() - barrier_at) * 1000.0:.0f} ms'
+            )
+        self.manager._update_status({
+            'timed_cycle': cycle_number,
+            'timed_start_monotonic': float(start_monotonic),
+        })
+        return {
+            'success': True,
+            'message': f'그룹 모션 {cycle_number}회차 시각 예약',
+            'execution_id': execution_id,
+            'cycle_number': cycle_number,
+            'start_monotonic': float(start_monotonic),
+            'status': self.manager.status(),
+        }
+
     def cancel(self, payload: Dict[str, Any]) -> Dict[str, Any]:
         execution_id = str(payload.get('execution_id') or '').strip()
         # 끝까지 돈 1회 · 회차 후 정지도 마스터가 이 길로 세션을 정리한다 · 그때 「완료」 를 「취소」 로 덮어
@@ -437,7 +507,7 @@ class GroupSession:
           보던 이음매 값 차이는 막지 않기로 했다(§6-142 · 검사 함수가 빈 사유만 돌려준다) ·
           그 검사는 재생 계획으로 한다
         - 재생 목록 2번부터는 뒤에서 짓는다(`DeferredPlaylist`) · 처음 쓰일 때 기다린다 ·
-          짓기 시작은 1회차가 시작되고 나서다(`DEFERRED_BUILD_DELAY_SEC`) · 여기서는 만들기만 · 171
+          짓기 시작은 1회차가 시작될 때 · 여기서는 만들기만 · 171 · 208
         """
         # 회차 맞춤 / 각자 재생 · 수정 목록 35
         continuous = (
@@ -504,6 +574,8 @@ class GroupSession:
                 return
             join_cycle = int(payload.get('join_cycle_number') or 0)
             cycle_number = 0
+            # 첫 바퀴는 재생 없이 다음 회차 초기화부터 · 복귀한 PC · 시간표 1회차를 쉰 PC(206)
+            initialize_first = bool(join_cycle)
             if join_cycle:
                 # 복귀 · 계획만 만들고 서 있는다 · 모터는 아직 움직이지 않는다 · 30-3 ·
                 # 재생 목록도 다 짓고 나서 「복귀 준비」 를 알린다 · 예약 시각에 쫓기지 않는 자리 · 164
@@ -514,18 +586,34 @@ class GroupSession:
                     return
                 cycle_number = committed
             else:
+                # 시간표 1회차 · 회차 명령이 오면(준비 바로 뒤) 그 시작에서 이 PC 초기 이동 시간으로 거꾸로 센 시각에 ·
+                # 받은 예약 시각은 연동 노드의 짐작(조인트 매핑 값)이라 첫 프레임 잇기는 모른다 · 수정 목록 206 ·
+                # 신호 재생은 회차 명령이 없어 받은 예약 시각 그대로
+                first_move_sec = self._initial_move_seconds(
+                    initialization_plan, blend=not payload.get('initialization_only'),
+                )
+                timed_at = self._timed_initialize_at(execution_id, 1, first_move_sec)
                 self.manager._wait_group_deadline(
-                    float(payload['initialize_monotonic']),
+                    float(payload['initialize_monotonic']) if timed_at is None else timed_at,
                     phase='group_initialize_scheduled',
                     message='그룹 초기 위치 이동 시작 대기',
                     execution_id=execution_id,
+                    refresh=lambda: self._timed_initialize_at(execution_id, 1, first_move_sec),
+                    late_ok=timed_at is not None,
                 )
+                timed = self._timed(execution_id, 1)
+                if timed is not None and self._skip_late_cycle(
+                    execution_id, timed, plan, first_move_sec, moved=False,
+                ):
+                    cycle_number, initialize_first = 1, True
+            if not join_cycle and not initialize_first:
                 initialize_triggered_at = time.time()
                 initialize_triggered_monotonic = time.monotonic()
                 # 재생이 뒤따르면 첫 프레임까지 잇는다 · 그룹 「초기 위치 이동」 만이면 초기 위치에 선다 · 13-1
                 self.manager._player._run_initialization({
                     **initialization_plan,
                     'blend_to_first_frame': not payload.get('initialization_only'),
+                    **self._timed_marks(self._timed(execution_id, 1)),
                 })
                 if self.manager._stop_event.is_set() or self.manager.status().get('state') != 'initialized':
                     return
@@ -551,9 +639,9 @@ class GroupSession:
                     ),
                 })
             # 복귀한 PC 는 그룹이 막 끝낸 회차에서 들어온다 · 첫 바퀴는 재생 없이
-            # 바로 다음 회차 초기화를 기다린다
-            if join_cycle and not self._initialize_next_cycle(
-                execution_id, cycle_number, playlist, initialization_plan,
+            # 바로 다음 회차 초기화를 기다린다 · 시간표 1회차를 쉰 PC 도(206)
+            if initialize_first and not self._initialize_next_cycle(
+                execution_id, cycle_number, playlist, initialization_plan, plan,
             ):
                 return
             while not self.manager._stop_event.is_set():
@@ -561,23 +649,41 @@ class GroupSession:
                 if scheduled is None:
                     break
                 cycle_number, start_at = scheduled
-                self.manager._wait_group_deadline(
-                    start_at,
-                    phase='group_start_scheduled',
-                    message=f'그룹 모션 {cycle_number}회차 시작 대기',
-                    execution_id=execution_id,
-                    cycle_number=cycle_number,
-                )
+                timed = self._timed(execution_id, cycle_number)
+                late_sec = 0.0
+                if timed is None:
+                    self.manager._wait_group_deadline(
+                        start_at,
+                        phase='group_start_scheduled',
+                        message=f'그룹 모션 {cycle_number}회차 시작 대기',
+                        execution_id=execution_id,
+                        cycle_number=cycle_number,
+                    )
+                else:
+                    # 시간표 회차 · 초기 이동이 늦게 끝났으면 끝나는 대로 바로 · 너무 늦으면 이 회차만 쉼 · 206
+                    cycle_plan = playlist[(cycle_number - 1) % len(playlist)][0] if playlist else plan
+                    if self._skip_late_cycle(
+                        execution_id, timed, cycle_plan, self._initial_move_seconds(initialization_plan),
+                        moved=True,
+                    ):
+                        if not self._initialize_next_cycle(
+                            execution_id, cycle_number, playlist, initialization_plan, plan,
+                        ):
+                            break
+                        continue
+                    late_sec = self._wait_timed_start(execution_id, cycle_number, start_at)
                 if self.manager._stop_event.is_set():
                     break
                 if isinstance(playlist, DeferredPlaylist):
-                    # 1회차 시작 · 시작 보고가 나간 뒤에 2번부터 짓는다 · 두 번째부터는 아무 일 없음 · 171
-                    playlist.start(DEFERRED_BUILD_DELAY_SEC)
+                    # 1회차 시작 · 2번부터 짓는다(변환본 읽기 · 208) · 두 번째부터는 아무 일 없음 · 171
+                    playlist.start()
                 group_context = {
                     'scheduled_start_at': 0.0,
                     'group_execution': True,
                     'execution_id': execution_id,
                     'group_cycle_number': cycle_number,
+                    # 시간표 회차 · 늦게 시작한 만큼이 재생 상태 · 회차 끝 장벽에 실린다(연동 노드가 기록) · 206
+                    **self._timed_marks(timed, late_sec),
                 }
                 if independent:
                     self._run_independent(
@@ -618,6 +724,7 @@ class GroupSession:
                     self.session.update({
                         'state': 'motion_completed',
                         'cycle_number': cycle_number,
+                        'barrier_at': time.monotonic(),
                     })
                     stop_after_cycle = bool(self.session.get('stop_after_cycle'))
                     stop_wait = stop_after_cycle and bool(self.session.get('stop_after_cycle_group'))
@@ -630,7 +737,7 @@ class GroupSession:
                     # 보고 풀기(`cancel`)를 보낸다 · 그때 끝 문구 · 1회 재생과 같은 길 · 수정 목록 154
                     self._mark_stop_wait(cycle_number)
                 if not self._initialize_next_cycle(
-                    execution_id, cycle_number, playlist, initialization_plan,
+                    execution_id, cycle_number, playlist, initialization_plan, plan,
                 ):
                     break
         except InterruptedError:
@@ -649,24 +756,31 @@ class GroupSession:
                     'phase_finished_at': time.time(),
                 })
         finally:
-            # 회차 사이(초기 위치 · 시작 대기)에 받은 회차 후 정지도 여기서 끝난다 · 같은 끝 문구 · 수정 목록 141
-            after_cycle_text = self.after_cycle_stop_message()
-            with self.condition:
-                if self.session.get('execution_id') == execution_id:
-                    self.session['active'] = False
-                    if self.session.get('state') not in {'error', 'stopped'}:
-                        self.session['state'] = str(self.manager.status().get('state') or 'stopped')
-                self.condition.notify_all()
-            if (
-                self.manager._stop_event.is_set()
-                and self.manager.status().get('state') not in {'stopped', 'error'}
-            ):
-                self.manager._update_status({
-                    'state': 'stopped',
-                    'phase': 'stopped',
-                    'message': after_cycle_text or '그룹 실행 정지',
-                    'phase_finished_at': time.time(),
-                })
+            try:
+                # 회차 사이(초기 위치 · 시작 대기)에 받은 회차 후 정지도 여기서 끝난다 · 같은 끝 문구 · 수정 목록 141
+                after_cycle_text = self.after_cycle_stop_message()
+                with self.condition:
+                    if self.session.get('execution_id') == execution_id:
+                        self.session['active'] = False
+                        if self.session.get('state') not in {'error', 'stopped'}:
+                            self.session['state'] = str(self.manager.status().get('state') or 'stopped')
+                    self.condition.notify_all()
+                if (
+                    self.manager._stop_event.is_set()
+                    and self.manager.status().get('state') not in {'stopped', 'error'}
+                ):
+                    self.manager._update_status({
+                        'state': 'stopped',
+                        'phase': 'stopped',
+                        'message': after_cycle_text or '그룹 실행 정지',
+                        'phase_finished_at': time.time(),
+                    })
+            finally:
+                # 그룹 실행 스레드 끝 · 재생 세션을 닫았다고 바로 알린다 · 감독이 재생이 쥔 축을 그때 놓는다 ·
+                # 전에는 정상 끝(`completed` · 회차 후 정지)이면 다음 0.5 s 상태 틱에야 닫혔다 · 수정 목록 203
+                close = getattr(self.manager, '_close_run_session', None)
+                if callable(close):
+                    close()
 
     def _initialize_next_cycle(
         self,
@@ -674,28 +788,53 @@ class GroupSession:
         cycle_number: int,
         playlist: List[tuple],
         initialization_plan: Dict[str, Any],
+        plan: Optional[Dict[str, Any]] = None,
     ) -> bool:
         """회차가 끝난 뒤 · 다음 회차 초기화 명령을 기다렸다가 초기 위치로 · 실패·정지면 거짓
 
         끝난 회차의 PC 와 복귀한 PC(수정 목록 30-3)가 같은 길을 탄다.
+
+        시간표 회차 명령(`group_cycle_at` · 수정 목록 206)이면 초기 이동 시각을 이 PC 가 센다 · 지금 시작해도 너무 늦으면
+        그 회차는 움직이지 않고 쉬고(이유 기록) 다음 회차 명령을 기다린다 · `plan` = 목록이 없을 때 회차 재생 계획(클립 길이).
         """
-        scheduled_initialize = self._wait_initialization(
-            execution_id,
-        )
-        if scheduled_initialize is None:
-            return False
-        initialized_cycle, initialize_at = scheduled_initialize
-        if playlist:
-            # 다음 회차 애니의 첫 프레임으로 · 회차 N 다음은 목록의 N 번째
-            initialization_plan = playlist[
-                initialized_cycle % len(playlist)
-            ][1]
-        initialization_plan = {
-            **initialization_plan,
-            'group_execution': True,
-            'execution_id': execution_id,
-            'group_cycle_number': initialized_cycle,
-        }
+        while True:
+            scheduled_initialize = self._wait_initialization(
+                execution_id,
+            )
+            if scheduled_initialize is None:
+                return False
+            initialized_cycle, initialize_at, timed = scheduled_initialize
+            cycle_initialization = initialization_plan
+            if playlist:
+                # 다음 회차 애니의 첫 프레임으로 · 회차 N 다음은 목록의 N 번째
+                cycle_initialization = playlist[
+                    initialized_cycle % len(playlist)
+                ][1]
+            cycle_initialization = {
+                **cycle_initialization,
+                'group_execution': True,
+                'execution_id': execution_id,
+                'group_cycle_number': initialized_cycle,
+            }
+            if timed is None:
+                return self._initialize_signal_cycle(
+                    execution_id, initialized_cycle, initialize_at, cycle_initialization,
+                )
+            outcome = self._initialize_timed_cycle(
+                execution_id, initialized_cycle, timed, cycle_initialization,
+                playlist[(int(timed['cycle']) - 1) % len(playlist)][0] if playlist else plan,
+            )
+            if outcome != 'skipped':
+                return outcome == 'ready'
+
+    def _initialize_signal_cycle(
+        self,
+        execution_id: str,
+        initialized_cycle: int,
+        initialize_at: float,
+        initialization_plan: Dict[str, Any],
+    ) -> bool:
+        """신호 재생 · 진행 PC 가 보낸 초기화 시각에 초기 위치로(옛 길 그대로)"""
         self.manager._wait_group_deadline(
             initialize_at,
             phase='group_cycle_initialize_scheduled',
@@ -710,6 +849,52 @@ class GroupSession:
         })
         if self.manager._stop_event.is_set() or self.manager.status().get('state') != 'initialized':
             return False
+        self._mark_cycle_ready(execution_id, initialized_cycle)
+        return True
+
+    def _initialize_timed_cycle(
+        self,
+        execution_id: str,
+        initialized_cycle: int,
+        timed: Dict[str, Any],
+        initialization_plan: Dict[str, Any],
+        cycle_plan: Optional[Dict[str, Any]],
+    ) -> str:
+        """시간표 회차 초기 이동 · 'ready'(초기 위치 · 시작 대기) · 'skipped'(이 회차 쉼) · 'stopped' · 수정 목록 206
+
+        초기 이동 시작 = 회차 시작 − 이 회차 초기 이동 계획 시간 − 여유(`timed_cycle.initialize_at`) · 이미 지났으면 바로 ·
+        끝나는 시각과 늦음 판단은 시작 직전에(`_run` 의 회차 루프) · 지금 시작해도 다음 회차 준비를 먹으면 움직이지 않고 쉼.
+        """
+        with self.condition:
+            stop_after = bool(self.session.get('stop_after_cycle')) and not self.session.get('stop_after_cycle_group')
+        if stop_after:
+            # 이 PC 만의 회차 후 정지(1등급 알람 등) · 장벽에서 다음 회차 명령을 받아도 더 돌지 않는다
+            self._finish(self.after_cycle_stop_message() or GROUP_AFTER_CYCLE_STOP_MESSAGE)
+            return 'stopped'
+        cycle = int(timed['cycle'])
+        move_sec = self._initial_move_seconds(initialization_plan)
+        if self._skip_late_cycle(execution_id, timed, cycle_plan, move_sec, moved=False):
+            return 'skipped'
+        self.manager._wait_group_deadline(
+            timed_cycle.initialize_at(float(timed['start']), move_sec),
+            phase='group_cycle_initialize_scheduled',
+            message=f'그룹 모션 {cycle}회차 초기 이동 대기',
+            execution_id=execution_id,
+            cycle_number=initialized_cycle,
+            late_ok=True,
+        )
+        if self.manager._stop_event.is_set():
+            return 'stopped'
+        self.manager._player._run_initialization({
+            **initialization_plan, 'blend_to_first_frame': True, **self._timed_marks(timed),
+        })
+        if self.manager._stop_event.is_set() or self.manager.status().get('state') != 'initialized':
+            return 'stopped'
+        self._mark_cycle_ready(execution_id, initialized_cycle)
+        return 'ready'
+
+    def _mark_cycle_ready(self, execution_id: str, initialized_cycle: int) -> None:
+        """다음 회차 초기 위치에 섰다 · 시작 명령(신호) · 시각(시간표)을 기다린다"""
         # 회차 번호는 예약 명령의 것 · 보통은 끝낸 회차와 같다 · 다시 합친 PC 는 진행 PC 것으로 바뀌었다(183)
         with self.condition:
             self.session.update({
@@ -728,7 +913,150 @@ class GroupSession:
             'current_cycle': initialized_cycle,
             'group_cycle_number': initialized_cycle,
         })
+
+    # -- 시간표 회차 명령 · 수정 목록 206 --------------------------------- #
+
+    def _timed(self, execution_id: str, cycle: int) -> Optional[Dict[str, Any]]:
+        """이 실행이 쥔 시간표 회차 명령 · 그 회차 것이 아니면 None(신호 재생은 늘 None)"""
+        with self.condition:
+            if self.session.get('execution_id') != execution_id:
+                return None
+            timed = self.session.get('timed') or {}
+            if int(timed.get('cycle') or 0) != int(cycle):
+                return None
+            return dict(timed)
+
+    def _timed_initialize_at(self, execution_id: str, cycle: int, move_sec: float) -> Optional[float]:
+        timed = self._timed(execution_id, cycle)
+        if timed is None:
+            return None
+        return timed_cycle.initialize_at(float(timed['start']), move_sec)
+
+    @staticmethod
+    def _timed_marks(timed: Optional[Mapping[str, Any]], late_sec: float = 0.0) -> Dict[str, Any]:
+        """계획에 붙여 상태로 내보내는 칸 · 연동 노드가 다시 떴을 때 이어받기(`timed_cycle`) · 늦음 기록"""
+        if not timed:
+            return {}
+        return {'timed_cycle': int(timed['cycle']), 'cycle_start_late_sec': round(max(float(late_sec), 0.0), 3)}
+
+    def _initial_move_seconds(self, initialization_plan: Mapping[str, Any], *, blend: bool = True) -> float:
+        """이 회차 초기 이동이 걸리는 계획 시간 · `_run_initialization` 과 같은 규칙
+
+        축마다 이동 시간(묶음 값 · 없으면 조인트 매핑 값 · 205) 중 가장 긴 것 · 초기 위치가 첫 프레임과 다르면 첫 프레임까지
+        같은 시간으로 한 번 더 잇는다(13-1) · 연동 노드는 이것을 몰라 매핑 값만으로 짐작했다 · 두 번 세는 규칙은
+        `timed_cycle.planned_initial_move_sec` 하나(웹의 자동 회차 간격 필요 시간도 같은 것 · 206 뒤처리).
+        """
+        axes = [axis for axis in (initialization_plan or {}).get('axes') or () if isinstance(axis, Mapping)]
+        if not axes:
+            return 0.0
+        period = float(getattr(self.manager, 'period_sec', 0.0) or 0.0)
+        longest = max(max(float(axis.get('initial_move_time_sec') or 0.0), period) for axis in axes)
+        return timed_cycle.planned_initial_move_sec(
+            longest, bool(blend) and self._blends_to_first_frame(initialization_plan, axes),
+        )
+
+    def _blends_to_first_frame(self, initialization_plan: Mapping[str, Any], axes: List[Mapping[str, Any]]) -> bool:
+        targets = {
+            int(axis['motor_axis']): float(axis['initial_motor_target_rad'])
+            for axis in axes
+            if axis.get('motor_axis') is not None and axis.get('initial_motor_target_rad') is not None
+        }
+        try:
+            return bool(self.manager._player._first_frame_targets(
+                {**initialization_plan, 'blend_to_first_frame': True}, list(axes), targets,
+            ))
+        except (AttributeError, KeyError, TypeError, ValueError):
+            # 허용 오차를 못 읽음(노드 없이 만든 시험) · 값이 다르면 잇는 것으로
+            return any(
+                axis.get('first_frame_motor_target_rad') is not None
+                and int(axis.get('motor_axis', -1)) in targets
+                and abs(float(axis['first_frame_motor_target_rad']) - targets[int(axis['motor_axis'])]) > 1e-9
+                for axis in axes
+            )
+
+    def _skip_late_cycle(
+        self,
+        execution_id: str,
+        timed: Mapping[str, Any],
+        cycle_plan: Optional[Mapping[str, Any]],
+        move_sec: float,
+        *,
+        moved: bool,
+    ) -> bool:
+        """이 회차를 쉬어야 하나 · 쉬면 장벽처럼 서서 다음 회차 명령을 기다린다 · 사용자 결정 2026-11-16
+
+        `moved` · 초기 이동을 끝냈다(지금 바로 시작할 수 있다) · 아니면 지금 시작해도 끝날 시각으로 · 늦어도 다음 회차 준비를
+        안 먹으면 쉬지 않는다(끝나는 대로 시작 · `_wait_timed_start`).
+        """
+        cycle, start = int(timed['cycle']), float(timed['start'])
+        now = time.monotonic()
+        ready = now if moved else max(now, timed_cycle.initialize_at(start, move_sec)) + float(move_sec)
+        summary = (cycle_plan or {}).get('summary') if isinstance(cycle_plan, Mapping) else None
+        clip_sec = float((summary or {}).get('duration_sec') or 0.0)
+        latest = timed_cycle.latest_start(start, float(timed.get('next_start') or 0.0), clip_sec, move_sec)
+        decision = timed_cycle.decide(cycle=cycle, start=start, ready_at=ready, latest=latest, moved=moved)
+        if not decision.skip:
+            return False
+        with self.condition:
+            if self.session.get('execution_id') == execution_id:
+                self.session.update({
+                    'state': 'motion_completed',
+                    'cycle_number': cycle,
+                    'next_cycle_number': 0,
+                    'next_start_at': 0.0,
+                    'barrier_at': time.monotonic(),
+                })
+            self.condition.notify_all()
+        self._log_warning(f'시간표 재생 · {cycle}회차 쉼 · {decision.skip}')
+        self.manager._update_status({
+            'state': 'motion_completed',
+            'phase': run_state.GROUP_CYCLE_SKIPPED_PHASE,
+            'message': f'그룹 모션 {cycle}회차 쉼 · {decision.skip}',
+            'group_execution': True,
+            'execution_id': execution_id,
+            'cycle_count': cycle,
+            'current_cycle': cycle,
+            'group_cycle_number': cycle,
+            'timed_cycle': cycle,
+            'cycle_skip_reason': decision.skip,
+        })
         return True
+
+    def _wait_timed_start(self, execution_id: str, cycle: int, start_at: float) -> float:
+        """시간표 회차 시작 · 시각 전이면 그때 · 지났으면(초기 이동이 늦게 끝남) 바로 · 늦은 만큼(초) · 수정 목록 206
+
+        사용자 결정 2026-11-16 · 늦게 끝난 초기 이동은 잘못이 아니다 · 회차를 쉬지 않고 끝나는 대로 시작 · 다른 PC 는
+        기다리지 않는다(각자 제 시계) · 다음 회차는 다시 시간표 시각에.
+        """
+        late = time.monotonic() - float(start_at)
+        if late <= 0.0:
+            # 초기 이동 끝 → 시작 · 시작 여유(`timed_cycle.INITIAL_MOVE_SETTLE_SEC`)가 실물에서 얼마나 남는지 보는 기록
+            self._log_info(f'시간표 재생 · {cycle}회차 · 초기 이동 끝 → 시작 {-late:.2f} s 남음')
+            self.manager._wait_group_deadline(
+                start_at,
+                phase='group_start_scheduled',
+                message=f'그룹 모션 {cycle}회차 시작 대기',
+                execution_id=execution_id,
+                cycle_number=cycle,
+                late_ok=True,
+            )
+            return 0.0
+        self._log_warning(
+            f'시간표 재생 · {cycle}회차 {late:.2f} s 늦게 시작 · 초기 이동이 늦게 끝남 · 쉼 아님 · '
+            '다른 PC 는 기다리지 않음 · 다음 회차는 다시 시간표 시각'
+        )
+        return late
+
+    def _log_info(self, text: str) -> None:
+        log = getattr(self.manager.get_logger(), 'info', None)
+        if callable(log):
+            log(text)
+
+    def _log_warning(self, text: str) -> None:
+        logger = self.manager.get_logger()
+        log = getattr(logger, 'warning', None) or getattr(logger, 'warn', None) or getattr(logger, 'error', None)
+        if callable(log):
+            log(text)
 
     def _run_independent(
         self,
@@ -800,6 +1128,15 @@ class GroupSession:
                 if committed > 0:
                     self.session['state'] = 'motion_completed'
                     break
+                if int((self.session.get('timed') or {}).get('cycle') or 0) == join_cycle + 1:
+                    # 시간표 복귀 · 회차 명령이 합류 확정을 겸한다 · 진행 PC 가 없다(각자 시간표) · 수정 목록 206
+                    committed = join_cycle
+                    self.session.update({
+                        'join_committed_cycle': join_cycle,
+                        'cycle_number': join_cycle,
+                        'state': 'motion_completed',
+                    })
+                    break
                 self.condition.wait(timeout=0.2)
             else:
                 return None
@@ -817,7 +1154,8 @@ class GroupSession:
 
     def _wait_initialization(
         self, execution_id: str,
-    ) -> Optional[tuple[int, float]]:
+    ) -> Optional[tuple[int, float, Optional[Dict[str, Any]]]]:
+        """(회차, 초기화 시각, 시간표 회차 명령) · 신호 재생 · 진행 PC 의 초기화 예약 · 시간표 · 다음 회차 명령(206 · 시각 0)"""
         with self.condition:
             while not self.manager._stop_event.is_set():
                 if self.session.get('execution_id') != execution_id:
@@ -832,7 +1170,12 @@ class GroupSession:
                     self.session['state'] = 'cycle_initialize_scheduled'
                     self.session['next_initialize_cycle_number'] = 0
                     self.session['next_initialize_at'] = 0.0
-                    return cycle, initialize_at
+                    return cycle, initialize_at, None
+                timed = self.session.get('timed') or {}
+                done = int(self.session.get('cycle_number') or 0)
+                if int(timed.get('cycle') or 0) == done + 1:
+                    self.session['state'] = 'cycle_initialize_scheduled'
+                    return done, 0.0, dict(timed)
                 self.condition.wait(timeout=0.2)
         return None
 
@@ -846,6 +1189,16 @@ class GroupSession:
                 if cycle > 0 and start_at > 0.0:
                     self.session['state'] = 'start_scheduled'
                     return cycle, start_at
+                # 시간표 회차 명령 · 시작 시각이 이미 들어 있다 · 시작 명령을 따로 기다리지 않는다 · 206
+                timed = self.session.get('timed') or {}
+                expected = int(self.session.get('cycle_number') or 0) + 1
+                if int(timed.get('cycle') or 0) == expected and self.session.get('state') in {'armed', 'cycle_ready'}:
+                    self.session.update({
+                        'state': 'start_scheduled',
+                        'next_cycle_number': expected,
+                        'next_start_at': float(timed['start']),
+                    })
+                    return expected, float(timed['start'])
                 self.condition.wait(timeout=0.2)
         return None
 

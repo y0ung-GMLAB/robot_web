@@ -304,8 +304,9 @@ export function shortReason(reason, max = 32) {
 export function groupRows(snap) {
   const group = groupRuntime(snap);
   const timetable = timetableView(snap);
-  const excluded = group.execution.excluded || {};
-  const joining = group.execution.joining || {};
+  // 제외 · 복귀는 도는 실행의 것 · 끝난 실행(번호 없음)의 값은 그리지 않는다 · 수정 목록 216
+  const excluded = group.active ? (group.execution.excluded || {}) : {};
+  const joining = group.active ? (group.execution.joining || {}) : {};
   const peers = [...group.peers];
   if (group.local && !peers.some((peer) => peer.pc_id === group.local.pc_id)) peers.unshift({ ...group.local, is_local: true });
   return peers.map((peer) => {

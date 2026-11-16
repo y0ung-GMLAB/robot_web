@@ -432,16 +432,76 @@ def test_a_group_that_never_releases_counts_as_failures_and_ends_with_servo_off_
     assert service.status()['state'] == 'gave_up'
 
 
-def test_a_park_refused_while_the_stop_settles_is_retried_within_seconds(tmp_path):
-    """실물 NY 2026-11-09 22:48 · 회차 끝 정지 0.5 s 뒤 「전체 동작 정지 처리 중」 거절 → 1분 뒤에야 주차(C)"""
-    robot = _Robot(tmp_path, replies=[{'success': False, 'message': '전체 동작 정지 처리 중'}] * 2)
-    robot.state = 'completed'
+def test_a_park_waits_for_the_previous_run_task_instead_of_being_refused(tmp_path):
+    """수정 목록 200 · 155 · 상태는 「끝」(stopped)인데 앞 실행 스레드가 아직 있다
+
+    「정지」 는 스레드가 알아채기 전에 상태부터 바꾼다 · 그 틈에 보낸 기준점 이동은 「previous motion run
+    task is still running」 으로 거절돼 1분 뒤 다시 했다 · 전에는 감독의 「정지 처리 중」 거절도 1 s 간격
+    4번 다시 보냈다(191 ⑤) · 이제는 런타임이 알리는 `run_task_active` 가 꺼질 때까지 기다렸다가 **한 번** 보낸다.
+    """
+    robot = _Robot(tmp_path)
+    robot.state = 'stopped'
+    robot.task_active = True
+    polls = []
+
+    def runtime_status():
+        polls.append(robot.now)
+        if len(polls) >= 5:
+            robot.task_active = False   # 몇 번 본 뒤에야 스레드가 끝났다
+        return {'status': {
+            'state': robot.state, 'phase_started_at': robot.phase_started_at,
+            'run_task_active': robot.task_active,
+        }}
+
+    robot.bridge.motion_run_status = runtime_status
+    initialize = robot._initialize
+
+    def refuse_while_task_alive(payload):
+        if robot.task_active:
+            robot.calls.append(('refused', robot.now))
+            return {'success': False, 'message': 'previous motion run task is still running'}
+        return initialize(payload)
+
+    robot.bridge.motion_run_initialize = refuse_while_task_alive
     service = _service(robot)
 
     service.begin()
 
-    inits = [call for call in robot.calls if call[0] == 'initialize']
-    assert len(inits) == 3
-    assert inits[-1][1] - inits[0][1] <= 3.0, '몇 초 안에 다시'
+    assert [call for call in robot.calls if call[0] == 'refused'] == [], '스레드가 끝나기 전에는 보내지 않는다'
+    assert [call[0] for call in robot.calls if call[0] == 'initialize'] == ['initialize'], '한 번에 간다'
     assert robot.events == [], '실패로 세지 않는다'
     assert service.status()['state'] == 'done'
+
+
+def test_park_judges_its_own_run_by_the_run_id_not_by_the_clock(tmp_path):
+    """수정 목록 36 · 200 · 보내기 1 s 안에 멈춘 **앞** 실행의 `stopped` 를 이번 주차의 끝으로 읽지 않는다
+
+    전에는 단계 시각이 「보낸 시각 − 1 s」 뒤면 이번 이동으로 쳤다 · 런타임이 받을 때 돌려준 실행 번호로 가린다.
+    """
+    robot = _Robot(tmp_path)
+    robot.state = 'completed'
+    run = {'id': 7, 'reads': 0}
+
+    def runtime_status():
+        run['reads'] += 1
+        if robot.calls and robot.calls[-1][0] == 'initialize' and run['reads'] < 6:
+            # 보낸 직후 · 아직 앞 실행(번호 7)의 「방금 멈춤」 이 보인다 · 시각은 보낸 시각과 거의 같다
+            return {'status': {'state': 'stopped', 'phase_finished_at': time.time(), 'run_id': 7}}
+        return {'status': {'state': robot.state, 'phase_started_at': robot.phase_started_at, 'run_id': run['id']}}
+
+    robot.bridge.motion_run_status = runtime_status
+    initialize = robot._initialize
+
+    def accept(payload):
+        reply = initialize(payload)
+        run['id'] = 8
+        return {**reply, 'status': {'state': 'preparing', 'run_id': 8}}
+
+    robot.bridge.motion_run_initialize = accept
+    service = _service(robot)
+
+    service.begin()
+
+    assert robot.events == [], '앞 실행의 멈춤을 주차 실패로 읽지 않는다'
+    assert service.status()['state'] == 'done'
+    assert ('ac', 'servo_off', 0) in robot.calls

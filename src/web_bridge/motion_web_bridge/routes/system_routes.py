@@ -47,11 +47,12 @@ async def _coordination_to_thread(function, *args):
     return await loop.run_in_executor(_COORDINATION_POOL, functools.partial(function, *args))
 
 
-#: 연동 노드가 50ms 마다 묻는 `local-status` 전용 스레드 · 수정 목록 172
+#: 연동 노드가 묻는 `local-status` 전용 스레드 · 수정 목록 172
 #:
 #: 공용 풀(`asyncio.to_thread`)은 다른 PC 실행 모드 조회(PC 마다 최대 3 s · Wi-Fi) · 화면 요청이 같이 쓴다 ·
-#: 그게 밀리면 이 짧은 응답도 줄을 서서 300ms 를 넘기고 그룹이 통째로 선다(실물 NY 2026-11-04 · 추정) ·
-#: 다른 일이 아무리 밀려도 이 응답은 기다리지 않게 따로 둔다 · 일 자체는 짧다(메모리의 상태를 읽어 담기).
+#: 다른 일이 아무리 밀려도 이 응답은 기다리지 않게 따로 둔다 · 일 자체는 짧다(메모리의 상태를 읽어 담기) ·
+#: 수정 목록 209 뒤로는 0.5 s 마다 · 웹 쪽 칸(운전 모드 · 시간표 칸 등)만 · 늦어도 그룹에서 빠지지 않는다
+#: (재생 · 안전 상태는 연동 노드가 로컬 DDS 로 직접 받는다).
 _LOCAL_STATUS_POOL = ThreadPoolExecutor(max_workers=2, thread_name_prefix='coordination-status')
 
 
@@ -298,11 +299,14 @@ def register_system_routes(app: FastAPI, bridge, project_call) -> None:
         remote_ip = request.client.host if request.client else ''
         if remote_ip not in {'127.0.0.1', '::1'}:
             raise HTTPException(status_code=403, detail='loopback only')
-        # 연동 노드가 50ms 마다 묻는 길 · 이벤트 루프에 두면 다른 요청이
-        # 몰릴 때 0.25초 제한을 넘기고 그룹이 통째로 선다 · §6-146
+        # 연동 노드가 0.5 s 마다 묻는 길(웹 쪽 칸만 · 수정 목록 209) · 이벤트 루프에 두지 않는다 · §6-146
         # 공용 풀도 줄을 선다 · 전용 스레드에서 · 수정 목록 172
+        # `?link=down` · 연동 노드가 로컬 연결 없이 웹 길로 되돌린 동안 · 이 질문이 「살아 있음」 을 대신한다(209 되돌리기 길)
+        link_down = request.query_params.get('link') == 'down'
         loop = asyncio.get_running_loop()
-        return await loop.run_in_executor(_LOCAL_STATUS_POOL, bridge.coordination_local_status)
+        return await loop.run_in_executor(
+            _LOCAL_STATUS_POOL, functools.partial(bridge.coordination_local_status, link_down=link_down),
+        )
 
     @app.post('/api/coordination/control')
     async def coordination_control(request: Request):
@@ -358,9 +362,10 @@ def register_system_routes(app: FastAPI, bridge, project_call) -> None:
         루프에서** 하고 있었다 · 화면 탭 하나가 초당 10번 부르니 탭 하나당
         루프를 초당 170ms 씩 막는다 · 탭 두셋이면 루프가 거의 서 있다.
 
-        그동안 연동 노드가 50ms 마다 묻는 `local-status` 가 굶는다 · 0.5초(지금 1.5초 ·
-        수정 목록 172) 못 받으면 **그룹 실행이 통째로 정지한다**(`GROUP_PARTICIPANT_FAILURE`) ·
-        실제로 `실시간 모니터링` 탭을 누를 때마다 그렇게 멈췄다.
+        그동안 연동 노드가 50ms 마다 묻는 `local-status` 가 굶었다 · 0.5초(뒤에 1.5초 ·
+        수정 목록 172) 못 받으면 **그룹 실행이 통째로 정지했다**(`GROUP_PARTICIPANT_FAILURE`) ·
+        실제로 `실시간 모니터링` 탭을 누를 때마다 그렇게 멈췄다 · 수정 목록 209 뒤로는 연동 노드가
+        재생 상태를 웹에서 읽지 않는다(웹이 늦어도 그룹은 그대로).
 
         `@app.get` 들은 스레드로 옮겼는데(§6-146) 여기만 남아 있었다 ·
         `@app.websocket` 은 그때 훑은 대상이 아니었다.

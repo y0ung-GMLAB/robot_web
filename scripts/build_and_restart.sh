@@ -34,6 +34,10 @@ source "${WORKSPACE_SETUP}"
 set -u
 
 echo "[2/3] 서비스 재시작: motion-control.service motion-coordination.service"
+# 기다리게 둔다(`--no-block` 아님) · 수정 목록 206 점검 · 연동 서비스는 Type=notify(202) 라 노드가 「준비 끝」 을 알릴 때까지
+# 이 줄에서 선다(보통 수 초 · 랜 대기 최대 60 s · 끝내 안 오면 TimeoutStartSec 600 s 뒤 실패) · 바로 아래 [3/3] 이
+# `is-active` 로 결과를 보므로 기동이 끝난 뒤여야 한다(`--no-block` 이면 「activating」 으로 이 스크립트가 실패)
+echo "    연동 서비스 「준비 끝」 까지 기다림 · 보통 수 초 · 랜 대기 최대 60 s"
 systemctl --user restart motion-control.service motion-coordination.service
 
 echo "[3/3] 서비스 상태"
