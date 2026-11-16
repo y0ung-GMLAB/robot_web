@@ -44,6 +44,8 @@ GROUP_RELEASE_WAIT_SEC = 5 * 60
 PARK_MOVE_SEC = 10.0
 PARK_WAIT_SEC = PARK_MOVE_SEC + 40.0
 SERVO_ON_WAIT_SEC = 5.0
+#: 운영시간 첫 회차 준비 · 따로 스레드가 꺼진 서보를 켜는 중 · 연동 노드는 이 답을 받으면 쉬지 않고 다시 묻는다 · 수정 목록 217
+WAKING_MESSAGE = '운영시간 시작 · 꺼진 서보를 켜는 중'
 POLL_SEC = 0.5
 # 191 ⑤ 의 「정지 처리 중」 거절 → 1 s 간격 4번 다시(`STOP_SETTLE_RETRY_SEC` · `STOP_SETTLE_RETRIES`)는 없앴다 ·
 # 감독이 정지 뒤 0.5 s 동안 모든 명령을 막던 것을 정지 표지로 바꿨다 · 정지 직후의 기준점 이동은 새 표지로
@@ -306,6 +308,9 @@ class ScheduleEndService:
         self._monotonic = monotonic
         self._lock = threading.Lock()
         self._thread: Optional[threading.Thread] = None
+        # 운영시간 첫 회차 준비의 서보 켜기 · 따로 스레드와 그 결과('' = 켜짐 · 글 = 실패 이유 · None = 없음) · 수정 목록 217
+        self._wake_thread: Optional[threading.Thread] = None
+        self._wake_result: Optional[str] = None
         # 다시 시도를 기다리는 동안 시작 요청이 왔다 · 다음 확인에서 그만둔다
         self._start_requested = False
         self._status: Dict[str, Any] = {'state': 'idle', 'message': '', 'updated_at': None}
@@ -920,15 +925,60 @@ class ScheduleEndService:
                 dxl_axes.append(int(axis))
         return sorted(ac_axes), sorted(dxl_axes), sorted(alarmed)
 
-    def start_blocker(self, *, wake_all: bool = False) -> str:
+    def start_blocker(self, *, wake_all: bool = False, wait: bool = True) -> str:
         """시작 전에 부른다 · 주차 중이면 막고 · 여기서 끈 모터는 켜고 확인한다.
 
         `wake_all` · 스케줄 운영시간 첫 회차 준비 · 운영 종료가 끈 축뿐 아니라 꺼진 서보를 모두 켠다(긴급 정지 ·
         알람 제외) · 운영 중 사람이 끈 서보는 켜지 않는다(복귀 회차 `group_join` 은 여기 오지 않음) · 수정 목록 193
+
+        `wait=False` · 연동 노드가 부르는 길(운영시간 첫 회차 준비) · 켜기와 확인은 따로 스레드가 하고 바로
+        `WAKING_MESSAGE` 를 돌려준다 · 다시 부르면 켜는 중이면 또 `WAKING_MESSAGE` · 끝났으면 실패 이유를 한 번 ·
+        성공이면 켤 것이 없어 '' · 전에는 다 켜질 때까지(최대 `SERVO_ON_WAIT_SEC`) 여기서 기다려 연동 노드 실행기가
+        그동안 섰다(NY 2026-11-16 · 2~4 s) · 수정 목록 217
         """
         if self.active():
             return '운영 종료 동작(기준점 이동 → 서보 OFF)이 진행 중입니다. 끝난 뒤 다시 시도하세요'
+        if not wait:
+            progress = self._wake_progress()
+            if progress is not None:
+                return progress
         self._take_over()
+        targets = self._wake_targets(wake_all)
+        if targets is None:
+            return ''
+        if wait or targets['all_on']:
+            # 켤 축이 모두 이미 켜져 있으면 기다릴 것이 없다 · 기록 정리만 바로
+            return self._wake(targets)
+        self._start_wake_thread(targets)
+        return WAKING_MESSAGE
+
+    def _wake_progress(self) -> Optional[str]:
+        """따로 스레드의 서보 켜기 · 켜는 중 `WAKING_MESSAGE` · 끝난 실패는 이유(한 번만) · 그 밖 None"""
+        with self._lock:
+            thread = self._wake_thread
+            if thread is not None and thread.is_alive():
+                return WAKING_MESSAGE
+            result, self._wake_result = self._wake_result, None
+            self._wake_thread = None
+        return result or None
+
+    def _start_wake_thread(self, targets: Dict[str, Any]) -> None:
+        def run() -> None:
+            try:
+                result = self._wake(targets)
+            except Exception as exc:  # noqa: BLE001 · 스레드가 죽어도 다음 물음에 실패로 답한다
+                result = f'꺼진 서보를 켜다 오류가 났습니다 · {exc}'
+            with self._lock:
+                self._wake_result = result
+
+        thread = threading.Thread(target=run, name='schedule-start-servo-on', daemon=True)
+        with self._lock:
+            self._wake_thread = thread
+            self._wake_result = None
+            thread.start()
+
+    def _wake_targets(self, wake_all: bool) -> Optional[Dict[str, Any]]:
+        """켤 축 · 없으면 None"""
         record = self._read_powered_off()
         ac_axes = list(record.get('ac_servo') or [])
         dxl_axes = list(record.get('dynamixel') or [])
@@ -942,17 +992,29 @@ class ScheduleEndService:
             if alarmed:
                 self._set('idle', f'운영시간 시작 · 알람 축은 서보를 켜지 않음{_axes_text("모터", alarmed)}')
         if not ac_axes and not dxl_axes:
-            return ''
+            return None
+        on_now = self._servos_on_now()
+        return {
+            'ac_axes': ac_axes, 'dxl_axes': dxl_axes, 'recorded': recorded, 'woke_all': woke_all,
+            'on_now': on_now, 'all_on': (set(ac_axes) | set(dxl_axes)) <= on_now,
+        }
 
-        def already_on() -> set:
-            return {
-                int(motor['controller_index']) for motor in self._detected_motors()
-                if motor.get('controller_index') is not None and motor.get('servo_on') is True
-            }
+    def _servos_on_now(self) -> set:
+        return {
+            int(motor['controller_index']) for motor in self._detected_motors()
+            if motor.get('controller_index') is not None and motor.get('servo_on') is True
+        }
 
+    def _wake(self, targets: Dict[str, Any]) -> str:
+        """켜고 다 켜질 때까지 확인 · '' = 켜짐 · 아니면 이유"""
+        ac_axes = targets['ac_axes']
+        dxl_axes = targets['dxl_axes']
+        recorded = targets['recorded']
+        woke_all = targets['woke_all']
+        already_on = self._servos_on_now
         # 이미 켜진 축은 건너뛴다 · 서보 ON 순서(0x06 → 0x07 → 0x0F)의 0x06 이 켜진 축을 잠깐 내려
         # 약 100 ms 토크가 빠졌다(실물 NY 2026-11-09 08:49:31) · 수정 목록 189 ⑤
-        on_now = already_on()
+        on_now = targets['on_now']
         for axis in ac_axes:
             if axis in on_now:
                 continue

@@ -924,3 +924,45 @@ def test_a_human_group_run_releases_the_window_end_park():
     _ticks(driver, clock, Choice(reason='마스터 스케줄 꺼짐'), 1.0)
     assert finished == []
     assert any('주차 기억 버림' in note for note in notes)
+
+
+def test_a_web_still_turning_servos_on_does_not_make_the_first_cycle_skip(monkeypatch):
+    """NY 2026-11-16 · 운영시간 첫 회차 준비 · 웹이 꺼진 서보를 켜는 동안 이 노드가 HTTP 를 쥐어 실행기가 2~4 s 섰다 ·
+    이제 웹은 「켜는 중」(`pending`)으로 바로 답하고 이 노드는 쉬지 않고 잠시 뒤 다시 묻는다 · 수정 목록 217"""
+    clock, runtime, driver, _, notes = _pc(100_000.0)
+    real = runtime.control
+    waking = {'left': 6}
+
+    def control(payload):
+        if payload['command'] == 'group_prepare' and waking['left'] > 0:
+            waking['left'] -= 1
+            runtime.calls.append('group_prepare(pending)')
+            return {'success': False, 'pending': 'servo_wake', 'message': '운영시간 시작 · 꺼진 서보를 켜는 중'}
+        return real(payload)
+
+    driver._control = control
+    _run(driver, runtime, clock, _always(Choice(timeline=TIMELINE)), 200.0)
+    assert runtime.starts[0] == (1, 100_060.0), '켜는 동안 쉬지 않고 1회차를 제때'
+    pending = [i for i, call in enumerate(runtime.calls) if call == 'group_prepare(pending)']
+    assert len(pending) == 6
+    assert runtime.calls[pending[-1] + 1] == 'group_prepare', '켜진 뒤 같은 회차 준비'
+    assert not any('쉼' in note for note in notes)
+
+
+def test_pending_asks_again_only_after_the_poll_interval_and_a_missed_entry_is_a_skip():
+    clock, runtime, driver, _, notes = _pc(100_000.0)
+    asked = []
+
+    def control(payload):
+        asked.append(round(clock.mono(), 1))
+        return {'success': False, 'pending': 'servo_wake', 'message': '켜는 중'}
+
+    driver._control = control
+    _run(driver, runtime, clock, _always(Choice(timeline=TIMELINE)), 5.0)
+    gaps = {round(b - a, 1) for a, b in zip(asked, asked[1:])}
+    assert asked and gaps <= {ClockDriver.PENDING_POLL_SEC, round(ClockDriver.PENDING_POLL_SEC + 0.1, 1)}
+    assert driver._note == '1회차 준비 · 켜는 중'
+    # 켜기가 끝내 안 끝나 1회차 들어갈 때(시작 − 준비)를 넘김 · 조용히 넘어가지 않고 쉼으로 남긴다
+    _run(driver, runtime, clock, _always(Choice(timeline=TIMELINE)), 25.0)
+    assert driver._note == '1회차 쉼 · 서보 켜기가 끝나지 않음'
+    assert any('1회차 쉼 · 서보 켜기가 끝나지 않음' in note for note in notes)

@@ -142,6 +142,9 @@ class ClockDriver:
     #: 실패 감지만 · 보낸 명령 뒤의 로컬 상태(응답 표시 이상)가 이만큼 안 오면 재생 관리자 · 웹이 멈춘 것 · 회차를 놓는다 ·
     #: 재생 관리자는 상태를 0.5 s 마다 내고 웹은 응답의 상태를 바로 들고 있으므로 정상이면 다음 틱에 온다 · 수정 목록 199
     ECHO_TIMEOUT_SEC = 10.0
+    #: 웹이 「서보 켜는 중」(`pending`)이라 답한 뒤 다시 묻는 간격 · 웹은 기다리지 않고 바로 답한다 · 수정 목록 217 ·
+    #: 전에는 웹이 서보를 다 켤 때까지(최대 5 s) 이 노드가 HTTP 를 쥐고 기다려(한도 4 s) 실행기 전체가 2~4 s 섰다(NY 2026-11-16)
+    PENDING_POLL_SEC = 0.5
     #: 즉시 정지한 시간표 · 정지가 풀릴 때까지 건너뜀 · 수정 목록 188
     _STOPPED_SKIP = 10 ** 9
 
@@ -164,6 +167,10 @@ class ClockDriver:
         self._run: Optional[Dict[str, Any]] = None
         #: 이 시간표의 이 회차까지는 다시 잡지 않는다(실패 · 쉼) · (plan_id, 회차)
         self._skip: tuple = ('', 0)
+        #: 웹이 서보를 켜는 중 · 이 시각(단조) 전에는 준비 명령을 다시 보내지 않는다 · 수정 목록 217
+        self._pending_until_m = 0.0
+        #: 「켜는 중」 을 받은 회차 · (plan_id, 회차) · 들어갈 때를 넘기면 쉼으로 남긴다
+        self._pending_slot: Optional[tuple] = None
         self._note = ''
         #: 회차를 쉬며 띄운 이유 · 다음 들어갈 때까지 화면에 남긴다 · 수정 목록 189
         self._skip_note = ''
@@ -451,6 +458,13 @@ class ClockDriver:
         skip_plan, skip_cycle = self._skip
         if skip_plan == timeline.plan_id and slot.cycle <= skip_cycle:
             return
+        pending = self._pending_slot
+        if pending and pending != (timeline.plan_id, slot.cycle):
+            # 서보 켜기(웹 「켜는 중」)를 기다리다 그 회차에 들어갈 때를 넘김 · 조용히 넘어가지 않게 쉼으로 남긴다 ·
+            # 웹의 켜기는 축마다 명령 + 확인 한도(`SERVO_ON_WAIT_SEC`)라 들어가는 창(30 s 남짓)보다 짧다 · 수정 목록 217
+            self._pending_slot = None
+            self._pending_until_m = 0.0
+            self._skip_cycle(pending[0], pending[1], '서보 켜기가 끝나지 않음', f'{pending[1]}회차 쉼 · 서보 켜기가 끝나지 않음')
         blocker = str(view.get('start_blocker') or '')
         early = slot.start_unix - now_w > prep + self.ENTER_WINDOW_SEC
         if blocker:
@@ -482,6 +496,8 @@ class ClockDriver:
             )
             self._skip_cycle(timeline.plan_id, slot.cycle, f'다른 재생 중({detail})', '다른 재생 중 · 이 회차 쉼')
             return
+        if now_m < self._pending_until_m:
+            return
         common = {
             'execution_id': timeline.plan_id,
             'network_operation_id': f'tt-enter-{uuid.uuid4().hex}',
@@ -503,6 +519,15 @@ class ClockDriver:
             payload = {**common, 'command': 'group_join', 'join_cycle_number': slot.cycle - 1}
             stage = 'joining'
         result = self._control(payload)
+        if result.get('pending'):
+            # 운영시간 첫 회차 · 웹이 꺼진 서보를 켜는 중 · 쉬지 않고 잠시 뒤 다시 묻는다 · 켜기 실패는 웹이 실패로 답해
+            # 아래에서 그 회차를 쉰다 · 수정 목록 217
+            self._pending_until_m = now_m + self.PENDING_POLL_SEC
+            self._pending_slot = (timeline.plan_id, slot.cycle)
+            self._set_note(f'{slot.cycle}회차 준비 · {result.get("message") or "서보 켜는 중"}')
+            return
+        self._pending_until_m = 0.0
+        self._pending_slot = None
         if not result.get('success'):
             self._skip = (timeline.plan_id, slot.cycle)
             self._set_note(f'{slot.cycle}회차 쉼 · {result.get("message") or "응답 없음"}', warn=True)
