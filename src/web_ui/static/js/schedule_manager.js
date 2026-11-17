@@ -350,10 +350,13 @@ const ScheduleManager = {
                 : '<span class="badge bg-secondary" style="background-color: #718096; color: #fff; padding: 2px 6px; border-radius: 4px; font-size: 11px;">꺼짐</span>';
 
             const stopInfo = `종료: ${item.stop_time || '없음'}`;
+            // 특정일 운영 · 휴무일은 같은 날짜의 정기 운영보다 우선 · 휴무일은 시각 없음 · 수정 목록 218
+            const holiday = item.repeat_type === 'holiday';
 
             const daysInfo = item.repeat_type === 'weekly'
                 ? `반복: 매주 [${(item.repeat_days || []).join(', ')}]`
-                : (item.repeat_type === 'daily' ? '반복: 매일' : `1회: ${item.run_date || ''}`);
+                : item.repeat_type === 'daily' ? '반복: 매일'
+                : `${holiday ? '휴무일' : '특정일'}: ${this.escapeHtml(item.run_date || '')}`;
 
             html += `
                 <div class="list-group-item" style="display: flex; justify-content: space-between; align-items: center; padding: 12px; margin-bottom: 8px; background: #1a202c; border: 1px solid #4a5568; border-radius: 6px;">
@@ -363,8 +366,8 @@ const ScheduleManager = {
                             ${enabledBadge}
                         </div>
                         <div style="font-size: 12px; color: #a0aec0; display: flex; gap: 12px;">
-                            <span>🕒 시작: <strong style="color: #63b3ed;">${item.start_time}</strong></span>
-                            <span>🛑 ${stopInfo}</span>
+                            ${holiday ? '' : `<span>🕒 시작: <strong style="color: #63b3ed;">${item.start_time}</strong></span>
+                            <span>🛑 ${stopInfo}</span>`}
                             <span>📅 ${daysInfo}</span>
                         </div>
                     </div>
@@ -432,7 +435,7 @@ const ScheduleManager = {
         if (type === 'weekly') {
             if (weeklyGroup) weeklyGroup.style.display = 'block';
             if (onceGroup) onceGroup.style.display = 'none';
-        } else if (type === 'once') {
+        } else if (type === 'once' || type === 'holiday') {
             if (weeklyGroup) weeklyGroup.style.display = 'none';
             if (onceGroup) onceGroup.style.display = 'block';
         } else {
@@ -456,16 +459,17 @@ const ScheduleManager = {
 
         const runDate = document.getElementById('schedRunDate').value || null;
 
+        const holiday = repeatType === 'holiday';
         const payload = {
             schedule_name: name,
-            start_time: startTime,
+            start_time: holiday ? null : startTime,
             // 정지 방식은 「지정 시각」 하나다 · §6-137
             stop_mode: 'time',
-            stop_time: stopTime,
+            stop_time: holiday ? null : stopTime,
             duration_sec: null,
             repeat_type: repeatType,
             repeat_days: repeatType === 'weekly' ? selectedDays : ["MON", "TUE", "WED", "THU", "FRI", "SAT", "SUN"],
-            run_date: repeatType === 'once' ? runDate : null,
+            run_date: repeatType === 'once' || holiday ? runDate : null,
             enabled: true
         };
 

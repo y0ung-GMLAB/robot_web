@@ -7,7 +7,8 @@ import { h, dot } from '../dom.js';
 import { RUN_MODE_LABEL } from '../model.js';
 import { tip } from '../tip.js';
 import {
-  WEEK, draftFrom, draftPayload, draftProblem, masterLink, repeatText, timeText, timezoneDrift, weekRows,
+  KINDS, WEEK, dateText, datedNote, draftFrom, draftPayload, draftProblem, masterLink, repeatText, scheduleGroups,
+  timeText, timezoneDrift, weekRows,
 } from '../schedule_model.js';
 import { api } from '../net.js';
 import * as act from '../actions.js';
@@ -69,48 +70,72 @@ function weekCard(state) {
         h('div', { class: 'timeline-scale mono' }, ['00', '06', '12', '18', '24'].map((t) => h('span', { text: t })))),
       rows.map((row) => h('div', { class: `week-row${row.today ? ' today' : ''}` },
         h('span', { class: 'week-day', text: row.today ? `${row.label} · 오늘` : row.label }),
-        h('div', { class: 'timeline', role: 'img', 'aria-label': `${row.label} ${row.windows.map((w) => `${w.name} ${hhmm(w.start)}–${hhmm(w.end)}`).join(', ') || '없음'}` },
+        h('div', { class: 'timeline', role: 'img', 'aria-label': `${row.label}${row.tag ? ` ${row.tag}` : ''} ${row.windows.map((w) => `${w.name} ${hhmm(w.start)}–${hhmm(w.end)}`).join(', ') || '없음'}` },
           row.windows.map((w) => h('div', {
             class: `timeline-window${w.id && w.id === selected ? ' selected' : ''}`,
             title: `${w.name} ${hhmm(w.start)} – ${hhmm(w.end)}`,
             style: { left: `${(w.start / 1440) * 100}%`, width: `${((w.end - w.start) / 1440) * 100}%` },
           }, w.end - w.start >= 150 && !w.carried ? h('span', { class: 'window-label', text: w.name }) : null)),
+          // 특정일 · 휴무일 표시 · 오른쪽 끝에 겹쳐 띄움(레이아웃 고정)
+          row.tag ? h('span', { class: `timeline-tag${row.tag === '휴무일' ? ' holiday' : ''}`, text: row.tag }) : null,
           row.today ? h('div', { class: 'timeline-now', style: { left: `${(minutes / 1440) * 100}%` } }) : null)))));
 }
 
 /* ---------- 목록 ---------- */
 
+function scheduleRow(item, ctx) {
+  const { state, changed, canEdit, items, active, unreadable, now } = ctx;
+  const id = String(item.schedule_id || '');
+  const on = item.enabled !== false;
+  const name = String(item.schedule_name || '스케줄');
+  const holiday = item.repeat_type === 'holiday';
+  const note = datedNote(item, items, now);
+  const past = note === '지난 날짜';
+  const tone = unreadable.has(id) ? 'bad' : !on || past ? 'idle' : id === active ? 'ok' : 'info';
+  // 정기 운영 · 「10:00 – 18:00 · 월 · 화」 · 특정일 운영 · 「09:00 – 18:00 · 2026-11-18 (수)」 · 휴무일 · 「2026-11-26 (목) · 휴무일」
+  const when = holiday
+    ? [dateText(item.run_date), ' · 휴무일']
+    : [h('span', { class: 'mono', text: timeText(item) }), ` · ${item.repeat_type === 'once' ? dateText(item.run_date) : repeatText(item)}`];
+  return h('li', { class: `sched-row${ui.draft?.id === id ? ' editing' : ''}${on && !past ? '' : ' off'}` },
+    dot(tone),
+    h('div', { class: 'grow sched-text' },
+      h('strong', { text: name }),
+      h('span', { class: 'muted small' },
+        ...when,
+        id === active ? h('span', { class: 'tone-text-ok', text: ' · 운영 중' }) : null,
+        note ? h('span', { class: note === '같은 날짜의 휴무일이 우선 적용됨' ? 'tone-text-warn' : '', text: ` · ${note}` }) : null,
+        unreadable.has(id) ? h('span', { class: 'tone-text-bad', text: ' · 시각 오류로 실행되지 않음' }) : null,
+        !on ? ' · 꺼짐' : null)),
+    canEdit ? h('span', { class: 'row-actions' },
+      h('label', { class: 'switch', title: on ? '끄기' : '켜기' },
+        h('input', { type: 'checkbox', role: 'switch', checked: on, 'aria-label': `${name} 켜기`, disabled: ui.busy,
+          onchange: (event) => busy(() => act.setScheduleEnabled(id, event.target.checked), state, changed) }),
+        h('span', { class: 'switch-track', 'aria-hidden': 'true' })),
+      h('button', { class: 'btn btn-mini', type: 'button', disabled: ui.busy, onclick: () => { ui.draft = draftFrom(item); changed(); } }, '편집'),
+      h('button', { class: 'btn btn-mini', type: 'button', disabled: ui.busy, onclick: () => busy(async () => {
+        if (await act.deleteSchedule(id, name) && ui.draft?.id === id) ui.draft = null;
+      }, state, changed) }, '삭제')) : null);
+}
+
 function listCard(state, changed, canEdit) {
   const items = Array.isArray(state.schedules) ? state.schedules : [];
-  const active = String(state.sched?.active_schedule_id || '');
-  const unreadable = new Set((state.sched?.unreadable_schedules || []).map((item) => String(item?.schedule_id ?? item)));
+  const now = new Date();
+  const ctx = {
+    state, changed, canEdit, items, now,
+    active: String(state.sched?.active_schedule_id || ''),
+    unreadable: new Set((state.sched?.unreadable_schedules || []).map((item) => String(item?.schedule_id ?? item))),
+  };
+  const groups = scheduleGroups(items, now);
+  const group = (title, hint, rows) => (rows.length ? h('div', { class: 'sched-group' },
+    h('h3', { class: 'sched-group-title' }, title, hint ? tip(hint) : null),
+    h('ul', { class: 'list sched-list' }, rows.map((item) => scheduleRow(item, ctx)))) : null);
   return h('section', { class: 'card', 'aria-label': '스케줄 목록' },
     h('div', { class: 'card-head' }, h('h2', { text: `스케줄 ${items.length}` })),
     items.length
-      ? h('ul', { class: 'list sched-list' }, items.map((item) => {
-        const id = String(item.schedule_id || '');
-        const on = item.enabled !== false;
-        const name = String(item.schedule_name || '스케줄');
-        const tone = unreadable.has(id) ? 'bad' : !on ? 'idle' : id === active ? 'ok' : 'info';
-        return h('li', { class: `sched-row${ui.draft?.id === id ? ' editing' : ''}${on ? '' : ' off'}` },
-          dot(tone),
-          h('div', { class: 'grow sched-text' },
-            h('strong', { text: name }),
-            h('span', { class: 'muted small' },
-              h('span', { class: 'mono', text: timeText(item) }), ` · ${repeatText(item)}`,
-              id === active ? h('span', { class: 'tone-text-ok', text: ' · 운영 중' }) : null,
-              unreadable.has(id) ? h('span', { class: 'tone-text-bad', text: ' · 시각 오류로 실행되지 않음' }) : null,
-              !on ? ' · 꺼짐' : null)),
-          canEdit ? h('span', { class: 'row-actions' },
-            h('label', { class: 'switch', title: on ? '끄기' : '켜기' },
-              h('input', { type: 'checkbox', role: 'switch', checked: on, 'aria-label': `${name} 켜기`, disabled: ui.busy,
-                onchange: (event) => busy(() => act.setScheduleEnabled(id, event.target.checked), state, changed) }),
-              h('span', { class: 'switch-track', 'aria-hidden': 'true' })),
-            h('button', { class: 'btn btn-mini', type: 'button', disabled: ui.busy, onclick: () => { ui.draft = draftFrom(item); changed(); } }, '편집'),
-            h('button', { class: 'btn btn-mini', type: 'button', disabled: ui.busy, onclick: () => busy(async () => {
-              if (await act.deleteSchedule(id, name) && ui.draft?.id === id) ui.draft = null;
-            }, state, changed) }, '삭제')) : null);
-      }))
+      ? [
+        group('특정일', ['특정일 운영 · 휴무일로 지정한 날짜에는 정기 운영 대신 해당 설정을 적용', '같은 날짜에 특정일 운영과 휴무일이 함께 있으면 휴무일을 우선 적용'], groups.dated),
+        group('정기 운영', null, groups.regular),
+      ]
       : h('p', { class: 'muted', text: '스케줄이 없습니다. 스케줄 모드여도 재생이 시작되지 않습니다.' }),
     endActionBlock(state, changed, canEdit));
 }
@@ -134,9 +159,12 @@ function endActionBlock(state, changed, canEdit) {
 
 /* ---------- 편집 ---------- */
 
+const NAME_HINT = { regular: '예: 매장 운영', date: '예: 연말 연장 운영', holiday: '예: 추수감사절' };
+
 function editCard(state, changed) {
   const draft = ui.draft;
-  const problem = draftProblem(draft);
+  const kind = draft.kind || 'regular';
+  const problem = draftProblem(draft, state.schedules);
   const set = (key) => (event) => { draft[key] = event.target.value; };
   const toggleDay = (code) => {
     draft.days = draft.days.includes(code) ? draft.days.filter((day) => day !== code) : [...draft.days, code];
@@ -148,24 +176,32 @@ function editCard(state, changed) {
   return h('section', { class: 'card edit-card', 'aria-label': '스케줄 편집' },
     h('div', { class: 'card-head' }, h('h2', { text: draft.id ? `편집 · ${draft.name || '스케줄'}` : '새 스케줄' })),
     h('label', { class: 'field' }, h('span', { class: 'field-label', text: '이름' }),
-      h('input', { class: 'input', type: 'text', value: draft.name, placeholder: '예: 매장 운영', maxlength: '40', oninput: set('name') })),
-    h('div', { class: 'row' },
-      h('label', { class: 'field' }, h('span', { class: 'field-label', text: '시작' }),
-        h('input', { class: 'input mono', type: 'time', value: draft.start, oninput: set('start'), onchange: () => changed() })),
-      h('label', { class: 'field' }, h('span', { class: 'field-label inline' }, '종료', tip(['종료 시각이 시작 시각보다 이르면 다음 날 해당 시각까지 운영 (예 22:00 – 02:00)'])),
-        h('input', { class: 'input mono', type: 'time', value: draft.stop, oninput: set('stop'), onchange: () => changed() }))),
+      h('input', { class: 'input', type: 'text', value: draft.name, placeholder: NAME_HINT[kind], maxlength: '40', oninput: set('name') })),
     h('div', { class: 'field' },
+      h('span', { class: 'field-label inline' }, '구분',
+        tip(['특정일 운영 · 휴무일로 지정한 날짜에는 정기 운영 대신 해당 설정을 적용', '전날 시작해 자정을 넘기는 운영 시간은 전날 설정을 따름'])),
+      h('div', { class: 'segmented', role: 'group', 'aria-label': '구분' },
+        KINDS.map(([value, label]) => h('button', {
+          class: 'seg', type: 'button', 'aria-pressed': String(kind === value), onclick: () => { draft.kind = value; changed(); },
+        }, label)))),
+    // 반복 · 날짜는 같은 자리 · 같은 높이(레이아웃 고정)
+    kind === 'regular' ? h('div', { class: 'field kind-slot' },
       h('span', { class: 'field-label', text: '반복' }),
       h('div', { class: 'segmented', role: 'group', 'aria-label': '반복' },
-        [['daily', '매일'], ['weekly', '요일 선택'], ['once', '한 번 (날짜 지정)']].map(([value, label]) => h('button', {
+        [['daily', '매일'], ['weekly', '요일 선택']].map(([value, label]) => h('button', {
           class: 'seg', type: 'button', 'aria-pressed': String(draft.repeat === value), onclick: () => { draft.repeat = value; changed(); },
-        }, label)))),
-    draft.repeat === 'weekly' ? h('div', { class: 'day-picks', role: 'group', 'aria-label': '요일' },
+        }, label)))) : h('label', { class: 'field kind-slot' }, h('span', { class: 'field-label', text: '날짜' }),
+      h('input', { class: 'input mono', type: 'date', value: draft.date, oninput: set('date'), onchange: () => changed() })),
+    kind === 'regular' && draft.repeat === 'weekly' ? h('div', { class: 'day-picks', role: 'group', 'aria-label': '요일' },
       WEEK.map(([code, label]) => h('button', {
         class: 'seg day', type: 'button', 'aria-pressed': String(draft.days.includes(code)), onclick: () => toggleDay(code),
       }, label))) : null,
-    draft.repeat === 'once' ? h('label', { class: 'field' }, h('span', { class: 'field-label', text: '날짜' }),
-      h('input', { class: 'input mono', type: 'date', value: draft.date, oninput: set('date'), onchange: () => changed() })) : null,
+    // 휴무일은 시각이 없다 · 자리는 그대로 두고 숨김(레이아웃 고정)
+    h('div', { class: 'row', style: kind === 'holiday' ? { visibility: 'hidden' } : {}, 'aria-hidden': String(kind === 'holiday') },
+      h('label', { class: 'field' }, h('span', { class: 'field-label', text: '시작' }),
+        h('input', { class: 'input mono', type: 'time', value: draft.start, disabled: kind === 'holiday', oninput: set('start'), onchange: () => changed() })),
+      h('label', { class: 'field' }, h('span', { class: 'field-label inline' }, '종료', tip(['종료 시각이 시작 시각보다 이르면 다음 날 해당 시각까지 운영 (예 22:00 – 02:00)'])),
+        h('input', { class: 'input mono', type: 'time', value: draft.stop, disabled: kind === 'holiday', oninput: set('stop'), onchange: () => changed() }))),
     problem ? h('p', { class: 'tone-text-warn small', text: problem }) : null,
     h('div', { class: 'row end' },
       h('button', { class: 'btn', type: 'button', onclick: () => { ui.draft = null; changed(); } }, '취소'),

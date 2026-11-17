@@ -212,27 +212,24 @@ def schedule_windows(schedules, now_unix: float, timezone: str = '') -> List[Tup
 
     규칙은 `motion_common.schedule_window`(스케줄 노드 `schedule_engine` 과 같은 곳) · 스케줄 노드와 같은 답.
     시간대가 마스터와 다른 PC 가 제 시간대로 읽어 엉뚱한 시각(NY 22:30 대신 KST 22:30)에 혼자 돌던 것을 막는다 ·
-    시간대 이름을 못 읽으면 전처럼 이 PC 시간대 · 사용자 2026-11-11 · 수정 목록 193
+    시간대 이름을 못 읽으면 전처럼 이 PC 시간대 · 사용자 2026-11-11 · 수정 목록 193 ·
+    날짜마다 특정일(특정일 운영 · 휴무일)이 정기 운영보다 우선 · 수정 목록 218
     """
     from motion_common.schedule_models import ScheduleItem
-    from motion_common.schedule_window import day_matches as _day_matches, window_of
+    from motion_common.schedule_window import windows_starting_on
 
     zone = _zone(timezone)
     now = datetime.fromtimestamp(float(now_unix), zone) if zone is not None else datetime.fromtimestamp(float(now_unix))
-    windows: List[Tuple[float, float]] = []
+    items = []
     for raw in schedules or ():
         try:
-            item = ScheduleItem.from_dict(dict(raw))
+            items.append(ScheduleItem.from_dict(dict(raw)))
         except (TypeError, ValueError):
             continue
-        if not item.enabled:
-            continue
-        for day in (now - timedelta(days=1), now, now + timedelta(days=1)):
-            if not _day_matches(item, day):
-                continue
-            window = window_of(item, day)
-            if window is not None:
-                windows.append((window[0].timestamp(), window[1].timestamp()))
+    windows: List[Tuple[float, float]] = []
+    for day in (now - timedelta(days=1), now, now + timedelta(days=1)):
+        for starts_at, ends_at, _item in windows_starting_on(items, day):
+            windows.append((starts_at.timestamp(), ends_at.timestamp()))
     return windows
 
 

@@ -156,6 +156,20 @@ def test_schedule_windows_follow_the_schedule_rules():
     assert len(windows) == 3, '어제 · 오늘 · 내일'
 
 
+def test_schedule_windows_put_a_dated_day_before_the_weekly_rule():
+    """수정 목록 218 · 시간표 재생도 스케줄 노드와 같은 규칙 · 특정일이 그날 정기 운영 대신 · 휴무일은 없음"""
+    now = _ts('2026-11-18 08:00:00')   # 수요일
+    wed = {**DAILY, 'schedule_id': 'wed', 'start_time': '10:00:00', 'stop_time': '20:00:00',
+           'repeat_type': 'weekly', 'repeat_days': ['WED', 'THU']}
+    special = {**DAILY, 'schedule_id': 'special', 'start_time': '09:00:00', 'stop_time': '18:00:00',
+               'repeat_type': 'once', 'run_date': '2026-11-18'}
+    holiday = {'schedule_id': 'closed', 'start_time': None, 'stop_time': None,
+               'repeat_type': 'holiday', 'run_date': '2026-11-19', 'enabled': True}
+    windows = timetable.schedule_windows([wed, special, holiday], now)
+    assert windows == [(_ts('2026-11-18 09:00:00'), _ts('2026-11-18 18:00:00'))], '수 10~20 빠짐 · 목은 휴무일'
+    assert clock_grid.pick_window(windows, now) == (_ts('2026-11-18 09:00:00'), _ts('2026-11-18 18:00:00'))
+
+
 # --------------------------------------------------------------------------- #
 # 수정 목록 188 · 마지막 즉시 정지는 스케줄이 다시 시작해도 남는다 · 끊겨서 정지를 못 받은 PC 가 세울 수 있게
 # --------------------------------------------------------------------------- #
