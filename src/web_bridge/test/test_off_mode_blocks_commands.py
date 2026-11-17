@@ -35,7 +35,7 @@ def _bridge(tmp_path, mode, project_id='시험-0001'):
 
 def test_off_mode_blocks_with_a_reason(tmp_path):
     reason = run_mode_gate.motion_command_block_reason(_bridge(tmp_path, 'off'))
-    assert '오프 모드' in reason
+    assert '끔 모드' in reason
     assert '차단' in reason
 
 
@@ -76,8 +76,8 @@ def _source(name):
 
 def test_every_motion_command_entry_point_is_gated():
     manual = _source('manual_motor_commands.py')
-    for entry in ('def ac_servo_jog', 'def dynamixel_jog',
-                  'def ac_servo_action', 'def dynamixel_action'):
+    # 조그 길(ac_servo_jog · dynamixel_jog)은 이전 UI 와 함께 지웠다 · 2026-11-17
+    for entry in ('def ac_servo_action', 'def dynamixel_action'):
         start = manual.index(entry)
         body = manual[start:start + 400]
         # 축을 넘긴다 · 조인트 범위 확인 문도 같이 지난다 · 수정 목록 97

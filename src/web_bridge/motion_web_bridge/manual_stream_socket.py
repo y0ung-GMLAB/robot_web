@@ -52,12 +52,12 @@ BLOCK_RECHECK_SEC = 0.5
 #: 수신 감시 · 화면이 주는 값의 범위 · 수정 목록 156
 WATCHDOG_MIN_SEC = 0.5
 WATCHDOG_MAX_SEC = 10.0
-DISCONNECT_REASON = '화면 연결 끊김 · 끊긴 순간까지 자동 저장'
+DISCONNECT_REASON = '화면 연결 중단, 중단 시점까지 자동 저장'
 
 HELLO_REQUIRED_MESSAGE = "hello 가 필요합니다 · {type:'hello'}"
 STALE_MAPPING_MESSAGE = (
-    '화면을 연 뒤에 조인트 매핑이 바뀌었습니다. '
-    '화면을 새로 고친 뒤 페이더를 다시 잡으세요.'
+    '화면을 연 이후 조인트 매핑 변경을 감지했습니다. '
+    '화면을 새로 고친 뒤 페이더를 다시 터치하세요.'
 )
 
 

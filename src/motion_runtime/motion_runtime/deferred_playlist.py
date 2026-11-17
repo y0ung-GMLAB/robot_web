@@ -71,7 +71,7 @@ class DeferredPlaylist:
             entries = list(self._build())
             if len(entries) != self._length:
                 raise RuntimeError(
-                    f'재생 목록 계획 수가 맞지 않습니다 · {len(entries)} / {self._length}'
+                    f'재생 목록 계획 수 불일치 ({len(entries)} / {self._length})'
                 )
             self._entries = entries
         except BaseException as exc:  # noqa: BLE001 · 쓰는 쪽에서 그대로 다시 올린다

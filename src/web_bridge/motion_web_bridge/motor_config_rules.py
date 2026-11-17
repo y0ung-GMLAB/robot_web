@@ -674,7 +674,7 @@ def scan_result_message(
             pass
         if success and dynamixel_port_missing(dynamixel):
             # 판정에서 뺀 경우(프로젝트에 다이나믹셀 없음) · 정보로만 · 수정 목록 120 (바)
-            parts.append('다이나믹셀 직렬 포트 없음(정보 · 다이나믹셀 모터를 쓰지 않으면 괜찮습니다)')
+            parts.append('다이나믹셀 직렬 포트 없음 (다이나믹셀 미사용 시 무시)')
     if project_compatible:
         parts.append('프로젝트 EtherCAT 구성 확인 완료')
         unused = ethercat_project.get('unused_registered_master_indices') or []
@@ -872,8 +872,8 @@ def motor_operation_runtime_readiness(
                 'ready': False,
                 'failed': True,
                 'error': (
-                    'Motor Manager 실행 설정 불일치 · '
-                    f'기대 {expected_file} · 실제 {actual_file}'
+                    '모터 프로그램 실행 설정 불일치 '
+                    f'(예상 {expected_file}, 실제 {actual_file})'
                 ),
             }
         try:
@@ -1005,7 +1005,7 @@ def runtime_service_status(
         runtime_message = 'motor_manager_node 시작 후 첫 모터 상태를 기다리는 중입니다'
     elif motor_feedback_age_sec is not None and motor_feedback_age_sec > 1.5:
         runtime_phase = 'motor_feedback_stale'
-        runtime_message = 'motor_manager_node의 모터 상태 갱신이 중단되었습니다'
+        runtime_message = '모터 프로그램의 모터 상태 갱신 중단'
     else:
         runtime_phase = 'ready'
         runtime_message = f'모터 {motor_count}대 상태 수신 중'

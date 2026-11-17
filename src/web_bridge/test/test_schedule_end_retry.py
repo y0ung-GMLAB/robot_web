@@ -31,8 +31,8 @@ def test_three_attempts_then_give_up():
     ({'start_requested': True}, '시작 요청'),
     ({'run_mode': 'manual'}, '수동 모드'),
     ({'run_mode': 'off'}, '끔 모드'),
-    ({'running': True}, '재생이 돌고'),
-    ({'in_window': True}, '운영 구간이 다시'),
+    ({'running': True}, '재생 진행 중'),
+    ({'in_window': True}, '운영 구간 재시작'),
 ])
 def test_retry_stops_when_someone_takes_the_robot(kwargs, reason):
     base = {'run_mode': 'schedule', 'running': False, 'in_window': False, 'start_requested': False}
@@ -78,12 +78,12 @@ def test_resume_continues_only_a_fresh_retry():
 
 def test_notice_wording_and_colour():
     retry = se.end_notice('retry_wait', attempts=1, reason='기준점 이동 거절')
-    assert retry['tone'] == 'warn' and retry['title'] == '구간 끝 주차 실패 · 1/3회'
-    assert '1분 뒤' in retry['detail']
+    assert retry['tone'] == 'warn' and retry['title'] == '운영 종료 기준점 이동 실패 (1/3회)'
+    assert '1분 후' in retry['detail']
     off = se.end_notice('gave_up', reason='기준점 이동 거절')
-    assert off['tone'] == 'warn' and '그 자리에서 서보 끔' in off['title'] and '처짐' in off['detail']
+    assert off['tone'] == 'warn' and '현재 위치에서 서보 OFF' in off['title'] and '처짐' in off['detail']
     kept = se.end_notice('gave_up', reason='r', detail='서보 알람', bad=True)
-    assert kept['tone'] == 'bad' and '켜진 채' in kept['title']
+    assert kept['tone'] == 'bad' and '서보 ON 유지' in kept['title']
     assert se.end_notice('done') is None
 
 
@@ -209,12 +209,12 @@ def test_v19_refused_three_times_then_servos_off_in_place_and_next_start_restore
     assert robot.moves()[-1] == ('ac', 'servo_off', 0), '「끝나면 서보 끄기」 켠 모터만'
     assert ('ac', 'servo_off', 1) not in robot.calls
     assert robot.event_types() == ['schedule_end_park_failed'] * 3 + ['schedule_end_servo_off_in_place']
-    assert robot.events[0][1].startswith('구간 끝 주차 실패 · 기준점 이동 거절 · ')
+    assert robot.events[0][1].startswith('기준점 이동 실패 (기준점 이동 거부: ')
     assert '실행 컨텍스트 적용 대기' in robot.events[0][1]
-    assert robot.events[-1][1].startswith('주차 못 하고 그 자리에서 서보 끔 · 기준점 이동 거절')
+    assert robot.events[-1][1].startswith('기준점 이동 불가, 현재 위치에서 서보 OFF (기준점 이동 거부')
     status = service.status()
     assert status['state'] == 'gave_up'
-    assert status['notice']['tone'] == 'warn' and '그 자리에서 서보 끔' in status['notice']['title']
+    assert status['notice']['tone'] == 'warn' and '현재 위치에서 서보 OFF' in status['notice']['title']
     assert robot.retry_record()['state'] == 'gave_up', '브리지가 다시 켜져도 알림이 남는다'
     powered = json.loads((robot.runtime / se.STATE_FILE).read_text(encoding='utf-8'))
     assert powered['ac_servo'] == [0], '다음 시작 때 다시 켠다'
@@ -234,7 +234,7 @@ def test_refused_once_then_parks_and_powers_off(tmp_path):
 
     assert [call[0] for call in robot.moves()] == ['initialize', 'initialize', 'ac', 'ac']
     assert robot.event_types() == ['schedule_end_park_failed', 'schedule_end_parked']
-    assert '2번째 시도' in robot.events[-1][1]
+    assert '2회차 시도' in robot.events[-1][1]
     assert service.status()['state'] == 'done' and not service.status().get('notice')
     assert robot.retry_record() is None
 
@@ -253,9 +253,9 @@ def test_normal_window_end_parks_without_any_notice(tmp_path):
 
 
 @pytest.mark.parametrize('change, reason', [
-    (lambda robot: setattr(robot, 'mode', 'manual'), '수동 모드로 바뀜'),
-    (lambda robot: setattr(robot, 'window', True), '운영 구간이 다시 시작됨'),
-    (lambda robot: setattr(robot, 'state', 'running'), '재생이 돌고 있음'),
+    (lambda robot: setattr(robot, 'mode', 'manual'), '수동 모드로 전환'),
+    (lambda robot: setattr(robot, 'window', True), '운영 구간 재시작'),
+    (lambda robot: setattr(robot, 'state', 'running'), '재생 진행 중'),
 ])
 def test_retry_is_cancelled_when_someone_takes_over(tmp_path, change, reason):
     robot = _Robot(tmp_path, replies=[REFUSED] * 3)
@@ -394,7 +394,7 @@ def test_give_up_notice_survives_restart_and_a_later_quiet_window_end(tmp_path):
     notice = se.end_notice('gave_up', reason='기준점 이동 거절')
     (robot.runtime / se.RETRY_FILE).write_text(json.dumps({
         'state': 'gave_up', 'attempts': 3, 'reason': '기준점 이동 거절',
-        'message': '운영 종료 · 주차 못 하고 그 자리에서 서보 끔', 'notice': notice, 'updated_at': 1.0,
+        'message': '운영 종료: 기준점 이동 불가, 현재 위치에서 서보 OFF', 'notice': notice, 'updated_at': 1.0,
     }), encoding='utf-8')
     service = _service(robot)
 
@@ -426,7 +426,7 @@ def test_a_group_that_never_releases_counts_as_failures_and_ends_with_servo_off_
     service.begin()
 
     assert robot.event_types() == ['schedule_end_park_failed'] * 3 + ['schedule_end_servo_off_in_place']
-    assert '그룹 재생이 해제되지 않음' in robot.events[0][1]
+    assert '그룹 재생 미해제' in robot.events[0][1]
     assert [call for call in robot.calls if call[0] == 'initialize'] == [], '주차 이동은 안 함'
     assert ('ac', 'servo_off', 0) in robot.calls and ('ac', 'servo_off', 1) in robot.calls
     assert service.status()['state'] == 'gave_up'

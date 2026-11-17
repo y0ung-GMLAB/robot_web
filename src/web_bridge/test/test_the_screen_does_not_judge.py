@@ -21,7 +21,6 @@ from pathlib import Path
 
 
 WORKSPACE = Path(__file__).resolve().parents[3]
-MAIN_JS = WORKSPACE / 'src/web_ui/static/js/main.js'
 BRIDGE = WORKSPACE / 'src/web_bridge/motion_web_bridge/bridge_node.py'
 
 
@@ -99,9 +98,3 @@ def test_the_answer_rides_along_with_the_status():
     )
 
 
-def test_the_screen_stores_what_it_received():
-    text = MAIN_JS.read_text(encoding='utf-8')
-    assert 'appState.motorActionBlocker = typeof payload?.motor_action_blocker' in text
-    assert 'motorActionBlocker: null,' in text, (
-        '처음 값이 없으면 `undefined` 를 「막힘 없음」 으로 읽을 수 있습니다'
-    )

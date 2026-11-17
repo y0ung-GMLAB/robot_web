@@ -87,8 +87,8 @@ class ScheduleService:
         role = resolve_master_role(package_hint=PACKAGE_HINT)
         if not role.is_master:
             raise ScheduleOwnershipError(
-                '슬레이브 PC라서 스케줄을 설정할 수 없습니다. '
-                '마스터 PC에서 설정하세요 · ' + role.reason
+                '슬레이브 PC에서는 스케줄을 설정할 수 없습니다. '
+                '마스터 PC에서 설정하세요. ' + role.reason
             )
 
     # ----------------------------------------------------------------- #

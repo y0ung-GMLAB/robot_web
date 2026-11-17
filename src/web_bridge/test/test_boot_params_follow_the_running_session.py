@@ -56,7 +56,7 @@ def test_an_old_session_on_the_platform_file_is_stale(tmp_path):
                       {0: _platform_dir(tmp_path), 1: _platform_dir(tmp_path)})
     result = boot_params.status(session, _expected(ws), boot_params.LABELS)
     assert result['state'] == 'stale'
-    assert result['message'] == '설정 적용 필요 · 지금 드라이브는 옛 부팅 값'
+    assert result['message'] == '설정 적용 필요 (현재 드라이브는 이전 부팅 값 사용 중)'
     assert result['source'] == 'file'   # 기록 없음(옛 버전이 켠 모터 프로그램) → 파일을 지금 읽음
     changed = {(row['axis'], row['label']): (row['running'], row['expected']) for row in result['differences']}
     assert changed[(0, 'Pr5.12')] == (50, 0)
@@ -241,7 +241,7 @@ def test_the_table_shows_the_running_boot_value_and_what_apply_would_write():
         runner=runner, target=lambda axis: {'master': 0, 'position': axis},
         boot_values=lambda axis: {PR4_37: 0, PR5_12: 50},
         boot_next=lambda axis: {PR4_37: 150, PR5_12: 50},
-        boot_stale=lambda: '설정 적용 필요 · 지금 드라이브는 옛 부팅 값',
+        boot_stale=lambda: '설정 적용 필요 (현재 드라이브는 이전 부팅 값 사용 중)',
         safety_blocker=lambda: '', record=lambda _record: None,
     )
     table = service.table(0)

@@ -76,7 +76,7 @@ function modeCard(state, changed) {
       h('button', { class: 'btn btn-mini', type: 'button', disabled: ui.busy, onclick: () => loadModes(state, changed) }, '다시 읽기')),
     page.modesError ? h('p', { class: 'tone-text-bad', text: page.modesError }) : null,
     !page.modes ? h('p', { class: 'muted', text: '불러오는 중…' }) : h('div', { class: 'table-wrap' }, h('table', { class: 'table' },
-      h('thead', {}, h('tr', {}, ['PC', '지금', '전환', '메모리'].map((text) => h('th', { scope: 'col', text })))),
+      h('thead', {}, h('tr', {}, ['PC', '현재', '전환', '메모리'].map((text) => h('th', { scope: 'col', text })))),
       h('tbody', {}, pcs.map((pc) => h('tr', {},
         h('td', {}, h('strong', { text: pc.display_name || pc.pc_id }), pc.is_local ? h('span', { class: 'muted small', text: ' · 현재 접속' }) : null),
         h('td', {}, pc.error ? h('span', { class: 'muted small', text: pc.error })
@@ -120,10 +120,10 @@ function joinCard(state, changed) {
         h('span', { class: 'switch-track', 'aria-hidden': 'true' })),
       h('div', { class: 'grow' },
         h('strong', {}, `그룹 참여 · ${joined ? 'ON' : 'OFF'}`,
-          tip(['켜면 같은 그룹의 PC와 함께 재생', '끄면 스케줄 재생을 포함해 현재 PC만 단독 재생'], '그룹 참여 설명')),
+          tip(['같은 그룹 PC와 연동 재생', '해제 시 스케줄 재생 포함 현재 PC 단독 재생'], '그룹 참여 설명')),
         // 경고 자리는 늘 둔다(레이아웃 고정)
         h('p', { class: 'tone-text-warn small msg-slot', text: coord.node_connected === false
-          ? '연동 서비스가 응답하지 않습니다. 프로그램을 다시 시작하세요.'
+          ? '연동 서비스가 응답하지 않습니다. 프로그램을 재시작하세요.'
           : joined && groupActive ? '그룹 재생 중에는 끌 수 없습니다' : '' }))));
 }
 
@@ -151,7 +151,7 @@ function updateCard(state, changed) {
   const running = rows.some((row) => row.tone === 'info');
   return h('section', { class: 'card', 'aria-label': '업데이트' },
     h('div', { class: 'card-head' },
-      h('h2', {}, '업데이트', tip(['PC마다 코드를 받아 빌드한 뒤 다시 시작 (몇 분 소요)', '재생 중인 PC는 업데이트하지 않음', '실패한 PC는 이전 버전으로 복구되어 계속 동작', '운영 시간 외에 진행 권장'], '업데이트 설명')),
+      h('h2', {}, '업데이트', tip(['PC별 코드 수신 및 빌드 후 재시작 (수 분 소요)', '재생 중인 PC는 업데이트하지 않음', '실패한 PC는 이전 버전으로 자동 복구 후 계속 동작', '운영 시간 외에 진행 권장'], '업데이트 설명')),
       h('button', { class: `btn ${summary.differ ? 'btn-warn' : ''}`, type: 'button', disabled: ui.busy || running,
         onclick: () => busy(async () => { if (await act.updateAll()) await loadStore(state, changed); }, state, changed) }, '모든 PC 업데이트')),
     h('p', { class: summary.differ ? 'tone-text-warn' : 'muted', text: summary.differ
@@ -173,12 +173,12 @@ function rosterCard(state, changed) {
   const candidates = rosterCandidates(state.snap);
   const same = roster.length === candidates.length && roster.every((id) => candidates.includes(id));
   return h('section', { class: 'card', 'aria-label': '필수 명단' },
-    h('div', { class: 'card-head' }, h('h2', {}, `필수 명단 · ${roster.length}대`, tip(['그룹 시작 시 명단에서 빠진 PC는 「미접속」으로 기록하고 나머지 PC로 시작'], '필수 명단 설명'))),
+    h('div', { class: 'card-head' }, h('h2', {}, `필수 명단 · ${roster.length}대`, tip(['그룹 시작 시 접속하지 않은 명단 PC는 「미접속」으로 기록, 나머지 PC로 시작'], '필수 명단 설명'))),
     h('p', { class: roster.length ? 'mono' : 'muted', text: roster.length ? roster.join(' · ') : '지정된 명단 없음 (그룹 시작 시 연결된 PC로 시작)' }),
     config.is_master ? h('div', { class: 'row' },
       h('button', { class: 'btn', type: 'button', disabled: ui.busy || !candidates.length || same,
         title: same ? '현재 연결된 PC와 명단이 같습니다' : '',
-        onclick: () => busy(() => act.saveRoster(candidates), state, changed) }, `현재 연결된 ${candidates.length}대로 다시 지정`)) : h('p', { class: 'muted small', text: '필수 명단은 마스터 PC에서 지정합니다' }));
+        onclick: () => busy(() => act.saveRoster(candidates), state, changed) }, `현재 연결된 ${candidates.length}대로 재지정`)) : h('p', { class: 'muted small', text: '필수 명단은 마스터 PC에서 지정합니다' }));
 }
 
 export function renderStore(state, { changed }) {
@@ -200,7 +200,7 @@ export function renderStore(state, { changed }) {
       h('section', { class: 'card', 'aria-label': '모든 PC 일괄 작업' },
         h('div', { class: 'card-head' }, h('h2', { text: '모든 PC 일괄 작업' })),
         h('div', { class: 'row' },
-          h('a', { class: 'btn', href: '#/network' }, '시간대 맞추기 (스피커 포함) ›'),
+          h('a', { class: 'btn', href: '#/network' }, '시간대 설정 (스피커 포함) ›'),
           h('a', { class: 'btn', href: '#/play' }, '그룹 재생 ›')))),
   ];
 }

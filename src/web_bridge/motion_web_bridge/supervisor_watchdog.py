@@ -33,6 +33,8 @@ LIVENESS_SEC = 2.0
 RESTART_AFTER_SEC = 10.0
 RECEPTION_STOP_SEC = 5.0
 RESTART_COOLDOWN_SEC = 300.0
+#: 살아 있는데 재생 명령을 못 받는 사유 · 이 글이면 스레드 덤프를 남긴다
+RECEPTION_STOP_REASON = '재생 중 모터 프로그램의 재생 명령 수신 중단, 자동 복구'
 #: 기동 뒤 첫 상태를 이만큼 한 번도 못 받으면 「supervisor 시작 안 됨」 · 그 전은 「아직 안 뜸」(고장 아님) ·
 #: 느린 PC 도 넘지 않을 만큼 길게 · 전 `BOOT_GRACE_SEC` 20 s · 수정 목록 202
 STARTUP_FAILURE_SEC = 300.0
@@ -82,10 +84,10 @@ class SupervisorWatchdog:
         if self._safety_at is None:
             if silence < STARTUP_FAILURE_SEC:
                 return ''
-            return f'supervisor 시작 안 됨 · {silence:.0f}초 동안 상태를 한 번도 받지 못함'
+            return f'모터 프로그램 미시작 ({silence:.0f}초간 상태 미수신)'
         if silence <= LIVENESS_SEC:
             return ''
-        return f'supervisor 응답 없음 · {silence:.0f}초째 상태 수신 없음'
+        return f'모터 프로그램 응답 없음 ({silence:.0f}초간 상태 미수신)'
 
     def _reception_stopped(self, run_state: str) -> bool:
         now = self._monotonic()
@@ -112,19 +114,19 @@ class SupervisorWatchdog:
             # 아직 안 뜸 · 오래 안 뜨면 그때 한 번 · 수정 목록 202
             if silence < STARTUP_FAILURE_SEC:
                 return ''
-            reason = f'supervisor 시작 안 됨 {silence:.0f}초 · 자동 재시작'
+            reason = f'모터 프로그램 미시작 {silence:.0f}초, 자동 재시작'
         elif silence >= RESTART_AFTER_SEC:
-            reason = f'supervisor 응답 없음 {silence:.0f}초 · 자동 재시작'
+            reason = f'모터 프로그램 응답 없음 {silence:.0f}초, 자동 재시작'
         elif self._safety_at is not None and silence <= LIVENESS_SEC and self._reception_stopped(
             str(run_state or '').strip().lower(),
         ):
-            reason = '재생 중 supervisor 재생 명령 수신 정지 · 자동 복구'
+            reason = RECEPTION_STOP_REASON
         else:
             return ''
         last = self.last_restart_at()
         if last is not None and self._wall() - last < RESTART_COOLDOWN_SEC:
             return ''
-        if 'supervisor 재생 명령 수신 정지' in reason:
+        if reason == RECEPTION_STOP_REASON:
             # 살아 있으니 그 순간의 스레드를 남긴다 · 원인 미특정 결함 (14-2)
             try:
                 self._dump_threads()

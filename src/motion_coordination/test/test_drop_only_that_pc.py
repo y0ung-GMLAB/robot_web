@@ -232,7 +232,7 @@ def test_a_master_servo_alarm_no_longer_blocks_the_group_start():
     result = node._start_group_execution(request={'started_by': 'schedule'})
 
     assert result['participants'] == ['pc-b', 'pc-c']
-    assert 'Servo 알람 2등급' in result['excluded']['pc-a']
+    assert '서보 알람 2등급' in result['excluded']['pc-a']
     assert node._execution.execution_id in node._self_dropped_ids(), '나으면 경계에서 스스로 들어간다'
 
 
@@ -282,7 +282,7 @@ def _reason_motor_error(node):
 def _reason_servo_alarm_stop(node):
     node._event_callback(GroupEvent(
         group_id='stage-a', execution_id=node._execution.execution_id, pc_id='pc-c',
-        event='stopped', success=True, message='Servo 알람', cycle_number=node._execution.cycle_number,
+        event='stopped', success=True, message='서보 알람', cycle_number=node._execution.cycle_number,
     ))
 
 

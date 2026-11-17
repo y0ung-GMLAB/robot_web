@@ -182,7 +182,7 @@ def analyze_motion_json(content: str, *, include_records: bool) -> Dict[str, Any
         result['message'] = 'motion data parsed from header/list rows'
         if _starts_with_motion_header(content):
             # Blender 내보내기 · 웹 녹화 형식(JSON Lines · 첫 줄 motion_header) · 정상 형식이라 경고가 아니다 · 수정 목록 120 (S-8)
-            result['notes'].append('헤더 + 프레임마다 한 줄(JSON Lines) 형식 · Blender 내보내기 형식')
+            result['notes'].append('헤더 + 프레임별 1행(JSON Lines) 형식 (Blender 내보내기 형식)')
         else:
             result['warnings'].append('strict JSON 형식은 아니지만 헤더+대괄호 행 형식으로 해석했습니다')
     else:
@@ -413,7 +413,7 @@ def _analyze_jsonl(path: Path, header, *, include_records: bool) -> Optional[Dic
     if not total:
         return None
     result['message'] = 'motion data parsed from header/list rows'
-    result['notes'].append('헤더 + 프레임마다 한 줄(JSON Lines) 형식 · Blender 내보내기 형식')
+    result['notes'].append('헤더 + 프레임별 1행(JSON Lines) 형식 (Blender 내보내기 형식)')
     result['rotation_unit'] = rotation_unit
     result['value_unit'] = motion_table.INTERNAL_ROTATION_UNIT
     result['format_valid'] = True

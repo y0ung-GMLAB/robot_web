@@ -174,8 +174,8 @@ class CoordinationWebBridge:
         running = self.local_execution_blocker()
         if running:
             raise ValueError(
-                '그룹 재생 중에는 연동 설정을 바꿀 수 없습니다. '
-                '먼저 정지한 뒤 바꾸세요'
+                '그룹 재생 중에는 연동 설정을 변경할 수 없습니다. '
+                '정지 후 변경하세요'
             )
         # `joined` · 「그룹 참여」 스위치가 설정이 꺼진 PC 를 켤 때 설정과 참가를 한 번에 (83)
         allowed = {'enabled', 'joined', 'group_id', 'dds_domain_id', 'display_name', 'is_master', 'required_peers'}

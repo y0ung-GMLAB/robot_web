@@ -70,7 +70,7 @@ class ExecutionContextService:
                 status.update({
                     'state': 'stale',
                     'ready': False,
-                    'message': '저장된 설정이 바뀌어 다시 적용하기를 기다리는 중입니다',
+                    'message': '저장된 설정 변경으로 재적용 대기 중입니다',
                     'stored_context_id': current.get('context_id', ''),
                 })
         runtime_blocker = (

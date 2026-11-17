@@ -73,7 +73,7 @@ def test_leave_is_refused_while_the_group_is_running():
     result = node._handle_local_request({'command': 'leave'})
 
     assert result['success'] is False
-    assert '먼저 정지' in result['message']
+    assert '정지 후 이탈' in result['message']
     assert node._joined is True, '거부됐으면 참가 상태가 그대로여야 한다'
 
 

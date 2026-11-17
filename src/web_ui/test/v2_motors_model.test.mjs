@@ -22,7 +22,7 @@ test('표 줄 · 설정과 지금 상태를 번호로 · 서보 · 위치 · 과
 test('앱솔루트 · 읽기만 실패(unknown)면 「앱솔루트 설정」 을 권하지 않는다 · 다시 읽는 중 (수정 목록 110)', () => {
   const snap = { motion_state: {
     motors: [{ controller_index: 0, state: 'detected' }, { controller_index: 1, state: 'detected' }],
-    minas_absolute: { drives: [{ axis: 0, status: 'unknown', problem: '확인 불가 · 드라이브 응답을 기다리며 다시 읽는 중' }, { axis: 1, status: 'ok' }] },
+    minas_absolute: { drives: [{ axis: 0, status: 'unknown', problem: '확인 불가: 드라이브 응답 대기 중 재확인 진행' }, { axis: 1, status: 'ok' }] },
   } };
   const rows = motorRows({ motors: [motor(0, 'A'), motor(1, 'B')] }, snap);
   assert.equal(rows[0].absolute, '다시 읽는 중');
@@ -48,7 +48,7 @@ test('앱솔루트 · 아직 못 읽은 드라이브(검색 직후 · 모터 프
 test('막는 것 · 빈 이름 · 겹친 이름 · 범위 · 프로파일 > 최대(수정 목록 37)', () => {
   assert.deepEqual(motorProblems([motor(0, 'A'), motor(1, 'B')]), []);
   assert.match(motorProblems([motor(0, '')]).join(), /이름이 비어 있습니다/);
-  assert.match(motorProblems([motor(0, 'A'), motor(1, 'A')]).join(), /중복됩니다/);
+  assert.match(motorProblems([motor(0, 'A'), motor(1, 'A')]).join(), /중복/);
   const fast = motor(0, 'A');
   setField(fast, 'profile_velocity', 20000);
   assert.match(motorProblems([fast]).join(), /최대 속도 3000 rpm \(18000 deg\/s\)/);
@@ -63,7 +63,7 @@ test('막는 것 · 빈 이름 · 겹친 이름 · 범위 · 프로파일 > 최�
 test('바뀐 것 · 이름 · 설정 칸 · 체크', () => {
   const saved = [motor(0, 'A')];
   const draft = [{ ...motor(0, 'B'), config: { ...motor(0, 'B').config, schedule_end_servo_off: true } }];
-  assert.deepEqual(motorChanges(saved, draft), ['0번 이름 A → B', '0번 스케줄 모드에서 운영 시간이 끝나면 서보 끄기 - → true']);
+  assert.deepEqual(motorChanges(saved, draft), ['0번 이름 A → B', '0번 운영 시간 종료 시 서보 끄기 (스케줄 모드) - → true']);
   assert.deepEqual(motorChanges(saved, [motor(0, 'A')]), []);
   // 검색 제안 · 뺌 · 더함 · 번호 (수정 목록 100)
   const two = [motor(0, 'A'), motor(1, 'B')];
@@ -75,10 +75,10 @@ test('바뀐 것 · 이름 · 설정 칸 · 체크', () => {
 test('앱솔루트 설정 일 한 줄', () => {
   assert.equal(absoluteJobText({ state: 'idle' }), '');
   assert.equal(absoluteJobText({ state: 'running', step_index: 3, step_count: 7, step_label: '전원 껐다 켜기 1' }), '앱솔루트 설정 중 · 3/7 · 전원 껐다 켜기 1');
-  assert.match(absoluteJobText({ state: 'running', resumed: true, step_index: 4, step_count: 7, step_label: '앱솔루트 방식 확인' }), /^앱솔루트 설정 이어서 하는 중 · 4\/7/);
+  assert.match(absoluteJobText({ state: 'running', resumed: true, step_index: 4, step_count: 7, step_label: '앱솔루트 방식 확인' }), /^앱솔루트 설정 재개 중 · 4\/7/);
 });
 
-test('앱솔루트 설정 이어서 하기 · 4/7 에서 실패하면 버튼 · 확인 창은 기준점 다시 캡처를 말한다 (수정 목록 134)', async () => {
+test('앱솔루트 설정 재개 · 4/7 에서 실패하면 버튼 · 확인 창은 기준점 다시 캡처를 말한다 (수정 목록 134)', async () => {
   const { absoluteResumeConfirm, absoluteResumeView } = await import('../static/v2/js/motors_model.js');
   const resume = {
     from_step: 'check_mode', from_index: 4, step_count: 7, failed_step: 'check_mode', failed_index: 4, failed_label: '앱솔루트 방식 확인',
@@ -87,7 +87,7 @@ test('앱솔루트 설정 이어서 하기 · 4/7 에서 실패하면 버튼 · 
   };
   // 방금 실패한 그 작업 · 실패 줄에 버튼만
   const failed = absoluteResumeView({ state: 'failed', step: 'check_mode', resume });
-  assert.equal(failed.label, '이어서 하기 (4/7 부터)');
+  assert.equal(failed.label, '재개 (4/7 부터)');
   assert.equal(failed.inline, true);
   assert.match(failed.note, /0번 모터, 1번 모터 · 다회전 클리어 전/);
   // 웹을 다시 켠 뒤(idle) · 따로 한 줄에 실패 이유
@@ -97,21 +97,21 @@ test('앱솔루트 설정 이어서 하기 · 4/7 에서 실패하면 버튼 · 
   // 진행 중 · 기록 없음 → 없음
   assert.equal(absoluteResumeView({ state: 'running', resume }), null);
   assert.equal(absoluteResumeView({ state: 'failed', step: 'write_mode', resume: null }), null);
-  assert.equal(absoluteResumeView({ state: 'idle', resume: { ...resume, from_step: 'power_cycle_2', from_index: 6 } }).label, '이어서 하기 (6/7 부터)');
+  assert.equal(absoluteResumeView({ state: 'idle', resume: { ...resume, from_step: 'power_cycle_2', from_index: 6 } }).label, '재개 (6/7 부터)');
 
   const box = absoluteResumeConfirm({
     from_index: 4, step_count: 7, failed_index: 4, failed_label: '앱솔루트 방식 확인', error: 'Input/output error', clear_done: false,
-    steps: ['앱솔루트 방식 확인', '다회전 클리어', '드라이브 전원 껐다 켜기 2', '최종 확인'], targets: [{ label: '0번 모터' }],
+    steps: ['앱솔루트 방식 확인', '다회전 클리어', '드라이브 전원 재투입 2', '최종 확인'], targets: [{ label: '0번 모터' }],
   });
-  assert.equal(box.title, '앱솔루트 설정 이어서 하기 (4/7 부터)');
-  assert.equal(box.confirmLabel, '이어서 하기');
-  assert.match(box.body, /4\. 앱솔루트 방식 확인\n5\. 다회전 클리어\n6\. 드라이브 전원 껐다 켜기 2\n7\. 최종 확인/);
+  assert.equal(box.title, '앱솔루트 설정 재개 (4/7 부터)');
+  assert.equal(box.confirmLabel, '재개');
+  assert.match(box.body, /4\. 앱솔루트 방식 확인\n5\. 다회전 클리어\n6\. 드라이브 전원 재투입 2\n7\. 최종 확인/);
   // 클리어는 4/7 에서 Err40 인 드라이브만 · 없으면 기준점 그대로 · 수정 목록 140
   assert.match(box.body, /Err40\(다회전 무효\)이 발생한 드라이브만/);
-  assert.match(box.body, /Err40이 없으면 클리어하지 않으며 기준점도 유지/);
+  assert.match(box.body, /Err40이 없는 경우 클리어하지 않으며 기준점도 유지/);
   assert.match(box.body, /전원을 한 번 더/);
   const after = absoluteResumeConfirm({ from_index: 7, step_count: 7, failed_index: 7, failed_label: '최종 확인', clear_done: true, cleared: [{ label: '0번 모터' }], steps: ['최종 확인'], targets: [] });
-  assert.match(after.body, /다회전 클리어로 위치 값이 바뀌었습니다\(0번 모터\).*기준점을 다시 지정해 저장/s);
+  assert.match(after.body, /다회전 클리어로 위치 값을 변경했습니다\(0번 모터\).*기준점을 재지정해 저장/s);
   assert.doesNotMatch(after.body, /전원을/);
 });
 
@@ -167,7 +167,7 @@ test('지령 필터 · 강성 옆 · 0.1 ms 정수 그대로 · ms 로 같이 �
   assert.match(gainChanges(gains, { command_fir: '10001' }).problems[0], /0~10000 사이 정수여야 합니다 \(0\.1 ms 단위/);
   assert.equal(gainChanges(gains, { command_smoothing: '9.2' }).problems.length, 1);       // ms 로 적으면 거절(정수만)
   assert.match(gainHint(smoothing, 92), /92 = 9\.2 ms/);
-  assert.match(gainHint(smoothing, 92), /강성을 바꾸면 자동조정이 이 값을 다시 쓸 수 있음/);
+  assert.match(gainHint(smoothing, 92), /강성 변경 시 자동조정이 해당 값을 재설정할 수 있음/);
   assert.match(gainHint(fir, 10), /정지해 있을 때만 변경 가능/);
   assert.ok(fir.stoppedOnly && !smoothing.stoppedOnly);
 });
@@ -204,7 +204,7 @@ test('PREOP 에 멈춘 드라이브는 그 줄 통신 칸에 (수정 목록 125)
     ethercat: { stuck_slaves: [{ slave_position: 1, axis: 1, state: 'PREOP', message: '1번 드라이브가 PREOP 에 멈춤 · …' }] } } };
   const rows = motorRows({ motors: [motor(0, 'A'), motor(1, 'B')] }, snap);
   assert.equal(rows[0].comm, '연결됨');
-  assert.equal(rows[1].comm, 'PREOP 상태에서 멈췄습니다. 드라이브 제어 전원을 껐다 켜세요.');
+  assert.equal(rows[1].comm, 'PREOP 상태에서 정지했습니다. 드라이브 제어 전원을 재투입하세요.');
 });
 
 test('메일박스가 멈춘 드라이브는 그 줄 통신 칸에 (수정 목록 139 ③)', () => {
@@ -212,5 +212,5 @@ test('메일박스가 멈춘 드라이브는 그 줄 통신 칸에 (수정 목�
     minas_absolute: { state: 'ok', drives: [], stuck_mailboxes: [{ slave_position: 1, axis: 1, message: '1번 드라이브 메일박스 응답 없음 · …' }] } } };
   const rows = motorRows({ motors: [motor(0, 'A'), motor(1, 'B')] }, snap);
   assert.equal(rows[0].comm, '연결됨');
-  assert.equal(rows[1].comm, '메일박스 응답이 없습니다. 드라이브 제어 전원을 껐다 켜세요.');
+  assert.equal(rows[1].comm, '메일박스 응답이 없습니다. 드라이브 제어 전원을 재투입하세요.');
 });

@@ -251,7 +251,7 @@ class ClockDriver:
             # 즉시 정지가 풀렸다(스케줄이 다시 시작) · 다음 경계부터 다시 들어간다 · 전에는 그 시간표를 그날 끝까지
             # 건너뛰어 정지한 PC 들만 서 있었다(실물 NY 2026-11-09 05:55 · 시험 4 뒤 floating1 · 3 · 4) · 수정 목록 188
             self._skip = ('', 0)
-            if self._note == '정지됨':
+            if self._note == '정지 상태':
                 self._note = ''
 
         if run is None and status_stamp(status) < self._released_ack:
@@ -289,7 +289,7 @@ class ClockDriver:
             self._info(f'시간표 재생 · 놓친 즉시 정지 · {run["plan_id"]} · {result.get("message") or ""}')
             self._skip = (run['plan_id'], int(run.get('cycle') or 0))
             self._run = None
-            self._set_note('놓친 즉시 정지 · 다음 경계', warn=True)
+            self._set_note('놓친 즉시 정지, 다음 경계에서 재개', warn=True)
             return
         if choice.stopped_plan_id and choice.stopped_plan_id == run['plan_id']:
             result = self._control({
@@ -301,7 +301,7 @@ class ClockDriver:
             self._info(f'시간표 재생 · 즉시 정지 · {run["plan_id"]} · {result.get("message") or ""}')
             self._skip = (run['plan_id'], self._STOPPED_SKIP)
             self._run = None
-            self._note = '정지됨'
+            self._note = '정지 상태'
             return
         if not self._belongs(run, status):
             # 보낸 명령이 아직 로컬 상태에 안 보인다 · 그 앞 상태(다른 실행 · 앞 시도의 정지 · 오류)로는 아무것도 정하지
@@ -310,13 +310,13 @@ class ClockDriver:
                 # 실패 감지만 · 재생 관리자 · 웹이 멈췄다(정상이면 다음 틱에 온다)
                 self._cancel(
                     run,
-                    f'{run["cycle"]}회차 쉼 · 로컬 상태가 명령 뒤로 바뀌지 않음'
+                    f'{run["cycle"]}회차 생략: 명령 후 로컬 상태 변화 없음'
                     f'({self.ECHO_TIMEOUT_SEC:.0f} s · 웹 · 재생 관리자 응답 없음)',
                 )
             return
         if held != run['plan_id']:
             # 로컬 실행이 사라졌다(오류 · 누가 세움 · 재생 관리자 재시작) · 이 회차는 쉬고 다음 경계
-            self._drop(f'{run["cycle"]}회차 로컬 실행이 끝남 · {status.get("message") or state or "상태 없음"}')
+            self._drop(f'{run["cycle"]}회차 로컬 실행 종료: {status.get("message") or state or "상태 없음"}')
             return
         if state == 'error':
             servo_off = servo_off_reason(str(status.get('message') or ''))
@@ -324,9 +324,9 @@ class ClockDriver:
                 # 사람이 세우고 서보를 끈 PC · 들어가기는 받아졌다가 로컬 준비 검사에서 걸림 · 쉰 것이지 오류가 아니다 ·
                 # 전에는 「N회차 오류 · 그룹 모션 실행 실패: Motion ID …」 로 축마다 긴 글이 남았다(NY 2026-11-12 00:32) ·
                 # 수정 목록 197
-                self._cancel(run, f'{run["cycle"]}회차 쉼 · {servo_off}')
+                self._cancel(run, f'{run["cycle"]}회차 생략: {servo_off}')
             else:
-                self._cancel(run, f'{run["cycle"]}회차 오류 · {status.get("message") or ""}')
+                self._cancel(run, f'{run["cycle"]}회차 오류: {status.get("message") or ""}')
             return
         if run.get('cycle_failed'):
             # 회차 명령이 거절됐고 로컬 상태도 오류가 아니다 · 이 회차를 놓고 다음 경계 · 수정 목록 206
@@ -341,7 +341,7 @@ class ClockDriver:
             # f2 A2) · 놓고 다음 경계 복귀 길 · 수정 목록 194
             # 정상 회차 끝은 여기 오지 않는다 · 회차 맞춤 회차의 끝은 장벽 전 틈부터 `motion_completed`(끝 아님) · 전에는
             # 그 틈이 `completed` 라 5 s 이어질 때만 놓았다(`ENDED_CONFIRM_SEC` · 195) · 이제 사람 정지는 바로 놓는다 · 199
-            self._cancel(run, f'{run["cycle"]}회차 로컬 실행이 끝남 · {status.get("message") or state or "상태 없음"}')
+            self._cancel(run, f'{run["cycle"]}회차 로컬 실행 종료: {status.get("message") or state or "상태 없음"}')
             return
         self._advance(run, timeline, choice, phase, state, status, now_w, now_m, view)
 
@@ -371,7 +371,7 @@ class ClockDriver:
         """
         timeline = choice.timeline
         stopped = ''
-        if choice.reason == '정지됨' and choice.stopped_plan_id.startswith(SCHEDULE_PREFIX):
+        if choice.reason == '정지 상태' and choice.stopped_plan_id.startswith(SCHEDULE_PREFIX):
             stopped = choice.stopped_plan_id
         elif choice.stop_after and timeline is not None and timeline.kind == 'schedule':
             stopped = timeline.plan_id
@@ -401,7 +401,7 @@ class ClockDriver:
             self._info(f'시간표 재생 · {plan_id} · 운영시간 끝 · 이 PC 가 {mode} 모드 · 사람이 맡음 · 주차 안 함')
             return False
         if self._finish is not None:
-            self._finish(plan_id, True, '운영시간 끝 · 그룹 정지로 서 있던 PC')
+            self._finish(plan_id, True, '운영 시간 종료: 그룹 정지 상태였던 PC')
         self._info(f'시간표 재생 · {plan_id} · 운영시간 끝 · 그룹 정지로 서 있던 PC · 기준점 주차 → 서보 OFF')
         return True
 
@@ -428,7 +428,7 @@ class ClockDriver:
         ):
             self._info(f'시간표 재생 · 남아 있던 실행 이어받음 · {held} · {cycle}회차')
             return self._run
-        self._cancel(self._run, f'남아 있던 실행({held}) · 준비 단계라 놓고 다음 경계')
+        self._cancel(self._run, f'잔여 실행({held}): 준비 단계이므로 해제 후 다음 경계에서 재개')
         return None
 
     def _init_sec(self, view: Mapping[str, Any], run: Optional[Mapping[str, Any]] = None) -> float:
@@ -452,7 +452,7 @@ class ClockDriver:
         if slot is None:
             self._next_start_unix = 0.0
             # 회차 후 정지로 남은 회차가 없음 · 그 운영시간 끝까지 유지(193) · 「시간표 끝」 은 틀린 말 · 수정 목록 194
-            self._set_note('그룹 정지 유지 · 운영시간 끝까지' if choice.stop_after else '시간표 끝')
+            self._set_note('그룹 정지 유지 (운영 시간 종료까지)' if choice.stop_after else '시간표 종료')
             return
         self._next_start_unix = slot.start_unix
         skip_plan, skip_cycle = self._skip
@@ -464,7 +464,7 @@ class ClockDriver:
             # 웹의 켜기는 축마다 명령 + 확인 한도(`SERVO_ON_WAIT_SEC`)라 들어가는 창(30 s 남짓)보다 짧다 · 수정 목록 217
             self._pending_slot = None
             self._pending_until_m = 0.0
-            self._skip_cycle(pending[0], pending[1], '서보 켜기가 끝나지 않음', f'{pending[1]}회차 쉼 · 서보 켜기가 끝나지 않음')
+            self._skip_cycle(pending[0], pending[1], '서보 ON 미완료', f'{pending[1]}회차 생략: 서보 ON 미완료')
         blocker = str(view.get('start_blocker') or '')
         early = slot.start_unix - now_w > prep + self.ENTER_WINDOW_SEC
         if blocker:
@@ -494,7 +494,7 @@ class ClockDriver:
             detail = held or ' · '.join(
                 part for part in (state, str(status.get('request_source') or '')) if part
             )
-            self._skip_cycle(timeline.plan_id, slot.cycle, f'다른 재생 중({detail})', '다른 재생 중 · 이 회차 쉼')
+            self._skip_cycle(timeline.plan_id, slot.cycle, f'다른 재생 중({detail})', '다른 재생 중으로 해당 회차 생략')
             return
         if now_m < self._pending_until_m:
             return
@@ -524,13 +524,13 @@ class ClockDriver:
             # 아래에서 그 회차를 쉰다 · 수정 목록 217
             self._pending_until_m = now_m + self.PENDING_POLL_SEC
             self._pending_slot = (timeline.plan_id, slot.cycle)
-            self._set_note(f'{slot.cycle}회차 준비 · {result.get("message") or "서보 켜는 중"}')
+            self._set_note(f'{slot.cycle}회차 준비: {result.get("message") or "서보 ON 진행 중"}')
             return
         self._pending_until_m = 0.0
         self._pending_slot = None
         if not result.get('success'):
             self._skip = (timeline.plan_id, slot.cycle)
-            self._set_note(f'{slot.cycle}회차 쉼 · {result.get("message") or "응답 없음"}', warn=True)
+            self._set_note(f'{slot.cycle}회차 생략: {result.get("message") or "응답 없음"}', warn=True)
             return
         self._run = {
             'plan_id': timeline.plan_id, 'stage': stage, 'cycle': slot.cycle, 'start_unix': slot.start_unix,
@@ -588,7 +588,7 @@ class ClockDriver:
         if not result.get('success'):
             # 바로 놓지 않고 다음 틱의 로컬 상태로 가른다 · 들어간 직후 로컬 준비 검사가 실패해(서보 꺼짐 등) 세션이 이미
             # 닫혔으면 이 명령은 「세션이 일치하지 않음」 으로 거절된다 · 그때는 오류 상태의 이유(197)를 남긴다 · 수정 목록 206
-            run['cycle_failed'] = f'{cycle}회차 시각 예약 실패 · {result.get("message") or "응답 없음"}'
+            run['cycle_failed'] = f'{cycle}회차 시각 예약 실패: {result.get("message") or "응답 없음"}'
             return False
         run['stage'] = 'scheduled'
         self._note_ack(run, result, now_m)
@@ -605,12 +605,12 @@ class ClockDriver:
             return
         plan_id = str(run.get('plan_id') or '')
         if phase == GROUP_CYCLE_SKIPPED_PHASE:
-            reason = str(status.get('cycle_skip_reason') or '') or '초기 이동이 너무 늦음'
+            reason = str(status.get('cycle_skip_reason') or '') or '초기 이동 지연'
             key = (plan_id, cycle, reason)
             if key != self._skip_logged:
                 self._skip_logged = key
-                self._warn(f'시간표 재생 · {cycle}회차 쉼 · {reason}')
-            self._result_note = f'{cycle}회차 쉼 · {reason}'
+                self._warn(f'시간표 재생 · {cycle}회차 생략: {reason}')
+            self._result_note = f'{cycle}회차 생략: {reason}'
             self._set_note(self._result_note)
             return
         if state not in {'running', 'verifying'}:
@@ -623,10 +623,10 @@ class ClockDriver:
             if (plan_id, cycle) != self._late_logged:
                 self._late_logged = (plan_id, cycle)
                 self._warn(
-                    f'시간표 재생 · {cycle}회차 {late:.1f} s 늦게 시작 · 초기 이동이 늦게 끝남 · 쉼 아님 · '
+                    f'시간표 재생 · {cycle}회차 {late:.1f} s 늦게 시작 · 초기 이동이 늦게 끝남 · 생략 아님 · '
                     '다음 회차는 다시 시간표 시각'
                 )
-                self._result_note = f'{cycle}회차 {late:.1f} s 늦게 시작 · 다음 회차는 시간표대로'
+                self._result_note = f'{cycle}회차 {late:.1f}초 지연 시작 (다음 회차는 시간표 기준)'
                 self._set_note(self._result_note)
         elif self._result_note and self._note == self._result_note:
             self._result_note = ''
@@ -694,11 +694,11 @@ class ClockDriver:
         self._note = why
         prefix = f'{cycle}회차 '
         reason = why[len(prefix):] if why.startswith(prefix) else why
-        reason = reason[len('쉼 · '):] if reason.startswith('쉼 · ') else reason
+        reason = reason[len('생략: '):] if reason.startswith('생략: ') else reason
         key = (plan_id, cycle, reason)
         if key != self._skip_logged:
             self._skip_logged = key
-            self._warn(f'시간표 재생 · {cycle}회차 쉼 · {reason}' if cycle else f'시간표 재생 · {reason}')
+            self._warn(f'시간표 재생 · {cycle}회차 생략: {reason}' if cycle else f'시간표 재생 · {reason}')
 
     def _skip_cycle(self, plan_id: str, cycle: int, why: str, note: str) -> None:
         """들어갈 때인데 못 들어감 · 화면 이유 + 회차마다 경고 로그 한 줄 · 수정 목록 189
@@ -711,7 +711,7 @@ class ClockDriver:
         key = (plan_id, int(cycle), why)
         if key != self._skip_logged:
             self._skip_logged = key
-            self._warn(f'시간표 재생 · {cycle}회차 쉼 · {why}')
+            self._warn(f'시간표 재생 · {cycle}회차 생략: {why}')
 
     def _set_note(self, text: str, *, warn: bool = False) -> None:
         if text == self._note:

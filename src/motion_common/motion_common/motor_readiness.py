@@ -58,8 +58,8 @@ STREAM_ORDER: Tuple[str, ...] = ('detected', 'fault', 'servo_on', 'internal_limi
 MANUAL_ORDER: Tuple[str, ...] = ('detected', 'servo_on', 'fault')
 
 INTERNAL_LIMIT_MESSAGE = (
-    '내부 리밋이 걸려 있습니다 · '
-    'POT/NOT · 비상정지 · 토크 제한 · 소프트웨어 리밋을 확인하세요'
+    '내부 리밋 상태입니다. '
+    'POT/NOT · 비상 정지 · 토크 제한 · 소프트웨어 리밋을 확인하세요'
 )
 
 

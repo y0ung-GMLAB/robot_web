@@ -95,7 +95,7 @@ def motor_restart_service_failure(error: Any) -> str:
     if detail:
         prefix += f' 원인: {detail}.'
     return (
-        f'{prefix} 서비스 상태를 확인하고, AC 서보를 사용한다면 '
+        f'{prefix} 서비스 상태를 확인하고, AC 서보 사용 시 '
         '서보 전원·EtherCAT 케이블·Master 상태를 확인하세요.'
     )
 
@@ -131,7 +131,7 @@ def _pending_axis(axis: int, motor: Any) -> Dict[str, Any]:
     elif transport == 'serial':
         reason = '직렬 통신 응답 없음'
     else:
-        reason = str(motor.get('connection_message') or '').strip() or '연결되지 않음'
+        reason = str(motor.get('connection_message') or '').strip() or '미연결'
     return {
         'controller_index': axis,
         'label': label,

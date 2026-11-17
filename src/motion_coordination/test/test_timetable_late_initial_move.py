@@ -92,8 +92,8 @@ def test_a_pc_whose_initial_move_ends_late_starts_late_without_skipping_and_othe
         'B 는 2회차를 늦은 만큼 늦게 · 쉬지 않음 · 3회차부터 다시 시간표 시각'
     assert not b[1].skips
     late_lines = [note for note in b[3] if '늦게 시작' in note]
-    assert late_lines == [f'시간표 재생 · 2회차 {late:.1f} s 늦게 시작 · 초기 이동이 늦게 끝남 · 쉼 아님 · 다음 회차는 다시 시간표 시각']
-    assert not any('회차 쉼' in note for note in b[3]), b[3]
+    assert late_lines == [f'시간표 재생 · 2회차 {late:.1f} s 늦게 시작 · 초기 이동이 늦게 끝남 · 생략 아님 · 다음 회차는 다시 시간표 시각']
+    assert not any('회차 생략' in note for note in b[3]), b[3]
     assert sounds[:4] == on_time, '스피커는 늘 시간표 시각에 음원 · 헤드 늦음과 상관없음'
 
 
@@ -103,8 +103,8 @@ def test_an_extremely_late_initial_move_skips_only_that_cycle_with_the_reason(tm
     assert a[1].starts == on_time
     assert [cycle for cycle, _ in b[1].starts] == [1, 3, 4], 'B 는 2회차만 쉼'
     assert b[1].starts[1:] == on_time[2:], '쉰 뒤 다음 회차는 시간표 시각'
-    skipped = [note for note in b[3] if '회차 쉼' in note]
-    assert skipped == ['시간표 재생 · 2회차 쉼 · 초기 이동이 20.0 s 늦게 끝남 · 돌면 3회차 준비 시각을 넘김'], b[3]
+    skipped = [note for note in b[3] if '회차 생략' in note]
+    assert skipped == ['시간표 재생 · 2회차 생략: 초기 이동이 20.0초 지연 종료, 재생 시 3회차 준비 시각 초과'], b[3]
     assert b[1].calls.count('group_prepare') == 1 and 'group_join' not in b[1].calls, '실행은 놓지 않고 이어서'
     assert sounds[:4] == on_time
 

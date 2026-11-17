@@ -117,20 +117,20 @@ def notice_text(axis: int, kind: str, *, position: Optional[float], target: floa
     """사람에게 보일 한 줄 · 모터 deg"""
     target_deg = math.degrees(float(target))
     if position is None:
-        where = '위치 못 읽음'
+        where = '위치 읽기 실패'
         error_deg = None
     else:
-        where = f'지금 {math.degrees(float(position)):.2f}°'
+        where = f'현재 {math.degrees(float(position)):.2f}°'
         error_deg = math.degrees(abs(float(position) - float(target)))
     if kind == HUNTING:
         swing = math.degrees(max(float(peak_error or 0.0), math.radians(error_deg or 0.0)))
         return (
-            f'{axis}번 모터가 목표 근처에서 출렁입니다(목표 {target_deg:.2f}° · {where} · '
-            f'최대 ±{swing:.2f}° 모터) · 게인(강성)을 확인하세요'
+            f'{axis}번 모터가 목표 근처에서 진동합니다(목표 {target_deg:.2f}°, {where}, '
+            f'최대 ±{swing:.2f}° 모터). 게인(강성)을 확인하세요'
         )
     if kind == SHORT:
         gap = f'차이 {error_deg:.2f}° 모터' if error_deg is not None else where
-        return f'{axis}번 모터가 목표에 못 미치고 섰습니다({gap}) · 기구 걸림 · 토크 한계를 확인하세요'
+        return f'{axis}번 모터가 목표 도달 전 정지했습니다({gap}). 기구 간섭과 토크 한계를 확인하세요'
     if kind == TIMEOUT:
         return f'{axis}번 모터가 제한 시간 안에 목표에 서지 않아 조작을 끝냈습니다(목표 {target_deg:.2f}° · {where})'
     return ''

@@ -393,7 +393,7 @@ def test_initialization_with_an_empty_registered_file_falls_back_to_zero():
         initialization_only=True,
     )
     assert plan['axes'][0]['initial_motor_target_rad'] == _approx_deg(100.0)
-    assert '쓸 수 있는 줄이 없습니다' in plan['warnings'][0]
+    assert '사용 가능한 행이 없습니다' in plan['warnings'][0]
 
 
 def test_playback_with_a_deleted_registered_file_is_still_refused():
@@ -426,7 +426,7 @@ def test_initialize_request_reports_plan_errors_right_away(monkeypatch):
     result = manager._start_thread('initialize', {'motion_file_id': '', 'mapping_file_id': 'mapping.yaml'})
 
     assert result['success'] is False
-    assert result['message'].startswith('초기 위치 이동 불가: 움직일 조인트가 없습니다')
+    assert result['message'].startswith('초기 위치 이동 불가: 재생할 조인트가 없습니다')
     assert started == []
 
 
@@ -899,7 +899,7 @@ def test_a_loop_value_gap_no_longer_blocks_the_run():
 
     warning = motion_run_rules._loop_gap_warning(unsafe)
     assert '시작·종료값 차이 초과' in warning
-    assert '값이 튑니다' in warning
+    assert '값 급변' in warning
 
 
 def test_reinitializing_repeat_has_nothing_to_warn_about():

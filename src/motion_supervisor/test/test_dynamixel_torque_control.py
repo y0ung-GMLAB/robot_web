@@ -68,7 +68,7 @@ def test_reboot_sends_the_fault_reset_bit_which_the_serial_controller_turns_into
     assert success is True
     assert published == [((2,), supervisor_node.DYNAMIXEL_REBOOT)]
     assert supervisor_node.DYNAMIXEL_REBOOT == supervisor_node.CW_FAULT_RESET_MINAS == 0x80
-    assert '토크가 꺼진' in message
+    assert '토크 OFF 상태로 재부팅' in message
 
 
 def test_torque_on_is_refused_while_the_motor_reports_a_hardware_error():

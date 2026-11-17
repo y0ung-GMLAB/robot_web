@@ -260,7 +260,7 @@ class EthercatScanner:
                     'state': state,
                     'error_flag': error,
                     'since': since,
-                    'message': f'{label} 드라이브가 {state} 에 멈춤 · 그 드라이브 제어 전원을 껐다 켜세요',
+                    'message': f'{label} 드라이브가 {state} 상태에서 정지했습니다. 해당 드라이브 제어 전원을 재투입하세요',
                 })
         self._not_op_since = {slot: since for slot, since in self._not_op_since.items() if slot in seen}
         return stuck

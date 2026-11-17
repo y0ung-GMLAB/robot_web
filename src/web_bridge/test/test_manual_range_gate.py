@@ -52,7 +52,7 @@ def test_one_unconfirmed_row_blocks_every_axis():
 
     reason = manual_range_gate.block_reason(rows, [], MOTORS, 0)
 
-    assert reason.startswith('수동 조작 불가 · 조인트 범위 미확인 · Neck_Pitch')
+    assert reason.startswith('수동 조작 불가: 조인트 범위 미확인(Neck_Pitch)')
 
 
 def test_the_applied_mapping_counts_too():
@@ -60,7 +60,7 @@ def test_the_applied_mapping_counts_too():
     saved = [_row('Neck_Yaw', 0)]
     applied = [_row('Neck_Yaw', 0, range_confirmed=False)]
 
-    assert '조인트 범위 미확인 · Neck_Yaw' in manual_range_gate.block_reason(saved, applied, MOTORS)
+    assert '조인트 범위 미확인(Neck_Yaw)' in manual_range_gate.block_reason(saved, applied, MOTORS)
 
 
 def test_a_motor_without_an_enabled_row_does_not_move():
@@ -68,7 +68,7 @@ def test_a_motor_without_an_enabled_row_does_not_move():
 
     assert manual_range_gate.block_reason(rows, [], MOTORS, 0) == ''
     reason = manual_range_gate.block_reason(rows, [], MOTORS, 1)
-    assert reason.startswith('수동 조작 불가 · 1번 모터는 조인트 매핑의 「사용」 줄에 없습니다')
+    assert reason.startswith('수동 조작 불가: 1번 모터는 조인트 매핑의 「사용」 줄에 없습니다')
 
 
 def test_rows_are_matched_by_motor_ref_like_playback():
@@ -124,7 +124,7 @@ def test_gate_sees_a_save_right_away(tmp_path):
         encoding='utf-8',
     )
 
-    assert '조인트 범위 미확인 · Neck_Yaw' in gate.block_reason(0)
+    assert '조인트 범위 미확인(Neck_Yaw)' in gate.block_reason(0)
 
 
 def test_auto_generated_mapping_blocks(tmp_path):
@@ -141,7 +141,7 @@ def test_unknown_means_blocked(tmp_path):
 
     for bridge in (no_project, no_file, no_mapping):
         reason = ManualRangeGate(bridge).block_reason(0)
-        assert reason.startswith('수동 조작 불가 · 조인트 범위를 확인할 수 없습니다'), reason
+        assert reason.startswith('수동 조작 불가: 조인트 범위를 확인할 수 없습니다'), reason
 
 
 def test_fader_targets_use_the_last_full_check(tmp_path):
@@ -160,8 +160,8 @@ def test_fader_targets_use_the_last_full_check(tmp_path):
 def test_every_manual_motion_command_passes_the_gate():
     source = (BRIDGE_DIR / 'manual_motor_commands.py').read_text(encoding='utf-8')
 
-    # 조그 2 · 동작(절대 이동·범위 복구) 2 · 모두 축을 넘긴다
-    assert source.count('off = self._off_mode_block(axis)') == 4
+    # 동작(절대 이동·범위 복구) 2 · 모두 축을 넘긴다 · 조그 길은 이전 UI 와 함께 지웠다(2026-11-17)
+    assert source.count('off = self._off_mode_block(axis)') == 2
     assert "getattr(self.bridge, 'manual_range_blocker', None)" in source
 
 
@@ -206,4 +206,4 @@ def test_speed_limits_fall_back_to_gain_one_for_an_unmapped_motor(tmp_path):
 
 def test_jog_and_action_requests_carry_the_speed_limits():
     source = (BRIDGE_DIR / 'manual_motor_commands.py').read_text(encoding='utf-8')
-    assert source.count('**self._speed_limits(axis_value),') == 4   # 조그 2 · 절대 이동(범위 복구 포함) 2
+    assert source.count('**self._speed_limits(axis_value),') == 2   # 절대 이동(범위 복구 포함) 2

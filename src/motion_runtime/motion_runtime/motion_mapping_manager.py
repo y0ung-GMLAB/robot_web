@@ -132,7 +132,7 @@ class MotionMappingManager(Node):
         self._execution_context = {}
         return {
             'success': True,
-            'message': '조인트 매핑 실행 대기 · 보던 설정은 유지',
+            'message': '조인트 매핑 실행 대기, 기존 설정 유지',
             'project_id': self._project_id if hasattr(self, '_project_id') else '',
             'context_id': '',
         }
@@ -341,8 +341,8 @@ class MotionMappingManager(Node):
                         f'actual={actual_mapping_revision}'
                     )
                 raise ValueError(
-                    '조인트 매핑이 화면을 불러온 뒤 변경됐습니다. '
-                    '현재 설정 보호를 위해 저장을 거부했습니다. 파일을 다시 불러오세요'
+                    '화면을 연 이후 조인트 매핑 변경을 감지해 저장을 중단했습니다. '
+                    '파일을 다시 불러오세요'
                 )
         elif source_path is not None and 'base_revision' in payload:
             actual_revision = hashlib.sha256(source_path.read_bytes()).hexdigest()
@@ -352,8 +352,8 @@ class MotionMappingManager(Node):
                 )
             if expected_revision != actual_revision:
                 raise ValueError(
-                    '조인트 매핑 파일이 화면을 불러온 뒤 변경됐습니다. '
-                    '현재 파일 보호를 위해 저장을 거부했습니다. 파일을 다시 불러오세요'
+                    '화면을 연 이후 조인트 매핑 파일 변경을 감지해 저장을 중단했습니다. '
+                    '파일을 다시 불러오세요'
                 )
         elif expected_revision:
             raise ValueError(
@@ -542,7 +542,7 @@ class MotionMappingManager(Node):
         if verified_playlist != playlist or verified != (playlist[0] if playlist else ''):
             raise ValueError('저장 후 재생 등록 파일 검증에 실패했습니다')
         if len(playlist) > 1:
-            message = f'재생 목록 등록 완료: {len(playlist)}개 · ' + ' → '.join(playlist)
+            message = f'재생 목록 등록 완료 ({len(playlist)}개): ' + ' → '.join(playlist)
         elif verified:
             message = f'재생 등록 완료: {verified}'
         else:
@@ -870,7 +870,7 @@ class MotionMappingManager(Node):
                     continue
                 limit = self._finite_float(raw)
                 if limit is None or limit <= 0:
-                    row_errors.append(f'{field} must be > 0 (비우면 검사 안 함)')
+                    row_errors.append(f'{field} must be > 0 (공란 시 검사 생략)')
             if offset is None:
                 row_errors.append('offset_rad must be numeric')
             if reference is None:
@@ -881,7 +881,7 @@ class MotionMappingManager(Node):
                 row_errors.append('motion_lower_rad must be <= motion_upper_rad')
             if enabled and not joint_mapping.range_confirmed(row):
                 # 저장은 된다 · 재생만 막힌다 (재생 계획이 같은 판정을 쓴다) · 수정 목록 97
-                row_warnings.append('범위 미확인 · 실제 범위를 넣거나 「범위 확인」 체크 · 그 전에는 재생·수동 조작 안 됨')
+                row_warnings.append('범위 미확인: 실제 범위 입력 후 「범위 확인」 체크 필요 (체크 전 재생·수동 조작 불가)')
             if initial_mode not in INITIAL_MODES:
                 row_errors.append(f'initial_mode must be one of: {", ".join(INITIAL_MODES)}')
             if initial_position is None:

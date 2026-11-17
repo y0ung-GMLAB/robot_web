@@ -3,7 +3,7 @@
 실물 NY 2026-11-09 04:04 · 연동 노드가 초기 이동 예약 → 끝 확인 → 시작 예약을 따로 보내 그 왕복(최대 1.4 s)과 늦게 끝난
 초기 이동(0.2~0.8 s)이 시작 여유 2 s 를 넘었다 · 4대 중 3대 「트리거가 이미 지났습니다」 로 회차를 쉼 · 188 은 여유를 4 s 로.
 
-사용자 결정 2026-11-16 · 초기 이동이 늦게 끝나도 잘못이 아니다 · 끝나는 대로 시작(쉼 아님 · 기록) · 다음 회차는 다시
+사용자 결정 2026-11-16 · 초기 이동이 늦게 끝나도 잘못이 아니다 · 끝나는 대로 시작(생략 아님 · 기록) · 다음 회차는 다시
 시간표대로 · 너무 늦어 다음 회차 준비를 먹을 때만 그 회차를 쉰다(이유 기록).
 
 진짜 `GroupSession` · 진짜 예약 기다림(`_wait_group_deadline`) · 초기 이동 · 재생만 가짜(시간만 흘림) · 여유를 짧게 줄여 빨리 돈다.
@@ -160,7 +160,7 @@ def test_one_timed_command_per_cycle_moves_back_from_its_start_and_starts_on_its
     assert abs(inits[1][1] - (second - MOVE - SETTLE)) < TOLERANCE
     assert manager.status().get('timed_cycle') == 2
     _stop(manager, worker)
-    assert not any('늦게' in line or '회차 쉼' in line for line in log.lines), log.lines
+    assert not any('늦게' in line or '회차 생략' in line for line in log.lines), log.lines
 
 
 def test_an_initial_move_that_ends_late_starts_late_without_skipping_and_the_next_cycle_is_on_time():
@@ -187,7 +187,7 @@ def test_an_initial_move_that_ends_late_starts_late_without_skipping_and_the_nex
     _wait_until(lambda: len(runs) == 3)
     assert abs(runs[2][1] - third) < TOLERANCE and runs[2][2] == 0.0, '다음 회차는 다시 시간표대로'
     _stop(manager, worker)
-    assert not any('회차 쉼' in line for line in log.lines), log.lines
+    assert not any('회차 생략' in line for line in log.lines), log.lines
 
 
 def test_an_initial_move_so_late_it_would_eat_the_next_preparation_skips_only_that_cycle():
@@ -203,9 +203,9 @@ def test_an_initial_move_so_late_it_would_eat_the_next_preparation_skips_only_th
     _wait_until(_at_barrier(manager, 2))
     status = manager.status()
     assert status['phase'] == GROUP_CYCLE_SKIPPED_PHASE and status['group_cycle_number'] == 2
-    assert status['cycle_skip_reason'].startswith('초기 이동이 0.') and '3회차 준비 시각을 넘김' in status['cycle_skip_reason']
+    assert status['cycle_skip_reason'].startswith('초기 이동이 0.') and '3회차 준비 시각 초과' in status['cycle_skip_reason']
     assert [cycle for cycle, *_ in runs] == [1], '2회차는 돌지 않는다'
-    assert any(line.startswith('시간표 재생 · 2회차 쉼 · 초기 이동이') for line in log.lines), log.lines
+    assert any(line.startswith('시간표 재생 · 2회차 생략: 초기 이동이') for line in log.lines), log.lines
     third = second + PERIOD
     assert _cycle(manager, 3, third)['success'] is True, '쉰 회차 뒤에도 같은 세션 · 다음 회차 명령을 받는다'
     _wait_until(lambda: len(runs) == 2)
@@ -254,7 +254,7 @@ def test_the_cycle_command_is_checked_against_the_session():
         manager._group.session.update(state='motion_completed', cycle_number=6)
         _cycle(manager, 9, start)
     manager._group.session.update(state='running')
-    with pytest.raises(ValueError, match='받을 수 있는 상태가 아닙니다'):
+    with pytest.raises(ValueError, match='수신할 수 있는 상태가 아닙니다'):
         _cycle(manager, 7, start)
     with pytest.raises(ValueError, match='세션이 일치하지 않습니다'):
         manager._group.schedule_timed_cycle({'execution_id': 'other', 'cycle_number': 7, 'start_monotonic': start})

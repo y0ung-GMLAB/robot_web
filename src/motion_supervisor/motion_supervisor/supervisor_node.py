@@ -31,7 +31,7 @@ from motion_common import (
 #:
 #: 같은 문장이 **일곱 곳**에 적혀 있었다 · 한 곳만 고치면 같은 상황에 두 가지
 #: 말이 나온다 · 게다가 영어라서 사용자가 화면에서 그대로 봤다.
-EMERGENCY_LATCHED_MESSAGE = '긴급정지가 걸려 있습니다 · 프로그램을 다시 시작하세요'
+EMERGENCY_LATCHED_MESSAGE = '긴급 정지 상태입니다. 프로그램을 재시작하세요'
 
 #: 수동 명령이 최종 출력을 쥐고 있을 때 · §6-178 · 이것도 네 곳에 따로 있었다
 MANUAL_COMMAND_ACTIVE_MESSAGE = '수동 명령이 실행 중입니다'
@@ -88,7 +88,7 @@ RUNTIME_SILENT_SEC = 2.0
 #: 세션을 닫고 쥔 축을 놓는다 · 정상 실행은 세션을 스스로 닫는다(정지 · 끝 · 오류) · 수정 목록 203
 PLAYBACK_LIVENESS_SEC = 2.0
 #: 열린 재생 세션 밖의 프레임 · 정지 전에 돌던 재생이 늦게 보낸 것 · 수정 목록 200
-PLAYBACK_SESSION_CLOSED_MESSAGE = '재생 세션 없음 · 정지 전 재생의 늦은 프레임'
+PLAYBACK_SESSION_CLOSED_MESSAGE = '재생 세션 없음 (정지 전 재생의 지연 프레임)'
 #: 정지가 지운(또는 정지와 겹쳐 들어온) 수동 조작의 다음 점 · 보내지 않았다 · 수정 목록 112 나 · 200
 MANUAL_CANCELLED_BY_STOP = 'cancelled by stop'
 #: 정지와 겹쳐 들어온 수동 요청에 돌려주는 말
@@ -463,7 +463,7 @@ class MotionSupervisor(Node):
                 f'Rejected malformed motion runtime command: {shape_error}.',
                 throttle_duration_sec=1.0,
             )
-            self._note_motion_run_drop(f'명령 형식 오류 · {shape_error}')
+            self._note_motion_run_drop(f'명령 형식 오류: {shape_error}')
             return
         # MIDI 는 **축별로** 판정한다 · §6-107
         #
@@ -1221,7 +1221,7 @@ class MotionSupervisor(Node):
                 released.append(axis)
         if not released:
             return True, 'stream release: 움직이는 축 없음'
-        return True, f'stream release: axes {self._axis_list_text(sorted(released))} · 목표까지 간 뒤 정지'
+        return True, f'stream release: axes {self._axis_list_text(sorted(released))} (목표 도달 후 정지)'
 
     def _cancel_stream_ramps(self, axes: Optional[list[Any]] = None) -> list[int]:
         """램프를 바로 끝낸다 · 정지 · 세우기(hold) · 프로젝트 경계 · 축을 안 주면 전부"""
@@ -1528,7 +1528,7 @@ class MotionSupervisor(Node):
         self._project_generation = generation
         self._servo_alarm_guard_instance().reset_project_policy()
         if bool(getattr(self, '_emergency_latched', False)):
-            return True, f'프로젝트 세대 {generation} 명령 경계 적용 · 긴급정지 유지'
+            return True, f'프로젝트 세대 {generation} 명령 경계 적용, 긴급 정지 유지'
 
         # A project/configuration restart is only a software command boundary.
         # Never turn it into a motor set-point: servo/torque enable already holds
@@ -2311,13 +2311,13 @@ class MotionSupervisor(Node):
                     self._publish_action_result(
                         str(active.get('request_id') or ''),
                         True,
-                        f'{axis}번 모터 · 다음 조작이 이어받음 · 목표 {_deg(active["target_position"]):.3f} deg 근처',
+                        f'{axis}번 모터: 다음 조작으로 인계 (목표 {_deg(active["target_position"]):.3f} deg 근처)',
                     )
                 continue
-            where = '' if position is None else f' · 지금 {_deg(position):.3f} deg'
+            where = '' if position is None else f', 현재 {_deg(position):.3f} deg'
             return (
-                f'{axis}번 모터의 이전 {noun} 아직 돌고 있습니다 · '
-                f'목표 {_deg(active["target_position"]):.3f} deg{where}'
+                f'{axis}번 모터의 이전 {noun} 아직 진행 중입니다 ('
+                f'목표 {_deg(active["target_position"]):.3f} deg{where})'
             )
         return ''
 
@@ -2893,8 +2893,8 @@ class MotionSupervisor(Node):
             ]
             if fault_axes:
                 return False, (
-                    f'{fault_axes[0]}번 모터에 에러가 있습니다 · '
-                    '먼저 알람 해제(Fault Reset)를 하세요'
+                    f'{fault_axes[0]}번 모터에 에러가 있습니다. '
+                    '먼저 오류 초기화(Fault Reset)를 실행하세요'
                 )
             self._publish_controlword(motors, axes, CW_SHUTDOWN_MINAS)
             time.sleep(CONTROLWORD_SEQUENCE_DELAY_SEC)
@@ -2913,8 +2913,8 @@ class MotionSupervisor(Node):
         # 리셋 뒤 0x06 으로 「켤 준비」 상태가 되어 서보가 꺼진 채로 남는다 · 의도(사람이 원인을
         # 보고 직접 켠다 · 사용자 결정 2026-10-07) · 다음 할 일을 문구에 적는다 · 수정 목록 71
         return True, (
-            f'AC Servo Fault Reset command sent: axes {self._axis_list_text(axes)} · '
-            '오류 초기화 완료 · 서보가 꺼졌습니다 · 알람 원인을 확인한 뒤 「서보 켜기」 를 누르세요'
+            f'AC Servo Fault Reset command sent: axes {self._axis_list_text(axes)}. '
+            '오류 초기화를 완료했습니다. 서보 OFF 상태이므로 알람 원인을 확인한 뒤 「서보 켜기」를 누르세요'
         )
 
     def _handle_dynamixel_torque_control(
@@ -2954,8 +2954,8 @@ class MotionSupervisor(Node):
         if action == 'reboot':
             self._publish_controlword(motors, axes, DYNAMIXEL_REBOOT)
             return True, (
-                f'Dynamixel reboot command sent: axes {self._axis_list_text(axes)} · '
-                '토크가 꺼진 채로 다시 켜집니다'
+                f'Dynamixel reboot command sent: axes {self._axis_list_text(axes)}. '
+                '토크 OFF 상태로 재부팅합니다'
             )
         if action == 'torque_on':
             # 토크 켜기도 서보 ON 과 같이 앱솔루트 확인 뒤에만 · 수정 목록 62
@@ -2969,7 +2969,7 @@ class MotionSupervisor(Node):
             ]
             if fault_axes:
                 return False, (
-                    f'{fault_axes[0]}번 모터에 하드웨어 오류가 있습니다 · '
+                    f'{fault_axes[0]}번 모터에 하드웨어 오류가 있습니다. '
                     '먼저 재부팅하세요'
                 )
         self._publish_controlword(
@@ -3187,14 +3187,14 @@ class MotionSupervisor(Node):
         # 앱솔루트 미확인 · 모든 모터 동작 차단 · 재생·스케줄·화면이 이 값을 본다 · 수정 목록 62
         absolute_reason = self._absolute_block_reason()
         if servo_grade3_latched:
-            message = '3등급 서보 에러 · 프로그램 재시작 필요'
+            message = '3등급 서보 에러: 프로그램 재시작 필요'
         elif servo_grade >= 2:
-            message = '2등급 서보 에러 · 전체 모터 동작 차단'
+            message = '2등급 서보 에러: 전체 모터 동작 차단'
         elif alarm_state['blocked_axes']:
             axes = self._axis_list_text(alarm_state['blocked_axes'])
-            message = f'1등급 서보 에러 · {axes} 동작 차단'
+            message = f'1등급 서보 에러: {axes} 동작 차단'
         elif self._emergency_latched:
-            message = '긴급정지 잠김 · 상위 프로그램 재시작 필요'
+            message = '긴급 정지 상태: 프로그램 재시작 필요'
         elif absolute_reason:
             message = absolute_reason
         elif settling:

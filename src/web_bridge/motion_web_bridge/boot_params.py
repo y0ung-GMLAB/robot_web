@@ -62,7 +62,7 @@ def expected_for(workspace_root: Path, motors: Any) -> Callable[[List[int]], Dic
 
 #: 세션 파일 옆에 남기는 기록 · `motor-<sha>.yaml` → `motor-<sha>.boot.json`
 SNAPSHOT_SUFFIX = '.boot.json'
-STALE_MESSAGE = '설정 적용 필요 · 지금 드라이브는 옛 부팅 값'
+STALE_MESSAGE = '설정 적용 필요 (현재 드라이브는 이전 부팅 값 사용 중)'
 
 
 def snapshot_path(config_file: Path) -> Path:
@@ -220,7 +220,7 @@ def differences(
         have = entry.get('values')
         if have is None:
             rows.append({'axis': axis, 'object': '', 'label': '부팅 목록', 'running': None, 'expected': None,
-                         'error': str(entry.get('error') or '지금 도는 설정에 이 모터의 부팅 목록이 없습니다')})
+                         'error': str(entry.get('error') or '현재 실행 중인 설정에 해당 모터의 부팅 목록이 없습니다')})
             continue
         for key in sorted(set(have) | set(want)):
             if have.get(key) == want.get(key):
@@ -254,7 +254,7 @@ def describe(rows: List[Dict[str, Any]], limit: int = 4) -> str:
 
 
 def _unknown(exc: BaseException) -> Dict[str, Any]:
-    return {'state': 'unknown', 'message': f'부팅 값을 확인하지 못했습니다 · {exc}', 'differences': [],
+    return {'state': 'unknown', 'message': f'부팅 값 확인 실패: {exc}', 'differences': [],
             'source': '', 'started_at': None, 'running': {}}
 
 

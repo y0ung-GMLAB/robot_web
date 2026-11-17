@@ -62,7 +62,7 @@ def normalize_automation_state(value: Any) -> Dict[str, Any]:
         source.get('group_sync_mode') or DEFAULT_GROUP_SYNC_MODE
     ).strip().lower()
     if group_sync_mode not in GROUP_SYNC_MODES:
-        raise ValueError(f'지원하지 않는 그룹 맞춤 방식입니다: {group_sync_mode}')
+        raise ValueError(f'지원하지 않는 그룹 동기화 방식입니다: {group_sync_mode}')
     state['group_sync_mode'] = group_sync_mode
     end_action = str(
         source.get('schedule_end_action') or DEFAULT_SCHEDULE_END_ACTION

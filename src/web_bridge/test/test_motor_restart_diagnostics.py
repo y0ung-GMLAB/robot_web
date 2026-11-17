@@ -94,7 +94,7 @@ def test_service_failure_guidance_does_not_claim_ethercat_is_the_cause():
     message = motor_restart_service_failure('service exited')
 
     assert '원인: service exited.' in message
-    assert 'AC 서보를 사용한다면' in message
+    assert 'AC 서보 사용 시' in message
 
 
 def test_motor_restart_timeout_persists_diagnosis_for_the_popup(

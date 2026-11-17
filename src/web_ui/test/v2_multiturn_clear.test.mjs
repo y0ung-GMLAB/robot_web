@@ -7,7 +7,7 @@ import { absoluteClearRule, absoluteJobText } from '../static/v2/js/motors_model
 import { startBlocker } from '../static/v2/js/play_model.js';
 import { capturePatch, hashAxis, notAlignedAxes } from '../static/v2/js/pages/manual.js';
 
-const PROMPT = '다회전 클리어한 1번 모터 · 몸을 정면·수평에 맞추고 기준점을 다시 지정해 저장하세요';
+const PROMPT = '다회전 클리어한 1번 모터: 로봇을 정면·수평으로 정렬하고 기준점을 재지정해 저장하세요';
 const snap = {
   multiturn_clear: {
     blocked_axes: [1], pending_axes: [1], stale_axes: [],
@@ -34,19 +34,19 @@ test('재생 화면 · 서버 글 그대로 막고 · 그 축 기준점 화면�
   assert.equal(blocker.fix, 'open:manual?axis=1');
 });
 
-test('앱솔루트 설정 끝 · 클리어했으면 「완료」 가 아니라 기준점 다시 지정 대기 · 확인 창은 Err40 규칙', () => {
+test('앱솔루트 설정 끝 · 클리어했으면 「완료」 가 아니라 기준점 재지정 대기 · 확인 창은 Err40 규칙', () => {
   const text = absoluteJobText({ state: 'reference_pending', step_index: 7, step_count: 7, step_label: '최종 확인', message: PROMPT });
   assert.match(text, /^앱솔루트 설정 · 기준점 재지정 대기 · 7\/7/);
-  assert.match(text, /몸을 정면·수평에 맞추고 기준점을 다시 지정해 저장하세요/);
-  assert.match(absoluteJobText({ state: 'done', step_index: 7, step_count: 7, message: '앱솔루트 설정을 마쳤습니다 · 다회전 정상 · 클리어 안 함 · 기준점 그대로' }),
-    /^앱솔루트 설정 완료 · 7\/7 · .*클리어 안 함 · 기준점 그대로/);
+  assert.match(text, /로봇을 정면·수평으로 정렬하고 기준점을 재지정해 저장하세요/);
+  assert.match(absoluteJobText({ state: 'done', step_index: 7, step_count: 7, message: '앱솔루트 설정을 완료했습니다. 다회전 정상으로 클리어하지 않았으며 기준점을 유지합니다' }),
+    /^앱솔루트 설정 완료 · 7\/7 · .*클리어하지 않았으며 기준점을 유지합니다/);
   const rule = absoluteClearRule();
   assert.match(rule, /Err40\(다회전 무효\)이 발생한 드라이브만/);
-  assert.match(rule, /Err40이 없으면 클리어하지 않으며 기준점도 유지/);
-  assert.match(rule, /모든 프로젝트에서 기준점을 다시 지정해야 합니다\. 감속기가 있는 축은 눈으로 맞춰야 합니다/);
+  assert.match(rule, /Err40이 없는 경우 클리어하지 않으며 기준점도 유지/);
+  assert.match(rule, /모든 프로젝트에서 기준점 재지정이 필요합니다. 감속기가 있는 축은 육안으로 정렬해야 합니다/);
   const motors = readFileSync(new URL('../static/v2/js/pages/motors.js', import.meta.url), 'utf8');
   assert.match(motors, /absoluteClearRule\(\)/, '앱솔루트 설정 확인 창이 규칙을 쓴다');
-  assert.match(motors, /모든 프로젝트에서 해당 축의 기준점이 무효가 됩니다\. 감속기가 있는 축은 눈으로 다시 맞춰야 합니다/, '클리어만 하는 길 확인 창');
+  assert.match(motors, /모든 프로젝트에서 해당 축의 기준점을 무효 처리합니다\. 감속기가 있는 축은 육안으로 재정렬해야 합니다/, '클리어만 하는 길 확인 창');
   assert.match(motors, /reference_pending' \? referenceButton/, '끝나면 기준점 지정으로 바로');
 });
 

@@ -8,7 +8,7 @@ import { readFileSync } from 'node:fs';
 import test from 'node:test';
 import {
   axisAngleQuat, bodyLocalPose, cameraPosition, forwardKinematics, frameIndexAt, quatMul, rotVec,
-} from '../static/js/sim3d_math.js';
+} from '../static/v2/js/sim3d_math.js';
 
 const fixture = JSON.parse(readFileSync(new URL('./fixtures/sim3d_fk.json', import.meta.url), 'utf8'));
 const { scene, cases } = fixture;

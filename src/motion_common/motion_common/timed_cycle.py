@@ -104,10 +104,10 @@ def decide(*, cycle: int, start: float, ready_at: float, latest: float, moved: b
         return Decision(start_at=start)
     late = ready_at - start
     if ready_at > float(latest):
-        what = '초기 이동이' if moved else '지금 초기 이동을 시작해도'
+        what = '초기 이동이' if moved else '현재 초기 이동을 시작해도'
         return Decision(
             start_at=ready_at, late_sec=late,
-            skip=f'{what} {late:.1f} s 늦게 끝남 · 돌면 {int(cycle) + 1}회차 준비 시각을 넘김',
+            skip=f'{what} {late:.1f}초 지연 종료, 재생 시 {int(cycle) + 1}회차 준비 시각 초과',
         )
     return Decision(start_at=ready_at, late_sec=late)
 

@@ -147,7 +147,7 @@ def test_a_refused_group_stop_falls_back_to_the_local_path(tmp_path):
 def test_an_accepted_start_does_not_wipe_the_failure_count(tmp_path):
     """받아들여진 시작은 아직 성공이 아니다 · 실제로 돌아야 지운다 · 수정 목록 124"""
     node = _node(tmp_path, coordination_enabled=True)
-    node._last_failure = {'endpoint': '시작 뒤 재생 없음', 'message': '준비 안 됨', 'count': 2}
+    node._last_failure = {'endpoint': '시작 후 재생 없음', 'message': '준비 안 됨', 'count': 2}
 
     def accept(endpoint, payload):
         node.sent.append((endpoint, payload))

@@ -10,16 +10,16 @@ export const RUN_MODE_LABEL = { schedule: '스케줄', manual: '수동', off: '�
 
 /** 운전 모드 뜻 = 누가 시작하나 · 위 막대 버튼 설명 · 수정 목록 122 (사용자 결정 2026-10-13) */
 export const RUN_MODE_HINT = {
-  schedule: '스케줄\n운영 시간에 맞춰 자동으로 시작하고 정지\n스케줄로 시작한 그룹 재생에는 스케줄 모드 PC만 참여',
+  schedule: '스케줄\n운영 시간에 따라 자동 시작 및 정지\n스케줄로 시작한 그룹 재생에는 스케줄 모드 PC만 참여',
   manual: '수동\n사람이 직접 시작 (단독 재생, 그룹 재생 모두 가능)\n직접 시작한 그룹 재생에는 수동 모드 PC도 참여',
   off: '끔\n움직이지 않으며 그룹 재생에서도 제외\n서보 토크는 유지',
 };
 
 /** 운전 모드 전환 확인 창 본문 · 위 막대(actions.js)와 PC 현황(store.js)이 같은 글을 쓴다 · 2026-11-09 */
 export const RUN_MODE_EFFECT = {
-  schedule: '운영 시간에 맞춰 재생을 자동으로 시작하고 정지합니다.\n지금이 운영 시간이면 곧 재생을 시작합니다.',
-  manual: '스케줄이 재생을 시작하거나 정지하지 않습니다.\n직접 시작한 재생은 운영 시간이 지나도 계속됩니다.',
-  off: '모든 움직임 명령을 차단합니다.\n진행 중인 재생은 이번 회차가 끝나면 정지합니다.\n서보 토크는 유지됩니다.',
+  schedule: '운영 시간에 따라 재생을 자동으로 시작하고 정지합니다.\n현재 운영 시간인 경우 곧 재생을 시작합니다.',
+  manual: '스케줄이 재생을 시작하거나 정지하지 않습니다.\n직접 시작한 재생은 운영 시간 종료 후에도 계속 진행합니다.',
+  off: '모든 동작 명령을 차단합니다.\n진행 중인 재생은 이번 회차 종료 후 정지합니다.\n서보 토크는 유지합니다.',
 };
 
 const RUNNING_STATES = new Set(['running', 'verifying', 'waiting']);
@@ -89,7 +89,7 @@ export function bootParamsNotice(snap) {
   if (!boot || boot.state !== 'stale') return null;
   return {
     title: String(boot.message || '드라이브가 이전 부팅 값으로 동작 중입니다'),
-    detail: `${boot.detail ? `${boot.detail} ` : ''}「장비에 적용」을 누르면 새 값이 반영됩니다.`,
+    detail: `${boot.detail ? `${boot.detail} ` : ''}「장비에 적용」 후 새 값을 반영합니다.`,
   };
 }
 
@@ -109,7 +109,7 @@ export function referenceRedoView(snap) {
   if (!axes.length) return null;
   return {
     axes,
-    title: String(info.prompt || `${axes.map((a) => `${a}번`).join(', ')} 모터를 다회전 클리어했습니다. 로봇을 정면·수평 자세로 맞추고 기준점을 다시 지정해 저장하세요.`),
+    title: String(info.prompt || `${axes.map((a) => `${a}번`).join(', ')} 모터를 다회전 클리어했습니다. 로봇을 정면·수평 자세로 정렬하고 기준점을 재지정해 저장하세요.`),
     detail: String(info.message || ''),
     target: `manual?axis=${axes[0]}`,
     label: '기준점 지정 열기',
@@ -149,18 +149,20 @@ export function scheduleEndNotice(snap) {
  */
 export const START_FAILURE_TITLE = {
   GROUP_START_NOT_READY: '그룹 시작 불가',
-  GROUP_PARTICIPANT_LEFT: '그룹 실행 정지 · PC 빠짐',
-  GROUP_LOCAL_BRIDGE_LOST: '그룹 실행 정지 · 웹 서비스 끊김',
-  GROUP_RELEASED: '그룹 실행 정지 · 웹 서비스 끊김',
+  GROUP_PARTICIPANT_LEFT: '그룹 실행 정지 · PC 이탈',
+  GROUP_LOCAL_BRIDGE_LOST: '그룹 실행 정지 · 웹 서비스 연결 중단',
+  GROUP_RELEASED: '그룹 실행 정지 · 웹 서비스 연결 중단',
 };
-export const START_FAILURE_DEFAULT_TITLE = '그룹 시작이 취소되었습니다';
+export const START_FAILURE_DEFAULT_TITLE = '그룹 시작 취소';
 
 export function startFailureView(failure) {
   const code = String(failure?.code || '').trim().toUpperCase();
   const title = START_FAILURE_TITLE[code] || START_FAILURE_DEFAULT_TITLE;
   let detail = String(failure?.message || '').trim();
-  // 서버 글이 제목과 같은 말로 시작하면(「그룹 시작 불가 · 들어갈 PC 가 없습니다 …」) 한 번만
-  if (detail.startsWith(`${title} · `)) detail = detail.slice(title.length + 3);
+  // 서버 글이 제목과 같은 말로 시작하면(「그룹 시작 불가: 참여 가능한 PC가 없습니다 …」) 한 번만 · 옛 글은 「 · 」
+  for (const sep of [': ', ' · ']) {
+    if (detail.startsWith(`${title}${sep}`)) { detail = detail.slice(title.length + sep.length); break; }
+  }
   return { title, detail };
 }
 
@@ -173,7 +175,7 @@ export function memoryNotice(memory) {
   const reasons = Array.isArray(memory.reasons) ? memory.reasons.filter(Boolean) : [];
   return {
     title: `메모리 부족 · 스왑 ${swap} MB`,
-    detail: `${reasons.join(' · ') || `남은 메모리 ${free} MB`}. 재생이 끊길 수 있으니 현재 PC에서 열어 둔 브라우저 탭(특히 3D 화면)을 닫거나, 재생하지 않을 때 프로그램을 다시 시작하세요.`,
+    detail: `${reasons.join(' · ') || `남은 메모리 ${free} MB`}. 재생이 중단될 수 있으므로 현재 PC에서 열어 둔 브라우저 탭(특히 3D 화면)을 닫거나, 재생하지 않을 때 프로그램을 재시작하세요.`,
   };
 }
 
@@ -192,14 +194,14 @@ export function collectIssues(snap, sched, { connected = true } = {}) {
   const bad = (title, detail = '', action = null) => issues.push({ tone: 'bad', title, detail, action });
   const warn = (title, detail = '', action = null) => issues.push({ tone: 'warn', title, detail, action });
   if (!connected) {
-    bad('서버와 연결이 끊겼습니다', '프로그램이 다시 시작되는 중이면 잠시 후 자동으로 연결됩니다.');
+    bad('서버 연결 중단', '프로그램 재시작 중인 경우 잠시 후 자동으로 재연결합니다.');
     return issues;
   }
   if (!snap) return issues;
   const safety = snap.safety_status || {};
   if (safety.emergency_latched) {
-    bad('긴급 정지 상태입니다', '모든 모터 명령이 차단되었습니다. 프로그램을 다시 시작하면 해제됩니다.',
-      { kind: 'restart-program', label: '프로그램 다시 시작' });
+    bad('긴급 정지 상태입니다', '모든 모터 명령을 차단했습니다. 프로그램 재시작 시 해제합니다.',
+      { kind: 'restart-program', label: '프로그램 재시작' });
   }
   const watchdog = String(snap.supervisor_watchdog?.message || '');
   if (watchdog) bad('모터 제어가 응답하지 않습니다', watchdog);
@@ -207,7 +209,7 @@ export function collectIssues(snap, sched, { connected = true } = {}) {
   const startup = snap.startup || {};
   if (startup.overdue && !watchdog) {
     bad('프로그램 시작이 끝나지 않았습니다', String(startup.message || ''),
-      { kind: 'restart-program', label: '프로그램 다시 시작' });
+      { kind: 'restart-program', label: '프로그램 재시작' });
   }
   const absolute = String(snap.minas_absolute_blocker || '');
   if (absolute) {
@@ -217,10 +219,10 @@ export function collectIssues(snap, sched, { connected = true } = {}) {
   // 다회전 클리어 뒤 기준점 다시 지정 전 · 재생·초기 이동·스케줄·그룹 참가 막힘 · 수동 조그는 됨 · 수정 목록 140
   // 웹을 다시 켜거나 페이지를 닫아도 PC 단위 표시가 남아 여기 남는다 · 버튼은 그 축 기준점 지정 화면
   const redo = referenceRedoView(snap);
-  if (redo) bad(redo.title, [redo.detail, '기준점을 다시 지정하기 전까지 재생, 스케줄, 그룹 참여가 차단됩니다. 수동 조작은 가능합니다.'].filter(Boolean).join(' '), { kind: 'open', target: redo.target, label: redo.label });
+  if (redo) bad(redo.title, [redo.detail, '기준점 재지정 전까지 재생, 스케줄, 그룹 참여를 차단합니다. 수동 조작은 가능합니다.'].filter(Boolean).join(' '), { kind: 'open', target: redo.target, label: redo.label });
   // OP 로 못 올라가고 멈춘 드라이브 · 시작 스크립트의 오류 플래그 해제로도 안 풀림 · 글은 서버 · 수정 목록 125
   for (const slave of stuckSlaves(snap)) {
-    bad(slave.message, '모터 프로그램이 해당 드라이브 설정을 마치지 못했습니다. 드라이브 제어 전원을 껐다 켜고, 그래도 같으면 모터 프로그램을 다시 시작하세요.');
+    bad(slave.message, '모터 프로그램이 해당 드라이브 설정을 마치지 못했습니다. 드라이브 제어 전원을 재투입하고, 증상이 동일한 경우 모터 프로그램을 재시작하세요.');
   }
   // 메일박스(SDO)만 멈춘 드라이브 · 재생 · PDO 는 그대로 · 제어 전원 재투입으로만 풀린다 · 글은 서버 · 수정 목록 139 ③
   for (const box of stuckMailboxes(snap)) {
@@ -230,7 +232,7 @@ export function collectIssues(snap, sched, { connected = true } = {}) {
   // 조인트 범위 미확인 · 재생·초기 이동·수동 조작이 막혀 있다 · 판정은 서버 · 수정 목록 97
   const range = String(snap.mapping_range_blocker || '');
   if (range) {
-    bad('조인트 범위를 확인하지 않아 재생과 수동 조작이 차단되어 있습니다', range,
+    bad('조인트 범위 미확인으로 재생과 수동 조작 차단 중', range,
       { kind: 'open', target: 'mapping', label: '조인트 매핑 열기' });
   }
   // 지금 도는 모터 프로그램의 부팅 값이 지금 설정과 다르다 · 업데이트만 하고 적용 안 한 PC · 수정 목록 116
@@ -270,8 +272,8 @@ export function collectIssues(snap, sched, { connected = true } = {}) {
   if (failCount > 0) {
     // 준비 대기(부팅 직후 앱솔루트 확인 등)는 거부가 아니다 · 같은 횟수 기준으로 색만 · 수정 목록 124
     const entry = failure.deferred
-      ? [`스케줄 시작 대기 중 (${failCount}회)`, `준비가 끝나면 자동으로 시작합니다. ${String(failure.message || '')}`]
-      : [`스케줄 시작 거부됨 (${failCount}회)`, String(failure.message || '거부 사유를 받지 못했습니다')];
+      ? [`스케줄 시작 대기 중 (${failCount}회)`, `준비 완료 후 자동으로 시작합니다. ${String(failure.message || '')}`]
+      : [`스케줄 시작 거부됨 (${failCount}회)`, String(failure.message || '거부 사유를 수신하지 못했습니다')];
     if (failCount >= 3) bad(...entry); else warn(...entry);
   }
   // 메모리 부족 · 스왑 · 막지 않고 알린다 · 수정 목록 170 (NY 2026-11-03 · 스왑 1.25 GB 에서 실행기가 멈췄다)
@@ -289,7 +291,7 @@ export function collectIssues(snap, sched, { connected = true } = {}) {
   const mismatched = others.filter((pc) => pc.protocol_mismatch);
   const differing = others.filter((pc) => !pc.protocol_mismatch && pc.version_differs);
   if (mismatched.length) {
-    warn(`${mismatched.map(pcName).join(' · ')} 연동 버전이 다릅니다`, '그룹 재생에서 제외됩니다. 모든 PC를 업데이트하세요.',
+    warn(`${mismatched.map(pcName).join(' · ')} 연동 버전이 다릅니다`, '그룹 재생에서 제외합니다. 모든 PC를 업데이트하세요.',
       { kind: 'update-all', label: '모든 PC 업데이트' });
   }
   if (differing.length) {
@@ -318,7 +320,7 @@ export function timetableNotices(snap) {
   const clock = Array.isArray(tt.clock_warnings) ? tt.clock_warnings : [];
   if (clock.length) {
     notices.push({ title: `${clock.map(name).join(' · ')} 시계 차이 ${Number(tt.clock_warn_ms) || 100} ms 초과`,
-      detail: '재생 유지 · 다음 회차에서 맞춰짐 · 그 PC 시계 맞춤(chrony) 확인' });
+      detail: '재생은 유지하며 다음 회차에서 자동 보정합니다. 해당 PC의 시계 동기화(chrony)를 확인하세요.' });
   }
   const zones = Array.isArray(tt.timezone_mismatches) ? [...tt.timezone_mismatches] : [];
   if (tt.local_timezone_mismatch === true && runtime.local) zones.unshift(runtime.local.pc_id);

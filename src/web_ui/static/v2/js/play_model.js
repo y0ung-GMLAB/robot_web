@@ -16,10 +16,10 @@ export const RUNNING_STATES = new Set([
 const GROUP_NOT_STARTED = new Set(['preparing', 'initializing', 'armed', 'start_scheduled']);
 
 export const REPEAT_MODES = [
-  { id: 'reinitialize', label: '초기 위치로 돌아간 뒤 다음 회차', short: '초기 위치 → 다음' },
+  { id: 'reinitialize', label: '초기 위치 복귀 후 다음 회차', short: '초기 위치 → 다음' },
   // 「바로 다음 회차」(direct) · 「대기 후 다음 회차」(dwell)는 뺐다 · 초기 위치를 거치지 않고
   // 끝 자세에서 첫 자세로 곧바로 튄다 · 안전상 쓰지 않는다(사용자 2026-10-12)
-  { id: 'dwell_reinitialize', label: '대기 후 초기 위치로 돌아간 뒤 다음 회차', short: '대기 후 초기 위치' },
+  { id: 'dwell_reinitialize', label: '대기 및 초기 위치 복귀 후 다음 회차', short: '대기 후 초기 위치' },
 ];
 
 export const INITIAL_MOVE_OPTIONS = [5, 7, 10];
@@ -191,8 +191,8 @@ export function startBlocker(snap, sched, { scope, playlist, mappingId }) {
   const status = runStatus(snap);
   const safety = snap?.safety_status || {};
   const mode = sched?.run_mode;
-  if (safety.emergency_latched) return { text: '긴급 정지 상태입니다. 프로그램을 다시 시작하면 해제됩니다.', fix: 'restart-program' };
-  if (mode === 'off') return { text: '끔 모드에서는 움직임 명령이 차단됩니다', fix: 'mode-manual' };
+  if (safety.emergency_latched) return { text: '긴급 정지 상태입니다. 프로그램 재시작 시 해제합니다.', fix: 'restart-program' };
+  if (mode === 'off') return { text: '끔 모드에서는 동작 명령을 차단합니다', fix: 'mode-manual' };
   if (mode === 'schedule') return { text: '스케줄 모드에서는 스케줄이 재생을 시작합니다. 직접 재생하려면 수동 모드로 전환하세요.', fix: 'mode-manual' };
   if (scope === 'group') {
     const blocker = groupScopeBlocker(snap);
@@ -230,11 +230,11 @@ export function playHeadline(snap) {
   if (segment) parts.push(segment);
   if (status.run_mode === 'continuous' || status.automation_run) parts.push('연속');
   else if (status.run_mode === 'once') parts.push('1회');
-  if (status.group_execution) parts.push(status.automation?.group_sync_mode === 'independent' ? '각자 재생' : '회차 맞춤');
+  if (status.group_execution) parts.push(status.automation?.group_sync_mode === 'independent' ? '개별 재생' : '회차 동기화');
   const STATE_TEXT = {
     initializing: '초기 위치로 천천히 이동 중', countdown: '곧 시작', running: '재생 중', verifying: '도착 확인 중',
     waiting: '다음 회차 대기 중', recovering: '자동 복구 중', stopping: '정지 중', preparing: '준비 중',
-    completed: '완료', stopped: '정지됨', error: '오류로 정지', initialized: '초기 위치에서 대기 중',
+    completed: '완료', stopped: '정지 상태', error: '오류로 정지', initialized: '초기 위치에서 대기 중',
   };
   const moving = isRunning(status);
   return {

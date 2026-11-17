@@ -114,7 +114,7 @@ def test_motor_event_log_records_stuck_mailbox_and_release_once_per_drive():
     log.append = lambda **event: events.append(event)
     stuck = {
         'master_index': 0, 'slave_position': 2, 'axis': 2, 'since': 1.0,
-        'message': '2번 드라이브 메일박스 응답 없음 · 그 드라이브 제어 전원을 껐다 켜세요',
+        'message': '2번 드라이브 메일박스 응답 없음. 해당 드라이브 제어 전원을 재투입하세요',
     }
 
     log.record_mailbox_stuck_transition({'minas_absolute': {'state': 'ok', 'stuck_mailboxes': []}})

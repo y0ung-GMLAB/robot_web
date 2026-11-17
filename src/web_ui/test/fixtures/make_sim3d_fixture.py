@@ -7,7 +7,7 @@
 작은 모델(자유·힌지·슬라이드·볼 관절 · 상자·캡슐·메쉬 지옴)을 임시 팩으로 만들고
 `scripts/sim/export_scene.py` 로 장면 JSON 을 뽑은 뒤, 무작위 qpos 몇 벌에 대해
 `mj_kinematics` 가 낸 바디 위치·자세를 함께 적는다 · `sim3d_fk.test.mjs` 가
-`static/js/sim3d_math.js` 의 결과와 비교한다 · MuJoCo 가 없는 PC 에서는 이 파일을
+`static/v2/js/sim3d_math.js` 의 결과와 비교한다 · MuJoCo 가 없는 PC 에서는 이 파일을
 다시 만들 필요가 없다 (JSON 이 저장소에 있다).
 """
 

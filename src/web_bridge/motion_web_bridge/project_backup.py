@@ -118,7 +118,7 @@ def import_project_zip(root: Path, data: bytes, *, overwrite: bool = False) -> D
     try:
         problems = unpack_zip(data, incoming)
         if problems:
-            raise ValueError('zip 검사 실패 · ' + ' / '.join(problems))
+            raise ValueError('zip 검사 실패: ' + ' / '.join(problems))
         manifest = _manifest(incoming)
         project_id = _valid_id(manifest['project_id'])
         destination = root / project_id

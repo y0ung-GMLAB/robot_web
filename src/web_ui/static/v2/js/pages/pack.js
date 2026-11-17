@@ -143,7 +143,7 @@ function diffCard(state) {
   const fmtRange = (range) => (Array.isArray(range) ? `${Number(range[0]).toFixed(1)} ~ ${Number(range[1]).toFixed(1)}°` : '-');
   return h('section', { class: 'card', 'aria-label': '매핑과 다른 항목' },
     h('div', { class: 'card-head' },
-      h('h2', {}, `조인트 매핑과 다른 항목 · ${rows.length}`, tip(['로봇 팩 값은 기본값이고, 실제로 적용되는 값은 조인트 매핑 값', '값이 다르면 의도한 변경인지 확인'], '다른 항목 설명')),
+      h('h2', {}, `조인트 매핑과 다른 항목 · ${rows.length}`, tip(['로봇 팩 값은 기본값이고, 실제로 적용되는 값은 조인트 매핑 값', '값이 다른 경우 의도한 변경인지 확인'], '다른 항목 설명')),
       h('a', { href: '#/mapping', text: '조인트 매핑' })),
     !diff || diff.available === false ? h('p', { class: 'muted', text: diff?.message || '비교할 팩이나 매핑이 없습니다' })
       : rows.length ? h('div', { class: 'table-wrap' }, h('table', { class: 'table' },
@@ -176,12 +176,12 @@ function sceneCard(state, changed) {
   };
   return h('section', { class: 'card', 'aria-label': '3D' },
     h('div', { class: 'card-head' }, h('h2', { text: '3D' })),
-    h('div', { class: 'list-row' }, h('span', { class: 'grow' }, '3D 장면', tip(['로봇 팩을 교체한 뒤 3D 화면을 처음 열 때 자동 생성 (몇 초 걸림)'], '3D 장면 설명')), h('span', { class: `chip chip-${tone}`, text: text }),
+    h('div', { class: 'list-row' }, h('span', { class: 'grow' }, '3D 장면', tip(['로봇 팩 교체 후 3D 화면 최초 실행 시 자동 생성 (수 초 소요)'], '3D 장면 설명')), h('span', { class: `chip chip-${tone}`, text: text }),
       h('button', { class: 'btn btn-mini', type: 'button', disabled: scene.state === 'computing' || scene.state === 'unavailable', onclick: rebuild }, '다시 만들기')),
     // 자리는 늘 둔다(레이아웃 고정)
     h('p', { class: 'muted small msg-slot', text: scene.message || '' }),
     h('div', { class: 'list-row' }, h('span', { class: 'grow' }, `애니메이션 3D 계산 · ${(page.files || []).length}`,
-      tip(['3D 계산은 별도로 실행되어 프로그램을 다시 시작해도 계속 진행'], '3D 계산 설명')),
+      tip(['3D 계산은 별도 실행, 프로그램 재시작 후에도 계속 진행'], '3D 계산 설명')),
       h('span', { class: 'muted small', text: Object.entries(counts).map(([k, v]) => `${k} ${v}`).join(' · ') || '-' }),
       h('a', { href: '#/animations', text: '애니메이션에서 보기 ›' })));
 }

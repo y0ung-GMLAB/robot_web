@@ -89,7 +89,7 @@ def test_wrong_password_rolls_back_at_once(tmp_path):
     nm = _Nm(up_rc=4)
     result = WifiSettings(tmp_path, run=nm).connect('shop', 'wrongpass', security='WPA2')
     assert result['success'] is False
-    assert '비밀번호가 맞지 않는' in result['message'] and '되돌렸습니다' in result['message']
+    assert '비밀번호가 맞지 않는' in result['message'] and '복귀했습니다' in result['message']
     assert nm.find(['systemctl', '--user', 'stop'])
     assert ['nmcli', 'connection', 'up', 'old-home'] in nm.calls
     # 이전 연결을 다시 켠 **뒤** 새 설정을 지운다

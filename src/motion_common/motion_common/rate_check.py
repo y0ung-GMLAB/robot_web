@@ -61,7 +61,7 @@ def _clip_hint(axis, values, indexes) -> str:
         over.append(f'최소 {_deg_text(source_min)}°')
     if hit_high:
         over.append(f'최대 {_deg_text(source_max)}°')
-    return f'매핑 범위({low_text}~{high_text}°)에서 잘린 곳 · 애니가 범위를 넘음({", ".join(over)})'
+    return f'매핑 범위({low_text}~{high_text}°) 초과 구간 제한 (범위 초과 조인트: {", ".join(over)})'
 
 
 def rate_limit_error(axes, samples, period_sec: float) -> str:
@@ -123,4 +123,4 @@ def rate_limit_error(axes, samples, period_sec: float) -> str:
                 )
     if not problems:
         return ''
-    return '애니메이션이 조인트 매핑의 속도·가속도 상한을 넘습니다 · ' + ' · '.join(problems[:4])
+    return '애니메이션이 조인트 매핑의 최대 속도·최대 가속을 초과합니다: ' + ', '.join(problems[:4])

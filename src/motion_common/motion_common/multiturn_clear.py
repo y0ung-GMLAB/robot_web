@@ -44,7 +44,7 @@ REFERENCE_SET_AT_FIELD = 'reference_set_at'
 #: 화면 캡처(「기준점 지정」)가 그 줄에 붙여 보내는 표시 · 값이 그대로여도 지정한 것으로 · 파일엔 안 남음
 REFERENCE_CAPTURED_FIELD = 'reference_captured'
 #: 사람이 읽는 글 · 끝말 · 「N번 모터 다회전 클리어 뒤 기준점 다시 지정 필요」
-BLOCK_SUFFIX = '모터 다회전 클리어 뒤 기준점 다시 지정 필요'
+BLOCK_SUFFIX = '모터 다회전 클리어 후 기준점 재지정 필요'
 #: 기준점 지정 화면 · 축 표시
 NOT_ALIGNED_LABEL = '기준점 재지정 필요'
 

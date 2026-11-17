@@ -68,9 +68,9 @@ MAILBOX_COMMANDS = frozenset({
 LOCK_WAIT_SEC = 15.0
 #: 보내지 않고 돌려준 결과의 종료 코드 · EX_TEMPFAIL · 부른 쪽이 「나중에 다시」 로 구분
 REFUSED_EXIT = 75
-CONFIGURING_MESSAGE = '버스 설정 중 · 모터 프로그램이 드라이브를 설정하고 있습니다 · 잠시 뒤 다시'
-EXCLUSIVE_MESSAGE = '앱솔루트 설정 중 · 끝날 때까지 다른 프로그램의 SDO 는 쉽니다 · 잠시 뒤 다시'
-BUSY_MESSAGE = '다른 SDO 요청이 끝나지 않았습니다 · 잠시 뒤 다시'
+CONFIGURING_MESSAGE = '버스 설정 중입니다. 모터 프로그램의 드라이브 설정 완료 후 재시도하세요'
+EXCLUSIVE_MESSAGE = '앱솔루트 설정 중입니다. 완료 전까지 다른 프로그램의 SDO 요청은 보류합니다. 잠시 후 재시도하세요'
+BUSY_MESSAGE = '다른 SDO 요청이 진행 중입니다. 잠시 후 재시도하세요'
 
 #: `watch` · 표시를 이만큼 넘게 두지 않는다 · 부팅 때 ROS 기동 + 설정이 보통 10~20 s
 CONFIGURE_TIMEOUT_SEC = 90.0
@@ -441,7 +441,7 @@ def watch(
     finish(owner)
     elapsed = clock() - started
     if reason == 'all_op':
-        again = f' · 다시 설정으로 OP ({tries}번 요청)' if tries else ''
+        again = f' (재설정으로 OP, {tries}회 요청)' if tries else ''
         log(f'EtherCAT 버스 설정 끝 · 슬레이브 {len(last or ())}대 OP{again} ({elapsed:.1f} s)')
     elif reason == 'error':
         stuck = ', '.join(f'{p}:{s}+E' for p, s, e in last or () if e)

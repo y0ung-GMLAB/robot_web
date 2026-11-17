@@ -111,7 +111,7 @@ export function datedNote(item, items, now = new Date()) {
   if (item.run_date < today) return '지난 날짜';
   const date = dateOf(item.run_date);
   if (item.enabled === false || !date) return '';
-  if (item.repeat_type === 'once' && scheduleDay(items, date).kind === 'holiday') return '같은 날짜의 휴무일이 우선 적용됨';
+  if (item.repeat_type === 'once' && scheduleDay(items, date).kind === 'holiday') return '같은 날짜의 휴무일 우선 적용';
   if (item.run_date === today && item.repeat_type === 'holiday') return '오늘 적용';
   return '';
 }
@@ -144,8 +144,8 @@ export function draftProblem(draft, items = []) {
   if (!/^\d{4}-\d{2}-\d{2}$/.test(draft.date)) return '날짜를 선택하세요';
   const same = (Array.isArray(items) ? items : [])
     .filter((item) => item && isDated(item) && item.run_date === draft.date && String(item.schedule_id || '') !== draft.id);
-  if (same.some((item) => item.repeat_type === 'holiday')) return '해당 날짜는 이미 휴무일로 지정되어 있습니다';
-  if (kind === 'holiday' && same.length) return '해당 날짜에 특정일 운영이 지정되어 있습니다';
+  if (same.some((item) => item.repeat_type === 'holiday')) return '해당 날짜는 이미 휴무일입니다';
+  if (kind === 'holiday' && same.length) return '해당 날짜에 특정일 운영이 있습니다';
   return '';
 }
 

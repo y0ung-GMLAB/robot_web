@@ -81,7 +81,7 @@ def test_a_merge_is_refused_away_from_the_barrier():
     manager = _group_manager()
     manager._group.session.update({'state': 'start_scheduled', 'cycle_number': 4})
 
-    with pytest.raises(ValueError, match='회차 끝 장벽'):
+    with pytest.raises(ValueError, match='회차 종료 대기 상태가 아니므로'):
         manager._group.commit_join({'execution_id': 'exec-a', 'cycle_number': 9, 'merge': True})
     assert manager._group.session['cycle_number'] == 4
 

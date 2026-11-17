@@ -68,7 +68,7 @@ def test_runtime_command_is_rejected_while_midi_fader_owns_output():
 
 def test_runtime_command_is_rejected_while_emergency_stop_is_latched():
     assert motion_run_rejection_reason(True, False, False, True) == (
-        '긴급정지가 걸려 있습니다 · 프로그램을 다시 시작하세요'
+        '긴급 정지 상태입니다. 프로그램을 재시작하세요'
     )
 
 
@@ -415,7 +415,7 @@ def test_midi_blocks_every_ac_axis_with_live_internal_limit_status():
 
     assert success is False
     assert results[0]['success'] is False
-    assert '내부 리밋이 걸려 있습니다' in results[0]['message']
+    assert '내부 리밋 상태입니다' in results[0]['message']
     assert supervisor._command_pub.messages == []
 
 
@@ -780,7 +780,7 @@ def test_motion_stop_cannot_bypass_emergency_latch():
     published_count = len(supervisor._command_pub.messages)
     success, message = supervisor._handle_safety_stop(False)
     assert success is False
-    assert '긴급정지가 걸려 있습니다' in message
+    assert '긴급 정지 상태입니다' in message
     assert len(supervisor._command_pub.messages) == published_count
 
 

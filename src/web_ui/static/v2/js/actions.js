@@ -27,7 +27,7 @@ export function emergencyStop() {
   return attempt(async () => {
     await api('POST', '/api/safety/emergency-stop');
     await api('POST', '/api/motion-run/stop').catch(() => null);
-  }, '긴급 정지했습니다. 서보가 꺼졌으며 프로그램을 다시 시작하면 해제됩니다.');
+  }, '긴급 정지했습니다. 서보를 껐으며 프로그램 재시작 시 해제합니다.');
 }
 
 const MODE_CONFIRM = {
@@ -47,13 +47,13 @@ export function stopAfterCycle(group) {
     () => (group
       ? api('POST', '/api/coordination/control', { body: { command: 'stop_after_cycle' } })
       : api('POST', '/api/motion-run/stop-after-cycle')),
-    '이번 회차가 끝나면 정지합니다');
+    '이번 회차 종료 후 정지합니다');
 }
 
 export async function updateAll() {
   const ok = await confirmBox({
     title: '모든 PC 업데이트',
-    body: '업데이트하는 동안 해당 PC는 재생할 수 없고 화면 연결이 잠시 끊깁니다.\n재생 중인 PC는 업데이트하지 않습니다.\nPC마다 몇 분 걸리므로 운영 시간 외에 진행하세요.',
+    body: '업데이트 중에는 해당 PC의 재생이 불가하며 화면 연결이 일시 중단됩니다.\n재생 중인 PC는 업데이트하지 않습니다.\nPC마다 수 분이 소요되므로 운영 시간 외에 진행하세요.',
     confirmLabel: '업데이트', tone: 'warning',
   });
   if (!ok) return null;
@@ -66,14 +66,14 @@ export async function faultReset() {
     (r) => (r?.skipped_axes ? r.message : '오류를 초기화했습니다. 알람이 있던 모터는 원인을 확인한 뒤 서보를 켜세요.'));
 }
 
-/** 프로그램 다시 시작 · 확인 → 보냄 · 재생 중이면 서버가 `needs_stop` 으로 거절 → 두 번째 확인 →
+/** 프로그램 재시작 · 확인 → 보냄 · 재생 중이면 서버가 `needs_stop` 으로 거절 → 두 번째 확인 →
  *  `stop_first` 로 다시 보냄(서버가 재생을 멈추고 · 그룹이면 이 PC 만 빠지고 · 다시 시작) · 수정 목록 144
  *  `request(body)` · `confirm(options)` 를 받는다(시험에서 바꿔 끼운다) · 취소면 null */
 export async function restartProgramFlow({ request, confirm }) {
   const ok = await confirm({
-    title: '프로그램 다시 시작',
-    body: '화면 연결이 30초 정도 끊깁니다.\n서보 토크는 유지됩니다.',
-    confirmLabel: '다시 시작', tone: 'warning',
+    title: '프로그램 재시작',
+    body: '재시작하는 약 30초 동안 화면에 연결할 수 없습니다.\n서보 토크는 유지합니다.',
+    confirmLabel: '재시작', tone: 'warning',
   });
   if (!ok) return null;
   try {
@@ -83,8 +83,8 @@ export async function restartProgramFlow({ request, confirm }) {
   }
   const again = await confirm({
     title: '재생 중입니다',
-    body: '재생을 정지한 뒤 프로그램을 다시 시작합니다.\n서보 토크는 유지됩니다.',
-    confirmLabel: '정지하고 다시 시작', tone: 'warning',
+    body: '재생을 정지한 뒤 프로그램을 재시작합니다.\n서보 토크는 유지합니다.',
+    confirmLabel: '정지 후 재시작', tone: 'warning',
   });
   if (!again) return null;
   return request({ stop_first: true });
@@ -96,7 +96,7 @@ export async function restartProgram() {
       request: (body) => api('POST', '/api/system/program/restart', { body, timeoutMs: 20000 }),
       confirm: confirmBox,
     });
-    if (result) toast('다시 시작합니다. 잠시 후 자동으로 연결됩니다.', 'ok');
+    if (result) toast('재시작합니다. 잠시 후 자동으로 재연결합니다.', 'ok');
     return result;
   } catch (error) {
     toast(error.message || String(error), 'bad');
@@ -146,7 +146,7 @@ export function stopNow(group) {
 
 export function stopGroupAfterCycle(command) {
   return attempt(() => control({ command }),
-    command === 'stop_now' ? '시작 전이라 바로 정지했습니다' : '이번 회차가 끝나면 그룹 전체가 정지합니다');
+    command === 'stop_now' ? '시작 전이므로 즉시 정지했습니다' : '이번 회차 종료 후 그룹 전체가 정지합니다');
 }
 
 /** 반복 설정 · 서버에 남는다(스케줄이 다음에 돌릴 때도 이것으로) · 보낸 칸만 바뀐다 */
@@ -157,7 +157,7 @@ export function saveAutomation(partial) {
 /** 실행 축 사용 · 끄면 그 자리에 선다 · 다시 켜면 다음 회차부터 · 매핑 파일에는 안 남는다 */
 export function setAxisMuted(motionId, muted) {
   return attempt(() => api('POST', '/api/motion-run/live-override', { body: { motion_id: motionId, muted } }),
-    muted ? `${motionId} 조인트를 껐습니다. 현재 위치에서 정지합니다.` : `${motionId} 조인트를 켰습니다. 재생 중이면 다음 회차부터 동작합니다.`);
+    muted ? `${motionId} 조인트를 껐습니다. 현재 위치에서 정지합니다.` : `${motionId} 조인트를 켰습니다. 재생 중인 경우 다음 회차부터 동작합니다.`);
 }
 
 /** 재생 목록 저장 · 목록 통째로 · 첫 줄이 등록 파일 */
@@ -179,7 +179,7 @@ export function setScheduleEnabled(id, enabled) {
 }
 
 export async function deleteSchedule(id, name) {
-  const ok = await confirmBox({ title: `「${name}」 스케줄을 삭제할까요?`, body: '삭제하면 되돌릴 수 없습니다.\n잠시 멈추려면 삭제 대신 스케줄을 끄세요.', confirmLabel: '삭제', tone: 'danger' });
+  const ok = await confirmBox({ title: `「${name}」 스케줄을 삭제할까요?`, body: '삭제 후에는 복구할 수 없습니다.\n일시 중지하려면 삭제 대신 스케줄을 끄세요.', confirmLabel: '삭제', tone: 'danger' });
   if (!ok) return null;
   return attempt(() => api('DELETE', `/api/schedule/${encodeURIComponent(id)}`), '삭제했습니다');
 }
@@ -187,7 +187,7 @@ export async function deleteSchedule(id, name) {
 /** 운영 시간이 끝나면 · park_servo_off(기준점 → 서보 끔) | hold(그 자세로 버팀) */
 export function saveEndAction(action) {
   return attempt(() => api('PUT', '/api/motion-run/automation', { body: { schedule_end_action: action } }),
-    action === 'hold' ? '저장했습니다. 운영 시간이 끝나면 마지막 자세에서 정지하고 서보 토크를 유지합니다.' : '저장했습니다. 운영 시간이 끝나면 기준점으로 이동한 뒤 서보를 끕니다.');
+    action === 'hold' ? '저장했습니다. 운영 시간 종료 시 마지막 자세에서 정지하고 서보 토크를 유지합니다.' : '저장했습니다. 운영 시간 종료 시 기준점으로 이동한 뒤 서보를 끕니다.');
 }
 
 /* ---------- 매장 PC ---------- */
@@ -209,7 +209,7 @@ export function joinGroup(config) {
 export async function leaveGroup() {
   const ok = await confirmBox({
     title: '그룹 참여 끄기',
-    body: '끄면 스케줄 재생을 포함해 현재 PC만 단독으로 재생합니다.\n프로그램을 다시 시작해도 꺼진 상태가 유지됩니다.',
+    body: '스케줄 재생을 포함해 현재 PC만 단독으로 재생합니다.\n프로그램 재시작 후에도 해제 상태를 유지합니다.',
     confirmLabel: '끄기', tone: 'warning',
   });
   if (!ok) return null;
@@ -219,8 +219,8 @@ export async function leaveGroup() {
 /** 필수 명단 · 그룹 시작 때 빠지면 「미접속」 으로 적고 나머지로 시작 */
 export async function saveRoster(list) {
   const ok = await confirmBox({
-    title: '필수 명단 다시 지정',
-    body: `현재 연결된 ${list.length}대: ${list.join(', ')}\n\n그룹을 시작할 때 명단에 있는 PC가 빠져 있으면 「미접속」으로 기록하고 나머지 PC로 시작합니다.\n저장하면 연동 서비스가 한 번 다시 시작됩니다.`,
+    title: '필수 명단 재지정',
+    body: `현재 연결된 ${list.length}대: ${list.join(', ')}\n\n그룹 시작 시 접속하지 않은 명단 PC는 「미접속」으로 기록하고 나머지 PC로 시작합니다.\n저장 시 연동 서비스를 1회 재시작합니다.`,
     confirmLabel: '지정',
   });
   if (!ok) return null;
@@ -245,7 +245,7 @@ export function precompute(fileId) {
 export async function deleteAnimation(fileId) {
   const ok = await confirmBox({
     title: `「${fileId}」 애니메이션을 삭제할까요?`,
-    body: '삭제하면 되돌릴 수 없습니다.',
+    body: '삭제 후에는 복구할 수 없습니다.',
     confirmLabel: '삭제', tone: 'danger',
   });
   if (!ok) return null;
@@ -266,9 +266,9 @@ export function confirmApplyMotorConfig(reason = '') {
   return confirmBox({
     title: '장비에 적용 및 모터 재시작',
     body: `${reason ? `${reason}\n\n` : ''}브레이크가 없는 모터는 토크가 잠시 풀려 처지거나 움직일 수 있습니다.\n`
-      + '하중을 받는 축이 있으면 기구를 받치고 주변에 사람이 없는지 확인한 뒤 진행하세요.\n'
+      + '중력 부하가 있는 축은 기구를 지지하고 주변에 사람이 없는지 확인한 뒤 진행하세요.\n'
       + '브레이크 보드에 연결된 모터는 브레이크로 위치를 유지합니다.\n'
-      + '모터 프로그램이 다시 시작되면서 모터 통신과 화면 연결이 잠시 끊깁니다.',
+      + '모터 프로그램 재시작 중에는 모터 통신과 화면 연결이 불가합니다.',
     confirmLabel: '적용 및 재시작', tone: 'danger',
   });
 }
@@ -294,11 +294,11 @@ export async function applyMotorConfig() {
   try { previousId = String((await api('GET', '/api/status', { timeoutMs: 3000 }))?.motor_operation?.operation_id || ''); } catch { /* 몰라도 됨 */ }
   try {
     const result = await api('POST', '/api/motor-config/apply', { timeoutMs: 60000 });
-    toast(result?.message || '적용했습니다. 모터 프로그램이 다시 시작됩니다.', 'ok');
+    toast(result?.message || '적용했습니다. 모터 프로그램을 재시작합니다.', 'ok');
     return result;
   } catch (error) {
     // 재시작이 응답보다 먼저 브리지를 내리면 연결 끊김·500 · 실제 결과는 작업 기록에 · 132
-    toast('응답이 끊겼습니다. 적용 결과를 확인하는 중입니다.', 'warn');
+    toast('응답을 수신하지 못했습니다. 적용 결과를 확인하는 중입니다.', 'warn');
     const outcome = await applyOutcomeFromRecord(() => api('GET', '/api/status', { timeoutMs: 3000 }), { previousId });
     if (outcome) {
       toast(outcome.message, outcome.success ? 'ok' : 'bad');
@@ -311,7 +311,7 @@ export async function applyMotorConfig() {
 
 /** 부팅 값이 옛 값일 때 · 확인 → 적용(서버가 부팅 목록을 새 설정으로 다시 만든다) · 홈 · 모터 설정 같이 씀 · 수정 목록 116 */
 export async function applyBootParams() {
-  if (!(await confirmApplyMotorConfig('드라이브 부팅 값이 이전 설정으로 남아 있습니다.\n드라이브 공통 설정과 모터별 값으로 다시 적용합니다.'))) return null;
+  if (!(await confirmApplyMotorConfig('드라이브 부팅 값이 이전 설정 그대로입니다.\n드라이브 공통 설정과 모터별 값으로 재적용합니다.'))) return null;
   return applyMotorConfig();
 }
 
@@ -334,7 +334,7 @@ export async function servoControl(motor, action) {
     if (!ok) return null;
   }
   if (action === 'reset' && !ac) {
-    const ok = await confirmBox({ title: `${label} 재부팅`, body: '재부팅하면 토크가 꺼지고, 브레이크가 없어 관절이 처질 수 있습니다.\n다회전 모드 모터는 회전 수 정보가 초기화되므로 재부팅 후 위치를 확인하세요.\n하드웨어 오류도 함께 해제됩니다.', confirmLabel: '재부팅', tone: 'warning' });
+    const ok = await confirmBox({ title: `${label} 재부팅`, body: '재부팅 시 토크가 꺼지며, 브레이크가 없어 관절이 처질 수 있습니다.\n다회전 모드 모터는 회전 수 정보가 초기화되므로 재부팅 후 위치를 확인하세요.\n하드웨어 오류도 함께 해제합니다.', confirmLabel: '재부팅', tone: 'warning' });
     if (!ok) return null;
   }
   const map = ac ? { on: 'servo_on', off: 'servo_off', reset: 'fault_reset' } : { on: 'torque_on', off: 'torque_off', reset: 'reboot' };
@@ -358,7 +358,7 @@ export async function servoAll(motors, action) {
   if (action === 'off') {
     const ok = await confirmBox({
       title: `모든 서보 끄기 · ${detected.length}대`,
-      body: '브레이크가 없는 모터는 처질 수 있으니 기구를 받치고 주변에 사람이 없는지 확인하세요.\n브레이크 보드에 연결된 모터는 브레이크로 위치를 유지합니다.',
+      body: '브레이크가 없는 모터는 처질 수 있으므로 기구를 지지하고 주변에 사람이 없는지 확인하세요.\n브레이크 보드에 연결된 모터는 브레이크로 위치를 유지합니다.',
       confirmLabel: '모두 끄기', tone: 'warning',
     });
     if (!ok) return null;

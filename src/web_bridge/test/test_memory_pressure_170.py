@@ -130,7 +130,7 @@ def test_lazy_upload_check_counts_the_same(tmp_path, case):
 @pytest.mark.parametrize('text, message', [
     ('# only\n', '애니메이션 행을 찾지 못했습니다 · text format requires at least one data row'),
     ('{"type":"motion_header","fields":["frame","time_sec","id","value"]}\nnot a row\n', 'bracket data rows not found'),
-    ('{"type":"motion_header","fields":["frame","time_sec","id","value"]}\n[1, "x", "a", 1]\n', '재생할 수 있는 행이 없습니다'),
+    ('{"type":"motion_header","fields":["frame","time_sec","id","value"]}\n[1, "x", "a", 1]\n', '재생 가능한 행이 없습니다'),
 ])
 def test_lazy_upload_check_keeps_the_messages(text, message):
     with pytest.raises(ValueError, match=message):
@@ -262,7 +262,7 @@ def test_busy_defers_and_the_tick_starts_it_after_playback(preview_workspace):
         return SimpleNamespace(poll=lambda: None)
 
     deferred = animation_preview.launch_precompute(workspace, motion, spawn=spawn, busy='그룹 재생 중')
-    assert deferred['success'] is True and deferred['deferred'] is True and '미뤘습니다' in deferred['message']
+    assert deferred['success'] is True and deferred['deferred'] is True and '보류했습니다' in deferred['message']
     assert spawned == [] and animation_preview.deferred_count() == 1
     # 아직 재생 중 · 그대로
     assert animation_preview.start_deferred(lambda: '재생 중', spawn=spawn) is None

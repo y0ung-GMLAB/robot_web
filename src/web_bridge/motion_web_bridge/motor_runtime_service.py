@@ -120,7 +120,7 @@ class MotorRuntimeService:
             )
         if time.time() - float(received_at) > 1.0:
             return (
-                '모터 상태 수신이 끊겨 정지 여부를 확인할 수 없습니다'
+                '모터 상태 수신 중단으로 정지 여부를 확인할 수 없습니다'
                 if require_fresh_motor_state else ''
             )
 
@@ -163,8 +163,8 @@ class MotorRuntimeService:
             return '모터 상태에서 AC 서보 모터를 찾을 수 없습니다'
         if moving_axes:
             return (
-                f'AC 서보 {", ".join(moving_axes)}번 모터가 움직이는 중입니다. '
-                '완전히 정지한 뒤 다시 검색하세요'
+                f'AC 서보 {", ".join(moving_axes)}번 모터가 동작 중입니다. '
+                '완전히 정지한 뒤 재검색하세요'
             )
         return ''
 

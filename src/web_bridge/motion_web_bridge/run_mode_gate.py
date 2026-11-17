@@ -26,9 +26,9 @@ from typing import Any
 from motion_common import run_state
 from motion_common.schedule_store import OFF_MODE, SCHEDULE_MODE, ScheduleStore
 
-OFF_BLOCK_MESSAGE = '오프 모드라 모든 명령이 차단되어 있습니다. 상단에서 모드를 바꾸세요.'
+OFF_BLOCK_MESSAGE = '끔 모드이므로 모든 명령을 차단 중입니다. 상단에서 모드를 변경하세요.'
 SCHEDULE_MANUAL_BLOCK_MESSAGE = (
-    '스케줄 모드에서는 수동 조작과 직접 재생을 할 수 없습니다. 상단에서 「수동」 모드로 바꾸세요.'
+    '스케줄 모드에서는 수동 조작과 직접 재생을 할 수 없습니다. 상단에서 「수동」 모드로 전환하세요.'
 )
 MODE_UNREADABLE_BLOCK_MESSAGE = '운전 모드를 확인할 수 없어 명령을 차단했습니다'
 
@@ -98,7 +98,7 @@ PLAYING_MANUAL_BLOCK_MESSAGE = '재생 중입니다. 「정지」를 누른 뒤 
 #: 소프트 긴급 정지 잠김 · 다른 사유(초기 위치 대기 · 서보 꺼짐)보다 먼저 · 실물 R-23 (2026-10-13)
 #: 잠김은 「프로그램 다시 시작」 으로만 풀린다 · 풀린 뒤 서보는 꺼진 채라 직접 켠다
 EMERGENCY_MANUAL_BLOCK_MESSAGE = (
-    '긴급정지 잠김 · 수동 조작 불가 · 「프로그램 다시 시작」 으로 잠김을 푼 뒤 서보를 켜세요.'
+    '긴급 정지 상태로 수동 조작이 불가합니다. 「프로그램 재시작」으로 해제한 뒤 서보를 켜세요.'
 )
 
 

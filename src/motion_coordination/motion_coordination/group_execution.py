@@ -614,7 +614,7 @@ class GroupExecution:
     def mark_ready(self, pc_id: str) -> None:
         self._participant(pc_id)
         if self.state != 'preparing':
-            raise ValueError('준비 응답을 받을 수 있는 상태가 아닙니다')
+            raise ValueError('준비 응답을 수신할 수 있는 상태가 아닙니다')
         self.ready.add(pc_id)
 
     def initialize_action(self, *, now: float, lead_sec: Optional[float] = None) -> ScheduledAction:
@@ -630,7 +630,7 @@ class GroupExecution:
     def mark_armed(self, pc_id: str, triggered_at: float = 0.0) -> None:
         self._participant(pc_id)
         if self.state not in {'initializing', 'armed'}:
-            raise ValueError('초기 위치 완료를 받을 수 있는 상태가 아닙니다')
+            raise ValueError('초기 위치 완료를 수신할 수 있는 상태가 아닙니다')
         self.armed.add(pc_id)
         if triggered_at > 0.0:
             self.initialize_triggered[pc_id] = float(triggered_at)

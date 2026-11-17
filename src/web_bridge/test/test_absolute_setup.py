@@ -227,9 +227,9 @@ def test_full_run_goes_through_every_step_with_two_power_cycles():
 
     status = setup.status()
     assert started['success'] is True
-    # 처음 앱솔루트로 바꾼 드라이브가 Err40 → 클리어 → 「기준점 다시 지정 대기」 · 140
+    # 처음 앱솔루트로 바꾼 드라이브가 Err40 → 클리어 → 「기준점 재지정 대기」 · 140
     assert status['state'] == 'reference_pending', status['message']
-    assert status['message'] == '다회전 클리어한 0번 모터 · 몸을 정면·수평에 맞추고 기준점을 다시 지정해 저장하세요'
+    assert status['message'] == '다회전 클리어한 0번 모터: 로봇을 정면·수평으로 정렬하고 기준점을 재지정해 저장하세요'
     assert status['reference_pending_axes'] == [0] and status['cleared_axes'] == [0]
     assert [r['slave_position'] for r in setup.test_marker.records] == [0, 1]      # 미등록(축 없음)도 넘긴다
     assert setup.test_marker.records[0]['serial'] == 1000
@@ -441,7 +441,7 @@ def test_read_failure_for_longer_than_the_window_fails_at_check_mode_and_leaves_
 
     status = setup.status()
     assert status['state'] == 'failed' and status['step'] == 'check_mode'
-    assert 'Input/output error' in status['error'] and '번 시도' in status['error']
+    assert 'Input/output error' in status['error'] and '회 시도' in status['error']
     # 1 s 간격 · 10 s 까지 · 그 드라이브에서 멈춤
     assert ethercat.reads_after_cycle == pytest.approx(READ_RETRY_WINDOW_SEC + 1, abs=1)
     assert status['resume']['from_step'] == 'check_mode' and status['resume']['from_index'] == 4
@@ -566,7 +566,7 @@ def test_resume_continues_from_check_mode_for_the_same_drives():
 
     preview = setup.preview({'resume': True})
     assert preview['success'] is True and preview['from_index'] == 4 and preview['failed_index'] == 4
-    assert preview['steps'] == ['앱솔루트 방식 확인', '다회전 클리어', '드라이브 전원 껐다 켜기 2', '최종 확인']
+    assert preview['steps'] == ['앱솔루트 방식 확인', '다회전 클리어', '드라이브 전원 재투입 2', '최종 확인']
     assert [t['label'] for t in preview['targets']] == ['0번 모터', '1번 모터']
     assert preview['clear_done'] is False
     assert setup.start({'resume': True})['success'] is False                               # 확인 필요
@@ -638,7 +638,7 @@ def test_resume_after_the_clear_starts_at_power_cycle_2_without_clearing_again()
     _absolute(minas, 0)
     calls_before = len(ethercat.calls)
     preview = setup.preview({'resume': True})
-    assert preview['clear_done'] is True and preview['steps'] == ['드라이브 전원 껐다 켜기 2', '최종 확인']
+    assert preview['clear_done'] is True and preview['steps'] == ['드라이브 전원 재투입 2', '최종 확인']
     assert setup.start({'resume': True, 'confirmed': True})['success'] is True
     assert setup.status()['state'] == 'reference_pending', setup.status()['message']
     assert not any(call.startswith('download') and '0x4D00' in call for call in ethercat.calls[calls_before:])
@@ -691,7 +691,7 @@ def test_without_err40_there_is_no_clear_no_second_power_cycle_and_references_st
 
     status = setup.status()
     assert status['state'] == 'done', status['message']
-    assert status['message'] == '앱솔루트 설정을 마쳤습니다 · 다회전 정상 · 클리어 안 함 · 기준점 그대로'
+    assert status['message'] == '앱솔루트 설정을 완료했습니다. 다회전 정상으로 클리어하지 않았으며 기준점을 유지합니다'
     assert switch.cycles == 1                                    # 재투입 2 건너뜀
     assert service_calls == ['stop', 'start']                    # 클리어용 정지 없음
     assert not any('0x4D0' in call for call in ethercat.calls)   # 클리어 명령 없음
@@ -714,8 +714,8 @@ def test_only_the_err40_drive_is_cleared_and_marked():
 
     status = setup.status()
     assert status['state'] == 'reference_pending', status['message']
-    assert status['state_label'] == '기준점 다시 지정 대기'
-    assert status['message'] == '다회전 클리어한 3번 모터 · 몸을 정면·수평에 맞추고 기준점을 다시 지정해 저장하세요'
+    assert status['state_label'] == '기준점 재지정 대기'
+    assert status['message'] == '다회전 클리어한 3번 모터: 로봇을 정면·수평으로 정렬하고 기준점을 재지정해 저장하세요'
     assert not any('-p 0' in call and '0x4D0' in call for call in ethercat.calls)
     assert any('-p 1' in call and '0x4D00' in call for call in ethercat.calls)
     assert any('-p 1' in call and '0x6064' in call for call in ethercat.calls)
@@ -726,7 +726,7 @@ def test_only_the_err40_drive_is_cleared_and_marked():
 
 
 def test_reference_pending_turns_done_when_every_cleared_axis_is_saved():
-    """「기준점 다시 지정 대기」 → 클리어한 축의 기준점을 모두 다시 저장하면(표시 풀림) 완료 · 웹을 다시 켜면 일은 사라짐"""
+    """「기준점 재지정 대기」 → 클리어한 축의 기준점을 모두 다시 저장하면(표시 풀림) 완료 · 웹을 다시 켜면 일은 사라짐"""
     drives = {0: FakeDrive(), 1: FakeDrive()}
     ethercat = FakeEthercat(drives)
     setup, _calls, _records = _setup(
@@ -744,7 +744,7 @@ def test_reference_pending_turns_done_when_every_cleared_axis_is_saved():
     setup.test_marker.pending.discard(1)
     status = setup.status()
     assert status['state'] == 'done'
-    assert status['message'] == '앱솔루트 설정을 마쳤습니다 · 다회전 클리어한 축의 기준점을 다시 지정했습니다'
+    assert status['message'] == '앱솔루트 설정을 완료했습니다. 다회전 클리어한 축의 기준점을 재지정했습니다'
 
     # 표시를 못 읽으면 대기로 둔다(안전한 쪽)
     setup._pending_axes = lambda: (_ for _ in ()).throw(OSError('x'))
@@ -758,7 +758,7 @@ def test_resume_from_check_mode_rejudges_err40_and_skips_the_clear_when_it_is_go
     setup.start({'resume': True, 'confirmed': True})
     status = setup.status()
     assert status['state'] == 'done', status['message']
-    assert status['message'].endswith('클리어 안 함 · 기준점 그대로')
+    assert status['message'].endswith('클리어하지 않았으며 기준점을 유지합니다')
     assert switch.cycles == 1                                     # 재투입 2 없음
     assert setup.test_marker.records == []
 

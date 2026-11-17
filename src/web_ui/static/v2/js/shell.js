@@ -57,7 +57,7 @@ export function createShell(root, { navigate }) {
     h('button', { class: 'seg', type: 'button', 'data-mode': mode, 'aria-pressed': 'false', onclick: () => act.setRunMode(mode) }, label));
   const modeGroup = h('div', { class: 'segmented', role: 'group', 'aria-label': '운전 모드' }, modeButtons);
   const stopButton = h('button', { class: 'btn btn-stop', type: 'button', title: '모든 움직임을 정지하고 서보 토크는 유지', onclick: act.stopAll }, '정지');
-  const estopButton = h('button', { class: 'btn btn-estop', type: 'button', title: '서보를 끄고 모든 명령을 차단 (프로그램을 다시 시작하면 해제)', onclick: act.emergencyStop }, '긴급 정지');
+  const estopButton = h('button', { class: 'btn btn-estop', type: 'button', title: '서보를 끄고 모든 명령 차단 (프로그램 재시작 시 해제)', onclick: act.emergencyStop }, '긴급 정지');
   const drawer = h('section', { id: 'issues-drawer', class: 'issues-drawer', hidden: true, 'aria-label': '확인할 일' });
   const menuButton = h('button', { class: 'btn btn-icon menu-toggle', type: 'button', 'aria-label': '메뉴', 'aria-expanded': 'false' }, '≡');
 
@@ -79,9 +79,7 @@ export function createShell(root, { navigate }) {
         navLinks.set(id, link);
         return link;
       }),
-    ]),
-    // 기존 화면은 / 에 그대로 · 같은 서버 · 같은 설정 · 익숙한 화면으로 돌아갈 때
-    h('a', { href: '/', class: 'nav-link nav-old', title: '이전 UI 열기 (설정은 두 화면이 같이 씀)' }, '이전 UI ↗'));
+    ]));
   const main = h('main', { class: 'main', id: 'main', tabindex: '-1' });
   root.replaceChildren(topbar, drawer, h('div', { class: 'body' }, nav, main));
 

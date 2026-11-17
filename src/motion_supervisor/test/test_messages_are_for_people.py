@@ -58,9 +58,9 @@ def test_the_emergency_sentence_has_one_owner():
     """일곱 곳에 적혀 있었다 · 한 곳만 고치면 말이 갈린다."""
     source = (WORKSPACE / USER_FACING[0]).read_text(encoding='utf-8')
 
-    assert supervisor_node.EMERGENCY_LATCHED_MESSAGE.startswith('긴급정지')
+    assert supervisor_node.EMERGENCY_LATCHED_MESSAGE.startswith('긴급 정지')
     # 상수 정의 한 줄 말고는 글자로 적힌 곳이 없어야 한다
-    assert source.count("'긴급정지가 걸려 있습니다") == 1
+    assert source.count("'긴급 정지 상태입니다") == 1
     assert source.count('EMERGENCY_LATCHED_MESSAGE') >= 7
 
 

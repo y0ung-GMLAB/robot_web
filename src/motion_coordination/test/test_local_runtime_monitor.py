@@ -113,7 +113,7 @@ def test_never_receiving_anything_says_so():
     """한 번도 못 받은 것과 받다가 끊긴 것은 원인이 다르다."""
     monitor = LocalRuntimeMonitor(lambda: (_ for _ in ()).throw(OSError('연결 거부')))
     monitor.poll_once()
-    assert '한 번도 못 받음' in monitor.diagnosis()
+    assert '수신 이력 없음' in monitor.diagnosis()
 
 
 # --------------------------------------------------------------------------- #

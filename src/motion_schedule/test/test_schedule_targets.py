@@ -9,7 +9,6 @@
 소스에서 확인한다.
 """
 
-import re
 from pathlib import Path
 
 NODE = (
@@ -63,34 +62,6 @@ def test_local_run_fills_active_project_files():
 # 라우트 글자를 대조하던 검사가 여기 있었는데, 로직이 서비스로 내려가면서
 # 대조가 깨졌다 · 같은 사실을 `web_bridge/test/test_schedule_service.py` 가
 # 실제 호출로 검사한다 (쓰기 셋은 막히고 읽기 둘은 열린다) · §6-182
-
-
-def test_schedule_button_is_disabled_on_a_slave():
-    manager = (
-        Path(__file__).resolve().parents[2]
-        / 'web_ui' / 'static' / 'js' / 'schedule_manager.js'
-    ).read_text(encoding='utf-8')
-    start = manager.index('updateStatusBadge()')
-    body = manager[start:start + 1600]
-    # 무엇을 잠글지는 `schedule_scope.js` 가 정한다 · §6-133 · §6-266
-    #
-    # 「묶여 있지 않으면 실행되지 않는다」는 상태는 없어졌다 · 이제 혼자 돈다 ·
-    # 받는 쪽 PC 에서만 잠근다.
-    assert 'motionScheduleBadgeState(this.status)' in body, '상태 판단을 쓰지 않는다'
-    assert 'button.disabled = !state.canEdit' in body, '받는 쪽에서 버튼이 잠기지 않는다'
-    assert 'state.blockedReason' in body, '왜 못 쓰는지 알려주지 않는다'
-
-    scope = (
-        Path(__file__).resolve().parents[2]
-        / 'web_ui' / 'static' / 'js' / 'schedule_scope.js'
-    ).read_text(encoding='utf-8')
-    # 주석에는 옛 문구를 적어 둘 수 있다 · 주석을 빼고 본다
-    shown = re.sub(r'/\*[\s\S]*?\*/', '', scope)
-    shown = re.sub(r'^\s*//.*$', '', shown, flags=re.M)
-    assert '마스터 스케줄을 따름' in shown, '어디서 설정하는지 알려주지 않는다'
-    assert '시각이 되어도 실행되지 않습니다' not in shown, (
-        '이제 혼자 돈다 · 실행되지 않는다는 말은 사실이 아니다'
-    )
 
 
 # 「지문은 이 PC 가 찍는다」(§6-150) 도 `schedule_service.save_schedule()` 로

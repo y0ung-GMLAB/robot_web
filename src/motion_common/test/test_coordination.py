@@ -52,7 +52,7 @@ def test_malformed_file_refuses_master_role(tmp_path):
     path.write_text('enabled: true\n  bad indent: [', encoding='utf-8')
     role = coordination.resolve_master_role(path)
     assert role.is_master is False
-    assert '읽지 못함' in role.reason
+    assert '읽기 실패' in role.reason
 
 
 def test_non_mapping_document_refuses_master_role(tmp_path):
@@ -82,7 +82,7 @@ def test_a_pc_with_group_participation_off_runs_alone(tmp_path):
     path = write(tmp_path / 'c.yaml', {'version': 2, 'enabled': True, 'joined': False, 'is_master': False})
     role = coordination.resolve_master_role(path)
     assert role.is_master is True
-    assert '그룹 참여 꺼짐' in role.reason
+    assert '그룹 참여 OFF' in role.reason
 
     path = write(tmp_path / 'c.yaml', {'version': 2, 'enabled': True, 'joined': True, 'is_master': False})
     assert coordination.resolve_master_role(path).is_master is False, '참여 중인 슬레이브는 그대로 아님'

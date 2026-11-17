@@ -1,7 +1,7 @@
 /** Blender 뷰 · 애니메이션 json 값으로 노드 돌리기 · 수정 목록 98 */
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { blenderUsesJoints, blenderViewAllowed, jointNodeRotation, sampleJointValues } from '../static/js/sim3d_math.js';
+import { blenderUsesJoints, blenderViewAllowed, jointNodeRotation, sampleJointValues } from '../static/v2/js/sim3d_math.js';
 
 const close = (a, b) => a.every((v, i) => Math.abs(v - b[i]) < 1e-9);
 

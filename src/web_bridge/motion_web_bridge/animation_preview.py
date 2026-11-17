@@ -407,7 +407,7 @@ def _stale_reason(workspace_root: Path, result: Path) -> str:
     if stamp['fingerprint'] == current:
         return ''
     label = ' '.join(str(stamp.get(k) or '') for k in ('name', 'version')).strip() or '이전 팩'
-    return f'로봇 팩이 바뀌었습니다. 다시 계산해야 합니다 (계산 당시: {label})'
+    return f'로봇 팩 변경으로 재계산이 필요합니다 (계산 당시: {label})'
 
 
 def preview_state(workspace_root: Path, motion_path: Path) -> Dict[str, Any]:
@@ -546,7 +546,7 @@ def launch_precompute(
         return {'success': False, 'message': NOT_CONFIGURED_MESSAGE}
     result = result_path_for(config, Path(motion_path))
     if result is None:
-        return {'success': True, 'message': '계산이 필요 없는 구성입니다. 바로 재생할 수 있습니다'}
+        return {'success': True, 'message': '계산이 필요 없는 구성입니다. 즉시 재생할 수 있습니다'}
     motion_path = Path(motion_path)
     if not motion_path.is_file():
         return {'success': False, 'message': f'애니메이션 파일이 없습니다: {motion_path.name}'}
@@ -562,7 +562,7 @@ def launch_precompute(
         return {
             'success': True,
             'deferred': True,
-            'message': f'재생 중이라 MuJoCo 계산을 미뤘습니다 · 재생이 끝나면 시작합니다: {motion_path.name} ({busy})',
+            'message': f'재생 중이므로 MuJoCo 계산을 보류했습니다. 재생 종료 후 시작합니다: {motion_path.name} ({busy})',
         }
     with _LOCK:
         _DEFERRED.pop(key, None)
@@ -596,5 +596,5 @@ def launch_precompute(
         pass  # 없으면 옛 동작(브리지가 거둘 때만 기록)
     return {
         'success': True,
-        'message': f'MuJoCo 계산을 시작했습니다: {motion_path.name}. 끝나면 3D 동시 재생을 볼 수 있습니다',
+        'message': f'MuJoCo 계산을 시작했습니다: {motion_path.name}. 완료 후 3D 동시 재생을 확인할 수 있습니다',
     }

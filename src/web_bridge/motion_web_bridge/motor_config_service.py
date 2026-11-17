@@ -244,8 +244,8 @@ class MotorConfigService:
                     )
                 if expected_revision != actual_revision:
                     raise ValueError(
-                        '설정 파일이 화면을 불러온 뒤 변경됐습니다. '
-                        '현재 파일을 보호하려고 저장하지 않았습니다. 화면을 새로고침해 설정을 다시 불러오세요'
+                        '화면을 연 이후 설정 파일 변경을 감지해 저장을 중단했습니다. '
+                        '화면을 새로 고친 뒤 설정을 다시 불러오세요'
                     )
             elif expected_revision:
                 raise ValueError(
@@ -286,8 +286,7 @@ class MotorConfigService:
             )
             if configured_axes == 0:
                 raise ValueError(
-                    '모터가 하나도 없는 설정은 저장할 수 없습니다. '
-                    '설정 파일을 삭제하려면 프로젝트 파일 메뉴의 「휴지통으로 이동」을 누르세요'
+                    '모터가 하나도 없는 설정은 저장할 수 없습니다'
                 )
 
             self._write(content, target_file)
@@ -361,12 +360,12 @@ class MotorConfigService:
             if not result.get('success'):
                 return {
                     **view, 'success': False,
-                    'message': f'공통 값은 저장했지만 모터 설정에 싣지 못했습니다 · {result.get("message") or ""}',
+                    'message': f'공통 값은 저장했으나 모터 설정 반영에 실패했습니다: {result.get("message") or ""}',
                 }
         return {
             **view, 'success': True, 'needs_apply': bool(motors),
             'message': '저장했습니다. 「장비에 적용」 을 해야 드라이브에 들어갑니다.' if motors
-            else '저장했습니다. 모터 설정을 저장하면 같이 들어갑니다.',
+            else '저장했습니다. 모터 설정 저장 시 함께 반영합니다.',
         }
 
     def sync_limits_from_mapping(self) -> Dict[str, Any]:
@@ -571,8 +570,8 @@ class MotorConfigService:
         return {
             'success': True,
             'message': (
-                '프로젝트 설정 적용을 시작했습니다. 잠시 후 화면이 다시 연결됩니다'
-                + (f' · 부팅 값을 새 설정으로 다시 만들었습니다({boot_refresh})' if boot_refresh else '')
+                '프로젝트 설정 적용을 시작했습니다. 잠시 후 화면을 재연결합니다'
+                + (f'. 부팅 값도 새 설정으로 재생성했습니다({boot_refresh})' if boot_refresh else '')
             ),
             'restart_script': str(self.restart_script),
             'restart_mode': restart_mode,
@@ -610,7 +609,7 @@ class MotorConfigService:
         try:
             config = yaml.safe_load(config_file.read_text(encoding='utf-8')) or {}
         except (OSError, yaml.YAMLError) as exc:
-            raise ValueError(f'부팅 값을 새 설정으로 다시 만들지 못했습니다 · 모터 설정을 못 읽음 · {exc}') from exc
+            raise ValueError(f'부팅 값 재생성 실패: 모터 설정 읽기 실패 ({exc})') from exc
         by_axis = {
             optional_int(motor.get('axis')): motor
             for motor in motors
@@ -632,7 +631,7 @@ class MotorConfigService:
         self._write(yaml.safe_dump(config, sort_keys=False, allow_unicode=True), config_file)
         left = boot_params.config_differences(config_file, expected)
         if left:
-            raise ValueError(f'부팅 값을 새 설정으로 다시 만들지 못했습니다 · {boot_params.describe(left)}')
+            raise ValueError(f'부팅 값 재생성 실패: {boot_params.describe(left)}')
         return boot_params.describe(rows)
 
     #: 실행 적용을 해제했을 때 「정지 중」에 붙는 마무리 문구 · 한 곳에서 쓴다
@@ -650,9 +649,9 @@ class MotorConfigService:
     #: 재생 중 「프로그램 다시 시작」 · 「정지 정리 끝」 을 기다리는 상한 · 수정 목록 144 · 200 ·
     #: **고장 감지만**(재생 노드가 멈춰 확인을 못 보냄) · 정상이면 확인이 오는 즉시 다시 시작한다
     RESTART_STOP_WAIT_SEC = 5.0
-    RESTART_NEEDS_STOP_MESSAGE = '재생 중입니다 · 정지하고 다시 시작하려면 확인하세요'
+    RESTART_NEEDS_STOP_MESSAGE = '재생 중입니다. 정지 후 재시작하려면 확인을 누르세요'
     RESTART_MOTOR_JOB_MESSAGE = (
-        '모터 설정·검색·재시작 작업이 진행 중입니다 · 끝난 뒤 다시 시작하세요'
+        '모터 설정·검색·재시작 작업이 진행 중입니다. 완료 후 재시도하세요'
     )
 
     def restart_managed_program(
@@ -733,7 +732,7 @@ class MotorConfigService:
         if stopped_playback:
             notes.append(self._stop_playback_before_restart())
         if still_coordinating:
-            notes.append('연동 서비스는 다른 PC 그룹을 진행 중이라 다시 시작하지 않음')
+            notes.append('그룹 재생 진행 중이므로 연동 서비스 재시작 제외')
         try:
             motor_config_rules.schedule_managed_service_restart(*restart_services)
         except OSError as exc:
@@ -745,9 +744,9 @@ class MotorConfigService:
             }
         return {
             'success': True,
-            'message': ' · '.join([
-                '상위 프로그램 재시작을 시작했습니다. '
-                'Motor Manager와 현재 서보 상태는 유지됩니다',
+            'message': '. '.join([
+                '프로그램 재시작을 시작했습니다. '
+                '모터 프로그램과 현재 서보 상태는 유지합니다',
                 *[note for note in notes if note],
             ]),
             'restart_mode': 'upper_service',
@@ -815,7 +814,7 @@ class MotorConfigService:
         if marker is not None and callable(wait_settled):
             if wait_settled(marker, float(self.RESTART_STOP_WAIT_SEC)):
                 return ' · '.join(['재생을 정지했습니다', *failures])
-            remaining = self._local_run_state() or '정지 정리 확인 없음'
+            remaining = self._local_run_state() or '정지 미확인'
         else:
             # 표지를 모른다(옛 감독 · 응답 없음) · 재생 상태로 본다
             deadline = time.monotonic() + float(self.RESTART_STOP_WAIT_SEC)
@@ -824,7 +823,7 @@ class MotorConfigService:
             remaining = self._local_run_state()
         if remaining:
             failures.append(
-                f'{self.RESTART_STOP_WAIT_SEC:g} s 안에 정지 확인 못 함({remaining}) · 그대로 다시 시작'
+                f'{self.RESTART_STOP_WAIT_SEC:g}초 이내 정지 미확인({remaining}), 재시작 진행'
             )
         return ' · '.join(['재생을 정지했습니다', *failures])
 
@@ -850,8 +849,8 @@ class MotorConfigService:
             return {
                 'success': False,
                 'message': (
-                    '현재 프로젝트의 모터 설정이 장비에 적용되지 않았습니다. '
-                    '모터 설정에서 「장비에 적용 · 모터 재시작」을 먼저 누르세요'
+                    '현재 프로젝트의 모터 설정이 장비 미적용 상태입니다. '
+                    '「모터 설정」에서 「저장 후 장비에 적용」을 먼저 누르세요'
                 ),
                 **self.bridge.snapshot(),
             }
@@ -910,146 +909,5 @@ class MotorConfigService:
             ),
             'restart_mode': 'motor_service',
             'motor_operation': self.repository.runtime.motor_operation_status(),
-            **self.bridge.snapshot(),
-        }
-
-    def clear_runtime_application(self) -> Dict[str, Any]:
-        """Stop Motor Manager and clear runtime ownership for project deletion."""
-        motor_service = str(
-            os.environ.get('MOTION_MOTOR_SERVICE_UNIT') or ''
-        ).strip()
-        if motor_service != 'motion-motor.service':
-            return {
-                'success': False,
-                'message': (
-                    'Motor Manager 분리 서비스가 설치되지 않았습니다. '
-                    '최초 설치를 다시 실행하세요'
-                ),
-                **self.bridge.snapshot(),
-            }
-        runtime_state = self.repository.runtime.motor_runtime_state()
-        runtime_project_id = str(runtime_state.get('target_project_id') or '').strip()
-        if not runtime_project_id:
-            return {
-                'success': True,
-                'cleared': False,
-                'message': '해제할 모터 실행 적용이 없습니다',
-                'runtime_project_id': '',
-                **self.bridge.snapshot(),
-            }
-        project_blocker = self.project.change_blocker(
-            allow_run_stopping=True,
-        )
-        if project_blocker:
-            return {
-                'success': False,
-                'message': project_blocker,
-                **self.bridge.snapshot(),
-            }
-        execution_blocker = self.bridge.coordination_execution_blocker()
-        if execution_blocker:
-            return {
-                'success': False,
-                'message': f'실행 적용을 해제하지 못했습니다: {execution_blocker}',
-                **self.bridge.snapshot(),
-            }
-        moving_blocker = self.runtime.ethercat_scan_safety_blocker(
-            require_fresh_motor_state=self.runtime.managed_service_active(motor_service),
-            allow_run_stopping=True,
-        )
-        if moving_blocker:
-            return {
-                'success': False,
-                'message': (
-                    f'실행 적용을 해제하지 못했습니다: {moving_blocker}. '
-                    '먼저 「전체 동작 정지」를 누르세요'
-                ),
-                **self.bridge.snapshot(),
-            }
-        lifecycle_lock = getattr(self, 'lifecycle_lock', None)
-        if lifecycle_lock is None:
-            lifecycle_lock = threading.Lock()
-            self.lifecycle_lock = lifecycle_lock
-        if not lifecycle_lock.acquire(blocking=False):
-            return {
-                'success': False,
-                'message': MOTOR_BUSY_MESSAGE,
-                **self.bridge.snapshot(),
-            }
-        operation: Dict[str, Any] = {}
-        cleared: Dict[str, Any] = {}
-        try:
-            operation = self.repository.runtime.begin_motor_operation(
-                'motor_runtime_clear',
-                'preparing',
-                timeout_sec=30.0,
-                details={'previous_project_id': runtime_project_id},
-            )
-            try:
-                self.bridge.motion_run_stop()
-            except Exception:
-                pass
-            try:
-                self.bridge.publish_safety_stop(False)
-            except Exception:
-                pass
-            if self.runtime.managed_service_active(motor_service):
-                self.repository.runtime.update_motor_operation(
-                    str(operation['operation_id']),
-                    'stopping_runtime',
-                    message='Motor Manager 정지 및 EtherCAT 소유권 해제 중',
-                )
-                self.runtime.run_managed_service('stop', motor_service)
-                try:
-                    motor_config_rules.wait_for_ethercat_release(8.0)
-                except Exception:
-                    pass
-            cleared = self.repository.runtime.clear_motor_runtime_target()
-            motor_config_rules.clear_motor_config_selection(self.repository)
-            self.clear_stopping_release_state()
-            # Drop launch-time ownership so delete / runtime_project_id update
-            # without waiting for a Bridge restart.
-            self.applied = Path()
-            self.repository.runtime.finish_motor_operation(
-                str(operation['operation_id']),
-                'success',
-                phase='completed',
-                message=str(cleared.get('message') or '모터 실행 적용 해제 완료'),
-                details={
-                    'previous_project_id': cleared.get('previous_project_id') or '',
-                    'motor_service_stopped': True,
-                },
-            )
-        except (OSError, RuntimeError, ValueError) as exc:
-            operation_id = str(operation.get('operation_id') or '')
-            if operation_id:
-                try:
-                    self.repository.runtime.finish_motor_operation(
-                        operation_id,
-                        'failure',
-                        phase='failed',
-                        error=str(exc),
-                    )
-                except ValueError:
-                    pass
-            return {
-                'success': False,
-                'message': f'실행 적용 해제 실패: {exc}',
-                **self.bridge.snapshot(),
-            }
-        finally:
-            lifecycle_lock.release()
-        return {
-            'success': True,
-            'cleared': bool(cleared.get('cleared')),
-            'previous_project_id': cleared.get('previous_project_id') or '',
-            'message': (
-                f"{cleared.get('message') or '모터 실행 적용을 해제했습니다'}. "
-                'Motor Manager는 정지 상태입니다. '
-                '다시 사용하려면 모터 설정에서 「장비에 적용 · 모터 재시작」을 누르세요'
-            ),
-            'runtime_project_id': '',
-            'motor_operation': self.repository.runtime.motor_operation_status(),
-            **self.project.list_projects(),
             **self.bridge.snapshot(),
         }

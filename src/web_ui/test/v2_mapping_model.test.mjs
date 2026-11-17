@@ -31,7 +31,7 @@ test('막는 것 · 빈 이름(줄 번호) · 겹친 이름 · 같은 모터 · 
   const a = rowToDraft(serverRow);
   assert.deepEqual(draftProblems([a]), []);
   assert.match(draftProblems([a, { ...newRow(1, ''), enabled: true }])[0], /2번 줄: 조인트 이름이 비어 있습니다 \(1번 모터\)/);
-  assert.match(draftProblems([a, { ...a }]).join(), /중복됩니다/);
+  assert.match(draftProblems([a, { ...a }]).join(), /중복/);
   assert.match(draftProblems([a, { ...a, motion_id: 'B' }]).join(), /같은 모터/);
   assert.match(draftProblems([{ ...a, motor_ref: '', motor_axis: null }]).join(), /모터가 지정되지 않았습니다/);
   assert.equal(draftProblems([{ ...a, motor_ref: '', motor_axis: null, enabled: false }]).length, 0, '안 쓰는 줄은 모터 없어도 됨');

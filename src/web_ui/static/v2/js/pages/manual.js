@@ -6,7 +6,7 @@
  *
  * 천천히 · 수정 목록 126 (사용자 결정 2026-10-13) · 페이더 · 다이얼 · 목표 위치 · 범위 복구 전부 서버가 조인트 2 °/s · 4 °/s² 로 ·
  * 화면이 보내는 값은 「가고 싶은 곳」(파랑 = 목표) · 모터는 천천히 따라온다(회색 = 현재) · 잘못 찍어도 그 자리까지 천천히 ·
- * 놓아도 목표까지 간다 · 멈추려면 「동작 취소」 · 같은 조작은 새 목표로 · 움직이는 축에 다른 조작은 거절.
+ * 놓아도 목표까지 간다 · 정지: 「동작 취소」 · 같은 조작은 새 목표로 · 움직이는 축에 다른 조작은 거절.
  */
 import { h, dot } from '../dom.js';
 import { api } from '../net.js';
@@ -156,9 +156,9 @@ const RUN_IDLE = new Set(['idle', 'off', 'ready', 'stopped', 'completed', 'motio
 
 export function manualBlocker(state, item) {
   const snap = state.snap || {};
-  if (snap.safety_status?.emergency_latched) return { text: '긴급 정지 상태입니다. 프로그램을 다시 시작해야 해제됩니다.', fix: 'restart' };
+  if (snap.safety_status?.emergency_latched) return { text: '긴급 정지 상태입니다. 프로그램 재시작 시 해제합니다.', fix: 'restart' };
   const mode = state.sched?.run_mode;
-  if (mode && mode !== 'manual') return { text: `지금은 ${mode === 'off' ? '끔' : '스케줄'} 모드입니다. 수동 조작은 「수동」 모드에서만 할 수 있습니다.`, fix: 'mode-manual' };
+  if (mode && mode !== 'manual') return { text: `현재 ${mode === 'off' ? '끔' : '스케줄'} 모드입니다. 수동 조작은 「수동」 모드에서만 할 수 있습니다.`, fix: 'mode-manual' };
   // 서버 run_mode_gate.manual_motion_block_reason 과 같은 문구 · 초기 위치 대기 · 재생 중이면 정지 뒤에만 (2026-10-12)
   const runState = String(snap.motion_run_status?.state || '');
   if (runState === 'initialized') return { text: '초기 위치에서 대기 중입니다. 「정지」를 누른 뒤 수동 조작을 하세요.', fix: 'stop' };
@@ -178,7 +178,7 @@ function fixButton(blocker, item, changed) {
   const map = {
     'mode-manual': ['수동 모드로 전환', () => act.setRunMode('manual')],
     stop: ['정지', act.stopAll],
-    restart: ['프로그램 다시 시작', act.restartProgram],
+    restart: ['프로그램 재시작', act.restartProgram],
     'open-mapping': ['조인트 매핑 열기', () => { location.hash = '#/mapping'; }],
     'open-motors': ['모터 설정 열기', () => { location.hash = '#/motors'; }],
     reset: ['오류 초기화', async () => { await act.servoControl(item, 'reset'); changed(); }],
@@ -363,7 +363,7 @@ async function cancelMotion() {
 async function moveTo(item, changed) {
   const blocker = manualBlocker(ctx.state, item);
   if (blocker) { toast(blocker.text, 'warn'); return; }
-  if (ui.session || ui.goals.has(item.axis)) { toast(`${item.axis}번 모터 이동 중입니다. 도착하거나 「동작 취소」 뒤에 다시 시도하세요.`, 'warn'); return; }
+  if (ui.session || ui.goals.has(item.axis)) { toast(`${item.axis}번 모터 이동 중입니다. 도착 또는 「동작 취소」 후 재시도하세요.`, 'warn'); return; }
   const value = Number(ui.goal);
   if (ui.goal === '' || !Number.isFinite(value)) { toast('목표 위치를 숫자로 입력하세요', 'warn'); return; }
   const motorDeg = ui.unit === 'joint' && item.row ? jointToMotor(item.row, value) : value;
@@ -440,7 +440,7 @@ async function capture(item, kind, changed) {
   if (!ok) return;
   // 줄은 이름 + 모터로 다시 찾는다 · 창이 떠 있는 사이(또는 그 전에) 매핑을 다시 불러오면 item.row 는 옛 객체 · 수정 목록 117
   const next = patchRow(ui.mapping || [], item.row, plan.patch);
-  if (!next) { toast(`「${item.row.motion_id}」 줄을 매핑에서 찾지 못했습니다. 화면을 새로 고친 뒤 다시 시도하세요.`, 'bad'); return; }
+  if (!next) { toast(`「${item.row.motion_id}」 줄을 매핑에서 찾지 못했습니다. 화면을 새로 고친 뒤 재시도하세요.`, 'bad'); return; }
   if (plan.kind !== 'reference') {
     // 범위 확인은 바꾸지 않는다 · 사람이 조인트 매핑에서 직접 체크 (사용자 2026-10-13)
     if (Number(next.row.motion_lower_deg) > Number(next.row.motion_upper_deg)) { toast('하한이 상한보다 커집니다. 위치를 확인하세요.', 'bad'); return; }
@@ -546,17 +546,17 @@ function axisPanel(state, changed, item) {
       h('span', { class: 'mono muted', 'data-live': 'motor', 'data-axis': String(item.axis), text: item.position === null ? '-' : `모터 ${signedDeg(item.position, 1)}°` })),
     rangeBar(item),
     notAlignedAxes(state.snap).has(item.axis) ? h('div', { class: 'blocker' }, dot('warn'),
-      h('span', { class: 'grow', text: '다회전 클리어로 위치 값이 바뀌었습니다. 로봇을 정면·수평에 맞춘 뒤 「기준점 지정」을 누르세요.' })) : null,
+      h('span', { class: 'grow', text: '다회전 클리어로 위치 값을 변경했습니다. 로봇을 정면·수평으로 정렬한 뒤 「기준점 지정」을 누르세요.' })) : null,
     h('div', { class: 'row' },
       ['lower', 'reference', 'upper'].map((kind) => h('button', { class: 'btn btn-mini', type: 'button', disabled: !canCapture,
-        title: canCapture ? { lower: '현재 위치를 하한점으로 지정', reference: '현재 위치를 기준점(조인트 0°)으로 지정', upper: '현재 위치를 상한점으로 지정' }[kind] : '조인트 매핑에 해당 모터가 있고, 모터 설정이 장비에 적용되어 있고, 다이얼 이동이 끝난 상태에서 사용할 수 있습니다',
+        title: canCapture ? { lower: '현재 위치를 하한점으로 지정', reference: '현재 위치를 기준점(조인트 0°)으로 지정', upper: '현재 위치를 상한점으로 지정' }[kind] : '사용 조건: 조인트 매핑에 해당 모터 등록, 모터 설정 장비 적용 완료, 다이얼 이동 완료',
         onclick: () => capture(item, kind, changed) }, { lower: '하한점 지정', reference: '기준점 지정', upper: '상한점 지정' }[kind])),
-      tip(['지정한 값은 조인트 매핑에 저장', '저장 후 장비에 적용(모터 재시작)할지 이어서 확인'], '지정 설명')),
+      tip(['지정한 값은 조인트 매핑에 저장', '저장 후 장비 적용(모터 재시작) 여부 확인'], '지정 설명')),
     outside ? h('div', { class: 'blocker bad' }, dot('bad'), h('span', { class: 'grow', text: '운전 한계를 벗어났습니다. 「범위 안으로 복귀」로 되돌리세요.' }),
       h('button', { class: 'btn btn-warn', type: 'button', onclick: () => recoverRange(item, changed) }, '범위 안으로 복귀')) : null,
     h('div', { class: 'field' },
       h('div', { class: 'row' }, h('strong', { class: 'inline' }, '움직이기',
-        tip([`한 칸 값과 관계없이 조인트 기준 ${MANUAL_JOINT_SPEED_DEG_S} °/s로 천천히 이동`, '파란 표시는 목표, 회색 표시는 현재 위치', '다이얼은 드래그, 휠, ← → 키로 조작 (Shift를 누르면 1/10칸씩)', '멈추려면 「동작 취소」'], '움직이기 설명')),
+        tip([`한 칸 값과 관계없이 조인트 기준 ${MANUAL_JOINT_SPEED_DEG_S} °/s로 천천히 이동`, '파란 표시는 목표, 회색 표시는 현재 위치', '다이얼은 드래그, 휠, ← → 키로 조작 (Shift: 1/10칸 단위)', '정지: 「동작 취소」'], '움직이기 설명')),
         h('label', { class: `switch${ui.dialOn ? ' on' : ''}` },
           h('input', { type: 'checkbox', role: 'switch', checked: ui.dialOn, 'aria-label': '다이얼',
             onchange: (e) => { ui.dialOn = e.target.checked; if (!ui.dialOn) endSession(true); changed(); } }),
@@ -620,8 +620,8 @@ function faderView(state, changed, list) {
   return h('section', { class: 'card', 'aria-label': '전체 페이더' },
     blocker && blocker.fix !== 'servo-on' && blocker.fix !== 'reset' ? h('div', { class: 'blocker' }, dot('warn'), h('span', { class: 'grow', text: blocker.text }), fixButton(blocker, null, changed)) : null,
     h('div', { class: 'row' },
-      h('p', { class: 'muted small grow' }, `조인트 기준 ${MANUAL_JOINT_SPEED_DEG_S} °/s로 천천히 따라갑니다`,
-        tip(['파란 손잡이는 목표, 회색 표시는 현재 위치', '손을 떼거나 잘못 눌러도 목표 위치까지 이동', '멈추려면 「동작 취소」', '페이더 범위는 조인트 매핑의 최소~최대'], '페이더 설명')),
+      h('p', { class: 'muted small grow' }, `조인트 기준 ${MANUAL_JOINT_SPEED_DEG_S} °/s로 저속 추종합니다`,
+        tip(['파란 손잡이는 목표, 회색 표시는 현재 위치', '손을 떼거나 잘못 눌러도 목표 위치까지 이동', '정지: 「동작 취소」', '페이더 범위는 조인트 매핑의 최소~최대'], '페이더 설명')),
       h('button', { class: 'btn btn-danger', type: 'button', title: '페이더, 다이얼, 목표 위치 이동을 모두 현재 위치에서 정지', onclick: cancelMotion }, '동작 취소')),
     usable.length ? h('ul', { class: 'list fader-list' }, usable.map((item) => {
       const own = manualBlocker(state, item);

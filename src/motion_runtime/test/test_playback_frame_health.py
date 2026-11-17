@@ -48,7 +48,7 @@ def test_one_tick_late_is_sent_without_skipping():
 def test_supervisor_drop_stops_playback_only_when_fresh_and_long(status, started, expected):
     error = motion_run_rules._supervisor_drop_error(status, started)
     if expected:
-        assert expected in error and '멈춥니다' in error
+        assert expected in error and '정지합니다' in error
     else:
         assert error == ''
 

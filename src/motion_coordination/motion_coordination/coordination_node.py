@@ -456,14 +456,14 @@ class MotionCoordinationNode(TimetableMixin, Node):
             if self._network_stale.get('now') == list(current):
                 return  # 같은 말을 심장박동마다 되풀이하지 않는다
             if self._boot_lan_addresses:
-                reason = '랜 주소가 기동 뒤에 바뀌었습니다'
+                reason = '기동 후 랜 주소 변경 감지'
             else:
-                reason = '랜이 이 서비스보다 늦게 올라왔습니다'
+                reason = '서비스 기동 후 랜 연결 활성화'
             message = (
-                f'{reason} · 기동 시점 '
-                f'{", ".join(self._boot_lan_addresses) or "없음"} · 지금 '
-                f'{", ".join(current) or "없음"} · 연동 서비스를 다시 '
-                '시작해야 다른 PC 가 보입니다'
+                f'{reason} (기동 시 '
+                f'{", ".join(self._boot_lan_addresses) or "없음"}, 현재 '
+                f'{", ".join(current) or "없음"}). 연동 서비스를 '
+                '재시작해야 다른 PC가 표시됩니다'
             )
             self._network_stale = {
                 'active': True,
@@ -816,7 +816,7 @@ class MotionCoordinationNode(TimetableMixin, Node):
         lower = sorted(pc_id for pc_id in self._other_live_masters() if pc_id < self._config.pc_id)
         if not lower:
             return ''
-        return f'마스터가 여럿입니다 · 번호가 낮은 {lower[0]} 가 진행합니다 · 이 PC 의 마스터 설정을 확인하세요'
+        return f'마스터가 2대 이상입니다. 번호가 낮은 {lower[0]}가 진행합니다. 현재 PC의 마스터 설정을 확인하세요'
 
     def _time_sync_callback(self, message: GroupTimeSync) -> None:
         """시계 맞추기 한 통 · **통로가 둘이다** · §6-299
@@ -1108,7 +1108,7 @@ class MotionCoordinationNode(TimetableMixin, Node):
             others_left = bool(set(self._execution.participants) - set(failed))
         if failed and others_left:
             self._warn(f'{reason} · {", ".join(failed)} 만 뺌')
-            self._drop_member_only({pc_id: f'시계 맞춤 실패 · {reason}' for pc_id in failed})
+            self._drop_member_only({pc_id: f'시계 동기화 실패: {reason}' for pc_id in failed})
             return
         self._cancel_before_start(reason, code='TRIGGER_SYNC_FAILED', latch=False)
         self._trigger_sync_status = failure_status
@@ -1193,7 +1193,7 @@ class MotionCoordinationNode(TimetableMixin, Node):
                         or message.coordinator_id != self._execution.coordinator_id
                         or self._config.pc_id not in participants
                     ):
-                        raise ValueError('참가 목록 갱신이 지금 실행과 맞지 않습니다')
+                        raise ValueError('참가 목록 갱신이 현재 실행과 일치하지 않습니다')
                     joining_self = self._execution.join_cycle > 0
                     merging = bool(getattr(self._execution, 'merging', False))
                 if joining_self:
@@ -1274,7 +1274,7 @@ class MotionCoordinationNode(TimetableMixin, Node):
             if command == 'cancel_before_start' and self._already_released(message, participants):
                 # 이미 놓은 실행의 풀기(준비를 거절하고 놓은 PC 등) · 「거절」 대신 「정지」 로 답한다 ·
                 # 거절은 진행 PC 가 「참가 PC 명령 실패」 로 읽어 전체 정지했다 · 수정 목록 136 ③
-                self._publish_event(message, 'stopped', True, '이 PC 는 이미 그 그룹 실행을 놓았습니다')
+                self._publish_event(message, 'stopped', True, '현재 PC는 해당 그룹 실행에서 이미 이탈했습니다')
                 return
             if command in {'stop_after_cycle', 'stop_now', 'cancel_before_start'}:
                 self._require_stop_command(message, participants)
@@ -1403,9 +1403,9 @@ class MotionCoordinationNode(TimetableMixin, Node):
                     # 그 PC 는 이미 재생을 놓아 계획을 새로 짓는다 · 보통 복귀(30-3)로 본다
                     info['warm'] = False
                 elif message.event == PARTICIPANT_LEFT_EVENT:
-                    joiner_drop = f'복귀 중 빠짐 · {message.message or "웹 다시 시작"}'
+                    joiner_drop = f'복귀 중 이탈: {message.message or "웹 재시작"}'
                 elif message.event in {'rejected', 'error', 'stopped'} or not message.success:
-                    joiner_drop = f'복귀 실패 · {message.message or message.event}'
+                    joiner_drop = f'복귀 실패: {message.message or message.event}'
                 if not joiner_drop:
                     return
             elif message.pc_id not in self._execution.participants:
@@ -1418,7 +1418,7 @@ class MotionCoordinationNode(TimetableMixin, Node):
             ):
                 # 참가 PC 의 웹 서비스가 내려간다(다시 시작 · 서비스 정지) · 그 PC 만 빼고 나머지는 계속 ·
                 # 그 PC 가 마지막이면 그룹만 세운다 · 잠그지 않는다 · 수정 목록 145 ①
-                exclude_reasons = {message.pc_id: message.message or '웹 다시 시작'}
+                exclude_reasons = {message.pc_id: message.message or '웹 재시작'}
                 left = True
             elif (
                 message.event == 'rejected'
@@ -1429,7 +1429,7 @@ class MotionCoordinationNode(TimetableMixin, Node):
                 # 이번 경계에서 넣은 복귀 PC 가 확정·초기화를 거절했다 · 그 PC 만 뺀다 · 그대로 재생하던
                 # 「연락 끊김」 PC 면 풀지 않는다(다음 회차를 이미 스스로 잡았을 수 있다 · 다음 경계에 다시) · 183
                 exclude_reasons = {
-                    message.pc_id: f'복귀 거절 · {message.message or "로컬 준비 실패"}',
+                    message.pc_id: f'복귀 거부: {message.message or "로컬 준비 실패"}',
                 }
                 if message.pc_id in self._execution.lost:
                     keep_playing = (message.pc_id,)
@@ -1478,7 +1478,7 @@ class MotionCoordinationNode(TimetableMixin, Node):
                     # 슬레이브 1대가 준비를 거절했다(오프·수동 모드·모터 문제) ·
                     # 고장 PC 와 같게 · 빼고 나머지로 · 수정 목록 30-6
                     exclude_reasons = {
-                        message.pc_id: f'준비 거절 · {message.message or "로컬 준비 실패"}',
+                        message.pc_id: f'준비 거부: {message.message or "로컬 준비 실패"}',
                     }
                 elif (
                     message.event == 'rejected'
@@ -1490,7 +1490,7 @@ class MotionCoordinationNode(TimetableMixin, Node):
                     # 다른 PC 와 같게 · 빠지고 진행만 한다 · 나머지는 그룹으로 돈다 · 수정 목록 136 ①
                     # (선택 때 마지막 로컬 상태로 이미 빼지만 0.5 s 안에 시작한 조그 등은 여기서 보인다)
                     exclude_reasons = {
-                        message.pc_id: f'준비 거절 · {message.message or "로컬 준비 실패"}',
+                        message.pc_id: f'준비 거부: {message.message or "로컬 준비 실패"}',
                     }
                     drop_self = True
                 elif (
@@ -1634,7 +1634,7 @@ class MotionCoordinationNode(TimetableMixin, Node):
                         # 수정 목록 178 · 「회차 후 정지」 를 기다리는 중(회차 재생 중)에 선 PC 도 그 PC 만 · 다른 PC 의
                         # 마지막 회차를 자르지 않는다 · 수정 목록 212
                         exclude_reasons = {
-                            message.pc_id: f'먼저 정지 · {message.message or "정지"}',
+                            message.pc_id: f'선행 정지: {message.message or "정지"}',
                         }
                         drop_self = message.pc_id == self._config.pc_id
                         left = True
@@ -1642,7 +1642,7 @@ class MotionCoordinationNode(TimetableMixin, Node):
                     # 한 PC 의 재생 오류(모터 상태 끊김 · 도달 확인 실패 등)는 그 PC 만 뺀다 · 전에는 전체 정지 +
                     # 잠금(회차 실패는 3번까지 전체 자동 재시작) · 빠진 PC 는 정상이 되면 다시 들어온다 · 수정 목록 178
                     exclude_reasons = {
-                        message.pc_id: f'로컬 그룹 실행 오류 · {message.message or "확인 필요"}',
+                        message.pc_id: f'로컬 그룹 실행 오류: {message.message or "확인 필요"}',
                     }
                     drop_self = message.pc_id == self._config.pc_id
                     left = True
@@ -1682,7 +1682,7 @@ class MotionCoordinationNode(TimetableMixin, Node):
                 roster = self._execution.participants
         if not self._runs_execution_here(execution_id, tuple(roster or ())):
             # 바빠서 빠진 진행 PC · 풀 것이 없다 · 제 단독 재생 · 조그를 건드리지 않는다 · 수정 목록 136 ②
-            return {'success': True, 'skipped': True, 'message': '이 PC 는 이 그룹 실행에 참가하지 않음'}
+            return {'success': True, 'skipped': True, 'message': '현재 PC는 해당 그룹 실행 미참가'}
         cancel_result = self._call_local_control({
             'command': 'group_cancel',
             'execution_id': execution_id,
@@ -1761,7 +1761,7 @@ class MotionCoordinationNode(TimetableMixin, Node):
         message = str(reason)
         if not local_release.get('success'):
             message += (
-                ' · 로컬 worker 정리 실패: '
+                '. 로컬 worker 정리 실패: '
                 f'{local_release.get("message") or "응답 없음"}'
             )
             with self._lock:
@@ -1844,7 +1844,7 @@ class MotionCoordinationNode(TimetableMixin, Node):
             others = {pc_id: reason for pc_id, reason in reasons.items() if pc_id != self._config.pc_id}
             if others:
                 self._exclude_participants(
-                    {pc_id: f'{reason} · 재생은 계속 · 경계에서 다시 맞춤' for pc_id, reason in others.items()},
+                    {pc_id: f'{reason} (재생 계속, 회차 경계에서 재동기화)' for pc_id, reason in others.items()},
                     left=True, keep_playing=tuple(others),
                 )
             return
@@ -1970,8 +1970,8 @@ class MotionCoordinationNode(TimetableMixin, Node):
         with self._lock:
             if self._execution.execution_id:
                 raise ValueError(
-                    '연동 모션이 도는 중에는 그룹에서 나갈 수 없습니다 · '
-                    '먼저 정지한 뒤 나가세요'
+                    '연동 모션 진행 중에는 그룹에서 이탈할 수 없습니다. '
+                    '정지 후 이탈하세요'
                 )
             self._execution.reset()
             self._clear_active_execution()
@@ -1985,8 +1985,8 @@ class MotionCoordinationNode(TimetableMixin, Node):
         return {
             'success': True,
             'message': (
-                '이 PC 를 그룹에서 뺐습니다 · '
-                '단독 모션·모션 스튜디오를 사용할 수 있습니다.'
+                '현재 PC를 그룹에서 제외했습니다. '
+                '단독 재생을 사용할 수 있습니다.'
             ),
         }
 
@@ -2089,11 +2089,11 @@ class MotionCoordinationNode(TimetableMixin, Node):
                 # 「프로그램 다시 시작」 · 이 PC 만 빠진다 · 수정 목록 123 → 145 ①
                 # 새 웹이 「준비 끝」 을 알릴 때까지 「다시 뜨는 중」(전 120 s) · 수정 목록 202
                 self._bridge_ready_tracker().leaving(time.monotonic())
-                result = self._local_bridge_leaving('프로그램 다시 시작')
+                result = self._local_bridge_leaving('프로그램 재시작')
             elif command == 'bridge_leaving':
                 # 웹 서비스 정상 종료(SIGTERM · SIGINT · systemd 다시 시작) · 수정 목록 145 ① · 202
                 self._bridge_ready_tracker().leaving(time.monotonic())
-                result = self._local_bridge_leaving(str(request.get('reason') or '웹 다시 시작'))
+                result = self._local_bridge_leaving(str(request.get('reason') or '웹 재시작'))
             else:
                 raise ValueError('지원하지 않는 그룹 연동 요청입니다')
         except Exception as exc:
@@ -2128,8 +2128,8 @@ class MotionCoordinationNode(TimetableMixin, Node):
         # 시작을 누르면 그룹이 어느 명령을 따르는지 알 수 없다.
         if not self._config.is_master:
             raise ValueError(
-                '이 PC 는 연동 슬레이브라 그룹 실행을 시작할 수 없습니다 · '
-                '마스터 PC 에서 시작하세요'
+                '현재 PC는 연동 슬레이브이므로 그룹 실행을 시작할 수 없습니다. '
+                '마스터 PC에서 시작하세요'
             )
         request = request or {}
         run_mode = str(request.get('run_mode') or 'continuous').strip().lower()
@@ -2193,7 +2193,7 @@ class MotionCoordinationNode(TimetableMixin, Node):
             sit_out = str(request.get('coordinator_sits_out') or '').strip()[:200]
             alarm_grade = self._local_alarm_grade()
             if alarm_grade > 0 and not sit_out:
-                sit_out = f'이 PC Servo 알람 {alarm_grade}등급'
+                sit_out = f'현재 PC 서보 알람 {alarm_grade}등급'
             participants, excluded = self._select_participants(
                 participants_override, started_by=started_by, sit_out=sit_out,
             )
@@ -2202,7 +2202,7 @@ class MotionCoordinationNode(TimetableMixin, Node):
                 return aligned
             if not participants:
                 # 바쁜 마스터만 남았다 · 시작 전에 거절한다 · 취소 · 잠금 없음 · 수정 목록 136 ①
-                refusal = '그룹 시작 불가 · 들어갈 PC 가 없습니다 · ' + start_summary(participants, excluded)
+                refusal = '그룹 시작 불가: 참여 가능한 PC가 없습니다. ' + start_summary(participants, excluded)
                 self._remember_start_failure(refusal, code='GROUP_START_NOT_READY')
                 raise ValueError(refusal)
             if len(participants) > 8:
@@ -2340,7 +2340,7 @@ class MotionCoordinationNode(TimetableMixin, Node):
         return {
             'success': True, 'deferred': True, 'aligned_start': True,
             'holders': sorted(holders), 'wait_sec': round(wait, 1),
-            'message': f'옛 실행 재생 중인 PC 의 회차 끝(약 {wait:.0f} s)에 맞춰 시작',
+            'message': f'이전 실행을 재생 중인 PC의 회차 종료(약 {wait:.0f}초)에 맞춰 시작',
         }
 
     def _drive_aligned_start(self) -> None:
@@ -2478,8 +2478,8 @@ class MotionCoordinationNode(TimetableMixin, Node):
                 self._execution.stop_now()
                 self._clear_active_execution()
                 empty_reason = (
-                    ('그룹 실행 정지 · 남은 PC 없음 · 잠그지 않음 · ' if left else
-                     '그룹 시작 취소 · 들어갈 PC 가 남지 않음 · 잠그지 않음 · ')
+                    ('그룹 실행 정지: 잔여 PC 없음 (잠금 없음) · ' if left else
+                     '그룹 시작 취소: 참여 가능한 PC 없음 (잠금 없음) · ')
                     + ', '.join(f'{pc_id}({reasons[pc_id]})' for pc_id in dropped)
                 )
             else:
@@ -2698,7 +2698,7 @@ class MotionCoordinationNode(TimetableMixin, Node):
         이 PC 의 재생을 세우는 일은 웹 서비스가 한다(「프로그램 다시 시작」 의 정지 · 서비스 종료) ·
         여기서 웹을 다시 부르지 않는다(내려가는 중이라 답이 없다).
         """
-        reason = str(reason or '').strip()[:120] or '웹 다시 시작'
+        reason = str(reason or '').strip()[:120] or '웹 재시작'
         pc_id = self._config.pc_id
         with self._lock:
             execution_id = self._execution.execution_id
@@ -2709,7 +2709,7 @@ class MotionCoordinationNode(TimetableMixin, Node):
         if not execution_id:
             return {
                 'success': True, 'left': False, 'still_coordinating': False,
-                'message': f'{reason} · 도는 그룹 실행 없음',
+                'message': f'{reason}: 진행 중인 그룹 실행 없음',
             }
         if coordinator:
             if participating:
@@ -2722,9 +2722,9 @@ class MotionCoordinationNode(TimetableMixin, Node):
                     and self._execution.participants
                 )
             message = (
-                f'{pc_id} 빠짐 · {reason} · 남은 PC 로 그룹 계속 · 이 PC 는 진행만'
+                f'{pc_id} 제외({reason}): 나머지 PC로 그룹 계속, 현재 PC는 진행 역할만 수행'
                 if still else
-                f'{pc_id} 빠짐 · {reason} · 남은 PC 없음 · 그룹 정지 · 잠그지 않음'
+                f'{pc_id} 제외({reason}): 잔여 PC 없음, 그룹 정지 (잠금 없음)'
             )
             self._warn(message)
             return {
@@ -2744,7 +2744,7 @@ class MotionCoordinationNode(TimetableMixin, Node):
                 self._cancelled_execution_ids.add(execution_id)
                 self._execution.stop_now()
                 self._clear_active_execution()
-        message = f'{pc_id} 빠짐 · {reason} · 진행 PC 에 알림 · 남은 PC 는 계속'
+        message = f'{pc_id} 제외({reason}): 진행 PC에 통보, 나머지 PC 계속'
         self._warn(message)
         return {
             'success': True, 'left': bool(participating or joining),
@@ -2766,7 +2766,7 @@ class MotionCoordinationNode(TimetableMixin, Node):
             'event_type': 'group_excluded',
             'execution_id': str(execution_id or ''),
             'message': (
-                f'그룹 실행 {stage} · 뺀 PC '
+                f'그룹 실행 {stage}: 제외 PC '
                 + ', '.join(f'{pc_id}({reason})' for pc_id, reason in sorted(excluded.items()))
                 + f' · 참가 {", ".join(participants)}'
             ),
@@ -3025,7 +3025,7 @@ class MotionCoordinationNode(TimetableMixin, Node):
                     drops[pc_id] = '복귀 중 통신 단절'
                 elif info.get('warm') and not self._merge_candidate(pc_id):
                     # 그대로 재생하던 PC 가 실행을 놓았다 · 다음엔 계획을 새로 짓는 복귀로 · 183
-                    drops[pc_id] = '복귀 중 그 PC 가 실행을 놓음'
+                    drops[pc_id] = '복귀 중 해당 PC 실행 이탈'
                 elif (
                     info.get('state') == 'preparing'
                     and now - float(info.get('since') or now) > self.JOIN_PREPARE_TIMEOUT_SEC
@@ -3128,7 +3128,7 @@ class MotionCoordinationNode(TimetableMixin, Node):
         if result.get('success'):
             self.get_logger().info(f'그룹 복귀 준비 · {me}(진행 PC 자신) · 회차 끝나면 합류')
             return
-        self._drop_joiner(me, f'복귀 준비 실패 · {result.get("message") or "로컬 준비 실패"}')
+        self._drop_joiner(me, f'복귀 준비 실패: {result.get("message") or "로컬 준비 실패"}')
 
     def _note_join_failure(self, pc_id: str) -> float:
         """진행 PC · 그 PC 의 복귀 실패를 센다 · 다음 권유까지 기다릴 시간(30 s 에서 두 배씩) · 잠금 안에서 · 187"""
@@ -3241,13 +3241,13 @@ class MotionCoordinationNode(TimetableMixin, Node):
                     self._self_dropped_ids().discard(execution_id)
             else:
                 self._exclude_participants(
-                    {self._config.pc_id: '복귀 합류 확정 실패 · '
+                    {self._config.pc_id: '복귀 합류 확정 실패: '
                      + str(committed.get('message') or '응답 없음')},
                     allow_coordinator=True, left=True,
                 )
         self._note_group(
             execution_id, 'group_rejoined',
-            f'그룹 복귀 · {", ".join(added)} · {next_cycle}회차부터 합류 · 참가 {", ".join(participants)}',
+            f'그룹 복귀: {", ".join(added)}, {next_cycle}회차부터 합류 (참가 {", ".join(participants)})',
             {'joined': list(added), 'participants': list(participants), 'cycle': next_cycle},
         )
 
@@ -3345,7 +3345,7 @@ class MotionCoordinationNode(TimetableMixin, Node):
             self._last_local_event_key = ()
         self._publish_event(
             message, 'join_accepted', True,
-            '그대로 재생하며 합류 대기 · 회차 끝에 합침', state='merging',
+            '재생 유지 및 합류 대기 (회차 종료 시 합류)', state='merging',
         )
         self.get_logger().info(
             f'그룹 다시 합치기 권유 받음 · 재생을 세우지 않음 · 회차 끝에서 합류 · {execution_id}'
@@ -3396,7 +3396,7 @@ class MotionCoordinationNode(TimetableMixin, Node):
         self._barrier_wait = None
         # 놓은 뒤 진행 PC 의 복귀 권유(`join`)는 받는다 · 181 과 같은 표시
         self._leave_group_execution(
-            f'진행 PC 가 다시 넣지 않음 · 회차 끝에서 {limit:.0f} s 기다림 · 복귀 권유를 기다림',
+            f'진행 PC 재합류 미승인: 회차 종료 후 {limit:.0f}초 대기, 복귀 요청 대기',
             rejoinable=True,
         )
 
@@ -3437,7 +3437,7 @@ class MotionCoordinationNode(TimetableMixin, Node):
         # 실행과 맞지 않습니다」 로 한 회차를 버렸다(실물 NY 11-08 22:16 놓음 → 22:20 floating2) · 수정 목록 188
         self._publish_runtime_event(
             'rejected', execution_id, join_cycle, success=False,
-            message_text=f'합류 확정이 {limit:.0f} s 오지 않아 놓음',
+            message_text=f'합류 확정 {limit:.0f}초간 미수신으로 이탈',
         )
         self._call_local_control({
             'command': 'group_cancel',
@@ -3524,7 +3524,7 @@ class MotionCoordinationNode(TimetableMixin, Node):
             self._publish_coordination_error(
                 code='GROUP_LOCAL_STOP_FAILED',
                 message=(
-                    '이 PC의 즉시 정지를 확인하지 못했습니다: '
+                    '현재 PC의 즉시 정지를 확인하지 못했습니다: '
                     f'{local.get("message") or "응답 없음"}'
                 ),
                 execution_id=execution_id,
@@ -3536,7 +3536,7 @@ class MotionCoordinationNode(TimetableMixin, Node):
                 if after_cycle and local_success else
                 '전체 즉시 정지 로컬 적용·DDS 전달'
                 if local_success else
-                f'로컬 정지 확인 실패·DDS 정지는 전달됨: '
+                f'로컬 정지 확인 실패, DDS 정지는 전달 완료: '
                 f'{local.get("message") or "응답 없음"}'
             ),
             'dds_stop_published': dds_stop_published,
@@ -3571,7 +3571,7 @@ class MotionCoordinationNode(TimetableMixin, Node):
         # 이 PC 의 주차 실패는 그 PC 기록에 남는다 · 길은 성공 · 스케줄이 단독 길로 또 보내지 않게
         return {
             'success': True,
-            'message': f'운영 종료 · 기준점 주차 → 서보 OFF 전달 · {summary} · 이 PC {local.get("message") or "응답 없음"}',
+            'message': f'운영 종료: 기준점 이동 → 서보 OFF 전달 ({summary}). 현재 PC {local.get("message") or "응답 없음"}',
             'dds_stop_published': published,
         }
 
@@ -3690,7 +3690,7 @@ class MotionCoordinationNode(TimetableMixin, Node):
             }, timeout_sec=0.25)
             return
         if not result.get('success') and not late:
-            reason = f'그룹 시작 거부 · 이 PC 예약 실패 · {message.command} · {result.get("message") or "응답 없음"}'
+            reason = f'그룹 시작 거부: 현재 PC 예약 실패 ({message.command}, {result.get("message") or "응답 없음"})'
             self._warn(f'{me} 자신의 그룹 예약 실패 · 이 PC 만 빠지고 나머지는 같은 시각에 · {reason}')
             self._drop_member_only({me: reason})
 
@@ -3915,7 +3915,7 @@ class MotionCoordinationNode(TimetableMixin, Node):
                 and time.monotonic() >= scheduled_at
             ):
                 command = 'stop_now'
-            reason = f'그룹 예약 확인 제한시간 초과 · {", ".join(missing)}'
+            reason = f'그룹 예약 확인 제한 시간 초과: {", ".join(missing)}'
         if silent:
             if pending_kind == 'prepare':
                 self._exclude_participants(silent)
@@ -3966,7 +3966,7 @@ class MotionCoordinationNode(TimetableMixin, Node):
                 '재생은 계속 · 경계에서 다시 맞춤'
             )
             self._exclude_participants(
-                {pc_id: '모션 시작 보고 없음 · 재생은 계속' for pc_id in others},
+                {pc_id: '모션 시작 보고 없음 (재생 계속)' for pc_id in others},
                 left=True, keep_playing=tuple(others),
             )
             missing = [pc_id for pc_id in missing if pc_id not in others]
@@ -4322,10 +4322,10 @@ class MotionCoordinationNode(TimetableMixin, Node):
             if not master_gone or phase not in self._BARRIER_PHASES:
                 return
             if not operating:
-                self._autonomy_note(execution_id, '진행 PC 안 보임 · 진행 PC 가 알려 준 운영시간이 없거나 끝나 스스로 잇지 않음')
+                self._autonomy_note(execution_id, '진행 PC 미확인: 운영 시간 정보 없음 또는 종료로 자체 진행 생략')
                 return
             if seen.get('execution_id') != execution_id or float(seen.get('period') or 0.0) <= 0.0:
-                self._autonomy_note(execution_id, '진행 PC 안 보임 · 주기를 아직 몰라(2회차 전) 스스로 잇지 않음')
+                self._autonomy_note(execution_id, '진행 PC 미확인: 주기 정보 없음(2회차 전)으로 자체 진행 생략')
                 return
             state = self._autonomy = {'execution_id': execution_id, 'stage': 'idle'}
             self._warn(f'진행 PC {coordinator} 안 보임 · 눈금대로 스스로 이어 감 · 주기 {seen["period"]:.3f} s')
@@ -4347,7 +4347,7 @@ class MotionCoordinationNode(TimetableMixin, Node):
                 why = '운영시간 끝(진행 PC 가 알려 준 시각)'
                 self._warn(f'스스로 잇기 끝 · {why} · 회차를 마치고 놓음 · 기준점 주차 → 서보 OFF')
                 # 진행 PC 가 없어도 평소 운영 종료와 같이 주차 → 서보 OFF · 끊김 시험 P
-                self._leave_group_execution(f'스스로 잇기 끝 · {why}', park_after=True)
+                self._leave_group_execution(f'자체 진행 종료: {why}', park_after=True)
             return
         stage = state.get('stage')
         now = time.monotonic()
@@ -4359,7 +4359,7 @@ class MotionCoordinationNode(TimetableMixin, Node):
                     earliest=now + init_sec + self.AUTONOMY_INIT_MARGIN_SEC + 1.0,
                 )
             except (KeyError, ValueError) as exc:
-                self._leave_group_execution(f'스스로 잇기 실패 · {exc}', rejoinable=True)
+                self._leave_group_execution(f'자체 진행 실패: {exc}', rejoinable=True)
                 return
             # 회차 번호는 하나씩 · 칸을 건너뛰어도(쉬어도) 이 PC 재생 관리자는 「끝낸 회차 + 1」 만 받는다
             completed = int(status.get('current_cycle') or status.get('group_cycle_number') or seen.get('cycle') or 0)
@@ -4374,7 +4374,7 @@ class MotionCoordinationNode(TimetableMixin, Node):
             )
             if not result.get('success'):
                 self._leave_group_execution(
-                    f'스스로 잇기 · 회차 초기화 예약 실패 · {result.get("message") or "응답 없음"}',
+                    f'자체 진행: 회차 초기화 예약 실패 ({result.get("message") or "응답 없음"})',
                     rejoinable=True,
                 )
                 return
@@ -4404,7 +4404,7 @@ class MotionCoordinationNode(TimetableMixin, Node):
                     result = self._autonomy_start_at(execution_id, state)
             if not result.get('success'):
                 self._leave_group_execution(
-                    f'스스로 잇기 · 시작 예약 실패 · {result.get("message") or "응답 없음"}',
+                    f'자체 진행: 시작 예약 실패 ({result.get("message") or "응답 없음"})',
                     rejoinable=True,
                 )
                 return
@@ -4497,7 +4497,7 @@ class MotionCoordinationNode(TimetableMixin, Node):
             # 돌아오면 회차 경계에서 다시 합친다(`_manage_rejoiners` · 183) · 전에는 망이 돌아온 순간 도착한
             # 풀기가 재생 중인 헤드를 세웠다(실물 NY 2026-11-07 15:08 · 공유기 112 s)
             self._exclude_participants(
-                {pc_id: f'연락 끊김 · 하트비트 {timeout:g}초 넘게 없음 · 재생은 계속' for pc_id in missing},
+                {pc_id: f'연락 끊김: 하트비트 {timeout:g}초 이상 미수신 (재생 계속)' for pc_id in missing},
                 left=True, keep_playing=missing,
             )
             return
@@ -4644,7 +4644,7 @@ class MotionCoordinationNode(TimetableMixin, Node):
         self, message: GroupCommand, participants: tuple[str, ...]
     ) -> None:
         if self._config.pc_id not in participants:
-            raise ValueError('그룹 정지 요청에 이 PC가 포함되어 있지 않습니다')
+            raise ValueError('그룹 정지 요청에 현재 PC가 포함되지 않았습니다')
         if not self._trusted_coordinator(message.coordinator_id, participants):
             raise ValueError('그룹 정지 요청 발신 PC가 참가 목록에 없습니다')
         if not message.execution_id:
@@ -4833,7 +4833,7 @@ class MotionCoordinationNode(TimetableMixin, Node):
             # 그 실행을 돌지 않는 이 PC(바빠서 빠진 마스터)는 세우지 않는다 · 단독 재생 · 조그가 섰다 ·
             # 실행 번호를 실어 브리지도 한 번 더 거른다 · 수정 목록 136 ② (실물 V-4 · V-5)
             if not self._runs_execution_here(str(execution_id), tuple(participants or ())):
-                return {'success': True, 'skipped': True, 'message': '이 PC 는 이 그룹 실행에 참가하지 않음'}
+                return {'success': True, 'skipped': True, 'message': '현재 PC는 해당 그룹 실행 미참가'}
             return self._call_local_control({
                 'command': 'stop_now',
                 'execution_id': execution_id,
@@ -4950,7 +4950,7 @@ class MotionCoordinationNode(TimetableMixin, Node):
             path += '?link=down'
         result = self._local_http(path, timeout_sec=BRIDGE_FIELDS_HTTP_TIMEOUT_SEC)
         if result.get('bridge_state') != 'ok':
-            raise OSError(result.get('message') or '로컬 Web Bridge 상태 응답 없음')
+            raise OSError(result.get('message') or '로컬 웹 서비스 상태 응답 없음')
         return result
 
     def _runtime_link(self) -> Optional[LocalLink]:
@@ -5057,8 +5057,8 @@ class MotionCoordinationNode(TimetableMixin, Node):
             return
         self._runtime_silent_execution = execution_id
         detail = (
-            f'재생 관리자 상태 {quiet:.1f} s 못 받음(0.5 s 마다 와야 함 · 한도 {RUNTIME_SILENT_SEC:.0f} s)'
-            if runtime_at else f'재생 관리자 상태를 한 번도 못 받음({quiet:.1f} s)'
+            f'재생 관리자 상태 {quiet:.1f}초간 미수신 (0.5초 주기, 한도 {RUNTIME_SILENT_SEC:.0f}초)'
+            if runtime_at else f'재생 관리자 상태 수신 이력 없음({quiet:.1f}초)'
         )
         self._drop_self_for_runtime_loss(detail)
 
@@ -5069,7 +5069,7 @@ class MotionCoordinationNode(TimetableMixin, Node):
             participants = tuple(self._execution.participants)
         if not execution_id:
             return
-        message = f'{self._config.pc_id} 재생 관리자 상태 끊김 · 이 PC 만 그룹에서 빠짐 · {detail}'
+        message = f'{self._config.pc_id} 재생 관리자 상태 중단: 현재 PC만 그룹에서 제외 ({detail})'
         with self._lock:
             self._runtime_loss = {
                 'active': True,
@@ -5083,7 +5083,7 @@ class MotionCoordinationNode(TimetableMixin, Node):
                 'lost_monotonic': time.monotonic(),
             }
         self.get_logger().error(f'[로컬 상태 끊김] {message} · 잠그지 않음')
-        self._drop_member_only({self._config.pc_id: f'재생 관리자 상태 끊김 · {detail}'}, rejoinable=True)
+        self._drop_member_only({self._config.pc_id: f'재생 관리자 상태 중단: {detail}'}, rejoinable=True)
 
     def _clear_runtime_loss_if_back(self, runtime_at: float) -> None:
         """끊김 뒤 재생 관리자 상태를 다시 받았다 · 기록을 지우고 모터 동작 로그에 남긴다 · 수정 목록 209"""
@@ -5095,7 +5095,7 @@ class MotionCoordinationNode(TimetableMixin, Node):
                 return
             self._runtime_loss = {}
             self._runtime_silent_execution = ''
-        text = f'{loss.get("message")} · 재생 관리자 상태 다시 받음 · 잠그지 않음'
+        text = f'{loss.get("message")}. 재생 관리자 상태 수신 재개 (잠금 없음)'
         self.get_logger().info(text)
         self._note_group(
             str(loss.get('execution_id') or ''), 'group_runtime_lost', text,
@@ -5222,7 +5222,7 @@ class MotionCoordinationNode(TimetableMixin, Node):
             # 모터 쪽은 supervisor 가 이미 세웠다(알람 가드) · 그룹에서 빠지고 제 재생을 세운다
             threading.Thread(
                 target=self._drop_member_only,
-                args=({self._config.pc_id: f'Servo 알람 {grade}등급 · {message.message or message.error_code}'},),
+                args=({self._config.pc_id: f'서보 알람 {grade}등급: {message.message or message.error_code}'},),
                 daemon=True,
             ).start()
         elif grade == 1 and self._execution.execution_id:
@@ -5585,7 +5585,7 @@ class MotionCoordinationNode(TimetableMixin, Node):
                 if member is None or self._registry.status(pc_id) == 'offline':
                     unhealthy[pc_id] = '통신 단절'
                 elif member.alarm_grade > 0:
-                    unhealthy[pc_id] = f'Servo 알람 {member.alarm_grade}등급'
+                    unhealthy[pc_id] = f'서보 알람 {member.alarm_grade}등급'
         return unhealthy
 
     def _drop_unhealthy_members(self, stage: str) -> bool:
@@ -5601,7 +5601,7 @@ class MotionCoordinationNode(TimetableMixin, Node):
             )
         if lost:
             self._exclude_participants(
-                {pc_id: f'{stage} · 연락 끊김 · 재생은 계속' for pc_id in lost},
+                {pc_id: f'{stage}: 연락 끊김 (재생 계속)' for pc_id in lost},
                 left=True, keep_playing=lost,
             )
             unhealthy = {pc_id: reason for pc_id, reason in unhealthy.items() if pc_id not in lost}
@@ -5648,8 +5648,8 @@ class MotionCoordinationNode(TimetableMixin, Node):
             self._publish_coordination_error(
                 code='GROUP_AUTO_RECOVERY_EXHAUSTED',
                 message=(
-                    f'그룹 회차 실패가 {self._CYCLE_FAILURE_WINDOW_SEC / 60:.0f}분 안 '
-                    f'{self._CYCLE_FAILURE_LIMIT + 1}번 · 자동 복구 멈춤: {reason}'
+                    f'그룹 회차 실패가 {self._CYCLE_FAILURE_WINDOW_SEC / 60:.0f}분 이내 '
+                    f'{self._CYCLE_FAILURE_LIMIT + 1}회 발생하여 자동 복구 중단: {reason}'
                 ),
                 execution_id=execution_id,
             )

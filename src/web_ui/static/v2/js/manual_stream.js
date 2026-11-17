@@ -39,7 +39,7 @@ export class ManualStream {
         try { message = JSON.parse(event.data); } catch { return; }
         if (message.type === 'hello_ok' && !settled) { settled = true; resolve(true); return; }
         if (message.type === 'error') {
-          if (!settled) { settled = true; reject(new Error(message.message || '수동 조작이 거부되었습니다')); }
+          if (!settled) { settled = true; reject(new Error(message.message || '수동 조작 거부')); }
           this.onClose(message.message || '');
           return;
         }
@@ -47,7 +47,7 @@ export class ManualStream {
         else this.onMessage(message);
       };
       socket.onclose = () => {
-        if (!settled) { settled = true; reject(new Error('수동 조작 연결이 끊겼습니다')); }
+        if (!settled) { settled = true; reject(new Error('수동 조작 연결 중단')); }
         if (this.socket === socket) { this.socket = null; this.ready = null; }
         this.onClose('');
       };

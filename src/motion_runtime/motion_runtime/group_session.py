@@ -24,7 +24,7 @@ from .deferred_playlist import DeferredPlaylist
 #: 스케줄 구간 끝이 보낸 회차 후 정지의 이유 · 브리지·연동 노드가 같은 글자를 쓴다
 SCHEDULE_END_REASON = 'schedule_end'
 #: 구간 끝 정상 정지 · 전에는 마스터의 세션 정리가 「그룹 실행 취소」 로 덮어 실패처럼 읽혔다 · 수정 목록 141
-SCHEDULE_END_STOP_MESSAGE = '구간 끝 · 회차 후 정지'
+SCHEDULE_END_STOP_MESSAGE = '운영 구간 종료: 회차 후 정지'
 #: 사람이 누른 「현재 회차 후 정지」
 GROUP_AFTER_CYCLE_STOP_MESSAGE = '현재 그룹 모션 회차 완료 후 정지'
 # 재생 목록 2번부터 짓기 · 1회차 시작에 바로 · 수정 목록 208
@@ -113,7 +113,7 @@ class GroupSession:
     def _mark_stop_wait(self, cycle_number: int) -> None:
         """회차 맞춤 · 제 회차를 끝냈고 회차 후 정지 대기 · 상태 · 단계는 그대로(장벽 보고가 그것으로 나간다) · 155"""
         self.manager._update_status({
-            'message': f'그룹 모션 {cycle_number}회차 완료 · 회차 후 정지 대기 · 다른 PC 회차 끝 기다림',
+            'message': f'그룹 모션 {cycle_number}회차 완료. 회차 후 정지 대기 중 (다른 PC 회차 종료 대기)',
             'group_stop_after_cycle': True,
         })
 
@@ -232,7 +232,7 @@ class GroupSession:
             merge = payload.get('merge') is True
             own_cycle = int(session.get('cycle_number') or 0)
             if merge and session.get('state') != 'motion_completed':
-                raise ValueError('회차 끝 장벽에 서 있지 않아 다시 합칠 수 없습니다 · 다음 회차 끝에 다시')
+                raise ValueError('회차 종료 대기 상태가 아니므로 재합류할 수 없습니다. 다음 회차 종료 시 재시도합니다')
             if not merge and session.get('state') != 'join_ready':
                 raise ValueError('복귀 준비가 끝나지 않아 합류를 확정할 수 없습니다')
             # 상태도 여기서 바꾼다 · 바로 뒤따르는 회차 초기화 명령이 작업
@@ -248,7 +248,7 @@ class GroupSession:
             self.manager._update_status({
                 'state': 'motion_completed',
                 'phase': 'group_join_committed',
-                'message': f'그룹 다시 합침 · {cycle_number + 1}회차부터 같이',
+                'message': f'그룹 재합류: {cycle_number + 1}회차부터 동시 재생',
                 'group_execution': True,
                 'execution_id': execution_id,
                 'cycle_count': cycle_number,
@@ -258,8 +258,8 @@ class GroupSession:
             return {
                 'success': True,
                 'message': (
-                    f'다시 합침 · 이 PC {own_cycle}회차 → 그룹 {cycle_number}회차 · '
-                    f'{cycle_number + 1}회차부터 같이'
+                    f'재합류: 현재 PC {own_cycle}회차 → 그룹 {cycle_number}회차, '
+                    f'{cycle_number + 1}회차부터 동시 재생'
                 ),
                 'execution_id': execution_id,
                 'cycle_number': cycle_number,
@@ -267,7 +267,7 @@ class GroupSession:
             }
         return {
             'success': True,
-            'message': f'복귀 · {cycle_number + 1}회차부터 합류',
+            'message': f'복귀: {cycle_number + 1}회차부터 합류',
             'execution_id': execution_id,
             'cycle_number': cycle_number,
             'status': self.manager.status(),
@@ -309,7 +309,7 @@ class GroupSession:
                         'message': '이미 예약된 그룹 회차 초기화 명령',
                         'status': self.manager.status(),
                     }
-                raise ValueError('다른 그룹 회차 초기화 명령이 이미 예약되었습니다')
+                raise ValueError('다른 그룹 회차 초기화 명령이 이미 예약 상태입니다')
             session.update({
                 'next_initialize_cycle_number': cycle_number,
                 'next_initialize_at': float(initialize_monotonic),
@@ -353,7 +353,7 @@ class GroupSession:
                         'message': '이미 예약된 그룹 모션 시작 명령',
                         'status': self.manager.status(),
                     }
-                raise ValueError('다른 그룹 모션 시작 명령이 이미 예약되었습니다')
+                raise ValueError('다른 그룹 모션 시작 명령이 이미 예약 상태입니다')
             session.update({
                 'next_cycle_number': cycle_number,
                 'next_start_at': float(start_monotonic),
@@ -401,7 +401,7 @@ class GroupSession:
             if int(held.get('cycle') or 0) == cycle_number:
                 return {
                     'success': True, 'duplicate': True,
-                    'message': f'이미 받은 그룹 모션 {cycle_number}회차 명령',
+                    'message': f'이미 수신한 그룹 모션 {cycle_number}회차 명령',
                     'status': self.manager.status(),
                 }
             state = str(session.get('state') or '')
@@ -415,7 +415,7 @@ class GroupSession:
             elif state == 'motion_completed':
                 expected = done + 1
             else:
-                raise ValueError('그룹 회차 명령을 받을 수 있는 상태가 아닙니다')
+                raise ValueError('그룹 회차 명령을 수신할 수 있는 상태가 아닙니다')
             if cycle_number != expected:
                 raise ValueError(f'그룹 모션 회차가 일치하지 않습니다: 예상 {expected}')
             session['timed'] = {
@@ -467,7 +467,7 @@ class GroupSession:
         if worker is not None and worker.is_alive():
             return {
                 'success': False,
-                'message': '이전 그룹 실행 정리 중입니다. 잠시 후 다시 시도하세요',
+                'message': '이전 그룹 실행 정리 중입니다. 잠시 후 재시도하세요',
                 'status': self.manager.status(),
             }
         # 회차 후 정지가 먼저 · 회차 맞춤은 장벽(`motion_completed`)에서 이 풀기를 기다린다 · 끝 문구는 회차 후 정지 · 154
@@ -478,14 +478,14 @@ class GroupSession:
                 'message': after_cycle_text,
                 'phase_finished_at': time.time(),
             })
-            return {'success': True, 'message': f'{after_cycle_text} · 세션 정리', 'status': self.manager.status()}
+            return {'success': True, 'message': f'{after_cycle_text}. 세션 정리', 'status': self.manager.status()}
         if finished:
             self.manager._update_status({
                 'state': 'completed',
                 'phase': 'completed',
                 'message': '그룹 실행 완료',
             })
-            return {'success': True, 'message': '그룹 실행 완료 · 세션 정리', 'status': self.manager.status()}
+            return {'success': True, 'message': '그룹 실행 완료, 세션 정리', 'status': self.manager.status()}
         self.manager._update_status({
             'state': 'stopped',
             'phase': 'stopped',
@@ -630,7 +630,7 @@ class GroupSession:
                 self.manager._update_status({
                     'state': 'armed',
                     'phase': 'group_armed',
-                    'message': '그룹 초기 위치 이동 완료 · 모션 시작 대기',
+                    'message': '그룹 초기 위치 이동 완료, 모션 시작 대기',
                     'group_execution': True,
                     'execution_id': execution_id,
                     'initialize_triggered_at': initialize_triggered_at,
@@ -1007,11 +1007,11 @@ class GroupSession:
                     'barrier_at': time.monotonic(),
                 })
             self.condition.notify_all()
-        self._log_warning(f'시간표 재생 · {cycle}회차 쉼 · {decision.skip}')
+        self._log_warning(f'시간표 재생 · {cycle}회차 생략: {decision.skip}')
         self.manager._update_status({
             'state': 'motion_completed',
             'phase': run_state.GROUP_CYCLE_SKIPPED_PHASE,
-            'message': f'그룹 모션 {cycle}회차 쉼 · {decision.skip}',
+            'message': f'그룹 모션 {cycle}회차 생략: {decision.skip}',
             'group_execution': True,
             'execution_id': execution_id,
             'cycle_count': cycle,
@@ -1042,7 +1042,7 @@ class GroupSession:
             )
             return 0.0
         self._log_warning(
-            f'시간표 재생 · {cycle}회차 {late:.2f} s 늦게 시작 · 초기 이동이 늦게 끝남 · 쉼 아님 · '
+            f'시간표 재생 · {cycle}회차 {late:.2f} s 늦게 시작 · 초기 이동이 늦게 끝남 · 생략 아님 · '
             '다른 PC 는 기다리지 않음 · 다음 회차는 다시 시간표 시각'
         )
         return late
@@ -1097,7 +1097,7 @@ class GroupSession:
         default = (
             str(result.get('message') or '')
             if result.get('state') == 'stopped'
-            else '각자 재생 · 현재 회차 완료 후 정지'
+            else '개별 재생: 현재 회차 완료 후 정지'
         )
         # 스케줄 구간 끝이면 그 문구 · 수정 목록 141
         self._finish(
@@ -1115,7 +1115,7 @@ class GroupSession:
         self.manager._update_status({
             'state': 'join_ready',
             'phase': 'group_join_ready',
-            'message': '그룹 복귀 · 다음 회차부터 합류 대기',
+            'message': '그룹 복귀: 다음 회차부터 합류 대기',
             'group_execution': True,
             'execution_id': execution_id,
             'group_cycle_number': join_cycle,
@@ -1143,7 +1143,7 @@ class GroupSession:
         self.manager._update_status({
             'state': 'motion_completed',
             'phase': 'group_join_committed',
-            'message': f'그룹 복귀 · {committed + 1}회차부터 합류',
+            'message': f'그룹 복귀: {committed + 1}회차부터 합류',
             'group_execution': True,
             'execution_id': execution_id,
             'cycle_count': committed,

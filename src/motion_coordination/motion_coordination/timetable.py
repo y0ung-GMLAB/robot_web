@@ -283,7 +283,7 @@ def _choose(config: TimetableConfig, now_unix: float, *, operation_mode: str) ->
     if period <= 0.0:
         return Choice(reason='회차 간격 모름', stopped_plan_id=halted)
     if not config.schedule_enabled:
-        return Choice(reason='마스터 스케줄 꺼짐', stopped_plan_id=halted)
+        return Choice(reason='마스터 스케줄 OFF', stopped_plan_id=halted)
     if mode != SCHEDULE_MODE:
         return Choice(reason='수동 모드', stopped_plan_id=halted)
     window = _window(config, now_unix)
@@ -300,11 +300,11 @@ def _choose(config: TimetableConfig, now_unix: float, *, operation_mode: str) ->
     # 정지를 다음 운영시간 이름으로 적지 않는 것은 적는 쪽(`stop_plan`)이 맡는다 · 수정 목록 192 · 201
     if stop.get('plan_id') and str(stop['plan_id']) == timeline.plan_id:
         if stop.get('mode') == STOP_NOW:
-            return Choice(reason='정지됨', stopped_plan_id=timeline.plan_id, window_end_unix=ends_at)
+            return Choice(reason='정지 상태', stopped_plan_id=timeline.plan_id, window_end_unix=ends_at)
         if stop.get('mode') == STOP_AFTER_CYCLE:
             last = _int(stop.get('last_cycle'))
             if last < timeline.first_cycle:
-                return Choice(reason='정지됨', stopped_plan_id=timeline.plan_id, window_end_unix=ends_at)
+                return Choice(reason='정지 상태', stopped_plan_id=timeline.plan_id, window_end_unix=ends_at)
             # 그 회차 다음 경계부터 시작 없음 · 도는 회차는 끝까지
             cut = timeline.start_of(last + 1) - 1e-3
             timeline = replace(timeline, end_unix=min(timeline.end_unix, cut) if timeline.end_unix else cut)

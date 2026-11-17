@@ -197,7 +197,7 @@ class RecordingService:
         if error:
             return {'success': False, 'message': error}
         if not resolved:
-            return {'success': False, 'message': '녹화할 축이 없습니다 · X-Touch 에서 SELECT 로 축을 고르세요'}
+            return {'success': False, 'message': '녹화할 축이 없습니다. X-Touch에서 SELECT로 축을 선택하세요'}
         now = self._clock()
         take = Take(t0=now + COUNTDOWN_SEC)
         for item in resolved:
@@ -227,8 +227,7 @@ class RecordingService:
                 missing = [motion_id for motion_id in ids if motion_id not in punch_rows]
                 if missing:
                     return [], [], (
-                        f'축 {axis} ({", ".join(missing)}) 속도·가속도 상한을 먼저 채우세요 · '
-                        '조인트 매핑의 최대 속도·가속도'
+                        f'축 {axis} ({", ".join(missing)})의 조인트 매핑 최대 속도·최대 가속을 먼저 입력하세요'
                     )
                 punch_ids.extend(ids)
                 continue
@@ -241,7 +240,7 @@ class RecordingService:
         try:
             base = load_base(base_file, self._read_motion(base_file))
         except Exception as exc:  # noqa: BLE001 · 화면에 그대로
-            return {'success': False, 'message': f'바탕 애니메이션을 읽을 수 없습니다 · {exc}'}
+            return {'success': False, 'message': f'바탕 애니메이션 읽기 실패: {exc}'}
         rows, _motors = self._mapping()
         if not any(motion_id in mapped_rows(rows) for motion_id in base.ids):
             return {'success': False, 'message': f'{base_file} 에 이 로봇의 조인트가 없습니다'}
@@ -278,7 +277,7 @@ class RecordingService:
                     self._base = None
                     self._owner = None
             return {'success': False, 'message': str(result.get('message') or '바탕 애니메이션 재생을 시작하지 못했습니다')}
-        return {'success': True, 'message': f'{base_file} 재생 · 초기 위치로 이동한 뒤 녹화', **self.status()}
+        return {'success': True, 'message': f'{base_file} 재생: 초기 위치 이동 후 녹화 시작', **self.status()}
 
     def add_axes(self, owner: Any, axes: Any) -> Dict[str, Any]:
         """녹화 중 SELECT 로 더한 축 · 그 전 프레임은 지금 위치 그대로(그동안 안 움직였다)
@@ -350,7 +349,7 @@ class RecordingService:
             self._owner = None
         if base is not None and self._stop_playback is not None:
             self._stop_playback()
-        return {'success': True, 'state': 'idle', 'message': '녹화를 취소했습니다 · 저장하지 않았습니다'}
+        return {'success': True, 'state': 'idle', 'message': '녹화를 취소했습니다. 저장하지 않았습니다'}
 
     def stop(self, owner: Any, end_wall: Optional[float] = None, *, reason: str = '') -> Dict[str, Any]:
         """정지 · 저장 · 카운트다운 중이면 저장할 것 없이 취소"""
@@ -370,8 +369,8 @@ class RecordingService:
             return self._stop_base(base, reason)
         end = self._clock() if end_wall is None else float(end_wall)
         if end < take.t0 + PERIOD_SEC:
-            return {'success': False, 'state': 'idle', 'message': '카운트다운 중에 멈췄습니다 · 저장할 녹화가 없습니다'}
-        kept = '연결이 끊겨 자동 저장' if wanted and not overwrite else ''
+            return {'success': False, 'state': 'idle', 'message': '카운트다운 중 정지했습니다. 저장할 녹화가 없습니다'}
+        kept = '연결 중단으로 자동 저장' if wanted and not overwrite else ''
         return self._remember(self._save(take.joint_series(end), name, reason, overwrite=overwrite, kept=kept))
 
     def _stop_base(self, base: BaseTake, reason: str) -> Dict[str, Any]:
@@ -395,7 +394,7 @@ class RecordingService:
                 return last
             self._sleep(0.05)
             waited += 0.05
-        return {'success': False, 'message': '저장 결과를 기다리다 시간이 지났습니다 · 애니메이션 목록을 확인하세요'}
+        return {'success': False, 'message': '저장 결과 대기 시간 초과. 애니메이션 목록을 확인하세요'}
 
     def _finish_base(self, expected: BaseTake, reason: str) -> Optional[Dict[str, Any]]:
         """한 번만 · 먼저 잡은 쪽이 저장 · 못 잡으면 None"""
@@ -408,20 +407,20 @@ class RecordingService:
         try:
             base = expected
             if base.frame_count() == 0 and base.error:
-                result = {'success': False, 'state': 'idle', 'message': f'바탕 재생을 시작하지 못했습니다 · {base.error}'}
+                result = {'success': False, 'state': 'idle', 'message': f'바탕 재생 시작 실패: {base.error}'}
             elif base.frame_count() == 0:
-                result = {'success': False, 'state': 'idle', 'message': '초기 위치 이동 중에 멈췄습니다 · 저장할 녹화가 없습니다'}
+                result = {'success': False, 'state': 'idle', 'message': '초기 위치 이동 중 정지했습니다. 저장할 녹화가 없습니다'}
             elif base.overrun:
-                problem = f'원본으로 잇기가 10초 안에 상한을 못 맞췄습니다 · {", ".join(sorted(base.overrun))}'
-                self._record_event('xtouch_record_refused', f'녹화 저장 거절 · {problem}', {'name': name})
-                result = {'success': False, 'state': 'idle', 'message': f'저장 안 함 · {problem}'}
+                problem = f'원본 동작 복귀가 10초 이내에 상한을 충족하지 못했습니다: {", ".join(sorted(base.overrun))}'
+                self._record_event('xtouch_record_refused', f'녹화 저장 거부: {problem}', {'name': name})
+                result = {'success': False, 'state': 'idle', 'message': f'저장하지 않음: {problem}'}
             else:
                 joints, _count = base.compose()
                 # 덮어쓰기는 바탕 끝까지 간 것만 · 중간에 멈춘 것으로 덮으면 바탕이 잘린다 · 끊김 자동 저장도 안 함
                 full = base.frame_count() >= base.base.count
                 overwrite = wanted and full and reason in ('재생 끝', '정지')
                 kept = '' if overwrite or not wanted else (
-                    '바탕 끝까지 가지 않음' if not full else '연결이 끊겨 자동 저장'
+                    '바탕 끝까지 미재생' if not full else '연결 중단으로 자동 저장'
                 )
                 result = self._save(
                     joints, name, reason, start=base.base.start, base_file=base.base.file_id,
@@ -466,8 +465,7 @@ class RecordingService:
             for row in found:
                 if not joint_mapping.rate_limits_set(row):
                     return [], (
-                        f'축 {axis} ({row.get("motion_id")}) 속도·가속도 상한을 먼저 채우세요 · '
-                        '조인트 매핑의 최대 속도·가속도'
+                        f'축 {axis} ({row.get("motion_id")})의 조인트 매핑 최대 속도·최대 가속을 먼저 입력하세요'
                     )
             if axis not in positions or not math.isfinite(positions[axis]):
                 return [], f'{axis}번 모터의 현재 위치를 읽을 수 없습니다'
@@ -483,8 +481,8 @@ class RecordingService:
         frames = len(joints[0][2]) if joints else 0
         problem = rate_problem(joints)
         if problem:
-            self._record_event('xtouch_record_refused', f'녹화 저장 거절 · {problem}', {'name': name})
-            return {'success': False, 'state': 'idle', 'message': f'저장 안 함 · {problem}'}
+            self._record_event('xtouch_record_refused', f'녹화 저장 거부: {problem}', {'name': name})
+            return {'success': False, 'state': 'idle', 'message': f'저장하지 않음: {problem}'}
         repository = self.bridge.project_repository
         backup = ''
         try:
@@ -500,19 +498,19 @@ class RecordingService:
                     name,
                 )
         except Exception as exc:  # noqa: BLE001 · 화면에 그대로
-            self._record_event('xtouch_record_failed', f'녹화 저장 실패 · {exc}', {'name': name})
-            return {'success': False, 'state': 'idle', 'message': f'저장 실패 · {exc}'}
+            self._record_event('xtouch_record_failed', f'녹화 저장 실패: {exc}', {'name': name})
+            return {'success': False, 'state': 'idle', 'message': f'저장 실패: {exc}'}
         duration = frames * PERIOD_SEC
         ids = [joint[0] for joint in joints]
-        content = f'X-Touch 녹화 저장 · {file_name} · {duration:.2f} s · {", ".join(ids)}'
+        content = f'X-Touch 녹화 저장: {file_name} ({duration:.2f}초, {", ".join(ids)})'
         if base_file:
-            content = f'{content} · 바탕 {base_file}'
+            content = f'{content}, 바탕 {base_file}'
         if backup:
-            content = f'{content} · 덮어씀(전 파일은 휴지통)'
+            content = f'{content}, 덮어쓰기 (기존 파일은 휴지통)'
         if kept:
-            content = f'{content} · 덮어쓰지 않음({kept})'
+            content = f'{content}, 덮어쓰기 안 함 ({kept})'
         if reason:
-            content = f'{content} · {reason}'
+            content = f'{content}. {reason}'
         self._record_event('xtouch_record_saved', content, {
             'file': file_name, 'frames': frames, 'motion_ids': ids, 'reason': reason, 'base_file': base_file,
             'overwritten': bool(backup), 'backup': backup,
@@ -522,7 +520,7 @@ class RecordingService:
             'duration_sec': duration, 'motion_ids': ids, 'base_file': base_file, 'overwritten': bool(backup),
             'message': (
                 f'{"덮어썼습니다(전 파일은 휴지통)" if backup else "저장했습니다"} · {file_name} · {duration:.2f} s'
-                + (f' · 덮어쓰지 않고 새 이름으로({kept})' if kept else '')
+                + (f', 덮어쓰기 대신 새 이름으로 저장 ({kept})' if kept else '')
                 + (f' · {reason}' if reason else '')
             ),
         }
@@ -536,7 +534,7 @@ class RecordingService:
             self.last_event_error = str(exc)
 
 
-BUSY_MESSAGE = '이미 녹화 중입니다 · 정지한 뒤 다시 시작하세요'
+BUSY_MESSAGE = '이미 녹화 중입니다. 정지 후 재시작하세요'
 
 
 def _axis_list(axes: Any) -> List[int]:

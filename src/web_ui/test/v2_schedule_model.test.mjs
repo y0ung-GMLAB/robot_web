@@ -98,7 +98,7 @@ test('목록 두 묶음 · 다가올 날짜 순 · 지난 날짜는 아래 · �
   assert.deepEqual(groups.regular.map((i) => i.schedule_id), ['wed', 'd']);
   assert.equal(datedNote(old, [old], new Date(2026, 10, 17)), '지난 날짜');
   const clash = { ...special, run_date: '2026-11-26' };
-  assert.equal(datedNote(clash, [clash, closed], new Date(2026, 10, 17)), '같은 날짜의 휴무일이 우선 적용됨');
+  assert.equal(datedNote(clash, [clash, closed], new Date(2026, 10, 17)), '같은 날짜의 휴무일 우선 적용');
   assert.equal(datedNote(closed, [closed], new Date(2026, 10, 26, 10)), '오늘 적용');
   assert.equal(datedNote(wed, [wed], new Date(2026, 10, 17)), '');
   assert.equal(dateText('2026-11-18'), '2026-11-18 (수)');
@@ -111,11 +111,11 @@ test('편집 · 휴무일은 시각 없이 저장 · 같은 날짜 겹침 막음
     schedule_name: '휴무일', start_time: null, stop_mode: 'time', stop_time: null, duration_sec: null,
     repeat_type: 'holiday', repeat_days: ['MON', 'TUE', 'WED', 'THU', 'FRI', 'SAT', 'SUN'], run_date: '2026-11-26', enabled: true,
   });
-  assert.equal(draftProblem(draft, [closed]), '해당 날짜는 이미 휴무일로 지정되어 있습니다');
-  assert.equal(draftProblem(draft, [{ ...special, run_date: '2026-11-26' }]), '해당 날짜에 특정일 운영이 지정되어 있습니다');
+  assert.equal(draftProblem(draft, [closed]), '해당 날짜는 이미 휴무일입니다');
+  assert.equal(draftProblem(draft, [{ ...special, run_date: '2026-11-26' }]), '해당 날짜에 특정일 운영이 있습니다');
   assert.equal(draftProblem({ ...draftFrom(closed), name: '추수감사절' }, [closed]), '', '자기 자신은 겹침 아님');
   const date = { ...draftFrom(special), kind: 'date', date: '2026-11-26' };
-  assert.equal(draftProblem(date, [closed]), '해당 날짜는 이미 휴무일로 지정되어 있습니다');
+  assert.equal(draftProblem(date, [closed]), '해당 날짜는 이미 휴무일입니다');
   assert.equal(draftPayload({ ...draftFrom(special), name: '' }).repeat_type, 'once');
   assert.equal(draftPayload({ ...draftFrom(special), name: '' }).schedule_name, '특정일 운영');
   assert.equal(draftPayload({ ...draftFrom(special) }).run_date, '2026-11-18');

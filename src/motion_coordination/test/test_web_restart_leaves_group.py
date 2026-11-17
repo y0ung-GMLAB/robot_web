@@ -102,7 +102,7 @@ def test_the_last_participant_leaving_stops_the_group_without_a_latch():
     assert node._coordination_error == {}
     failure = node.snapshot()['last_start_failure']
     assert failure['code'] == 'GROUP_PARTICIPANT_LEFT'
-    assert failure['message'].startswith('그룹 실행 정지 · 남은 PC 없음 · 잠그지 않음 · pc-b(')
+    assert failure['message'].startswith('그룹 실행 정지: 잔여 PC 없음 (잠금 없음) · pc-b(')
     commands = [(m.command, tuple(m.participant_ids)) for m in node._command_pub.messages]
     assert commands == [('cancel_before_start', ('pc-a', 'pc-b'))]
 
@@ -191,7 +191,7 @@ def test_leaving_with_nothing_running_does_nothing():
 
     assert result == {
         'success': True, 'left': False, 'still_coordinating': False,
-        'message': '웹 다시 시작 · 도는 그룹 실행 없음',
+        'message': '웹 재시작: 진행 중인 그룹 실행 없음',
     }
     assert node._event_pub.messages == []
 

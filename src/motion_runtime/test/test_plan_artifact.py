@@ -139,7 +139,7 @@ def test_a_speed_refusal_is_the_same_through_the_artifact(tmp_path):
     with pytest.raises(ValueError) as again:
         _project_manager(project_dir, mapping)._plan_builder.build(_check_payload())
     assert str(first.value) == str(again.value)
-    assert '속도·가속도 상한' in str(first.value) and ' 속도 ' in str(first.value)
+    assert '최대 속도·최대 가속' in str(first.value) and ' 속도 ' in str(first.value)
     assert 'samples' in _kinds(project_dir)
 
 

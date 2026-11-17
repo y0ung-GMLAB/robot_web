@@ -177,7 +177,7 @@ export function draftProblems(rows) {
     const at = `${index + 1}번 줄`;
     const name = String(row.motion_id || '').trim();
     if (!name) problems.push(`${at}: 조인트 이름이 비어 있습니다${row.motor_axis !== null ? ` (${row.motor_axis}번 모터)` : ''}`);
-    else if (names.has(name)) problems.push(`${at}: 「${name}」 이름이 ${names.get(name) + 1}번 줄과 중복됩니다`);
+    else if (names.has(name)) problems.push(`${at}: 「${name}」 이름이 ${names.get(name) + 1}번 줄과 중복`);
     else names.set(name, index);
     if (!(Number(row.gear_ratio) > 0)) problems.push(`${at}: 감속·기어비는 0보다 커야 합니다`);
     if (!Number(row.scale)) problems.push(`${at}: 배율(scale)이 0입니다. 매핑 파일을 확인하세요`);
@@ -191,7 +191,7 @@ export function draftProblems(rows) {
       else if (targets.has(target)) problems.push(`${at}: ${targets.get(target) + 1}번 줄과 같은 모터를 사용합니다`);
       else targets.set(target, index);
       const fader = faderNumber(row.xtouch_fader);
-      if (fader !== null && faders.has(fader)) problems.push(`${at}: X-Touch 페이더 ${fader}번이 ${faders.get(fader) + 1}번 줄과 중복됩니다`);
+      if (fader !== null && faders.has(fader)) problems.push(`${at}: X-Touch 페이더 ${fader}번이 ${faders.get(fader) + 1}번 줄과 중복`);
       else if (fader !== null) faders.set(fader, index);
     }
   });
@@ -267,7 +267,7 @@ function fmt(value) {
 
 /** 서버 충돌 문구 · 다른 화면에서 먼저 바꿈 (§6-243) */
 export function isRevisionConflict(message) {
-  return /화면을 불러온 뒤 변경됐습니다|버전 정보가 없습니다/.test(String(message || ''));
+  return /화면을 불러온 뒤 변경됐습니다|변경을 감지해 저장을 중단|버전 정보가 없습니다/.test(String(message || ''));
 }
 
 /**

@@ -547,7 +547,7 @@ def test_alarm_on_execution_member_blocks_next_cycle():
         alarm_grade=2,
         received_monotonic=time.monotonic(),
     ))
-    assert node._execution_unhealthy_members() == {'pc-b': 'Servo 알람 2등급'}
+    assert node._execution_unhealthy_members() == {'pc-b': '서보 알람 2등급'}
 
 
 def test_a_slow_heartbeat_alone_does_not_drop_a_pc_at_the_cycle_boundary():
@@ -991,9 +991,9 @@ def test_start_leaves_out_broken_pcs_and_names_the_reason():
     assert result['participants'] == ['pc-a', 'pc-b']
     assert result['excluded'] == {
         'pc-c': '통신 단절',
-        'pc-d': 'Servo 알람 2등급',
+        'pc-d': '서보 알람 2등급',
         'pc-e': '끔 모드',
-        'pc-f': '버전 불일치 · 그 PC 에서 bash scripts/install.sh',
+        'pc-f': '버전 불일치 (해당 PC에서 bash scripts/install.sh 실행)',
     }
     assert node._execution.excluded == result['excluded']
     assert node.snapshot()['execution']['excluded'] == result['excluded']
@@ -1165,7 +1165,7 @@ def test_local_alarm_blocks_new_group_execution_before_prepare():
     node._local_status = {'safety_status': {'servo_alarm_grade': 3}}
     node._execution = GroupExecution()
 
-    with pytest.raises(ValueError, match='Servo 알람'):
+    with pytest.raises(ValueError, match='서보 알람'):
         node._start_group_execution()
 
 
@@ -1499,9 +1499,9 @@ def test_says_so_when_the_lan_arrives_after_the_service(monkeypatch):
     _drift(node, monkeypatch, ('172.16.21.10',))
 
     assert node._network_stale['active'] is True
-    assert node._network_stale['reason'] == '랜이 이 서비스보다 늦게 올라왔습니다'
+    assert node._network_stale['reason'] == '서비스 기동 후 랜 연결 활성화'
     assert '172.16.21.10' in node._network_stale['message']
-    assert '다시' in node._network_stale['message']  # 무엇을 해야 하는지까지 말한다
+    assert '재시작' in node._network_stale['message']  # 무엇을 해야 하는지까지 말한다
 
 
 def test_says_so_when_the_address_changes_after_boot(monkeypatch):
@@ -1511,7 +1511,7 @@ def test_says_so_when_the_address_changes_after_boot(monkeypatch):
 
     _drift(node, monkeypatch, ('172.16.21.77',))
 
-    assert node._network_stale['reason'] == '랜 주소가 기동 뒤에 바뀌었습니다'
+    assert node._network_stale['reason'] == '기동 후 랜 주소 변경 감지'
     assert node._network_stale['boot'] == ['172.16.21.10']
     assert node._network_stale['now'] == ['172.16.21.77']
 
@@ -1747,7 +1747,7 @@ def test_left_out_pcs_are_written_to_the_operation_log_not_the_alarm_table(monke
     assert note['command'] == 'group_note'
     assert note['event_type'] == 'group_excluded'
     assert note['excluded'] == {'pc-c': '미접속'}
-    assert '그룹 실행 시작 · 뺀 PC pc-c(미접속) · 참가 pc-a, pc-b' == note['message']
+    assert '그룹 실행 시작: 제외 PC pc-c(미접속) · 참가 pc-a, pc-b' == note['message']
     assert node._alarm_pub.messages == []
 
 
@@ -1801,19 +1801,19 @@ def test_cycle_failure_drops_only_that_pc_without_locking():
 
 
 def test_a_runtime_error_on_one_pc_no_longer_locks_the_group():
-    """실물 NY 11-07 08:22 · 「통신이 끊긴 모터가 있어 재생을 멈춥니다」 · 그 PC 만 빠진다 · 178"""
+    """실물 NY 11-07 08:22 · 「통신이 중단된 모터가 있어 재생을 정지합니다」 · 그 PC 만 빠진다 · 178"""
     node = _node()
     execution_id, stops, errors = _running_group(node)
 
     node._event_callback(GroupEvent(
         group_id='stage-a', execution_id=execution_id, pc_id='pc-b', event='error',
-        success=False, message='그룹 모션 실행 실패: 통신이 끊긴 모터가 있어 재생을 멈춥니다',
+        success=False, message='그룹 모션 실행 실패: 통신이 중단된 모터가 있어 재생을 정지합니다',
     ))
 
     assert stops == []
     assert errors == []
     assert node._execution.participants == ('pc-a',)
-    assert '통신이 끊긴 모터' in node._execution.excluded['pc-b']
+    assert '통신이 중단된 모터' in node._execution.excluded['pc-b']
 
 
 def test_repeated_failures_never_lock_the_group():

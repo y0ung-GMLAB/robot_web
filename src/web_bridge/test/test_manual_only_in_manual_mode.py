@@ -46,7 +46,7 @@ def test_schedule_mode_refuses_with_a_way_out(tmp_path):
 
 def test_off_mode_still_refuses(tmp_path):
     reason = run_mode_gate.manual_control_block_reason(_bridge(tmp_path, 'off'))
-    assert '오프 모드' in reason
+    assert '끔 모드' in reason
 
 
 def test_no_project_does_not_block(tmp_path):
@@ -85,8 +85,8 @@ def test_manual_entry_points_use_the_manual_gate_and_servo_does_not():
     body = manual[start:start + 500]
     # 운전 모드 문 + 재생 상태(초기 위치 대기 · 재생 중) 문 · 2026-10-12
     assert 'run_mode_gate.manual_motion_block_reason(self.bridge)' in body
-    for entry in ('def ac_servo_jog', 'def dynamixel_jog',
-                  'def ac_servo_action', 'def dynamixel_action'):
+    # 조그 길(ac_servo_jog · dynamixel_jog)은 이전 UI 와 함께 지웠다 · 2026-11-17
+    for entry in ('def ac_servo_action', 'def dynamixel_action'):
         start = manual.index(entry)
         # 축을 넘긴다 · 조인트 범위 확인 문도 같이 지난다 · 수정 목록 97
         assert '_off_mode_block(axis)' in manual[start:start + 400], entry

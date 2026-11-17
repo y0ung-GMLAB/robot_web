@@ -45,7 +45,7 @@ PARK_MOVE_SEC = 10.0
 PARK_WAIT_SEC = PARK_MOVE_SEC + 40.0
 SERVO_ON_WAIT_SEC = 5.0
 #: 운영시간 첫 회차 준비 · 따로 스레드가 꺼진 서보를 켜는 중 · 연동 노드는 이 답을 받으면 쉬지 않고 다시 묻는다 · 수정 목록 217
-WAKING_MESSAGE = '운영시간 시작 · 꺼진 서보를 켜는 중'
+WAKING_MESSAGE = '운영 시간 시작: 서보 ON 진행 중'
 POLL_SEC = 0.5
 # 191 ⑤ 의 「정지 처리 중」 거절 → 1 s 간격 4번 다시(`STOP_SETTLE_RETRY_SEC` · `STOP_SETTLE_RETRIES`)는 없앴다 ·
 # 감독이 정지 뒤 0.5 s 동안 모든 명령을 막던 것을 정지 표지로 바꿨다 · 정지 직후의 기준점 이동은 새 표지로
@@ -140,8 +140,8 @@ def mode_skip(run_mode: Optional[str]) -> Optional[Tuple[str, str]]:
         return None
     text = _MODE_TEXT.get(run_mode)
     if not text:
-        return 'failed', '운전 모드를 확인할 수 없어 주차하지 않고 그대로 둡니다'
-    return 'skipped', f'운영 종료 · 이 PC 는 {text} 모드라 주차하지 않고 그대로 둡니다'
+        return 'failed', '운전 모드 확인 불가로 기준점 이동 없이 현재 상태를 유지합니다'
+    return 'skipped', f'운영 종료: 현재 PC는 {text} 모드이므로 기준점 이동 없이 현재 상태를 유지합니다'
 
 
 def idle_park_skip(
@@ -155,18 +155,18 @@ def idle_park_skip(
     'failed' 는 실패로 세어 1분 뒤 다시 본다 · 수정 목록 131
     """
     if alarm_grade > 0:
-        return 'failed', f'서보 알람 {alarm_grade}등급이라 주차하지 않았습니다'
+        return 'failed', f'서보 알람 {alarm_grade}등급으로 기준점 이동을 생략했습니다'
     targets = [
         motor for motor in motors
         if motor.get('controller_index') is not None and flags.get(int(motor['controller_index']), True)
     ]
     if not targets:
-        return 'skipped', '운영 종료 · 끝나면 서보를 끌 모터가 없어(모터 설정) 주차하지 않습니다'
+        return 'skipped', '운영 종료: 「운영 시간 종료 시 서보 끄기」 대상 모터가 없어 기준점 이동을 생략합니다'
     off = sorted(int(motor['controller_index']) for motor in targets if motor.get('servo_on') is False)
     if len(off) == len(targets):
-        return 'skipped', '운영 종료 · 서보가 이미 꺼져 있어 그대로 둡니다'
+        return 'skipped', '운영 종료: 서보 OFF 상태이므로 현재 상태를 유지합니다'
     if off:
-        return 'failed', f'서보가 꺼진 모터가 있어 주차하지 않았습니다 · {", ".join(map(str, off))}번'
+        return 'failed', f'서보 OFF 모터({", ".join(map(str, off))}번)가 있어 기준점 이동을 생략했습니다'
     return None
 
 
@@ -187,13 +187,13 @@ def retry_cancel_reason(
     `run_mode` None = 모드를 안 읽는 배선 · 빈 글(못 읽음)은 그만두지 않는다(시도가 다시 거른다).
     """
     if start_requested:
-        return '시작 요청이 들어옴'
+        return '시작 요청 수신'
     if run_mode in _MODE_TEXT:
-        return f'{_MODE_TEXT[run_mode]} 모드로 바뀜'
+        return f'{_MODE_TEXT[run_mode]} 모드로 전환'
     if running:
-        return '재생이 돌고 있음'
+        return '재생 진행 중'
     if in_window:
-        return '운영 구간이 다시 시작됨'
+        return '운영 구간 재시작'
     return ''
 
 
@@ -212,11 +212,11 @@ def give_up_step(
     if cancel:
         return GIVE_UP_CANCEL, cancel
     if run_mode is not None and run_mode != 'schedule':
-        return GIVE_UP_KEEP, '운전 모드를 확인할 수 없어 서보를 끄지 않음'
+        return GIVE_UP_KEEP, '운전 모드 확인 불가로 서보 유지'
     if int(alarm_grade or 0) > 0:
-        return GIVE_UP_KEEP, f'서보 알람 {int(alarm_grade)}등급이라 서보 끄기는 알람 처리에 맡김'
+        return GIVE_UP_KEEP, f'서보 알람 {int(alarm_grade)}등급으로 서보 OFF는 알람 처리에 위임'
     if int(servo_on_targets) <= 0:
-        return GIVE_UP_NOTHING, '끌 서보가 없음(이미 꺼짐 · 모터 설정)'
+        return GIVE_UP_NOTHING, 'OFF 대상 서보 없음 (이미 OFF 또는 모터 설정 제외)'
     return GIVE_UP_SERVO_OFF, ''
 
 
@@ -249,25 +249,25 @@ def end_notice(
     if state == 'retry_wait':
         return {
             'tone': 'warn',
-            'title': f'구간 끝 주차 실패 · {attempts}/{max_attempts}회',
+            'title': f'운영 종료 기준점 이동 실패 ({attempts}/{max_attempts}회)',
             'detail': (
-                f'{reason} · 약 1분 뒤 다시 시도합니다. {max_attempts}번 모두 안 되면 '
-                '그 자리에서 서보를 끕니다(모터 설정 「끝나면 서보 끄기」 켠 모터만).'
+                f'{reason}. 약 1분 후 재시도합니다. {max_attempts}회 모두 실패 시 '
+                '현재 위치에서 서보를 끕니다(「운영 시간 종료 시 서보 끄기」 선택 모터만).'
             ),
         }
     if state == 'gave_up':
         if bad:
             return {
                 'tone': 'bad',
-                'title': '구간 끝 주차 못 함 · 서보가 켜진 채입니다',
-                'detail': f'{detail} · {reason}' if detail else reason,
+                'title': '운영 종료 기준점 이동 불가: 서보 ON 유지',
+                'detail': f'{detail}: {reason}' if detail else reason,
             }
         return {
             'tone': 'warn',
-            'title': '구간 끝 주차 못 하고 그 자리에서 서보 끔',
+            'title': '운영 종료 기준점 이동 불가: 현재 위치에서 서보 OFF',
             'detail': (
-                f'{reason} · 기준점이 아닌 자세에서 껐습니다. 다음 시작 때 다시 켭니다. '
-                '머리를 단 로봇은 처짐을 확인하세요.'
+                f'{reason}. 기준점이 아닌 위치에서 서보를 껐습니다. 다음 운영 시작 시 서보를 켭니다. '
+                '헤드가 있는 로봇은 처짐 여부를 확인하세요.'
             ),
         }
     return None
@@ -442,7 +442,7 @@ class ScheduleEndService:
                 return dict(self._status)
         action = self.end_action()
         if action == HOLD:
-            self._settle('skipped', '운영 종료 · 설정에 따라 서보를 켠 채 마지막 자세에서 정지했습니다')
+            self._settle('skipped', '운영 종료: 설정에 따라 서보 ON 상태로 마지막 자세에서 정지했습니다')
             return self.status()
         skip = self._skip()
         if skip and skip[0] == 'skipped':
@@ -455,7 +455,7 @@ class ScheduleEndService:
             self._note_failure(1, skip[1])
             self._spawn(1, skip[1])
             return self.status()
-        self._set('waiting_cycle', '운영 종료 · 현재 애니메이션을 마무리하는 중')
+        self._set('waiting_cycle', '운영 종료: 현재 애니메이션 마무리 중')
         self._spawn(0, '')
         return self.status()
 
@@ -480,7 +480,7 @@ class ScheduleEndService:
         step = resume_step(record, time.time())
         if step == RESUME_RETRY:
             attempts = int(record.get('attempts') or 0)
-            reason = str(record.get('reason') or '') or '브리지가 다시 시작되어 결과를 모름'
+            reason = str(record.get('reason') or '') or '웹 서비스 재시작으로 결과 확인 불가'
             if attempts <= 0:
                 attempts = 1
             self._start_requested = False
@@ -489,12 +489,12 @@ class ScheduleEndService:
             self._spawn(attempts, reason, wait_first=True)
         elif step == RESUME_NOTICE:
             self._set(
-                'gave_up', str(record.get('message') or '운영 종료 · 구간 끝 주차 못 함'),
+                'gave_up', str(record.get('message') or '운영 종료: 기준점 이동 불가'),
                 notice=record.get('notice') if isinstance(record.get('notice'), dict) else None,
             )
         elif step == RESUME_DROP:
             self._write_retry(None)
-            self._event('schedule_end_retry_dropped', '구간 끝 주차 다시 시도 기록이 오래되어 버림', record or {})
+            self._event('schedule_end_retry_dropped', '기준점 이동 재시도 기록 만료로 폐기', record or {})
 
     def _spawn(self, attempts: int, error: str, *, wait_first: bool = False) -> None:
         with self._lock:
@@ -574,16 +574,16 @@ class ScheduleEndService:
         except Exception as exc:  # noqa: BLE001 · 실패는 기록하고 홀드
             message = f'예기치 않은 오류: {exc}'
             self._set(
-                'failed', f'운영 종료 · 서보를 끄지 않고 그대로 두었습니다 · {message}',
-                notice=end_notice('gave_up', reason=message, detail='구간 끝 주차 중 오류', bad=True),
+                'failed', f'운영 종료: 서보를 끄지 않고 현재 상태를 유지했습니다 ({message})',
+                notice=end_notice('gave_up', reason=message, detail='기준점 이동 중 오류', bad=True),
             )
-            self._event('schedule_end_park_failed', f'구간 끝 주차 실패 · {message}', {})
+            self._event('schedule_end_park_failed', f'기준점 이동 실패: {message}', {})
 
     def _attempt(self, check_skip: bool) -> Tuple[str, str]:
         """한 번 해 본다 · ('done' | 'skipped' | 'failed', 글)"""
         if check_skip:
             if self._start_requested:
-                return 'skipped', '운영 종료 · 시작 요청이 들어와 주차하지 않음'
+                return 'skipped', '운영 종료: 시작 요청 수신으로 기준점 이동 생략'
             skip = self._skip()
             if skip:
                 return skip
@@ -594,17 +594,17 @@ class ScheduleEndService:
 
     def _note_failure(self, attempts: int, reason: str, *, log_event: bool = True) -> None:
         last = after_failure(attempts) == GIVE_UP
-        tail = '' if last else ' · 약 1분 뒤 다시'
+        tail = '' if last else ', 약 1분 후 재시도'
         self._set(
             'retry_wait',
-            f'운영 종료 · 구간 끝 주차 실패 · {reason} ({attempts}/{PARK_ATTEMPTS}회{tail})',
+            f'운영 종료: 기준점 이동 실패 ({reason}, {attempts}/{PARK_ATTEMPTS}회{tail})',
             attempts=attempts, reason=reason,
             notice=end_notice('retry_wait', attempts=attempts, reason=reason),
         )
         if log_event:
             self._event(
                 'schedule_end_park_failed',
-                f'구간 끝 주차 실패 · {reason} ({attempts}/{PARK_ATTEMPTS}회{tail})',
+                f'기준점 이동 실패 ({reason}, {attempts}/{PARK_ATTEMPTS}회{tail})',
                 {'attempts': attempts, 'max_attempts': PARK_ATTEMPTS, 'reason': reason},
             )
 
@@ -621,8 +621,8 @@ class ScheduleEndService:
     def _cancel(self, why: str) -> None:
         """사람이나 스케줄이 로봇을 맡았다 · 다시 시도 · 알림 모두 그만"""
         self._write_retry(None)
-        self._set('cancelled', f'운영 종료 · 주차 다시 시도 그만둠 · {why}')
-        self._event('schedule_end_retry_cancelled', f'구간 끝 주차 다시 시도 그만둠 · {why}', {'reason': why})
+        self._set('cancelled', f'운영 종료: 기준점 이동 재시도 중단 ({why})')
+        self._event('schedule_end_retry_cancelled', f'기준점 이동 재시도 중단 ({why})', {'reason': why})
 
     def _resolved(self, attempts: int, state: str, message: str) -> None:
         self._write_retry(None)
@@ -630,11 +630,11 @@ class ScheduleEndService:
             # 다시 볼 때 할 일이 없어졌다(서보가 이미 꺼짐 · 모드 바뀜 …) · 글만 남긴다
             self._set('skipped', message)
             if attempts > 1:
-                self._event('schedule_end_retry_cancelled', f'구간 끝 주차 다시 시도 그만둠 · {message}', {})
+                self._event('schedule_end_retry_cancelled', f'기준점 이동 재시도 중단 ({message})', {})
             return
         if attempts > 1:
             self._event(
-                'schedule_end_parked', f'구간 끝 주차 성공 ({attempts}번째 시도) · {message}',
+                'schedule_end_parked', f'기준점 이동 성공 ({attempts}회차 시도): {message}',
                 {'attempts': attempts},
             )
 
@@ -657,33 +657,33 @@ class ScheduleEndService:
             return
         if step == GIVE_UP_NOTHING:
             self._write_retry(None)
-            self._set('skipped', f'운영 종료 · 주차는 못 했지만 {why} · {reason}')
-            self._event('schedule_end_gave_up', f'구간 끝 주차 못 함 · {why} · {reason}', {'reason': reason})
+            self._set('skipped', f'운영 종료: 기준점 이동 불가, {why} ({reason})')
+            self._event('schedule_end_gave_up', f'기준점 이동 불가: {why} ({reason})', {'reason': reason})
             return
         if step == GIVE_UP_KEEP:
             notice = end_notice('gave_up', reason=reason, detail=why, bad=True)
-            message = f'운영 종료 · 주차 못 하고 서보 켠 채 둠 · {why} · {reason}'
+            message = f'운영 종료: 기준점 이동 불가, 서보 ON 유지 ({why}, {reason})'
             self._finish_give_up(message, notice, attempts, reason)
-            self._event('schedule_end_gave_up', f'주차 못 하고 서보 켠 채 둠 · {why} · {reason}', {'reason': reason})
+            self._event('schedule_end_gave_up', f'기준점 이동 불가, 서보 ON 유지 ({why}, {reason})', {'reason': reason})
             return
-        self._set('powering_off', '운영 종료 · 주차 못 함 · 그 자리에서 서보 끄는 중')
+        self._set('powering_off', '운영 종료: 기준점 이동 불가, 현재 위치에서 서보 OFF 진행 중')
         done, failures, _kept = self._power_off_flagged(only=on_targets)
         if failures:
             notice = end_notice(
                 'gave_up', reason=reason,
-                detail=f'그 자리에서 서보 끄기 실패 {", ".join(map(str, failures))}번', bad=True,
+                detail=f'현재 위치에서 서보 OFF 실패 {", ".join(map(str, failures))}번', bad=True,
             )
         else:
             notice = end_notice('gave_up', reason=reason)
         message = (
-            '운영 종료 · 주차 못 하고 그 자리에서 서보 끔'
+            '운영 종료: 기준점 이동 불가, 현재 위치에서 서보 OFF'
             + _axes_text('AC', done['ac_servo']) + _axes_text('다이나믹셀', done['dynamixel'])
-            + (f' · 끄기 실패 {", ".join(map(str, failures))}번' if failures else '')
+            + (f' · OFF 실패 {", ".join(map(str, failures))}번' if failures else '')
             + f' · {reason}'
         )
         self._finish_give_up(message, notice, attempts, reason, powered_off=done)
         self._event(
-            'schedule_end_servo_off_in_place', f'주차 못 하고 그 자리에서 서보 끔 · {reason}',
+            'schedule_end_servo_off_in_place', f'기준점 이동 불가, 현재 위치에서 서보 OFF ({reason})',
             {'reason': reason, 'powered_off': done, 'failures': failures, 'attempts': attempts},
         )
 
@@ -727,7 +727,7 @@ class ScheduleEndService:
             return '회차 종료 대기 시간 초과'
         # 그룹 장벽 · 진행 PC 가 모든 PC 회차 끝을 보고 풀 때까지 · 실행 상태 목록 `run_state.GROUP_ACTIVE_STATES` · 155
         if not self._wait(lambda: not self.bridge.coordination_execution_blocker(), GROUP_RELEASE_WAIT_SEC):
-            return '그룹 재생이 해제되지 않음'
+            return '그룹 재생 미해제'
         # 앞 실행 스레드가 끝날 때까지 · 상한은 고장 감지(스레드가 안 끝남)일 뿐 · 보통 바로 끝난다 · 200
         last: Dict[str, Any] = {}
 
@@ -736,14 +736,14 @@ class ScheduleEndService:
             return run_task_ended(last['status'])
 
         if not self._wait(task_ended, GROUP_RELEASE_WAIT_SEC):
-            return '앞 재생 실행이 끝나지 않음'
+            return '이전 재생 미종료'
         if str(last['status'].get('state') or '').strip().lower() == 'error':
-            return '재생이 오류로 끝남'
+            return '재생 오류 종료'
         if self._alarm_grade() > 0:
             return f'서보 알람 {self._alarm_grade()}등급'
 
         # 2 · 기준점으로 천천히 · 도달 확인은 초기 위치 이동이 한다
-        self._set('parking', f'운영 종료 · 기준점(0°)으로 {PARK_MOVE_SEC:g}초 동안 이동 중')
+        self._set('parking', f'운영 종료: 기준점(0°)으로 이동 중 ({PARK_MOVE_SEC:g}초)')
         payload = self._fill_active_files({
             'initial_mode_override': 'reference',
             'initial_move_time_sec': PARK_MOVE_SEC,
@@ -755,7 +755,7 @@ class ScheduleEndService:
         if not isinstance(result, dict) or result.get('success') is False:
             # 거절 · 예 「실행 컨텍스트 적용 대기」(실물 V-19) · 부른 쪽이 기록하고 1분 뒤 다시 · 수정 목록 131
             message = result.get('message') if isinstance(result, dict) else ''
-            return f'기준점 이동 거절 · {message or "응답 없음"}'
+            return f'기준점 이동 거부: {message or "응답 없음"}'
         seen: List[str] = []
         accepted = result.get('status') if isinstance(result.get('status'), dict) else {}
         park_run_id = accepted.get('run_id')
@@ -790,20 +790,20 @@ class ScheduleEndService:
                         pass
             return '기준점 도달 확인 시간 초과'
         if seen[-1] != 'initialized':
-            return f'기준점 이동이 끝나지 않음({seen[-1]})'
+            return f'기준점 이동 미완료({seen[-1]})'
         if self._alarm_grade() > 0:
             return f'서보 알람 {self._alarm_grade()}등급'
 
         # 3 · 서보 OFF · 모터별 설정
-        self._set('powering_off', '운영 종료 · 기준점 도달 · 서보 끄는 중')
+        self._set('powering_off', '운영 종료: 기준점 도달, 서보 OFF 진행 중')
         done, failures, kept = self._power_off_flagged()
         message = (
-            '운영 종료 · 기준점 이동 후 서보 OFF '
+            '운영 종료: 기준점 이동 후 서보 OFF'
             + _axes_text('AC', done['ac_servo']) + _axes_text('다이나믹셀', done['dynamixel'])
-            + (f' · 켠 채 둠(모터 설정) {", ".join(map(str, kept))}번' if kept else '')
+            + (f' · 서보 유지(모터 설정) {", ".join(map(str, kept))}번' if kept else '')
         )
         if failures:
-            return message + f' · 끄기 실패 {", ".join(map(str, failures))}번'
+            return message + f' · OFF 실패 {", ".join(map(str, failures))}번'
         self._set('done', message, powered_off=done)
         return ''
 
@@ -900,7 +900,7 @@ class ScheduleEndService:
                 self._start_requested = True   # 기다리던 스레드가 다음 확인에서 그만둔다
         if state == 'retry_wait' or has_notice:
             self._write_retry(None)
-            self._set('idle', '운영 종료 · 시작 요청이 들어와 주차 다시 시도 · 알림을 거둠')
+            self._set('idle', '운영 종료: 시작 요청 수신으로 기준점 이동 재시도 취소')
 
     def _off_axes_to_wake(self) -> tuple[List[int], List[int], List[int]]:
         """운영시간 시작 · 꺼진 서보 전부(사람이 끈 것 포함) · (AC, 다이나믹셀, 알람이라 건너뛴 축) · 수정 목록 193
@@ -937,7 +937,7 @@ class ScheduleEndService:
         그동안 섰다(NY 2026-11-16 · 2~4 s) · 수정 목록 217
         """
         if self.active():
-            return '운영 종료 동작(기준점 이동 → 서보 OFF)이 진행 중입니다. 끝난 뒤 다시 시도하세요'
+            return '운영 종료 동작(기준점 이동 → 서보 OFF)이 진행 중입니다. 완료 후 재시도하세요'
         if not wait:
             progress = self._wake_progress()
             if progress is not None:
@@ -967,7 +967,7 @@ class ScheduleEndService:
             try:
                 result = self._wake(targets)
             except Exception as exc:  # noqa: BLE001 · 스레드가 죽어도 다음 물음에 실패로 답한다
-                result = f'꺼진 서보를 켜다 오류가 났습니다 · {exc}'
+                result = f'서보 ON 중 오류 발생: {exc}'
             with self._lock:
                 self._wake_result = result
 
@@ -990,7 +990,7 @@ class ScheduleEndService:
             ac_axes = sorted(set(ac_axes) | set(extra_ac))
             dxl_axes = sorted(set(dxl_axes) | set(extra_dxl))
             if alarmed:
-                self._set('idle', f'운영시간 시작 · 알람 축은 서보를 켜지 않음{_axes_text("모터", alarmed)}')
+                self._set('idle', f'운영 시간 시작: 알람 모터는 서보 ON 제외{_axes_text("모터", alarmed)}')
         if not ac_axes and not dxl_axes:
             return None
         on_now = self._servos_on_now()
@@ -1020,18 +1020,18 @@ class ScheduleEndService:
                 continue
             reply = self._ac_servo_control('servo_on', axis, 'selected')
             if reply.get('success') is False:
-                return f'운영 종료 때 끈 {axis}번 모터의 서보를 켜지 못했습니다 · {reply.get("message") or ""}'
+                return f'운영 종료 시 OFF한 {axis}번 모터의 서보 ON 실패: {reply.get("message") or ""}'
         dxl_off = [axis for axis in dxl_axes if axis not in on_now]
         if dxl_off:
             reply = self._dynamixel_torque_control('torque_on', dxl_off)
             if reply.get('success') is False:
-                return f'운영 종료 때 끈 다이나믹셀 토크를 켜지 못했습니다 · {reply.get("message") or ""}'
+                return f'운영 종료 시 OFF한 다이나믹셀 토크 ON 실패: {reply.get("message") or ""}'
 
         def servos_on() -> bool:
             return set(ac_axes) <= already_on()
 
         if not self._wait(servos_on, SERVO_ON_WAIT_SEC):
-            return '운영 종료 때 끈 서보가 켜지지 않았습니다. 모터 상태를 확인하세요'
+            return '운영 종료 시 OFF한 서보가 ON 되지 않았습니다. 모터 상태를 확인하세요'
         self._write_powered_off(None)
         turned_on = {'ac_servo': sorted(set(ac_axes) - on_now), 'dynamixel': sorted(dxl_off)}
         if woke_all and (turned_on['ac_servo'] or turned_on['dynamixel']):
@@ -1041,8 +1041,8 @@ class ScheduleEndService:
             by_end = {key: [axis for axis in axes if axis in recorded[key]] for key, axes in turned_on.items()}
             woken = {key: [axis for axis in axes if axis not in recorded[key]] for key, axes in turned_on.items()}
             text = (
-                '운영시간 시작 · 꺼져 있던 서보를 켰습니다'
-                + _group_text('운영 종료 때 끈 축', by_end) + _group_text('그 밖(사람이 끈 축 등)', woken)
+                '운영 시간 시작: 서보 ON 완료'
+                + _group_text('운영 종료 시 OFF한 축', by_end) + _group_text('기타(수동 OFF 축 등)', woken)
             )
             self._event('schedule_start_servo_on', text, {'woken': woken, 'by_schedule_end': by_end, 'turned_on': turned_on})
         self._set('idle', '운영 종료 때 끈 서보를 다시 켰습니다', restored={'ac_servo': ac_axes, 'dynamixel': dxl_axes})

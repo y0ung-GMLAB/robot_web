@@ -75,7 +75,7 @@ def test_link_alarm_and_version_come_first():
     assert _reason(None, started_by=STARTED_BY_HUMAN) == '통신 단절'
     assert _reason(_member(), started_by=STARTED_BY_HUMAN, link='offline') == '통신 단절'
     assert _reason(_member(), started_by=STARTED_BY_HUMAN, link='warning') == '응답 지연'
-    assert _reason(_member(alarm_grade=2), started_by=STARTED_BY_HUMAN) == 'Servo 알람 2등급'
+    assert _reason(_member(alarm_grade=2), started_by=STARTED_BY_HUMAN) == '서보 알람 2등급'
     assert _reason(_member(protocol_version=1), started_by=STARTED_BY_HUMAN).startswith('버전 불일치')
 
 
@@ -100,7 +100,7 @@ def test_the_start_notice_names_the_count_and_who_was_left_out():
     """(다) 결과 알림에도 · 「참가 N대 · 빠짐 …」"""
     assert start_summary(('a', 'b', 'c'), {}) == '참가 3대'
     assert start_summary(('a',), {'c': '끔 모드', 'b': '단독 재생 중'}) == (
-        '참가 1대 · 빠짐 b(단독 재생 중), c(끔 모드)'
+        '참가 1대 · 제외 b(단독 재생 중), c(끔 모드)'
     )
 
 

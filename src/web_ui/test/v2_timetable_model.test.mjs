@@ -42,14 +42,14 @@ test('시계 차이 글자 · 부호 · 모르면 빈 글자', () => {
 test('PC 줄 · 시간표 재생이면 시계 차이 칸 · 100 ms 넘으면 노랑 · 쉬는 이유를 상태로', () => {
   const rows = groupRows(snap({
     mode: 'clock',
-    peers: { f2: { clock_offset_ms: -140, clock_warning: true, run: { note: '3회차 쉼 · 다른 재생 중' } } },
+    peers: { f2: { clock_offset_ms: -140, clock_warning: true, run: { note: '3회차 생략: 다른 재생 중' } } },
     local: { note: '' },
   }));
   const f2 = rows.find((row) => row.id === 'f2');
   assert.equal(f2.clock, '시계 -140 ms');
   assert.equal(f2.clockWarn, true);
   assert.equal(f2.tone, 'warn');
-  assert.equal(f2.note, '3회차 쉼 · 다른 재생 중');
+  assert.equal(f2.note, '3회차 생략: 다른 재생 중');
   const signal = groupRows(snap({ mode: 'lockstep', peers: { f2: { clock_offset_ms: -140 } } }));
   assert.equal(signal.find((row) => row.id === 'f2').clock, '', '신호 재생에서는 빈 칸(자리는 그대로)');
 });

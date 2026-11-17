@@ -171,7 +171,7 @@ def annotate_ethercat_project_compatibility(
                 continue
             if actual.get('direct_read_complete') is not True:
                 errors.append(
-                    f'Slave {position} 식별 정보를 아직 읽지 못함'
+                    f'Slave {position} 식별 정보 미확인'
                 )
             for field in ('vendor_id', 'product_code', 'serial_number'):
                 expected_value = target.get(field)

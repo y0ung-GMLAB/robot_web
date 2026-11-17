@@ -79,12 +79,6 @@ def register_project_routes(app: FastAPI, bridge, project_call) -> None:
             raise HTTPException(status_code=400, detail='request body must be an object')
         return await project_call(bridge.project.import_file, project_id, body)
 
-    @app.get('/api/projects/{project_id}/tree-file')
-    async def read_only_motion_project_file(project_id: str, relative_path: str):
-        return await project_call(
-            bridge.project.load_read_only_file, project_id, relative_path
-        )
-
     @app.get('/api/projects/{project_id}/files/{category}/{file_name}/download')
     async def download_motion_project_file(
         project_id: str, category: str, file_name: str
@@ -113,43 +107,6 @@ def register_project_routes(app: FastAPI, bridge, project_call) -> None:
             category,
             file_name,
             body,
-        )
-
-    @app.post('/api/projects/{project_id}/files/{category}/{file_name}/rename')
-    async def rename_motion_project_file(
-        project_id: str, category: str, file_name: str, request: Request
-    ):
-        body = await request.json()
-        if not isinstance(body, dict):
-            raise HTTPException(status_code=400, detail='request body must be an object')
-        return await project_call(
-            bridge.project.rename_file,
-            project_id,
-            category,
-            file_name,
-            body,
-        )
-
-    @app.post('/api/projects/{project_id}/files/{category}/{file_name}/active')
-    async def activate_motion_project_file(
-        project_id: str, category: str, file_name: str
-    ):
-        return await project_call(
-            bridge.project.activate_file,
-            project_id,
-            category,
-            file_name,
-        )
-
-    @app.post('/api/projects/{project_id}/files/{category}/{file_name}/open-editor')
-    async def open_motion_project_file_for_editing(
-        project_id: str, category: str, file_name: str
-    ):
-        return await project_call(
-            bridge.project.open_file_for_editing,
-            project_id,
-            category,
-            file_name,
         )
 
     @app.delete('/api/projects/{project_id}/files/{category}/{file_name}')

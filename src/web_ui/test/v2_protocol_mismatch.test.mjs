@@ -16,7 +16,7 @@ test('PC 현황 · 연동 버전 다름은 빨강 · 번호를 같이 · 커밋�
   assert.deepEqual(rows.map((r) => [r.id, r.status, r.tone]), [
     ['floating4', '그룹 대기', 'ok'], ['floating1', '연동 버전 다름', 'bad'], ['floating2', '버전 다름', 'warn'], ['speaker', '스피커', 'ok'],
   ]);
-  assert.match(rows[1].note, /그룹 재생에서 제외됩니다 \(해당 PC 6, 현재 PC 7\)/);
+  assert.match(rows[1].note, /그룹 재생에서 제외합니다 \(해당 PC 6, 현재 PC 7\)/);
   assert.match(rows[2].note, /그룹 재생은 가능/);
   assert.match(protocolNote(0, 7), /해당 PC 번호 없음, 현재 PC 7/);
 });
@@ -24,7 +24,7 @@ test('PC 현황 · 연동 버전 다름은 빨강 · 번호를 같이 · 커밋�
 test('확인할 일 · 연동 버전 다름과 커밋 다름을 나눠 말한다 · 스피커 뺌', () => {
   const issues = collectIssues(snap, {}).filter((i) => i.action?.kind === 'update-all');
   assert.deepEqual(issues.map((i) => [i.title, i.detail]), [
-    ['floating1 연동 버전이 다릅니다', '그룹 재생에서 제외됩니다. 모든 PC를 업데이트하세요.'],
+    ['floating1 연동 버전이 다릅니다', '그룹 재생에서 제외합니다. 모든 PC를 업데이트하세요.'],
     ['floating2 버전이 다릅니다', '그룹 재생은 가능하지만 모든 PC를 같은 버전으로 업데이트하세요.'],
   ]);
 });

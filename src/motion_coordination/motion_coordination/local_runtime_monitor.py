@@ -99,7 +99,7 @@ class LocalRuntimeMonitor:
             recent = ', '.join(f'{value:.0f}' for value in self._recent_ms) or '없음'
             parts = [
                 f'마지막 성공 {since:.0f}ms 전' if since is not None
-                else '한 번도 못 받음',
+                else '수신 이력 없음',
                 f'연속 실패 {self._consecutive_failures}회',
                 f'최근 응답(ms) {recent}',
             ]

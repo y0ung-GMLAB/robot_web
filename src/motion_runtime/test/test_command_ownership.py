@@ -75,7 +75,7 @@ def test_runtime_rejects_missing_or_stale_supervisor_status():
         age_sec=SAFETY_STATUS_TIMEOUT_SEC + 0.1,
     )
 
-    assert '아직 받지 못했습니다' in missing._playback_ownership_error()
+    assert '아직 수신하지 못했습니다' in missing._playback_ownership_error()
     assert '갱신되지 않았습니다' in stale._playback_ownership_error()
 
 

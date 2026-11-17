@@ -52,14 +52,14 @@ function updateCard(state, changed) {
   const start = async () => {
     const ok = await confirmBox({
       title: `${localName(state)}만 업데이트`,
-      body: '업데이트하는 몇 분 동안 재생할 수 없고 화면 연결이 잠시 끊깁니다.\n재생 중이면 업데이트하지 않습니다.\n실패하면 이전 버전으로 자동 복구합니다.\n같은 그룹 PC는 버전이 같아야 함께 재생할 수 있으니 보통은 「PC 현황 → 모든 PC 업데이트」를 사용하세요.',
+      body: '업데이트 중(수 분 소요)에는 재생이 불가하며 화면 연결이 일시 중단됩니다.\n재생 중에는 업데이트하지 않습니다.\n실패 시 이전 버전으로 자동 복구합니다.\n같은 그룹 PC는 버전이 같아야 함께 재생할 수 있으므로 일반적으로 「PC 현황 → 모든 PC 업데이트」를 사용하세요.',
       confirmLabel: '업데이트', tone: 'warning',
     });
     if (!ok) return;
     await busy('update', async () => {
       try {
         const result = await api('POST', '/api/system/update', { timeoutMs: 30000 });
-        toast(result?.message || '업데이트를 시작했습니다. 화면 연결이 잠시 끊깁니다.', 'ok');
+        toast(result?.message || '업데이트를 시작했습니다. 화면 연결이 일시 중단됩니다.', 'ok');
       } catch (error) { toast(error.message || String(error), 'bad'); }
     }, state, changed);
   };
@@ -89,7 +89,7 @@ function projectCard(state, changed) {
   const pick = async (project) => {
     const ok = await confirmBox({
       title: '프로젝트 전환',
-      body: `「${project.name || project.project_id}」 프로젝트로 전환합니다.\n매핑, 애니메이션, 스케줄이 해당 프로젝트 것으로 바뀝니다.\n모터에는 바로 적용되지 않습니다. 전환 후 「모터 설정 → 저장 후 장비에 적용」을 누르세요.`,
+      body: `「${project.name || project.project_id}」 프로젝트로 전환합니다.\n매핑, 애니메이션, 스케줄을 해당 프로젝트 기준으로 변경합니다.\n모터에는 즉시 적용하지 않습니다. 전환 후 「모터 설정 → 저장 후 장비에 적용」을 누르세요.`,
       confirmLabel: '전환', tone: 'warning',
     });
     if (!ok) return;
@@ -113,8 +113,8 @@ function projectCard(state, changed) {
   const remove = async (project) => {
     const name = String(project.name || project.project_id);
     const typed = await promptBox({
-      title: '프로젝트 삭제', body: `「${name}」 프로젝트를 삭제합니다. 휴지통에 7일 동안 보관됩니다.`,
-      label: `삭제하려면 프로젝트 이름을 똑같이 입력하세요: ${name}`, must: name, confirmLabel: '삭제', tone: 'danger',
+      title: '프로젝트 삭제', body: `「${name}」 프로젝트를 삭제합니다. 휴지통에 7일간 보관합니다.`,
+      label: `삭제하려면 프로젝트 이름을 동일하게 입력하세요: ${name}`, must: name, confirmLabel: '삭제', tone: 'danger',
     });
     if (typed === null) return;
     await busy('delete', async () => {
@@ -215,10 +215,10 @@ export function renderBackup(state, { changed }) {
   const running = state.backupPage?.update?.state === 'running';
   return [
     h('div', { class: 'page-head' }, h('h1', { text: '업데이트·백업' })),
-    running ? h('div', { class: 'blocker' }, dot('info'), h('span', { class: 'grow', text: '업데이트 중입니다. 끝나면 화면 연결이 잠시 끊깁니다.' })) : null,
+    running ? h('div', { class: 'blocker' }, dot('info'), h('span', { class: 'grow', text: '업데이트 중입니다. 완료 후 화면 연결이 일시 중단됩니다.' })) : null,
     h('div', { class: 'grid-2' }, updateCard(state, changed), projectCard(state, changed)),
     backupCard(state, changed),
-    h('p', { class: 'muted small' }, h('button', { class: 'link-button inline-link', type: 'button', onclick: act.restartProgram }, '프로그램 다시 시작'),
-      tip(['업데이트 없이 프로그램만 다시 시작', '서보 토크는 유지'], '프로그램 다시 시작 설명')),
+    h('p', { class: 'muted small' }, h('button', { class: 'link-button inline-link', type: 'button', onclick: act.restartProgram }, '프로그램 재시작'),
+      tip(['업데이트 없이 프로그램만 재시작', '서보 토크는 유지'], '프로그램 재시작 설명')),
   ];
 }

@@ -35,7 +35,7 @@ def test_no_dynamixel_in_project_port_missing_is_success_with_info():
     message = motor_config_rules.scan_result_message(True, scan, 'raw')
     assert message.startswith('모터 검색 완료')
     assert 'AC 서보 3대' in message
-    assert '다이나믹셀 직렬 포트 없음(정보' in message
+    assert '다이나믹셀 직렬 포트 없음 (다이나믹셀 미사용 시 무시' in message
     assert '일부' not in message
 
 

@@ -26,7 +26,7 @@ DEFAULT_CONFIRM_SEC = 60
 CONNECTION_PREFIX = 'robot-wifi-'
 STATE_FILE = Path('log') / 'wifi' / 'pending.json'
 POWERSAVE_DISABLE = '2'
-POWERSAVE_TEXT = {'0': '기본값', '1': '그대로', '2': '꺼짐', '3': '켜짐'}
+POWERSAVE_TEXT = {'0': '기본값', '1': '유지', '2': '꺼짐', '3': '켜짐'}
 NOT_ALLOWED_HINT = (
     '이 계정에 Wi-Fi 설정 권한이 없습니다. PC 터미널에서 다음 명령을 한 번 실행하세요: '
     'bash ~/ros2_ws/scripts/allow_web_admin.sh'
@@ -191,7 +191,7 @@ class WifiSettings:
         if not self._device():
             return {'success': False, 'networks': [], 'message': 'Wi-Fi 장치가 없습니다'}
         networks = self._list(rescan=True)
-        return {'success': True, 'networks': networks, 'message': f'{len(networks)}개 찾음'}
+        return {'success': True, 'networks': networks, 'message': f'검색 결과 {len(networks)}개'}
 
     # ------------------------------------------------------------------ #
 
@@ -248,12 +248,12 @@ class WifiSettings:
         try:
             ip_args = self._static_args(static)
         except ValueError as exc:
-            return {'success': False, 'message': f'고정 IP 값을 확인하세요 · {exc}'}
+            return {'success': False, 'message': f'고정 IP 값을 확인하세요: {exc}'}
 
         previous = device['connection'] if device['connection'] not in ('', '--') else ''
         name = f'{CONNECTION_PREFIX}{ssid}'
         if previous == name:
-            return {'success': False, 'message': '이미 같은 설정으로 이 Wi-Fi에 연결되어 있습니다. 설정을 바꾸려면 먼저 다른 Wi-Fi로 연결하세요.'}
+            return {'success': False, 'message': '이미 같은 설정으로 해당 Wi-Fi에 연결 중입니다. 설정을 변경하려면 먼저 다른 Wi-Fi에 연결하세요.'}
         self._nmcli('connection', 'delete', name)   # 같은 이름 옛 설정 · 없으면 실패해도 그만
         add = [
             'connection', 'add', 'type', 'wifi', 'ifname', device['device'], 'con-name', name, 'ssid', ssid,
@@ -266,7 +266,7 @@ class WifiSettings:
         code, _, err = self._nmcli(*add)
         if code != 0:
             hint = NOT_ALLOWED_HINT.replace('~/ros2_ws', str(self.workspace_root))
-            return {'success': False, 'message': hint if _permission_denied(err) else f'연결 설정을 만들지 못했습니다 · {err.strip()}'}
+            return {'success': False, 'message': hint if _permission_denied(err) else f'연결 설정 생성 실패: {err.strip()}'}
 
         # 바꾸기 **전에** 되돌리기를 건다 · 확인 못 하면 이전 연결 다시 켜고 새 것은 지운다
         back = f'nmcli connection up {shlex.quote(previous)}; ' if previous else ''
@@ -278,7 +278,7 @@ class WifiSettings:
         ])
         if code != 0:
             self._nmcli('connection', 'delete', name)
-            return {'success': False, 'message': f'되돌리기 예약을 걸지 못해 변경하지 않았습니다 · {err.strip()}'}
+            return {'success': False, 'message': f'복귀 예약 실패로 변경하지 않았습니다: {err.strip()}'}
         self._write_pending({
             'ssid': ssid, 'name': name, 'previous': previous,
             'deadline': self._now() + seconds, 'confirm_sec': seconds,
@@ -290,10 +290,10 @@ class WifiSettings:
             text = err.strip()
             if 'secrets were required' in text.lower() or 'password' in text.lower():
                 text = '비밀번호가 맞지 않는 것 같습니다'
-            return {'success': False, 'message': f'연결에 실패해 이전 연결로 되돌렸습니다 · {text}'}
+            return {'success': False, 'message': f'연결 실패로 이전 연결로 복귀했습니다: {text}'}
         return {
             **self.status(), 'success': True,
-            'message': f'{ssid}에 연결했습니다. {seconds}초 안에 「유지」를 누르세요. 누르지 않으면 이전 연결로 되돌립니다.',
+            'message': f'{ssid}에 연결했습니다. {seconds}초 이내에 「유지」를 누르세요. 미선택 시 이전 연결로 복귀합니다.',
         }
 
     def confirm(self) -> Dict[str, Any]:

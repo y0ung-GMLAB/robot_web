@@ -34,8 +34,8 @@ ALLOWED_REPEAT_MODES = frozenset({REINITIALIZE, DWELL_REINITIALIZE})
 SAFE_REPLACEMENT = {DIRECT: REINITIALIZE, DWELL: DWELL_REINITIALIZE}
 
 UNSAFE_MODE_MESSAGE = (
-    '초기 위치를 거치지 않는 반복(바로 다음 회차 · 대기 후 다음 회차)은 안전을 위해 쓰지 않습니다 · '
-    '「초기 위치로 돌아간 뒤 다음 회차」 를 고르세요'
+    '초기 위치를 거치지 않는 반복(즉시 다음 회차 · 대기 후 다음 회차)은 안전을 위해 사용하지 않습니다. '
+    '「초기 위치 복귀 후 다음 회차」를 선택하세요'
 )
 
 

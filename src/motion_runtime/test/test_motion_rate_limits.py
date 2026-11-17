@@ -74,7 +74,7 @@ def test_a_spike_made_by_the_mapping_range_says_so():
     axis, samples = _clipped_axis(values, max_acceleration_deg_s2=14)
     error = _motion_rate_limit_error(axis, samples, 0.02)
     assert 'Neck_Yaw 가속도 250 deg/s² > 상한 14' in error, error
-    assert '매핑 범위(−15~15°)에서 잘린 곳 · 애니가 범위를 넘음(최소 −15.9°)' in error, error
+    assert '매핑 범위(−15~15°) 초과 구간 제한 (범위 초과 조인트: 최소 −15.9°)' in error, error
 
 
 def test_a_real_spike_inside_the_range_gets_no_range_hint():
@@ -87,7 +87,7 @@ def test_a_real_spike_inside_the_range_gets_no_range_hint():
     # 상한을 낮춰 잘린 곳(125)만 넘게 하면 그때는 범위 이야기
     error = _motion_rate_limit_error(_clipped_axis(values[:9], max_acceleration_deg_s2=100)[0],
                                      _clipped_axis(values[:9])[1], 0.02)
-    assert '가속도 125 deg/s² > 상한 100' in error and '애니가 범위를 넘음(최대 15.1°)' in error, error
+    assert '가속도 125 deg/s² > 상한 100' in error and '범위 초과 조인트: 최대 15.1°' in error, error
 
 
 def test_no_range_info_means_the_old_message():

@@ -112,7 +112,7 @@ GAIN_RETRY_SEC = 15.0
 MAILBOX_STUCK_COUNT = 3
 MAILBOX_STUCK_SPAN_SEC = 10.0
 MAILBOX_PROBE_SEC = 30.0
-MAILBOX_SKIPPED = '메일박스 응답 없음 · 읽기 쉼'
+MAILBOX_SKIPPED = '메일박스 응답 없음, 읽기 생략'
 
 #: 응답이 없었다는 CLI 글 · IgH 1.6.9 는 upload request 시간 초과(SM0 쓰기 WKC 0)를 커널 로그에만 「timeout」 으로 적고
 #: CLI 에는 「Failed to upload SDO: Input/output error」 (실물 S-4 · S 3회차) · 「wrong SDO」 도 같은 EIO 라 연속 횟수 · 시간으로 가른다
@@ -368,7 +368,7 @@ class MinasAbsoluteCheck:
                 self._answered_at[slot] = now
                 self._no_answer.pop(slot, None)
                 if self._stuck.pop(slot, None) is not None:
-                    message = f'{self._slot_label(slot)} 드라이브 메일박스 응답 돌아옴 · 멈춤 해제'
+                    message = f'{self._slot_label(slot)} 드라이브 메일박스 응답 복구, 정지 해제'
             elif slot in self._op:
                 # OP 가 아니면 마스터가 설정 중일 수 있다 · 판정에 안 쓴다
                 streak = self._no_answer.setdefault(slot, {'count': 0, 'first_at': now})
@@ -398,7 +398,7 @@ class MinasAbsoluteCheck:
             'slave_position': slot[1],
             'axis': axis,
             'since': info['since'],
-            'message': f'{self._slot_label(slot)} 드라이브 메일박스 응답 없음 · 그 드라이브 제어 전원을 껐다 켜세요',
+            'message': f'{self._slot_label(slot)} 드라이브 메일박스 응답 없음. 해당 드라이브 제어 전원을 재투입하세요',
         }
 
     # -- 읽기 ------------------------------------------------------------- #

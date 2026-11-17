@@ -71,8 +71,8 @@ class StartupReadiness:
         message = ''
         if overdue:
             message = (
-                f'{", ".join(waiting)} 상태를 {elapsed / 60.0:.0f}분 동안 받지 못했습니다. '
-                '프로그램을 다시 시작하세요.'
+                f'{", ".join(waiting)} 상태를 {elapsed / 60.0:.0f}분간 수신하지 못했습니다. '
+                '프로그램을 재시작하세요.'
             )
         return {
             'ready': ready_after is not None,

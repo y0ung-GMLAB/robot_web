@@ -1,6 +1,6 @@
 """시간표 재생 회차 명령 · 초기 이동 시각 · 늦음 · 쉼 규칙 · 수정 목록 206 (2026-11-16)
 
-사용자 결정 · 초기 이동이 늦게 끝나도 잘못이 아니다 · 끝나는 대로 시작(쉼 아님) · 너무 늦어 다음 회차 준비를 먹을 때만 쉼.
+사용자 결정 · 초기 이동이 늦게 끝나도 잘못이 아니다 · 끝나는 대로 시작(생략 아님) · 너무 늦어 다음 회차 준비를 먹을 때만 쉼.
 """
 
 import math
@@ -29,10 +29,10 @@ def test_on_time_a_little_late_and_too_late():
     on_time = decide(cycle=3, start=1000.0, ready_at=999.2, latest=1008.5)
     assert on_time.start_at == 1000.0 and on_time.late_sec == 0.0 and not on_time.skip
     late = decide(cycle=3, start=1000.0, ready_at=1003.0, latest=1008.5)
-    assert late.start_at == 1003.0 and late.late_sec == 3.0 and not late.skip, '3 s 늦음 · 쉼 아님 · 끝나는 대로'
+    assert late.start_at == 1003.0 and late.late_sec == 3.0 and not late.skip, '3 s 늦음 · 생략 아님 · 끝나는 대로'
     edge = decide(cycle=3, start=1000.0, ready_at=1008.5, latest=1008.5)
     assert not edge.skip, '한도 그 시각까지는 돈다'
     too_late = decide(cycle=3, start=1000.0, ready_at=1009.0, latest=1008.5)
-    assert too_late.skip == '초기 이동이 9.0 s 늦게 끝남 · 돌면 4회차 준비 시각을 넘김'
+    assert too_late.skip == '초기 이동이 9.0초 지연 종료, 재생 시 4회차 준비 시각 초과'
     before = decide(cycle=3, start=1000.0, ready_at=1012.0, latest=1008.5, moved=False)
-    assert before.skip.startswith('지금 초기 이동을 시작해도 12.0 s 늦게 끝남'), '아직 안 움직였으면 끝날 시각으로'
+    assert before.skip.startswith('현재 초기 이동을 시작해도 12.0초 지연 종료'), '아직 안 움직였으면 끝날 시각으로'

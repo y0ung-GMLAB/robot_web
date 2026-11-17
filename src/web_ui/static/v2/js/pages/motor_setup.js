@@ -83,8 +83,8 @@ async function saveChanged(state, changed) {
       if (isRevisionConflict(error.message)) {
         // 화면을 연 뒤 파일이 바뀌었다(다른 화면 저장 · 매핑 저장이 운전 한계를 고쳐 씀) · 고친 것을 버리고 다시 받을지 묻는다
         const reload = await confirmBox({
-          title: '화면을 연 뒤 모터 설정 파일이 바뀌었습니다',
-          body: '다시 불러오면 현재 화면에서 수정한 모터 설정이 사라집니다.\n다른 화면에서 저장했거나, 조인트 매핑 저장으로 운전 한계가 바뀐 경우입니다.\n다시 불러온 뒤 수정해서 저장하세요.',
+          title: '화면을 연 이후 모터 설정 파일 변경 감지',
+          body: '다시 불러오기 시 현재 화면에서 수정한 모터 설정을 취소합니다.\n다른 화면에서 저장했거나, 조인트 매핑 저장으로 운전 한계가 변경된 경우입니다.\n다시 불러온 뒤 수정해서 저장하세요.',
           confirmLabel: '다시 불러오기', tone: 'warning',
         });
         if (reload) await loadMotors(state, changed, { force: true });
@@ -112,7 +112,7 @@ async function save(state, changed, { apply = false } = {}) {
   const dirty = motorsDraft().changes.length + mappingDraft().changes.length > 0;
   if (!apply && !dirty) { toast('저장할 변경이 없습니다', 'warn'); return; }
   if (apply && !(await act.confirmApplyMotorConfig(dirty
-    ? '변경한 모터 설정과 조인트 매핑을 저장한 뒤 장비에 적용합니다.\n운전 한계(소프트 리밋)도 조인트 매핑 범위에 맞춰 바뀝니다.'
+    ? '변경한 모터 설정과 조인트 매핑을 저장한 뒤 장비에 적용합니다.\n운전 한계(소프트 리밋)도 조인트 매핑 범위에 따라 변경합니다.'
     : '저장된 모터 설정과 조인트 매핑을 장비에 적용합니다.'))) return;
   ui.busy = true;
   changed();
@@ -191,7 +191,7 @@ export function renderSetup(state, { changed }) {
         onclick: () => { revertMotors(); revertMapping(); changed(); } }, '되돌리기'),
       h('button', { class: 'btn btn-primary', type: 'button', disabled: busy || !dirty || Boolean(problems.length), title: blockReason({ busy, dirty, problems }, '파일에만 저장 (드라이브에는 「저장 후 장비에 적용」 시 반영)'),
         onclick: () => save(state, changed) }, busy ? '저장 중' : '저장'),
-      h('button', { class: 'btn btn-warn', type: 'button', disabled: busy || Boolean(problems.length), title: blockReason({ busy, dirty: true, problems }, '저장 → 장비에 적용 → 모터 프로그램 다시 시작'),
+      h('button', { class: 'btn btn-warn', type: 'button', disabled: busy || Boolean(problems.length), title: blockReason({ busy, dirty: true, problems }, '저장 → 장비에 적용 → 모터 프로그램 재시작'),
         onclick: () => save(state, changed, { apply: true }) }, '저장 후 장비에 적용')),
   ];
 }

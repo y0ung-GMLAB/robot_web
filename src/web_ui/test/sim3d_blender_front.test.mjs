@@ -1,7 +1,7 @@
 /** Blender 뷰 카메라 · 로봇들 정면 평균 쪽에서 (MuJoCo 뷰처럼 정면) */
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { rigQuatsFromJoints, sceneFrontDir } from '../static/js/sim3d_math.js';
+import { rigQuatsFromJoints, sceneFrontDir } from '../static/v2/js/sim3d_math.js';
 
 // 실제 floating 팩 scene.glb 의 리그 회전 (glTF x, y, z, w) · 매장 배치로 로봇마다 Y 축으로 돌아 있다
 const RIGS = {

@@ -198,13 +198,13 @@ def test_local_status_says_why_this_pc_cannot_start_a_group():
 
     result = bridge.coordination_local_status()
 
-    assert result['start_blocker'] == '실행 준비 안 됨 · 모터 설정과 조인트 매핑을 저장해 확정하세요'
+    assert result['start_blocker'] == '실행 준비 미완료: 모터 설정과 조인트 매핑을 저장해 확정하세요'
 
 
 def test_local_status_names_a_motor_problem_when_the_settings_are_fine():
     bridge, _calls = _status_bridge(runtime='연결되지 않은 모터가 있습니다: 2')
 
-    assert bridge.coordination_local_status()['start_blocker'] == '실행 준비 안 됨 · 연결되지 않은 모터가 있습니다: 2'
+    assert bridge.coordination_local_status()['start_blocker'] == '실행 준비 미완료: 연결되지 않은 모터가 있습니다: 2'
 
 
 def test_local_status_start_blocker_is_empty_when_ready_and_read_once_a_second():

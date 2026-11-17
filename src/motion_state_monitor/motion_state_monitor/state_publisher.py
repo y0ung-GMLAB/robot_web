@@ -529,6 +529,6 @@ class StatePublisher:
             'stale': '모터 피드백 갱신이 지연되고 있습니다.',
             'disconnected': '축이 현재 응답하지 않습니다.',
             'monitoring_off': '상위 모니터링이 꺼져 있습니다.',
-            'ethercat_down': '서보드라이버 전원 OFF 또는 EtherCAT 통신 끊김 상태입니다.',
+            'ethercat_down': '서보 드라이브 전원 OFF 또는 EtherCAT 통신 중단 상태입니다.',
         }
         return details.get(state, '상태를 확인할 수 없습니다.')

@@ -44,8 +44,8 @@ def _legacy_midi(motor, axis, is_ac_servo, limit_active):
             return f'{axis}번 모터 서보가 꺼져 있습니다'
         if limit_active:
             return (
-                f'{axis}번 모터 내부 리밋이 걸려 있습니다 · '
-                'POT/NOT · 비상정지 · 토크 제한 · 소프트웨어 리밋을 확인하세요'
+                f'{axis}번 모터 내부 리밋 상태입니다. '
+                'POT/NOT · 비상 정지 · 토크 제한 · 소프트웨어 리밋을 확인하세요'
             )
     return ''
 

@@ -234,13 +234,3 @@ def test_old_days_are_still_dropped_on_the_first_write(tmp_path):
 
     assert not (tmp_path / '2000-01-01.jsonl').exists()
 
-
-def test_delete_single_event_log_file(tmp_path):
-    bridge = event_log_bridge(tmp_path)
-    bridge.append('motion', 'motion_started', 'sample.json', '모션 시작')
-    file_name = bridge.events()['files'][0]['name']
-
-    result = bridge.delete_file(file_name)
-
-    assert result['deleted_file'] == file_name
-    assert bridge.events()['files'] == []

@@ -616,7 +616,7 @@ class MotionRunManager(Node):
             project_id = self._automation_project_id
         return {
             'success': True,
-            'message': '모션 실행 대기 · 저장된 자동 반복 설정은 유지',
+            'message': '모션 실행 대기, 저장된 자동 반복 설정 유지',
             'project_id': project_id,
             'context_id': '',
             'status': self.status(),
@@ -1482,8 +1482,8 @@ class MotionRunManager(Node):
         return {
             'success': True,
             'message': (
-                '이번 동기 반복 회차가 끝나면 정지합니다'
-                if is_sync_repeat else '이번 회차가 끝나면 정지합니다'
+                '이번 동기 반복 회차 종료 후 정지합니다'
+                if is_sync_repeat else '이번 회차 종료 후 정지합니다'
             ),
             'status': self.status(),
         }
@@ -1526,7 +1526,7 @@ class MotionRunManager(Node):
             received_at = getattr(self, '_latest_safety_status_at', None)
             status = dict(payload) if isinstance(payload, dict) else None
         if status is None or received_at is None:
-            return '모션 Supervisor 상태를 아직 받지 못했습니다'
+            return '모터 프로그램 상태를 아직 수신하지 못했습니다'
         if time.monotonic() - float(received_at) > SAFETY_STATUS_TIMEOUT_SEC:
             return '모션 Supervisor 상태가 갱신되지 않았습니다'
         if bool(status.get('emergency_latched')):

@@ -89,7 +89,7 @@ def test_absolute_clear_needs_servo_off_and_asks_for_power_cycle():
     service, calls, _records = _service(servo_on=False)
     done = service.run({'action': ABSOLUTE_CLEAR, 'axis': 1, 'confirmed': True})
     assert done['success'] is True and done['power_cycle_required'] is True
-    assert '모든 프로젝트의 이 축 기준점이 무효' in done['message'] and '다시 지정' in done['message']
+    assert '모든 프로젝트에서 해당 축의 기준점이 무효' in done['message'] and '재지정' in done['message']
     # 클리어만 하는 길도 PC 단위 표시를 **명령 전에** 남긴다 · 수정 목록 140 ④
     assert calls[0] == ('marker',)
     assert service.test_cleared == [{
@@ -117,9 +117,9 @@ def test_verify_only_for_absolute_clear():
 
 
 @pytest.mark.parametrize('upload_stdout, returncodes, text', [
-    ('0x00000000 0\n', None, 'bit9가 1이 아닙니다'),
-    ('', None, '되읽기 실패'),
-    ('', [0, 0, 0, 1], '되읽기 실패'),
+    ('0x00000000 0\n', None, 'bit9 ≠ 1'),
+    ('', None, '재확인 읽기 실패'),
+    ('', [0, 0, 0, 1], '재확인 읽기 실패'),
 ])
 def test_absolute_clear_readback_failure_is_a_failure(upload_stdout, returncodes, text):
     service, calls, records = _service(upload_stdout=upload_stdout, returncodes=returncodes)
@@ -146,7 +146,7 @@ def test_a_failed_write_stops_the_sequence_but_still_restores_motor_manager():
 
 
 @pytest.mark.parametrize('kwargs, payload, text', [
-    ({}, {'action': EEPROM_SAVE, 'axis': 1}, '확인이 필요'),
+    ({}, {'action': EEPROM_SAVE, 'axis': 1}, '확인 필요'),
     ({}, {'action': 'reboot', 'axis': 1, 'confirmed': True}, '지원하지 않는'),
     ({}, {'action': EEPROM_SAVE, 'axis': 9, 'confirmed': True}, '모터 설정에 없습니다'),
     ({'vendor': 0x0002}, {'action': EEPROM_SAVE, 'axis': 1, 'confirmed': True}, 'MINAS가 아닙니다'),
@@ -225,7 +225,7 @@ def test_fir_is_refused_while_a_motor_moves_and_says_why():
     moving, calls, _records = _service(blocker='축 1이 움직이는 중입니다')
     result = moving.write_gains({'axis': 1, 'values': {'command_fir': 20}, 'confirmed': True})
     assert result['success'] is False
-    assert '지령 FIR 필터(Pr2.23)는 모터가 모두 멈춰 있을 때만' in result['message']
+    assert '지령 FIR 필터(Pr2.23)는 전체 모터 정지 상태에서만' in result['message']
     assert '움직이는 중' in result['message']
     assert not [c for c in calls if c[0] == 'cli' and c[1].startswith('download')]
     other = moving.write_gains({'axis': 1, 'values': {'stiffness': 12}, 'confirmed': True})
@@ -245,7 +245,7 @@ def test_message_says_when_servos_are_still_turning_on():
     service, _calls, _records = _service()
     service._wait_recovery = lambda _service, axes: {'service_active': True, 'recovered': True, 'servo_waiting_axes': [0]}
     result = service.run({'action': EEPROM_SAVE, 'axis': 1, 'confirmed': True})
-    assert '0번 서보가 아직 켜지는 중' in result['message']
+    assert '0번 서보 ON 진행 중' in result['message']
 
 
 def test_wait_for_servo_on_returns_when_all_ac_axes_are_on():

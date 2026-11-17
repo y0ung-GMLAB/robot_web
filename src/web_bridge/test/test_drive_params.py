@@ -62,7 +62,7 @@ def test_write_reads_back_and_warns_when_boot_will_overwrite():
     assert records[0]['event_type'] == 'minas_param_write' and records[0]['before'] == 1
     values[(0x3437, 0)] = 150
     warned = service.write({'axis': 1, 'object': 'Pr4.37', 'type': 'int16', 'value': '0', 'confirmed': True})
-    assert '부팅 때 150' in warned['notes'][0]
+    assert '부팅 시 150' in warned['notes'][0]
 
 
 def test_negative_value_is_passed_after_end_of_options():
@@ -99,7 +99,7 @@ def test_command_filters_are_in_the_catalog_so_drive_read_shows_them():
 
 
 def test_0x60b2_reason_is_the_user_decision():
-    assert '사용자 결정' in write_block_reason(0x60B2)
+    assert '사용하지 않음' in write_block_reason(0x60B2)
 
 
 def test_table_and_write_are_refused_while_the_motor_program_configures_the_bus(monkeypatch):

@@ -135,11 +135,3 @@ def test_the_route_turns_refusals_into_status_codes(name):
 # 화면 조립 · HTTP 와 상관없다
 # --------------------------------------------------------------------------- #
 
-def test_the_page_composer_lives_outside_the_routes():
-    from motion_web_bridge.index_composer import IndexComposer
-
-    assert callable(IndexComposer.compose)
-
-    text = (ROUTES / 'system_routes.py').read_text(encoding='utf-8')
-    assert 'class IndexComposer' not in text
-    assert '<!--#include' not in text, '조각 끼우는 규칙이 길목에 남아 있습니다'

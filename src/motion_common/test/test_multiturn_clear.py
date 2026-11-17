@@ -15,7 +15,7 @@ def test_record_then_block_until_a_reference_is_saved_after_the_clear(tmp_path):
     assert axes == [1]
     state = mc.load(path)
     assert state['axes']['1']['serial'] == 4321 and state['axes']['1']['pending'] is True
-    assert mc.block_reason(state) == '1번 모터 다회전 클리어 뒤 기준점 다시 지정 필요'
+    assert mc.block_reason(state) == '1번 모터 다회전 클리어 후 기준점 재지정 필요'
 
     # 클리어 전에 지정한 기준점은 못 푼다 · 뒤에 지정하면 푼다
     assert mc.mark_reference_saved(path, [{'motor_axis': 1, 'reference_set_at': 999.0}]) == []
@@ -37,7 +37,7 @@ def test_other_projects_with_an_older_reference_stay_blocked(tmp_path):
         {'motion_id': 'd', 'motor_axis': 3, 'enabled': False},
     ]
     assert mc.stale_axes(state, other_project) == [1, 3]
-    assert mc.block_reason(state, other_project) == '1번 · 3번 모터 다회전 클리어 뒤 기준점 다시 지정 필요'
+    assert mc.block_reason(state, other_project) == '1번 · 3번 모터 다회전 클리어 후 기준점 재지정 필요'
     summary = mc.summary(state, other_project)
     assert summary['pending_axes'] == [] and summary['blocked_axes'] == [1, 3]
 

@@ -6,7 +6,7 @@ import { collectIssues } from '../static/v2/js/model.js';
 const base = { motion_state: { motors: [] } };
 const overdue = {
   ready: false, waiting: ['재생 관리자'], elapsed_sec: 301, overdue: true,
-  message: '재생 관리자 상태를 5분 동안 받지 못했습니다. 프로그램을 다시 시작하세요.',
+  message: '재생 관리자 상태를 5분 동안 받지 못했습니다. 프로그램을 재시작하세요.',
 };
 
 test('시작 중(아직 안 뜸)은 확인할 일이 아니다', () => {
@@ -14,12 +14,12 @@ test('시작 중(아직 안 뜸)은 확인할 일이 아니다', () => {
   assert.equal(collectIssues(snap, {}).length, 0);
 });
 
-test('오래 안 끝나면 빨간 줄 · 프로그램 다시 시작 버튼', () => {
+test('오래 안 끝나면 빨간 줄 · 프로그램 재시작 버튼', () => {
   const [issue] = collectIssues({ ...base, startup: overdue }, {});
   assert.equal(issue.tone, 'bad');
   assert.equal(issue.title, '프로그램 시작이 끝나지 않았습니다');
   assert.equal(issue.detail, overdue.message);
-  assert.deepEqual(issue.action, { kind: 'restart-program', label: '프로그램 다시 시작' });
+  assert.deepEqual(issue.action, { kind: 'restart-program', label: '프로그램 재시작' });
 });
 
 test('supervisor 쪽은 「모터 제어가 응답하지 않습니다」 한 줄만', () => {
