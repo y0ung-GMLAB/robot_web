@@ -111,3 +111,111 @@ def test_operating_until_crosses_midnight_and_ignores_disabled_items():
     assert operating_until(datetime(2026, 11, 8, 23, 30), schedules) == datetime(2026, 11, 9, 1, 0)
     assert operating_until(datetime(2026, 11, 9, 0, 30), schedules) == datetime(2026, 11, 9, 1, 0)
     assert operating_until(datetime(2026, 11, 8, 12, 0), schedules) is None
+
+
+# --------------------------------------------------------------------------- #
+# 수정 목록 218 · 특정일(특정일 운영 · 휴무일)이 그날 정기 운영보다 우선
+#
+# 전에는 모든 구간을 합쳐서 11/18 09~18 특정일 + 수요일 10~20 이 09~20 으로 돌았다 · 요청은 09~18.
+# 2026-11-18 은 수요일이다.
+# --------------------------------------------------------------------------- #
+
+def _item(schedule_id, start, stop, repeat_type, **kwargs):
+    from motion_common.schedule_models import ScheduleItem
+
+    return ScheduleItem(
+        schedule_id=schedule_id, schedule_name=schedule_id,
+        start_time=start, stop_time=stop, repeat_type=repeat_type, **kwargs,
+    )
+
+
+def _wednesday():
+    return _item('wed', '10:00:00', '20:00:00', 'weekly', repeat_days=['WED'])
+
+
+def test_a_dated_schedule_replaces_the_weekly_one_on_that_date():
+    from datetime import datetime
+
+    from motion_schedule.schedule_engine import active_schedule, operating_until
+
+    special = _item('special', '09:00:00', '18:00:00', 'once', run_date='2026-11-18')
+    schedules = [_wednesday(), special]
+    assert active_schedule(datetime(2026, 11, 18, 9, 30), schedules) is special
+    assert operating_until(datetime(2026, 11, 18, 9, 30), schedules) == datetime(2026, 11, 18, 18, 0)
+    assert active_schedule(datetime(2026, 11, 18, 19, 0), schedules) is None, '수요일 10~20 은 그날 빠짐'
+    assert active_schedule(datetime(2026, 11, 25, 19, 0), schedules).schedule_id == 'wed', '다음 주 수요일은 정기 운영'
+
+
+def test_a_holiday_removes_every_window_that_starts_that_day():
+    from datetime import datetime
+
+    from motion_schedule.schedule_engine import active_schedule, operating_until, unreadable_schedules
+
+    holiday = _item('closed', None, None, 'holiday', run_date='2026-11-18')
+    daily = _item('daily', '09:00:00', '18:00:00', 'daily')
+    schedules = [_wednesday(), daily, holiday]
+    assert active_schedule(datetime(2026, 11, 18, 12, 0), schedules) is None
+    assert operating_until(datetime(2026, 11, 18, 12, 0), schedules) is None
+    assert active_schedule(datetime(2026, 11, 19, 12, 0), schedules) is daily
+    assert unreadable_schedules(schedules) == [], '휴무일은 시각이 없어도 오류가 아니다'
+
+
+def test_a_holiday_wins_over_a_dated_operation_on_the_same_date():
+    from datetime import datetime
+
+    from motion_schedule.schedule_engine import active_schedule
+
+    special = _item('special', '09:00:00', '18:00:00', 'once', run_date='2026-11-18')
+    holiday = _item('closed', None, None, 'holiday', run_date='2026-11-18')
+    assert active_schedule(datetime(2026, 11, 18, 12, 0), [special, holiday]) is None
+    holiday.enabled = False
+    assert active_schedule(datetime(2026, 11, 18, 12, 0), [special, holiday]) is special, '꺼 둔 휴무일은 없는 것'
+
+
+def test_a_window_from_the_night_before_still_runs_into_a_holiday():
+    """구간은 시작한 날짜의 것 · 화 22:00~02:00 은 수요일이 휴무일이어도 02:00 까지"""
+    from datetime import datetime
+
+    from motion_schedule.schedule_engine import active_schedule, operating_until
+
+    night = _item('night', '22:00:00', '02:00:00', 'weekly', repeat_days=['TUE', 'WED'])
+    holiday = _item('closed', None, None, 'holiday', run_date='2026-11-18')
+    schedules = [night, holiday]
+    assert active_schedule(datetime(2026, 11, 18, 1, 0), schedules) is night
+    assert operating_until(datetime(2026, 11, 18, 1, 0), schedules) == datetime(2026, 11, 18, 2, 0)
+    assert active_schedule(datetime(2026, 11, 18, 23, 0), schedules) is None, '수요일 밤 구간은 빠짐'
+
+
+def test_several_dated_windows_on_one_date_all_apply():
+    from datetime import datetime
+
+    from motion_schedule.schedule_engine import active_schedule
+
+    am = _item('am', '09:00:00', '12:00:00', 'once', run_date='2026-11-18')
+    pm = _item('pm', '14:00:00', '18:00:00', 'once', run_date='2026-11-18')
+    schedules = [_wednesday(), am, pm]
+    assert active_schedule(datetime(2026, 11, 18, 10, 0), schedules) is am
+    assert active_schedule(datetime(2026, 11, 18, 13, 0), schedules) is None
+    assert active_schedule(datetime(2026, 11, 18, 15, 0), schedules) is pm
+
+
+def test_an_old_once_without_a_date_keeps_running_every_day():
+    """날짜 없는 옛 「한 번」 은 전처럼 날마다 · 1단계로 보지 않는다(정기 운영을 빼지 않음)"""
+    from datetime import datetime
+
+    from motion_schedule.schedule_engine import active_schedule
+
+    legacy = _item('legacy', '09:00:00', '11:00:00', 'once')
+    schedules = [legacy, _wednesday()]
+    assert active_schedule(datetime(2026, 11, 18, 10, 0), schedules) is legacy
+    assert active_schedule(datetime(2026, 11, 18, 19, 0), schedules).schedule_id == 'wed'
+
+
+def test_a_saved_holiday_reads_back_without_times():
+    from motion_common.schedule_models import ScheduleItem
+
+    item = ScheduleItem.from_dict({
+        'schedule_id': 'h', 'schedule_name': '추수감사절', 'start_time': None, 'stop_time': None,
+        'repeat_type': 'holiday', 'run_date': '2026-11-26', 'enabled': True,
+    })
+    assert (item.repeat_type, item.run_date, item.start_time, item.stop_time) == ('holiday', '2026-11-26', None, None)

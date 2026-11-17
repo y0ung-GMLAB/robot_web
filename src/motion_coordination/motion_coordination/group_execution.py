@@ -46,7 +46,9 @@ from .participant_rules import STARTED_BY_SCHEDULE, normalize_started_by
 #: 「연락 끊김」 · 돌아오면 재생을 세우지 않고 회차 경계에서 다시 합침(수정 목록 183 · 칸은 그대로)
 #: 13 · 2026-11-09 시간표 재생(`GroupTimetable` 묶음 · `GroupHeartbeat.timetable_version` · `timetable_report`) ·
 #: 모든 PC 가 같은 시간표로 스스로 재생(수정 목록 186) · 메시지가 바뀜 → 로봇 PC · 스피커 모두 같은 버전 · 다시 빌드
-GROUP_PROTOCOL_VERSION = 13
+#: 14 · 2026-11-17 운영시간 규칙 바뀜 · 특정일(특정일 운영 · 휴무일)이 그날 정기 운영보다 우선(수정 목록 218) ·
+#: 메시지 칸은 그대로지만 옛 PC 는 마스터 스케줄로 구간을 다르게 계산(휴무일에 혼자 재생) → 로봇 PC 모두 같은 버전
+GROUP_PROTOCOL_VERSION = 14
 
 #: 진행 PC 가 **뺀 PC 하나에만** 보내는 풀기 명령의 번호 앞머리 · 수정 목록 123
 #:

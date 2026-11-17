@@ -437,16 +437,37 @@ export function toMinutes(text) {
   return Number(match[1]) * 60 + Number(match[2]);
 }
 
+export function ymdOf(date) {
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
+}
+
+/** 1단계 · 날짜를 지정하는 종류 (특정일 운영 · 휴무일) */
+export function isDated(item) {
+  return ['once', 'holiday'].includes(String(item?.repeat_type || '')) && Boolean(item?.run_date);
+}
+
+function regularOn(item, date) {
+  const type = String(item.repeat_type || 'daily');
+  if (type === 'daily') return true;
+  if (type === 'weekly') return (item.repeat_days || []).includes(DAY_CODES[date.getDay()]);
+  return type === 'once';   // 날짜 없는 옛 「한 번」 · 서버처럼 날마다
+}
+
+/** 해당 날짜에 시작하는 켜진 스케줄 · 특정일이 있으면 정기 운영 대신 · 휴무일이면 없음 · 서버 규칙과 같음
+ * → { kind: 'regular' | 'date' | 'holiday', items } */
+export function scheduleDay(items, date) {
+  const key = ymdOf(date);
+  const on = (Array.isArray(items) ? items : []).filter((item) => item && item.enabled !== false);
+  const dated = on.filter((item) => isDated(item) && item.run_date === key);
+  if (dated.some((item) => item.repeat_type === 'holiday')) return { kind: 'holiday', items: [] };
+  if (dated.length) return { kind: 'date', items: dated };
+  return { kind: 'regular', items: on.filter((item) => !isDated(item) && regularOn(item, date)) };
+}
+
 /** 오늘 도는 구간 · [{name, start, end(분)}] · 자정 넘김은 오늘 몫만 */
 export function todayWindows(items, now = new Date()) {
-  const day = DAY_CODES[now.getDay()];
-  const ymd = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
   const out = [];
-  for (const item of Array.isArray(items) ? items : []) {
-    if (!item || item.enabled === false) continue;
-    const type = String(item.repeat_type || 'daily');
-    if (type === 'weekly' && !(item.repeat_days || []).includes(day)) continue;
-    if (type === 'once' && item.run_date !== ymd) continue;
+  for (const item of scheduleDay(items, now).items) {
     const start = toMinutes(item.start_time);
     let end = toMinutes(item.stop_time);
     if (start === null) continue;

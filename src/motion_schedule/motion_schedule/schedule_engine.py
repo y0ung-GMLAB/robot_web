@@ -22,7 +22,7 @@ from typing import List, Optional
 from motion_common.schedule_models import ScheduleItem
 
 from motion_common.schedule_window import (  # noqa: F401 · 옛 이름 그대로 내보냄 · 규칙은 한 곳(수정 목록 186)
-    DAY_ABBREVIATIONS, _at, _day_matches, parse_time_of_day, window_of,
+    DAY_ABBREVIATIONS, REPEAT_HOLIDAY, _at, _day_matches, parse_time_of_day, window_of, windows_starting_on,
 )
 
 
@@ -34,7 +34,7 @@ def unreadable_schedules(schedules: List[ScheduleItem]) -> List[str]:
     """
     broken = []
     for item in schedules:
-        if not item.enabled:
+        if not item.enabled or str(item.repeat_type or '') == REPEAT_HOLIDAY:  # 휴무일은 시각이 없다 · 수정 목록 218
             continue
         if (
             parse_time_of_day(item.start_time) is None
@@ -53,22 +53,13 @@ def active_schedule(
     """지금 돌아야 하는 스케줄 · 없으면 None.
 
     어제 시작해 자정을 넘긴 구간도 본다 · 여러 개가 겹치면 **먼저 시작한**
-    것을 고른다 · 순서가 늘 같아야 점검이 흔들리지 않는다.
+    것을 고른다 · 순서가 늘 같아야 점검이 흔들리지 않는다 · 날짜마다 특정일 우선(수정 목록 218).
     """
     found = []
-    for item in schedules:
-        if not item.enabled:
-            continue
-        for day in (now - timedelta(days=1), now):
-            if not _day_matches(item, day):
-                continue
-            window = window_of(item, day)
-            if window is None:
-                continue
-            starts_at, ends_at = window
+    for day in (now - timedelta(days=1), now):
+        for starts_at, ends_at, item in windows_starting_on(schedules, day):
             if starts_at <= now < ends_at:
                 found.append((starts_at, item))
-                break
     if not found:
         return None
     found.sort(key=lambda pair: (pair[0], str(pair[1].schedule_id)))
@@ -83,16 +74,11 @@ def operating_until(
     겹치거나 맞닿은 구간은 하나로 본다 · 10:00~14:00 과 14:00~18:00 이면 18:00 ·
     진행 PC 가 이 값을 그룹 명령에 실어 보내고, 진행 PC 가 안 보이는 참가 PC 는 이 시각까지만 스스로 잇는다.
     """
-    windows = []
-    for item in schedules:
-        if not item.enabled:
-            continue
-        for day in (now - timedelta(days=1), now, now + timedelta(days=1)):
-            if not _day_matches(item, day):
-                continue
-            window = window_of(item, day)
-            if window is not None:
-                windows.append(window)
+    windows = [
+        (starts_at, ends_at)
+        for day in (now - timedelta(days=1), now, now + timedelta(days=1))
+        for starts_at, ends_at, _item in windows_starting_on(schedules, day)
+    ]
     current = [ends_at for starts_at, ends_at in windows if starts_at <= now < ends_at]
     if not current:
         return None

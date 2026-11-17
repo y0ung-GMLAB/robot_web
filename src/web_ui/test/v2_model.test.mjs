@@ -171,8 +171,12 @@ test('오늘 스케줄 · 매일 · 요일 · 한 번 · 자정 넘김 · 꺼진
     { schedule_name: '오늘만', start_time: '22:00:00', stop_time: '02:00:00', repeat_type: 'once', run_date: '2026-10-08' },
     { schedule_name: '꺼짐', start_time: '08:00:00', stop_time: '09:00:00', repeat_type: 'daily', enabled: false },
   ];
+  // 특정일(「오늘만」)이 있는 날은 정기 운영(「매장」) 대신 특정일만 · 수정 목록 218
   assert.deepEqual(todayWindows(items, thursday).map((w) => [w.name, w.start, w.end]), [
-    ['매장', 600, 1080], ['오늘만', 1320, 1440],
+    ['오늘만', 1320, 1440],
+  ]);
+  assert.deepEqual(todayWindows(items.filter((item) => item.repeat_type !== 'once'), thursday).map((w) => [w.name, w.start, w.end]), [
+    ['매장', 600, 1080],
   ]);
 });
 

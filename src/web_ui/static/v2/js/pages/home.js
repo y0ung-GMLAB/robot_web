@@ -1,6 +1,6 @@
 /** UI v2 · 홈 · 운영자 첫 화면 · 「지금 무엇이 · 무엇을 확인할지 · 매장 PC · 오늘 · 모터 · 최근 일」 */
 import { h, dot } from '../dom.js';
-import { headline, motorChips, pcRows, runSummary, todayWindows } from '../model.js';
+import { headline, motorChips, pcRows, runSummary, scheduleDay, todayWindows } from '../model.js';
 import { eventTarget } from '../records_model.js';
 import { issueRow } from '../shell.js';
 import * as act from '../actions.js';
@@ -42,7 +42,8 @@ function endHint(state) {
   const current = windows.find((w) => w.start <= minutes && minutes < w.end);
   if (current) return `오늘 ${hhmm(current.end)} 운영 종료 (진행 중인 회차를 마치고 정지)`;
   const next = windows.find((w) => w.start > minutes);
-  return next ? `다음 시작 ${hhmm(next.start)}` : '오늘 운영 종료';
+  if (next) return `다음 시작 ${hhmm(next.start)}`;
+  return scheduleDay(state.schedules, now).kind === 'holiday' ? '오늘 휴무일' : '오늘 운영 종료';
 }
 
 function hhmm(minutes) {
@@ -82,7 +83,7 @@ function scheduleCard(state) {
     h('div', { class: 'timeline-scale mono' }, ['00', '06', '12', '18', '24'].map((t) => h('span', { text: t }))),
     windows.length
       ? h('ul', { class: 'list' }, windows.map((w) => h('li', { class: 'list-row' }, h('span', { class: 'grow', text: w.name }), h('span', { class: 'mono muted', text: w.text }))))
-      : h('p', { class: 'muted', text: '오늘 예정된 스케줄 없음' }),
+      : h('p', { class: 'muted', text: scheduleDay(state.schedules, now).kind === 'holiday' ? '오늘 휴무일' : '오늘 예정된 스케줄 없음' }),
     h('p', { class: 'muted small mono', text: `${clock.timezone || ''} ${String(clock.local_time || '').slice(11, 16)}`.trim() }));
 }
 
