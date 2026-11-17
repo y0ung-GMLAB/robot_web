@@ -325,7 +325,7 @@ class ProjectService:
         if target and target == self.runtime_project_id():
             raise ValueError(
                 '현재 모터에 적용된 프로젝트는 덮어쓸 수 없습니다. '
-                '「실행 적용 해제」를 실행하거나 다른 프로젝트를 적용한 뒤 다시 시도하세요'
+                '다른 프로젝트를 적용한 뒤 재시도하세요'
             )
         if overwrite and target and target == self.repository.selected_project_id():
             self.ensure_change_allowed()
@@ -337,7 +337,7 @@ class ProjectService:
                 'success': False,
                 'exists': True,
                 'project_id': str(exc),
-                'message': f"같은 ID의 프로젝트가 있습니다({exc}). 덮어쓰면 기존 프로젝트는 휴지통으로 옮겨집니다",
+                'message': f"같은 ID의 프로젝트가 있습니다({exc}). 덮어쓰기 시 기존 프로젝트는 휴지통으로 이동합니다",
             }
 
     def list_trash(self) -> Dict[str, Any]:
@@ -360,12 +360,6 @@ class ProjectService:
         self.ensure_selected(project_id)
         return self.repository.read_file(project_id, category, file_name)
 
-    def load_read_only_file(
-        self, project_id: Any, relative_path: Any
-    ) -> Dict[str, Any]:
-        self.ensure_selected(project_id)
-        return self.repository.read_read_only_file(project_id, relative_path)
-
     def download_file(
         self, project_id: Any, category: Any, file_name: Any
     ) -> Path:
@@ -378,14 +372,6 @@ class ProjectService:
         self.ensure_mutation_allowed(project_id)
         return self.repository.save_file(
             project_id, category, file_name, payload.get('content')
-        )
-
-    def rename_file(
-        self, project_id: Any, category: Any, file_name: Any, payload: Dict[str, Any]
-    ) -> Dict[str, Any]:
-        self.ensure_mutation_allowed(project_id)
-        return self.repository.rename_file(
-            project_id, category, file_name, payload.get('new_name')
         )
 
     def import_file(
@@ -433,19 +419,6 @@ class ProjectService:
                 '조인트 매핑이 없는 프로젝트에는 애니메이션을 넣을 수 없습니다. '
                 '조인트 매핑을 먼저 만드세요'
             )
-
-    def activate_file(
-        self, project_id: Any, category: Any, file_name: Any
-    ) -> Dict[str, Any]:
-        self.ensure_mutation_allowed(project_id)
-        # This only selects a file in project metadata.  It does not apply a
-        # motor configuration or publish a motion command.
-        result = self.repository.set_active(project_id, category, file_name)
-        if str(category) in {'motor_axes', 'motion_axis_matching', 'motions'}:
-            result['editor_link'] = self.open_file_for_editing(
-                project_id, category, file_name
-            )
-        return result
 
     def delete_file(
         self, project_id: Any, category: Any, file_name: Any

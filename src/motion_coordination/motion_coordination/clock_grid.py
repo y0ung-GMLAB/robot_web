@@ -114,7 +114,7 @@ def period_error(period_sec: float, auto_sec: float) -> str:
     if period > MAX_PERIOD_SEC:
         return f'회차 간격은 {MAX_PERIOD_SEC:.0f} s 이하여야 합니다'
     if auto_sec and period + 1e-6 < float(auto_sec):
-        return f'회차 간격이 애니메이션보다 짧습니다 · 최소 {float(auto_sec):.0f} s'
+        return f'회차 간격이 애니메이션보다 짧습니다 (최소 {float(auto_sec):.0f}초)'
     return ''
 
 

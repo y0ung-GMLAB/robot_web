@@ -37,21 +37,21 @@ CATALOG: List[Tuple[str, str, str, int, int, str, Optional[int], str, str]] = [
     ('게인', '관성비 추정 속도', 'Pr6.31', 0x3631, 0, 'int16', 1, '', ''),
     # 지령 필터 · 「드라이브 게인」 칸에서도 쓴다 · 2026-10-16 · Pr2.22 팩토리값은 프레임마다 다름(A~C 92 · D~H 139)
     ('지령 필터', '지령 스무딩 필터', 'Pr2.22', 0x3222, 0, 'int16', 92, '× 0.1 ms', 'D~H 프레임 팩토리값 139'),
-    ('지령 필터', '지령 FIR 필터', 'Pr2.23', 0x3223, 0, 'int16', 10, '× 0.1 ms', '모터가 멈췄을 때만 바꿈'),
+    ('지령 필터', '지령 FIR 필터', 'Pr2.23', 0x3223, 0, 'int16', 10, '× 0.1 ms', '모터 정지 상태에서만 변경'),
     ('앱솔루트 · 리밋', '앱솔루트 방식', 'Pr0.15', 0x3015, 0, 'int16', 1, '', 'C'),
     ('앱솔루트 · 리밋', '토크 한계', 'Pr0.13', 0x3013, 0, 'int16', 500, '%', ''),
     ('앱솔루트 · 리밋', '위치 편차 과대 기준', 'Pr0.14', 0x3014, 0, 'int32', 83886080, 'pulse', ''),
     ('앱솔루트 · 리밋', '리밋 스위치(구동 금지 입력) 설정', 'Pr5.04', 0x3504, 0, 'int16', 1, '', ''),
     ('앱솔루트 · 리밋', '과속도 기준', 'Pr5.13', 0x3513, 0, 'int16', 0, 'r/min', ''),
     ('앱솔루트 · 리밋', '모터 가동 범위', 'Pr5.14', 0x3514, 0, 'int16', 10, '× 0.1회전', ''),
-    ('브레이크 · 정지', '브레이크 지연 · 멈춰 있을 때', 'Pr4.37', 0x3437, 0, 'int16', 0, 'ms', ''),
-    ('브레이크 · 정지', '브레이크 지연 · 움직이는 중', 'Pr4.38', 0x3438, 0, 'int16', 0, 'ms', ''),
+    ('브레이크 · 정지', '브레이크 지연 (정지 시)', 'Pr4.37', 0x3437, 0, 'int16', 0, 'ms', ''),
+    ('브레이크 · 정지', '브레이크 지연 (동작 중)', 'Pr4.38', 0x3438, 0, 'int16', 0, 'ms', ''),
     ('브레이크 · 정지', '브레이크 해제 속도', 'Pr4.39', 0x3439, 0, 'int16', 30, 'r/min', ''),
-    ('브레이크 · 정지', '서보 OFF 때 멈추는 방법', 'Pr5.06', 0x3506, 0, 'int16', 0, '', 'A6B 는 605B/605C 가 0 일 때만'),
-    ('브레이크 · 정지', '알람 때 멈추는 방법', 'Pr5.10', 0x3510, 0, 'int16', 0, '', ''),
+    ('브레이크 · 정지', '서보 OFF 시 정지 방법', 'Pr5.06', 0x3506, 0, 'int16', 0, '', 'A6B는 605B/605C가 0인 경우에만 적용'),
+    ('브레이크 · 정지', '알람 시 정지 방법', 'Pr5.10', 0x3510, 0, 'int16', 0, '', ''),
     ('브레이크 · 정지', '즉시 정지 토크', 'Pr5.11', 0x3511, 0, 'int16', 0, '%', ''),
     ('브레이크 · 정지', '과부하 알람 기준', 'Pr5.12', 0x3512, 0, 'int16', 0, '%', ''),
-    ('브레이크 · 정지', '알람 때 모터 힘으로 세우는 최대 시간', 'Pr6.14', 0x3614, 0, 'int16', 200, 'ms', ''),
+    ('브레이크 · 정지', '알람 시 토크 정지 최대 시간', 'Pr6.14', 0x3614, 0, 'int16', 200, 'ms', ''),
     ('입력 핀', 'SI1 입력 선택', 'Pr4.00', 0x3400, 0, 'uint32', 3289650, '', ''),
     ('입력 핀', 'SI2 입력 선택', 'Pr4.01', 0x3401, 0, 'uint32', 8487297, '', ''),
     ('입력 핀', 'SI3 입력 선택', 'Pr4.02', 0x3402, 0, 'uint32', 8553090, '', ''),
@@ -76,13 +76,13 @@ CATALOG: List[Tuple[str, str, str, int, int, str, Optional[int], str, str]] = [
 
 #: 여기서 못 쓰는 객체 · 이유
 WRITE_BLOCKED: Dict[int, str] = {
-    0x1010: 'EEPROM 저장은 「드라이브 저장(EEPROM)」 버튼으로',
-    0x3015: '앱솔루트 방식은 「앱솔루트 설정」 버튼으로(전원 재투입 · 다회전 클리어 순서가 있다)',
-    0x4D00: '다회전 클리어는 전용 버튼으로', 0x4D01: '다회전 클리어는 전용 버튼으로',
-    0x6040: '제어 워드는 모터 프로그램이 쓴다', 0x6060: '운전 모드는 모터 프로그램이 정한다',
-    0x607A: '목표 위치는 모터 프로그램이 쓴다', 0x60FF: '목표 속도는 모터 프로그램이 쓴다',
-    0x6071: '목표 토크는 모터 프로그램이 쓴다',
-    0x60B2: '토크 오프셋(중력 보정)은 쓰지 않기로 했다(사용자 결정 2026-10-13)',
+    0x1010: 'EEPROM 저장은 「드라이브 저장(EEPROM)」 버튼 사용',
+    0x3015: '앱솔루트 방식은 「앱솔루트 설정」 버튼 사용 (전원 재투입·다회전 클리어 순서 필요)',
+    0x4D00: '다회전 클리어는 전용 버튼 사용', 0x4D01: '다회전 클리어는 전용 버튼 사용',
+    0x6040: '제어 워드는 모터 프로그램 전용', 0x6060: '운전 모드는 모터 프로그램 전용',
+    0x607A: '목표 위치는 모터 프로그램 전용', 0x60FF: '목표 속도는 모터 프로그램 전용',
+    0x6071: '목표 토크는 모터 프로그램 전용',
+    0x60B2: '토크 오프셋(중력 보정)은 사용하지 않음',
 }
 #: PDO 배선 · 동기 관리자 · 통신 설정
 WRITE_BLOCKED_RANGES = [(0x1600, 0x17FF, 'PDO 배선'), (0x1A00, 0x1BFF, 'PDO 배선'), (0x1C00, 0x1CFF, '통신 설정')]
@@ -97,7 +97,7 @@ def parse_object(text: Any) -> Tuple[int, int]:
         return 0x3000 + int(match.group(1)) * 0x100 + int(match.group(2).zfill(2), 16), 0
     match = re.fullmatch(r'(?:0[xX])?([0-9a-fA-F]{4})[hH]?(?::(\d{1,3}|0[xX][0-9a-fA-F]{1,2}))?', raw)
     if not match:
-        raise ValueError(f'객체를 알아보지 못했습니다: {text} (예 Pr5.04 · 0x3504 · 0x607D:2)')
+        raise ValueError(f'객체를 인식하지 못했습니다: {text} (예: Pr5.04, 0x3504, 0x607D:2)')
     return int(match.group(1), 16), int(match.group(2), 0) if match.group(2) else 0
 
 
@@ -106,7 +106,7 @@ def write_block_reason(index: int) -> str:
         return WRITE_BLOCKED[index]
     for low, high, name in WRITE_BLOCKED_RANGES:
         if low <= index <= high:
-            return f'{name}는 여기서 바꾸지 않습니다'
+            return f'{name}는 해당 화면에서 변경할 수 없습니다'
     return ''
 
 
@@ -202,7 +202,7 @@ class DriveParams:
 
     def write(self, payload: Dict[str, Any]) -> Dict[str, Any]:
         if payload.get('confirmed') is not True:
-            return {'success': False, 'message': '쓰기 · 확인이 필요합니다'}
+            return {'success': False, 'message': '쓰기: 확인 필요'}
         try:
             axis = int(payload.get('axis'))
             index, sub = parse_object(payload.get('object'))
@@ -218,10 +218,10 @@ class DriveParams:
                 raise ValueError(reason)
             target = self._target(axis)
         except (TypeError, ValueError) as exc:
-            return {'success': False, 'message': f'쓰기 불가 · {exc}'}
+            return {'success': False, 'message': f'쓰기 불가: {exc}'}
         blocker = self._safety_blocker()
         if blocker:
-            return {'success': False, 'message': f'쓰기 불가 · {blocker}'}
+            return {'success': False, 'message': f'쓰기 불가: {blocker}'}
         before, _ = self._upload(target, index, sub, data_type)
         # `--` · 음수 값(-4)을 ethercat 이 옵션으로 읽지 않게(「invalid option -- '4'」)
         command = ['ethercat', 'download', '-m', str(target['master']), '-p', str(target['position']),
@@ -233,18 +233,18 @@ class DriveParams:
             error = str(exc)
         after, read_error = self._upload(target, index, sub, data_type) if not error else (None, '')
         if not error and after != value:
-            error = f'되읽기 {after} ≠ {value}{f" · {read_error}" if read_error else ""}'
+            error = f'재확인 값 {after} ≠ {value}{f" · {read_error}" if read_error else ""}'
         boot = (self._boot_values(axis) or {}).get((index, sub))
         notes = []
         if isinstance(boot, int) and boot != value:
-            notes.append(f'부팅 때 {boot} 로 다시 씁니다(재시작하면 돌아감 · 남기려면 공통 설정이나 모터 칸에서)')
+            notes.append(f'부팅 시 {boot}(으)로 재설정합니다 (재시작 시 복귀, 유지하려면 드라이브 공통 값 또는 모터별 칸에서 변경)')
         record = {'event_type': 'minas_param_write', 'axis': axis, 'index': f'0x{index:04X}', 'subindex': sub,
                   'type': data_type, 'before': before, 'value': value, 'after': after, 'success': not error,
                   'message': error or '썼습니다(드라이브 RAM)'}
         self._record(record)
         return {
             'success': not error,
-            'message': (f'0x{index:04X}:{sub} {before} → {after} · 지금부터 적용(전원을 끄면 사라짐 · 남기려면 「드라이브 저장(EEPROM)」)'
-                        if not error else f'쓰기 실패 · {error}'),
+            'message': (f'0x{index:04X}:{sub} {before} → {after}. 즉시 적용 (전원 차단 시 원래 값으로 복귀, 유지하려면 「드라이브 저장(EEPROM)」)'
+                        if not error else f'쓰기 실패: {error}'),
             'notes': notes, 'before': before, 'after': after,
         }

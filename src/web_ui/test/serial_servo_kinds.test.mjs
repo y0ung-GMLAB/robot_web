@@ -12,10 +12,6 @@ import { motorErrorText } from '../static/v2/js/model.js';
 import { motorRefFor, motorWhere } from '../static/v2/js/mapping_model.js';
 import { axisRows } from '../static/v2/js/play_model.js';
 import { manualBlocker } from '../static/v2/js/pages/manual.js';
-import { runtimeIsDynamixel } from '../static/js/motor_type_dynamixel.js';
-import { normalizeMotorTypeKey } from '../static/js/format.js';
-import { servoButtonLabels } from '../static/js/motion_test.js';
-import { motionMotorIdentityLabel, motionMotorRef, motionMotorRefs } from '../static/js/motion_data.js';
 
 const read = (path) => readFileSync(new URL(path, import.meta.url), 'utf8');
 
@@ -215,38 +211,3 @@ test('서보 버튼 · 직렬 서보 한 통로 · 재부팅은 다이나믹셀�
   assert.match(all, /const failed = \[\];/);
 });
 
-test('이전 화면 · Feetech 은 다이나믹셀도 AC 도 아님 · 직렬 서보 통로 · 재부팅 없음', () => {
-  assert.equal(runtimeIsDynamixel({ motor_type: 'feetech', transport: 'serial' }), false);
-  assert.equal(runtimeIsDynamixel({ motor_type: 'feetech', motor_type_label: 'Feetech', transport_label: 'Serial' }), false);
-  assert.equal(runtimeIsDynamixel({ motor_type: 'dynamixel' }), true);
-  assert.equal(runtimeIsDynamixel({ transport: 'serial' }), true, '옛 판정 그대로');
-  assert.equal(runtimeIsDynamixel({ motor_type: 'minas', transport: 'ethercat' }), false);
-  assert.equal(normalizeMotorTypeKey('feetech', 'Feetech'), 'feetech');
-  assert.equal(normalizeMotorTypeKey('dynamixel', ''), 'dynamixel');
-  assert.equal(normalizeMotorTypeKey('minas', 'AC Servo'), 'ac_servo');
-  assert.deepEqual(servoButtonLabels({ motor_type: 'feetech' }), { on: '토크 켜기', off: '토크 끄기', reset: '재부팅 없음' });
-  assert.deepEqual(servoButtonLabels({ motor_type: 'dynamixel' }), { on: '토크 켜기', off: '토크 끄기', reset: '재부팅' });
-  // 모르는 종류 · 칸 없음 · 전과 같음
-  assert.deepEqual(servoButtonLabels({ motor_type: 'unknown' }), { on: '서보 켜기', off: '서보 끄기', reset: '오류 초기화' });
-  assert.deepEqual(servoButtonLabels({}), { on: '서보 켜기', off: '서보 끄기', reset: '오류 초기화' });
-  assert.equal(runtimeIsDynamixel({ motor_type: 'unknown', transport: 'unknown' }), false);
-  assert.equal(normalizeMotorTypeKey('unknown', 'Unknown'), 'unknown');
-  const ft = { motor_type: 'feetech', serial_port: '/dev/ttyUSB1', bus_id: 4 };
-  assert.equal(motionMotorRef(ft), 'feetech:port:%2Fdev%2FttyUSB1:id:4');
-  assert.deepEqual(motionMotorRefs(ft), ['feetech:port:%2Fdev%2FttyUSB1:id:4'], '옛 이름 없음');
-  assert.equal(motionMotorIdentityLabel(ft), 'Feetech /dev/ttyUSB1 · ID 4');
-  // 1 Mbps 고정 가정 없음 · 속도는 검색 결과 그대로
-  assert.doesNotMatch(read('../static/js/motor_type_dynamixel.js'), /DYNAMIXEL_BAUDRATE|1000000/);
-});
-
-test('이전 화면 · 「직렬 서보 검색」 버튼 하나 · 결과 글은 다이나믹셀 · Feetech 따로', () => {
-  const panel = read('../static/panels/05-panel-registration.html');
-  assert.match(panel, /id="dynamixelScanButton"[^>]*>직렬 서보 검색</);
-  assert.match(panel, /id="dynamixelScanResult"[\s\S]*id="feetechScanResult"/);
-  assert.doesNotMatch(panel, /feetechScanButton/);
-  const controller = read('../static/js/motor_config.js');
-  assert.match(controller, /render: \(scan\) => \{ renderDynamixelScan\(scan\); renderFeetechScan\(scan\); \}/);
-  assert.match(controller, /feetech_scan: scan\?\.feetech_scan \|\| latestScan\?\.feetech_scan/);
-  assert.doesNotMatch(controller, /feetechScanButton|requestFeetechScan|scan\/feetech/);
-  assert.doesNotMatch(read('../static/js/api.js'), /scan\/feetech/);
-});

@@ -75,9 +75,9 @@ def _state(**axes):
 def test_pending_clear_blocks_playback_and_initial_move_with_the_same_reason():
     rows = [_row('1-1', 0), _row('1-2', 1, reference_set_at=5000.0)]
     manager = _manager(rows, _state(a1=(1000.0, True)))
-    with pytest.raises(ValueError, match='1번 모터 다회전 클리어 뒤 기준점 다시 지정 필요'):
+    with pytest.raises(ValueError, match='1번 모터 다회전 클리어 후 기준점 재지정 필요'):
         _build(manager)
-    with pytest.raises(ValueError, match='1번 모터 다회전 클리어 뒤 기준점 다시 지정 필요'):
+    with pytest.raises(ValueError, match='1번 모터 다회전 클리어 후 기준점 재지정 필요'):
         _build(manager, initialization_only=True)
 
 

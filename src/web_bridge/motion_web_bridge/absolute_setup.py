@@ -91,9 +91,9 @@ SERVO_OFF_TIMEOUT_SEC = 5.0
 #: 「혼자 씀」 표시 마감을 늘리는 간격 · 139 E-1
 HOLD_REFRESH_SEC = 30.0
 #: 끝 문구 · 140
-NO_CLEAR_MESSAGE = '앱솔루트 설정을 마쳤습니다 · 다회전 정상 · 클리어 안 함 · 기준점 그대로'
-REFERENCE_DONE_MESSAGE = '앱솔루트 설정을 마쳤습니다 · 다회전 클리어한 축의 기준점을 다시 지정했습니다'
-REFERENCE_PENDING_LABEL = '기준점 다시 지정 대기'
+NO_CLEAR_MESSAGE = '앱솔루트 설정을 완료했습니다. 다회전 정상으로 클리어하지 않았으며 기준점을 유지합니다'
+REFERENCE_DONE_MESSAGE = '앱솔루트 설정을 완료했습니다. 다회전 클리어한 축의 기준점을 재지정했습니다'
+REFERENCE_PENDING_LABEL = '기준점 재지정 대기'
 #: 「이어서 하기」 기록을 두는 시간 · 134
 RESUME_EXPIRE_SEC = 24 * 3600.0
 RESUME_VERSION = 1
@@ -101,10 +101,10 @@ RESUME_VERSION = 1
 STEPS = (
     ('servo_off', '서보 끄기'),
     ('write_mode', '앱솔루트 쓰기 · EEPROM 저장'),
-    ('power_cycle_1', '드라이브 전원 껐다 켜기 1'),
+    ('power_cycle_1', '드라이브 전원 재투입 1'),
     ('check_mode', '앱솔루트 방식 확인'),
     ('clear', '다회전 클리어'),
-    ('power_cycle_2', '드라이브 전원 껐다 켜기 2'),
+    ('power_cycle_2', '드라이브 전원 재투입 2'),
     ('verify', '최종 확인'),
 )
 STEP_LABELS = dict(STEPS)
@@ -131,7 +131,7 @@ def step_index(key: str) -> int:
 def reference_prompt(axes: List[int]) -> str:
     """클리어한 축 · 기준점을 다시 지정하라는 글 · 화면 · 「확인할 일」 이 같은 글 · 140"""
     names = ' · '.join(f'{int(axis)}번' for axis in sorted(set(axes)))
-    return f'다회전 클리어한 {names} 모터 · 몸을 정면·수평에 맞추고 기준점을 다시 지정해 저장하세요'
+    return f'다회전 클리어한 {names} 모터: 로봇을 정면·수평으로 정렬하고 기준점을 재지정해 저장하세요'
 
 
 def drive_key(drive: Dict[str, Any]) -> Tuple[int, int]:
@@ -157,7 +157,7 @@ def plan_targets(
     targets = [drive for drive in drives if drive.get('status') != minas_absolute.DRIVE_OK]
     skipped = [drive for drive in drives if drive.get('status') == minas_absolute.DRIVE_OK]
     if not targets:
-        return [], skipped, '이미 앱솔루트 방식으로 정상입니다. 다시 클리어하면 기준점이 사라지므로 하지 않습니다'
+        return [], skipped, '이미 앱솔루트 방식으로 정상입니다. 재클리어 시 기준점이 초기화되므로 실행하지 않습니다'
     return targets, skipped, ''
 
 
@@ -277,7 +277,7 @@ class AbsoluteSetup:
         )
         return {
             'success': not reason,
-            'message': reason or f'처리 {len(targets)}대 · 건너뜀 {len(skipped)}대',
+            'message': reason or f'대상 {len(targets)}대, 제외 {len(skipped)}대',
             'targets': [self._view(drive) for drive in targets],
             'skipped': [self._view(drive) for drive in skipped],
             'steps': [label for _key, label in STEPS],
@@ -306,14 +306,14 @@ class AbsoluteSetup:
         )
         if not started:
             return {'success': False, 'message': '앱솔루트 설정이 이미 진행 중입니다'}
-        return {'success': True, 'message': f'앱솔루트 설정을 시작했습니다 · 대상 {len(targets)}대', 'job': self.status()}
+        return {'success': True, 'message': f'앱솔루트 설정을 시작했습니다 (대상 {len(targets)}대)', 'job': self.status()}
 
     def cancel(self) -> Dict[str, Any]:
         """전원 재투입을 기다리는 동안만 의미가 있다 · 쓰는 중에는 그 단계가 끝나야 선다"""
         if not self.active():
             return {'success': False, 'message': '진행 중인 앱솔루트 설정이 없습니다'}
         self._cancel.set()
-        return {'success': True, 'message': '앱솔루트 설정 취소를 요청했습니다. 현재 단계가 끝나면 중지합니다'}
+        return {'success': True, 'message': '앱솔루트 설정 취소를 요청했습니다. 현재 단계 완료 후 중지합니다'}
 
     # -- 이어서 하기 · 134 -------------------------------------------------- #
 
@@ -377,7 +377,7 @@ class AbsoluteSetup:
         return {
             'success': True,
             'resume': True,
-            'message': f'이어서 하기 · {step_index(first)}/{len(STEPS)} {STEP_LABELS[first]}부터 · 대상 {len(targets)}대',
+            'message': f'재개: {step_index(first)}/{len(STEPS)} {STEP_LABELS[first]}부터 (대상 {len(targets)}대)',
             'targets': [self._public_target(item) for item in targets],
             'skipped': [],
             'steps': [label for key, label in STEPS if step_index(key) >= step_index(first)],
@@ -406,7 +406,7 @@ class AbsoluteSetup:
             return {'success': False, 'message': '앱솔루트 설정이 이미 진행 중입니다'}
         return {
             'success': True,
-            'message': f'앱솔루트 설정을 이어서 합니다 · {step_index(first)}/{len(STEPS)} {STEP_LABELS[first]}부터 · 대상 {len(targets)}대',
+            'message': f'앱솔루트 설정을 재개합니다: {step_index(first)}/{len(STEPS)} {STEP_LABELS[first]}부터 (대상 {len(targets)}대)',
             'job': self.status(),
         }
 
@@ -557,7 +557,7 @@ class AbsoluteSetup:
                 self._step('write_mode', 'Motor Manager를 정지하고 Pr0.15 = 0을 EEPROM에 저장합니다')
                 self._with_motor_manager_stopped(lambda: self._write_mode(targets))
             if due('power_cycle_1'):
-                self._step('power_cycle_1', '드라이브 전원을 껐다 켜세요. 대상 드라이브가 꺼졌다가 다시 연결되면 다음 단계로 넘어갑니다')
+                self._step('power_cycle_1', '드라이브 전원을 재투입하세요. 대상 드라이브 재연결 확인 후 다음 단계로 진행합니다')
                 if resumed:
                     self._servo_off_targets(targets)
                 self._wait_power_cycle(targets)
@@ -571,21 +571,21 @@ class AbsoluteSetup:
                 clearing = [item for item in targets if item.get('needs_clear') and not item.get('cleared')]
                 if clearing:
                     names = ', '.join(item['label'] for item in clearing)
-                    self._step('clear', f'Err40(다회전 무효) · {names}만 다회전 클리어 · 서보 끄기 → Motor Manager 정지 → 클리어')
+                    self._step('clear', f'Err40(다회전 무효): {names}만 다회전 클리어 (서보 OFF → 모터 프로그램 정지 → 클리어)')
                     self._servo_off_targets(clearing)
                     self._with_motor_manager_stopped(lambda: self._clear(targets, clearing))
                 else:
-                    self._step('clear', '다회전 정상(Err40 없음) · 다회전 클리어를 건너뜁니다 · 기준점 그대로')
+                    self._step('clear', '다회전 정상(Err40 없음): 다회전 클리어 생략, 기준점 유지')
             cleared = [item for item in targets if item.get('cleared')]
             if due('power_cycle_2'):
                 if cleared:
-                    self._step('power_cycle_2', '드라이브 전원을 한 번 더 껐다 켜세요. 그래야 다회전 클리어가 적용됩니다')
+                    self._step('power_cycle_2', '드라이브 전원을 1회 더 재투입하세요. 재투입 후 다회전 클리어가 적용됩니다')
                     if resumed:
                         self._servo_off_targets(cleared)
                     self._wait_power_cycle(cleared)
                 else:
                     self._step('power_cycle_2', '다회전 클리어를 하지 않아 전원 재투입 2를 건너뜁니다')
-            self._step('verify', 'Pr0.15 · 오류 코드를 다시 읽습니다' + (' · 클리어한 드라이브는 위치도' if cleared else ''))
+            self._step('verify', 'Pr0.15와 오류 코드 재확인' + (' (클리어한 드라이브는 위치 포함)' if cleared else ''))
             if first == step_index('verify'):
                 self._wait_settled(targets)
             self._verify(targets)
@@ -614,9 +614,9 @@ class AbsoluteSetup:
         if not cleared:
             message = NO_CLEAR_MESSAGE
         else:
-            parts = [reference_prompt(axes)] if axes else ['앱솔루트 설정을 마쳤습니다 · 다회전 클리어함']
+            parts = [reference_prompt(axes)] if axes else ['앱솔루트 설정을 완료했습니다. 다회전 클리어를 실행했습니다']
             if unregistered:
-                parts.append(f'{", ".join(unregistered)}도 클리어함 · 등록한 뒤 기준점을 지정하세요')
+                parts.append(f'{", ".join(unregistered)}도 클리어했습니다. 모터 등록 후 기준점을 지정하세요')
             message = ' · '.join(parts)
         self._finish('done', message)
 
@@ -726,7 +726,7 @@ class AbsoluteSetup:
                 continue
             reply = self._servo_off(axis) or {}
             if reply.get('success') is False:
-                raise _Stop(f'{axis}번 모터 서보 끄기 실패 · {reply.get("message") or "응답 없음"}')
+                raise _Stop(f'{axis}번 모터 서보 OFF 실패: {reply.get("message") or "응답 없음"}')
         deadline = self._clock() + SERVO_OFF_TIMEOUT_SEC
         while True:
             still_on = [axis for axis in axes if (self._current_motor(axis) or {}).get('servo_on') is not False]
@@ -777,7 +777,7 @@ class AbsoluteSetup:
             self._cli(base + ['-t', 'int16', '0x3015', '0', '0'], item)
             value = self._upload(master, position, '0x3015', 'int16', item)
             if value != 0:
-                raise _Stop(f'{item["label"]} Pr0.15를 다시 읽은 값이 {value}입니다. 0이어야 합니다')
+                raise _Stop(f'{item["label"]} Pr0.15 재확인 값이 {value}입니다 (정상값 0)')
             self._cli(base + ['-t', 'uint32', '0x1010', '1', '0x65766173'], item)
 
     def _check_mode(self, targets: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
@@ -823,7 +823,7 @@ class AbsoluteSetup:
             verify = verify_command(ABSOLUTE_CLEAR, master, position)
             value = self._read(verify, parse_upload_value, item, '0x4D00:01')
             if not value & ABSOLUTE_CLEAR_BIT:
-                raise _Stop(f'{item["label"]} 다회전 클리어 확인 실패 · 0x4D00:01 = {value}')
+                raise _Stop(f'{item["label"]} 다회전 클리어 확인 실패 (0x4D00:01 = {value})')
             item['cleared'] = True
             self._set_targets(targets)
 
@@ -838,7 +838,7 @@ class AbsoluteSetup:
                 return
             if self._clock() >= deadline:
                 raise _Stop(' · '.join(problems))
-            self._note('최종 확인 · ' + ' · '.join(problems) + ' · 다시 확인합니다')
+            self._note('최종 확인: ' + ', '.join(problems) + '. 재확인합니다')
             self._pause(1.0)
 
     def _verify_one(self, master: int, position: int, item: Dict[str, Any]) -> List[str]:
@@ -858,7 +858,7 @@ class AbsoluteSetup:
         if code != 0:
             problems.append(f'{item["label"]} 오류 0x{code & 0xFFFF:04X}')
         if abs(int(where)) >= ONE_TURN_COUNTS:
-            problems.append(f'{item["label"]} 위치 {where} count · 클리어했는데 한 바퀴를 넘음(다회전 값이 남아 있음)')
+            problems.append(f'{item["label"]} 위치 {where} count: 클리어 후에도 1회전 초과 (다회전 값 잔존)')
         return problems
 
     def _wait_power_cycle(self, targets: List[Dict[str, Any]]) -> None:
@@ -867,9 +867,9 @@ class AbsoluteSetup:
         deadline = self._clock() + POWER_CYCLE_TIMEOUT_SEC
         while True:
             if self._cancel.is_set():
-                raise _Stop('전원을 껐다 켜기를 기다리던 중에 사용자가 취소했습니다')
+                raise _Stop('전원 재투입 대기 중 사용자가 취소했습니다')
             if self._clock() >= deadline:
-                raise _Stop('30분 안에 드라이브 전원을 껐다 켜지 않아 중지했습니다')
+                raise _Stop('30분 이내 드라이브 전원 재투입이 없어 중지했습니다')
             slaves = self._visible_slaves()
             if slaves is not None:
                 seen = {
@@ -881,7 +881,7 @@ class AbsoluteSetup:
                 waiting_off = sorted(keys - gone)
                 waiting_on = sorted(gone - back)
                 if not waiting_off and not waiting_on:
-                    self._note('대상 드라이브가 모두 다시 연결됐습니다. EtherCAT 마스터가 다시 설정할 때까지 잠시 기다립니다')
+                    self._note('대상 드라이브 재연결을 확인했습니다. EtherCAT 마스터 재설정까지 대기합니다')
                     self._wait_reconfigured(keys, slaves)
                     self._settle(keys)
                     return
@@ -890,7 +890,7 @@ class AbsoluteSetup:
                     parts.append('전원 꺼짐 대기 ' + ', '.join(f'슬레이브 {p}' for _m, p in waiting_off))
                 if waiting_on:
                     parts.append('다시 켜짐 대기 ' + ', '.join(f'슬레이브 {p}' for _m, p in waiting_on))
-                self._note('드라이브 전원을 껐다 켜세요 · ' + ' · '.join(parts))
+                self._note('드라이브 전원을 재투입하세요: ' + ', '.join(parts))
             self._pause(POLL_SEC)
 
     def _wait_settled(self, targets: List[Dict[str, Any]]) -> None:
@@ -949,7 +949,7 @@ class AbsoluteSetup:
                 return
             if now - started >= RECONFIGURE_WAIT_SEC:
                 return
-            self._note(f'대상 드라이브가 다시 연결됐습니다. 마스터가 드라이브 정보를 읽는 동안 기다립니다 ({quiet:.0f}/{SETTLE_AFTER_RETURN_SEC:.0f} s)')
+            self._note(f'대상 드라이브 재연결을 확인했습니다. 마스터의 드라이브 정보 읽기를 대기합니다 ({quiet:.0f}/{SETTLE_AFTER_RETURN_SEC:.0f}초)')
             self._pause(POLL_SEC)
 
     def _configuring(self) -> bool:
@@ -966,7 +966,7 @@ class AbsoluteSetup:
                 command, check=False, capture_output=True, text=True, timeout=COMMAND_TIMEOUT_SEC,
             )
         except (OSError, subprocess.TimeoutExpired) as exc:
-            raise _Stop(f'{" ".join(command[1:3])} 실패 · {exc}') from exc
+            raise _Stop(f'{" ".join(command[1:3])} 실패: {exc}') from exc
 
     def _cli(self, command: List[str], item: Dict[str, Any]) -> None:
         """쓰기 · 보낸 것은 다시 안 보낸다 · 보내지 않고 돌려받은 것(버스 설정 중 · 잠금)만 다시 · 134"""
@@ -978,7 +978,7 @@ class AbsoluteSetup:
             self._pause(READ_RETRY_INTERVAL_SEC)
         if result.returncode != 0:
             detail = (result.stderr or result.stdout or '').strip() or f'종료 코드 {result.returncode}'
-            raise _Stop(f'{item["label"]} {" ".join(command[6:])} 실패 · {detail}')
+            raise _Stop(f'{item["label"]} {" ".join(command[6:])} 실패: {detail}')
 
     def _upload(self, master: int, position: int, index: str, data_type: str, item: Dict[str, Any]) -> int:
         command = ['ethercat', 'upload', '-m', str(master), '-p', str(position), '-t', data_type, index, '0']
@@ -1009,8 +1009,8 @@ class AbsoluteSetup:
                 else:
                     detail = (result.stderr or result.stdout or '').strip() or f'종료 코드 {result.returncode}'
             if attempt >= 2 and self._clock() >= deadline:
-                raise _Stop(f'{item["label"]} {what} 읽기 실패 · {detail} ({attempt}번 시도)')
-            self._note(f'{item["label"]} {what} 읽기 실패 · 다시 읽습니다 ({attempt}번째) · {detail}')
+                raise _Stop(f'{item["label"]} {what} 읽기 실패: {detail} ({attempt}회 시도)')
+            self._note(f'{item["label"]} {what} 읽기 실패, 재시도 ({attempt}회차): {detail}')
             self._pause(READ_RETRY_INTERVAL_SEC)
 
     # -- 도움 --------------------------------------------------------------- #

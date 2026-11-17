@@ -8,7 +8,7 @@ import {
 import { runSummary } from '../static/v2/js/model.js';
 import { playHeadline } from '../static/v2/js/play_model.js';
 import { runRows } from '../static/v2/js/records_model.js';
-import { followPlayheadSec, followRestSec } from '../static/js/sim3d_math.js';
+import { followPlayheadSec, followRestSec } from '../static/v2/js/sim3d_math.js';
 
 test('시각 글 · 서버(motion_segment.format_time)와 같은 모양 · 0.1 초', () => {
   assert.equal(segmentClock(80), '1:20');
@@ -58,8 +58,8 @@ test('구간 글 · 진행 글은 파일 시각 · 끝을 넘지 않는다', () 
   assert.equal(segmentLabel(80, 0), '구간 1:20~끝');
   assert.equal(segmentLabel(0, 0), '');
   assert.equal(segmentLabel(0, 30), '구간 0:00~0:30');
-  assert.equal(segmentProgressText({ segment_start_sec: 80, segment_end_sec: 105 }, 11), '구간 1:20~1:45 · 지금 1:31');
-  assert.equal(segmentProgressText({ segment_start_sec: 80, segment_end_sec: 105 }, 40), '구간 1:20~1:45 · 지금 1:45');
+  assert.equal(segmentProgressText({ segment_start_sec: 80, segment_end_sec: 105 }, 11), '구간 1:20~1:45 · 현재 1:31');
+  assert.equal(segmentProgressText({ segment_start_sec: 80, segment_end_sec: 105 }, 40), '구간 1:20~1:45 · 현재 1:45');
   assert.equal(segmentProgressText({}, 11), '');
 });
 
@@ -68,7 +68,7 @@ test('지금 칸 · 진행 시각 옆에 구간과 파일 시각 · 머리에 �
     state: 'running', motion_file_id: 'narration.json', current_cycle: 1, run_mode: 'once',
     segment_start_sec: 80, segment_end_sec: 105, progress: { elapsed_sec: 11, duration_sec: 25 },
   };
-  assert.equal(runSummary({ motion_run_status: status }).timeText, '00:11 / 00:25 · 구간 1:20~1:45 · 지금 1:31');
+  assert.equal(runSummary({ motion_run_status: status }).timeText, '00:11 / 00:25 · 구간 1:20~1:45 · 현재 1:31');
   assert.equal(runSummary({ motion_run_status: { ...status, segment_start_sec: 0, segment_end_sec: 0 } }).timeText, '00:11 / 00:25');
   assert.match(playHeadline({ motion_run_status: status }).detail, /구간 1:20~1:45/);
   assert.doesNotMatch(playHeadline({ motion_run_status: { ...status, segment_start_sec: 0, segment_end_sec: 0 } }).detail, /구간/);

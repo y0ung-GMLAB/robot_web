@@ -3,7 +3,7 @@
 미니PC 에 가기 전에 화면을 보면서 고치기 위한 것이다 · 실제 브리지는
 rclpy 가 필요해 개발 PC(Windows)에서 못 뜬다 · 여기는:
 
-    /            실제 서버와 같은 규칙(IndexComposer)으로 조각을 합쳐 준다
+    /            /v2 로 넘긴다 (실제 서버와 같음)
     /static/*    src/web_ui/static 그대로
     /ws/status   가짜 스냅샷 2Hz · 플로팅 헤드 5축이 살아 있는 척한다
     /ws/manual-stream   페이더 규약(hello → hello_ok → target/release)을 흉내
@@ -34,10 +34,9 @@ sys.path.insert(0, str(ROOT / 'src' / 'web_bridge'))
 sys.path.insert(0, str(ROOT / 'src' / 'motion_common'))
 
 from fastapi import FastAPI, Request, WebSocket, WebSocketDisconnect  # noqa: E402
-from fastapi.responses import FileResponse, HTMLResponse, JSONResponse  # noqa: E402
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse  # noqa: E402
 import uvicorn  # noqa: E402
 
-from motion_web_bridge.index_composer import IndexComposer  # noqa: E402
 
 STATIC = ROOT / 'src' / 'web_ui' / 'static'
 
@@ -293,13 +292,11 @@ def tick(dt: float) -> None:
 # --------------------------------------------------------------------------- #
 
 app = FastAPI()
-composer = IndexComposer(STATIC / 'index.html')
 
 
 @app.get('/')
 async def index():
-    html, _etag = composer.compose()
-    return HTMLResponse(html)
+    return RedirectResponse('/v2', status_code=307)
 
 
 @app.get('/v2')

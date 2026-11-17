@@ -286,11 +286,11 @@ def test_schedule_end_release_after_the_cycle_says_window_end_not_cancel():
     manager._status = {'state': 'running', 'group_execution': True}
     assert manager._handle_stop_after_cycle({'reason': 'schedule_end'})['success'] is True
     assert manager._group.session['stop_reason'] == 'schedule_end'
-    manager._status = {'state': 'stopped', 'message': '구간 끝 · 회차 후 정지'}
+    manager._status = {'state': 'stopped', 'message': '운영 구간 종료: 회차 후 정지'}
     result = manager._group.cancel({'execution_id': 'exec-a'})
     assert result['success'] is True
     assert manager._status['state'] == 'stopped'
-    assert manager._status['message'] == '구간 끝 · 회차 후 정지'
+    assert manager._status['message'] == '운영 구간 종료: 회차 후 정지'
     assert '취소' not in result['message']
 
 
@@ -356,10 +356,10 @@ def test_schedule_end_after_the_last_cycle_finishes_with_the_window_end_text():
     assert not worker.is_alive()
     assert stop_sent.is_set()
     assert manager._status['state'] == 'stopped'
-    assert manager._status['message'] == '구간 끝 · 회차 후 정지'
+    assert manager._status['message'] == '운영 구간 종료: 회차 후 정지'
     # 마스터의 세션 정리가 와도 그대로
     manager._group.cancel({'execution_id': 'exec-a'})
-    assert manager._status['message'] == '구간 끝 · 회차 후 정지'
+    assert manager._status['message'] == '운영 구간 종료: 회차 후 정지'
 
 
 # 회차 맞춤 · 그룹 전체 회차 후 정지 · 장벽에서 풀기를 기다린다 · 수정 목록 154 · 155 ----------- #
@@ -421,7 +421,7 @@ def test_group_wide_stop_after_cycle_waits_at_the_barrier_until_released():
     assert not worker.is_alive()
     assert result['success'] is True
     assert manager._status['state'] == 'stopped'
-    assert manager._status['message'] == '구간 끝 · 회차 후 정지'
+    assert manager._status['message'] == '운영 구간 종료: 회차 후 정지'
 
 
 def test_group_wide_stop_received_at_the_barrier_shows_the_wait():
@@ -438,7 +438,7 @@ def test_group_wide_stop_received_at_the_barrier_shows_the_wait():
     assert not manager._stop_event.is_set()
     assert manager._status['state'] == 'motion_completed'
     assert manager._status['phase'] == 'group_motion_completed'
-    assert manager._status['message'].startswith('그룹 모션 2회차 완료 · 회차 후 정지 대기')
+    assert manager._status['message'].startswith('그룹 모션 2회차 완료. 회차 후 정지 대기')
 
 
 def test_a_local_only_stop_after_cycle_still_finishes_at_the_cycle_end():
@@ -450,7 +450,7 @@ def test_a_local_only_stop_after_cycle_still_finishes_at_the_cycle_end():
 
     assert not worker.is_alive()
     assert manager._status['state'] == 'stopped'
-    assert manager._status['message'] == '구간 끝 · 회차 후 정지'
+    assert manager._status['message'] == '운영 구간 종료: 회차 후 정지'
 
 
 def test_stop_after_cycle_right_after_the_cycle_motion_does_not_cut_it():

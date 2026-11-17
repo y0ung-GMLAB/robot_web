@@ -12,19 +12,19 @@ import { tip } from '../tip.js';
 
 export const GAIN_FIELDS = [
   { key: 'auto_tuning', label: '자동조정', number: 'Pr0.02', min: 0, max: 4,
-    meanings: { 0: '끔 (게인 고정)', 1: '표준 (일반 축)', 2: '위치결정 (짧게 이동하고 자주 정지하는 축)', 3: '수직축 (중력 부하가 걸리는 축)', 4: '마찰 보상' } },
+    meanings: { 0: '끔 (게인 고정)', 1: '표준 (일반 축)', 2: '위치결정 (짧게 이동하고 자주 정지하는 축)', 3: '수직축 (중력 부하가 있는 축)', 4: '마찰 보상' } },
   { key: 'stiffness', label: '강성', number: 'Pr0.03', min: 0, max: 31,
-    meanings: null, note: '높을수록 지령을 강하게 따라가지만, 너무 높으면 진동과 소음 발생\n낮은 값부터 한 칸씩 올려서 조정\n팩토리값 13' },
+    meanings: null, note: '값이 높을수록 지령 추종성 향상, 과도한 경우 진동·소음 발생\n낮은 값부터 1칸씩 올려 조정\n팩토리값 13' },
   // 지령 필터 · 입력은 드라이브 값 그대로(0.1 ms 정수 · 92 = 9.2 ms) · 옆에 ms 로 바꿔 보여 줌 · 2026-10-16 (사용자 요청)
   { key: 'command_smoothing', label: '지령 스무딩 필터', number: 'Pr2.22', min: 0, max: 10000, msPerUnit: 0.1,
-    meanings: null, note: '위치 지령 1차 지연 필터 (시작·정지는 부드러워지고 그만큼 추종이 늦어짐)'
+    meanings: null, note: '위치 지령 1차 지연 필터 (시작·정지 동작 완화, 그만큼 추종 지연)'
       + '\n단위 0.1 ms (92 = 9.2 ms)'
       + '\n팩토리값 92(A~C 프레임), 139(D~H 프레임)'
       + '\n2자유도 제어(Pr6.47 bit0 = 1)일 때 최대 2000(200.0 ms)'
-      + '\n강성을 바꾸면 자동조정이 이 값을 다시 쓸 수 있음'
+      + '\n강성 변경 시 자동조정이 해당 값을 재설정할 수 있음'
       + '\n한 로봇의 모든 모터를 같은 값으로 설정' },
   { key: 'command_fir', label: '지령 FIR 필터', number: 'Pr2.23', min: 0, max: 10000, msPerUnit: 0.1, stoppedOnly: true,
-    meanings: null, note: '위치 지령 이동 평균 필터 (설정 시간만큼 추종이 늦어짐)'
+    meanings: null, note: '위치 지령 이동 평균 필터 (설정 시간만큼 추종 지연)'
       + '\n단위 0.1 ms (10 = 1.0 ms)'
       + '\n팩토리값 10'
       + '\n모든 모터가 정지해 있을 때만 변경 가능 (동작 중에는 거절)'
@@ -82,9 +82,9 @@ export function gainChanges(gains, draft) {
 async function unlock(row, changed) {
   const ok = await confirmBox({
     title: `${row.axis}번 게인 잠금 해제`,
-    body: '강성을 너무 높이면 진동이나 소음이 발생합니다. 한 번에 한두 칸씩 바꾸고, 주변에 사람이 없는지 확인하세요.\n'
-      + '모터 프로그램 정지 없이 바로 적용되며, 전원을 끄면 원래 값으로 돌아갑니다.\n'
-      + '지령 필터(스무딩, FIR)는 값을 키울수록 부드러워지지만 그만큼 추종이 늦어집니다. 한 로봇의 모든 모터를 같은 값으로 설정하세요.',
+    body: '강성을 너무 높이면 진동이나 소음이 발생합니다. 한 번에 1~2칸씩 변경하고, 주변에 사람이 없는지 확인하세요.\n'
+      + '모터 프로그램 정지 없이 즉시 적용하며, 전원 차단 시 원래 값으로 복귀합니다.\n'
+      + '지령 필터(스무딩, FIR)는 값이 클수록 동작이 부드러우나 그만큼 추종 지연이 커집니다. 한 로봇의 모든 모터를 같은 값으로 설정하세요.',
     confirmLabel: '잠금 해제', tone: 'warning',
   });
   if (!ok) return;
@@ -107,9 +107,9 @@ async function write(row, changed, reload) {
   const stoppedOnly = GAIN_FIELDS.filter((f) => f.stoppedOnly && values[f.key] !== undefined).map((f) => f.label);
   const ok = await confirmBox({
     title: `${row.axis}번 게인 쓰기`,
-    body: `${lines.join('\n')}\n\n${jump ? '강성을 한 번에 2칸 넘게 바꿉니다. 진동이 생기면 바로 「정지」를 누르고 값을 되돌리세요.\n' : ''}`
+    body: `${lines.join('\n')}\n\n${jump ? '강성을 한 번에 2칸 넘게 변경합니다. 진동 발생 시 즉시 「정지」를 누르고 값을 복원하세요.\n' : ''}`
       + (stoppedOnly.length ? `${stoppedOnly.join(', ')}는 모든 모터가 정지해 있을 때만 바뀝니다(동작 중에는 거절).\n` : '')
-      + '모터가 정지해 있을 때만 씁니다. 바로 적용되며, 전원을 끄면 원래 값으로 돌아갑니다.',
+      + '모터 정지 상태에서만 씁니다. 즉시 적용하며, 전원 차단 시 원래 값으로 복귀합니다.',
     confirmLabel: '쓰기', tone: jump ? 'danger' : 'warning',
   });
   if (!ok) return;
@@ -123,7 +123,7 @@ async function write(row, changed, reload) {
     ui.draft = {};
     const keep = await confirmBox({
       title: '드라이브 저장(EEPROM)',
-      body: '현재 값은 전원을 끄면 원래 값으로 돌아갑니다. 드라이브 EEPROM에도 저장할까요?\n저장하면 모터 프로그램이 몇 초 정지했다가 다시 시작되고, 그동안 서보 토크가 해제됩니다. 브레이크 없는 모터는 처질 수 있습니다.\n값을 더 조정할 예정이면 「나중에」를 누르세요. 표의 게인 칸은 1분 안에 갱신됩니다.',
+      body: '현재 값은 전원 차단 시 원래 값으로 복귀합니다. 드라이브 EEPROM에도 저장할까요?\n저장 시 모터 프로그램이 수 초간 정지 후 재시작하며, 그동안 서보 토크를 해제합니다. 브레이크 없는 모터는 처질 수 있습니다.\n값을 더 조정할 예정이면 「나중에」를 누르세요. 표의 게인 칸은 1분 이내에 갱신합니다.',
       confirmLabel: '저장', cancelLabel: '나중에', tone: 'warning',
     });
     if (keep) await saveAll([row.axis], changed, reload);
@@ -176,12 +176,12 @@ export function gainField(row, changed, reload) {
   });
   return h('div', { class: 'field' },
     h('div', { class: 'group-title' }, '게인', tip([
-      '자동조정이 켜져 있으면 관성비와 위치·속도 게인은 드라이브가 정하고, 사람은 강성만 조정',
+      '자동조정 사용 시 관성비와 위치·속도 게인은 드라이브가 자동 설정, 강성만 수동 조정',
       '지령 필터(스무딩, FIR)는 0.1 ms 단위 정수로 입력 (92 = 9.2 ms)',
-      '지령 필터는 클수록 부드럽지만 추종이 늦어짐',
+      '지령 필터 값이 클수록 동작은 부드러우나 추종 지연',
       '지령 필터는 모든 모터를 같은 값으로 설정하고, FIR은 정지 상태에서만 변경 가능',
-      '드라이브에 쓰면 바로 적용되지만 전원을 끄면 원래 값으로 돌아감',
-      '값을 유지하려면 「드라이브 저장(EEPROM)」',
+      '드라이브 쓰기 즉시 적용, 전원 차단 시 원래 값으로 복귀',
+      '값 유지: 「드라이브 저장(EEPROM)」',
     ], '게인 설명')),
     h('span', { class: 'muted small', text: `드라이브에 저장된 값${gains?.inertia_ratio !== undefined && gains?.inertia_ratio !== null ? ` · 관성비 ${gains.inertia_ratio} % (자동조정 값)` : ''}` }),
     h('div', { class: 'row form-row' }, cells),

@@ -114,7 +114,7 @@ def test_a_joiner_that_fails_is_dropped_without_stopping_the_group():
 
     assert node._execution.state == 'running'
     assert node._execution.joining == {}
-    assert node._execution.excluded['pc-c'] == '복귀 실패 · 수동 모드'
+    assert node._execution.excluded['pc-c'] == '복귀 실패: 수동 모드'
     [cancel] = _commands(node, 'cancel_before_start')
     assert cancel.participant_ids == ['pc-a', 'pc-c']
     # 접은 뒤 그 PC 의 늦은 「정지」 는 그룹에 영향이 없다
@@ -363,7 +363,7 @@ def test_a_joiner_refusing_at_the_boundary_is_not_invited_again_right_away():
     node._publish_next_start = lambda: None
     node._registry.update(_member('pc-c'))
 
-    _event(node, 'pc-c', 'rejected', success=False, message='참가 목록 갱신이 지금 실행과 맞지 않습니다')
+    _event(node, 'pc-c', 'rejected', success=False, message='참가 목록 갱신이 현재 실행과 일치하지 않습니다')
     node._execution.state = 'running'
     node._manage_rejoiners()
 

@@ -23,7 +23,6 @@ from pathlib import Path
 
 WORKSPACE = Path(__file__).resolve().parents[3]
 BRIDGE = WORKSPACE / 'src/web_bridge/motion_web_bridge'
-JS_DIR = WORKSPACE / 'src/web_ui/static/js'
 V2_JS_DIR = WORKSPACE / 'src/web_ui/static/v2/js'
 
 ROUTE = re.compile(r"@app\.(get|post|put|patch|delete|websocket)\('([^']+)'")
@@ -56,8 +55,8 @@ def _declared():
 
 
 def _frontend():
-    # 새 화면(/v2)도 부르는 쪽이다 · 새 화면에만 있는 기능(드라이브 공통 값 등)이 생겼다 · 2026-10-13
-    paths = [*JS_DIR.glob('*.js'), *V2_JS_DIR.rglob('*.js')]
+    # 이전 UI(static/js)는 2026-11-17 에 지웠다 · 부르는 쪽은 /v2 하나
+    paths = [*V2_JS_DIR.rglob('*.js')]
     return '\n'.join(path.read_text(encoding='utf-8') for path in paths)
 
 
@@ -83,6 +82,11 @@ def _is_called(route: str, js: str) -> bool:
             tail = route[len(prefix):] or '/'
             if re.search(f"['`]{_loose(tail)}", js):
                 return True
+
+    # 끝 조각을 고르는 것 · `/api/system/wifi/${keep ? 'confirm' : 'rollback'}`
+    head, _, last = route.rpartition('/')
+    if '{' not in last and re.search(rf"{_loose(head)}/\$\{{", js) and f"'{last}'" in js:
+        return True
 
     # 앞이 함수로 조립되고 뒷자락만 글자로 남는 것
     tail = '/' + route.rsplit('/', 1)[-1]
@@ -114,6 +118,18 @@ def test_the_removed_routes_stay_removed():
         '/api/execution-context/apply',
         '/api/motion-studio/projects',
         '/api/motion-studio/projects/load',
+        # 이전 UI 를 지우며 같이 지운 길 · 2026-11-17
+        '/api/monitoring/enabled',
+        '/api/motion-run/check',
+        '/api/motion-test/ac-servo/jog',
+        '/api/motion-test/dynamixel/jog',
+        '/api/motor-events/files/{file_name}',
+        '/api/projects/{project_id}/files/{category}/{file_name}/active',
+        '/api/projects/{project_id}/files/{category}/{file_name}/open-editor',
+        '/api/projects/{project_id}/files/{category}/{file_name}/rename',
+        '/api/projects/{project_id}/tree-file',
+        '/api/system/desktop-shortcut',
+        '/api/system/motor-runtime/clear',
     ):
         assert route not in declared, (
             f'{route} 가 돌아왔습니다 · 정말 쓰는 곳이 있다면 화면에서 부르세요'

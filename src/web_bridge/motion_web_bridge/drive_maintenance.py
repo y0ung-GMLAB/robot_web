@@ -40,7 +40,7 @@ ABSOLUTE_CLEAR = 'absolute_clear'
 ACTIONS = (EEPROM_SAVE, ABSOLUTE_MODE, ABSOLUTE_CLEAR)
 
 #: Pr0.15 값 · 매뉴얼 p.176
-ABSOLUTE_MODES = {0: '절대', 1: '인크리멘털', 2: '절대 · 다회전 넘침 무시', 3: '절대 · 한 바퀴만', 4: '절대 · 연속 회전'}
+ABSOLUTE_MODES = {0: '절대', 1: '인크리멘털', 2: '절대 (다회전 오버플로 무시)', 3: '절대 (단회전)', 4: '절대 (무한 회전)'}
 
 #: EEPROM 저장은 매뉴얼상 최대 10초
 COMMAND_TIMEOUT_SEC = 15.0
@@ -152,15 +152,15 @@ def parse_upload_value(text: str) -> Optional[int]:
 
 def after_message(action: str, value: Optional[int] = None) -> str:
     if action == EEPROM_SAVE:
-        return 'EEPROM에 저장했습니다. 드라이브 전원을 꺼도 현재 값이 유지됩니다'
+        return 'EEPROM에 저장했습니다. 전원 차단 후에도 현재 값을 유지합니다'
     if action == ABSOLUTE_MODE:
         return (
             f'앱솔루트 방식 {value} ({ABSOLUTE_MODES.get(value, "?")})을 저장했습니다. '
-            '드라이브 전원을 껐다 켜야 적용됩니다. 전원을 켠 뒤 모터 검색으로 값을 확인하세요'
+            '드라이브 전원 재투입 후 적용합니다. 재투입 후 모터 검색으로 값을 확인하세요'
         )
     return (
-        '다회전 클리어를 마쳤습니다. 드라이브 전원을 껐다 켜세요. 위치 값이 바뀌므로 모든 프로젝트의 이 축 기준점이 무효입니다. '
-        '몸을 정면·수평에 맞추고 기준점을 다시 지정해 저장하기 전까지 재생·초기 위치 이동·스케줄·그룹 참가가 막힙니다'
+        '다회전 클리어를 완료했습니다. 드라이브 전원을 재투입하세요. 위치 값 변경으로 모든 프로젝트에서 해당 축의 기준점이 무효입니다. '
+        '로봇을 정면·수평으로 정렬하고 기준점을 재지정해 저장하기 전까지 재생·초기 위치 이동·스케줄·그룹 참여를 차단합니다'
     )
 
 
@@ -220,7 +220,7 @@ class DriveMaintenance:
             and int(slave.get('slave_position', -1)) == position
         ]
         if len(matches) != 1:
-            raise ValueError(f'{axis}번 모터 자리(마스터 {master} · 슬레이브 {position})에 드라이브가 보이지 않습니다')
+            raise ValueError(f'{axis}번 모터 위치(마스터 {master}, 슬레이브 {position})에서 드라이브를 찾을 수 없습니다')
         vendor = matches[0].get('vendor_id')
         try:
             vendor_id = int(str(vendor), 0) if isinstance(vendor, str) else int(vendor)
@@ -235,7 +235,7 @@ class DriveMaintenance:
     def write_gains(self, payload: Dict[str, Any]) -> Dict[str, Any]:
         """게인 쓰기 · Motor Manager 를 멈추지 않는다 · 축 하나 또는 여러 축(axes) · 108 (다)"""
         if payload.get('confirmed') is not True:
-            return {'success': False, 'message': '게인 쓰기 · 확인이 필요합니다'}
+            return {'success': False, 'message': '게인 쓰기: 확인 필요'}
         values = payload.get('values') if isinstance(payload.get('values'), dict) else {}
         raw_axes = payload.get('axes') if isinstance(payload.get('axes'), list) else [payload.get('axis')]
         try:
@@ -249,14 +249,14 @@ class DriveMaintenance:
             plans = {axis: (target, gain_commands(target['master'], target['position'], values))
                      for axis, (target, _) in plans.items()}
         except ValueError as exc:
-            return {'success': False, 'message': f'게인 쓰기 불가 · {exc}'}
+            return {'success': False, 'message': f'게인 쓰기 불가: {exc}'}
         blocker = self._safety_blocker()
         if blocker:
             stopped_only = [GAIN_LABELS[name] for name in STOPPED_ONLY_GAINS if name in values]
-            why = f"{' · '.join(stopped_only)}는 모터가 모두 멈춰 있을 때만 바꿀 수 있습니다 · " if stopped_only else ''
-            return {'success': False, 'message': f'게인 쓰기 불가 · {why}{blocker}'}
+            why = f"{' · '.join(stopped_only)}는 전체 모터 정지 상태에서만 변경할 수 있습니다. " if stopped_only else ''
+            return {'success': False, 'message': f'게인 쓰기 불가: {why}{blocker}'}
         if not self._lock.acquire(blocking=False):
-            return {'success': False, 'message': '게인 쓰기 불가 · 다른 모터 작업이 진행 중입니다'}
+            return {'success': False, 'message': '게인 쓰기 불가: 다른 모터 작업 진행 중'}
         results = []
         try:
             for axis, (target, plan) in plans.items():
@@ -266,7 +266,7 @@ class DriveMaintenance:
                     try:
                         done = self._runner(write, check=False, capture_output=True, text=True, timeout=COMMAND_TIMEOUT_SEC)
                         if done.returncode != 0:
-                            errors.append(f'{GAIN_LABELS[name]} 쓰기 실패 · '
+                            errors.append(f'{GAIN_LABELS[name]} 쓰기 실패: '
                                           + ((done.stderr or done.stdout or '').strip() or f'종료 코드 {done.returncode}'))
                             continue
                         got = self._runner(read, check=False, capture_output=True, text=True, timeout=COMMAND_TIMEOUT_SEC)
@@ -291,7 +291,7 @@ class DriveMaintenance:
         return {
             'success': not failed,
             'message': (
-                f'{axes_text} 게인을 썼습니다. 지금부터 적용됩니다(전원을 끄면 사라짐 · 남기려면 EEPROM 저장).'
+                f'{axes_text} 게인을 썼습니다. 즉시 적용하며, 전원 차단 시 원래 값으로 복귀합니다(유지하려면 EEPROM 저장).'
                 if not failed else
                 ' / '.join(f"{r['axis']}번 {r['message']}" for r in failed)
             ),
@@ -301,19 +301,19 @@ class DriveMaintenance:
     def save_eeprom_all(self, payload: Dict[str, Any]) -> Dict[str, Any]:
         """모든 MINAS 축 EEPROM 저장 · Motor Manager 를 **한 번만** 멈췄다 띄운다 · 108 (다)"""
         if payload.get('confirmed') is not True:
-            return {'success': False, 'message': 'EEPROM 저장 · 확인이 필요합니다'}
+            return {'success': False, 'message': 'EEPROM 저장: 확인 필요'}
         axes = [int(axis) for axis in (payload.get('axes') or [])]
         if not axes:
             return {'success': False, 'message': '저장할 모터가 없습니다'}
         try:
             targets = {axis: self._target(axis) for axis in axes}
         except ValueError as exc:
-            return {'success': False, 'message': f'EEPROM 저장 불가 · {exc}'}
+            return {'success': False, 'message': f'EEPROM 저장 불가: {exc}'}
         blocker = self._safety_blocker()
         if blocker:
-            return {'success': False, 'message': f'EEPROM 저장 불가 · {blocker}'}
+            return {'success': False, 'message': f'EEPROM 저장 불가: {blocker}'}
         if not self._lock.acquire(blocking=False):
-            return {'success': False, 'message': 'EEPROM 저장 불가 · 다른 모터 작업이 진행 중입니다'}
+            return {'success': False, 'message': 'EEPROM 저장 불가: 다른 모터 작업 진행 중'}
         try:
             commands = []
             for axis, target in targets.items():
@@ -324,7 +324,7 @@ class DriveMaintenance:
             self._lock.release()
         result['axes'] = axes
         if result.get('success'):
-            result['message'] = f"{' · '.join(f'{a}번' for a in axes)} EEPROM에 저장했습니다. 드라이브 전원을 꺼도 지금 값이 유지됩니다"
+            result['message'] = f"{' · '.join(f'{a}번' for a in axes)} EEPROM에 저장했습니다. 전원 차단 후에도 현재 값을 유지합니다"
         return result
 
     def run(self, payload: Dict[str, Any]) -> Dict[str, Any]:
@@ -332,7 +332,7 @@ class DriveMaintenance:
         if action not in ACTIONS:
             return {'success': False, 'message': f'지원하지 않는 드라이브 정비입니다: {action}'}
         if payload.get('confirmed') is not True:
-            return {'success': False, 'message': f'{LABELS[action]} · 확인이 필요합니다'}
+            return {'success': False, 'message': f'{LABELS[action]}: 확인 필요'}
         try:
             axis = int(payload.get('axis'))
         except (TypeError, ValueError):
@@ -343,20 +343,20 @@ class DriveMaintenance:
             target = self._target(axis)
             commands = command_plan(action, target['master'], target['position'], value)
         except ValueError as exc:
-            return {'success': False, 'message': f'{LABELS[action]} 불가 · {exc}'}
+            return {'success': False, 'message': f'{LABELS[action]} 불가: {exc}'}
 
         blocker = self._safety_blocker()
         if blocker:
-            return {'success': False, 'message': f'{LABELS[action]} 불가 · {blocker}'}
+            return {'success': False, 'message': f'{LABELS[action]} 불가: {blocker}'}
         if action == ABSOLUTE_CLEAR:
             motor = self._current_motor(axis) or {}
             if motor.get('servo_on') is not False:
                 return {
                     'success': False,
-                    'message': f'{LABELS[action]} 불가 · {axis}번 모터의 서보를 먼저 끄세요(서보가 꺼져 있을 때만 할 수 있습니다)',
+                    'message': f'{LABELS[action]} 불가: {axis}번 모터의 서보를 먼저 끄세요(서보 OFF 상태에서만 가능)',
                 }
         if not self._lock.acquire(blocking=False):
-            return {'success': False, 'message': f'{LABELS[action]} 불가 · 다른 모터 작업이 진행 중입니다'}
+            return {'success': False, 'message': f'{LABELS[action]} 불가: 다른 모터 작업 진행 중'}
         try:
             return self._run_locked(action, axis, value, target, commands)
         finally:
@@ -403,11 +403,11 @@ class DriveMaintenance:
                     'value': read_value,
                 })
                 if read_value is None:
-                    error = '되읽기 실패 · 0x4D00:01 · ' + (
+                    error = '재확인 읽기 실패 (0x4D00:01): ' + (
                         (result.stderr or result.stdout or '').strip() or f'종료 코드 {result.returncode}'
                     )
                 elif not read_value & ABSOLUTE_CLEAR_BIT:
-                    error = f'되읽기 불일치 · 0x4D00:01 = 0x{read_value:08X} · bit9가 1이 아닙니다'
+                    error = f'재확인 값 불일치: 0x4D00:01 = 0x{read_value:08X} (bit9 ≠ 1)'
         except (OSError, RuntimeError, subprocess.TimeoutExpired) as exc:
             error = str(exc)
         finally:
@@ -422,13 +422,13 @@ class DriveMaintenance:
         success = not error and not restore_error
         message = (
             after_message(action, value) if not error
-            else f'{LABELS[action]} 실패 · {error}'
+            else f'{LABELS[action]} 실패: {error}'
         )
         if restore_error:
             message += f' / Motor Manager 복구 실패: {restore_error}'
         elif recovery.get('servo_waiting_axes'):
             waiting = ' · '.join(f'{axis}번' for axis in recovery['servo_waiting_axes'])
-            message += f' / {waiting} 서보가 아직 켜지는 중입니다 · 잠시 뒤 모터 표에서 확인하세요'
+            message += f' / {waiting} 서보 ON 진행 중. 잠시 후 모터 표에서 확인하세요'
         self._record({
             'event_type': f'minas_{action}',
             'axis': axis,

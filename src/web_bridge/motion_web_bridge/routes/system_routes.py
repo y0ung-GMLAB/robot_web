@@ -9,12 +9,11 @@ from pathlib import Path
 from typing import List
 
 from fastapi import FastAPI, HTTPException, Request, WebSocket, WebSocketDisconnect
-from fastapi.responses import FileResponse, Response
+from fastapi.responses import FileResponse, RedirectResponse, Response
 from ament_index_python.packages import get_package_share_directory
 from motion_common import local_clock
 
-from motion_web_bridge import desktop_shortcut, system_timezone, system_update
-from motion_web_bridge.index_composer import IndexComposer
+from motion_web_bridge import system_timezone, system_update
 from motion_web_bridge.shared_snapshot import SharedSnapshot
 
 
@@ -92,21 +91,15 @@ def register_system_routes(app: FastAPI, bridge, project_call) -> None:
             },
         )
 
-    index_composer = IndexComposer(ui_share / 'index.html')
-
     @app.get('/')
-    async def index(request: Request = None):
-        html, etag = index_composer.compose()
-        headers = {'Cache-Control': 'no-cache', 'ETag': etag}
-        request_headers = getattr(request, 'headers', None)
-        if request_headers is not None and request_headers.get('if-none-match') == etag:
-            return Response(status_code=304, headers=headers)
-        return Response(content=html, media_type='text/html; charset=utf-8', headers=headers)
+    async def index():
+        """이전 UI 는 지웠다 · 옛 주소(바탕화면 바로가기 · 북마크)는 새 화면으로 넘긴다"""
+        return RedirectResponse('/v2', status_code=307)
 
     @app.get('/v2')
     @app.get('/v2/')
     async def index_v2(request: Request = None):
-        """새 UI · 뼈대 + 홈부터 · 설계안 2026-10-09 · 기존 화면(/)은 그대로 · 파일은 static/v2/"""
+        """화면 · 파일은 static/v2/ · `/` 는 여기로 넘어온다"""
         asset = ui_share / 'v2' / 'index.html'
         if not asset.is_file():
             raise HTTPException(status_code=404, detail='Not Found')
@@ -338,22 +331,6 @@ def register_system_routes(app: FastAPI, bridge, project_call) -> None:
         return await asyncio.to_thread(
             bridge.motor_config.restart_managed_program, body if isinstance(body, dict) else {},
         )
-
-    @app.post('/api/system/desktop-shortcut')
-    async def create_desktop_shortcut():
-        return await asyncio.to_thread(
-            desktop_shortcut.create_desktop_shortcut, bridge.workspace_root
-        )
-
-    @app.post('/api/system/motor-runtime/clear')
-    async def clear_motor_runtime_application():
-        return await project_call(bridge.motor_config.clear_runtime_application)
-
-    @app.post('/api/monitoring/enabled')
-    async def set_monitoring(request: Request):
-        body = await request.json()
-        enabled = bool(body.get('enabled', True))
-        return await asyncio.to_thread(bridge.set_monitoring, enabled)
 
     def _snapshot_text() -> str:
         """스냅샷을 만들고 글자로 바꾸는 일까지 한 번에 · §6-152

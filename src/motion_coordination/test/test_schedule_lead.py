@@ -135,7 +135,7 @@ def test_only_rejections_that_surely_did_not_book_are_retried():
     # 받았는지 모른다 · 다시 예약하면 두 번 잡힐 수 있다
     assert is_not_accepted_rejection('motion_run_manager response timeout') is False
     assert is_not_accepted_rejection('로컬 Web Bridge 응답 없음: timed out') is False
-    assert is_not_accepted_rejection('다른 그룹 회차 초기화 명령이 이미 예약되었습니다') is False
+    assert is_not_accepted_rejection('다른 그룹 회차 초기화 명령이 이미 예약 상태입니다') is False
     assert is_not_accepted_rejection('') is False
 
 

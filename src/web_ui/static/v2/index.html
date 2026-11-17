@@ -21,12 +21,7 @@
     again.textContent = '다시 불러오기';
     again.className = 'btn';
     again.onclick = function () { location.reload(); };
-    var old = document.createElement('a');
-    old.href = '/';
-    old.textContent = '이전 UI';
-    old.className = 'btn';
     box.appendChild(again);
-    box.appendChild(old);
   }, 8000);
 </script>
 </body>

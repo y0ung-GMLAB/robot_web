@@ -2,7 +2,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { decodeFloat32Base64, prepareDerived, sampleDerivedTable } from '../static/js/sim3d_math.js';
+import { decodeFloat32Base64, prepareDerived, sampleDerivedTable } from '../static/v2/js/sim3d_math.js';
 
 function b64(values) {
   const buffer = Buffer.alloc(values.length * 4);

@@ -47,7 +47,7 @@ def test_never_ready_is_a_notice_only_after_the_long_limit():
     clock.now += 2.0
     status = startup.status()
     assert status['overdue'] is True and status['waiting'] == ['재생 관리자']
-    assert status['message'] == '재생 관리자 상태를 5분 동안 받지 못했습니다. 프로그램을 다시 시작하세요.'
+    assert status['message'] == '재생 관리자 상태를 5분간 수신하지 못했습니다. 프로그램을 재시작하세요.'
 
 
 def _bridge():

@@ -117,7 +117,7 @@ def test_safety_stop_also_stops_the_group():
     )
     assert ('로컬 정지', False) in sent, '이 PC 를 세우지 않는다'
     assert {'command': 'stop_now'} in sent, '그룹을 세우지 않는다'
-    assert '그룹 재생도 함께 정지를 요청했습니다' in result['message']
+    assert '그룹 재생 정지도 함께 요청했습니다' in result['message']
     # 이 PC 부터 세운다 · 그룹은 HTTP 왕복이라 느리다
     assert sent.index(('로컬 정지', False)) < sent.index({'command': 'stop_now'})
 

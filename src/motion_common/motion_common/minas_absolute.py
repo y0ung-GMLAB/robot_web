@@ -22,7 +22,7 @@ MINAS_VENDOR_ID = 0x066F
 #: Pr0.15 값 · 매뉴얼 SX-DSV03241 p.176 · 허용은 0 하나(사용자 결정 2026-10-07)
 ABSOLUTE_MODE_OK = 0
 ABSOLUTE_MODE_NAMES = {
-    0: '절대', 1: '인크리멘털', 2: '절대 · 다회전 넘침 무시', 3: '절대 · 한 바퀴만', 4: '절대 · 연속 회전',
+    0: '절대', 1: '인크리멘털', 2: '절대 (다회전 오버플로 무시)', 3: '절대 (단회전)', 4: '절대 (무한 회전)',
 }
 
 #: 0x603F 의 Err40(앱솔루트 시스템 다운 · 다회전 무효)
@@ -42,8 +42,8 @@ STATE_CHECKING = 'checking'  # 드라이브 구성이 바뀌어 읽는 중 · �
 STATE_OK = 'ok'
 STATE_BLOCKED = 'blocked'
 
-MISSING_MESSAGE = '앱솔루트 확인 정보 없음 · 모터 상태 프로그램 확인 필요'
-CHECKING_MESSAGE = '앱솔루트 확인 중 · 잠시 후 다시 시도하세요'
+MISSING_MESSAGE = '앱솔루트 확인 정보 없음. 모터 상태 프로그램을 확인하세요'
+CHECKING_MESSAGE = '앱솔루트 확인 중입니다. 잠시 후 재시도하세요'
 
 
 def classify_drive(
@@ -78,7 +78,7 @@ def drive_problem(drive: Mapping[str, Any]) -> str:
         return 'Err40 다회전 무효'
     if status == DRIVE_UNKNOWN:
         # 읽기가 실패한 것뿐 · 값이 틀린 것이 아니다 · 감시 쪽이 몇 초마다 다시 읽는다 (수정 목록 110)
-        return '확인 불가 · 드라이브 응답을 기다리며 다시 읽는 중'
+        return '확인 불가: 드라이브 응답 대기 중 재확인 진행'
     return ''
 
 
@@ -90,7 +90,7 @@ def blocked_message(drives: Iterable[Mapping[str, Any]]) -> str:
     ]
     if not parts:
         return ''
-    return '앱솔루트 미확인 · ' + ' · '.join(parts) + ' · 모터 설정에서 「앱솔루트 설정」을 누르세요'
+    return '앱솔루트 미확인: ' + ', '.join(parts) + '. 「모터 설정」에서 「앱솔루트 설정」을 누르세요'
 
 
 def summary(drives: List[Dict[str, Any]], *, checked_at: Optional[float]) -> Dict[str, Any]:

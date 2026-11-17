@@ -63,7 +63,7 @@ function runsView(state, changed) {
   const pickDay = (day) => { ui.day = day; ui.run = ''; ui.trace = null; ui.traceFor = ''; loadRecords(state, changed); };
   const pickRun = (file) => { ui.run = file; ui.trace = null; changed(); loadTrace(changed); };
   const removeDay = async () => {
-    const ok = await confirmBox({ title: `${ui.day} 재생 기록 삭제`, body: '해당 날짜의 회차별 기록(CSV)이 모두 삭제되며 되돌릴 수 없습니다.', confirmLabel: '삭제', tone: 'danger' });
+    const ok = await confirmBox({ title: `${ui.day} 재생 기록 삭제`, body: '해당 날짜의 회차별 기록(CSV)을 모두 삭제하며 복구할 수 없습니다.', confirmLabel: '삭제', tone: 'danger' });
     if (!ok) return;
     try {
       await api('DELETE', `/api/motion-trace/days/${encodeURIComponent(ui.day)}`);
@@ -122,7 +122,7 @@ function eventsView(state, changed) {
   const files = Array.isArray(data.files) ? data.files : [];
   const reload = () => loadRecords(state, changed);
   const clear = async () => {
-    const ok = await confirmBox({ title: '운영 로그 삭제', body: '현재 프로젝트의 운영 로그가 모두 삭제되며 되돌릴 수 없습니다.', confirmLabel: '삭제', tone: 'danger' });
+    const ok = await confirmBox({ title: '운영 로그 삭제', body: '현재 프로젝트의 운영 로그를 모두 삭제하며 복구할 수 없습니다.', confirmLabel: '삭제', tone: 'danger' });
     if (!ok) return;
     try { await api('DELETE', '/api/motor-events'); toast('삭제했습니다', 'ok'); } catch (error) { toast(error.message || String(error), 'bad'); }
     reload();

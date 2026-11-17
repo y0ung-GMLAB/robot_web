@@ -133,14 +133,6 @@ def register_motion_run_routes(app: FastAPI, bridge, safety_first_stop) -> None:
     async def motion_run_status():
         return await asyncio.to_thread(bridge.motion_run_status)
 
-    @app.post('/api/motion-run/check')
-    async def motion_run_check(request: Request):
-        body = await request.json()
-        if not isinstance(body, dict):
-            raise HTTPException(status_code=400, detail='request body must be an object')
-        handler = bridge.motion_run_check
-        return await asyncio.to_thread(handler, body)
-
     @app.post('/api/motion-run/initialize')
     async def motion_run_initialize(request: Request):
         body = await request.json()

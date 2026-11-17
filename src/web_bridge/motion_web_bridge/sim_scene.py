@@ -34,7 +34,7 @@ SCENE_DIR_NAME = 'preview'
 #: 프레임 응답 상한 · 100 Hz 기록을 이 아래로 솎는다 (브라우저 60 fps 면 충분)
 MAX_FRAME_HZ = 60.0
 NO_PACK_MESSAGE = '로봇 팩이 없습니다. 시스템 정보 → 로봇 팩에서 업로드하세요.'
-NO_UV_MESSAGE = '장면 내보내기 실패 · uv 또는 MuJoCo를 실행할 수 없습니다 (log/animation_preview/scene.log)'
+NO_UV_MESSAGE = '장면 내보내기 실패: uv 또는 MuJoCo 실행 불가 (log/animation_preview/scene.log)'
 
 _LOCK = threading.Lock()
 #: 도는 장면 내보내기 · {결과 경로: Popen}
@@ -118,7 +118,7 @@ def _mujoco_scene_state(workspace_root: Path) -> Dict[str, Any]:
     if path.is_file():
         return {'state': 'ready', 'path': key}
     if last_rc not in (None, 0):
-        return {'state': 'failed', 'message': f'{NO_UV_MESSAGE} · 코드 {last_rc}'}
+        return {'state': 'failed', 'message': f'{NO_UV_MESSAGE}, 코드 {last_rc}'}
     return {'state': 'missing', 'message': '3D 장면이 아직 없습니다. 「3D 장면 준비」를 누르세요.'}
 
 
@@ -180,7 +180,7 @@ def frames_payload(workspace_root: Path, motion_path: Path, *, max_hz: float = M
     except (OSError, ValueError, KeyError) as exc:
         return {'success': False, 'message': f'계산 결과를 읽지 못했습니다: {exc}'}
     if t.size == 0 or qpos.ndim != 2 or qpos.shape[0] != t.size:
-        return {'success': False, 'message': '계산 결과 모양이 맞지 않습니다 (t · qpos)'}
+        return {'success': False, 'message': '계산 결과 형식 불일치 (t, qpos)'}
     duration = float(t[-1] - t[0]) if t.size > 1 else 0.0
     source_hz = (t.size - 1) / duration if duration > 0 else 0.0
     step = max(1, int(round(source_hz / max_hz))) if source_hz > max_hz > 0 else 1

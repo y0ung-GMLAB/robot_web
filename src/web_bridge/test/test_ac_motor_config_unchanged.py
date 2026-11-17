@@ -7,6 +7,7 @@ AC 전용 레지스트리는 바이트 단위로 같아야 한다 (MINAS param �
 섞인 레지스트리(AC + XM540) · AC 쪽 드라이버·마스터는 같아야 한다 ·
 다이나믹셀 드라이버의 `param_file` 만 새 생성 파일(`config/serial_params/`)로 바뀐다 ·
 운전 값(속도·가속)은 0 = 서보 최대로 바뀐다 (수정 목록 163).
+2026-11-17 · fixture 안 설명 글(4D29h 과부하율 읽기) 한 줄만 손으로 바꿨다 · 값은 그대로 (수정 목록 219 문구 정리).
 
 다시 뜨기 (변경 전 코드에서만) · `python3 test_ac_motor_config_unchanged.py <출력.json>`
 """

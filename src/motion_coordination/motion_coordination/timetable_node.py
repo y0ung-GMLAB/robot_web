@@ -45,7 +45,7 @@ CLOCK_SAMPLES = 40
 #: 슬레이브가 마스터에 정지를 요청하는 그룹 명령 · 마스터만 처리
 TIMETABLE_STOP_COMMAND = 'timetable_stop'
 #: 스케줄이 시작을 원하지만 사람 그룹 정지가 그 운영시간 끝까지 유지 · 수정 목록 193
-STOP_HELD_MESSAGE = '그룹 정지 유지 · 이 운영시간은 재생하지 않음 · 다시 돌리려면 마스터를 수동 → 스케줄'
+STOP_HELD_MESSAGE = '그룹 정지 유지: 현재 운영 시간에는 재생하지 않습니다. 재개하려면 마스터를 수동 → 스케줄 모드로 전환하세요'
 
 TIMETABLE_QOS = QoSProfile(
     depth=1, reliability=ReliabilityPolicy.RELIABLE, durability=DurabilityPolicy.TRANSIENT_LOCAL,
@@ -136,7 +136,7 @@ class TimetableMixin:
             self._warn(f'시간표 설정을 읽지 못함 · {message.pc_id} · {exc}')
             return
         if timetable.accept(self._tt(), incoming):
-            self._store_timetable(incoming, f'{message.pc_id} 에서 받음')
+            self._store_timetable(incoming, f'{message.pc_id}에서 수신')
 
     # ------------------------------------------------------------------ #
     # 하트비트
@@ -245,7 +245,7 @@ class TimetableMixin:
             changes['auto_period_sec'] = auto
         updated = timetable.issue(current, issuer=self._config.pc_id, **changes)
         if updated is not current:
-            self._store_timetable(updated, '마스터 설정 바뀜')
+            self._store_timetable(updated, '마스터 설정 변경')
             self._publish_timetable(force=True)
         else:
             self._publish_timetable()
@@ -323,14 +323,14 @@ class TimetableMixin:
         holding = driver.holding or str(status.get('execution_id') or '').startswith(PLAN_PREFIX)
         if not config.clock and not holding:
             # 마스터가 신호 재생으로 바꿨다 · 사람이 그룹을 맡는다 · 그룹 정지 운영시간 끝 주차 기억도 버린다 · 수정 목록 201
-            driver.release_stopped_window('신호 재생으로 바뀜')
+            driver.release_stopped_window('신호 재생으로 전환')
             return
         with self._lock:
             signal_running = bool(self._execution.execution_id)
         if signal_running:
             # 신호 재생 실행(사람이 누른 그룹 재생 · 초기 위치 이동)이 도는 중 · 손대지 않는다 · 사람이 그룹을 맡았다 ·
             # 그 재생이 끝난 뒤(운영시간 끝 뒤) 갑자기 주차하지 않게 기억을 버린다 · 수정 목록 201
-            driver.release_stopped_window('사람이 그룹 재생을 시작함')
+            driver.release_stopped_window('수동 그룹 재생 시작')
             return
         if not (self._config.configured and self._joined):
             choice = timetable.Choice(reason='그룹 미참가')
@@ -391,7 +391,7 @@ class TimetableMixin:
         with self._lock:
             lockstep_active = bool(self._execution.execution_id)
         if changes.get('mode') == timetable.MODE_CLOCK and lockstep_active:
-            raise ValueError('신호 재생 그룹 실행이 도는 중입니다 · 정지한 뒤 바꾸세요')
+            raise ValueError('신호 재생 그룹 실행 중입니다. 정지 후 변경하세요')
         updated = timetable.issue(current, issuer=self._config.pc_id, **changes)
         if updated is not current:
             self._store_timetable(updated, '마스터 화면')
@@ -403,7 +403,7 @@ class TimetableMixin:
         if not self._joined:
             raise ValueError('먼저 DDS 그룹에 참가하세요')
         if not self._config.is_master:
-            raise ValueError('이 PC 는 연동 슬레이브라 그룹 실행을 시작할 수 없습니다 · 마스터 PC 에서 시작하세요')
+            raise ValueError('현재 PC는 연동 슬레이브이므로 그룹 실행을 시작할 수 없습니다. 마스터 PC에서 시작하세요')
         current = self._tt()
         if timetable.stop_holds(current, time.time()):
             # 사람 그룹 정지 · 그 운영시간 끝까지 · 스케줄 점검(1분)이 지우지 않는다 · 수정 목록 193
@@ -412,7 +412,7 @@ class TimetableMixin:
         if updated is not current:
             self._store_timetable(updated, '스케줄 시작')
             self._publish_timetable(force=True)
-        return {'success': True, 'message': '시간표 재생 · 각 PC 가 스케줄 시간표로 재생', 'sync_mode': timetable.MODE_CLOCK}
+        return {'success': True, 'message': '시간표 재생: 각 PC가 스케줄 시간표 기준으로 재생', 'sync_mode': timetable.MODE_CLOCK}
 
     def _timetable_held(self) -> Dict[str, str]:
         """시간표 회차를 아직 쥔 PC · {PC: 시간표 이름} · 이 PC(로컬 재생 상태 포함) + 연결된 PC 의 하트비트"""
@@ -450,16 +450,16 @@ class TimetableMixin:
         """사람이 누른 그룹 재생(신호 재생)을 막을 이유 · 시간표 회차가 아직 도는 중 · 섞이면 축을 둘이 쥔다"""
         held = self._timetable_held()
         if held:
-            return '시간표 재생 회차가 아직 도는 중 · {} · 그룹 「즉시 정지」 뒤 시작하세요'.format(' · '.join(sorted(held)))
+            return '시간표 재생 회차 진행 중({}). 그룹 「즉시 정지」 후 시작하세요'.format(', '.join(sorted(held)))
         if self._timetable_execution_view():
-            return '스케줄 시간표 재생 중 · 마스터를 수동 모드로 바꾼 뒤 시작하세요'
+            return '스케줄 시간표 재생 중입니다. 마스터를 수동 모드로 전환한 뒤 시작하세요'
         return ''
 
     def _timetable_stop(self, *, after_cycle: bool, reason: str = '') -> Dict[str, Any]:
         """시간표 재생에서 정지 · 마스터 = 묶음에 정지 · 슬레이브 = 마스터에 요청 + 즉시 정지면 제 재생도"""
         if after_cycle and reason == SCHEDULE_END_REASON:
             # 운영시간 끝은 각 PC 가 시간표로 안다(회차 끝까지 → 주차) · 따로 할 일 없음
-            return {'success': True, 'message': '운영시간 끝 · 각 PC 가 회차를 마치고 주차'}
+            return {'success': True, 'message': '운영 시간 종료: 각 PC가 회차 완료 후 기준점 이동'}
         if self._config.is_master:
             updated, plan_id = timetable.stop_plan(
                 self._tt(), issuer=self._config.pc_id, after_cycle=after_cycle,

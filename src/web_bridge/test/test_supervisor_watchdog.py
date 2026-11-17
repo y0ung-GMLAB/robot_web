@@ -36,7 +36,7 @@ def test_silence_after_the_first_status_blocks_starts(tmp_path):
     dog.safety_received({})
     assert dog.unresponsive_reason() == '' and dog.ready is True
     clock.advance(wd.LIVENESS_SEC + 0.5)
-    assert 'supervisor 응답 없음' in dog.unresponsive_reason()
+    assert '모터 프로그램 응답 없음' in dog.unresponsive_reason()
     assert calls == []
 
 
@@ -65,13 +65,13 @@ def test_a_supervisor_that_never_starts_is_reported_and_restarted_once(tmp_path)
     clock.advance(wd.STARTUP_FAILURE_SEC - 1)
     assert dog.tick('idle') == '' and dog.unresponsive_reason() == ''
     clock.advance(2)
-    assert 'supervisor 시작 안 됨' in dog.unresponsive_reason()
-    assert 'supervisor 시작 안 됨' in dog.tick('idle')
+    assert '모터 프로그램 미시작' in dog.unresponsive_reason()
+    assert '모터 프로그램 미시작' in dog.tick('idle')
     assert calls == ['restart']
     clock.advance(30)
     assert dog.tick('idle') == '', '5분에 한 번까지'
     assert calls == ['restart']
-    assert 'supervisor 시작 안 됨' in dog.snapshot()['message']
+    assert '모터 프로그램 미시작' in dog.snapshot()['message']
 
 
 def test_ten_seconds_of_silence_restarts_once_then_cools_down(tmp_path):
@@ -107,7 +107,7 @@ def test_reception_stop_while_playing_dumps_threads_then_restarts(tmp_path):
 
     clock.advance(1.0)
     dog.safety_received({'motion_run_received_age_sec': wd.RECEPTION_STOP_SEC + 0.5})
-    assert '수신 정지' in dog.tick('running')
+    assert '수신 중단' in dog.tick('running')
     assert calls == ['dump', 'restart']
 
 

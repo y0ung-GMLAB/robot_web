@@ -219,7 +219,7 @@ def test_watch_recovers_a_slave_in_error_by_requesting_op():
     reason, _clock, logs = _watch(None, bus=bus)
     assert reason == 'all_op' and not em.configuring()
     assert bus.sent == [['ethercat', 'states', '-m', '0', '-p', '1', 'OP']]
-    assert '다시 설정으로 OP' in logs[-1]
+    assert '재설정으로 OP' in logs[-1]
 
 
 def test_watch_stops_when_the_motor_program_ends_or_time_runs_out():

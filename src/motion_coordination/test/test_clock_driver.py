@@ -110,7 +110,7 @@ class FakeRuntime:
             elif s['state'] == 'motion_completed':
                 expected = s['cycle'] + 1
             else:
-                return {'success': False, 'message': '그룹 회차 명령을 받을 수 있는 상태가 아닙니다'}
+                return {'success': False, 'message': '그룹 회차 명령을 수신할 수 있는 상태가 아닙니다'}
             if cycle != expected:
                 return {'success': False, 'message': f'그룹 모션 회차가 일치하지 않습니다: 예상 {expected}'}
             start = float(payload['start_monotonic'])
@@ -263,7 +263,7 @@ def test_a_clip_longer_than_the_period_makes_only_this_pc_skip_and_come_back():
     assert started[0] == 1 and 2 not in started, '1회차 끝이 2회차 초기 이동 시각을 넘김 · 2회차를 돌면 3회차 준비도 먹음 · 쉼'
     assert all(at == 100_060.0 + (k - 1) * 100.0 for k, at in runtime.starts), '돌아와도 시간표 시각'
     # 쉼은 재생 관리자가 정해 알린다 · 실행은 놓지 않고 다음 회차 명령을 이어서(전에는 놓고 다음 경계 복귀 길) · 수정 목록 206
-    assert any(note.startswith('시간표 재생 · 2회차 쉼 · 지금 초기 이동을 시작해도') for note in notes), notes
+    assert any(note.startswith('시간표 재생 · 2회차 생략: 현재 초기 이동을 시작해도') for note in notes), notes
     assert runtime.calls.count('group_prepare') == 1 and 'group_join' not in runtime.calls
 
 
@@ -271,9 +271,9 @@ def test_stop_now_stops_right_away_and_does_not_come_back():
     clock, runtime, driver, _, _ = _pc(100_000.0)
     _run(driver, runtime, clock, _always(Choice(timeline=TIMELINE)), 120.0)
     assert runtime.status['state'] == 'running'
-    _run(driver, runtime, clock, _always(Choice(reason='정지됨', stopped_plan_id=TIMELINE.plan_id)), 1.0)
+    _run(driver, runtime, clock, _always(Choice(reason='정지 상태', stopped_plan_id=TIMELINE.plan_id)), 1.0)
     assert runtime.calls[-1] == 'stop_now' and runtime.status['state'] == 'stopped'
-    assert driver.report()['note'] == '정지됨'
+    assert driver.report()['note'] == '정지 상태'
 
 
 def test_stop_after_cycle_finishes_the_cycle_without_parking():
@@ -292,7 +292,7 @@ def test_a_busy_pc_skips_that_cycle_and_takes_the_next():
     runtime.busy = False
     _run(driver, runtime, clock, _always(Choice(timeline=TIMELINE)), 200.0)
     assert runtime.starts[0] == (2, 100_160.0)
-    assert any('1회차 쉼' in note for note in notes)
+    assert any('1회차 생략' in note for note in notes)
 
 
 def test_a_restarted_node_takes_over_the_running_cycle():
@@ -338,7 +338,7 @@ def test_after_the_window_the_next_day_timeline_means_finish_and_park():
 def test_switching_the_master_to_manual_stops_without_parking():
     clock, runtime, driver, finished, _ = _pc(100_000.0)
     _run(driver, runtime, clock, _always(Choice(timeline=TIMELINE)), 120.0)
-    _run(driver, runtime, clock, _always(Choice(reason='마스터 스케줄 꺼짐')), 100.0)
+    _run(driver, runtime, clock, _always(Choice(reason='마스터 스케줄 OFF')), 100.0)
     assert [cycle for cycle, _ in runtime.starts] == [1]
     assert finished == [(TIMELINE.plan_id, False)], '도는 회차 끝까지 · 그 자리 정지'
 
@@ -348,7 +348,7 @@ def test_switching_the_master_to_manual_stops_without_parking():
 # ---------------------------------------------------------------------- #
 
 def test_a_stopped_signal_run_left_in_the_runtime_does_not_block_the_timetable():
-    """실물 NY 2026-11-09 03:49 · 신호 재생 그룹을 즉시 정지 → 시간표 재생 · 4대 모두 「다른 재생 중 · 이 회차 쉼」"""
+    """실물 NY 2026-11-09 03:49 · 신호 재생 그룹을 즉시 정지 → 시간표 재생 · 4대 모두 「다른 재생 중으로 해당 회차 생략」"""
     clock, runtime, driver, _, notes = _pc(100_000.0)
     runtime.status = {'group_execution': True, 'execution_id': 'exec-old', 'state': 'stopped', 'phase': 'stopped'}
     _run(driver, runtime, clock, _always(Choice(timeline=TIMELINE)), 200.0)
@@ -363,7 +363,7 @@ def test_a_stopped_timetable_run_is_not_adopted_again_and_again():
         'group_execution': True, 'execution_id': TIMELINE.plan_id, 'state': 'stopped', 'phase': 'stopped',
         'group_cycle_number': 1,
     }
-    _run(driver, runtime, clock, _always(Choice(reason='정지됨', stopped_plan_id=TIMELINE.plan_id)), 5.0)
+    _run(driver, runtime, clock, _always(Choice(reason='정지 상태', stopped_plan_id=TIMELINE.plan_id)), 5.0)
     assert runtime.calls.count('group_cancel') == 0
 
 
@@ -373,7 +373,7 @@ def test_a_live_other_run_still_makes_the_pc_skip():
     runtime.busy = True
     _run(driver, runtime, clock, _always(Choice(timeline=TIMELINE)), 3.0)   # 1회차 들어갈 때(준비 54 s 전)
     assert runtime.starts == [] and 'group_prepare' not in runtime.calls
-    assert driver.report()['note'] == '다른 재생 중 · 이 회차 쉼'
+    assert driver.report()['note'] == '다른 재생 중으로 해당 회차 생략'
 
 
 
@@ -407,7 +407,7 @@ def test_every_cycle_starts_on_time_when_the_initial_move_runs_long_and_is_seen_
     _run_seen_late(driver, runtime, clock, _always(Choice(timeline=timeline)), period * 5, late=0.6, init_sec=5.0)
     assert [cycle for cycle, _ in runtime.starts] == [1, 2, 3, 4, 5], notes
     assert all(at == 100_060.0 + (k - 1) * period for k, at in runtime.starts)
-    assert not any('쉼' in note or '늦게 시작' in note for note in notes), notes
+    assert not any('생략' in note or '늦게 시작' in note for note in notes), notes
     assert 'group_start_at' not in runtime.calls and 'group_initialize_at' not in runtime.calls
 
 
@@ -441,9 +441,9 @@ def test_after_a_stop_now_is_lifted_by_the_schedule_the_pc_comes_back_at_the_nex
     """즉시 정지 → 스케줄이 다시 시작(정지 지움) · 전에는 그날 끝까지 「정지됨」 (NY 2026-11-09 05:55) · 수정 목록 188"""
     clock, runtime, driver, _, _ = _pc(100_000.0)
     _run(driver, runtime, clock, _always(Choice(timeline=TIMELINE)), 120.0)
-    stopped = Choice(reason='정지됨', stopped_plan_id=TIMELINE.plan_id)
+    stopped = Choice(reason='정지 상태', stopped_plan_id=TIMELINE.plan_id)
     _run(driver, runtime, clock, _always(stopped), 18.0)
-    assert runtime.status['state'] == 'stopped' and driver.report()['note'] == '정지됨'
+    assert runtime.status['state'] == 'stopped' and driver.report()['note'] == '정지 상태'
     resumed = Choice(timeline=TIMELINE, halt_plan_id=TIMELINE.plan_id, halt_at_unix=100_120.0)
     _run(driver, runtime, clock, _always(resumed), 300.0)
     started = [cycle for cycle, _ in runtime.starts]
@@ -468,7 +468,7 @@ def test_the_first_cycle_after_a_schedule_end_park_prepares_and_plays():
     _run(driver, runtime, clock, _always(Choice(timeline=TIMELINE)), 200.0)
     assert runtime.calls[0] == 'group_prepare', '준비 길 · 서보 복구도 여기서'
     assert [cycle for cycle, _ in runtime.starts] == [1, 2]
-    assert not any('쉼' in note for note in notes)
+    assert not any('생략' in note for note in notes)
 
 
 def test_a_stale_group_initialized_execution_is_cancelled_once_and_the_cycle_is_entered():
@@ -502,18 +502,18 @@ def test_a_skipped_cycle_is_logged_once_per_cycle_and_stays_on_screen_until_the_
     runtime.status = {'group_execution': True, 'execution_id': 'exec-other', 'state': 'running', 'phase': 'running'}
     runtime.busy = True
     _run(driver, runtime, clock, _always(Choice(timeline=TIMELINE)), 120.0)
-    skipped = [note for note in notes if '회차 쉼' in note]
+    skipped = [note for note in notes if '회차 생략' in note]
     assert skipped == [
-        '시간표 재생 · 1회차 쉼 · 다른 재생 중(exec-other)',
-        '시간표 재생 · 2회차 쉼 · 다른 재생 중(exec-other)',
+        '시간표 재생 · 1회차 생략: 다른 재생 중(exec-other)',
+        '시간표 재생 · 2회차 생략: 다른 재생 중(exec-other)',
     ], '회차마다 한 줄 · 틱마다 되풀이하지 않는다'
-    assert driver.report()['note'] == '다른 재생 중 · 이 회차 쉼', '다음 회차 들어갈 때 전까지 남는다'
+    assert driver.report()['note'] == '다른 재생 중으로 해당 회차 생략', '다음 회차 들어갈 때 전까지 남는다'
 
 
 def test_the_start_blocker_is_logged_when_a_cycle_is_skipped_for_it():
     clock, runtime, driver, _, notes = _pc(100_000.0)
     _run(driver, runtime, clock, _always(Choice(timeline=TIMELINE)), 30.0, view={'start_blocker': '실행 준비 안 됨 · 모터 끊김'})
-    assert notes == ['시간표 재생 · 1회차 쉼 · 실행 준비 안 됨 · 모터 끊김']
+    assert notes == ['시간표 재생 · 1회차 생략: 실행 준비 안 됨 · 모터 끊김']
 
 
 # ---------------------------------------------------------------------- #
@@ -536,15 +536,15 @@ def test_a_run_whose_local_ended_stopped_is_let_go_and_parked_at_the_last_window
 
 
 def test_a_dropped_cycle_is_logged_as_a_skipped_cycle():
-    """실물 NY 2026-11-09 · 「1회차 로컬 실행이 끝남」 이 「회차 쉼」 으로 안 찾아졌다(D)"""
+    """실물 NY 2026-11-09 · 「1회차 로컬 실행 종료」 이 「회차 쉼」 으로 안 찾아졌다(D)"""
     clock, runtime, driver, _, notes = _pc(100_000.0)
     _run(driver, runtime, clock, _always(Choice(timeline=TIMELINE)), 40.0)
     assert driver.holding == TIMELINE.plan_id
     runtime.session = {}
     runtime.set_status(state='initialized', phase='initialized')
     _run(driver, runtime, clock, _always(Choice(timeline=TIMELINE)), 5.0)
-    skipped = [note for note in notes if '회차 쉼' in note]
-    assert skipped and skipped[0].startswith('시간표 재생 · 1회차 쉼 · 로컬 실행이 끝남')
+    skipped = [note for note in notes if '회차 생략' in note]
+    assert skipped and skipped[0].startswith('시간표 재생 · 1회차 생략: 로컬 실행 종료')
     assert len(skipped) == 1
 
 
@@ -560,7 +560,7 @@ def _ticks(driver, clock, choice, seconds, *, mode=''):
 
 def test_a_pc_standing_by_a_group_stop_parks_once_when_the_operating_hours_end():
     clock, runtime, driver, finished, notes = _pc(100_000.0)
-    _ticks(driver, clock, Choice(reason='정지됨', stopped_plan_id='tt-s100000'), 60.0)
+    _ticks(driver, clock, Choice(reason='정지 상태', stopped_plan_id='tt-s100000'), 60.0)
     assert finished == []
     _ticks(driver, clock, Choice(reason='운영시간 아님'), 5.0)
     assert finished == [('tt-s100000', True)]
@@ -579,7 +579,7 @@ def test_no_park_if_the_stop_was_lifted():
     """수정 목록 201 · 옛 시험의 앞 절반(마스터 수동으로 정지를 2분 넘게 못 봄 → 주차 안 함)은 사용자 결정으로 뒤집혔다 ·
     `test_a_group_stop_parks_at_its_window_end_even_when_the_stop_is_not_seen` 으로 · 여기는 정지가 풀린 경우만"""
     clock, runtime, driver, finished, notes = _pc(100_000.0)
-    _ticks(driver, clock, Choice(reason='정지됨', stopped_plan_id='tt-s100000'), 5.0)
+    _ticks(driver, clock, Choice(reason='정지 상태', stopped_plan_id='tt-s100000'), 5.0)
     _ticks(driver, clock, Choice(reason='수동 모드', stopped_plan_id='tt-s100000'), 5.0)
     assert driver._stopped_window == 'tt-s100000'
     _ticks(driver, clock, Choice(timeline=TIMELINE), 0.2)                  # 수동 → 스케줄 · 다시 돎
@@ -621,7 +621,7 @@ def test_a_pc_stopped_by_a_person_lets_go_and_rejoins_at_the_next_boundary():
     _run(driver, runtime, clock, _always(Choice(timeline=TIMELINE)), 7.0)
     cancel = runtime.calls.index('group_cancel')
     assert 'group_join' in runtime.calls[cancel:], '놓고 바로 다음 경계(2회차) 복귀 길'
-    assert any(note.startswith('시간표 재생 · 1회차 쉼 · 로컬 실행이 끝남 · 즉시 정지') for note in notes)
+    assert any(note.startswith('시간표 재생 · 1회차 생략: 로컬 실행 종료: 즉시 정지') for note in notes)
     assert finished == [], '주차하지 않는다(운영시간 안)'
     _run(driver, runtime, clock, _always(Choice(timeline=TIMELINE)), 200.0)
     assert [cycle for cycle, _ in runtime.starts][1:3] == [2, 3], '다음 경계부터 복귀 길로 다시 돈다'
@@ -629,13 +629,13 @@ def test_a_pc_stopped_by_a_person_lets_go_and_rejoins_at_the_next_boundary():
 
 
 def test_a_stopped_pc_with_its_servo_off_shows_why_it_skips():
-    """A2 · 정지 → 서보 OFF · 다음 경계에 「N회차 쉼 · 서보 꺼짐」 이유가 남는다"""
+    """A2 · 정지 → 서보 OFF · 다음 경계에 「N회차 생략: 서보 꺼짐」 이유가 남는다"""
     clock, runtime, driver, _, notes = _pc(100_000.0)
     _run(driver, runtime, clock, _always(Choice(timeline=TIMELINE)), 100.0)
     _human_stop(runtime, TIMELINE.plan_id)
     off = {'start_blocker': '0번 모터 서보가 꺼져 있습니다'}
     _run(driver, runtime, clock, _always(Choice(timeline=TIMELINE)), 100.0, view=off)
-    assert '시간표 재생 · 2회차 쉼 · 0번 모터 서보가 꺼져 있습니다' in notes
+    assert '시간표 재생 · 2회차 생략: 0번 모터 서보가 꺼져 있습니다' in notes
     assert [cycle for cycle, _ in runtime.starts] == [1]
 
 
@@ -644,7 +644,7 @@ def test_the_normal_cycle_barrier_is_not_mistaken_for_a_finished_run():
     clock, runtime, driver, _, notes = _pc(100_000.0)
     _run(driver, runtime, clock, _always(Choice(timeline=TIMELINE)), 400.0)
     assert [cycle for cycle, _ in runtime.starts] == [1, 2, 3, 4]
-    assert not any('회차 쉼' in note for note in notes)
+    assert not any('회차 생략' in note for note in notes)
 
 
 def test_a_dropped_cycle_reason_stays_on_screen_until_the_next_try():
@@ -660,9 +660,9 @@ def test_a_dropped_cycle_reason_stays_on_screen_until_the_next_try():
     runtime.set_status(state='idle', phase='idle', message='', group_execution=False, execution_id='')
     _run(driver, runtime, clock, _always(Choice(timeline=TIMELINE)), 0.2)
     assert driver.holding == ''
-    assert driver.report()['note'] == '1회차 로컬 실행이 끝남 · idle'
+    assert driver.report()['note'] == '1회차 로컬 실행 종료: idle'
     _run(driver, runtime, clock, _always(Choice(timeline=TIMELINE)), 7.0)
-    assert driver.report()['note'] == '1회차 로컬 실행이 끝남 · idle', '다음 회차 들어갈 때까지 남는다'
+    assert driver.report()['note'] == '1회차 로컬 실행 종료: idle', '다음 회차 들어갈 때까지 남는다'
     _run(driver, runtime, clock, _always(Choice(timeline=TIMELINE)), 100.0)
     assert driver.report()['note'] == '' and [cycle for cycle, _ in runtime.starts] == [1, 2]
 
@@ -672,7 +672,7 @@ def test_a_held_group_stop_says_so_instead_of_timetable_end():
     clock, runtime, driver, _, _ = _pc(100_200.0)
     cut = Timeline(TIMELINE.plan_id, TIMELINE.anchor_unix, 100.0, end_unix=TIMELINE.start_of(2) - 1e-3)
     _ticks(driver, clock, Choice(timeline=cut, stop_after=True), 5.0)
-    assert driver.report()['note'] == '그룹 정지 유지 · 운영시간 끝까지'
+    assert driver.report()['note'] == '그룹 정지 유지 (운영 시간 종료까지)'
 
 
 class _BlinkRuntime(FakeRuntime):
@@ -703,7 +703,7 @@ class _BlinkRuntime(FakeRuntime):
 
 
 def test_the_brief_completed_before_the_cycle_barrier_is_not_a_stop():
-    """실물 NY 2026-11-11 14:31 · f2 23회차 끝 0.68 s 뒤 「23회차 쉼 · 로컬 실행이 끝남 · 모션 실행 완료」 → 24회차 쉼 · 수정 목록 195
+    """실물 NY 2026-11-11 14:31 · f2 23회차 끝 0.68 s 뒤 「23회차 생략: 로컬 실행 종료: 모션 실행 완료」 → 24회차 생략: 수정 목록 195
 
     199 · 그 틈은 이제 끝난 상태가 아니다 · 틈이 길어도(다음 항목 짓기 8 s) 쉼 없음 · 기다림 시간 기준 없음.
     """
@@ -715,7 +715,7 @@ def test_the_brief_completed_before_the_cycle_barrier_is_not_a_stop():
                          finish=lambda plan, park, why: runtime.control({'command': 'group_cancel'}))
     _run(driver, runtime, clock, _always(Choice(timeline=TIMELINE)), 500.0)
     assert [cycle for cycle, _ in runtime.starts] == [1, 2, 3, 4, 5]
-    assert not any('회차 쉼' in note for note in notes)
+    assert not any('회차 생략' in note for note in notes)
 
 
 SERVO_OFF_MESSAGE = (
@@ -756,10 +756,10 @@ def test_a_servo_off_pc_that_was_let_in_rests_instead_of_erroring():
     runtime.control = servo_off_control
     driver._control = servo_off_control
     _run(driver, runtime, clock, _always(Choice(timeline=TIMELINE)), 100.0)
-    assert '시간표 재생 · 2회차 쉼 · 서보가 꺼져 있습니다(0~4번 모터)' in notes
+    assert '시간표 재생 · 2회차 생략: 서보가 꺼져 있습니다(0~4번 모터)' in notes
     assert not any('회차 오류' in note for note in notes)
     note = driver.report()['note']
-    assert note.endswith('회차 쉼 · 서보가 꺼져 있습니다(0~4번 모터)'), note
+    assert note.endswith('회차 생략: 서보가 꺼져 있습니다(0~4번 모터)'), note
     assert [cycle for cycle, _ in runtime.starts] == [1]
 
 
@@ -768,12 +768,12 @@ def test_a_servo_off_pc_that_was_let_in_rests_instead_of_erroring():
 # ---------------------------------------------------------------------- #
 
 def test_a_local_status_seen_late_right_after_entering_does_not_end_the_run():
-    """명령 뒤 3.2 s 동안 그 앞 상태(실행 없음)가 보인다 · 전에는 3 s(`STATUS_GRACE_SEC`) 뒤 「로컬 실행이 끝남」 으로 1회차를 쉼"""
+    """명령 뒤 3.2 s 동안 그 앞 상태(실행 없음)가 보인다 · 전에는 3 s(`STATUS_GRACE_SEC`) 뒤 「로컬 실행 종료」 으로 1회차를 쉼"""
     clock, runtime, driver, _, notes = _pc(100_000.0)
     _run_seen_late(driver, runtime, clock, _always(Choice(timeline=TIMELINE)), 250.0, late=3.2, init_sec=5.0)
     assert [cycle for cycle, _ in runtime.starts] == [1, 2], notes
     assert all(at == 100_060.0 + (k - 1) * 100.0 for k, at in runtime.starts)
-    assert not any('쉼' in note for note in notes), notes
+    assert not any('생략' in note for note in notes), notes
 
 
 def test_a_status_that_never_follows_the_command_is_a_failure_only_after_the_echo_timeout():
@@ -791,17 +791,17 @@ def test_a_status_that_never_follows_the_command_is_a_failure_only_after_the_ech
     # 들어가기 + 그 회차 명령(같은 틱 · 수정 목록 206)
     assert runtime.calls == ['group_prepare', 'group_cycle_at'] and driver.holding == TIMELINE.plan_id
     tick(5.0)
-    assert driver.holding == TIMELINE.plan_id, '옛 코드는 3 s 뒤 「로컬 실행이 끝남」 으로 놓았다'
+    assert driver.holding == TIMELINE.plan_id, '옛 코드는 3 s 뒤 「로컬 실행 종료」 으로 놓았다'
     assert runtime.calls == ['group_prepare', 'group_cycle_at']
     tick(ClockDriver.ECHO_TIMEOUT_SEC - 5.0 + 0.2)
     assert driver.holding == '' and runtime.calls[-1] == 'group_cancel'
-    assert any('로컬 상태가 명령 뒤로 바뀌지 않음' in note for note in notes), notes
+    assert any('명령 후 로컬 상태 변화 없음' in note for note in notes), notes
 
 
 def test_an_error_left_by_the_previous_try_does_not_fold_the_new_try():
     """앞 시도(서보 꺼짐)의 오류 상태가 다시 들어간 직후 아직 보인다 · 그것으로 새 시도를 접지 않는다 · 새 상태의 오류만 본다
 
-    전에는 오류는 기다림 없이 바로 봐 다시 들어가자마자 「N회차 쉼 · 서보가 꺼져 있습니다」 로 또 쉬었다.
+    전에는 오류는 기다림 없이 바로 봐 다시 들어가자마자 「N회차 생략: 서보가 꺼져 있습니다」 로 또 쉬었다.
     """
     clock, runtime, driver, _, notes = _pc(100_000.0)
     runtime.set_status(
@@ -856,7 +856,7 @@ def test_a_run_just_cancelled_is_not_taken_over_again_from_the_status_before_the
         clock.advance(0.1)
         driver.tick(Choice(timeline=TIMELINE), {'status': before_cancel, 'init_sec': 5.0})
     assert runtime.calls.count('group_cancel') == 1, runtime.calls
-    assert driver.report()['note'] == '1회차 쉼 · 서보가 꺼져 있습니다(0~4번 모터)'
+    assert driver.report()['note'] == '1회차 생략: 서보가 꺼져 있습니다(0~4번 모터)'
 
 
 def test_the_driver_says_whether_a_status_belongs_to_its_last_command():
@@ -878,13 +878,13 @@ WINDOW_END = 100_600.0
 def test_a_group_stop_parks_at_its_window_end_even_when_the_stop_is_not_seen():
     """사용자 결정 「끊겨도 운영시간 끝에 스스로 선다」 · 전에는 정지를 2분 못 보면 기억을 버려 서보를 켠 채 밤을 샜다"""
     clock, runtime, driver, finished, notes = _pc(100_000.0)
-    stopped = Choice(reason='정지됨', stopped_plan_id='tt-s100000', window_end_unix=WINDOW_END)
+    stopped = Choice(reason='정지 상태', stopped_plan_id='tt-s100000', window_end_unix=WINDOW_END)
     _ticks(driver, clock, stopped, 5.0)
-    _ticks(driver, clock, Choice(reason='마스터 스케줄 꺼짐'), 300.0)     # 정지가 안 보임 · 2분 훨씬 넘게
+    _ticks(driver, clock, Choice(reason='마스터 스케줄 OFF'), 300.0)     # 정지가 안 보임 · 2분 훨씬 넘게
     assert finished == [] and clock.wall() < WINDOW_END, '운영시간 안 · 아직'
-    _ticks(driver, clock, Choice(reason='마스터 스케줄 꺼짐'), WINDOW_END - clock.wall() + 0.2)
+    _ticks(driver, clock, Choice(reason='마스터 스케줄 OFF'), WINDOW_END - clock.wall() + 0.2)
     assert finished == [('tt-s100000', True)], '그 운영시간 끝 시각에 한 번'
-    _ticks(driver, clock, Choice(reason='마스터 스케줄 꺼짐'), 30.0)
+    _ticks(driver, clock, Choice(reason='마스터 스케줄 OFF'), 30.0)
     assert len(finished) == 1
 
 
@@ -892,15 +892,15 @@ def test_a_group_stop_unseen_for_minutes_is_still_parked_when_the_hours_end():
     """정지를 2분 넘게 못 봤다고 기억을 버리지 않는다(옛 `STOPPED_FORGET_SEC`) · 운영시간 끝 시각 없이 본 정지여도
     운영시간이 끝났다고 보이면(「운영시간 아님」) 주차 · 고치기 전에는 이 시험이 실패한다(옛 시험은 그 반대를 확인)"""
     clock, runtime, driver, finished, notes = _pc(100_000.0)
-    _ticks(driver, clock, Choice(reason='정지됨', stopped_plan_id='tt-s100000'), 5.0)
-    _ticks(driver, clock, Choice(reason='마스터 스케줄 꺼짐'), 300.0)
+    _ticks(driver, clock, Choice(reason='정지 상태', stopped_plan_id='tt-s100000'), 5.0)
+    _ticks(driver, clock, Choice(reason='마스터 스케줄 OFF'), 300.0)
     _ticks(driver, clock, Choice(reason='운영시간 아님'), 1.0)
     assert finished == [('tt-s100000', True)]
 
 
 def test_a_group_stop_does_not_park_a_pc_left_in_manual_at_the_window_end():
     clock, runtime, driver, finished, notes = _pc(100_000.0)
-    stopped = Choice(reason='정지됨', stopped_plan_id='tt-s100000', window_end_unix=WINDOW_END)
+    stopped = Choice(reason='정지 상태', stopped_plan_id='tt-s100000', window_end_unix=WINDOW_END)
     _ticks(driver, clock, stopped, 5.0)
     _ticks(driver, clock, Choice(reason='수동 모드', stopped_plan_id='tt-s100000'), WINDOW_END - clock.wall() + 1.0,
            mode='manual')
@@ -918,10 +918,10 @@ def test_a_group_stop_does_not_park_a_pc_left_in_manual_at_the_window_end():
 def test_a_human_group_run_releases_the_window_end_park():
     """사람이 그룹 재생을 돌렸다 · 그 재생이 끝난 직후(운영시간 끝 뒤) 갑자기 주차하지 않는다"""
     clock, runtime, driver, finished, notes = _pc(100_000.0)
-    _ticks(driver, clock, Choice(reason='정지됨', stopped_plan_id='tt-s100000', window_end_unix=WINDOW_END), 5.0)
-    driver.release_stopped_window('사람이 그룹 재생을 시작함')
+    _ticks(driver, clock, Choice(reason='정지 상태', stopped_plan_id='tt-s100000', window_end_unix=WINDOW_END), 5.0)
+    driver.release_stopped_window('수동 그룹 재생 시작')
     clock.advance(WINDOW_END - clock.wall() + 600.0)
-    _ticks(driver, clock, Choice(reason='마스터 스케줄 꺼짐'), 1.0)
+    _ticks(driver, clock, Choice(reason='마스터 스케줄 OFF'), 1.0)
     assert finished == []
     assert any('주차 기억 버림' in note for note in notes)
 
@@ -946,7 +946,7 @@ def test_a_web_still_turning_servos_on_does_not_make_the_first_cycle_skip(monkey
     pending = [i for i, call in enumerate(runtime.calls) if call == 'group_prepare(pending)']
     assert len(pending) == 6
     assert runtime.calls[pending[-1] + 1] == 'group_prepare', '켜진 뒤 같은 회차 준비'
-    assert not any('쉼' in note for note in notes)
+    assert not any('생략' in note for note in notes)
 
 
 def test_pending_asks_again_only_after_the_poll_interval_and_a_missed_entry_is_a_skip():
@@ -961,8 +961,8 @@ def test_pending_asks_again_only_after_the_poll_interval_and_a_missed_entry_is_a
     _run(driver, runtime, clock, _always(Choice(timeline=TIMELINE)), 5.0)
     gaps = {round(b - a, 1) for a, b in zip(asked, asked[1:])}
     assert asked and gaps <= {ClockDriver.PENDING_POLL_SEC, round(ClockDriver.PENDING_POLL_SEC + 0.1, 1)}
-    assert driver._note == '1회차 준비 · 켜는 중'
+    assert driver._note == '1회차 준비: 켜는 중'
     # 켜기가 끝내 안 끝나 1회차 들어갈 때(시작 − 준비)를 넘김 · 조용히 넘어가지 않고 쉼으로 남긴다
     _run(driver, runtime, clock, _always(Choice(timeline=TIMELINE)), 25.0)
-    assert driver._note == '1회차 쉼 · 서보 켜기가 끝나지 않음'
-    assert any('1회차 쉼 · 서보 켜기가 끝나지 않음' in note for note in notes)
+    assert driver._note == '1회차 생략: 서보 ON 미완료'
+    assert any('1회차 생략: 서보 ON 미완료' in note for note in notes)

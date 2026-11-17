@@ -83,7 +83,7 @@ def test_auto_generated_range_blocks_playback():
         _row('Neck_Pitch', 1),                         # 자동 생성 그대로
     ])
 
-    with pytest.raises(ValueError, match=r'^조인트 범위 미확인 · Neck_Pitch · '):
+    with pytest.raises(ValueError, match=r'^조인트 범위 미확인\(Neck_Pitch\)\. '):
         _build(manager)
 
 
@@ -91,7 +91,7 @@ def test_auto_generated_range_blocks_the_initial_move_too():
     """초기 이동도 모터를 움직인다 · 매핑의 「사용」 축 전부를 옮긴다"""
     manager = _manager([_row('Neck_Pitch', 0, range_confirmed=False, motion_lower_deg=-10.0)])
 
-    with pytest.raises(ValueError, match='조인트 범위 미확인 · Neck_Pitch'):
+    with pytest.raises(ValueError, match=r'조인트 범위 미확인\(Neck_Pitch\)'):
         _build(manager, initialization_only=True)
 
 

@@ -16,13 +16,13 @@ def test_group_note_goes_to_the_operation_log_without_touching_motion():
     bridge = _Bridge()
     result = local_motion_control(bridge, {
         'command': 'group_note', 'event_type': 'group_excluded',
-        'message': '그룹 실행 시작 · 뺀 PC pc-c(미접속)',
+        'message': '그룹 실행 시작: 제외 PC pc-c(미접속)',
         'excluded': {'pc-c': '미접속'}, 'participants': ['pc-a'], 'execution_id': 'exec-1',
         'ignored': 'x',
     })
     assert result == {'success': True}
     assert bridge.notes == [(
-        'group_excluded', '그룹 실행 시작 · 뺀 PC pc-c(미접속)',
+        'group_excluded', '그룹 실행 시작: 제외 PC pc-c(미접속)',
         {'execution_id': 'exec-1', 'excluded': {'pc-c': '미접속'}, 'participants': ['pc-a']},
     )]
 

@@ -171,7 +171,7 @@ def test_release_keeps_going_to_the_last_goal_then_ends():
     supervisor._accept_stream_goals([_target(0, 100.0, gain=10.0)])
     _run(supervisor, 5)
     ok, message = supervisor._release_stream_ramps([0])
-    assert ok and '목표까지' in message
+    assert ok and '목표 도달 후 정지' in message
     assert 0 in supervisor._stream_ramps                  # 놓아도 계속
 
     _run(supervisor, 2000)

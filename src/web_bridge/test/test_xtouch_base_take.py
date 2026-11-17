@@ -183,7 +183,7 @@ def test_playback_end_saves_by_itself():
 
 def test_base_take_refuses_a_selected_base_joint_without_limits_and_failed_playback():
     service, _, _ = _service([_row('neck_yaw', 1, velocity=None)])
-    assert '속도·가속도 상한' in service.start(object(), [1], '', 'base.json')['message']
+    assert '최대 속도·최대 가속' in service.start(object(), [1], '', 'base.json')['message']
     service, _, _ = _service([_row('neck_yaw', 1)], playback_ok=False)
     result = service.start(object(), [1], '', 'base.json')
     assert result['success'] is False and '범위 미확인' in result['message']
@@ -199,7 +199,7 @@ def test_blend_overrun_refuses_to_save():
     service.take_frames_callback(SimpleNamespace(data=json.dumps(
         {'take_id': take_id, 'frame': 0, 't': 1.0, 'values': {}, 'blend_overrun': ['neck_yaw']})))
     result = service.stop(owner)
-    assert result['success'] is False and '잇기' in result['message']
+    assert result['success'] is False and '원본 동작 복귀' in result['message']
     assert bridge.project_repository.files == {}
 
 
@@ -222,7 +222,7 @@ def test_playback_that_never_starts_ends_the_take_with_the_reason():
     _wait_idle(service)
     last = service.status()['last_result']
     assert last['success'] is False
-    assert '바탕 재생을 시작하지 못했습니다' in last['message'] and '재생 등록에 없는' in last['message']
+    assert '바탕 재생 시작 실패' in last['message'] and '재생 등록에 없는' in last['message']
     assert bridge.project_repository.files == {}
 
 
@@ -249,5 +249,5 @@ def test_overwrite_of_the_base_is_skipped_when_stopped_before_the_end():
     _frames(service, calls['start'][0]['xtouch_take_id'], 40, end=False)
     result = service.stop(owner)
     assert result['success'] and result['file'] == 'base_2.json'
-    assert '바탕 끝까지 가지 않음' in result['message']
+    assert '바탕 끝까지 미재생' in result['message']
     assert bridge.project_repository.files['base.json'] == 'old' and bridge.project_repository.trash == []

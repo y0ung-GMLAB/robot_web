@@ -232,7 +232,7 @@ def add_monitoring_motion_values(
             motor.update({
                 'motion_value_status': 'missing',
                 'motion_value_message': (
-                    '사용 중인 조인트가 중복 설정되어 모션값을 연결할 수 없음'
+                    '조인트 중복 설정으로 모션값 연결 불가'
                 ),
             })
             continue

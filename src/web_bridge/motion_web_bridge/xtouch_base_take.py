@@ -45,7 +45,7 @@ def load_base(file_id: str, content: str, dt: float = PERIOD_SEC) -> BaseAnimati
     records = motion_table.parse_rows(rows, headers)
     motion_table.scale_record_values(records, motion_table.rotation_unit_from_content(content))
     if not records:
-        raise ValueError(f'{file_id} · 재생할 수 있는 행이 없습니다')
+        raise ValueError(f'{file_id}: 재생 가능한 행이 없습니다')
     groups: Dict[str, List[Dict[str, Any]]] = {}
     for record in sorted(records, key=lambda item: (item['time_sec'], item.get('row_index', 0))):
         groups.setdefault(str(record['motion_id']), []).append(record)

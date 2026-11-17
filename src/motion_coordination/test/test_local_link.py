@@ -334,7 +334,7 @@ def test_runtime_silence_past_the_limit_drops_only_this_pc_and_clears_when_back(
     assert node._execution.execution_id != ''
     loss = node.snapshot()['runtime_loss']
     assert loss['code'] == coordination_node.RUNTIME_LOST_CODE
-    assert loss['latched'] is False and loss['message'].startswith('pc-a 재생 관리자 상태 끊김')
+    assert loss['latched'] is False and loss['message'].startswith('pc-a 재생 관리자 상태 중단')
     assert node._coordination_error == {}
 
     link.on_runtime_status(json.dumps({'execution_context': CONTEXT, 'state': 'stopped'}))

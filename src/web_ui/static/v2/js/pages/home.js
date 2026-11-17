@@ -28,14 +28,14 @@ function nowCard(state, navigate) {
   body.push(h('div', { class: 'row' },
     h('a', { class: 'btn btn-primary', href: '#/play' }, '재생 화면 열기'),
     run.moving ? h('button', { class: 'btn', type: 'button', onclick: () => act.stopAfterCycle(run.group) }, '이번 회차 후 정지') : null));
-  return h('section', { class: 'card card-now', 'aria-label': '지금' }, ...body);
+  return h('section', { class: 'card card-now', 'aria-label': '현재' }, ...body);
 }
 
 /** 오늘 남은 운영 시간 한 줄 */
 function endHint(state) {
   const sched = state.sched;
   if (!sched) return '';
-  if (sched.run_mode !== 'schedule') return sched.run_mode === 'manual' ? '수동 모드에서는 스케줄이 동작하지 않습니다' : '끔 모드라 움직임 명령이 차단되어 있습니다';
+  if (sched.run_mode !== 'schedule') return sched.run_mode === 'manual' ? '수동 모드에서는 스케줄이 동작하지 않습니다' : '끔 모드이므로 동작 명령을 차단 중입니다';
   const now = new Date();
   const minutes = now.getHours() * 60 + now.getMinutes();
   const windows = todayWindows(state.schedules, now);

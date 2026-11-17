@@ -69,9 +69,9 @@ def exclusion_reason(
         return '응답 지연'
     grade = int(getattr(member, 'alarm_grade', 0) or 0)
     if grade > 0:
-        return f'Servo 알람 {grade}등급'
+        return f'서보 알람 {grade}등급'
     if int(getattr(member, 'protocol_version', 0) or 0) != int(protocol_version):
-        return '버전 불일치 · 그 PC 에서 bash scripts/install.sh'
+        return '버전 불일치 (해당 PC에서 bash scripts/install.sh 실행)'
     mode = str(getattr(member, 'operation_mode', '') or '').strip().lower()
     if mode == 'off':
         return OFF_REASON
@@ -135,7 +135,7 @@ def start_summary(participants, excluded) -> str:
     text = f'참가 {count}대'
     rows = sorted((str(pc), str(reason)) for pc, reason in dict(excluded or {}).items())
     if rows:
-        text += ' · 빠짐 ' + ', '.join(f'{pc}({reason})' for pc, reason in rows)
+        text += ' · 제외 ' + ', '.join(f'{pc}({reason})' for pc, reason in rows)
     return text
 
 

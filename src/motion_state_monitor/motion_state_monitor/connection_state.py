@@ -108,7 +108,7 @@ def set_physical_connection_fields(
         'physical_connection_confirmed': True,
         'physical_connection_checked_at': scanned_at,
         'physical_connection_message': (
-            '최근 EtherCAT 물리 검색에서 확인됐습니다.'
+            '최근 EtherCAT 물리 검색에서 확인했습니다.'
             if detected
             else '최근 EtherCAT 물리 검색에서 확인되지 않았습니다.'
         ),
@@ -156,8 +156,8 @@ def set_connection_fields(
 def connection_message(reason: str) -> str:
     messages = {
         'runtime_feedback_fresh': '모터 런타임 피드백이 정상 수신 중입니다.',
-        'communication_unavailable': '제어 노드가 이 축의 통신 불가를 보고했습니다.',
-        'ethercat_bus_down': 'EtherCAT Master 또는 물리 링크가 내려가 있습니다.',
+        'communication_unavailable': '모터 프로그램이 해당 축의 통신 불가를 보고했습니다.',
+        'ethercat_bus_down': 'EtherCAT Master 또는 물리 링크가 비활성 상태입니다.',
         'ethercat_axis_missing': 'EtherCAT 버스에서 설정된 Slave를 찾지 못했습니다.',
         'ethercat_axis_not_operational': 'EtherCAT Slave가 운전 가능 상태가 아닙니다.',
         'feedback_timeout': '마지막 모터 피드백 이후 연결 제한 시간을 초과했습니다.',
@@ -165,8 +165,8 @@ def connection_message(reason: str) -> str:
         'monitoring_disabled': '모터 상태 모니터링이 꺼져 있습니다.',
         'awaiting_first_feedback': '제어 노드의 첫 모터 피드백을 기다리고 있습니다.',
         'communication_confirmation_pending': '일시적인 통신 실패인지 확인하고 있습니다.',
-        'no_runtime_feedback': '설정된 축이지만 제어 노드에서 피드백을 받지 못했습니다.',
-        'scan_detected': '통신 버스 검색에서 모터가 확인되었습니다.',
+        'no_runtime_feedback': '설정된 축이나 모터 프로그램의 피드백을 수신하지 못했습니다.',
+        'scan_detected': '통신 버스 검색에서 모터를 확인했습니다.',
         'scan_missing': '통신 버스 검색에서 설정된 모터를 찾지 못했습니다.',
         'scan_failed': '통신 버스 검색에 실패하여 연결 여부를 확정할 수 없습니다.',
     }

@@ -152,7 +152,7 @@ class LocalLink:
                 except ExternalShutdownException:
                     pass
                 except Exception as exc:  # noqa: BLE001 · 연결이 죽어도 연동 노드는 산다 · 웹 길로
-                    self.error = f'로컬 연결 실행기 멈춤: {exc}'
+                    self.error = f'로컬 연결 실행기 정지: {exc}'
                     self._note(self.error)
 
             self._thread = threading.Thread(target=spin, name='motion-coordination-local-link', daemon=True)
@@ -299,7 +299,7 @@ class LocalLink:
         stamp = dict(stamp) if stamp else self.stamp()
         generation = int(stamp.get('project_generation') or 0)
         if generation < 1:
-            raise LinkUnavailable('요청에 실을 세대가 없음')
+            raise LinkUnavailable('요청에 포함할 세대 정보 없음')
         body = dict(payload or {})
         body['project_id'] = str(stamp.get('project_id') or '')
         body['project_generation'] = generation
@@ -318,7 +318,7 @@ class LocalLink:
                     'payload': body,
                 }, ensure_ascii=False))
             except Exception as exc:  # noqa: BLE001 · 컨텍스트가 내려감(SIGINT) · 웹 길로
-                raise LinkUnavailable(f'로컬 연결로 보내지 못함: {exc}') from exc
+                raise LinkUnavailable(f'로컬 연결 전송 실패: {exc}') from exc
             waiter[0].wait(max(float(timeout_sec), 0.0))
             answer = waiter[1]
         finally:
@@ -341,7 +341,7 @@ class LocalLink:
                 'command': 'safety_motion_stop',
             }, separators=(',', ':')))
         except Exception as exc:  # noqa: BLE001
-            raise LinkUnavailable(f'안전 정지를 보내지 못함: {exc}') from exc
+            raise LinkUnavailable(f'안전 정지 전송 실패: {exc}') from exc
         return request_id
 
     def alive(self, info: Mapping[str, Any]) -> bool:

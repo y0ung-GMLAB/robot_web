@@ -245,7 +245,7 @@ def test_read_failure_is_read_again_and_the_block_clears():
     check, _ = _check(runner, clock=clock)
     _see(check, _masters(0, 1))
     assert check.snapshot()['drives'][0]['status'] == ma.DRIVE_UNKNOWN
-    assert '다시 읽는 중' in ma.block_reason(check.snapshot())
+    assert '재확인 진행' in ma.block_reason(check.snapshot())
 
     runner.fail.clear()
     clock.now += 1.0
@@ -485,7 +485,7 @@ def test_a_slave_stuck_in_preop_is_reported_after_a_while(monkeypatch):
     assert scanner._stuck_slaves(bus, 100.0) == []
     stuck = scanner._stuck_slaves(bus, 100.0 + STUCK_NOTICE_SEC)
     assert [(s['slave_position'], s['axis'], s['state'], s['error_flag']) for s in stuck] == [(1, 1, 'PREOP', True)]
-    assert stuck[0]['message'] == '1번 드라이브가 PREOP 에 멈춤 · 그 드라이브 제어 전원을 껐다 켜세요'
+    assert stuck[0]['message'] == '1번 드라이브가 PREOP 상태에서 정지했습니다. 해당 드라이브 제어 전원을 재투입하세요'
     # OP 로 올라가면 사라지고 시간도 다시 잰다
     assert scanner._stuck_slaves(_bus({0: 'OP', 1: 'OP'}), 200.0) == []
     assert scanner._stuck_slaves(bus, 201.0) == []
@@ -568,7 +568,7 @@ def test_one_slave_timing_out_while_others_answer_is_a_stuck_mailbox():
 
     snapshot = check.snapshot()
     assert [(s['slave_position'], s['axis']) for s in snapshot['stuck_mailboxes']] == [(1, 2)]
-    assert snapshot['stuck_mailboxes'][0]['message'] == '2번 드라이브 메일박스 응답 없음 · 그 드라이브 제어 전원을 껐다 켜세요'
+    assert snapshot['stuck_mailboxes'][0]['message'] == '2번 드라이브 메일박스 응답 없음. 해당 드라이브 제어 전원을 재투입하세요'
     # 막지 않는다 · 앱솔루트 판정 · PDO · 재생은 그대로
     assert snapshot['state'] == ma.STATE_OK and ma.block_reason(snapshot) == ''
 
@@ -620,7 +620,7 @@ def test_reads_to_a_stuck_slave_stop_except_a_sparse_probe():
     check.observe(masters)
     assert len(_uploads_to(runner, 1)) == sent
     assert len(_uploads_to(runner, 0)) > other             # 다른 드라이브는 그대로 읽음
-    assert '읽기 쉼' in check.snapshot()['drives'][1]['gains']['error']
+    assert '읽기 생략' in check.snapshot()['drives'][1]['gains']['error']
 
     check._clock.now += MAILBOX_PROBE_SEC - GAIN_RETRY_SEC  # 떠볼 때 · 한 번만
     check.observe(masters)

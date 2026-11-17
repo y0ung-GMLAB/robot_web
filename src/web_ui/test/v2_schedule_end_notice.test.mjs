@@ -10,7 +10,7 @@ const retrying = {
 };
 const keptOn = {
   state: 'gave_up',
-  notice: { tone: 'bad', title: '구간 끝 주차 못 함 · 서보가 켜진 채입니다', detail: '서보 알람 2등급이라 서보 끄기는 알람 처리에 맡김' },
+  notice: { tone: 'bad', title: '운영 종료 기준점 이동 불가: 서보 ON 유지', detail: '서보 알람 2등급이라 서보 끄기는 알람 처리에 맡김' },
 };
 
 test('다시 시도 중 · 노랑 · 스케줄 열기', () => {

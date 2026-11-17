@@ -287,7 +287,7 @@ class ScanOrchestrator:
                 # 위 `lifecycle_lock` 과 **다른 상황**이다 · 저쪽은 설정 적용·
                 # 재시작까지 포함하고, 여기는 검색이 이미 도는 중이다 ·
                 # 문구를 합치면 사용자가 무엇을 기다려야 하는지 모른다
-                'message': '다른 모터 검색이 진행 중입니다. 완료 후 다시 시도하세요',
+                'message': '다른 모터 검색이 진행 중입니다. 완료 후 재시도하세요',
                 'scan': None,
                 'project_id': self.repository.selected_project_id(),
                 'project_generation': self.bridge.current_project_generation(),
@@ -513,7 +513,7 @@ class ScanOrchestrator:
         handle.cancel_goal_async()
         return {
             'success': True,
-            'message': '모터 검색 취소를 요청했습니다. 진행 중인 장치 종류의 검색이 끝나면 중지합니다',
+            'message': '모터 검색 취소를 요청했습니다. 진행 중인 장치 종류의 검색 완료 후 중지합니다',
         }
 
     def _call_service_locked(
@@ -808,7 +808,7 @@ class ScanOrchestrator:
             result['message'] = (
                 f'{result.get("message") or f"{scan_label} 완료"}. '
                 '이전 프로젝트의 모터 실행은 정지했습니다. '
-                '현재 프로젝트 설정을 저장한 뒤 「장비에 적용 · 모터 재시작」을 누르세요'
+                '「모터 설정」에서 「저장 후 장비에 적용」을 누르세요'
             )
         missing_axes = result.get('missing_axes') or []
         if missing_axes and not restore_error:
@@ -816,7 +816,7 @@ class ScanOrchestrator:
             result['message'] = (
                 f'{result.get("message") or f"{scan_label} 완료"}. '
                 f'검색 전 설정의 {", ".join(str(a) for a in missing_axes)}번 모터가 '
-                '다시 연결되지 않았습니다. 연결이 빠졌거나 알람 상태인지 확인하세요'
+                '재연결되지 않았습니다. 케이블 연결 상태와 알람 여부를 확인하세요'
             )
         if restore_error:
             result['success'] = False

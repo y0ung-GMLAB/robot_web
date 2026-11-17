@@ -71,7 +71,7 @@ def test_hunting_jog_is_finished_with_a_notice_after_the_settle_window():
     assert [n['axis'] for n in notices] == [2]
     assert notices[0]['kind'] == 'hunting'
     assert '게인(강성)을 확인하세요' in notices[0]['message']
-    assert logger.warnings and '출렁입니다' in logger.warnings[0]
+    assert logger.warnings and '진동합니다' in logger.warnings[0]
 
 
 def test_a_jog_still_inside_the_settle_window_keeps_waiting():
@@ -95,8 +95,8 @@ def test_a_jog_still_sending_is_refused_with_where_the_motor_is():
     active.pop('commands_sent_at')
     supervisor._active_jogs[2] = active
     message = supervisor._previous_manual_busy_message(2)
-    assert message.startswith('2번 모터의 이전 조그가 아직 돌고 있습니다')
-    assert '목표 117.210 deg' in message and '지금 60.000 deg' in message
+    assert message.startswith('2번 모터의 이전 조그가 아직 진행 중입니다')
+    assert '목표 117.210 deg' in message and '현재 60.000 deg' in message
 
 
 def test_a_settling_action_is_taken_over_and_reported_done():
@@ -115,4 +115,4 @@ def test_a_hunting_action_completes_with_the_notice_in_its_result():
     assert 1 not in supervisor._active_actions
     request_id, success, message = results[-1]
     assert request_id == 'act-2' and success is True
-    assert 'trajectory completed' in message and '출렁입니다' in message
+    assert 'trajectory completed' in message and '진동합니다' in message

@@ -32,7 +32,7 @@ def _bridge(tmp_path, *, latched, run_state='initialized', mode='manual'):
 def test_latch_is_the_reason_not_the_initial_pose(tmp_path):
     reason = run_mode_gate.manual_motion_block_reason(_bridge(tmp_path, latched=True))
     assert reason == run_mode_gate.EMERGENCY_MANUAL_BLOCK_MESSAGE
-    assert '긴급정지 잠김' in reason and '프로그램 다시 시작' in reason
+    assert '긴급 정지 상태로 수동 조작이 불가' in reason and '프로그램 재시작' in reason
     assert '초기 위치' not in reason
 
 
@@ -56,6 +56,6 @@ def test_missing_safety_status_does_not_block(tmp_path):
 def test_the_gate_runs_before_the_servo_check():
     """서버 선검사 순서 · 잠김·운전 모드 문이 서보 꺼짐 검사(readiness)보다 먼저"""
     source = (Path(run_mode_gate.__file__).parent / 'manual_motor_commands.py').read_text(encoding='utf-8')
-    for name, following in (('ac_servo_jog', 'dynamixel_jog'), ('ac_servo_action', 'dynamixel_action')):
+    for name, following in (('ac_servo_action', 'dynamixel_action'),):
         body = source.split(f'def {name}', 1)[1].split(f'def {following}', 1)[0]
         assert body.index('_off_mode_block') < body.index('_readiness_error')

@@ -277,7 +277,7 @@ def test_clock_mode_is_detected_and_the_cut_pc_must_keep_playing_too():
 
 def test_clock_mode_fails_on_a_skipped_cycle():
     log = '[WARN] 시간표 재생 · 5회차 초기 이동 시각을 놓침 · 다음 경계\n[INFO] 시간표 재생 · tt-s100 · 5회차 준비'
-    verdict = netfault.judge(netfault.SCENARIOS['2b'], _clock_samples(note=('f2', '5회차 쉼 · 다른 재생 중')), PCS, 'f1',
+    verdict = netfault.judge(netfault.SCENARIOS['2b'], _clock_samples(note=('f2', '5회차 생략: 다른 재생 중')), PCS, 'f1',
                              fault_start=10.0, fault_end=160.0, end=190.0, log_text=log)
     assert not verdict.ok
     assert any('놓침' in reason for reason in verdict.reasons)
@@ -289,6 +289,6 @@ def test_summarize_reads_the_timetable_mode():
         'mode': 'clock', 'local': {'note': 'x', 'plan_id': 'tt-s1'}}}})
     assert row['sync_mode'] == 'clock' and row['tt_note'] == 'x'
     signal = netfault.summarize({'runtime': {'local': {'pc_id': 'f1'}, 'timetable': {
-        'mode': 'clock', 'local': {'note': '마스터 스케줄 꺼짐', 'plan_id': ''}}}})
+        'mode': 'clock', 'local': {'note': '마스터 스케줄 OFF', 'plan_id': ''}}}})
     assert signal['sync_mode'] == 'lockstep', '시간표 설정이어도 사람이 누른 그룹(신호 재생)은 신호 재생 기준 · 188'
     assert netfault.summarize({'runtime': {}})['sync_mode'] == 'lockstep', '옛 서버 · 칸 없음'

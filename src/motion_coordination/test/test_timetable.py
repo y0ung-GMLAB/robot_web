@@ -83,7 +83,7 @@ def test_signal_mode_off_mode_and_manual_mode_do_not_follow_the_schedule():
     assert choose(_clock(mode='lockstep'), now, operation_mode='schedule').timeline is None
     assert choose(_clock(), now, operation_mode='off').reason == '오프 모드'
     assert choose(_clock(), now, operation_mode='manual').reason == '수동 모드'
-    assert choose(_clock(schedule_enabled=False), now, operation_mode='schedule').reason == '마스터 스케줄 꺼짐'
+    assert choose(_clock(schedule_enabled=False), now, operation_mode='schedule').reason == '마스터 스케줄 OFF'
     tomorrow = choose(_clock(), _ts('2026-11-09 20:00:00'), operation_mode='schedule').timeline
     assert tomorrow.anchor_unix == _ts('2026-11-10 10:01:00'), '운영시간 밖이면 다음 운영시간 시간표(표시 · 미리 준비)'
     weekly = {**DAILY, 'repeat_type': 'weekly', 'repeat_days': []}
@@ -238,7 +238,7 @@ def test_a_stop_before_the_window_stops_it_only_once_a_pc_holds_its_first_cycle(
     early = _ts('2026-11-10 09:58:00')
     stopped, plan_id = stop_plan(config, issuer='floating1', after_cycle=False, now_unix=early, held_plan_id=window_plan)
     assert plan_id == window_plan
-    assert choose(stopped, early + 300.0, operation_mode='schedule').reason == '정지됨'
+    assert choose(stopped, early + 300.0, operation_mode='schedule').reason == '정지 상태'
     other = stop_plan(config, issuer='floating1', after_cycle=False, now_unix=now, held_plan_id='tt-s5')
     assert other[1] == 'tt-s5', '다른(지난) 운영시간 회차를 쥔 PC 만 세운다 · 다음 운영시간은 그대로'
     assert choose(other[0], now + 120.0, operation_mode='schedule').timeline is not None
@@ -252,8 +252,8 @@ def test_a_stop_names_one_operating_hours_and_never_the_next():
     """
     window_plan = choose(_clock(), _ts('2026-11-10 09:00:00'), operation_mode='schedule').timeline.plan_id
     inside = _clock(stop={'plan_id': window_plan, 'mode': 'now'}, halt={'plan_id': window_plan, 'at_unix': _ts('2026-11-10 13:00:00')})
-    assert choose(inside, _ts('2026-11-10 13:00:10'), operation_mode='schedule').reason == '정지됨', '그 운영시간 안 정지'
-    assert choose(inside, _ts('2026-11-10 17:59:00'), operation_mode='schedule').reason == '정지됨', '끝까지'
+    assert choose(inside, _ts('2026-11-10 13:00:10'), operation_mode='schedule').reason == '정지 상태', '그 운영시간 안 정지'
+    assert choose(inside, _ts('2026-11-10 17:59:00'), operation_mode='schedule').reason == '정지 상태', '끝까지'
     tomorrow = choose(inside, _ts('2026-11-11 09:59:40'), operation_mode='schedule')
     assert tomorrow.timeline is not None and tomorrow.timeline.plan_id != window_plan, '다음 운영시간은 정시'
     assert choose(inside, _ts('2026-11-10 13:00:10'), operation_mode='schedule').window_end_unix == _ts('2026-11-10 18:00:00')

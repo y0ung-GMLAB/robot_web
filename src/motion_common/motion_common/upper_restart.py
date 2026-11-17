@@ -75,4 +75,4 @@ def event_content(marker: Dict[str, Any]) -> str:
         when_text = time.strftime('%H:%M:%S', time.localtime(float(when)))
     except (TypeError, ValueError):
         when_text = '?'
-    return f'{node} 비정상 종료(코드 {code} · {when_text}) · 상위 서비스 자동 재시작 · 모터는 제자리 유지'
+    return f'{node} 비정상 종료(코드 {code}, {when_text}). 상위 서비스 자동 재시작, 모터는 현재 위치 유지'

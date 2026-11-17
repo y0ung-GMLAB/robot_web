@@ -68,11 +68,11 @@ def test_a_schedule_group_start_says_so(tmp_path, monkeypatch):
 # --------------------------------------------------------------------------- #
 
 @pytest.mark.parametrize('run, safety, expected', [
-    ({'state': 'running'}, {}, '사람 조작 중 · 단독 재생'),
-    ({'state': 'initializing'}, {}, '사람 조작 중 · 단독 재생'),
-    ({}, {'manual_activity_modes': ['jog']}, '사람 조작 중 · 조그 이동'),
-    ({}, {'manual_activity_modes': ['action']}, '사람 조작 중 · 목표 위치 이동'),
-    ({}, {'command_owner': 'stream'}, '사람 조작 중 · 페이더'),
+    ({'state': 'running'}, {}, '수동 조작 중: 단독 재생'),
+    ({'state': 'initializing'}, {}, '수동 조작 중: 단독 재생'),
+    ({}, {'manual_activity_modes': ['jog']}, '수동 조작 중: 조그 이동'),
+    ({}, {'manual_activity_modes': ['action']}, '수동 조작 중: 목표 위치 이동'),
+    ({}, {'command_owner': 'stream'}, '수동 조작 중: 페이더'),
 ])
 def test_a_pc_a_person_is_operating_refuses_to_join(run, safety, expected):
     assert human_operation_reason(run, safety) == expected
@@ -103,7 +103,7 @@ def test_readiness_refuses_while_a_person_jogs():
 
     result = local_motion_readiness(bridge, {'budget_sec': 6.0})
 
-    assert result == {'success': False, 'message': '사람 조작 중 · 조그 이동'}
+    assert result == {'success': False, 'message': '수동 조작 중: 조그 이동'}
 
 
 # --------------------------------------------------------------------------- #

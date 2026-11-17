@@ -36,7 +36,7 @@ def test_no_alarm_sends_nothing_and_keeps_the_servo():
     service, sent = _service([_ac(0), _ac(1)])
     result = service.ac_servo_control('fault_reset', None, 'all')
     assert result['success'] is True
-    assert '서보는 그대로' in result['message']
+    assert '서보 상태는 유지' in result['message']
     assert sent == []
 
 

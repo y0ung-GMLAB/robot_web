@@ -12,7 +12,6 @@
 from __future__ import annotations
 
 import json
-import math
 from typing import Any, Dict, List, Optional
 
 from std_msgs.msg import String
@@ -160,158 +159,6 @@ class ManualMotorCommandService:
         if not reason:
             return None
         return {'success': False, 'message': reason, **self.bridge.snapshot()}
-
-    def ac_servo_jog(self, axis: Any, relative_rad: Any) -> Dict[str, Any]:
-        off = self._off_mode_block(axis)
-        if off is not None:
-            return off
-        axis_value = optional_int(axis, None)
-        relative_value = optional_float(relative_rad, None)
-        if axis_value is None:
-            return {
-                'success': False,
-                'message': 'axis is required',
-                **self.bridge.snapshot(),
-            }
-        if relative_value is None or math.isclose(relative_value, 0.0, abs_tol=1e-9):
-            return {
-                'success': False,
-                'message': 'relative_rad is required',
-                **self.bridge.snapshot(),
-            }
-
-        motor = self._motion_state_motor(axis_value)
-        if motor is None:
-            return {
-                'success': False,
-                'message': f'{axis_value}번 모터를 현재 모터 상태에서 찾을 수 없습니다',
-                **self.bridge.snapshot(),
-            }
-        if not motor_config_rules.is_ac_servo_motor(motor):
-            return {
-                'success': False,
-                'message': f'{axis_value}번 모터는 AC 서보가 아닙니다',
-                **self.bridge.snapshot(),
-            }
-        ready_error = self._readiness_error(motor, axis_value)
-        if ready_error:
-            return {
-                'success': False,
-                'message': ready_error,
-                **self.bridge.snapshot(),
-            }
-
-        request_id = self.bridge.new_project_request_id('jog')
-        payload = {
-            'request_id': request_id,
-            'project_generation': self.bridge.current_project_generation(),
-            'command': 'ac_servo_jog',
-            'axis': axis_value,
-            'relative_rad': relative_value,
-            **self._speed_limits(axis_value),
-        }
-        self._jog_request_publisher.publish(
-            String(data=json.dumps(payload, ensure_ascii=False, separators=(',', ':')))
-        )
-
-        result = self.wait_for_jog_result(request_id)
-        if result is None:
-            return {
-                'success': False,
-                'message': (
-                    f'AC Servo jog request published, but motion_supervisor result '
-                    f'timed out: Axis {axis_value}, {units.rad_to_deg(relative_value):+.3f} deg'
-                ),
-                'request_id': request_id,
-                **self.bridge.snapshot(),
-            }
-
-        success = bool(result.get('success'))
-        if success:
-            self.repository.mark_jog_verified()
-        return {
-            'success': success,
-            'message': str(result.get('message') or 'motion_supervisor returned empty result'),
-            'request_id': request_id,
-            'supervisor_result': result,
-            **self.bridge.snapshot(),
-        }
-
-    def dynamixel_jog(self, axis: Any, relative_rad: Any) -> Dict[str, Any]:
-        off = self._off_mode_block(axis)
-        if off is not None:
-            return off
-        axis_value = optional_int(axis, None)
-        relative_value = optional_float(relative_rad, None)
-        if axis_value is None:
-            return {
-                'success': False,
-                'message': 'axis is required',
-                **self.bridge.snapshot(),
-            }
-        if relative_value is None or math.isclose(relative_value, 0.0, abs_tol=1e-9):
-            return {
-                'success': False,
-                'message': 'relative_rad is required',
-                **self.bridge.snapshot(),
-            }
-
-        motor = self._motion_state_motor(axis_value)
-        if motor is None:
-            return {
-                'success': False,
-                'message': f'{axis_value}번 모터를 현재 모터 상태에서 찾을 수 없습니다',
-                **self.bridge.snapshot(),
-            }
-        if not motor_config_rules.is_serial_servo_motor(motor):   # 다이나믹셀 · Feetech · 수정 목록 158
-            return {
-                'success': False,
-                'message': f'{axis_value}번 모터는 다이나믹셀이 아닙니다',
-                **self.bridge.snapshot(),
-            }
-        ready_error = self._readiness_error(motor, axis_value, is_ac_servo=False)
-        if ready_error:
-            return {
-                'success': False,
-                'message': ready_error,
-                **self.bridge.snapshot(),
-            }
-
-        request_id = self.bridge.new_project_request_id('dynamixel-jog')
-        payload = {
-            'request_id': request_id,
-            'project_generation': self.bridge.current_project_generation(),
-            'command': 'dynamixel_jog',
-            'axis': axis_value,
-            'relative_rad': relative_value,
-            **self._speed_limits(axis_value),
-        }
-        self._jog_request_publisher.publish(
-            String(data=json.dumps(payload, ensure_ascii=False, separators=(',', ':')))
-        )
-
-        result = self.wait_for_jog_result(request_id)
-        if result is None:
-            return {
-                'success': False,
-                'message': (
-                    f'Dynamixel jog request published, but motion_supervisor result '
-                    f'timed out: Axis {axis_value}, {units.rad_to_deg(relative_value):+.3f} deg'
-                ),
-                'request_id': request_id,
-                **self.bridge.snapshot(),
-            }
-
-        success = bool(result.get('success'))
-        if success:
-            self.repository.mark_jog_verified()
-        return {
-            'success': success,
-            'message': str(result.get('message') or 'motion_supervisor returned empty result'),
-            'request_id': request_id,
-            'supervisor_result': result,
-            **self.bridge.snapshot(),
-        }
 
     def ac_servo_action(
         self,
@@ -596,7 +443,7 @@ class ManualMotorCommandService:
             if not faulted:
                 return {
                     'success': True,
-                    'message': '알람이 없어 오류 초기화를 하지 않았습니다 · 서보는 그대로입니다',
+                    'message': '알람이 없어 오류 초기화를 생략했습니다. 서보 상태는 유지합니다',
                     'skipped_axes': list(axes),
                     **self.bridge.snapshot(),
                 }

@@ -136,7 +136,7 @@ def test_mapping_save_rejects_an_outdated_loaded_file_revision(tmp_path):
     path = manager.mappings_dir / first['file']['id']
     path.write_text(path.read_text(encoding='utf-8') + '# external update\n', encoding='utf-8')
 
-    with pytest.raises(ValueError, match='저장을 거부했습니다'):
+    with pytest.raises(ValueError, match='저장을 중단했습니다'):
         manager._save_mapping({
             'file_id': first['file']['id'],
             'base_revision': revision,
@@ -197,7 +197,7 @@ def test_mapping_save_rejects_a_stale_mapping_section_revision(tmp_path):
         encoding='utf-8',
     )
 
-    with pytest.raises(ValueError, match='조인트 매핑이 화면을 불러온 뒤 변경'):
+    with pytest.raises(ValueError, match='조인트 매핑 변경을 감지해 저장을 중단'):
         manager._save_mapping({
             'file_id': first['file']['id'],
             'base_mapping_revision': first['file']['mapping_revision'],

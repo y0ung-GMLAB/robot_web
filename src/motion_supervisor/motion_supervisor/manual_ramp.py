@@ -112,4 +112,4 @@ def conflict_message(axis: int, ramp: AxisRamp, source: str) -> str:
     if ramp.arrived or ramp.source == source:
         return ''
     label = SOURCE_LABELS.get(ramp.source, ramp.source)
-    return f'{axis}번 모터 이동 중({label}) · 도착하거나 「동작 취소」 뒤에 조작하세요'
+    return f'{axis}번 모터 이동 중({label}). 도착 또는 「동작 취소」 후 조작하세요'

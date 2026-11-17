@@ -30,21 +30,21 @@ test('「인식 모터 자동 생성」 · 막혔으면 이유(다른 프로젝�
   assert.match(autoBuildReason(other, 0), /「저장 후 장비에 적용」을 먼저/);
   assert.match(autoBuildReason(other, 0), /조인트가 없어도 적용 가능/);
   const same = { snap: { project_scope: { runtime_matches_selected: true } } };
-  assert.match(autoBuildReason(same, 0), /모터 상태를 아직 받지 못했습니다/);
+  assert.match(autoBuildReason(same, 0), /모터 상태를 아직 수신하지 못했습니다/);
   assert.match(autoBuildReason(same, 3), /3대에 한 줄씩/);
   assert.match(MAPPING_SRC, /title: autoBuildReason\(state, motors\.length\)/);
 });
 
 test('검색 확인 창 · 다른 프로젝트로 돌던 모터 프로그램은 검색 뒤 다시 켜지 않는다고 말한다(서버 scan_orchestrator 와 같음)', () => {
   const other = scanConfirmText('all', { runtime_matches_selected: false, runtime_project_id: 'floating4' });
-  assert.doesNotMatch(other, /정지했다가 다시 시작됩니다/);
+  assert.doesNotMatch(other, /정지하고, 검색 후 재시작합니다/);
   assert.match(other, /다른 프로젝트\(floating4\)/);
-  assert.match(other, /「저장 후 장비에 적용」을 눌러야 다시 시작됩니다/);
+  assert.match(other, /「저장 후 장비에 적용」 시 재시작합니다/);
   const same = scanConfirmText('ac', { runtime_matches_selected: true });
-  assert.match(same, /정지했다가 다시 시작됩니다/);
-  assert.match(same, /검색하지 않은 종류의 모터 설정은 바뀌지 않습니다/);
+  assert.match(same, /정지하고, 검색 후 재시작합니다/);
+  assert.match(same, /검색하지 않은 종류의 모터 설정은 변경하지 않습니다/);
   const none = scanConfirmText('serial', {}, { dirty: true });
-  assert.doesNotMatch(none, /정지했다가 다시 시작됩니다/);
+  assert.doesNotMatch(none, /정지하고, 검색 후 재시작합니다/);
   assert.match(none, /저장하지 않은 변경 내용은 검색 결과로 바뀝니다/);
   assert.match(MOTORS_SRC, /body: scanConfirmText\(kind, state\.snap\?\.project_scope/);
 });

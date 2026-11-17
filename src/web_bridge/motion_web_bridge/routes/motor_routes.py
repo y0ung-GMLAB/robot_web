@@ -160,10 +160,6 @@ def register_motor_routes(app: FastAPI, bridge, project_call) -> None:
     async def clear_motor_events():
         return await asyncio.to_thread(bridge.motor_event_log.clear)
 
-    @app.delete('/api/motor-events/files/{file_name}')
-    async def delete_motor_event_file(file_name: str):
-        return await project_call(bridge.motor_event_log.delete_file, file_name)
-
     @app.get('/api/servo-alarm-policy')
     async def servo_alarm_policy():
         return await project_call(bridge.servo_alarm_policy)
@@ -174,24 +170,6 @@ def register_motor_routes(app: FastAPI, bridge, project_call) -> None:
         if not isinstance(body, dict):
             raise HTTPException(status_code=400, detail='request body must be an object')
         return await project_call(bridge.save_servo_alarm_policy, body)
-
-    @app.post('/api/motion-test/ac-servo/jog')
-    async def ac_servo_jog(request: Request):
-        body = await request.json()
-        return await asyncio.to_thread(
-            bridge.manual.ac_servo_jog,
-            body.get('axis'),
-            body.get('relative_rad'),
-        )
-
-    @app.post('/api/motion-test/dynamixel/jog')
-    async def dynamixel_jog(request: Request):
-        body = await request.json()
-        return await asyncio.to_thread(
-            bridge.manual.dynamixel_jog,
-            body.get('axis'),
-            body.get('relative_rad'),
-        )
 
     @app.post('/api/motion-test/ac-servo/action')
     async def ac_servo_action(request: Request):

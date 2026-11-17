@@ -27,7 +27,7 @@ from motion_common import joint_mapping, manual_speed
 from motion_common import motor_ref as motor_ref_rules
 from motion_common.values import optional_int
 
-PREFIX = '수동 조작 불가 · '
+PREFIX = '수동 조작 불가: '
 
 
 def _rows_of(payload: Any) -> List[Dict[str, Any]]:
@@ -102,8 +102,8 @@ def xtouch_limits(
     for row in found:
         if not joint_mapping.rate_limits_set(row):
             return {}, (
-                f'{PREFIX}{row.get("motion_id")} ({axis}번 모터) 속도·가속도 상한을 먼저 채우세요 · '
-                'X-Touch 는 조인트 매핑의 최대 속도·가속도로 따라갑니다'
+                f'{PREFIX}{row.get("motion_id")}({axis}번 모터)의 최대 속도·최대 가속을 먼저 입력하세요. '
+                'X-Touch는 조인트 매핑의 최대 속도·최대 가속으로 추종합니다'
             )
         gain_value = abs(joint_mapping.gain(row)) or 1.0
         row_velocity = float(joint_mapping.rate(row, 'max_velocity')) * gain_value

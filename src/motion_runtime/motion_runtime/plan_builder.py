@@ -340,7 +340,7 @@ class PlanBuilder:
         `samples_cached` · `samples_from`(208 · memory · artifact · compiled · computed).
         """
         if warm_only and initialization_only:
-            raise ValueError('미리 짓기는 재생 계획만 됩니다')
+            raise ValueError('사전 생성은 재생 계획만 가능합니다')
         run_mode = str(payload.get('run_mode') or 'once').strip().lower()
         if run_mode not in ('once', 'continuous'):
             raise ValueError('run_mode must be once or continuous')
@@ -408,7 +408,7 @@ class PlanBuilder:
         if initial_mode_override and (
             not initialization_only or initial_mode_override != 'reference'
         ):
-            raise ValueError('초기 방식 덮어쓰기는 초기 위치 이동의 기준점(reference)만 됩니다')
+            raise ValueError('초기 방식 덮어쓰기는 초기 위치 이동의 기준점(reference)만 가능합니다')
         #: 초기 위치 이동만 할 때 등록 파일이 없거나 비었으면 「애니메이션 없음」처럼 간다
         #: (2026-10-02 · 전에는 그 자리에서 실패해 0° 대체 경로까지 못 갔다)
         unusable_motion_file_note = ''
@@ -423,7 +423,7 @@ class PlanBuilder:
                 if not initialization_only:
                     raise
                 unusable_motion_file_note = (
-                    f'재생 등록된 애니메이션 {motion_file_id} 를 찾지 못했습니다 ({exc}) · '
+                    f'재생 등록된 애니메이션 {motion_file_id} 를 찾지 못했습니다 ({exc}). '
                     '애니메이션 없이 초기 위치로 이동합니다'
                 )
                 return None
@@ -483,7 +483,7 @@ class PlanBuilder:
                 if not initialization_only:
                     raise
                 unusable_motion_file_note = (
-                    f'재생 등록된 애니메이션 {motion_file_id} 에 쓸 수 있는 줄이 없습니다 ({exc}) · '
+                    f'재생 등록된 애니메이션 {motion_file_id} 에 사용 가능한 행이 없습니다 ({exc}). '
                     '애니메이션 없이 초기 위치로 이동합니다'
                 )
                 groups = {}
@@ -521,7 +521,7 @@ class PlanBuilder:
         initialization_fallback_used = False
         if not motors:
             raise ValueError(
-                '모터 상태를 아직 받지 못했습니다 · 모터 설정에서 장비에 적용이 끝났는지 확인하세요 '
+                '모터 상태를 아직 수신하지 못했습니다. 「모터 설정」의 장비 적용 완료 여부를 확인하세요 '
                 '(current motion_state is unavailable)'
             )
 
@@ -759,7 +759,7 @@ class PlanBuilder:
             warnings.append(
                 '모션 자료가 없어 건너뛴 Motion ID: '
                 + ', '.join(missing_motion_data_ids)
-                + ' · 모션 파일에 이 축이 없습니다'
+                + ' (애니메이션에 해당 축 없음)'
             )
             requested_motion_ids = {
                 motion_id for motion_id in requested_motion_ids
@@ -769,7 +769,7 @@ class PlanBuilder:
             warnings.append(
                 '모터가 없어 건너뛴 Motion ID: '
                 + ', '.join(missing_motor_motion_ids)
-                + ' · 모터축 설정에서 지웠거나 연결되지 않았습니다'
+                + ' (모터 설정에서 삭제 또는 미연결)'
             )
             # 건너뛴 축은 더 이상 「요구한 축」이 아니다 · 그대로 두면 아래에서
             # `requested Motion ID is unavailable` 로 다시 막힌다
@@ -781,7 +781,7 @@ class PlanBuilder:
             warnings.append(
                 '재생 선택이 꺼져 건너뛴 Motion ID: '
                 + ', '.join(sorted(set(disabled_motion_ids)))
-                + ' · 조인트 매핑에서 체크하면 같이 돕니다'
+                + ' (조인트 매핑 「사용」 체크 시 함께 재생)'
             )
             requested_motion_ids = {
                 motion_id for motion_id in requested_motion_ids
@@ -789,7 +789,7 @@ class PlanBuilder:
             }
         if not axes:
             errors.append(
-                '움직일 조인트가 없습니다 · 조인트 매핑에서 「사용」을 켠 줄과 모터 연결을 확인하세요 '
+                '재생할 조인트가 없습니다. 조인트 매핑의 「사용」 체크 행과 모터 연결을 확인하세요 '
                 '(enabled motion mappings not found)'
             )
         if requested_motion_ids:

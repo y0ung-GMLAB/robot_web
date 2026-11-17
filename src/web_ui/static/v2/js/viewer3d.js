@@ -1,7 +1,7 @@
 /** UI v2 · 공연 3D · 실물 재생과 같이 · MuJoCo 계산 뷰 · Blender 뷰 (설계안 2026-10-09)
  *
  * 화면 코드는 새로 · 계산(정기구학 · 실물 시계 · json 값 → 노드 회전)은 기존 화면과 **같은 함수**
- * (`static/js/sim3d_math.js` · 순수 계산)를 쓴다 · 두 화면이 같은 시각에 같은 자세를 보이게(수정 목록 92 · 98).
+ * (`sim3d_math.js` · 순수 계산)를 쓴다 · 두 화면이 같은 시각에 같은 자세를 보이게(수정 목록 92 · 98).
  *
  * 칸(node)은 한 번 만들고 계속 같은 것을 끼운다 · 페이지가 0.5초마다 다시 그려도 WebGL 은 그대로.
  * 보이는 동안만 그린다(requestAnimationFrame) · 칸이 화면에서 빠지면 멈춘다.
@@ -12,7 +12,7 @@ import {
   blenderUsesJoints, blenderViewAllowed, bodyLocalPose, cameraPosition, followEndSec, followPlayheadSec, followRestSec,
   frameIndexAt, jointNodeRotation, jointsByBody, nextClockOffset, prepareDerived, rigQuatsFromJoints, sampleDerivedTable,
   sampleJointValues, sceneFrontDir,
-} from '../../js/sim3d_math.js';
+} from './sim3d_math.js';
 
 const THREE_URL = '/static/vendor/three/three.module.js';
 const CONTROLS_URL = '/static/vendor/three/OrbitControls.js';
@@ -255,7 +255,7 @@ function createViewer3d() {
     } catch (error) {
       values = null;
       valuesFor = fileId;
-      say(`${fileId}: 값을 받지 못했습니다 (${error.message})`);
+      say(`${fileId}: 값을 수신하지 못했습니다 (${error.message})`);
     } finally {
       valuesLoading = '';
     }
@@ -331,7 +331,7 @@ function createViewer3d() {
       } else if (sceneInfo.state === 'missing' && !exportAsked) {
         exportAsked = true;
         await api('POST', '/api/preview/scene/export').catch(() => null);
-        say('3D 장면 생성 중 (몇 초 걸림)');
+        say('3D 장면 생성 중 (수 초 소요)');
       } else if (sceneInfo.state !== 'ready') {
         say(sceneInfo.message || (sceneInfo.state === 'unavailable' ? '로봇 팩이 없어 3D 화면을 표시할 수 없습니다' : `3D 장면 · ${sceneInfo.state}`));
       }

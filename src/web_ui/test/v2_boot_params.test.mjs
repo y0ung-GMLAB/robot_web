@@ -7,7 +7,7 @@ import { setupStatus } from '../static/v2/js/pages/motor_setup.js';
 import { rowFlags } from '../static/v2/js/pages/drive_params.js';
 
 const stale = {
-  state: 'stale', message: '설정 적용 필요 · 지금 드라이브는 옛 부팅 값',
+  state: 'stale', message: '설정 적용 필요 (현재 드라이브는 이전 부팅 값 사용 중)',
   detail: '0번 Pr4.37 없음 → 150 · 0번 Pr5.12 50 → 0',
 };
 const applied = { runtime_matches_selected: true, motor_config_applied: true };
@@ -40,6 +40,6 @@ test('홈 · 모터 설정의 버튼이 실제로 적용을 부른다', () => {
 
 test('고급 표 · 적용하면 바뀔 값 표시 · 같으면 없음', () => {
   const flags = rowFlags({ boot: 0, boot_next: 150, differs_boot: false, differs_factory: false });
-  assert.deepEqual(flags.map((f) => f.text), ['적용하면 150']);
+  assert.deepEqual(flags.map((f) => f.text), ['적용 후 150']);
   assert.deepEqual(rowFlags({ boot: 0, boot_next: null }), []);
 });

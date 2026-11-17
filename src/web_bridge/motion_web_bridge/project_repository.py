@@ -523,8 +523,7 @@ class ProjectRepository:
         if runtime_target.get('target_project_id') == project_dir.name:
             raise ValueError(
                 '현재 모터 실행 설정이 사용하는 프로젝트는 삭제할 수 없습니다. '
-                '「전체 동작 정지」를 누른 뒤 「실행 적용 해제」를 누르거나, '
-                '다른 프로젝트의 모터 설정을 적용한 뒤 다시 시도하세요'
+                '다른 프로젝트의 모터 설정을 적용한 뒤 재시도하세요'
             )
         manifest = self._read_manifest(project_dir)
         project_name = str(manifest.get('name') or project_dir.name)
@@ -593,7 +592,7 @@ class ProjectRepository:
             'message': (
                 f"프로젝트 '{result['project_id']}'를 복원했습니다"
                 + ('. 같은 이름으로 있던 프로젝트는 휴지통으로 옮겼습니다' if result['replaced_to'] else '')
-                + '. 프로젝트를 선택한 뒤 모터 설정에서 「장비에 적용 · 모터 재시작」을 누르세요'
+                + '. 프로젝트를 선택한 뒤 「모터 설정」에서 「저장 후 장비에 적용」을 누르세요'
             ),
         }
 

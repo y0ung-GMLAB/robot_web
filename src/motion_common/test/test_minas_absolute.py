@@ -29,7 +29,7 @@ def test_summary_states():
         _drive(ma.DRIVE_UNKNOWN, axis=None, position=3, mode=None),
     ], checked_at=1.0)
     assert blocked['state'] == ma.STATE_BLOCKED
-    assert blocked['message'].startswith('앱솔루트 미확인 · ')
+    assert blocked['message'].startswith('앱솔루트 미확인: ')
     assert '1번 모터 Pr0.15=1(인크리멘털)' in blocked['message']
     assert '슬레이브 3(미등록) 확인 불가' in blocked['message']
     assert '0번 모터' not in blocked['message']

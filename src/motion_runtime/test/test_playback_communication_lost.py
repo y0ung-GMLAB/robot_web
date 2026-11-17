@@ -18,7 +18,7 @@ def _motor(axis, state='detected'):
 
 @pytest.mark.parametrize('state, text', [
     ('disconnected', '응답 없음'),
-    ('ethercat_down', 'EtherCAT 끊김'),
+    ('ethercat_down', 'EtherCAT 연결 중단'),
 ])
 def test_lost_axes_are_named(state, text):
     error = motion_run_rules._communication_lost_error(
@@ -55,7 +55,7 @@ def test_player_guard_raises_during_playback_and_initial_move():
     manager = _Manager([_motor(0), _motor(1, 'disconnected')])
     player = MotionPlayer(manager)
 
-    with pytest.raises(RuntimeError, match='통신이 끊긴 모터'):
+    with pytest.raises(RuntimeError, match='통신이 중단된 모터'):
         player._require_playback_command_allowed([{'motor_axis': 0}, {'motor_axis': 1}])
 
     manager.motors = [_motor(0), _motor(1)]

@@ -60,7 +60,7 @@ def test_a_pc_that_says_it_cannot_start_is_left_out_before_preparation():
 
 
 def test_solo_run_still_reads_as_solo_busy_before_the_blocker():
-    member = _member(motion_phase='running', start_blocker='사람 조작 중 · 단독 재생')
+    member = _member(motion_phase='running', start_blocker='수동 조작 중: 단독 재생')
     assert exclusion_reason(
         member, 'online', protocol_version=GROUP_PROTOCOL_VERSION, started_by=STARTED_BY_HUMAN,
     ) == SOLO_BUSY_REASON
@@ -71,8 +71,8 @@ def test_solo_run_still_reads_as_solo_busy_before_the_blocker():
     ({'start_blocker': '실행 준비 안 됨 · 모터 상태를 아직 수신하지 못했습니다'},
      '실행 준비 안 됨 · 모터 상태를 아직 수신하지 못했습니다'),
     ({'safety_status': {'manual_activity_modes': ['jog']}, 'start_blocker': '실행 준비 안 됨 · x'},
-     '사람 조작 중 · 조그 이동'),
-    ({'safety_status': {'command_owner': 'stream'}}, '사람 조작 중 · 페이더'),
+     '수동 조작 중: 조그 이동'),
+    ({'safety_status': {'command_owner': 'stream'}}, '수동 조작 중: 페이더'),
     ({'motion_run_status': {'state': 'running', 'group_execution': True}}, ''),
 ])
 def test_the_heartbeat_blocker_comes_from_one_local_status(status, expected):
@@ -84,8 +84,8 @@ def test_the_heartbeat_blocker_comes_from_one_local_status(status, expected):
 @pytest.mark.parametrize('run, safety, blocker, expected', [
     ({'state': 'running'}, {}, '', SOLO_BUSY_REASON),                              # V-4
     ({'state': 'initializing'}, {}, '', SOLO_BUSY_REASON),
-    ({'state': 'idle'}, {'manual_activity_modes': ['jog']}, '', '사람 조작 중 · 조그 이동'),   # V-5
-    ({'state': 'idle'}, {'command_owner': 'stream'}, '', '사람 조작 중 · 페이더'),
+    ({'state': 'idle'}, {'manual_activity_modes': ['jog']}, '', '수동 조작 중: 조그 이동'),   # V-5
+    ({'state': 'idle'}, {'command_owner': 'stream'}, '', '수동 조작 중: 페이더'),
     ({'state': 'idle'}, {}, '실행 준비 안 됨 · x', '실행 준비 안 됨 · x'),
     ({'state': 'idle'}, {}, '', ''),
     ({'state': 'completed', 'group_execution': True}, {}, '', ''),                 # 끝난 그룹 · 쉬는 중

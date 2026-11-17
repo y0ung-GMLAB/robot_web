@@ -146,7 +146,7 @@ function segmented(label, options, current, onPick) {
 function fixButton(fix, navigate) {
   const map = {
     'mode-manual': ['수동 모드로 전환', () => act.setRunMode('manual')],
-    'restart-program': ['프로그램 다시 시작', act.restartProgram],
+    'restart-program': ['프로그램 재시작', act.restartProgram],
     'ack-group-error': ['그룹 오류 해제', act.ackGroupError],
     'open-mapping': ['조인트 매핑 열기', () => navigate('mapping')],
   };
@@ -174,7 +174,7 @@ function scopeHeader(state, changed) {
       changed();
     }),
     ui.scope === 'group'
-      ? tip(['그룹에 참여한 PC가 각자의 재생 목록을 동시에 시작', '수동 모드 PC는 참여, 끔 모드 PC는 제외', '회차를 맞출지는 「반복 → PC 간 동기화」에서 설정', '정지하면 참여한 PC 모두 정지'], '그룹 전체 설명')
+      ? tip(['그룹에 참여한 PC가 각자의 재생 목록을 동시에 시작', '수동 모드 PC는 참여, 끔 모드 PC는 제외', '회차 동기화 여부는 「반복 → PC 간 동기화」에서 설정', '정지 시 참여 PC 전체 정지'], '그룹 전체 설명')
       : tip(['현재 PC만 재생하며 다른 PC에는 영향 없음'], '단독 설명'),
     // 경고 자리는 늘 둔다(레이아웃 고정) · 그룹 = 빠질 PC · 단독 = 그룹을 못 쓰는 이유
     h('p', { class: 'small tone-text-warn msg-slot', text: ui.scope === 'group'
@@ -222,7 +222,7 @@ function nowCard(state, changed, navigate) {
     : act.initializeLocal(localPayload(state, 'once', segment))));
   const stopAfter = () => (group ? act.stopGroupAfterCycle(groupStopCommand(state.snap)) : act.stopAfterCycle(false));
 
-  return h('section', { class: `card card-now tone-${head.tone}`, 'aria-label': '지금' },
+  return h('section', { class: `card card-now tone-${head.tone}`, 'aria-label': '현재' },
     h('div', { class: 'now-title' },
       h('h2', { class: 'now-h', text: head.title }),
       head.file ? h('strong', { class: 'mono', text: head.file }) : null,
@@ -275,7 +275,7 @@ function segmentRow(seg, group, running, changed) {
     if (seg.localNote) notes.push(seg.localNote);
   }
   return h('div', { class: 'segment-row', role: 'group', 'aria-label': '구간 재생' },
-    h('span', { class: 'field-label inline' }, '구간', tip(['분:초 형식으로 입력 (예 1:20)', '비워 두면 처음부터 끝까지 재생', '그룹 재생 시 모든 PC와 스피커가 각자 재생 목록 1번의 같은 구간을 재생'], '구간 설명')),
+    h('span', { class: 'field-label inline' }, '구간', tip(['분:초 형식으로 입력 (예 1:20)', '공란 시 전체 구간 재생', '그룹 재생 시 모든 PC와 스피커가 각자 재생 목록 1번의 같은 구간을 재생'], '구간 설명')),
     h('label', { class: 'inline' }, '시작',
       h('input', { class: 'input mono', type: 'text', inputmode: 'decimal', placeholder: '0:00', value: ui.segStart, disabled: running,
         'aria-label': '구간 시작 (분:초)', oninput: typed('segStart') })),
@@ -326,10 +326,10 @@ function timetableFields(state) {
   return [
     h('div', { class: 'field' },
       h('span', { class: 'field-label inline' }, '그룹 재생 방식', tip([
-        '신호 재생: 마스터가 회차마다 시작 신호를 보냄',
-        '시간표 재생: 스케줄 운영에만 적용, 모든 PC가 같은 시간표에 맞춰 각자 시작',
-        '시간표 재생에서는 연결이 끊긴 PC도 재생을 이어 감',
-        '직접 누른 그룹 재생은 방식과 관계없이 신호 재생',
+        '신호 재생: 마스터가 회차마다 시작 신호 전송',
+        '시간표 재생: 스케줄 운영에만 적용, 모든 PC가 동일 시간표에 따라 개별 시작',
+        '시간표 재생에서는 연결이 중단된 PC도 재생 계속',
+        '수동으로 시작한 그룹 재생은 방식과 관계없이 신호 재생',
         '마스터 PC에서만 변경, 다음 회차 경계부터 적용',
       ], '그룹 재생 방식 설명')),
       segmented('그룹 재생 방식', [['lockstep', '신호 재생', locked], ['clock', '시간표 재생', locked]],
@@ -337,10 +337,10 @@ function timetableFields(state) {
     h('div', { class: 'field' },
       h('label', { class: 'inline' },
         h('span', { class: 'field-label inline' }, '회차 간격', tip([
-          '0이면 자동 (가장 긴 애니메이션 + 초기 위치 이동)',
-          '지금 애니메이션으로 잰 자동값보다 짧은 값은 저장되지 않음',
-          '애니메이션을 짧게 바꾸면 자동값은 운영시간이 끝난 뒤 줄어듦',
-          '운영 중에 바로 줄이려면 회차 간격을 저장 (다음 회차부터 적용)',
+          '0 입력 시 자동 (가장 긴 애니메이션 + 초기 위치 이동)',
+          '현재 애니메이션 기준 자동값보다 짧은 값은 저장 불가',
+          '애니메이션 길이 단축 시 자동값은 운영 시간 종료 후 반영',
+          '운영 중 즉시 단축 시 회차 간격 저장 (다음 회차부터 적용)',
           '시간표 재생(스케줄 운영)에서만 사용',
         ], '회차 간격 설명')),
         h('input', { class: 'input num-input', type: 'number', min: '0', step: '10', value: String(timetable.period || 0),
@@ -384,8 +384,8 @@ function repeatCard(state, changed) {
           onchange: (event) => { ui.targetCycles = Math.max(0, Math.floor(Number(event.target.value) || 0)); changed(); } }),
         h('span', { class: 'muted small', text: '0 = 계속 반복' }))),
     group ? h('div', { class: 'field' },
-      h('span', { class: 'field-label inline' }, 'PC 간 동기화', tip(['회차 맞춤: 먼저 끝난 PC는 다른 PC를 기다렸다가 다음 회차를 함께 시작', '각자 재생: 시작만 함께 하고 이후에는 PC별로 반복', '직접 누른 그룹 재생에 적용 (그룹 재생 방식이 시간표 재생이어도)'])),
-      segmented('PC 간 동기화', [['lockstep', '회차 맞춤'], ['independent', '각자 재생']], ui.syncMode || 'lockstep', (value) => {
+      h('span', { class: 'field-label inline' }, 'PC 간 동기화', tip(['회차 동기화: 먼저 종료한 PC는 다른 PC를 대기한 뒤 다음 회차 동시 시작', '개별 재생: 시작만 동시, 이후 PC별 반복', '수동으로 시작한 그룹 재생에 적용 (그룹 재생 방식이 시간표 재생인 경우도 동일)'])),
+      segmented('PC 간 동기화', [['lockstep', '회차 동기화'], ['independent', '개별 재생']], ui.syncMode || 'lockstep', (value) => {
         ui.syncMode = value;
         changed();
         act.saveAutomation({ group_sync_mode: value });
@@ -402,7 +402,7 @@ function axesCard(state) {
     rows.length
       ? h('div', { class: 'table-wrap' }, h('table', { class: 'table' },
         h('thead', {}, h('tr', {},
-          h('th', { scope: 'col' }, '사용', tip(['끄면 해당 모터는 현재 위치에서 정지', '재생 중에 다시 켜면 다음 회차부터 동작', '프로그램을 다시 시작하면 모두 켜짐'], '사용 설명')),
+          h('th', { scope: 'col' }, '사용', tip(['해제 시 해당 모터는 현재 위치에서 정지', '재생 중 재선택 시 다음 회차부터 적용', '프로그램 재시작 시 전체 사용 상태로 복귀'], '사용 설명')),
           ['조인트', '모터', '범위', '현재 값', '범위 초과', '상태'].map((text) => h('th', { scope: 'col', text })))),
         h('tbody', {}, rows.map((row) => h('tr', { class: row.muted ? 'muted-row' : '' },
           h('td', {}, h('label', { class: 'switch' },
@@ -431,7 +431,7 @@ function previewCard(state, changed) {
           onchange: (event) => { ui.show3d = event.target.checked; writeShow3d(ui.show3d); changed(); } }),
         h('span', { class: 'switch-track', 'aria-hidden': 'true' })),
       h('h2', { class: 'grow' }, `3D 동시 재생 · ${ui.show3d ? 'ON' : 'OFF'}`,
-        tip(['켜면 로봇 재생에 맞춰 3D 화면에서 동시 재생', '그래픽 부하가 커서 필요할 때만 사용 권장'], '3D 동시 재생 설명')),
+        tip(['로봇 재생과 3D 화면 동시 재생', '그래픽 부하가 크므로 필요 시에만 사용 권장'], '3D 동시 재생 설명')),
       h('a', { href: '#/pack', text: '로봇 팩·3D' })),
     ui.show3d ? getViewer3d().update(state, { fileId }) : null);
 }

@@ -73,7 +73,7 @@ def test_xtouch_limits_are_the_mapping_rates_times_the_gain():
 
 def test_xtouch_limits_refuse_an_axis_without_rates_or_without_a_row():
     _, reason = manual_range_gate.xtouch_limits([_row(acceleration=None)], [_motor(1)], 1)
-    assert '속도·가속도 상한을 먼저 채우세요' in reason
+    assert '최대 속도·최대 가속을 먼저 입력하세요' in reason
     _, reason = manual_range_gate.xtouch_limits([_row()], [_motor(1)], 3)
     assert '「사용」 줄에 없습니다' in reason
 
@@ -105,11 +105,11 @@ def test_stream_target_from_xtouch_is_refused_when_the_rates_are_empty():
     publisher = _Publisher()
     bridge = SimpleNamespace(
         current_project_generation=lambda: 1,
-        xtouch_speed_limits=lambda axis: ({}, '속도·가속도 상한을 먼저 채우세요'),
+        xtouch_speed_limits=lambda axis: ({}, '최대 속도·최대 가속을 먼저 입력하세요'),
     )
     service = ManualStreamService(bridge, publisher=publisher)
     result = service.send_target(1, 0.5, source='xtouch')
-    assert result['success'] is False and '상한' in result['message']
+    assert result['success'] is False and '최대 속도·최대 가속' in result['message']
     assert publisher.sent == []
 
 
@@ -336,11 +336,11 @@ def test_recording_counts_down_records_and_saves_with_a_numbered_name():
 def test_recording_refuses_an_axis_without_rate_limits():
     service = _service(_bridge(rows=[_row(velocity=None)]), _Clock())
     result = service.start(object(), [1], 'take')
-    assert result['success'] is False and '속도·가속도 상한을 먼저 채우세요' in result['message']
+    assert result['success'] is False and '최대 속도·최대 가속을 먼저 입력하세요' in result['message']
 
 
 def test_recording_is_refused_outside_manual_mode_and_while_another_runs():
-    service = _service(_bridge(block='수동 조작 불가 · 스케줄 모드'), _Clock())
+    service = _service(_bridge(block='수동 조작 불가: 스케줄 모드'), _Clock())
     assert service.start(object(), [1], 'take')['success'] is False
     service = _service(_bridge(), _Clock())
     assert service.start(object(), [1], 'a')['success'] is True
@@ -424,7 +424,7 @@ def test_a_silent_socket_is_treated_as_disconnected_and_the_take_is_saved(monkey
     lines = bridge.project_repository.files['live.json'].splitlines()
     assert len(lines) - 1 == 351                             # 3.0 → 10.0 s · 20 ms
     saved = [event for event in bridge._motor_event_log.events if event['event_type'] == 'xtouch_record_saved']
-    assert saved and '끊김' in saved[0]['content']
+    assert saved and '중단' in saved[0]['content']
 
 
 # ------------------------------------------------------------ 덮어쓰기 ---
@@ -459,7 +459,7 @@ def test_overwrite_is_not_used_for_an_automatic_save_after_a_disconnect():
     service.start(owner, [1], 'take', '', True)
     result = _record(service, owner, clock, reason='화면 연결 끊김')
     assert result['success'] and result['file'] == 'take_2.json'
-    assert '덮어쓰지 않고' in result['message']
+    assert '덮어쓰기 대신 새 이름으로' in result['message']
     assert bridge.project_repository.trash == []
     assert bridge.project_repository.files['take.json'] == ''
 

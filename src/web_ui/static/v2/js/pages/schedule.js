@@ -103,7 +103,7 @@ function scheduleRow(item, ctx) {
       h('span', { class: 'muted small' },
         ...when,
         id === active ? h('span', { class: 'tone-text-ok', text: ' · 운영 중' }) : null,
-        note ? h('span', { class: note === '같은 날짜의 휴무일이 우선 적용됨' ? 'tone-text-warn' : '', text: ` · ${note}` }) : null,
+        note ? h('span', { class: note === '같은 날짜의 휴무일 우선 적용' ? 'tone-text-warn' : '', text: ` · ${note}` }) : null,
         unreadable.has(id) ? h('span', { class: 'tone-text-bad', text: ' · 시각 오류로 실행되지 않음' }) : null,
         !on ? ' · 꺼짐' : null)),
     canEdit ? h('span', { class: 'row-actions' },
@@ -133,7 +133,7 @@ function listCard(state, changed, canEdit) {
     h('div', { class: 'card-head' }, h('h2', { text: `스케줄 ${items.length}` })),
     items.length
       ? [
-        group('특정일', ['특정일 운영 · 휴무일로 지정한 날짜에는 정기 운영 대신 해당 설정을 적용', '같은 날짜에 특정일 운영과 휴무일이 함께 있으면 휴무일을 우선 적용'], groups.dated),
+        group('특정일', ['특정일 운영 · 휴무일로 지정한 날짜에는 정기 운영 대신 해당 설정을 적용', '같은 날짜에 특정일 운영과 휴무일이 함께 있는 경우 휴무일 우선 적용'], groups.dated),
         group('정기 운영', null, groups.regular),
       ]
       : h('p', { class: 'muted', text: '스케줄이 없습니다. 스케줄 모드여도 재생이 시작되지 않습니다.' }),
@@ -144,7 +144,7 @@ function endActionBlock(state, changed, canEdit) {
   const page = state.schedulePage || {};
   const current = page.endAction || 'park_servo_off';
   const options = [
-    ['park_servo_off', '회차가 끝나면 기준점으로 이동 후 서보 끄기'],
+    ['park_servo_off', '회차 종료 후 기준점 이동, 서보 끄기'],
     ['hold', '마지막 회차가 끝난 자세에서 정지 (서보 토크 유지)'],
   ];
   return h('div', { class: 'field end-action' },
@@ -200,7 +200,7 @@ function editCard(state, changed) {
     h('div', { class: 'row', style: kind === 'holiday' ? { visibility: 'hidden' } : {}, 'aria-hidden': String(kind === 'holiday') },
       h('label', { class: 'field' }, h('span', { class: 'field-label', text: '시작' }),
         h('input', { class: 'input mono', type: 'time', value: draft.start, disabled: kind === 'holiday', oninput: set('start'), onchange: () => changed() })),
-      h('label', { class: 'field' }, h('span', { class: 'field-label inline' }, '종료', tip(['종료 시각이 시작 시각보다 이르면 다음 날 해당 시각까지 운영 (예 22:00 – 02:00)'])),
+      h('label', { class: 'field' }, h('span', { class: 'field-label inline' }, '종료', tip(['종료 시각이 시작 시각보다 이른 경우 다음 날 해당 시각까지 운영 (예 22:00 – 02:00)'])),
         h('input', { class: 'input mono', type: 'time', value: draft.stop, disabled: kind === 'holiday', oninput: set('stop'), onchange: () => changed() }))),
     problem ? h('p', { class: 'tone-text-warn small', text: problem }) : null,
     h('div', { class: 'row end' },
@@ -217,7 +217,7 @@ export function renderSchedule(state, { changed }) {
   return [
     h('div', { class: 'page-head' },
       h('h1', { text: '스케줄' }),
-      tip([`스케줄 모드에서는 아래 운영 시간에 맞춰 ${sched.coordination_joined ? '그룹 전체' : '로봇'} 재생을 자동으로 시작하고 정지`], '스케줄 설명'),
+      tip([`스케줄 모드에서는 아래 운영 시간에 따라 ${sched.coordination_joined ? '그룹 전체' : '로봇'} 재생을 자동으로 시작하고 정지`], '스케줄 설명'),
       // 경고 자리는 늘 둔다(레이아웃 고정)
       h('p', { class: 'small tone-text-warn msg-slot', text: mode && mode !== 'schedule' ? `${RUN_MODE_LABEL[mode] || '-'} 모드에서는 스케줄이 실행되지 않습니다` : '' }),
       canEdit ? h('button', { class: 'btn btn-primary', type: 'button', disabled: ui.busy, onclick: () => { ui.draft = draftFrom(null); changed(); } }, '+ 새 스케줄') : null),
@@ -226,7 +226,7 @@ export function renderSchedule(state, { changed }) {
       master?.url ? h('a', { class: 'btn', href: master.url, target: '_blank', rel: 'noopener' }, '마스터 화면 열기') : null) : null,
     drift ? h('div', { class: 'blocker' }, dot('warn'), h('span', { class: 'grow', text: drift })) : null,
     sched.last_failure?.message ? h('div', { class: 'blocker' }, dot('warn'),
-      h('span', { class: 'grow', text: `스케줄 시작이 거부되었습니다${sched.last_failure.count ? ` (${sched.last_failure.count}회)` : ''}: ${sched.last_failure.message}` })) : null,
+      h('span', { class: 'grow', text: `스케줄 시작 거부${sched.last_failure.count ? ` (${sched.last_failure.count}회)` : ''}: ${sched.last_failure.message}` })) : null,
     // 구간 끝 주차 실패 · 그 자리에서 서보 끔 · 이 PC 것 · 수정 목록 131
     sched.schedule_end_notice?.title ? h('div', { class: 'blocker' }, dot(sched.schedule_end_notice.tone === 'bad' ? 'bad' : 'warn'),
       h('span', { class: 'grow', text: `${sched.schedule_end_notice.title} · ${sched.schedule_end_notice.detail || ''}` })) : null,

@@ -58,7 +58,7 @@ def test_hunting_near_the_target_ends_after_the_settle_window_with_a_notice():
     # 예전엔 120 초 · 이제 자리 잡기 3 초 + 꺾이는 순간 한 번 더 보는 만큼
     assert ms.JOG_SETTLE_SEC <= end_t < ms.JOG_SETTLE_SEC + 1.0
     text = ms.notice_text(2, end, position=_hunting(end_t)[0], target=TARGET, peak_error=active['settle_peak_error'])
-    assert text.startswith('2번 모터가 목표 근처에서 출렁입니다')
+    assert text.startswith('2번 모터가 목표 근처에서 진동합니다')
     assert '게인(강성)을 확인하세요' in text
     assert '최대 ±2.' in text   # 10 Hz 로 본 꼭대기
 
@@ -74,7 +74,7 @@ def test_stopped_short_ends_with_a_notice_instead_of_waiting_two_minutes():
     assert _verdict(active, TARGET - R(0.8), 0.0, 101.0) == ms.WAIT
     assert _verdict(active, TARGET - R(0.8), 0.0, 103.1) == ms.SHORT
     text = ms.notice_text(1, ms.SHORT, position=TARGET - R(0.8), target=TARGET)
-    assert '못 미치고 섰습니다' in text and '0.80°' in text
+    assert '목표 도달 전 정지했습니다' in text and '0.80°' in text
 
 
 def test_trembling_inside_the_tolerance_counts_as_arrived():
@@ -125,7 +125,7 @@ SUPERVISOR = Path(__file__).resolve().parents[1] / 'motion_supervisor' / 'superv
 def test_supervisor_uses_the_settle_rules_everywhere():
     source = SUPERVISOR.read_text(encoding='utf-8')
     # 거절 문구는 한 곳(넘겨받기 판정 안)에만 · 조그 · 다이나믹셀 조그 · AC · 다이나믹셀 목표 이동 네 길이 다 그곳을 지난다
-    assert source.count('아직 돌고 있습니다') == 1
+    assert source.count('아직 진행 중입니다') == 1
     assert source.count('self._previous_manual_busy_message(axis)') == 4
     assert source.count('self._manual_settle_verdict(') == 2
     # 알림은 안전 상태에 실려 화면으로 간다

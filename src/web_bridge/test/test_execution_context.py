@@ -505,7 +505,7 @@ def test_range_recovery_is_refused_while_joint_range_unconfirmed(monkeypatch):
     """범위 복귀도 수동 조작이다 · 조인트 범위 미확인이면 supervisor 로 안 보낸다 · 수정 목록 97"""
     monkeypatch.setattr(run_mode_gate, 'current_run_mode', lambda _bridge: 'manual')
     bridge = make_bridge()
-    bridge.manual_range_blocker = lambda _axis=None: '수동 조작 불가 · 조인트 범위 미확인 · Neck_Pitch'
+    bridge.manual_range_blocker = lambda _axis=None: '수동 조작 불가: 조인트 범위 미확인(Neck_Pitch)'
     published = []
     _manual_of(bridge)._motion_state_motor = lambda _axis: {
         'controller_index': 0,
@@ -681,17 +681,26 @@ def test_status_websocket_reads_disconnect_and_finishes():
 
 def test_web_ui_files_are_not_served_from_stale_browser_cache():
     app = create_app(make_bridge())
-    index_endpoint = next(
+    root_endpoint = next(
         route.endpoint for route in app.routes
         if getattr(route, 'path', '') == '/'
+    )
+    index_endpoint = next(
+        route.endpoint for route in app.routes
+        if getattr(route, 'path', '') == '/v2'
     )
     static_endpoint = next(
         route.endpoint for route in app.routes
         if getattr(route, 'path', '') == '/static/{asset_path:path}'
     )
 
+    # 이전 UI 는 지웠다 · 옛 주소는 새 화면으로 넘긴다 · 2026-11-17
+    root_response = asyncio.run(root_endpoint())
+    assert root_response.status_code == 307
+    assert root_response.headers['location'] == '/v2'
+
     index_response = asyncio.run(index_endpoint())
-    script_response = asyncio.run(static_endpoint('app.js'))
+    script_response = asyncio.run(static_endpoint('v2/js/main.js'))
 
     # `no-store`는 캐시 자체를 막아 함께 나가는 ETag를 무의미하게 만든다.
     # `no-cache`는 **매번 물어보게** 하므로 낡은 화면 위험은 같다 · §6-42
@@ -711,11 +720,11 @@ def test_unchanged_web_ui_file_answers_304_without_body():
         if getattr(route, 'path', '') == '/static/{asset_path:path}'
     )
 
-    first = asyncio.run(static_endpoint('app.js'))
+    first = asyncio.run(static_endpoint('v2/js/main.js'))
     etag = first.headers['etag']
 
     repeat = asyncio.run(static_endpoint(
-        'app.js',
+        'v2/js/main.js',
         SimpleNamespace(headers={'if-none-match': etag}),
     ))
 
@@ -724,7 +733,7 @@ def test_unchanged_web_ui_file_answers_304_without_body():
     assert repeat.headers['etag'] == etag
 
     stale = asyncio.run(static_endpoint(
-        'app.js',
+        'v2/js/main.js',
         SimpleNamespace(headers={'if-none-match': 'other-etag'}),
     ))
 
@@ -1830,7 +1839,7 @@ def test_ac_servo_scan_is_blocked_while_runtime_velocity_is_nonzero(monkeypatch)
     assert result['success'] is False
     assert result['scan_blocked'] is True
     assert '2번 모터' in result['message']
-    assert '움직이는 중' in result['message']
+    assert '동작 중' in result['message']
 
 
 @pytest.mark.parametrize('received_at', [None, time.time() - 2.0])
@@ -1914,7 +1923,7 @@ def test_ac_servo_scan_retires_previous_project_runtime_without_feedback(
         ('stop', 'motion-motor.service'),
         ('released', 5.0),
     ]
-    assert '현재 프로젝트 설정을 저장' in result['message']
+    assert '「저장 후 장비에 적용」을 누르세요' in result['message']
 
 
 def test_ac_servo_scan_still_blocks_observed_motion_during_project_handoff(
@@ -1956,7 +1965,7 @@ def test_ac_servo_scan_still_blocks_observed_motion_during_project_handoff(
     assert result['success'] is False
     assert result['scan_blocked'] is True
     assert '1번 모터' in result['message']
-    assert '움직이는 중' in result['message']
+    assert '동작 중' in result['message']
 
 
 def test_ac_servo_scan_ignores_stopped_servo_velocity_quantization_noise():
@@ -2013,7 +2022,7 @@ def test_ac_servo_scan_blocks_clear_motion_even_when_target_is_reached():
     blocker = _runtime_of(bridge).ethercat_scan_safety_blocker()
 
     assert '4번 모터' in blocker
-    assert '움직이는 중' in blocker
+    assert '동작 중' in blocker
 
 
 def test_ac_servo_scan_ignores_stale_velocity_when_axis_is_bus_down():

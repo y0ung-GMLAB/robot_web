@@ -65,7 +65,7 @@ def run_modes(
                 if isinstance(answer.get('memory'), dict):
                     row['memory'] = _memory_view(answer['memory'])
             except (OSError, urllib.error.URLError, ValueError) as exc:
-                row['error'] = f'읽지 못함 · {exc}'
+                row['error'] = f'읽기 실패: {exc}'
         rows.append(row)
     return {'success': True, 'pcs': rows}
 
@@ -93,7 +93,7 @@ def set_run_mode(
                     raise OSError('연결 안 됨')
                 answer = http(f"{pc['web_url']}/api/schedule/mode", method='PUT', body={'run_mode': mode}, timeout=SET_TIMEOUT_SEC)
                 if answer.get('success') is False or (answer.get('run_mode') and answer.get('run_mode') != mode):
-                    raise ValueError(str(answer.get('message') or answer.get('detail') or '그 PC 가 거절했습니다'))
+                    raise ValueError(str(answer.get('message') or answer.get('detail') or '해당 PC가 거부했습니다'))
             results.append({'pc_id': pc_id, 'success': True, 'run_mode': mode})
         except (OSError, urllib.error.URLError, ValueError, RuntimeError) as exc:
             results.append({'pc_id': pc_id, 'success': False, 'message': str(exc)})
@@ -102,6 +102,6 @@ def set_run_mode(
     return {
         'success': not failed and bool(results),
         'message': (f"{' · '.join(r['pc_id'] for r in results)} 을(를) {names[mode]} 모드로 바꿨습니다" if not failed
-                    else ' / '.join(f"{r['pc_id']} 실패 · {r['message']}" for r in failed)),
+                    else ' / '.join(f"{r['pc_id']} 실패: {r['message']}" for r in failed)),
         'results': results,
     }

@@ -59,28 +59,28 @@ def resolve_master_role(
     target = Path(path) if path is not None else coordination_settings_path(package_hint)
 
     if not target.is_file():
-        return MasterRole(True, f'연동 설정 없음 · 단독 동작으로 간주 · {target}')
+        return MasterRole(True, f'연동 설정 없음, 단독 동작으로 간주 ({target})')
 
     settings = load_coordination_settings(target)
     if settings is None:
         return MasterRole(
             False,
-            f'연동 설정을 읽지 못함 · 중복 발화 방지를 위해 마스터 아님으로 처리 · {target}',
+            f'연동 설정 읽기 실패, 중복 실행 방지를 위해 슬레이브로 처리 ({target})',
         )
 
     if not bool(settings.get('enabled', False)):
-        return MasterRole(True, '연동 비활성 · 단독 동작으로 간주')
+        return MasterRole(True, '연동 비활성, 단독 동작으로 간주')
 
     # 「그룹 참여」 를 꺼 둔 PC 는 마스터든 아니든 혼자 돈다 · 스케줄도 이 PC 혼자 (수정 목록 83)
     # 전에는 꺼 둔 슬레이브는 스케줄이 아예 안 돌았다 · 「이 PC 혼자 재생」 이라는 화면 말과 달랐다 ·
     # 값 읽기는 정본 로더(group_config)와 같다 · version 2 에 joined 가 없으면 enabled 를 따른다
     if int(settings.get('version') or 1) == 2 and not bool(settings.get('joined', True)):
-        return MasterRole(True, '그룹 참여 꺼짐 · 단독 동작으로 간주')
+        return MasterRole(True, '그룹 참여 OFF, 단독 동작으로 간주')
 
     # 정본 로더(motion_coordination.group_configuration)와 같은 기본값을 쓴다
     is_master = bool(settings.get('is_master', False))
     pc_id = str(settings.get('pc_id') or '').strip() or '(pc_id 없음)'
-    return MasterRole(is_master, f'연동 활성 · pc_id={pc_id} · is_master={is_master}')
+    return MasterRole(is_master, f'연동 활성 (pc_id={pc_id}, is_master={is_master})')
 
 
 def is_master_pc(

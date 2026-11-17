@@ -66,7 +66,7 @@ def test_a_jogging_master_alone_is_refused_up_front_without_a_latch():
     node = _master(local=JOG, peers=())
     calls = _local_calls(node)
 
-    with pytest.raises(ValueError, match='들어갈 PC 가 없습니다'):
+    with pytest.raises(ValueError, match='참여 가능한 PC가 없습니다'):
         node._start_group_execution(request={'started_by': 'human'})
 
     assert calls == []
@@ -75,7 +75,7 @@ def test_a_jogging_master_alone_is_refused_up_front_without_a_latch():
     assert node._coordination_error == {}
     failure = node.snapshot()['last_start_failure']
     assert failure['code'] == 'GROUP_START_NOT_READY'
-    assert 'pc-a(사람 조작 중 · 조그 이동)' in failure['message']
+    assert 'pc-a(수동 조작 중: 조그 이동)' in failure['message']
 
 
 def test_the_local_request_answers_the_refusal_instead_of_raising():
@@ -84,7 +84,7 @@ def test_the_local_request_answers_the_refusal_instead_of_raising():
     result = node._handle_local_request({'command': 'start_group', 'started_by': 'human'})
 
     assert result['success'] is False
-    assert '사람 조작 중 · 조그 이동' in result['message']
+    assert '수동 조작 중: 조그 이동' in result['message']
 
 
 def test_the_play_screen_preview_shows_the_busy_master():
@@ -111,12 +111,12 @@ def test_a_master_whose_own_prepare_is_refused_drops_itself_and_the_others_go_on
 
     node._event_callback(GroupEvent(
         group_id='stage-a', execution_id=execution_id, pc_id='pc-a', command_id='cmd-prepare',
-        event='rejected', success=False, message='사람 조작 중 · 조그 이동',
+        event='rejected', success=False, message='수동 조작 중: 조그 이동',
     ))
 
     assert node._execution.execution_id == execution_id
     assert node._execution.participants == ('pc-b',)
-    assert node._execution.excluded['pc-a'].endswith('사람 조작 중 · 조그 이동')
+    assert node._execution.excluded['pc-a'].endswith('수동 조작 중: 조그 이동')
     [update] = [m for m in node._command_pub.messages if m.command == 'update_participants']
     assert list(update.participant_ids) == ['pc-b']
     assert [m for m in node._command_pub.messages if m.command in {'cancel_before_start', 'stop_now'}] == []
@@ -160,7 +160,7 @@ def test_when_every_participant_drops_the_sitting_out_master_lets_go_quietly():
     releases = [m for m in node._command_pub.messages if m.command == 'cancel_before_start']
     assert [list(m.participant_ids) for m in releases] == [['pc-a', 'pc-b']]
     assert [m for m in node._command_pub.messages if m.command == 'stop_now'] == []
-    assert '들어갈 PC 가 남지 않음' in node.snapshot()['last_start_failure']['message']
+    assert '참여 가능한 PC 없음' in node.snapshot()['last_start_failure']['message']
 
 
 def test_trigger_sync_waits_for_every_participant_when_the_master_sits_out():

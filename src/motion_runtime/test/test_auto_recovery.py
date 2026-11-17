@@ -73,7 +73,7 @@ def test_more_than_limit_failures_end_in_final_error_marked_exhausted(monkeypatc
     assert len(calls) == motion_player.AUTO_RECOVERY_LIMIT + 1
     final = manager.statuses[-1]
     assert final['state'] == 'error' and final['auto_recovery_exhausted'] is True
-    assert '자동 복구 3번 실패' in final['message'] and '서보는 켠 채 제자리' in final['message']
+    assert '자동 복구 3회 실패' in final['message'] and '서보 ON 상태로 현재 위치 유지' in final['message']
 
 
 def test_successful_cycles_reset_the_count(monkeypatch):
@@ -114,7 +114,7 @@ def test_safety_block_prevents_retry(monkeypatch):
     player, calls = _player(manager, [LIGHT], monkeypatch)
     player._prepare_and_run('start', dict(CONTINUOUS), [])
     assert len(calls) == 1
-    assert '자동 복구 안 함(2등급 서보 에러' in manager.statuses[-1]['message']
+    assert '자동 복구 생략(2등급 서보 에러' in manager.statuses[-1]['message']
 
 
 def test_stop_during_wait_ends_quietly(monkeypatch):

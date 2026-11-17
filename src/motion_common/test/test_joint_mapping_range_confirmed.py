@@ -54,7 +54,7 @@ def test_reason_names_the_joints_and_what_to_do():
         {'motion_id': 'Neck_Yaw'}, {'motion_id': 'Neck_Pitch'},
     ])
 
-    assert reason.startswith('조인트 범위 미확인 · Neck_Yaw, Neck_Pitch')
+    assert reason.startswith('조인트 범위 미확인(Neck_Yaw, Neck_Pitch)')
     assert '범위 확인' in reason
     assert joint_mapping.range_block_reason([{'motion_id': 'a', 'range_confirmed': True}]) == ''
     assert joint_mapping.range_block_reason([]) == ''

@@ -153,10 +153,10 @@ def test_independent_release_still_waits_for_every_pc_to_stop():
     node = _master(sync_mode='independent')
     node._request_group_stop(after_cycle=True, reason='schedule_end')
 
-    _event(node, 'pc-b', 'stopped', message='구간 끝 · 회차 후 정지')
+    _event(node, 'pc-b', 'stopped', message='운영 구간 종료: 회차 후 정지')
     assert _released(node) == [], '각자 재생 · 다른 PC 가 아직 돈다'
 
-    _event(node, 'pc-a', 'stopped', message='구간 끝 · 회차 후 정지')
+    _event(node, 'pc-a', 'stopped', message='운영 구간 종료: 회차 후 정지')
     assert node._execution.state == 'releasing'
     assert len(_released(node)) == 1
 

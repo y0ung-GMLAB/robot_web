@@ -116,7 +116,7 @@ function listCard(state, changed) {
   return h('section', { class: 'card', 'aria-label': '애니메이션 목록' },
     h('div', { class: 'card-head' },
       h('h2', {}, `업로드된 애니메이션 · ${rows.length}개`,
-        tip(['.json 파일을 화면에 끌어다 놓아도 업로드 가능', '업로드하면 검사와 3D 계산이 자동으로 시작'], '업로드 설명')),
+        tip(['.json 파일을 화면에 끌어다 놓아도 업로드 가능', '업로드 시 검사 및 3D 계산 자동 시작'], '업로드 설명')),
       h('button', { class: 'btn btn-primary', type: 'button', disabled: Boolean(ui.busy), onclick: () => picker.click() }, '업로드'),
       picker),
     ui.upload ? h('div', { class: 'busy-line', role: 'status' }, h('span', { class: 'spinner', 'aria-hidden': 'true' }), ui.upload) : null,
@@ -200,7 +200,7 @@ function detailCard(state, changed, navigate) {
       analysis.value_unit ? ` · 단위 ${analysis.value_unit}` : ''),
     check.tone === 'bad' ? h('div', { class: 'blocker bad' }, dot('bad'), h('span', { class: 'grow', text: `재생할 수 없습니다 (${check.text}). Blender에서 다시 내보내세요.` })) : null,
     issues.length ? h('div', { class: 'blocker' }, dot('warn'),
-      h('span', { class: 'grow', text: `범위를 벗어난 조인트 ${issues.length}개: ${issues.slice(0, 3).map((i) => `${i.id} ${signedDeg(i.min)} ~ ${signedDeg(i.max)}° (범위 ${signedDeg(i.lower)} ~ ${signedDeg(i.upper)}°)`).join(', ')}. 범위 밖 값은 잘라서 재생합니다. 고치려면 Blender에서 다시 내보내세요.` })) : null,
+      h('span', { class: 'grow', text: `범위를 벗어난 조인트 ${issues.length}개: ${issues.slice(0, 3).map((i) => `${i.id} ${signedDeg(i.min)} ~ ${signedDeg(i.max)}° (범위 ${signedDeg(i.lower)} ~ ${signedDeg(i.upper)}°)`).join(', ')}. 범위 밖 값은 범위 내로 제한하여 재생합니다. 수정하려면 Blender에서 다시 내보내세요.` })) : null,
     detail?.error ? h('p', { class: 'tone-text-bad small', text: detail.error }) : null,
     series.length
       ? h('div', { class: 'charts' }, series.map((item) => chart(item, rows.get(String(item.motion_id)))))

@@ -43,9 +43,9 @@ export function rowHint(row) {
 /** 표시 · 팩토리값과 다름 · 부팅 시 적용값과 다름(재시작하면 부팅 값으로 돌아감) · 적용하면 바뀜(116) */
 export function rowFlags(row) {
   const flags = [];
-  if (row.differs_boot) flags.push({ tone: 'warn', text: '부팅 시 적용값과 다름', hint: `모터 프로그램을 다시 시작하면 부팅 시 적용값 ${row.boot}로 돌아갑니다` });
+  if (row.differs_boot) flags.push({ tone: 'warn', text: '부팅 시 적용값과 다름', hint: `모터 프로그램 재시작 후 부팅 시 적용값 ${row.boot}로 복귀합니다` });
   // 지금 도는 모터 프로그램은 옛 부팅 값 · 적용하면 바뀜 · 수정 목록 116
-  if (row.boot_next !== null && row.boot_next !== undefined) flags.push({ tone: 'warn', text: `적용하면 ${row.boot_next}`, hint: '드라이브 공통 설정 또는 모터별 값의 변경분이 「장비에 적용」 후 반영됨' });
+  if (row.boot_next !== null && row.boot_next !== undefined) flags.push({ tone: 'warn', text: `적용 후 ${row.boot_next}`, hint: '드라이브 공통 설정 또는 모터별 값의 변경분이 「장비에 적용」 후 반영' });
   if (row.differs_factory) flags.push({ tone: 'info', text: '팩토리값과 다름', hint: `팩토리값 ${row.factory}` });
   return flags;
 }
@@ -64,10 +64,10 @@ async function writeOne(axis, changed) {
   const ok = await confirmBox({
     title: `${axis}번 드라이브 파라미터 쓰기`,
     body: `${ui.form.object} (${ui.form.type}) ← ${ui.form.value}\n\n`
-      + '잘못 쓰면 모터가 한쪽 방향으로 움직이지 않거나 알람이 발생할 수 있습니다. 의미를 모르는 값은 쓰지 마세요.\n'
-      + '드라이브 RAM에 바로 쓰며, 모터가 정지해 있을 때만 쓸 수 있습니다.\n'
-      + '전원을 끄면 원래 값으로 돌아갑니다. 유지하려면 「드라이브 저장(EEPROM)」을 누르세요.\n'
-      + '모터 프로그램이 부팅 시 쓰는 항목은 모터 프로그램을 다시 시작하면 부팅 시 적용값으로 돌아갑니다.',
+      + '잘못된 값 입력 시 모터가 한쪽 방향으로 동작하지 않거나 알람이 발생할 수 있습니다. 의미를 모르는 값은 쓰지 마세요.\n'
+      + '드라이브 RAM에 즉시 쓰며, 모터 정지 상태에서만 쓸 수 있습니다.\n'
+      + '전원 차단 시 원래 값으로 복귀합니다. 값을 유지하려면 「드라이브 저장(EEPROM)」을 누르세요.\n'
+      + '모터 프로그램이 부팅 시 쓰는 항목은 모터 프로그램 재시작 후 부팅 시 적용값으로 복귀합니다.',
     confirmLabel: '쓰기', tone: 'danger',
   });
   if (!ok) return;
@@ -98,7 +98,7 @@ export function paramsField(row, changed) {
     h('div', { class: 'row' },
       h('button', { class: 'btn btn-mini', type: 'button', disabled: ui.loading, onclick: () => load(row.axis, changed) },
         ui.loading ? '읽는 중' : ui.rows ? '다시 읽기' : '드라이브에서 읽기'),
-      tip(['모터 프로그램을 정지하지 않고 읽음', '드라이브 현재값, 부팅 시 적용값, 팩토리값을 비교', '표의 줄을 누르면 아래 읽기·쓰기 칸에 해당 항목이 입력됨'], '파라미터 설명')),
+      tip(['모터 프로그램 정지 없이 읽기', '드라이브 현재값, 부팅 시 적용값, 팩토리값을 비교', '표의 행 선택 시 아래 읽기·쓰기 칸에 해당 항목 입력'], '파라미터 설명')),
     ui.error ? h('p', { class: 'tone-text-bad', text: ui.error }) : null,
     // 「부팅 시 적용값」 은 지금 도는 모터 프로그램 기준 · 지금 설정과 다르면 한 줄 · 수정 목록 116
     ui.rows && ui.stale ? h('p', { class: 'tone-text-warn small', text: `${ui.stale}. 「저장 후 장비에 적용」을 누르세요.` }) : null,
@@ -108,7 +108,7 @@ export function paramsField(row, changed) {
         h('tr', { class: 'params-group' }, h('td', { colspan: '5', text: group.name })),
         group.rows.map((item) => h('tr', { class: 'pick-row', title: rowHint(item), onclick: () => pick(item) },
           h('td', {}, h('span', { text: item.label }), h('span', { class: 'muted small mono', text: `  ${item.number}` })),
-          h('td', { class: 'mono' }, item.drive === null ? h('span', { class: 'muted', text: '못 읽음' }) : `${item.drive}${item.unit ? ` ${item.unit}` : ''}`),
+          h('td', { class: 'mono' }, item.drive === null ? h('span', { class: 'muted', text: '읽기 실패' }) : `${item.drive}${item.unit ? ` ${item.unit}` : ''}`),
           h('td', { class: 'mono muted' }, item.boot === 'auto' ? '모터 설정에서' : item.boot === null || item.boot === undefined ? '-' : String(item.boot)),
           h('td', { class: 'mono muted' }, item.factory === null ? '-' : String(item.factory)),
           h('td', {}, rowFlags(item).map((flag) => h('span', { class: `chip chip-${flag.tone}`, title: flag.hint, text: flag.text })))))]))))

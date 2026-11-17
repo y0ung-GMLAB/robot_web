@@ -254,10 +254,10 @@ class MotionPlayer:
             # 스케줄은 이 표시를 보고 다시 시작하지 않는다(사람 확인) · 73
             status['auto_recovery_exhausted'] = True
             status['message'] = (
-                f'자동 복구 {AUTO_RECOVERY_LIMIT}번 실패 · 멈춤 · 서보는 켠 채 제자리 · {exc}'
+                f'자동 복구 {AUTO_RECOVERY_LIMIT}회 실패로 정지 (서보 ON 상태로 현재 위치 유지): {exc}'
             )
         elif exhausted.startswith('blocked:'):
-            status['message'] = f'{status["message"]} · 자동 복구 안 함({exhausted[8:]})'
+            status['message'] = f'{status["message"]}. 자동 복구 생략({exhausted[8:]})'
         self.manager._set_status(status)
         # X-Touch 바탕 위 녹화 · 녹화가 「초기 위치 이동 중」 으로 계속 기다리지 않게 이유를 알린다 · 2026-10-19
         TakePlayback.announce_failure(self.manager, payload, status['message'])
@@ -676,7 +676,7 @@ class MotionPlayer:
                     break
                 if automation_run and grade1_seen:
                     self.manager._automation_failure(
-                        '1등급 서보 에러 · 나머지 축의 현재 회차 완료 후 자동 반복 중단'
+                        '1등급 서보 에러: 나머지 축은 현재 회차 완료 후 자동 반복 중단'
                     )
                     self._finish_cycle_stop(
                         plan,
@@ -985,7 +985,7 @@ class MotionPlayer:
         started_at = time.time()
         status = motion_run_rules._status_from_plan(
             'waiting',
-            f'자동 반복 대기 중 · {dwell_sec:g}초',
+            f'자동 반복 대기 중 ({dwell_sec:g}초)',
             plan,
         )
         status['phase'] = 'repeat_waiting'
@@ -1080,8 +1080,8 @@ class MotionPlayer:
                 if error > tolerance:
                     ok = False
                     messages.append(
-                        f'{motor_axis}번 모터 현재 {units.rad_to_deg(current):.3f} deg · '
-                        f'목표 {units.rad_to_deg(target):.3f} deg · 오차 {units.rad_to_deg(error):.3f} deg'
+                        f'{motor_axis}번 모터 현재 {units.rad_to_deg(current):.3f} deg, '
+                        f'목표 {units.rad_to_deg(target):.3f} deg, 오차 {units.rad_to_deg(error):.3f} deg'
                     )
             if ok:
                 return True, 'targets reached'

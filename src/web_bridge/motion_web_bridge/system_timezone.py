@@ -76,7 +76,7 @@ class SystemTimezone:
             low = err.lower()
             denied = 'interactive authentication required' in low or 'access denied' in low or 'not authorized' in low
             hint = NOT_ALLOWED_HINT.replace('~/ros2_ws', self._workspace_hint)
-            return {'success': False, 'message': hint if denied else f'바꾸지 못했습니다 · {err.strip()}'}
+            return {'success': False, 'message': hint if denied else f'변경 실패: {err.strip()}'}
         if not self._restart_unit:
             return {'success': True, 'changed': True, 'clock': self._snapshot(),
                     'message': f'{current or "?"} → {zone}'}
@@ -87,7 +87,7 @@ class SystemTimezone:
         ])
         return {
             'success': True, 'changed': True, 'clock': self._snapshot(),
-            'message': f'{current or "?"} → {zone}. 2초 뒤 프로그램을 다시 시작해 스케줄에 새 시간대를 적용합니다.',
+            'message': f'{current or "?"} → {zone}. 2초 후 프로그램을 재시작해 스케줄에 새 시간대를 적용합니다.',
         }
 
 
@@ -109,31 +109,31 @@ def apply_all(
         if row['role'] == 'speaker':
             # 스피커도 바꾼다(로그 시각 · 89) · 옛 스피커 앱(주소 없음)이면 건너뜀 · 결과는 성공·실패 집계에 안 넣는다
             if not pc.get('online', True):
-                rows.append({**row, 'success': True, 'message': '스피커 · 연결 안 됨 · 건너뜀'})
+                rows.append({**row, 'success': True, 'message': '스피커 미연결, 건너뜀'})
                 continue
             try:
                 result = http(f"{row['web_url']}/api/system/timezone", method='POST', timeout=25.0, body={'zone': zone})
                 rows.append({**row, **result})
             except (OSError, ValueError, urllib.error.URLError):
-                rows.append({**row, 'success': True, 'message': '스피커 · 이전 버전 스피커 앱이라 건너뜀 (해당 PC 터미널에서 install_speaker.sh를 실행한 뒤 가능)'})
+                rows.append({**row, 'success': True, 'message': '스피커 앱이 이전 버전이므로 건너뜀 (해당 PC 터미널에서 install_speaker.sh 실행 후 가능)'})
             continue
         if row['is_local']:
             local_row = row
             continue
         if not pc.get('online', True):
-            rows.append({**row, 'success': False, 'message': '연결 안 됨 · 건너뜀'})
+            rows.append({**row, 'success': False, 'message': '미연결, 건너뜀'})
             continue
         try:
             result = http(f"{row['web_url']}/api/system/timezone", method='POST', timeout=25.0, body={'zone': zone})
             rows.append({**row, **result})
         except (OSError, ValueError, urllib.error.URLError) as exc:
-            rows.append({**row, 'success': False, 'message': f'요청 실패 · {exc}'})
+            rows.append({**row, 'success': False, 'message': f'요청 실패: {exc}'})
     if local_row is not None:
         rows.append({**local_row, **local.apply(zone)})
     robots = [row for row in rows if row['role'] != 'speaker']
     ok = [row for row in robots if row.get('success')]
     return {
         'success': bool(robots) and len(ok) == len(robots),
-        'message': f'로봇 PC {len(ok)}/{len(robots)}대 시간대 변경 · {zone}',
+        'message': f'로봇 PC {len(ok)}/{len(robots)}대 시간대 변경 완료 ({zone})',
         'pcs': rows,
     }

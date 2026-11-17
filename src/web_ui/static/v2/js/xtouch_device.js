@@ -34,7 +34,7 @@ export const MIDI_FLAG_URL = 'chrome://flags/#unsafely-treat-insecure-origin-as-
 export function midiUnavailableReason(win = globalThis) {
   if (typeof win.navigator?.requestMIDIAccess === 'function') return '';
   if (win.isSecureContext === false) {
-    return `http 주소(${win.location?.origin || ''})라 브라우저가 MIDI를 차단합니다. 크롬에서 ${MIDI_FLAG_URL} 를 열어 현재 주소를 추가한 뒤 크롬을 다시 시작하세요.`;
+    return `http 주소(${win.location?.origin || ''})라 브라우저가 MIDI를 차단합니다. 크롬에서 ${MIDI_FLAG_URL} 를 열어 현재 주소를 추가한 뒤 크롬을 재시작하세요.`;
   }
   return 'Web MIDI를 지원하지 않는 브라우저입니다. 크롬이나 엣지를 사용하세요.';
 }
@@ -101,7 +101,7 @@ export class XTouchDevice {
         this.sysex = false;
       }
     } catch (error) {
-      this.setState({ status: 'denied', message: `MIDI 권한이 거부되었습니다. 주소창 왼쪽 자물쇠 아이콘에서 MIDI를 허용하세요. (${error?.message || error})` });
+      this.setState({ status: 'denied', message: `MIDI 권한이 없습니다. 주소창 왼쪽 자물쇠 아이콘에서 MIDI를 허용하세요. (${error?.message || error})` });
       return false;
     }
     // 뽑힘 · 꽂힘만 · 여는 중에도 statechange(connection) 가 오므로 연결 상태(state)가 바뀐 X-Touch 포트만 본다
@@ -161,7 +161,7 @@ export class XTouchDevice {
       await input.open();
       if (output) await output.open();
     } catch (error) {
-      this.setState({ status: 'busy', name: input.name, message: `X-Touch를 다른 곳에서 사용 중입니다. 다른 탭이나 프로그램(DAW 등)을 닫고 다시 연결하세요. (${error?.name || error})` });
+      this.setState({ status: 'busy', name: input.name, message: `X-Touch를 다른 곳에서 사용 중입니다. 다른 탭이나 프로그램(DAW 등)을 닫고 재연결하세요. (${error?.name || error})` });
       return false;
     }
     this.input = input;

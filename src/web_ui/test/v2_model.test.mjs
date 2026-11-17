@@ -48,7 +48,7 @@ test('나쁜 문제가 있으면 그 문제가 한 문장 · 주의만 있으면
 test('조인트 범위 미확인 · 빨간 문제 · 조인트 매핑 열기 (수정 목록 97)', () => {
   const line = headline({ ...pcs(), mapping_range_blocker: '조인트 범위 미확인 · Neck_Pitch · …' }, { run_mode: 'manual' });
   assert.equal(line.tone, 'bad');
-  assert.deepEqual([line.issues[0].title, line.issues[0].action.target], ['조인트 범위를 확인하지 않아 재생과 수동 조작이 차단되어 있습니다', 'mapping']);
+  assert.deepEqual([line.issues[0].title, line.issues[0].action.target], ['조인트 범위 미확인으로 재생과 수동 조작 차단 중', 'mapping']);
 });
 
 test('문제마다 해결 버튼 · 긴급 정지 · 알람 · 그룹 오류 · 스케줄 거부 · 연결 끊김', () => {
@@ -74,7 +74,7 @@ test('스케줄 시작 대기 · 잠그지 않은 그룹 시작 실패 · 수정
   assert.equal(collectIssues({}, { last_failure: { count: 3, deferred: true, message: 'x' } })[0].tone, 'bad');
   // 진행 PC 준비 안 됨 · 그룹 오류로 잠그지 않지만 이유는 보인다 · 그룹이 돌면 안 보인다
   const failed = { coordination: { runtime: { last_start_failure: { message: 'floating4 실행 준비 안 됨: 앱솔루트 미확인' }, execution: {} } } };
-  assert.deepEqual(collectIssues(failed, {}).map((i) => [i.tone, i.title]), [['warn', '그룹 시작이 취소되었습니다']]);
+  assert.deepEqual(collectIssues(failed, {}).map((i) => [i.tone, i.title]), [['warn', '그룹 시작 취소']]);
   failed.coordination.runtime.execution = { execution_id: 'exec-1' };
   assert.equal(collectIssues(failed, {}).length, 0);
 });
@@ -88,22 +88,22 @@ test('그룹 시작 실패 노란 줄 · 제목을 code 로 나눔 · 수정 목
     return found[0];
   };
   // 실물 2026-10-15 12:42 · 참가 0대 거절 · 서버 글이 제목과 같은 말로 시작하면 한 번만
-  const empty = issue({ code: 'GROUP_START_NOT_READY', message: '그룹 시작 불가 · 들어갈 PC 가 없습니다 · 참가 0대' });
+  const empty = issue({ code: 'GROUP_START_NOT_READY', message: '그룹 시작 불가: 참여 가능한 PC가 없습니다. 참가 0대' });
   assert.equal(empty.title, '그룹 시작 불가');
-  assert.equal(empty.detail, '들어갈 PC 가 없습니다 · 참가 0대');
+  assert.equal(empty.detail, '참여 가능한 PC가 없습니다. 참가 0대');
   // 준비 중 거절 · 같은 코드 · 다른 글
   assert.equal(issue({ code: 'GROUP_START_NOT_READY', message: 'floating4 실행 준비 안 됨: 앱솔루트 미확인' }).title, '그룹 시작 불가');
   // W-A10 · 9회차 돈 뒤 PC 빠짐 · 「시작이 취소」 가 아니다
-  const left = issue({ code: 'GROUP_PARTICIPANT_LEFT', message: '그룹 실행 정지 · 남은 PC 없음 · 잠그지 않음 · floating4(웹 다시 시작)' });
-  assert.equal(left.title, '그룹 실행 정지 · PC 빠짐');
-  assert.match(left.detail, /남은 PC 없음/);
+  const left = issue({ code: 'GROUP_PARTICIPANT_LEFT', message: '그룹 실행 정지: 잔여 PC 없음 (잠금 없음) · floating4(웹 다시 시작)' });
+  assert.equal(left.title, '그룹 실행 정지 · PC 이탈');
+  assert.match(left.detail, /잔여 PC 없음/);
   // 이 PC 웹 서비스 끊김 · 잠그지 않고 놓음(145) · 145 ② 코드가 이 칸에 와도 같은 제목
-  assert.equal(issue({ code: 'GROUP_RELEASED', message: '로컬 Web Bridge 상태 수신 중단: 519ms' }).title, '그룹 실행 정지 · 웹 서비스 끊김');
-  assert.equal(issue({ code: 'GROUP_LOCAL_BRIDGE_LOST', message: 'floating4 웹 서비스 끊김으로 그룹 정지' }).title, '그룹 실행 정지 · 웹 서비스 끊김');
+  assert.equal(issue({ code: 'GROUP_RELEASED', message: '로컬 Web Bridge 상태 수신 중단: 519ms' }).title, '그룹 실행 정지 · 웹 서비스 연결 중단');
+  assert.equal(issue({ code: 'GROUP_LOCAL_BRIDGE_LOST', message: 'floating4 웹 서비스 끊김으로 그룹 정지' }).title, '그룹 실행 정지 · 웹 서비스 연결 중단');
   // 정말 시작 전 취소 · 코드 없는 옛 연동 노드 · 전 글 그대로
   for (const code of ['TRIGGER_SYNC_FAILED', 'GROUP_START_REJECTED', 'GROUP_SCHEDULE_ACK_TIMEOUT', 'GROUP_SCHEDULE_SELF_LATE', '', undefined]) {
     const other = issue({ code, message: '예약 확인 늦음' });
-    assert.equal(other.title, '그룹 시작이 취소되었습니다', String(code));
+    assert.equal(other.title, '그룹 시작 취소', String(code));
     assert.equal(other.detail, '예약 확인 늦음');
   }
   // 서버가 남기는 코드는 모두 여기서 다룬다(새 코드가 생기면 제목을 정할 것)
@@ -121,7 +121,7 @@ test('운전 모드 버튼 설명 · 누가 시작하나 · 수정 목록 122', 
   assert.match(shell, /RUN_MODE_HINT\[button\.dataset\.mode\]/);
   assert.match(RUN_MODE_HINT.manual, /사람이 직접 시작/);
   assert.match(RUN_MODE_HINT.manual, /그룹 재생/);
-  assert.match(RUN_MODE_HINT.schedule, /자동으로 시작/);
+  assert.match(RUN_MODE_HINT.schedule, /자동 시작/);
   assert.match(RUN_MODE_HINT.off, /움직이지 않으며/);
 });
 
@@ -216,12 +216,12 @@ test('PREOP 에 멈춘 드라이브 · 감시 노드 글 그대로 빨강 · 제
 
 test('메일박스가 멈춘 드라이브 · 감시 노드 글 그대로 빨강 · 재생은 그대로라고 (수정 목록 139 ③)', () => {
   const snap = { motion_state: { minas_absolute: { state: 'ok', drives: [], stuck_mailboxes: [
-    { master_index: 0, slave_position: 2, axis: 2, since: 1, message: '2번 드라이브 메일박스 응답 없음 · 그 드라이브 제어 전원을 껐다 켜세요' },
+    { master_index: 0, slave_position: 2, axis: 2, since: 1, message: '2번 드라이브 메일박스 응답 없음. 해당 드라이브 제어 전원을 재투입하세요' },
   ] } } };
   const issues = collectIssues(snap, { run_mode: 'manual' });
   const box = issues.find((i) => i.title.includes('메일박스'));
   assert.equal(box.tone, 'bad');
-  assert.equal(box.title, '2번 드라이브 메일박스 응답 없음 · 그 드라이브 제어 전원을 껐다 켜세요');
+  assert.equal(box.title, '2번 드라이브 메일박스 응답 없음. 해당 드라이브 제어 전원을 재투입하세요');
   assert.match(box.detail, /재생/);
   assert.equal(collectIssues({ motion_state: { minas_absolute: { state: 'ok', stuck_mailboxes: [] } } }, { run_mode: 'manual' }).length, 0);
   assert.equal(collectIssues({ motion_state: { minas_absolute: { state: 'ok' } } }, { run_mode: 'manual' }).length, 0);

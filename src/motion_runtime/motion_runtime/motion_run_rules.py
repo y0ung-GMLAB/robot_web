@@ -120,7 +120,7 @@ def _cycle_end_status(plan: Dict[str, Any]) -> Dict[str, Any]:
     if _lockstep_group_cycle(plan):
         cycle = int(plan.get('group_cycle_number') or 0)
         status = _status_from_plan(
-            'motion_completed', f'그룹 모션 {cycle}회차 재생 끝 · 회차 끝 알림 준비', plan,
+            'motion_completed', f'그룹 모션 {cycle}회차 재생 종료, 회차 종료 알림 준비', plan,
         )
         status['phase'] = run_state.GROUP_CYCLE_FINISHING_PHASE
         return status
@@ -266,7 +266,7 @@ def _motor_ready_error(motor: Dict[str, Any]) -> str:
 #: 통신이 끊긴 축 · 모터 상태 모니터(`state_publisher`)가 붙이는 이름 · 수정 목록 3-1
 COMMUNICATION_LOST_STATES = {
     'disconnected': '응답 없음',
-    'ethercat_down': '드라이버 전원 OFF 또는 EtherCAT 끊김',
+    'ethercat_down': '드라이브 전원 OFF 또는 EtherCAT 연결 중단',
 }
 
 
@@ -295,7 +295,7 @@ def _communication_lost_error(axes, motors: List[Dict[str, Any]]) -> str:
             lost.append(f'{axis}번 모터({COMMUNICATION_LOST_STATES[state]})')
     if not lost:
         return ''
-    return '통신이 끊긴 모터가 있어 재생을 멈춥니다 · ' + ', '.join(lost)
+    return '통신이 중단된 모터가 있어 재생을 정지합니다: ' + ', '.join(lost)
 
 
 def _motor_position(motor: Optional[Dict[str, Any]]) -> Optional[float]:
@@ -346,7 +346,7 @@ def _target_range_limit_error(
     # 범위로 자른 값을 다시 견주면 반올림 차이로 같은 숫자끼리 비교하는 글이 났다 · 실물 테스트 38 · 확인 대기 72 ·
     # 한계를 적을 때의 반올림(0.001°)만큼은 같은 값(보낼 때 한계로 자름 · `_clamp_to_motor_limits`)
     # 그보다 넘으면 조인트 매핑 범위가 모터 설정 한계보다 넓다 · 적용 안 한 매핑이 흔한 원인
-    hint = ' · 조인트 매핑 범위가 모터 설정 한계보다 넓습니다 · 매핑 저장 뒤 「장비에 적용 · 모터 재시작」'
+    hint = '. 조인트 매핑 범위가 모터 설정 한계보다 넓습니다. 매핑 저장 후 「저장 후 장비에 적용」을 누르세요'
     if lower is not None and target_min < lower - MOTOR_LIMIT_ROUNDING_RAD:
         return (f'{axis}번 모터 목표 최소 {deg(target_min):.3f}° 가 하한 {deg(lower):.3f}° 보다 '
                 f'{deg(lower - target_min):.3f}° 작습니다{hint}')
@@ -413,7 +413,7 @@ def _loop_gap_warning(plan: Dict[str, Any]) -> str:
             return str(
                 capability.get('reason')
                 or '모션 시작값과 끝값이 다릅니다'
-            ) + ' · 회차가 이어질 때 값이 튑니다'
+            ) + ' (회차 연결 시 값 급변)'
     return ''
 
 
@@ -528,7 +528,7 @@ def _supervisor_drop_error(safety_status: Any, run_started_wall: float) -> str:
     if continuous < MOTION_RUN_DROP_STOP_SEC:
         return ''
     return (
-        f'모터 제어가 재생 명령을 {continuous:.1f}초째 버리고 있어 멈춥니다 · '
+        f'모터 프로그램이 재생 명령을 {continuous:.1f}초간 거부해 정지합니다: '
         f'{drop.get("reason") or "사유 미상"}'
     )
 

@@ -128,10 +128,10 @@ export function pickPort(ports, preferred) {
     if (byId) return { port: byId, status: 'ok', message: '' };
     const byName = list.filter((port) => preferred.name && port.name === preferred.name);
     if (byName.length === 1) return { port: byName[0], status: 'ok', message: '' };
-    return { port: null, status: 'missing', message: `선택해 둔 X-Touch(${preferred.name || preferred.id})가 연결되어 있지 않습니다. USB 연결을 확인하고 다시 선택하세요.` };
+    return { port: null, status: 'missing', message: `선택해 둔 X-Touch(${preferred.name || preferred.id})가 연결되지 않았습니다. USB 연결 확인 후 재선택하세요.` };
   }
   if (list.length === 1) return { port: list[0], status: 'ok', message: '' };
-  return { port: null, status: 'choose', message: `X-Touch가 ${list.length}대 연결되어 있습니다. 사용할 장치를 선택하세요.` };
+  return { port: null, status: 'choose', message: `X-Touch가 ${list.length}대 연결 상태입니다. 사용할 장치를 선택하세요.` };
 }
 
 /** 입력 포트와 같은 장치의 출력 · 이름이 똑같은 것 먼저 · 없으면 같은 순번 · Windows 는 둘째 대가 「2- X-Touch-Ext」 */
@@ -192,7 +192,7 @@ export function channelConfig(rows, axisOf) {
 }
 
 /** 채널 상태 글 · 화면 · 글씨 칸 */
-export const PHASE_LABEL = { idle: '선택 안 됨', pickup: '맞추는 중', ready: '선택됨', live: '조종 중' };
+export const PHASE_LABEL = { idle: '선택 안 됨', pickup: '위치 일치 대기', ready: '선택됨', live: '조종 중' };
 
 /**
  * 채널 8개의 상태 · 일(event)을 받아 할 일(action) 목록을 돌려준다 · 보내기는 화면이

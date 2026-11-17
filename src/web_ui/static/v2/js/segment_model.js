@@ -66,5 +66,5 @@ export function segmentProgressText(status, elapsed) {
   const label = segmentLabel(start, end);
   if (!label) return '';
   const now = start + Math.max(Number(elapsed) || 0, 0);
-  return `${label} · 지금 ${segmentClock(end > 0 ? Math.min(now, end) : now)}`;
+  return `${label} · 현재 ${segmentClock(end > 0 ? Math.min(now, end) : now)}`;
 }

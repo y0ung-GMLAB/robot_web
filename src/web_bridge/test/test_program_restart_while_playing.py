@@ -95,7 +95,7 @@ def test_playing_is_refused_with_a_clear_reason_and_a_flag(monkeypatch):
         assert result['success'] is False, state
         assert result['needs_stop'] is True
         assert result['run_state'] == state
-        assert result['message'] == '재생 중입니다 · 정지하고 다시 시작하려면 확인하세요'
+        assert result['message'] == '재생 중입니다. 정지 후 재시작하려면 확인을 누르세요'
         assert '프로젝트' not in result['message']
         assert bridge.events == [], '묻기 전에는 아무것도 안 한다(알림 · 정지 · 재시작 없음)'
 
@@ -134,7 +134,7 @@ def test_a_master_still_coordinating_others_keeps_its_coordination_service(monke
 
     assert result['success'] is True
     assert bridge.events[-1] == ('restart', ('motion-control.service',))
-    assert '연동 서비스는 다른 PC 그룹을 진행 중이라 다시 시작하지 않음' in result['message']
+    assert '그룹 재생 진행 중이므로 연동 서비스 재시작 제외' in result['message']
 
 
 def test_a_master_that_only_coordinates_has_nothing_local_to_stop(monkeypatch):
@@ -163,7 +163,7 @@ def test_the_wait_for_the_stop_is_bounded(monkeypatch):
 
     assert result['success'] is True
     assert bridge.events[-1] == BOTH, '정지를 확인 못 해도 다시 시작은 간다'
-    assert '0.2 s 안에 정지 확인 못 함(running)' in result['message']
+    assert '0.2초 이내 정지 미확인(running)' in result['message']
 
 
 def test_the_restart_waits_for_the_supervisors_stop_settled_not_the_run_cache(monkeypatch):
@@ -212,7 +212,7 @@ def test_the_settle_wait_is_only_a_failure_detector(monkeypatch):
 
     assert asked == [(('b', 4), 0.2)], '상한은 「정지 정리 끝」 을 기다리는 데만 쓴다'
     assert result['success'] is True and bridge.events[-1] == BOTH
-    assert '0.2 s 안에 정지 확인 못 함(running)' in result['message']
+    assert '0.2초 이내 정지 미확인(running)' in result['message']
 
 
 def test_only_a_literal_true_means_stop_first(monkeypatch):
@@ -226,7 +226,7 @@ def test_a_motor_job_in_progress_is_refused_in_plain_words(monkeypatch):
     result = _service(monkeypatch, bridge, motor_job=True).restart_managed_program({'stop_first': True})
 
     assert result['success'] is False
-    assert result['message'] == '모터 설정·검색·재시작 작업이 진행 중입니다 · 끝난 뒤 다시 시작하세요'
+    assert result['message'] == '모터 설정·검색·재시작 작업이 진행 중입니다. 완료 후 재시도하세요'
     assert 'needs_stop' not in result
     assert bridge.events == []
 
@@ -254,7 +254,7 @@ def test_the_route_passes_the_body_and_keeps_the_refusal_readable(monkeypatch, t
         seen.append(body)
         if body.get('stop_first') is True:
             return {'success': True, 'message': '상위 프로그램 재시작을 시작했습니다'}
-        return {'success': False, 'needs_stop': True, 'message': '재생 중입니다 · 정지하고 다시 시작하려면 확인하세요'}
+        return {'success': False, 'needs_stop': True, 'message': '재생 중입니다. 정지 후 재시작하려면 확인을 누르세요'}
 
     client = _client(monkeypatch, tmp_path, restart)
 

@@ -48,17 +48,10 @@ test('no asset carries a cache-bust token', () => {
   );
 });
 
-test('the entry chain still loads without them', () => {
-  const read = (name) => readFileSync(new URL(name, STATIC), 'utf8');
-  assert.match(read('index.html'), /src="\/static\/app\.js"/);
-  assert.match(read('app.js'), /import '\.\/js\/main\.js'/);
-});
-
 test('the scan actually looks at the files', () => {
   /** 목록이 비면 위 검사는 아무것도 안 보면서 통과한다. */
   const names = assetFiles().map(([name]) => name);
   assert.ok(names.length > 20, `자산을 ${names.length}개밖에 못 찾았다`);
-  assert.ok(names.includes('index.html'));
-  assert.ok(names.some((name) => name.startsWith('js/')));
-  assert.ok(names.some((name) => name.startsWith('panels/')));
+  assert.ok(names.includes('v2/index.html'));
+  assert.ok(names.some((name) => name.startsWith('v2/js/')));
 });

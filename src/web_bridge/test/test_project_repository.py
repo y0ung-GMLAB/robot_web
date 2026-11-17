@@ -409,8 +409,6 @@ def test_an_ac_servo_whose_model_nobody_knows_still_applies(tmp_path):
 # 알린다 · 막아야 하는 것은 **값이 위험할 때**지 이름을 모를 때가 아니다.
 
 
-
-
 def test_an_ac_servo_with_no_model_saves_and_applies(tmp_path):
     repository = ProjectRepository(tmp_path / 'projects')
     project_id = repository.create_project('save before model confirmation')['project']['project_id']
@@ -517,8 +515,6 @@ def test_first_motor_config_save_returns_persisted_axes_before_apply(tmp_path):
     assert len(reloaded['registry'].get('motors') or []) == 1
     assert reloaded['registry']['motors'][0]['name'] == '왼쪽 서보'
     assert reloaded['config_revision'] == second['config_revision']
-
-
 
 
 def test_legacy_untouched_motor_placeholder_is_removed(tmp_path):
@@ -883,7 +879,7 @@ def test_motor_config_save_rejects_stale_browser_revision(tmp_path):
     })
 
     assert result['success'] is False
-    assert '현재 파일을 보호하려고 저장하지 않았습니다' in result['message']
+    assert '변경을 감지해 저장을 중단했습니다' in result['message']
     assert 'period: 2000000' in _motor_config_of(bridge).selected.read_text(encoding='utf-8')
 
 
@@ -2578,7 +2574,7 @@ def test_motor_control_restart_rejects_project_without_applied_motor_config(monk
     result = _motor_config_of(bridge).restart_motor_control()
 
     assert result['success'] is False
-    assert '장비에 적용 · 모터 재시작' in result['message']
+    assert '「저장 후 장비에 적용」' in result['message']
     assert commands == []
     assert bridge._motion_run_status['state'] == 'stopped'
 
@@ -2671,74 +2667,6 @@ def test_clear_motor_runtime_target_allows_project_delete(tmp_path):
     assert not (tmp_path / 'projects' / project_id).exists()
 
 
-def test_clear_motor_runtime_application_stops_and_allows_delete(
-    tmp_path, monkeypatch
-):
-    workspace = tmp_path / 'workspace'
-    repository = ProjectRepository(workspace / 'motion_projects')
-    project_id = repository.create_project('running')['project']['project_id']
-    repository.save_file(
-        project_id,
-        'motor_axes',
-        'motor_axes.yaml',
-        'period: 1000000\nmasters:\n- id: 0\n  type: ethercat\n  slaves:\n'
-        '  - controller_index: 0\n    driver_id: 0\ndrivers:\n- id: 0\n  type: minas\n'
-        '  profile_velocity: 18000\n  profile_acceleration: 180000\n'
-        '  profile_deceleration: 180000\n',
-    )
-    repository.prepare_runtime_motor_config(project_id)
-    runtime_file = repository.runtime.mark_runtime_motor_config_applied(project_id)
-
-    bridge = MotionWebBridge.__new__(MotionWebBridge)
-
-    bridge.project_repository = repository
-    bridge.workspace_root = workspace
-    bridge.motion_projects_dir = workspace / 'motion_projects'
-    _motor_config_of(bridge).applied = Path(runtime_file).resolve()
-    _motor_config_of(bridge).selected = Path(runtime_file).resolve()
-    bridge.snapshot = lambda: {}
-    _project_of(bridge).list_projects = lambda: {
-        'projects': [],
-        'runtime_project_id': '',
-        'selected_project_id': project_id,
-    }
-    bridge._motion_run_status = {'state': 'stopping'}
-    bridge._motion_run_lock = threading.Lock()
-    bridge.coordination_execution_blocker = lambda: ''
-    _runtime_of(bridge).ethercat_scan_safety_blocker = lambda **_kwargs: ''
-    _runtime_of(bridge).managed_service_active = lambda _unit: True
-    _runtime_of(bridge).run_managed_service = lambda *_args, **_kwargs: None
-    monkeypatch.setattr(
-        motor_config_rules, 'wait_for_ethercat_release',
-        lambda *_args, **_kwargs: None,
-    )
-    bridge.motion_run_stop = lambda: None
-    bridge.publish_safety_stop = lambda *_args, **_kwargs: None
-    monkeypatch.setattr(
-        motor_config_rules, 'clear_motor_config_selection', lambda _repository: None
-    )
-    bridge._motor_lifecycle_lock = threading.Lock()
-    _execution_context_of(bridge)._apply_lock = threading.Lock()
-    bridge._project_generation = 1
-    bridge._project_generation_lock = threading.Lock()
-    _execution_context_of(bridge).invalidate_nodes = lambda *_args, **_kwargs: None
-    monkeypatch.setenv('MOTION_MOTOR_SERVICE_UNIT', 'motion-motor.service')
-
-    assert _project_of(bridge).runtime_project_id() == project_id
-    result = _motor_config_of(bridge).clear_runtime_application()
-
-    assert result['success'] is True
-    assert result['cleared'] is True
-    assert result['previous_project_id'] == project_id
-    assert result['runtime_project_id'] == ''
-    assert _motor_config_of(bridge).applied == Path()
-    assert _project_of(bridge).runtime_project_id() == ''
-    assert bridge._motion_run_status['state'] == 'stopped'
-    assert repository.runtime.motor_runtime_state().get('target_project_id') in ('', None)
-    deleted = _project_of(bridge).delete_project(project_id)
-    assert deleted['permanently_deleted'] is False   # 휴지통 · 수정 목록 33
-
-
 def test_project_change_blocker_allows_stopping_only_when_requested(tmp_path):
     repository = ProjectRepository(tmp_path / 'projects')
     bridge = MotionWebBridge.__new__(MotionWebBridge)
@@ -2787,7 +2715,7 @@ def test_import_rejects_path_escape_and_invalid_file(tmp_path):
     with pytest.raises(ValueError):
         repository.import_text(project_id, 'motions', '../escape.json', MOTION_TEXT)
     # 검사 = 재생 파서 · 사유도 파서 것 · 수정 목록 31
-    with pytest.raises(ValueError, match='재생할 수 있는 행이 없습니다'):
+    with pytest.raises(ValueError, match='재생 가능한 행이 없습니다'):
         repository.import_text(project_id, 'motions', 'bad.json', '{}\n[]')
 
 
@@ -2877,14 +2805,3 @@ def test_read_only_project_files_can_be_viewed_but_managed_paths_are_rejected(tm
     with pytest.raises(ValueError, match='올바르지 않은'):
         repository.read_read_only_file(project_id, '../outside.txt')
 
-
-def test_web_read_only_file_rejects_non_selected_project(tmp_path):
-    repository = ProjectRepository(tmp_path / 'projects')
-    other_id = repository.create_project('other')['project']['project_id']
-    selected_id = repository.create_project('selected')['project']['project_id']
-    repository.select_project(selected_id)
-    bridge = MotionWebBridge.__new__(MotionWebBridge)
-    bridge.project_repository = repository
-
-    with pytest.raises(ValueError, match='현재 선택한 프로젝트'):
-        _project_of(bridge).load_read_only_file(other_id, 'project.json')

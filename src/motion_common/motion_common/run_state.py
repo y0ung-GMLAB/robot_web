@@ -174,14 +174,14 @@ def human_operation_reason(motion_run_status, safety_status) -> str:
     """
     safety = safety_status if isinstance(safety_status, Mapping) else {}
     if solo_running(motion_run_status):
-        return '사람 조작 중 · 단독 재생'
+        return '수동 조작 중: 단독 재생'
     modes = safety.get('manual_activity_modes')
     modes = {str(item) for item in modes} if isinstance(modes, (list, tuple, set)) else set()
     for mode in ('jog', 'action'):
         if mode in modes:
-            return f'사람 조작 중 · {_MANUAL_ACTIVITY_TEXT[mode]}'
+            return f'수동 조작 중: {_MANUAL_ACTIVITY_TEXT[mode]}'
     if str(safety.get('command_owner') or '') == 'stream':
-        return '사람 조작 중 · 페이더'
+        return '수동 조작 중: 페이더'
     return ''
 
 
@@ -201,4 +201,4 @@ def group_stop_skip_reason(motion_run_status, safety_status, execution_id) -> st
     busy = human_operation_reason(run, safety_status)
     if not busy:
         return ''
-    return f'이 PC 는 그룹 실행 {execution_id} 에 없음 · {busy} · 정지하지 않음'
+    return f'현재 PC는 그룹 실행 {execution_id} 미참가 ({busy}), 정지 생략'

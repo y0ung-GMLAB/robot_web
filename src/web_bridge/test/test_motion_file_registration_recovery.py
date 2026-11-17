@@ -29,9 +29,6 @@ MIDI 는 오래전에 제 길을 얻었는데(`save_midi_banks`) 재생 등록�
 from pathlib import Path
 
 WORKSPACE = Path(__file__).resolve().parents[3]
-UI = WORKSPACE / 'src/web_ui/static/js'
-MOTION_DATA = UI / 'motion_data.js'
-API = UI / 'api.js'
 MANAGER = (
     WORKSPACE
     / 'src/motion_runtime/motion_runtime'
@@ -62,67 +59,10 @@ def _function(source: str, name: str) -> str:
 # 버튼 · 조인트 매핑을 편집 중이어도 눌린다
 # --------------------------------------------------------------------------- #
 
-def test_the_buttons_do_not_watch_the_mapping_draft():
-    """`mappingDirty` 로 끄면 안 된다 · 모션 데이터와 상관없는 사정이다.
-
-    이것이 막다른 길의 입구였다 · 등록이 한 번 실패하면 프로그램이 세운
-    표시 때문에 등록도 해제도 영영 안 눌렸다.
-    """
-    source = MOTION_DATA.read_text(encoding='utf-8')
-    for button in ('registerMotionFileButton', 'unregisterMotionFileButton'):
-        block = source[source.index(f'el.{button}.disabled'):][:260]
-        assert 'mappingDirty' not in block, (
-            f'{button} 이 조인트 매핑 편집 상태를 보고 있습니다 · '
-            '모션 데이터와 상관없는 사정으로 버튼이 꺼집니다'
-        )
-
-
-def test_registering_does_not_refuse_while_the_mapping_is_being_edited():
-    """진입에서도 막지 않는다 · 버튼만 살리고 안에서 막으면 같은 일이다."""
-    source = MOTION_DATA.read_text(encoding='utf-8')
-    for name in ('registerSelectedMotionFile', 'unregisterSelectedMotionFile'):
-        body = _function(source, name)
-        assert 'if (mappingDirty)' not in body, (
-            f'{name} 이 조인트 매핑 편집 중이라고 되돌려 보냅니다'
-        )
-
 
 # --------------------------------------------------------------------------- #
 # 저장 경로 · 설정 전체를 보내지 않는다
 # --------------------------------------------------------------------------- #
-
-def test_registering_uses_its_own_narrow_path():
-    """조인트 매핑 전체 저장(`saveMotionMapping`)을 타면 안 된다.
-
-    그 길을 타면 편집 중인 설정까지 같이 저장되고, 개정 검사에 걸려
-    「조인트 매핑 저장 충돌」 창이 뜬다.
-    """
-    body = _function(MOTION_DATA.read_text(encoding='utf-8'), 'applyMotionFileRegistration')
-
-    assert 'saveRegisteredMotionFile(' in body, (
-        '재생 등록이 제 길(saveRegisteredMotionFile)을 쓰지 않습니다'
-    )
-    assert 'saveCurrentMapping(' not in body, (
-        '재생 등록이 조인트 매핑 전체 저장을 타고 있습니다'
-    )
-
-
-def test_registering_keeps_the_mapping_draft_alone():
-    """편집 중인 조인트 매핑은 건드리지도, 저장하지도 않는다."""
-    body = _function(MOTION_DATA.read_text(encoding='utf-8'), 'applyMotionFileRegistration')
-
-    assert 'markMappingDirty()' not in body, (
-        '재생 등록이 조인트 매핑을 「편집 중」 으로 표시합니다'
-    )
-    assert 'mappingDraft.mappings' not in body
-
-
-def test_the_narrow_path_exists_end_to_end():
-    """화면 · 경로 · 브리지 · 노드가 모두 이어져 있어야 한다."""
-    assert "'/api/motion-mappings/motion-file'" in API.read_text(encoding='utf-8')
-    assert "@app.post('/api/motion-mappings/motion-file')" in ROUTES.read_text(encoding='utf-8')
-    assert 'def save_registered_motion_file(' in BRIDGE.read_text(encoding='utf-8')
-    assert "router.register('save_motion_file'" in MANAGER.read_text(encoding='utf-8')
 
 
 # --------------------------------------------------------------------------- #

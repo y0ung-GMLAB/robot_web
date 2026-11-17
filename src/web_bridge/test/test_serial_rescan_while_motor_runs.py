@@ -91,7 +91,7 @@ def test_a_moving_serial_axis_still_blocks_the_serial_scan():
         require_fresh_motor_state=True, all_transports=True,
     )
 
-    assert '2번 모터가 움직이는 중' in blocker
+    assert '2번 모터가 동작 중' in blocker
     assert 'AC 서보' not in blocker
 
 
@@ -103,7 +103,7 @@ def test_a_moving_ac_axis_also_blocks_the_serial_scan():
         require_fresh_motor_state=True, all_transports=True,
     )
 
-    assert '5번 모터가 움직이는 중' in blocker
+    assert '5번 모터가 동작 중' in blocker
 
 
 def test_an_empty_motor_state_is_still_refused_for_the_serial_scan():
@@ -226,7 +226,7 @@ def test_serial_scan_is_refused_in_serial_words_while_an_axis_moves(monkeypatch)
     assert result['success'] is False
     assert result['scan_blocked'] is True
     assert result['message'].startswith('직렬 서보 검색을 하지 않았습니다: ')
-    assert '1번 모터가 움직이는 중' in result['message']
+    assert '1번 모터가 동작 중' in result['message']
     assert calls == [], '움직이는 중에는 매니저를 멈추지 않는다'
 
 

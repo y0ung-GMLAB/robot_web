@@ -196,7 +196,7 @@ def test_grade_one_alarm_allows_current_cycle_then_blocks_next_cycle():
 
     manager._player._run_motion(_plan())
 
-    assert failures == ['1등급 서보 에러 · 나머지 축의 현재 회차 완료 후 자동 반복 중단']
+    assert failures == ['1등급 서보 에러: 나머지 축은 현재 회차 완료 후 자동 반복 중단']
     assert manager.status()['state'] == 'error'
     assert manager.status()['cycle_count'] == 1
 

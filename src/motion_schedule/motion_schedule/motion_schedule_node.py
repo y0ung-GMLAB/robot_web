@@ -623,7 +623,7 @@ class MotionScheduleNode(Node):
         runtime = payload.get('runtime') if isinstance(payload, dict) else None
         message = schedule_rules.start_failure_message(runtime, self._local_run_status())
         self.get_logger().warning(f"[점검] 지난 시작이 재생으로 이어지지 않음 · {message}")
-        self._remember_failure('시작 뒤 재생 없음', message)
+        self._remember_failure('시작 후 재생 없음', message)
 
     def _started_by_schedule(self):
         """지금 도는 재생을 스케줄이 켰나 · True 켰음 · False 사람이 켬 · None 모름 · 수정 목록 106 · 143

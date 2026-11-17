@@ -158,7 +158,7 @@ class SystemUpdate:
                     # 그 뒤 터미널에서 설치가 끝까지 됐다 · 실패만 남겨 두면 지금 상태를 잘못 읽는다
                     out.update({
                         'state': 'done', 'after_hash': str(success.get('hash') or out.get('git_hash', '')),
-                        'message': '웹 업데이트는 실패했지만 이후 설치로 복구되었습니다',
+                        'message': '웹 업데이트는 실패했으나 이후 설치로 복구했습니다',
                     })
             return out
         if self._unit_active(str(state.get('unit') or '')):
@@ -169,7 +169,7 @@ class SystemUpdate:
         if float(success.get('time') or 0) > float(state.get('started_at') or 0):
             out.update({
                 'state': 'done', 'after_hash': str(success.get('hash') or out.get('git_hash', '')),
-                'message': '웹 업데이트는 결과 없이 끝났지만 이후 설치로 복구되었습니다',
+                'message': '웹 업데이트는 결과 없이 종료했으나 이후 설치로 복구했습니다',
             })
         return out
 
@@ -194,15 +194,15 @@ class SystemUpdate:
         try:
             result = self._run(command, capture_output=True, text=True, timeout=15)
         except (OSError, subprocess.SubprocessError) as exc:
-            return {**current, 'success': False, 'message': f'업데이트를 시작하지 못했습니다 · {exc}'}
+            return {**current, 'success': False, 'message': f'업데이트 시작 실패: {exc}'}
         if getattr(result, 'returncode', 1) != 0:
             detail = str(getattr(result, 'stderr', '') or '').strip()
-            return {**current, 'success': False, 'message': f'업데이트를 시작하지 못했습니다 · {detail or "systemd-run 실패"}'}
+            return {**current, 'success': False, 'message': f'업데이트 시작 실패: {detail or "systemd-run 실패"}'}
         self._write_state({
             'unit': unit, 'log': str(log), 'rc': str(rc),
             'started_at': self._now(), 'before_hash': current.get('git_hash', ''),
         })
-        return {**self.status(), 'success': True, 'message': '업데이트를 시작했습니다. 몇 분 걸리며, 그동안 웹 화면이 잠깐 끊깁니다.'}
+        return {**self.status(), 'success': True, 'message': '업데이트를 시작했습니다. 수 분 소요되며, 진행 중 웹 화면 연결이 일시 중단됩니다.'}
 
 
 # ---------------------------------------------------------------------- #
@@ -252,7 +252,7 @@ def start_all(
             continue
         row = _row(pc)
         if not pc.get('online', True) and not row['is_local']:
-            rows.append({**row, 'state': 'offline', 'message': '연결 안 됨 · 건너뜀'})
+            rows.append({**row, 'state': 'offline', 'message': '미연결, 건너뜀'})
         elif row['role'] == 'speaker' and row['web_url']:
             # 스피커 PC · 그 앱의 같은 주소를 부른다 · 옛 스피커 앱이면 안내만
             try:
@@ -270,14 +270,14 @@ def start_all(
             result = http(f"{target['web_url']}/api/system/update", method='POST', timeout=REMOTE_START_TIMEOUT_SEC)
             rows.append({**target, **result, 'state': result.get('state') or ('running' if result.get('success') else 'failed')})
         except (OSError, ValueError, urllib.error.URLError) as exc:
-            rows.append({**target, 'state': 'failed', 'success': False, 'message': f'요청 실패 · {exc}'})
+            rows.append({**target, 'state': 'failed', 'success': False, 'message': f'요청 실패: {exc}'})
     local_row = next((row for row in robot_targets(network_pcs) if row['is_local']), None)
     if local_row is not None:
         rows.append({**local_row, **local.start()})
     started = [row for row in rows if row.get('state') == 'running']
     return {
         'success': bool(started),
-        'message': f'{len(started)}대 업데이트를 시작했습니다. 현재 접속한 PC의 웹 화면은 잠깐 끊겼다가 다시 연결됩니다.' if started else '업데이트를 시작한 PC가 없습니다',
+        'message': f'{len(started)}대 업데이트를 시작했습니다. 현재 접속한 PC의 웹 화면은 일시 중단 후 재연결합니다.' if started else '업데이트를 시작한 PC가 없습니다',
         'pcs': rows,
     }
 
@@ -312,7 +312,7 @@ def status_all(
             rows.append({**row, **http(f"{row['web_url']}/api/system/update", timeout=REMOTE_STATUS_TIMEOUT_SEC)})
         except (OSError, ValueError, urllib.error.URLError):
             # 업데이트 중에는 그 PC 웹이 잠깐 내려간다 · 실패가 아니라 기다림
-            rows.append({**row, 'state': 'unreachable', 'message': '응답 없음 · 업데이트 중이면 잠시 뒤 다시 연결됩니다',
+            rows.append({**row, 'state': 'unreachable', 'message': '응답 없음 (업데이트 중인 경우 잠시 후 재연결)',
                          'git_hash': str(pc.get('git_hash') or '')})
     hashes = {str(row.get('git_hash') or '') for row in rows if row.get('role') != 'speaker' and row.get('git_hash')}
     return {'success': True, 'pcs': rows, 'same_version': len(hashes) <= 1}

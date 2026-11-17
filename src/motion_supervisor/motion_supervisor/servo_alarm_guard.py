@@ -201,11 +201,11 @@ class ServoAlarmGuard:
     def block_reason(self, axis: Optional[int] = None) -> str:
         with self._lock:
             if self._grade3_latched:
-                return '3등급 서보 에러 · 프로그램 재시작 전까지 전체 모터 제어 차단'
+                return '3등급 서보 에러: 프로그램 재시작 전까지 전체 모터 제어 차단'
             if self._active_grade >= 2:
-                return '2등급 서보 에러 · 정상 상태 확인 전까지 전체 모터 동작 차단'
+                return '2등급 서보 에러: 정상 상태 확인 전까지 전체 모터 동작 차단'
             if axis is not None and axis in self._blocked_axes:
-                return f'1등급 서보 에러 · 축 {axis} 모터 동작 차단'
+                return f'1등급 서보 에러: 축 {axis} 모터 동작 차단'
             return ''
 
     def blocked_slots(self, controller_indexes: Iterable[Any]) -> set[int]:

@@ -40,7 +40,7 @@ def test_a_running_group_refuses_the_change(tmp_path):
     """도는 중에 재시작하면 세 대가 통째로 선다."""
     bridge = _bridge(tmp_path, RUNNING)
 
-    with pytest.raises(ValueError, match='먼저 정지'):
+    with pytest.raises(ValueError, match='정지 후 변경'):
         bridge.update_settings({'required_peers': ['a']})
 
 
@@ -66,7 +66,7 @@ def test_every_setting_goes_through_the_same_door(tmp_path, field, value):
     """명단만이 아니다 · 그룹 이름·도메인·마스터 전부 재시작을 부른다."""
     bridge = _bridge(tmp_path, RUNNING)
 
-    with pytest.raises(ValueError, match='먼저 정지'):
+    with pytest.raises(ValueError, match='정지 후 변경'):
         bridge.update_settings({field: value})
 
 

@@ -17,7 +17,6 @@
 from __future__ import annotations
 
 import json
-import re
 import threading
 import time
 from datetime import datetime, timedelta
@@ -193,7 +192,7 @@ class MotorEventLog:
                 category='error',
                 event_type='minas_absolute_blocked',
                 target='MINAS 드라이브',
-                content=f'{message} · 모든 모터 동작 차단',
+                content=f'{message}. 전체 모터 동작 차단',
                 details={'drives': summary.get('drives') or []},
             )
         elif previous:
@@ -201,7 +200,7 @@ class MotorEventLog:
                 category='system',
                 event_type='minas_absolute_confirmed',
                 target='MINAS 드라이브',
-                content='앱솔루트 확인됨 · 모터 동작 차단 해제',
+                content='앱솔루트 확인 완료, 모터 동작 차단 해제',
                 details={'drives': summary.get('drives') or []},
             )
 
@@ -238,7 +237,7 @@ class MotorEventLog:
                     category='system',
                     event_type='ethercat_mailbox_recovered',
                     target=self._mailbox_target(slot, item),
-                    content='메일박스 멈춤 해제 · 응답이 돌아왔거나 드라이브를 다시 잡음',
+                    content='메일박스 정지 해제 (응답 복구 또는 드라이브 재연결)',
                     details=dict(item),
                 )
 
@@ -273,7 +272,7 @@ class MotorEventLog:
                 category='initial_position',
                 event_type='initial_position_started',
                 target=target,
-                content=f'초기 위치 이동 시작 · 매핑 {mapping_file}',
+                content=f'초기 위치 이동 시작 (매핑 {mapping_file})',
                 details=details,
             )
 
@@ -283,7 +282,7 @@ class MotorEventLog:
                 category='initial_position',
                 event_type='initial_position_completed' if completed else 'initial_position_stopped',
                 target=target,
-                content='초기 위치 이동 완료' if completed else f'초기 위치 이동 종료 · 상태 {state}',
+                content='초기 위치 이동 완료' if completed else f'초기 위치 이동 종료 (상태 {state})',
                 details=details,
             )
 
@@ -294,7 +293,7 @@ class MotorEventLog:
                 category='motion',
                 event_type='continuous_motion_started' if continuous else 'single_motion_started',
                 target=target,
-                content=f'{motion_label} 시작 · 매핑 {mapping_file}',
+                content=f'{motion_label} 시작 (매핑 {mapping_file})',
                 details=details,
             )
 
@@ -487,27 +486,6 @@ class MotorEventLog:
             'message': '현재 프로젝트의 모터 동작 로그를 삭제했습니다.',
             'deleted_files': deleted_files,
             'deleted_bytes': deleted_bytes,
-            'project_id': project_id,
-            'project_name': project_name,
-        }
-
-    def delete_file(self, file_name: Any) -> Dict[str, Any]:
-        name = str(file_name or '').strip()
-        if name != Path(name).name or not re.fullmatch(r'\d{4}-\d{2}-\d{2}\.jsonl', name):
-            raise ValueError('올바르지 않은 로그 파일명입니다')
-        log_dir, project_id, project_name = self.context()
-        path = log_dir / name
-        if not path.is_file() or path.is_symlink():
-            raise ValueError(f'로그 파일을 찾을 수 없습니다: {name}')
-        with self._lock:
-            self._tally.pop(Path(log_dir), None)
-            size = path.stat().st_size
-            path.unlink()
-        return {
-            'success': True,
-            'message': f'{name} 로그 파일을 삭제했습니다.',
-            'deleted_file': name,
-            'deleted_bytes': size,
             'project_id': project_id,
             'project_name': project_name,
         }

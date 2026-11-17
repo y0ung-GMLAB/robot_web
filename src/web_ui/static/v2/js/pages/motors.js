@@ -127,9 +127,9 @@ function servoAllBar(rows, state, changed) {
 
 async function maintenance(row, action, state, changed) {
   const texts = {
-    eeprom_save: { title: `${row.axis}번 드라이브 저장(EEPROM)`, body: '저장하는 동안(최대 10초) 드라이브 전원을 끄지 마세요.\n모터 프로그램이 몇 초 정지했다가 다시 시작되고, 그동안 서보 토크가 해제됩니다. 브레이크 없는 모터는 처질 수 있습니다.\n드라이브의 현재 설정값을 저장해 전원을 꺼도 유지되게 합니다.', tone: 'warning', label: '저장' },
+    eeprom_save: { title: `${row.axis}번 드라이브 저장(EEPROM)`, body: '저장하는 동안(최대 10초) 드라이브 전원을 끄지 마세요.\n모터 프로그램이 수 초간 정지 후 재시작하며, 그동안 서보 토크를 해제합니다. 브레이크 없는 모터는 처질 수 있습니다.\n드라이브의 현재 설정값을 저장해 전원 차단 후에도 유지합니다.', tone: 'warning', label: '저장' },
     // 클리어만 하는 길(드라이브 정비)도 앱솔루트 설정과 같은 표시를 남긴다 · 수정 목록 140 ④
-    absolute_clear: { title: `${row.axis}번 다회전 클리어`, body: '위치 기준이 바뀌어 모든 프로젝트에서 해당 축의 기준점이 무효가 됩니다. 감속기가 있는 축은 눈으로 다시 맞춰야 합니다.\n기준점을 다시 지정해 저장하기 전까지 재생 · 초기 위치 이동 · 스케줄 · 그룹 참여가 차단됩니다.\n엔코더 다회전 값을 0으로 초기화합니다. 끝나면 드라이브 전원을 껐다 켜세요.', tone: 'danger', label: '클리어' },
+    absolute_clear: { title: `${row.axis}번 다회전 클리어`, body: '위치 기준 변경으로 모든 프로젝트에서 해당 축의 기준점을 무효 처리합니다. 감속기가 있는 축은 육안으로 재정렬해야 합니다.\n기준점을 재지정해 저장하기 전까지 재생 · 초기 위치 이동 · 스케줄 · 그룹 참여를 차단합니다.\n엔코더 다회전 값을 0으로 초기화합니다. 완료 후 드라이브 전원을 재투입하세요.', tone: 'danger', label: '클리어' },
   }[action];
   if (action === 'absolute_clear' && row.servoOn) { toast('다회전 클리어는 서보를 끈 뒤에 할 수 있습니다.', 'warn'); return; }
   const ok = await confirmBox({ ...texts, confirmLabel: texts.label });
@@ -138,7 +138,7 @@ async function maintenance(row, action, state, changed) {
     body: { action, axis: row.axis, confirmed: true }, timeoutMs: 60000,
   }), state, changed);
   if (result?.power_cycle_required) {
-    await confirmBox({ title: '드라이브 전원을 껐다 켜야 합니다', body: '바뀐 값은 전원을 다시 켠 뒤 적용됩니다.\n전원을 켠 뒤 기준점을 다시 캡처하세요.', confirmLabel: '확인' });
+    await confirmBox({ title: '드라이브 전원 재투입 필요', body: '변경한 값은 전원 재투입 후 적용합니다.\n전원 재투입 후 기준점을 재캡처하세요.', confirmLabel: '확인' });
   }
 }
 
@@ -154,9 +154,9 @@ async function writeAlias(row, motor, state, changed) {
   const ok = await confirmBox({
     title: `${row.axis}번 드라이브 EEPROM Alias 쓰기`,
     body: `Master ${row.masterIndex} · Slave ${row.slavePosition} · 현재 Alias ${current ?? '-'} → ${next}\n`
-      + '드라이브 EEPROM에 저장됩니다. 다른 드라이브와 같은 값은 쓸 수 없습니다(0은 중복 가능, 케이블 순서로 구분).\n'
+      + '드라이브 EEPROM에 저장합니다. 다른 드라이브와 같은 값은 쓸 수 없습니다(0은 중복 가능, 케이블 순서로 구분).\n'
       + '쓴 뒤 「전체 검색」으로 새 값을 확인하고 「저장 후 장비에 적용」을 누르세요.\n'
-      + '값이 바뀌지 않았으면 드라이브 제어 전원을 껐다 켠 뒤 다시 검색하세요.',
+      + '값이 변경되지 않은 경우 드라이브 제어 전원 재투입 후 재검색하세요.',
     confirmLabel: '쓰기', tone: 'warning',
   });
   if (!ok) return;
@@ -189,7 +189,7 @@ async function absoluteSetup(scope, row, state, changed) {
   if (!targets.length) { toast(preview?.message || '모든 모터가 이미 앱솔루트 방식입니다.', 'ok'); return; }
   const ok = await confirmBox({
     title: '앱솔루트 설정',
-    body: `${absoluteClearRule()}\n진행 중 드라이브 전원을 한 번 껐다 켜야 합니다(Err40이 발생해 다회전 클리어하면 한 번 더).\n\n대상\n${targets.join('\n')}${skipped.length ? `\n\n건너뜀(이미 앱솔루트 방식이며, 다시 설정하면 기준점이 사라짐)\n${skipped.join('\n')}` : ''}\n\n${(preview?.steps || []).map((s, i) => `${i + 1}. ${s.label || s}`).join('\n')}`,
+    body: `${absoluteClearRule()}\n진행 중 드라이브 전원을 1회 재투입해야 합니다(Err40 발생으로 다회전 클리어 시 1회 추가).\n\n대상\n${targets.join('\n')}${skipped.length ? `\n\n건너뜀(이미 앱솔루트 방식이며, 다시 설정하면 기준점이 사라짐)\n${skipped.join('\n')}` : ''}\n\n${(preview?.steps || []).map((s, i) => `${i + 1}. ${s.label || s}`).join('\n')}`,
     confirmLabel: '시작', tone: 'danger',
   });
   if (!ok) return;
@@ -202,9 +202,9 @@ async function absoluteResume(state, changed) {
   try {
     preview = await api('POST', '/api/motor-config/absolute-setup/preview', { body: { resume: true } });
   } catch (error) { toast(error.message || String(error), 'bad'); return; }
-  if (!preview?.success) { toast(preview?.message || '이어서 할 수 없습니다', 'bad'); await loadMotors(state, changed); return; }
+  if (!preview?.success) { toast(preview?.message || '재개할 수 없습니다', 'bad'); await loadMotors(state, changed); return; }
   if (!await confirmBox(absoluteResumeConfirm(preview))) return;
-  await run('앱솔루트 설정 이어서 하기', () => api('POST', '/api/motor-config/absolute-setup', { body: { resume: true, confirmed: true }, timeoutMs: 20000 }), state, changed);
+  await run('앱솔루트 설정 재개', () => api('POST', '/api/motor-config/absolute-setup', { body: { resume: true, confirmed: true }, timeoutMs: 20000 }), state, changed);
 }
 
 /** 다회전 클리어 뒤 기준점 지정 화면으로 · 클리어한 첫 축 · 수정 목록 140 */
@@ -364,9 +364,9 @@ function detailCard(state, changed, row) {
     row.ac ? h('label', { class: 'inline' }, h('input', { type: 'checkbox', checked: Number(motor.config?.overload_monitor) === 1,
       onchange: (e) => { setField(motor, 'overload_monitor', e.target.checked ? 1 : 0); changed(); } }),
     '과부하율 읽기', h('span', { class: 'small tone-text-warn', text: '드라이브 Ver1.03 이상만' }),
-    tip(['드라이브 소프트웨어 Ver1.03 미만에서 켜면 모터 프로그램이 시작되지 않음'], '과부하율 읽기 설명')) : null,
+    tip(['드라이브 소프트웨어 Ver1.03 미만에서는 모터 프로그램 시작 불가'], '과부하율 읽기 설명')) : null,
     h('label', { class: 'inline' }, h('input', { type: 'checkbox', checked: motor.config?.schedule_end_servo_off !== false,   // 안 적었으면 켬 · 서버(schedule_end.motor_turns_off_at_end)와 같게 · 2026-10-13
-      onchange: (e) => { setField(motor, 'schedule_end_servo_off', e.target.checked); changed(); } }), '스케줄 모드에서 운영 시간이 끝나면 서보 끄기')),
+      onchange: (e) => { setField(motor, 'schedule_end_servo_off', e.target.checked); changed(); } }), '운영 시간 종료 시 서보 끄기 (스케줄 모드)')),
     // 드라이브 게인 · 잠금 · 재시작 없이 쓰기 · 수정 목록 108 (다)
     row.ac ? h('div', { class: 'detail-group' }, gainField(row, changed, () => loadMotors(state, changed, { force: true }))) : null,
     h('div', { class: 'detail-group' }, h('div', { class: 'field' },
@@ -377,13 +377,13 @@ function detailCard(state, changed, row) {
         row.servoOn
           ? h('button', { class: 'btn btn-mini', type: 'button', disabled: busy, onclick: () => servo(row, 'off', state, changed) }, `${spec.power} 끄기`)
           : h('button', { class: 'btn btn-mini', type: 'button', disabled: busy || row.fault || !row.detected, onclick: () => servo(row, 'on', state, changed) }, `${spec.power} 켜기`),
-        row.ac ? h('button', { class: 'btn btn-mini', type: 'button', disabled: busy, title: '현재 값을 드라이브에 저장해 전원을 꺼도 유지 (모터 프로그램이 몇 초 정지 후 다시 시작)', onclick: () => maintenance(row, 'eeprom_save', state, changed) }, '드라이브 저장(EEPROM)') : null,
-        row.ac ? h('button', { class: 'btn btn-mini', type: 'button', disabled: busy || row.absolute === '정상', title: row.absolute === '정상' ? '이미 앱솔루트 방식입니다. 다시 설정하면 기준점이 사라집니다.' : '',
+        row.ac ? h('button', { class: 'btn btn-mini', type: 'button', disabled: busy, title: '현재 값을 드라이브에 저장, 전원 차단 후에도 유지 (모터 프로그램 수 초간 정지 후 재시작)', onclick: () => maintenance(row, 'eeprom_save', state, changed) }, '드라이브 저장(EEPROM)') : null,
+        row.ac ? h('button', { class: 'btn btn-mini', type: 'button', disabled: busy || row.absolute === '정상', title: row.absolute === '정상' ? '이미 앱솔루트 방식입니다. 재설정 시 기준점을 초기화합니다.' : '',
           onclick: () => absoluteSetup('one', row, state, changed) }, row.absolute === '정상' ? '앱솔루트 정상' : '앱솔루트 설정') : null,
         row.ac ? h('button', { class: 'btn btn-mini danger-text', type: 'button', disabled: busy, onclick: () => maintenance(row, 'absolute_clear', state, changed) }, '다회전 클리어') : null))),
     row.ac ? h('div', { class: 'detail-group' }, h('div', { class: 'field' },
       h('div', { class: 'group-title' }, 'EtherCAT Alias',
-        tip(['드라이브마다 다른 값을 써야 함 (0은 중복 가능, 케이블 순서로 구분)', '쓴 뒤 「전체 검색」으로 새 값 확인', '값이 바뀌지 않으면 드라이브 제어 전원을 껐다 켠 뒤 다시 검색'], 'Alias 설명')),
+        tip(['드라이브마다 다른 값을 써야 함 (0은 중복 가능, 케이블 순서로 구분)', '쓴 뒤 「전체 검색」으로 새 값 확인', '값이 변경되지 않은 경우 드라이브 제어 전원 재투입 후 재검색'], 'Alias 설명')),
       // 「지금」 이 아니라 마지막 검색 때 읽은 값 · 사용자 2026-10-13
       h('span', { class: 'muted small', text: `마지막 검색 때 읽은 값 ${motor.identity?.ethercat_alias ?? '-'} · Slave ${Number.isFinite(row.slavePosition) ? row.slavePosition : '-'}` }),
       h('div', { class: 'row' },
@@ -413,7 +413,7 @@ function tempCell(row, temps) {
 export function motorsActions(state, changed) {
   return h('div', { class: 'segmented', role: 'group', 'aria-label': '모터 검색' },
     Object.entries(SCAN_KINDS).map(([kind, spec]) => h('button', { class: 'seg', type: 'button', disabled: Boolean(ui.busy),
-      title: `${spec.label} 모터 다시 검색 (결과는 저장 전까지 화면에만 표시)`, onclick: () => scan(kind, state, changed) }, `${spec.label} 검색`)));
+      title: `${spec.label} 모터 재검색 (결과는 저장 전까지 화면에만 표시)`, onclick: () => scan(kind, state, changed) }, `${spec.label} 검색`)));
 }
 
 /** ② 모터·드라이브 구획 본문 · 머리와 저장 칸은 motor_setup.js */
@@ -434,7 +434,7 @@ export function motorsBody(state, changed) {
       ? h('div', { class: 'blocker' }, dot('warn'), h('span', { class: 'grow', text: `모터 프로그램: ${runtime.motor_manager_start_block_reason || runtime.message || runtime.phase}` })) : null,
     h('div', { class: `blocker ${abs.allOk ? 'ok' : ''}` }, dot(abs.allOk ? 'ok' : 'warn'),
       h('span', { class: 'grow' }, absoluteLine(abs),
-        abs.total ? tip(['앱솔루트 방식은 전원을 껐다 켜도 위치가 유지됨', '정상이 아닌 드라이브가 하나라도 있으면 모든 모터 동작 차단', '인크리멘털 방식으로 읽히면 「앱솔루트 설정」 버튼 표시'], '앱솔루트 설명') : null),
+        abs.total ? tip(['앱솔루트 방식은 전원 재투입 후에도 위치 유지', '비정상 드라이브가 1대라도 있을 경우 전체 모터 동작 차단', '인크리멘털 방식 확인 시 「앱솔루트 설정」 버튼 표시'], '앱솔루트 설명') : null),
       abs.needsSetup ? h('button', { class: 'btn btn-warn', type: 'button', disabled: Boolean(ui.busy) || ui.job?.state === 'running',
         title: ui.job?.state === 'running' ? '앱솔루트 설정이 진행 중입니다' : ui.busy ? '다른 작업(검색·저장)이 진행 중입니다' : undefined, onclick: () => absoluteSetup('all', null, state, changed) }, '앱솔루트 설정 (전체)') : null),
     jobText ? h('div', { class: `blocker ${ui.job.state === 'failed' ? 'bad' : ''}` }, dot(ui.job.state === 'failed' ? 'bad' : ui.job.state === 'reference_pending' ? 'warn' : 'info'),
@@ -487,7 +487,7 @@ export function motorsBody(state, changed) {
         const ok = await confirmBox({
           title: `모든 드라이브 저장(EEPROM) · ${axes.map((a) => `${a}번`).join(' · ')}`,
           body: '저장하는 동안(드라이브마다 최대 10초) 드라이브 전원을 끄지 마세요.\n'
-            + '모터 프로그램이 한 번 정지했다가 다시 시작되고, 그동안 서보 토크가 해제됩니다. 브레이크 없는 모터는 처질 수 있습니다.\n'
+            + '모터 프로그램이 1회 정지 후 재시작하며, 그동안 서보 토크를 해제합니다. 브레이크 없는 모터는 처질 수 있습니다.\n'
             + '드라이브의 현재 값(공통 설정, 게인 등)을 저장해 전원을 꺼도 유지되게 합니다.',
           confirmLabel: '저장', tone: 'warning',
         });

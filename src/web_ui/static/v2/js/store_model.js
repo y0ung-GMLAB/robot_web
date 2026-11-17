@@ -23,7 +23,7 @@ export function shortHash(hash) {
 export function protocolNote(theirs, mine) {
   const them = Number(theirs) > 0 ? String(theirs) : '번호 없음';
   const me = Number(mine) > 0 ? `, 현재 PC ${mine}` : '';
-  return `연동 버전이 달라 그룹 재생에서 제외됩니다 (해당 PC ${them}${me}). 「모든 PC 업데이트」를 누르세요.`;
+  return `연동 버전 불일치로 그룹 재생에서 제외합니다 (해당 PC ${them}${me}). 「모든 PC 업데이트」를 누르세요.`;
 }
 
 /** PC 한 줄 · 상태 글과 색 · 그룹 사람 표의 「재생 중」 같은 말을 쓴다 */
@@ -43,7 +43,7 @@ export function storeRows(snap) {
     if (pc.online === false) { status = '연결 안 됨'; tone = 'bad'; note = 'PC 전원과 Wi-Fi 연결을 확인하세요'; }
     else if (pc.protocol_mismatch) { status = '연동 버전 다름'; tone = 'bad'; note = protocolNote(pc.protocol_version, mine); }
     // 커밋만 다르다 · 연동 약속 번호가 같으면 그룹에서 빠지지 않는다(participant_rules) · 2026-10-13
-    else if (pc.version_differs && !speaker) { status = '버전 다름'; tone = 'warn'; note = '그룹 재생은 가능하지만 「모든 PC 업데이트」로 버전을 맞추세요'; }
+    else if (pc.version_differs && !speaker) { status = '버전 다름'; tone = 'warn'; note = '그룹 재생은 가능하지만 「모든 PC 업데이트」로 버전을 통일하세요'; }
     else if (Number(peer.servo_alarm_grade || 0) > 0) { status = '알람'; tone = 'bad'; }
     const role = speaker ? '스피커' : pc.is_master ? '마스터' : '슬레이브';
     const group = speaker ? (pc.same_group ? '같은 그룹' : '') : pc.joined ? '그룹 참여' : '그룹 미참여';

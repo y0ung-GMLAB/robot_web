@@ -121,7 +121,7 @@ def test_finish_cycle_then_park_then_power_off_only_flagged_motors(tmp_path):
     assert record['ac_servo'] == [0] and record['dynamixel'] == [2]
     status = service.status()
     assert status['state'] == 'done'
-    assert '켠 채 둠(모터 설정) 1번' in status['message']
+    assert '서보 유지(모터 설정) 1번' in status['message']
 
 
 def _barrier_robot(tmp_path, *, release_after_polls):
@@ -143,7 +143,7 @@ def _barrier_robot(tmp_path, *, release_after_polls):
         if robot['released']:
             return {'status': {
                 'state': 'stopped', 'group_execution': True, 'execution_id': 'exec-a',
-                'message': '구간 끝 · 회차 후 정지', 'phase_finished_at': 0.0,
+                'message': '운영 구간 종료: 회차 후 정지', 'phase_finished_at': 0.0,
             }}
         return {'status': {
             'state': 'motion_completed', 'phase': 'group_motion_completed',
@@ -209,8 +209,8 @@ def test_a_solo_motion_completed_is_still_a_finished_cycle():
 @pytest.mark.parametrize('kwargs, reason', [
     ({'states': ['running', 'error']}, '오류'),
     ({'states': ['completed'], 'alarm': 2}, '서보 알람'),
-    ({'states': ['completed'], 'init_ok': False}, '기준점 이동 거절'),
-    ({'states': ['completed', 'initializing', 'error']}, '끝나지 않음'),
+    ({'states': ['completed'], 'init_ok': False}, '기준점 이동 거부'),
+    ({'states': ['completed', 'initializing', 'error']}, '미완료'),
 ])
 def test_no_servo_off_when_parking_did_not_succeed(tmp_path, kwargs, reason):
     bridge, calls, runtime = _bridge(tmp_path, **kwargs)
@@ -415,7 +415,7 @@ def test_operating_hours_start_logs_the_servo_on_even_when_the_axes_are_in_the_s
     details = events[0][2]
     assert details['turned_on']['ac_servo'] == [0, 1]
     assert details['by_schedule_end']['ac_servo'] == [0] and details['woken']['ac_servo'] == [1]
-    assert '운영 종료 때 끈 축 AC 0번' in events[0][1] and 'AC 1번' in events[0][1]
+    assert '운영 종료 시 OFF한 축 AC 0번' in events[0][1] and 'AC 1번' in events[0][1]
 
 
 def test_a_rejoin_restoring_only_the_schedule_end_record_logs_no_operating_hours_event(tmp_path):
@@ -441,7 +441,7 @@ def test_a_servo_a_person_turned_on_and_off_again_is_not_called_schedule_end_off
     assert service.start_blocker(wake_all=True) == ''
     details = events[0][2]
     assert details['by_schedule_end']['ac_servo'] == [1] and details['woken']['ac_servo'] == [0]
-    assert '운영 종료 때 끈 축 AC 1번' in events[0][1] and '그 밖(사람이 끈 축 등) AC 0번' in events[0][1]
+    assert '운영 종료 시 OFF한 축 AC 1번' in events[0][1] and '기타(수동 OFF 축 등) AC 0번' in events[0][1]
 
 
 def test_turning_every_servo_on_by_hand_clears_the_schedule_end_record(tmp_path):
@@ -491,7 +491,7 @@ def test_a_failed_background_servo_on_is_reported_once_then_tried_again(tmp_path
     assert service.start_blocker(wake_all=True, wait=False) == WAKING_MESSAGE
     service._wake_thread.join(5)
     reason = service.start_blocker(wake_all=True, wait=False)
-    assert reason and reason != WAKING_MESSAGE and '켜지지 않았습니다' in reason, '실패 이유 · 연동 노드는 그 회차를 쉰다'
+    assert reason and reason != WAKING_MESSAGE and 'ON 되지 않았습니다' in reason, '실패 이유 · 연동 노드는 그 회차를 쉰다'
     assert service.start_blocker(wake_all=True, wait=False) == WAKING_MESSAGE, '이유는 한 번만 · 다음 물음은 다시 켜기'
     service._wake_thread.join(5)
 

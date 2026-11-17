@@ -540,7 +540,7 @@ def validate_motion_content(content: str) -> int:
     if not seen:
         raise ValueError(f'애니메이션 행을 찾지 못했습니다{f" · {warning}" if warning else ""}')
     if count == 0:
-        raise ValueError(f'재생할 수 있는 행이 없습니다 · {first_error or "형식 확인"}')
+        raise ValueError(f'재생 가능한 행이 없습니다: {first_error or "형식 확인"}')
     return count
 
 

@@ -715,8 +715,8 @@ class MotionWebBridge(Node):
             return
         for item in plan['exhausted']:
             text = (
-                f'{item["axis"]}번 모터 · Err{item["code"]} · 자동 오류 초기화 한도(1시간 3번) 넘음 · '
-                '이 헤드는 정지 그대로 · 사람 확인 필요'
+                f'{item["axis"]}번 모터 Err{item["code"]}: 자동 오류 초기화 한도(1시간 3회) 초과. '
+                '해당 헤드는 정지 상태를 유지합니다. 현장 확인이 필요합니다'
             )
             self.get_logger().error(text)
             self._motor_event_log.append('error', 'auto_fault_reset_exhausted', f'{item["axis"]}번 모터', text, item)
@@ -724,8 +724,8 @@ class MotionWebBridge(Node):
             axis = int(item['axis'])
             result = self._manual.ac_servo_control('fault_reset', axis, 'selected')
             text = (
-                f'{axis}번 모터 · Err{item["code"]} · 자동 오류 초기화 {item["attempt"]}/3 · '
-                f'{"성공" if result.get("success") else "실패 · " + str(result.get("message") or "")}'
+                f'{axis}번 모터 Err{item["code"]}: 자동 오류 초기화 {item["attempt"]}/3회 '
+                f'{"성공" if result.get("success") else "실패: " + str(result.get("message") or "")}'
             )
             self.get_logger().warning(text)
             self._motor_event_log.append('error', 'auto_fault_reset', f'{axis}번 모터', text, item)
@@ -1298,7 +1298,7 @@ class MotionWebBridge(Node):
                 reason = self.motor_runtime_control_blocker()
         except Exception:  # noqa: BLE001 · 못 보면 빈 값 · 준비 단계가 다시 본다
             reason = ''
-        text = f'실행 준비 안 됨 · {reason}'[:200] if reason else ''
+        text = f'실행 준비 미완료: {reason}'[:200] if reason else ''
         self._start_blocker_cache = (now, text)
         return text
 
@@ -1420,7 +1420,6 @@ class MotionWebBridge(Node):
         return result
 
 
-
     def _monitoring_mapping_rows_for_context(
         self,
         execution_context: Dict[str, Any],
@@ -1530,7 +1529,7 @@ class MotionWebBridge(Node):
         """
         managed = str(os.environ.get('MOTION_CONTROL_SERVICE_UNIT') or '').strip()
         if managed != 'motion-control.service':
-            return '자동실행 서비스가 아니라 재시작하지 않음'
+            return '자동 실행 서비스가 아니므로 재시작 생략'
         services = [managed]
         coordination = str(os.environ.get('MOTION_COORDINATION_SERVICE_UNIT') or '').strip()
         if coordination == 'motion-coordination.service':
@@ -1573,7 +1572,7 @@ class MotionWebBridge(Node):
         if not isinstance(motion_state, dict) or received_at is None:
             return '모터 상태를 아직 수신하지 못했습니다'
         if time.time() - float(received_at) > 1.0:
-            return '모터 상태 수신이 중단되었습니다'
+            return '모터 상태 수신 중단'
 
         motors = [
             motor for motor in motion_state.get('motors') or []
@@ -1690,40 +1689,11 @@ class MotionWebBridge(Node):
 
         return ''
 
-    def set_monitoring(self, enabled: bool, timeout_sec: float = 2.0) -> Dict[str, Any]:
-        if not self._monitoring_client.wait_for_service(timeout_sec=0.2):
-            return {
-                'success': False,
-                'message': f'monitoring service unavailable: {self.monitoring_service}',
-                **self.snapshot(),
-            }
-
-        request = SetBool.Request()
-        request.data = enabled
-        future = self._monitoring_client.call_async(request)
-        deadline = time.time() + timeout_sec
-        while not future.done() and time.time() < deadline:
-            time.sleep(0.02)
-
-        if not future.done():
-            return {
-                'success': False,
-                'message': 'monitoring service timeout',
-                **self.snapshot(),
-            }
-
-        response = future.result()
-        return {
-            'success': bool(response.success),
-            'message': response.message,
-            **self.snapshot(),
-        }
-
     def write_ethercat_alias(self, payload: Dict[str, Any]) -> Dict[str, Any]:
         if payload.get('confirmed') is not True:
             return {
                 'success': False,
-                'message': '확인을 받지 못해 EEPROM Alias 쓰기를 중단했습니다.',
+                'message': '확인 미수신으로 EEPROM Alias 쓰기를 중단했습니다.',
             }
         try:
             master_index = int(payload.get('master_index', 0))
@@ -1767,10 +1737,6 @@ class MotionWebBridge(Node):
             details=result,
         )
         return {'success': True, **result}
-
-
-
-
 
 
     def current_project_generation(self) -> int:
@@ -2207,7 +2173,7 @@ class MotionWebBridge(Node):
         rows = validation.get('rows')
         if not isinstance(rows, dict):
             return
-        message = '이 모터는 모터 설정에 없습니다. 재생할 때 이 모터는 건너뜁니다'
+        message = '해당 모터는 모터 설정에 없습니다. 재생 시 해당 모터는 제외합니다'
         warnings = validation.setdefault('warnings', [])
         for row in mapping.get('mappings') or []:
             if not isinstance(row, dict) or row.get('enabled') is False:
@@ -2311,8 +2277,8 @@ class MotionWebBridge(Node):
             if limits.get('changed'):
                 axes = ', '.join(str(item.get('controller_index')) for item in limits['changed'])
                 result['message'] += (
-                    f'. {axes}번 모터의 운전 한계를 바꿨습니다. 드라이브에 반영하려면 '
-                    '모터 설정에서 「장비에 적용 · 모터 재시작」을 누르세요'
+                    f'. {axes}번 모터의 운전 한계를 변경했습니다. 드라이브에 반영하려면 '
+                    '「모터 설정」에서 「저장 후 장비에 적용」을 누르세요'
                 )
             elif limits.get('success') is False:
                 result['message'] += f" · {limits.get('message')}"
@@ -2523,7 +2489,7 @@ class MotionWebBridge(Node):
                 category='system',
                 event_type='minas_multiturn_clear_marked',
                 target=' · '.join(f'{axis}번 모터' for axis in axes),
-                content=f'{multiturn_clear.message_for(axes)} · 다시 지정해 저장하기 전까지 재생·초기 위치 이동·스케줄·그룹 참가 막음',
+                content=f'{multiturn_clear.message_for(axes)}. 기준점 재지정 및 저장 전까지 재생·초기 위치 이동·스케줄·그룹 참여 차단',
                 details={'drives': [dict(drive) for drive in drives]},
             )
 
@@ -2541,7 +2507,7 @@ class MotionWebBridge(Node):
                 category='system',
                 event_type='minas_multiturn_clear_reference_set',
                 target=' · '.join(f'{axis}번 모터' for axis in released),
-                content='다회전 클리어 뒤 기준점을 다시 지정했습니다 · 이 축 표시 풀림 · 다른 프로젝트는 그 프로젝트에서 다시 지정할 때까지 막힘',
+                content='다회전 클리어 후 기준점 재지정을 완료했습니다. 해당 축 차단을 해제합니다(다른 프로젝트는 각 프로젝트에서 재지정 전까지 차단 유지)',
                 details={'axes': released},
             )
         return released
@@ -3056,19 +3022,6 @@ class MotionWebBridge(Node):
         return request_id
 
 
-
-
-
-
-
-
-
-
-
-
-
-
-
 def _safety_first_stop(bridge: MotionWebBridge, method, *args):
     """Hold final motor output before waiting for an upper-level source to stop."""
     safety_result = bridge.request_safety_stop(False)
@@ -3224,7 +3177,7 @@ def _leave_notice(bridge: MotionWebBridge) -> LeaveNotice:
         coordination = bridge.coordination
         if coordination is None:
             return {'success': True, 'skipped': True}
-        return coordination.notify_leaving('웹 서비스 다시 시작')
+        return coordination.notify_leaving('웹 서비스 재시작')
     return LeaveNotice(send)
 
 

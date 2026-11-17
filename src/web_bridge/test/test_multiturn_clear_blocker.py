@@ -14,7 +14,7 @@ from motion_common import multiturn_clear
 from motion_web_bridge import bridge_node
 from motion_web_bridge.bridge_node import MotionWebBridge
 
-REASON = '1번 모터 다회전 클리어 뒤 기준점 다시 지정 필요'
+REASON = '1번 모터 다회전 클리어 후 기준점 재지정 필요'
 
 
 class Log:
@@ -72,14 +72,14 @@ def test_a_clear_blocks_check_initialize_start_and_heartbeat_but_not_jog(tmp_pat
 
     # 그룹 하트비트 · 마스터가 선택 때 미리 뺀다
     bridge._execution_context = SimpleNamespace(terminal_block_reason=lambda: '')
-    assert bridge._cached_start_blocker() == f'실행 준비 안 됨 · {REASON}'
+    assert bridge._cached_start_blocker() == f'실행 준비 미완료: {REASON}'
 
     # 수동 조그는 그대로(모터를 움직이는 기능 판단에 넣지 않는다)
     assert bridge.motor_runtime_control_blocker() == ''
 
     status = bridge.multiturn_clear_status()
     assert status['pending_axes'] == [1] and status['blocked_axes'] == [1]
-    assert status['prompt'] == '다회전 클리어한 1번 모터 · 몸을 정면·수평에 맞추고 기준점을 다시 지정해 저장하세요'
+    assert status['prompt'] == '다회전 클리어한 1번 모터: 로봇을 정면·수평으로 정렬하고 기준점을 재지정해 저장하세요'
     assert status['not_aligned_label'] == '기준점 재지정 필요'
 
 
