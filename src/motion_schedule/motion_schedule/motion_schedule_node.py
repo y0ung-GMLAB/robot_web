@@ -500,7 +500,7 @@ class MotionScheduleNode(Node):
                     return
             self._manual_run_noted = False
             self.get_logger().info("[점검] 구간 밖인데 돌고 있다 · 회차 후 정지")
-            # 스케줄 모드에서 운영 시간이 끝났다 · 정지 뒤 PC 마다 제 설정대로
+            # 스케줄 모드에서 운영시간이 끝났다 · 정지 뒤 PC 마다 제 설정대로
             # 기준점 주차 → 서보 OFF · 수동·오프 모드는 멈추기만 (사람이 만지는 중일 수 있다) ·
             # 수정 목록 36
             self._execute_stop_after_cycle(

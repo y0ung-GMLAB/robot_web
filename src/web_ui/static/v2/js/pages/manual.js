@@ -168,8 +168,8 @@ export function manualBlocker(state, item) {
   if (snap.motor_action_blocker) return { text: String(snap.motor_action_blocker) };
   if (!item) return { text: '모터를 선택하세요' };
   if (!item.detected) return { text: `${item.axis}번 모터와 통신이 되지 않습니다` };
-  if (item.fault) return { text: `${item.axis}번 모터에 알람이 있습니다. 오류를 초기화한 뒤 서보를 켜세요.`, fix: 'reset' };
-  if (item.ac && !item.servoOn) return { text: `${item.axis}번 서보가 꺼져 있습니다`, fix: 'servo-on' };
+  if (item.fault) return { text: `${item.axis}번 모터에 알람이 있습니다. 오류를 초기화한 뒤 「서보 ON」을 누르세요.`, fix: 'reset' };
+  if (item.ac && !item.servoOn) return { text: `${item.axis}번 모터 서보 OFF 상태입니다`, fix: 'servo-on' };
   if (!item.row) return { text: `조인트 매핑에 ${item.axis}번 모터 줄이 없거나 「사용」이 꺼져 있습니다`, fix: 'open-mapping' };
   return null;
 }
@@ -182,7 +182,7 @@ function fixButton(blocker, item, changed) {
     'open-mapping': ['조인트 매핑 열기', () => { location.hash = '#/mapping'; }],
     'open-motors': ['모터 설정 열기', () => { location.hash = '#/motors'; }],
     reset: ['오류 초기화', async () => { await act.servoControl(item, 'reset'); changed(); }],
-    'servo-on': ['서보 켜기', async () => { await act.servoControl(item, 'on'); changed(); }],
+    'servo-on': ['서보 ON', async () => { await act.servoControl(item, 'on'); changed(); }],
   };
   const entry = map[blocker?.fix];
   return entry ? h('button', { class: 'btn btn-warn', type: 'button', onclick: entry[1] }, entry[0]) : null;
@@ -582,10 +582,10 @@ function axisPanel(state, changed, item) {
       h('span', { class: 'field-label', text: `서보 · ${item.label}` }),
       h('div', { class: 'row' },
         dot(item.fault ? 'bad' : item.servoOn ? 'ok' : 'warn'),
-        h('span', { class: 'grow', text: `${item.servoOn ? '켜짐' : '꺼짐'} · ${item.fault ? '알람' : '알람 없음'}` }),
+        h('span', { class: 'grow', text: `${item.servoOn ? 'ON' : 'OFF'} · ${item.fault ? '알람' : '알람 없음'}` }),
         item.servoOn
-          ? h('button', { class: 'btn btn-mini', type: 'button', onclick: async () => { endSession(true); await act.servoControl(item, 'off'); changed(); } }, item.ac ? '서보 끄기' : '토크 끄기')
-          : h('button', { class: 'btn btn-mini', type: 'button', disabled: item.fault || !item.detected, onclick: async () => { await act.servoControl(item, 'on'); changed(); } }, item.ac ? '서보 켜기' : '토크 켜기'),
+          ? h('button', { class: 'btn btn-mini', type: 'button', onclick: async () => { endSession(true); await act.servoControl(item, 'off'); changed(); } }, item.ac ? '서보 OFF' : '토크 OFF')
+          : h('button', { class: 'btn btn-mini', type: 'button', disabled: item.fault || !item.detected, onclick: async () => { await act.servoControl(item, 'on'); changed(); } }, item.ac ? '서보 ON' : '토크 ON'),
         h('button', { class: 'btn btn-mini', type: 'button', onclick: async () => { await act.servoControl(item, 'reset'); changed(); } }, item.ac ? '오류 초기화' : '재부팅'))),
     ui.message ? h('p', { class: 'tone-text-warn small', text: ui.message }) : null);
 }
@@ -708,7 +708,7 @@ export function renderManual(state, { changed }) {
               h('span', { class: 'axis-pick-head' }, h('strong', { text: a.label }),
                 h('span', { class: 'mono', 'data-live': 'joint', 'data-axis': String(a.axis), text: a.joint === null ? '-' : `${signedDeg(a.joint, 2)}°` })),
               h('span', { class: 'axis-pick-meta' }, dot(a.fault ? 'bad' : a.servoOn ? 'ok' : 'warn'),
-                h('span', { class: 'muted small', text: `${a.fault ? '알람' : a.servoOn ? '서보 켜짐' : '서보 꺼짐'} · ${a.axis}번 · ${a.ac ? 'AC' : 'DXL'}${a.row ? ` · 1:${a.row.gear_ratio}` : ' · 매핑 없음'}` }),
+                h('span', { class: 'muted small', text: `${a.fault ? '알람' : a.servoOn ? '서보 ON' : '서보 OFF'} · ${a.axis}번 · ${a.ac ? 'AC' : 'DXL'}${a.row ? ` · 1:${a.row.gear_ratio}` : ' · 매핑 없음'}` }),
                 notAligned.has(a.axis) ? h('span', { class: 'chip chip-warn', text: NOT_ALIGNED_LABEL }) : null)))))),
           item ? axisPanel(state, changed, item) : null))
     ],

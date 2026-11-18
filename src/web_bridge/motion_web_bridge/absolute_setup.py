@@ -99,7 +99,7 @@ RESUME_EXPIRE_SEC = 24 * 3600.0
 RESUME_VERSION = 1
 
 STEPS = (
-    ('servo_off', '서보 끄기'),
+    ('servo_off', '서보 OFF'),
     ('write_mode', '앱솔루트 쓰기 · EEPROM 저장'),
     ('power_cycle_1', '드라이브 전원 재투입 1'),
     ('check_mode', '앱솔루트 방식 확인'),
@@ -551,7 +551,7 @@ class AbsoluteSetup:
             if not resumed:
                 targets = self._remember_identity(targets)
             if due('servo_off'):
-                self._step('servo_off', '대상 모터의 서보를 끕니다')
+                self._step('servo_off', '대상 모터를 서보 OFF 합니다')
                 self._servo_off_targets(targets)
             if due('write_mode'):
                 self._step('write_mode', 'Motor Manager를 정지하고 Pr0.15 = 0을 EEPROM에 저장합니다')
@@ -733,7 +733,7 @@ class AbsoluteSetup:
             if not still_on:
                 return
             if self._clock() >= deadline:
-                raise _Stop(f'{", ".join(str(axis) for axis in still_on)}번 모터의 서보가 꺼지지 않았습니다')
+                raise _Stop(f'{", ".join(str(axis) for axis in still_on)}번 모터가 서보 OFF 되지 않았습니다')
             self._pause(0.2)
 
     def _with_motor_manager_stopped(self, work: Callable[[], None]) -> None:

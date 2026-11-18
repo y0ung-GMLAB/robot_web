@@ -1035,7 +1035,7 @@ def test_roster_marks_missing_and_outside_pcs():
     result = node._start_group_execution()
 
     assert result['participants'] == ['pc-a', 'pc-b']
-    assert result['excluded'] == {'pc-c': '미접속', 'pc-x': '명단 외'}
+    assert result['excluded'] == {'pc-c': '미접속', 'pc-x': '미등록'}
 
 
 def test_disconnect_error_does_not_keep_the_store_down():

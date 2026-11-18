@@ -45,7 +45,7 @@ CLOCK_SAMPLES = 40
 #: 슬레이브가 마스터에 정지를 요청하는 그룹 명령 · 마스터만 처리
 TIMETABLE_STOP_COMMAND = 'timetable_stop'
 #: 스케줄이 시작을 원하지만 사람 그룹 정지가 그 운영시간 끝까지 유지 · 수정 목록 193
-STOP_HELD_MESSAGE = '그룹 정지 유지: 현재 운영 시간에는 재생하지 않습니다. 재개하려면 마스터를 수동 → 스케줄 모드로 전환하세요'
+STOP_HELD_MESSAGE = '그룹 정지 유지: 현재 운영시간에는 재생하지 않습니다. 재개하려면 마스터를 수동 → 스케줄 모드로 전환하세요'
 
 TIMETABLE_QOS = QoSProfile(
     depth=1, reliability=ReliabilityPolicy.RELIABLE, durability=DurabilityPolicy.TRANSIENT_LOCAL,
@@ -459,7 +459,7 @@ class TimetableMixin:
         """시간표 재생에서 정지 · 마스터 = 묶음에 정지 · 슬레이브 = 마스터에 요청 + 즉시 정지면 제 재생도"""
         if after_cycle and reason == SCHEDULE_END_REASON:
             # 운영시간 끝은 각 PC 가 시간표로 안다(회차 끝까지 → 주차) · 따로 할 일 없음
-            return {'success': True, 'message': '운영 시간 종료: 각 PC가 회차 완료 후 기준점 이동'}
+            return {'success': True, 'message': '운영시간 종료: 각 PC가 회차 완료 후 기준점 이동'}
         if self._config.is_master:
             updated, plan_id = timetable.stop_plan(
                 self._tt(), issuer=self._config.pc_id, after_cycle=after_cycle,
@@ -608,6 +608,9 @@ class TimetableMixin:
             'clock_warnings': sorted(pc for pc, item in peers.items() if item['clock_warning']),
             # 시간대 · 마스터(묶음) · 이 PC · 다른 PC 목록 · 표시만(한 PC 문제는 그 PC 만)
             'master_timezone': str(config.timezone or ''),
+            # 마스터 스케줄 항목 · 슬레이브 홈이 제 스케줄 대신 이것으로 오늘 운영시간을 그린다 · 표시만 · 2026-11-18
+            # 마스터 설정을 아직 못 받았으면 None
+            'master_schedules': [dict(item) for item in config.schedules] if config.version else None,
             'local_timezone': self._own_timezone(),
             'local_timezone_mismatch': self._timezone_differs(self._own_timezone()),
             'timezone_mismatches': sorted(pc for pc, item in peers.items() if item['timezone_mismatch']),

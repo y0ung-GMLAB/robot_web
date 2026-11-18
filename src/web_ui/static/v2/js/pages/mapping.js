@@ -275,7 +275,7 @@ function previewCard() {
   const validation = ui.validation;
   return h('section', { class: 'card', 'aria-label': '미리보기' },
     h('div', { class: 'card-head' }, h('h2', { text: `${row.motion_id || '(이름 없음)'} · 미리보기` })),
-    h('p', { class: 'mono' }, `조인트 +1° → 모터 ${signedDeg(view.perDegree, 2)}°${row.invert ? ' (반대)' : ''}`),
+    h('p', { class: 'mono' }, `조인트 +1° → 모터 ${signedDeg(view.perDegree, 2)}°`),
     h('p', { class: 'mono' }, `범위 ${signedDeg(Number(row.motion_lower_deg))} ~ ${signedDeg(Number(row.motion_upper_deg))}° → 모터 한계 ${signedDeg(view.motorMin)} ~ ${signedDeg(view.motorMax)}°`,
       tip(['장비 적용 시 드라이브 소프트 리밋으로 설정'], '모터 한계 설명')),
     validation ? h('div', { class: 'field' },

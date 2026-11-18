@@ -27,7 +27,7 @@ export function emergencyStop() {
   return attempt(async () => {
     await api('POST', '/api/safety/emergency-stop');
     await api('POST', '/api/motion-run/stop').catch(() => null);
-  }, '긴급 정지했습니다. 서보를 껐으며 프로그램 재시작 시 해제합니다.');
+  }, '긴급 정지했습니다. 서보 OFF 상태이며 프로그램 재시작 시 해제합니다.');
 }
 
 const MODE_CONFIRM = {
@@ -53,7 +53,7 @@ export function stopAfterCycle(group) {
 export async function updateAll() {
   const ok = await confirmBox({
     title: '모든 PC 업데이트',
-    body: '업데이트 중에는 해당 PC의 재생이 불가하며 화면 연결이 일시 중단됩니다.\n재생 중인 PC는 업데이트하지 않습니다.\nPC마다 수 분이 소요되므로 운영 시간 외에 진행하세요.',
+    body: '업데이트 중에는 해당 PC의 재생이 불가하며 화면 연결이 일시 중단됩니다.\n재생 중인 PC는 업데이트하지 않습니다.\nPC마다 수 분이 소요되므로 운영시간 외에 진행하세요.',
     confirmLabel: '업데이트', tone: 'warning',
   });
   if (!ok) return null;
@@ -63,7 +63,7 @@ export async function updateAll() {
 export async function faultReset() {
   // 알람이 없는 축은 서버가 건드리지 않는다(서보 그대로) · 수정 목록 112 가
   return attempt(() => api('POST', '/api/motion-test/ac-servo/control', { body: { action: 'fault_reset', scope: 'all' } }),
-    (r) => (r?.skipped_axes ? r.message : '오류를 초기화했습니다. 알람이 있던 모터는 원인을 확인한 뒤 서보를 켜세요.'));
+    (r) => (r?.skipped_axes ? r.message : '오류를 초기화했습니다. 알람이 있던 모터는 원인을 확인한 뒤 「서보 ON」을 누르세요.'));
 }
 
 /** 프로그램 재시작 · 확인 → 보냄 · 재생 중이면 서버가 `needs_stop` 으로 거절 → 두 번째 확인 →
@@ -184,10 +184,10 @@ export async function deleteSchedule(id, name) {
   return attempt(() => api('DELETE', `/api/schedule/${encodeURIComponent(id)}`), '삭제했습니다');
 }
 
-/** 운영 시간이 끝나면 · park_servo_off(기준점 → 서보 끔) | hold(그 자세로 버팀) */
+/** 운영시간이 끝나면 · park_servo_off(기준점 → 서보 끔) | hold(그 자세로 버팀) */
 export function saveEndAction(action) {
   return attempt(() => api('PUT', '/api/motion-run/automation', { body: { schedule_end_action: action } }),
-    action === 'hold' ? '저장했습니다. 운영 시간 종료 시 마지막 자세에서 정지하고 서보 토크를 유지합니다.' : '저장했습니다. 운영 시간 종료 시 기준점으로 이동한 뒤 서보를 끕니다.');
+    action === 'hold' ? '저장했습니다. 운영시간 종료 시 최종 위치에서 정지하고 서보 토크를 유지합니다.' : '저장했습니다. 운영시간 종료 시 기준점으로 이동한 뒤 서보 OFF 합니다.');
 }
 
 /* ---------- 매장 PC ---------- */
@@ -216,15 +216,15 @@ export async function leaveGroup() {
   return attempt(() => api('POST', '/api/coordination/control', { body: { command: 'leave' }, timeoutMs: 7000 }), '그룹 참여를 껐습니다');
 }
 
-/** 필수 명단 · 그룹 시작 때 빠지면 「미접속」 으로 적고 나머지로 시작 */
+/** 등록 PC 목록 · 그룹 시작 때 빠지면 「미접속」 으로 적고 나머지로 시작 */
 export async function saveRoster(list) {
   const ok = await confirmBox({
-    title: '필수 명단 재지정',
-    body: `현재 연결된 ${list.length}대: ${list.join(', ')}\n\n그룹 시작 시 접속하지 않은 명단 PC는 「미접속」으로 기록하고 나머지 PC로 시작합니다.\n저장 시 연동 서비스를 1회 재시작합니다.`,
+    title: '등록 PC 목록 재지정',
+    body: `현재 연결된 ${list.length}대: ${list.join(', ')}\n\n그룹 시작 시 접속하지 않은 등록 PC는 「미접속」으로 기록하고 나머지 PC로 시작합니다.\n저장 시 연동 서비스를 1회 재시작합니다.`,
     confirmLabel: '지정',
   });
   if (!ok) return null;
-  return attempt(() => api('PUT', '/api/coordination/settings', { body: { required_peers: list }, timeoutMs: 20000 }), '필수 명단을 저장했습니다');
+  return attempt(() => api('PUT', '/api/coordination/settings', { body: { required_peers: list }, timeoutMs: 20000 }), '등록 PC 목록을 저장했습니다');
 }
 
 /* ---------- 애니메이션 ---------- */
@@ -326,15 +326,15 @@ export async function servoControl(motor, action) {
   const label = `${motor.axis}번${motor.name ? ` · ${motor.name}` : ''}`;
   if (action === 'off') {
     const ok = await confirmBox({
-      title: `${label} ${ac ? '서보' : '토크'} 끄기`,
+      title: `${label} ${ac ? '서보' : '토크'} OFF`,
       body: ac ? '브레이크가 없는 모터는 처질 수 있습니다.\n브레이크 보드에 연결된 모터는 브레이크로 위치를 유지합니다.'
         : '다이나믹셀은 브레이크가 없어 관절이 처질 수 있습니다.',
-      confirmLabel: '끄기', tone: 'warning',
+      confirmLabel: 'OFF', tone: 'warning',
     });
     if (!ok) return null;
   }
   if (action === 'reset' && !ac) {
-    const ok = await confirmBox({ title: `${label} 재부팅`, body: '재부팅 시 토크가 꺼지며, 브레이크가 없어 관절이 처질 수 있습니다.\n다회전 모드 모터는 회전 수 정보가 초기화되므로 재부팅 후 위치를 확인하세요.\n하드웨어 오류도 함께 해제합니다.', confirmLabel: '재부팅', tone: 'warning' });
+    const ok = await confirmBox({ title: `${label} 재부팅`, body: '재부팅 시 토크 OFF 상태가 되며, 브레이크가 없어 관절이 처질 수 있습니다.\n다회전 모드 모터는 회전 수 정보가 초기화되므로 재부팅 후 위치를 확인하세요.\n하드웨어 오류도 함께 해제합니다.', confirmLabel: '재부팅', tone: 'warning' });
     if (!ok) return null;
   }
   const map = ac ? { on: 'servo_on', off: 'servo_off', reset: 'fault_reset' } : { on: 'torque_on', off: 'torque_off', reset: 'reboot' };
@@ -342,7 +342,7 @@ export async function servoControl(motor, action) {
   const body = ac ? { action: map[action], scope: 'selected', axis: motor.axis } : { action: map[action], axis: motor.axis };
   return attempt(() => api('POST', path, { body, timeoutMs: 5000 }),
     action === 'reset' && ac
-      ? (r) => (r?.skipped_axes ? r.message : '오류를 초기화했습니다. 원인을 확인한 뒤 「서보 켜기」를 누르세요.')
+      ? (r) => (r?.skipped_axes ? r.message : '오류를 초기화했습니다. 원인을 확인한 뒤 「서보 ON」을 누르세요.')
       : (r) => r?.message || '명령을 보냈습니다');
 }
 
@@ -357,9 +357,9 @@ export async function servoAll(motors, action) {
   if (!detected.length) { toast('감지된 모터가 없습니다. 먼저 「전체 검색」을 누르세요.', 'warn'); return null; }
   if (action === 'off') {
     const ok = await confirmBox({
-      title: `모든 서보 끄기 · ${detected.length}대`,
+      title: `모든 서보 OFF · ${detected.length}대`,
       body: '브레이크가 없는 모터는 처질 수 있으므로 기구를 지지하고 주변에 사람이 없는지 확인하세요.\n브레이크 보드에 연결된 모터는 브레이크로 위치를 유지합니다.',
-      confirmLabel: '모두 끄기', tone: 'warning',
+      confirmLabel: '모두 OFF', tone: 'warning',
     });
     if (!ok) return null;
   }
@@ -376,9 +376,8 @@ export async function servoAll(motors, action) {
       if (r && r.success === false) failed.push(`${m.axis}번 · ${r.message || '실패'}`);
     } catch (error) { failed.push(`${m.axis}번 · ${error.message || error}`); }
   }
-  const verb = action === 'on' ? '켰습니다' : '껐습니다';
   if (failed.length) toast(`일부 모터에서 실패했습니다: ${failed.join(', ')}`, 'bad');
-  else toast(`모든 서보를 ${verb} (${detected.length}대)`, 'ok');
+  else toast(`모든 서보 ${action === 'on' ? 'ON' : 'OFF'} (${detected.length}대)`, 'ok');
   return failed.length === 0;
 }
 

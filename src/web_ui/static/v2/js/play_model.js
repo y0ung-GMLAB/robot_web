@@ -232,7 +232,7 @@ export function playHeadline(snap) {
   else if (status.run_mode === 'once') parts.push('1회');
   if (status.group_execution) parts.push(status.automation?.group_sync_mode === 'independent' ? '개별 재생' : '회차 동기화');
   const STATE_TEXT = {
-    initializing: '초기 위치로 천천히 이동 중', countdown: '곧 시작', running: '재생 중', verifying: '도착 확인 중',
+    initializing: '초기 위치로 이동 중', countdown: '곧 시작', running: '재생 중', verifying: '도착 확인 중',
     waiting: '다음 회차 대기 중', recovering: '자동 복구 중', stopping: '정지 중', preparing: '준비 중',
     completed: '완료', stopped: '정지 상태', error: '오류로 정지', initialized: '초기 위치에서 대기 중',
   };

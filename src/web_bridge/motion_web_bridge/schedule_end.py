@@ -1,6 +1,6 @@
 """스케줄이 끝나면 · 기준점 주차 → 서보 OFF · 수정 목록 36 (2026-10-06)
 
-전에는 운영 시간이 끝나면 「현재 회차 후 정지」 만 했다 · 애니메이션 마지막
+전에는 운영시간이 끝나면 「현재 회차 후 정지」 만 했다 · 애니메이션 마지막
 프레임 자세에서 서보가 켜진 채 밤새 서 있었다(발열·전력·사람이 만지면 버팀).
 
 이제 이 PC 의 프로젝트 설정(`schedule_end_action`)을 따른다.
@@ -45,7 +45,7 @@ PARK_MOVE_SEC = 10.0
 PARK_WAIT_SEC = PARK_MOVE_SEC + 40.0
 SERVO_ON_WAIT_SEC = 5.0
 #: 운영시간 첫 회차 준비 · 따로 스레드가 꺼진 서보를 켜는 중 · 연동 노드는 이 답을 받으면 쉬지 않고 다시 묻는다 · 수정 목록 217
-WAKING_MESSAGE = '운영 시간 시작: 서보 ON 진행 중'
+WAKING_MESSAGE = '운영시간 시작: 서보 ON 진행 중'
 POLL_SEC = 0.5
 # 191 ⑤ 의 「정지 처리 중」 거절 → 1 s 간격 4번 다시(`STOP_SETTLE_RETRY_SEC` · `STOP_SETTLE_RETRIES`)는 없앴다 ·
 # 감독이 정지 뒤 0.5 s 동안 모든 명령을 막던 것을 정지 표지로 바꿨다 · 정지 직후의 기준점 이동은 새 표지로
@@ -161,7 +161,7 @@ def idle_park_skip(
         if motor.get('controller_index') is not None and flags.get(int(motor['controller_index']), True)
     ]
     if not targets:
-        return 'skipped', '운영 종료: 「운영 시간 종료 시 서보 끄기」 대상 모터가 없어 기준점 이동을 생략합니다'
+        return 'skipped', '운영 종료: 「운영시간 종료 시 서보 OFF」 대상 모터가 없어 기준점 이동을 생략합니다'
     off = sorted(int(motor['controller_index']) for motor in targets if motor.get('servo_on') is False)
     if len(off) == len(targets):
         return 'skipped', '운영 종료: 서보 OFF 상태이므로 현재 상태를 유지합니다'
@@ -252,7 +252,7 @@ def end_notice(
             'title': f'운영 종료 기준점 이동 실패 ({attempts}/{max_attempts}회)',
             'detail': (
                 f'{reason}. 약 1분 후 재시도합니다. {max_attempts}회 모두 실패 시 '
-                '현재 위치에서 서보를 끕니다(「운영 시간 종료 시 서보 끄기」 선택 모터만).'
+                '현재 위치에서 서보 OFF 합니다(「운영시간 종료 시 서보 OFF」 선택 모터만).'
             ),
         }
     if state == 'gave_up':
@@ -266,7 +266,7 @@ def end_notice(
             'tone': 'warn',
             'title': '운영 종료 기준점 이동 불가: 현재 위치에서 서보 OFF',
             'detail': (
-                f'{reason}. 기준점이 아닌 위치에서 서보를 껐습니다. 다음 운영 시작 시 서보를 켭니다. '
+                f'{reason}. 기준점이 아닌 위치에서 서보 OFF 했습니다. 다음 운영 시작 시 서보 ON 합니다. '
                 '헤드가 있는 로봇은 처짐 여부를 확인하세요.'
             ),
         }
@@ -574,7 +574,7 @@ class ScheduleEndService:
         except Exception as exc:  # noqa: BLE001 · 실패는 기록하고 홀드
             message = f'예기치 않은 오류: {exc}'
             self._set(
-                'failed', f'운영 종료: 서보를 끄지 않고 현재 상태를 유지했습니다 ({message})',
+                'failed', f'운영 종료: 서보 OFF 없이 현재 상태를 유지했습니다 ({message})',
                 notice=end_notice('gave_up', reason=message, detail='기준점 이동 중 오류', bad=True),
             )
             self._event('schedule_end_park_failed', f'기준점 이동 실패: {message}', {})
@@ -990,7 +990,7 @@ class ScheduleEndService:
             ac_axes = sorted(set(ac_axes) | set(extra_ac))
             dxl_axes = sorted(set(dxl_axes) | set(extra_dxl))
             if alarmed:
-                self._set('idle', f'운영 시간 시작: 알람 모터는 서보 ON 제외{_axes_text("모터", alarmed)}')
+                self._set('idle', f'운영시간 시작: 알람 모터는 서보 ON 제외{_axes_text("모터", alarmed)}')
         if not ac_axes and not dxl_axes:
             return None
         on_now = self._servos_on_now()
@@ -1041,11 +1041,11 @@ class ScheduleEndService:
             by_end = {key: [axis for axis in axes if axis in recorded[key]] for key, axes in turned_on.items()}
             woken = {key: [axis for axis in axes if axis not in recorded[key]] for key, axes in turned_on.items()}
             text = (
-                '운영 시간 시작: 서보 ON 완료'
+                '운영시간 시작: 서보 ON 완료'
                 + _group_text('운영 종료 시 OFF한 축', by_end) + _group_text('기타(수동 OFF 축 등)', woken)
             )
             self._event('schedule_start_servo_on', text, {'woken': woken, 'by_schedule_end': by_end, 'turned_on': turned_on})
-        self._set('idle', '운영 종료 때 끈 서보를 다시 켰습니다', restored={'ac_servo': ac_axes, 'dynamixel': dxl_axes})
+        self._set('idle', '운영 종료 때 OFF 한 서보를 다시 ON 했습니다', restored={'ac_servo': ac_axes, 'dynamixel': dxl_axes})
         return ''
 
 

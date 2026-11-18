@@ -101,7 +101,7 @@ async function servo(row, action, state, changed) {
 
 async function servoAll(rows, action, state, changed) {
   if (ui.busy) return;
-  ui.busy = action === 'on' ? '모든 서보 켜기' : '모든 서보 끄기';
+  ui.busy = action === 'on' ? '모든 서보 ON' : '모든 서보 OFF';
   changed();
   try { await act.servoAll(rows, action); } finally {
     ui.busy = '';
@@ -116,11 +116,11 @@ function servoAllBar(rows, state, changed) {
   const on = detected.filter((r) => r.servoOn).length;
   const tone = on === detected.length ? 'ok' : on === 0 ? 'warn' : 'info';
   return h('div', { class: `blocker ${tone === 'ok' ? 'ok' : ''}` }, dot(tone),
-    h('span', { class: 'grow', text: `서보 켜짐 ${on}/${detected.length}${on < detected.length ? ' (서보가 꺼진 모터는 재생과 수동 조작 불가)' : ''}` }),
+    h('span', { class: 'grow', text: `서보 ON ${on}/${detected.length}` }),
     h('button', { class: 'btn btn-mini', type: 'button', disabled: Boolean(ui.busy) || on === detected.length,
-      title: '알람이 있는 모터는 먼저 오류 초기화 필요', onclick: () => servoAll(rows, 'on', state, changed) }, '모든 서보 켜기'),
+      title: '알람이 있는 모터는 먼저 오류 초기화 필요', onclick: () => servoAll(rows, 'on', state, changed) }, '모든 서보 ON'),
     h('button', { class: 'btn btn-mini', type: 'button', disabled: Boolean(ui.busy) || on === 0,
-      title: '브레이크 없는 모터는 처질 수 있음', onclick: () => servoAll(rows, 'off', state, changed) }, '모든 서보 끄기'));
+      title: '브레이크 없는 모터는 처질 수 있음', onclick: () => servoAll(rows, 'off', state, changed) }, '모든 서보 OFF'));
 }
 
 async function maintenance(row, action, state, changed) {
@@ -129,7 +129,7 @@ async function maintenance(row, action, state, changed) {
     // 클리어만 하는 길(드라이브 정비)도 앱솔루트 설정과 같은 표시를 남긴다 · 수정 목록 140 ④
     absolute_clear: { title: `${row.axis}번 다회전 클리어`, body: '위치 기준 변경으로 모든 프로젝트에서 해당 축의 기준점을 무효 처리합니다. 감속기가 있는 축은 육안으로 재정렬해야 합니다.\n기준점을 재지정해 저장하기 전까지 재생 · 초기 위치 이동 · 스케줄 · 그룹 참여를 차단합니다.\n엔코더 다회전 값을 0으로 초기화합니다. 완료 후 드라이브 전원을 재투입하세요.', tone: 'danger', label: '클리어' },
   }[action];
-  if (action === 'absolute_clear' && row.servoOn) { toast('다회전 클리어는 서보를 끈 뒤에 할 수 있습니다.', 'warn'); return; }
+  if (action === 'absolute_clear' && row.servoOn) { toast('다회전 클리어는 서보 OFF 상태에서만 할 수 있습니다.', 'warn'); return; }
   const ok = await confirmBox({ ...texts, confirmLabel: texts.label });
   if (!ok) return;
   const result = await run(`${row.axis}번 드라이브 관리`, () => api('POST', '/api/motor-config/drive-maintenance', {
@@ -359,16 +359,16 @@ function detailCard(state, changed, row) {
     '과부하율 읽기', h('span', { class: 'small tone-text-warn', text: '드라이브 Ver1.03 이상만' }),
     tip(['드라이브 소프트웨어 Ver1.03 미만에서는 모터 프로그램 시작 불가'], '과부하율 읽기 설명')) : null,
     h('label', { class: 'inline' }, h('input', { type: 'checkbox', checked: motor.config?.schedule_end_servo_off !== false,   // 안 적었으면 켬 · 서버(schedule_end.motor_turns_off_at_end)와 같게 · 2026-10-13
-      onchange: (e) => { setField(motor, 'schedule_end_servo_off', e.target.checked); changed(); } }), '운영 시간 종료 시 서보 끄기 (스케줄 모드)')),
+      onchange: (e) => { setField(motor, 'schedule_end_servo_off', e.target.checked); changed(); } }), '운영시간 종료 시 서보 OFF')),
     // 드라이브 게인 · 잠금 · 재시작 없이 쓰기 · 수정 목록 108 (다)
     row.ac ? h('div', { class: 'detail-group' }, gainField(row, changed, () => loadMotors(state, changed, { force: true }))) : null,
     h('div', { class: 'detail-group' }, h('div', { class: 'field' },
       h('div', { class: 'group-title', text: '드라이브 관리' }),
       h('div', { class: 'row' },
-        h('button', { class: 'btn btn-mini', type: 'button', disabled: busy, onclick: () => servo(row, 'reset', state, changed) }, row.ac ? `오류 초기화${row.fault ? '' : ' (알람 없음)'}` : '재부팅'),
+        h('button', { class: 'btn btn-mini', type: 'button', disabled: busy, onclick: () => servo(row, 'reset', state, changed) }, row.ac ? '오류 초기화' : '재부팅'),
         row.servoOn
-          ? h('button', { class: 'btn btn-mini', type: 'button', disabled: busy, onclick: () => servo(row, 'off', state, changed) }, row.ac ? '서보 끄기' : '토크 끄기')
-          : h('button', { class: 'btn btn-mini', type: 'button', disabled: busy || row.fault || !row.detected, onclick: () => servo(row, 'on', state, changed) }, row.ac ? '서보 켜기' : '토크 켜기'),
+          ? h('button', { class: 'btn btn-mini', type: 'button', disabled: busy, onclick: () => servo(row, 'off', state, changed) }, row.ac ? '서보 OFF' : '토크 OFF')
+          : h('button', { class: 'btn btn-mini', type: 'button', disabled: busy || row.fault || !row.detected, onclick: () => servo(row, 'on', state, changed) }, row.ac ? '서보 ON' : '토크 ON'),
         row.ac ? h('button', { class: 'btn btn-mini', type: 'button', disabled: busy, title: '현재 값을 드라이브에 저장, 전원 차단 후에도 유지 (모터 프로그램 수 초간 정지 후 재시작)', onclick: () => maintenance(row, 'eeprom_save', state, changed) }, '드라이브 저장(EEPROM)') : null,
         row.ac ? h('button', { class: 'btn btn-mini', type: 'button', disabled: busy || row.absolute === '정상', title: row.absolute === '정상' ? '이미 앱솔루트 방식입니다. 재설정 시 기준점을 초기화합니다.' : '',
           onclick: () => absoluteSetup('one', row, state, changed) }, row.absolute === '정상' ? '앱솔루트 정상' : '앱솔루트 설정') : null,
@@ -427,7 +427,7 @@ export function motorsBody(state, changed) {
     resume && !resume.inline ? h('div', { class: 'blocker bad' }, dot('bad'), h('span', { class: 'grow', text: resume.text }), resumeButton(resume, state, changed)) : null,
     faults.map((row) => h('div', { class: 'issue issue-bad' }, dot('bad'),
       h('div', { class: 'issue-text' }, h('strong', { text: `${row.axis}번 · ${row.name} · ${row.error || '알람'}` }),
-        h('span', { text: '기구에 걸린 것이 없는지 확인한 뒤 오류를 초기화하고 서보를 켜세요' })),
+        h('span', { text: '기구에 걸린 것이 없는지 확인한 뒤 오류를 초기화하고 「서보 ON」을 누르세요' })),
       h('button', { class: 'btn btn-danger-soft', type: 'button', disabled: Boolean(ui.busy), onclick: () => servo(row, 'reset', state, changed) }, row.ac ? '오류 초기화' : '재부팅'))),
     servoAllBar(rows, state, changed),
     // 게인 알림 · 막지 않음 · 108 (나) · 자동조정 꺼짐 알림 · 「자동조정 켜기」 는 뺌(사용자 2026-11-04)

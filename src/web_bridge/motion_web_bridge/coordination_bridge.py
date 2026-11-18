@@ -478,7 +478,7 @@ READINESS_SLOW_LOG_MS = 1000.0
 _READINESS_STEPS = (
     ('context_ms', '실행 컨텍스트'),
     ('selection_ms', '재생 파일'),
-    ('servo_ms', '서보 켜기'),
+    ('servo_ms', '서보 ON'),
     ('check_ms', '실행 준비 검사 왕복'),
 )
 

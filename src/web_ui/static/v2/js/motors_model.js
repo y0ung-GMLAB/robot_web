@@ -48,8 +48,8 @@ export function motorRows(registry, snap) {
     const live = runtime.get(axis) || {};
     const drive = drives.get(axis);
     const ac = isAc(motor);
-    let servo = live.state !== 'detected' ? ['통신 없음', 'bad'] : live.fault ? ['알람', 'bad'] : live.servo_on ? ['켜짐', 'ok'] : ['꺼짐', 'warn'];
-    if (!ac && live.state === 'detected') servo = live.fault ? ['오류', 'bad'] : live.servo_on ? ['토크 켜짐', 'ok'] : ['토크 꺼짐', 'warn'];
+    let servo = live.state !== 'detected' ? ['통신 없음', 'bad'] : live.fault ? ['알람', 'bad'] : live.servo_on ? ['ON', 'ok'] : ['OFF', 'warn'];
+    if (!ac && live.state === 'detected') servo = live.fault ? ['오류', 'bad'] : live.servo_on ? ['토크 ON', 'ok'] : ['토크 OFF', 'warn'];
     const position = live.position_rad === null || live.position_rad === undefined ? null : Number(live.position_rad) * 180 / Math.PI;
     const [absText, absTone] = !ac ? ['-', 'idle'] : drive ? (ABS_TEXT[drive.status] || [String(drive.status), 'warn']) : ['-', 'idle'];
     return {
@@ -248,7 +248,7 @@ export function motorChanges(saved, draft) {
     const old = before.get(motor.id);
     if (!old) { out.push(`${motor.axis}번 ${motor.name || ''} 추가`.replace('  ', ' ')); continue; }
     if (Number(old.axis) !== Number(motor.axis)) out.push(`${motor.name || motor.id} 번호 ${old.axis} → ${motor.axis}`);
-    for (const field of EDIT_FIELDS.concat([{ key: 'overload_monitor', label: '과부하율 읽기' }, { key: 'schedule_end_servo_off', label: '운영 시간 종료 시 서보 끄기 (스케줄 모드)' }])) {
+    for (const field of EDIT_FIELDS.concat([{ key: 'overload_monitor', label: '과부하율 읽기' }, { key: 'schedule_end_servo_off', label: '운영시간 종료 시 서보 OFF' }])) {
       const a = field.top ? old[field.key] : old.config?.[field.key];
       const b = field.top ? motor[field.key] : motor.config?.[field.key];
       const same = (a ?? '') === (b ?? '') || (Number.isFinite(Number(a)) && Number.isFinite(Number(b)) && a !== '' && b !== '' && Number(a) === Number(b));
@@ -279,7 +279,7 @@ export function absoluteClearRule() {
   return '다회전 클리어한 축은 위치 값 변경으로 모든 프로젝트에서 기준점 재지정이 필요합니다. 감속기가 있는 축은 육안으로 정렬해야 합니다.\n'
     + '기준점을 재지정해 저장하기 전까지 재생 · 초기 위치 이동 · 스케줄 · 그룹 참여를 차단합니다.\n'
     + '다회전 클리어는 4/7 단계에서 Err40(다회전 무효)이 발생한 드라이브만 실행합니다. Err40이 없는 경우 클리어하지 않으며 기준점도 유지합니다.\n'
-    + '대상 모터의 서보를 끄고 모터 프로그램을 잠시 정지합니다.';
+    + '대상 모터를 서보 OFF 하고 모터 프로그램을 잠시 정지합니다.';
 }
 
 /** 앞서 실패한 앱솔루트 설정 「재개」 · 서버가 남긴 기록(job.resume · 웹을 다시 켜도 남음) · 진행 중엔 없음 · 수정 목록 134

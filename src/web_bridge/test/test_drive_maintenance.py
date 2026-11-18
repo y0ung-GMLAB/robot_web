@@ -83,7 +83,7 @@ def test_eeprom_save_stops_writes_then_restores_motor_manager():
 def test_absolute_clear_needs_servo_off_and_asks_for_power_cycle():
     service, calls, _records = _service(servo_on=True)
     refused = service.run({'action': ABSOLUTE_CLEAR, 'axis': 1, 'confirmed': True})
-    assert refused['success'] is False and '서보를 먼저 끄세요' in refused['message']
+    assert refused['success'] is False and '먼저 서보 OFF 하세요' in refused['message']
     assert calls == []
 
     service, calls, _records = _service(servo_on=False)

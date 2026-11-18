@@ -24,10 +24,10 @@ const pcs = (...extra) => ({ coordination: { runtime: { network_pcs: [
   ...extra,
 ] } } });
 
-test('정상이면 한 문장 · 모드와 운영 시간', () => {
+test('정상이면 한 문장 · 모드와 운영시간', () => {
   const sched = { run_mode: 'schedule', active_schedule_id: 'a' };
   assert.deepEqual(headline(pcs(), sched).text, '정상 · 스케줄 운영 중');
-  assert.equal(headline(pcs(), { run_mode: 'schedule' }).text, '정상 · 운영 시간 외');
+  assert.equal(headline(pcs(), { run_mode: 'schedule' }).text, '정상 · 운영시간 외');
   assert.equal(headline(pcs(), { run_mode: 'manual' }).tone, 'info');
   assert.equal(modePhrase({ run_mode: 'off' }), '끔 · 명령 차단');
 });
@@ -145,7 +145,7 @@ test('모터 · 조인트 값이 있으면 조인트 deg · 알람·서보 꺼�
     { controller_index: 3, name: '빈 조인트', motion_actual_rad: null, position_rad: 0, servo_on: true, error_text: 'No error' },
   ] } });
   assert.deepEqual(chips.map((c) => [c.value, c.unit, c.tone, c.note]), [
-    ['+2.31°', '조인트', 'ok', '과부하율 18%'], ['−80.40°', '모터', 'warn', '서보 꺼짐'], ['-', '모터', 'bad', '알람 Err16.0'],
+    ['+2.31°', '조인트', 'ok', '과부하율 18%'], ['−80.40°', '모터', 'warn', '서보 OFF'], ['-', '모터', 'bad', '알람 Err16.0'],
     ['+0.00°', '모터', 'ok', ''],
   ]);
 });
@@ -181,7 +181,7 @@ test('오늘 스케줄 · 매일 · 요일 · 한 번 · 자정 넘김 · 꺼진
 });
 
 test('새 UI 는 기존 화면 코드를 가져다 쓰지 않는다 · 따로 선다', () => {
-  for (const file of ['main.js', 'shell.js', 'net.js', 'actions.js', 'play_model.js', 'schedule_model.js', 'store_model.js', 'anim_model.js', 'pages/home.js', 'pages/play.js', 'pages/schedule.js', 'pages/store.js', 'pages/animations.js', 'pages/playlist_card.js', 'markdown.js', 'pages/docs.js', 'pages/tools.js', 'pages/alarms.js', 'pages/network.js', 'pages/backup.js', 'dialog.js', 'net.js', 'pages/pack.js', 'zip_store.js', 'records_model.js', 'pages/records.js', 'mapping_model.js', 'pages/mapping.js', 'motors_model.js', 'pages/motors.js', 'pages/minas_base.js', 'pages/drive_gains.js', 'pages/drive_params.js', 'pages/manual.js', 'dial_session.js', 'manual_stream.js', 'viewer3d.js']) {
+  for (const file of ['main.js', 'shell.js', 'net.js', 'actions.js', 'play_model.js', 'schedule_model.js', 'store_model.js', 'anim_model.js', 'pages/home.js', 'pages/play.js', 'pages/schedule.js', 'pages/store.js', 'pages/animations.js', 'pages/playlist_card.js', 'pages/tools.js', 'pages/alarms.js', 'pages/network.js', 'pages/backup.js', 'dialog.js', 'net.js', 'pages/pack.js', 'zip_store.js', 'records_model.js', 'pages/records.js', 'mapping_model.js', 'pages/mapping.js', 'motors_model.js', 'pages/motors.js', 'pages/minas_base.js', 'pages/drive_gains.js', 'pages/drive_params.js', 'pages/manual.js', 'dial_session.js', 'manual_stream.js', 'viewer3d.js']) {
     const text = readFileSync(new URL(`../static/v2/js/${file}`, import.meta.url), 'utf8');
     // 기존 화면 코드는 안 쓴다 · 예외 하나 · 3D 순수 계산(sim3d_math.js)은 두 화면이 같은 시계·자세를 쓰게 함께 쓴다
     const imports = [...text.matchAll(/from '((?:\.\.\/)+js\/[^']+)'/g)].map((m) => m[1]);

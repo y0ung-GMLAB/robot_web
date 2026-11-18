@@ -1,6 +1,6 @@
 /** UI v2 · 스케줄 · 「자동 모드일 때 언제 켜고 끄나」 (설계안 2026-10-09)
  *
- * 이번 주를 한눈에 · 목록 · 바로 옆 편집 칸 · 운영 시간이 끝나면 무엇을.
+ * 이번 주를 한눈에 · 목록 · 바로 옆 편집 칸 · 운영시간이 끝나면 무엇을.
  * 슬레이브 PC 는 읽기만 · 마스터 화면으로 가는 길을 준다(서버도 저장을 거절한다 · §6-69).
  */
 import { h, dot } from '../dom.js';
@@ -15,7 +15,7 @@ import * as act from '../actions.js';
 
 const ui = { draft: null, busy: false };
 
-/** 이 화면만 쓰는 값 · 운영 시간 끝 동작 · 지난번 결과 · 목록은 바로 새로 */
+/** 이 화면만 쓰는 값 · 운영시간 끝 동작 · 지난번 결과 · 목록은 바로 새로 */
 export async function loadSchedule(state, changed) {
   const page = state.schedulePage || (state.schedulePage = { endAction: '', endMessage: '' });
   try {
@@ -52,7 +52,7 @@ function clockLine(sched) {
   return h('p', { class: 'muted small' },
     'PC 시각 ', h('span', { class: 'mono', text: time || '-' }),
     ` · ${clock.timezone || '시간대 알 수 없음'}`,
-    synced === true ? ' · 시계 동기화됨' : synced === false ? h('span', { class: 'tone-text-warn', text: ' · 시계 동기화 안 됨 (시간 서버에 연결되지 않음)' }) : null);
+    synced === true ? ' · 시계 동기화' : synced === false ? h('span', { class: 'tone-text-warn', text: ' · 시계 동기화 X' }) : null);
 }
 
 /* ---------- 이번 주 ---------- */
@@ -144,12 +144,12 @@ function endActionBlock(state, changed, canEdit) {
   const page = state.schedulePage || {};
   const current = page.endAction || 'park_servo_off';
   const options = [
-    ['park_servo_off', '회차 종료 후 기준점 이동, 서보 끄기'],
-    ['hold', '마지막 회차가 끝난 자세에서 정지 (서보 토크 유지)'],
+    ['park_servo_off', '종료 후 기준점 이동 (서보 OFF)'],
+    ['hold', '최종 위치에서 정지 (서보 토크 유지)'],
   ];
   return h('div', { class: 'field end-action' },
-    h('span', { class: 'field-label', text: '운영 시간이 끝나면' }),
-    h('div', { class: 'choice-list', role: 'radiogroup', 'aria-label': '운영 시간이 끝나면' },
+    h('span', { class: 'field-label', text: '운영시간이 끝나면' }),
+    h('div', { class: 'choice-list', role: 'radiogroup', 'aria-label': '운영시간이 끝나면' },
       options.map(([value, label]) => h('button', {
         class: 'choice', type: 'button', role: 'radio', 'aria-checked': String(current === value), disabled: ui.busy || !canEdit,
         onclick: () => busy(async () => { if (await act.saveEndAction(value)) page.endAction = value; }, state, changed),
@@ -179,7 +179,7 @@ function editCard(state, changed) {
       h('input', { class: 'input', type: 'text', value: draft.name, placeholder: NAME_HINT[kind], maxlength: '40', oninput: set('name') })),
     h('div', { class: 'field' },
       h('span', { class: 'field-label inline' }, '구분',
-        tip(['특정일 운영 · 휴무일로 지정한 날짜에는 정기 운영 대신 해당 설정을 적용', '전날 시작해 자정을 넘기는 운영 시간은 전날 설정을 따름'])),
+        tip(['특정일 운영 · 휴무일로 지정한 날짜에는 정기 운영 대신 해당 설정을 적용', '전날 시작해 자정을 넘기는 운영시간은 전날 설정을 따름'])),
       h('div', { class: 'segmented', role: 'group', 'aria-label': '구분' },
         KINDS.map(([value, label]) => h('button', {
           class: 'seg', type: 'button', 'aria-pressed': String(kind === value), onclick: () => { draft.kind = value; changed(); },
@@ -217,7 +217,7 @@ export function renderSchedule(state, { changed }) {
   return [
     h('div', { class: 'page-head' },
       h('h1', { text: '스케줄' }),
-      tip([`스케줄 모드에서는 아래 운영 시간에 따라 ${sched.coordination_joined ? '그룹 전체' : '로봇'} 재생을 자동으로 시작하고 정지`], '스케줄 설명'),
+      tip([`스케줄 모드에서는 아래 운영시간에 따라 ${sched.coordination_joined ? '그룹 전체' : '로봇'} 재생을 자동으로 시작하고 정지`], '스케줄 설명'),
       // 경고 자리는 늘 둔다(레이아웃 고정)
       h('p', { class: 'small tone-text-warn msg-slot', text: mode && mode !== 'schedule' ? `${RUN_MODE_LABEL[mode] || '-'} 모드에서는 스케줄이 실행되지 않습니다` : '' }),
       canEdit ? h('button', { class: 'btn btn-primary', type: 'button', disabled: ui.busy, onclick: () => { ui.draft = draftFrom(null); changed(); } }, '+ 새 스케줄') : null),

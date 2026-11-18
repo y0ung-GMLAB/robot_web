@@ -353,7 +353,7 @@ class DriveMaintenance:
             if motor.get('servo_on') is not False:
                 return {
                     'success': False,
-                    'message': f'{LABELS[action]} 불가: {axis}번 모터의 서보를 먼저 끄세요(서보 OFF 상태에서만 가능)',
+                    'message': f'{LABELS[action]} 불가: {axis}번 모터를 먼저 서보 OFF 하세요',
                 }
         if not self._lock.acquire(blocking=False):
             return {'success': False, 'message': f'{LABELS[action]} 불가: 다른 모터 작업 진행 중'}

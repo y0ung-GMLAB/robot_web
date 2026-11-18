@@ -67,7 +67,6 @@ from .routes import (
     register_safety_routes,
     register_system_routes,
     register_schedule_routes,
-    register_docs_routes,
     register_motion_trace_routes,
     register_stream_routes,
     register_robot_pack_routes,
@@ -3117,7 +3116,6 @@ def create_app(bridge: MotionWebBridge) -> FastAPI:
     register_motion_run_routes(app, bridge, _safety_first_stop)
     register_safety_routes(app, bridge)
     register_schedule_routes(app, bridge, project_call)
-    register_docs_routes(app, bridge)
     register_motion_trace_routes(app, bridge, project_call)
     register_stream_routes(app, bridge)
     register_robot_pack_routes(app, bridge)

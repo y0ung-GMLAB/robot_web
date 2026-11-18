@@ -137,4 +137,4 @@ def test_fault_reset_says_the_servo_is_now_off_and_what_to_do_next():
     supervisor = _supervisor({'state': 'ok'})
     success, message = supervisor._handle_ac_servo_control({'action': 'fault_reset', 'scope': 'all'})
     assert success is True
-    assert '서보 OFF 상태' in message and '서보 켜기' in message
+    assert '서보 OFF 상태' in message and '서보 ON' in message

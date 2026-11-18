@@ -20,7 +20,7 @@ from typing import Any, Dict
 
 AUTOMATION_VERSION = 1
 
-#: 운영 시간이 끝나면 · 이름은 `web_bridge/schedule_end.py` 와 같다 · 수정 목록 36
+#: 운영시간이 끝나면 · 이름은 `web_bridge/schedule_end.py` 와 같다 · 수정 목록 36
 SCHEDULE_END_ACTIONS = ('park_servo_off', 'hold')
 DEFAULT_SCHEDULE_END_ACTION = 'park_servo_off'
 
@@ -32,7 +32,7 @@ def default_automation_state() -> Dict[str, Any]:
         'dwell_sec': 0.0,
         # 그룹 PC 사이 맞춤 · 마스터의 값으로 그룹을 시작한다 · 수정 목록 35
         'group_sync_mode': DEFAULT_GROUP_SYNC_MODE,
-        # 운영 시간이 끝나면 · 기준점 주차 → 서보 OFF(기본) / 서보 유지 · 수정 목록 36
+        # 운영시간이 끝나면 · 기준점 주차 → 서보 OFF(기본) / 서보 유지 · 수정 목록 36
         'schedule_end_action': DEFAULT_SCHEDULE_END_ACTION,
         'motion_file_id': '',
         'mapping_file_id': '',

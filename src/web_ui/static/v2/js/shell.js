@@ -11,7 +11,7 @@ export const NAV = [
   { label: '작업', items: [['animations', '애니메이션'], ['manual', '수동 조작'], ['xtouch', 'X-Touch']] },
   { label: '설정', items: [['maintain-motors', '모터 설정'], ['pack', '로봇 팩·3D'],
     ['alarms', '드라이브 알람'], ['network', '네트워크·시간·그룹'], ['backup', '업데이트·백업']] },
-  { label: '기록·도구', items: [['records', '기록'], ['tools', '터미널 · PC 성능'], ['docs', '사용법']] },
+  { label: '기록·도구', items: [['records', '기록'], ['tools', '터미널 · PC 성능']] },
 ];
 
 /** 메뉴에 따로 없는 화면 → 메뉴에서 켜질 칸 · 조인트 매핑(①) · 모터·드라이브(②)는 「모터 설정」 한 페이지의 구획 */
@@ -57,7 +57,7 @@ export function createShell(root, { navigate }) {
     h('button', { class: 'seg', type: 'button', 'data-mode': mode, 'aria-pressed': 'false', onclick: () => act.setRunMode(mode) }, label));
   const modeGroup = h('div', { class: 'segmented', role: 'group', 'aria-label': '운전 모드' }, modeButtons);
   const stopButton = h('button', { class: 'btn btn-stop', type: 'button', title: '모든 움직임을 정지하고 서보 토크는 유지', onclick: act.stopAll }, '정지');
-  const estopButton = h('button', { class: 'btn btn-estop', type: 'button', title: '서보를 끄고 모든 명령 차단 (프로그램 재시작 시 해제)', onclick: act.emergencyStop }, '긴급 정지');
+  const estopButton = h('button', { class: 'btn btn-estop', type: 'button', title: '서보 OFF, 모든 명령 차단 (프로그램 재시작 시 해제)', onclick: act.emergencyStop }, '긴급 정지');
   const drawer = h('section', { id: 'issues-drawer', class: 'issues-drawer', hidden: true, 'aria-label': '확인할 일' });
   const menuButton = h('button', { class: 'btn btn-icon menu-toggle', type: 'button', 'aria-label': '메뉴', 'aria-expanded': 'false' }, '≡');
 

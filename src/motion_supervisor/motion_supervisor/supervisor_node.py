@@ -2914,7 +2914,7 @@ class MotionSupervisor(Node):
         # 보고 직접 켠다 · 사용자 결정 2026-10-07) · 다음 할 일을 문구에 적는다 · 수정 목록 71
         return True, (
             f'AC Servo Fault Reset command sent: axes {self._axis_list_text(axes)}. '
-            '오류 초기화를 완료했습니다. 서보 OFF 상태이므로 알람 원인을 확인한 뒤 「서보 켜기」를 누르세요'
+            '오류 초기화를 완료했습니다. 서보 OFF 상태이므로 알람 원인을 확인한 뒤 「서보 ON」을 누르세요'
         )
 
     def _handle_dynamixel_torque_control(

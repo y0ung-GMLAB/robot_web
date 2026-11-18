@@ -70,8 +70,8 @@ test('모터·드라이브 · 모든 서보 켜기·끄기 (사용자 2026-10-12
   const { readFileSync } = await import('node:fs');
   const page = readFileSync(new URL('../static/v2/js/pages/motors.js', import.meta.url), 'utf8');
   const actions = readFileSync(new URL('../static/v2/js/actions.js', import.meta.url), 'utf8');
-  assert.match(page, /'모든 서보 켜기'/);
-  assert.match(page, /'모든 서보 끄기'/);
+  assert.match(page, /'모든 서보 ON'/);
+  assert.match(page, /'모든 서보 OFF'/);
   assert.match(page, /servoAllBar\(rows, state, changed\)/);
   const body = actions.slice(actions.indexOf('export async function servoAll'), actions.indexOf('export function motionStop'));
   assert.match(body, /scope: 'all'/);
