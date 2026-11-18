@@ -1,4 +1,4 @@
-/** UI v2 · 매장 PC 화면 값 · PC 줄 · 주소 · 업데이트 표 · 필수 명단 후보 (설계안 2026-10-09) */
+/** UI v2 · 매장 PC 화면 값 · PC 줄 · 주소 · 업데이트 표 · 등록 PC 목록 후보 (설계안 2026-10-09) */
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { pcLinks, rosterCandidates, storeRows, updateRows, versionSummary } from '../static/v2/js/store_model.js';
@@ -50,6 +50,6 @@ test('업데이트 표 · 상태 글 · 버전 바뀜 · 실패 이유', () => {
   assert.deepEqual(updateRows(null), []);
 });
 
-test('필수 명단 후보 · 보이는 같은 그룹 로봇만 · 이름 순', () => {
+test('등록 PC 목록 후보 · 보이는 같은 그룹 로봇만 · 이름 순', () => {
   assert.deepEqual(rosterCandidates(snap), ['f1', 'f2', 'f3']);
 });

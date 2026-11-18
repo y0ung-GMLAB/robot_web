@@ -77,9 +77,9 @@ test('모터 표 · Feetech 줄 · AC 아님 · FT · 토크 · 재부팅 없음
     motor(2, 'feetech', { transport: 'serial', profile: { driver_model: 'STS3215' } }),
   ] }, snap);
   assert.deepEqual(rows.map((r) => [r.kindKey, r.ac, r.kind, r.servo]), [
-    ['ac_servo', true, 'AC · MINAS A6B', '켜짐'],
-    ['dynamixel', false, 'DXL · XM540-W150', '토크 켜짐'],
-    ['feetech', false, 'FT · STS3215', '토크 켜짐'],
+    ['ac_servo', true, 'AC · MINAS A6B', 'ON'],
+    ['dynamixel', false, 'DXL · XM540-W150', '토크 ON'],
+    ['feetech', false, 'FT · STS3215', '토크 ON'],
   ]);
   const ft = rows[2];
   assert.equal(kindSpec(ft.kindKey).power, '토크');
@@ -110,8 +110,8 @@ test('모터 표 · motor_type unknown · 칸 없음 · cubemars 줄은 전(HEAD
   ] }, snap);
   // HEAD 값 · ac = motor_type !== 'dynamixel' · kind 'AC…' · 서보 글 AC 식
   assert.deepEqual(rows.map((r) => [r.ac, r.kind, r.servo, r.absolute]), [
-    [true, 'AC · MINAS A6B', '꺼짐', '정상'],
-    [true, 'AC', '켜짐', '앱솔루트 아님'],
+    [true, 'AC · MINAS A6B', 'OFF', '정상'],
+    [true, 'AC', 'ON', '앱솔루트 아님'],
     [true, 'AC', '알람', '-'],
   ]);
   assert.deepEqual(rows[0].gains, gains);
@@ -184,7 +184,7 @@ test('수동 조작 · Feetech 은 서보 검사 없음 · 오류면 재부팅 �
   assert.equal(manualBlocker({ snap: {}, sched: manual }, item), null);
   const fault = manualBlocker({ snap: {}, sched: manual }, { ...item, fault: true });
   assert.equal(fault.fix, undefined, '재부팅 버튼 없음');
-  assert.match(fault.text, /토크를 껐다 켜세요/);
+  assert.match(fault.text, /토크 OFF 후 다시 ON 하세요/);
   // 모르는 종류(런타임 'unknown') · 전처럼 AC · 서보 꺼짐이면 서보 켜기 · 알람이면 오류 초기화
   const unknown = { ...item, kindKey: 'unknown', ac: true };
   assert.equal(manualBlocker({ snap: {}, sched: manual }, unknown).fix, 'servo-on');

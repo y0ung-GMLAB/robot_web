@@ -43,7 +43,7 @@ async function upload(blob, label) {
     return;
   }
   if (ui.busy) return;
-  ui.busy = `${label} (${(blob.size / 1e6).toFixed(1)} MB) 검사 중 (수십 초 걸릴 수 있음)`;
+  ui.busy = `${label} (${(blob.size / 1e6).toFixed(1)} MB) 검사 중 · 수십 초 소요`;
   ui.result = null;
   changed();
   try {
@@ -126,7 +126,7 @@ function packCard(state, changed) {
     ] : h('p', { class: 'muted', text: '로봇 팩이 없어 3D 동시 재생과 3D 계산을 할 수 없습니다' }),
     previous ? h('div', { class: 'row' }, h('button', { class: 'btn', type: 'button', disabled: Boolean(ui.busy), onclick: rollback }, `이전 팩(${previous.version || previous.name})으로 되돌리기`)) : null,
     h('div', { class: 'drop-zone' },
-      h('strong', {}, '새 팩 업로드', tip(['zip 파일이나 팩 폴더를 화면에 끌어다 놓아도 업로드 가능', '폴더는 브라우저에서 zip으로 압축한 뒤 업로드'], '새 팩 업로드 설명')),
+      h('strong', {}, '새 팩 업로드', tip(['zip 파일 · 팩 폴더 드래그 앤 드롭', '폴더는 브라우저에서 zip으로 압축한 뒤 업로드'], '새 팩 업로드 설명')),
       h('div', { class: 'row' },
         h('button', { class: 'btn btn-primary', type: 'button', disabled: Boolean(ui.busy), onclick: () => zipPicker.click() }, 'zip 파일 선택'),
         h('button', { class: 'btn', type: 'button', disabled: Boolean(ui.busy), onclick: () => dirPicker.click() }, '폴더 선택'),

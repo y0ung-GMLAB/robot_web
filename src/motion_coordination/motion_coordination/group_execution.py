@@ -399,7 +399,7 @@ class GroupExecution:
         self.sync_mode = GROUP_LOCKSTEP
         #: 각자 재생에서 제 회차를 끝내고 멈췄다고 알린 PC
         self.independent_stopped: set[str] = set()
-        #: 이번 실행에서 뺀 PC 와 이유 · 미접속·알람·끔 모드·명단 외 · 수정 목록 30
+        #: 이번 실행에서 뺀 PC 와 이유 · 미접속·알람·끔 모드·미등록 · 수정 목록 30
         self.excluded: Dict[str, str] = {}
         #: 누가 시작했나 · 사람(human) · 스케줄(schedule) · 참가 · 복귀 규칙이 다르다 · 수정 목록 122
         self.started_by = STARTED_BY_SCHEDULE

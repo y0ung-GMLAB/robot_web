@@ -2380,7 +2380,7 @@ class MotionCoordinationNode(TimetableMixin, Node):
         어제 참가했던 PC 1대가 안 켜지면 매장 전체가 1분마다 실패만 했다.
         이제는 빼고 나머지로 시작한다 · 뺀 PC 와 이유를 돌려준다(화면·기록).
 
-        명단(`required_peers`)이 있으면 명단 = 와야 할 PC · 명단 밖은 「명단 외」 로
+        명단(`required_peers`)이 있으면 명단 = 와야 할 PC · 명단 밖은 「미등록」 으로
         빼고, 명단에 있는데 안 보이면 「미접속」 으로 적는다. 명단이 없으면
         참가한 PC 전부가 후보다(옛 동작).
         """
@@ -2394,7 +2394,7 @@ class MotionCoordinationNode(TimetableMixin, Node):
         excluded: Dict[str, str] = {}
         if roster:
             for pc_id in sorted(candidates - roster):
-                excluded[pc_id] = '명단 외'
+                excluded[pc_id] = '미등록'
             candidates &= roster
             for pc_id in sorted(roster - candidates):
                 excluded[pc_id] = '미접속'
@@ -4322,7 +4322,7 @@ class MotionCoordinationNode(TimetableMixin, Node):
             if not master_gone or phase not in self._BARRIER_PHASES:
                 return
             if not operating:
-                self._autonomy_note(execution_id, '진행 PC 미확인: 운영 시간 정보 없음 또는 종료로 자체 진행 생략')
+                self._autonomy_note(execution_id, '진행 PC 미확인: 운영시간 정보 없음 또는 종료로 자체 진행 생략')
                 return
             if seen.get('execution_id') != execution_id or float(seen.get('period') or 0.0) <= 0.0:
                 self._autonomy_note(execution_id, '진행 PC 미확인: 주기 정보 없음(2회차 전)으로 자체 진행 생략')

@@ -108,7 +108,7 @@ export function updateRows(data) {
   });
 }
 
-/** 필수 명단 후보 · 지금 보이는 같은 그룹 로봇 PC (이 PC 포함) */
+/** 등록 PC 목록 후보 · 지금 보이는 같은 그룹 로봇 PC (이 PC 포함) */
 export function rosterCandidates(snap) {
   const pcs = snap?.coordination?.runtime?.network_pcs || [];
   return pcs.filter((pc) => pc.role !== 'speaker' && pc.online !== false && (pc.same_group !== false || pc.is_local))

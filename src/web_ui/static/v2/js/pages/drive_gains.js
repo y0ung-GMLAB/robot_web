@@ -27,7 +27,7 @@ export const GAIN_FIELDS = [
     meanings: null, note: '위치 지령 이동 평균 필터 (설정 시간만큼 추종 지연)'
       + '\n단위 0.1 ms (10 = 1.0 ms)'
       + '\n팩토리값 10'
-      + '\n모든 모터가 정지해 있을 때만 변경 가능 (동작 중에는 거절)'
+      + '\n모든 모터가 정지해 있을 때만 변경 가능'
       + '\n한 로봇의 모든 모터를 같은 값으로 설정' },
   { key: 'estimation_speed', label: '관성비 추정 속도', number: 'Pr6.31', min: 0, max: 3,
     meanings: { 0: '추정 안 함 (관성비 고정)', 1: '분 단위로 천천히 (팩토리값)', 2: '초 단위', 3: '최대한 빠르게 (부하가 급변하는 축)' } },
@@ -108,7 +108,7 @@ async function write(row, changed, reload) {
   const ok = await confirmBox({
     title: `${row.axis}번 게인 쓰기`,
     body: `${lines.join('\n')}\n\n${jump ? '강성을 한 번에 2칸 넘게 변경합니다. 진동 발생 시 즉시 「정지」를 누르고 값을 복원하세요.\n' : ''}`
-      + (stoppedOnly.length ? `${stoppedOnly.join(', ')}는 모든 모터가 정지해 있을 때만 바뀝니다(동작 중에는 거절).\n` : '')
+      + (stoppedOnly.length ? `${stoppedOnly.join(', ')}는 모든 모터가 정지해 있을 때만 바뀝니다.\n` : '')
       + '모터 정지 상태에서만 씁니다. 즉시 적용하며, 전원 차단 시 원래 값으로 복귀합니다.',
     confirmLabel: '쓰기', tone: jump ? 'danger' : 'warning',
   });

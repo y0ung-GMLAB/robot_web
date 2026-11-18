@@ -14,7 +14,6 @@ import { loadPlay, renderPlay } from './pages/play.js';
 import { loadSchedule, renderSchedule } from './pages/schedule.js';
 import { loadStore, renderStore } from './pages/store.js';
 import { loadAnimations, renderAnimations } from './pages/animations.js';
-import { loadDocs, renderDocs } from './pages/docs.js';
 import { renderTools } from './pages/tools.js';
 import { loadAlarms, renderAlarms } from './pages/alarms.js';
 import { loadNetwork, renderNetwork } from './pages/network.js';
@@ -33,7 +32,6 @@ const PAGES = {
   schedule: { render: renderSchedule, load: loadSchedule, reloadMs: 30000 },
   store: { render: renderStore, load: loadStore, reloadMs: 10000 },
   animations: { render: renderAnimations, load: loadAnimations, reloadMs: 10000 },
-  docs: { render: renderDocs, load: loadDocs },
   alarms: { render: renderAlarms, load: loadAlarms, reloadMs: 30000 },
   network: { render: renderNetwork, load: loadNetwork, reloadMs: 15000 },
   backup: { render: renderBackup, load: loadBackup, reloadMs: 5000 },

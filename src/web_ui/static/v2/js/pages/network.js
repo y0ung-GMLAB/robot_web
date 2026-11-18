@@ -160,7 +160,7 @@ function wifiCard(state, changed) {
     ui.pick ? [
       h('label', { class: 'field' }, h('span', { class: 'field-label', text: '비밀번호' }),
         h('input', { class: 'input', type: 'password', autocomplete: 'off', value: ui.password, oninput: (e) => { ui.password = e.target.value; }, onchange: () => changed() })),
-      h('label', { class: 'inline' }, h('input', { type: 'checkbox', checked: ui.useStatic, onchange: (e) => { ui.useStatic = e.target.checked; changed(); } }), '고정 IP (선택)'),
+      h('label', { class: 'inline' }, h('input', { type: 'checkbox', checked: ui.useStatic, onchange: (e) => { ui.useStatic = e.target.checked; changed(); } }), '고정 IP'),
       ui.useStatic ? h('div', { class: 'row' },
         h('label', { class: 'field grow' }, h('span', { class: 'field-label', text: '주소' }),
           h('input', { class: 'input mono', placeholder: '192.168.0.24/24', value: ui.address, oninput: (e) => { ui.address = e.target.value; }, onchange: () => changed() })),
@@ -203,7 +203,7 @@ function timeCard(state, changed) {
   return h('section', { class: 'card', 'aria-label': '시간대' },
     h('div', { class: 'card-head' }, h('h2', { text: '시간대' })),
     h('p', {}, h('strong', { text: clock.timezone || '-' }), ' · ', h('span', { class: 'mono', text: String(clock.local_time || '').slice(11, 19) || '-' }),
-      clock.ntp_synced === true ? ' · 시계 동기화됨' : clock.ntp_synced === false ? h('span', { class: 'tone-text-warn', text: ' · 시계 동기화 안 됨' }) : null),
+      clock.ntp_synced === true ? ' · 시계 동기화' : clock.ntp_synced === false ? h('span', { class: 'tone-text-warn', text: ' · 시계 동기화 X' }) : null),
     browserZone && clock.timezone && browserZone !== clock.timezone
       ? h('p', { class: 'tone-text-warn small', text: `브라우저(${browserZone})와 PC(${clock.timezone})의 시간대가 다릅니다. 해외 설치 PC인 경우 PC 시간대를 변경하세요.` }) : null,
     h('div', { class: 'row' },
@@ -212,7 +212,7 @@ function timeCard(state, changed) {
           zones.map((zone) => h('option', { value: zone, selected: zone === ui.zone }, zone)))
         : h('input', { class: 'input grow mono', value: ui.zone, 'aria-label': '시간대', oninput: (e) => { ui.zone = e.target.value; }, onchange: () => changed() }),
       h('button', { class: 'btn', type: 'button', disabled: ui.zoneBusy || !ui.zone, onclick: () => apply(false) }, `${localName(state)}에만 적용`),
-      h('button', { class: 'btn', type: 'button', disabled: ui.zoneBusy || !ui.zone, onclick: () => apply(true) }, '모든 PC에 적용 (스피커 포함)')));
+      h('button', { class: 'btn', type: 'button', disabled: ui.zoneBusy || !ui.zone, onclick: () => apply(true) }, '모든 PC에 적용')));
 }
 
 /* ---------- 이 PC ---------- */
@@ -257,7 +257,7 @@ function groupCard(state, changed) {
   // 상태가 오기 전에 초안을 만들면 빈 값이 굳는다 · 설정이 보일 때까지 기다린다
   if (!config.pc_id) {
     return h('section', { class: 'card', 'aria-label': '그룹 설정' },
-      h('div', { class: 'card-head' }, h('h2', { text: '그룹 설정 (처음 한 번만)' })),
+      h('div', { class: 'card-head' }, h('h2', { text: '그룹 설정 (최초 1회만 실시)' })),
       h('p', { class: 'muted', text: coord.config_error || '그룹 설정을 불러오는 중…' }));
   }
   if (!ui.group) {
@@ -299,7 +299,7 @@ function groupCard(state, changed) {
   const field = (key, label, attrs = {}) => h('label', { class: 'field' }, h('span', { class: 'field-label', text: label }),
     h('input', { class: 'input mono', value: String(form[key] ?? ''), ...attrs, oninput: (e) => { form[key] = e.target.value; }, onchange: () => changed() }));
   return h('section', { class: 'card', 'aria-label': '그룹 설정' },
-    h('div', { class: 'card-head' }, h('h2', {}, '그룹 설정 (처음 한 번만)',
+    h('div', { class: 'card-head' }, h('h2', {}, '그룹 설정 (최초 1회만 실시)',
       tip(['그룹 ID와 Domain이 같은 PC끼리 한 그룹으로 동작', '그룹 참여 켜기·끄기는 「PC 현황」 화면에서 설정'], '그룹 설정 설명'))),
     h('div', { class: 'field' }, h('span', { class: 'field-label', text: '역할' }),
       h('div', { class: 'segmented', role: 'group', 'aria-label': '역할' },

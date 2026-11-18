@@ -30,7 +30,7 @@ def _legacy_motion_run(motor, axis, is_ac_servo):
     if bool(motor.get('fault', False)):
         return f'{axis}번 모터에 에러가 있습니다'
     if is_ac_servo and motor.get('servo_on') is not True:
-        return f'{axis}번 모터 서보가 꺼져 있습니다'
+        return f'{axis}번 모터 서보 OFF 상태입니다'
     return ''
 
 
@@ -41,7 +41,7 @@ def _legacy_midi(motor, axis, is_ac_servo, limit_active):
         return f'{axis}번 모터에 에러가 있습니다'
     if is_ac_servo:
         if motor.get('servo_on') is not True:
-            return f'{axis}번 모터 서보가 꺼져 있습니다'
+            return f'{axis}번 모터 서보 OFF 상태입니다'
         if limit_active:
             return (
                 f'{axis}번 모터 내부 리밋 상태입니다. '
@@ -54,7 +54,7 @@ def _legacy_manual(motor, axis, is_ac_servo):
     if str(motor.get('state') or '') != 'detected':
         return f'{axis}번 모터가 감지되지 않았습니다'
     if is_ac_servo and motor.get('servo_on') is not True:
-        return f'{axis}번 모터 서보가 꺼져 있습니다'
+        return f'{axis}번 모터 서보 OFF 상태입니다'
     if bool(motor.get('fault', False)):
         return f'{axis}번 모터에 에러가 있습니다'
     return ''

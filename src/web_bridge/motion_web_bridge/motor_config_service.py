@@ -961,7 +961,7 @@ class MotorConfigService:
             'success': True,
             'message': (
                 '모터 제어 시스템 재시작을 시작했습니다. '
-                'AC 서보가 꺼졌다가 자동으로 다시 켜질 수 있습니다'
+                'AC 서보가 OFF 된 뒤 자동으로 다시 ON 될 수 있습니다'
             ),
             'restart_mode': 'motor_service',
             'motor_operation': self.repository.runtime.motor_operation_status(),

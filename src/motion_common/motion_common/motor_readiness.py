@@ -108,7 +108,7 @@ def readiness_error(
                 return f'{axis}번 모터에 에러가 있습니다'
         elif check == 'servo_on':
             if is_ac_servo and motor.get('servo_on') is not True:
-                return f'{axis}번 모터 서보가 꺼져 있습니다'
+                return f'{axis}번 모터 서보 OFF 상태입니다'
         elif check == 'internal_limit':
             if is_ac_servo and internal_limit_active:
                 return f'{axis}번 모터 {INTERNAL_LIMIT_MESSAGE}'

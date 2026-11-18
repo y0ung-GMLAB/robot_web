@@ -94,13 +94,13 @@ def _occupied(held: str, state: str, status: Mapping[str, Any]) -> bool:
     return not status.get('group_execution') and state in _SOLO_BUSY_STATES
 
 
-_SERVO_OFF = re.compile(r'(\d+)번 모터 서보가 꺼져 있습니다')
+_SERVO_OFF = re.compile(r'(\d+)번 모터 서보 OFF 상태입니다')
 
 
 def servo_off_reason(message: str) -> str:
-    """로컬 준비 검사 실패가 서보 꺼짐뿐이면 짧은 이유 · 「서보가 꺼져 있습니다(0~4번 모터)」 · 아니면 '' · 수정 목록 197
+    """로컬 준비 검사 실패가 서보 꺼짐뿐이면 짧은 이유 · 「서보 OFF 상태(0~4번 모터)」 · 아니면 '' · 수정 목록 197
 
-    재생 관리자 글 · 「그룹 모션 실행 실패: Motion ID f2_neck_pitch: 0번 모터 서보가 꺼져 있습니다; …」 · 조인트마다
+    재생 관리자 글 · 「그룹 모션 실행 실패: Motion ID f2_neck_pitch: 0번 모터 서보 OFF 상태입니다; …」 · 조인트마다
     `;` 로 이어진다 · 알람 · 감지 안 됨 같은 다른 이유가 하나라도 섞이면 오류 그대로 둔다.
     """
     parts = [part.strip() for part in str(message or '').split(';') if part.strip()]
@@ -112,7 +112,7 @@ def servo_off_reason(message: str) -> str:
         if not found:
             return ''
         axes.update(int(axis) for axis in found)
-    return f'서보가 꺼져 있습니다({_axis_ranges(sorted(axes))}번 모터)'
+    return f'서보 OFF 상태({_axis_ranges(sorted(axes))}번 모터)'
 
 
 def _axis_ranges(axes) -> str:
@@ -401,7 +401,7 @@ class ClockDriver:
             self._info(f'시간표 재생 · {plan_id} · 운영시간 끝 · 이 PC 가 {mode} 모드 · 사람이 맡음 · 주차 안 함')
             return False
         if self._finish is not None:
-            self._finish(plan_id, True, '운영 시간 종료: 그룹 정지 상태였던 PC')
+            self._finish(plan_id, True, '운영시간 종료: 그룹 정지 상태였던 PC')
         self._info(f'시간표 재생 · {plan_id} · 운영시간 끝 · 그룹 정지로 서 있던 PC · 기준점 주차 → 서보 OFF')
         return True
 
@@ -452,7 +452,7 @@ class ClockDriver:
         if slot is None:
             self._next_start_unix = 0.0
             # 회차 후 정지로 남은 회차가 없음 · 그 운영시간 끝까지 유지(193) · 「시간표 끝」 은 틀린 말 · 수정 목록 194
-            self._set_note('그룹 정지 유지 (운영 시간 종료까지)' if choice.stop_after else '시간표 종료')
+            self._set_note('그룹 정지 유지 (운영시간 종료까지)' if choice.stop_after else '시간표 종료')
             return
         self._next_start_unix = slot.start_unix
         skip_plan, skip_cycle = self._skip

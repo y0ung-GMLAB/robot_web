@@ -14,7 +14,7 @@ test('표 줄 · 설정과 지금 상태를 번호로 · 서보 · 위치 · 과
   } };
   const rows = motorRows({ motors: [motor(1, 'B'), motor(0, 'A'), motor(2, 'C', { deleted: true })] }, snap);
   assert.deepEqual(rows.map((r) => [r.axis, r.servo, r.position, r.load, r.absolute, r.error]), [
-    [0, '켜짐', 180, 104, '정상', ''], [1, '알람', null, null, '앱솔루트 아님', 'Err16.0'],
+    [0, 'ON', 180, 104, '정상', ''], [1, '알람', null, null, '앱솔루트 아님', 'Err16.0'],
   ]);
   assert.deepEqual(absoluteSummary(rows), { total: 2, ok: 1, allOk: false, needsSetup: 1, waiting: 0, unread: 0 });
 });
@@ -63,7 +63,7 @@ test('막는 것 · 빈 이름 · 겹친 이름 · 범위 · 프로파일 > 최�
 test('바뀐 것 · 이름 · 설정 칸 · 체크', () => {
   const saved = [motor(0, 'A')];
   const draft = [{ ...motor(0, 'B'), config: { ...motor(0, 'B').config, schedule_end_servo_off: true } }];
-  assert.deepEqual(motorChanges(saved, draft), ['0번 이름 A → B', '0번 운영 시간 종료 시 서보 끄기 (스케줄 모드) - → true']);
+  assert.deepEqual(motorChanges(saved, draft), ['0번 이름 A → B', '0번 운영시간 종료 시 서보 OFF - → true']);
   assert.deepEqual(motorChanges(saved, [motor(0, 'A')]), []);
   // 검색 제안 · 뺌 · 더함 · 번호 (수정 목록 100)
   const two = [motor(0, 'A'), motor(1, 'B')];

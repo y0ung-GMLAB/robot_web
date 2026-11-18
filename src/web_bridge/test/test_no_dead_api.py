@@ -77,7 +77,7 @@ def _is_called(route: str, js: str) -> bool:
         return True
 
     # 앞자락을 떼고 부르는 것
-    for prefix in ('/api/motion-studio', '/api/docs'):
+    for prefix in ('/api/motion-studio',):
         if route.startswith(prefix):
             tail = route[len(prefix):] or '/'
             if re.search(f"['`]{_loose(tail)}", js):

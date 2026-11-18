@@ -268,7 +268,7 @@ function segmentRow(seg, group, running, changed) {
   if (check.active && !check.error) {
     const what = segmentLabel(check.start, check.end);
     notes.push(seg.playlist.length > 1
-      ? `재생 목록 1번 ${seg.first.replace(/[.]json$/i, '')}의 ${what}만 재생 (2번부터는 재생 안 함)`
+      ? `재생 목록 1번 ${seg.first.replace(/[.]json$/i, '')}의 ${what}만 재생`
       : `${what}만 재생`);
     if (group) notes.push('모든 PC와 스피커가 같은 구간 재생');
     if (check.note) notes.push(check.note);
@@ -339,7 +339,7 @@ function timetableFields(state) {
         h('span', { class: 'field-label inline' }, '회차 간격', tip([
           '0 입력 시 자동 (가장 긴 애니메이션 + 초기 위치 이동)',
           '현재 애니메이션 기준 자동값보다 짧은 값은 저장 불가',
-          '애니메이션 길이 단축 시 자동값은 운영 시간 종료 후 반영',
+          '애니메이션 길이 단축 시 자동값은 운영시간 종료 후 반영',
           '운영 중 즉시 단축 시 회차 간격 저장 (다음 회차부터 적용)',
           '시간표 재생(스케줄 운영)에서만 사용',
         ], '회차 간격 설명')),

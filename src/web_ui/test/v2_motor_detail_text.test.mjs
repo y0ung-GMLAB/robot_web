@@ -17,6 +17,6 @@ test('내부 ID 는 카드 머리에 없고 「원본」 안에', () => {
   assert.match(raw.split('\n').slice(0, 3).join('\n'), /내부 ID: .*text: row\.id/);
 });
 
-test('「운영 시간이 끝나면 서보 끄기」 · 안 적었으면 켬으로 보인다 · 서버 기본과 같게', () => {
+test('「운영시간이 끝나면 서보 끄기」 · 안 적었으면 켬으로 보인다 · 서버 기본과 같게', () => {
   assert.match(source, /checked: motor\.config\?\.schedule_end_servo_off !== false/);
 });

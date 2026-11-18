@@ -104,7 +104,7 @@ def test_the_stop_route_only_moves_it_off_the_event_loop():
 # 업무는 HTTP 를 모른다
 # --------------------------------------------------------------------------- #
 
-SERVICES = ['docs_service.py', 'safety_service.py', 'schedule_service.py']
+SERVICES = ['safety_service.py', 'schedule_service.py']
 
 
 @pytest.mark.parametrize('name', SERVICES)
@@ -123,7 +123,7 @@ def test_a_service_does_not_speak_http(name):
     assert 'raise HTTPException' not in source
 
 
-@pytest.mark.parametrize('name', ['docs_routes.py', 'schedule_routes.py'])
+@pytest.mark.parametrize('name', ['schedule_routes.py'])
 def test_the_route_turns_refusals_into_status_codes(name):
     """업무의 사실을 HTTP 로 옮기는 것은 길목의 일이다."""
     text = (ROUTES / name).read_text(encoding='utf-8')

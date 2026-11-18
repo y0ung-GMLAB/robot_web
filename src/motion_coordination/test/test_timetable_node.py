@@ -223,6 +223,15 @@ def test_a_pc_in_another_timezone_is_shown_but_keeps_playing(tmp_path):
     assert node._timetable_snapshot()['local_timezone_mismatch'] is True
 
 
+def test_the_snapshot_carries_the_master_schedules_for_the_slave_home(tmp_path):
+    """슬레이브 홈은 제 스케줄(빈 목록) 대신 마스터 스케줄로 오늘 운영시간을 그린다 · 2026-11-18"""
+    item = {'schedule_id': 's1', 'start_time': '10:00:00', 'stop_time': '21:00:00', 'repeat_type': 'daily'}
+    node = _tt_node(tmp_path, config=TimetableConfig(version=3, issued_by='pc-a', schedules=(item,)))
+    assert node._timetable_snapshot()['master_schedules'] == [item]
+    unset = _tt_node(tmp_path / 'unset', config=TimetableConfig())
+    assert unset._timetable_snapshot()['master_schedules'] is None, '마스터 설정을 아직 못 받음'
+
+
 def test_a_timetable_run_keeps_the_local_status_read_fast(tmp_path):
     """시간표 실행 중에는 50 ms 로 읽는다 · 전에는 0.5 s 라 초기 이동 끝을 늦게 봤다 · 수정 목록 188"""
     node = _tt_node(tmp_path)

@@ -76,7 +76,7 @@ export class XTouchDevice {
     this.claims.onmessage = (event) => {
       const claim = event?.data || {};
       if (claim.tab !== this.tab && this.input && claim.id === this.input.id) {
-        this.disconnect('같은 로봇의 다른 탭(창)에서 X-Touch를 사용 중이라 현재 탭의 연결을 해제했습니다');
+        this.disconnect('같은 로봇의 다른 탭에서 X-Touch를 사용 중이라 현재 탭의 연결을 해제했습니다');
       }
     };
   }

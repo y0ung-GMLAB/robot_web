@@ -2915,7 +2915,7 @@ class MotionSupervisor(Node):
         # 보고 직접 켠다 · 사용자 결정 2026-10-07) · 다음 할 일을 문구에 적는다 · 수정 목록 71
         return True, (
             f'AC Servo Fault Reset command sent: axes {self._axis_list_text(axes)}. '
-            '오류 초기화를 완료했습니다. 서보 OFF 상태이므로 알람 원인을 확인한 뒤 「서보 켜기」를 누르세요'
+            '오류 초기화를 완료했습니다. 서보 OFF 상태이므로 알람 원인을 확인한 뒤 「서보 ON」을 누르세요'
         )
 
     def _handle_dynamixel_torque_control(
@@ -2961,7 +2961,7 @@ class MotionSupervisor(Node):
             if feetech_axes and isinstance(requested, list):
                 return False, (
                     f'{feetech_axes[0]}번 모터는 Feetech 라 재부팅이 없습니다 · '
-                    '오류 해제는 토크 끄기 · 계속되면 전원을 다시 넣으세요'
+                    '오류 해제는 토크 OFF · 계속되면 전원을 다시 넣으세요'
                 )
             axes = [axis for axis in axes if axis not in feetech_axes]
             if not axes:
@@ -2995,7 +2995,7 @@ class MotionSupervisor(Node):
                 if motor_kinds.is_feetech(self._motor_for_axis(fault_axes[0], motors) or {}):
                     return False, (
                         f'{fault_axes[0]}번 모터에 오류가 있습니다 · '
-                        'Feetech 는 토크 끄기로 오류를 풀고 다시 켜세요 · 계속되면 전원을 다시 넣으세요'
+                        'Feetech 는 토크 OFF 로 오류를 풀고 다시 ON 하세요 · 계속되면 전원을 다시 넣으세요'
                     )
                 return False, (
                     f'{fault_axes[0]}번 모터에 하드웨어 오류가 있습니다. '

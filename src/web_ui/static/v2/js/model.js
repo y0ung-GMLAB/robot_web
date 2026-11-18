@@ -11,15 +11,15 @@ export const RUN_MODE_LABEL = { schedule: '스케줄', manual: '수동', off: '�
 
 /** 운전 모드 뜻 = 누가 시작하나 · 위 막대 버튼 설명 · 수정 목록 122 (사용자 결정 2026-10-13) */
 export const RUN_MODE_HINT = {
-  schedule: '스케줄\n운영 시간에 따라 자동 시작 및 정지\n스케줄로 시작한 그룹 재생에는 스케줄 모드 PC만 참여',
+  schedule: '스케줄\n운영시간에 따라 자동 시작 및 정지\n스케줄로 시작한 그룹 재생에는 스케줄 모드 PC만 참여',
   manual: '수동\n사람이 직접 시작 (단독 재생, 그룹 재생 모두 가능)\n직접 시작한 그룹 재생에는 수동 모드 PC도 참여',
   off: '끔\n움직이지 않으며 그룹 재생에서도 제외\n서보 토크는 유지',
 };
 
 /** 운전 모드 전환 확인 창 본문 · 위 막대(actions.js)와 PC 현황(store.js)이 같은 글을 쓴다 · 2026-11-09 */
 export const RUN_MODE_EFFECT = {
-  schedule: '운영 시간에 따라 재생을 자동으로 시작하고 정지합니다.\n현재 운영 시간인 경우 곧 재생을 시작합니다.',
-  manual: '스케줄이 재생을 시작하거나 정지하지 않습니다.\n직접 시작한 재생은 운영 시간 종료 후에도 계속 진행합니다.',
+  schedule: '운영시간에 따라 재생을 자동으로 시작하고 정지합니다.\n현재 운영시간인 경우 곧 재생을 시작합니다.',
+  manual: '스케줄이 재생을 시작하거나 정지하지 않습니다.\n직접 시작한 재생은 운영시간 종료 후에도 계속 진행합니다.',
   off: '모든 동작 명령을 차단합니다.\n진행 중인 재생은 이번 회차 종료 후 정지합니다.\n서보 토크는 유지합니다.',
 };
 
@@ -31,12 +31,12 @@ export function runMode(sched) {
   return mode in RUN_MODE_LABEL ? mode : '';
 }
 
-/** 운전 모드 + 운영 시간 · 한 마디 */
+/** 운전 모드 + 운영시간 · 한 마디 */
 export function modePhrase(sched) {
   const mode = runMode(sched);
   if (mode === 'manual') return '수동';
   if (mode === 'off') return '끔 · 명령 차단';
-  if (mode === 'schedule') return sched?.active_schedule_id ? '스케줄 운영 중' : '운영 시간 외';
+  if (mode === 'schedule') return sched?.active_schedule_id ? '스케줄 운영 중' : '운영시간 외';
   return '상태 확인 중';
 }
 
@@ -296,7 +296,7 @@ export function collectIssues(snap, sched, { connected = true } = {}) {
   if (hot.length) {
     const names = hot.map((t) => `${t.index}번 ${t.name} ${t.tempText} (한계 ${t.limitText})`).join(' · ');
     (hot.some((t) => t.tone === 'bad') ? bad : warn)(`모터 온도가 높습니다 · ${names}`,
-      '한계 온도를 넘으면 서보가 스스로 토크를 꺼서 관절이 처질 수 있습니다. 재생을 멈추고 식히세요.',
+      '한계 온도를 넘으면 서보가 스스로 토크 OFF 하여 관절이 처질 수 있습니다. 재생을 멈추고 식히세요.',
       { kind: 'open-temperature', label: '온도 보기' });
   }
   const run = snap.motion_run_status || {};
@@ -420,7 +420,7 @@ export function runSummary(snap) {
   const continuous = String(run.run_mode || '') === 'continuous';
   let title = '대기 상태';
   if (RUNNING_STATES.has(state)) title = `${file || '애니메이션'} 재생 중`;
-  else if (state === 'initializing') title = '초기 위치로 천천히 이동 중';
+  else if (state === 'initializing') title = '초기 위치로 이동 중';
   else if (state === 'recovering') title = '자동 복구 중';
   else if (state === 'initialized') title = '초기 위치에서 대기 중';
   else if (state === 'error') title = '오류로 정지';
@@ -456,7 +456,7 @@ export function motorChips(snap) {
     if (m.fault) { tone = 'bad'; note = `알람${motorErrorText(m) ? ` ${motorErrorText(m)}` : ''}`; }
     // MINAS 경고(A0 과부하 경고 등) · 드라이브는 계속 돈다 · 알람이 아니라 경고 색 · 수정 목록 166
     else if (m.error_kind === 'warning') { tone = 'warn'; note = motorErrorText(m); }
-    else if (!m.servo_on) { tone = 'warn'; note = '서보 꺼짐'; }
+    else if (!m.servo_on) { tone = 'warn'; note = '서보 OFF'; }
     return {
       name: String(m.motion_id || m.name || m.display_name || `${m.controller_index}번 모터`),
       index: m.controller_index,

@@ -633,9 +633,9 @@ def test_a_stopped_pc_with_its_servo_off_shows_why_it_skips():
     clock, runtime, driver, _, notes = _pc(100_000.0)
     _run(driver, runtime, clock, _always(Choice(timeline=TIMELINE)), 100.0)
     _human_stop(runtime, TIMELINE.plan_id)
-    off = {'start_blocker': '0번 모터 서보가 꺼져 있습니다'}
+    off = {'start_blocker': '0번 모터 서보 OFF 상태입니다'}
     _run(driver, runtime, clock, _always(Choice(timeline=TIMELINE)), 100.0, view=off)
-    assert '시간표 재생 · 2회차 생략: 0번 모터 서보가 꺼져 있습니다' in notes
+    assert '시간표 재생 · 2회차 생략: 0번 모터 서보 OFF 상태입니다' in notes
     assert [cycle for cycle, _ in runtime.starts] == [1]
 
 
@@ -672,7 +672,7 @@ def test_a_held_group_stop_says_so_instead_of_timetable_end():
     clock, runtime, driver, _, _ = _pc(100_200.0)
     cut = Timeline(TIMELINE.plan_id, TIMELINE.anchor_unix, 100.0, end_unix=TIMELINE.start_of(2) - 1e-3)
     _ticks(driver, clock, Choice(timeline=cut, stop_after=True), 5.0)
-    assert driver.report()['note'] == '그룹 정지 유지 (운영 시간 종료까지)'
+    assert driver.report()['note'] == '그룹 정지 유지 (운영시간 종료까지)'
 
 
 class _BlinkRuntime(FakeRuntime):
@@ -719,19 +719,19 @@ def test_the_brief_completed_before_the_cycle_barrier_is_not_a_stop():
 
 
 SERVO_OFF_MESSAGE = (
-    '그룹 모션 실행 실패: Motion ID f2_neck_pitch: 0번 모터 서보가 꺼져 있습니다; '
-    'Motion ID f2_neck_yaw: 1번 모터 서보가 꺼져 있습니다; Motion ID f2_eye_pitch: 2번 모터 서보가 꺼져 있습니다; '
-    'Motion ID f2_eye_yaw_r: 3번 모터 서보가 꺼져 있습니다; Motion ID f2_eye_yaw_l: 4번 모터 서보가 꺼져 있습니다'
+    '그룹 모션 실행 실패: Motion ID f2_neck_pitch: 0번 모터 서보 OFF 상태입니다; '
+    'Motion ID f2_neck_yaw: 1번 모터 서보 OFF 상태입니다; Motion ID f2_eye_pitch: 2번 모터 서보 OFF 상태입니다; '
+    'Motion ID f2_eye_yaw_r: 3번 모터 서보 OFF 상태입니다; Motion ID f2_eye_yaw_l: 4번 모터 서보 OFF 상태입니다'
 )
 
 
 def test_the_servo_off_reason_is_short_and_only_for_servo_off():
     from motion_coordination.clock_driver import servo_off_reason
 
-    assert servo_off_reason(SERVO_OFF_MESSAGE) == '서보가 꺼져 있습니다(0~4번 모터)'
-    assert servo_off_reason('Motion ID a: 0번 모터 서보가 꺼져 있습니다; Motion ID b: 3번 모터 서보가 꺼져 있습니다') \
-        == '서보가 꺼져 있습니다(0, 3번 모터)'
-    mixed = 'Motion ID a: 0번 모터 서보가 꺼져 있습니다; Motion ID b: 1번 모터에 에러가 있습니다'
+    assert servo_off_reason(SERVO_OFF_MESSAGE) == '서보 OFF 상태(0~4번 모터)'
+    assert servo_off_reason('Motion ID a: 0번 모터 서보 OFF 상태입니다; Motion ID b: 3번 모터 서보 OFF 상태입니다') \
+        == '서보 OFF 상태(0, 3번 모터)'
+    mixed = 'Motion ID a: 0번 모터 서보 OFF 상태입니다; Motion ID b: 1번 모터에 에러가 있습니다'
     assert servo_off_reason(mixed) == '', '다른 이유가 섞이면 오류 그대로'
     assert servo_off_reason('') == ''
 
@@ -756,10 +756,10 @@ def test_a_servo_off_pc_that_was_let_in_rests_instead_of_erroring():
     runtime.control = servo_off_control
     driver._control = servo_off_control
     _run(driver, runtime, clock, _always(Choice(timeline=TIMELINE)), 100.0)
-    assert '시간표 재생 · 2회차 생략: 서보가 꺼져 있습니다(0~4번 모터)' in notes
+    assert '시간표 재생 · 2회차 생략: 서보 OFF 상태(0~4번 모터)' in notes
     assert not any('회차 오류' in note for note in notes)
     note = driver.report()['note']
-    assert note.endswith('회차 생략: 서보가 꺼져 있습니다(0~4번 모터)'), note
+    assert note.endswith('회차 생략: 서보 OFF 상태(0~4번 모터)'), note
     assert [cycle for cycle, _ in runtime.starts] == [1]
 
 
@@ -801,7 +801,7 @@ def test_a_status_that_never_follows_the_command_is_a_failure_only_after_the_ech
 def test_an_error_left_by_the_previous_try_does_not_fold_the_new_try():
     """앞 시도(서보 꺼짐)의 오류 상태가 다시 들어간 직후 아직 보인다 · 그것으로 새 시도를 접지 않는다 · 새 상태의 오류만 본다
 
-    전에는 오류는 기다림 없이 바로 봐 다시 들어가자마자 「N회차 생략: 서보가 꺼져 있습니다」 로 또 쉬었다.
+    전에는 오류는 기다림 없이 바로 봐 다시 들어가자마자 「N회차 생략: 서보 OFF 상태」 로 또 쉬었다.
     """
     clock, runtime, driver, _, notes = _pc(100_000.0)
     runtime.set_status(
@@ -856,7 +856,7 @@ def test_a_run_just_cancelled_is_not_taken_over_again_from_the_status_before_the
         clock.advance(0.1)
         driver.tick(Choice(timeline=TIMELINE), {'status': before_cancel, 'init_sec': 5.0})
     assert runtime.calls.count('group_cancel') == 1, runtime.calls
-    assert driver.report()['note'] == '1회차 생략: 서보가 꺼져 있습니다(0~4번 모터)'
+    assert driver.report()['note'] == '1회차 생략: 서보 OFF 상태(0~4번 모터)'
 
 
 def test_the_driver_says_whether_a_status_belongs_to_its_last_command():
