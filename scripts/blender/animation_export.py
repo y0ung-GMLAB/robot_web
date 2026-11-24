@@ -23,6 +23,8 @@ Text 블록 「Register」 는 켜지 말 것 (Auto Run 이 켜져 있으면 파
 
 값 = 컨스트레인트까지 반영한 본 회전 (레스트 기준, 관절 각) × export_scale · 감속기어비·부호·오프셋은
 각 PC 조인트 매핑이 적용 · Blender 안 검사·리포트는 deg, 파일만 rad.
+보기 전용 컨스트레인트 = 이름이 "Preview" 로 시작 (예: 드라이브 지령 필터를 거친 실물 움직임 미리보기) →
+내보내기·검사 동안만 끄고 계산 → 파일·검사는 늘 PC 가 보내는 값 (드라이브가 필터를 다시 거니까 두 번 걸리지 않게).
 Blender 안: 초과 구간마다 타임라인 마커 "ANIM! ..." (ERR 마커만 선택 상태 = 밝게) · Empty "AnimSpeedCheck" 의
 <본>_vel_pct / <본>_acc_pct 곡선 (Graph Editor · 100 = 한계 · 필요한 점만 베지어로, 오차 1%) · ANIM_issue 채널
 (키 종류 Extreme = 100% 초과 · Jitter = 80% 이상 · Empty 선택하면 타임라인·도프시트에 보임).
@@ -49,6 +51,7 @@ CHECK_OBJECT = 'AnimSpeedCheck'
 ISSUE_PROP = 'ANIM_issue'          # AnimSpeedCheck 의 문제 구간 채널 (키 종류: Extreme = 100% 초과 · Jitter = 80% 이상)
 CURVE_TOL = 1.0                    # 검사 곡선(%) 단순화 오차 · 프레임마다 굽지 않음
 DIR_PROP = 'anim_export_dir'
+PREVIEW_PREFIX = 'Preview'         # 이 이름으로 시작하는 컨스트레인트 = 보기 전용 · 내보내기·검사 동안 끔
 
 BONE_PROPS = {
     'joint_name': ('', '조인트 이름 · 각 로봇 PC 웹 「조인트 매핑」의 조인트 이름과 완전히 같게 '
@@ -207,12 +210,27 @@ def _restore(state):
         vl.objects.active = vl.objects[state['active']]
 
 
+def _mute_preview(arms):
+    """보기 전용 컨스트레인트 (이름이 PREVIEW_PREFIX 로 시작 · 켜져 있는 것) 를 잠깐 끔 · 끈 것 목록을 돌려줌"""
+    out = []
+    for arm in arms:
+        for pb in arm.pose.bones:
+            for c in pb.constraints:
+                if c.name.startswith(PREVIEW_PREFIX) and not c.mute:
+                    c.mute = True
+                    out.append(c)
+    return out
+
+
 def sample(scene, bones):
     arms = {pb.id_data for pb in bones}
     state = _exclude_others(arms)
+    muted = _mute_preview(arms)
     try:
         return _sample(scene, bones)
     finally:
+        for c in muted:
+            c.mute = False
         _restore(state)
 
 
@@ -301,7 +319,7 @@ def _key_sources(pb):
         out.append((b, idx))
         own = list(b.constraints)
         for c in own + [c for c in _ik_on(b) if not any(c == x for x in own)]:
-            if c.mute or getattr(c, 'target', None) != arm or not getattr(c, 'subtarget', ''):
+            if c.mute or c.name.startswith(PREVIEW_PREFIX) or getattr(c, 'target', None) != arm or not getattr(c, 'subtarget', ''):
                 continue
             src = arm.pose.bones.get(c.subtarget)
             if src is None:
