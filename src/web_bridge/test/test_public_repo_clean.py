@@ -2,7 +2,7 @@
 
 이 저장소(github.com/y0ung-GMLAB/robot_web)는 공개 · humble 만 둔다 · 다른 라인의 이름 · 기능 · 현장 PC 이름이
 코드 · 주석 · 문서 · 시험에 들어오면 실패한다 · 걸리면 글을 고칠 것(이 목록에 예외를 더하지 말 것).
-제외 · 가져온 외부 코드(src/motion_system · VENDORED.md) · 외부 라이브러리(static/vendor).
+가져온 외부 코드(src/motion_system) · 외부 라이브러리(static/vendor)까지 전부 본다 · 제외는 이 파일 하나.
 """
 
 from pathlib import Path
@@ -15,7 +15,7 @@ import pytest
 ROOT = Path(__file__).resolve().parents[3]
 BANNED = re.compile(
     r'jazzy|raspberry|라즈베리|feetech|chicken|iic_lab|24\.04|직렬 서보|serial[_ -]servo', re.IGNORECASE)
-SKIP_PREFIX = ('src/motion_system/', 'src/web_ui/static/vendor/')
+SKIP_PREFIX = ()
 SKIP_FILES = {'src/web_bridge/test/test_public_repo_clean.py'}
 TEXT_SUFFIX = {'.py', '.sh', '.md', '.js', '.mjs', '.css', '.html', '.yaml', '.yml', '.json', '.txt', '.cfg',
                '.toml', '.xml', '.in', '.service', '.rules', '.pkla', ''}

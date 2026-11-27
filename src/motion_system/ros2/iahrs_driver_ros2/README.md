@@ -13,7 +13,6 @@ The driver reads the IMU from `/dev/IMU`, publishes `sensor_msgs/msg/Imu` data, 
 
 - Foxy
 - Humble
-- Jazzy
 
 ## Device Setup
 
