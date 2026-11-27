@@ -1,0 +1,3558 @@
+import faulthandler
+import json
+import math
+import os
+import re
+import signal
+import threading
+import time
+import uuid
+from pathlib import Path
+from typing import Any, Dict, Optional
+
+import rclpy
+import yaml
+from motion_control_msgs.msg import MotorStatus
+from rclpy.callback_groups import MutuallyExclusiveCallbackGroup
+from rclpy.executors import MultiThreadedExecutor
+from rclpy.node import Node
+from rclpy.qos import DurabilityPolicy, QoSProfile, ReliabilityPolicy
+from std_msgs.msg import Int8MultiArray, String
+
+from motion_supervisor import manual_ramp, manual_settle
+from motion_supervisor.command_arbiter import CommandArbiter, CommandOwner
+from motion_supervisor.servo_alarm_guard import ServoAlarmGuard
+from motion_common import (
+    manual_speed, minas_absolute, motor_readiness, stop_fence, units, values, topics, wire_units,
+)
+
+
+#: 긴급정지가 걸렸을 때 하는 말 · §6-178
+#:
+#: 같은 문장이 **일곱 곳**에 적혀 있었다 · 한 곳만 고치면 같은 상황에 두 가지
+#: 말이 나온다 · 게다가 영어라서 사용자가 화면에서 그대로 봤다.
+EMERGENCY_LATCHED_MESSAGE = '긴급 정지 상태입니다. 프로그램을 재시작하세요'
+
+#: 수동 명령이 최종 출력을 쥐고 있을 때 · §6-178 · 이것도 네 곳에 따로 있었다
+MANUAL_COMMAND_ACTIVE_MESSAGE = '수동 명령이 실행 중입니다'
+
+ID_CONTROLWORD = 0
+ID_TARGET_POSITION = 1
+CW_SHUTDOWN_MINAS = 0x0006
+CW_SWITCH_ON_MINAS = 0x0007
+CW_ENABLE_OPERATION_MINAS = 0x000F
+CW_DISABLE_OPERATION_MINAS = 0x0007
+CW_FAULT_RESET_MINAS = 0x0080
+CW_NEW_SET_POINT_MINAS = 0x003F
+DYNAMIXEL_TORQUE_ENABLE = 1
+DYNAMIXEL_TORQUE_DISABLE = 0
+#: 다이나믹셀 재부팅 · 고장 리셋 비트(MINAS 0x80 과 같은 값) · motor_manager 직렬 컨트롤러가
+#: Torque Enable 에 쓰지 않고 REBOOT 명령으로 바꾼다 · 알람 중에도 지나간다 · 수정 목록 24
+DYNAMIXEL_REBOOT = 0x0080
+#: 서보 전원 명령 · 알람 차단·조그 중 거절·소유권 규칙이 같다 · 수정 목록 36
+SERVO_POWER_COMMANDS = ('ac_servo_control', 'dynamixel_torque_control')
+CONTROLWORD_SEQUENCE_DELAY_SEC = 0.05
+# 각도 상수는 사람이 읽기 쉽게 deg 로 적고 쓸 때 rad 로 바꾼다 · 안쪽 값은 rad · 수정 목록 6-4
+JOG_TARGET_TOLERANCE_DEG = 0.05
+JOG_DONE_VELOCITY_DEG_SEC = 0.05
+JOG_ACTIVE_TIMEOUT_SEC = 120.0
+DYNAMIXEL_TARGET_TOLERANCE_RAW_COUNTS = 2.0
+DYNAMIXEL_DONE_VELOCITY_DEG_SEC = 2.0
+DYNAMIXEL_JOG_ACTIVE_TIMEOUT_SEC = 8.0
+DEFAULT_CONFIG_FILE = str(
+    Path(os.environ.get('MOTION_WORKSPACE', Path.cwd())).expanduser()
+    / 'config'
+    / 'bootstrap_motor_config.yaml'
+)
+DEFAULT_ACTION_PERIOD_SEC = 0.02
+DEFAULT_ACTION_DURATION_SEC = 1.0
+MIN_ACTION_DURATION_SEC = 0.02
+CUBIC_SMOOTHSTEP_MAX_VELOCITY = 1.5
+CUBIC_SMOOTHSTEP_MAX_ACCELERATION = 6.0
+DEFAULT_JOG_MIN_DURATION_SEC = 0.15
+DEFAULT_JOG_MAX_DURATION_SEC = 0.5
+JOG_COMMAND_PERIOD_SEC = 0.04
+DEFAULT_JOG_VELOCITY_DEG_SEC = 1125.0
+DEFAULT_JOG_ACCELERATION_DEG_SEC2 = 9375.0
+ACTION_RESULT_SETTLE_SEC = 2.0
+#: 수동 페이더(스트림) 임대 · 사람 손 입력이라 「끝」 신호가 없다 · 마지막 값 뒤 이만큼 지나면 놓는다 ·
+#: 경쟁을 덮는 창이 아니라 「손을 뗐다」 의 뜻 · 재생은 임대가 아니라 세션으로 쥔다(수정 목록 203)
+STREAM_COMMAND_OWNERSHIP_SEC = 0.15
+MANUAL_CONTROL_OWNERSHIP_SEC = 1.0
+
+#: **고장 감지만** · 재생 노드 상태(`/motion_run/status` · 0.5 s 마다 온다)가 이만큼 끊기면 재생 노드가
+#: 죽었다고 본다 · 죽은 노드는 프레임을 못 보내니 정지 정리를 끝낸 것으로 친다 · 살아 있는 노드는 늘
+#: 표지를 확인해서 끝낸다(시간으로 끝내지 않는다) · 수정 목록 200
+RUNTIME_SILENT_SEC = 2.0
+#: **고장 감지만** · 세션이 열려 있는데 프레임도 재생 노드 상태도 이만큼 없으면 재생 노드가 죽은 것 ·
+#: 세션을 닫고 쥔 축을 놓는다 · 정상 실행은 세션을 스스로 닫는다(정지 · 끝 · 오류) · 수정 목록 203
+PLAYBACK_LIVENESS_SEC = 2.0
+#: 열린 재생 세션 밖의 프레임 · 정지 전에 돌던 재생이 늦게 보낸 것 · 수정 목록 200
+PLAYBACK_SESSION_CLOSED_MESSAGE = '재생 세션 없음 (정지 전 재생의 지연 프레임)'
+#: 정지가 지운(또는 정지와 겹쳐 들어온) 수동 조작의 다음 점 · 보내지 않았다 · 수정 목록 112 나 · 200
+MANUAL_CANCELLED_BY_STOP = 'cancelled by stop'
+#: 정지와 겹쳐 들어온 수동 요청에 돌려주는 말
+MANUAL_BLOCKED_BY_STOP = 'motor command blocked by safety stop'
+
+#: 지금 최종 출력을 쥐고 있는 쪽 · 사용자에게 보인다 · §6-178
+COMMAND_OWNER_LABELS = {
+    CommandOwner.MANUAL: '수동 조그·동작',
+    CommandOwner.STREAM: '수동 페이더',
+    CommandOwner.PLAYBACK: '모션 재생',
+}
+
+
+def motion_run_rejection_reason(
+    motor_state_available: bool,
+    manual_command_active: bool,
+    stream_command_active: bool = False,
+    emergency_latched: bool = False,
+) -> Optional[str]:
+    """Return why a runtime command cannot own the final command output."""
+    if emergency_latched:
+        return EMERGENCY_LATCHED_MESSAGE
+    if not motor_state_available:
+        return '모터 상태를 읽을 수 없거나 오래되었습니다'
+    if manual_command_active:
+        return MANUAL_COMMAND_ACTIVE_MESSAGE
+    if stream_command_active:
+        return '수동 페이더 제어가 실행 중입니다'
+    return None
+
+
+#: 글에 넣을 때만 deg · 안쪽 값은 rad
+_deg = units.rad_to_deg
+
+
+#: 한계 비교 반올림 여유 · 설정 파일 한계 자릿수(0.001°) · 수정 목록 103(라)
+LIMIT_ROUNDING_TOLERANCE_RAD = math.radians(0.001)
+
+class MotionSupervisor(Node):
+    """Final publisher for upper-level motion commands."""
+
+    def __init__(self) -> None:
+        super().__init__('motion_supervisor')
+
+        self.motion_state_topic = self.declare_parameter(
+            'motion_state_topic',
+            topics.MOTION_STATE,
+        ).value
+        self.jog_request_topic = self.declare_parameter(
+            'jog_request_topic',
+            topics.MANUAL_JOG_REQUEST,
+        ).value
+        self.jog_result_topic = self.declare_parameter(
+            'jog_result_topic',
+            topics.MANUAL_JOG_RESULT,
+        ).value
+        self.safety_request_topic = self.declare_parameter(
+            'safety_request_topic',
+            topics.SAFETY_REQUEST,
+        ).value
+        self.action_request_topic = self.declare_parameter(
+            'action_request_topic',
+            topics.MANUAL_ACTION_REQUEST,
+        ).value
+        self.action_result_topic = self.declare_parameter(
+            'action_result_topic',
+            topics.MANUAL_ACTION_RESULT,
+        ).value
+        self.motor_command_topic = self.declare_parameter(
+            'motor_command_topic',
+            topics.MOTOR_COMMAND,
+        ).value
+        self.motion_run_command_topic = self.declare_parameter(
+            'motion_run_command_topic',
+            topics.MOTION_RUN_COMMAND,
+        ).value
+        self.manual_stream_request_topic = self.declare_parameter(
+            'manual_stream_request_topic',
+            topics.MANUAL_STREAM_REQUEST,
+        ).value
+        self.manual_stream_result_topic = self.declare_parameter(
+            'manual_stream_result_topic',
+            topics.MANUAL_STREAM_RESULT,
+        ).value
+        self.safety_status_topic = self.declare_parameter(
+            'safety_status_topic',
+            topics.SAFETY_STATUS,
+        ).value
+        self.state_timeout_sec = float(
+            self.declare_parameter('state_timeout_sec', 0.5).value
+        )
+        self.max_jog_delta_deg = float(
+            self.declare_parameter('max_jog_delta_deg', 360.0).value
+        )
+        self.config_file = Path(
+            str(self.declare_parameter('config_file', DEFAULT_CONFIG_FILE).value)
+        ).expanduser()
+        self.action_period_sec = self._load_action_period_sec()
+
+        qos = QoSProfile(depth=1, reliability=ReliabilityPolicy.BEST_EFFORT)
+        self._latest_state: Optional[Dict[str, Any]] = None
+        self._latest_state_at: Optional[float] = None
+        self._active_jogs: Dict[int, Dict[str, Any]] = {}
+        self._active_actions: Dict[int, Dict[str, Any]] = {}
+        #: 조그 · 목표 이동을 끝내며 남긴 알림(목표 근처 출렁임 등) · 축 → 알림 · 실물 R-11
+        self._manual_notices: Dict[int, Dict[str, Any]] = {}
+        self._jog_threads: Dict[int, threading.Thread] = {}
+        self._action_threads: Dict[int, threading.Thread] = {}
+        self._motor_config_cache: Optional[Dict[str, Any]] = None
+        self._last_motion_run_command_at = 0.0
+        #: 재생 명령을 **받은** 시각 · 내보낸 시각(`_last_motion_run_command_at`)과 다르다 ·
+        #: 알람·잠김으로 버린 명령도 받은 것이다 · 브리지가 「수신 정지」 를 가린다 · 수정 목록 14
+        self._last_motion_run_received_at = 0.0
+        # 재생 명령을 통째로 버린 기록 · 재생기가 보고 멈춘다 · 수정 목록 12-1
+        self._motion_run_drop_since = 0.0
+        self._motion_run_drop_last_at = 0.0
+        self._motion_run_drop_reason = ''
+        self._motion_run_drop_count = 0
+        self._emergency_latched = False
+        self._servo_alarm_guard = ServoAlarmGuard()
+        # 정지 표지 · 재생 세션 · 0.5 s 차단 대신 · 수정 목록 200 · 203 (`motion_common.stop_fence`)
+        self._stop_boot = uuid.uuid4().hex[:12]
+        self._stop_epoch = 0
+        self._stop_settled = True
+        self._stop_started_at = 0.0
+        #: 재생 노드 상태를 마지막으로 받은 때 · 0 = 아직 못 받음 · 고장 감지에만 쓴다
+        self._runtime_status_at = 0.0
+        self._runtime_session: Dict[str, Any] = {}
+        self._playback_session_accepted = False
+        self.motion_run_status_topic = self.declare_parameter(
+            'motion_run_status_topic',
+            topics.MOTION_RUN_STATUS,
+        ).value
+        self._command_lock = threading.RLock()
+        self._command_arbiter = CommandArbiter()
+        self._project_generation = 0
+        self._safety_callback_group = MutuallyExclusiveCallbackGroup()
+        # 수동 스트림(페이더 · 다이얼) 램프 · 축마다 · 수정 목록 126
+        self._stream_ramps: Dict[int, manual_ramp.AxisRamp] = {}
+        self._ramp_lock = threading.Lock()
+        self._ramp_thread: Optional[threading.Thread] = None
+
+        self._state_sub = self.create_subscription(
+            String,
+            self.motion_state_topic,
+            self._motion_state_callback,
+            10,
+        )
+        self._jog_sub = self.create_subscription(
+            String,
+            self.jog_request_topic,
+            self._jog_request_callback,
+            10,
+        )
+        self._safety_sub = self.create_subscription(
+            String,
+            self.safety_request_topic,
+            self._safety_request_callback,
+            10,
+            callback_group=self._safety_callback_group,
+        )
+        self._action_sub = self.create_subscription(
+            String,
+            self.action_request_topic,
+            self._action_request_callback,
+            10,
+        )
+        self._command_pub = self.create_publisher(
+            MotorStatus,
+            self.motor_command_topic,
+            qos,
+        )
+        self._motion_run_command_sub = self.create_subscription(
+            MotorStatus,
+            self.motion_run_command_topic,
+            self._motion_run_command_callback,
+            qos,
+        )
+        self._manual_stream_sub = self.create_subscription(
+            String,
+            self.manual_stream_request_topic,
+            self._manual_stream_request_callback,
+            10,
+        )
+        # 재생 노드 상태 · 재생 세션(열림 · 표지 · 본 표지)만 읽는다 · 프레임과 같은 콜백 묶음이라
+        # 세션 판단과 프레임 판단이 서로 끼어들지 않는다 · 수정 목록 200 · 203
+        self._motion_run_status_sub = self.create_subscription(
+            String,
+            self.motion_run_status_topic,
+            self._motion_run_status_callback,
+            10,
+        )
+        self._result_pub = self.create_publisher(String, self.jog_result_topic, 10)
+        self._action_result_pub = self.create_publisher(String, self.action_result_topic, 10)
+        self._manual_stream_result_pub = self.create_publisher(
+            String, self.manual_stream_result_topic, 10
+        )
+        # X-Touch 램프 값 · 녹화(브리지)가 받는다 · 깊이는 1초치 · 수정 목록 156
+        self._manual_stream_samples_pub = self.create_publisher(
+            String, topics.MANUAL_STREAM_SAMPLES, 50
+        )
+        safety_qos = QoSProfile(
+            depth=1,
+            reliability=ReliabilityPolicy.RELIABLE,
+            durability=DurabilityPolicy.TRANSIENT_LOCAL,
+        )
+        self._safety_status_pub = self.create_publisher(
+            String, self.safety_status_topic, safety_qos
+        )
+        self._safety_status_timer = self.create_timer(0.5, self._safety_status_tick)
+        self._publish_safety_status()
+
+        self.get_logger().info(
+            f'motion_supervisor started: state={self.motion_state_topic}, '
+            f'jog_request={self.jog_request_topic}, '
+            f'action_request={self.action_request_topic}, '
+            f'motion_run_command={self.motion_run_command_topic}, '
+            f'manual_stream_request={self.manual_stream_request_topic}, '
+            f'safety_status={self.safety_status_topic}, '
+            f'command={self.motor_command_topic}, '
+            f'config_file={self.config_file}, '
+            f'action_period={self.action_period_sec * 1000.0:.3f} ms'
+        )
+
+    def _command_arbiter_instance(self) -> CommandArbiter:
+        """Return the arbiter, including for lightweight unit-test instances."""
+        arbiter = getattr(self, '_command_arbiter', None)
+        if arbiter is None:
+            arbiter = CommandArbiter()
+            self._command_arbiter = arbiter
+        return arbiter
+
+    @staticmethod
+    def _command_owner_label(owner: CommandOwner) -> str:
+        return COMMAND_OWNER_LABELS.get(owner, '다른 명령')
+
+    @staticmethod
+    def _commanded_axes(msg: Any) -> list:
+        """이번 모터 명령이 실제로 목표를 준 축 · 슬롯이 0 이면 안 건드린다."""
+        axes = []
+        try:
+            counts = list(msg.number_of_target_interfaces)
+            indexes = list(msg.controller_index)
+        except (AttributeError, TypeError):
+            return axes
+        for slot, axis in enumerate(indexes):
+            if slot < len(counts) and int(counts[slot]) > 0:
+                axes.append(int(axis))
+        return axes
+
+    @staticmethod
+    def _position_axes(msg: Any) -> list:
+        """이번 명령이 **위치 목표**를 준 축 · 제어어만 실은 슬롯(서보 켜기 준비)은 뺀다 · 수정 목록 203"""
+        axes = []
+        try:
+            counts = list(msg.number_of_target_interfaces)
+            indexes = list(msg.controller_index)
+            interfaces = list(msg.target_interface_id)
+        except (AttributeError, TypeError):
+            return axes
+        for slot, axis in enumerate(indexes):
+            if slot >= len(counts) or int(counts[slot]) <= 0 or slot >= len(interfaces):
+                continue
+            if ID_TARGET_POSITION in list(interfaces[slot].data)[:int(counts[slot])]:
+                axes.append(int(axis))
+        return axes
+
+    def _clamp_motion_run_targets(self, msg: Any, motors: list) -> list:
+        """재생 목표도 모터 운전 한계(`lower/upper`) 안으로 · 2026-10-04
+
+        단위도 여기서 바꾼다 · 들어온 위치(명령 토픽 단위)를 rad 로 읽어 한계와
+        견주고, 나갈 위치는 motor_manager 단위로 다시 적는다 · 목표 위치가 있는
+        슬롯은 모두(자르지 않은 것도) · 수정 목록 6-4
+
+        수동 조그·절대이동·스트림은 `_target_position_limit_error` 가 막는데
+        재생 중계만 검사가 없었다 · 계획(plan_builder)이 자르긴 하지만 매핑
+        저장으로 `lower/upper` 가 바뀐 뒤 옛 계획이 돌 수 있다 · Dynamixel 은
+        Extended Position 모드라 드라이브 Min/Max Position Limit 이 안 먹어
+        여기가 마지막 문이다.
+
+        밖이면 **버리지 않고 경계값으로** 보낸다 · 샘플을 버리면 그 축이 멈췄다
+        다음 샘플에서 튄다 · 슬롯이 0 인 축(이번 명령이 안 모는 축 · §6-72)과
+        목표 위치가 없는 슬롯(제어어만)은 건드리지 않는다 · 한계가 없거나
+        뒤집힌 모터도 그대로 둔다 (매핑 검증이 잡을 일).
+
+        돌려주는 값 · 클램프한 축 설명 목록 (비어 있으면 변경 없음).
+        """
+        clamped = []
+        try:
+            indexes = list(msg.controller_index)
+            counts = list(msg.number_of_target_interfaces)
+        except (AttributeError, TypeError):
+            return clamped
+        for slot, axis in enumerate(indexes):
+            if slot >= len(counts) or int(counts[slot]) <= 0:
+                continue
+            try:
+                interface_ids = list(msg.target_interface_id[slot].data)[:int(counts[slot])]
+            except (AttributeError, IndexError, TypeError):
+                continue
+            if ID_TARGET_POSITION not in interface_ids:
+                continue
+            try:
+                raw_target = self._optional_float(msg.position[slot])
+            except (IndexError, TypeError):
+                continue
+            if raw_target is None:
+                continue
+            target = wire_units.from_command(raw_target)
+            msg.position[slot] = wire_units.to_motor_node(target)
+            motor = self._motor_for_axis(int(axis), motors)
+            if motor is None:
+                continue
+            lower = wire_units.motor_limit(motor, 'lower')
+            upper = wire_units.motor_limit(motor, 'upper')
+            if lower is None or upper is None or lower > upper:
+                continue
+            bounded = min(max(target, lower), upper)
+            if bounded == target:
+                continue
+            msg.position[slot] = wire_units.to_motor_node(bounded)
+            clamped.append(
+                f'{int(axis)}번 {_deg(target):.3f}→{_deg(bounded):.3f} deg '
+                f'(한계 {_deg(lower):.3f}~{_deg(upper):.3f})'
+            )
+        return clamped
+
+    def _acquire_command_owner(
+        self,
+        owner: CommandOwner,
+        *,
+        axes: Optional[list] = None,
+        lease_sec: Optional[float] = None,
+    ) -> tuple[bool, str]:
+        """소유권을 얻는다 · `axes` 를 주면 그 축만, 안 주면 전체를 혼자 쓴다.
+
+        축을 주면 재생이 모는 축과 MIDI 가 모는 축이 같은 순간에 공존할 수 있다 ·
+        오버더빙이 그 위에 선다 · §6-72
+        """
+        acquired, current_owner = self._command_arbiter_instance().acquire(
+            owner,
+            axes=axes,
+            lease_sec=lease_sec,
+        )
+        if acquired:
+            return True, ''
+        return False, f'{self._command_owner_label(current_owner)} 실행 중입니다'
+
+    def _release_manual_owner_if_idle(self) -> None:
+        if not self._active_jogs and not self._active_actions:
+            self._command_arbiter_instance().release(CommandOwner.MANUAL)
+
+    def _motion_state_callback(self, msg: String) -> None:
+        try:
+            state = json.loads(msg.data)
+        except json.JSONDecodeError:
+            self.get_logger().warn('Invalid motion_state JSON received.')
+            return
+        self._latest_state = state if isinstance(state, dict) else None
+        self._latest_state_at = time.time()
+        self._evaluate_servo_alarms()
+        self._clear_completed_jogs()
+        self._clear_completed_actions()
+        self._release_manual_owner_if_idle()
+
+    def _motion_run_command_callback(self, msg: MotorStatus) -> None:
+        """Relay runtime commands through the sole final command publisher."""
+        self._last_motion_run_received_at = time.monotonic()
+        shape_error = self._motor_command_shape_error(msg)
+        if shape_error:
+            self.get_logger().error(
+                f'Rejected malformed motion runtime command: {shape_error}.',
+                throttle_duration_sec=1.0,
+            )
+            self._note_motion_run_drop(f'명령 형식 오류: {shape_error}')
+            return
+        # MIDI 는 **축별로** 판정한다 · §6-107
+        #
+        # 전에는 `_midi_active_until` 하나로 "MIDI 가 도는 중" 을 적어 두고,
+        # 축을 가리지 않고 재생 중계를 통째로 막았다 · 추가 녹화는 한쪽 축을
+        # MIDI 로 녹화하면서 다른 축을 재생하는 일이라, 녹화를 시작하는 순간
+        # 재생이 끊겼다.
+        #
+        # 같은 사실을 `CommandArbiter` 가 이미 축별로 쥐고 있다 · 한 사실을 두
+        # 곳에 적으면 반드시 어긋난다 · 판정은 중재기 하나만 한다.
+        motors = self._current_motors()
+        reason = motion_run_rejection_reason(
+            motor_state_available=bool(motors),
+            manual_command_active=bool(self._active_jogs or self._active_actions),
+            emergency_latched=self._emergency_latched,
+        )
+        alarm_reason = self._motion_block_reason()
+        if reason is None and alarm_reason:
+            reason = alarm_reason
+        if reason:
+            self.get_logger().warning(
+                f'Rejected motion runtime command because {reason}.',
+                throttle_duration_sec=1.0,
+            )
+            self._note_motion_run_drop(reason)
+            return
+        # 이번 명령이 실제로 모는 축만 잡는다 · 슬롯이 0 인 축은 건드리지 않으므로
+        # 그 축은 MIDI 가 쓸 수 있다 · 이것이 오버더빙의 바탕이다 · §6-72
+        playback_axes = self._commanded_axes(msg)
+        with self._command_lock:
+            alarm_state = self._servo_alarm_guard_instance().snapshot()
+            if (
+                self._emergency_latched
+                or alarm_state['grade3_latched']
+                or alarm_state['grade'] >= 2
+            ):
+                self._note_motion_run_drop(
+                    '긴급정지 잠김' if self._emergency_latched
+                    else f'{alarm_state["grade"]}등급 서보 에러'
+                )
+                return
+            # 지금 표지로 열린 재생 세션의 프레임만 · 정지 뒤 늦게 온 옛 프레임은 여기서 버린다 ·
+            # 전에는 정지 뒤 0.5 s 만 막아, 그보다 늦은 틱(GIL)이 정지한 축을 다시 움직일 수 있었다 · 수정 목록 200
+            if not self._playback_session_open():
+                self.get_logger().warning(
+                    f'Rejected motion runtime command because {PLAYBACK_SESSION_CLOSED_MESSAGE}.',
+                    throttle_duration_sec=1.0,
+                )
+                self._note_motion_run_drop(PLAYBACK_SESSION_CLOSED_MESSAGE)
+                return
+            # 소유는 세션 동안 쥔다(임대 없음) · 세션이 닫힐 때 · 프레임에서 빠진 축은 그때 놓는다 · 수정 목록 203 ·
+            # 정지와 같은 잠금 안에서 얻는다 · 정지가 모두 빼앗은 **뒤에** 다시 쥐지 않게
+            acquired, current_owner = self._command_arbiter_instance().acquire(
+                CommandOwner.PLAYBACK,
+                axes=playback_axes,
+            )
+            if not acquired:
+                self.get_logger().warning(
+                    'Rejected motion runtime command because '
+                    f'{self._command_owner_label(current_owner)} 실행 중입니다.',
+                    throttle_duration_sec=1.0,
+                )
+                self._note_motion_run_drop(f'{self._command_owner_label(current_owner)} 실행 중')
+                return
+            position_axes = self._position_axes(msg)
+            if position_axes:
+                # 위치를 준 프레임이 뺀 축 = 지금 재생이 안 모는 축(오버더빙 구간 밖 · 뮤트) · 바로 놓는다
+                self._command_arbiter_instance().release_except(
+                    CommandOwner.PLAYBACK, position_axes,
+                )
+            for slot in self._servo_alarm_guard_instance().blocked_slots(
+                msg.controller_index
+            ):
+                msg.number_of_target_interfaces[slot] = 0
+                msg.target_interface_id[slot].data = []
+            clamped = self._clamp_motion_run_targets(msg, motors)
+            if clamped:
+                self.get_logger().warning(
+                    '재생 목표가 모터 운전 한계를 벗어나 경계값으로 보냅니다 · '
+                    + ' · '.join(clamped),
+                    throttle_duration_sec=1.0,
+                )
+            self._last_motion_run_command_at = time.monotonic()
+            self._motion_run_drop_since = 0.0
+            self._command_pub.publish(msg)
+
+    #: 이만큼 새 버림이 없으면 「지금 버리는 중」 이 아니다 · 옛 기록으로 새 재생을 멈추지 않게
+    MOTION_RUN_DROP_FRESH_SEC = 0.25
+
+    def _note_motion_run_drop(self, reason: str) -> None:
+        """재생 명령 한 프레임을 통째로 버렸다 · 수정 목록 12-1
+
+        축 일부만 막는 것(1등급 알람 축)은 정책이라 여기 넣지 않는다 · 프레임
+        전체가 모터에 못 간 경우만 센다.
+        """
+        now = time.monotonic()
+        if not getattr(self, '_motion_run_drop_since', 0.0):
+            self._motion_run_drop_since = now
+        self._motion_run_drop_last_at = now
+        self._motion_run_drop_reason = str(reason)
+        self._motion_run_drop_count = int(getattr(self, '_motion_run_drop_count', 0)) + 1
+
+    def _motion_run_drop_snapshot(self) -> Dict[str, Any]:
+        now = time.monotonic()
+        since = float(getattr(self, '_motion_run_drop_since', 0.0) or 0.0)
+        last = float(getattr(self, '_motion_run_drop_last_at', 0.0) or 0.0)
+        dropping = bool(since) and now - last <= self.MOTION_RUN_DROP_FRESH_SEC
+        return {
+            'count': int(getattr(self, '_motion_run_drop_count', 0)),
+            'reason': str(getattr(self, '_motion_run_drop_reason', '') or ''),
+            'continuous_sec': round(now - since, 3) if dropping else 0.0,
+        }
+
+    # ------------------------------------------------------------------ #
+    # 정지 표지 · 재생 세션 · 수정 목록 200 · 203 (`motion_common.stop_fence`)
+    #
+    # 전에는 정지 뒤 0.5 s 동안 모든 명령을 거절하고(`_motion_stop_block_until`), 재생 소유는
+    # 프레임마다 0.15 s 임대였다 · 둘 다 「그 사이에 경쟁이 끝나겠지」 였다 · 이제는 정지마다
+    # 표지를 올리고, 재생 노드가 그 표지로 연 세션의 프레임만 받는다.
+    # ------------------------------------------------------------------ #
+
+    def _stop_marker(self) -> stop_fence.Marker:
+        return (
+            str(getattr(self, '_stop_boot', '') or ''),
+            int(getattr(self, '_stop_epoch', 0) or 0),
+        )
+
+    def _begin_stop_epoch(self) -> None:
+        """정지 하나 = 표지 하나 · 이 앞의 재생 세션은 끝 · 명령 잠금 안에서 부른다
+
+        쥔 축은 부른 쪽이 `revoke_all` 로 이미 빼앗는다 · 여기서는 세션을 닫고 「정리 중」 으로 둔다 ·
+        정리 끝은 재생 노드가 새 표지를 봤다고 알려 올 때(`_apply_runtime_session`).
+        """
+        self._stop_epoch = int(getattr(self, '_stop_epoch', 0) or 0) + 1
+        self._stop_settled = False
+        self._stop_started_at = time.monotonic()
+        self._playback_session_accepted = False
+
+    def _motion_run_status_callback(self, msg: String) -> None:
+        """재생 노드 상태 · `playback_session` 만 본다 · 0.5 s 마다 + 상태가 바뀔 때마다 온다"""
+        try:
+            payload = json.loads(msg.data)
+        except json.JSONDecodeError:
+            return
+        if not isinstance(payload, dict):
+            return
+        session = payload.get('playback_session')
+        self._apply_runtime_session(session if isinstance(session, dict) else {})
+
+    def _apply_runtime_session(self, session: Dict[str, Any]) -> None:
+        """재생 노드가 알려 온 세션 · 받을지(지금 표지인가) · 정지 정리가 끝났는지 정한다"""
+        changed = False
+        with self._command_lock:
+            self._runtime_status_at = time.monotonic()
+            self._runtime_session = dict(session)
+            current = self._stop_marker()
+            run_marker = stop_fence.marker(session)
+            seen = stop_fence.marker(session, 'seen_stop_')
+            active = bool(session.get('active'))
+            accepted = active and run_marker == current
+            if bool(getattr(self, '_playback_session_accepted', False)) != accepted:
+                changed = True
+            if not accepted and self._command_arbiter_instance().release(CommandOwner.PLAYBACK):
+                # 세션이 없다(정지 · 끝 · 오류 · 부팅 직후 옛 동작으로 받은 프레임) · 쥔 축을 바로 놓는다 ·
+                # 임대가 끝나길 기다리지 않는다 · 203
+                changed = True
+            self._playback_session_accepted = accepted
+            # 정지 정리 끝 · 재생 노드가 이 표지를 봤고 그 앞 표지로 연 세션이 없다 → 옛 프레임이 더 오지 않는다
+            if (
+                not getattr(self, '_stop_settled', True)
+                and seen == current
+                and not (active and run_marker != current)
+            ):
+                self._stop_settled = True
+                changed = True
+        if changed:
+            self._publish_safety_status()
+
+    def _playback_session_open(self) -> bool:
+        """지금 재생 프레임을 받아도 되나 · 명령 잠금 안에서 부른다"""
+        if getattr(self, '_playback_session_accepted', False):
+            return True
+        # 부팅 직후 · 재생 노드 상태를 아직 한 번도 못 받았고 정지도 없었다 · 옛 동작(받는다) ·
+        # 재생 노드는 상태를 0.5 s 마다 보내므로 이 틈은 켜진 직후뿐 · 정지가 한 번이라도 있으면 세션만 받는다
+        return (
+            not getattr(self, '_runtime_status_at', 0.0)
+            and not int(getattr(self, '_stop_epoch', 0) or 0)
+        )
+
+    def _playback_streaming(self) -> bool:
+        """재생이 지금 프레임을 흘리는 단계인가 · 서보 알람 판정의 「재생 중」 · 수정 목록 203
+
+        전에는 「재생이 축을 쥐었거나 마지막 프레임이 0.15 s 안」 이었다 · 틱이 늦으면 꺼졌다 켜져
+        1등급 축의 복구 대기가 실행 도중 풀렸다 · 이제는 재생 노드가 알려 온 단계(초기 이동 · 재생)다.
+        """
+        if not getattr(self, '_runtime_status_at', 0.0) and not int(getattr(self, '_stop_epoch', 0) or 0):
+            # 부팅 직후 · 재생 노드 상태를 아직 못 받음 · 옛 판정(재생이 쥔 축)
+            return self._command_arbiter_instance().owns_any(CommandOwner.PLAYBACK)
+        session = getattr(self, '_runtime_session', {}) or {}
+        return bool(getattr(self, '_playback_session_accepted', False) and session.get('streaming'))
+
+    def _stop_settled_now(self) -> bool:
+        """「정지 정리 끝」 · 재생 노드가 확인해서 끝난다 · 재생 노드가 죽었으면 고장 감지로 끝낸다"""
+        if getattr(self, '_stop_settled', True):
+            return True
+        last_heard = max(
+            float(getattr(self, '_runtime_status_at', 0.0) or 0.0),
+            float(getattr(self, '_stop_started_at', 0.0) or 0.0),
+        )
+        # 고장 감지 · 재생 노드 상태가 `RUNTIME_SILENT_SEC` 넘게 끊겼다 = 노드가 없다 · 옛 프레임도 없다 ·
+        # 살아 있는 노드는 0.5 s 마다 상태를 보내므로 이 길로 오지 않는다 · 경쟁을 기다리는 시간이 아니다
+        if time.monotonic() - last_heard > RUNTIME_SILENT_SEC:
+            self._stop_settled = True
+            self._warn_safely(
+                f'재생 노드 상태가 {RUNTIME_SILENT_SEC:g} s 넘게 없어 정지 정리를 끝냅니다 · 재생 노드가 꺼졌는지 확인'
+            )
+            return True
+        return False
+
+    def _warn_safely(self, text: str) -> None:
+        """로그 실패가 판단을 막지 않게 · 노드 없이 만든 시험 감독도 지나간다"""
+        try:
+            self.get_logger().warning(text)
+        except Exception:  # noqa: BLE001
+            pass
+
+    def _expire_silent_playback_session(self) -> bool:
+        """고장 감지 · 세션이 열려 있는데 프레임도 상태도 끊겼다 · 재생 노드가 죽었다 · 세션을 닫는다 · 203
+
+        정상 실행은 끝 · 정지 · 오류에서 세션을 스스로 닫는다 · 이 길은 노드가 죽어 닫지 못했을 때뿐 ·
+        닫지 않으면 재생이 쥔 축을 수동 · MIDI 가 영영 못 쓴다.
+        """
+        with self._command_lock:
+            if not getattr(self, '_playback_session_accepted', False):
+                return False
+            last_heard = max(
+                float(getattr(self, '_runtime_status_at', 0.0) or 0.0),
+                float(getattr(self, '_last_motion_run_received_at', 0.0) or 0.0),
+            )
+            if time.monotonic() - last_heard <= PLAYBACK_LIVENESS_SEC:
+                return False
+            self._playback_session_accepted = False
+            self._command_arbiter_instance().release(CommandOwner.PLAYBACK)
+        self._warn_safely(
+            f'재생 프레임 · 재생 노드 상태가 {PLAYBACK_LIVENESS_SEC:g} s 넘게 없어 재생 세션을 닫고 축을 놓습니다'
+        )
+        return True
+
+    def _stop_result_fields(self) -> Dict[str, Any]:
+        """정지 결과에 싣는 이 정지의 표지 · 브리지가 이 표지의 「정리 끝」 을 기다린다 · 200"""
+        return stop_fence.marker_fields(self._stop_marker())
+
+    # -- 정지와 겹쳐 들어온 수동 요청 · 수정 목록 200 --------------------------------------------
+    #
+    # 전에는 정지 뒤 0.5 s 동안 수동 명령을 모두 거절해서, 정지와 거의 같은 때 처리되던 조그 · 이동 ·
+    # 페이더 요청이 정지 **뒤에** 첫 점을 보내는 것을 막았다 · 이제는 요청이 들어온 순간의 표지를 적고
+    # 보낼 때 표지가 그대로인지 정지와 같은 잠금 안에서 본다 · 정지 뒤에 들어온 요청은 바로 간다.
+
+    def _mark_request_entry(self) -> None:
+        local = getattr(self, '_request_epoch_local', None)
+        if local is None:
+            local = threading.local()
+            self._request_epoch_local = local
+        local.epoch = int(getattr(self, '_stop_epoch', 0) or 0)
+
+    def _clear_request_entry(self) -> None:
+        local = getattr(self, '_request_epoch_local', None)
+        if local is not None:
+            local.epoch = None
+
+    def _entry_stop_epoch(self) -> int:
+        """지금 처리 중인 요청이 들어올 때의 표지 · 요청 밖(램프 · 궤적 실)이면 지금 표지"""
+        local = getattr(self, '_request_epoch_local', None)
+        value = getattr(local, 'epoch', None) if local is not None else None
+        if value is None:
+            return int(getattr(self, '_stop_epoch', 0) or 0)
+        return int(value)
+
+    def _manual_entry_live(self, table: Dict[int, Any], axis: int, active: Dict[str, Any]) -> bool:
+        """이 조그 · 이동이 아직 살아 있나 · 정지가 표에서 지웠거나 정지와 겹쳐 들어왔으면 거짓"""
+        if table.get(axis) is not active:
+            return False
+        epoch = active.get('stop_epoch') if isinstance(active, dict) else None
+        return epoch is None or int(epoch) == int(getattr(self, '_stop_epoch', 0) or 0)
+
+    def _end_cancelled_manual(
+        self, table: Dict[int, Any], axis: int, active: Dict[str, Any], *, action: bool = False,
+    ) -> None:
+        """정지가 끊은 조작 · 정지와 겹쳐 들어와 표에 남았으면 지운다(남으면 끝나지 않은 조작으로 보여 다음 조작을 막는다)"""
+        with self._command_lock:
+            removed = table.get(axis) is active
+            if removed:
+                table.pop(axis, None)
+        if removed and action:
+            self._publish_action_result(
+                str(active.get('request_id') or ''), False, 'trajectory cancelled by motion stop',
+            )
+
+    def _stop_status_fields(self) -> Dict[str, Any]:
+        """safety 상태에 싣는 표지 · 정리 끝 · 세션 · 재생 노드와 브리지가 본다"""
+        session = getattr(self, '_runtime_session', {}) or {}
+        accepted = bool(getattr(self, '_playback_session_accepted', False))
+        return {
+            **stop_fence.marker_fields(self._stop_marker()),
+            'stop_settled': self._stop_settled_now(),
+            'playback_session': {
+                'accepted': accepted,
+                'streaming': bool(accepted and session.get('streaming')),
+            },
+        }
+
+    def _manual_stream_request_callback(self, msg: String) -> None:
+        self._mark_request_entry()
+        try:
+            self._handle_manual_stream_request(msg)
+        finally:
+            self._clear_request_entry()
+
+    def _handle_manual_stream_request(self, msg: String) -> None:
+        try:
+            request = json.loads(msg.data)
+        except json.JSONDecodeError:
+            self._publish_manual_stream_result({}, False, 'invalid manual stream JSON')
+            return
+        if not isinstance(request, dict):
+            self._publish_manual_stream_result({}, False, 'invalid manual stream request')
+            return
+        if not self._request_generation_is_current(request):
+            self._publish_manual_stream_result(
+                request, False, '이전 프로젝트 세대의 수동 스트림 명령을 폐기했습니다'
+            )
+            return
+        if (
+            self._emergency_latched
+            or self._servo_alarm_guard_instance().snapshot()['grade3_latched']
+        ):
+            self._publish_manual_stream_result(
+                request, False, EMERGENCY_LATCHED_MESSAGE
+            )
+            return
+        alarm_reason = self._motion_block_reason(
+            self._optional_int(request.get('axis'))
+        )
+        if alarm_reason:
+            self._publish_manual_stream_result(request, False, alarm_reason)
+            return
+        # 정지 뒤 0.5 s 거절은 없앴다 · 정지 **뒤에** 온 요청은 새 조작이다 · 정지와 겹쳐 들어온 요청만
+        # 표지로 가려 버린다(`_entry_stop_epoch`) · 수정 목록 200
+        hold_axes = request.get('hold_axes')
+        if isinstance(hold_axes, list):
+            success, message, results = self._handle_stream_hold_axes(
+                hold_axes, self._optional_int(request.get('channel'))
+            )
+            self._publish_manual_stream_result(
+                request, success, message, results=results
+            )
+            return
+        release_axes = request.get('release_axes')
+        if isinstance(release_axes, list):
+            success, message = self._release_stream_ramps(release_axes)
+            self._publish_manual_stream_result(request, success, message)
+            return
+        # 목표는 「가고 싶은 곳」 · 램프가 상한 속도로 천천히 보낸다 · 수정 목록 126
+        targets = request.get('targets')
+        if isinstance(targets, list):
+            atomic_channels = {
+                channel
+                for value in request.get('atomic_channels') or []
+                if (channel := self._optional_int(value)) is not None
+            }
+            success, message, results = self._accept_stream_goals(
+                targets, atomic_channels=atomic_channels
+            )
+            self._publish_manual_stream_result(
+                request, success, message, results=results
+            )
+        else:
+            success, message, results = self._accept_stream_goals([request])
+            if results:
+                message = results[0]['message']
+            self._publish_manual_stream_result(request, success, message)
+
+    def _handle_stream_hold_axes(
+        self, axes: list[Any], channel: Optional[int]
+    ) -> tuple[bool, str, list[Dict[str, Any]]]:
+        unique_axes = []
+        for value in axes:
+            axis = self._optional_int(value)
+            if axis is not None and axis not in unique_axes:
+                unique_axes.append(axis)
+        if not unique_axes:
+            return False, 'manual stream hold axis list is empty', []
+        # 세우기 전에 램프부터 끝낸다 · 다음 주기가 세운 자리 너머로 또 보내지 않게
+        self._cancel_stream_ramps(unique_axes)
+        motors = self._current_motors()
+        targets = []
+        for axis in unique_axes:
+            motor = self._motor_for_axis(axis, motors)
+            position = self._motor_position(motor) if motor is not None else None
+            if position is None:
+                results = [
+                    self._stream_target_result({
+                        'request_id': f'stream-hold-{candidate}',
+                        'channel': channel,
+                        'axis': candidate,
+                        'operation': 'hold',
+                    }, False, f'연동 축 전체 정지 실패: Axis {axis} 현재 위치 확인 불가')
+                    for candidate in unique_axes
+                ]
+                return False, results[0]['message'], results
+            targets.append({
+                'request_id': f'stream-hold-{axis}',
+                'channel': channel,
+                'axis': axis,
+                'target_rad': position,
+                'operation': 'hold',
+            })
+        atomic_channels = {channel} if channel is not None else set()
+        return self._handle_manual_stream_batch(
+            targets, atomic_channels=atomic_channels
+        )
+
+    def _handle_manual_stream_batch(
+        self,
+        targets: list[Any],
+        *,
+        atomic_channels: set[int] | None = None,
+    ) -> tuple[bool, str, list[Dict[str, Any]]]:
+        requests = [target for target in targets if isinstance(target, dict)]
+        if not requests:
+            return False, 'manual stream target batch is empty', []
+
+        global_error = ''
+        # 재생 여부는 **축마다** 따진다 · 전에는 재생이 돌면 MIDI 전체를 막아서
+        # 오버더빙이 불가능했다 · §6-72
+        if self._active_jogs or self._active_actions:
+            global_error = MANUAL_COMMAND_ACTIVE_MESSAGE
+
+        motors = self._current_motors()
+        if not global_error and not motors:
+            global_error = 'current motion_state is unavailable'
+        if global_error:
+            results = [self._stream_target_result(target, False, global_error) for target in requests]
+            return False, global_error, results
+
+        command = self._empty_motor_command(motors)
+        results: list[Dict[str, Any]] = []
+        commanded_axes: set[int] = set()
+        success_count = 0
+        atomic_channels = atomic_channels or set()
+
+        for target in requests:
+            axis = self._optional_int(target.get('axis'))
+            target_position = self._optional_float(target.get('target_rad'))
+            motor = self._motor_for_axis(axis, motors) if axis is not None else None
+            error, controlword = self._stream_target_check(
+                target, axis, target_position, motor, commanded_axes
+            )
+
+            if error:
+                results.append(self._stream_target_result(target, False, error))
+                continue
+
+            if motor is not None and target.get('operation') != 'hold':
+                target_position = self._clamp_to_limits(motor, target_position)
+            commanded_axes.add(axis)
+            command.number_of_target_interfaces[axis] = 2
+            command.target_interface_id[axis] = Int8MultiArray(
+                data=[ID_CONTROLWORD, ID_TARGET_POSITION]
+            )
+            command.controlword[axis] = int(controlword)
+            command.position[axis] = wire_units.to_motor_node(target_position)
+            motion_rad = self._optional_float(target.get('motion_rad'))
+            motion_text = '' if motion_rad is None else f', motion {_deg(motion_rad):.3f} deg'
+            results.append(self._stream_target_result(
+                target,
+                True,
+                f'stream target published: Axis {axis}{motion_text}, '
+                f'motor {_deg(target_position):.3f} deg (arrival not verified)',
+            ))
+            success_count += 1
+
+        for channel in atomic_channels:
+            indexes = [
+                index for index, target in enumerate(requests)
+                if self._optional_int(target.get('channel')) == channel
+            ]
+            if not indexes or all(results[index]['success'] for index in indexes):
+                continue
+            first_error = next(
+                results[index]['message']
+                for index in indexes if not results[index]['success']
+            )
+            group_message = f'연동 축 전체 차단: {first_error}'
+            for index in indexes:
+                if not results[index]['success']:
+                    results[index]['message'] = group_message
+                    continue
+                axis = self._optional_int(requests[index].get('axis'))
+                if axis is not None:
+                    command.number_of_target_interfaces[axis] = 0
+                    command.target_interface_id[axis] = Int8MultiArray(data=[])
+                    command.controlword[axis] = 0
+                    command.position[axis] = 0.0
+                    commanded_axes.discard(axis)
+                results[index] = self._stream_target_result(
+                    requests[index], False, group_message
+                )
+                success_count -= 1
+
+        if success_count:
+            shape_error = self._motor_command_shape_error(command)
+            if shape_error:
+                message = f'invalid motor command blocked: {shape_error}'
+                return False, message, [
+                    self._stream_target_result(target, False, message)
+                    for target in requests
+                ]
+            acquired, owner_error = self._acquire_command_owner(
+                CommandOwner.STREAM,
+                axes=commanded_axes,
+                lease_sec=STREAM_COMMAND_OWNERSHIP_SEC,
+            )
+            if not acquired:
+                return False, owner_error, [
+                    self._stream_target_result(target, False, owner_error)
+                    for target in requests
+                ]
+            # All accepted axes are published atomically in one MotorStatus,
+            # preventing depth-1 QoS from dropping an earlier per-axis command.
+            with self._command_lock:
+                alarm_axes = [
+                    axis for axis in commanded_axes
+                    if self._motion_block_reason(axis)
+                ]
+                if (
+                    self._emergency_latched
+                    # 정지와 겹쳐 들어온 요청 · 정지가 「현재 위치에 서라」 를 보낸 뒤에 또 보내지 않는다 · 200
+                    or self._entry_stop_epoch() != int(getattr(self, '_stop_epoch', 0) or 0)
+                    or alarm_axes
+                ):
+                    self._command_arbiter_instance().release(CommandOwner.STREAM)
+                    message = (
+                        self._motion_block_reason(alarm_axes[0])
+                        if alarm_axes
+                        else MANUAL_BLOCKED_BY_STOP
+                    )
+                    return False, message, [
+                        self._stream_target_result(target, False, message)
+                        for target in requests
+                    ]
+                self._command_pub.publish(self._only_driven_axes(command))
+            # A SELECT-off hold releases MIDI ownership. The initialization
+            # command which follows must be allowed through immediately.
+            # SELECT 를 놓으면 소유권도 놓는다 · 뒤따르는 초기화 명령이
+            # 바로 지나가야 한다.
+            if not any(target.get('operation') != 'hold' for target in requests):
+                self._command_arbiter_instance().release(CommandOwner.STREAM)
+
+        all_success = success_count == len(requests)
+        message = (
+            f'stream batch sent: {success_count}/{len(requests)} axes'
+            if success_count
+            else 'stream batch rejected'
+        )
+        return all_success, message, results
+
+    def _stream_target_check(
+        self,
+        target: Dict[str, Any],
+        axis: Optional[int],
+        target_position: Optional[float],
+        motor: Optional[Dict[str, Any]],
+        seen_axes: set,
+    ) -> tuple[str, int]:
+        """스트림 목표 하나 · (거절 이유, 제어어) · 이유가 빈 글자면 통과 · 묶음 발행과 램프 접수가 같이 쓴다"""
+        if axis is None:
+            return 'axis is required', 0
+        block = self._motion_block_reason(axis)
+        if block:
+            return block, 0
+        if target_position is None:
+            return 'target_rad is required', 0
+        if axis in seen_axes:
+            return f'{axis}번 모터가 수동 스트림 묶음에 두 번 들어 있습니다', 0
+        if motor is None:
+            return f'{axis}번 모터를 현재 모터 상태에서 찾을 수 없습니다', 0
+        hold = target.get('operation') == 'hold'
+        if self._is_ac_servo(motor):
+            # 유지 명령은 이미 리밋에 걸린 축을 그 자리에 붙잡아 두는
+            # 것이라 리밋 검사를 건너뛴다.
+            error = self._stream_readiness_error(motor, axis, check_internal_limit=not hold)
+            controlword = CW_NEW_SET_POINT_MINAS
+        elif self._is_dynamixel(motor):
+            error = self._stream_readiness_error(motor, axis, is_ac_servo=False)
+            controlword = DYNAMIXEL_TORQUE_ENABLE
+        else:
+            error = self._stream_readiness_error(motor, axis, is_ac_servo=False)
+            if not error:
+                error = f'{axis}번 모터는 수동 스트림으로 제어할 수 없는 모터 종류입니다'
+            controlword = 0
+        if error:
+            return error, 0
+        if not hold:
+            limit_error = self._target_position_limit_error(motor, target_position)
+            if limit_error:
+                return limit_error, 0
+        return '', controlword
+
+    # ------------------------------------------------------------------ #
+    # 수동 스트림 램프 · 수정 목록 126 (사용자 결정 2026-10-13)
+    # ------------------------------------------------------------------ #
+
+    def _ramp_store(self) -> tuple[Dict[int, manual_ramp.AxisRamp], threading.Lock]:
+        """램프 표와 잠금 · 시험용 가벼운 인스턴스에도 만든다"""
+        ramps = getattr(self, '_stream_ramps', None)
+        if ramps is None:
+            ramps = self._stream_ramps = {}
+        lock = getattr(self, '_ramp_lock', None)
+        if lock is None:
+            lock = self._ramp_lock = threading.Lock()
+        return ramps, lock
+
+    def _accept_stream_goals(
+        self,
+        targets: list[Any],
+        *,
+        atomic_channels: set[int] | None = None,
+    ) -> tuple[bool, str, list[Dict[str, Any]]]:
+        """스트림 목표를 램프의 「가고 싶은 곳」 으로 받는다 · 모터에는 아직 안 보낸다
+
+        같은 조작(같은 출처 · `source`)이면 새 목표로 · 움직이는 축에 다른 조작이면 거절 ·
+        상한은 요청에 실린 모터 rad/s · rad/s² (브리지가 매핑 이득으로 계산 · 없으면 이득 1)
+        """
+        requests = [target for target in targets if isinstance(target, dict)]
+        if not requests:
+            return False, 'manual stream target batch is empty', []
+        global_error = ''
+        if self._active_jogs or self._active_actions:
+            global_error = MANUAL_COMMAND_ACTIVE_MESSAGE
+        motors = self._current_motors()
+        if not global_error and not motors:
+            global_error = 'current motion_state is unavailable'
+        if global_error:
+            results = [self._stream_target_result(target, False, global_error) for target in requests]
+            return False, global_error, results
+
+        atomic_channels = atomic_channels or set()
+        ramps, lock = self._ramp_store()
+        now = time.monotonic()
+        with lock:
+            if self._entry_stop_epoch() != int(getattr(self, '_stop_epoch', 0) or 0):
+                # 정지와 겹쳐 들어온 요청 · 정지는 램프를 비운 뒤라 여기서 새로 넣으면 정지 뒤에 돈다 · 200
+                message = MANUAL_BLOCKED_BY_STOP
+                return False, message, [
+                    self._stream_target_result(target, False, message) for target in requests
+                ]
+            results: list[Dict[str, Any]] = []
+            accepted: list[tuple[int, Dict[str, Any], float, Dict[str, Any]]] = []
+            seen_axes: set = set()
+            for target in requests:
+                axis = self._optional_int(target.get('axis'))
+                goal = self._optional_float(target.get('target_rad'))
+                motor = self._motor_for_axis(axis, motors) if axis is not None else None
+                error, _ = self._stream_target_check(target, axis, goal, motor, seen_axes)
+                if not error and target.get('operation') == 'hold':
+                    error = '유지 명령은 hold_axes 로 보내야 합니다'
+                ramp = ramps.get(axis) if axis is not None else None
+                if not error and ramp is not None:
+                    error = manual_ramp.conflict_message(axis, ramp, manual_ramp.source_of(target))
+                if not error and ramp is None and self._motor_position(motor) is None:
+                    error = f'{axis}번 모터의 현재 위치를 읽을 수 없습니다'
+                if error:
+                    results.append(self._stream_target_result(target, False, error))
+                    continue
+                seen_axes.add(axis)
+                accepted.append((axis, target, self._clamp_to_limits(motor, goal), motor))
+                results.append(self._stream_target_result(target, True, ''))
+
+            # 묶인 채널은 하나라도 거절이면 모두 거절 · 묶음 발행과 같다
+            for channel in atomic_channels:
+                indexes = [
+                    index for index, target in enumerate(requests)
+                    if self._optional_int(target.get('channel')) == channel
+                ]
+                if not indexes or all(results[index]['success'] for index in indexes):
+                    continue
+                first_error = next(
+                    results[index]['message'] for index in indexes if not results[index]['success']
+                )
+                group_message = f'연동 축 전체 차단: {first_error}'
+                for index in indexes:
+                    results[index] = self._stream_target_result(requests[index], False, group_message)
+                blocked = {self._optional_int(requests[index].get('axis')) for index in indexes}
+                accepted = [item for item in accepted if item[0] not in blocked]
+
+            for axis, target, goal, motor in accepted:
+                limits = manual_speed.limits_from_request(target)
+                velocity = limits[manual_speed.VELOCITY_FIELD]
+                acceleration = limits[manual_speed.ACCELERATION_FIELD]
+                request = {
+                    key: target.get(key)
+                    for key in ('request_id', 'channel', 'motion_id', 'mapping_file_id', 'motion_rad', 'source')
+                    if target.get(key) is not None
+                }
+                request['atomic'] = self._optional_int(target.get('channel')) in atomic_channels
+                source = manual_ramp.source_of(target)
+                # X-Touch 는 날 값 · 여기서 거른다(화면에서 고른 시간) · 수정 목록 156
+                smooth_sec = manual_ramp.smooth_of(target)
+                ramp = ramps.get(axis)
+                if ramp is None:
+                    ramps[axis] = manual_ramp.AxisRamp(
+                        axis=axis,
+                        goal=goal,
+                        position=float(self._motor_position(motor)),
+                        max_velocity=velocity,
+                        max_acceleration=acceleration,
+                        source=source,
+                        updated_at=now,
+                        request=request,
+                        smooth_sec=smooth_sec,
+                    )
+                else:
+                    ramp.source = source
+                    ramp.retarget(goal, velocity, acceleration, request, now, smooth_sec)
+            accepted_axes = {item[0] for item in accepted}
+            for index, target in enumerate(requests):
+                axis = self._optional_int(target.get('axis'))
+                if results[index]['success'] and axis in accepted_axes:
+                    ramp = ramps[axis]
+                    results[index]['message'] = (
+                        f'stream goal accepted: Axis {axis}, goal {_deg(ramp.goal):.3f} deg, '
+                        f'max {_deg(ramp.max_velocity):.3f} deg/s (motor)'
+                    )
+            if accepted_axes:
+                self._ensure_ramp_thread()
+        success_count = sum(1 for result in results if result['success'])
+        message = (
+            f'stream goals accepted: {success_count}/{len(requests)} axes'
+            if success_count else 'stream batch rejected'
+        )
+        return success_count == len(requests), message, results
+
+    def _release_stream_ramps(self, axes: list[Any]) -> tuple[bool, str]:
+        """놓음 · 멈추지 않고 마지막 목표까지 간 뒤 끝 · 수정 목록 126"""
+        ramps, lock = self._ramp_store()
+        released = []
+        with lock:
+            for value in axes:
+                axis = self._optional_int(value)
+                ramp = ramps.get(axis) if axis is not None else None
+                if ramp is None:
+                    continue
+                ramp.released = True
+                released.append(axis)
+        if not released:
+            return True, 'stream release: 움직이는 축 없음'
+        return True, f'stream release: axes {self._axis_list_text(sorted(released))} (목표 도달 후 정지)'
+
+    def _cancel_stream_ramps(self, axes: Optional[list[Any]] = None) -> list[int]:
+        """램프를 바로 끝낸다 · 정지 · 세우기(hold) · 프로젝트 경계 · 축을 안 주면 전부"""
+        ramps, lock = self._ramp_store()
+        with lock:
+            if axes is None:
+                cancelled = sorted(ramps)
+                ramps.clear()
+                return cancelled
+            cancelled = []
+            for value in axes:
+                axis = self._optional_int(value)
+                if axis is not None and ramps.pop(axis, None) is not None:
+                    cancelled.append(axis)
+            return cancelled
+
+    def _ensure_ramp_thread(self) -> None:
+        """램프 주기 실을 띄운다 · 램프 잠금 안에서 부른다"""
+        if getattr(self, '_ramp_thread', None) is not None:
+            return
+        thread = threading.Thread(target=self._run_stream_ramps, daemon=True)
+        self._ramp_thread = thread
+        thread.start()
+
+    def _run_stream_ramps(self) -> None:
+        period = max(float(getattr(self, 'action_period_sec', DEFAULT_ACTION_PERIOD_SEC)), 0.005)
+        ramps, lock = self._ramp_store()
+        next_time = time.monotonic()
+        while True:
+            with lock:
+                if not ramps:
+                    self._ramp_thread = None
+                    return
+                try:
+                    self._stream_ramp_tick(period)
+                except Exception as exc:  # noqa: BLE001 · 실이 죽으면 램프가 남는다 · 끝내고 알린다
+                    ramps.clear()
+                    self._ramp_thread = None
+                    self.get_logger().error(f'manual stream ramp stopped: {exc}')
+                    return
+            next_time += period
+            sleep_sec = next_time - time.monotonic()
+            if sleep_sec > 0.0:
+                time.sleep(sleep_sec)
+            else:
+                next_time = time.monotonic()
+
+    def _stream_ramp_tick(self, dt: float) -> None:
+        """한 주기 · 램프 잠금 안에서 · 모든 램프 축을 한 MotorStatus 로 · 실패한 축은 끝내고 알린다"""
+        ramps, _ = self._ramp_store()
+        if not ramps:
+            return
+        now = time.monotonic()
+        targets = []
+        atomic_channels = set()
+        for axis, ramp in sorted(ramps.items()):
+            position = ramp.advance(dt, now)
+            target = {key: value for key, value in ramp.request.items() if key != 'atomic'}
+            target['axis'] = axis
+            target['target_rad'] = position
+            channel = self._optional_int(target.get('channel'))
+            if ramp.request.get('atomic') and channel is not None:
+                atomic_channels.add(channel)
+            targets.append(target)
+        _, _, results = self._handle_manual_stream_batch(targets, atomic_channels=atomic_channels)
+        failed = [result for result in results if not result.get('success')]
+        for result in failed:
+            ramps.pop(self._optional_int(result.get('axis')), None)
+        if failed:
+            self._publish_manual_stream_result(failed[0], False, failed[0]['message'], results=failed)
+        self._publish_ramp_samples(targets, results)
+        for axis, ramp in list(ramps.items()):
+            if ramp.finished(now):
+                ramps.pop(axis, None)
+
+
+    def _publish_ramp_samples(self, targets: list[Dict[str, Any]], results: list[Dict[str, Any]]) -> None:
+        """X-Touch 램프가 이번 주기에 모터로 보낸 값 · 녹화용 · 수정 목록 156
+
+        `seq` 는 주기 번호 · 한 축의 값이 이어진 번호면 정확히 한 주기(20 ms) 뒤 값이다 ·
+        녹화는 그 번호로 프레임을 잇는다(받은 시각으로 맞추면 흔들림이 차분 가속을 키운다) ·
+        `t` 는 보낸 벽시계 · 끊겼다 다시 시작한 값을 어느 프레임에 둘지만 정한다.
+        """
+        publisher = getattr(self, '_manual_stream_samples_pub', None)
+        if publisher is None:
+            return
+        sent = {
+            self._optional_int(result.get('axis'))
+            for result in results if result.get('success')
+        }
+        samples = [
+            [int(target['axis']), float(target['target_rad'])]
+            for target in targets
+            if target.get('source') == 'xtouch' and self._optional_int(target.get('axis')) in sent
+        ]
+        if not samples:
+            return
+        self._ramp_sample_seq = int(getattr(self, '_ramp_sample_seq', 0)) + 1
+        publisher.publish(String(data=json.dumps({
+            'seq': self._ramp_sample_seq,
+            't': time.time(),
+            'samples': samples,
+        })))
+
+    @staticmethod
+    def _stream_target_result(
+        request: Dict[str, Any], success: bool, message: str
+    ) -> Dict[str, Any]:
+        return {
+            'request_id': str(request.get('request_id') or ''),
+            'channel': request.get('channel'),
+            'axis': request.get('axis'),
+            'operation': request.get('operation'),
+            'motion_id': request.get('motion_id'),
+            'mapping_file_id': request.get('mapping_file_id'),
+            'motion_rad': request.get('motion_rad'),
+            'target_rad': request.get('target_rad'),
+            'success': success,
+            'message': message,
+        }
+
+    def _publish_manual_stream_result(
+        self,
+        request: Dict[str, Any],
+        success: bool,
+        message: str,
+        results: Optional[list[Dict[str, Any]]] = None,
+    ) -> None:
+        payload = {
+            'request_id': str(request.get('request_id') or ''),
+            'project_generation': request.get('project_generation'),
+            'channel': request.get('channel'),
+            'axis': request.get('axis'),
+            'motion_id': request.get('motion_id'),
+            'mapping_file_id': request.get('mapping_file_id'),
+            'motion_rad': request.get('motion_rad'),
+            'target_rad': request.get('target_rad'),
+            'success': success,
+            'message': message,
+            'stamp': time.time(),
+        }
+        if results is not None:
+            payload['results'] = results
+        self._manual_stream_result_pub.publish(
+            String(data=json.dumps(payload, ensure_ascii=False))
+        )
+        if not success:
+            self.get_logger().warning(message, throttle_duration_sec=1.0)
+
+    def _jog_request_callback(self, msg: String) -> None:
+        self._mark_request_entry()
+        try:
+            self._handle_jog_request(msg)
+        finally:
+            self._clear_request_entry()
+
+    def _handle_jog_request(self, msg: String) -> None:
+        try:
+            request = json.loads(msg.data)
+        except json.JSONDecodeError:
+            self._publish_result('', False, 'invalid jog request JSON')
+            return
+
+        request_id = str(request.get('request_id') or '')
+        command = str(request.get('command') or 'ac_servo_jog')
+        if command == 'safety_emergency_stop':
+            success, message = self._handle_safety_stop(emergency=True)
+            self._publish_result(request_id, success, message, extra=self._stop_result_fields())
+            return
+        if command == 'safety_motion_stop' and not self._emergency_latched:
+            success, message = self._handle_safety_stop(emergency=False)
+            self._publish_result(request_id, success, message, extra=self._stop_result_fields())
+            return
+        if not self._request_generation_is_current(request):
+            success, message = False, '이전 프로젝트 세대의 수동 명령을 폐기했습니다'
+        elif (
+            self._emergency_latched
+            or self._servo_alarm_guard_instance().snapshot()['grade3_latched']
+        ):
+            success, message = False, EMERGENCY_LATCHED_MESSAGE
+        elif (
+            command not in SERVO_POWER_COMMANDS
+            and self._motion_block_reason(self._optional_int(request.get('axis')))
+        ):
+            success, message = False, self._motion_block_reason(
+                self._optional_int(request.get('axis'))
+            )
+        elif command in SERVO_POWER_COMMANDS and (
+            self._active_jogs or self._active_actions
+        ):
+            success, message = False, MANUAL_COMMAND_ACTIVE_MESSAGE
+        elif command in (*SERVO_POWER_COMMANDS, 'ac_servo_jog', 'dynamixel_jog'):
+            lease_sec = (
+                MANUAL_CONTROL_OWNERSHIP_SEC
+                if command in SERVO_POWER_COMMANDS
+                else None
+            )
+            success, message = self._acquire_command_owner(
+                CommandOwner.MANUAL,
+                lease_sec=lease_sec,
+            )
+            if success:
+                if command in SERVO_POWER_COMMANDS:
+                    try:
+                        success, message = (
+                            self._handle_ac_servo_control(request)
+                            if command == 'ac_servo_control'
+                            else self._handle_dynamixel_torque_control(request)
+                        )
+                    finally:
+                        self._command_arbiter_instance().release(CommandOwner.MANUAL)
+                elif command == 'ac_servo_jog':
+                    success, message = self._handle_ac_servo_jog(request)
+                else:
+                    success, message = self._handle_dynamixel_jog(request)
+                if not success:
+                    self._release_manual_owner_if_idle()
+        else:
+            success, message = False, f'unknown manual command: {command}'
+        self._publish_result(request_id, success, message)
+
+    def _safety_request_callback(self, msg: String) -> None:
+        """Handle safety commands on a callback group independent of normal control."""
+        try:
+            request = json.loads(msg.data)
+        except json.JSONDecodeError:
+            self._publish_result('', False, 'invalid safety request JSON')
+            return
+        if not isinstance(request, dict):
+            self._publish_result('', False, 'invalid safety request')
+            return
+        request_id = str(request.get('request_id') or '')
+        command = str(request.get('command') or '')
+        extra = None
+        if command == 'servo_alarm_policy_update':
+            success, message = self._apply_servo_alarm_policy(request)
+        elif command == 'safety_emergency_stop':
+            success, message = self._handle_safety_stop(emergency=True)
+            extra = self._stop_result_fields()
+        elif command == 'safety_motion_stop' and not self._emergency_latched:
+            success, message = self._handle_safety_stop(emergency=False)
+            extra = self._stop_result_fields()
+        elif self._emergency_latched:
+            success, message = False, EMERGENCY_LATCHED_MESSAGE
+        else:
+            success, message = False, f'unknown safety command: {command}'
+        if extra:
+            self._publish_result(request_id, success, message, extra=extra)
+        else:
+            self._publish_result(request_id, success, message)
+
+    def _action_request_callback(self, msg: String) -> None:
+        self._mark_request_entry()
+        try:
+            self._handle_action_request(msg)
+        finally:
+            self._clear_request_entry()
+
+    def _handle_action_request(self, msg: String) -> None:
+        try:
+            request = json.loads(msg.data)
+        except json.JSONDecodeError:
+            self._publish_action_result('', False, 'invalid action request JSON')
+            return
+
+        request_id = str(request.get('request_id') or '')
+        command = str(request.get('command') or 'ac_servo_absolute_move')
+        if command == 'project_generation_boundary':
+            success, message = self._apply_project_generation_boundary(request)
+        elif not self._request_generation_is_current(request):
+            success, message = False, '이전 프로젝트 세대의 동작 명령을 폐기했습니다'
+        elif (
+            self._emergency_latched
+            or self._servo_alarm_guard_instance().snapshot()['grade3_latched']
+        ):
+            success, message = False, EMERGENCY_LATCHED_MESSAGE
+        elif self._motion_block_reason(self._optional_int(request.get('axis'))):
+            success, message = False, self._motion_block_reason(
+                self._optional_int(request.get('axis'))
+            )
+        elif command in ('ac_servo_absolute_move', 'dynamixel_absolute_move'):
+            success, message = self._acquire_command_owner(CommandOwner.MANUAL)
+            if success:
+                if command == 'ac_servo_absolute_move':
+                    success, message = self._handle_ac_servo_absolute_move(request)
+                else:
+                    success, message = self._handle_dynamixel_absolute_move(request)
+                if not success:
+                    self._release_manual_owner_if_idle()
+        else:
+            success, message = False, f'unknown action command: {command}'
+        self._publish_action_result(request_id, success, message)
+
+    def _apply_project_generation_boundary(
+        self, request: Dict[str, Any]
+    ) -> tuple[bool, str]:
+        try:
+            generation = int(request.get('project_generation'))
+        except (TypeError, ValueError):
+            return False, '프로젝트 세대 번호가 필요합니다'
+        current = int(getattr(self, '_project_generation', 0) or 0)
+        if generation < current:
+            return False, '이전 프로젝트 세대 경계를 폐기했습니다'
+        self._project_generation = generation
+        self._servo_alarm_guard_instance().reset_project_policy()
+        if bool(getattr(self, '_emergency_latched', False)):
+            return True, f'프로젝트 세대 {generation} 명령 경계 적용, 긴급 정지 유지'
+
+        # A project/configuration restart is only a software command boundary.
+        # Never turn it into a motor set-point: servo/torque enable already holds
+        # the drive's current position and a sampled position may be stale or may
+        # have changed after an encoder/multi-turn reset.
+        with self._command_lock:
+            # 경계도 정지 하나 · 그 앞의 재생 세션 · 겹쳐 들어온 수동 요청을 표지로 끝낸다 ·
+            # 전에는 0.5 s 차단이었다 · 수정 목록 200
+            self._begin_stop_epoch()
+        self._cancel_stream_ramps()
+        cancelled_actions = []
+        with self._command_lock:
+            cancelled_actions = [
+                str(item.get('request_id') or '')
+                for item in self._active_actions.values()
+                if isinstance(item, dict) and item.get('request_id')
+            ]
+            self._active_jogs.clear()
+            self._active_actions.clear()
+            self._last_motion_run_command_at = 0.0
+            self._command_arbiter_instance().revoke_all()
+
+        for request_id in cancelled_actions:
+            self._publish_action_result(
+                request_id,
+                False,
+                'trajectory cancelled by project/configuration restart',
+            )
+        self._publish_safety_status()
+        return True, f'프로젝트 세대 {generation} 명령 경계 적용'
+
+    def _apply_servo_alarm_policy(
+        self, request: Dict[str, Any]
+    ) -> tuple[bool, str]:
+        if not self._request_generation_is_current(request):
+            return False, '이전 프로젝트 세대의 서보 에러 정책을 폐기했습니다'
+        grades = request.get('grades')
+        if not isinstance(grades, dict):
+            return False, '서보 에러 등급 정보가 필요합니다'
+        success, message = self._servo_alarm_guard_instance().apply_policy(
+            grades,
+            project_id=str(request.get('project_id') or ''),
+            catalog_version=int(request.get('catalog_version') or 0),
+            revision=str(request.get('policy_revision') or ''),
+        )
+        if not success:
+            return False, message
+        self._evaluate_servo_alarms()
+        self._publish_safety_status()
+        return True, message
+
+    def _evaluate_servo_alarms(self) -> None:
+        state = self._latest_state if isinstance(self._latest_state, dict) else {}
+        motors = [
+            motor for motor in state.get('motors') or []
+            if isinstance(motor, dict)
+        ]
+        # "재생이 도는 중인가" 는 **한 축이라도 쥐고 있으면 참**이다 · §6-106
+        #
+        # 대표 주인(`snapshot().owner`)으로 보면, 추가 녹화에서 MIDI 가 축
+        # 하나를 잡는 순간 대표가 `midi` 로 바뀌어 다른 축을 몰던 재생이
+        # 없는 것으로 판정된다 · 알람 처리가 "재생 중" 과 "정지 중" 을 다르게
+        # 다루므로 판정이 달라진다.
+        #
+        # 「마지막 프레임이 0.15 s 안」 도 쓰지 않는다 · 틱이 늦으면 실행 도중 「정지 중」 으로
+        # 읽혀 1등급 축의 복구 대기가 풀렸다 · 재생 노드가 알려 온 단계로 본다 · 수정 목록 203
+        playback_active = self._playback_streaming()
+        result = self._servo_alarm_guard_instance().evaluate(
+            motors,
+            is_ac_servo=self._is_ac_servo,
+            axis_value=self._optional_int,
+            playback_active=playback_active,
+        )
+        if result.stop_required:
+            self._handle_safety_stop(emergency=False)
+        if result.changed:
+            self._publish_safety_status()
+
+    def _servo_alarm_block_reason(self, axis: Optional[int] = None) -> str:
+        return self._servo_alarm_guard_instance().block_reason(axis)
+
+    def _absolute_block_reason(self) -> str:
+        """연결된 MINAS 드라이브 전부 앱솔루트 확인 전에는 모든 모터 동작 거부 · 수정 목록 62
+
+        판정은 `motion_common.minas_absolute` 하나 · 값은 motion_state 의 `minas_absolute` ·
+        상태를 아직 못 받았으면 여기서는 말하지 않는다(모터 상태 없음으로 이미 막힘).
+        """
+        state = getattr(self, '_latest_state', None)
+        if not isinstance(state, dict):
+            return ''
+        return minas_absolute.block_reason(state.get('minas_absolute'))
+
+    def _motion_block_reason(self, axis: Optional[int] = None) -> str:
+        """움직이는 명령의 공통 관문 · 서보 알람 · 앱솔루트 미확인(62)"""
+        return self._servo_alarm_block_reason(axis) or self._absolute_block_reason()
+
+    def _servo_alarm_guard_instance(self) -> ServoAlarmGuard:
+        guard = getattr(self, '_servo_alarm_guard', None)
+        if guard is None:
+            guard = ServoAlarmGuard()
+            self._servo_alarm_guard = guard
+        return guard
+
+    def _request_generation_is_current(self, request: Dict[str, Any]) -> bool:
+        try:
+            generation = int(request.get('project_generation'))
+        except (TypeError, ValueError):
+            generation = self._request_project_generation(request.get('request_id'))
+        return generation >= 1 and generation == int(
+            getattr(self, '_project_generation', 0) or 0
+        )
+
+    def _handle_ac_servo_jog(self, request: Dict[str, Any]) -> tuple[bool, str]:
+        axis = self._optional_int(request.get('axis'))
+        relative_rad = self._optional_float(request.get('relative_rad'))
+        if axis is None:
+            return False, 'axis is required'
+        if relative_rad is None or math.isclose(relative_rad, 0.0, abs_tol=1e-9):
+            return False, 'relative_rad is required'
+        if abs(relative_rad) > units.deg_to_rad(self.max_jog_delta_deg):
+            return False, f'jog delta exceeds limit: {self.max_jog_delta_deg:g} deg'
+
+        motors = self._current_motors()
+        motor = self._motor_for_axis(axis, motors)
+        if motor is None:
+            return False, f'{axis}번 모터를 모터 상태에서 찾을 수 없습니다'
+        if not self._is_ac_servo(motor):
+            return False, f'{axis}번 모터는 AC 서보가 아닙니다'
+        ready_error = self._manual_readiness_error(motor, axis)
+        if ready_error:
+            return False, ready_error
+
+        current_position = self._motor_position(motor)
+        if current_position is None:
+            return False, f'{axis}번 모터의 현재 위치를 읽을 수 없습니다'
+
+        self._clear_completed_jogs()
+        # 앞 조작이 다 보냈고 목표 근처면 끝내고 넘겨받는다 · 아니면 거절 · 실물 R-11 · R-14
+        busy_message = self._previous_manual_busy_message(axis)
+        if busy_message:
+            return False, busy_message
+
+        target_position = current_position + relative_rad
+        limit_error = self._target_position_limit_error(motor, target_position)
+        if limit_error:
+            return False, limit_error
+
+        jog_duration = self._correct_jog_duration_sec(
+            motor,
+            current_position,
+            target_position,
+            manual_speed.limits_from_request(request),
+        )
+        command_period_sec = JOG_COMMAND_PERIOD_SEC
+        steps = self._jog_step_count(jog_duration['applied_sec'])
+        self._active_jogs[axis] = {
+            'stop_epoch': self._entry_stop_epoch(),  # 정지 표지 · 수정 목록 200
+            'request_id': str(request.get('request_id') or ''),
+            'target_position': float(target_position),
+            'started_at': time.time(),
+            'started_monotonic': time.monotonic(),
+            'start_position': float(current_position),
+            'applied_duration_sec': float(steps * command_period_sec),
+            'command_period_sec': float(command_period_sec),
+            'steps': float(steps),
+            'last_step': 0.0,
+            'motors': motors,
+            'motor': motor,
+        }
+        thread = threading.Thread(
+            target=self._run_ac_servo_jog_trajectory,
+            args=(axis,),
+            daemon=True,
+        )
+        self._jog_threads[axis] = thread
+        thread.start()
+
+        return (
+            True,
+            f'AC Servo smooth jog started: Axis {axis}, '
+            f'{_deg(relative_rad):+.3f} deg, target {_deg(target_position):.3f} deg, '
+            f'command interval {command_period_sec * 1000.0:.1f}ms, '
+            f'steps {steps}, duration {steps * command_period_sec:.3f}s',
+        )
+
+    def _handle_dynamixel_jog(self, request: Dict[str, Any]) -> tuple[bool, str]:
+        axis = self._optional_int(request.get('axis'))
+        relative_rad = self._optional_float(request.get('relative_rad'))
+        if axis is None:
+            return False, 'axis is required'
+        if relative_rad is None or math.isclose(relative_rad, 0.0, abs_tol=1e-9):
+            return False, 'relative_rad is required'
+        if abs(relative_rad) > units.deg_to_rad(self.max_jog_delta_deg):
+            return False, f'jog delta exceeds limit: {self.max_jog_delta_deg:g} deg'
+
+        motors = self._current_motors()
+        motor = self._motor_for_axis(axis, motors)
+        if motor is None:
+            return False, f'{axis}번 모터를 모터 상태에서 찾을 수 없습니다'
+        if not self._is_dynamixel(motor):
+            return False, f'{axis}번 모터는 다이나믹셀이 아닙니다'
+        ready_error = self._manual_readiness_error(motor, axis, is_ac_servo=False)
+        if ready_error:
+            return False, ready_error
+
+        current_position = self._motor_position(motor)
+        if current_position is None:
+            return False, f'{axis}번 모터의 현재 위치를 읽을 수 없습니다'
+
+        self._clear_completed_jogs()
+        self._clear_completed_actions()
+        # 앞 조작이 다 보냈고 목표 근처면 끝내고 넘겨받는다 · 아니면 거절 · 실물 R-11 · R-14
+        busy_message = self._previous_manual_busy_message(axis)
+        if busy_message:
+            return False, busy_message
+
+        target_position = current_position + relative_rad
+        entry_epoch = self._entry_stop_epoch()
+        success, message = self._publish_position_target(
+            motors,
+            motor,
+            axis,
+            target_position,
+            DYNAMIXEL_TORQUE_ENABLE,
+            # 정지와 겹쳐 들어온 조그면 보내지 않는다 · 수정 목록 200
+            still_active=lambda: entry_epoch == int(getattr(self, '_stop_epoch', 0) or 0),
+        )
+        if success and message == MANUAL_CANCELLED_BY_STOP:
+            return False, MANUAL_BLOCKED_BY_STOP
+        if not success:
+            return False, message
+        self._active_jogs[axis] = {
+            'stop_epoch': self._entry_stop_epoch(),  # 정지 표지 · 수정 목록 200
+            'target_position': float(target_position),
+            'started_at': time.time(),
+            'active_timeout_sec': DYNAMIXEL_JOG_ACTIVE_TIMEOUT_SEC,
+        }
+        return (
+            True,
+            f'Dynamixel jog command sent: Axis {axis}, '
+            f'{_deg(relative_rad):+.3f} deg, target {_deg(target_position):.3f} deg',
+        )
+
+    def _handle_ac_servo_absolute_move(self, request: Dict[str, Any]) -> tuple[bool, str]:
+        request_id = str(request.get('request_id') or '')
+        axis = self._optional_int(request.get('axis'))
+        target_position = self._optional_float(request.get('target_rad'))
+        requested_duration = self._optional_float(request.get('duration_sec'))
+        if axis is None:
+            return False, 'axis is required'
+        if target_position is None:
+            return False, 'target_rad is required'
+        if requested_duration is not None and requested_duration <= 0:
+            return False, 'duration_sec must be greater than 0'
+
+        motors = self._current_motors()
+        motor = self._motor_for_axis(axis, motors)
+        if motor is None:
+            return False, f'{axis}번 모터를 모터 상태에서 찾을 수 없습니다'
+        if not self._is_ac_servo(motor):
+            return False, f'{axis}번 모터는 AC 서보가 아닙니다'
+        # 운전 한계(`lower/upper`) 밖 목표는 시작 전에 거절 · 다이나믹셀·조그와 같은 검사 ·
+        # 빠져 있어 300° 를 success 로 받고 궤적 도중 스텝 검사에 걸려 고속 구간에서
+        # 끊겼다(실물 2026-10-07 · 시험 16 · 수정 목록 69) · 범위 복귀는 자체 검사
+        # (`_range_recovery_target_error`)
+        range_recovery = request.get('range_recovery') is True
+        if not range_recovery:
+            limit_error = self._target_position_limit_error(motor, target_position)
+            if limit_error:
+                return False, limit_error
+        ready_error = self._manual_readiness_error(motor, axis)
+        if ready_error:
+            return False, ready_error
+        current_position = self._motor_position(motor)
+        if current_position is None:
+            return False, f'{axis}번 모터의 현재 위치를 읽을 수 없습니다'
+
+        self._clear_completed_jogs()
+        self._clear_completed_actions()
+        # 앞 조작이 다 보냈고 목표 근처면 끝내고 넘겨받는다 · 아니면 거절 · 실물 R-11 · R-14
+        busy_message = self._previous_manual_busy_message(axis)
+        if busy_message:
+            return False, busy_message
+
+        if range_recovery:
+            return self._start_range_recovery(
+                motors,
+                motor,
+                axis,
+                current_position,
+                target_position,
+                request_id,
+                is_ac_servo=True,
+                manual_limits=manual_speed.limits_from_request(request),
+            )
+
+        corrected_duration = self._correct_action_duration_sec(
+            motor,
+            current_position,
+            target_position,
+            requested_duration,
+            manual_speed.limits_from_request(request),
+        )
+        command_period_sec = self._action_command_period_sec()
+        steps = max(1, int(math.ceil(corrected_duration['applied_sec'] / command_period_sec)))
+        self._active_actions[axis] = {
+            'stop_epoch': self._entry_stop_epoch(),  # 정지 표지 · 수정 목록 200
+            'request_id': request_id,
+            'target_position': float(target_position),
+            'started_at': time.time(),
+            'started_monotonic': time.monotonic(),
+            'start_position': float(current_position),
+            'applied_duration_sec': float(corrected_duration['applied_sec']),
+            'requested_duration_sec': float(corrected_duration['requested_sec']),
+            'command_period_sec': float(command_period_sec),
+            'steps': float(steps),
+            'last_step': 0.0,
+            'motors': motors,
+            'motor': motor,
+            'label': 'AC Servo',
+        }
+        thread = threading.Thread(
+            target=self._run_action_trajectory,
+            args=(axis,),
+            daemon=True,
+        )
+        self._action_threads[axis] = thread
+        thread.start()
+
+        limit_text = ''
+        if corrected_duration['limited']:
+            limit_text = (
+                f', requested {corrected_duration["requested_sec"]:.3f}s '
+                f'-> applied {corrected_duration["applied_sec"]:.3f}s by speed/acceleration limits'
+            )
+        else:
+            limit_text = f', duration {corrected_duration["applied_sec"]:.3f}s'
+        return (
+            True,
+            f'AC Servo absolute trajectory started: Axis {axis}, '
+            f'current {_deg(current_position):.3f} deg, target {_deg(target_position):.3f} deg, '
+            f'command interval {command_period_sec * 1000.0:.1f}ms, steps {steps}{limit_text}',
+        )
+
+    def _handle_dynamixel_absolute_move(self, request: Dict[str, Any]) -> tuple[bool, str]:
+        request_id = str(request.get('request_id') or '')
+        axis = self._optional_int(request.get('axis'))
+        target_position = self._optional_float(request.get('target_rad'))
+        requested_duration = self._optional_float(request.get('duration_sec'))
+        range_recovery = request.get('range_recovery') is True
+        if axis is None:
+            return False, 'axis is required'
+        if target_position is None:
+            return False, 'target_rad is required'
+        if requested_duration is not None and requested_duration <= 0:
+            return False, 'duration_sec must be greater than 0'
+
+        motors = self._current_motors()
+        motor = self._motor_for_axis(axis, motors)
+        if motor is None:
+            return False, f'{axis}번 모터를 모터 상태에서 찾을 수 없습니다'
+        if not self._is_dynamixel(motor):
+            return False, f'{axis}번 모터는 다이나믹셀이 아닙니다'
+        # ±180 한 바퀴 검사는 없앴다 · Extended Position(멀티턴) · 한계는 모터
+        # 운전 한계(`lower/upper` = 조인트 매핑 환산값) 하나 · AC 서보와 같다 · 2026-10-04
+        if not range_recovery:
+            limit_error = self._target_position_limit_error(motor, target_position)
+            if limit_error:
+                return False, limit_error
+        ready_error = self._manual_readiness_error(motor, axis, is_ac_servo=False)
+        if ready_error:
+            return False, ready_error
+        current_position = self._motor_position(motor)
+        if current_position is None:
+            return False, f'{axis}번 모터의 현재 위치를 읽을 수 없습니다'
+
+        self._clear_completed_jogs()
+        self._clear_completed_actions()
+        # 앞 조작이 다 보냈고 목표 근처면 끝내고 넘겨받는다 · 아니면 거절 · 실물 R-11 · R-14
+        busy_message = self._previous_manual_busy_message(axis)
+        if busy_message:
+            return False, busy_message
+
+        if range_recovery:
+            return self._start_range_recovery(
+                motors,
+                motor,
+                axis,
+                current_position,
+                target_position,
+                request_id,
+                is_ac_servo=False,
+                manual_limits=manual_speed.limits_from_request(request),
+            )
+
+        corrected_duration = self._correct_action_duration_sec(
+            motor,
+            current_position,
+            target_position,
+            requested_duration,
+            manual_speed.limits_from_request(request),
+        )
+        command_period_sec = self.action_period_sec
+        steps = max(1, int(math.ceil(corrected_duration['applied_sec'] / command_period_sec)))
+        self._active_actions[axis] = {
+            'stop_epoch': self._entry_stop_epoch(),  # 정지 표지 · 수정 목록 200
+            'request_id': request_id,
+            'target_position': float(target_position),
+            'started_at': time.time(),
+            'started_monotonic': time.monotonic(),
+            'start_position': float(current_position),
+            'applied_duration_sec': float(corrected_duration['applied_sec']),
+            'requested_duration_sec': float(corrected_duration['requested_sec']),
+            'command_period_sec': float(command_period_sec),
+            'steps': float(steps),
+            'last_step': 0.0,
+            'motors': motors,
+            'motor': motor,
+            'label': 'Dynamixel',
+        }
+        thread = threading.Thread(
+            target=self._run_dynamixel_action_trajectory,
+            args=(axis,),
+            daemon=True,
+        )
+        self._action_threads[axis] = thread
+        thread.start()
+
+        limit_text = ''
+        if corrected_duration['limited']:
+            limit_text = (
+                f', requested {corrected_duration["requested_sec"]:.3f}s '
+                f'-> applied {corrected_duration["applied_sec"]:.3f}s by speed/acceleration limits'
+            )
+        else:
+            limit_text = f', duration {corrected_duration["applied_sec"]:.3f}s'
+        return (
+            True,
+            f'Dynamixel absolute trajectory started: Axis {axis}, '
+            f'current {_deg(current_position):.3f} deg, target {_deg(target_position):.3f} deg, '
+            f'command interval {command_period_sec * 1000.0:.1f}ms, steps {steps}{limit_text}',
+        )
+
+    def _clear_completed_jogs(self) -> None:
+        self._clear_completed_position_targets(self._active_jogs)
+
+    def _clear_completed_actions(self) -> None:
+        self._clear_completed_action_targets()
+
+    def _run_ac_servo_jog_trajectory(self, axis: int) -> None:
+        active = self._active_jogs.get(axis)
+        if active is None:
+            self._jog_threads.pop(axis, None)
+            return
+
+        steps = max(1, int(active.get('steps') or 1))
+        active_start_position = self._optional_float(active.get('start_position'))
+        active_target_position = self._optional_float(active.get('target_position'))
+        start_position = 0.0 if active_start_position is None else active_start_position
+        target_position = (
+            start_position
+            if active_target_position is None
+            else active_target_position
+        )
+        command_period_sec = max(
+            self._optional_float(active.get('command_period_sec'))
+            or self._action_command_period_sec(),
+            self.action_period_sec,
+        )
+        start_time = time.monotonic()
+
+        for step in range(1, steps + 1):
+            active = self._active_jogs.get(axis)
+            if active is None:
+                break
+
+            u = min(max(step / steps, 0.0), 1.0)
+            command_position = start_position + (
+                (target_position - start_position) * self._cubic_smoothstep(u)
+            )
+            motors = active.get('motors')
+            motor = active.get('motor')
+            if not isinstance(motors, list) or not isinstance(motor, dict):
+                self._active_jogs.pop(axis, None)
+                self.get_logger().warning(
+                    f'AC Servo smooth jog stopped: Axis {axis}, '
+                    'motor state snapshot is unavailable'
+                )
+                break
+
+            success, message = self._publish_ac_servo_action_setpoint(
+                motors,
+                motor,
+                axis,
+                command_position,
+                still_active=lambda axis=axis, active=active: self._manual_entry_live(self._active_jogs, axis, active),
+            )
+            if success and message == MANUAL_CANCELLED_BY_STOP:
+                # 정지가 끊었다 · 정지와 겹쳐 들어와 표에 남은 조그면 여기서 지운다 · 수정 목록 200
+                self._end_cancelled_manual(self._active_jogs, axis, active)
+                break
+            if not success:
+                self._active_jogs.pop(axis, None)
+                self.get_logger().warning(
+                    f'AC Servo smooth jog stopped: Axis {axis}, {message}'
+                )
+                break
+
+            active['last_step'] = float(step)
+            next_time = start_time + (step * command_period_sec)
+            sleep_sec = next_time - time.monotonic()
+            if sleep_sec > 0.0:
+                time.sleep(sleep_sec)
+
+        active = self._active_jogs.get(axis)
+        if active is not None and int(active.get('last_step') or 0) >= steps:
+            active['commands_sent_at'] = time.time()
+            self.get_logger().info(
+                f'AC Servo smooth jog commands sent: Axis {axis}, '
+                f'sent {steps}/{steps} steps, target {_deg(target_position):.3f} deg'
+            )
+        self._jog_threads.pop(axis, None)
+
+    def _run_action_trajectory(self, axis: int) -> None:
+        active = self._active_actions.get(axis)
+        if active is None:
+            return
+
+        steps = max(1, int(active.get('steps') or 1))
+        active_start_position = self._optional_float(active.get('start_position'))
+        active_target_position = self._optional_float(active.get('target_position'))
+        start_position = 0.0 if active_start_position is None else active_start_position
+        target_position = (
+            start_position
+            if active_target_position is None
+            else active_target_position
+        )
+        command_period_sec = max(
+            self._optional_float(active.get('command_period_sec')) or self._action_command_period_sec(),
+            self.action_period_sec,
+        )
+        start_time = time.monotonic()
+
+        for step in range(1, steps + 1):
+            active = self._active_actions.get(axis)
+            if active is None:
+                break
+
+            u = min(max(step / steps, 0.0), 1.0)
+            command_position = start_position + (
+                (target_position - start_position) * self._cubic_smoothstep(u)
+            )
+
+            motors = active.get('motors')
+            motor = active.get('motor')
+            if not isinstance(motors, list) or not isinstance(motor, dict):
+                current_motors = self._current_motors()
+                current_motor = self._motor_for_axis(axis, current_motors)
+                if current_motor is None:
+                    self.get_logger().warn(
+                        f'AC Servo trajectory waiting for Axis {axis} motion_state'
+                    )
+                    time.sleep(self.action_period_sec)
+                    continue
+                motors = current_motors
+                motor = current_motor
+
+            success, message = self._publish_ac_servo_action_setpoint(
+                motors,
+                motor,
+                axis,
+                command_position,
+                still_active=lambda axis=axis, active=active: self._manual_entry_live(self._active_actions, axis, active),
+                # 범위 복구 중간 점은 한계 밖(시작점 → 한계값 사이) · 수정 목록 126
+                **({'check_limits': False} if active.get('range_recovery') else {}),
+            )
+            if success and message == MANUAL_CANCELLED_BY_STOP:
+                self._end_cancelled_manual(self._active_actions, axis, active, action=True)
+                break
+            if not success:
+                request_id = str(active.get('request_id') or '')
+                self._active_actions.pop(axis, None)
+                self._action_threads.pop(axis, None)
+                self._publish_action_result(
+                    request_id,
+                    False,
+                    f'AC Servo trajectory stopped: Axis {axis}, {message}',
+                )
+                return
+
+            active['last_step'] = float(step)
+            next_time = start_time + (step * command_period_sec)
+            sleep_sec = next_time - time.monotonic()
+            if sleep_sec > 0.0:
+                time.sleep(sleep_sec)
+
+        active = self._active_actions.get(axis)
+        if active is not None:
+            active['last_step'] = float(steps)
+            active['commands_sent_at'] = time.time()
+            self.get_logger().info(
+                f'AC Servo trajectory commands sent: Axis {axis}, '
+                f'sent {steps}/{steps} steps, target {_deg(target_position):.3f} deg'
+            )
+        self._action_threads.pop(axis, None)
+
+    def _run_dynamixel_action_trajectory(self, axis: int) -> None:
+        active = self._active_actions.get(axis)
+        if active is None:
+            return
+
+        steps = max(1, int(active.get('steps') or 1))
+        active_start_position = self._optional_float(active.get('start_position'))
+        active_target_position = self._optional_float(active.get('target_position'))
+        start_position = 0.0 if active_start_position is None else active_start_position
+        target_position = (
+            start_position
+            if active_target_position is None
+            else active_target_position
+        )
+        command_period_sec = max(
+            self._optional_float(active.get('command_period_sec')) or self.action_period_sec,
+            self.action_period_sec,
+        )
+        start_time = time.monotonic()
+
+        for step in range(1, steps + 1):
+            active = self._active_actions.get(axis)
+            if active is None:
+                break
+
+            u = min(max(step / steps, 0.0), 1.0)
+            command_position = start_position + (
+                (target_position - start_position) * self._cubic_smoothstep(u)
+            )
+
+            motors = active.get('motors')
+            motor = active.get('motor')
+            if not isinstance(motors, list) or not isinstance(motor, dict):
+                current_motors = self._current_motors()
+                current_motor = self._motor_for_axis(axis, current_motors)
+                if current_motor is None:
+                    self.get_logger().warn(
+                        f'Dynamixel trajectory waiting for Axis {axis} motion_state'
+                    )
+                    time.sleep(self.action_period_sec)
+                    continue
+                motors = current_motors
+                motor = current_motor
+
+            success, message = self._publish_position_target(
+                motors,
+                motor,
+                axis,
+                command_position,
+                DYNAMIXEL_TORQUE_ENABLE,
+                # 정지가 이 궤적을 지운 뒤면 보내지 않는다 · 정지와 같은 잠금 안에서 · AC 길과 같다 · 수정 목록 200
+                still_active=lambda axis=axis, active=active: self._manual_entry_live(
+                    self._active_actions, axis, active,
+                ),
+                **({'check_limits': False} if active.get('range_recovery') else {}),
+            )
+            if success and message == MANUAL_CANCELLED_BY_STOP:
+                self._end_cancelled_manual(self._active_actions, axis, active, action=True)
+                break
+            if not success:
+                request_id = str(active.get('request_id') or '')
+                self._active_actions.pop(axis, None)
+                self._action_threads.pop(axis, None)
+                self._publish_action_result(
+                    request_id,
+                    False,
+                    f'Dynamixel trajectory stopped: Axis {axis}, {message}',
+                )
+                return
+
+            active['last_step'] = float(step)
+            next_time = start_time + (step * command_period_sec)
+            sleep_sec = next_time - time.monotonic()
+            if sleep_sec > 0.0:
+                time.sleep(sleep_sec)
+
+        active = self._active_actions.get(axis)
+        if active is not None:
+            active['last_step'] = float(steps)
+            active['commands_sent_at'] = time.time()
+            self.get_logger().info(
+                f'Dynamixel trajectory commands sent: Axis {axis}, '
+                f'sent {steps}/{steps} steps, target {_deg(target_position):.3f} deg'
+            )
+        self._action_threads.pop(axis, None)
+
+    def _manual_settle_verdict(
+        self,
+        active: Dict[str, Any],
+        motor: Dict[str, Any],
+        position: Optional[float],
+        velocity: Optional[float],
+        now: float,
+        *,
+        settle_sec: float,
+        timed_out: bool,
+    ) -> str:
+        """조그 · 목표 이동이 끝났나 · 판정은 `manual_settle` · 실물 R-11 · R-14"""
+        done_velocity = self._done_velocity(motor)
+        manual_settle.observe(active, position, velocity, done_velocity, now)
+        return manual_settle.verdict(
+            position=position,
+            velocity=velocity,
+            target=float(active['target_position']),
+            tolerance=self._target_tolerance(motor),
+            done_velocity=done_velocity,
+            commands_sent_at=self._optional_float(active.get('commands_sent_at')),
+            peak_error=self._optional_float(active.get('settle_peak_error')),
+            moving_at=self._optional_float(active.get('settle_moving_at')),
+            near=manual_settle.near_for(not self._is_dynamixel(motor)),
+            settle_sec=settle_sec,
+            now=now,
+            timed_out=timed_out,
+        )
+
+    def _note_manual_settle(
+        self,
+        axis: int,
+        active: Dict[str, Any],
+        result: str,
+        position: Optional[float],
+        motor: Optional[Dict[str, Any]] = None,
+    ) -> str:
+        """끝낸 조작에 알릴 일이 있으면 남긴다 · 화면은 안전 상태의 `manual_notices` 로 본다 · 알림 글
+
+        AC 서보만 · 다이나믹셀은 도착 오차(2 카운트)가 빡빡해 시간 초과가 흔하고 게인 안내가 맞지 않는다
+        """
+        if result not in manual_settle.NOTICE_VERDICTS:
+            return ''
+        if motor is not None and self._is_dynamixel(motor):
+            return ''
+        text = manual_settle.notice_text(
+            axis,
+            result,
+            position=position,
+            target=float(active['target_position']),
+            peak_error=self._optional_float(active.get('settle_peak_error')),
+        )
+        notices = getattr(self, '_manual_notices', None)
+        if notices is None:
+            notices = {}
+            self._manual_notices = notices
+        notices[int(axis)] = {
+            'axis': int(axis),
+            'kind': result,
+            'message': text,
+            'stamp': time.time(),
+        }
+        self.get_logger().warning(text)
+        return text
+
+    def _previous_manual_busy_message(self, axis: int) -> str:
+        """같은 축의 앞 조그 · 동작 · 다 보냈고 목표 근처면 끝내고 넘겨받는다 · 아니면 거절 문구 · 실물 R-11 · R-14
+
+        앞 조작이 드라이브 출렁임(R-11) · 자리 잡기(R-14) 때문에 안 끝났을 뿐이면 새 조작을 막을
+        까닭이 없다 · 새 궤적은 지금 위치에서 시작한다 · 아직 보내는 중이거나 목표에서 멀면 거절.
+        """
+        self._clear_completed_jogs()
+        self._clear_completed_actions()
+        motor = self._motor_for_axis(axis, self._current_motors())
+        position = self._motor_position(motor) if motor is not None else None
+        for active_targets, noun in ((self._active_jogs, '조그가'), (self._active_actions, '동작이')):
+            active = active_targets.get(axis)
+            if active is None:
+                continue
+            if motor is not None and manual_settle.can_take_over(
+                active,
+                position,
+                manual_settle.near_for(not self._is_dynamixel(motor)),
+                self._target_tolerance(motor),
+            ):
+                active_targets.pop(axis, None)
+                if active_targets is self._active_actions:
+                    self._publish_action_result(
+                        str(active.get('request_id') or ''),
+                        True,
+                        f'{axis}번 모터: 다음 조작으로 인계 (목표 {_deg(active["target_position"]):.3f} deg 근처)',
+                    )
+                continue
+            where = '' if position is None else f', 현재 {_deg(position):.3f} deg'
+            return (
+                f'{axis}번 모터의 이전 {noun} 아직 진행 중입니다 ('
+                f'목표 {_deg(active["target_position"]):.3f} deg{where})'
+            )
+        return ''
+
+    def _clear_completed_position_targets(self, active_targets: Dict[int, Dict[str, Any]]) -> None:
+        if not active_targets:
+            return
+
+        now = time.time()
+        motors = self._current_motors()
+        for axis, active in list(active_targets.items()):
+            motor = self._motor_for_axis(axis, motors)
+            if motor is None:
+                if now - active['started_at'] > self.state_timeout_sec:
+                    active_targets.pop(axis, None)
+                continue
+
+            position = self._motor_position(motor)
+            velocity = self._motor_velocity(motor)
+            timeout_limit = max(
+                float(active.get('active_timeout_sec') or JOG_ACTIVE_TIMEOUT_SEC),
+                float(active.get('applied_duration_sec') or 0.0) + 5.0,
+            )
+            # 도착 · 또는 다 보낸 뒤 3 초 지나 목표 근처 출렁임 · 못 미치고 섬 → 끝내고 알림 · 실물 R-11
+            result = self._manual_settle_verdict(
+                active, motor, position, velocity, now,
+                settle_sec=manual_settle.JOG_SETTLE_SEC,
+                timed_out=now - active['started_at'] > timeout_limit,
+            )
+            if result != manual_settle.WAIT:
+                active_targets.pop(axis, None)
+                self._note_manual_settle(axis, active, result, position, motor)
+
+    def _clear_completed_action_targets(self) -> None:
+        if not self._active_actions:
+            return
+
+        now = time.time()
+        motors = self._current_motors()
+        for axis, active in list(self._active_actions.items()):
+            steps = max(1, int(active.get('steps') or 1))
+            last_step = int(active.get('last_step') or 0)
+            request_id = str(active.get('request_id') or '')
+            label = str(active.get('label') or 'Motion')
+            timeout_limit = max(float(active.get('applied_duration_sec') or 0.0) + 10.0, 10.0)
+            timed_out = now - active['started_at'] > timeout_limit
+
+            if last_step < steps and not timed_out:
+                continue
+
+            motor = self._motor_for_axis(axis, motors)
+            if motor is None:
+                if timed_out:
+                    self._active_actions.pop(axis, None)
+                continue
+
+            position = self._motor_position(motor)
+            velocity = self._motor_velocity(motor)
+            target_position = active['target_position']
+            # 자리 잡기 2 초(예전 그대로) 뒤 · 목표 근처 출렁임은 끝내고 알림 · 멈췄는데 못 미침은 실패 · 실물 R-11 · R-14
+            result = self._manual_settle_verdict(
+                active, motor, position, velocity, now,
+                settle_sec=max(ACTION_RESULT_SETTLE_SEC, self.action_period_sec * 3.0),
+                timed_out=timed_out,
+            )
+            if result == manual_settle.WAIT:
+                continue
+            self._active_actions.pop(axis, None)
+            notice = self._note_manual_settle(axis, active, result, position, motor)
+
+            if result in (manual_settle.ARRIVED, manual_settle.HUNTING):
+                message = (
+                    f'{label} trajectory completed: Axis {axis}, '
+                    f'sent {last_step}/{steps} steps, '
+                    f'target {_deg(target_position):.3f} deg'
+                )
+                self._publish_action_result(
+                    request_id, True, f'{message} · {notice}' if notice else message,
+                )
+                continue
+
+            position_text = 'unavailable' if position is None else f'{_deg(position):.3f} deg'
+            message = (
+                f'{label} trajectory did not reach target: Axis {axis}, '
+                f'current {position_text}, target {_deg(target_position):.3f} deg, '
+                f'sent {last_step}/{steps} steps'
+            )
+            self._publish_action_result(request_id, False, f'{message} · {notice}' if notice else message)
+            self.get_logger().warn(message)
+
+    @staticmethod
+    def _motor_position(motor: Optional[Dict[str, Any]]) -> Optional[float]:
+        """모터 상태의 현재 위치 · rad · 상태 단위는 `wire_units` 가 안다"""
+        return wire_units.motor_position(motor)
+
+    @staticmethod
+    def _motor_velocity(motor: Optional[Dict[str, Any]]) -> Optional[float]:
+        """모터 상태의 현재 속도 · rad/s"""
+        return wire_units.motor_velocity(motor)
+
+    @staticmethod
+    def _cubic_smoothstep(u: float) -> float:
+        return (3.0 * u * u) - (2.0 * u * u * u)
+
+    def _correct_action_duration_sec(
+        self,
+        motor: Dict[str, Any],
+        current_position: float,
+        target_position: float,
+        requested_duration: Optional[float],
+        manual_limits: Optional[Dict[str, float]] = None,
+    ) -> Dict[str, Any]:
+        """`manual_limits` · 수동 조작 상한(모터 rad/s · rad/s²) · 수정 목록 126"""
+        requested = requested_duration
+        if requested is None:
+            requested = DEFAULT_ACTION_DURATION_SEC
+        requested = max(float(requested), MIN_ACTION_DURATION_SEC, self.action_period_sec)
+
+        distance = abs(target_position - current_position)
+        applied = requested
+        velocity_limit, acceleration_limit = self._limits_with_manual(motor, manual_limits)
+
+        if distance > 0.0 and velocity_limit is not None and velocity_limit > 0.0:
+            applied = max(
+                applied,
+                CUBIC_SMOOTHSTEP_MAX_VELOCITY * distance / velocity_limit,
+            )
+        if distance > 0.0 and acceleration_limit is not None and acceleration_limit > 0.0:
+            applied = max(
+                applied,
+                math.sqrt(CUBIC_SMOOTHSTEP_MAX_ACCELERATION * distance / acceleration_limit),
+            )
+
+        return {
+            'requested_sec': requested,
+            'applied_sec': applied,
+            'limited': applied > requested + 1e-9,
+            'velocity_limit_rad_s': velocity_limit,
+            'acceleration_limit_rad_s2': acceleration_limit,
+        }
+
+    def _correct_jog_duration_sec(
+        self,
+        motor: Dict[str, Any],
+        current_position: float,
+        target_position: float,
+        manual_limits: Optional[Dict[str, float]] = None,
+    ) -> Dict[str, Any]:
+        """`manual_limits` · 수동 조작 상한(모터 rad/s · rad/s²) · 수정 목록 126"""
+        distance = abs(target_position - current_position)
+        configured_velocity, configured_acceleration = self._limits_with_manual(
+            motor, manual_limits
+        )
+        applied = max(DEFAULT_JOG_MIN_DURATION_SEC, JOG_COMMAND_PERIOD_SEC)
+        if distance > 0.0:
+            nominal_duration = max(
+                CUBIC_SMOOTHSTEP_MAX_VELOCITY
+                * distance
+                / units.deg_to_rad(DEFAULT_JOG_VELOCITY_DEG_SEC),
+                math.sqrt(
+                    CUBIC_SMOOTHSTEP_MAX_ACCELERATION
+                    * distance
+                    / units.deg_to_rad(DEFAULT_JOG_ACCELERATION_DEG_SEC2)
+                ),
+            )
+            applied = max(
+                applied,
+                min(nominal_duration, DEFAULT_JOG_MAX_DURATION_SEC),
+            )
+            if configured_velocity is not None:
+                applied = max(
+                    applied,
+                    CUBIC_SMOOTHSTEP_MAX_VELOCITY
+                    * distance
+                    / configured_velocity,
+                )
+            if configured_acceleration is not None:
+                applied = max(
+                    applied,
+                    math.sqrt(
+                        CUBIC_SMOOTHSTEP_MAX_ACCELERATION
+                        * distance
+                        / configured_acceleration
+                    ),
+                )
+        return {
+            'applied_sec': applied,
+            'velocity_limit_rad_s': configured_velocity,
+            'acceleration_limit_rad_s2': configured_acceleration,
+        }
+
+    def _limits_with_manual(
+        self,
+        motor: Dict[str, Any],
+        manual_limits: Optional[Dict[str, float]],
+    ) -> tuple[Optional[float], Optional[float]]:
+        """모터 설정 상한과 수동 조작 상한 중 작은 쪽 · rad/s · rad/s²"""
+        velocity = self._velocity_limit(motor)
+        acceleration = self._acceleration_limit(motor)
+        if manual_limits:
+            velocity = self._min_positive([velocity, manual_limits.get(manual_speed.VELOCITY_FIELD)])
+            acceleration = self._min_positive([
+                acceleration, manual_limits.get(manual_speed.ACCELERATION_FIELD),
+            ])
+        return velocity, acceleration
+
+    @staticmethod
+    def _jog_step_count(duration_sec: float) -> int:
+        return max(
+            4,
+            int(math.ceil((duration_sec - 1e-9) / JOG_COMMAND_PERIOD_SEC)),
+        )
+
+    @staticmethod
+    def _config_rate(value: Optional[float]) -> Optional[float]:
+        """모터 설정 파일의 속도·가속도(설정 단위/s) → rad/s"""
+        if value is None:
+            return None
+        return units.convert(value, wire_units.MOTOR_CONFIG_UNIT, units.RAD)
+
+    def _velocity_limit(self, motor: Dict[str, Any]) -> Optional[float]:
+        """속도 상한 · rad/s"""
+        driver = self._driver_config_for_motor(motor)
+        candidates = [
+            self._config_rate(self._optional_float((driver or {}).get('profile_velocity'))),
+        ]
+        rated_speed_rpm = self._optional_float((driver or {}).get('rated_speed_rpm'))
+        if rated_speed_rpm is None:
+            rated_speed_rpm = self._optional_float(motor.get('rated_speed_rpm'))
+        if rated_speed_rpm is not None:
+            candidates.append(units.rpm_to_rad_s(rated_speed_rpm))
+
+        speed = self._optional_float((driver or {}).get('speed'))
+        if speed is not None and speed <= 1_000_000.0:
+            candidates.append(self._config_rate(speed))
+        return self._min_positive(candidates)
+
+    def _acceleration_limit(self, motor: Dict[str, Any]) -> Optional[float]:
+        """가속도 상한 · rad/s²"""
+        driver = self._driver_config_for_motor(motor)
+        candidates = [
+            self._config_rate(self._optional_float((driver or {}).get(key)))
+            for key in ('profile_acceleration', 'profile_deceleration', 'acceleration', 'deceleration')
+        ]
+        return self._min_positive(candidates)
+
+    def _driver_config_for_motor(self, motor: Dict[str, Any]) -> Dict[str, Any]:
+        axis = self._optional_int(motor.get('controller_index'))
+        if axis is None:
+            return {}
+
+        config = self._load_motor_config()
+        masters = config.get('masters', [])
+        drivers = config.get('drivers', [])
+        if not isinstance(masters, list) or not isinstance(drivers, list):
+            return {}
+
+        driver_by_id: Dict[int, Dict[str, Any]] = {}
+        for driver in drivers:
+            if not isinstance(driver, dict):
+                continue
+            driver_id = self._optional_int(driver.get('id'))
+            if driver_id is not None:
+                driver_by_id[driver_id] = driver
+
+        for master in masters:
+            if not isinstance(master, dict):
+                continue
+            slaves = master.get('slaves', [])
+            if not isinstance(slaves, list):
+                continue
+            for slave in slaves:
+                if not isinstance(slave, dict):
+                    continue
+                if self._optional_int(slave.get('controller_index')) != axis:
+                    continue
+                driver_id = self._optional_int(slave.get('driver_id'))
+                if driver_id is None:
+                    return {}
+                return driver_by_id.get(driver_id, {})
+        return {}
+
+    def _load_motor_config(self) -> Dict[str, Any]:
+        if self._motor_config_cache is not None:
+            return self._motor_config_cache
+        if not self.config_file.is_file():
+            self.get_logger().warn(f'motor config file not found: {self.config_file}')
+            self._motor_config_cache = {}
+            return self._motor_config_cache
+        try:
+            data = yaml.safe_load(self.config_file.read_text(encoding='utf-8')) or {}
+        except (OSError, yaml.YAMLError) as exc:
+            self.get_logger().warn(f'Failed to read motor config file: {exc}')
+            data = {}
+        self._motor_config_cache = data if isinstance(data, dict) else {}
+        return self._motor_config_cache
+
+    def _load_action_period_sec(self) -> float:
+        period = self._optional_float(
+            self.declare_parameter('action_period_sec', DEFAULT_ACTION_PERIOD_SEC).value
+        )
+        if period is None or period <= 0:
+            return DEFAULT_ACTION_PERIOD_SEC
+        return max(period, 0.001)
+
+    def _action_setpoint_clear_sec(self) -> float:
+        return max(self.action_period_sec + 0.002, 0.002)
+
+    def _action_command_period_sec(self) -> float:
+        return self.action_period_sec + self._action_setpoint_clear_sec()
+
+    @staticmethod
+    def _min_positive(values: list[Optional[float]]) -> Optional[float]:
+        positive = [
+            value for value in values
+            if value is not None and math.isfinite(value) and value > 0.0
+        ]
+        return min(positive) if positive else None
+
+    def _target_position_limit_error(
+        self,
+        motor: Dict[str, Any],
+        target_position: float,
+    ) -> str:
+        """Common limit guard for every upper-level position target."""
+        axis = self._optional_int(motor.get('controller_index'))
+        lower = wire_units.motor_limit(motor, 'lower')
+        upper = wire_units.motor_limit(motor, 'upper')
+        # 설정 파일은 한계를 0.001° 로 반올림해 적는다 · 그 안쪽 넘침은 반올림 차이라 거절하지 않는다
+        # (호출한 쪽이 경계값으로 자른다 · `_clamp_to_limits`) · 수정 목록 103(라)
+        tolerance = LIMIT_ROUNDING_TOLERANCE_RAD
+        if lower is not None and target_position < lower - tolerance:
+            return (
+                f'{axis}번 모터 목표 위치 {_deg(target_position):.4f} deg 가 '
+                f'하한 {_deg(lower):.4f} deg 보다 작습니다'
+            )
+        if upper is not None and target_position > upper + tolerance:
+            return (
+                f'{axis}번 모터 목표 위치 {_deg(target_position):.4f} deg 가 '
+                f'상한 {_deg(upper):.4f} deg 보다 큽니다'
+            )
+        return ''
+
+    def _clamp_to_limits(self, motor: Dict[str, Any], target_position: float) -> float:
+        """반올림 여유 안에서 넘은 목표를 경계값으로 · 재생 쪽 클리핑과 같은 방식 · 수정 목록 103(라)"""
+        lower = wire_units.motor_limit(motor, 'lower')
+        upper = wire_units.motor_limit(motor, 'upper')
+        if lower is None or upper is None or lower > upper:
+            return target_position
+        return min(max(target_position, lower), upper)
+
+    def _range_recovery_target_error(
+        self,
+        motor: Dict[str, Any],
+        current_position: float,
+        target_position: float,
+    ) -> str:
+        axis = self._optional_int(motor.get('controller_index'))
+        lower = wire_units.motor_limit(motor, 'lower')
+        upper = wire_units.motor_limit(motor, 'upper')
+        if lower is None or upper is None or lower > upper:
+            return f'{axis}번 모터의 위치 한계값이 올바르지 않습니다'
+
+        expected_target: Optional[float] = None
+        boundary_name = ''
+        if current_position < lower:
+            expected_target = lower
+            boundary_name = '하한'
+        elif current_position > upper:
+            expected_target = upper
+            boundary_name = '상한'
+        else:
+            return f'{axis}번 모터는 이미 위치 한계 안에 있습니다'
+
+        # 화면이 보낸 한계값(deg → rad) 과 비교 · deg 로 1e-6 에 해당하는 폭
+        if not math.isclose(target_position, expected_target, abs_tol=units.deg_to_rad(1e-6)):
+            return (
+                f'{axis}번 모터 한계 복구는 {boundary_name} '
+                f'한계값 {_deg(expected_target):.3f} deg 를 목표로 해야 합니다'
+            )
+        return ''
+
+    def _start_range_recovery(
+        self,
+        motors: list[Dict[str, Any]],
+        motor: Dict[str, Any],
+        axis: int,
+        current_position: float,
+        target_position: float,
+        request_id: str,
+        *,
+        is_ac_servo: bool,
+        manual_limits: Optional[Dict[str, float]] = None,
+    ) -> tuple[bool, str]:
+        """한계 밖 → 가장 가까운 한계까지 · 수동 조작 상한으로 천천히 · 수정 목록 126
+
+        전에는 한계값 하나를 바로 보내 드라이브 프로파일 속도로 갔다 · 이제 절대 이동과 같은
+        궤적 · 중간 점은 한계 밖이라 한계 검사를 건너뛴다(시작점 → 한계값 사이 · 위에서 확인)
+        """
+        recovery_error = self._range_recovery_target_error(
+            motor,
+            current_position,
+            target_position,
+        )
+        if recovery_error:
+            return False, recovery_error
+
+        corrected = self._correct_action_duration_sec(
+            motor,
+            current_position,
+            target_position,
+            None,
+            manual_limits if manual_limits is not None else manual_speed.limits_from_request(None),
+        )
+        command_period_sec = (
+            self._action_command_period_sec() if is_ac_servo else self.action_period_sec
+        )
+        steps = max(1, int(math.ceil(corrected['applied_sec'] / command_period_sec)))
+        label = 'AC Servo range recovery' if is_ac_servo else 'Dynamixel range recovery'
+        self._active_actions[axis] = {
+            'stop_epoch': self._entry_stop_epoch(),  # 정지 표지 · 수정 목록 200
+            'request_id': request_id,
+            'target_position': float(target_position),
+            'started_at': time.time(),
+            'started_monotonic': time.monotonic(),
+            'start_position': float(current_position),
+            'applied_duration_sec': float(corrected['applied_sec']),
+            'requested_duration_sec': float(corrected['requested_sec']),
+            'command_period_sec': float(command_period_sec),
+            'steps': float(steps),
+            'last_step': 0.0,
+            'motors': motors,
+            'motor': motor,
+            'label': label,
+            'range_recovery': True,
+        }
+        thread = threading.Thread(
+            target=self._run_action_trajectory if is_ac_servo else self._run_dynamixel_action_trajectory,
+            args=(axis,),
+            daemon=True,
+        )
+        self._action_threads[axis] = thread
+        thread.start()
+        return (
+            True,
+            f'{label} started: Axis {axis}, current {_deg(current_position):.3f} deg, '
+            f'target {_deg(target_position):.3f} deg, duration {corrected["applied_sec"]:.3f}s',
+        )
+
+    def _target_tolerance(self, motor: Dict[str, Any]) -> float:
+        """도달 허용 오차 · rad"""
+        return units.deg_to_rad(self._target_tolerance_deg(motor))
+
+    def _target_tolerance_deg(self, motor: Dict[str, Any]) -> float:
+        if not self._is_dynamixel(motor):
+            return JOG_TARGET_TOLERANCE_DEG
+
+        raw_per_degree = self._optional_float(motor.get('position_raw_per_degree'))
+        if raw_per_degree is None or raw_per_degree <= 0.0:
+            pulse_per_revolution = self._optional_float(motor.get('pulse_per_revolution'))
+            if pulse_per_revolution is not None and pulse_per_revolution > 0.0:
+                raw_per_degree = pulse_per_revolution / 360.0
+
+        if raw_per_degree is None or raw_per_degree <= 0.0:
+            return max(JOG_TARGET_TOLERANCE_DEG, 0.2)
+        return max(
+            JOG_TARGET_TOLERANCE_DEG,
+            DYNAMIXEL_TARGET_TOLERANCE_RAW_COUNTS / raw_per_degree,
+        )
+
+    def _done_velocity(self, motor: Dict[str, Any]) -> float:
+        """멈췄다고 볼 속도 · rad/s"""
+        if self._is_dynamixel(motor):
+            return units.deg_to_rad(DYNAMIXEL_DONE_VELOCITY_DEG_SEC)
+        return units.deg_to_rad(JOG_DONE_VELOCITY_DEG_SEC)
+
+    def _publish_position_target(
+        self,
+        motors: list[Dict[str, Any]],
+        motor: Dict[str, Any],
+        axis: int,
+        target_position: float,
+        controlword: int,
+        check_limits: bool = True,
+        still_active=None,
+    ) -> tuple[bool, str]:
+        alarm_reason = self._motion_block_reason(axis)
+        if alarm_reason:
+            return False, alarm_reason
+        limit_error = self._target_position_limit_error(motor, target_position) if check_limits else ''
+        if limit_error:
+            return False, limit_error
+
+        command = self._empty_motor_command(motors)
+        command.number_of_target_interfaces[axis] = 2
+        command.target_interface_id[axis] = Int8MultiArray(
+            data=[ID_CONTROLWORD, ID_TARGET_POSITION]
+        )
+        command.controlword[axis] = int(controlword)
+        # 안쪽은 rad · motor_manager 로 나가는 순간에만 그 단위로 · 수정 목록 6-4
+        command.position[axis] = wire_units.to_motor_node(target_position)
+        with self._command_lock:
+            if (
+                self._emergency_latched
+                or self._servo_alarm_guard_instance().snapshot()['grade3_latched']
+            ):
+                return False, EMERGENCY_LATCHED_MESSAGE
+            # 정지 뒤 0.5 s 차단 대신 · 이 명령을 낸 조작이 정지 뒤에도 살아 있나를 정지와 같은 잠금
+            # 안에서 본다 · 정지가 지웠거나 정지와 겹쳐 들어온 조작이면 보내지 않는다 · 수정 목록 200
+            if still_active is not None and not still_active():
+                return True, MANUAL_CANCELLED_BY_STOP
+            self._command_pub.publish(self._only_driven_axes(command))
+        return True, 'position target command sent'
+
+    def _publish_ac_servo_action_setpoint(
+        self,
+        motors: list[Dict[str, Any]],
+        motor: Dict[str, Any],
+        axis: int,
+        target_position: float,
+        still_active=None,
+        check_limits: bool = True,
+    ) -> tuple[bool, str]:
+        limit_error = self._target_position_limit_error(motor, target_position) if check_limits else ''
+        if limit_error:
+            return False, limit_error
+
+        with self._command_lock:
+            # 서보 켜기 준비(0x0F)도 정지가 끊은 조작이면 보내지 않는다 · 전에는 정지 뒤 0.5 s 차단이 막았다 · 200
+            if still_active is not None and not still_active():
+                return True, MANUAL_CANCELLED_BY_STOP
+            self._publish_controlword(motors, [axis], CW_ENABLE_OPERATION_MINAS)
+        time.sleep(self._action_setpoint_clear_sec())
+        # 기다리는 사이 정지가 왔으면 보내지 않는다 · 정지가 「지금 위치에 서라」 를 보낸 **뒤에** 다음 점을
+        # 또 보내 그만큼 더 갔다(2026-10-12 floating4 「동작 취소」 뒤 모터 7.4°) · 정지와 같은 잠금 안에서 확인 ·
+        # 수정 목록 112 나
+        with self._command_lock:
+            if still_active is not None and not still_active():
+                return True, MANUAL_CANCELLED_BY_STOP
+            return self._publish_position_target(
+                motors,
+                motor,
+                axis,
+                target_position,
+                CW_NEW_SET_POINT_MINAS,
+                **({} if check_limits else {'check_limits': False}),
+            )
+
+    def _handle_ac_servo_control(self, request: Dict[str, Any]) -> tuple[bool, str]:
+        action = str(request.get('action') or '').strip().lower().replace('-', '_')
+        if action not in ('servo_on', 'servo_off', 'fault_reset'):
+            return False, 'action must be servo_on, servo_off, or fault_reset'
+
+        motors = self._current_motors()
+        if not motors:
+            return False, 'current motion_state is unavailable'
+
+        axes, error = self._ac_servo_control_axes(request, motors)
+        if error:
+            return False, error
+        if not axes:
+            return False, 'AC Servo axis not found'
+
+        if action == 'servo_on':
+            blocked = [
+                axis for axis in axes
+                if self._motion_block_reason(axis)
+            ]
+            if blocked:
+                return False, self._motion_block_reason(blocked[0])
+            fault_axes = [
+                axis for axis in axes
+                if bool((self._motor_for_axis(axis, motors) or {}).get('fault', False))
+            ]
+            if fault_axes:
+                return False, (
+                    f'{fault_axes[0]}번 모터에 에러가 있습니다. '
+                    '먼저 오류 초기화(Fault Reset)를 실행하세요'
+                )
+            self._publish_controlword(motors, axes, CW_SHUTDOWN_MINAS)
+            time.sleep(CONTROLWORD_SEQUENCE_DELAY_SEC)
+            self._publish_controlword(motors, axes, CW_SWITCH_ON_MINAS)
+            time.sleep(CONTROLWORD_SEQUENCE_DELAY_SEC)
+            self._publish_controlword(motors, axes, CW_ENABLE_OPERATION_MINAS)
+            return True, f'AC Servo ON command sent: axes {self._axis_list_text(axes)}'
+
+        if action == 'servo_off':
+            self._publish_controlword(motors, axes, CW_DISABLE_OPERATION_MINAS)
+            return True, f'AC Servo OFF command sent: axes {self._axis_list_text(axes)}'
+
+        self._publish_controlword(motors, axes, CW_FAULT_RESET_MINAS)
+        time.sleep(CONTROLWORD_SEQUENCE_DELAY_SEC)
+        self._publish_controlword(motors, axes, CW_SHUTDOWN_MINAS)
+        # 리셋 뒤 0x06 으로 「켤 준비」 상태가 되어 서보가 꺼진 채로 남는다 · 의도(사람이 원인을
+        # 보고 직접 켠다 · 사용자 결정 2026-10-07) · 다음 할 일을 문구에 적는다 · 수정 목록 71
+        return True, (
+            f'AC Servo Fault Reset command sent: axes {self._axis_list_text(axes)}. '
+            '오류 초기화를 완료했습니다. 서보 OFF 상태이므로 알람 원인을 확인한 뒤 「서보 ON」을 누르세요'
+        )
+
+    def _handle_dynamixel_torque_control(
+        self, request: Dict[str, Any],
+    ) -> tuple[bool, str]:
+        """다이나믹셀 토크 켜기·끄기 · 수정 목록 36 (2026-10-06)
+
+        전에는 끄는 길이 긴급 정지 하나뿐이었다 · 스케줄이 끝나 기준점에
+        세운 뒤 끄려면 따로 있어야 한다. 켜기는 원래 재생·조그 명령마다
+        토크 켜기(1)를 실어 보내므로 여기서는 「지금 켜기」 만 한다.
+
+        재부팅 · 수정 목록 24 (2026-10-06) · 하드웨어 오류(과부하·과열·전압)는
+        재부팅이나 전원 재투입으로만 풀린다 · 재부팅하면 토크가 꺼진다.
+        """
+        action = str(request.get('action') or '').strip().lower().replace('-', '_')
+        if action not in ('torque_on', 'torque_off', 'reboot'):
+            return False, 'action must be torque_on, torque_off or reboot'
+        motors = self._current_motors()
+        if not motors:
+            return False, 'current motion_state is unavailable'
+        requested = request.get('axes')
+        axes = []
+        for motor in motors:
+            axis = self._optional_int(motor.get('controller_index'))
+            if axis is None or not self._is_dynamixel(motor):
+                continue
+            if str(motor.get('state') or '') != 'detected':
+                continue
+            if isinstance(requested, list) and axis not in {
+                self._optional_int(item) for item in requested
+            }:
+                continue
+            axes.append(axis)
+        axes = sorted(set(axes))
+        if not axes:
+            return False, 'Dynamixel axis not found'
+        if action == 'reboot':
+            self._publish_controlword(motors, axes, DYNAMIXEL_REBOOT)
+            return True, (
+                f'Dynamixel reboot command sent: axes {self._axis_list_text(axes)}. '
+                '토크 OFF 상태로 재부팅합니다'
+            )
+        if action == 'torque_on':
+            # 토크 켜기도 서보 ON 과 같이 앱솔루트 확인 뒤에만 · 수정 목록 62
+            absolute_reason = self._absolute_block_reason()
+            if absolute_reason:
+                return False, absolute_reason
+            # 하드웨어 오류 중에는 장치가 토크 켜기를 받지 않는다 · 먼저 재부팅
+            fault_axes = [
+                axis for axis in axes
+                if bool((self._motor_for_axis(axis, motors) or {}).get('fault', False))
+            ]
+            if fault_axes:
+                return False, (
+                    f'{fault_axes[0]}번 모터에 하드웨어 오류가 있습니다. '
+                    '먼저 재부팅하세요'
+                )
+        self._publish_controlword(
+            motors, axes,
+            DYNAMIXEL_TORQUE_ENABLE if action == 'torque_on' else DYNAMIXEL_TORQUE_DISABLE,
+        )
+        return True, (
+            f'Dynamixel torque {"ON" if action == "torque_on" else "OFF"} '
+            f'command sent: axes {self._axis_list_text(axes)}'
+        )
+
+    def _ac_servo_control_axes(
+        self,
+        request: Dict[str, Any],
+        motors: list[Dict[str, Any]],
+    ) -> tuple[list[int], str]:
+        scope = str(request.get('scope') or 'selected').strip().lower()
+        if scope == 'all':
+            axes = []
+            for motor in motors:
+                axis = self._optional_int(motor.get('controller_index'))
+                if axis is None:
+                    continue
+                if not self._is_ac_servo(motor):
+                    continue
+                if str(motor.get('state') or '') != 'detected':
+                    continue
+                axes.append(axis)
+            return sorted(set(axes)), ''
+
+        if isinstance(request.get('axes'), list):
+            requested_axes = [
+                self._optional_int(axis)
+                for axis in request.get('axes')
+            ]
+            requested_axes = [
+                axis for axis in requested_axes
+                if axis is not None
+            ]
+        else:
+            axis = self._optional_int(request.get('axis'))
+            requested_axes = [] if axis is None else [axis]
+
+        if not requested_axes:
+            return [], 'axis is required'
+
+        axes = []
+        for axis in requested_axes:
+            motor = self._motor_for_axis(axis, motors)
+            if motor is None:
+                return [], f'{axis}번 모터를 모터 상태에서 찾을 수 없습니다'
+            if not self._is_ac_servo(motor):
+                return [], f'{axis}번 모터는 AC 서보가 아닙니다'
+            if str(motor.get('state') or '') != 'detected':
+                return [], f'{axis}번 모터가 감지되지 않았습니다'
+            axes.append(axis)
+        return sorted(set(axes)), ''
+
+    def _publish_controlword(
+        self,
+        motors: list[Dict[str, Any]],
+        axes: list[int],
+        controlword: int,
+    ) -> None:
+        command = self._empty_motor_command(motors)
+        for axis in axes:
+            if axis < 0 or axis >= len(command.number_of_target_interfaces):
+                continue
+            command.number_of_target_interfaces[axis] = 1
+            command.target_interface_id[axis] = Int8MultiArray(data=[ID_CONTROLWORD])
+            command.controlword[axis] = int(controlword)
+        with self._command_lock:
+            if (
+                self._emergency_latched
+                or self._servo_alarm_guard_instance().snapshot()['grade3_latched']
+            ):
+                return
+            # 끄는 명령(MINAS 0x07 · 다이나믹셀 토크 0)과 리셋(MINAS 0x80 · 다이나믹셀 재부팅)은
+            # 알람 중에도 지나간다
+            if int(controlword) not in (
+                CW_DISABLE_OPERATION_MINAS, CW_FAULT_RESET_MINAS, DYNAMIXEL_TORQUE_DISABLE,
+                DYNAMIXEL_REBOOT,
+            ):
+                if any(self._servo_alarm_block_reason(axis) for axis in axes):
+                    return
+            # 켜는 명령(MINAS 0x0F · 새 목표 0x3F · 다이나믹셀 토크 1)은 앱솔루트 확인 뒤에만 ·
+            # 끄기·리셋·0x06(전원 차단 상태로)은 막지 않는다 · 수정 목록 62
+            if int(controlword) in (
+                CW_ENABLE_OPERATION_MINAS, CW_NEW_SET_POINT_MINAS, DYNAMIXEL_TORQUE_ENABLE,
+            ) and self._absolute_block_reason():
+                return
+            # 정지 뒤 0.5 s 차단은 없앴다 · 서보 켜기 · 끄기 · 리셋은 사람이 정지 **뒤에** 누른 새 명령이다 ·
+            # 정지가 끊은 조작의 0x0F 는 부르는 쪽이 `still_active` 로 거른다 · 긴급 정지는 위에서 막는다 · 200
+            self._command_pub.publish(self._only_driven_axes(command))
+
+    def _handle_safety_stop(self, emergency: bool) -> tuple[bool, str]:
+        """Cancel every upper-level command and publish one final safe command."""
+        if self._emergency_latched and not emergency:
+            return False, EMERGENCY_LATCHED_MESSAGE
+        with self._command_lock:
+            if emergency:
+                self._emergency_latched = True
+            # 표지 먼저 · 이 순간부터 옛 재생 세션의 프레임과 정지와 겹쳐 들어온 수동 요청은 표지가 달라
+            # 거절된다(램프에 새로 들어오는 것 포함) · 전에는 0.5 s 차단(긴급은 무한) · 긴급은 위 잠금이
+            # 그대로 모두 막는다 · 수정 목록 200
+            self._begin_stop_epoch()
+        # 램프 먼저 · 램프 주기는 램프 잠금을 쥔 채 발행하므로, 여기서 비우면 그 뒤로는
+        # 램프 목표가 안 나간다 · 아래 「현재 위치에 서라」 가 마지막 명령 · 수정 목록 126
+        self._cancel_stream_ramps()
+        cancelled_actions = []
+        with self._command_lock:
+            cancelled_actions = [
+                str(item.get('request_id') or '')
+                for item in self._active_actions.values()
+                if isinstance(item, dict) and item.get('request_id')
+            ]
+            self._active_jogs.clear()
+            self._active_actions.clear()
+            self._last_motion_run_command_at = 0.0
+            self._command_arbiter_instance().revoke_all()
+
+            current_motors = self._current_motors()
+            motors = current_motors
+            if emergency and not motors:
+                motors = self._last_known_motors()
+            current_axes = {
+                axis for axis in (
+                    self._optional_int(motor.get('controller_index'))
+                    for motor in current_motors
+                )
+                if axis is not None
+            }
+            command = self._empty_motor_command(motors)
+            affected_axes = []
+            servo_off_axes = []
+            for motor in motors:
+                if str(motor.get('state') or '') != 'detected':
+                    continue
+                axis = self._optional_int(motor.get('controller_index'))
+                if axis is None or axis < 0 or axis >= len(command.number_of_target_interfaces):
+                    continue
+                position = self._motor_position(motor)
+                if emergency and (
+                    self._is_ac_servo(motor) or self._is_dynamixel(motor)
+                ):
+                    command.number_of_target_interfaces[axis] = 1
+                    command.target_interface_id[axis] = Int8MultiArray(data=[ID_CONTROLWORD])
+                    command.controlword[axis] = (
+                        CW_DISABLE_OPERATION_MINAS
+                        if self._is_ac_servo(motor)
+                        else DYNAMIXEL_TORQUE_DISABLE
+                    )
+                    affected_axes.append(axis)
+                    continue
+                if axis not in current_axes:
+                    # Never command a stale position merely to make a software stop.
+                    continue
+                if motor.get('servo_on') is not True:
+                    # 꺼진 서보 · 토크는 그대로 둔다 · 0x003F(또는 토크 ON)를 보내면 꺼진 축이 켜졌다 · 수정 목록 189 ④
+                    # (실물 NY 2026-11-09 08:39 · 운영 종료로 끈 4대가 「정지」 한 번에 켜짐 · 이 길은 앱솔루트 · 알람 관문도 건너뜀)
+                    servo_off_axes.append(axis)
+                    continue
+                if position is None:
+                    continue
+                command.number_of_target_interfaces[axis] = 2
+                command.target_interface_id[axis] = Int8MultiArray(
+                    data=[ID_CONTROLWORD, ID_TARGET_POSITION]
+                )
+                command.controlword[axis] = (
+                    CW_NEW_SET_POINT_MINAS
+                    if self._is_ac_servo(motor)
+                    else DYNAMIXEL_TORQUE_ENABLE
+                )
+                # 현재 위치(rad) 에 세운다 · motor_manager 단위로 · 수정 목록 6-4
+                command.position[axis] = wire_units.to_motor_node(position)
+                affected_axes.append(axis)
+            if affected_axes:
+                # Safety command is intentionally the final command and may bypass
+                # the latch/block that was set immediately above.
+                self._command_pub.publish(command)
+
+        for request_id in cancelled_actions:
+            self._publish_action_result(
+                request_id,
+                False,
+                'trajectory cancelled by emergency stop' if emergency
+                else 'trajectory cancelled by motion stop',
+            )
+        self._publish_safety_status()
+        mode = 'Emergency stop latched' if emergency else 'Motion stopped; servo remains enabled'
+        axes_text = self._axis_list_text(sorted(set(affected_axes))) or 'none'
+        if servo_off_axes:
+            off_text = self._axis_list_text(sorted(set(servo_off_axes)))
+            return True, f'{mode}: axes {axes_text}; servo off, left off: axes {off_text}'
+        return True, f'{mode}: axes {axes_text}'
+
+    def _safety_status_tick(self) -> None:
+        """0.5 s 주기 · 죽은 재생 노드의 세션을 닫고(고장 감지) 상태를 낸다 · 수정 목록 203"""
+        self._expire_silent_playback_session()
+        self._publish_safety_status()
+
+    def _publish_safety_status(self) -> None:
+        publisher = getattr(self, '_safety_status_pub', None)
+        if publisher is None:
+            return
+        stop_fields = self._stop_status_fields()
+        # 「정지 정리 중」 · 정지 전 재생이 아직 끝났다고 확인되지 않았다 · **이제 명령을 막지 않는다** ·
+        # 재생 프레임은 세션으로 가리고(새 실행 · 주차는 새 표지로 바로 간다) 수동 조작은 정지 뒤 새 명령이다 ·
+        # 그래서 `commands_blocked` 에 넣지 않는다 · 전에는 0.5 s 동안 모두 막아 주차가 거절됐다(191 ⑤) · 200
+        settling = not self._emergency_latched and not stop_fields['stop_settled']
+        alarm_state = self._servo_alarm_guard_instance().snapshot()
+        servo_grade = alarm_state['grade']
+        servo_grade3_latched = alarm_state['grade3_latched']
+        servo_blocked = bool(servo_grade >= 2 or servo_grade3_latched)
+        # 앱솔루트 미확인 · 모든 모터 동작 차단 · 재생·스케줄·화면이 이 값을 본다 · 수정 목록 62
+        absolute_reason = self._absolute_block_reason()
+        if servo_grade3_latched:
+            message = '3등급 서보 에러: 프로그램 재시작 필요'
+        elif servo_grade >= 2:
+            message = '2등급 서보 에러: 전체 모터 동작 차단'
+        elif alarm_state['blocked_axes']:
+            axes = self._axis_list_text(alarm_state['blocked_axes'])
+            message = f'1등급 서보 에러: {axes} 동작 차단'
+        elif self._emergency_latched:
+            message = '긴급 정지 상태: 프로그램 재시작 필요'
+        elif absolute_reason:
+            message = absolute_reason
+        elif settling:
+            message = '전체 동작 정지 처리 중'
+        else:
+            message = '동작 가능'
+        if absolute_reason and absolute_reason not in message and message.startswith('1등급'):
+            # 1등급(축별) 문구만 보이면 전체가 막힌 이유가 가려진다
+            message = f'{message} · {absolute_reason}'
+        payload = {
+            'emergency_latched': bool(self._emergency_latched),
+            'motion_stop_settling': settling,
+            # 정지 표지 · 「정지 정리 끝」 · 재생 세션 · 재생 노드 · 브리지(다시 시작 대기)가 본다 · 200 · 203
+            **stop_fields,
+            'commands_blocked': bool(
+                self._emergency_latched or servo_blocked or absolute_reason
+            ),
+            'minas_absolute_blocked': bool(absolute_reason),
+            'servo_alarm_grade': servo_grade,
+            'servo_alarm_grade3_latched': servo_grade3_latched,
+            'servo_alarm_blocked_axes': alarm_state['blocked_axes'],
+            'servo_alarm_recovery_hold_axes': alarm_state['recovery_hold_axes'],
+            'servo_alarm_active': alarm_state['active'],
+            'servo_alarm_policy_project_id': alarm_state['policy_project_id'],
+            'servo_alarm_policy_version': alarm_state['policy_version'],
+            'servo_alarm_policy_revision': alarm_state['policy_revision'],
+            # `command_owner` 는 **화면 표시용 축약형**이다 · 무엇을 계속할지
+            # 정하는 쪽은 `command_axis_owners` 를 봐야 한다 · §6-106
+            'command_owner': self._command_arbiter_instance().snapshot().owner.value,
+            'command_axis_owners': self._command_arbiter_instance().axis_owners(),
+            **self._manual_activity_snapshot(),
+            # 마지막 재생 명령을 받은 지 몇 초 · 받은 적 없으면 None · 수정 목록 14
+            # 재생 프레임을 통째로 버리는 중인가 · 재생기가 0.5초 넘으면 멈춘다 · 12-1
+            'motion_run_drop': self._motion_run_drop_snapshot(),
+            'motion_run_received_age_sec': (
+                round(time.monotonic() - self._last_motion_run_received_at, 3)
+                if getattr(self, '_last_motion_run_received_at', 0.0) else None
+            ),
+            'message': message,
+            'stamp': time.time(),
+        }
+        publisher.publish(String(data=json.dumps(payload, ensure_ascii=False)))
+
+    def _manual_activity_snapshot(self) -> Dict[str, Any]:
+        modes = []
+        if self._active_jogs:
+            modes.append('jog')
+        if self._active_actions:
+            modes.append('action')
+        axes = sorted({
+            *self._active_jogs.keys(),
+            *self._active_actions.keys(),
+        })
+        return {
+            'manual_activity_modes': modes,
+            'manual_activity_axes': axes,
+            # 끝낸 조작의 알림 · 목표 근처 출렁임 등 · 5 분 · 실물 R-11
+            'manual_notices': manual_settle.recent_notices(
+                getattr(self, '_manual_notices', None) or {}, time.time(),
+            ),
+        }
+
+    def _current_motors(self) -> list[Dict[str, Any]]:
+        if self._latest_state is None or self._latest_state_at is None:
+            return []
+        if time.time() - self._latest_state_at > self.state_timeout_sec:
+            return []
+        motors = self._latest_state.get('motors', [])
+        if not isinstance(motors, list):
+            return []
+        return [motor for motor in motors if isinstance(motor, dict)]
+
+    def _last_known_motors(self) -> list[Dict[str, Any]]:
+        if self._latest_state is None:
+            return []
+        motors = self._latest_state.get('motors', [])
+        if not isinstance(motors, list):
+            return []
+        return [motor for motor in motors if isinstance(motor, dict)]
+
+    def _motor_for_axis(
+        self,
+        axis: int,
+        motors: Optional[list[Dict[str, Any]]] = None,
+    ) -> Optional[Dict[str, Any]]:
+        if motors is None:
+            motors = self._current_motors()
+        if not motors:
+            return None
+        for motor in motors:
+            if self._optional_int(motor.get('controller_index')) == axis:
+                return motor
+        return None
+
+    def _empty_motor_command(self, motors: list[Dict[str, Any]]) -> MotorStatus:
+        axes = [
+            axis for axis in (
+                self._optional_int(motor.get('controller_index')) for motor in motors
+            )
+            if axis is not None and axis >= 0
+        ]
+        size = max(axes) + 1 if axes else 0
+
+        command = MotorStatus()
+        command.number_of_target_interfaces = [0] * size
+        command.target_interface_id = [Int8MultiArray(data=[]) for _ in range(size)]
+        command.controller_index = list(range(size))
+        command.controlword = [0] * size
+        command.statusword = [0] * size
+        command.errorcode = [0] * size
+        command.position = [0.0] * size
+        command.velocity = [0.0] * size
+        command.effort = [0.0] * size
+        return command
+
+    @staticmethod
+    def _only_driven_axes(command: MotorStatus) -> MotorStatus:
+        """이번에 **실제로 모는 축만** 남긴다 · §6-108
+
+        모터 매니저는 메시지에 실린 축을 전부 자기 명령표에 덮어쓴다 ·
+        슬롯이 0 인 **빈 칸도 덮어쓴다** · 그래서 한 축만 보내는 명령에 다른
+        축의 빈 칸이 같이 실려 있으면, 방금 도착한 **그 축의 목표가 지워진다**.
+
+        추가 녹화는 재생과 MIDI 가 같은 통로로 번갈아 나간다 · MIDI 가 한 번
+        나갈 때마다 재생 축의 목표가 지워져 모터가 버벅였다 · 레이어 재생은
+        한 줄기라 모든 축이 한 메시지에 실려 멀쩡했다.
+
+        재생은 이미 자기 축만 담는다(`_publish_positions`) · 같은 규칙을 MIDI
+        와 수동 단건 명령에도 적용한다.
+        """
+        slots = [
+            slot for slot in range(len(command.controller_index))
+            if int(command.number_of_target_interfaces[slot]) > 0
+        ]
+        if len(slots) == len(command.controller_index):
+            return command
+
+        compact = MotorStatus()
+        compact.number_of_target_interfaces = [
+            int(command.number_of_target_interfaces[slot]) for slot in slots
+        ]
+        compact.target_interface_id = [
+            Int8MultiArray(data=list(command.target_interface_id[slot].data))
+            for slot in slots
+        ]
+        compact.controller_index = [
+            int(command.controller_index[slot]) for slot in slots
+        ]
+        compact.controlword = [int(command.controlword[slot]) for slot in slots]
+        compact.statusword = [int(command.statusword[slot]) for slot in slots]
+        compact.errorcode = [int(command.errorcode[slot]) for slot in slots]
+        compact.position = [float(command.position[slot]) for slot in slots]
+        compact.velocity = [float(command.velocity[slot]) for slot in slots]
+        compact.effort = [float(command.effort[slot]) for slot in slots]
+        return compact
+
+    @staticmethod
+    def _motor_command_shape_error(command: MotorStatus) -> Optional[str]:
+        """Validate arrays before the C++ motor bridge indexes the message."""
+        size = len(command.controller_index)
+        parallel_fields = (
+            'number_of_target_interfaces',
+            'target_interface_id',
+            'controlword',
+            'statusword',
+            'errorcode',
+            'position',
+            'velocity',
+            'effort',
+        )
+        for field in parallel_fields:
+            values = getattr(command, field, None)
+            if values is None or len(values) < size:
+                actual = 0 if values is None else len(values)
+                return f'{field} length {actual} is smaller than {size}'
+        indexes = [int(value) for value in command.controller_index]
+        if len(set(indexes)) != len(indexes):
+            return 'controller_index contains duplicates'
+        if any(index < 0 for index in indexes):
+            return 'controller_index contains a negative value'
+        for slot in range(size):
+            interface_count = int(command.number_of_target_interfaces[slot])
+            interface_ids = command.target_interface_id[slot].data
+            if len(interface_ids) < interface_count:
+                return (
+                    f'axis slot {slot} interface data length {len(interface_ids)} '
+                    f'is smaller than {interface_count}'
+                )
+        return None
+
+    @staticmethod
+    def _is_ac_servo(motor: Dict[str, Any]) -> bool:
+        values = [
+            motor.get('motor_type'),
+            motor.get('motor_type_label'),
+            motor.get('driver_model'),
+            motor.get('driver_name'),
+            motor.get('transport'),
+        ]
+        text = ' '.join(str(value or '').lower() for value in values)
+        return 'minas' in text or 'ac servo' in text or 'ac_servo' in text
+
+    def _stream_readiness_error(
+        self,
+        motor: Dict[str, Any],
+        axis: Any,
+        *,
+        is_ac_servo: bool = True,
+        check_internal_limit: bool = True,
+    ) -> str:
+        """수동 스트림(페이더) 실시간 제어의 준비 검사 · 내부리밋까지 본다.
+
+        사람이 페이더를 잡고 있는 동안 20Hz 안팎으로 명령이 나가므로, 리밋에
+        걸린 축을 계속 밀어붙이지 않도록 여기서 막는다.
+        """
+        return motor_readiness.readiness_error(
+            motor,
+            order=motor_readiness.STREAM_ORDER,
+            axis=axis,
+            is_ac_servo=is_ac_servo,
+            internal_limit_active=(
+                check_internal_limit
+                and self._ac_servo_internal_limit_active(motor)
+            ),
+        )
+
+    @staticmethod
+    def _manual_readiness_error(
+        motor: Dict[str, Any],
+        axis: Any,
+        *,
+        is_ac_servo: bool = True,
+    ) -> str:
+        """수동 조그·절대이동의 준비 검사 · 내부리밋을 **일부러** 보지 않는다.
+
+        리밋에 걸린 축을 빼내는 수단이 조그다. 여기서 리밋을 막으면 복구
+        방법이 사라진다.
+        """
+        return motor_readiness.readiness_error(
+            motor,
+            order=motor_readiness.MANUAL_ORDER,
+            axis=axis,
+            is_ac_servo=is_ac_servo,
+        )
+
+    @staticmethod
+    def _ac_servo_internal_limit_active(motor: Dict[str, Any]) -> bool:
+        """Use the live CiA-402 Statusword, never cached UI/mapping state."""
+        if motor.get('internal_limit_active') is not None:
+            return bool(motor.get('internal_limit_active'))
+        try:
+            return bool(int(motor.get('statusword', 0)) & 0x0800)
+        except (TypeError, ValueError):
+            return False
+
+    @staticmethod
+    def _is_dynamixel(motor: Dict[str, Any]) -> bool:
+        values = [
+            motor.get('motor_type'),
+            motor.get('motor_type_label'),
+            motor.get('driver_model'),
+            motor.get('driver_name'),
+            motor.get('transport'),
+        ]
+        text = ' '.join(str(value or '').lower() for value in values)
+        return 'dynamixel' in text or 'serial' in text and 'xm' in text
+
+    def _publish_result(
+        self, request_id: str, success: bool, message: str,
+        extra: Optional[Dict[str, Any]] = None,
+    ) -> None:
+        payload = {
+            'request_id': request_id,
+            'project_generation': self._request_project_generation(request_id),
+            'success': success,
+            'message': message,
+            'stamp': time.time(),
+            # 정지 결과에는 그 정지의 표지 · 브리지가 「이 정지의 정리 끝」 을 기다린다 · 수정 목록 200
+            **(extra or {}),
+        }
+        self._result_pub.publish(String(data=json.dumps(payload, ensure_ascii=False)))
+        if success:
+            self.get_logger().info(message)
+        else:
+            self.get_logger().warn(message)
+
+    def _publish_action_result(self, request_id: str, success: bool, message: str) -> None:
+        payload = {
+            'request_id': request_id,
+            'project_generation': self._request_project_generation(request_id),
+            'success': success,
+            'message': message,
+            'stamp': time.time(),
+        }
+        self._action_result_pub.publish(String(data=json.dumps(payload, ensure_ascii=False)))
+        if success:
+            self.get_logger().info(message)
+        else:
+            self.get_logger().warn(message)
+
+    @staticmethod
+    def _request_project_generation(request_id: Any) -> int:
+        match = re.search(r'-g(\d+)-', str(request_id or ''))
+        return int(match.group(1)) if match else 0
+
+    @staticmethod
+    def _axis_list_text(axes: list[int]) -> str:
+        return ', '.join(str(axis) for axis in axes)
+
+    @staticmethod
+    def _optional_int(value: Any) -> Optional[int]:
+        try:
+            if value is None or value == '':
+                return None
+            return int(value)
+        except (TypeError, ValueError):
+            return None
+
+    @staticmethod
+    def _optional_float(value: Any) -> Optional[float]:
+        return values.finite_float(value)
+
+
+#: 스레드 덤프 파일 · 쓰레기 수거로 닫히지 않게 붙들어 둔다
+_THREAD_DUMP_FILE = None
+
+
+def _register_thread_dump() -> None:
+    """SIGUSR1 → 모든 스레드의 스택을 파일로 · 수정 목록 14-2 (2026-10-06)
+
+    수신 정지는 원인을 못 찾은 결함이다 · 브리지가 재시작하기 직전에 이 신호를
+    보내 그 순간 각 스레드가 어디에 서 있었는지 남긴다.
+    """
+    global _THREAD_DUMP_FILE
+    if not hasattr(signal, 'SIGUSR1'):
+        return
+    workspace = Path(os.environ.get('MOTION_WORKSPACE') or Path.cwd()).expanduser()
+    path = workspace / 'log' / 'motion_supervisor_threads.log'
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        _THREAD_DUMP_FILE = open(path, 'a', encoding='utf-8')
+        faulthandler.register(signal.SIGUSR1, file=_THREAD_DUMP_FILE, all_threads=True)
+    except OSError:
+        _THREAD_DUMP_FILE = None
+
+
+def main(args=None) -> None:
+    _register_thread_dump()
+    rclpy.init(args=args)
+    node = MotionSupervisor()
+    executor = MultiThreadedExecutor(num_threads=2)
+    executor.add_node(node)
+    try:
+        executor.spin()
+    except KeyboardInterrupt:
+        pass
+    finally:
+        executor.shutdown()
+        node.destroy_node()
+        if rclpy.ok():
+            rclpy.shutdown()

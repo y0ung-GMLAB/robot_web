@@ -1,0 +1,377 @@
+import asyncio
+import functools
+import json
+import os
+import subprocess
+import time
+from concurrent.futures import ThreadPoolExecutor
+from pathlib import Path
+from typing import List
+
+from fastapi import FastAPI, HTTPException, Request, WebSocket, WebSocketDisconnect
+from fastapi.responses import FileResponse, RedirectResponse, Response
+from ament_index_python.packages import get_package_share_directory
+from motion_common import local_clock
+
+from motion_web_bridge import system_timezone, system_update
+from motion_web_bridge.shared_snapshot import SharedSnapshot
+
+
+def _is_not_modified(response_headers, request_headers) -> bool:
+    """`ETag`가 같으면 본문을 다시 보내지 않아도 된다.
+
+    `Last-Modified`는 보지 않는다 · 초 단위라 같은 초 안의 수정을 놓친다 ·
+    낡은 화면이 뜨느니 한 번 더 보내는 편이 낫다.
+    """
+    request_etag = request_headers.get('if-none-match')
+    if not request_etag:
+        return False
+    return request_etag == response_headers.get('etag')
+
+
+#: 연동 노드가 부르는 느린 로컬 길(준비 검사 · 그룹 명령) 전용 스레드 · 수정 목록 136 ④
+#:
+#: 이 길은 한 번에 2~5 s 를 기다린다(재생 관리자 답 · 실행 설정 맞추기) · 공용 스레드 풀
+#: (`asyncio.to_thread` · CPU 수 + 4 개)을 같이 쓰면 그룹 시작 · 취소 · 정지가 한꺼번에 올 때
+#: 풀이 차서 `/api/status` · 화면 스냅샷이 줄을 선다(실물 10-14 09:29 · 5 s 넘게 무응답 · 추정).
+_COORDINATION_POOL = ThreadPoolExecutor(max_workers=8, thread_name_prefix='coordination-local')
+
+#: 준비 확인이 연동 스레드 줄에서 이만큼 기다리면 기록 · 수정 목록 174
+READINESS_QUEUE_WARN_SEC = 0.5
+
+
+async def _coordination_to_thread(function, *args):
+    """`asyncio.to_thread` 와 같다 · 연동 전용 스레드에서"""
+    loop = asyncio.get_running_loop()
+    return await loop.run_in_executor(_COORDINATION_POOL, functools.partial(function, *args))
+
+
+#: 연동 노드가 묻는 `local-status` 전용 스레드 · 수정 목록 172
+#:
+#: 공용 풀(`asyncio.to_thread`)은 다른 PC 실행 모드 조회(PC 마다 최대 3 s · Wi-Fi) · 화면 요청이 같이 쓴다 ·
+#: 다른 일이 아무리 밀려도 이 응답은 기다리지 않게 따로 둔다 · 일 자체는 짧다(메모리의 상태를 읽어 담기) ·
+#: 수정 목록 209 뒤로는 0.5 s 마다 · 웹 쪽 칸(운전 모드 · 시간표 칸 등)만 · 늦어도 그룹에서 빠지지 않는다
+#: (재생 · 안전 상태는 연동 노드가 로컬 DDS 로 직접 받는다).
+_LOCAL_STATUS_POOL = ThreadPoolExecutor(max_workers=2, thread_name_prefix='coordination-status')
+
+
+def register_system_routes(app: FastAPI, bridge, project_call) -> None:
+    ui_share = Path(get_package_share_directory('motion_web_ui')) / 'static'
+    workspace_dir = os.environ.get('MOTION_WORKSPACE', '')
+    dev_static = Path(workspace_dir) / 'src' / 'web_ui' / 'static'
+    if workspace_dir and dev_static.is_dir():
+        ui_share = dev_static
+
+    def _asset_response(asset: Path, request: Request = None):
+        """정적 파일을 재검증 가능한 형태로 돌려준다 · §6-42.
+
+        `no-store`는 브라우저가 아예 캐시하지 않게 만들어, 함께 나가는 `ETag`를
+        무의미하게 한다. `no-cache`는 **매번 물어보되 안 바뀌었으면 본문을 받지
+        않는** 것이라 낡은 화면 위험은 같고 전송만 줄어든다.
+
+        Starlette의 `FileResponse`는 조건부 요청을 스스로 처리하지 않는다 ·
+        `If-None-Match`를 보고 304를 돌려주는 것은 여기서 한다.
+        """
+        response = FileResponse(
+            str(asset),
+            headers={'Cache-Control': 'no-cache'},
+            stat_result=asset.stat(),
+        )
+        request_headers = getattr(request, 'headers', None)
+        if request_headers is None:
+            return response
+        if not _is_not_modified(response.headers, request_headers):
+            return response
+        return Response(
+            status_code=304,
+            headers={
+                'Cache-Control': 'no-cache',
+                'ETag': response.headers['etag'],
+                'Last-Modified': response.headers['last-modified'],
+            },
+        )
+
+    @app.get('/')
+    async def index():
+        """이전 UI 는 지웠다 · 옛 주소(바탕화면 바로가기 · 북마크)는 새 화면으로 넘긴다"""
+        return RedirectResponse('/v2', status_code=307)
+
+    @app.get('/v2')
+    @app.get('/v2/')
+    async def index_v2(request: Request = None):
+        """화면 · 파일은 static/v2/ · `/` 는 여기로 넘어온다"""
+        asset = ui_share / 'v2' / 'index.html'
+        if not asset.is_file():
+            raise HTTPException(status_code=404, detail='Not Found')
+        return _asset_response(asset, request)
+
+    @app.get('/favicon.ico')
+    async def favicon():
+        """탭 아이콘 · 없어도 되지만 **404 를 남기지 않는다** · §6-223
+
+        브라우저가 페이지를 열 때마다 자동으로 요청한다 · 없으면 콘솔에 늘
+        빨간 줄이 하나 남고, 진짜 오류가 났을 때 그 속에 묻힌다.
+        """
+        return Response(status_code=204)
+
+    @app.get('/static/{asset_path:path}')
+    async def static_asset(asset_path: str, request: Request = None):
+        relative_path = Path(asset_path)
+        if relative_path.is_absolute() or '..' in relative_path.parts:
+            raise HTTPException(status_code=404, detail='Not Found')
+        asset = ui_share / relative_path
+        if not asset.is_file():
+            raise HTTPException(status_code=404, detail='Not Found')
+        return _asset_response(asset, request)
+
+    @app.get('/api/status')
+    async def status():
+        return await asyncio.to_thread(bridge.snapshot)
+
+    @app.get('/api/system/time')
+    async def system_time():
+        """이 PC 의 시각·시간대와 고를 수 있는 지역 목록 · §6-150
+
+        **바꾸지는 않는다** · `timedatectl` 은 root 권한이 필요하고, 그 권한을
+        웹 서비스에 주는 것이 시간대를 잘못 잡는 것보다 위험하다 · 화면은
+        고를 거리와 **칠 명령**까지만 만들고, 치는 일은 사람이 터미널에서 한다.
+        """
+        return await asyncio.to_thread(
+            lambda: {
+                'clock': local_clock.snapshot(),
+                'timezones': list(local_clock.timezones()),
+            }
+        )
+
+    @app.get('/api/system/version')
+    async def system_version():
+        def _git_text(args: List[str], cwd: str) -> str:
+            return subprocess.check_output(
+                ['git', *args], cwd=cwd, stderr=subprocess.DEVNULL
+            ).decode('utf-8').strip()
+
+        def _web_url(remote: str) -> str:
+            if remote.startswith('git@github.com:'):
+                return 'https://github.com/' + remote.split(':', 1)[1].removesuffix('.git')
+            if remote.startswith('https://github.com/'):
+                return remote.removesuffix('.git')
+            return remote
+
+        try:
+            cwd = os.environ.get('MOTION_WORKSPACE', os.getcwd())
+            branch = _git_text(['rev-parse', '--abbrev-ref', 'HEAD'], cwd)
+            hash_str = _git_text(['rev-parse', '--short', 'HEAD'], cwd)
+            full_hash = _git_text(['rev-parse', 'HEAD'], cwd)
+            msg = _git_text(['log', '-1', '--format=%s'], cwd)
+            remote = _git_text(['remote', 'get-url', 'origin'], cwd)
+            return {
+                'branch': branch,
+                'hash': hash_str,
+                'full_hash': full_hash,
+                'message': msg,
+                'remote_url': remote,
+                'remote_web_url': _web_url(remote),
+                'is_main': branch in ('humble', 'main'),   # 운영 브랜치 · 2026-10-27
+            }
+        except Exception:
+            return {
+                'branch': 'unknown',
+                'hash': 'unknown',
+                'full_hash': '',
+                'message': '',
+                'remote_url': '',
+                'remote_web_url': '',
+                'is_main': False,
+            }
+
+    @app.get('/api/coordination')
+    async def coordination_status():
+        return await asyncio.to_thread(bridge.coordination.snapshot)
+
+    # 웹에서 업데이트 · 이 PC · 같은 망 로봇 PC 전부 (2026-10-08)
+    @app.get('/api/system/update')
+    async def system_update_status():
+        return await asyncio.to_thread(bridge.system_update.status)
+
+    @app.post('/api/system/update')
+    async def system_update_start():
+        return await asyncio.to_thread(bridge.system_update.start)
+
+    # 시간대 · 이 PC · 같은 망 로봇 PC 전부 · 수정 목록 79 (2026-10-08)
+    @app.post('/api/system/timezone')
+    async def system_timezone_apply(request: Request):
+        body = await request.json()
+        zone = body.get('zone') if isinstance(body, dict) else ''
+        return await asyncio.to_thread(bridge.system_timezone.apply, zone)
+
+    @app.post('/api/system/timezone-all')
+    async def system_timezone_apply_all(request: Request):
+        body = await request.json()
+        zone = body.get('zone') if isinstance(body, dict) else ''
+        return await asyncio.to_thread(
+            lambda: system_timezone.apply_all(_network_pcs(), zone, bridge.system_timezone)
+        )
+
+    # Wi-Fi · 이 PC · 수정 목록 81 (2026-10-08)
+    @app.get('/api/system/wifi')
+    async def wifi_status():
+        return await asyncio.to_thread(bridge.wifi.status)
+
+    @app.post('/api/system/wifi/scan')
+    async def wifi_scan():
+        return await asyncio.to_thread(bridge.wifi.scan)
+
+    @app.post('/api/system/wifi/connect')
+    async def wifi_connect(request: Request):
+        body = await request.json()
+        if not isinstance(body, dict):
+            raise HTTPException(status_code=400, detail='request body must be an object')
+        static = body.get('static') if isinstance(body.get('static'), dict) else None
+        return await asyncio.to_thread(
+            lambda: bridge.wifi.connect(
+                body.get('ssid'), body.get('password'), static, security=body.get('security'),
+            )
+        )
+
+    @app.post('/api/system/wifi/confirm')
+    async def wifi_confirm():
+        return await asyncio.to_thread(bridge.wifi.confirm)
+
+    @app.post('/api/system/wifi/rollback')
+    async def wifi_rollback():
+        return await asyncio.to_thread(bridge.wifi.rollback)
+
+    def _network_pcs():
+        runtime = bridge.coordination.snapshot().get('runtime') or {}
+        return runtime.get('network_pcs') if isinstance(runtime, dict) else []
+
+    @app.get('/api/system/update-all')
+    async def system_update_all_status():
+        return await asyncio.to_thread(
+            lambda: system_update.status_all(_network_pcs(), bridge.system_update)
+        )
+
+    @app.post('/api/system/update-all')
+    async def system_update_all_start():
+        return await asyncio.to_thread(
+            lambda: system_update.start_all(_network_pcs(), bridge.system_update)
+        )
+
+    @app.put('/api/coordination/settings')
+    async def update_coordination_settings(request: Request):
+        body = await request.json()
+        if not isinstance(body, dict):
+            raise HTTPException(status_code=400, detail='request body must be an object')
+        try:
+            return await asyncio.to_thread(bridge.coordination.update_settings, body)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    @app.post('/api/coordination/local-readiness')
+    async def coordination_local_readiness(request: Request):
+        # 부르는 쪽이 자기 예산(`budget_sec`)을 실어 보낸다 · §6-297
+        try:
+            body = await request.json()
+        except Exception:
+            body = {}
+        submitted = time.monotonic()
+
+        def readiness():
+            # 연동 전용 스레드가 차서 줄을 선 시간 · 안쪽 단계 기록(`[준비 확인 시간]`)엔 안 잡힌다 · 수정 목록 174
+            waited = time.monotonic() - submitted
+            if waited >= READINESS_QUEUE_WARN_SEC:
+                bridge.get_logger().warning(
+                    f'[준비 확인 대기] 연동 스레드 줄에서 {waited * 1000.0:.0f} ms 기다린 뒤 시작'
+                )
+            return bridge.coordination_local_readiness(body if isinstance(body, dict) else {})
+
+        return await _coordination_to_thread(readiness)
+
+    @app.get('/api/coordination/local-status')
+    async def coordination_local_status(request: Request):
+        remote_ip = request.client.host if request.client else ''
+        if remote_ip not in {'127.0.0.1', '::1'}:
+            raise HTTPException(status_code=403, detail='loopback only')
+        # 연동 노드가 0.5 s 마다 묻는 길(웹 쪽 칸만 · 수정 목록 209) · 이벤트 루프에 두지 않는다 · §6-146
+        # 공용 풀도 줄을 선다 · 전용 스레드에서 · 수정 목록 172
+        # `?link=down` · 연동 노드가 로컬 연결 없이 웹 길로 되돌린 동안 · 이 질문이 「살아 있음」 을 대신한다(209 되돌리기 길)
+        link_down = request.query_params.get('link') == 'down'
+        loop = asyncio.get_running_loop()
+        return await loop.run_in_executor(
+            _LOCAL_STATUS_POOL, functools.partial(bridge.coordination_local_status, link_down=link_down),
+        )
+
+    @app.post('/api/coordination/control')
+    async def coordination_control(request: Request):
+        body = await request.json()
+        if not isinstance(body, dict):
+            raise HTTPException(status_code=400, detail='request body must be an object')
+        try:
+            return await asyncio.to_thread(bridge.coordination.request_control, body)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    @app.post('/api/coordination/local-control')
+    async def coordination_local_control(request: Request):
+        remote_ip = request.client.host if request.client else ''
+        if remote_ip not in {'127.0.0.1', '::1'}:
+            raise HTTPException(status_code=403, detail='loopback only')
+        body = await request.json()
+        if not isinstance(body, dict):
+            raise HTTPException(status_code=400, detail='request body must be an object')
+        return await _coordination_to_thread(bridge.coordination_local_control, body)
+
+    @app.post('/api/system/program/restart')
+    async def restart_managed_program(request: Request):
+        # 프로젝트 변경 잠금 밖 · 재생 중이면 `needs_stop` 거절 · `stop_first` 면 정지 뒤 다시 시작 · 수정 목록 144
+        try:
+            body = await request.json()
+        except Exception:  # noqa: BLE001 · 빈 몸통 = 쉬는 중이면 바로 다시 시작
+            body = {}
+        return await asyncio.to_thread(
+            bridge.motor_config.restart_managed_program, body if isinstance(body, dict) else {},
+        )
+
+    def _snapshot_text() -> str:
+        """스냅샷을 만들고 글자로 바꾸는 일까지 한 번에 · §6-152
+
+        둘 다 무겁다 · 실측 66KB, 만드는 데만 17ms · 그런데 이걸 **이벤트
+        루프에서** 하고 있었다 · 화면 탭 하나가 초당 10번 부르니 탭 하나당
+        루프를 초당 170ms 씩 막는다 · 탭 두셋이면 루프가 거의 서 있다.
+
+        그동안 연동 노드가 50ms 마다 묻는 `local-status` 가 굶었다 · 0.5초(뒤에 1.5초 ·
+        수정 목록 172) 못 받으면 **그룹 실행이 통째로 정지했다**(`GROUP_PARTICIPANT_FAILURE`) ·
+        실제로 `실시간 모니터링` 탭을 누를 때마다 그렇게 멈췄다 · 수정 목록 209 뒤로는 연동 노드가
+        재생 상태를 웹에서 읽지 않는다(웹이 늦어도 그룹은 그대로).
+
+        `@app.get` 들은 스레드로 옮겼는데(§6-146) 여기만 남아 있었다 ·
+        `@app.websocket` 은 그때 훑은 대상이 아니었다.
+
+        탭이 여럿이면 반 박자 안에 만든 한 장을 같이 쓴다 · 수정 목록 130
+        """
+        return shared_snapshot.text()
+
+    shared_snapshot = SharedSnapshot(
+        lambda: json.dumps(bridge.snapshot()),
+        max_age_sec=lambda: 0.5 / max(float(bridge.web_publish_hz), 0.1),
+    )
+
+    @app.websocket('/ws/status')
+    async def websocket_status(websocket: WebSocket):
+        await websocket.accept()
+        period_sec = 1.0 / max(bridge.web_publish_hz, 0.1)
+        try:
+            while True:
+                await websocket.send_text(await asyncio.to_thread(_snapshot_text))
+                try:
+                    event = await asyncio.wait_for(
+                        websocket.receive(), timeout=period_sec
+                    )
+                except asyncio.TimeoutError:
+                    continue
+                if event.get('type') == 'websocket.disconnect':
+                    return
+        except WebSocketDisconnect:
+            return
+        except (ConnectionError, RuntimeError):
+            return

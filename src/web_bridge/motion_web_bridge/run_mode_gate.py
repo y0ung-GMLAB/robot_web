@@ -1,0 +1,176 @@
+"""오프 모드 게이트 · 운전 모드가 「오프」면 움직임 명령을 전부 막는다.
+
+세 모드의 뜻 (`motion_common.schedule_store`):
+
+    schedule  스케줄이 1분마다 맞춘다
+    manual    스케줄만 멈춘다 · 사람 조작(조그·재생·그룹)은 된다
+    off       움직임 명령을 전부 차단한다 · 서보는 켠 채 제자리 유지
+
+여기서 막는 것 · 조그 / 절대 이동 / 수동 스트림(페이더) / 애니메이션 재생
+시작·초기 위치 이동 / 그룹 시작.
+막지 않는 것 · 정지·긴급정지(언제나 통과) · 서보 켜고 끄기 · 알람 해제 ·
+조회·설정 저장.
+
+판정은 **저장 파일**을 읽는다 · 조회 경유(0.5초 제한)는 브리지가 잠깐 막히면
+기본값(스케줄)으로 둔갑했던 전력이 있다 (§6-270 과 같은 이유).
+
+**모드를 못 읽으면 막는다**(fail-close · 수정 목록 18 · 2026-10-03) · 전에는
+통과시켰다 · 정지·긴급정지·서보 끄기는 이 문을 지나지 않으므로 막아도 멈출 수
+있다 · 기동 초기(프로젝트 저장소 미준비)에는 잠깐 막히고 사유가 화면에 뜬다.
+"""
+
+from __future__ import annotations
+
+from typing import Any
+
+from motion_common import run_state
+from motion_common.schedule_store import OFF_MODE, SCHEDULE_MODE, ScheduleStore
+
+OFF_BLOCK_MESSAGE = '끔 모드이므로 모든 명령을 차단 중입니다. 상단에서 모드를 변경하세요.'
+SCHEDULE_MANUAL_BLOCK_MESSAGE = (
+    '스케줄 모드에서는 수동 조작과 직접 재생을 할 수 없습니다. 상단에서 「수동」 모드로 전환하세요.'
+)
+MODE_UNREADABLE_BLOCK_MESSAGE = '운전 모드를 확인할 수 없어 명령을 차단했습니다'
+
+
+def current_run_mode(bridge: Any) -> str:
+    """선택된 프로젝트의 운전 모드 · 프로젝트가 없으면 빈 문자열."""
+    project_id = bridge.project_repository.selected_project_id()
+    if not project_id:
+        return ''
+    store = ScheduleStore(
+        projects_dir=str(bridge.workspace_root / 'motion_projects'),
+        current_project_id=project_id,
+    )
+    return store.mode
+
+
+def _unreadable(bridge: Any, exc: BaseException, what: str) -> str:
+    """모드를 못 읽었다 · 경고를 남기고 차단 사유를 돌려준다 (fail-close · 18)."""
+    logger = getattr(bridge, 'get_logger', None)
+    if callable(logger):
+        logger().warn(f'운전 모드 확인 실패 · {what} 차단: {exc}')
+    return f'{MODE_UNREADABLE_BLOCK_MESSAGE} ({exc})'
+
+
+def motion_command_block_reason(bridge: Any) -> str:
+    """막혔으면 사유를, 아니면 빈 문자열을 돌려준다 · 읽기 실패도 막는다."""
+    try:
+        if current_run_mode(bridge) == OFF_MODE:
+            return OFF_BLOCK_MESSAGE
+    except Exception as exc:  # noqa: BLE001 - 어떤 실패든 사유를 붙여 막는다
+        # 파일 읽기(OSError)만이 아니다 · 프로젝트 저장소가 아직 없는 기동
+        # 초기에도 여기로 온다 · 정지 계열은 이 문을 지나지 않는다
+        return _unreadable(bridge, exc, '명령')
+    return ''
+
+
+def manual_control_block_reason(bridge: Any) -> str:
+    """사람이 모터를 직접 움직이는 명령(조그·동작·범위 복귀·페이더)의 문 · 2026-10-02
+
+    **수동 모드에서만 연다.** 스케줄 모드에서는 스케줄이 60초마다 「구간 안인데
+    멈춰 있다」며 재생을 다시 켠다 · 서버가 조그를 막는 것은 조그가 실제로
+    움직이는 0.15~0.5초뿐이라, 조그 사이 빈틈에 걸리면 사람이 만지던 축으로
+    초기 위치 이동이 시작됐다 · 그래서 규칙을 하나로 한다: 손으로 만질 땐 수동.
+
+    오프는 원래대로 막는다 · 정지·긴급정지·서보 켜고 끄기·알람 해제는 이 문을
+    지나지 않는다 (막으면 오히려 위험하다).
+
+    프로젝트가 없으면(빈 모드) 막지 않는다 · 스케줄이 돌 수 없는 상태다 ·
+    모드 파일을 못 읽으면 경고하고 **막는다** (오프 문과 같은 원칙 · 18).
+    """
+    try:
+        mode = current_run_mode(bridge)
+    except Exception as exc:  # noqa: BLE001 - 어떤 실패든 사유를 붙여 막는다
+        return _unreadable(bridge, exc, '수동 명령')
+    if mode == OFF_MODE:
+        return OFF_BLOCK_MESSAGE
+    if mode == SCHEDULE_MODE:
+        return SCHEDULE_MANUAL_BLOCK_MESSAGE
+    # MANUAL_MODE 또는 프로젝트 없음('')
+    return ''
+
+
+#: 초기 위치 이동이 끝나 재생이 축을 쥐고 서 있다 · 손으로 움직이면 재생 계획과 어긋난다 (사용자 2026-10-12)
+INITIALIZED_MANUAL_BLOCK_MESSAGE = '초기 위치에서 대기 중입니다. 「정지」를 누른 뒤 수동 조작을 하세요.'
+#: 재생 · 초기 위치 이동 · 회차 사이 대기 중
+PLAYING_MANUAL_BLOCK_MESSAGE = '재생 중입니다. 「정지」를 누른 뒤 수동 조작을 하세요.'
+#: 소프트 긴급 정지 잠김 · 다른 사유(초기 위치 대기 · 서보 꺼짐)보다 먼저 · 실물 R-23 (2026-10-13)
+#: 잠김은 「프로그램 다시 시작」 으로만 풀린다 · 풀린 뒤 서보는 꺼진 채라 직접 켠다
+EMERGENCY_MANUAL_BLOCK_MESSAGE = (
+    '긴급 정지 상태로 수동 조작이 불가합니다. 「프로그램 재시작」으로 해제한 뒤 「서보 ON」을 누르세요.'
+)
+
+
+def _emergency_latched(bridge: Any) -> bool:
+    """브리지가 받아 둔 마지막 안전 상태 · 못 읽으면 False(supervisor 가 최종 판정 · 거기서도 막는다)"""
+    lock = getattr(bridge, '_safety_status_lock', None)
+    try:
+        if lock is not None:
+            with lock:
+                status = dict(getattr(bridge, '_safety_status', None) or {})
+        else:
+            status = dict(getattr(bridge, '_safety_status', None) or {})
+    except (TypeError, ValueError):
+        return False
+    return bool(status.get('emergency_latched'))
+
+
+def _current_run_state(bridge: Any) -> str:
+    """이 PC 재생 상태 · 브리지가 받아 둔 마지막 값 · 못 읽으면 ''(막지 않는다 · 운전 모드 문이 이미 있다)"""
+    lock = getattr(bridge, '_motion_run_lock', None)
+    try:
+        if lock is not None:
+            with lock:
+                status = dict(getattr(bridge, '_motion_run_status', None) or {})
+        else:
+            status = dict(getattr(bridge, '_motion_run_status', None) or {})
+    except (TypeError, ValueError):
+        return ''
+    return str(status.get('state') or '').strip().lower()
+
+
+def manual_motion_block_reason(bridge: Any, *, allow_running: bool = False) -> str:
+    """손으로 모터를 움직이는 명령(조그·다이얼·목표 이동·범위 복귀·페이더)의 문 · 2026-10-12
+
+    긴급 정지 잠김이 맨 먼저 · 운전 모드 문(`manual_control_block_reason`) 다음에 **재생 상태**를 본다 ·
+    초기 위치에서 대기 중이거나 재생 중이면 정지한 뒤에만 · 재생 시작 문에는 쓰지 않는다
+    (초기 위치에서 대기 중일 때 「1회 시작」 은 되어야 한다).
+    """
+    # 잠김이 진짜 이유다 · 이게 없으면 「초기 위치에서 대기 중」 · 「서보 꺼짐」 이 대신 나왔다(R-23)
+    if _emergency_latched(bridge):
+        return EMERGENCY_MANUAL_BLOCK_MESSAGE
+    reason = manual_control_block_reason(bridge)
+    if reason:
+        return reason
+    if allow_running:
+        # X-Touch 바탕 위 녹화 · 그 재생은 이 화면이 시작했다 · 재생이 안 쓰는 축·덮어쓰기만 받는다 · 수정 목록 156 ⑨
+        return ''
+    state = _current_run_state(bridge)
+    if state == 'initialized':
+        return INITIALIZED_MANUAL_BLOCK_MESSAGE
+    if state and run_state.is_running(state):
+        return PLAYING_MANUAL_BLOCK_MESSAGE
+    return ''
+
+
+#: 사람이 누른 것이 아닌 시작 · 스케줄·연동·스케줄 끝 정리가 보낸다
+AUTOMATED_REQUEST_SOURCES = frozenset({'network_control', 'network_readiness', 'schedule_end'})
+
+
+def human_start_block_reason(bridge: Any, payload: Any) -> str:
+    """사람이 누른 재생·초기 위치 이동·그룹 시작의 문 · 수정 목록 70 (사용자 결정 2026-10-07)
+
+    스케줄 모드에서는 **스케줄이 보낸 시작만** 받는다 · 조그·페이더가 「수동」 에서만
+    되는 것과 같은 이유다 · 스케줄이 1분마다 맞추는 사이에 사람이 재생을 섞으면 둘이
+    부딪힌다 (실물 2026-10-07 시험 19 · 스케줄 모드에서 화면 「1회 재생」 이 초기 이동까지 감).
+
+    스케줄이 보낸 것(`schedule_id`)·연동이 보낸 것(`request_source`)은 통과 · 오프는
+    `motion_command_block_reason` 이 이미 막는다 · 모드를 못 읽으면 막는다(18).
+    """
+    request = payload if isinstance(payload, dict) else {}
+    if str(request.get('schedule_id') or '').strip():
+        return ''
+    if str(request.get('request_source') or '') in AUTOMATED_REQUEST_SOURCES:
+        return ''
+    return manual_control_block_reason(bridge)

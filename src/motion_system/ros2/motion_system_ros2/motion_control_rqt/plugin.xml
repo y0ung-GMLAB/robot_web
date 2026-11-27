@@ -1,0 +1,20 @@
+<library path="src">
+  <class 
+    name="MotionControlController"
+    type="motion_control_rqt.motion_control_controller.MotionControlController"
+    base_class_type="rqt_gui_py::Plugin">
+    <description>
+      A plugin for motion controlling.
+    </description>
+    <qtgui>
+      <group>
+        <label>Motion Control</label>
+        <icon type="theme">folder</icon>
+        <statustip>Motion Control</statustip>
+      </group>
+      <label>Motion Control</label>
+      <icon type="theme">utilities-system-monitor</icon>
+      <statustip>Motion Control</statustip>
+    </qtgui>
+  </class>
+</library>

@@ -1,0 +1,761 @@
+"""모션 파일 해석·요약 · 상태 비의존.
+
+`MotionWebBridge`에서 떼어낸 순수 함수 모음이다. 모션 파일 내용과 인자만 보고
+판단하며 노드의 상태도 락도 건드리지 않는다.
+
+파서 자체는 `motion_common.motion_table`이 단일 구현으로 갖는다 · 이 모듈은
+그 결과를 화면·API가 쓰는 형태로 요약한다.
+
+`test_pure_modules.py`가 순수성을 검사한다.
+"""
+
+from __future__ import annotations
+
+import copy
+import json
+import math
+from array import array
+from collections import OrderedDict
+from pathlib import Path
+from typing import Any, Dict, List, Optional
+
+import yaml
+
+from motion_common import motion_table, motion_tracks
+from motion_common.paths import NO_PROJECT_SELECTED
+from motion_common.timing import CONTROL_PERIOD_SEC
+
+# MuJoCo 계산 기록 · `animation_preview.meta_path_for` 가 만든다
+SIM_META_SUFFIX = '.sim.meta.json'
+# 계산 시작 때 남기는 임시 기록 · `animation_preview.pending_path_for` · 수정 목록 120 (마)
+SIM_PENDING_SUFFIX = '.sim.pending.json'
+SIM_RECORD_SUFFIXES = (SIM_META_SUFFIX, SIM_PENDING_SUFFIX)
+
+
+def is_sim_record(name: str) -> bool:
+    """3D 계산 기록 파일(애니메이션 아님) · 목록에 「오류 · motion data rows not found」 로 보이던 것"""
+    return str(name or '').lower().endswith(SIM_RECORD_SUFFIXES)
+
+
+def motion_mapping_file_id(result: Dict[str, Any]) -> str:
+    file_info = result.get('file')
+    if not isinstance(file_info, dict):
+        return ''
+    return str(file_info.get('id') or file_info.get('filename') or '').strip()
+
+
+def midi_mapping_file_id(result: Dict[str, Any]) -> str:
+    file_id = str(result.get('motion_mapping_file_id') or '').strip()
+    if file_id:
+        return Path(file_id).name
+    file_path = str(result.get('bank_config_file') or '').strip()
+    return Path(file_path).name if file_path else ''
+
+
+def motion_file_path(file_id: Any, directory: Path) -> Path:
+    name = str(file_id or '').strip()
+    if not name:
+        raise ValueError('file_id is required')
+    if name != Path(name).name or '/' in name or '\\' in name:
+        raise ValueError('invalid motion file id')
+    path = directory / name
+    if not path.is_file():
+        raise ValueError(f'motion file not found: {name}')
+    return path
+
+
+def configured_axes_from_runtime_file(
+    runtime: Path | str,
+    *,
+    transport: str = '',
+) -> List[int]:
+    try:
+        payload = yaml.safe_load(
+            Path(runtime).read_text(encoding='utf-8')
+        ) or {}
+        axes = [
+            int(slave['controller_index'])
+            for master in payload.get('masters') or []
+            if isinstance(master, dict)
+            and (
+                not transport
+                or str(master.get('type') or '').lower() == transport.lower()
+            )
+            for slave in master.get('slaves') or []
+            if isinstance(slave, dict) and 'controller_index' in slave
+        ]
+        return sorted(set(axes))
+    except (OSError, TypeError, ValueError, yaml.YAMLError):
+        return []
+
+
+def motion_id_sort_key(value: str) -> tuple[int, Any]:
+    try:
+        return (0, int(value))
+    except ValueError:
+        return (1, value)
+
+
+#: 상세 그래프 중 처음에 보이는 수 · 나머지는 `graph_series_extra` 로 같은 응답에 실어
+#: 화면의 「나머지 보기」 가 펼친다 · 수정 목록 138 (2026-10-13 · 나레이션 20 조인트 중 8 개가
+#: 말없이 빠졌다)
+GRAPH_SERIES_SHOWN = 12
+
+
+def motion_graph_series(
+    groups: Dict[str, List[Dict[str, Any]]],
+    max_series: Optional[int] = None,
+    max_points: int = 300,
+) -> List[Dict[str, Any]]:
+    """조인트마다 그래프 점 · 이름 순 · `max_series` 없으면 전부
+
+    점은 조인트마다 최대 `max_points` 개로 솎는다 · 9 분 애니메이션이면 약 1.9 초 간격이라
+    짧은 튐은 그래프에 안 보일 수 있다(범위 검사는 솎지 않은 최소·최대로 한다) · 138 범위 밖.
+    """
+    series = []
+    motion_ids = sorted(groups, key=motion_id_sort_key)
+    if max_series is not None:
+        motion_ids = motion_ids[:max_series]
+    for motion_id in motion_ids:
+        records = groups[motion_id]
+        stride = max(1, int(math.ceil(len(records) / max_points)))
+        points = [
+            {
+                'time_sec': record['time_sec'],
+                'value': record['value'],
+            }
+            for record in records[::stride]
+        ]
+        series.append({
+            'motion_id': motion_id,
+            'points': points,
+        })
+    return series
+
+
+def _starts_with_motion_header(content: str) -> bool:
+    """첫 줄(빈 줄·# 줄 빼고)이 `{"type": "motion_header", …}` 인가 · 표준 모션 파일(JSON Lines)"""
+    for line in str(content or '').splitlines():
+        text = line.strip()
+        if not text or text.startswith('#'):
+            continue
+        try:
+            first = json.loads(text)
+        except json.JSONDecodeError:
+            return False
+        return isinstance(first, dict) and str(first.get('type') or '') == 'motion_header'
+    return False
+
+
+def analyze_motion_json(content: str, *, include_records: bool) -> Dict[str, Any]:
+    result: Dict[str, Any] = {
+        'json_valid': False,
+        'format_valid': False,
+        'valid': False,
+        'message': 'not analyzed',
+        'headers': [],
+        'total_records': 0,
+        'valid_records': 0,
+        'motion_id_count': 0,
+        'motion_ids': [],
+        'time': {},
+        'frame': {},
+        'interpolation': {
+            'period_sec': CONTROL_PERIOD_SEC,
+            'required': False,
+        },
+        'errors': [],
+        'warnings': [],
+        # 알림(정보) · 경고가 아닌 것 · 화면 검사 칸을 「경고」 로 바꾸지 않는다
+        'notes': [],
+    }
+    try:
+        payload = json.loads(content)
+    except json.JSONDecodeError as exc:
+        rows, headers, source, text_error = motion_table.extract_rows_from_text(content)
+        if not rows:
+            result['message'] = f'invalid JSON: {exc}'
+            result['errors'].append(str(exc))
+            if text_error:
+                result['errors'].append(text_error)
+            return result
+        result['message'] = 'motion data parsed from header/list rows'
+        if _starts_with_motion_header(content):
+            # Blender 내보내기 · 웹 녹화 형식(JSON Lines · 첫 줄 motion_header) · 정상 형식이라 경고가 아니다 · 수정 목록 120 (S-8)
+            result['notes'].append('헤더 + 프레임별 1행(JSON Lines) 형식 (Blender 내보내기 형식)')
+        else:
+            result['warnings'].append('strict JSON 형식은 아니지만 헤더+대괄호 행 형식으로 해석했습니다')
+    else:
+        result['json_valid'] = True
+        rows, headers, source = motion_table.extract_rows(payload)
+    # 각도 단위 · 헤더 `rotation_unit` · 모르는 단위는 거절 · 수정 목록 6-2
+    try:
+        rotation_unit = motion_table.rotation_unit_from_content(content)
+    except ValueError as exc:
+        result['message'] = str(exc)
+        result['errors'].append(str(exc))
+        return result
+    result['rotation_unit'] = rotation_unit
+    # 아래 값(첫·끝·최소·최대·그래프·미리보기)의 단위 · 파일 단위와 상관없이 내부 단위 ·
+    # 화면이 이것을 보고 deg 로 바꿔 보여 준다 · 수정 목록 6
+    result['value_unit'] = motion_table.INTERNAL_ROTATION_UNIT
+    result['format_valid'] = True
+    result['headers'] = headers
+    result['source'] = source
+    result['total_records'] = len(rows)
+    if not rows:
+        result['message'] = 'motion data rows not found'
+        result['errors'].append('motion data rows not found')
+        return result
+
+    parsed_records = []
+    errors = result['errors']
+    for index, row in enumerate(rows):
+        parsed, error = motion_table.parse_row(row, headers)
+        if error:
+            if len(errors) < 50:
+                errors.append(f'row {index + 1}: {error}')
+            continue
+        parsed['row_index'] = index
+        parsed_records.append(parsed)
+
+    # 화면 값·그래프·범위 검사는 재생과 같은 내부 단위로
+    motion_table.scale_record_values(parsed_records, rotation_unit)
+    result['valid_records'] = len(parsed_records)
+    if not parsed_records:
+        result['message'] = 'valid motion records not found'
+        if not errors:
+            errors.append('valid motion records not found')
+        return result
+
+    times_in_input = [record['time_sec'] for record in parsed_records]
+    for previous, current in zip(times_in_input, times_in_input[1:]):
+        if current + 1e-9 < previous:
+            result['warnings'].append('time values are not monotonic in file order')
+            break
+
+    duplicate_pairs = set()
+    duplicated_count = 0
+    for record in parsed_records:
+        key = (round(record['time_sec'], 9), record['motion_id'])
+        if key in duplicate_pairs:
+            duplicated_count += 1
+        duplicate_pairs.add(key)
+    if duplicated_count:
+        result['warnings'].append(f'duplicate time/motion_id records: {duplicated_count}')
+
+    sorted_records = sorted(
+        parsed_records,
+        key=lambda item: (item['time_sec'], str(item['motion_id']), item['row_index']),
+    )
+    time_values = [record['time_sec'] for record in sorted_records]
+    frame_values = [record['frame'] for record in sorted_records]
+    min_time = min(time_values)
+    max_time = max(time_values)
+    result['time'] = {
+        'start_sec': min_time,
+        'end_sec': max_time,
+        'duration_sec': max_time - min_time,
+        'unique_count': len(set(round(value, 9) for value in time_values)),
+    }
+    result['frame'] = {
+        'min': min(frame_values),
+        'max': max(frame_values),
+        'unique_count': len(set(frame_values)),
+    }
+
+    groups: Dict[str, List[Dict[str, Any]]] = {}
+    for record in sorted_records:
+        groups.setdefault(str(record['motion_id']), []).append(record)
+
+    motion_ids = []
+    interpolation_required = False
+    for motion_id in sorted(groups, key=motion_id_sort_key):
+        records = groups[motion_id]
+        values = [record['value'] for record in records]
+        group_times = [record['time_sec'] for record in records]
+        diffs = [
+            group_times[index] - group_times[index - 1]
+            for index in range(1, len(group_times))
+        ]
+        off_period = [
+            diff for diff in diffs
+            if abs(diff - CONTROL_PERIOD_SEC) > 0.001
+        ]
+        if off_period:
+            interpolation_required = True
+        motion_ids.append({
+            'motion_id': motion_id,
+            'count': len(records),
+            'first_value': records[0]['value'],
+            'last_value': records[-1]['value'],
+            'min_value': min(values),
+            'max_value': max(values),
+            'first_time_sec': min(group_times),
+            'last_time_sec': max(group_times),
+            'period_sec_min': min(diffs) if diffs else None,
+            'period_sec_max': max(diffs) if diffs else None,
+            'requires_interpolation': bool(off_period),
+        })
+
+    unique_times = sorted(set(round(value, 9) for value in time_values))
+    if unique_times:
+        for value in unique_times:
+            offset = (value - min_time) / CONTROL_PERIOD_SEC
+            if abs(offset - round(offset)) > 0.001:
+                interpolation_required = True
+                break
+
+    sample_count = 1
+    duration = max_time - min_time
+    if duration > 0.0:
+        sample_count = int(math.floor(duration / CONTROL_PERIOD_SEC)) + 1
+        last_sample_time = min_time + ((sample_count - 1) * CONTROL_PERIOD_SEC)
+        if max_time - last_sample_time > 0.001:
+            sample_count += 1
+
+    result['motion_ids'] = motion_ids
+    result['motion_id_count'] = len(motion_ids)
+    result['interpolation'] = {
+        'period_sec': CONTROL_PERIOD_SEC,
+        'required': interpolation_required,
+        'sample_count': sample_count,
+        'estimated_record_count': sample_count * len(motion_ids),
+        'method': 'linear',
+    }
+    if include_records:
+        result['preview_records'] = sorted_records[:80]
+        # 138 · 처음 12 개는 `graph_series`(옛 화면도 이것만 본다) · 나머지는 `graph_series_extra` ·
+        # 따로 부르는 길을 두지 않고 같은 응답에 싣는다 · 상세는 캐시돼 한 번만 만들고
+        # 조인트 20 개 · 300 점이면 몇백 KB 수준
+        all_series = motion_graph_series(groups)
+        result['graph_series'] = all_series[:GRAPH_SERIES_SHOWN]
+        result['graph_series_extra'] = all_series[GRAPH_SERIES_SHOWN:]
+        result['graph_series_total'] = len(all_series)
+
+    result['valid'] = len(errors) == 0
+    result['message'] = 'motion data valid' if result['valid'] else 'motion data has errors'
+    return result
+
+
+def _empty_result() -> Dict[str, Any]:
+    return {
+        'json_valid': False,
+        'format_valid': False,
+        'valid': False,
+        'message': 'not analyzed',
+        'headers': [],
+        'total_records': 0,
+        'valid_records': 0,
+        'motion_id_count': 0,
+        'motion_ids': [],
+        'time': {},
+        'frame': {},
+        'interpolation': {
+            'period_sec': CONTROL_PERIOD_SEC,
+            'required': False,
+        },
+        'errors': [],
+        'warnings': [],
+        'notes': [],
+    }
+
+
+def analyze_motion_path(path: Path, *, include_records: bool) -> Dict[str, Any]:
+    """파일 → `analyze_motion_json(파일 글)` 과 같은 결과 · 수정 목록 170
+
+    머리 줄이 있는 JSON Lines 는 한 줄씩 읽어 조인트별 배열(`motion_tracks`)에 담는다 · 글 통째 ·
+    행 목록 · 레코드 사전을 만들지 않는다(920 s × 20 조인트에서 약 630 MB → 30 MB). 다른 모양 ·
+    단위가 틀린 머리 · 읽을 행이 없는 파일은 옛 길(`analyze_motion_json`)로 · 결과가 같다.
+    """
+    header = motion_table.jsonl_motion_header(path)
+    if header is not None:
+        result = _analyze_jsonl(path, header, include_records=include_records)
+        if result is not None:
+            return result
+    return analyze_motion_json(path.read_text(encoding='utf-8'), include_records=include_records)
+
+
+def _analyze_jsonl(path: Path, header, *, include_records: bool) -> Optional[Dict[str, Any]]:
+    """`analyze_motion_json` 의 JSON Lines 길과 같은 결과 · 옛 길로 가야 하면 None"""
+    header_object, headers = header
+    try:
+        rotation_unit = motion_table.header_rotation_unit(header_object)
+    except ValueError:
+        return None
+    result = _empty_result()
+    errors = result['errors']
+    tracks: Dict[str, motion_tracks.JointTrack] = {}
+    total = 0
+    valid = 0
+    previous_time = None
+    not_monotonic = False
+    for row, _skipped in motion_table.iter_jsonl_rows(path, headers):
+        if row is None:
+            continue
+        index = total
+        total += 1
+        parsed, error = motion_table.parse_row(row, headers)
+        if error:
+            if len(errors) < 50:
+                errors.append(f'row {index + 1}: {error}')
+            continue
+        valid += 1
+        time_sec = parsed['time_sec']
+        if previous_time is not None and time_sec + 1e-9 < previous_time:
+            not_monotonic = True
+        previous_time = time_sec
+        motion_id = parsed['motion_id']
+        track = tracks.get(motion_id)
+        if track is None:
+            track = tracks[motion_id] = motion_tracks.JointTrack(motion_id)
+        track.append(parsed['frame'], time_sec, parsed['value'], index)
+    if not total:
+        return None
+    result['message'] = 'motion data parsed from header/list rows'
+    result['notes'].append('헤더 + 프레임별 1행(JSON Lines) 형식 (Blender 내보내기 형식)')
+    result['rotation_unit'] = rotation_unit
+    result['value_unit'] = motion_table.INTERNAL_ROTATION_UNIT
+    result['format_valid'] = True
+    result['headers'] = headers
+    result['source'] = 'text_header_list_rows'
+    result['total_records'] = total
+
+    scale = motion_table.rotation_unit_scale(rotation_unit)
+    for track in tracks.values():
+        track.scale_values(scale)
+    result['valid_records'] = valid
+    if not valid:
+        result['message'] = 'valid motion records not found'
+        if not errors:
+            errors.append('valid motion records not found')
+        return result
+    if not_monotonic:
+        result['warnings'].append('time values are not monotonic in file order')
+    for track in tracks.values():
+        track.sort_by_time()
+    duplicated_count = sum(
+        len(track) - len(set(round(value, 9) for value in track.times)) for track in tracks.values()
+    )
+    if duplicated_count:
+        result['warnings'].append(f'duplicate time/motion_id records: {duplicated_count}')
+
+    min_time = min(min(track.times) for track in tracks.values())
+    max_time = max(max(track.times) for track in tracks.values())
+    rounded_times = set()
+    frames = set()
+    for track in tracks.values():
+        rounded_times.update(round(value, 9) for value in track.times)
+        frames.update(track.frames)
+    result['time'] = {
+        'start_sec': min_time,
+        'end_sec': max_time,
+        'duration_sec': max_time - min_time,
+        'unique_count': len(rounded_times),
+    }
+    result['frame'] = {
+        'min': min(frames),
+        'max': max(frames),
+        'unique_count': len(frames),
+    }
+
+    motion_ids = []
+    interpolation_required = False
+    for motion_id in sorted(tracks, key=motion_id_sort_key):
+        track = tracks[motion_id]
+        times = track.times
+        diffs = [times[index] - times[index - 1] for index in range(1, len(times))]
+        off_period = [diff for diff in diffs if abs(diff - CONTROL_PERIOD_SEC) > 0.001]
+        if off_period:
+            interpolation_required = True
+        motion_ids.append({
+            'motion_id': motion_id,
+            'count': len(track),
+            'first_value': track.values[0],
+            'last_value': track.values[-1],
+            'min_value': min(track.values),
+            'max_value': max(track.values),
+            'first_time_sec': min(times),
+            'last_time_sec': max(times),
+            'period_sec_min': min(diffs) if diffs else None,
+            'period_sec_max': max(diffs) if diffs else None,
+            'requires_interpolation': bool(off_period),
+        })
+    for value in sorted(rounded_times):
+        offset = (value - min_time) / CONTROL_PERIOD_SEC
+        if abs(offset - round(offset)) > 0.001:
+            interpolation_required = True
+            break
+
+    sample_count = 1
+    duration = max_time - min_time
+    if duration > 0.0:
+        sample_count = int(math.floor(duration / CONTROL_PERIOD_SEC)) + 1
+        last_sample_time = min_time + ((sample_count - 1) * CONTROL_PERIOD_SEC)
+        if max_time - last_sample_time > 0.001:
+            sample_count += 1
+    result['motion_ids'] = motion_ids
+    result['motion_id_count'] = len(motion_ids)
+    result['interpolation'] = {
+        'period_sec': CONTROL_PERIOD_SEC,
+        'required': interpolation_required,
+        'sample_count': sample_count,
+        'estimated_record_count': sample_count * len(motion_ids),
+        'method': 'linear',
+    }
+    if include_records:
+        # 전체 정렬(시각 · 이름 · 줄 번호)의 앞 80 개는 조인트마다 앞 80 개 안에 있다
+        head = [track.record(index) for track in tracks.values() for index in range(min(80, len(track)))]
+        head.sort(key=lambda item: (item['time_sec'], str(item['motion_id']), item['row_index']))
+        result['preview_records'] = head[:80]
+        all_series = _graph_series_from_tracks(tracks)
+        result['graph_series'] = all_series[:GRAPH_SERIES_SHOWN]
+        result['graph_series_extra'] = all_series[GRAPH_SERIES_SHOWN:]
+        result['graph_series_total'] = len(all_series)
+    result['valid'] = len(errors) == 0
+    result['message'] = 'motion data valid' if result['valid'] else 'motion data has errors'
+    return result
+
+
+def _graph_series_from_tracks(tracks, max_points: int = 300) -> List[Dict[str, Any]]:
+    """`motion_graph_series` 와 같은 점 · 배열에서"""
+    series = []
+    for motion_id in sorted(tracks, key=motion_id_sort_key):
+        track = tracks[motion_id]
+        stride = max(1, int(math.ceil(len(track) / max_points)))
+        series.append({
+            'motion_id': motion_id,
+            'points': [
+                {'time_sec': track.times[index], 'value': track.values[index]}
+                for index in range(0, len(track), stride)
+            ],
+        })
+    return series
+
+
+#: 분석 캐시 · (경로, 수정 시각 ns, 크기) → **상세** 분석 · 수정 목록 5-3 (2026-10-06) · 88 (2026-10-09)
+#:
+#: 전에는 목록을 부를 때마다(재생 등록·화면 새로고침마다) 프로젝트의 애니메이션을
+#: **전부** 다시 읽고 파싱했다 · 수천 줄 파일 여러 개면 그것만으로 응답이 늦었다.
+#: 파일이 바뀌면 시각·크기가 바뀌어 저절로 새로 읽는다.
+#:
+#: 88 · 상세(파일을 누를 때)는 캐시를 안 써서 9분 나레이션이면 누를 때마다 3.8 초 ·
+#: MuJoCo 계산 중엔 5초마다 그랬다 · 이제 상세를 한 번 만들어 두고 목록은 거기서 그래프·
+#: 미리보기 두 칸만 뺀다(상세는 0.2 MB · 만드는 데 목록보다 0.1 초 더) · 목록이든 상세든
+#: 처음 한 번만 읽는다.
+_SUMMARY_CACHE: 'OrderedDict[tuple, Dict[str, Any]]' = OrderedDict()
+_SUMMARY_CACHE_SIZE = 64
+#: 바이트 예산(대략) · 수정 목록 170 · 그래프 점은 배열로 들고(조인트 20 · 300 점이면 96 KB) 꺼낼 때 사전으로 ·
+#: 큰 파일 64 개여도 몇 MB · 넘으면 오래된 것부터
+_SUMMARY_CACHE_MAX_BYTES = 16 * 1024 * 1024
+_SUMMARY_BYTES: Dict[tuple, int] = {}
+#: 상세에만 있는 칸
+DETAIL_ONLY_KEYS = ('preview_records', 'graph_series', 'graph_series_extra', 'graph_series_total')
+#: 캐시 안에서 그래프 점을 든 칸 · (조인트, 시각 배열, 값 배열) 튜플
+_GRAPH_KEY = '_graph'
+
+
+def _cache_key(path: Path, stat) -> tuple:
+    return (str(path), stat.st_mtime_ns, stat.st_size)
+
+
+def _cached_analysis(path: Path, stat, *, include_detail: bool) -> Optional[Dict[str, Any]]:
+    cached = _SUMMARY_CACHE.get(_cache_key(path, stat))
+    if cached is None:
+        return None
+    _SUMMARY_CACHE.move_to_end(_cache_key(path, stat))
+    return _view(cached, include_detail=include_detail)
+
+
+def _view(detail: Dict[str, Any], *, include_detail: bool) -> Dict[str, Any]:
+    """캐시 값(또는 상세) → 응답 사본 · 그래프 점은 여기서 사전으로 · 칸 순서는 상세 그대로"""
+    view: Dict[str, Any] = {}
+    for key, value in detail.items():
+        if key == _GRAPH_KEY:
+            if include_detail:
+                series = [
+                    {
+                        'motion_id': motion_id,
+                        'points': [{'time_sec': t, 'value': v} for t, v in zip(times, values)],
+                    }
+                    for motion_id, times, values in value
+                ]
+                view['graph_series'] = series[:GRAPH_SERIES_SHOWN]
+                view['graph_series_extra'] = series[GRAPH_SERIES_SHOWN:]
+            continue
+        if not include_detail and key in DETAIL_ONLY_KEYS:
+            continue
+        view[key] = copy.deepcopy(value)
+    return view
+
+
+def _compact_detail(detail: Dict[str, Any]) -> Dict[str, Any]:
+    """상세 → 캐시 값 · 그래프 점(조인트마다 사전 300 개)을 배열 둘로"""
+    stored: Dict[str, Any] = {}
+    for key, value in detail.items():
+        if key == 'graph_series_extra':
+            continue
+        if key == 'graph_series':
+            series = list(value or []) + list(detail.get('graph_series_extra') or [])
+            points_ok = all(
+                isinstance(point.get('time_sec'), float) and isinstance(point.get('value'), float)
+                for item in series for point in item.get('points') or []
+            )
+            if not points_ok:
+                # 배열에 못 담는 값(정수 등)이면 그대로 · 화면이 받는 값이 바뀌면 안 된다
+                stored[key] = copy.deepcopy(value)
+                if 'graph_series_extra' in detail:
+                    stored['graph_series_extra'] = copy.deepcopy(detail['graph_series_extra'])
+                continue
+            stored[_GRAPH_KEY] = tuple(
+                (
+                    item['motion_id'],
+                    array('d', [point['time_sec'] for point in item.get('points') or []]),
+                    array('d', [point['value'] for point in item.get('points') or []]),
+                )
+                for item in series
+            )
+            continue
+        stored[key] = copy.deepcopy(value)
+    return stored
+
+
+def _stored_bytes(stored: Dict[str, Any]) -> int:
+    """대략 · 요약 칸 + 조인트마다 1 KB + 그래프 배열 + 미리보기 줄마다 0.4 KB"""
+    graph = sum(times.itemsize * len(times) * 2 for _, times, _ in stored.get(_GRAPH_KEY) or ())
+    return (
+        4096
+        + 1024 * len(stored.get('motion_ids') or [])
+        + graph
+        + 400 * len(stored.get('preview_records') or [])
+        + 200 * len(stored.get('errors') or [])
+    )
+
+
+def _remember_analysis(path: Path, stat, detail: Dict[str, Any]) -> Dict[str, Any]:
+    key = _cache_key(path, stat)
+    stored = _compact_detail(detail)
+    _SUMMARY_CACHE[key] = stored
+    _SUMMARY_CACHE.move_to_end(key)
+    _SUMMARY_BYTES[key] = _stored_bytes(stored)
+    while len(_SUMMARY_CACHE) > 1 and (
+        len(_SUMMARY_CACHE) > _SUMMARY_CACHE_SIZE
+        or sum(_SUMMARY_BYTES.get(item, 0) for item in _SUMMARY_CACHE) > _SUMMARY_CACHE_MAX_BYTES
+    ):
+        old, _ = _SUMMARY_CACHE.popitem(last=False)
+        _SUMMARY_BYTES.pop(old, None)
+    for stale in [item for item in _SUMMARY_BYTES if item not in _SUMMARY_CACHE]:
+        _SUMMARY_BYTES.pop(stale, None)
+    return stored
+
+
+def prime_motion_file_cache(path: Path) -> None:
+    """올린 직후 · 화면이 바로 목록·상세를 부르기 전에 분석해 둔다 (88) · 실패는 조용히."""
+    try:
+        motion_file_entry(Path(path), include_detail=False)
+    except OSError:
+        pass
+
+
+def motion_file_entry(path: Path, *, include_detail: bool) -> Dict[str, Any]:
+    """목록 한 줄 · 상세 · 파일 본문은 싣지 않는다 (88 · 화면이 안 쓰는데 15 MB 를 보냈다 ·
+    내려받기는 따로 있는 파일 내려받기 주소)."""
+    stat = path.stat()
+    entry: Dict[str, Any] = {
+        'id': path.name,
+        'filename': path.name,
+        'path': str(path),
+        'size_bytes': stat.st_size,
+        'updated_at': stat.st_mtime,
+    }
+    cached = _cached_analysis(path, stat, include_detail=include_detail)
+    if cached is not None:
+        entry['analysis'] = cached
+        return entry
+    try:
+        # 한 줄씩 · 글 통째로 읽지 않는다 · 수정 목록 170
+        detail = analyze_motion_path(path, include_records=True)
+        analysis = _view(_remember_analysis(path, stat, detail), include_detail=include_detail)
+    except OSError as exc:
+        analysis = {
+            'json_valid': False,
+            'valid': False,
+            'message': f'failed to read file: {exc}',
+            'errors': [str(exc)],
+            'warnings': [],
+        }
+    entry['analysis'] = analysis
+    return entry
+
+
+def _selected_motion_files_dir(repository: Any, motion_projects_dir: Path) -> Path:
+    project_id = repository.require_selected_project_id()
+    return motion_projects_dir / project_id / 'motions'
+
+
+def list_motion_files(
+    repository: Any, motion_projects_dir: Path
+) -> Dict[str, Any]:
+    project_id = repository.selected_project_id()
+    if not project_id:
+        return {
+            'success': True,
+            'message': NO_PROJECT_SELECTED,
+            'project_id': '',
+            'project_dir': '',
+            'files_dir': '',
+            'files': [],
+        }
+    files_dir = motion_projects_dir / project_id / 'motions'
+    files_dir.mkdir(parents=True, exist_ok=True)
+    files = []
+    for path in sorted(
+        (
+            item for item in files_dir.iterdir()
+            if (
+                item.is_file()
+                and item.suffix.lower() == '.json'
+                and not item.name.startswith('__studio_')
+                # MuJoCo 계산 기록(`x.sim.meta.json` · 임시 `x.sim.pending.json`) · 애니메이션 아님
+                and not is_sim_record(item.name)
+            )
+        ),
+        key=lambda item: item.stat().st_mtime if item.exists() else 0.0,
+        reverse=True,
+    ):
+        files.append(motion_file_entry(path, include_detail=False))
+    return {
+        'success': True,
+        'message': (
+            '현재 프로젝트의 애니메이션을 불러왔습니다'
+            if repository.selected_project_id()
+            else NO_PROJECT_SELECTED
+        ),
+        # 파일로 저장할 때 쓰는 주소가 프로젝트 번호를 쓴다 · 화면은 이 응답 말고는
+        # 번호를 알 길이 없어서 폴더 경로에서 끊어 쓰고 있었다.
+        'project_id': project_id,
+        'project_dir': str(motion_projects_dir / project_id),
+        'files_dir': str(files_dir),
+        'files': files,
+    }
+
+
+def load_motion_file(
+    repository: Any, motion_projects_dir: Path, file_id: Any
+) -> Dict[str, Any]:
+    try:
+        path = motion_file_path(
+            file_id, _selected_motion_files_dir(repository, motion_projects_dir)
+        )
+    except ValueError as exc:
+        return {
+            **list_motion_files(repository, motion_projects_dir),
+            'success': False,
+            'message': str(exc),
+        }
+    return {
+        **list_motion_files(repository, motion_projects_dir),
+        'success': True,
+        'message': 'motion file loaded',
+        'file': motion_file_entry(path, include_detail=True),
+    }

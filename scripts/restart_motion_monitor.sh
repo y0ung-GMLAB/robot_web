@@ -1,0 +1,191 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+WORKSPACE="${MOTION_WORKSPACE:-$(cd "${SCRIPT_DIR}/.." && pwd)}"
+LOG_DIR="${WORKSPACE}/log/web_apply_restart"
+STAMP="$(date +%Y%m%d-%H%M%S)"
+
+mkdir -p "${LOG_DIR}"
+# 재시작 로그 · 14일 지난 것은 시작 때 삭제 · ROS 노드 로그도 작업공간 log/ros 로 · 수정 목록 21
+source "${WORKSPACE}/src/web_bridge/deploy/log_retention.sh"
+prune_old_entries "${LOG_DIR}"
+# 재시작마다 새 파일 · 최근 20 개만(이번 것 포함 21) · 수정 목록 112 아
+prune_keep_newest "${LOG_DIR}" 'restart-*.log'
+prepare_ros_log_dir "${WORKSPACE}"
+exec >> "${LOG_DIR}/restart-${STAMP}.log" 2>&1
+# 오래 돌면 한 파일이 커진다 · 크기로 돌린다(50 MB × 3) · 수정 목록 77
+watch_log_size "${LOG_DIR}/restart-${STAMP}.log"
+
+log() {
+  echo "[$(date +%Y%m%d-%H%M%S.%3N)] $*"
+}
+
+# DDS 범위 · 서비스 실행 스크립트(run_user_service.sh)와 같은 규칙 · §6-96 · 수정 목록 19
+# MOTION_GROUP_NETWORK=1(기본) → ROS_LOCALHOST_ONLY=0 (PC 이름공간 + 그룹 도메인으로 구분)
+# MOTION_GROUP_NETWORK=0        → ROS_LOCALHOST_ONLY=1 (이 PC 안에 가둠)
+# 이미 ROS_LOCALHOST_ONLY 가 주어졌으면(서비스에서 상속) 그대로 쓴다 · 전에는 손으로
+# 직접 실행하면 기본값 1 이라 서비스 때와 다르게 돌았다
+export MOTION_GROUP_NETWORK="${MOTION_GROUP_NETWORK:-1}"
+if [[ -z "${ROS_LOCALHOST_ONLY:-}" ]]; then
+  if [[ "${MOTION_GROUP_NETWORK}" == "1" ]]; then
+    export ROS_LOCALHOST_ONLY=0
+  else
+    export ROS_LOCALHOST_ONLY=1
+  fi
+fi
+# 로컬 도메인 + 루프백 · 웹 서비스가 띄우면 이미 정해져 상속된다(`MOTION_LOCAL_DDS` 있음) ·
+# 손으로 실행했을 때만 같은 도우미로 정한다 · 다르면 모터 노드와 갈려 아무것도 안 보인다 · 수정 목록 176
+if [[ -z "${MOTION_LOCAL_DDS:-}" && -f "${WORKSPACE}/src/motion_common/motion_common/group_env.py" ]]; then
+  eval "$(python3 "${WORKSPACE}/src/motion_common/motion_common/group_env.py" --local)"
+fi
+START_MOTOR_MANAGER_MODE="${START_MOTOR_MANAGER:-auto}"
+
+any_running() {
+  for pattern in "$@"; do
+    if pgrep -f "${pattern}" >/dev/null 2>&1; then
+      return 0
+    fi
+  done
+  return 1
+}
+
+wait_until_stopped() {
+  local timeout_sec="$1"
+  shift
+  local start_ms now_ms elapsed_ms timeout_ms
+  start_ms="$(date +%s%3N)"
+  timeout_ms="$(python3 -c "print(int(float('${timeout_sec}') * 1000))")"
+  while any_running "$@"; do
+    now_ms="$(date +%s%3N)"
+    elapsed_ms=$((now_ms - start_ms))
+    if (( elapsed_ms >= timeout_ms )); then
+      return 1
+    fi
+    sleep 0.05
+  done
+  return 0
+}
+
+log "restart_motion_monitor.sh started"
+
+sleep "${RESTART_DELAY_SEC:-0.2}"
+
+patterns=(
+  "ros2 launch motion_state_monitor motion_monitor.launch.py"
+  "ros2 launch motion_state_monitor project_services.launch.py"
+  "install/motion_state_monitor/lib/motion_state_monitor/motion_state_monitor"
+  "install/motion_supervisor/lib/motion_supervisor/motion_supervisor"
+  "ros2 run motion_supervisor motion_supervisor"
+  "install/motion_runtime/lib/motion_runtime/motion_mapping_manager"
+  "install/motion_runtime/lib/motion_runtime/motion_run_manager"
+  "install/motion_web_bridge/lib/motion_web_bridge/motion_web_bridge"
+  "install/motion_schedule/lib/motion_schedule/motion_schedule_node"
+  "ros2 run motion_schedule motion_schedule_node"
+  # Stop legacy pre-refactor processes so they cannot publish duplicate
+  # motion state on the current topics.
+  "install/motion_web_bridge/lib/motion_web_bridge/motion_mapping_manager"
+  "install/motion_web_bridge/lib/motion_web_bridge/motion_run_manager"
+  "ros2 launch motion_web_bridge midi_monitor.launch.py"
+)
+if [[ "${START_MOTOR_MANAGER_MODE}" == "true" ]] \
+  || { [[ "${START_MOTOR_MANAGER_MODE}" == "auto" ]] && [[ -n "${MOTOR_CONFIG_FILE:-}" ]]; }; then
+  patterns+=(
+    "install/motion_control_bridge/lib/motion_control_bridge/motor_manager_node"
+  )
+fi
+
+for pattern in "${patterns[@]}"; do
+  pkill -TERM -f "${pattern}" || true
+done
+
+if wait_until_stopped "${TERM_WAIT_SEC:-1.5}" "${patterns[@]}"; then
+  log "previous nodes stopped after TERM"
+else
+  log "TERM wait timeout; sending KILL to remaining nodes"
+fi
+
+for pattern in "${patterns[@]}"; do
+  pkill -KILL -f "${pattern}" || true
+done
+
+wait_until_stopped "${KILL_WAIT_SEC:-0.5}" "${patterns[@]}" || true
+
+ethercat_error_positions() {
+  ethercat slaves 2>/dev/null \
+    | awk '$3 ~ /ERROR/ || $4 == "E" {print $1}' \
+    || true
+}
+
+recover_ethercat_errors_before_launch() {
+  if ! command -v ethercat >/dev/null 2>&1; then
+    return 0
+  fi
+
+  local attempts="${ETHERCAT_RECOVERY_ATTEMPTS:-2}"
+  local interval="${ETHERCAT_RECOVERY_INTERVAL_SEC:-0.5}"
+  local command_timeout="${ETHERCAT_STATE_TIMEOUT_SEC:-3}"
+  local attempt position positions
+
+  for ((attempt = 1; attempt <= attempts; attempt++)); do
+    positions="$(ethercat_error_positions)"
+    if [[ -z "${positions}" ]]; then
+      return 0
+    fi
+
+    for position in ${positions}; do
+      log "acknowledging EtherCAT slave ${position} before motor node start (attempt ${attempt}/${attempts})"
+      # AL Control 0x11 = request INIT + acknowledge the slave error flag.
+      # This never enables the servo or sends a position command.
+      timeout "${command_timeout}" \
+        ethercat reg_write -p "${position}" -t uint16 0x0120 0x0011 || true
+      sleep "${interval}"
+      timeout "${command_timeout}" ethercat states -p "${position}" PREOP || true
+      sleep "${interval}"
+    done
+  done
+
+  positions="$(ethercat_error_positions)"
+  if [[ -n "${positions}" ]]; then
+    log "EtherCAT error flag remains on slave(s): ${positions}"
+    return 1
+  fi
+  return 0
+}
+
+cd "${WORKSPACE}"
+CONFIG_FILE="${MOTOR_CONFIG_FILE:-${WORKSPACE}/config/bootstrap_motor_config.yaml}"
+START_MOTOR_MANAGER="${START_MOTOR_MANAGER_MODE}"
+if [[ "${START_MOTOR_MANAGER}" == "auto" ]]; then
+  START_MOTOR_MANAGER="false"
+  if [[ -n "${MOTOR_CONFIG_FILE:-}" ]]; then
+    START_MOTOR_MANAGER="true"
+  fi
+fi
+
+MOTOR_START_BLOCK_REASON=""
+if [[ "${START_MOTOR_MANAGER}" == "true" ]] \
+  && ! recover_ethercat_errors_before_launch; then
+  START_MOTOR_MANAGER="false"
+  MOTOR_START_BLOCK_REASON="EtherCAT 오류 플래그를 해제하지 못해 모터 관리 노드 시작을 차단했습니다"
+  log "${MOTOR_START_BLOCK_REASON}"
+fi
+
+export CONFIG_FILE
+export START_MOTOR_MANAGER
+export MOTOR_START_BLOCK_REASON
+export WORKSPACE
+PROJECT_GENERATION="${MOTION_PROJECT_GENERATION:-0}"
+export PROJECT_GENERATION
+log "ROS DDS isolation: ROS_LOCALHOST_ONLY=${ROS_LOCALHOST_ONLY} · ROS_DOMAIN_ID=${ROS_DOMAIN_ID:-0} · MOTION_LOCAL_DDS=${MOTION_LOCAL_DDS:-}"
+# 모터 노드를 같이 띄우면 버스 설정 중 표시 · `run_motor_service.sh` 와 같음 · 수정 목록 125
+BUS_MARKER_HELPER="${WORKSPACE}/src/motion_common/motion_common/ethercat_mailbox.py"
+if [[ "${START_MOTOR_MANAGER}" == "true" ]] && [[ -f "${BUS_MARKER_HELPER}" ]] && command -v python3 >/dev/null 2>&1; then
+  python3 "${BUS_MARKER_HELPER}" begin --owner "$$" || true
+  ( python3 "${BUS_MARKER_HELPER}" watch --owner "$$" </dev/null & )
+fi
+log "starting motion_monitor.launch.py with config_file=${CONFIG_FILE}, project_generation=${PROJECT_GENERATION}, start_motor_manager=${START_MOTOR_MANAGER}"
+sg dialout -c 'bash -lc '"'"'source "$WORKSPACE/install/setup.bash" && ros2 launch motion_state_monitor motion_monitor.launch.py config_file:="$CONFIG_FILE" start_motor_manager:="$START_MOTOR_MANAGER"'"'" &
+launch_pid="$!"
+wait "${launch_pid}"
+exit "$?"

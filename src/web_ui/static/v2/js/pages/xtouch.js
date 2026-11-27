@@ -1,0 +1,654 @@
+/** UI v2 · X-Touch · 페이더로 축 실시간 조종 + 녹화 · 수정 목록 156 (사용자 결정 2026-10-17 · 2026-10-18)
+ *
+ * X-Touch 는 이 화면을 연 PC 에 USB · 브라우저가 Web MIDI 로 읽고 쓴다(xtouch_device.js) ·
+ * 페이더 값은 수동 페이더와 같은 소켓 · 출처 `xtouch` · 서버가 조인트 매핑 최대 속도·가속도로 따라간다(빈 축은 거절) ·
+ * 수동 모드에서만 · 한 번에 로봇 한 대 · 창이 가려지거나 다른 탭이어도 그대로(X-Touch 화면을 떠나면 끊음 · 2026-10-19).
+ *
+ * 녹화 · 화면 버튼 또는 X-Touch REC · 3초 뒤 시작 · 선택(SELECT)한 축만 · 로봇 쪽이 램프 뒤 명령값을 기록 ·
+ * 정지하면 애니메이션 목록에 저장(같은 이름이면 _2 · _3) · 화면이 끊기면 끊긴 순간까지 자동 저장.
+ *
+ * 바탕 위 녹화(⑨) · 「바탕」 에 애니메이션을 고르면 그것을 재생하면서 녹화 · 초기 위치 이동이 카운트다운 ·
+ * 바탕 조인트 페이더는 재생을 따라 움직이고 잡으면 그 구간만 덮어씀(⑨-2 · 놓으면 원본으로 이음) ·
+ * 바탕에 없는 축은 얹어 녹화(추가 녹화) · 결과는 새 파일(바탕은 안 바뀜).
+ */
+import { h, dot } from '../dom.js';
+import { api } from '../net.js';
+import { confirmBox, toast } from '../dialog.js';
+import * as act from '../actions.js';
+import { ManualStream } from '../manual_stream.js';
+import { tip } from '../tip.js';
+import { jointToMotor, motorForRow, motorRefFor, motorToJoint, previewRow, rowToDraft } from '../mapping_model.js';
+import { fileInfo, signedDeg } from '../play_model.js';
+import { manualBlocker } from './manual.js';
+import { MIDI_FLAG_URL, XTouchDevice, midiUnavailableReason } from '../xtouch_device.js';
+import {
+  CHANNELS, DEFAULT_SMOOTH_SEC, LCD_WHITE, PHASE_LABEL, SMOOTH_LEVELS, XTouchSession, channelConfig, faderMessage, lcdColorMessage,
+  lcdMessages, ledMessage, recordLed, robotTag,
+} from '../xtouch_model.js';
+
+const DEG = 180 / Math.PI;
+const RAD = Math.PI / 180;
+const TICK_MS = 20;
+const PING_MS = 500;
+/** 이만큼 아무것도 안 오면 서버가 끊긴 것으로 본다(무선 멈춤) · 화면은 0.5 s 마다 ping */
+const WATCHDOG_SEC = 2;
+const ROUTE = '#/xtouch';
+/**
+ * 스무딩 · 조인트마다 · 이 브라우저에 기억(로봇 주소마다 다른 저장소) · 사용자 결정 2026-10-19 「조인트별로 고를 수 있게」 ·
+ * 고른 적 없는 조인트는 기본(0.25 s) · 전에 하나로 고른 값(`rw.xtouch.smooth_sec`)이 있으면 그것
+ */
+const SMOOTH_KEY = 'rw.xtouch.smooth_by_joint';
+const OLD_SMOOTH_KEY = 'rw.xtouch.smooth_sec';
+const isLevel = (value) => SMOOTH_LEVELS.some((level) => level.sec === value);
+
+function loadSmooth() {
+  const out = { fallback: DEFAULT_SMOOTH_SEC, joints: {} };
+  try {
+    const old = globalThis.localStorage?.getItem(OLD_SMOOTH_KEY);
+    if (old !== null && old !== undefined && isLevel(Number(old))) out.fallback = Number(old);
+    const saved = JSON.parse(globalThis.localStorage?.getItem(SMOOTH_KEY) || 'null');
+    if (saved && typeof saved === 'object') {
+      for (const [id, value] of Object.entries(saved)) if (isLevel(Number(value))) out.joints[id] = Number(value);
+    }
+  } catch { /* 기본값 */ }
+  return out;
+}
+
+function smoothFor(motionId) {
+  return ui.smooth.joints[motionId] ?? ui.smooth.fallback;
+}
+
+function setSmooth(motionId, value) {
+  ui.smooth.joints[motionId] = value;
+  try { globalThis.localStorage?.setItem(SMOOTH_KEY, JSON.stringify(ui.smooth.joints)); } catch { /* 이번만 */ }
+}
+
+const ui = {
+  rows: null, fileId: '', revision: '', message: '', name: '', base: '', files: [], lastResultAt: 0,
+  record: { state: 'idle' }, recordAt: 0, lastSaved: null,
+  dev: { status: 'off', name: '', message: '' },
+  smooth: loadSmooth(),
+  /** 같은 이름이면 덮어쓰기 · 기억하지 않음(화면을 열 때마다 끔) · 사용자 2026-10-19 */
+  overwrite: false,
+};
+let ctx = { state: null, changed: () => {} };
+const session = new XTouchSession();
+const device = new XTouchDevice({
+  onEvent: (event) => onDeviceEvent(event),
+  onRaw: (bytes, event) => noteMidi(bytes, event),
+  onState: (state) => {
+    if (state.status !== ui.dev.status) diag('dev', `장치 ${ui.dev.status} → ${state.status} ${state.name || ''} ${state.message || ''}`);
+    ui.dev = state;
+    if (state.status !== 'ready') run(session.reset());
+    else paintSurface();
+    ctx.changed();
+  },
+});
+const stream = new ManualStream({
+  onResult: (result) => {
+    if (result.success === false && result.message) {
+      diag('reject', `거절 ${result.axis ?? ''} ${String(result.message).slice(0, 140)}`);
+      ui.message = result.message;
+      ctx.changed();
+    }
+  },
+  onClose: (reason) => {
+    diag('close', `로봇 연결 닫힘 ${reason || '(이유 없음)'} · 선택 ${session.selectedAxes().join(',') || '없음'} 놓음`);
+    if (reason) ui.message = reason;
+    run(session.reset());
+    ctx.changed();
+  },
+  onMessage: (message) => {
+    if (message.type === 'pong') setRecord(message.record);
+    else if (message.type === 'record') onRecordReply(message);
+  },
+});
+let loop = null;
+let lastBlocked = null;
+let lastPing = 0;
+let lastOpenTry = 0;
+let lastLcd = '';
+
+/* ---------- 상태 ---------- */
+
+function motors(state) {
+  return (state?.snap?.motion_state?.motors || []).map((m) => ({
+    raw: m, axis: Number(m.controller_index), ref: motorRefFor(m),
+    position: m.position_rad === null || m.position_rad === undefined ? null : Number(m.position_rad) * DEG,
+    lower: Number.isFinite(Number(m.lower)) ? Number(m.lower) : -Infinity,
+    upper: Number.isFinite(Number(m.upper)) ? Number(m.upper) : Infinity,
+  }));
+}
+
+function config(state) {
+  const list = motors(state);
+  return channelConfig(ui.rows || [], (row) => motorForRow(row, list)?.axis ?? null);
+}
+
+/** 수동 조작을 막는 PC 전체 이유 · 빈 글자면 됨 · 이 화면이 시작한 바탕 재생 중이면 「재생 중」 은 막지 않는다(⑨) */
+function blockedText(state) {
+  const blocker = manualBlocker(state, null);
+  if (!blocker || blocker.text === '모터를 선택하세요') return '';
+  if (blocker.fix === 'stop' && ui.record.base && recording()) return '';
+  return blocker.text;
+}
+
+function sessionCtx() {
+  const list = motors(ctx.state);
+  return {
+    now: performance.now(),
+    blocked: blockedText(ctx.state),
+    recording: ui.record.state === 'countdown' || ui.record.state === 'recording',
+    jointOf: (axis) => {
+      const item = session.config.find((c) => c?.axis === axis);
+      const motor = list.find((m) => m.axis === axis);
+      if (!item || !motor || motor.position === null) return null;
+      return motorToJoint(item.row, motor.position);
+    },
+  };
+}
+
+/* ---------- 장치 → 할 일 ---------- */
+
+/** 받은 MIDI 마지막 몇 개 · 채널 하나가 안 먹을 때 무엇이 오는지(오기는 하는지) 보려고 · 2026-10-19 */
+const MIDI_LOG_SIZE = 12;
+const midiLog = [];
+let lastFaderLog = new Map();
+
+function noteMidi(bytes, event) {
+  const hex = bytes.map((b) => b.toString(16).padStart(2, '0')).join(' ');
+  let text;
+  if (!event) text = `모름 · ${hex}`;
+  else if (event.kind === 'fader') text = `페이더 ${event.channel + 1} · ${event.value}`;
+  else if (event.kind === 'touch') text = `페이더 ${event.channel + 1} 터치 ${event.down ? '누름' : '뗌'}`;
+  else text = `${{ rec: 'REC', solo: 'SOLO', mute: 'MUTE', select: 'SELECT' }[event.group]} ${event.channel + 1} ${event.down ? '누름' : '뗌'}`;
+  if (event?.kind === 'fader') diag(`inf${event.channel}`, `받음 페이더 ${event.channel + 1} ${event.value}`, 100);
+  // 페이더 값은 채널마다 0.3 초에 한 줄만(쏟아져서 다른 것이 밀려나지 않게)
+  if (event?.kind === 'fader') {
+    const now = performance.now();
+    if (now - (lastFaderLog.get(event.channel) || 0) < 300) return;
+    lastFaderLog.set(event.channel, now);
+  }
+  if (event?.kind !== 'fader') diag('in', `받음 ${text}`);
+  midiLog.unshift(`${new Date().toLocaleTimeString()} · ${text}`);
+  midiLog.length = Math.min(midiLog.length, MIDI_LOG_SIZE);
+  ctx.changed();
+}
+
+function onDeviceEvent(event) {
+  // 보이는 탭만 · 다른 탭에서 같은 장치를 받아도 움직이지 않게
+  if (!location.hash.startsWith(ROUTE)) { diag('hidden', '무시 · X-Touch 화면이 아님', 1000); return; }
+  // 받은 페이더 값을 그대로 돌려보낸다(Mackie Control 호스트 방식) · X-Touch 는 손을 떼면 모터 페이더를 「호스트가 마지막으로
+  // 보낸 위치」 로 되돌린다 · 전에는 안 돌려보내서 놓을 때마다 마지막 SELECT 위치로 휙 돌아갔다 (floating4 실물 2026-10-19 18:02 ·
+  // SELECT 때 보낸 10252 로 되돌아감) · 채널마다 · 선택 안 한 채널도
+  if (event.kind === 'fader') {
+    device.send(faderMessage(event.channel, event.value));
+    diag(`echo${event.channel}`, `되돌림 페이더 ${event.channel + 1} ${event.value}`, 200);
+  }
+  const context = sessionCtx();
+  run(session.handle(event, context));
+  if (event.kind === 'fader') {
+    // 왜 안 먹나 · 채널 상태 · 0.5 s 에 한 줄
+    const ch = session.channels[event.channel];
+    const item = session.config[event.channel];
+    diag(`st${event.channel}`, `상태 페이더 ${event.channel + 1} 선택 ${ch.selected ? 'O' : 'X'} 손 ${ch.touched ? (ch.touchDown ? '터치' : '뗌 확인 중') : 'X'} `
+      + `단계 ${ch.phase} 축값 ${item ? (context.jointOf(item.axis) ?? 'null') : '연결없음'} 막힘 ${context.blocked || '없음'} 연결 ${stream.isOpen() ? 'O' : 'X'}`, 500);
+  }
+}
+
+/** 진단 · 받은 것·보낸 것을 로봇 기록으로(1 s 마다 묶어) · 화면 밖에서 원인을 보려고 · 2026-10-19 */
+const diagQueue = [];
+const diagLast = new Map();
+/** 화면 하나마다 다른 표 · 같은 로봇 화면이 여럿 열려 있으면 기록에서 가른다 */
+const PAGE_ID = Math.random().toString(36).slice(2, 6);
+
+function diag(key, text, throttleMs = 0) {
+  const now = performance.now();
+  if (throttleMs && now - (diagLast.get(key) || 0) < throttleMs) return;
+  diagLast.set(key, now);
+  if (diagQueue.length < 400) diagQueue.push(`[${PAGE_ID}] ${Math.round(now)} ${text}`);
+}
+
+function run(actions) {
+  for (const action of actions || []) {
+    if (action.type === 'feedback') diag(`fb${action.channel}`, `보냄 페이더 ${action.channel + 1} ${action.value}`);
+    else if (action.type === 'target' || action.type === 'punch') diag(`t${action.channel}`, `목표 ${action.motionId} ${action.joint.toFixed(2)}°`, 200);
+    else if (action.type === 'release' || action.type === 'punch-release') diag(`r${action.type}`, `놓음 ${action.motionId || action.axes}`);
+    if (action.type === 'feedback') device.send(faderMessage(action.channel, action.value));
+    else if (action.type === 'led') device.send(ledMessage(action.group, action.channel, action.state));
+    else if (action.type === 'target') sendTarget(action);
+    else if (action.type === 'release') stream.release(action.axes);
+    else if (action.type === 'punch') stream.send({ type: 'punch', motion_id: action.motionId, joint_rad: action.joint * RAD, smooth_sec: smoothFor(action.motionId) });
+    else if (action.type === 'punch-release') stream.send({ type: 'punch_release', motion_id: action.motionId });
+    else if (action.type === 'record-toggle') toggleRecord();
+    else if (action.type === 'record-add') stream.send({ type: 'record_add', axes: action.axes });
+    else if (action.type === 'message') { ui.message = action.text; ctx.changed(); }
+    else if (action.type === 'hand') { diag(`hand${action.channel}`, `손 ${action.channel + 1} ${action.on ? '인식' : '없음'}`); paintLcd(); ctx.changed(); }
+  }
+}
+
+function sendTarget(action) {
+  const item = session.config[action.channel];
+  const motor = motors(ctx.state).find((m) => m.axis === action.axis);
+  if (!item || !motor) return;
+  const view = previewRow(item.row);
+  const lower = Math.max(motor.lower, view.motorMin);
+  const upper = Math.min(motor.upper, view.motorMax);
+  const motorDeg = Math.min(upper, Math.max(lower, jointToMotor(item.row, action.joint)));
+  // 받은 값 그대로 · 거르는 것은 로봇 쪽이 고른 시간으로(supervisor 램프 앞)
+  stream.target(action.axis, motorDeg * RAD, { motion_id: action.motionId, motion_rad: action.joint * RAD, source: 'xtouch', smooth_sec: smoothFor(action.motionId) });
+}
+
+/** 불빛 · 글씨 칸 · 연결 직후와 상태가 바뀔 때 */
+function paintSurface() {
+  if (!device.ready()) return;
+  const recordState = recordLed(ui.record.state);
+  const armed = new Set(ui.record.axes || []);
+  for (let channel = 0; channel < CHANNELS; channel += 1) {
+    const item = session.config[channel];
+    const selected = session.channels[channel].selected;
+    device.send(ledMessage('select', channel, selected ? 'on' : 'off'));
+    const lit = recordState !== 'off' && (armed.size ? armed.has(item?.axis) : channel === 0);
+    device.send(ledMessage('rec', channel, lit ? recordState : 'off'));
+  }
+  run(session.handIndicators(true));
+  paintLcd(true);
+}
+
+function thisRobotTag() {
+  return robotTag(ctx.state?.snap?.system_info?.hostname || location.hostname);
+}
+
+function paintLcd(force = false) {
+  if (!device.ready() || !device.sysex) return;
+  // 어느 X-Touch 가 어느 로봇인지 · 빈 칸·안 고른 채널에 로봇 표시(f3 등) · 여러 대 꽂을 때(2026-10-19)
+  const tag = thisRobotTag();
+  const texts = session.config.map((item, channel) => {
+    if (!item) return [tag, ''];
+    const state = session.channels[channel];
+    const bottom = state.selected ? { ready: 'SEL', pickup: 'MATCH', live: 'LIVE', idle: tag }[state.phase] : tag;
+    return [item.motionId.replace(/^f\d+_/, ''), ui.record.state === 'recording' && state.selected ? 'REC' : bottom];
+  });
+  // 손이 닿은 채널은 글씨 칸을 반전(밝게) · 2026-10-19
+  const hands = session.channels.map((state) => Boolean(state.touched));
+  const key = JSON.stringify([texts, hands]);
+  if (!force && key === lastLcd) return;
+  lastLcd = key;
+  texts.forEach(([top, bottom], channel) => {
+    for (const message of lcdMessages(device.deviceId, channel, top, bottom)) device.send(message);
+    device.send(lcdColorMessage(device.deviceId, channel, top, bottom, LCD_WHITE, hands[channel]));
+  });
+}
+
+/* ---------- 주기 ---------- */
+
+/**
+ * 주기는 Web Worker 타이머로 · 창이 가려지거나 다른 탭이어도 느려지지 않게 · 2026-10-19 floating4 실물 ·
+ * 크롬은 가려진 창도 「안 보임」 으로 치고 그 창의 타이머를 1 s(5 분 뒤 1 분)로 늦춘다 · 전에는 안 보이면 연결을 끊어
+ * 다른 창(VS Code 등)을 띄우는 순간 선택이 다 풀리고 X-Touch 포트가 닫혀 페이더가 내려갔다
+ */
+function makeTicker(callback) {
+  try {
+    const source = `let t=null;onmessage=(e)=>{clearInterval(t);if(e.data>0)t=setInterval(()=>postMessage(0),e.data);}`;
+    const worker = new Worker(URL.createObjectURL(new Blob([source], { type: 'text/javascript' })));
+    worker.onmessage = callback;
+    worker.postMessage(TICK_MS);
+    return { stop: () => { worker.postMessage(0); worker.terminate(); } };
+  } catch {
+    const timer = setInterval(callback, TICK_MS);
+    return { stop: () => clearInterval(timer) };
+  }
+}
+
+function ensureLoop() {
+  if (loop) return;
+  loop = makeTicker(tick);
+}
+
+function teardown(reason = '') {
+  diag('teardown', `X-Touch 끊음 · ${reason || 'X-Touch 화면을 떠남 또는 「연결 끊기」'} · 주소 ${location.hash}`);
+  run(session.reset());
+  paintSurface();
+  stream.close();
+  device.disconnect();
+  if (loop) { loop.stop(); loop = null; }
+  if (reason) ui.message = reason;
+}
+
+let lastHidden = false;
+
+function tick() {
+  if (!location.hash.startsWith(ROUTE)) { teardown(); return; }
+  // 가려지거나 다른 탭이어도 그대로 쓴다 · 기록만
+  if (document.hidden !== lastHidden) { lastHidden = document.hidden; diag('vis', document.hidden ? '창 안 보임(가려짐·다른 탭) · 계속 씀' : '창 보임'); }
+  const now = performance.now();
+  const blocked = blockedText(ctx.state);
+  if (blocked !== lastBlocked) { diag('blk', `막힘 바뀜 · ${blocked || '없음'}`); lastBlocked = blocked; }
+  const configActions = session.configure(config(ctx.state));
+  if (configActions.length) diag('cfg', `매핑 바뀜 · 채널 놓음 ${configActions.length}`);
+  run(configActions);
+  if (blocked) {
+    if (session.selectedAxes().length) { diag('blkreset', `막혀서 선택 놓음 · ${blocked}`); run(session.reset()); ctx.changed(); }
+    if (stream.isOpen()) stream.close();
+  } else if (device.ready() && !stream.isOpen() && now - lastOpenTry > 1000) {
+    lastOpenTry = now;
+    diag('open', '로봇 연결 여는 중', 0);
+    stream.open({ mapping_file_id: ui.fileId, base_mapping_revision: ui.revision, watchdog_sec: WATCHDOG_SEC })
+      .then(() => diag('opened', '로봇 연결 열림'))
+      .catch((error) => { diag('openfail', `로봇 연결 거절 · ${error.message}`); ui.message = error.message; ctx.changed(); });
+  }
+  // 손 인식 표시는 로봇과 연결 안 돼도(터치가 되는지만 볼 때)
+  if (device.ready()) run(session.handIndicators());
+  if (stream.isOpen()) {
+    run(session.tick(sessionCtx()));
+    if (now - lastPing >= PING_MS) {
+      lastPing = now;
+      stream.send({ type: 'ping' });
+      if (diagQueue.length) stream.send({ type: 'diag', lines: diagQueue.splice(0) });
+    }
+  }
+  paintLcd();
+}
+
+/* ---------- 녹화 ---------- */
+
+function setRecord(record) {
+  const next = record && typeof record === 'object' ? record : { state: 'idle' };
+  const changed = next.state !== ui.record.state || JSON.stringify(next.axes || []) !== JSON.stringify(ui.record.axes || [])
+    || next.base !== ui.record.base;
+  ui.record = next;
+  ui.recordAt = performance.now();
+  // 바탕 위 녹화 · 바탕 조인트는 덮어쓰기 채널 · 끝나면 보통으로
+  run(session.setTake(next.base && (next.state === 'countdown' || next.state === 'recording') ? next.punch_ids : []));
+  // 화면이 기다리는 사이(재생 끝 · 다른 곳에서 정지) 끝난 녹화 결과 · 처음 받은 것은 옛 결과라 알리지 않는다
+  const last = next.last_result;
+  if (last?.at && last.at !== ui.lastResultAt) {
+    const first = !ui.lastResultAt;
+    ui.lastResultAt = last.at;
+    if (!first) showResult(last);
+  }
+  if (changed) { paintSurface(); ctx.changed(); }
+}
+
+function showResult(result) {
+  if (result.success && result.file) {
+    ui.lastSaved = { file: result.file, duration: result.duration_sec, ids: result.motion_ids || [] };
+    toast(result.message || '저장했습니다', 'ok');
+  } else if (result.message) {
+    ui.message = result.message;
+    toast(result.message, 'warn');
+  }
+  ctx.changed();
+}
+
+function onRecordReply(message) {
+  if (message.state === 'saved' || message.success === false) showResult(message);
+  if (message.state === 'saved') setRecord({ state: 'idle' });
+  else if (message.state) setRecord(message);
+  ctx.changed();
+}
+
+function recording() {
+  return ui.record.state === 'countdown' || ui.record.state === 'recording';
+}
+
+function toggleRecord() {
+  if (recording()) { stopRecord(); return; }
+  startRecord();
+}
+
+function startRecord() {
+  const blocked = blockedText(ctx.state);
+  if (blocked) { ui.message = blocked; ctx.changed(); return; }
+  const axes = session.selectedAxes();
+  // 바탕이 있으면 축을 안 골라도 된다(재생하면서 바탕 조인트를 잡으면 덮어씀)
+  if (!axes.length && !ui.base) { ui.message = '녹화할 축이 없습니다. X-Touch의 SELECT로 축을 선택하세요.'; ctx.changed(); return; }
+  if (!stream.send({ type: 'record_start', axes, name: ui.name, base: ui.base, overwrite: ui.overwrite })) { ui.message = '로봇과 연결되지 않았습니다. 잠시 후 재시도하세요.'; ctx.changed(); return; }
+  ui.message = '';
+}
+
+function stopRecord() {
+  if (!stream.send({ type: 'record_stop' })) ui.message = '로봇 연결이 중단되어 중단 전까지 녹화한 내용을 자동 저장합니다.';
+  ctx.changed();
+}
+
+function cancelRecord() {
+  stream.send({ type: 'record_cancel' });
+}
+
+/** 카운트다운 남은 초 · 녹화 경과 · 서버 값 + 받은 뒤 지난 시간 */
+function recordText() {
+  const since = (performance.now() - ui.recordAt) / 1000;
+  const clock = (sec) => `${Math.floor(sec / 60)}:${String(Math.floor(sec % 60)).padStart(2, '0')}`;
+  if (ui.record.state === 'countdown') {
+    if (ui.record.base) return `${ui.record.base} 초기 위치로 이동 중 (도착 후 재생과 함께 녹화 시작)`;
+    return `${Math.max(0, Math.ceil(Number(ui.record.starts_in_sec || 0) - since))}초 뒤 시작`;
+  }
+  if (ui.record.state === 'recording') {
+    const total = Number(ui.record.elapsed_sec || 0) + since;
+    if (ui.record.base) {
+      const duration = Number(ui.record.duration_sec || 0);
+      return `녹화 중 ${clock(Math.min(total, duration || total))} / ${clock(duration)} · 바탕 ${ui.record.base}`;
+    }
+    return `녹화 중 ${clock(total)}`;
+  }
+  return '대기';
+}
+
+/* ---------- 읽기 ---------- */
+
+export async function loadXTouch(state, changed) {
+  ctx = { state, changed };
+  try {
+    const list = await api('GET', '/api/motion-mappings');
+    const files = Array.isArray(list?.files) ? list.files : [];
+    const fileId = files.some((f) => f.id === list?.active_file_id) ? list.active_file_id : (files[0]?.id || '');
+    if (fileId) {
+      const data = await api('GET', `/api/motion-mappings/${encodeURIComponent(fileId)}`);
+      if (data?.mapping) {
+        const revision = String(data.file?.mapping_revision || data.file?.revision || '');
+        // 매핑이 바뀌면 소켓의 변환표도 낡았다 · 다시 연다
+        if (ui.revision && revision !== ui.revision && stream.isOpen()) stream.close();
+        ui.rows = (data.mapping.mappings || []).map(rowToDraft);
+        ui.fileId = fileId;
+        ui.revision = revision;
+      }
+    } else {
+      ui.rows = [];
+    }
+  } catch { /* 옛 매핑 그대로 · 다음 주기에 다시 */ }
+  try {
+    const files = await api('GET', '/api/motion-files');
+    ui.files = (Array.isArray(files?.files) ? files.files : []).map(fileInfo).filter((f) => f.id);
+    if (ui.base && !ui.files.some((f) => f.id === ui.base)) ui.base = '';
+  } catch { /* 목록은 다음 주기에 */ }
+  changed();
+}
+
+/* ---------- 그리기 ---------- */
+
+const DEV_TONE = { ready: 'ok', connecting: 'warn', off: 'idle', missing: 'warn', choose: 'warn', busy: 'bad', denied: 'bad', unavailable: 'bad' };
+const DEV_TEXT = { ready: '연결됨', connecting: '연결 중', off: '연결 안 됨', missing: '장치 없음', choose: 'X-Touch 선택 필요', busy: '다른 곳에서 사용 중', denied: '권한 없음', unavailable: '현재 주소에서는 MIDI 사용 불가' };
+
+/**
+ * 이 로봇에 쓸 X-Touch 고르기 · 늘 보임 · 사용자 2026-10-19 「어떤 xtouch 인지는 어디서 고르냐 · 허브면 여러 포트」 ·
+ * 전에는 2대 이상일 때만 나와 1대일 때·연결 전에는 고르는 곳이 안 보였다 · 연결 전에는 안내만(목록은 MIDI 권한 뒤)
+ */
+function deviceChooser(changed) {
+  const tag = thisRobotTag();
+  const label = `${tag} 로봇에 사용할 X-Touch`;
+  if (!device.access) {
+    return h('div', { class: 'row' }, h('span', { class: 'muted small' }, `${label}: 「X-Touch 연결」 후 선택`,
+      tip(['「X-Touch 연결」 선택 시 현재 PC에 연결된 X-Touch 목록 표시', '허브로 여러 대를 연결한 경우 목록에서 선택'])));
+  }
+  const ports = device.ports || [];
+  const current = device.input?.id || '';
+  return h('div', { class: 'row' },
+    h('label', { class: 'inline' }, label,
+      h('select', { class: 'select select-sm', 'aria-label': '로봇에 사용할 X-Touch', disabled: !ports.length,
+        onchange: async (e) => {
+          if (!e.target.value) return;
+          run(session.reset());
+          if (await device.choose(e.target.value)) { ensureLoop(); paintSurface(); }
+          changed();
+        } },
+      h('option', { value: '', selected: !current }, ports.length ? '선택하세요' : 'X-Touch 없음 (USB 연결 확인)'),
+      ports.map((port, index) => h('option', { value: port.id, selected: port.id === current }, `${index + 1}. ${port.name}`)))),
+    h('span', { class: 'muted small' }, `X-Touch ${ports.length}대 연결됨`,
+      tip([`선택한 X-Touch의 글씨 칸에 「${tag}」 표시`])));
+}
+
+function connectCard(state, changed) {
+  const unavailable = midiUnavailableReason();
+  const blocker = manualBlocker(state, null);
+  const blocked = blockedText(state);
+  return h('section', { class: 'card', 'aria-label': 'X-Touch 연결' },
+    h('div', { class: 'card-head' }, h('h2', {}, '연결',
+      tip(['X-Touch 한 대로 로봇 한 대를 조종', '허브로 여러 대를 연결한 경우 로봇 화면마다 사용할 장치를 선택',
+        '다른 로봇 화면에서 같은 장치를 선택하지 않도록 주의 (글씨 칸의 로봇 이름으로 확인)',
+        '창이 가려지거나 다른 탭으로 이동해도 계속 동작', 'X-Touch 화면 이탈 시 연결 해제'], '연결 설명'))),
+    h('div', { class: 'row' },
+      dot(DEV_TONE[ui.dev.status] || 'idle'),
+      h('span', { class: 'grow', text: `${DEV_TEXT[ui.dev.status] || ui.dev.status}${ui.dev.name ? ` · ${ui.dev.name}` : ''}${ui.dev.status === 'ready' && !device.sysex ? ' · 글씨 칸 표시 권한 없음 (조종은 가능)' : ''}` }),
+      ui.dev.status === 'ready' || ui.dev.status === 'connecting'
+        ? h('button', { class: 'btn', type: 'button', onclick: () => { teardown(); changed(); } }, '연결 해제')
+        : h('button', { class: 'btn btn-primary', type: 'button', disabled: Boolean(unavailable), onclick: async () => {
+          ui.message = '';
+          if (await device.connect()) { ensureLoop(); paintSurface(); }
+          changed();
+        } }, 'X-Touch 연결')),
+    deviceChooser(changed),
+    ui.dev.status === 'ready' ? h('details', { class: 'small' },
+      h('summary', {}, `수신 MIDI (최근 ${MIDI_LOG_SIZE}개)`, tip(['특정 페이더가 반응하지 않을 때 입력 신호 확인용'])),
+      // 높이 고정 · 줄이 늘어도 아래가 안 밀림 (2026-10-20)
+      h('ul', { class: 'mono small midi-log' }, midiLog.length ? midiLog.map((line) => h('li', { text: line }))
+        : h('li', { class: 'muted', text: '수신 MIDI 없음 (페이더 또는 버튼 조작으로 확인)' }))) : null,
+    ui.dev.message ? h('p', { class: 'tone-text-warn small', text: ui.dev.message }) : null,
+    unavailable ? h('div', { class: 'blocker' }, dot('warn'), h('span', { class: 'grow', text: unavailable })) : null,
+    unavailable ? h('ol', { class: 'small muted' },
+      h('li', { text: `현재 PC의 크롬 주소창에 ${MIDI_FLAG_URL} 입력` }),
+      h('li', { text: `「Insecure origins treated as secure」 항목에 ${location.origin} 추가 후 Enabled 선택` }),
+      h('li', { text: '크롬을 재시작하고 X-Touch 화면에서 「X-Touch 연결」을 누른 뒤 MIDI 권한 허용' })) : null,
+    blocked ? h('div', { class: 'blocker' }, dot('warn'), h('span', { class: 'grow', text: `X-Touch 입력을 수신하지 않습니다. ${blocked}` }),
+      blocker?.fix === 'mode-manual' ? h('button', { class: 'btn btn-warn', type: 'button', onclick: () => act.setRunMode('manual') }, '수동 모드로 전환') : null,
+      blocker?.fix === 'stop' ? h('button', { class: 'btn btn-warn', type: 'button', onclick: act.stopAll }, '정지') : null) : null);
+}
+
+/** 조인트 스무딩 고르기 · 바로 다음 값부터 · 잡고 있는 중에 바꿔도 된다 */
+function smoothPicker(motionId, changed) {
+  const current = smoothFor(motionId);
+  return h('select', { class: 'select select-sm', 'aria-label': `${motionId} 스무딩`,
+    onchange: (e) => { setSmooth(motionId, Number(e.target.value)); diag(`smooth${motionId}`, `스무딩 ${motionId} ${e.target.value} s`); changed(); } },
+  SMOOTH_LEVELS.map((level) => h('option', { value: String(level.sec), selected: level.sec === current }, level.label)));
+}
+
+/** 손 인식 · 터치 신호만 · 「뗌」 뒤 0.2 s 는 아직 손(잠깐 끊김) */
+function handCell(ch) {
+  if (!ch.touched) return h('td', { class: 'muted', text: '-' });
+  return h('td', {}, h('span', { class: 'chip chip-ok', text: '● 터치' }));
+}
+
+function channelCard(state, changed) {
+  const list = motors(state);
+  const rows = session.config;
+  return h('section', { class: 'card', 'aria-label': '채널' },
+    h('div', { class: 'card-head' }, h('h2', {}, '페이더 · 축',
+      tip(['SELECT 시 페이더가 해당 축의 현재 위치로 이동', '페이더 터치 후 축 값과 일치 시(0.5° 이내 또는 통과 시) 조종 시작',
+        '터치 해제 시 마지막 목표 위치까지 이동 후 정지', '속도·가속도 상한은 조인트 매핑의 최대 속도·최대 가속',
+        '손은 페이더 터치 신호로만 인식 (움직이기만 해서는 조종 안 됨, 터치 신호가 없는 페이더는 사용 불가)',
+        '터치 인식 시 해당 채널 SOLO 점등, 글씨 칸 밝기 증가 (표의 「손」 칸)'], '페이더 · 축 설명'))),
+    // 칸 너비 고정 · 손·상태·목표 글이 바뀌어도 표가 안 출렁임 (2026-10-20)
+    rows.some(Boolean) ? h('div', { class: 'table-wrap' }, h('table', { class: 'table xtouch-table' },
+      h('colgroup', {}, ['6%', '17%', '7%', '10%', '24%', '10%', '10%', '16%'].map((width) => h('col', { style: { width } }))),
+      h('thead', {}, h('tr', {}, ['페이더', '조인트', '모터', '손', '상태', '현재', '목표'].map((text) => h('th', { scope: 'col', text })),
+        h('th', { scope: 'col' }, '스무딩', tip(['로봇 PC에서 페이더 값을 설정한 시간만큼 부드럽게 처리', '길수록 부드러우나 추종 지연', '녹화에는 스무딩 처리 값 저장'], '스무딩 설명')))),
+      h('tbody', {}, rows.map((item, channel) => {
+        if (!item) return h('tr', { class: 'muted-row' }, h('td', { class: 'mono', text: String(channel + 1) }), h('td', { colspan: '7', class: 'muted', text: '연결된 조인트 없음' }));
+        const motor = list.find((m) => m.axis === item.axis);
+        const joint = motor && motor.position !== null ? motorToJoint(item.row, motor.position) : null;
+        const ch = session.channels[channel];
+        const punch = session.isPunch(channel);
+        const suffix = punch ? (ch.phase === 'live' ? ' · 덮어쓰는 중' : ' · 페이더 터치 시 덮어쓰기') : '';
+        const phase = ch.selected
+          ? (ch.touched && ch.phase === 'pickup' ? '위치 일치 대기 (페이더를 축 값 위치로 이동하세요)' : `${PHASE_LABEL[ch.phase]}${suffix}`)
+          : punch ? '재생 연동' : PHASE_LABEL.idle;
+        return h('tr', { class: ch.selected ? 'selected' : '' },
+          h('td', { class: 'mono', text: String(item.fader) }),
+          h('td', {}, h('strong', { text: item.motionId })),
+          h('td', { class: 'mono', text: Number.isInteger(item.axis) ? `${item.axis}번` : '없음' }),
+          handCell(ch),
+          h('td', {}, item.ratesSet ? h('span', { class: `chip chip-${ch.phase === 'live' ? 'ok' : ch.selected ? 'warn' : 'idle'}`, text: phase })
+            : h('span', { class: 'chip chip-bad', text: '속도·가속도 상한 없음' })),
+          h('td', { class: 'mono', text: joint === null ? '-' : `${signedDeg(joint, 2)}°` }),
+          h('td', { class: 'mono', text: ch.phase === 'live' && Number.isFinite(ch.goal) ? `${signedDeg(ch.goal, 2)}°` : '-' }),
+          h('td', {}, smoothPicker(item.motionId, changed)));
+      })))) : h('p', { class: 'muted', text: '페이더가 연결된 조인트가 없습니다. 「모터 설정 → 조인트 매핑」의 「X-Touch 페이더」 칸에 1~8을 입력하고 저장하세요.' }),
+    // 안내 줄은 늘 자리를 둔다 · 생겼다 사라지며 아래를 밀지 않게 · 길면 … (전체는 마우스를 올리면)
+    h('p', { class: 'tone-text-warn small msg-slot', text: ui.message || '', title: ui.message || undefined }));
+}
+
+/** 이름 칸 안내 · 덮어쓰기 + 바탕이면 바탕 이름 · 바탕만이면 바탕_xtouch */
+function namePlaceholder() {
+  const stem = ui.base ? ui.base.replace(/\.json$/i, '') : '';
+  if (stem) return ui.overwrite ? `${stem} (바탕에 덮어쓰기)` : `${stem}_xtouch`;
+  return 'xtouch_날짜_시각';
+}
+
+function recordCard(state, changed) {
+  const live = recording();
+  const ready = stream.isOpen() && !blockedText(state);
+  const axes = live ? (ui.record.axes || []) : session.selectedAxes();
+  const names = axes.map((axis) => session.config.find((c) => c?.axis === axis)?.motionId || `${axis}번`);
+  return h('section', { class: 'card', 'aria-label': '녹화' },
+    h('div', { class: 'card-head' }, h('h2', {}, '녹화',
+      tip(['X-Touch의 REC 버튼으로도 시작·정지 가능', '시작하고 3초 뒤부터 기록', '선택한 축만 기록, 모터가 실제 수신한 명령값을 20 ms마다 저장',
+        '애니메이션 목록에 저장 (동일 이름 존재 시 _2, _3 추가)', '녹화 중 연결 중단 시 해당 축은 현재 위치에서 정지, 중단 전까지의 내용 자동 저장',
+        '녹화할 축은 조인트 매핑에 최대 속도·최대 가속 입력 필요'], '녹화 설명'))),
+    h('div', { class: 'row' },
+      h('label', { class: 'inline' }, '바탕',
+        tip(['바탕 애니메이션을 재생하면서 녹화 (초기 위치로 이동한 뒤 시작)', '바탕에 있는 조인트의 페이더는 재생과 연동',
+          'SELECT 상태에서 페이더 터치 중에만 덮어쓰기', '터치 해제 시 최대 속도·가속 범위 내에서 원본 동작으로 복귀 (최소 0.5초)',
+          '바탕에 없는 축은 추가로 녹화', '전체 재생 시 바탕 길이만큼, 중간 정지 시 정지 시점까지 저장',
+          '결과는 새 파일로 저장 (「같은 이름이면 덮어쓰기」 선택 후 이름 공란 시 바탕 파일에 저장)'], '바탕 설명'),
+        h('select', { class: 'select select-sm', disabled: live, 'aria-label': '바탕 애니메이션',
+        onchange: (e) => { ui.base = e.target.value; changed(); } },
+        h('option', { value: '', selected: !ui.base }, '없음 · 새로 녹화'),
+        ui.files.map((file) => h('option', { value: file.id, selected: ui.base === file.id }, file.name)))),
+      h('label', { class: 'inline' }, '이름', h('input', { class: 'input mono', type: 'text', value: ui.name, placeholder: namePlaceholder(), disabled: live,
+        'aria-label': '녹화 이름', oninput: (e) => { ui.name = e.target.value; } })),
+      h('label', { class: 'inline' },
+        h('input', { type: 'checkbox', checked: ui.overwrite, disabled: live, 'aria-label': '같은 이름이면 덮어쓰기',
+          onchange: async (e) => {
+            if (e.target.checked) {
+              const ok = await confirmBox({
+                title: '같은 이름이면 덮어쓰기',
+                body: `녹화 종료 후 ${ui.name || (ui.base ? `바탕(${ui.base})` : '같은 이름의 애니메이션')}에 덮어씁니다.\n기존 파일은 프로젝트 휴지통에 사본을 보관하므로 복원할 수 있습니다.\n연결 중단으로 자동 저장한 경우 또는 바탕을 끝까지 재생하지 않은 경우 새 이름으로 저장합니다.`,
+                confirmLabel: '덮어쓰기 켬', tone: 'warning',
+              });
+              ui.overwrite = Boolean(ok);
+            } else {
+              ui.overwrite = false;
+            }
+            changed();
+          } }), '같은 이름이면 덮어쓰기',
+        tip(['동일 이름 애니메이션 존재 시 해당 파일에 덮어쓰기', '기존 파일은 프로젝트 휴지통에 사본 보관', '바탕 선택 후 이름 공란 시 바탕 파일에 덮어쓰기'], '덮어쓰기 설명')),
+      live
+        ? [h('button', { class: 'btn btn-primary', type: 'button', onclick: stopRecord }, '정지 · 저장'),
+          h('button', { class: 'btn', type: 'button', onclick: cancelRecord }, '취소')]
+        : h('button', { class: 'btn btn-danger', type: 'button', disabled: !ready || (!axes.length && !ui.base), title: !ready ? '수동 모드에서 X-Touch를 연결한 뒤 사용 가능' : !axes.length && !ui.base ? 'SELECT로 축을 선택하세요' : '',
+          onclick: () => { startRecord(); changed(); } }, '● 녹화 시작')),
+    h('p', { class: 'mono', text: `${recordText()} · 축 ${names.length ? names.join(', ') : '없음'}` }),
+    ui.lastSaved ? h('p', { class: 'small' }, `마지막 저장: ${ui.lastSaved.file} (${Number(ui.lastSaved.duration || 0).toFixed(2)} s) · `,
+      h('a', { href: '#/animations', text: '애니메이션 목록' })) : null);
+}
+
+export function renderXTouch(state, { changed }) {
+  ctx = { state, changed };
+  run(session.configure(config(state)));
+  return [
+    h('div', { class: 'page-head' }, h('h1', { text: 'X-Touch' })),
+    connectCard(state, changed),
+    channelCard(state, changed),
+    recordCard(state, changed),
+  ];
+}

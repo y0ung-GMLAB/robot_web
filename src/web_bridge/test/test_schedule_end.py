@@ -1,0 +1,525 @@
+"""스케줄 끝 · 기준점 주차 → 서보 OFF · 다음 시작 전 다시 켜기 · 수정 목록 36 (2026-10-06)"""
+
+import json
+import time
+from types import SimpleNamespace
+
+import pytest
+
+from motion_web_bridge.schedule_end import ScheduleEndService, idle_park_skip, mode_skip, motor_turns_off_at_end
+
+
+class _Clock:
+    def __init__(self):
+        self.now = 0.0
+
+    def sleep(self, seconds):
+        self.now += seconds
+
+    def monotonic(self):
+        return self.now
+
+
+def _bridge(tmp_path, *, states, end_action='park_servo_off', flags=None, alarm=0,
+            init_ok=True, motors=None):
+    runtime = tmp_path / 'motion_projects' / 'p1' / 'runtime'
+    runtime.mkdir(parents=True)
+    (runtime / 'motion_automation.json').write_text(
+        json.dumps({'schedule_end_action': end_action}), encoding='utf-8',
+    )
+    calls = []
+    sequence = list(states)
+    current = {'state': sequence[0], 'phase_started_at': 0.0}
+
+    def motion_run_status():
+        if len(sequence) > 1:
+            state = sequence.pop(0)
+            started = time.time() + 5 if state in ('initializing', 'initialized') else 0.0
+            current.update({'state': state, 'phase_started_at': started})
+        else:
+            current['state'] = sequence[0]
+            if sequence[0] in ('initializing', 'initialized'):
+                current['phase_started_at'] = time.time() + 5
+        return {'status': dict(current)}
+
+    motors = motors if motors is not None else [
+        {'controller_index': 0, 'state': 'detected', 'motor_type': 'ac_servo', 'servo_on': False},
+        {'controller_index': 1, 'state': 'detected', 'motor_type': 'ac_servo', 'servo_on': False},
+        {'controller_index': 2, 'state': 'detected', 'motor_type': 'dynamixel', 'transport': 'serial'},
+    ]
+    registry = [
+        {'axis': axis, 'config': ({'schedule_end_servo_off': False} if flag is False else {})}
+        for axis, flag in (flags or {}).items()
+    ]
+
+    def ac_servo_control(action, axis, scope):
+        calls.append(('ac', action, axis))
+        if action == 'servo_on':
+            for motor in motors:
+                if motor['controller_index'] == axis:
+                    motor['servo_on'] = True
+        return {'success': True}
+
+    def dynamixel_torque_control(action, axes=None):
+        calls.append(('dxl', action, tuple(axes or ())))
+        return {'success': True}
+
+    def motion_run_initialize(payload):
+        calls.append(('initialize', payload.get('initial_mode_override'), payload.get('initial_move_time_sec')))
+        return {'success': init_ok, 'message': '' if init_ok else '오프 모드'}
+
+    bridge = SimpleNamespace(
+        workspace_root=tmp_path,
+        project_repository=SimpleNamespace(selected_project_id=lambda: 'p1'),
+        motion_run_status=motion_run_status,
+        coordination_execution_blocker=lambda: '',
+        _safety_status={'servo_alarm_grade': alarm},
+        _with_active_project_files=lambda payload: {**payload, 'motion_file_id': 'a.json', 'mapping_file_id': 'm.yaml'},
+        motion_run_initialize=motion_run_initialize,
+        _manual=SimpleNamespace(
+            ac_servo_control=ac_servo_control,
+            dynamixel_torque_control=dynamixel_torque_control,
+        ),
+        _motor_config=SimpleNamespace(load=lambda: {'registry': {'motors': registry}}),
+        motion_state=lambda: {'motors': motors},
+        get_logger=lambda: SimpleNamespace(info=lambda _m: None, warn=lambda _m: None),
+    )
+    return bridge, calls, runtime
+
+
+def _service(bridge, run_mode=None):
+    clock = _Clock()
+    return ScheduleEndService(
+        bridge,
+        fill_active_files=bridge._with_active_project_files,
+        ac_servo_control=bridge._manual.ac_servo_control,
+        dynamixel_torque_control=bridge._manual.dynamixel_torque_control,
+        load_motor_registry=lambda: bridge._motor_config.load().get('registry') or {},
+        alarm_grade=lambda: bridge._safety_status.get('servo_alarm_grade'),
+        run_mode=run_mode,
+        sleep=clock.sleep,
+        monotonic=clock.monotonic,
+    )
+
+
+def test_finish_cycle_then_park_then_power_off_only_flagged_motors(tmp_path):
+    bridge, calls, runtime = _bridge(
+        tmp_path,
+        states=['running', 'running', 'completed', 'initializing', 'initialized'],
+        flags={1: False},   # 1번 모터는 켠 채 둔다
+    )
+    service = _service(bridge)
+
+    assert service._park_and_power_off() == ''
+
+    assert calls == [
+        ('initialize', 'reference', 10.0),
+        ('ac', 'servo_off', 0),
+        ('dxl', 'torque_off', (2,)),
+    ]
+    record = json.loads((runtime / 'schedule_end_state.json').read_text(encoding='utf-8'))
+    assert record['ac_servo'] == [0] and record['dynamixel'] == [2]
+    status = service.status()
+    assert status['state'] == 'done'
+    assert '서보 유지(모터 설정) 1번' in status['message']
+
+
+def _barrier_robot(tmp_path, *, release_after_polls):
+    """회차 맞춤 슬레이브 · 제 회차를 끝내고 장벽에서 긴 PC 를 기다린다 · `release_after_polls` 번 본 뒤 풀린다
+
+    실행 스레드가 살아 있는 동안 기준점 이동은 런타임 `_claim_run_slot` 처럼 거절한다 · 수정 목록 155
+    """
+    from motion_common import run_state
+
+    bridge, calls, runtime = _bridge(tmp_path, states=['motion_completed'])
+    robot = {'polls': 0, 'released': False, 'parked_at': 0.0}
+
+    def motion_run_status():
+        robot['polls'] += 1
+        if not robot['released'] and robot['polls'] > release_after_polls:
+            robot['released'] = True   # 진행 PC 가 긴 PC 회차 끝을 보고 풀었다
+        if robot['parked_at']:
+            return {'status': {'state': 'initialized', 'phase_started_at': robot['parked_at']}}
+        if robot['released']:
+            return {'status': {
+                'state': 'stopped', 'group_execution': True, 'execution_id': 'exec-a',
+                'message': '운영 구간 종료: 회차 후 정지', 'phase_finished_at': 0.0,
+            }}
+        return {'status': {
+            'state': 'motion_completed', 'phase': 'group_motion_completed',
+            'group_execution': True, 'execution_id': 'exec-a',
+        }}
+
+    def coordination_execution_blocker():
+        # 슬레이브 · 실행 상태 = 이 PC 런타임 상태 · 풀리면 실행 번호가 빈다
+        execution = (
+            {'execution_id': '', 'state': 'stopped'} if robot['released']
+            else {'execution_id': 'exec-a', 'state': 'motion_completed'}
+        )
+        return '그룹 재생 중' if run_state.group_is_active(execution) else ''
+
+    def motion_run_initialize(payload):
+        if not robot['released']:
+            calls.append(('refused',))
+            return {'success': False, 'message': 'previous motion run task is still running'}
+        calls.append(('initialize', payload.get('initial_mode_override'), payload.get('initial_move_time_sec')))
+        robot['parked_at'] = time.time() + 5
+        return {'success': True}
+
+    bridge.motion_run_status = motion_run_status
+    bridge.coordination_execution_blocker = coordination_execution_blocker
+    bridge.motion_run_initialize = motion_run_initialize
+    return bridge, calls, robot
+
+
+def test_parking_waits_for_the_group_barrier_then_parks_with_the_group(tmp_path):
+    """실물 2026-10-16 14:44:51 · 짧은 PC 가 장벽에서 기다릴 때 구간 끝 · 주차 거절 → 1분 뒤 · 155"""
+    bridge, calls, robot = _barrier_robot(tmp_path, release_after_polls=8)
+
+    assert _service(bridge)._park_and_power_off() == ''
+
+    assert ('refused',) not in calls, '장벽 중에는 기준점 이동을 보내지 않는다'
+    assert robot['released'] is True
+    assert calls[0] == ('initialize', 'reference', 10.0)
+    assert ('ac', 'servo_off', 0) in calls
+
+
+def test_parking_waits_on_the_local_barrier_even_without_the_coordination_status(tmp_path):
+    """연동 상태를 3초 넘게 못 받으면 막는 값이 빈다 · 그래도 로컬 장벽이면 기다린다 · 155"""
+    bridge, calls, robot = _barrier_robot(tmp_path, release_after_polls=8)
+    bridge.coordination_execution_blocker = lambda: ''
+
+    assert _service(bridge)._park_and_power_off() == ''
+
+    assert ('refused',) not in calls
+    assert calls[0] == ('initialize', 'reference', 10.0)
+
+
+def test_a_solo_motion_completed_is_still_a_finished_cycle():
+    from motion_web_bridge.schedule_end import cycle_finished
+
+    assert cycle_finished({'state': 'motion_completed'}) is True
+    assert cycle_finished({'state': 'motion_completed', 'group_execution': True}) is False
+    assert cycle_finished({'state': 'completed', 'group_execution': True}) is True, '1회 그룹 끝 · 풀린 뒤'
+    assert cycle_finished({'state': 'stopped', 'group_execution': True}) is True
+    assert cycle_finished({'state': 'running'}) is False
+    assert cycle_finished({'state': 'error'}) is True
+
+
+@pytest.mark.parametrize('kwargs, reason', [
+    ({'states': ['running', 'error']}, '오류'),
+    ({'states': ['completed'], 'alarm': 2}, '서보 알람'),
+    ({'states': ['completed'], 'init_ok': False}, '기준점 이동 거부'),
+    ({'states': ['completed', 'initializing', 'error']}, '미완료'),
+])
+def test_no_servo_off_when_parking_did_not_succeed(tmp_path, kwargs, reason):
+    bridge, calls, runtime = _bridge(tmp_path, **kwargs)
+
+    error = _service(bridge)._park_and_power_off()
+
+    assert reason in error
+    assert not any(call[0] in ('ac', 'dxl') for call in calls)
+    assert not (runtime / 'schedule_end_state.json').exists()
+
+
+def test_stale_initialized_state_is_not_taken_as_arrival(tmp_path):
+    # 보내기 전부터 남아 있던 「초기 위치 완료」(옛 시각) 는 도달로 치지 않는다
+    bridge, calls, _runtime = _bridge(tmp_path, states=['initialized'])
+    bridge.motion_run_status = lambda: {'status': {'state': 'initialized', 'phase_started_at': 1.0}}
+
+    error = _service(bridge)._park_and_power_off()
+
+    assert error == '기준점 도달 확인 시간 초과'
+    assert not any(call[0] == 'ac' for call in calls)
+
+
+def test_hold_setting_keeps_the_old_behaviour(tmp_path):
+    bridge, calls, _runtime = _bridge(tmp_path, states=['running'], end_action='hold')
+
+    status = _service(bridge).begin()
+
+    assert status['state'] == 'skipped'
+    assert calls == []
+
+
+def test_next_start_turns_on_only_what_schedule_end_turned_off(tmp_path):
+    bridge, calls, runtime = _bridge(tmp_path, states=['idle'])
+    (runtime / 'schedule_end_state.json').write_text(
+        json.dumps({'ac_servo': [0], 'dynamixel': [2]}), encoding='utf-8',
+    )
+    service = _service(bridge)
+
+    assert service.start_blocker() == ''
+
+    assert calls == [('ac', 'servo_on', 0), ('dxl', 'torque_on', (2,))]
+    assert not (runtime / 'schedule_end_state.json').exists()
+    # 한 번 켰으면 다음 시작은 아무것도 안 한다
+    assert service.start_blocker() == '' and len(calls) == 2
+
+
+def test_axes_already_on_are_not_sent_servo_on_again(tmp_path):
+    """이미 켜진 축에 서보 ON 순서를 다시 보내 0x06 으로 약 100 ms 토크가 빠졌다(NY 2026-11-09 08:49:31) · 수정 목록 189 ⑤"""
+    motors = [
+        {'controller_index': 0, 'state': 'detected', 'motor_type': 'ac_servo', 'servo_on': True},
+        {'controller_index': 1, 'state': 'detected', 'motor_type': 'ac_servo', 'servo_on': False},
+        {'controller_index': 2, 'state': 'detected', 'motor_type': 'dynamixel', 'servo_on': True},
+    ]
+    bridge, calls, runtime = _bridge(tmp_path, states=['idle'], motors=motors)
+    (runtime / 'schedule_end_state.json').write_text(
+        json.dumps({'ac_servo': [0, 1], 'dynamixel': [2]}), encoding='utf-8',
+    )
+    service = _service(bridge)
+
+    assert service.start_blocker() == ''
+
+    assert calls == [('ac', 'servo_on', 1)], '켜진 0번 · 다이나믹셀 2번은 건너뜀'
+    assert not (runtime / 'schedule_end_state.json').exists()
+
+
+def test_start_is_refused_while_parking(tmp_path):
+    bridge, _calls, _runtime = _bridge(tmp_path, states=['running'])
+    service = _service(bridge)
+    service._set('parking', '기준점 이동 중')
+
+    assert '운영 종료 동작' in service.start_blocker()
+
+
+def test_motor_flag_defaults_to_power_off():
+    assert motor_turns_off_at_end({}) is True
+    assert motor_turns_off_at_end({'config': {}}) is True
+    assert motor_turns_off_at_end({'config': {'schedule_end_servo_off': False}}) is False
+
+
+# --------------------------------------------------------------------------- #
+# 구간 끝에 멈춰 있던 로봇 · 사용자 2026-10-13
+# --------------------------------------------------------------------------- #
+
+def _on(axis, motor_type='ac_servo', servo_on=True):
+    return {'controller_index': axis, 'state': 'detected', 'motor_type': motor_type, 'servo_on': servo_on}
+
+
+def test_idle_park_needs_servos_on_no_alarm_and_a_motor_to_turn_off():
+    assert idle_park_skip([_on(0), _on(1)], {}, 0) is None
+    assert idle_park_skip([_on(0)], {}, 2)[0] == 'failed', '알람이면 주차하지 않는다'
+    assert idle_park_skip([_on(0), _on(1)], {0: False, 1: False}, 0)[0] == 'skipped', '끌 모터가 없다(모터 설정)'
+    assert idle_park_skip([_on(0, servo_on=False), _on(1, servo_on=False)], {}, 0)[0] == 'skipped', '이미 꺼짐'
+    state, message = idle_park_skip([_on(0), _on(1, servo_on=False)], {}, 0)
+    assert state == 'failed' and '1번' in message, '억지로 켜지 않는다'
+    assert idle_park_skip([_on(0), _on(1, servo_on=False)], {1: False}, 0) is None, '켠 채 둘 모터는 안 본다'
+
+
+def test_only_a_schedule_mode_pc_parks():
+    assert mode_skip(None) is None, '모드를 안 읽는 배선(옛 동작)'
+    assert mode_skip('schedule') is None
+    assert mode_skip('manual')[0] == 'skipped'
+    assert mode_skip('off')[0] == 'skipped'
+    assert mode_skip('')[0] == 'failed', '못 읽으면 움직이지 않는다'
+
+
+def test_a_stopped_robot_is_parked_and_powered_off(tmp_path):
+    motors = [_on(0), _on(1)]
+    bridge, calls, _runtime = _bridge(tmp_path, states=['idle', 'idle', 'initializing', 'initialized'], motors=motors)
+    service = _service(bridge, run_mode=lambda: 'schedule')
+
+    assert service._skip() is None
+    assert service._park_and_power_off() == ''
+    assert calls == [('initialize', 'reference', 10.0), ('ac', 'servo_off', 0), ('ac', 'servo_off', 1)]
+
+
+@pytest.mark.parametrize('kwargs, run_mode, state', [
+    ({'motors': [_on(0), _on(1)]}, 'manual', 'skipped'),
+    # 지금 주차할 수 없는 것은 첫 실패로 센다 · 1분 뒤 다시 · 수정 목록 131 (흐름은 test_schedule_end_retry)
+    ({'motors': [_on(0, servo_on=False), _on(1)]}, 'schedule', 'retry_wait'),
+    ({'motors': [_on(0)], 'alarm': 1}, 'schedule', 'retry_wait'),
+    ({'motors': [_on(0)], 'flags': {0: False}}, 'schedule', 'skipped'),
+])
+def test_a_stopped_robot_that_cannot_park_is_left_alone(tmp_path, kwargs, run_mode, state):
+    bridge, calls, _runtime = _bridge(tmp_path, states=['idle'], **kwargs)
+    service = _service(bridge, run_mode=lambda: run_mode)
+    service._spawn = lambda *_args, **_kwargs: None   # 다시 시도 스레드는 띄우지 않는다
+
+    status = service.begin()
+
+    assert status['state'] == state
+    assert calls == [], '움직이지도 끄지도 않는다'
+
+
+def test_a_running_robot_keeps_the_old_path_even_with_the_mode_reader(tmp_path):
+    bridge, _calls, _runtime = _bridge(tmp_path, states=['running'], motors=[_on(0, servo_on=False)])
+    assert _service(bridge, run_mode=lambda: 'schedule')._skip() is None, '도는 중 · 회차 끝을 기다린다'
+
+
+# --------------------------------------------------------------------------- #
+# 수정 목록 193 (사용자 2026-11-11) · 운영시간 시작 · 사람이 끈 서보도 켠다 · 긴급 정지 · 알람은 그대로
+# --------------------------------------------------------------------------- #
+
+def _human_off(tmp_path, motors=None):
+    """운영 종료 기록 없음 · 사람이 0 · 1번 서보를 끔"""
+    bridge, calls, runtime = _bridge(tmp_path, states=['idle'], motors=motors)
+    return bridge, calls, runtime
+
+
+def test_operating_hours_start_turns_on_servos_a_person_turned_off(tmp_path):
+    bridge, calls, runtime = _human_off(tmp_path)
+    events = []
+    service = _service(bridge)
+    service._record_event = lambda kind, text, details: events.append((kind, text, details))
+    assert service.start_blocker() == '' and calls == [], '복귀 회차 · 사람 조작 시작 · 사람이 끈 것은 그대로'
+    assert service.start_blocker(wake_all=True) == ''
+    assert calls == [('ac', 'servo_on', 0), ('ac', 'servo_on', 1)]
+    assert events and events[0][0] == 'schedule_start_servo_on' and events[0][2]['woken']['ac_servo'] == [0, 1]
+
+
+def test_operating_hours_start_skips_alarm_axes_and_an_emergency_latch(tmp_path):
+    motors = [
+        {'controller_index': 0, 'state': 'detected', 'motor_type': 'ac_servo', 'servo_on': False, 'errorcode': 0x1600},
+        {'controller_index': 1, 'state': 'detected', 'motor_type': 'ac_servo', 'servo_on': False},
+    ]
+    bridge, calls, runtime = _human_off(tmp_path, motors=motors)
+    service = _service(bridge)
+    assert service.start_blocker(wake_all=True) == ''
+    assert calls == [('ac', 'servo_on', 1)], '알람 축(0번)은 켜지 않음 · 준비 검사가 알람 이유를 띄운다'
+
+    motors[1]['servo_on'] = False
+    calls.clear()
+    service._emergency_latched = lambda: True
+    assert service.start_blocker(wake_all=True) == ''
+    assert calls == [], '긴급 정지 잠김 · 아무것도 켜지 않음'
+
+
+def test_operating_hours_start_wakes_only_in_schedule_mode(tmp_path):
+    bridge, calls, runtime = _human_off(tmp_path)
+    service = _service(bridge, run_mode=lambda: 'manual')
+    assert service.start_blocker(wake_all=True) == '' and calls == []
+
+
+def test_operating_hours_start_also_restores_what_schedule_end_turned_off(tmp_path):
+    bridge, calls, runtime = _human_off(tmp_path)
+    (runtime / 'schedule_end_state.json').write_text(json.dumps({'ac_servo': [0], 'dynamixel': []}), encoding='utf-8')
+    service = _service(bridge, run_mode=lambda: 'schedule')
+    assert service.start_blocker(wake_all=True) == ''
+    assert calls == [('ac', 'servo_on', 0), ('ac', 'servo_on', 1)]
+    assert not (runtime / 'schedule_end_state.json').exists()
+
+
+def test_operating_hours_start_logs_the_servo_on_even_when_the_axes_are_in_the_schedule_end_record(tmp_path):
+    """실물 NY 2026-11-11 A · 운영 종료 주차(0 · 1 OFF 기록) → 사람 ON → 사람 OFF · 기록에 있다고 이벤트 0건이었다 · 수정 목록 194"""
+    bridge, calls, runtime = _human_off(tmp_path)
+    (runtime / 'schedule_end_state.json').write_text(json.dumps({'ac_servo': [0], 'dynamixel': []}), encoding='utf-8')
+    events = []
+    service = _service(bridge, run_mode=lambda: 'schedule')
+    service._record_event = lambda kind, text, details: events.append((kind, text, details))
+    assert service.start_blocker(wake_all=True) == ''
+    assert calls == [('ac', 'servo_on', 0), ('ac', 'servo_on', 1)]
+    assert len(events) == 1 and events[0][0] == 'schedule_start_servo_on'
+    details = events[0][2]
+    assert details['turned_on']['ac_servo'] == [0, 1]
+    assert details['by_schedule_end']['ac_servo'] == [0] and details['woken']['ac_servo'] == [1]
+    assert '운영 종료 시 OFF한 축 AC 0번' in events[0][1] and 'AC 1번' in events[0][1]
+
+
+def test_a_rejoin_restoring_only_the_schedule_end_record_logs_no_operating_hours_event(tmp_path):
+    bridge, calls, runtime = _human_off(tmp_path)
+    (runtime / 'schedule_end_state.json').write_text(json.dumps({'ac_servo': [0], 'dynamixel': []}), encoding='utf-8')
+    events = []
+    service = _service(bridge, run_mode=lambda: 'schedule')
+    service._record_event = lambda kind, text, details: events.append((kind, text, details))
+    assert service.start_blocker() == '' and calls == [('ac', 'servo_on', 0)]
+    assert events == [], '운영시간 시작(wake_all)이 아니면 예전처럼'
+
+
+def test_a_servo_a_person_turned_on_and_off_again_is_not_called_schedule_end_off(tmp_path):
+    """NY 2026-11-11 21:00 운영 종료 OFF → 사람 ON → 사람 OFF → 22:09 창 시작 · 「운영 종료 때 끈 축」 으로 나왔다 · 수정 목록 198"""
+    bridge, calls, runtime = _human_off(tmp_path)
+    state = runtime / 'schedule_end_state.json'
+    state.write_text(json.dumps({'ac_servo': [0, 1], 'dynamixel': [], 'at': 1.0}), encoding='utf-8')
+    events = []
+    service = _service(bridge, run_mode=lambda: 'schedule')
+    service._record_event = lambda kind, text, details: events.append((kind, text, details))
+    service.forget_powered_off('ac_servo', [0])   # 사람이 0번만 켬(그 뒤 다시 끔)
+    assert json.loads(state.read_text(encoding='utf-8'))['ac_servo'] == [1]
+    assert service.start_blocker(wake_all=True) == ''
+    details = events[0][2]
+    assert details['by_schedule_end']['ac_servo'] == [1] and details['woken']['ac_servo'] == [0]
+    assert '운영 종료 시 OFF한 축 AC 1번' in events[0][1] and '기타(수동 OFF 축 등) AC 0번' in events[0][1]
+
+
+def test_turning_every_servo_on_by_hand_clears_the_schedule_end_record(tmp_path):
+    bridge, calls, runtime = _human_off(tmp_path)
+    state = runtime / 'schedule_end_state.json'
+    state.write_text(json.dumps({'ac_servo': [0, 1], 'dynamixel': []}), encoding='utf-8')
+    service = _service(bridge)
+    service.forget_powered_off('ac_servo', None)
+    assert not state.exists()
+    service.forget_powered_off('ac_servo', [3])   # 기록 없음 · 아무 일 없음
+    assert not state.exists()
+
+
+# --------------------------------------------------------------------------- #
+# 수정 목록 217 (NY 2026-11-16) · 연동 노드 길(wait=False) · 서보 켜기를 기다리지 않고 「켜는 중」 으로 바로 답
+# 전에는 다 켜질 때까지(최대 5 s) HTTP 를 쥐어 연동 노드 실행기가 2~4 s 섰다(살아 있음 알림 끊김 경고)
+# --------------------------------------------------------------------------- #
+
+def test_operating_hours_start_from_the_coordination_node_answers_at_once_while_servos_turn_on(tmp_path):
+    import threading
+    from motion_web_bridge.schedule_end import WAKING_MESSAGE
+
+    bridge, calls, _runtime = _human_off(tmp_path)
+    service = _service(bridge, run_mode=lambda: 'schedule')
+    gate = threading.Event()
+    real_wait = service._wait
+    service._wait = lambda predicate, timeout: gate.wait(5) and real_wait(predicate, timeout)
+
+    assert service.start_blocker(wake_all=True, wait=False) == WAKING_MESSAGE, '켜기는 따로 스레드 · 바로 답'
+    assert service.start_blocker(wake_all=True, wait=False) == WAKING_MESSAGE, '켜는 중에 다시 물어도 같은 답'
+    gate.set()
+    service._wake_thread.join(5)
+    assert calls == [('ac', 'servo_on', 0), ('ac', 'servo_on', 1)], '한 번만 켬'
+    assert service.start_blocker(wake_all=True, wait=False) == '', '다 켜졌으면 바로 진행'
+    assert calls == [('ac', 'servo_on', 0), ('ac', 'servo_on', 1)]
+
+
+def test_a_failed_background_servo_on_is_reported_once_then_tried_again(tmp_path):
+    from motion_web_bridge.schedule_end import WAKING_MESSAGE
+
+    bridge, calls, _runtime = _human_off(tmp_path)
+    service = _service(bridge, run_mode=lambda: 'schedule')
+    # 명령은 받았는데 끝내 안 켜짐(드라이브가 안 따라옴)
+    service._ac_servo_control = lambda action, axis, mode: (calls.append(('ac', action, axis)), {'success': True})[1]
+    service._wait = lambda predicate, timeout: False
+
+    assert service.start_blocker(wake_all=True, wait=False) == WAKING_MESSAGE
+    service._wake_thread.join(5)
+    reason = service.start_blocker(wake_all=True, wait=False)
+    assert reason and reason != WAKING_MESSAGE and 'ON 되지 않았습니다' in reason, '실패 이유 · 연동 노드는 그 회차를 쉰다'
+    assert service.start_blocker(wake_all=True, wait=False) == WAKING_MESSAGE, '이유는 한 번만 · 다음 물음은 다시 켜기'
+    service._wake_thread.join(5)
+
+
+def test_operating_hours_start_with_every_servo_already_on_needs_no_thread(tmp_path):
+    bridge, calls, runtime = _bridge(tmp_path, states=['idle'], motors=[_on(0), _on(1)])
+    (runtime / 'schedule_end_state.json').write_text(json.dumps({'ac_servo': [0], 'dynamixel': []}), encoding='utf-8')
+    service = _service(bridge, run_mode=lambda: 'schedule')
+    assert service.start_blocker(wake_all=True, wait=False) == '' and calls == []
+    assert service._wake_thread is None
+    assert not (runtime / 'schedule_end_state.json').exists(), '기록 정리만 바로'
+
+
+def test_group_prepare_from_the_coordination_node_answers_pending_while_servos_turn_on():
+    """웹 `motion_group_prepare` · 연동 노드 길은 기다리지 않고(wait=False) 「켜는 중」 이면 `pending` 으로 바로 답 · 수정 목록 217"""
+    from motion_web_bridge import bridge_node
+    from motion_web_bridge.schedule_end import WAKING_MESSAGE
+
+    seen = {}
+
+    def blocker(payload, wait=True):
+        seen['wait'] = wait
+        return WAKING_MESSAGE
+
+    def no_forward(*_args, **_kwargs):
+        raise AssertionError('켜는 중에는 재생 관리자에 넘기지 않는다')
+
+    fake = SimpleNamespace(group_prepare_gate=lambda: '', schedule_end_start_blocker=blocker, _request_motion_run=no_forward)
+    result = bridge_node.MotionWebBridge.motion_group_prepare(fake, {'execution_id': 'tt-s1', 'command': 'group_prepare'})
+    assert result == {'success': False, 'pending': 'servo_wake', 'message': WAKING_MESSAGE}
+    assert seen['wait'] is False

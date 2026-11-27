@@ -1,0 +1,409 @@
+/** UI v2 · 공연 화면이 보는 값 · 화면 없이 시험되는 함수만 (설계안 2026-10-09 · 공연)
+ *
+ * 서버 값은 rad · 화면에 낼 때만 deg (기존 화면 규칙 그대로 · 수정 목록 6).
+ */
+import { pcName } from './model.js';
+import { segmentLabel } from './segment_model.js';
+
+const DEG = 180 / Math.PI;
+
+/** 움직이는 중 · 이때는 시작 버튼이 꺼지고 재생 목록을 못 바꾼다 */
+export const RUNNING_STATES = new Set([
+  'preparing', 'initializing', 'countdown', 'running', 'verifying', 'waiting', 'recovering', 'stopping',
+]);
+
+/** 그룹 실행이 아직 출발 전 · 이때 「회차 끝나면 멈춤」은 지금 멈춤과 같다 (기존 화면 규칙) */
+const GROUP_NOT_STARTED = new Set(['preparing', 'initializing', 'armed', 'start_scheduled']);
+
+export const REPEAT_MODES = [
+  { id: 'reinitialize', label: '초기 위치 복귀 후 다음 회차', short: '초기 위치 → 다음' },
+  // 「바로 다음 회차」(direct) · 「대기 후 다음 회차」(dwell)는 뺐다 · 초기 위치를 거치지 않고
+  // 끝 자세에서 첫 자세로 곧바로 튄다 · 안전상 쓰지 않는다(사용자 2026-10-12)
+  { id: 'dwell_reinitialize', label: '대기 및 초기 위치 복귀 후 다음 회차', short: '대기 후 초기 위치' },
+];
+
+export const INITIAL_MOVE_OPTIONS = [5, 7, 10];
+
+/** 첫 자세 이동 시간 칸 · 매핑 시간이 하나면 그 값을 고른 것으로 보이고(보낼 땐 null = 매핑대로) ·
+ *  조인트마다 다를 때만 「조인트마다 다름」 칸을 둔다 · 옛 「매핑 설정 (5 s)」 옆 「5 s」 중복 없앰 */
+export function initialMoveChoices(mappings, picked) {
+  const times = [...new Set((Array.isArray(mappings) ? mappings : [])
+    .filter((row) => row && row.enabled !== false)
+    .map((row) => Number(row.initial_move_time_sec))
+    .filter((value) => Number.isFinite(value) && value > 0))];
+  const common = times.length === 1 ? times[0] : null;
+  const values = [...new Set([...INITIAL_MOVE_OPTIONS, ...(common === null ? [] : [common])])].sort((a, b) => a - b);
+  const options = values.map((value) => [value, `${value}초`]);
+  if (times.length > 1) options.unshift([null, '조인트별 매핑 값']);
+  const selected = picked ?? common;
+  return {
+    options,
+    selected,
+    // 매핑 값과 같으면 null 로 보낸다 · 서버가 매핑대로
+    pick: (value) => (value === common ? null : value),
+  };
+}
+
+export function runStatus(snap) {
+  return snap?.motion_run_status || snap?.motion_state?.motion_run_status || {};
+}
+
+export function isRunning(status) {
+  return RUNNING_STATES.has(String(status?.state || ''));
+}
+
+export function groupRuntime(snap) {
+  const coord = snap?.coordination || {};
+  const runtime = coord.runtime || {};
+  const execution = runtime.execution || {};
+  return {
+    configured: coord.config?.enabled === true,
+    joined: runtime.joined === true,
+    master: coord.config?.is_master === true,
+    execution,
+    active: Boolean(execution.execution_id),
+    error: runtime.coordination_error?.active ? String(runtime.coordination_error.message || '그룹 오류') : '',
+    peers: Array.isArray(runtime.peers) ? runtime.peers : [],
+    local: runtime.local || null,
+  };
+}
+
+/**
+ * 지금 「그룹 전체」 를 누르면 들어갈 PC 수와 빠질 PC · 서버(마스터 연동 노드)가 시작과 같은 규칙으로 센다 ·
+ * 수동 PC 도 들어가고 끔 · 연결 안 됨 · 알람 · 단독 재생 중 PC 는 빠진다 · 수정 목록 122 (다)
+ * 미리 보기가 없으면(슬레이브 · 옛 서버) count = null
+ */
+export function groupStartPreview(snap) {
+  const group = groupRuntime(snap);
+  const preview = snap?.coordination?.runtime?.start_preview || {};
+  const participants = Array.isArray(preview.participants) ? preview.participants.map(String) : null;
+  const names = new Map([...(group.peers || []), ...(group.local ? [group.local] : [])].map((peer) => [String(peer.pc_id || ''), pcName(peer)]));
+  const excluded = Object.entries(preview.excluded || {})
+    .map(([id, reason]) => ({ id, name: names.get(id) || id, reason: String(reason || '') }))
+    .sort((a, b) => a.name.localeCompare(b.name));
+  return { count: participants ? participants.length : null, excluded };
+}
+
+/** 빠질 PC 한 줄 · 「floating1(끔 모드), floating2(단독 재생 중)」 · 없으면 빈 글 */
+export function excludedText(excluded) {
+  const rows = Array.isArray(excluded) ? excluded : [];
+  return rows.length ? rows.map((row) => `${row.name}(${row.reason})`).join(', ') : '';
+}
+
+/** 범위 고르기 · 기본은 단독(이 PC 만) · 수정 목록 120 (나) (실물 2026-10-13 S-9)
+ *  그룹 전체는 사람이 고를 때만 · 마스터에서 그룹 실행이 이미 돌고 있으면 그것을 보여 준다(정지 버튼이 그룹에 걸리게) */
+export function defaultScope(snap) {
+  const group = groupRuntime(snap);
+  return group.joined && group.master && group.active ? 'group' : 'local';
+}
+
+/** 「회차 사이」 고른 값 · 서버 저장값을 화면 칸으로 · 모르는 값·빈 값이면 안전한 「초기 위치로 돌아간 뒤」 · 120 (다)
+ *  옛 「바로 다음」(direct) · 「대기 후 다음」(dwell) 은 초기 위치를 거치는 쪽으로 읽는다 */
+export function repeatChoice(saved) {
+  const mode = String(saved || '').trim().toLowerCase();
+  if (mode === 'dwell') return 'dwell_reinitialize';
+  return REPEAT_MODES.some((m) => m.id === mode) ? mode : 'reinitialize';
+}
+
+/** 매장 전체를 못 고르는 이유 · 빈 글이면 고를 수 있다 */
+export function groupScopeBlocker(snap) {
+  const group = groupRuntime(snap);
+  if (!group.joined) return '그룹에 참여하지 않았습니다. PC 현황에서 「그룹 참여」를 켜세요.';
+  if (!group.master) return '그룹 재생은 마스터 PC에서만 시작할 수 있습니다';
+  return '';
+}
+
+/** 단계 셋 · 초기 위치 → 재생 → 도착 확인 · 다음 회차 기다림은 재생 뒤로 친다 */
+export function phaseSteps(status) {
+  const state = String(status?.state || '');
+  const phase = String(status?.phase || '');
+  const order = { initializing: 0, countdown: 0, running: 1, verifying: 2, waiting: 2, recovering: 2 };
+  // 그룹 · 초기 위치 이동 예약(1회차 전) · 회차 시작 예약(초기 위치 끝)도 state 는 waiting · 「다음 회차 대기」 가 아니다 · 수정 목록 189 ⑦
+  const before = state === 'waiting' && (phase === 'group_initialize_scheduled' || phase === 'group_start_scheduled');
+  const summary = status?.summary || {};
+  const labels = [
+    `초기 위치${summary.initialization_duration_sec ? ` · ${Number(summary.initialization_duration_sec).toFixed(1)} s` : ''}`,
+    '재생',
+    state === 'waiting' && !before ? '다음 회차 대기' : '도착 확인',
+  ];
+  if (before) {
+    const done = phase === 'group_start_scheduled' ? 1 : 0;
+    return labels.map((label, index) => ({ label, state: index < done ? 'done' : 'todo' }));
+  }
+  const at = order[state];
+  return labels.map((label, index) => ({
+    label,
+    state: at === undefined ? 'todo' : index < at ? 'done' : index === at ? 'now' : 'todo',
+  }));
+}
+
+/** 재생 목록 · 매핑 파일에 적힌 것 · 없으면 한 개 등록 */
+export function registeredPlaylist(mapping) {
+  const list = Array.isArray(mapping?.motion_playlist) ? mapping.motion_playlist.filter(Boolean).map(String) : [];
+  if (list.length) return list;
+  return mapping?.motion_file_id ? [String(mapping.motion_file_id)] : [];
+}
+
+export function playlistMove(list, index, delta) {
+  const next = [...list];
+  const target = index + delta;
+  if (index < 0 || index >= next.length || target < 0 || target >= next.length) return next;
+  [next[index], next[target]] = [next[target], next[index]];
+  return next;
+}
+
+export function playlistRemove(list, index) {
+  return list.filter((_, i) => i !== index);
+}
+
+export const PLAYLIST_MAX = 50;
+
+export function playlistAdd(list, fileId) {
+  if (!fileId || list.length >= PLAYLIST_MAX) return [...list];
+  return [...list, String(fileId)];
+}
+
+/** 애니메이션 파일 한 줄 · 길이 · 검사 · 서버(analysis)와 프리뷰(최상위 valid) 둘 다 읽는다 */
+export function fileInfo(file) {
+  const analysis = file?.analysis || {};
+  const valid = analysis.valid ?? file?.valid;
+  const duration = Number(analysis.time?.duration_sec ?? file?.duration_sec);
+  return {
+    id: String(file?.id || file?.filename || ''),
+    name: String(file?.filename || file?.id || ''),
+    duration: Number.isFinite(duration) && duration > 0 ? duration : null,
+    check: valid === false ? 'bad' : valid === true ? 'ok' : 'unknown',
+    checkText: valid === false ? (analysis.message || file?.message || '검사 실패') : valid === true ? '검사 정상' : '검사 전',
+  };
+}
+
+export function formatDuration(sec) {
+  if (sec === null || sec === undefined || !Number.isFinite(Number(sec))) return '-';
+  const total = Math.round(Number(sec));
+  return `${Math.floor(total / 60)}:${String(total % 60).padStart(2, '0')}`;
+}
+
+/**
+ * 시작 버튼을 막는 이유 · 버튼 아래에 그대로 쓴다 · 해결 버튼이 붙을 수 있으면 `fix`
+ * 서버도 같은 것을 거절한다 · 화면은 먼저 알려 줄 뿐 (자동 모드 막기는 서버 run_mode_gate)
+ */
+export function startBlocker(snap, sched, { scope, playlist, mappingId }) {
+  const status = runStatus(snap);
+  const safety = snap?.safety_status || {};
+  const mode = sched?.run_mode;
+  if (safety.emergency_latched) return { text: '긴급 정지 상태입니다. 프로그램 재시작 시 해제합니다.', fix: 'restart-program' };
+  if (mode === 'off') return { text: '끔 모드에서는 동작 명령을 차단합니다', fix: 'mode-manual' };
+  if (mode === 'schedule') return { text: '스케줄 모드에서는 스케줄이 재생을 시작합니다. 직접 재생하려면 수동 모드로 전환하세요.', fix: 'mode-manual' };
+  if (scope === 'group') {
+    const blocker = groupScopeBlocker(snap);
+    if (blocker) return { text: blocker };
+    const group = groupRuntime(snap);
+    if (group.error) return { text: `그룹 오류 · ${group.error}`, fix: 'ack-group-error' };
+    if (group.active) return { text: '그룹 재생이 이미 진행 중입니다' };
+  } else if (isRunning(status)) {
+    return { text: '재생 중입니다' };
+  }
+  if (snap?.mapping_range_blocker) return { text: String(snap.mapping_range_blocker), fix: 'open-mapping' };
+  // 다회전 클리어 뒤 기준점 다시 지정 전 · 서버 판정 글 그대로 · 수정 목록 140
+  const redo = (snap?.multiturn_clear?.blocked_axes || []).map(Number).filter(Number.isFinite);
+  if (redo.length) return { text: String(snap.multiturn_clear.message || ''), fix: `open:manual?axis=${redo[0]}` };
+  if (snap?.execution_context && snap.execution_context.ready === false) {
+    return { text: String(snap.execution_context.message || '실행 준비가 되지 않았습니다') };
+  }
+  if (!mappingId) return { text: '조인트 매핑이 없습니다', fix: 'open-mapping' };
+  if (!playlist.length) return { text: '재생 목록이 비어 있습니다. 아래에서 애니메이션을 추가하세요.' };
+  return null;
+}
+
+/** 지금 무엇을 · 공연 카드 머리 */
+export function playHeadline(snap) {
+  const status = runStatus(snap);
+  const state = String(status.state || 'idle');
+  const file = String(status.motion_file_id || '').replace(/\.json$/i, '');
+  const cycle = Number(status.current_cycle || status.display_cycle || 0);
+  const index = Number(status.playlist_index);
+  const length = Number(status.playlist_length || 0);
+  const parts = [];
+  if (length > 1 && Number.isInteger(index)) parts.push(`목록 ${index + 1}/${length}`);
+  // 구간 재생 · 2026-10-16
+  const segment = segmentLabel(status.segment_start_sec, status.segment_end_sec);
+  if (segment) parts.push(segment);
+  if (status.run_mode === 'continuous' || status.automation_run) parts.push('연속');
+  else if (status.run_mode === 'once') parts.push('1회');
+  if (status.group_execution) parts.push(status.automation?.group_sync_mode === 'independent' ? '개별 재생' : '회차 동기화');
+  const STATE_TEXT = {
+    initializing: '초기 위치로 이동 중', countdown: '곧 시작', running: '재생 중', verifying: '도착 확인 중',
+    waiting: '다음 회차 대기 중', recovering: '자동 복구 중', stopping: '정지 중', preparing: '준비 중',
+    completed: '완료', stopped: '정지 상태', error: '오류로 정지', initialized: '초기 위치에서 대기 중',
+  };
+  const moving = isRunning(status);
+  return {
+    moving,
+    tone: state === 'error' ? 'bad' : moving ? 'ok' : 'idle',
+    title: moving && cycle ? `${cycle}회차 ${STATE_TEXT[state] || state}` : (STATE_TEXT[state] || '대기 상태'),
+    file: moving || state === 'initialized' ? file : '',
+    detail: parts.join(' · '),
+    message: state === 'error' ? String(status.message || '') : '',
+  };
+}
+
+/** 그룹 PC 줄 · 이번 실행에서 뺀 PC 는 이유 · 돌아오는 PC 는 「다음 회차부터」 */
+/**
+ * 시간표 재생 · 마스터가 정한 재생 방식 · 회차 간격 · 다음 회차 · PC 별 시계 차이 · 수정 목록 186
+ * 서버(연동 노드) `runtime.timetable` · 없으면(옛 서버) known = false
+ * 시간표는 스케줄에만 · 사람이 누른 그룹 재생은 신호 재생 · 그 실행이 도는 동안은 시간표 표시를 쉰다(signalRun)
+ */
+export function timetableView(snap) {
+  const tt = snap?.coordination?.runtime?.timetable || {};
+  const clock = tt.mode === 'clock';
+  const next = Number(tt.next_start_unix) || 0;
+  const auto = Number(tt.auto_period_sec) || 0;
+  // 지금 잰 자동 간격이 저장된 값보다 작음 · 운영시간 밖에서 내려간다 · 수정 목록 196
+  const measured = tt.measured_complete === true ? Number(tt.measured_auto_period_sec) || 0 : 0;
+  const lower = measured > 0 && measured < auto;
+  const executionId = String(snap?.coordination?.runtime?.execution?.execution_id || '');
+  return {
+    known: Boolean(tt.mode),
+    clock,
+    signalRun: Boolean(executionId) && !executionId.startsWith('tt-'),
+    period: Number(tt.period_sec) || 0,
+    auto,
+    autoText: !auto ? '자동 · 애니메이션 길이 확인 중'
+      : lower ? `자동 ${auto.toFixed(0)} s → ${measured.toFixed(0)} s (운영시간 끝나면)`
+        : `자동 ${auto.toFixed(0)} s`,
+    nextText: clock && next ? `다음 ${Number(tt.next_cycle) || ''}회차 · ${clockText(next)}` : '',
+    reason: clock && !next ? String(tt.reason || '') : '',
+    peers: tt.peers && typeof tt.peers === 'object' ? tt.peers : {},
+    localNote: String(tt.local?.note || ''),
+    masterTimezone: String(tt.master_timezone || ''),
+    localTimezone: String(tt.local_timezone || ''),
+    localTimezoneMismatch: tt.local_timezone_mismatch === true,
+  };
+}
+
+/** 유닉스 초 → 이 브라우저 시각 HH:MM:SS */
+export function clockText(unixSec) {
+  const date = new Date(Number(unixSec) * 1000);
+  const pad = (value) => String(value).padStart(2, '0');
+  return `${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())}`;
+}
+
+/** PC 시계 차이 · + = 그 PC 시계가 빠름 · 모르면 빈 글자 */
+export function clockOffsetText(ms) {
+  if (ms === null || ms === undefined || !Number.isFinite(Number(ms))) return '';
+  const value = Math.round(Number(ms));
+  return `시계 ${value >= 0 ? '+' : ''}${value} ms`;
+}
+
+/** 빠진 이유 · 줄에는 첫 마디만(「웹 서비스 끊김」) · 전체는 마우스를 올리면(title) · 줄이 길어져 칸이 밀리지 않게 */
+export function shortReason(reason, max = 32) {
+  const head = String(reason || '').split(' · ')[0].trim();
+  return head.length > max ? `${head.slice(0, max - 1)}…` : head;
+}
+
+export function groupRows(snap) {
+  const group = groupRuntime(snap);
+  const timetable = timetableView(snap);
+  // 제외 · 복귀는 도는 실행의 것 · 끝난 실행(번호 없음)의 값은 그리지 않는다 · 수정 목록 216
+  const excluded = group.active ? (group.execution.excluded || {}) : {};
+  const joining = group.active ? (group.execution.joining || {}) : {};
+  const peers = [...group.peers];
+  if (group.local && !peers.some((peer) => peer.pc_id === group.local.pc_id)) peers.unshift({ ...group.local, is_local: true });
+  return peers.map((peer) => {
+    const id = String(peer.pc_id || '');
+    const offline = peer.state && peer.state !== 'online';
+    const alarm = Number(peer.servo_alarm_grade || 0) > 0;
+    let note = String(peer.motion_step || '그룹 대기');
+    let detail = '';
+    let tone = 'ok';
+    if (excluded[id]) {
+      // 모터 설정이 없는 PC(모터 없이 둔 PC)는 고장이 아니라 빠진 것 · 서버 긴 문구 대신 짧게 (2026-10-12 실물)
+      const reason = String(excluded[id]);
+      note = /실행 준비가 끝나지 않았습니다|모터 설정과 조인트 매핑을 저장/.test(reason)
+        ? '제외됨 (재생할 모터 없음)' : `제외됨 (${shortReason(reason)})`;
+      detail = reason;
+      tone = 'warn';
+    }
+    else if (joining[id]) { note = joining[id] === 'ready' ? '다음 회차부터 참여' : '참여 준비 중'; tone = 'info'; }
+    const tt = timetable.clock ? (timetable.peers[id] || null) : null;
+    const ttNote = timetable.clock && !timetable.signalRun ? String((tt?.run?.note) ?? (id === group.local?.pc_id ? timetable.localNote : '')) : '';
+    if (ttNote && !excluded[id]) { note = ttNote; tone = 'warn'; }
+    if (alarm) { note = `알람 · ${note}`; tone = 'bad'; }
+    if (offline) { note = '연결 안 됨'; tone = 'bad'; }
+    const isLocal = peer.is_local === true || (group.local && id === group.local.pc_id);
+    // 시간대 · 마스터와 다르면 노랑 · 운영시간을 그 PC 시간대로 읽어 회차가 어긋남 · 재생은 그대로
+    const zoneWarn = timetable.clock && (isLocal ? timetable.localTimezoneMismatch : tt?.timezone_mismatch === true);
+    const clockWarn = Boolean(tt?.clock_warning) || zoneWarn;
+    if (clockWarn && tone === 'ok') tone = 'warn';
+    return {
+      id,
+      name: pcName(peer),
+      local: peer.is_local === true || (group.local && id === group.local.pc_id),
+      cycle: String(peer.motion_cycle_text || '-'),
+      progress: String(peer.motion_progress || ''),
+      note,
+      detail: detail || note,
+      tone,
+      // 시간표 재생 · 이 PC 기준 시계 차이 · 100 ms 넘으면 노랑 · 다음 회차에서 맞춰짐(Q5)
+      clock: zoneWarn ? '시간대 다름' : (timetable.clock && tt ? clockOffsetText(tt.clock_offset_ms) : ''),
+      clockWarn,
+    };
+  });
+}
+
+/** 그룹 「회차 끝나면 멈춤」 · 출발 전이면 지금 멈춤 */
+export function groupStopCommand(snap) {
+  const state = String(groupRuntime(snap).execution.state || '');
+  return GROUP_NOT_STARTED.has(state) ? 'stop_now' : 'stop_after_cycle';
+}
+
+function deg(value) {
+  const number = Number(value);
+  return Number.isFinite(number) ? number * DEG : null;
+}
+
+export function signedDeg(value, digits = 1) {
+  if (value === null || value === undefined || !Number.isFinite(value)) return '-';
+  const text = Math.abs(value).toFixed(digits);
+  return value > 0 ? `+${text}` : value < 0 ? `−${text}` : text;
+}
+
+/**
+ * 실행 축 줄 · 매핑 줄이 바탕(시작 전에도 보인다) · 계획(status.axes)이 있으면 자름 정보를 얹는다
+ * 상태 · 끔 = 그 자리에 섬 · 다시 켰는데 회차 중 = 다음 회차부터 · 아니면 재생 중 도는 중
+ */
+export function axisRows(snap, mapping) {
+  const status = runStatus(snap);
+  const overrides = status.live_overrides || {};
+  const held = new Set(Array.isArray(status.held_motion_ids) ? status.held_motion_ids.map(String) : []);
+  const planned = new Map((Array.isArray(status.axes) ? status.axes : []).map((axis) => [String(axis.motion_id), axis]));
+  const motors = new Map((snap?.motion_state?.motors || []).map((motor) => [Number(motor.controller_index), motor]));
+  const base = Array.isArray(mapping?.mappings) && mapping.mappings.length
+    ? mapping.mappings.filter((row) => row.enabled !== false)
+    : [...planned.values()];
+  const moving = isRunning(status);
+  return base.map((row) => {
+    const id = String(row.motion_id);
+    const plan = planned.get(id) || {};
+    const axis = Number(row.motor_axis ?? plan.motor_axis);
+    const motor = motors.get(axis) || {};
+    const lower = deg(row.motion_lower_rad ?? plan.motion_limit_lower_rad);
+    const upper = deg(row.motion_upper_rad ?? plan.motion_limit_upper_rad);
+    const muted = overrides[id]?.muted === true;
+    let state = moving ? '재생 중' : '대기';
+    let tone = moving ? 'ok' : 'idle';
+    if (muted) { state = '꺼짐 · 현재 위치에서 정지'; tone = 'warn'; }
+    else if (held.has(id)) { state = '다음 회차부터 적용'; tone = 'info'; }
+    return {
+      id,
+      axis: Number.isFinite(axis) ? axis : null,
+      motorType: String(row.motor_type || plan.motor_type || motor.motor_type || '') === 'dynamixel' ? 'DXL' : 'AC',
+      range: lower === null || upper === null ? '-' : `${signedDeg(lower)} ~ ${signedDeg(upper)}°`,
+      now: signedDeg(deg(motor.motion_actual_rad), 2),
+      clamped: plan.motion_clamped === true ? '범위 안으로 제한' : plan.motion_id ? '없음' : '-',
+      muted,
+      state,
+      tone,
+    };
+  });
+}

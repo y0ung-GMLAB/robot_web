@@ -1,0 +1,753 @@
+"""Local web/ROS adapter for the independent PC coordination service."""
+
+import copy
+from dataclasses import replace
+import json
+import os
+import subprocess
+import threading
+import time
+import urllib.error
+import urllib.request
+from pathlib import Path
+from typing import Any, Callable, Dict, Mapping, Optional
+
+from motion_common import check_timing as check_timing_mod, group_run_request, motion_segment, repeat_policy
+
+from motion_web_bridge import run_mode_gate
+from motion_common import run_state
+
+import yaml
+
+from motion_common.group_config import (
+    load_group_config,
+    migrate_legacy_group_config,
+    save_group_config,
+)
+
+
+#: 웹 서비스가 내려갈 때 「이 PC 빠짐」 알림을 기다리는 시간 · systemd 종료 제한(8 s) 안 · 수정 목록 145 ①
+LEAVE_NOTICE_TIMEOUT_SEC = 1.5
+
+
+class LeaveNotice:
+    """웹 서비스가 내려갈 때 한 번만 · 연동 노드에 「이 PC 빠짐」 · 수정 목록 145 ①
+
+    신호(SIGINT · SIGTERM)를 받은 바로 그때 보낸다 · 웹 서버가 연결을 닫는 동안 연동 노드는 0.5 s
+    안에 「상태 수신 중단」 을 본다 · 그보다 먼저 닿아야 이 PC 만 빠진다 · 신호 처리기를 막지 않게
+    따로 스레드에서 · 종료 끝에서 잠깐(`wait`) 기다린다 · 여러 번 불려도 한 번만 보낸다.
+    """
+
+    def __init__(self, send: Callable[[], Any]) -> None:
+        self._send = send
+        self._lock = threading.Lock()
+        self._thread: Optional[threading.Thread] = None
+        self.result: Any = None
+
+    def send(self) -> None:
+        with self._lock:
+            if self._thread is not None:
+                return
+            self._thread = threading.Thread(
+                target=self._run, name='coordination-leave-notice', daemon=True,
+            )
+            self._thread.start()
+
+    def wait(self, timeout_sec: float = LEAVE_NOTICE_TIMEOUT_SEC + 0.5) -> None:
+        with self._lock:
+            thread = self._thread
+        if thread is not None:
+            thread.join(timeout=max(float(timeout_sec), 0.0))
+
+    def _run(self) -> None:
+        try:
+            self.result = self._send()
+        except Exception as exc:  # noqa: BLE001 · 알림 실패가 종료를 막지 않는다
+            self.result = {'success': False, 'message': str(exc)}
+
+
+class CoordinationWebBridge:
+    """Expose global coordination state without mixing it into project data."""
+
+    def __init__(
+        self,
+        node: Any,
+        workspace: Path,
+        project_generation: Callable[[], int],
+    ) -> None:
+        self._node = node
+        self._workspace = Path(workspace).resolve()
+        self._project_generation = project_generation
+        self._config_path = Path(
+            os.environ.get('MOTION_COORDINATION_CONFIG')
+            or self._workspace / 'config/motion_coordination.yaml'
+        ).expanduser()
+        self._config, _migrated = migrate_legacy_group_config(self._config_path)
+        self._status: Dict[str, Any] = {}
+        self._status_received_at = 0.0
+        self._local_port = int(
+            os.environ.get('MOTION_COORDINATION_LOCAL_PORT') or 8011
+        )
+
+    def snapshot(self) -> Dict[str, Any]:
+        """Return runtime state plus a non-secret global configuration summary."""
+        try:
+            runtime = self._local_api('/status')
+            self._status = copy.deepcopy(runtime)
+            self._status_received_at = time.time()
+            runtime_error = ''
+        except (OSError, ValueError) as exc:
+            runtime = copy.deepcopy(self._status)
+            runtime_error = str(exc)
+        received_at = self._status_received_at
+        try:
+            config = load_group_config(self._config_path)
+            config_error = ''
+            configured = self._config_summary(config)
+        except (ImportError, OSError, ValueError) as exc:
+            configured = {}
+            config_error = str(exc)
+        age = max(time.time() - received_at, 0.0) if received_at else None
+        return {
+            'success': not bool(config_error or runtime_error),
+            'node_connected': age is not None and age <= 3.0,
+            'status_age_sec': round(age, 3) if age is not None else None,
+            'config': configured,
+            'config_error': config_error or runtime_error,
+            'runtime': runtime,
+        }
+
+    def session_summary(self) -> Dict[str, Any]:
+        """연동을 쓰는가 · 지금 그룹에 들어가 있는가 · §6-133
+
+        둘은 다른 값이다. `enabled` 는 설정 파일에 영구히 남고, `joined` 는
+        조정 노드의 메모리에만 있어 재시작하면 `enabled` 를 따라 되돌아간다.
+
+        스케줄은 `enabled` 를 보고 그룹으로 쏘는데, 실제 발화는 `joined` 가
+        아니면 조정 노드가 거부한다 · 그 어긋남이 로그에만 남아 "스케줄이
+        발화했는데 아무 일도 안 났다" 가 됐다 · §6-68 과 같은 모양이다.
+        """
+        snapshot = self.snapshot()
+        runtime = snapshot.get('runtime') or {}
+        runtime = runtime if isinstance(runtime, Mapping) else {}
+        config = runtime.get('config') if isinstance(runtime.get('config'), Mapping) else {}
+        return {
+            'enabled': bool(config.get('enabled', False)),
+            'joined': bool(runtime.get('joined', False)),
+            'node_connected': bool(snapshot.get('node_connected')),
+        }
+
+    def local_execution_blocker(self, *, timetable_ok: bool = False) -> str:
+        """Return why a local motion action conflicts with upper ownership.
+
+        `timetable_ok` · 수동 모드 PC 의 단독 재생 · 초기 위치 이동 · 그룹이 시간표 재생이면 막지 않는다 · 수정 목록 194
+        (사용자 2026-11-11) · 시간표 재생은 각 PC 가 제 시계로 돌고 연동 노드는 그 모습을 실행처럼(`tt-` ·
+        참가 PC 없음) 보여 줄 뿐이라 수동으로 빠진 PC 까지 「그룹 재생 중」 이 됐다(실물 NY 2026-11-11 00:33 · f2) ·
+        이 PC 가 아직 회차를 돌고 있으면 로컬 재생 관리자가 실행 자리가 차 있다고 거부한다.
+        """
+        runtime = self.snapshot().get('runtime') or {}
+        execution = runtime.get('execution') if isinstance(runtime, Mapping) else {}
+        connected = self._status_received_at and time.time() - self._status_received_at <= 3.0
+        # 「그룹 실행 중」 판단의 주인은 `motion_common.run_state` 다 · §6-145
+        if connected and run_state.group_is_active(dict(execution or {})):
+            if timetable_ok and str((execution or {}).get('execution_id') or '').startswith('tt-'):
+                return ''
+            return '그룹 재생 중이라 단독 재생을 할 수 없습니다'
+        return ''
+
+    def update_settings(self, payload: Mapping[str, Any]) -> Dict[str, Any]:
+        """Save project-independent DDS group settings and restart the node.
+
+        **모션이 도는 중에는 받지 않는다** · §6-163
+
+        이 저장은 끝에서 **연동 서비스를 재시작한다** · 도는 중에 재시작하면
+        이 PC 가 그룹에서 사라지고, 남은 PC 들은 참가 PC 가 죽은 것으로 보아
+        `GROUP_PARTICIPANT_FAILURE` 로 **세 대가 통째로** 선다 · 명단에서 PC
+        하나 빼려던 일이 공연을 멈춘다.
+
+        연동 탈퇴도 같은 규칙이다 · 도는 중에는 못 나간다 (§6-164) ·
+        설정 저장만 아무것도 안 보고 있었다 · 같은 규칙을 준다 ·
+        「그룹이 도는가」의 판정은 `run_state` 가 한다 (§6-145).
+        """
+        if not isinstance(payload, Mapping):
+            raise ValueError('연동 설정 요청은 객체여야 합니다')
+        running = self.local_execution_blocker()
+        if running:
+            raise ValueError(
+                '그룹 재생 중에는 연동 설정을 변경할 수 없습니다. '
+                '정지 후 변경하세요'
+            )
+        # `joined` · 「그룹 참여」 스위치가 설정이 꺼진 PC 를 켤 때 설정과 참가를 한 번에 (83)
+        allowed = {'enabled', 'joined', 'group_id', 'dds_domain_id', 'display_name', 'is_master', 'required_peers'}
+        if set(payload).difference(allowed):
+            raise ValueError('허용되지 않은 연동 설정 항목이 있습니다')
+        for key in ('enabled', 'joined'):
+            if key in payload and not isinstance(payload[key], bool):
+                raise ValueError(f'{key}는 true 또는 false여야 합니다')
+        current = load_group_config(self._config_path)
+        config = replace(
+            current,
+            enabled=bool(payload.get('enabled', current.enabled)),
+            joined=bool(payload.get('joined', current.joined)),
+            is_master=bool(payload.get('is_master', current.is_master)),
+            required_peers=tuple(str(x).strip() for x in payload.get('required_peers', current.required_peers) if str(x).strip()),
+            group_id=str(payload.get('group_id', current.group_id)).strip(),
+            dds_domain_id=int(payload.get('dds_domain_id', current.dds_domain_id)),
+            display_name=(
+                str(payload.get('display_name', current.display_name)).strip()
+                or current.pc_id
+            ),
+        )
+        # Validate the complete value through the canonical loader before use.
+        save_group_config(self._config_path, config)
+        config = load_group_config(self._config_path)
+        restart = self._restart_coordination_service()
+        if not restart['service_installed']:
+            return {
+                'success': True,
+                'saved': True,
+                'message': f'설정 저장 완료 (수동 재시작 필요: {restart["message"]})',
+                'config': self._config_summary(config),
+            }
+        if not restart['restart_pending']:
+            return {
+                'success': False,
+                'saved': True,
+                'message': restart['message'],
+                'config': self._config_summary(config),
+            }
+        return {
+            'success': True,
+            'saved': True,
+            'restart_pending': True,
+            'message': 'DDS 그룹 설정을 저장하고 PC 연동 서비스 재시작을 요청했습니다',
+            'config': self._config_summary(config),
+        }
+
+    @staticmethod
+    def _restart_coordination_service() -> Dict[str, Any]:
+        service = str(
+            os.environ.get('MOTION_COORDINATION_SERVICE_UNIT') or ''
+        ).strip()
+        unit_path = Path.home() / '.config/systemd/user/motion-coordination.service'
+        if service != 'motion-coordination.service' or not unit_path.is_file():
+            return {
+                'service_installed': False,
+                'restart_pending': False,
+                'message': 'PC 연동 자동실행 서비스가 설치되지 않았습니다',
+            }
+        completed = subprocess.run(
+            ['/usr/bin/systemctl', '--user', 'restart', '--no-block', service],
+            check=False,
+            capture_output=True,
+            text=True,
+            timeout=5.0,
+        )
+        if completed.returncode != 0:
+            detail = completed.stderr.strip() or completed.stdout.strip()
+            return {
+                'service_installed': True,
+                'restart_pending': False,
+                'message': detail or 'PC 연동 서비스 재시작 요청 실패',
+            }
+        return {
+            'service_installed': True,
+            'restart_pending': True,
+            'message': 'PC 연동 서비스 재시작 요청 완료',
+        }
+
+    def request_control(self, payload: Mapping[str, Any]) -> Dict[str, Any]:
+        """Send one manual DDS group operation through the local ROS adapter."""
+        if not isinstance(payload, Mapping):
+            raise ValueError('연동 실행 요청은 객체여야 합니다')
+        command = str(payload.get('command') or '').strip()
+        allowed = {
+            'join', 'leave', 'start_group', 'stop_after_cycle', 'stop_now',
+            'acknowledge_group_error', 'initialize_group',
+            # 시간표 재생 · 재생 방식 · 회차 간격 · 마스터 그룹 화면 · 수정 목록 186
+            'timetable_set',
+        }
+        if command not in allowed:
+            raise ValueError('지원하지 않는 DDS 그룹 실행 요청입니다')
+        if command in {'start_group', 'initialize_group'}:
+            off = run_mode_gate.motion_command_block_reason(self._node)
+            if off:
+                return {'success': False, 'message': off}
+            # 스케줄 모드에서 사람이 누른 그룹 시작은 막는다 · 스케줄이 보낸 것만 · 수정 목록 70
+            human = run_mode_gate.human_start_block_reason(self._node, dict(payload))
+            if human:
+                return {'success': False, 'message': human}
+            repeat_error = repeat_policy.request_repeat_mode_error(payload.get('repeat_mode'))
+            if repeat_error:
+                return {'success': False, 'message': repeat_error}
+            # 구간 재생 · 모든 PC · 스피커가 같은 시각부터 · 스케줄이 보낸 시작은 늘 통째로 · 2026-10-16
+            try:
+                segment = motion_segment.apply_to_payload(
+                    payload, allowed=group_start_origin(payload) != 'schedule',
+                )
+            except ValueError as exc:
+                return {'success': False, 'message': str(exc)}
+        start_generation = int(self._project_generation())
+        try:
+            request = {'command': command}
+            if command == 'stop_after_cycle':
+                # 스케줄 끝이면 PC 마다 기준점 주차 → 서보 OFF · 수정 목록 36
+                request['reason'] = str(payload.get('reason') or '')
+            if command == 'timetable_set':
+                # 보낸 칸만 · 연동 노드가 검사(마스터만 · 자동보다 짧은 간격 거부)
+                for key in ('mode', 'period_sec', 'initial_move_time_sec'):
+                    if key in payload:
+                        request[key] = payload.get(key)
+            if command in {'start_group', 'initialize_group'}:
+                request.update({
+                    'run_mode': payload.get('run_mode', 'continuous'),
+                    'repeat_mode': payload.get(
+                        'repeat_mode', repeat_policy.DEFAULT_REPEAT_MODE,
+                    ),
+                    'dwell_sec': payload.get('dwell_sec', 0.0),
+                    'target_cycle_count': payload.get('target_cycle_count', 0),
+                    # 초기 위치 이동 시간 · 없으면 PC마다 조인트 매핑 값 · 2026-10-12
+                    'initial_move_time_sec': payload.get('initial_move_time_sec') or 0.0,
+                    # 회차 맞춤 / 각자 재생 · 수정 목록 35
+                    'sync_mode': repeat_policy.normalize_group_sync_mode(
+                        payload.get('sync_mode'),
+                    ),
+                    # 누가 시작했나 · 스케줄이 보낸 것만 `schedule_id` 가 있다 · 사람이 누른 그룹 재생은
+                    # 수동 PC 도 넣는다 · 수정 목록 122
+                    'started_by': group_start_origin(payload),
+                    motion_segment.START_KEY: segment[motion_segment.START_KEY],
+                    motion_segment.END_KEY: segment[motion_segment.END_KEY],
+                })
+                if group_start_origin(payload) == 'schedule' and payload.get('coordinator_sits_out'):
+                    # 마스터 자기 모터 문제 · 스케줄이 알려 준 이유 · 진행만 하고 빠진다 · 끊김 시험 H
+                    request['coordinator_sits_out'] = str(payload.get('coordinator_sits_out'))[:200]
+            result = self._local_api('/control', request)
+        except (OSError, ValueError) as exc:
+            result = {'success': False, 'message': str(exc)}
+        if int(self._project_generation()) != start_generation:
+            return {
+                'success': False, 'stale_project_generation': True,
+                'message': '프로젝트 전환 전 시작한 그룹 실행 결과를 폐기했습니다',
+            }
+        return result
+
+    def notify_planned_restart(self) -> Dict[str, Any]:
+        """「프로그램 다시 시작」 직전 · 연동 노드에 「이 PC 빠짐」 을 알린다 · 수정 목록 123 · 145 ①
+
+        브리지가 사라지는 동안 연동 노드가 그것을 고장(GROUP_PARTICIPANT_FAILURE 2등급)으로
+        잠그지 않게 · 그룹이 돌면 이 PC 만 빠지고 나머지는 계속 · 답에 `still_coordinating`
+        (이 PC 가 다른 PC 들의 그룹을 계속 진행) · 연동 노드가 없거나 답이 없어도 재시작은 그대로 간다.
+        """
+        try:
+            return self._local_api('/control', {'command': 'planned_restart'})
+        except (OSError, ValueError) as exc:
+            return {'success': False, 'message': str(exc)}
+
+    def notify_leaving(
+        self, reason: str, *, timeout_sec: float = LEAVE_NOTICE_TIMEOUT_SEC,
+    ) -> Dict[str, Any]:
+        """웹 서비스가 내려간다(SIGTERM · SIGINT · systemd 다시 시작) · 「이 PC 빠짐」 · 수정 목록 145 ①
+
+        내려가는 중이라 오래 기다리지 않는다 · 실패해도 종료는 그대로 간다 · 그때 연동 노드는
+        「상태 수신 중단」 으로 보고 그룹을 세운다(잠그지 않음 · 145 ②).
+        """
+        try:
+            return self._local_api(
+                '/control', {'command': 'bridge_leaving', 'reason': str(reason or '')},
+                timeout_sec=timeout_sec,
+            )
+        except (OSError, ValueError) as exc:
+            return {'success': False, 'message': str(exc)}
+
+    def _local_api(
+        self, path: str, payload: Mapping[str, Any] | None = None,
+        *, timeout_sec: float = 5.0,
+    ) -> Dict[str, Any]:
+        data = None
+        method = 'GET'
+        headers: Dict[str, str] = {}
+        if payload is not None:
+            data = json.dumps(dict(payload), separators=(',', ':')).encode('utf-8')
+            method = 'POST'
+            headers['Content-Type'] = 'application/json'
+        request = urllib.request.Request(
+            f'http://127.0.0.1:{self._local_port}{path}',
+            data=data, headers=headers, method=method,
+        )
+        try:
+            with urllib.request.urlopen(request, timeout=float(timeout_sec)) as response:
+                value = json.loads(response.read(64 * 1024).decode('utf-8'))
+        except (urllib.error.URLError, OSError, UnicodeError, ValueError) as exc:
+            raise OSError(f'DDS 그룹 연동 노드 응답 없음: {exc}') from exc
+        if not isinstance(value, dict):
+            raise ValueError('DDS 그룹 연동 노드 응답 형식 오류')
+        return value
+
+    @staticmethod
+    def _config_summary(config: Any) -> Dict[str, Any]:
+        return {
+            'pc_id': config.pc_id,
+            'display_name': config.display_name,
+            'enabled': config.enabled,
+            'is_master': config.is_master,
+            'required_peers': list(config.required_peers),
+            'group_id': config.group_id,
+            'dds_domain_id': config.dds_domain_id,
+            'heartbeat_sec': config.heartbeat_sec,
+            'warning_timeout_sec': config.warning_timeout_sec,
+            'peer_timeout_sec': config.peer_timeout_sec,
+            'start_lead_sec': config.start_lead_sec,
+            'schedule_ack_margin_sec': config.schedule_ack_margin_sec,
+            'max_trigger_sync_uncertainty_ms': (
+                config.max_trigger_sync_uncertainty_ms
+            ),
+            'trigger_sync_samples': config.trigger_sync_samples,
+            'prepare_timeout_sec': config.prepare_timeout_sec,
+            'trigger_report_timeout_sec': config.trigger_report_timeout_sec,
+        }
+
+
+def readiness_failure_text(context: Mapping[str, Any]) -> str:
+    """준비가 안 된 **진짜 이유**를 한 줄로 · §6-297
+
+    실행 컨텍스트는 노드마다 실패 사유를 들고 있다 · 그런데 위로 올라가는 것은
+    「모터 관리 노드 상태 확인 대기 중」 같은 뭉뚱그린 말 하나뿐이었다 ·
+    정작 아래에는 「motor_manager_node 시작 후 첫 모터 상태를 기다리는 중」이
+    적혀 있었는데 아무도 그것을 보지 못했다.
+
+    아는 쪽이 말하게 한다 · 뭉뚱그린 말 뒤에 노드 이름과 사유를 붙인다.
+    """
+    summary = str(context.get('message') or '적용 대기 중')
+    failures = context.get('failures')
+    if not isinstance(failures, Mapping) or not failures:
+        return summary
+    detail = ' · '.join(
+        f'{name}: {str(reason)[:120]}'
+        for name, reason in sorted(failures.items())
+        if str(reason or '').strip()
+    )
+    return f'{summary} · {detail}' if detail else summary
+
+
+def group_start_origin(payload: Mapping[str, Any]) -> str:
+    """그룹 시작을 누가 보냈나 · `schedule_id` 가 있으면 스케줄 · 아니면 사람 · 수정 목록 122"""
+    return 'schedule' if str(payload.get('schedule_id') or '').strip() else 'human'
+
+
+#: 사람 조작 판정 · 연동 노드(선택 · 하트비트 · 마스터 자신)와 같이 쓴다 · 수정 목록 122 (나) · 136
+human_operation_reason = run_state.human_operation_reason
+
+
+def stop_now_not_ours(bridge: Any, execution_id: str) -> str:
+    """그룹 즉시 정지가 이 PC 가 돌지 않는 실행 것인가 · 그러면 이유 · 수정 목록 136
+
+    전에는 실행 ID 를 안 보고 무조건 세웠다 · 그룹에 안 들어간 PC(단독 재생 중이라 빠진 마스터 ·
+    조그 중인 PC)에 그 그룹의 정지가 닿으면 단독 재생 · 조그가 멈췄다(실물 V-4 · V-5) · 판정은
+    `run_state.group_stop_skip_reason` 하나 · 연동 노드가 재생 관리자에 직접 보낼 때도 같은 것(수정 목록 209).
+    """
+    return run_state.group_stop_skip_reason(
+        _locked_copy(bridge, '_motion_run_status', '_motion_run_lock'),
+        _locked_copy(bridge, '_safety_status', '_safety_status_lock'),
+        execution_id,
+    )
+
+
+def _locked_copy(bridge: Any, value_name: str, lock_name: str) -> Dict[str, Any]:
+    lock = getattr(bridge, lock_name, None)
+    if lock is None:
+        value = getattr(bridge, value_name, None)
+    else:
+        with lock:
+            value = getattr(bridge, value_name, None)
+    return dict(value) if isinstance(value, Mapping) else {}
+
+
+#: 부르는 쪽이 기다려 주는 시간에서 **떼어 둘 몫** · §6-297
+#:
+#: 답이 돌아가는 데도 시간이 든다 · 안쪽이 바깥 예산을 꽉 채우면, 일은 끝났는데
+#: 답이 늦어 「응답 없음」이 된다.
+READINESS_MARGIN_SEC = 1.0
+
+#: 예산을 못 받았을 때 · 옛 호출과 시험을 위한 값
+DEFAULT_READINESS_BUDGET_SEC = 4.0
+
+#: 준비 확인이 이보다 길면 단계별 시간을 로그에 · 실패는 늘 · 수정 목록 174
+READINESS_SLOW_LOG_MS = 1000.0
+
+#: 준비 확인 단계 · 로그 이름
+_READINESS_STEPS = (
+    ('context_ms', '실행 컨텍스트'),
+    ('selection_ms', '재생 파일'),
+    ('servo_ms', '서보 ON'),
+    ('check_ms', '실행 준비 검사 왕복'),
+)
+
+def readiness_timing_text(
+    total_ms: float, budget_sec: float, steps: Mapping[str, Any], check_timing: Any = None,
+) -> str:
+    """준비 확인 단계별 시간 한 줄 · 「합계 5230 ms(예산 6.0 s) · 실행 컨텍스트 120 · … · 실행 준비 검사 왕복 5100
+    [대기 0 · 파일 3200 · 재샘플 1800(새로) · 계획 5050] ms」 · 안 거친 단계는 뺀다 · 수정 목록 174
+    """
+    parts = [f'합계 {total_ms:.0f} ms(예산 {budget_sec:.1f} s)']
+    for key, label in _READINESS_STEPS:
+        if key in steps:
+            parts.append(f'{label} {float(steps[key]):.0f}')
+    line = ' · '.join(parts)
+    # 실행 준비 검사(motion_run_manager) 안쪽 단계 · 답의 `timing_ms`
+    inner = check_timing_mod.stage_text(check_timing)
+    if inner:
+        line += f' [{inner}]'
+    return line + ' ms'
+
+
+def local_motion_readiness(
+    bridge: Any, payload: Optional[Mapping[str, Any]] = None,
+) -> Dict[str, Any]:
+    """준비 확인 + 단계별 시간 · 1 s 넘거나 실패면 로그 한 줄 · 1 s 넘은 실패는 거절 사유에도 · 수정 목록 174
+
+    NY 실물 2026-11-05 · 재부팅 뒤 첫 그룹 시작에서 「준비 거절 · 로컬 Web Bridge 응답 없음: timed out」 ·
+    어느 단계가 느렸는지 기록이 없어 원인 미확인 · 부르는 쪽이 먼저 끊으면 답은 못 가도 이 로그는 남는다.
+    """
+    request = payload if isinstance(payload, Mapping) else {}
+    try:
+        budget = float(request.get('budget_sec') or DEFAULT_READINESS_BUDGET_SEC)
+    except (TypeError, ValueError):
+        budget = DEFAULT_READINESS_BUDGET_SEC
+    steps: Dict[str, float] = {}
+    started = time.monotonic()
+    result = _local_motion_readiness(bridge, request, budget, steps)
+    total_ms = (time.monotonic() - started) * 1000.0
+    failed = not (isinstance(result, Mapping) and result.get('success') is not False)
+    if not failed and total_ms < READINESS_SLOW_LOG_MS:
+        return result
+    check_timing = result.get('timing_ms') if isinstance(result, Mapping) else None
+    line = readiness_timing_text(total_ms, budget, steps, check_timing)
+    message = str(result.get('message') or '') if isinstance(result, Mapping) else ''
+    logger_of = getattr(bridge, 'get_logger', None)
+    if callable(logger_of):
+        logger_of().warning(
+            f'[준비 확인 시간] {line}' + (f' · 거절: {message[:200]}' if failed else '')
+        )
+    if failed and total_ms >= READINESS_SLOW_LOG_MS and isinstance(result, Mapping):
+        # 거절 사유에 붙인다 · 진행 PC 의 「준비 거절」 로그 · 그룹 연동 기록에 그대로 보인다
+        result = {**result, 'message': f'{message} · {line}' if message else line}
+    return result
+
+
+def _local_motion_readiness(
+    bridge: Any, request: Mapping[str, Any], budget: float, steps: Dict[str, float],
+) -> Dict[str, Any]:
+    """이 PC 가 지금 그룹 모션을 시작할 수 있는가 · 못 하면 **이유를 적어** 답한다.
+
+    **안쪽 일은 바깥이 기다려 주는 시간보다 짧아야 한다** · §6-297
+
+    전에는 부르는 쪽이 4초를 기다리는데 여기서 최대 10초를 썼다 · 그러면 모터가
+    멀쩡해도 「로컬 Web Bridge 응답 없음: timed out」이 뜬다 · 실측으로 준비
+    확인이 10.2초가 걸렸고, 화면에는 브리지가 죽은 것처럼 보였다 · 정작 원인은
+    모터 피드백이 끊긴 것이었는데 그 말은 어디에도 안 실렸다.
+
+    이제 부르는 쪽이 `budget_sec` 로 자기 예산을 알려 준다 · 여기서는 그보다
+    한 칸 짧게 쓴다 · 그래서 **시간이 다 되면 「왜 안 되는지」가 돌아간다**.
+
+    `steps` · 단계마다 걸린 ms 를 적는다(거친 단계만) · 수정 목록 174
+    """
+    timeout_sec = max(0.5, budget - READINESS_MARGIN_SEC)
+    # 안쪽 일 전부(실행 컨텍스트 맞추기 + 실행 준비 검사)가 이 마감 안에 · 수정 목록 164
+    deadline = time.monotonic() + timeout_sec
+    # 아직 안 뜸(supervisor · 재생 관리자 첫 상태 전) · 검사 시간 초과를 기다리지 않고 이유를 바로 · 수정 목록 202
+    startup = getattr(bridge, '_startup', None)
+    starting = startup.blocker() if startup is not None else ''
+    if starting:
+        return {'success': False, 'message': starting}
+    # 사람이 이 PC 를 만지는 중이면 그룹에 안 들어간다 · 수정 목록 122 (나)
+    busy = human_operation_reason(
+        _locked_copy(bridge, '_motion_run_status', '_motion_run_lock'),
+        _locked_copy(bridge, '_safety_status', '_safety_status_lock'),
+    )
+    if busy:
+        return {'success': False, 'message': busy}
+    # 오프 모드 · 모터 문제 · 전에는 `initialize_at`(그룹 초기 위치 예약) 때 웹이 `group_prepare` 안에서 봤다 ·
+    # 이제 그 예약은 연동 노드가 재생 관리자에 바로 보낸다(수정 목록 209 · 207) · 같은 관문을 준비에서 미리 본다 ·
+    # 걸리면 시작 전에 이 PC 만 빠진다(전에는 초기 위치 예약 거절로 빠졌다)
+    gate = getattr(bridge, 'group_prepare_gate', None)
+    blocked = gate() if callable(gate) else ''
+    if blocked:
+        return {'success': False, 'message': blocked}
+    # A group prepare must not race the periodic project-context reconciler.
+    # Apply and verify the context synchronously before reporting this PC ready.
+    reconcile = getattr(
+        getattr(bridge, '_execution_context', None), 'reconcile_blocking', None
+    )
+    step_started = time.monotonic()
+    if callable(reconcile):
+        context = reconcile(timeout_sec=timeout_sec)
+    else:
+        context = bridge._execution_context.reconcile()
+    steps['context_ms'] = (time.monotonic() - step_started) * 1000.0
+    if not context.get('ready'):
+        return {
+            'success': False,
+            'message': (
+                '현재 프로젝트의 실행 준비가 끝나지 않았습니다: '
+                + readiness_failure_text(context)
+            ),
+        }
+    step_started = time.monotonic()
+    try:
+        selection = _local_motion_selection(bridge)
+    except ValueError as exc:
+        return {'success': False, 'message': str(exc)}
+    finally:
+        steps['selection_ms'] = (time.monotonic() - step_started) * 1000.0
+    # 스케줄 끝에 끈 서보를 켜고 나서 본다 · 안 그러면 「서보가 꺼져 있습니다」 로
+    # 이 PC 가 그룹에서 빠진다 · 수정 목록 36
+    parked = getattr(bridge, 'schedule_end_start_blocker', None)
+    if callable(parked):
+        step_started = time.monotonic()
+        reason = parked({})
+        steps['servo_ms'] = (time.monotonic() - step_started) * 1000.0
+        if reason:
+            return {'success': False, 'message': reason}
+    # 구간 재생 · 이 PC 재생 목록 1번이 구간 시작보다 짧으면 여기서 거절 → 진행 PC 가 이 PC 를 빼고 간다 · 2026-10-16
+    try:
+        segment = motion_segment.apply_to_payload(request)
+    except ValueError as exc:
+        return {'success': False, 'message': str(exc)}
+    # 검사는 남은 예산을 다 쓴다 · 전에는 3 s 고정이라 예산(6 s − 여백 1 s)이 남아도 긴 애니(920 s ×
+    # 20 조인트)의 첫 검사가 「motion_run_manager response timeout」 으로 끝났다 · 수정 목록 164
+    step_started = time.monotonic()
+    try:
+        result = bridge.motion_run_check({
+            **selection,
+            'initial_move_time_sec': None,
+            'run_mode': 'once',
+            'request_source': 'network_readiness',
+            motion_segment.START_KEY: segment[motion_segment.START_KEY],
+            motion_segment.END_KEY: segment[motion_segment.END_KEY],
+        }, timeout_sec=max(0.5, deadline - time.monotonic()))
+        if isinstance(result, Mapping) and result.get('success') is not False:
+            stamp = run_request_stamp(bridge, selection)
+            if stamp:
+                result = {**result, 'run_request': stamp}
+        return result
+    finally:
+        steps['check_ms'] = (time.monotonic() - step_started) * 1000.0
+
+
+def local_motion_control(bridge: Any, payload: Mapping[str, Any]) -> Dict[str, Any]:
+    """Execute one loopback-only high-level command through motion_run_manager.
+
+    재생 관리자 요청 본문은 `motion_common.group_run_request` 하나 · 연동 노드가 로컬 DDS 로 바로 보낼 때와
+    같은 본문 · 이 길은 웹만 아는 일(준비 · 주차 · 운영 로그)과 연동 노드의 로컬 연결이 없을 때 · 수정 목록 209
+    """
+    command = str(payload.get('command') or '')
+    if command in {'stop_motion', 'stop_initialize', 'stop_now'}:
+        # 그 실행을 돌지 않는 PC 의 단독 재생 · 조그는 그대로 둔다 · 수정 목록 136
+        ignored = stop_now_not_ours(bridge, str(payload.get('execution_id') or ''))
+        if ignored:
+            return {'success': True, 'ignored': True, 'message': ignored}
+        return bridge.coordination_stop_now()
+    if command in {'cancel_before_start', 'group_cancel'}:
+        return group_run_request.cancel_result(bridge.motion_group_cancel({
+            'execution_id': str(payload.get('execution_id') or ''),
+        }))
+    if command == 'group_join_commit':
+        # 도는 그룹에 복귀한 PC · 합류 확정 · 수정 목록 30-3
+        return bridge.motion_group_join_commit(group_run_request.join_commit_request(payload))
+    if command == 'group_note':
+        # 연동 노드가 남기는 기록 · 지금은 뺀 PC · 수정 목록 30-2
+        return bridge.record_coordination_note(
+            str(payload.get('event_type') or 'group_note'),
+            str(payload.get('message') or ''),
+            {
+                key: payload.get(key)
+                for key in ('execution_id', 'excluded', 'participants')
+                if key in payload
+            },
+        )
+    if command == 'stop_after_cycle':
+        # 웹 단의 회차 후 정지 · 운영 종료(`schedule_end`)면 회차 뒤 기준점 주차까지 웹이 한다 · 수정 목록 36 · 141 · 154
+        return group_run_request.stop_after_cycle_result(bridge.motion_run_stop_after_cycle({
+            'reason': payload.get('reason') or '',
+            'group_wide': payload.get('group_wide') is True,
+        }))
+    if command == 'group_cycle_at':
+        # 시간표 재생 회차 명령 · 「k 회차를 S 에 시작 · 다음 회차 N」 · 초기 이동 시각은 재생 관리자가 정한다 · 수정 목록 206 ·
+        # 이미 서 있는 그룹 세션에 보낸다 · 매핑 · 애니 선택은 필요 없다(아래 `_local_motion_selection` 의 프로젝트 읽기를 건너뜀) ·
+        # 본문은 연동 노드의 로컬 직접 길(209)과 같은 `group_run_request.cycle_request` · 이 길은 그 연결이 없을 때
+        return bridge.motion_group_cycle_at(group_run_request.cycle_request(payload))
+    try:
+        selection = _local_motion_selection(bridge)
+    except ValueError as exc:
+        return {'success': False, 'message': str(exc)}
+    if command in {'group_prepare', 'group_join'}:
+        def automation() -> Mapping[str, Any]:
+            run_status = bridge.motion_run_status()
+            current = (
+                (run_status.get('status') or {}).get('automation')
+                if isinstance(run_status, Mapping) else {}
+            )
+            return current if isinstance(current, Mapping) else {}
+
+        try:
+            request = group_run_request.prepare_request(
+                command, payload, selection, automation=automation,
+            )
+        except ValueError as exc:
+            return {'success': False, 'message': str(exc)}
+        return bridge.motion_group_prepare(request)
+    if command == 'group_start_at':
+        return bridge.motion_group_start_at(
+            group_run_request.schedule_request(command, payload, selection),
+        )
+    if command == 'group_initialize_at':
+        return bridge.motion_group_initialize_at(
+            group_run_request.schedule_request(command, payload, selection),
+        )
+    return {'success': False, 'message': '지원하지 않는 로컬 연동 실행 명령입니다'}
+
+
+def run_request_stamp(bridge: Any, selection: Mapping[str, Any]) -> Dict[str, Any]:
+    """준비가 끝난 이 실행의 「무엇을 · 어느 설정으로」 · 연동 노드가 초기 위치 예약을 재생 관리자에 바로 보낼 때 쓴다 · 209 · 207
+
+    재생 파일(매핑 · 애니) · 프로젝트 · 세대 · 실행 컨텍스트 · 방금 실행 준비 검사가 이 값으로 통과했다 ·
+    전에는 `initialize_at` 마다 웹이 프로젝트 · 매핑 YAML 을 디스크에서 다시 읽었다(153 ②) · 그 사이 프로젝트가
+    바뀌면 재생 관리자가 세대 · 컨텍스트가 다르다고 거절한다(옛 길과 같은 보호) · 하나라도 모르면 빈 값(웹 길 그대로).
+    """
+    try:
+        project_id = str(bridge.project_repository.selected_project_id() or '')
+        generation = int(bridge.current_project_generation())
+        context_id = str(bridge._execution_context.context_id() or '')
+    except (AttributeError, TypeError, ValueError):
+        return {}
+    if not project_id or generation < 1 or not context_id:
+        return {}
+    return {
+        **{key: str(value) for key, value in dict(selection or {}).items()},
+        'project_id': project_id,
+        'project_generation': generation,
+        'context_id': context_id,
+    }
+
+
+def _local_motion_selection(bridge: Any) -> Dict[str, str]:
+    project_id = bridge.project_repository.require_selected_project_id()
+    try:
+        project = bridge.project_repository.get_project(project_id).get('project') or {}
+        active = project.get('active_files') or {}
+        mapping_id = str(active.get('motion_axis_matching') or '').strip()
+        if not mapping_id:
+            raise ValueError('조인트 매핑을 선택하세요')
+        mapping_path = bridge.project_repository.export_path(
+            project_id, 'motion_axis_matching', mapping_id
+        )
+        mapping = yaml.safe_load(mapping_path.read_text(encoding='utf-8')) or {}
+        motion_id = str(
+            mapping.get('motion_file_id') if isinstance(mapping, dict) else ''
+        ).strip()
+        if not motion_id:
+            raise ValueError('애니메이션을 재생 등록하세요')
+        bridge.project_repository.export_path(project_id, 'motions', motion_id)
+    except (OSError, ValueError, yaml.YAMLError) as exc:
+        raise ValueError(f'재생 파일 확인 실패: {exc}') from exc
+    return {'motion_file_id': motion_id, 'mapping_file_id': mapping_id}

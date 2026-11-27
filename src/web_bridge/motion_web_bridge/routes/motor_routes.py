@@ -1,0 +1,223 @@
+import asyncio
+
+from fastapi import FastAPI, HTTPException, Request
+
+
+def _forget_schedule_end_off(bridge, kind: str, axes) -> None:
+    """사람이 서보 · 토크를 켬 · 운영 종료가 끈 축 기록에서 뺀다 · 다음 운영시간 시작 알림 글이 맞게 · 수정 목록 198"""
+    end = getattr(bridge, 'schedule_end', None)
+    if end is None or not hasattr(end, 'forget_powered_off'):
+        return
+    try:
+        end.forget_powered_off(kind, axes)
+    except Exception:  # noqa: BLE001 · 기록 정리 실패가 서보 응답을 막지 않게
+        pass
+
+
+def register_motor_routes(app: FastAPI, bridge, project_call) -> None:
+    @app.post('/api/motors/scan')
+    async def scan_motors():
+        return await asyncio.to_thread(bridge.scan.scan_all)
+
+    @app.post('/api/motors/scan/ac-servo')
+    async def scan_ac_servo_motors():
+        return await asyncio.to_thread(bridge.scan.scan_ac_servo)
+
+    @app.post('/api/motors/scan/dynamixel')
+    async def scan_dynamixel_motors():
+        return await asyncio.to_thread(bridge.scan.scan_dynamixel)
+
+    @app.get('/api/motors/scan/progress')
+    async def motor_scan_progress():
+        return await asyncio.to_thread(bridge.scan.progress)
+
+    @app.post('/api/motors/scan/cancel')
+    async def cancel_motor_scan():
+        # 진행 중인 물리 검색은 끝까지 간다 · 다음 장치 종류부터 중단된다 (§6-26)
+        #
+        # **화면에 취소 버튼이 없다** · §6-180 · 죽은 길처럼 보이지만 지운 것이
+        # 아니라 아직 안 붙인 것이다 · 모터 검색은 몇 분씩 걸리는데 시작하면
+        # 끝날 때까지 기다리는 수밖에 없다 · 버튼을 붙이면 바로 쓸 수 있다.
+        return await asyncio.to_thread(bridge.scan.cancel)
+
+    @app.post('/api/motors/ethercat-alias')
+    async def write_ethercat_alias(request: Request):
+        body = await request.json()
+        if not isinstance(body, dict):
+            raise HTTPException(status_code=400, detail='request body must be an object')
+        return await asyncio.to_thread(bridge.write_ethercat_alias, body)
+
+    @app.get('/api/motor-config')
+    async def motor_config():
+        return await asyncio.to_thread(bridge.motor_config.load)
+
+    @app.put('/api/motor-config')
+    async def save_motor_config(request: Request):
+        body = await request.json()
+        if not isinstance(body, dict):
+            raise HTTPException(status_code=400, detail='request body must be an object')
+        return await asyncio.to_thread(bridge.motor_config.save, body)
+
+    # MINAS 공통 값(부팅 때 모든 축에 쓰는 값) · 수정 목록 114
+    @app.get('/api/motor-config/minas-base')
+    async def minas_base():
+        return await asyncio.to_thread(bridge.motor_config.minas_base)
+
+    @app.put('/api/motor-config/minas-base')
+    async def save_minas_base(request: Request):
+        body = await request.json()
+        if not isinstance(body, dict):
+            raise HTTPException(status_code=400, detail='request body must be an object')
+        return await asyncio.to_thread(bridge.motor_config.save_minas_base, body)
+
+    @app.post('/api/motor-config/drive-maintenance')
+    async def minas_drive_maintenance(request: Request):
+        # EEPROM 저장 · 앱솔루트 방식 · 다회전 클리어 · 수정 목록 15 + 34-3
+        body = await request.json()
+        if not isinstance(body, dict):
+            raise HTTPException(status_code=400, detail='request body must be an object')
+        return await asyncio.to_thread(bridge.minas_drive_maintenance, body)
+
+    # MINAS 게인 쓰기(재시작 없음) · 모든 축 EEPROM 저장(재시작 한 번) · 수정 목록 108 (다)
+    @app.post('/api/motor-config/drive-gains')
+    async def minas_drive_gains(request: Request):
+        body = await request.json()
+        if not isinstance(body, dict):
+            raise HTTPException(status_code=400, detail='request body must be an object')
+        return await asyncio.to_thread(bridge.minas_drive_gains, body)
+
+    # 드라이브 파라미터 고급 · 표(지금 · 부팅 때 · 팩토리값) · 직접 읽기 · 쓰기 · 수정 목록 109 · 114
+    @app.get('/api/motor-config/drive-params')
+    async def drive_params_table(axis: int):
+        return await asyncio.to_thread(bridge.drive_params.table, axis)
+
+    @app.post('/api/motor-config/drive-params/read')
+    async def drive_params_read(request: Request):
+        body = await request.json()
+        if not isinstance(body, dict):
+            raise HTTPException(status_code=400, detail='request body must be an object')
+        return await asyncio.to_thread(bridge.drive_params.read, body)
+
+    @app.post('/api/motor-config/drive-params/write')
+    async def drive_params_write(request: Request):
+        body = await request.json()
+        if not isinstance(body, dict):
+            raise HTTPException(status_code=400, detail='request body must be an object')
+        return await asyncio.to_thread(bridge.drive_params.write, body)
+
+    @app.post('/api/motor-config/eeprom-save-all')
+    async def minas_eeprom_save_all(request: Request):
+        body = await request.json()
+        if not isinstance(body, dict):
+            raise HTTPException(status_code=400, detail='request body must be an object')
+        return await asyncio.to_thread(bridge.minas_eeprom_save_all, body)
+
+    # MINAS 「앱솔루트 설정」 · 수정 목록 62 ③④
+    @app.get('/api/motor-config/absolute-setup')
+    async def absolute_setup_status():
+        return await asyncio.to_thread(bridge.absolute_setup.status)
+
+    @app.post('/api/motor-config/absolute-setup/preview')
+    async def absolute_setup_preview(request: Request):
+        body = await request.json()
+        if not isinstance(body, dict):
+            raise HTTPException(status_code=400, detail='request body must be an object')
+        return await asyncio.to_thread(bridge.absolute_setup_preview, body)
+
+    @app.post('/api/motor-config/absolute-setup')
+    async def absolute_setup_start(request: Request):
+        body = await request.json()
+        if not isinstance(body, dict):
+            raise HTTPException(status_code=400, detail='request body must be an object')
+        return await asyncio.to_thread(bridge.absolute_setup_start, body)
+
+    @app.post('/api/motor-config/absolute-setup/cancel')
+    async def absolute_setup_cancel():
+        return await asyncio.to_thread(bridge.absolute_setup.cancel)
+
+    @app.post('/api/motor-config/apply')
+    async def apply_motor_config():
+        return await asyncio.to_thread(bridge.motor_config.apply)
+
+    @app.get('/api/motor-events')
+    async def motor_events(
+        limit: int = 200, category: str = 'all', file_name: str = 'all'
+    ):
+        return await asyncio.to_thread(
+            lambda: bridge.motor_event_log.events(
+                limit=limit, category=category, file_name=file_name,
+            )
+        )
+
+    @app.delete('/api/motor-events')
+    async def clear_motor_events():
+        return await asyncio.to_thread(bridge.motor_event_log.clear)
+
+    @app.get('/api/servo-alarm-policy')
+    async def servo_alarm_policy():
+        return await project_call(bridge.servo_alarm_policy)
+
+    @app.put('/api/servo-alarm-policy')
+    async def save_servo_alarm_policy(request: Request):
+        body = await request.json()
+        if not isinstance(body, dict):
+            raise HTTPException(status_code=400, detail='request body must be an object')
+        return await project_call(bridge.save_servo_alarm_policy, body)
+
+    @app.post('/api/motion-test/ac-servo/action')
+    async def ac_servo_action(request: Request):
+        body = await request.json()
+        return await asyncio.to_thread(
+            bridge.manual.ac_servo_action,
+            body.get('axis'),
+            body.get('target_rad'),
+            body.get('duration_sec'),
+            body.get('range_recovery', False),
+        )
+
+    @app.post('/api/motion-test/dynamixel/action')
+    async def dynamixel_action(request: Request):
+        body = await request.json()
+        return await asyncio.to_thread(
+            bridge.manual.dynamixel_action,
+            body.get('axis'),
+            body.get('target_rad'),
+            body.get('duration_sec'),
+            body.get('range_recovery', False),
+        )
+
+    @app.post('/api/motion-test/dynamixel/control')
+    async def dynamixel_control(request: Request):
+        """다이나믹셀 토크 켜기·끄기·재부팅 · 한 모터 · 수정 목록 24"""
+        body = await request.json()
+        try:
+            axis = int(body.get('axis'))
+        except (TypeError, ValueError):
+            return {'success': False, 'message': 'axis is required'}
+        result = await asyncio.to_thread(
+            bridge.manual.dynamixel_torque_control,
+            body.get('action'),
+            [axis],
+        )
+        if str(body.get('action') or '') == 'torque_on' and result.get('success'):
+            _forget_schedule_end_off(bridge, 'dynamixel', [axis])
+        return result
+
+    @app.post('/api/motion-test/ac-servo/control')
+    async def ac_servo_control(request: Request):
+        body = await request.json()
+        result = await asyncio.to_thread(
+            bridge.manual.ac_servo_control,
+            body.get('action'),
+            body.get('axis'),
+            body.get('scope', 'selected'),
+        )
+        if str(body.get('action') or '').strip().lower().replace('-', '_') == 'servo_on' and result.get('success'):
+            if str(body.get('scope') or 'selected').strip().lower() == 'all':
+                _forget_schedule_end_off(bridge, 'ac_servo', None)
+            else:
+                try:
+                    _forget_schedule_end_off(bridge, 'ac_servo', [int(body.get('axis'))])
+                except (TypeError, ValueError):
+                    pass
+        return result

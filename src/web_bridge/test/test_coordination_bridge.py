@@ -1,0 +1,446 @@
+import pytest
+from pathlib import Path
+from types import SimpleNamespace
+
+from motion_common.paths import NO_PROJECT_SELECTED
+from motion_web_bridge import run_mode_gate
+from motion_web_bridge.coordination_bridge import (
+    CoordinationWebBridge,
+    local_motion_control,
+    local_motion_readiness,
+)
+
+
+class _FakeExecutionContext:
+    def reconcile(self):
+        return {'ready': True, 'message': 'applied'}
+
+    def reconcile_blocking(self, *, timeout_sec=10.0):
+        return self.reconcile()
+
+
+class _Node:
+    def __init__(self):
+        self.generation = [1]
+        self.change_generation_on_publish = False
+
+
+def _idle_service(node, root):
+    """이 PC 에서 도는 연동 서비스에 붙지 않는다 · §6-168
+
+    `_local_api` 를 막지 않으면 진짜 `localhost:8011` 로 나간다 · 이 PC 에서
+    그룹이 돌고 있으면 시험이 「도는 중」을 읽고, 아무도 시작한 적 없는 실행
+    때문에 설정 저장이 거부된다 · 실제로 그렇게 두 시험이 깨졌다.
+
+    시험은 제 손으로 세운 상태만 본다.
+    """
+    service = CoordinationWebBridge(node, root, lambda: 1)
+    service._local_api = lambda path, payload=None: {
+        'success': True,
+        'joined': True,
+        'execution': {'state': 'stopped', 'execution_id': ''},
+    }
+    return service
+
+
+class _Repository:
+    def __init__(self, root: Path, *, selected='project-a'):
+        self.root = root
+        self.selected = selected
+
+    def selected_project_id(self):
+        return self.selected
+
+    def require_selected_project_id(self):
+        # 검사와 문구를 함께 하는 주인 · §6-169
+        if not self.selected:
+            raise ValueError(NO_PROJECT_SELECTED)
+        return self.selected
+
+    def get_project(self, _project_id):
+        return {'project': {'active_files': {'motion_axis_matching': 'mapping.yaml'}}}
+
+    def export_path(self, _project_id, category, name):
+        path = self.root / category / name
+        if not path.is_file():
+            raise ValueError(f'missing {category}')
+        return path
+
+
+class _Bridge:
+    def __init__(self, repository):
+        self.project_repository = repository
+        self.payload = None
+        #: 실행 컨텍스트는 서비스가 갖는다 (§6-20)
+        self._execution_context = _FakeExecutionContext()
+
+    def motion_run_check(self, payload, timeout_sec=3.0):
+        self.payload = payload
+        return {'success': True, 'status': {'state': 'ready'}}
+
+    def motion_run_status(self):
+        return {'status': {'automation': {'repeat_mode': 'dwell', 'dwell_sec': 0.25}}}
+
+    def motion_group_prepare(self, payload):
+        self.payload = payload
+        return {'success': True}
+
+    def motion_group_start_at(self, payload):
+        self.payload = payload
+        return {'success': True}
+
+    def motion_group_initialize_at(self, payload):
+        self.payload = payload
+        return {'success': True}
+
+    def motion_group_cancel(self, payload):
+        self.payload = payload
+        return {'success': True}
+
+    def motion_run_stop(self):
+        return {'success': True}
+
+    def coordination_stop_now(self):
+        self.payload = {'command': 'coordination_stop_now'}
+        return {'success': True}
+
+    def motion_run_stop_after_cycle(self):
+        return {'success': True}
+
+
+def _assets(tmp_path):
+    mapping_dir = tmp_path / 'motion_axis_matching'
+    motion_dir = tmp_path / 'motions'
+    mapping_dir.mkdir()
+    motion_dir.mkdir()
+    (mapping_dir / 'mapping.yaml').write_text(
+        'motion_file_id: local-motion.jsonl\n', encoding='utf-8'
+    )
+    (motion_dir / 'local-motion.jsonl').write_text('{}\n', encoding='utf-8')
+
+
+def test_local_readiness_uses_only_local_active_files(tmp_path):
+    _assets(tmp_path)
+    bridge = _Bridge(_Repository(tmp_path))
+    result = local_motion_readiness(bridge)
+    assert result['success'] is True
+    assert bridge.payload['motion_file_id'] == 'local-motion.jsonl'
+    assert bridge.payload['request_source'] == 'network_readiness'
+
+
+def test_readiness_hands_back_what_it_approved_for_the_direct_reservation(tmp_path):
+    """수정 목록 209 · 207 · 준비가 통과한 재생 파일 · 실행 설정 · 연동 노드가 초기 위치 예약을 재생 관리자에 바로 보낸다
+    (전에는 `initialize_at` 마다 웹이 프로젝트 · 매핑 YAML 을 다시 읽었다)"""
+    _assets(tmp_path)
+    bridge = _Bridge(_Repository(tmp_path))
+    bridge.current_project_generation = lambda: 7
+    bridge._execution_context.context_id = lambda: 'ctx-7'
+
+    result = local_motion_readiness(bridge)
+
+    assert result['success'] is True
+    assert result['run_request'] == {
+        'motion_file_id': 'local-motion.jsonl', 'mapping_file_id': 'mapping.yaml',
+        'project_id': 'project-a', 'project_generation': 7, 'context_id': 'ctx-7',
+    }
+
+
+def test_readiness_refuses_what_group_prepare_would_refuse(tmp_path):
+    """오프 모드 · 모터 문제 · 전에는 `initialize_at` 의 `group_prepare` 에서야 봤다 · 이제 준비에서 · 시작 전에 이 PC 만 빠진다"""
+    _assets(tmp_path)
+    bridge = _Bridge(_Repository(tmp_path))
+    bridge.group_prepare_gate = lambda: '그룹 실행 준비 불가: 오프 모드'
+
+    result = local_motion_readiness(bridge)
+
+    assert result == {'success': False, 'message': '그룹 실행 준비 불가: 오프 모드'}
+    assert bridge.payload is None, '검사까지 가지 않는다'
+
+
+def test_group_prepare_preserves_local_between_cycle_setting_without_auto_repeat(tmp_path):
+    _assets(tmp_path)
+    bridge = _Bridge(_Repository(tmp_path))
+    result = local_motion_control(bridge, {
+        'command': 'group_prepare', 'execution_id': 'exec-a',
+        'initialize_monotonic': 100.0, 'network_operation_id': 'command-a',
+    })
+    assert result['success'] is True
+    assert bridge.payload['run_mode'] == 'once'
+    assert bridge.payload['group_execution'] is True
+    # 저장된 옛 dwell 은 「대기 후 초기 위치로」 로 · 수정 목록 112 라
+    assert bridge.payload['repeat_mode'] == 'dwell_reinitialize'
+    assert bridge.payload['dwell_sec'] == 0.25
+    assert 'automation_run' not in bridge.payload
+
+
+def test_each_group_start_at_schedules_exactly_one_cycle(tmp_path):
+    _assets(tmp_path)
+    bridge = _Bridge(_Repository(tmp_path))
+    result = local_motion_control(bridge, {
+        'command': 'group_start_at', 'execution_id': 'exec-a',
+        'cycle_number': 3, 'start_monotonic': 100.0,
+        'network_operation_id': 'command-b',
+    })
+    assert result['success'] is True
+    assert bridge.payload['run_mode'] == 'once'
+    assert bridge.payload['cycle_number'] == 3
+    assert bridge.payload['start_monotonic'] == 100.0
+
+
+def test_group_initialize_at_targets_the_existing_group_session(tmp_path):
+    _assets(tmp_path)
+    bridge = _Bridge(_Repository(tmp_path))
+    result = local_motion_control(bridge, {
+        'command': 'group_initialize_at', 'execution_id': 'exec-a',
+        'cycle_number': 3, 'initialize_monotonic': 100.0,
+        'network_operation_id': 'command-c',
+    })
+    assert result['success'] is True
+    assert bridge.payload['execution_id'] == 'exec-a'
+    assert bridge.payload['cycle_number'] == 3
+    assert bridge.payload['initialize_monotonic'] == 100.0
+
+
+def test_group_cycle_at_forwards_the_timed_cycle_without_reading_the_project(tmp_path):
+    """시간표 재생 회차 명령 · 서 있는 그룹 세션에 그대로 · 매핑 · 애니 고르기(프로젝트 읽기 약 0.5 s)는 안 한다 · 수정 목록 206"""
+
+    class _NoProjectRead(_Repository):
+        def get_project(self, _project_id):
+            raise AssertionError('회차 명령은 프로젝트를 읽지 않는다')
+
+    bridge = _Bridge(_NoProjectRead(tmp_path))
+    bridge.motion_group_cycle_at = lambda payload: setattr(bridge, 'payload', payload) or {'success': True}
+    result = local_motion_control(bridge, {
+        'command': 'group_cycle_at', 'execution_id': 'tt-s1', 'cycle_number': 4,
+        'start_monotonic': 1234.5, 'next_start_monotonic': 2174.5, 'network_operation_id': 'tt-cycle-a',
+    })
+    assert result['success'] is True
+    assert bridge.payload == {
+        'execution_id': 'tt-s1', 'cycle_number': 4, 'start_monotonic': 1234.5,
+        'next_start_monotonic': 2174.5, 'network_operation_id': 'tt-cycle-a', 'group_execution': True,
+    }
+
+
+def test_stop_now_uses_coordination_safety_stop_path(tmp_path):
+    bridge = _Bridge(_Repository(tmp_path))
+
+    result = local_motion_control(bridge, {'command': 'stop_now'})
+
+    assert result['success'] is True
+    assert bridge.payload == {'command': 'coordination_stop_now'}
+
+
+def test_control_uses_loopback_local_api(tmp_path):
+    node = _Node()
+    service = CoordinationWebBridge(node, tmp_path, lambda: node.generation[0])
+    calls = []
+    service._local_api = lambda path, payload=None: (
+        calls.append((path, payload)) or {'success': True, 'message': 'accepted'}
+    )
+    result = service.request_control({'command': 'join'})
+    assert result['success'] is True
+    assert calls == [('/control', {'command': 'join'})]
+
+
+def test_group_error_acknowledgement_uses_loopback_local_api(tmp_path):
+    node = _Node()
+    service = CoordinationWebBridge(node, tmp_path, lambda: node.generation[0])
+    calls = []
+    service._local_api = lambda path, payload=None: (
+        calls.append((path, payload)) or {'success': True, 'message': 'cleared'}
+    )
+
+    result = service.request_control({'command': 'acknowledge_group_error'})
+
+    assert result['success'] is True
+    assert calls == [('/control', {'command': 'acknowledge_group_error'})]
+
+
+def test_active_dds_execution_blocks_local_start(tmp_path):
+    node = _Node()
+    service = CoordinationWebBridge(node, tmp_path, lambda: node.generation[0])
+    service._local_api = lambda *_args, **_kwargs: {
+        'execution': {'state': 'running', 'execution_id': 'exec-a'},
+    }
+    assert '그룹 재생 중이라 단독 재생을' in service.local_execution_blocker()
+
+
+def test_a_manual_pc_may_play_solo_while_the_others_run_the_timetable(tmp_path):
+    """실물 NY 2026-11-11 00:33 · 수동 모드 f2 단독 재생이 시간표 재생(`tt-` · 참가 PC 없음) 때문에 거부 · 수정 목록 194"""
+    node = _Node()
+    service = CoordinationWebBridge(node, tmp_path, lambda: node.generation[0])
+    service._local_api = lambda *_args, **_kwargs: {
+        'execution': {'state': 'running', 'execution_id': 'tt-s1794373200', 'participants': []},
+    }
+    assert service.local_execution_blocker(timetable_ok=True) == ''
+    assert '그룹 재생 중' in service.local_execution_blocker(), '다른 쓰임(설정 저장 · 정지 전파 등)은 그대로'
+    service._local_api = lambda *_args, **_kwargs: {
+        'execution': {'state': 'running', 'execution_id': 'exec-a'},
+    }
+    assert '그룹 재생 중' in service.local_execution_blocker(timetable_ok=True), '신호 재생 그룹은 그대로 막는다'
+
+
+def test_the_solo_start_gate_lets_only_a_manual_pc_through_a_timetable_run(monkeypatch):
+    from motion_web_bridge.bridge_node import MotionWebBridge
+
+    seen = []
+    bridge = SimpleNamespace(
+        _coordination_web_bridge=SimpleNamespace(
+            local_execution_blocker=lambda *, timetable_ok=False: seen.append(timetable_ok) or '',
+        ),
+    )
+    for mode, expected in (('manual', True), ('schedule', False), ('off', False)):
+        monkeypatch.setattr(run_mode_gate, 'current_run_mode', lambda _node, mode=mode: mode)
+        MotionWebBridge.solo_start_group_blocker(bridge)
+        assert seen[-1] is expected, mode
+
+
+@pytest.mark.parametrize('state', ['motion_completed', 'cycle_initializing', 'completed', 'initialized'])
+def test_the_lockstep_barrier_is_still_a_group_run(tmp_path, state):
+    """회차 맞춤 장벽 · 슬레이브 실행 상태 = 런타임 상태 · 전에는 「그룹 끝」 으로 읽어 구간 끝 주차가 거절됐다 · 155"""
+    node = _Node()
+    service = CoordinationWebBridge(node, tmp_path, lambda: node.generation[0])
+    service._local_api = lambda *_args, **_kwargs: {
+        'execution': {'state': state, 'execution_id': 'exec-a'},
+    }
+
+    assert '그룹 재생 중' in service.local_execution_blocker()
+
+
+def test_a_group_stop_after_cycle_reaches_the_bridge_as_group_wide():
+    """연동 노드 → 브리지 · 그룹 전체 회차 후 정지 표시를 넘긴다 · 수정 목록 154"""
+    calls = []
+    bridge = SimpleNamespace(
+        motion_run_stop_after_cycle=lambda payload: calls.append(dict(payload)) or {'success': True},
+    )
+
+    local_motion_control(bridge, {'command': 'stop_after_cycle', 'reason': 'schedule_end', 'group_wide': True})
+    local_motion_control(bridge, {'command': 'stop_after_cycle'})
+
+    assert calls == [
+        {'reason': 'schedule_end', 'group_wide': True},
+        {'reason': '', 'group_wide': False},
+    ]
+
+
+def test_stale_dds_display_state_without_lease_does_not_block_local_start(tmp_path):
+    node = _Node()
+    service = CoordinationWebBridge(node, tmp_path, lambda: node.generation[0])
+    service._local_api = lambda *_args, **_kwargs: {
+        'execution': {'state': 'preparing', 'execution_id': ''},
+    }
+
+    assert service.local_execution_blocker() == ''
+
+
+def test_control_response_is_discarded_after_project_transition(tmp_path, monkeypatch):
+    # 운전 모드 문은 못 읽으면 막는다(18) · 이 시험의 관심사가 아니라 수동으로 둔다
+    monkeypatch.setattr(run_mode_gate, 'current_run_mode', lambda _node: 'manual')
+    node = _Node()
+    node.change_generation_on_publish = True
+    service = CoordinationWebBridge(node, tmp_path, lambda: node.generation[0])
+
+    def request(*_args, **_kwargs):
+        node.generation[0] += 1
+        return {'success': True}
+    service._local_api = request
+    result = service.request_control({'command': 'start_group'})
+    assert result['success'] is False
+    assert result['stale_project_generation'] is True
+
+
+def test_global_group_settings_do_not_modify_project_files(tmp_path, monkeypatch):
+    project = tmp_path / 'projects/project-a/project.yaml'
+    project.parent.mkdir(parents=True)
+    project.write_text('name: A\n', encoding='utf-8')
+    node = _Node()
+    service = _idle_service(node, tmp_path)
+    monkeypatch.setattr(service, '_restart_coordination_service', lambda: {
+        'service_installed': False, 'restart_pending': False, 'message': 'not installed',
+    })
+    result = service.update_settings({
+        'enabled': True, 'group_id': 'stage-a', 'dds_domain_id': 21,
+        'display_name': 'PC A',
+    })
+    assert result['saved'] is True
+    assert project.read_text(encoding='utf-8') == 'name: A\n'
+    assert (tmp_path / 'config/motion_coordination.yaml').is_file()
+
+
+def test_invalid_group_settings_do_not_replace_valid_file(tmp_path, monkeypatch):
+    node = _Node()
+    service = _idle_service(node, tmp_path)
+    monkeypatch.setattr(service, '_restart_coordination_service', lambda: {
+        'service_installed': True, 'restart_pending': True, 'message': 'ok',
+    })
+    service.update_settings({
+        'enabled': True, 'group_id': 'stage-a', 'dds_domain_id': 21,
+        'display_name': 'PC A',
+    })
+    original = (tmp_path / 'config/motion_coordination.yaml').read_text(encoding='utf-8')
+    try:
+        service.update_settings({
+            'enabled': True, 'group_id': '', 'dds_domain_id': 500,
+            'display_name': 'PC A',
+        })
+    except ValueError:
+        pass
+    else:
+        raise AssertionError('invalid settings accepted')
+    assert (tmp_path / 'config/motion_coordination.yaml').read_text(encoding='utf-8') == original
+
+
+def test_human_group_start_is_refused_in_schedule_mode_but_schedule_start_passes(tmp_path, monkeypatch):
+    """수정 목록 70 · 스케줄 모드에서는 스케줄이 보낸 그룹 시작만"""
+    monkeypatch.setattr(run_mode_gate, 'current_run_mode', lambda _node: 'schedule')
+    node = _Node()
+    service = CoordinationWebBridge(node, tmp_path, lambda: node.generation[0])
+    calls = []
+    service._local_api = lambda path, payload=None: (
+        calls.append((path, payload)) or {'success': True}
+    )
+
+    refused = service.request_control({'command': 'start_group'})
+    assert refused['success'] is False and '스케줄 모드' in refused['message']
+    assert calls == []
+
+    accepted = service.request_control({'command': 'start_group', 'schedule_id': 's1'})
+    assert accepted['success'] is True and len(calls) == 1
+
+
+def test_the_group_switch_turns_settings_and_participation_on_together(tmp_path, monkeypatch):
+    """수정 목록 83 · 설정이 꺼진 PC 에서 「그룹 참여」 를 켜면 enabled 와 joined 를 한 번에 저장한다."""
+    from motion_common.group_config import load_group_config
+    service = _idle_service(_Node(), tmp_path)
+    monkeypatch.setattr(service, '_restart_coordination_service', lambda: {
+        'service_installed': True, 'restart_pending': True, 'message': 'ok',
+    })
+    service.update_settings({'enabled': False, 'joined': False, 'group_id': 'stage-a', 'dds_domain_id': 21})
+    path = tmp_path / 'config/motion_coordination.yaml'
+    assert load_group_config(path).joined is False
+
+    service.update_settings({'enabled': True, 'joined': True, 'group_id': 'stage-a'})
+    config = load_group_config(path)
+    assert config.enabled is True and config.joined is True
+
+    # 화면은 더 이상 enabled 를 보내지 않는다 · 안 오면 지금 값 그대로
+    service.update_settings({'group_id': 'stage-b'})
+    config = load_group_config(path)
+    assert config.enabled is True and config.joined is True and config.group_id == 'stage-b'
+
+    with pytest.raises(ValueError):
+        service.update_settings({'joined': 'yes'})
+
+
+def test_group_prepare_carries_the_masters_initial_move_time(tmp_path):
+    """마스터 재생 화면에서 고른 초기 위치 이동 시간 · 0 이나 없으면 조인트 매핑 값(None) · 2026-10-12"""
+    _assets(tmp_path)
+    bridge = _Bridge(_Repository(tmp_path))
+    base = {'command': 'group_prepare', 'execution_id': 'exec-a',
+            'initialize_monotonic': 100.0, 'network_operation_id': 'command-a'}
+    assert local_motion_control(bridge, {**base, 'initial_move_time_sec': 7.0})['success'] is True
+    assert bridge.payload['initial_move_time_sec'] == 7.0
+    local_motion_control(bridge, {**base, 'initial_move_time_sec': 0.0})
+    assert bridge.payload['initial_move_time_sec'] is None
+    local_motion_control(bridge, base)
+    assert bridge.payload['initial_move_time_sec'] is None

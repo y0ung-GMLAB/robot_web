@@ -1,0 +1,324 @@
+/** UI v2 · 모터·드라이브 · 화면 없이 시험되는 함수만 (설계안 2026-10-09 · 모터·드라이브)
+ *
+ * 설정(registry · 파일)과 지금 상태(motion_state.motors · 런타임)를 번호(axis = controller_index)로 맞춘다.
+ * 편집 칸은 기존 화면이 고치던 것만 · 이름 · 속도·가속 · 브레이크 · 과부하 감시 · 운영 끝 서보 끄기.
+ */
+import { motorErrorText, motorLoad, stuckMailboxes, stuckSlaves } from './model.js';
+
+/** 편집 칸 · [키, 이름, 단위, AC 전용, 범위] · config 아래(name 만 바깥) */
+export const EDIT_FIELDS = [
+  { key: 'name', label: '이름', top: true },
+  { key: 'max_speed_rpm', label: '최대 속도', unit: 'rpm', ac: true, min: 1, max: 6500 },
+  { key: 'profile_velocity', label: '프로파일 속도', unit: 'deg/s', min: 0 },
+  { key: 'acceleration', label: '최대 가속', unit: 'deg/s²', min: 0 },
+  { key: 'profile_acceleration', label: '프로파일 가속', unit: 'deg/s²', min: 0 },
+  // 비우면 「드라이브 공통 설정」(아래 칸 · config/minas_base.yaml) · 이름은 공통 설정과 같은 말 · 사용자 2026-10-13
+  { key: 'brake_delay_stop_ms', label: '브레이크 지연 (정지 시)', unit: 'ms', ac: true, min: 0, max: 10000, blank: '공통 설정 (기본값 150)' },
+  { key: 'brake_delay_run_ms', label: '브레이크 지연 (동작 중)', unit: 'ms', ac: true, min: 0, max: 10000, blank: '공통 설정 (기본값 0)' },
+];
+
+export function getField(motor, key) {
+  const field = EDIT_FIELDS.find((f) => f.key === key);
+  return field?.top ? motor?.[key] : motor?.config?.[key];
+}
+
+export function setField(motor, key, value) {
+  const field = EDIT_FIELDS.find((f) => f.key === key);
+  if (field?.top) motor[key] = value;
+  else motor.config = { ...(motor.config || {}), [key]: value };
+}
+
+function isAc(motor) {
+  return String(motor?.motor_type || '') !== 'dynamixel';
+}
+
+const ABS_TEXT = { ok: ['정상', 'ok'], not_absolute: ['앱솔루트 아님', 'bad'], unknown: ['다시 읽는 중', 'warn'], multiturn_invalid: ['다회전 무효(Err40)', 'bad'] };
+
+/** 표 줄 · 설정 + 지금 상태 */
+export function motorRows(registry, snap) {
+  const runtime = new Map((snap?.motion_state?.motors || []).map((m) => [Number(m.controller_index), m]));
+  const drives = new Map((snap?.motion_state?.minas_absolute?.drives || []).map((d) => [Number(d.axis), d]));
+  // PREOP 등에 멈춘 드라이브 · 감시 노드 판정 · 수정 목록 125
+  const stuck = new Map(stuckSlaves(snap).filter((s) => s.axis !== null && s.axis !== undefined).map((s) => [Number(s.axis), s]));
+  // 메일박스(SDO)만 멈춘 드라이브 · 감시 노드 판정 · 수정 목록 139 ③
+  const mailbox = new Set(stuckMailboxes(snap).filter((s) => s.axis !== null && s.axis !== undefined).map((s) => Number(s.axis)));
+  const motors = (registry?.motors || []).filter((m) => !m.deleted);
+  return motors.map((motor) => {
+    const axis = Number(motor.axis ?? motor.config?.controller_index);
+    const live = runtime.get(axis) || {};
+    const drive = drives.get(axis);
+    const ac = isAc(motor);
+    let servo = live.state !== 'detected' ? ['통신 없음', 'bad'] : live.fault ? ['알람', 'bad'] : live.servo_on ? ['ON', 'ok'] : ['OFF', 'warn'];
+    if (!ac && live.state === 'detected') servo = live.fault ? ['오류', 'bad'] : live.servo_on ? ['토크 ON', 'ok'] : ['토크 OFF', 'warn'];
+    const position = live.position_rad === null || live.position_rad === undefined ? null : Number(live.position_rad) * 180 / Math.PI;
+    const [absText, absTone] = !ac ? ['-', 'idle'] : drive ? (ABS_TEXT[drive.status] || [String(drive.status), 'warn']) : ['-', 'idle'];
+    return {
+      id: String(motor.id || ''),
+      axis,
+      name: String(motor.name || ''),
+      ac,
+      kind: `${ac ? 'AC' : 'DXL'}${motor.profile?.driver_model ? ` · ${motor.profile.driver_model}` : ''}`,
+      servo: servo[0],
+      servoTone: servo[1],
+      fault: live.fault === true,
+      error: motorErrorText(live),
+      servoOn: live.servo_on === true,
+      detected: live.state === 'detected',
+      position,
+      load: motorLoad(live),
+      absolute: absText,
+      absoluteTone: absTone,
+      absoluteProblem: String(drive?.problem || ''),
+      absoluteStatus: ac && drive ? String(drive.status || '') : '',
+      // 게인 · 드라이브 EEPROM 값 그대로(우리 부팅 목록에 없음) · 수정 목록 108 (가)
+      gains: ac && drive?.gains ? drive.gains : null,
+      comm: stuck.has(axis) ? `${stuck.get(axis).state} 상태에서 정지했습니다. 드라이브 제어 전원을 재투입하세요.`
+        : mailbox.has(axis) ? '메일박스 응답이 없습니다. 드라이브 제어 전원을 재투입하세요.'
+        : live.state === 'detected' ? '연결됨' : live.state ? `연결 안 됨 (${live.state})` : '연결 안 됨',
+      masterIndex: Number(motor.identity?.ethercat_master_index ?? motor.config?.ethercat_master_index ?? 0),
+      slavePosition: Number(motor.config?.position ?? motor.identity?.slave_position),
+    };
+  }).sort((a, b) => a.axis - b.axis);
+}
+
+/** 지령 필터 값 · 0.1 ms 단위 → 「92 (9.2 ms)」 · 못 읽었으면 「?」 · 2026-10-16 */
+function filterText(value) {
+  return Number.isFinite(value) ? `${value} (${(value * 0.1).toFixed(1)} ms)` : '?';
+}
+
+/** 게인 칸 글 · 「자동 · 강성 13 · 관성비 137 %」 · 못 읽었으면 「-」 · 108 */
+export function gainText(gains) {
+  if (!gains) return { text: '-', tone: 'idle', hint: '드라이브 OP 상태 진입 후 읽기' };
+  const auto = gains.auto_tuning;
+  const parts = [
+    `자동조정 ${auto ?? '?'}`,   // 숫자 그대로 · 뜻(0 = 꺼짐 · 1 = 켬)은 마우스를 올리면 · 사용자 2026-10-13
+    gains.stiffness === null || gains.stiffness === undefined ? null : `강성 ${gains.stiffness}`,
+    gains.inertia_ratio === null || gains.inertia_ratio === undefined ? null : `관성비 ${gains.inertia_ratio} %`,
+  ].filter(Boolean);
+  const hint = [
+    `자동조정(Pr0.02) ${auto ?? '?'}${auto === 0 ? ' = 꺼짐' : auto ? ' = 켬' : ''}`,
+    `강성(Pr0.03) ${gains.stiffness ?? '?'}`,
+    `관성비(Pr0.04) ${gains.inertia_ratio ?? '?'} %`,
+    `추정 속도(Pr6.31) ${gains.estimation_speed ?? '?'}`,
+    `지령 스무딩(Pr2.22) ${filterText(gains.command_smoothing)}`,
+    `지령 FIR(Pr2.23) ${filterText(gains.command_fir)}`,
+    '드라이브에 저장된 값 (모터 프로그램이 변경하지 않음)',
+    gains.error ? `일부 항목 읽기 실패: ${gains.error}` : '',
+  ].filter(Boolean).join('\n');
+  // 자동조정 꺼짐도 노란색 아님 · 일부러 끄고 쓰는 값 · 사용자 2026-11-04
+  return { text: parts.join(' · '), tone: 'ok', hint };
+}
+
+/** 게인 알림 · 드라이브끼리 강성 · 지령 필터가 다름 · 막지는 않는다 · 108 (나) · 자동조정 꺼짐은 알리지 않음(사용자 2026-11-04)
+ *
+ * 한 줄만 · 드라이브별 값은 표의 게인 칸(마우스 글)에 이미 있다 · 사용자 2026-11-16 「딱 하나만 · 드라이브마다 강성이 다릅니다 정도만」
+ * 지령 필터가 축마다 다르면 늦게 따라가는 정도가 달라 축끼리 어긋난다(2026-10-16) · 목 · 눈처럼 일부러 다르게 둔 PC 도 있어 막지는 않는다
+ */
+export function gainWarnings(rows) {
+  const ac = rows.filter((r) => r.ac && r.gains);
+  const differs = (key) => new Set(ac.map((r) => r.gains[key]).filter((v) => v !== null && v !== undefined)).size > 1;
+  const items = [];
+  if (differs('stiffness')) items.push('강성');
+  if (differs('command_smoothing') || differs('command_fir')) items.push('지령 필터');
+  if (!items.length) return [];
+  const particle = items[items.length - 1] === '강성' ? '이' : '가';
+  return [`드라이브마다 ${items.join(' · ')}${particle} 다릅니다`];
+}
+
+/** 앱솔루트 한 줄 · 「3/3 정상」 */
+export function absoluteSummary(rows) {
+  const ac = rows.filter((r) => r.ac);
+  const ok = ac.filter((r) => r.absolute === '정상').length;
+  // 「앱솔루트 설정」 은 값이 틀린 드라이브(Pr0.15 ≠ 0 · Err40)에만 권한다 · 그 버튼은 다회전 클리어까지 가서
+  // 기준점을 잃는다 · 읽기만 실패한 것(unknown)은 감시가 몇 초마다 다시 읽는다 (수정 목록 110)
+  const needsSetup = ac.filter((r) => r.absoluteStatus === 'not_absolute' || r.absoluteStatus === 'multiturn_invalid').length;
+  const waiting = ac.filter((r) => r.absoluteStatus === 'unknown').length;
+  // 판정 자체가 없음(모터 프로그램이 이 프로젝트로 안 돎 · 감시가 아직 못 봄) · 인크리멘털일 수도 있다 · 수정 목록 120 (아)
+  const unread = ac.filter((r) => !r.absoluteStatus).length;
+  return { total: ac.length, ok, allOk: ac.length > 0 && ok === ac.length, needsSetup, waiting, unread };
+}
+
+/**
+ * 모터 검색 확인 창 · 모터 프로그램이 검색 뒤 다시 켜지는가는 서버 규칙 그대로 · 수정 목록 118
+ * 서버(scan_orchestrator) · 지금 도는 모터 프로그램이 선택한 프로젝트 것이면 검색 뒤 다시 켬 ·
+ * 다른 프로젝트 것이면 정지만 하고 안 켬(옛 프로젝트 설정으로 되살리지 않게) · 이 프로젝트 설정을 「저장 후 장비에 적용」 해야 켜짐
+ */
+export function scanConfirmText(kind, scope = {}, { dirty = false } = {}) {
+  const what = kind === 'dxl' ? '다이나믹셀' : kind === 'ac' ? 'AC 서보(EtherCAT)' : 'AC 서보와 다이나믹셀';
+  const runtime = String(scope.runtime_project_id || '');
+  const restart = scope.runtime_matches_selected === true
+    ? '검색 중 모터 프로그램을 정지하고, 검색 후 재시작합니다.'
+    : runtime
+      ? `현재 모터 프로그램은 다른 프로젝트(${runtime}) 설정으로 실행 중입니다. 검색 중 정지하며, 현재 프로젝트에서 「저장 후 장비에 적용」 시 재시작합니다.`
+      : '검색 중 모터 프로그램을 정지하며, 「저장 후 장비에 적용」 시 재시작합니다.';
+  return [
+    '서보 OFF 상태가 됩니다. 브레이크 없는 모터는 처질 수 있으므로 기구를 지지하고, 모든 모터가 정지한 상태에서 진행하세요.',
+    restart,
+    `${what} 모터를 검색합니다. 수십 초가 소요되며, 실패 시 재시도합니다.`,
+    '검색 결과는 저장 전까지 화면에만 표시합니다. 모터 이름과 드라이브 설정값은 유지합니다.',
+    kind === 'all' ? '' : '검색하지 않은 종류의 모터 설정은 변경하지 않습니다.',
+    dirty ? '저장하지 않은 변경 내용은 검색 결과로 바뀝니다.' : '',
+  ].filter(Boolean).join('\n');
+}
+
+/**
+ * 앱솔루트 한 줄 글 · 모르는 것은 모른다고 · 수정 목록 120 (아)
+ * 전에는 값을 못 읽은 채(검색 직후 · 모터 프로그램 꺼짐)에도 「앱솔루트 설정은 필요 없음」 이라 해서 인크리멘털 드라이브를 놓쳤다
+ */
+export function absoluteLine(abs) {
+  if (!abs.total) return 'AC 서보 없음';
+  const head = `앱솔루트 ${abs.ok}/${abs.total} 정상`;
+  if (abs.allOk) return head;
+  if (abs.needsSetup) return `${head} · ${abs.needsSetup}대 앱솔루트 설정 필요 (설정 전까지 모든 모터 동작 차단)`;
+  const why = abs.unread && !abs.waiting
+    ? `${abs.unread}대는 「저장 후 장비에 적용」 후 확인 가능`
+    : `${abs.waiting + abs.unread}대 다시 읽는 중`;
+  return `${head} · ${why} (확인 전까지 모든 모터 동작 차단)`;
+}
+
+/** 저장 전 검사 · 서버도 같은 것을 거절한다(수정 목록 37 · §6-217) */
+/** EtherCAT 주소 겹침 · 서버 저장 검사(motor_profile_validation)와 같은 규칙 · 저장을 누르기 전에 보이게 (2026-10-12)
+ *  Alias 1 이상은 같은 Master 안에서 겹치면 안 된다 · Alias 0 은 Slave 번호로 찾으니 Slave 번호가 겹치면 안 된다 */
+function addressProblems(motors) {
+  const problems = [];
+  const seen = new Map();
+  for (const motor of motors || []) {
+    if (motor.deleted || !isAc(motor)) continue;
+    const identity = motor.identity || {};
+    const config = motor.config || {};
+    // 주소 정보가 하나도 없으면 여기서 판정하지 않는다(서버가 「식별 정보 불완전」 으로 따로 말한다)
+    if (![identity.ethercat_alias, identity.slave_position, config.alias, config.position].some((v) => v !== undefined && v !== null && v !== '')) continue;
+    const master = Number(identity.ethercat_master_index ?? config.ethercat_master_index ?? 0) || 0;
+    const alias = Number(identity.ethercat_alias ?? config.alias ?? 0) || 0;
+    const position = Number(identity.slave_position ?? config.position ?? 0) || 0;
+    const key = alias ? `m${master}:a${alias}` : `m${master}:p${position}`;
+    const other = seen.get(key);
+    if (other !== undefined) {
+      problems.push(alias
+        ? `${motor.axis}번: EtherCAT Alias ${alias}가 ${other}번과 같습니다. ${motor.axis}번 줄을 눌러 「Alias 쓰기」로 다른 값 또는 0으로 변경하세요`
+        : `${motor.axis}번: Alias 0, Slave ${position}이 ${other}번과 같습니다. 「전체 검색」으로 실제 Slave 번호를 재확인하세요`);
+    } else {
+      seen.set(key, motor.axis);
+    }
+  }
+  return problems;
+}
+
+export function motorProblems(motors) {
+  const problems = addressProblems(motors);
+  const names = new Map();
+  for (const motor of motors || []) {
+    if (motor.deleted) continue;
+    const at = `${motor.axis}번`;
+    const name = String(motor.name || '').trim();
+    if (!name) problems.push(`${at}: 이름이 비어 있습니다`);
+    else if (names.has(name)) problems.push(`${at}: 「${name}」 이름이 ${names.get(name)}번과 중복`);
+    else names.set(name, motor.axis);
+    for (const field of EDIT_FIELDS) {
+      if (field.top || (field.ac && !isAc(motor))) continue;
+      const raw = getField(motor, field.key);
+      if (raw === null || raw === undefined || raw === '') continue;
+      const value = Number(raw);
+      if (!Number.isFinite(value)) problems.push(`${at}: ${field.label} 값이 숫자가 아닙니다`);
+      else if ((field.min !== undefined && value < field.min) || (field.max !== undefined && value > field.max)) {
+        problems.push(`${at}: ${field.label} 값은 ${field.min}~${field.max ?? '∞'} ${field.unit} 범위여야 합니다`);
+      }
+    }
+    const config = motor.config || {};
+    const pv = Number(config.profile_velocity);
+    const rpm = Number(config.max_speed_rpm);
+    if (isAc(motor) && pv > 0 && rpm > 0 && pv > rpm * 6 + 1e-6) problems.push(`${at}: 프로파일 속도 ${pv} deg/s가 최대 속도 ${rpm} rpm (${rpm * 6} deg/s)보다 큽니다`);
+    const pa = Number(config.profile_acceleration);
+    const acc = Number(config.acceleration);
+    if (pa > 0 && acc > 0 && pa > acc + 1e-6) problems.push(`${at}: 프로파일 가속 ${pa}가 최대 가속 ${acc}보다 큽니다`);
+  }
+  return problems;
+}
+
+/** 저장 안 한 변경 · 사람이 읽는 줄 */
+export function motorChanges(saved, draft) {
+  const before = new Map((saved || []).map((m) => [m.id, m]));
+  const after = new Set((draft || []).map((m) => m.id));
+  const out = [];
+  // 검색 제안으로 빠진 · 새로 든 모터 · 번호가 바뀐 모터도 변경이다 · 수정 목록 100
+  for (const old of saved || []) {
+    if (!after.has(old.id)) out.push(`${old.axis}번 ${old.name || ''} 삭제`.replace('  ', ' '));
+  }
+  for (const motor of draft || []) {
+    const old = before.get(motor.id);
+    if (!old) { out.push(`${motor.axis}번 ${motor.name || ''} 추가`.replace('  ', ' ')); continue; }
+    if (Number(old.axis) !== Number(motor.axis)) out.push(`${motor.name || motor.id} 번호 ${old.axis} → ${motor.axis}`);
+    for (const field of EDIT_FIELDS.concat([{ key: 'overload_monitor', label: '과부하율 읽기' }, { key: 'schedule_end_servo_off', label: '운영시간 종료 시 서보 OFF' }])) {
+      const a = field.top ? old[field.key] : old.config?.[field.key];
+      const b = field.top ? motor[field.key] : motor.config?.[field.key];
+      const same = (a ?? '') === (b ?? '') || (Number.isFinite(Number(a)) && Number.isFinite(Number(b)) && a !== '' && b !== '' && Number(a) === Number(b));
+      if (!same) out.push(`${motor.axis}번 ${field.label} ${a ?? '-'} → ${b ?? '-'}`);
+    }
+  }
+  return out;
+}
+
+/** 앱솔루트 설정 일 · 상태 한 줄 */
+export function absoluteJobText(job) {
+  if (!job || !job.state || job.state === 'idle') return '';
+  const step = job.step_count ? ` · ${job.step_index ?? 0}/${job.step_count}` : '';
+  const label = job.step_label ? ` · ${job.step_label}` : '';
+  // 다회전을 클리어하고 끝나면 「완료」 가 아니라 기준점 다시 지정 대기 · 클리어한 축을 다 다시 지정하면 완료 · 수정 목록 140
+  const head = { running: job.resumed ? '앱솔루트 설정 재개 중' : '앱솔루트 설정 중', done: '앱솔루트 설정 완료', failed: '앱솔루트 설정 실패', reference_pending: '앱솔루트 설정 · 기준점 재지정 대기' }[job.state] || job.state;
+  // 단계 이름·메시지가 머리말과 같은 말(「완료」 등)이면 한 번만
+  const parts = [label, job.message, job.error].flatMap((part) => String(part || '').split(' · ')).map((part) => part.trim()).filter(Boolean);
+  const unique = parts.filter((part, i) => !head.includes(part) && parts.indexOf(part) === i);
+  return [`${head}${step}`, ...unique].join(' · ');
+}
+
+/**
+ * 앱솔루트 설정 확인 창에 늘 적는 규칙 · 수정 목록 140 (사용자 결정 2026-10-14)
+ * 다회전 클리어는 4/7 에서 Err40(다회전 무효)인 드라이브만 · 없으면 클리어 안 함 · 기준점 그대로
+ */
+export function absoluteClearRule() {
+  return '다회전 클리어한 축은 위치 값 변경으로 모든 프로젝트에서 기준점 재지정이 필요합니다. 감속기가 있는 축은 육안으로 정렬해야 합니다.\n'
+    + '기준점을 재지정해 저장하기 전까지 재생 · 초기 위치 이동 · 스케줄 · 그룹 참여를 차단합니다.\n'
+    + '다회전 클리어는 4/7 단계에서 Err40(다회전 무효)이 발생한 드라이브만 실행합니다. Err40이 없는 경우 클리어하지 않으며 기준점도 유지합니다.\n'
+    + '대상 모터를 서보 OFF 하고 모터 프로그램을 잠시 정지합니다.';
+}
+
+/** 앞서 실패한 앱솔루트 설정 「재개」 · 서버가 남긴 기록(job.resume · 웹을 다시 켜도 남음) · 진행 중엔 없음 · 수정 목록 134
+ *  inline · 방금 실패한 그 작업 · 위 줄이 이미 실패 이유를 보여 주므로 버튼만 붙인다 · 아니면 따로 한 줄 */
+export function absoluteResumeView(job) {
+  const r = job?.resume;
+  if (!r || !r.from_index || job?.state === 'running') return null;
+  const count = r.step_count || 7;
+  const drives = (r.targets || []).map((t) => t.label).filter(Boolean).join(', ');
+  // 4/7 · 5/7 부터면 Err40 을 다시 읽어 그 드라이브만 클리어 · 6/7 부터는 클리어한 드라이브가 있을 때만 남는다 · 140 ⑤
+  const note = `${drives || '대상 드라이브'} · ${r.from_index <= 5 ? '다회전 클리어 전 (Err40 드라이브만 클리어 예정)' : r.from_index === 6 ? '다회전 클리어 완료 (전원 재투입과 확인 남음)' : '최종 확인만 남음'}`;
+  const inline = job?.state === 'failed' && job?.step === r.failed_step;
+  return {
+    inline,
+    note,
+    text: [`앱솔루트 설정 실패 · ${r.failed_index}/${count} · ${r.failed_label}`, r.error, note].filter(Boolean).join(' · '),
+    label: `재개 (${r.from_index}/${count} 부터)`,
+  };
+}
+
+/** 재개 확인 창 · 미리보기(서버) 그대로 · 134 · 클리어는 Err40 인 드라이브만 · 클리어한 축만 기준점 다시 지정 · 140 */
+export function absoluteResumeConfirm(preview) {
+  const p = preview || {};
+  const count = p.step_count || 7;
+  const from = p.from_index || 1;
+  const steps = (p.steps || []).map((s, i) => `${from + i}. ${s}`);
+  const cycles = (p.steps || []).filter((s) => String(s).includes('전원')).length;
+  const clear = p.clear_done
+    ? `다회전 클리어로 위치 값을 변경했습니다(${(p.cleared || []).map((t) => t.label).filter(Boolean).join(', ') || '대상 드라이브'}). 작업 완료 후 해당 축의 기준점을 재지정해 저장하세요.\n기준점을 저장하기 전까지 모든 프로젝트에서 재생 · 초기 위치 이동 · 스케줄 · 그룹 참여를 차단합니다.`
+    : absoluteClearRule();
+  return {
+    title: `앱솔루트 설정 재개 (${from}/${count} 부터)`,
+    body: [
+      `${p.failed_index ?? '?'}/${count} 단계(${p.failed_label || '-'})에서 중단된 작업을 같은 드라이브에서 재개합니다.${p.error ? `\n실패 원인: ${p.error}` : ''}`,
+      `대상\n${(p.targets || []).map((t) => `· ${t.label || t.axis}`).join('\n')}`,
+      steps.join('\n'),
+      `${clear}${cycles ? `\n진행 중 드라이브 전원을 ${cycles === 1 ? '한 번' : '최대 두 번'} 더 껐다 켜야 합니다(두 번째는 다회전 클리어할 때만).` : ''}`,
+    ].join('\n\n'),
+    confirmLabel: '재개',
+    tone: 'danger',
+  };
+}

@@ -1,0 +1,58 @@
+"""프런트엔드 `.mjs` 테스트를 파이썬 실행 경로에 올린다 · §6-59.
+
+`test/` 에 `node --test` 로 도는 테스트가 38개 · 257건 있는데 `colcon` 에도
+`pytest` 에도 걸려 있지 않았다. 아무도 돌리지 않으니 UI 를 고치고도 깨진 줄
+몰랐다 · 실제로 §6-57 커밋이 7건을 깨뜨린 채 올라갔다.
+
+여기서 감싸면 `pytest src/` 한 번에 딸려 온다. 테스트를 옮기지 않는다 ·
+`.mjs` 는 그대로 두고 실행 경로만 잇는다.
+"""
+
+import shutil
+import subprocess
+from pathlib import Path
+
+import pytest
+
+WEB_UI = Path(__file__).resolve().parents[1]
+
+
+def _node_major():
+    """node 주 버전 · 못 읽으면 0 · `node --test` 는 18 부터 · 수정 목록 63"""
+    try:
+        out = subprocess.run(['node', '--version'], capture_output=True, text=True, timeout=10).stdout
+        return int(out.strip().lstrip('v').split('.')[0])
+    except (OSError, ValueError, subprocess.SubprocessError):
+        return 0
+
+
+# 우분투 22.04 기본 node 는 12 · `node --test` 가 없어 실패로 보였다(실물 2026-10-07) ·
+# node 18 설치는 현장 결정이라 여기서는 건너뛴다 · 수정 목록 63
+@pytest.mark.skipif(shutil.which('node') is None, reason='node 가 없다')
+@pytest.mark.skipif(
+    shutil.which('node') is not None and _node_major() < 18,
+    reason='node 18 미만 · `node --test` 없음',
+)
+def test_frontend_mjs_suite_passes():
+    # 디렉터리 인자(`node --test test/`)는 Node 22 에서 모듈로 해석돼 실패한다 ·
+    # 파일을 직접 나열하면 Node 18 ~ 22 어디서나 같다 (수정 목록 10 · 2026-10-03)
+    files = sorted(str(path.relative_to(WEB_UI)) for path in (WEB_UI / 'test').glob('*.test.mjs'))
+    assert files, 'test/*.test.mjs 가 없다'
+    result = subprocess.run(
+        ['node', '--test', *files],
+        cwd=WEB_UI,
+        capture_output=True,
+        text=True,
+        timeout=600,
+    )
+    if result.returncode != 0:
+        failures = [
+            line for line in result.stdout.splitlines()
+            if line.startswith('not ok')
+        ]
+        pytest.fail(
+            'node --test 실패 {}건\n{}\n\n재현 · cd {} && node --test test/*.test.mjs'.format(
+                len(failures), '\n'.join(failures), WEB_UI,
+            ),
+            pytrace=False,
+        )

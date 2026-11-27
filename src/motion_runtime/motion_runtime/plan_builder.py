@@ -1,0 +1,994 @@
+"""모션 실행 계획 수립 · 요청과 현재 모터 상태로부터 실행 계획을 만든다.
+
+`MotionRunManager`에서 떼어냈다 · §5 분해 목표안의 `PlanBuilder` · §6-30
+
+**함수 자체는 아직 하나다.** 421줄짜리 `build` 하나가 이 모듈의 전부다.
+쪼개는 것은 별개 작업이다 · 모터를 실제로 움직이는 계획을 만드는 코드라
+경계를 잘못 그으면 축 목표값이 틀어진다. 먼저 **집을 마련하고** 거기서
+초점 맞춘 시험과 함께 나누는 편이 안전하다.
+
+노드에서 받는 것 · 모터 목록 · 파일 경로 해석 · 파일 읽기 · 제어 주기.
+"""
+
+from __future__ import annotations
+
+import json
+import math
+import time
+from typing import Any, Dict, List, Mapping, Optional
+
+from motion_common import joint_mapping, manual_speed, motion_segment, motion_tracks, multiturn_clear, rate_check, repeat_policy, units, wire_units
+from motion_common.values import finite_float, optional_int
+
+from . import motion_run_rules, plan_artifact
+from .motion_automation_store import REPEAT_MODES
+from .motion_run_constants import CONTINUOUS_LOOP_TOLERANCE_DEG
+from .motion_file_reader import parse_motion_tracks
+from .packed_samples import PackedSamples
+from .plan_cache import SingleFlightCache
+
+#: 안쪽 값은 rad · 글에 넣을 때만 deg · 수정 목록 6
+_deg = units.rad_to_deg
+from .registered_motion_file import playlist_from_mapping
+
+
+def _axis_playback_spans(
+    payload: Dict[str, Any],
+    axes: List[Dict[str, Any]],
+) -> Dict[int, List[tuple[float, float]]]:
+    """`{motion_id: [[시작, 끝], ...]}` 요청을 `{모터축: [(시작, 끝), ...]}` 로 옮긴다.
+
+    부르는 쪽(스튜디오)은 조인트 이름 로 말하고 발행부는 모터축으로 움직인다 ·
+    옮겨 두면 재생 루프가 매 프레임 매핑을 다시 뒤지지 않는다 · §6-73 §6-77
+    """
+    requested = payload.get('axis_playback_spans')
+    if not isinstance(requested, Mapping):
+        return {}
+    by_motion_id: Dict[str, List[tuple[float, float]]] = {}
+    for motion_id, spans in requested.items():
+        if not isinstance(spans, (list, tuple)):
+            continue
+        clean = []
+        for span in spans:
+            if not isinstance(span, (list, tuple)) or len(span) != 2:
+                continue
+            start = finite_float(span[0])
+            end = finite_float(span[1])
+            if start is None or end is None or end < start:
+                continue
+            clean.append((max(0.0, float(start)), float(end)))
+        # 빈 목록도 뜻이 있다 · "이 축은 재생이 한 번도 쥐지 않는다" · §6-87
+        #
+        # 레이어에 없는 축도 초기 이동에는 함께 나서야 하고(0도로 맞춰야
+        # MIDI 절대값이 맞는다), 그 뒤로는 재생이 건드리면 안 된다.
+        by_motion_id[str(motion_id)] = clean
+    if not by_motion_id:
+        return {}
+    return {
+        int(axis['motor_axis']): by_motion_id[str(axis['motion_id'])]
+        for axis in axes
+        if str(axis['motion_id']) in by_motion_id
+    }
+
+
+def _punch_joints(payload: Dict[str, Any], axes: List[Dict[str, Any]]) -> Dict[str, Dict[str, float]]:
+    """X-Touch 녹화 재생에서 사람이 덮어쓸 수 있는 조인트 · 조인트 rad · 수정 목록 156 ⑨-2
+
+    요청 `xtouch_punch_ids` 중 이 재생에 있는 조인트 · 최대 속도·가속도가 둘 다 있어야(빈 줄은 빠짐 ·
+    녹화 시작에서 이미 막는다) · 범위는 재생과 같은 자르기 범위.
+    """
+    if not payload.get('xtouch_take'):
+        return {}
+    wanted = {str(item) for item in payload.get('xtouch_punch_ids') or [] if str(item)}
+    joints: Dict[str, Dict[str, float]] = {}
+    for axis in axes:
+        motion_id = str(axis['motion_id'])
+        row = axis.get('row') or {}
+        if motion_id not in wanted or not joint_mapping.rate_limits_set(row):
+            continue
+        lower = finite_float(axis.get('motion_limit_lower_rad'))
+        upper = finite_float(axis.get('motion_limit_upper_rad'))
+        # 덮어쓰기·잇기도 상한의 98 % 로 · 녹화 파일이 반올림만으로 재생 검사를 넘지 않게(2026-10-19)
+        ratio = manual_speed.XTOUCH_LIMIT_RATIO
+        joints[motion_id] = {
+            'max_velocity': float(joint_mapping.rate(row, 'max_velocity', units.RAD)) * ratio,
+            'max_acceleration': float(joint_mapping.rate(row, 'max_acceleration', units.RAD)) * ratio,
+            'lower': float(lower) if lower is not None else -math.inf,
+            'upper': float(upper) if upper is not None else math.inf,
+        }
+    return joints
+
+
+#: 계획 재료 캐시 크기 · 준비 검사 → 그룹 준비 → 재생 목록이 같은 것을 쓰면 된다
+#:
+#: 수정 목록 208 · 재료는 디스크 변환본(`plan_artifact`)에서 ms 안에 읽는다 · 메모리 칸은 바로 앞에 쓴
+#: 것 둘만(920 s × 5 조인트 · 샘플 4.4 MB · 배열 7.4 MB) · 바이트 예산(170)은 뺐다
+SAMPLES_CACHE_SIZE = 2
+#: 조인트별로 나눈 레코드(구간을 잘랐으면 자른 것)
+RECORDS_STAGE_CACHE_SIZE = 2
+
+
+class _MotionFileUnreadable(ValueError):
+    """모션 파일에 쓸 수 있는 줄이 없다 · 글은 읽기 오류 그대로 · 초기 위치 이동만이면 0° 대체로 간다"""
+
+
+def _mapping_motion_ids(mapping: Mapping[str, Any]) -> frozenset:
+    """매핑 파일의 조인트 이름 전부(사용을 끈 줄 포함) · 이 PC 가 모션 파일에서 볼 조인트"""
+    return frozenset(
+        str(row.get('motion_id') or '').strip()
+        for row in (mapping.get('mappings') or [])
+        if isinstance(row, dict)
+    )
+
+
+def _samples_key(records_key: Any, period_sec: float, axes: List[Dict[str, Any]]) -> Optional[tuple]:
+    """재샘플 결과를 가리키는 키 · 레코드(파일 · 조인트 · 구간) + 주기 + 축마다 계산에 드는 값 전부
+
+    매핑 줄(`row`)은 통째로 넣는다 · 감속비 · 반전 · 기준점 · 상한 어느 칸이 바뀌어도 키가 바뀐다.
+    모터 한계(`motor_for_limits`)도 넣는다 · 장비에 적용으로 바뀐다.
+    """
+    if records_key is None:
+        return None
+    try:
+        axes_key = tuple(
+            (
+                str(axis['motion_id']),
+                int(axis['motor_axis']),
+                json.dumps(axis.get('row') or {}, sort_keys=True, default=str),
+                axis.get('motion_limit_lower_rad'),
+                axis.get('motion_limit_upper_rad'),
+                json.dumps(axis.get('motor_for_limits') or {}, sort_keys=True, default=str),
+            )
+            for axis in axes
+        )
+    except (TypeError, ValueError):
+        return None
+    return (records_key, float(period_sec), axes_key)
+
+
+def _sample_plan(
+    axes: List[Dict[str, Any]],
+    groups: Mapping[str, motion_tracks.JointTrack],
+    start_time: float,
+    end_time: float,
+    period_sec: float,
+) -> tuple:
+    """(샘플, 속도·가속 거절 사유) · 결과는 여러 계획이 같이 쓴다 · 고치지 않는다
+
+    샘플은 배열 묶음(`PackedSamples`) · 꺼내면 옛 사전 모양 · 값은 옛 식 그대로(비트까지 같다) · 수정 목록 170
+    애니 변환 자식 프로세스(`plan_artifact`)도 이 함수를 같은 인자로 부른다 · 수정 목록 208
+    """
+    duration = max(end_time - start_time, 0.0)
+    sample_count = max(1, int(math.floor(duration / period_sec)) + 1)
+    last_time = start_time + ((sample_count - 1) * period_sec)
+    if end_time - last_time > 0.001:
+        sample_count += 1
+    # 축마다 바뀌지 않는 것은 한 번만 읽는다 · 식은 그대로(`motor_target` · `_clamp_to_motor_limits`)
+    prepared = []
+    for axis in axes:
+        motion_id = str(axis['motion_id'])
+        limits = axis.get('motor_for_limits')
+        track = groups[motion_id]
+        prepared.append((
+            track.times,
+            track.values,
+            axis.get('motion_limit_lower_rad'),
+            axis.get('motion_limit_upper_rad'),
+            joint_mapping.motor_target_function(axis['row'], units.RAD),
+            bool(limits),
+            motion_run_rules._motor_limit_bounds(limits),
+        ))
+    samples = PackedSamples(
+        [int(axis['motor_axis']) for axis in axes],
+        [str(axis['motion_id']) for axis in axes],
+    )
+    interpolated = motion_tracks.interpolated
+    clamp_motion = motion_run_rules._clamp_motion_value
+    clamp_motor = motion_run_rules._clamp_to_motor_bounds
+    for index in range(sample_count):
+        sample_time = min(start_time + (index * period_sec), end_time)
+        positions = []
+        motion_values = []
+        for times, values, lower, upper, to_motor, has_limits, bounds in prepared:
+            motion_value = interpolated(times, values, sample_time)
+            motion_value = clamp_motion(motion_value, lower, upper)
+            target = to_motor(motion_value)
+            positions.append(clamp_motor(target, *bounds) if has_limits else target)
+            motion_values.append(float(motion_value))
+        samples.append(sample_time - start_time, sample_time, positions, motion_values)
+    return samples, _motion_rate_limit_error(axes, samples, period_sec)
+
+
+class PlanBuilder:
+    def __init__(self, manager: Any) -> None:
+        self.manager = manager
+        #: 계획 재료 캐시 · 준비 검사 · 그룹 준비 · 재생 목록이 같은 파일로 다시 짓지 않게 · 수정 목록 164
+        #:
+        #: 계획 **전체**는 담지 않는다 · 모터 상태(알람 · 위치) · 요청 칸(실행 번호 · 회차)은 짓는
+        #: 때마다 다시 본다. 무거운 둘만 담는다 · 조인트별로 나눈 레코드와 20 ms 재샘플.
+        #:
+        #: 수정 목록 208 · 둘 다 디스크 변환본이 원본이다(재부팅 · 서비스 재시작 뒤에도 남음) · 여기는 같은
+        #: 키를 두 스레드가 동시에 변환하지 않게 하는 자리 + 바로 앞에 읽은 것
+        self._records_cache = SingleFlightCache(RECORDS_STAGE_CACHE_SIZE)
+        self._samples_cache = SingleFlightCache(SAMPLES_CACHE_SIZE)
+
+    def _warn(self, message: str) -> None:
+        """변환 경고 한 줄 · 노드 없이 만든 시험 객체면 조용히"""
+        try:
+            self.manager.get_logger().warning(message)
+        except Exception:  # noqa: BLE001 · 로그 때문에 계획이 실패하면 안 된다
+            return
+
+    def _parse_here(self, motion_file_path: Any, ids: Optional[frozenset]) -> motion_tracks.MotionTracks:
+        """이 프로세스에서 파일 읽기 · 변환 자식 프로세스가 안 될 때 · 노드의 읽기 함수(시험이 갈아 끼움)를 쓴다"""
+        parse = getattr(self.manager, '_parse_motion_records', None)
+        if not callable(parse):
+            return parse_motion_tracks(motion_file_path, ids)
+        if ids is None:
+            return parse(motion_file_path)
+        return parse(motion_file_path, ids)
+
+    def _load_tracks(self, motion_file_path: Any, ids: Optional[frozenset]) -> motion_tracks.MotionTracks:
+        """조인트별 배열 · 노드는 캐시에서(`_load_motion_tracks`) · 읽는 함수를 갈아 끼운 시험 대역은
+        그 레코드 사전 목록을 옮겨 담는다(옛 길 · `_motion_groups` 와 같은 묶음)"""
+        manager = self.manager
+        replaced = '_load_motion_records' in getattr(manager, '__dict__', {})
+        loader = getattr(type(manager), '_load_motion_tracks', None)
+        if not replaced and callable(loader):
+            if ids is None:
+                return manager._load_motion_tracks(motion_file_path)
+            return manager._load_motion_tracks(motion_file_path, motion_ids=ids)
+        if ids is None:
+            records = manager._load_motion_records(motion_file_path)
+        else:
+            records = manager._load_motion_records(motion_file_path, motion_ids=ids)
+        if isinstance(records, motion_tracks.MotionTracks):
+            records = records.records()
+        if ids is not None:
+            # 읽는 쪽이 이미 걸렀다 · 갈아 끼운 읽기(시험 대역)도 같은 결과가 되게 한 번 더
+            records = [
+                record for record in records
+                if str(record.get('motion_id') or '') in ids
+            ]
+        return motion_tracks.MotionTracks.from_records(records)
+
+    def _records_stage(
+        self,
+        motion_file_path: Any,
+        mapping_motion_ids: frozenset,
+        segment_start: float,
+        segment_end: float,
+    ) -> tuple:
+        """(키, 조인트별 배열 사전, 구간 정보) · 사전은 매번 새것(부르는 쪽이 덧붙인다) · 배열은 같이 쓴다
+
+        이 PC 의 조인트 매핑에 없는 축은 **읽자마자 버린다** · 알리지 않는다 · §6-106 · N16
+
+        연동은 원래 이 모양이다 · 한 모션 파일을 여러 PC 가 나눠 가지고 각자 제 축만 돈다.
+        예전에는 파일에 들어 있는 축을 전부 "요구한 축" 으로 바꿔 버려서, 남의 축이 하나라도
+        섞이면 실행이 통째로 거부됐다(`requested Motion ID is unavailable`).
+
+        여기서 한 번 버리면 아래는 저절로 풀린다 · `groups` 도 요구 축도 재생 길이도 남은 축만
+        보고 정해진다. 파일 자체는 건드리지 않으므로 버려진 축은 그 PC 에서 자고 있을 뿐이다.
+
+        이제 파일을 **읽으면서** 버린다 · 4대 × 5 조인트 파일이면 레코드가 1/4 · 수정 목록 164
+
+        수정 목록 208 · 프로젝트 애니면 디스크 변환본(`plan_artifact` · tracks)에서 읽는다 · 없거나 키가 다르면
+        자식 프로세스가 변환해 둔다 · 돌려주는 네 번째 칸 = 출처(memory · artifact · compiled · parsed · file)
+        """
+        ids = mapping_motion_ids or None
+        token_of = getattr(self.manager, '_motion_records_token', None)
+        token = token_of(motion_file_path, ids) if callable(token_of) else None
+        key = None if token is None else (token, float(segment_start), float(segment_end))
+        store = plan_artifact.store_for(motion_file_path) if token is not None else None
+        sources: List[str] = []
+
+        def build() -> tuple:
+            try:
+                if store is not None:
+                    tracks, source = plan_artifact.load_or_compile_tracks(
+                        store, token, motion_file_path, ids,
+                        lambda: self._parse_here(motion_file_path, ids), self._warn,
+                    )
+                else:
+                    tracks, source = self._load_tracks(motion_file_path, ids), 'file'
+            except _MotionFileUnreadable:
+                raise
+            except ValueError as exc:
+                raise _MotionFileUnreadable(str(exc)) from exc
+            sources.append(source)
+            info: Dict[str, Any] = {}
+            if motion_segment.is_active(segment_start, segment_end) and tracks:
+                tracks, info = tracks.sliced(segment_start, segment_end)
+            return tracks, info
+
+        tracks, info = self._records_cache.get_or_compute(key, build)
+        groups = {motion_id: track for motion_id, track in tracks.tracks.items() if len(track)}
+        return key, groups, dict(info), (sources[0] if sources else 'memory')
+
+    def warm_records(self, motion_file_path: Any, mapping: Mapping[str, Any]) -> str:
+        """그 애니의 조인트별 배열을 디스크 변환본으로 · 모터 상태 없이 된다 · 출처를 돌려준다 · 수정 목록 208
+
+        준비 검사와 같은 키(같은 조인트 묶음 · 구간 없음) · 등록(실행 허용) 때 미리 부른다.
+        """
+        return self._records_stage(motion_file_path, _mapping_motion_ids(mapping), 0.0, 0.0)[3]
+
+    def _multiturn_clear_state(self) -> Dict[str, Any]:
+        """PC 단위 다회전 클리어 표시 · 작업 폴더 `runtime/` · 못 읽으면 빈 표시 · 수정 목록 140 ③"""
+        reader = getattr(self.manager, '_multiturn_clear_state', None)
+        if callable(reader):
+            return reader()
+        projects_dir = getattr(self.manager, 'motion_projects_dir', None)
+        if projects_dir is None:
+            return {}
+        return multiturn_clear.load(multiturn_clear.marker_path_for_projects(projects_dir))
+
+    def build(
+        self,
+        payload: Dict[str, Any],
+        *,
+        initialization_only: bool = False,
+        motors_snapshot: Optional[List[Dict[str, Any]]] = None,
+        warm_only: bool = False,
+        timing: Optional[Dict[str, Any]] = None,
+    ) -> Dict[str, Any]:
+        """실행 계획 · 아래 둘은 수정 목록 174
+
+        `warm_only` · 미리 짓기 · 재샘플 변환본 · 캐시만 채우고 `{'samples_key', 'sample_count', 'samples_cached',
+        'samples_from'}` 를 돌려준다 · 모터 준비 상태(알람 · 서보 · 통신)는 보지 않는다(검사 때 다시 본다 · 키에 안 든다) ·
+        속도·가속 거절도 안 올린다(변환본에 같이 담긴다).
+        `timing` · 넘긴 사전에 단계별 ms 를 적는다(실패해도 거기까지) · `records_ms` · `records_from` · `samples_ms` ·
+        `samples_cached` · `samples_from`(208 · memory · artifact · compiled · computed).
+        """
+        if warm_only and initialization_only:
+            raise ValueError('사전 생성은 재생 계획만 가능합니다')
+        run_mode = str(payload.get('run_mode') or 'once').strip().lower()
+        if run_mode not in ('once', 'continuous'):
+            raise ValueError('run_mode must be once or continuous')
+        automation_run = bool(payload.get('automation_run', False))
+        # 안 적었으면 「초기 위치 이동 후 다음」이다 · §6-135 · 주인은
+        # `motion_common.repeat_policy` · 화면 선택칸의 기본값과 같다
+        repeat_mode = str(
+            payload.get('repeat_mode') or repeat_policy.DEFAULT_REPEAT_MODE
+        ).strip().lower()
+        if repeat_mode not in REPEAT_MODES:
+            raise ValueError(f'지원하지 않는 자동 반복 방식입니다: {repeat_mode}')
+        # 옛 「바로 다음 · 대기 후 다음」 은 초기 위치를 거치게 바꾼다 · 수정 목록 112 라 (사용자 결정)
+        repeat_mode = repeat_policy.normalize_repeat_mode(repeat_mode)
+        dwell_sec = finite_float(payload.get('dwell_sec'))
+        dwell_sec = 0.0 if dwell_sec is None else dwell_sec
+        if dwell_sec < 0.0:
+            raise ValueError('자동 반복 대기 시간은 0초 이상이어야 합니다')
+        countdown_sec = finite_float(payload.get('countdown_sec'))
+        countdown_sec = 0.0 if countdown_sec is None else countdown_sec
+        if countdown_sec < 0.0 or countdown_sec > 10.0:
+            raise ValueError('모션 시작 대기 시간은 0초 이상 10초 이하여야 합니다')
+        scheduled_start_at = finite_float(payload.get('scheduled_start_at'))
+        scheduled_start_at = 0.0 if scheduled_start_at is None else scheduled_start_at
+        synchronized_cycle_sec = finite_float(payload.get('synchronized_cycle_sec'))
+        synchronized_cycle_sec = 0.0 if synchronized_cycle_sec is None else synchronized_cycle_sec
+        try:
+            synchronized_repeat_count = int(payload.get('synchronized_repeat_count') or 0)
+        except (TypeError, ValueError) as exc:
+            raise ValueError('동기 반복 횟수가 올바르지 않습니다') from exc
+        try:
+            target_cycle_count = int(payload.get('target_cycle_count') or 0)
+        except (TypeError, ValueError) as exc:
+            raise ValueError('목표 정지 회차가 올바르지 않습니다') from exc
+        if target_cycle_count < 0:
+            raise ValueError('목표 정지 회차는 0 이상이어야 합니다')
+        if synchronized_repeat_count and (
+            scheduled_start_at <= time.time() or synchronized_cycle_sec <= 0.0
+            or not 1 <= synchronized_repeat_count <= 10000
+        ):
+            raise ValueError('동기 예약 시작 시각·주기·반복 횟수를 확인하세요')
+        try:
+            operation_generation = int(payload.get('operation_generation') or 0)
+        except (TypeError, ValueError) as exc:
+            raise ValueError('작업 세대 값이 올바르지 않습니다') from exc
+        if operation_generation < 0:
+            raise ValueError('작업 세대 값은 0 이상이어야 합니다')
+        group_execution = bool(payload.get('group_execution'))
+        if not automation_run and not group_execution and run_mode != 'continuous':
+            # 한 번만 도는 실행은 이을 일이 없다 · 값을 쓰지 않는다
+            repeat_mode = repeat_policy.DIRECT
+            dwell_sec = 0.0
+        motion_file_id = str(payload.get('motion_file_id') or '').strip()
+        mapping_file_id = str(payload.get('mapping_file_id') or '').strip()
+        request_source = str(payload.get('request_source') or 'motion_run').strip()
+        studio_request = request_source == 'motion_studio'
+        requested_motion_ids = {
+            str(value or '').strip()
+            for value in (payload.get('active_motion_ids') or [])
+            if str(value or '').strip()
+        }
+        initial_move_time_override = motion_run_rules._initial_move_time_override_sec(payload)
+        # 스케줄이 끝나 기준점(조인트 0°)에 세울 때 · 매핑의 초기 방식과 상관없이 ·
+        # 초기 위치 이동에서만 받는다 · 수정 목록 36
+        initial_mode_override = str(payload.get('initial_mode_override') or '').strip()
+        if initial_mode_override and (
+            not initialization_only or initial_mode_override != 'reference'
+        ):
+            raise ValueError('초기 방식 덮어쓰기는 초기 위치 이동의 기준점(reference)만 가능합니다')
+        #: 초기 위치 이동만 할 때 등록 파일이 없거나 비었으면 「애니메이션 없음」처럼 간다
+        #: (2026-10-02 · 전에는 그 자리에서 실패해 0° 대체 경로까지 못 갔다)
+        unusable_motion_file_note = ''
+
+        def resolve_motion_file(resolve):
+            nonlocal unusable_motion_file_note
+            if not motion_file_id:
+                return None
+            try:
+                return resolve()
+            except ValueError as exc:
+                if not initialization_only:
+                    raise
+                unusable_motion_file_note = (
+                    f'재생 등록된 애니메이션 {motion_file_id} 를 찾지 못했습니다 ({exc}). '
+                    '애니메이션 없이 초기 위치로 이동합니다'
+                )
+                return None
+
+        if hasattr(self.manager, 'motion_projects_dir'):
+            project_id, motion_files_dir, mappings_dir = self.manager._project_asset_dirs(payload)
+            motion_directory = motion_files_dir
+            if studio_request and motion_file_id.startswith('__studio_'):
+                motion_directory = motion_files_dir.parent / 'runtime' / 'studio_runtime'
+            motion_file_path = resolve_motion_file(
+                lambda: self.manager._motion_file_path(motion_file_id, motion_directory)
+            )
+            mapping_path = self.manager._mapping_file_path(mapping_file_id, mappings_dir)
+        else:
+            # Compatibility for isolated unit tests that replace the path
+            # helpers without constructing a ROS node.
+            project_id = ''
+            motion_file_path = resolve_motion_file(
+                lambda: self.manager._motion_file_path(motion_file_id)
+            )
+            mapping_path = self.manager._mapping_file_path(mapping_file_id)
+        if not motion_file_id and not initialization_only:
+            raise ValueError('재생 등록된 애니메이션이 없습니다 (motion file_id is required)')
+        motors = (
+            list(motors_snapshot)
+            if motors_snapshot is not None
+            else self.manager._current_motors()
+        )
+        # 매핑을 먼저 읽는다 · 모션 파일을 읽으면서 이 PC 의 조인트만 남기려고 · 수정 목록 164
+        mapping = self.manager._load_mapping(mapping_path)
+        mapping_motion_ids = _mapping_motion_ids(mapping)
+        # 구간 재생 · 파일 시각 [시작, 끝] 만 남기고 0 부터 다시 센다 · 2026-10-16
+        #
+        # 여기서 줄을 자르면 아래는 그대로 간다 · 첫 프레임(초기 위치 · 첫 프레임 잇기) · 범위 자르기 ·
+        # 속도·가속 검사 · 회차 길이가 모두 잘린 구간만 본다. 스케줄(자동 반복)·스튜디오는 구간을 쓰지 않는다.
+        segment_start, segment_end = (
+            (0.0, 0.0)
+            if automation_run or studio_request
+            else motion_segment.parse(payload)
+        )
+        #: 조인트 → 시각 순 배열 · 수정 목록 170 · 사전은 이 계획 것 · 배열은 캐시와 같이 쓴다(고치지 않는다)
+        groups: Dict[str, motion_tracks.JointTrack] = {}
+        segment_info: Dict[str, Any] = {}
+        #: 같은 레코드 · 같은 구간이면 같은 키 · 샘플 캐시가 이것으로 시작한다 · 없으면 캐시 안 씀
+        records_key = None
+        # 경로를 못 찾았을 때만 건너뛴다 · 경로 값이 None 인 것 자체는 막지 않는다 (옛 계약)
+        if motion_file_id and not unusable_motion_file_note:
+            records_started = time.perf_counter()
+            try:
+                records_key, groups, segment_info, records_from = self._records_stage(
+                    motion_file_path, mapping_motion_ids, segment_start, segment_end,
+                )
+                if timing is not None:
+                    timing['records_from'] = records_from
+            except _MotionFileUnreadable as exc:
+                # 파일 읽기 실패만 · 구간이 파일보다 긴 것 같은 요청 오류는 초기 위치 이동도 막는다(옛 그대로)
+                if not initialization_only:
+                    raise
+                unusable_motion_file_note = (
+                    f'재생 등록된 애니메이션 {motion_file_id} 에 사용 가능한 행이 없습니다 ({exc}). '
+                    '애니메이션 없이 초기 위치로 이동합니다'
+                )
+                groups = {}
+                segment_info = {}
+            finally:
+                if timing is not None:
+                    timing['records_ms'] = round((time.perf_counter() - records_started) * 1000.0, 1)
+        # 읽으면서 이 PC 조인트만 남겼다 · 파일에 남의 조인트만 있으면 빈 목록이다 · 그때도 아래
+        # 「모션 자료 없음」 길로 가서 결과는 전과 같다(전부 빠져 움직일 조인트 없음 · 초기 이동은 0° 대체)
+        source_motion_data_available = bool(groups)
+
+        mapping_motion_file_id = str(mapping.get('motion_file_id') or '').strip()
+        # 재생 목록 안의 파일이면 된다 · 수정 목록 35 · 목록이 없으면 옛 규칙(등록 파일 하나) ·
+        # X-Touch 바탕 위 녹화는 사람이 수동 모드에서 고른 바탕을 한 번 재생 · 등록 안 된 파일도 된다
+        # (floating4 실물 2026-10-19 · 「바탕이 재생이 안 됨」 = 이 거절 · 수정 목록 156 ⑨)
+        registered_playlist = playlist_from_mapping(mapping)
+        if (
+            mapping_motion_file_id
+            and motion_file_id not in registered_playlist
+            and not studio_request
+            and not payload.get('xtouch_take')
+            and not (initialization_only and not motion_file_id)
+        ):
+            raise ValueError(
+                f'재생 등록에 없는 애니메이션입니다 ({motion_file_id}) · '
+                f'mapping file expects motion file {mapping_motion_file_id}, not {motion_file_id}'
+            )
+
+        if request_source != 'motion_studio':
+            requested_motion_ids = (
+                set()
+                if initialization_only
+                else {str(motion_id) for motion_id in groups}
+            )
+        initialization_fallback_used = False
+        if not motors:
+            raise ValueError(
+                '모터 상태를 아직 수신하지 못했습니다. 「모터 설정」의 장비 적용 완료 여부를 확인하세요 '
+                '(current motion_state is unavailable)'
+            )
+
+        rows = mapping.get('mappings')
+        if not isinstance(rows, list):
+            rows = []
+        axes = []
+        errors = []
+        # 범위를 사람이 확인 안 한 줄이 있으면 재생·초기 이동 모두 안 한다 ·
+        # 자동 생성 기본 −180 ~ 180° 는 기계 범위가 아니라 막는 것이 없다 · 수정 목록 97
+        # 맨 앞에 둔다 · 오류는 8개까지만 보인다
+        range_reason = joint_mapping.range_block_reason(rows)
+        if range_reason:
+            errors.append(range_reason)
+        # 다회전 클리어 뒤 기준점을 다시 지정하지 않은 축 · 재생·초기 위치 이동·스케줄·그룹 참가 모두 여기서 막힌다 ·
+        # 표시는 PC 단위(프로젝트를 바꾸거나 되돌려도 남음) · 이 매핑 줄의 기준점이 클리어 전 것이어도 막는다 · 수정 목록 140 ③
+        clear_reason = multiturn_clear.block_reason(self._multiturn_clear_state(), rows)
+        if clear_reason:
+            errors.insert(0, clear_reason)
+        warnings = [unusable_motion_file_note] if unusable_motion_file_note else []
+        if segment_info.get('end_clamped'):
+            warnings.append(
+                f'구간 끝 {motion_segment.format_time(segment_end)} 이 애니메이션 길이 '
+                f'{motion_segment.format_time(segment_info["source_duration_sec"])} 보다 길어 끝까지 재생합니다'
+            )
+        # 모터가 이 PC 에 없는 축 · 막지 않고 건너뛴다 · §6-139
+        missing_motor_motion_ids = []
+        # 모션 파일에 자료가 없는 축 · 이것도 막지 않는다 · §6-142
+        missing_motion_data_ids = []
+        # 재생 선택이 꺼진 축 · 이것도 막지 않는다 · §6-158
+        #
+        # 앞의 둘과 **같은 병의 세 번째 문**이다 · 모션 파일에 1-1·1-2·1-3 이
+        # 들어 있는데 조인트 매핑에서 1-2·1-3 의 체크를 꺼 두면, 그 둘은 이
+        # 반복문 첫 줄에서 조용히 빠져나가 어느 통에도 안 담겼다 · 그래서
+        # 아래에서 `requested Motion ID is unavailable: 1-2, 1-3` 로 **모션
+        # 전체가** 거부됐다 · 켜 둔 1-1 까지 같이 죽었다.
+        #
+        # 체크를 끈 것은 「이 축은 빼고 돌려라」는 뜻이지 「돌리지 말라」가
+        # 아니다 · 그러니 그 축만 빼고 돈다.
+        disabled_motion_ids = []
+        for row in rows:
+            if not isinstance(row, dict):
+                continue
+            if row.get('enabled') is False:
+                skipped_id = str(row.get('motion_id') or '').strip()
+                if skipped_id and skipped_id in requested_motion_ids:
+                    disabled_motion_ids.append(skipped_id)
+                continue
+            motion_id = str(row.get('motion_id') or '').strip()
+            if requested_motion_ids and motion_id not in requested_motion_ids:
+                continue
+            if not motion_id:
+                errors.append('enabled mapping row without motion_id')
+                continue
+            motor_ref = str(row.get('motor_ref') or '').strip()
+            motor_axis = optional_int(row.get('motor_axis'))
+            motor = None
+            if motor_ref:
+                matches = motion_run_rules._motors_for_ref(motor_ref, motors)
+                if len(matches) == 0:
+                    # 축 하나를 떼면 그 축만 빠진다 · 모션 전체가 못 돌 이유가
+                    # 없다 · §6-139
+                    #
+                    # 로보티즈 2축을 떼자 3축 모션이 통째로 거부됐다 · 멀쩡한
+                    # AC 서보 1축까지 같이 죽었다 · 바로 위에서 「이 PC 의
+                    # 조인트 매핑에 없는 축은 읽자마자 버린다」 를 이미 하고
+                    # 있는데(§6-106), 모터가 빠진 것도 같은 모양이다.
+                    #
+                    # 조용히 넘어가지는 않는다 · 3축짜리가 1축만 도는 것을
+                    # 모르면 안 된다.
+                    missing_motor_motion_ids.append(motion_id)
+                    continue
+                if len(matches) > 1:
+                    errors.append(f'Motion ID {motion_id}: Motor {motor_ref} is duplicated')
+                    continue
+                motor = matches[0]
+                motor_axis = optional_int(motor.get('controller_index'))
+            elif motor_axis is not None:
+                # Backward compatibility for mapping files saved before motor_ref.
+                motor = self.manager._motor_for_axis(motor_axis, motors)
+            if motor_axis is None:
+                errors.append(f'Motion ID {motion_id}: motor_ref is required')
+                continue
+            missing_motion_data = motion_id not in groups
+            if missing_motion_data:
+                if not initialization_only:
+                    # 모션 파일에 이 축이 없으면 그 축만 빠진다 · §6-142
+                    #
+                    # 모터가 없을 때와 같은 일이다(§6-139) · 축 하나가 비었다고
+                    # 나머지가 못 돌 이유가 없다 · 사용자가 보고 판단한다.
+                    missing_motion_data_ids.append(motion_id)
+                    continue
+                initial_mode = str(
+                    initial_mode_override
+                    or row.get('initial_mode')
+                    or motion_run_rules.DEFAULT_INITIAL_MODE
+                )
+                fallback_value = (
+                    float(joint_mapping.angle(row, 'initial_motion_position', units.RAD))
+                    if initial_mode == 'manual'
+                    else 0.0
+                )
+                groups[motion_id] = motion_tracks.JointTrack.single(
+                    motion_id, 0.0, float(fallback_value),
+                    row=sum(len(track) for track in groups.values()),
+                )
+                initialization_fallback_used = True
+                # 「기준점」은 원래 0° 로 간다 · 애니메이션이 없어도 알릴 일이 아니다
+                if initial_mode != 'reference':
+                    warnings.append(
+                        f'Motion ID {motion_id}: '
+                        + (
+                            f'모션 데이터가 없어 직접 지정 초기위치 {_deg(fallback_value):.3f}°를 사용'
+                            if initial_mode == 'manual'
+                            else '첫 프레임 데이터가 없어 모션 0°를 초기위치로 사용'
+                        )
+                    )
+            if motor is None:
+                errors.append(f'Motion ID {motion_id}: Axis {motor_axis} not found')
+                continue
+            motor_error = motion_run_rules._motor_ready_error(motor)
+            # 미리 짓기는 모터 준비를 안 본다 · 키에 안 드는 지금 상태라 검사 때 다시 본다 · 수정 목록 174
+            if motor_error and not automation_run and not warm_only:
+                errors.append(f'Motion ID {motion_id}: {motor_error}')
+
+            motion_values = groups[motion_id].values
+            motion_min = min(motion_values)
+            motion_max = max(motion_values)
+            # 범위 칸이 없으면 자르지 않는다(None) · 옛 동작 그대로
+            lower = joint_mapping.angle(row, 'motion_lower', units.RAD, default=None)
+            upper = joint_mapping.angle(row, 'motion_upper', units.RAD, default=None)
+            if lower is not None and upper is not None and lower > upper:
+                errors.append(f'Motion ID {motion_id}: motion min limit must be <= max limit')
+                continue
+            if missing_motion_data and (
+                (lower is not None and motion_values[0] < lower)
+                or (upper is not None and motion_values[0] > upper)
+            ):
+                errors.append(
+                    f'Motion ID {motion_id}: 초기 모션값 {_deg(motion_values[0]):.3f}°가 '
+                    '모션 설정 범위 밖입니다'
+                )
+                continue
+            if lower is not None and motion_min < lower:
+                warnings.append(
+                    f'Motion ID {motion_id}: {_deg(motion_min):.3f}° 이하 데이터는 {_deg(lower):.3f}°로 제한'
+                )
+            if upper is not None and motion_max > upper:
+                warnings.append(
+                    f'Motion ID {motion_id}: {_deg(motion_max):.3f}° 이상 데이터는 {_deg(upper):.3f}°로 제한'
+                )
+
+            command_motion_min = motion_run_rules._clamp_motion_value(motion_min, lower, upper)
+            command_motion_max = motion_run_rules._clamp_motion_value(motion_max, lower, upper)
+
+            target_min = motion_run_rules._motor_target(row, command_motion_min)
+            target_max = motion_run_rules._motor_target(row, command_motion_max)
+            target_low = min(target_min, target_max)
+            target_high = max(target_min, target_max)
+            limit_error = motion_run_rules._target_range_limit_error(motor, target_low, target_high)
+            if limit_error:
+                errors.append(f'Motion ID {motion_id}: {limit_error}')
+
+            initial_motion_source_value = motion_run_rules._initial_motion_value(
+                {**row, 'initial_mode': initial_mode_override} if initial_mode_override else row,
+                groups[motion_id],
+            )
+            initial_motion_value = motion_run_rules._clamp_motion_value(
+                initial_motion_source_value,
+                lower,
+                upper,
+            )
+            row_initial_time = max(
+                finite_float(row.get('initial_move_time_sec')) or 0.0,
+                0.0,
+            )
+            initial_move_time = (
+                initial_move_time_override
+                if initial_move_time_override is not None
+                else row_initial_time
+            )
+            axis_plan = {
+                'motion_id': motion_id,
+                'motor_ref': motor_ref,
+                'motor_axis': motor_axis,
+                'motor_type': motion_run_rules._motor_type(motor),
+                'initial_move_time_sec': initial_move_time,
+                'initial_motion_source_position_rad': initial_motion_source_value,
+                'initial_motion_position_rad': initial_motion_value,
+                'initial_motor_target_rad': motion_run_rules._clamp_to_motor_limits(
+                    motion_run_rules._motor_target(row, initial_motion_value), motor,
+                ),
+                'motion_limit_lower_rad': lower,
+                'motion_limit_upper_rad': upper,
+                'source_motion_min_rad': motion_min,
+                'source_motion_max_rad': motion_max,
+                'command_motion_min_rad': command_motion_min,
+                'command_motion_max_rad': command_motion_max,
+                'motion_clamped': command_motion_min != motion_min or command_motion_max != motion_max,
+                'target_min_rad': target_low,
+                'target_max_rad': target_high,
+                'loop_start_motion_rad': motion_run_rules._clamp_motion_value(motion_values[0], lower, upper),
+                # 첫 프레임 · 초기 위치와 다르면 초기 이동 끝에 여기까지 잇는다 · 수정 목록 13-1
+                'first_frame_motor_target_rad': motion_run_rules._clamp_to_motor_limits(
+                    motion_run_rules._motor_target(
+                        row, motion_run_rules._clamp_motion_value(motion_values[0], lower, upper),
+                    ),
+                    motor,
+                ),
+                'loop_end_motion_rad': motion_run_rules._clamp_motion_value(motion_values[-1], lower, upper),
+                'row': row,
+                # 반올림 차이만큼은 모터 한계로 잘라 보낸다 · 93-72
+                'motor_for_limits': {
+                    'lower_rad': wire_units.motor_limit(motor, 'lower') if motor else None,
+                    'upper_rad': wire_units.motor_limit(motor, 'upper') if motor else None,
+                },
+            }
+            axis_plan['loop_start_target_rad'] = motion_run_rules._clamp_to_motor_limits(
+                motion_run_rules._motor_target(row, axis_plan['loop_start_motion_rad']), motor,
+            )
+            axis_plan['loop_end_target_rad'] = motion_run_rules._motor_target(
+                row,
+                axis_plan['loop_end_motion_rad'],
+            )
+            axis_plan['loop_delta_rad'] = abs(
+                float(axis_plan['loop_end_motion_rad']) - float(axis_plan['loop_start_motion_rad'])
+            )
+            axis_plan['loop_motor_delta_rad'] = abs(
+                float(axis_plan['loop_end_target_rad']) - float(axis_plan['loop_start_target_rad'])
+            )
+            axis_plan['loop_tolerance_rad'] = units.deg_to_rad(CONTINUOUS_LOOP_TOLERANCE_DEG)
+            axes.append(axis_plan)
+
+        if missing_motion_data_ids:
+            warnings.append(
+                '모션 자료가 없어 건너뛴 Motion ID: '
+                + ', '.join(missing_motion_data_ids)
+                + ' (애니메이션에 해당 축 없음)'
+            )
+            requested_motion_ids = {
+                motion_id for motion_id in requested_motion_ids
+                if motion_id not in set(missing_motion_data_ids)
+            }
+        if missing_motor_motion_ids:
+            warnings.append(
+                '모터가 없어 건너뛴 Motion ID: '
+                + ', '.join(missing_motor_motion_ids)
+                + ' (모터 설정에서 삭제 또는 미연결)'
+            )
+            # 건너뛴 축은 더 이상 「요구한 축」이 아니다 · 그대로 두면 아래에서
+            # `requested Motion ID is unavailable` 로 다시 막힌다
+            requested_motion_ids = {
+                motion_id for motion_id in requested_motion_ids
+                if motion_id not in set(missing_motor_motion_ids)
+            }
+        if disabled_motion_ids:
+            warnings.append(
+                '재생 선택이 꺼져 건너뛴 Motion ID: '
+                + ', '.join(sorted(set(disabled_motion_ids)))
+                + ' (조인트 매핑 「사용」 체크 시 함께 재생)'
+            )
+            requested_motion_ids = {
+                motion_id for motion_id in requested_motion_ids
+                if motion_id not in set(disabled_motion_ids)
+            }
+        if not axes:
+            errors.append(
+                '재생할 조인트가 없습니다. 조인트 매핑의 「사용」 체크 행과 모터 연결을 확인하세요 '
+                '(enabled motion mappings not found)'
+            )
+        if requested_motion_ids:
+            planned_motion_ids = {str(axis['motion_id']) for axis in axes}
+            missing_requested = sorted(requested_motion_ids - planned_motion_ids)
+            if missing_requested:
+                errors.append(
+                    'requested Motion ID is unavailable: '
+                    + ', '.join(missing_requested)
+                )
+        duplicate_axes = motion_run_rules._duplicate_axis_text(axes)
+        if duplicate_axes:
+            errors.append(f'duplicate motor axis in enabled mappings: {duplicate_axes}')
+        if errors:
+            raise ValueError('; '.join(errors[:8]))
+
+        # 조인트마다 시각 순이라 첫 줄 · 끝 줄 · 전체 레코드의 최소 · 최대와 같다
+        start_time = min(track.times[0] for track in groups.values())
+        end_time = max(track.times[-1] for track in groups.values())
+        duration = max(end_time - start_time, 0.0)
+        samples = []
+        if not initialization_only:
+            # 20 ms 재샘플 · 속도·가속 검사 · 긴 애니(920 s)에서 가장 무거운 몫 · 같은 레코드 · 같은
+            # 매핑 줄 · 같은 모터 한계면 같은 답이라 한 번만 계산한다 · 수정 목록 164
+            #
+            # 키는 파일 · 매핑 줄 · 모터 번호 · 모터 한계(설정 값)뿐 · 모터 위치 · 알람 · 서보는 안 든다 ·
+            # 그래서 부팅 뒤 미리 지은 것(warm_only)을 준비 검사가 그대로 쓴다 · 수정 목록 174
+            #
+            # 수정 목록 208 · 프로젝트 애니면 디스크 변환본(samples) · 없으면 자식 프로세스가 같은 함수로
+            # 계산해 둔다 · 재부팅 · 서비스 재시작 뒤에도 그대로 · 이 프로세스는 읽기만(ms)
+            samples_key = _samples_key(records_key, self.manager.period_sec, axes)
+            store = plan_artifact.store_for(motion_file_path) if samples_key is not None else None
+            computed = []
+            samples_from = []
+            period_sec = self.manager.period_sec
+
+            def compute_here() -> tuple:
+                computed.append(True)
+                return _sample_plan(axes, groups, start_time, end_time, period_sec)
+
+            def compute() -> tuple:
+                if store is None:
+                    samples_from.append('computed')
+                    return compute_here()
+                result, source = plan_artifact.load_or_compile_samples(
+                    store, samples_key, motion_segment.is_active(segment_start, segment_end),
+                    {
+                        'axes': axes, 'groups': groups,
+                        'start_time': start_time, 'end_time': end_time, 'period_sec': period_sec,
+                    },
+                    compute_here, self._warn,
+                )
+                samples_from.append(source)
+                if source == 'compiled':
+                    computed.append(True)
+                return result
+
+            samples_started = time.perf_counter()
+            try:
+                samples, rate_error = self._samples_cache.get_or_compute(samples_key, compute)
+            finally:
+                if timing is not None:
+                    timing['samples_ms'] = round((time.perf_counter() - samples_started) * 1000.0, 1)
+                    timing['samples_cached'] = not computed
+                    timing['samples_from'] = samples_from[0] if samples_from else 'memory'
+            if warm_only:
+                return {
+                    'samples_key': samples_key,
+                    'sample_count': len(samples),
+                    'samples_cached': not computed,
+                    'samples_from': samples_from[0] if samples_from else 'memory',
+                }
+        else:
+            rate_error = _motion_rate_limit_error(axes, samples, self.manager.period_sec)
+        if rate_error:
+            raise ValueError(rate_error)
+
+        complete_motion_data_available = (
+            source_motion_data_available and not initialization_fallback_used
+        )
+        continuous_capability = (
+            motion_run_rules._continuous_capability(axes)
+            if complete_motion_data_available
+            else {
+                'available': False,
+                'reason': '실제 모션 데이터가 없어 초기 위치 이동만 가능합니다',
+            }
+        )
+        capabilities = {
+            'initial_position': {
+                'available': True,
+                'reason': '모터 상태·매핑·초기 목표 검사 통과',
+            },
+            'single_run': {
+                'available': complete_motion_data_available,
+                'reason': (
+                    '모터 상태·매핑 검사 통과, 모션 범위 초과값은 Min/Max로 제한'
+                    if complete_motion_data_available
+                    else '실제 모션 데이터가 없어 재생할 수 없습니다'
+                ),
+            },
+            'continuous_run': {
+                **continuous_capability,
+            },
+        }
+
+        # 이어 붙일 때 값이 튀는지 · **막지 않고 알린다** · §6-142
+        loop_gap = motion_run_rules._loop_gap_warning({
+            'run_mode': run_mode,
+            'repeat_mode': repeat_mode,
+            'capabilities': capabilities,
+        })
+        if loop_gap:
+            warnings.append(loop_gap)
+
+        return {
+            'project_id': project_id,
+            'request_source': request_source,
+            'group_execution': group_execution,
+            'execution_id': str(payload.get('execution_id') or ''),
+            'group_cycle_number': int(payload.get('group_cycle_number') or 0),
+            'motion_file_id': motion_file_id,
+            'mapping_file_id': mapping_file_id,
+            # 매핑 파일의 재생 목록 · 재생기가 다음 애니를 고를 때 본다 · 수정 목록 35
+            'motion_playlist': list(registered_playlist),
+            'run_mode': run_mode,
+            'automation_run': automation_run,
+            'repeat_mode': repeat_mode,
+            'dwell_sec': dwell_sec,
+            'countdown_sec': countdown_sec,
+            'scheduled_start_at': scheduled_start_at,
+            'synchronized_cycle_sec': synchronized_cycle_sec,
+            'synchronized_repeat_count': synchronized_repeat_count,
+            'hold_final_until_cycle': bool(payload.get('hold_final_until_cycle')),
+            'network_operation_id': str(payload.get('network_operation_id') or ''),
+            'network_lease_id': str(payload.get('network_lease_id') or ''),
+            'operation_generation': operation_generation,
+            'motion_file_path': str(motion_file_path) if motion_file_path else '',
+            'mapping_path': str(mapping_path),
+            'axes': axes,
+            # 축별 재생 소유 구간 · 오버더빙에서 스튜디오가 준다 · §6-77
+            #
+            # 이 구간 밖에서는 그 축을 명령하지 않는다 · 소유권이 풀려 MIDI 가
+            # 그 시간을 쓸 수 있다. 샘플 계산은 그대로 두고 **발행 직전에만**
+            # 거르므로, 로컬·그룹 실행 경로는 이 값이 없어 아무 영향이 없다.
+            'axis_playback_spans': _axis_playback_spans(payload, axes),
+            # X-Touch 녹화 재생 · 프레임 시각을 알리고 덮어쓸 조인트를 사람 손에 · 수정 목록 156 ⑨
+            'xtouch_take': bool(payload.get('xtouch_take')),
+            'xtouch_take_id': str(payload.get('xtouch_take_id') or ''),
+            'punch_joints': _punch_joints(payload, axes),
+            # 구간 재생 · 파일 시각 · 0/0 = 통째로 · 끝은 실제 끝(끝까지면 파일 길이) · 2026-10-16
+            **_segment_plan_fields(segment_info),
+            'samples': samples,
+            'warnings': warnings,
+            'capabilities': capabilities,
+            'summary': {
+                'request_source': request_source,
+                'motion_file_id': motion_file_id,
+                'mapping_file_id': mapping_file_id,
+                'axis_count': len(axes),
+                'duration_sec': duration,
+                'period_sec': self.manager.period_sec,
+                'sample_count': len(samples),
+                'initial_move_time_sec': initial_move_time_override,
+                'initialization_duration_sec': max(
+                    (
+                        float(axis.get('initial_move_time_sec') or self.manager.period_sec)
+                        for axis in axes
+                    ),
+                    default=0.0,
+                ),
+                'continuous_available': continuous_capability['available'],
+                'clamped_axis_count': sum(1 for axis in axes if axis.get('motion_clamped')),
+                'automation_run': automation_run,
+                'repeat_mode': repeat_mode,
+                'dwell_sec': dwell_sec,
+                'countdown_sec': countdown_sec,
+                'scheduled_start_at': scheduled_start_at,
+                'synchronized_cycle_sec': synchronized_cycle_sec,
+                'synchronized_repeat_count': synchronized_repeat_count,
+                'operation_generation': operation_generation,
+                'target_cycle_count': target_cycle_count,
+                **_segment_plan_fields(segment_info),
+            },
+        }
+
+
+def _segment_plan_fields(segment_info: Mapping[str, Any]) -> Dict[str, float]:
+    """계획 · 상태 · 기록에 싣는 구간 칸 · 구간이 없으면 0/0 · 파일 길이는 구간일 때만"""
+    if not segment_info:
+        return {**motion_segment.fields(0.0, 0.0), 'source_duration_sec': 0.0}
+    return {
+        **motion_segment.fields(
+            float(segment_info.get(motion_segment.START_KEY) or 0.0),
+            float(segment_info.get(motion_segment.END_KEY) or 0.0),
+        ),
+        'source_duration_sec': float(segment_info.get('source_duration_sec') or 0.0),
+    }
+
+
+# 검사는 motion_common 하나 · 녹화 저장(브리지)도 같은 잣대 · 수정 목록 156
+_motion_rate_limit_error = rate_check.rate_limit_error

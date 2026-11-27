@@ -1,0 +1,40 @@
+#!/usr/bin/env bash
+# 사운드 장치 독점 설정 — 새 PC 설치 시 1회만 실행한다.
+#
+# 이 앱은 aplay(ALSA)로 장치를 직접 연다. PulseAudio가 같은 장치를 붙잡고 있으면
+# aplay가 "Device or resource busy"로 실패해 소리가 전혀 나지 않는다.
+# 스피커 전용 PC이므로 PulseAudio를 봉인해 장치를 앱 전용으로 만든다.
+# (데스크톱 소리는 나지 않게 된다 — 의도한 동작이다)
+#
+# 블루투스 앰프·스피커는 PulseAudio 대신 bluez-alsa 로 낸다(aplay 그대로 · 2026-10-15 스피커 PC 확인):
+#   sudo apt install -y bluez-alsa-utils   (scripts/install_speaker.sh 가 깔아 둔다)
+#   bluetoothctl → scan on → pair <MAC> → trust <MAC> → connect <MAC>
+#   스피커 화면 출력 장치 = bluealsa:DEV=<MAC>,PROFILE=a2dp
+
+set -e
+
+systemctl --user mask --now speech-dispatcher.service speech-dispatcher.socket
+systemctl --user mask --now pulseaudio.service pulseaudio.socket
+pkill -x pulseaudio || true
+
+# 클라이언트가 PulseAudio를 되살리지 못하게 한다
+mkdir -p "$HOME/.config/pulse"
+grep -q '^autospawn' "$HOME/.config/pulse/client.conf" 2>/dev/null \
+  || echo 'autospawn = no' >> "$HOME/.config/pulse/client.conf"
+
+# 사운드 카드를 열지 않는 빈 PulseAudio 만 띄운다 · AnyDesk 8.1 은 PulseAudio 서버가 없으면 접속 때
+# 죽는다(desk_rt_ipc_error · 2026-11-04 스피커 PC) · 장치는 그대로 aplay 전용 ·
+# 출력 장치는 plughw:… · hw:… · bluealsa:… 로 (default / pulse 면 소리가 빈 출력으로 간다)
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+mkdir -p "$HOME/.config/systemd/user"
+cp "${SCRIPT_DIR}/pulseaudio-null.service" "$HOME/.config/systemd/user/"
+systemctl --user daemon-reload
+systemctl --user enable --now pulseaudio-null.service
+
+echo
+echo "완료. 이 PC의 사운드 카드 목록:"
+aplay -l | grep '^card' || true
+echo
+echo "config/speaker.yaml 의 audio.device 를 위 카드 번호에 맞춰라."
+echo "  예) card 1, device 0  ->  plughw:1,0"
+echo "웹 UI 설정에서 바꿔도 된다."

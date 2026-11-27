@@ -1,0 +1,183 @@
+import asyncio
+
+from fastapi import FastAPI, HTTPException, Request
+from fastapi.responses import FileResponse
+
+from pathlib import Path
+
+from motion_common import repeat_policy
+from motion_web_bridge import animation_preview, motion_file_analysis
+from motion_web_bridge.json_body import json_response
+
+
+def register_motion_run_routes(app: FastAPI, bridge, safety_first_stop) -> None:
+    @app.get('/api/motion-files')
+    async def motion_files():
+        payload = await asyncio.to_thread(
+            motion_file_analysis.list_motion_files,
+            bridge.project_repository,
+            bridge.motion_projects_dir,
+        )
+        # MuJoCo 상태(계산 중·완료·미계산)를 파일마다 싣는다 · 설정 없으면 그대로
+        return await asyncio.to_thread(
+            animation_preview.annotate_files,
+            bridge.workspace_root,
+            Path(payload.get('files_dir') or '.'),
+            payload,
+        )
+
+    @app.get('/api/motion-files/{file_id}')
+    async def motion_file(file_id: str):
+        payload = await asyncio.to_thread(
+            motion_file_analysis.load_motion_file,
+            bridge.project_repository,
+            bridge.motion_projects_dir,
+            file_id,
+        )
+        # 목록과 같은 MuJoCo 상태를 싣는다 · 화면이 이 `files` 로 목록을 덮어쓴다
+        return await asyncio.to_thread(
+            animation_preview.annotate_files,
+            bridge.workspace_root,
+            Path(payload.get('files_dir') or '.'),
+            payload,
+        )
+
+    @app.delete('/api/motion-files/{file_id}')
+    async def delete_motion_file(file_id: str):
+        return await asyncio.to_thread(bridge.delete_motion_file, file_id)
+
+    @app.get('/api/motion-mappings')
+    async def motion_mappings():
+        return await asyncio.to_thread(bridge.list_motion_mappings)
+
+    @app.post('/api/motion-mappings')
+    async def save_motion_mapping(request: Request):
+        body = await request.json()
+        if not isinstance(body, dict):
+            raise HTTPException(status_code=400, detail='request body must be an object')
+        return await asyncio.to_thread(bridge.save_motion_mapping, body)
+
+    @app.post('/api/motion-mappings/validate')
+    async def validate_motion_mapping(request: Request):
+        body = await request.json()
+        if not isinstance(body, dict):
+            raise HTTPException(status_code=400, detail='request body must be an object')
+        return await asyncio.to_thread(bridge.validate_motion_mapping, body)
+
+    @app.post('/api/motion-mappings/motion-file')
+    async def save_registered_motion_file(request: Request):
+        # 재생 등록만 바꾸는 좁은 길 · 조인트 매핑은 안 건드린다 · §6-160
+        body = await request.json()
+        if not isinstance(body, dict):
+            raise HTTPException(status_code=400, detail='request body must be an object')
+        return await asyncio.to_thread(bridge.save_registered_motion_file, body)
+
+    @app.get('/api/motion-mappings/{file_id}')
+    async def motion_mapping(file_id: str):
+        return await asyncio.to_thread(bridge.load_motion_mapping, file_id)
+
+    @app.post('/api/motion-files/{file_id}/preview-precompute')
+    async def precompute_motion_file(file_id: str):
+        return await asyncio.to_thread(bridge.precompute_motion_file, file_id)
+
+    # 웹 3D 표시 · 7-a · 장면은 팩마다 1회 · 프레임은 계산 결과(.sim.npz)에서
+    @app.get('/api/preview/scene')
+    async def preview_scene_state():
+        return await asyncio.to_thread(bridge.preview_scene_state)
+
+    @app.post('/api/preview/scene/export')
+    async def preview_scene_export():
+        return await asyncio.to_thread(bridge.preview_scene_export)
+
+    @app.get('/api/preview/scene/data')
+    async def preview_scene_data():
+        path = await asyncio.to_thread(bridge.preview_scene_path)
+        if path is None:
+            raise HTTPException(status_code=404, detail='3D 장면이 아직 없습니다')
+        return FileResponse(str(path), media_type='application/json', headers={'Cache-Control': 'no-cache'})
+
+    # Blender 뷰 · 팩의 scene.glb 그대로 · 수정 목록 50
+    @app.get('/api/preview/blender-scene')
+    async def preview_blender_scene():
+        path = await asyncio.to_thread(bridge.preview_blender_scene_path)
+        if path is None:
+            raise HTTPException(status_code=404, detail='로봇 팩에 scene.glb가 없습니다')
+        return FileResponse(str(path), media_type='model/gltf-binary', headers={'Cache-Control': 'no-cache'})
+
+    # Blender 뷰 · 애니메이션 json 값 그대로(glb 에 굽지 않음) · 수정 목록 98
+    @app.get('/api/motion-files/{file_id}/joint-values')
+    async def motion_joint_values(file_id: str):
+        # 글 만들기까지 스레드에서 · 루프를 막지 않게 · 수정 목록 170
+        return await asyncio.to_thread(lambda: json_response(bridge.motion_joint_values(file_id)))
+
+    @app.get('/api/motion-files/{file_id}/preview-frames')
+    async def preview_motion_frames(file_id: str):
+        return await asyncio.to_thread(lambda: json_response(bridge.preview_motion_frames(file_id)))
+
+    @app.post('/api/motion-run/live-override')
+    async def set_motion_run_live_override(request: Request):
+        body = await request.json()
+        if not isinstance(body, dict):
+            raise HTTPException(status_code=400, detail='request body must be an object')
+        return await asyncio.to_thread(bridge.set_motion_run_live_override, body)
+
+    @app.get('/api/motion-run/status')
+    async def motion_run_status():
+        return await asyncio.to_thread(bridge.motion_run_status)
+
+    @app.post('/api/motion-run/initialize')
+    async def motion_run_initialize(request: Request):
+        body = await request.json()
+        if not isinstance(body, dict):
+            raise HTTPException(status_code=400, detail='request body must be an object')
+        handler = bridge.motion_run_initialize
+        return await asyncio.to_thread(handler, body)
+
+    @app.post('/api/motion-run/start')
+    async def motion_run_start(request: Request):
+        body = await request.json()
+        if not isinstance(body, dict):
+            raise HTTPException(status_code=400, detail='request body must be an object')
+        # 받은 뒤 준비에서 죽지 않게 받기 전에 거절 · direct·dwell 도 거절 · 수정 목록 112 라
+        repeat_error = repeat_policy.request_repeat_mode_error(body.get('repeat_mode'))
+        if repeat_error:
+            return {'success': False, 'message': repeat_error}
+        handler = bridge.motion_run_start
+        return await asyncio.to_thread(handler, body)
+
+    @app.put('/api/motion-run/automation')
+    async def motion_automation_configure(request: Request):
+        try:
+            body = await request.json()
+        except Exception:
+            body = {}
+        if not isinstance(body, dict):
+            raise HTTPException(status_code=400, detail='request body must be an object')
+        repeat_error = repeat_policy.request_repeat_mode_error(body.get('repeat_mode'))
+        if repeat_error:
+            return {'success': False, 'message': repeat_error}
+        try:
+            handler = bridge.motion_automation_configure
+            return await asyncio.to_thread(handler, body)
+        except Exception as exc:
+            import traceback
+            trace = traceback.format_exc()
+            bridge.get_logger().error(f'motion_automation_configure API error: {trace}')
+            return {'success': False, 'message': f'서버 내부 오류: {exc}'}
+
+    @app.post('/api/motion-run/stop')
+    async def motion_run_stop():
+        return await asyncio.to_thread(
+            safety_first_stop, bridge, bridge.motion_run_stop,
+        )
+
+    @app.post('/api/motion-run/stop-after-cycle')
+    async def motion_run_stop_after_cycle_api(request: Request):
+        # 몸통은 선택 · 스케줄은 `reason: schedule_end` 를 싣는다 · 수정 목록 36
+        try:
+            body = await request.json()
+        except Exception:  # noqa: BLE001 · 빈 몸통 = 사람이 누른 정지
+            body = {}
+        return await asyncio.to_thread(
+            bridge.motion_run_stop_after_cycle, body if isinstance(body, dict) else {},
+        )

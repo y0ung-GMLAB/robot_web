@@ -1,0 +1,13 @@
+[Unit]
+# 빈 PulseAudio · 사운드 카드를 열지 않음(-n · 빈 출력 dummy 하나) · 장치는 그대로 aplay 전용
+# AnyDesk 8.1 은 PulseAudio 서버가 없으면 접속 때 죽는다(desk_rt_ipc_error · 2026-11-04 스피커 PC)
+# setup-audio.sh 가 깐다 · 출력 장치를 default / pulse 로 두면 소리가 이 빈 출력으로 간다
+Description=PulseAudio without sound card (for AnyDesk)
+
+[Service]
+ExecStart=/usr/bin/pulseaudio -n --daemonize=no --exit-idle-time=-1 --log-target=journal -L module-native-protocol-unix -L "module-null-sink sink_name=dummy"
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=default.target

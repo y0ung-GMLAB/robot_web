@@ -1,0 +1,34 @@
+items:
+  - { id: 30, index: 0x6060, subindex: 0x00, value: 1,       type: s8  } # Modes of operation  
+  - { id: 31, index: 0x3511, subindex: 0x00, value: 100,     type: s16 } # Effort setup for emergency stop
+  - { id: 32, index: 0x3512, subindex: 0x00, value: 50,      type: s16 } # Over-load level setup
+  - { id: 33, index: 0x3513, subindex: 0x00, value: 0,       type: s16 } # Over-speed level setup
+  - { id: 34, index: 0x3514, subindex: 0x00, value: 1,       type: s16 } # Motor working range setup
+  - { id: 35, index: 0x607F, subindex: 0x00, value: 279620000,type: u32 } # Max profile velocity
+  - { id: 36, index: 0x6082, subindex: 0x00, value: 500,     type: u32 } # End velocity
+  - { id: 37, index: 0x60B1, subindex: 0x00, value: 0, type: s32 } # Velocity offset
+  - { id: 38, index: 0x60B2, subindex: 0x00, value: 0, type: s16 } # Effort offset
+  - { id: 50, index: 0x6072, subindex: 0x00, value: 0, type: u16 } # Max effort
+  - { id: 51, index: 0x607B, subindex: 0x01, value: 0, type: s32 } # Min position range limit
+  - { id: 52, index: 0x607B, subindex: 0x02, value: 0, type: s32 } # Max position range limit
+  - { id: 51, index: 0x607D, subindex: 0x01, value: 0, type: s32 } # Min software position limit
+  - { id: 52, index: 0x607D, subindex: 0x02, value: 0, type: s32 } # Max software position limit
+  - { id: 53, index: 0x6080, subindex: 0x00, value: 0, type: u32 } # Max motor speed
+  - { id: 54, index: 0x6081, subindex: 0x00, value: 0, type: u32 } # Profile velocity
+  - { id: 55, index: 0x6083, subindex: 0x00, value: 0, type: u32 } # Profile acceleration
+  - { id: 56, index: 0x6084, subindex: 0x00, value: 0, type: u32 } # Profile deceleration
+  - { id: 57, index: 0x60C5, subindex: 0x00, value: 0, type: u32 } # Max acceleration
+  - { id: 58, index: 0x60C6, subindex: 0x00, value: 0, type: u32 } # Max deceleration
+
+interfaces:
+  - { id: 98, index: 0x1600                                     } # RxPDO
+  - { id: 0,  index: 0x6040, subindex: 0x00, size: 2, type: u16 } # Control word
+  - { id: 1,  index: 0x607A, subindex: 0x00, size: 4, type: s32 } # Target position
+  - { id: 2,  index: 0x60FF, subindex: 0x00, size: 4, type: s32 } # Target velocity
+  - { id: 3,  index: 0x6071, subindex: 0x00, size: 2, type: s16 } # Target effort
+  - { id: 99, index: 0x1A00                                     } # TxPDO
+  - { id: 4,  index: 0x6041, subindex: 0x00, size: 2, type: u16 } # Status word
+  - { id: 5,  index: 0x603F, subindex: 0x00, size: 2, type: u16 } # Error code
+  - { id: 6,  index: 0x6064, subindex: 0x00, size: 4, type: s32 } # Position actual value
+  - { id: 7,  index: 0x606C, subindex: 0x00, size: 4, type: s32 } # Velocity actual value
+  - { id: 8,  index: 0x6077, subindex: 0x00, size: 2, type: s16 } # Effort actual value

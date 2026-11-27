@@ -1,0 +1,43 @@
+# motion_system · robot_web 안으로 합친 코드
+
+2026-10-02 · git 서브모듈 → robot_web 저장소 안 코드 (사용자 결정)
+
+- 이유 · 모터 통신층(온도 등) 수정이 필요할 때 커밋·push 할 곳이 없었음
+  (원본 저장소 쓰기 권한 없음)
+- 이후 수정 · robot_web 커밋으로 · 원본 저장소로 되돌려 보내지 않음
+- 수정 규칙 · `AGENTS.md` 「motion_system 보호」 그대로 (사용자가 대상·범위를 명시할 때만)
+
+## 가져온 커밋 (합친 시점 · 이 상태 그대로 · 코드 변경 없음)
+
+| 경로 | 원본 저장소 | 커밋 |
+|---|---|---|
+| `.` | https://github.com/kimjoonho-git/motion_system_ros2 | 5ec19096952c1f536270ca50c75bedb6cc40e996 |
+| `lib/motor_manager` | https://github.com/SeonilChoi/motor_manager | a77fd250ef7904cc637a95295a6b7d8333f9e5c7 |
+| `lib/robot_manager` | https://github.com/SeonilChoi/robot_manager | 84999745512490f2415c6040878d4525b30fe9eb |
+| `ros2/iahrs_driver_ros2` | https://github.com/SeonilChoi/iahrs_driver_ros2 | ed1a6236e12f1440f008e34f4ae9e534d8341e55 |
+| `ros2/playstation_joy_interface_ros2` | https://github.com/SeonilChoi/PlayStation-JoyInterface-ROS2 | 892b3914578c9faa157279264a418623399ffc0a |
+| `ros2/xtouch_midi_ros2` | https://github.com/SeonilChoi/xtouch_midi_ros2 | f0c9edd546ab486a72a34658f943f79cb3e9a8f8 |
+
+원본 계보 · https://github.com/SeonilChoi/motion_system → kimjoonho-git/motion_system_ros2
+
+## 빠진 파일 (robot_web `.gitignore` 대상 · 빌드와 무관)
+
+- `.gitmodules` (서브모듈 정의 · 이제 필요 없음)
+- `ros2/motion_system_ros2/motion_control_midi/launch/__pycache__/motion_control_midi_node.launch.cpython-310.pyc`
+- `ros2/playstation_joy_interface_ros2/.vscode/` 4개 (편집기 설정)
+
+나머지 250개 파일 · 원본 커밋과 blob 해시 동일 (합칠 때 확인)
+
+## 이후 수정 (robot_web 커밋 · 사용자 명시 지시)
+
+| 날짜 | 경로 | 수정 | 사유 |
+|---|---|---|---|
+| 2026-10-04 | `lib/motor_manager/hardware/dynamixel/src/dynamixel_driver.cpp` · `include/dynamixel/dynamixel_driver.hpp` | `position(double)` 한 바퀴(0~4095) 클램프 → Extended Position 허용 raw ±`extended_position_raw_limit_`(기본 1,048,575 · param yaml `extended_position_raw_limit`) | 다이나믹셀 멀티턴 · 외부 기어 사용 · 운전 한계는 상위 `lower/upper` 로 |
+| 2026-10-06 | `ros2/motion_system_ros2/motion_control_bridge/src/motor_manager_node.cpp` | 토픽 `motion_control/motor_command`·`motor_status` 의 `position`·`velocity` 를 rad · rad/s 로 (받을 때 ×180/π · 낼 때 ×π/180) · motor_manager·드라이버 4종·모터 설정 파일은 deg 그대로 | robot_web 수정 목록 6-1 · 사용자 결정 「노드 경계만」 · 같은 토픽을 쓰는 MIDI·robot_manager·rqt 노드는 robot_web 서비스가 띄우지 않아 고치지 않음(띄우면 rad 로 읽어야 함) |
+| 2026-10-06 | `lib/motor_manager/motor_manager/src/motor_manager.cpp` · `include/motor_manager/motor_manager.hpp` | 드라이브 알람(errorcode≠0) 중에도 **제어어만 담은 알람 리셋(bit 7)** 은 드라이브로 보냄(전에는 모든 명령 보류) · 알람이 풀리는 순간 알람 동안 받은 명령은 버림(옛 위치 목표 재생 → 튐 방지) · `isFaultResetOnly` | robot_web 수정 목록 1 · 사용자 승인 2026-10-06 |
+| 2026-10-06 | `lib/motor_manager/communications/serial/` (`serial_master` · `serial_controller` · `serial_driver.hpp`) · `lib/motor_manager/hardware/dynamixel/src/dynamixel_driver.cpp` | ① 상태 패킷 오류 바이트의 Alert 비트(0x80 · 하드웨어 오류 있음)만 선 응답은 값을 받는다(전에는 버려 오류 상태·토크·위치가 동결) · 패킷 오류 코드(1~7)만 실패 ② 노드별 연속 무응답 수 · 20회면 `errorcode` 0xFFFF(통신 불가) ③ 제어어 bit 7(고장 리셋) = REBOOT(0x08 · param yaml `protocol.reboot` 선택) · 재부팅 뒤 items 다시 씀 ④ 부팅 items 는 읽어서 다를 때만 쓰고 · Access Error(토크 ON 중 EEPROM)일 때만 토크 OFF | robot_web 수정 목록 23 · 24-1 · 25-2 · 사용자 승인 2026-10-06 |
+| 2026-10-06 | `ros2/motion_system_ros2/motion_control_bridge/src/motor_manager_node.cpp` · `include/motion_control_bridge/motor_manager_node.hpp` | `MotorManager::run()` 이 예외로 끝나면 `rclcpp::shutdown()` → 프로세스 종료 코드 70 (전에는 로그만 남기고 상태가 멈춘 채 노드가 살아 있었음) · 서비스 `Restart=on-failure` 가 3초 뒤 다시 띄움 | robot_web 수정 목록 3-2 · 사용자 승인 2026-10-06 |
+| 2026-10-12 | `lib/motor_manager/core/motor_interface/include/motor_interface/motor_driver.hpp` · `lib/motor_manager/motor_manager/src/motor_manager.cpp` · `lib/motor_manager/hardware/minas/src/minas_driver.cpp` · `lib/motor_manager/hardware/zeroerr/src/zeroerr_driver.cpp` | 드라이브 소프트 리밋(0x607D)만 `lower − soft_limit_margin` · `upper + soft_limit_margin` 으로 씀 · `driver_config_t.soft_limit_margin` 새 칸 · 드라이버 설정에 `soft_limit_margin`(모터 deg) 있으면 읽고 없으면 2.0 · 음수면 시작 거부 · 설정 파일의 `lower/upper` · supervisor · 재생 클리핑은 그대로 매핑 범위 | robot_web 수정 목록 103(가) · 사용자 결정 2026-10-12 · 다이얼·페이더를 범위 끝까지 밀면 추종 오차로 리밋을 넘어 내부 리밋(bit 11)이 걸려 그 축 명령이 거절됨 |
+| 2026-11-09 | `lib/motor_manager/motor_manager/src/motor_manager.cpp` · `include/motor_manager/motor_manager.hpp` | 정상 종료(`request_exit`) 때 바로 마스터를 내리지 않고 · 모든 EtherCAT 축 서보 OFF → 모두 꺼진 뒤 PDO 100 ms 더 → `deactivate` · 안 꺼지면 500 ms 에서 내림 · 예외로 끝날 때는 그대로 · `controllersDisabled` | robot_web 수정 목록 187 ③ · 서보가 켜진 채 OP 를 떠나 드라이브가 통신 오류(SM2 워치독) 길로 섬 · 사용자 지시 2026-11-09 |
+| 2026-11-09 | `lib/motor_manager/motor_manager/src/motor_manager.cpp` · `core/motor_interface/include/motor_interface/motor_master.hpp` · `communications/ethercat/{include/ethercat/ethercat_master.hpp,src/ethercat_master.cpp}` | 정상 종료 때 서보 OFF → PDO 100 ms 뒤 · PDO 를 계속 돌리며 `ethercat states -m N PREOP`(보조 스레드) · 모든 슬레이브가 SAFEOP/OP 를 벗어나면(`ecrt_master_state` al_states · 최대 1.5 s) `deactivate` · `MotorMaster::request_safe_state` · `safe_state_reached`(기본 = 할 일 없음 · CAN · 시리얼) | robot_web 수정 목록 188 ⑪ · OP 에서 바로 내려 순서가 늦은 드라이브가 SM2 워치독(AL 0x001B · SAFEOP+E) · 다음 기동 PREOP+E · 사용자가 floating4 패치 전달 2026-11-09 |
+| 2026-11-09 | `core/motor_interface/include/motor_interface/motor_master.hpp` · `communications/ethercat/{include/ethercat/ethercat_master.hpp,src/ethercat_master.cpp}` · `motor_manager/{include/motor_manager/motor_manager.hpp,src/motor_manager.cpp}` · `ros2/motion_system_ros2/motion_control_bridge/{include/motion_control_bridge/motor_manager_node.hpp,src/motor_manager_node.cpp}` | `receive` 뒤 `ecrt_domain_state` 로 working counter 완전 여부(`MotorMaster::cycle_complete` · 기본 true) · `run` 이 불완전 주기를 원자 변수로 셈(횟수 · 주기 합 · 가장 긴 연속 · 첫 완전 주기 전과 정지 중은 뺌) · `take_cycle_loss_stats` · 노드가 10 s 마다 손실 있으면 경고 한 줄(연속 20 ms 이상이면 오류) · 제어 동작은 그대로 | robot_web 수정 목록 190 · 커널 로그 「Working counter changed to 0/15」 를 앱이 몰라 가장 긴 연속 손실을 모름 · 사용자 승인 2026-11-09 |

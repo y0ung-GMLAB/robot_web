@@ -1,0 +1,14 @@
+[Unit]
+# 커널 업데이트 뒤 EtherLab 모듈 자동 재빌드 · robot_web 수정 목록 11-1
+Description=Rebuild EtherLab (IgH EtherCAT) kernel modules when missing
+Before=ethercat.service
+After=network.target
+ConditionPathExists=/usr/local/src/ethercat
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/ethercat-rebuild
+TimeoutStartSec=900
+
+[Install]
+WantedBy=multi-user.target

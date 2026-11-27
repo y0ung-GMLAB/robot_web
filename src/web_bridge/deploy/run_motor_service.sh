@@ -1,0 +1,152 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+
+WORKSPACE="${MOTION_WORKSPACE:?MOTION_WORKSPACE is required}"
+MOTOR_CONFIG_FILE="${MOTOR_CONFIG_FILE:?MOTOR_CONFIG_FILE is required}"
+# 이 PC 안(루프백)에만 연다 · 수정 목록 176 (실물 NY 2026-11-07)
+#
+# §6-96 에서 연동된 PC 의 MIDI 로 모터를 움직이려고 네트워크에 열었다 · 그러자 Wi-Fi 가
+# 막히거나 끊길 때 **이 PC 안의** 모터 상태까지 끊겼다(floating2 · 재부팅 전까지 못 돌아옴) ·
+# PC 끼리 만나는 일은 연동 노드 하나가 맡는다(그룹 토픽 · 로컬과는 HTTP) · 이 서비스의 노드는
+# 다른 PC 토픽을 쓰지 않는다 · 그래서 그룹과 다른 로컬 도메인 + 루프백(`group_env.py --local`).
+#
+# 되돌리기 · `MOTION_LOCAL_DDS=0` → 옛 방식(그룹 도메인 · 아래 `MOTION_GROUP_NETWORK` 가지).
+export MOTION_GROUP_NETWORK="${MOTION_GROUP_NETWORK:-1}"
+if [[ "${MOTION_GROUP_NETWORK}" == "1" ]]; then
+  export ROS_LOCALHOST_ONLY=0
+else
+  export ROS_LOCALHOST_ONLY=1
+fi
+# PC 이름공간과 DDS 도메인 · §6-96
+#
+# "이 PC 는 누구인가"와 "어느 DDS 망에 있는가"는 그룹 설정이 주인이다 ·
+# `config/motion_coordination.yaml` 의 `pc_id` 와 `dds_domain_id` · 호스트
+# 이름을 따로 읽으면 주인이 둘이 된다.
+#
+# 바깥에서 이미 정했으면 그것을 존중한다 · 되돌릴 수 있어야 한다.
+GROUP_ENV_HELPER="${WORKSPACE}/src/motion_common/motion_common/group_env.py"
+if [[ -f "${GROUP_ENV_HELPER}" ]]; then
+  eval "$(python3 "${GROUP_ENV_HELPER}" --local)"
+fi
+# 도우미가 없거나 실패해도 서비스는 떠야 한다 · 빈 값이면 예전 이름 그대로다
+export MOTION_PC_NAMESPACE="${MOTION_PC_NAMESPACE:-}"
+# ROS 버전 · scripts/lib/ros_distro.sh
+# shellcheck disable=SC1091
+source "${WORKSPACE}/scripts/lib/ros_distro.sh" 2>/dev/null || ROBOT_ROS_SETUP="/opt/ros/humble/setup.bash"
+ROS_SETUP="${ROBOT_ROS_SETUP}"
+WORKSPACE_SETUP="${WORKSPACE}/install/setup.bash"
+MOTOR_EXECUTABLE="${WORKSPACE}/install/motion_control_bridge/lib/motion_control_bridge/motor_manager_node"
+
+if [[ ! -f "${ROS_SETUP}" ]]; then
+  echo "ROS 2 환경을 찾을 수 없습니다: ${ROS_SETUP}" >&2
+  exit 1
+fi
+if [[ ! -f "${WORKSPACE_SETUP}" ]]; then
+  echo "작업공간 빌드 환경을 찾을 수 없습니다: ${WORKSPACE_SETUP}" >&2
+  exit 1
+fi
+if [[ ! -x "${MOTOR_EXECUTABLE}" ]]; then
+  echo "Motor Manager 실행 파일을 찾을 수 없습니다: ${MOTOR_EXECUTABLE}" >&2
+  exit 1
+fi
+if [[ ! -f "${MOTOR_CONFIG_FILE}" ]]; then
+  echo "적용된 모터 설정 파일을 찾을 수 없습니다: ${MOTOR_CONFIG_FILE}" >&2
+  exit 1
+fi
+
+ethercat_master_indices() {
+  ethercat master 2>/dev/null \
+    | awk '/^Master[0-9]+$/ {sub(/^Master/, ""); print}' \
+    || true
+}
+
+ethercat_error_slaves() {
+  local master_index
+
+  while IFS= read -r master_index; do
+    [[ -n "${master_index}" ]] || continue
+    ethercat slaves -m "${master_index}" 2>/dev/null \
+      | awk -v master="${master_index}" \
+          '$3 ~ /ERROR/ || $4 == "E" {print master ":" $1}' \
+      || true
+  done < <(ethercat_master_indices)
+}
+
+recover_ethercat_errors_before_launch() {
+  if ! command -v ethercat >/dev/null 2>&1; then
+    return 0
+  fi
+
+  local attempts="${ETHERCAT_RECOVERY_ATTEMPTS:-2}"
+  local interval="${ETHERCAT_RECOVERY_INTERVAL_SEC:-0.5}"
+  local command_timeout="${ETHERCAT_STATE_TIMEOUT_SEC:-3}"
+  local attempt error_slave error_slaves master_index position
+
+  for ((attempt = 1; attempt <= attempts; attempt++)); do
+    error_slaves="$(ethercat_error_slaves)"
+    if [[ -z "${error_slaves}" ]]; then
+      return 0
+    fi
+
+    while IFS= read -r error_slave; do
+      [[ -n "${error_slave}" ]] || continue
+      IFS=: read -r master_index position <<< "${error_slave}"
+      echo "EtherCAT Master ${master_index} Slave ${position} 오류 플래그 해제 시도 (${attempt}/${attempts})"
+      timeout "${command_timeout}" \
+        ethercat reg_write -m "${master_index}" -p "${position}" \
+          -t uint16 0x0120 0x0011 || true
+      sleep "${interval}"
+      timeout "${command_timeout}" \
+        ethercat states -m "${master_index}" -p "${position}" PREOP || true
+      sleep "${interval}"
+    done <<< "${error_slaves}"
+  done
+
+  error_slaves="$(ethercat_error_slaves)"
+  if [[ -n "${error_slaves}" ]]; then
+    echo "EtherCAT 오류 플래그를 해제하지 못했습니다:" >&2
+    while IFS= read -r error_slave; do
+      [[ -n "${error_slave}" ]] || continue
+      IFS=: read -r master_index position <<< "${error_slave}"
+      echo "  Master ${master_index} Slave ${position}" >&2
+    done <<< "${error_slaves}"
+    return 1
+  fi
+}
+
+# 버스 설정 중 표시 · 수정 목록 125 (실물 U-1 · 2026-10-13)
+#
+# 부팅 때 Motor Manager 가 PREOP 인 드라이브에 부팅 설정 SDO 를 쓰는 사이 감시 노드 · 웹이 같은 드라이브에
+# SDO 를 보내 메일박스가 엉켰다 → 「SDO configuration failed」 → PREOP + E 로 굳음(PC 만 재부팅 2/2) ·
+# 그래서 띄우기 **전에** 표시를 세운다 · 우리 SDO 는 모두 `motion_common/ethercat_mailbox.py` 를 거치며
+# 표시가 있으면 보내지 않는다 · `begin` 은 도는 SDO 가 끝나길 기다린 뒤 세운다(같은 잠금) ·
+# 표시는 이 프로세스 pid(`$$` · exec 해도 같다)에 묶여 이게 끝나면 무효 · 실패해도 모터는 띄운다.
+BUS_MARKER_HELPER="${WORKSPACE}/src/motion_common/motion_common/ethercat_mailbox.py"
+if [[ -f "${BUS_MARKER_HELPER}" ]] && command -v python3 >/dev/null 2>&1; then
+  python3 "${BUS_MARKER_HELPER}" begin --owner "$$" || true
+fi
+
+if ! recover_ethercat_errors_before_launch; then
+  exit 1
+fi
+
+set +u
+# 기록 파일 보존 · ROS 로그를 작업공간 log/ros 로 · 14일 지난 것 삭제 · 수정 목록 21
+source "${WORKSPACE}/src/web_bridge/deploy/log_retention.sh"
+prepare_ros_log_dir "${WORKSPACE}"
+source "${ROS_SETUP}"
+source "${WORKSPACE_SETUP}"
+set -u
+# Motor Manager 는 토픽을 **상대 이름**으로 연다(`motion_control/motor_status`) ·
+# 그래서 ROS 이름공간이 그대로 먹는다 · 파일을 건드리지 않고 밖에서 준다 ·
+# 그 노드는 `motion_system` 안에 있어 수정하지 않는다 · §6-95
+MOTOR_ROS_ARGS=(--ros-args -p "config_file:=${MOTOR_CONFIG_FILE}")
+if [[ -n "${MOTION_PC_NAMESPACE}" ]]; then
+  MOTOR_ROS_ARGS+=(-r "__ns:=/${MOTION_PC_NAMESPACE}")
+fi
+# 슬레이브가 모두 OP 로 자리 잡거나(설정 끝) · 오류로 굳거나 · 시간이 지나거나 · 모터가 끝나면 표시를 지운다 ·
+# 서브셸로 띄워 부모가 systemd 가 되게(좀비 안 남김) · 같은 cgroup 이라 서비스를 멈추면 같이 끝난다 · 125
+if [[ -f "${BUS_MARKER_HELPER}" ]] && command -v python3 >/dev/null 2>&1; then
+  ( python3 "${BUS_MARKER_HELPER}" watch --owner "$$" </dev/null & )
+fi
+exec "${MOTOR_EXECUTABLE}" "${MOTOR_ROS_ARGS[@]}"

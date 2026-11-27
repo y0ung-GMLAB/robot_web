@@ -1,0 +1,132 @@
+"""오프 모드 = 움직임 명령 전부 차단 · 서보는 홀드 유지.
+
+게이트는 **저장 파일**(schedule_store.json)을 읽는다 · 조회 경유는 브리지가
+잠깐 막히면 기본값(스케줄)으로 둔갑했던 전력이 있다 (§6-270).
+
+막는 것 · 조그 / 절대 이동 / 애니메이션 재생·초기 위치 이동 / 그룹 시작.
+막지 않는 것 · 정지·긴급정지 · 서보 켜고 끄기 · 조회 — 그 경로들에는
+게이트를 달지 않는 것으로 보장한다 (아래 배선 검사).
+"""
+
+import json
+from pathlib import Path
+from types import SimpleNamespace
+
+from motion_web_bridge import run_mode_gate
+
+BRIDGE_DIR = Path(__file__).resolve().parents[1] / 'motion_web_bridge'
+
+
+def _bridge(tmp_path, mode, project_id='시험-0001'):
+    project_dir = tmp_path / 'motion_projects' / project_id
+    project_dir.mkdir(parents=True)
+    (project_dir / 'schedule_store.json').write_text(
+        json.dumps({'version': 2, 'mode': mode, 'schedules': []}, ensure_ascii=False),
+        encoding='utf-8',
+    )
+    warns = []
+    return SimpleNamespace(
+        workspace_root=tmp_path,
+        project_repository=SimpleNamespace(selected_project_id=lambda: project_id),
+        get_logger=lambda: SimpleNamespace(warn=warns.append),
+        _warns=warns,
+    )
+
+
+def test_off_mode_blocks_with_a_reason(tmp_path):
+    reason = run_mode_gate.motion_command_block_reason(_bridge(tmp_path, 'off'))
+    assert '끔 모드' in reason
+    assert '차단' in reason
+
+
+def test_schedule_and_manual_modes_do_not_block(tmp_path):
+    schedule = _bridge(tmp_path, 'schedule', project_id='스케줄-0001')
+    manual = _bridge(tmp_path, 'manual', project_id='수동-0001')
+    assert run_mode_gate.motion_command_block_reason(schedule) == ''
+    assert run_mode_gate.motion_command_block_reason(manual) == ''
+
+
+def test_no_project_does_not_block(tmp_path):
+    bridge = _bridge(tmp_path, 'off')
+    bridge.project_repository = SimpleNamespace(selected_project_id=lambda: '')
+    assert run_mode_gate.motion_command_block_reason(bridge) == ''
+
+
+def test_a_read_failure_blocks_commands_with_a_reason(tmp_path):
+    """못 읽으면 막는다(fail-close · 수정 목록 18) · 사유에 원인이 붙고 경고도 남는다."""
+    bridge = _bridge(tmp_path, 'off')
+    warns = []
+    def broken():
+        raise OSError('디스크 오류')
+    bridge.project_repository = SimpleNamespace(selected_project_id=broken)
+    bridge.get_logger = lambda: SimpleNamespace(warn=warns.append)
+    reason = run_mode_gate.motion_command_block_reason(bridge)
+    assert '디스크 오류' in reason
+    assert reason.startswith(run_mode_gate.MODE_UNREADABLE_BLOCK_MESSAGE)
+    assert warns and '차단' in warns[0]
+
+
+# --------------------------------------------------------------------------- #
+# 배선 · 게이트가 정확히 움직임 명령에만 달려 있다
+# --------------------------------------------------------------------------- #
+
+def _source(name):
+    return (BRIDGE_DIR / name).read_text(encoding='utf-8')
+
+
+def test_every_motion_command_entry_point_is_gated():
+    manual = _source('manual_motor_commands.py')
+    # 조그 길(ac_servo_jog · dynamixel_jog)은 이전 UI 와 함께 지웠다 · 2026-11-17
+    for entry in ('def ac_servo_action', 'def dynamixel_action'):
+        start = manual.index(entry)
+        body = manual[start:start + 400]
+        # 축을 넘긴다 · 조인트 범위 확인 문도 같이 지난다 · 수정 목록 97
+        assert '_off_mode_block(axis)' in body, f'{entry} 에 오프 게이트가 없다'
+
+    bridge = _source('bridge_node.py')
+    for entry in ('def motion_run_start', 'def motion_run_initialize'):
+        start = bridge.index(entry)
+        body = bridge[start:start + 400]
+        assert 'run_mode_gate.motion_command_block_reason' in body, (
+            f'{entry} 에 오프 게이트가 없다'
+        )
+
+    # 그룹 준비 관문 하나 · `group_prepare`(웹 길)와 준비 검사(연동 노드가 초기 위치를 바로 보내기 전)가 같이 본다 · 209
+    start = bridge.index('def group_prepare_gate')
+    assert 'run_mode_gate.motion_command_block_reason' in bridge[start:start + 900], (
+        'group_prepare_gate 에 오프 게이트가 없다 · 원격 그룹 시작이 뚫린다'
+    )
+    start = bridge.index('def motion_group_prepare')
+    assert 'self.group_prepare_gate()' in bridge[start:start + 300], (
+        'motion_group_prepare 가 관문을 안 지난다 · 원격 그룹 시작이 뚫린다'
+    )
+    readiness = _source('coordination_bridge.py')
+    start = readiness.index('def _local_motion_readiness(')
+    assert "getattr(bridge, 'group_prepare_gate', None)" in readiness[start:start + 3000], (
+        '준비 검사가 관문을 안 지난다 · 초기 위치 예약은 연동 노드가 재생 관리자에 바로 보낸다(209)'
+    )
+
+    coordination = _source('coordination_bridge.py')
+    start = coordination.index("if command in {'start_group', 'initialize_group'}:")
+    assert 'run_mode_gate.motion_command_block_reason' in coordination[start:start + 300], (
+        '그룹 시작에 오프 게이트가 없다'
+    )
+
+
+def test_stop_and_servo_paths_are_not_gated():
+    """정지·서보 제어는 오프에서도 되어야 한다 · 잠긴 문에 소화전까지 걸면 안 된다."""
+    manual = _source('manual_motor_commands.py')
+    for entry in ('def ac_servo_control',):
+        if entry in manual:
+            start = manual.index(entry)
+            assert '_off_mode_block' not in manual[start:start + 400], (
+                f'{entry} 는 막으면 안 된다'
+            )
+    safety = _source('routes/safety_routes.py')
+    assert 'run_mode_gate' not in safety, '안전 정지 경로에 게이트가 있다'
+
+
+def test_the_gate_reads_the_file_not_a_query():
+    gate = _source('run_mode_gate.py')
+    assert 'ScheduleStore(' in gate
+    assert 'schedule/status' not in gate, '조회로 물어보면 §6-270 의 함정에 빠진다'

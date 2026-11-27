@@ -1,0 +1,482 @@
+/** UI v2 · 화면이 보여 줄 것을 서버 상태에서 뽑는다 · DOM 을 모른다 (시험은 이것만 본다)
+ *
+ * 원칙 1 · 상태는 한 문장으로 · 원칙 2 · 문제마다 해결 버튼 (설계안 2026-10-09)
+ * 입력 · `snap` = `/ws/status` 한 장 · `sched` = `GET /api/schedule/status` · `connected` = 소켓 살아 있나
+ */
+
+import { segmentProgressText } from './segment_model.js';
+
+export const RUN_MODE_LABEL = { schedule: '스케줄', manual: '수동', off: '끔' };
+
+/** 운전 모드 뜻 = 누가 시작하나 · 위 막대 버튼 설명 · 수정 목록 122 (사용자 결정 2026-10-13) */
+export const RUN_MODE_HINT = {
+  schedule: '스케줄\n운영시간에 따라 자동 시작 및 정지\n스케줄로 시작한 그룹 재생에는 스케줄 모드 PC만 참여',
+  manual: '수동\n사람이 직접 시작 (단독 재생, 그룹 재생 모두 가능)\n직접 시작한 그룹 재생에는 수동 모드 PC도 참여',
+  off: '끔\n움직이지 않으며 그룹 재생에서도 제외\n서보 ON 유지',
+};
+
+/** 운전 모드 전환 확인 창 본문 · 위 막대(actions.js)와 PC 현황(store.js)이 같은 글을 쓴다 · 2026-11-09 */
+export const RUN_MODE_EFFECT = {
+  schedule: '운영시간에 따라 재생을 자동으로 시작하고 정지합니다.\n현재 운영시간인 경우 곧 재생을 시작합니다.',
+  manual: '스케줄이 재생을 시작하거나 정지하지 않습니다.\n직접 시작한 재생은 운영시간 종료 후에도 계속 진행합니다.',
+  off: '모든 동작 명령을 차단합니다.\n진행 중인 재생은 이번 회차 종료 후 정지합니다.\n서보 ON 상태를 유지합니다.',
+};
+
+const RUNNING_STATES = new Set(['running', 'verifying', 'waiting']);
+const MOVING_STATES = new Set(['running', 'verifying', 'waiting', 'initializing', 'recovering']);
+
+export function runMode(sched) {
+  const mode = String(sched?.run_mode || '');
+  return mode in RUN_MODE_LABEL ? mode : '';
+}
+
+/** 운전 모드 + 운영시간 · 한 마디 */
+export function modePhrase(sched) {
+  const mode = runMode(sched);
+  if (mode === 'manual') return '수동';
+  if (mode === 'off') return '끔 · 명령 차단';
+  if (mode === 'schedule') return sched?.active_schedule_id ? '스케줄 운영 중' : '운영시간 외';
+  return '상태 확인 중';
+}
+
+/** 모터 오류 글 · 서버 칸은 error_text(영문)·errorcode(숫자) · 없으면 빈 글 */
+export function motorErrorText(motor) {
+  const text = String(motor?.error_text || '').trim();
+  if (text && text !== 'No error') {
+    return text === 'Communication unavailable' ? '통신 없음' : text.replace(/^Error\s+/i, '오류 ');
+  }
+  const code = Number(motor?.errorcode);
+  return Number.isFinite(code) && code !== 0 ? `오류 ${code}` : '';
+}
+
+/** 과부하율 % · 서버 칸 overload_ratio_pct · 없으면 null */
+export function motorLoad(motor) {
+  const value = motor?.overload_ratio_pct;
+  return value === null || value === undefined || !Number.isFinite(Number(value)) ? null : Number(value);
+}
+
+export function networkPcs(snap) {
+  const list = snap?.coordination?.runtime?.network_pcs;
+  return Array.isArray(list) ? list : [];
+}
+
+/** 접속한 PC 이름 · 「이 PC」 대신 · 단독/전체를 나눠 말해야 할 때만 */
+export function localName(state) {
+  const snap = state?.snap;
+  return String(snap?.system_info?.hostname || snap?.coordination?.config?.pc_id || '현재 PC');
+}
+
+/**
+ * 위 막대 「이 PC」 역할 · 마스터 / 슬레이브 / 단독 · 수정 목록 119
+ * is_master 는 설정 파일 요약(coordination.config)에만 있다 · 돌고 있는 노드 칸(runtime.config)은 그 위에 얹는다
+ * (전에는 runtime.config 를 통째로 먼저 써서 마스터도 늘 「슬레이브」)
+ */
+export function pcRole(snap) {
+  const coord = snap?.coordination || {};
+  const config = { ...(coord.config || {}), ...(coord.runtime?.config || {}) };
+  const isMaster = coord.config?.is_master ?? coord.runtime?.config?.is_master;
+  const group = config.enabled && config.group_id ? ` · 그룹 ${config.group_id}` : '';
+  return { pcId: config.pc_id || '', text: `${config.enabled ? (isMaster === true ? '마스터' : '슬레이브') : '단독'}${group}` };
+}
+
+export function pcName(pc) {
+  return String(pc?.display_name || pc?.pc_id || '-');
+}
+
+/** 부팅 값 알림 · 서버 `boot_params` (지금 도는 세션 vs 지금 설정) · 다를 때만 · 수정 목록 116 */
+export function bootParamsNotice(snap) {
+  const boot = snap?.boot_params;
+  if (!boot || boot.state !== 'stale') return null;
+  return {
+    title: String(boot.message || '드라이브가 이전 부팅 값으로 동작 중입니다'),
+    detail: `${boot.detail ? `${boot.detail} ` : ''}「장비에 적용」 후 새 값을 반영합니다.`,
+  };
+}
+
+/** supervisor 알림 · 조그 · 목표 이동을 끝내며 남김(목표 근처 출렁임 · 못 미치고 섬 · 시간 초과) · axis 를 주면 그 모터만 */
+export function manualNotices(snap, axis = null) {
+  const list = snap?.safety_status?.manual_notices;
+  return (Array.isArray(list) ? list : [])
+    .filter((n) => n && n.message && (axis === null || Number(n.axis) === Number(axis)))
+    .map((n) => ({ axis: Number(n.axis), kind: String(n.kind || ''), message: String(n.message) }));
+}
+
+/** 다회전 클리어 뒤 기준점 다시 지정 · 서버 `multiturn_clear` · 없으면 null · 수정 목록 140
+ *  웹을 다시 켜도 · 페이지를 닫아도 PC 단위 표시가 남아 같은 안내 · 버튼은 그 축 기준점 지정 화면(#/manual?axis=N)으로 */
+export function referenceRedoView(snap) {
+  const info = snap?.multiturn_clear || {};
+  const axes = (Array.isArray(info.blocked_axes) ? info.blocked_axes : []).map(Number).filter(Number.isFinite);
+  if (!axes.length) return null;
+  return {
+    axes,
+    title: String(info.prompt || `${axes.map((a) => `${a}번`).join(', ')} 모터를 다회전 클리어했습니다. 로봇을 정면·수평 자세로 정렬하고 기준점을 재지정해 저장하세요.`),
+    detail: String(info.message || ''),
+    target: `manual?axis=${axes[0]}`,
+    label: '기준점 지정 열기',
+  };
+}
+
+/** 확인할 일 · 나쁜 것(bad)이 먼저 · action.kind 는 화면이 버튼으로 바꾼다 */
+/** PREOP 등에 멈춘 EtherCAT 드라이브 · 감시 노드가 판정한 목록 그대로 · 수정 목록 125 */
+export function stuckSlaves(snap) {
+  const list = snap?.motion_state?.ethercat?.stuck_slaves;
+  return Array.isArray(list) ? list.filter((s) => s && s.message) : [];
+}
+
+/** 메일박스(SDO)가 멈춘 드라이브 · 감시 노드가 판정한 목록 그대로 · 수정 목록 139 ③ */
+export function stuckMailboxes(snap) {
+  const list = snap?.motion_state?.minas_absolute?.stuck_mailboxes;
+  return Array.isArray(list) ? list.filter((s) => s && s.message) : [];
+}
+
+/** 운영 종료 동작 알림 · 서버 `schedule_end.notice` · 없으면 null · 수정 목록 131 */
+export function scheduleEndNotice(snap) {
+  const notice = snap?.schedule_end?.notice;
+  if (!notice || !String(notice.title || '')) return null;
+  return { tone: notice.tone === 'bad' ? 'bad' : 'warn', title: String(notice.title), detail: String(notice.detail || '') };
+}
+
+/**
+ * 연동 노드의 「마지막 그룹 시작 실패」 노란 줄 제목 · `code` 로 나눈다 · 수정 목록 147
+ *
+ * 전에는 모두 「그룹 시작이 취소되었습니다」 였다 · 9회차 돈 뒤 PC 가 빠져 멈춘 것(GROUP_PARTICIPANT_LEFT)도
+ * 「시작이 취소」 로 읽혔고, 참가 0대 거절(GROUP_START_NOT_READY)은 다음 시작도 늘 실패라 줄이 계속 남았다
+ * (실물 2026-10-15 W-A10) · 코드는 `coordination_node._remember_start_failure` 부르는 곳 ·
+ * GROUP_RELEASED 는 이 PC 웹 서비스가 끊겨 잠그지 않고 놓은 것(`_release_without_latch`) ·
+ * GROUP_LOCAL_BRIDGE_LOST(145 ②)는 지금 `bridge_loss` 칸에만 남지만 이 칸에 오면 같은 제목.
+ * 그 밖(TRIGGER_SYNC_FAILED · GROUP_START_REJECTED · GROUP_SCHEDULE_ACK_TIMEOUT · GROUP_SCHEDULE_SELF_LATE ·
+ * 코드 없음)은 정말 시작 전 취소라 전 글 그대로.
+ */
+export const START_FAILURE_TITLE = {
+  GROUP_START_NOT_READY: '그룹 시작 불가',
+  GROUP_PARTICIPANT_LEFT: '그룹 실행 정지 · PC 이탈',
+  GROUP_LOCAL_BRIDGE_LOST: '그룹 실행 정지 · 웹 서비스 연결 중단',
+  GROUP_RELEASED: '그룹 실행 정지 · 웹 서비스 연결 중단',
+};
+export const START_FAILURE_DEFAULT_TITLE = '그룹 시작 취소';
+
+export function startFailureView(failure) {
+  const code = String(failure?.code || '').trim().toUpperCase();
+  const title = START_FAILURE_TITLE[code] || START_FAILURE_DEFAULT_TITLE;
+  let detail = String(failure?.message || '').trim();
+  // 서버 글이 제목과 같은 말로 시작하면(「그룹 시작 불가: 참여 가능한 PC가 없습니다 …」) 한 번만 · 옛 글은 「 · 」
+  for (const sep of [': ', ' · ']) {
+    if (detail.startsWith(`${title}${sep}`)) { detail = detail.slice(title.length + sep.length); break; }
+  }
+  return { title, detail };
+}
+
+/** 메모리 부족 · 서버 판정(`memory.low`) 그대로 · 글만 · 수정 목록 170
+ *  남은 메모리 < 600 MB · 스왑 ≥ 1 GB · 스왑 읽기 ≥ 1 MB/s 중 하나 (서버 memory_status.py) */
+export function memoryNotice(memory) {
+  if (!memory || !memory.available || !memory.low) return null;
+  const swap = Number(memory.swap_used_mb) || 0;
+  const free = Number(memory.available_mb) || 0;
+  const reasons = Array.isArray(memory.reasons) ? memory.reasons.filter(Boolean) : [];
+  return {
+    title: `메모리 부족 · 스왑 ${swap} MB`,
+    detail: `${reasons.join(' · ') || `남은 메모리 ${free} MB`}. 재생이 중단될 수 있으므로 현재 PC에서 열어 둔 브라우저 탭(특히 3D 화면)을 닫거나, 재생하지 않을 때 프로그램을 재시작하세요.`,
+  };
+}
+
+/** PC 현황 표 한 칸 · 옛 버전 PC(칸 없음)는 빈 글 */
+export function memoryCell(memory) {
+  if (!memory || memory.available_mb === undefined || memory.available_mb === null) return { tone: 'muted', text: '-' };
+  const free = Number(memory.available_mb) || 0;
+  const swap = Number(memory.swap_used_mb) || 0;
+  const freeText = free >= 1024 ? `${(free / 1024).toFixed(1)} GB` : `${free} MB`;
+  if (memory.low) return { tone: 'warn', text: `메모리 부족 · 남은 ${freeText} · 스왑 ${swap} MB` };
+  return { tone: 'ok', text: `남은 ${freeText}${swap ? ` · 스왑 ${swap} MB` : ''}` };
+}
+
+export function collectIssues(snap, sched, { connected = true } = {}) {
+  const issues = [];
+  const bad = (title, detail = '', action = null) => issues.push({ tone: 'bad', title, detail, action });
+  const warn = (title, detail = '', action = null) => issues.push({ tone: 'warn', title, detail, action });
+  if (!connected) {
+    bad('서버 연결 중단', '프로그램 재시작 중인 경우 잠시 후 자동으로 재연결합니다.');
+    return issues;
+  }
+  if (!snap) return issues;
+  const safety = snap.safety_status || {};
+  if (safety.emergency_latched) {
+    bad('긴급 정지 상태입니다', '모든 모터 명령을 차단했습니다. 프로그램 재시작 시 해제합니다.',
+      { kind: 'restart-program', label: '프로그램 재시작' });
+  }
+  const watchdog = String(snap.supervisor_watchdog?.message || '');
+  if (watchdog) bad('모터 제어가 응답하지 않습니다', watchdog);
+  // 프로그램 시작이 오래 안 끝남(supervisor · 재생 관리자 첫 상태 없음) · 판정은 서버 · supervisor 쪽은 위 줄이 이미 말한다 · 수정 목록 202
+  const startup = snap.startup || {};
+  if (startup.overdue && !watchdog) {
+    bad('프로그램 시작이 끝나지 않았습니다', String(startup.message || ''),
+      { kind: 'restart-program', label: '프로그램 재시작' });
+  }
+  const absolute = String(snap.minas_absolute_blocker || '');
+  if (absolute) {
+    bad('앱솔루트 방식이 확인되지 않아 모터를 움직일 수 없습니다', absolute,
+      { kind: 'open', target: 'motors', label: '모터 설정 열기' });
+  }
+  // 다회전 클리어 뒤 기준점 다시 지정 전 · 재생·초기 이동·스케줄·그룹 참가 막힘 · 수동 조그는 됨 · 수정 목록 140
+  // 웹을 다시 켜거나 페이지를 닫아도 PC 단위 표시가 남아 여기 남는다 · 버튼은 그 축 기준점 지정 화면
+  const redo = referenceRedoView(snap);
+  if (redo) bad(redo.title, [redo.detail, '기준점 재지정 전까지 재생, 스케줄, 그룹 참여를 차단합니다. 수동 조작은 가능합니다.'].filter(Boolean).join(' '), { kind: 'open', target: redo.target, label: redo.label });
+  // OP 로 못 올라가고 멈춘 드라이브 · 시작 스크립트의 오류 플래그 해제로도 안 풀림 · 글은 서버 · 수정 목록 125
+  for (const slave of stuckSlaves(snap)) {
+    bad(slave.message, '모터 프로그램이 해당 드라이브 설정을 마치지 못했습니다. 드라이브 제어 전원을 재투입하고, 증상이 동일한 경우 모터 프로그램을 재시작하세요.');
+  }
+  // 메일박스(SDO)만 멈춘 드라이브 · 재생 · PDO 는 그대로 · 제어 전원 재투입으로만 풀린다 · 글은 서버 · 수정 목록 139 ③
+  for (const box of stuckMailboxes(snap)) {
+    bad(box.message, '해당 드라이브가 설정 읽기·쓰기(SDO)에 응답하지 않습니다. 재생은 정상이지만 앱솔루트 설정과 게인 읽기는 할 수 없습니다.');
+  }
+  // 자동조정 꺼짐(Pr0.02 = 0)은 알리지 않는다 · 일부러 끄고 쓰는 값 · 사용자 2026-11-04 (108 (나) 알림 뺌)
+  // 조인트 범위 미확인 · 재생·초기 이동·수동 조작이 막혀 있다 · 판정은 서버 · 수정 목록 97
+  const range = String(snap.mapping_range_blocker || '');
+  if (range) {
+    bad('조인트 범위 미확인으로 재생과 수동 조작 차단 중', range,
+      { kind: 'open', target: 'mapping', label: '조인트 매핑 열기' });
+  }
+  // 지금 도는 모터 프로그램의 부팅 값이 지금 설정과 다르다 · 업데이트만 하고 적용 안 한 PC · 수정 목록 116
+  const boot = bootParamsNotice(snap);
+  if (boot) warn(boot.title, boot.detail, { kind: 'apply-motor-config', label: '장비에 적용' });
+  // 조그 · 목표 이동을 끝내며 supervisor 가 남긴 알림 · 목표 근처 출렁임 등 · 5 분 · 실물 R-11
+  for (const notice of manualNotices(snap)) {
+    warn(notice.message, '해당 조작은 끝났으며 다음 조작에는 영향이 없습니다.', { kind: 'open', target: 'motors', label: '모터 설정 열기' });
+  }
+  const motors = Array.isArray(snap.motion_state?.motors) ? snap.motion_state.motors : [];
+  const faulted = motors.filter((m) => m && m.fault);
+  if (faulted.length) {
+    const names = faulted.map((m) => `${m.controller_index}번${motorErrorText(m) ? ` (${motorErrorText(m)})` : ''}`).join(' · ');
+    bad(`모터 알람 · ${names}`, '기구에 걸린 것이 없는지 확인한 뒤 오류를 초기화하세요',
+      { kind: 'fault-reset', label: '오류 초기화' });
+  }
+  const run = snap.motion_run_status || {};
+  if (String(run.state || '') === 'error') {
+    bad('재생이 오류로 정지했습니다', String(run.message || ''));
+  }
+  const group = snap.coordination?.runtime?.coordination_error || {};
+  if (group.active) {
+    bad('그룹 오류', String(group.message || ''), { kind: 'ack-group-error', label: '그룹 오류 해제' });
+  }
+  // 잠그지 않은 그룹 시작 실패 · 준비 안 됨 · 다시 시작으로 정리 · 다음 시작에 지워진다 · 수정 목록 123·124
+  const startFailure = snap.coordination?.runtime?.last_start_failure || {};
+  const groupActive = Boolean(snap.coordination?.runtime?.execution?.execution_id);
+  if (!group.active && !groupActive && String(startFailure.message || '')) {
+    const view = startFailureView(startFailure);
+    warn(view.title, view.detail);
+  }
+  // 구간 끝 주차 실패(다시 시도 중) · 그 자리에서 서보 끔 · 글과 색은 서버 · 다음 시작까지 남음 · 수정 목록 131
+  const endNotice = scheduleEndNotice(snap);
+  if (endNotice) (endNotice.tone === 'bad' ? bad : warn)(endNotice.title, endNotice.detail, { kind: 'open', target: 'schedule', label: '스케줄 열기' });
+  const failure = sched?.last_failure || {};
+  const failCount = Number(failure.count) || 0;
+  if (failCount > 0) {
+    // 준비 대기(부팅 직후 앱솔루트 확인 등)는 거부가 아니다 · 같은 횟수 기준으로 색만 · 수정 목록 124
+    const entry = failure.deferred
+      ? [`스케줄 시작 대기 중 (${failCount}회)`, `준비 완료 후 자동으로 시작합니다. ${String(failure.message || '')}`]
+      : [`스케줄 시작 거부됨 (${failCount}회)`, String(failure.message || '거부 사유를 수신하지 못했습니다')];
+    if (failCount >= 3) bad(...entry); else warn(...entry);
+  }
+  // 메모리 부족 · 스왑 · 막지 않고 알린다 · 수정 목록 170 (NY 2026-11-03 · 스왑 1.25 GB 에서 실행기가 멈췄다)
+  const memory = memoryNotice(sched?.memory);
+  if (memory) warn(memory.title, memory.detail, { kind: 'open', target: 'tools', label: 'PC 성능 열기' });
+  const unreadable = Array.isArray(sched?.unreadable_schedules) ? sched.unreadable_schedules.filter(Boolean) : [];
+  if (unreadable.length) {
+    warn(`시각을 읽을 수 없는 스케줄 ${unreadable.length}개`, unreadable.join(' · '), { kind: 'open', target: 'schedule', label: '스케줄 수정' });
+  }
+  // 시간표 재생 · 시계 차이 100 ms 초과 · 시간대 다름 · 재생은 그대로 · 표시만 · 수정 목록 186
+  for (const notice of timetableNotices(snap)) warn(notice.title, notice.detail);
+  const pcs = networkPcs(snap);
+  // 연동 약속 번호가 다르면 그룹에서 빠진다 · 커밋만 다르면 빠지지 않는다 · 2026-10-13
+  const others = pcs.filter((pc) => !pc.is_local && pc.role !== 'speaker');
+  const mismatched = others.filter((pc) => pc.protocol_mismatch);
+  const differing = others.filter((pc) => !pc.protocol_mismatch && pc.version_differs);
+  if (mismatched.length) {
+    warn(`${mismatched.map(pcName).join(' · ')} 연동 버전이 다릅니다`, '그룹 재생에서 제외합니다. 모든 PC를 업데이트하세요.',
+      { kind: 'update-all', label: '모든 PC 업데이트' });
+  }
+  if (differing.length) {
+    warn(`${differing.map(pcName).join(' · ')} 버전이 다릅니다`, '그룹 재생은 가능하지만 모든 PC를 같은 버전으로 업데이트하세요.',
+      { kind: 'update-all', label: '모든 PC 업데이트' });
+  }
+  const offline = pcs.filter((pc) => !pc.is_local && pc.online === false);
+  if (offline.length) {
+    warn(`${offline.map(pcName).join(' · ')} 연결 안 됨`, 'PC 전원과 Wi-Fi 연결을 확인하세요.');
+  }
+  return issues.sort((a, b) => (a.tone === b.tone ? 0 : a.tone === 'bad' ? -1 : 1));
+}
+
+/**
+ * 시간표 재생 확인할 일 · 시계 차이 100 ms 초과 PC · 마스터와 시간대가 다른 PC(이 PC 포함) · 수정 목록 186
+ * 서버 `runtime.timetable` · 시간표 재생이 아니면 없음
+ */
+export function timetableNotices(snap) {
+  const runtime = snap?.coordination?.runtime || {};
+  const tt = runtime.timetable || {};
+  if (tt.mode !== 'clock') return [];
+  const names = new Map([...(Array.isArray(runtime.peers) ? runtime.peers : []), ...(runtime.local ? [runtime.local] : [])]
+    .map((peer) => [String(peer.pc_id || ''), pcName(peer)]));
+  const name = (id) => names.get(String(id)) || String(id);
+  const notices = [];
+  const clock = Array.isArray(tt.clock_warnings) ? tt.clock_warnings : [];
+  if (clock.length) {
+    notices.push({ title: `${clock.map(name).join(' · ')} 시계 차이 ${Number(tt.clock_warn_ms) || 100} ms 초과`,
+      detail: '재생은 유지하며 다음 회차에서 자동 보정합니다. 해당 PC의 시계 동기화(chrony)를 확인하세요.' });
+  }
+  const zones = Array.isArray(tt.timezone_mismatches) ? [...tt.timezone_mismatches] : [];
+  if (tt.local_timezone_mismatch === true && runtime.local) zones.unshift(runtime.local.pc_id);
+  if (zones.length) {
+    notices.push({ title: `${zones.map(name).join(' · ')} 시간대가 마스터와 다름`,
+      detail: `마스터 ${String(tt.master_timezone || '-')} · 운영시간이 어긋남 · 재생 유지 · 설정 → 네트워크·시간·그룹에서 시간대 변경` });
+  }
+  return notices;
+}
+
+/** 상단 가운데 한 문장 · tone = ok | warn | bad | info */
+export function headline(snap, sched, options = {}) {
+  const issues = collectIssues(snap, sched, options);
+  const mode = modePhrase(sched);
+  const first = issues[0];
+  if (first && first.tone === 'bad') return { tone: 'bad', text: first.title, issues };
+  if (issues.length) return { tone: 'warn', text: `${mode} · 확인할 일 ${issues.length}개`, issues };
+  if (runMode(sched) === 'manual') return { tone: 'info', text: '수동 · 스케줄 동작 안 함', issues };
+  return { tone: 'ok', text: `정상 · ${mode}`, issues };
+}
+
+export function formatClock(seconds) {
+  const total = Math.max(0, Math.floor(Number(seconds) || 0));
+  const m = Math.floor(total / 60);
+  const s = total % 60;
+  return `${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
+}
+
+function stripJson(name) {
+  return String(name || '').replace(/\.json$/i, '');
+}
+
+/** 홈 「지금」 카드 */
+export function runSummary(snap) {
+  const run = snap?.motion_run_status || {};
+  const state = String(run.state || '');
+  const file = stripJson(run.motion_file_id);
+  const group = Boolean(run.group_execution);
+  const participants = snap?.coordination?.runtime?.execution?.participants;
+  const count = Array.isArray(participants) ? participants.length : 0;
+  const scope = group ? (count ? `그룹 전체 ${count}대` : '그룹 전체') : '단독';
+  const cycle = Number(run.current_cycle) || 0;
+  const progress = run.progress || {};
+  const elapsed = Number(progress.elapsed_sec) || 0;
+  const duration = Number(progress.duration_sec) || 0;
+  const ratio = duration > 0 ? Math.min(1, Math.max(0, elapsed / duration)) : 0;
+  const continuous = String(run.run_mode || '') === 'continuous';
+  let title = '대기 상태';
+  if (RUNNING_STATES.has(state)) title = `${file || '애니메이션'} 재생 중`;
+  else if (state === 'initializing') title = '초기 위치로 이동 중';
+  else if (state === 'recovering') title = '자동 복구 중';
+  else if (state === 'initialized') title = '초기 위치에서 대기 중';
+  else if (state === 'error') title = '오류로 정지';
+  // 대기·오류일 땐 범위가 의미 없다 · 움직이거나 초기 위치에서 기다릴 때만
+  const parts = MOVING_STATES.has(state) || state === 'initialized' ? [scope] : [];
+  if (cycle > 0 && MOVING_STATES.has(state)) parts.push(`${cycle}회차`);
+  if (continuous && MOVING_STATES.has(state)) parts.push('연속');
+  return {
+    state,
+    moving: MOVING_STATES.has(state),
+    title,
+    subtitle: parts.join(' · '),
+    group,
+    ratio,
+    // 구간 재생이면 파일 시각도 · `구간 1:20~1:45 · 지금 1:31` · 2026-10-16
+    timeText: duration > 0 && MOVING_STATES.has(state)
+      ? [`${formatClock(elapsed)} / ${formatClock(duration)}`, segmentProgressText(run, elapsed)].filter(Boolean).join(' · ')
+      : '',
+  };
+}
+
+/** 이 PC 모터 · 조인트 값이 있으면 조인트 deg, 없으면 모터 deg */
+export function motorChips(snap) {
+  const motors = Array.isArray(snap?.motion_state?.motors) ? snap.motion_state.motors : [];
+  return motors.map((m) => {
+    // null 은 0 이 아니다 · 매핑 없는 모터는 조인트 값이 비어 온다
+    const joint = m.motion_actual_rad === null || m.motion_actual_rad === undefined ? NaN : Number(m.motion_actual_rad);
+    const motor = m.position_rad === null || m.position_rad === undefined ? NaN : Number(m.position_rad);
+    const deg = Number.isFinite(joint) ? (joint * 180) / Math.PI : (Number.isFinite(motor) ? (motor * 180) / Math.PI : null);
+    const load = motorLoad(m);
+    let tone = 'ok';
+    let note = '';
+    if (m.fault) { tone = 'bad'; note = `알람${motorErrorText(m) ? ` ${motorErrorText(m)}` : ''}`; }
+    // MINAS 경고(A0 과부하 경고 등) · 드라이브는 계속 돈다 · 알람이 아니라 경고 색 · 수정 목록 166
+    else if (m.error_kind === 'warning') { tone = 'warn'; note = motorErrorText(m); }
+    else if (!m.servo_on) { tone = 'warn'; note = '서보 OFF'; }
+    return {
+      name: String(m.motion_id || m.name || m.display_name || `${m.controller_index}번 모터`),
+      index: m.controller_index,
+      tone,
+      value: deg === null ? '-' : `${deg >= 0 ? '+' : '−'}${Math.abs(deg).toFixed(2)}°`,
+      unit: Number.isFinite(joint) ? '조인트' : '모터',
+      note: note || (Number.isFinite(load) ? `과부하율 ${Math.round(load)}%` : ''),
+    };
+  });
+}
+
+/** 매장 PC 줄 · 이 PC 가 맨 위 */
+export function pcRows(snap) {
+  return networkPcs(snap).map((pc) => {
+    let tone = 'ok';
+    let note = pc.role === 'speaker' ? '스피커' : (pc.is_master ? '마스터' : '슬레이브');
+    if (pc.online === false) { tone = 'bad'; note = '연결 안 됨'; }
+    else if (pc.protocol_mismatch) { tone = 'bad'; note = '연동 버전 다름'; }
+    else if (pc.version_differs) { tone = 'warn'; note = '버전 다름'; }
+    else if (pc.role !== 'speaker' && pc.joined === false) { tone = 'info'; note = '그룹 미참여'; }
+    return { name: pcName(pc), local: Boolean(pc.is_local), tone, note, url: String(pc.web_url || '') };
+  });
+}
+
+export const DAY_CODES = ['SUN', 'MON', 'TUE', 'WED', 'THU', 'FRI', 'SAT'];
+
+export function toMinutes(text) {
+  const match = /^(\d{1,2}):(\d{2})/.exec(String(text || ''));
+  if (!match) return null;
+  return Number(match[1]) * 60 + Number(match[2]);
+}
+
+export function ymdOf(date) {
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
+}
+
+/** 1단계 · 날짜를 지정하는 종류 (특정일 운영 · 휴무일) */
+export function isDated(item) {
+  return ['once', 'holiday'].includes(String(item?.repeat_type || '')) && Boolean(item?.run_date);
+}
+
+function regularOn(item, date) {
+  const type = String(item.repeat_type || 'daily');
+  if (type === 'daily') return true;
+  if (type === 'weekly') return (item.repeat_days || []).includes(DAY_CODES[date.getDay()]);
+  return type === 'once';   // 날짜 없는 옛 「한 번」 · 서버처럼 날마다
+}
+
+/** 해당 날짜에 시작하는 켜진 스케줄 · 특정일이 있으면 정기 운영 대신 · 휴무일이면 없음 · 서버 규칙과 같음
+ * → { kind: 'regular' | 'date' | 'holiday', items } */
+export function scheduleDay(items, date) {
+  const key = ymdOf(date);
+  const on = (Array.isArray(items) ? items : []).filter((item) => item && item.enabled !== false);
+  const dated = on.filter((item) => isDated(item) && item.run_date === key);
+  if (dated.some((item) => item.repeat_type === 'holiday')) return { kind: 'holiday', items: [] };
+  if (dated.length) return { kind: 'date', items: dated };
+  return { kind: 'regular', items: on.filter((item) => !isDated(item) && regularOn(item, date)) };
+}
+
+/** 오늘 도는 구간 · [{name, start, end(분)}] · 자정 넘김은 오늘 몫만 */
+export function todayWindows(items, now = new Date()) {
+  const out = [];
+  for (const item of scheduleDay(items, now).items) {
+    const start = toMinutes(item.start_time);
+    let end = toMinutes(item.stop_time);
+    if (start === null) continue;
+    if (end === null && Number(item.duration_sec) > 0) end = start + Math.round(Number(item.duration_sec) / 60);
+    if (end === null) continue;
+    out.push({ name: String(item.schedule_name || '스케줄'), start, end: end > start ? end : 24 * 60,
+      text: `${String(item.start_time).slice(0, 5)} – ${String(item.stop_time || '').slice(0, 5)}` });
+  }
+  return out.sort((a, b) => a.start - b.start);
+}
